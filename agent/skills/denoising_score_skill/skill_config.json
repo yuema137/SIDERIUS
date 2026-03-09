@@ -1,0 +1,31 @@
+{
+  "name": "denoising_score_skill",
+  "description": "Calculate the physical denoising scores for a specific experiment and record results.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "exp_id": {
+        "type": "string",
+        "description": "The experiment ID to score."
+      },
+      "model_type": {
+        "type": "string",
+        "enum": ["fcnet", "punet"],
+        "description": "The architecture of the model used."
+      },
+      "model_config": {
+        "type": "object",
+        "description": "The model configuration used during training/inference."
+      },
+      "train_config": {
+        "type": "object",
+        "description": "The training configuration used."
+      },
+      "loss_config": {
+        "type": "object",
+        "description": "The loss configuration used."
+      }
+    },
+    "required": ["exp_id", "model_type", "model_config", "train_config", "loss_config"]
+  }
+}
