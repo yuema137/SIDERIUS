@@ -1,0 +1,27 @@
+# dashboard_config.yaml
+# ---------------------
+# Configuration for the SIDERIUS monitoring dashboard.
+# See dashboard/settings.py for the full schema and defaults.
+
+data_source:
+  type: local           # "local" | "postgres"
+
+  local:
+    root_data_dir: /home/klz/Data/SIDEREIS_DATA
+    # Explicit model list. Leave empty ([]) to auto-discover from root_data_dir.
+    models: [punet, wavenet, rnn, fcnet, transformer]
+
+  postgres:
+    # Used only when type=postgres. Ignored otherwise.
+    connection_string: "postgresql+asyncpg://user:password@localhost:5432/siderius"
+    schema: public
+
+server:
+  host: 0.0.0.0         # 0.0.0.0 = accessible remotely; 127.0.0.1 = local only
+  port: 8000
+  log_level: info       # debug | info | warning | error
+
+dashboard:
+  refresh_interval_seconds: 30
+  max_records_per_run: 200
+  default_run_name: v1
