@@ -103,7 +103,7 @@ def run_experiment(model_cfg, train_cfg: TrainConfig, loss_cfg: LossConfig, data
 
             # --- KEY FIX: Type conversion based on LOSS and MODEL requirements ---
             # 1. Input: Based on Architecture
-            if model_cfg.model_type in ("punet", "transformer", "wavenet"):
+            if model_cfg.model_type in ("punet", "transformer", "wavenet", "rnn"):
                 input_seq = input_seq.int()   # Embedding layers expect discrete ADC values
             else:
                 input_seq = input_seq.float() # AE/FCNet expects floats

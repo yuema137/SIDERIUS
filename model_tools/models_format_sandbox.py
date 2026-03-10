@@ -134,11 +134,26 @@ class WaveNetConfig(BaseConfig):
 
 
 # ==========================================
+# 6. RNNSeq2Seq Configuration
+# ==========================================
+class RNNSeq2SeqConfig(BaseConfig):
+    model_type: Literal["rnn"] = "rnn"
+    embedding_dim: int = Field(default=128, ge=8, le=512,
+                               description="Embedding dimension for ADC tokens")
+    hidden_dim: int = Field(default=256, ge=8, le=1024,
+                            description="LSTM hidden state size")
+    num_layers: int = Field(default=2, ge=1, le=6,
+                            description="Number of LSTM layers in encoder and decoder")
+    dropout: float = Field(default=0.1, ge=0.0, le=0.5,
+                           description="Dropout applied between LSTM layers (ignored if num_layers=1)")
+
+
+# ==========================================
 # Global Model Registry
 # ==========================================
 
 # Union type for the Agent to choose from
-ModelConfigUnion = Union[PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig]
+ModelConfigUnion = Union[PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, RNNSeq2SeqConfig]
 
 def get_config_class(model_type: str) -> Optional[Type[BaseConfig]]:
     """Helper for the Orchestrator to map strings to Pydantic classes."""
@@ -147,6 +162,7 @@ def get_config_class(model_type: str) -> Optional[Type[BaseConfig]]:
         "fcnet": AEConfig,
         "transformer": TransformerConfig,
         "wavenet": WaveNetConfig,
+        "rnn": RNNSeq2SeqConfig,
     }
     return mapping.get(model_type)
 
@@ -216,7 +232,7 @@ class TrainConfig(BaseModel):
     lr: float = Field(default=1e-4, ge=1e-6, le=1e-1)
     epochs: int = Field(default=10, ge=1, le=100)
     # --- Add batch ---
-    batch_size: int = Field(default=1, ge=1, le=128, description="Batch size for training")
+    batch_size: int = Field(default=1, ge=1, le=1024, description="Batch size for training")
     # ----------------------------
     optimizer_type: Literal["adam", "adamw", "sgd"] = "adamw"
     weight_decay: float = Field(default=1e-5, ge=0, le=1e-1)
@@ -232,7 +248,7 @@ class ExperimentConfig(BaseModel):
     """
     exp_id: str
     run_name: str
-    model_type: Literal["punet", "fcnet", "transformer", "wavenet"]
+    model_type: Literal["punet", "fcnet", "transformer", "wavenet", "rnn"]
     network_config: ModelConfigUnion # This uses the Union defined earlier
     train_config: TrainConfig
     loss_config: LossConfig

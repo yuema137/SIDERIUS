@@ -12,6 +12,7 @@ from model_tools.models_format_sandbox import (
     AEConfig,
     TransformerConfig,
     WaveNetConfig,
+    RNNSeq2SeqConfig,
     LossConfig,
     TrainConfig,
     ExperimentConfig,
@@ -125,6 +126,33 @@ class TestWaveNetConfig:
 
 
 # ==========================================
+# RNNSeq2SeqConfig
+# ==========================================
+
+class TestRNNSeq2SeqConfig:
+
+    def test_valid_default(self):
+        cfg = RNNSeq2SeqConfig()
+        assert cfg.model_type == "rnn"
+        assert cfg.hidden_dim == 256
+        assert cfg.num_layers == 2
+
+    def test_valid_custom(self):
+        cfg = RNNSeq2SeqConfig(embedding_dim=64, hidden_dim=128, num_layers=1)
+        assert cfg.hidden_dim == 128
+        assert cfg.num_layers == 1
+
+    def test_dropout_ignored_for_single_layer(self):
+        # dropout > 0 with num_layers=1 is valid config (LSTM silently ignores it)
+        cfg = RNNSeq2SeqConfig(num_layers=1, dropout=0.3)
+        assert cfg.dropout == 0.3
+
+    def test_hidden_dim_out_of_range_raises(self):
+        with pytest.raises(ValidationError):
+            RNNSeq2SeqConfig(hidden_dim=2000)
+
+
+# ==========================================
 # LossConfig — parameter nullification
 # ==========================================
 
@@ -162,6 +190,7 @@ def _make_experiment(model_type: str, loss_type: str) -> dict:
         "fcnet":       {"model_type": "fcnet", "segmentation_size": 1000, "latent_dims": [100, 10]},
         "transformer": {"model_type": "transformer", "segmentation_size": 1000, "embedding_dim": 32, "nhead": 4},
         "wavenet":     {"model_type": "wavenet", "segmentation_size": 1000},
+        "rnn":         {"model_type": "rnn", "segmentation_size": 1000},
     }
     return {
         "exp_id": "test_exp",
@@ -210,3 +239,11 @@ class TestExperimentConfig:
     def test_wavenet_with_smooth_l1_raises(self):
         with pytest.raises(ValidationError, match="smooth_l1"):
             ExperimentConfig(**_make_experiment("wavenet", "smooth_l1"))
+
+    def test_rnn_with_ce_passes(self):
+        cfg = ExperimentConfig(**_make_experiment("rnn", "ce"))
+        assert cfg.model_type == "rnn"
+
+    def test_rnn_with_smooth_l1_raises(self):
+        with pytest.raises(ValidationError, match="smooth_l1"):
+            ExperimentConfig(**_make_experiment("rnn", "smooth_l1"))

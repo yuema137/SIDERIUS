@@ -8,7 +8,7 @@ from torch.utils.data import dataset
 import math
 from pydantic import BaseModel, Field, field_validator, model_validator 
 from typing import List, Literal, Union
-from models_format_sandbox import PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig
+from models_format_sandbox import PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, RNNSeq2SeqConfig
 
 # Blocks used by networks
 
@@ -431,10 +431,71 @@ class SimpleWaveNet(nn.Module):
         return self.output_conv2(x)    # [B, 256, T]
 
 
+# ==========================================
+# RNNSeq2Seq
+# ==========================================
+
+class Seq2SeqEncoder(nn.Module):
+    """LSTM encoder that processes the full input sequence."""
+    def __init__(self, embedding_dim, hidden_dim, num_layers, dropout):
+        super().__init__()
+        self.embedding = nn.Embedding(256, embedding_dim)
+        self.lstm = nn.LSTM(
+            input_size=embedding_dim, hidden_size=hidden_dim,
+            num_layers=num_layers, dropout=dropout if num_layers > 1 else 0,
+            batch_first=True, bidirectional=False,
+        )
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        embedded = self.dropout(self.embedding(x))
+        outputs, (hidden, cell) = self.lstm(embedded)
+        return outputs, hidden, cell
+
+
+class Seq2SeqDecoder(nn.Module):
+    """LSTM decoder with teacher-forcing support."""
+    def __init__(self, embedding_dim, hidden_dim, num_layers, dropout):
+        super().__init__()
+        self.embedding = nn.Embedding(256, embedding_dim)
+        self.lstm = nn.LSTM(
+            input_size=embedding_dim, hidden_size=hidden_dim,
+            num_layers=num_layers, dropout=dropout if num_layers > 1 else 0,
+            batch_first=True, bidirectional=False,
+        )
+        self.output_proj = nn.Linear(hidden_dim, 256)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward_sequence(self, x, hidden, cell):
+        embedded = self.dropout(self.embedding(x))
+        outputs, _ = self.lstm(embedded, (hidden, cell))
+        return self.output_proj(self.dropout(outputs))  # [B, T, 256]
+
+
+class RNNSeq2Seq(nn.Module):
+    """
+    LSTM encoder-decoder for ADC denoising.
+    Input:  [B, T]  — integer ADC values (0-255)
+    Output: [B, 256, T] — class logits per time step
+    """
+    def __init__(self, config: RNNSeq2SeqConfig):
+        super().__init__()
+        self.encoder = Seq2SeqEncoder(config.embedding_dim, config.hidden_dim,
+                                       config.num_layers, config.dropout)
+        self.decoder = Seq2SeqDecoder(config.embedding_dim, config.hidden_dim,
+                                       config.num_layers, config.dropout)
+
+    def forward(self, x):
+        _, hidden, cell = self.encoder(x)
+        logits = self.decoder.forward_sequence(x, hidden, cell)  # [B, T, 256]
+        return logits.transpose(1, 2)                             # [B, 256, T]
+
+
 # 2. Global Registry
 MODEL_REGISTRY = {
     "punet": PositionalUNet,
     "fcnet": AE,
     "transformer": TransformerModel,
     "wavenet": SimpleWaveNet,
+    "rnn": RNNSeq2Seq,
 }

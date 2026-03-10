@@ -16,7 +16,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from train_engine_sandbox import TIDMADDataset, run_experiment
-from models_format_sandbox import PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, TrainConfig, LossConfig
+from models_format_sandbox import PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, RNNSeq2SeqConfig, TrainConfig, LossConfig
 
 
 SEG_SIZE = 1000
@@ -40,6 +40,9 @@ def make_model_cfg(model_type):
     elif model_type == "wavenet":
         return WaveNetConfig(segmentation_size=SEG_SIZE, input_channels=8, residual_channels=16,
                              gate_channels=16, skip_channels=16, num_blocks=3)
+    elif model_type == "rnn":
+        return RNNSeq2SeqConfig(segmentation_size=SEG_SIZE, embedding_dim=16,
+                                hidden_dim=32, num_layers=1)
 
 
 def make_loader(synthetic_h5, model_cfg):
@@ -156,6 +159,30 @@ class TestWaveNetTraining:
     @pytest.mark.parametrize("loss_type", ["ce", "focal", "focal_cw"])
     def test_wavenet_model_is_loadable(self, loss_type, synthetic_h5, tmp_path):
         _, model_path = run_one("wavenet", loss_type, synthetic_h5, tmp_path)
+        state = torch.load(model_path, map_location="cpu")
+        assert isinstance(state, dict)
+        assert len(state) > 0
+
+
+# ==========================================
+# rnn — classification losses only
+# ==========================================
+
+class TestRNNSeq2SeqTraining:
+
+    @pytest.mark.parametrize("loss_type", ["ce", "focal", "focal_cw"])
+    def test_rnn_trains_and_saves_model(self, loss_type, synthetic_h5, tmp_path):
+        results, model_path = run_one("rnn", loss_type, synthetic_h5, tmp_path)
+
+        assert "final_loss" in results
+        assert "loss_history" in results
+        assert len(results["loss_history"]) == 1
+        assert isinstance(results["final_loss"], float)
+        assert os.path.exists(model_path), f"Model not saved at {model_path}"
+
+    @pytest.mark.parametrize("loss_type", ["ce", "focal", "focal_cw"])
+    def test_rnn_model_is_loadable(self, loss_type, synthetic_h5, tmp_path):
+        _, model_path = run_one("rnn", loss_type, synthetic_h5, tmp_path)
         state = torch.load(model_path, map_location="cpu")
         assert isinstance(state, dict)
         assert len(state) > 0

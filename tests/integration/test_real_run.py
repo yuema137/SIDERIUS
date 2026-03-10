@@ -77,6 +77,13 @@ MODEL_CONFIGS = {
         "skip_channels": 16,
         "num_blocks": 4,
     },
+    "rnn": {
+        "model_type": "rnn",
+        "segmentation_size": 40000,
+        "embedding_dim": 8,
+        "hidden_dim": 8,
+        "num_layers": 1,
+    },
 }
 
 LOSS_CONFIGS = {
@@ -84,12 +91,80 @@ LOSS_CONFIGS = {
     "fcnet":       [{"loss_type": "ce"}, {"loss_type": "focal"}, {"loss_type": "focal_cw"}, {"loss_type": "smooth_l1"}],
     "transformer": [{"loss_type": "ce"}, {"loss_type": "focal"}, {"loss_type": "focal_cw"}],
     "wavenet":     [{"loss_type": "ce"}, {"loss_type": "focal"}, {"loss_type": "focal_cw"}],
+    "rnn":         [{"loss_type": "ce"}, {"loss_type": "focal"}, {"loss_type": "focal_cw"}],
 }
 
 TRAIN_CONFIG = {"lr": 1e-4, "epochs": 1, "batch_size": 1, "device": "cuda"}
 
+# Two complete configs per model for flexibility testing.
+# Config A and Config B differ in ALL dimensions: model hparams, loss, and training hparams.
+# segmentation_size=10000 for all to keep inference fast.
+FLEX_CONFIGS = {
+    "punet": [
+        {
+            "model_cfg":  {"model_type": "punet", "segmentation_size": 10000, "depth": 2, "multi": 8,  "kernel_size": 7, "embedding_dim": 8},
+            "loss_cfg":   {"loss_type": "ce"},
+            "train_cfg":  {"lr": 1e-4, "epochs": 1, "batch_size": 128, "device": "cuda"},
+        },
+        {
+            "model_cfg":  {"model_type": "punet", "segmentation_size": 10000, "depth": 3, "multi": 16, "kernel_size": 9, "embedding_dim": 16},
+            "loss_cfg":   {"loss_type": "focal"},
+            "train_cfg":  {"lr": 3e-4, "epochs": 1, "batch_size": 256, "device": "cuda"},
+        },
+    ],
+    "fcnet": [
+        {
+            "model_cfg":  {"model_type": "fcnet", "segmentation_size": 10000, "latent_dims": [400, 40]},
+            "loss_cfg":   {"loss_type": "ce"},
+            "train_cfg":  {"lr": 1e-4, "epochs": 1, "batch_size": 128, "device": "cuda"},
+        },
+        {
+            "model_cfg":  {"model_type": "fcnet", "segmentation_size": 10000, "latent_dims": [200, 50, 20]},
+            "loss_cfg":   {"loss_type": "smooth_l1"},
+            "train_cfg":  {"lr": 3e-4, "epochs": 1, "batch_size": 256, "device": "cuda"},
+        },
+    ],
+    "transformer": [
+        {
+            "model_cfg":  {"model_type": "transformer", "segmentation_size": 4000, "embedding_dim": 16, "nhead": 4, "num_layers": 1, "dim_feedforward": 64},
+            "loss_cfg":   {"loss_type": "ce"},
+            "train_cfg":  {"lr": 1e-4, "epochs": 1, "batch_size": 128, "device": "cuda"},
+        },
+        {
+            "model_cfg":  {"model_type": "transformer", "segmentation_size": 4000, "embedding_dim": 32, "nhead": 4, "num_layers": 2, "dim_feedforward": 128},
+            "loss_cfg":   {"loss_type": "focal"},
+            "train_cfg":  {"lr": 3e-4, "epochs": 1, "batch_size": 256, "device": "cuda"},
+        },
+    ],
+    "wavenet": [
+        {
+            "model_cfg":  {"model_type": "wavenet", "segmentation_size": 10000, "input_channels": 8,  "residual_channels": 16, "gate_channels": 16, "skip_channels": 16, "num_blocks": 3, "kernel_size": 4},
+            "loss_cfg":   {"loss_type": "ce"},
+            "train_cfg":  {"lr": 1e-4, "epochs": 1, "batch_size": 128, "device": "cuda"},
+        },
+        {
+            "model_cfg":  {"model_type": "wavenet", "segmentation_size": 10000, "input_channels": 16, "residual_channels": 32, "gate_channels": 32, "skip_channels": 32, "num_blocks": 5, "kernel_size": 8},
+            "loss_cfg":   {"loss_type": "focal_cw"},
+            "train_cfg":  {"lr": 3e-4, "epochs": 1, "batch_size": 256, "device": "cuda"},
+        },
+    ],
+    "rnn": [
+        {
+            "model_cfg":  {"model_type": "rnn", "segmentation_size": 10000, "embedding_dim": 8,  "hidden_dim": 8,  "num_layers": 1},
+            "loss_cfg":   {"loss_type": "ce"},
+            "train_cfg":  {"lr": 1e-4, "epochs": 1, "batch_size": 512, "device": "cuda"},
+        },
+        {
+            "model_cfg":  {"model_type": "rnn", "segmentation_size": 10000, "embedding_dim": 16, "hidden_dim": 16, "num_layers": 2},
+            "loss_cfg":   {"loss_type": "focal"},
+            "train_cfg":  {"lr": 3e-4, "epochs": 1, "batch_size": 128, "device": "cuda"},
+        },
+    ],
+}
 
-def run_one_loop(provider: str, model_type: str, loss_cfg: dict, workspace: str):
+
+def run_one_loop(provider: str, model_type: str, loss_cfg: dict, workspace: str,
+                 model_cfg: dict = None, train_cfg: dict = None):
     """
     Runs one full agent loop iteration:
       plan -> train -> inference -> score -> reflect -> save record
@@ -114,19 +189,22 @@ def run_one_loop(provider: str, model_type: str, loss_cfg: dict, workspace: str)
     assert "model_config" in decision or "model_type" in decision, \
         f"LLM plan response missing expected keys: {decision}"
 
+    m_cfg = model_cfg if model_cfg is not None else MODEL_CONFIGS[model_type]
+    t_cfg = train_cfg if train_cfg is not None else TRAIN_CONFIG
+
     params = {
         "exp_id": exp_id,
         "run_name": run_name,
         "model_type": model_type,
-        "model_config": MODEL_CONFIGS[model_type],
-        "train_config": TRAIN_CONFIG,
+        "model_config": m_cfg,
+        "train_config": t_cfg,
         "loss_config": loss_cfg,
     }
 
     # --- ACT: train -> inference -> score ---
     train_result = sandbox.execute_training(
         exp_id=exp_id, run_name=run_name, model_type=model_type,
-        m_cfg=MODEL_CONFIGS[model_type], t_cfg=TRAIN_CONFIG, l_cfg=loss_cfg,
+        m_cfg=m_cfg, t_cfg=t_cfg, l_cfg=loss_cfg,
     )
     assert train_result["status"] == "success", (
         f"Training failed for {model_type}/{loss_cfg['loss_type']}:\n"
@@ -135,7 +213,7 @@ def run_one_loop(provider: str, model_type: str, loss_cfg: dict, workspace: str)
 
     inf_result = sandbox.execute_inference(
         exp_id=exp_id, run_name=run_name, model_type=model_type,
-        m_cfg=MODEL_CONFIGS[model_type], l_cfg=loss_cfg,
+        m_cfg=m_cfg, l_cfg=loss_cfg,
     )
     assert inf_result["status"] == "success", (
         f"Inference failed for {model_type}/{loss_cfg['loss_type']}:\n"
@@ -144,7 +222,7 @@ def run_one_loop(provider: str, model_type: str, loss_cfg: dict, workspace: str)
 
     score_result = sandbox.execute_scoring(
         exp_id=exp_id, run_name=run_name, model_type=model_type,
-        m_cfg=MODEL_CONFIGS[model_type], t_cfg=TRAIN_CONFIG, l_cfg=loss_cfg,
+        m_cfg=m_cfg, t_cfg=t_cfg, l_cfg=loss_cfg,
     )
     assert score_result["status"] == "success", (
         f"Scoring failed for {model_type}/{loss_cfg['loss_type']}:\n"
@@ -217,6 +295,41 @@ class TestRealRunGemini:
         record = run_one_loop("gemini", "wavenet", loss_cfg, str(tmp_path))
         assert record["status"] == "success"
 
+    @pytest.mark.parametrize("loss_cfg", LOSS_CONFIGS["rnn"])
+    def test_rnn_gemini(self, loss_cfg, tmp_path):
+        record = run_one_loop("gemini", "rnn", loss_cfg, str(tmp_path))
+        assert record["status"] == "success"
+
+    @pytest.mark.parametrize("cfg", FLEX_CONFIGS["punet"])
+    def test_punet_flexibility_gemini(self, cfg, tmp_path):
+        record = run_one_loop("gemini", "punet", cfg["loss_cfg"], str(tmp_path),
+                              model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
+        assert record["status"] == "success"
+
+    @pytest.mark.parametrize("cfg", FLEX_CONFIGS["fcnet"])
+    def test_fcnet_flexibility_gemini(self, cfg, tmp_path):
+        record = run_one_loop("gemini", "fcnet", cfg["loss_cfg"], str(tmp_path),
+                              model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
+        assert record["status"] == "success"
+
+    @pytest.mark.parametrize("cfg", FLEX_CONFIGS["transformer"])
+    def test_transformer_flexibility_gemini(self, cfg, tmp_path):
+        record = run_one_loop("gemini", "transformer", cfg["loss_cfg"], str(tmp_path),
+                              model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
+        assert record["status"] == "success"
+
+    @pytest.mark.parametrize("cfg", FLEX_CONFIGS["wavenet"])
+    def test_wavenet_flexibility_gemini(self, cfg, tmp_path):
+        record = run_one_loop("gemini", "wavenet", cfg["loss_cfg"], str(tmp_path),
+                              model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
+        assert record["status"] == "success"
+
+    @pytest.mark.parametrize("cfg", FLEX_CONFIGS["rnn"])
+    def test_rnn_flexibility_gemini(self, cfg, tmp_path):
+        record = run_one_loop("gemini", "rnn", cfg["loss_cfg"], str(tmp_path),
+                              model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
+        assert record["status"] == "success"
+
 
 # ==========================================
 # OpenAI — all model/loss combinations
@@ -246,4 +359,39 @@ class TestRealRunOpenAI:
     @pytest.mark.parametrize("loss_cfg", LOSS_CONFIGS["wavenet"])
     def test_wavenet_openai(self, loss_cfg, tmp_path):
         record = run_one_loop("openai", "wavenet", loss_cfg, str(tmp_path))
+        assert record["status"] == "success"
+
+    @pytest.mark.parametrize("loss_cfg", LOSS_CONFIGS["rnn"])
+    def test_rnn_openai(self, loss_cfg, tmp_path):
+        record = run_one_loop("openai", "rnn", loss_cfg, str(tmp_path))
+        assert record["status"] == "success"
+
+    @pytest.mark.parametrize("cfg", FLEX_CONFIGS["punet"])
+    def test_punet_flexibility_openai(self, cfg, tmp_path):
+        record = run_one_loop("openai", "punet", cfg["loss_cfg"], str(tmp_path),
+                              model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
+        assert record["status"] == "success"
+
+    @pytest.mark.parametrize("cfg", FLEX_CONFIGS["fcnet"])
+    def test_fcnet_flexibility_openai(self, cfg, tmp_path):
+        record = run_one_loop("openai", "fcnet", cfg["loss_cfg"], str(tmp_path),
+                              model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
+        assert record["status"] == "success"
+
+    @pytest.mark.parametrize("cfg", FLEX_CONFIGS["transformer"])
+    def test_transformer_flexibility_openai(self, cfg, tmp_path):
+        record = run_one_loop("openai", "transformer", cfg["loss_cfg"], str(tmp_path),
+                              model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
+        assert record["status"] == "success"
+
+    @pytest.mark.parametrize("cfg", FLEX_CONFIGS["wavenet"])
+    def test_wavenet_flexibility_openai(self, cfg, tmp_path):
+        record = run_one_loop("openai", "wavenet", cfg["loss_cfg"], str(tmp_path),
+                              model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
+        assert record["status"] == "success"
+
+    @pytest.mark.parametrize("cfg", FLEX_CONFIGS["rnn"])
+    def test_rnn_flexibility_openai(self, cfg, tmp_path):
+        record = run_one_loop("openai", "rnn", cfg["loss_cfg"], str(tmp_path),
+                              model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
         assert record["status"] == "success"

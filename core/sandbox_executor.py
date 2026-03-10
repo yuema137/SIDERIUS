@@ -216,7 +216,7 @@ class TidmadSandbox:
                 ["python", "execute_tools/inference_single.py", "--mode", "agent", "-m", model_type,
                  "--model_cfg", m_path, "--loss_cfg", l_path,
                  "--model_path", model_path, "--exp_id", exp_id, "--run_name", run_name,
-                 "--output_dir", self.base_dir],
+                 "--output_dir", self.base_dir, "--inference_batch_size", "256"],
                 check=True, capture_output=True, text=True, cwd=os.getcwd(),
                 env=_subprocess_env(),
             )
