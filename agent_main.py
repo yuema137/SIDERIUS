@@ -157,15 +157,21 @@ def main():
                 continue  # attempt consumed but completed_rounds NOT incremented
 
             print(f"\n[Step 1/3] Training...")
+            t0 = time.time()
             train_status = run_skill("training_skill", sandbox, **active_params)
+            train_time = round(time.time() - t0, 1)
             if train_status.get("status") == "error": continue
-            
+
             print(f"[Step 2/3] Inference...")
+            t0 = time.time()
             inf_status = run_skill("inference_skill", sandbox, **active_params)
+            inference_time = round(time.time() - t0, 1)
             if inf_status.get("status") == "error": continue
-            
+
             print(f"[Step 3/3] Scoring...")
+            t0 = time.time()
             score_res = run_skill("denoising_score_skill", sandbox, **active_params)
+            scoring_time = round(time.time() - t0, 1)
 
             # D. REFLECT: Analyze results and generate insights
             print(f"\n🤔 Generating Research Memory...")
@@ -275,7 +281,12 @@ def main():
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "params": active_params,
                 "results": combined_results,
-                "denoising_score": combined_results.get("denoising_score"), 
+                "denoising_score": combined_results.get("denoising_score"),
+                "timing": {
+                    "train_time_s":     train_time,
+                    "inference_time_s": inference_time,
+                    "scoring_time_s":   scoring_time,
+                },
                 "memory": {
                     "expert_advice_followed": args.expert_advice,
                     "hypothesis": hypothesis,
