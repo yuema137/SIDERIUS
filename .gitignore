@@ -3,7 +3,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Virtual Environments 
+# Virtual Environments
+.venv/
 tidmad/
 venv/
 env/
@@ -15,4 +16,5 @@ env/
 *.pdf
 
 # Operating System files
-.DS_Store.claude/
+.DS_Store
+.claude/

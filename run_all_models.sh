@@ -13,9 +13,10 @@
 #
 # Two-layer structure:
 #   Orchestrator screen  (siderius-orchestrator)
-#     └── Group 1: siderius-punet + siderius-wavenet + siderius-rnn  (parallel)
-#     └── Group 2: siderius-fcnet                                     (alone)
-#     └── Group 3: siderius-transformer                               (alone)
+#     └── Group 1: siderius-punet + siderius-wavenet  (parallel)
+#     └── Group 2: siderius-rnn                       (alone)
+#     └── Group 3: siderius-fcnet                     (alone)
+#     └── Group 4: siderius-transformer               (alone)
 #
 # Usage:
 #   screen -S siderius-orchestrator
@@ -47,9 +48,10 @@ POLL_INTERVAL=30   # seconds between checks for screen exit
 # Groups themselves run sequentially.
 # ---------------------------------------------------------------------------
 MODEL_GROUPS=(
-    "punet wavenet rnn"   # Group 1 — light models (~0.6 GB combined)
-    "fcnet"               # Group 2 — large model (323M params, ~5 GB)
-    "transformer"         # Group 3 — attention-heavy (~6 GB)
+    "punet wavenet"   # Group 1 — light models (run in parallel)
+    "rnn"             # Group 2 — separate to avoid concurrent GPU OOM
+    "fcnet"           # Group 3 — large model (323M params, ~5 GB)
+    "transformer"     # Group 4 — attention-heavy (~6 GB)
 )
 
 mkdir -p "$LOG_DIR"
