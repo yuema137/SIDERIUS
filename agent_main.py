@@ -49,11 +49,14 @@ def main():
     # Storage
     parser.add_argument("--workspace", type=str, default="./siderius_workspace",
                         help="Root directory for all agent-generated outputs: configs, cached models, and records.")
+    parser.add_argument("--progress_bar", action="store_true",
+                        help="Stream live tqdm progress bars from training/inference subprocesses.")
 
     args = parser.parse_args()
 
     # Initialize "Body" (Sandbox) and "Brain" (LLM Bridge)
-    sandbox = TidmadSandbox(metadata_source="local", run_name=args.run_name, workspace=args.workspace)
+    sandbox = TidmadSandbox(metadata_source="local", run_name=args.run_name, workspace=args.workspace,
+                            progress_bar=args.progress_bar)
     brain = LLMBridge(provider=args.provider, model_id=args.model_id)
     
     print(f"=== 🧠 TIDMAD Agent Activated ===")

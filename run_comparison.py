@@ -62,7 +62,7 @@ def _agent_env() -> dict:
 # Phase 1: Baseline
 # ==========================================
 
-def run_baseline(model_type: str, baseline_workspace: str) -> dict:
+def run_baseline(model_type: str, baseline_workspace: str, progress_bar: bool = False) -> dict:
     """
     Runs the full pipeline (train -> inference -> score) with the exact legacy config
     from the TIDMAD paper. Returns the final record dict.
@@ -85,6 +85,7 @@ def run_baseline(model_type: str, baseline_workspace: str) -> dict:
         metadata_source="local",
         run_name=run_name,
         workspace=baseline_workspace,
+        progress_bar=progress_bar,
     )
 
     print(f"\n{'='*60}")
@@ -201,7 +202,7 @@ def seed_agent_memory(baseline_record: dict, agent_workspace: str, agent_run_nam
 # ==========================================
 
 def run_agent(model_type: str, agent_workspace: str, agent_run_name: str,
-              provider: str, model_id: str, max_rounds: int):
+              provider: str, model_id: str, max_rounds: int, progress_bar: bool = False):
     """
     Launches agent_main.py as a subprocess, locked to model_type, for max_rounds rounds.
     """
@@ -223,6 +224,8 @@ def run_agent(model_type: str, agent_workspace: str, agent_run_name: str,
         "--workspace",   agent_workspace,
         "--expert_advice", expert_advice,
     ]
+    if progress_bar:
+        cmd.append("--progress_bar")
 
     print(f"\n{'='*60}")
     print(f"  PHASE 3 — AGENT EXPLORATION: {model_type.upper()}")
@@ -260,6 +263,10 @@ def main():
         help="Number of agent exploration rounds (default: 50).",
     )
     parser.add_argument(
+        "--progress_bar", action="store_true",
+        help="Stream live tqdm progress bars from training/inference/scoring subprocesses.",
+    )
+    parser.add_argument(
         "--run_name", type=str, default="v1",
         help=(
             "Name for this comparison run (default: v1). "
@@ -268,13 +275,40 @@ def main():
             "Baseline is shared at {ROOT_DATA_DIR}/{model}/baseline/."
         ),
     )
+    parser.add_argument(
+        "--override_old_run", action="store_true",
+        help=(
+            "Delete any existing data for --run_name and start fresh. "
+            "Without this flag the script will error if the run_name already exists."
+        ),
+    )
     args = parser.parse_args()
 
     model_type         = args.model
     model_root         = os.path.join(ROOT_DATA_DIR, model_type)
+    run_dir            = os.path.join(model_root, args.run_name)
     baseline_workspace = os.path.join(model_root, "baseline")       # shared across all runs
-    agent_workspace    = os.path.join(model_root, args.run_name, "agent")
+    agent_workspace    = os.path.join(run_dir, "agent")
     agent_run_name     = f"{model_type}_{args.run_name}_agent"
+
+    # --- Guard: prevent accidental overwrite of existing run ---
+    if os.path.exists(run_dir) and os.listdir(run_dir):
+        if not args.override_old_run:
+            raise SystemExit(
+                f"\n[ERROR] Run '{args.run_name}' already exists at:\n"
+                f"  {run_dir}\n\n"
+                f"Options:\n"
+                f"  1. Use a different run name:\n"
+                f"       --run_name <new_name>\n\n"
+                f"  2. Manually delete the existing run and restart:\n"
+                f"       rm -rf {run_dir}\n\n"
+                f"  3. Let the script delete it automatically:\n"
+                f"       --override_old_run"
+            )
+        else:
+            import shutil
+            shutil.rmtree(run_dir)
+            print(f"  [override] Deleted existing run at: {run_dir}")
 
     os.makedirs(baseline_workspace, exist_ok=True)
     os.makedirs(agent_workspace, exist_ok=True)
@@ -302,7 +336,7 @@ def main():
             pass
 
     if not baseline_done:
-        baseline_record = run_baseline(model_type, baseline_workspace)
+        baseline_record = run_baseline(model_type, baseline_workspace, progress_bar=args.progress_bar)
 
     # --- Phase 2: Seed agent memory ---
     seed_agent_memory(baseline_record, agent_workspace, agent_run_name)
@@ -315,6 +349,7 @@ def main():
         provider=args.provider,
         model_id=args.model_id,
         max_rounds=args.max_rounds,
+        progress_bar=args.progress_bar,
     )
 
     print(f"\n{'#'*60}")

@@ -4,6 +4,7 @@ import json
 import argparse
 import torch
 import torch.nn as nn
+import sys
 import numpy as np
 import h5py
 from tqdm import tqdm
@@ -97,7 +98,7 @@ def run_experiment(model_cfg, train_cfg: TrainConfig, loss_cfg: LossConfig, data
     for ep in range(train_cfg.epochs):
         model.train()
         batch_losses = []
-        for input_batch, target_batch in tqdm(data_loader, desc=f"Epoch {ep}"):
+        for input_batch, target_batch in tqdm(data_loader, desc=f"Epoch {ep}", file=sys.stdout):
             input_seq = input_batch.to(device)
             target_seq = target_batch.to(device)
 
