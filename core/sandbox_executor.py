@@ -21,7 +21,7 @@ class LocalRecorder(BaseRecorder):
     def __init__(self, record_dir: str, summary_file: str, run_name: str):
         self.summary_file = summary_file
         self.record_dir = os.path.join(record_dir, run_name)
-        os.makedirs(self.record_dir, exist_ok=True)
+        _ensure_dir(self.record_dir)
 
     def save_record(self, record: Dict[str, Any]):
         exp_id = record["exp_id"]
@@ -69,18 +69,38 @@ class MongoRecorder(BaseRecorder):
 
 # --- Main Executor ---
 
+def _ensure_dir(path: str) -> None:
+    """Create directory if it does not exist. Raises RuntimeError with a clear message on failure."""
+    try:
+        os.makedirs(path, exist_ok=True)
+    except PermissionError:
+        raise RuntimeError(
+            f"[Sandbox] Permission denied: cannot create directory '{path}'. "
+            "Check that you have write access to the workspace."
+        )
+    except OSError as e:
+        raise RuntimeError(
+            f"[Sandbox] Failed to create directory '{path}': {e}. "
+            "Check that the path is valid and the filesystem is accessible."
+        )
+    if not os.access(path, os.W_OK):
+        raise RuntimeError(
+            f"[Sandbox] Directory '{path}' exists but is not writable. "
+            "Check filesystem permissions."
+        )
+
 class TidmadSandbox:
-    def __init__(self, metadata_source: str = "local", mongodb_uri: Optional[str] = None, run_name: str="test_run"):
-        # Set up sandbox directory structure - hard coded for now
-        self.base_dir = "/home/klz/Data/TIDMAD_Sandbox"
+    def __init__(self, metadata_source: str = "local", mongodb_uri: Optional[str] = None,
+                 run_name: str = "test_run", workspace: str = "./siderius_workspace"):
+        self.base_dir = os.path.abspath(workspace)
         self.dirs = {
             "configs": os.path.join(self.base_dir, "configs", run_name),
             "models": os.path.join(self.base_dir, "cached_models"),
             "records": os.path.join(self.base_dir, "records"),
-            "data": "/home/klz/Data/TIDMAD/" 
+            "data": "/home/klz/Data/TIDMAD/"
         }
         for d in self.dirs.values():
-            os.makedirs(d, exist_ok=True)
+            _ensure_dir(d)
 
         self.run_name = run_name
         # Initialize Recorder based on strategy
@@ -141,12 +161,13 @@ class TidmadSandbox:
 
             print(f">>> [Executor] Running training for {exp_id}...")
             result = subprocess.run(
-                    ["python", "execute_tools/train_engine_sandbox.py", 
-                    "--model_cfg", paths["m"], 
-                    "--train_cfg", paths["t"], 
+                    ["python", "execute_tools/train_engine_sandbox.py",
+                    "--model_cfg", paths["m"],
+                    "--train_cfg", paths["t"],
                     "--loss_cfg", paths["l"],
                     "--exp_id", exp_id,
-                    "--run_name", run_name,],
+                    "--run_name", run_name,
+                    "--sandbox_dir", self.base_dir,],
                     check=True, 
                     capture_output=True, 
                     text=True,
@@ -188,7 +209,7 @@ class TidmadSandbox:
     def execute_scoring(self, exp_id: str, run_name: str, model_type: str, m_cfg: Dict, t_cfg: Dict, l_cfg: Dict):
         """Calculates score and returns results to Skill layer."""
         result_dir = os.path.join(self.dirs["records"], run_name)
-        os.makedirs(result_dir, exist_ok=True)
+        _ensure_dir(result_dir)
         
         result_json_name = f"experiment_results_{model_type}_{exp_id}.json"
         actual_json_path = os.path.abspath(os.path.join(result_dir, result_json_name))

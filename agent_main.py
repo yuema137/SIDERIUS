@@ -43,13 +43,17 @@ def main():
                         help="Force a specific architecture or let the agent decide (auto).")
     
     # Project Name
-    parser.add_argument("--run_name", type=str,  default="test_run",
+    parser.add_argument("--run_name", type=str, default="test_run",
                         help="Run name for the auto-exploration.")
-    
+
+    # Storage
+    parser.add_argument("--workspace", type=str, default="./siderius_workspace",
+                        help="Root directory for all agent-generated outputs: configs, cached models, and records.")
+
     args = parser.parse_args()
 
     # Initialize "Body" (Sandbox) and "Brain" (LLM Bridge)
-    sandbox = TidmadSandbox(metadata_source="local", run_name = args.run_name)
+    sandbox = TidmadSandbox(metadata_source="local", run_name=args.run_name, workspace=args.workspace)
     brain = LLMBridge(provider=args.provider, model_id=args.model_id)
     
     print(f"=== 🧠 TIDMAD Agent Activated ===")

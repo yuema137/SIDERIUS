@@ -139,5 +139,6 @@ python agent_main.py \
 | `--max_rounds` | `10` | int | Max experiment iterations |
 | `--force_model` | `auto` | `punet`, `fcnet`, `transformer`, `auto` | Lock the architecture or let the agent choose |
 | `--run_name` | `test_run` | str | Name for this research session; scopes all saved records |
+| `--workspace` | `./siderius_workspace` | path | Root directory for all agent-generated outputs (configs, cached models, records) |
 
 ---
