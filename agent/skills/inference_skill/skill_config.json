@@ -1,0 +1,27 @@
+{
+  "name": "inference_model_skill",
+  "description": "Run inference using a previously trained model to generate denoised signals.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "exp_id": {
+        "type": "string",
+        "description": "The experiment ID of the trained model to use (e.g., 'ae_v1_baseline')."
+      },
+      "model_type": {
+        "type": "string",
+        "enum": ["fcnet", "punet"],
+        "description": "The architecture of the model."
+      },
+      "model_config": {
+        "type": "object",
+        "description": "Must match the config used during training."
+      },
+      "loss_config": {
+        "type": "object",
+        "description": "Must match the config used during training."
+      }
+    },
+    "required": ["exp_id", "model_type", "model_config", "loss_config"]
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "name": "train_model_skill",
+  "description": "Trigger the training process for a TIDMAD denoising model with specific hyperparameters.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "exp_id": {
+        "type": "string",
+        "description": "Unique experiment identifier (e.g., 'ae_v1_baseline')."
+      },
+      "model_type": {
+        "type": "string",
+        "enum": ["fcnet", "punet"],
+        "description": "The architecture to train."
+      },
+      "model_config": {
+        "type": "object",
+        "properties": {
+          "latent_dims": {
+            "type": "array",
+            "items": { "type": "number" },
+            "description": "Layers for FCNet or multipliers for PUNet."
+          },
+          "dropout": { "type": "number", "minimum": 0, "maximum": 0.8 }
+        },
+        "required": ["latent_dims"]
+      },
+      "train_config": {
+        "type": "object",
+        "properties": {
+          "lr": { "type": "number", "minimum": 1e-6, "maximum": 0.1 },
+          "epochs": { "type": "integer", "minimum": 1, "maximum": 100 },
+          "batch_size": { "type": "integer", "enum": [4, 8, 16, 32, 64] }
+        },
+        "required": ["lr", "epochs", "batch_size"]
+      }
+    },
+    "required": ["exp_id", "model_type", "model_config", "train_config"]
+  }
+}

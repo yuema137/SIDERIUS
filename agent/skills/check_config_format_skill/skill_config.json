@@ -1,0 +1,8 @@
+{
+  "name": "check_config_format_skill",
+  "description": "Consult this tool to get the EXACT Pydantic schema for PUNet, FCNet (AE), Loss, and Training configs. It provides constraints like range, default values, and forbidden values.",
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  }
+}
