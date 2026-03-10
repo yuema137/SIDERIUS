@@ -64,13 +64,16 @@ class LLMBridge:
         
         return self._generate_json_response(system_prompt, final_user_prompt)
         
-    def reflect(self, exp_id: str, hypothesis: str, actual_results: Dict) -> Dict:
+    def reflect(self, exp_id: str, hypothesis: str, actual_results: Dict,
+                reflection_context: Optional[Dict] = None) -> Dict:
         """
         Uses the Reflector logic to transform results into new Memory entries.
+        reflection_context provides baseline/best score comparisons so the
+        reflector can judge results correctly.
         """
         system_prompt = REFLECTOR_PROMPT
-        user_prompt = get_reflector_user_prompt(exp_id, hypothesis, actual_results)
-        
+        user_prompt = get_reflector_user_prompt(exp_id, hypothesis, actual_results, reflection_context)
+
         return self._generate_json_response(system_prompt, user_prompt)
 
     def _generate_json_response(self, system_prompt: str, user_prompt: str) -> Dict:

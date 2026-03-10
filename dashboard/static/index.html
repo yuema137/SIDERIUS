@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SIDERIUS Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<header>
+  <h1>SIDERIUS Dashboard</h1>
+  <div id="status-bar">
+    <span><span class="dot" id="health-dot"></span><span id="health-text">connecting…</span></span>
+    <span id="refresh-bar">
+      Refreshing in <span id="countdown">—</span>s
+      <button class="secondary" onclick="App.refresh()" style="padding:4px 10px;font-size:11px;">↺ Now</button>
+    </span>
+  </div>
+</header>
+
+<main>
+
+  <!-- Series Config -->
+  <div class="card" id="series-panel">
+    <div class="card-title">Series — each line = one (model · run · limit) combination</div>
+
+    <div class="add-series-form">
+      <label>Model
+        <select id="inp-model">
+          <option value="">loading…</option>
+        </select>
+      </label>
+      <label>Run name
+        <input id="inp-run" type="text" placeholder="e.g. v1" value="v1" />
+      </label>
+      <label>Limit (records)
+        <input id="inp-limit" type="number" value="50" min="1" max="1000" style="min-width:80px;" />
+      </label>
+      <label style="visibility:hidden;">x
+        <button onclick="App.addSeries()">+ Add series</button>
+      </label>
+      <button onclick="App.addSeries()" style="align-self:flex-end;">+ Add series</button>
+    </div>
+
+    <div id="series-list">
+      <span style="color:var(--muted);font-size:12px;">No series added yet.</span>
+    </div>
+  </div>
+
+  <!-- Charts -->
+  <div class="charts-grid">
+
+    <!-- Chart 1: Best denoising score -->
+    <div class="card">
+      <div class="card-title">Best denoising score vs research loop</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:12px;">
+        Cumulative best score at each loop — higher is better (even if negative)
+      </div>
+      <div class="chart-wrap">
+        <canvas id="chart-score"></canvas>
+        <div class="chart-empty" id="empty-score">Add a series to begin</div>
+      </div>
+    </div>
+
+    <!-- Chart 2: Memory usage -->
+    <div class="card">
+      <div class="card-title">Model parameters vs research loop</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:12px;">
+        Number of trainable parameters per experiment (proxy for model size / memory)
+      </div>
+      <div class="chart-wrap">
+        <canvas id="chart-memory"></canvas>
+        <div class="chart-empty" id="empty-memory">Add a series to begin</div>
+      </div>
+    </div>
+
+  </div>
+
+</main>
+
+<!-- Chart.js from CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

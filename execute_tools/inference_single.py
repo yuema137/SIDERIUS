@@ -32,8 +32,8 @@ def get_parser():
     parser.add_argument('--model_path', type=str, help="Path to the .pth state_dict")
     parser.add_argument('--output_dir', type=str, default=None,
                         help="Directory to write denoised H5 output. Defaults to data_dir.")
-    parser.add_argument('--inference_batch_size', type=int, default=32,
-                        help="Number of segments per GPU forward pass. Higher = fewer kernel launches.")
+    parser.add_argument('--inference_batch_size', type=int, default=25,
+                        help="Number of segments per GPU forward pass. Per-model defaults set in sandbox_executor.py (punet/wavenet/fcnet=25, rnn=10, transformer=1).")
     return parser
 
 def process_batch(index, inputarr, targetarr, model, args, current_loss_type):

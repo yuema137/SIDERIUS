@@ -20,6 +20,9 @@ dependencies = [
     "scitokens>=1.8.1",
     "torch>=2.10.0",
     "tqdm>=4.67.3",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pyyaml>=6.0.2",
 ]
 
 [dependency-groups]
@@ -29,7 +32,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = [".", "model_tools", "execute_tools"]
+pythonpath = [".", "model_tools", "execute_tools", "dashboard"]
 markers = [
     "real_run: requires API keys and real TIDMAD data. Run locally only with: pytest -m real_run",
 ]
