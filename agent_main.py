@@ -58,7 +58,20 @@ def main():
     sandbox = TidmadSandbox(metadata_source="local", run_name=args.run_name, workspace=args.workspace,
                             progress_bar=args.progress_bar)
     brain = LLMBridge(provider=args.provider, model_id=args.model_id)
-    
+
+    # Save run configuration once — written at startup, never modified
+    run_config = {
+        "provider":    args.provider,
+        "model_id":    args.model_id,
+        "run_name":    args.run_name,
+        "force_model": args.force_model,
+        "max_rounds":  args.max_rounds,
+        "started_at":  time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    run_config_path = os.path.join(args.workspace, f"run_config_{args.run_name}.json")
+    with open(run_config_path, "w", encoding="utf-8") as f:
+        json.dump(run_config, f, indent=4)
+
     print(f"=== 🧠 TIDMAD Agent Activated ===")
     print(f"🤖 Provider: {args.provider} | Model: {args.model_id}")
     print(f"👨‍🔬 Expert Advice: {args.expert_advice}")
@@ -98,8 +111,8 @@ def main():
                 config_manual=config_manual_data,
             )
             
-            exp_id = decision.get("exp_id", f"exp_{iteration}_{int(time.time())}")
             model_type = decision.get("model_type", "fcnet")
+            exp_id = f"{model_type}_{args.run_name}_{total_attempts:03d}"
             hypothesis = decision.get("hypothesis", "N/A")
 
             print(f"📍 Action: {model_type.upper()} | ID: {exp_id}")

@@ -289,7 +289,7 @@ def main():
     run_dir            = os.path.join(model_root, args.run_name)
     baseline_workspace = os.path.join(model_root, "baseline")       # shared across all runs
     agent_workspace    = os.path.join(run_dir, "agent")
-    agent_run_name     = f"{model_type}_{args.run_name}_agent"
+    agent_run_name     = f"{args.run_name}_agent"
 
     # --- Guard: prevent accidental overwrite of existing run ---
     if os.path.exists(run_dir) and os.listdir(run_dir):
