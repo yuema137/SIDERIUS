@@ -1,0 +1,172 @@
+/* SIDERIUS Dashboard — style.css */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #0f1117;
+  --surface:   #1a1d27;
+  --border:    #2a2d3a;
+  --accent:    #4f8ef7;
+  --accent2:   #7c5cbf;
+  --text:      #e2e4ed;
+  --muted:     #7a7d8e;
+  --success:   #4caf82;
+  --warn:      #e6a43a;
+  --danger:    #e05c5c;
+  --radius:    8px;
+  --font:      'Inter', 'Segoe UI', system-ui, sans-serif;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  min-height: 100vh;
+}
+
+/* ── Header ── */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 28px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+header h1 { font-size: 16px; font-weight: 600; letter-spacing: .04em; color: var(--accent); }
+#status-bar { font-size: 12px; color: var(--muted); display: flex; gap: 16px; align-items: center; }
+#status-bar span { display: flex; align-items: center; gap: 5px; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+.dot.warn { background: var(--warn); }
+
+/* ── Layout ── */
+main { max-width: 1400px; margin: 0 auto; padding: 24px 28px; display: flex; flex-direction: column; gap: 24px; }
+
+/* ── Cards ── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 24px;
+}
+.card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  margin-bottom: 16px;
+}
+
+/* ── Series Config Panel ── */
+#series-panel { display: flex; flex-direction: column; gap: 14px; }
+
+.add-series-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+.add-series-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.add-series-form input,
+.add-series-form select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 13px;
+  min-width: 130px;
+  outline: none;
+  transition: border-color .15s;
+}
+.add-series-form input:focus,
+.add-series-form select:focus { border-color: var(--accent); }
+
+button {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  padding: 7px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity .15s;
+}
+button:hover { opacity: .85; }
+button.secondary { background: var(--border); color: var(--text); }
+button.danger { background: var(--danger); }
+
+/* ── Series Table ── */
+#series-list { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.series-tag {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 5px 12px;
+  font-size: 12px;
+}
+.series-color-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.series-tag button {
+  background: none;
+  color: var(--muted);
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+.series-tag button:hover { background: var(--danger); color: #fff; opacity: 1; }
+
+/* ── Charts ── */
+.charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+@media (max-width: 900px) { .charts-grid { grid-template-columns: 1fr; } }
+
+.chart-wrap { position: relative; height: 340px; }
+.chart-wrap canvas { width: 100% !important; height: 100% !important; }
+
+.chart-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 13px;
+  pointer-events: none;
+}
+
+/* ── Metric selector ── */
+.metric-bar { display: flex; gap: 8px; margin-bottom: 14px; }
+.metric-btn {
+  background: var(--bg);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 5px 14px;
+  font-size: 12px;
+}
+.metric-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* ── Refresh bar ── */
+#refresh-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+#countdown { color: var(--accent); font-weight: 600; min-width: 24px; }
