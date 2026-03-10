@@ -30,6 +30,10 @@ def get_parser():
     parser.add_argument("--run_name", type=str,  default="test_run",
                         help="Run name for the auto-exploration.")
     parser.add_argument('--model_path', type=str, help="Path to the .pth state_dict")
+    parser.add_argument('--output_dir', type=str, default=None,
+                        help="Directory to write denoised H5 output. Defaults to data_dir.")
+    parser.add_argument('--inference_batch_size', type=int, default=32,
+                        help="Number of segments per GPU forward pass. Higher = fewer kernel launches.")
     return parser
 
 def process_batch(index, inputarr, targetarr, model, args, current_loss_type):
@@ -49,7 +53,7 @@ def process_batch(index, inputarr, targetarr, model, args, current_loss_type):
         input_seq = input_seq.squeeze(1)
 
     # 3. Model-Specific Execution & Type Casting
-    if args.denoising_model in ["punet", "transformer"]:
+    if args.denoising_model in ["punet", "transformer", "wavenet", "rnn"]:
         # Embedding layer requires Long/Int tensors
         input_seq = input_seq.long().to(DEVICE)
     else:
@@ -147,18 +151,23 @@ def main():
         dim1 = train_loader.shape[0]
         denoised = np.zeros((dim1, input_size), dtype=np.int8)
         injected = np.zeros((dim1, input_size), dtype=np.int8)
+        bs = args.inference_batch_size
 
-        for i in tqdm(range(dim1), desc=f"Inference ({args.mode})"):
-            idx, dn, ij = process_batch(i, train_loader[i:i+1], target_loader[i:i+1], model, args, current_loss_type)
-            denoised[idx] = dn
-            injected[idx] = ij
+        for i in tqdm(range(0, dim1, bs), desc=f"Inference ({args.mode})"):
+            batch_in  = train_loader[i:i+bs]
+            batch_tgt = target_loader[i:i+bs]
+            _, dn, ij = process_batch(i, batch_in, batch_tgt, model, args, current_loss_type)
+            actual_n = batch_in.shape[0]
+            denoised[i:i+actual_n] = dn.reshape(actual_n, input_size)
+            injected[i:i+actual_n] = ij.reshape(actual_n, input_size)
 
     # 4. Save Output
     idx_str = str(args.file_index).zfill(4)
+    out_dir = args.output_dir if args.output_dir else args.data_dir
     if args.mode == 'fix':
-        out_name = os.path.join(args.data_dir, f"abra_validation_denoised_{args.denoising_model}_{idx_str}.h5")
+        out_name = os.path.join(out_dir, f"abra_validation_denoised_{args.denoising_model}_{idx_str}.h5")
     else:
-        out_name = os.path.join(args.data_dir, f"abra_validation_denoised_{args.denoising_model}_{args.run_name}_{args.exp_id}_{idx_str}.h5")
+        out_name = os.path.join(out_dir, f"abra_validation_denoised_{args.denoising_model}_{args.run_name}_{args.exp_id}_{idx_str}.h5")
 
     # Clean up old files before writing new one
     if os.path.exists(out_name):

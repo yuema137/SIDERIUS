@@ -6,6 +6,23 @@ import datetime
 from typing import Dict, Any, Optional
 from model_tools.models_format_sandbox import get_config_class, TrainConfig, LossConfig, ExperimentConfig
 
+
+def _subprocess_env() -> dict:
+    """
+    Returns an env dict for subprocesses with model_tools and execute_tools
+    added to PYTHONPATH, so flat imports in those scripts resolve correctly
+    regardless of the working directory.
+    """
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    extra_paths = [
+        os.path.join(project_root, "model_tools"),
+        os.path.join(project_root, "execute_tools"),
+    ]
+    env = os.environ.copy()
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = os.pathsep.join(extra_paths + ([existing] if existing else []))
+    return env
+
 # --- Storage Strategies ---
 
 class BaseRecorder:
@@ -99,8 +116,9 @@ class TidmadSandbox:
             "records": os.path.join(self.base_dir, "records"),
             "data": "/home/klz/Data/TIDMAD/"
         }
-        for d in self.dirs.values():
-            _ensure_dir(d)
+        for key, d in self.dirs.items():
+            if key != "data":  # data dir is read-only input, not agent-generated output
+                _ensure_dir(d)
 
         self.run_name = run_name
         # Initialize Recorder based on strategy
@@ -168,10 +186,11 @@ class TidmadSandbox:
                     "--exp_id", exp_id,
                     "--run_name", run_name,
                     "--sandbox_dir", self.base_dir,],
-                    check=True, 
-                    capture_output=True, 
+                    check=True,
+                    capture_output=True,
                     text=True,
-                    cwd=os.getcwd() 
+                    cwd=os.getcwd(),
+                    env=_subprocess_env(),
                 )
             
             if result.stdout: print(f"--- Train Script Output ---\n{result.stdout}")
@@ -194,10 +213,12 @@ class TidmadSandbox:
         try:
             print(f">>> [Executor] Running inference for {exp_id}...")
             result = subprocess.run(
-                ["python", "execute_tools/inference_single.py", "--mode", "agent", "-m", model_type, 
-                 "--model_cfg", m_path, "--loss_cfg", l_path, 
-                 "--model_path", model_path, "--exp_id", exp_id, "--run_name", run_name,], 
-                check=True, capture_output=True, text=True, cwd=os.getcwd()
+                ["python", "execute_tools/inference_single.py", "--mode", "agent", "-m", model_type,
+                 "--model_cfg", m_path, "--loss_cfg", l_path,
+                 "--model_path", model_path, "--exp_id", exp_id, "--run_name", run_name,
+                 "--output_dir", self.base_dir, "--inference_batch_size", "256"],
+                check=True, capture_output=True, text=True, cwd=os.getcwd(),
+                env=_subprocess_env(),
             )
             if result.stdout: print(f"--- Inference Output ---\n{result.stdout}")
             return {"status": "success", "message": "Inference finished."}
@@ -211,21 +232,32 @@ class TidmadSandbox:
         result_dir = os.path.join(self.dirs["records"], run_name)
         _ensure_dir(result_dir)
         
-        result_json_name = f"experiment_results_{model_type}_{exp_id}.json"
-        actual_json_path = os.path.abspath(os.path.join(result_dir, result_json_name))
-        
+        train_json_path = os.path.abspath(os.path.join(result_dir, f"experiment_results_{model_type}_{exp_id}.json"))
+        score_json_path = os.path.abspath(os.path.join(result_dir, f"score_results_{model_type}_{exp_id}.json"))
+
         try:
+            # Pre-create the scoring JSON so the script can write to it
+            with open(score_json_path, 'w') as f:
+                json.dump({}, f)
+
             print(f">>> [Executor] Running scoring for {exp_id}...")
             result = subprocess.run(
-                ["python", "execute_tools/denoising_score_single.py", "--mode", "agent", "-m", model_type, 
-                 "--exp_id", exp_id, "--run_name", run_name, "--output_json", actual_json_path], 
-                check=True, capture_output=True, text=True, cwd=os.getcwd()
+                ["python", "execute_tools/denoising_score_single.py", "--mode", "agent", "-m", model_type,
+                 "--exp_id", exp_id, "--run_name", run_name, "--output_json", score_json_path,
+                 "--data_dir", self.base_dir],
+                check=True, capture_output=True, text=True, cwd=os.getcwd(),
+                env=_subprocess_env(),
             )
 
-            with open(actual_json_path, 'r') as f:
-                results = json.load(f)
-            
-            if os.path.exists(actual_json_path): os.remove(actual_json_path)
+            # Merge training results (loss history) with scoring results
+            results = {}
+            if os.path.exists(train_json_path):
+                with open(train_json_path, 'r') as f:
+                    results.update(json.load(f))
+            with open(score_json_path, 'r') as f:
+                results.update(json.load(f))
+
+            if os.path.exists(score_json_path): os.remove(score_json_path)
             
             # Note: We NO LONGER call self.recorder.save_record(record) here.
             # We return results to agent_main.py, which adds LLM memory and then saves.

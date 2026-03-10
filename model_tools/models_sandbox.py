@@ -8,7 +8,7 @@ from torch.utils.data import dataset
 import math
 from pydantic import BaseModel, Field, field_validator, model_validator 
 from typing import List, Literal, Union
-from models_format_sandbox import PUNetConfig, AEConfig, TransformerConfig
+from models_format_sandbox import PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, RNNSeq2SeqConfig
 
 # Blocks used by networks
 
@@ -354,9 +354,148 @@ class TransformerModel(nn.Module):
         # Transpose to [Batch, 256, Time] to match Loss requirements
         return output.transpose(1, 2)
     
+# ==========================================
+# WaveNet
+# ==========================================
+
+class CausalConv1d(nn.Module):
+    """Causal convolution — no future information leakage."""
+    def __init__(self, in_channels, out_channels, kernel_size, dilation=1):
+        super().__init__()
+        self.padding = (kernel_size - 1) * dilation
+        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size,
+                              padding=self.padding, dilation=dilation)
+
+    def forward(self, x):
+        x = self.conv(x)
+        if self.padding > 0:
+            x = x[:, :, :-self.padding]
+        return x
+
+
+class WaveNetBlock(nn.Module):
+    """Single WaveNet residual block with dilated causal convolution."""
+    def __init__(self, residual_channels, gate_channels, skip_channels, kernel_size, dilation):
+        super().__init__()
+        self.causal_conv = CausalConv1d(residual_channels, gate_channels, kernel_size, dilation)
+        half = gate_channels // 2
+        self.gate_conv   = nn.Conv1d(half, half, 1)
+        self.filter_conv = nn.Conv1d(half, half, 1)
+        self.residual_conv = nn.Conv1d(half, residual_channels, 1)
+        self.skip_conv     = nn.Conv1d(half, skip_channels, 1)
+
+    def forward(self, x):
+        residual = x
+        x = self.causal_conv(x)
+        filter_part, gate_part = torch.chunk(x, 2, dim=1)
+        x = torch.tanh(self.filter_conv(filter_part)) * torch.sigmoid(self.gate_conv(gate_part))
+        skip = self.skip_conv(x)
+        res_out = self.residual_conv(x)
+        if res_out.size(-1) != residual.size(-1):
+            residual = residual[:, :, :res_out.size(-1)]
+        return residual + res_out, skip
+
+
+class SimpleWaveNet(nn.Module):
+    """
+    WaveNet-style model for ADC denoising.
+    Input:  [B, T]  — integer ADC values (0-255)
+    Output: [B, 256, T] — class logits per time step
+    """
+    def __init__(self, config: WaveNetConfig):
+        super().__init__()
+        self.embedding   = nn.Embedding(256, config.input_channels)
+        self.input_conv  = nn.Conv1d(config.input_channels, config.residual_channels, 1)
+        self.blocks = nn.ModuleList([
+            WaveNetBlock(config.residual_channels, config.gate_channels,
+                         config.skip_channels, config.kernel_size, 2 ** i)
+            for i in range(config.num_blocks)
+        ])
+        self.output_conv1 = nn.Conv1d(config.skip_channels, config.skip_channels, 1)
+        self.output_conv2 = nn.Conv1d(config.skip_channels, 256, 1)
+
+    def forward(self, x):
+        x = self.embedding(x.long())   # [B, T, input_channels]
+        x = x.transpose(1, 2)          # [B, input_channels, T]
+        x = self.input_conv(x)
+        skip_sum = None
+        for block in self.blocks:
+            x, skip = block(x)
+            if skip_sum is None:
+                skip_sum = skip
+            else:
+                min_len = min(skip_sum.size(-1), skip.size(-1))
+                skip_sum = skip_sum[:, :, :min_len] + skip[:, :, :min_len]
+        x = F.relu(skip_sum)
+        x = F.relu(self.output_conv1(x))
+        return self.output_conv2(x)    # [B, 256, T]
+
+
+# ==========================================
+# RNNSeq2Seq
+# ==========================================
+
+class Seq2SeqEncoder(nn.Module):
+    """LSTM encoder that processes the full input sequence."""
+    def __init__(self, embedding_dim, hidden_dim, num_layers, dropout):
+        super().__init__()
+        self.embedding = nn.Embedding(256, embedding_dim)
+        self.lstm = nn.LSTM(
+            input_size=embedding_dim, hidden_size=hidden_dim,
+            num_layers=num_layers, dropout=dropout if num_layers > 1 else 0,
+            batch_first=True, bidirectional=False,
+        )
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        embedded = self.dropout(self.embedding(x))
+        outputs, (hidden, cell) = self.lstm(embedded)
+        return outputs, hidden, cell
+
+
+class Seq2SeqDecoder(nn.Module):
+    """LSTM decoder with teacher-forcing support."""
+    def __init__(self, embedding_dim, hidden_dim, num_layers, dropout):
+        super().__init__()
+        self.embedding = nn.Embedding(256, embedding_dim)
+        self.lstm = nn.LSTM(
+            input_size=embedding_dim, hidden_size=hidden_dim,
+            num_layers=num_layers, dropout=dropout if num_layers > 1 else 0,
+            batch_first=True, bidirectional=False,
+        )
+        self.output_proj = nn.Linear(hidden_dim, 256)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward_sequence(self, x, hidden, cell):
+        embedded = self.dropout(self.embedding(x))
+        outputs, _ = self.lstm(embedded, (hidden, cell))
+        return self.output_proj(self.dropout(outputs))  # [B, T, 256]
+
+
+class RNNSeq2Seq(nn.Module):
+    """
+    LSTM encoder-decoder for ADC denoising.
+    Input:  [B, T]  — integer ADC values (0-255)
+    Output: [B, 256, T] — class logits per time step
+    """
+    def __init__(self, config: RNNSeq2SeqConfig):
+        super().__init__()
+        self.encoder = Seq2SeqEncoder(config.embedding_dim, config.hidden_dim,
+                                       config.num_layers, config.dropout)
+        self.decoder = Seq2SeqDecoder(config.embedding_dim, config.hidden_dim,
+                                       config.num_layers, config.dropout)
+
+    def forward(self, x):
+        _, hidden, cell = self.encoder(x)
+        logits = self.decoder.forward_sequence(x, hidden, cell)  # [B, T, 256]
+        return logits.transpose(1, 2)                             # [B, 256, T]
+
+
 # 2. Global Registry
 MODEL_REGISTRY = {
     "punet": PositionalUNet,
     "fcnet": AE,
     "transformer": TransformerModel,
+    "wavenet": SimpleWaveNet,
+    "rnn": RNNSeq2Seq,
 }

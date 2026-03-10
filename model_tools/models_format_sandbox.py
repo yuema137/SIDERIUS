@@ -99,20 +99,61 @@ class TransformerConfig(BaseConfig):
             pass
         return self
 
-    @field_validator('embedding_dim')
+    @field_validator('nhead')
     @classmethod
     def check_nhead_divisibility(cls, v: int, info) -> int:
-        nhead = info.data.get('nhead')
-        if nhead and v % nhead != 0:
-            raise ValueError(f"embedding_dim {v} must be divisible by nhead {nhead}")
+        embedding_dim = info.data.get('embedding_dim')
+        if embedding_dim and embedding_dim % v != 0:
+            raise ValueError(f"embedding_dim {embedding_dim} must be divisible by nhead {v}")
         return v
     
+# ==========================================
+# 5. WaveNet Configuration
+# ==========================================
+class WaveNetConfig(BaseConfig):
+    model_type: Literal["wavenet"] = "wavenet"
+    input_channels: int = Field(default=16, ge=4, le=64,
+                                description="Embedding output dimension")
+    residual_channels: int = Field(default=32, ge=8, le=128,
+                                   description="Channel width through residual blocks")
+    gate_channels: int = Field(default=64, ge=8, le=256,
+                               description="Channels for gated activation (must be even)")
+    skip_channels: int = Field(default=32, ge=8, le=128,
+                               description="Skip connection channels")
+    kernel_size: int = Field(default=12, ge=2, le=32,
+                             description="Causal convolution kernel size")
+    num_blocks: int = Field(default=10, ge=1, le=20,
+                            description="Number of WaveNet residual blocks")
+
+    @field_validator('gate_channels')
+    @classmethod
+    def gate_channels_must_be_even(cls, v: int) -> int:
+        if v % 2 != 0:
+            raise ValueError('gate_channels must be even (split in half for gated activation)')
+        return v
+
+
+# ==========================================
+# 6. RNNSeq2Seq Configuration
+# ==========================================
+class RNNSeq2SeqConfig(BaseConfig):
+    model_type: Literal["rnn"] = "rnn"
+    embedding_dim: int = Field(default=128, ge=8, le=512,
+                               description="Embedding dimension for ADC tokens")
+    hidden_dim: int = Field(default=256, ge=8, le=1024,
+                            description="LSTM hidden state size")
+    num_layers: int = Field(default=2, ge=1, le=6,
+                            description="Number of LSTM layers in encoder and decoder")
+    dropout: float = Field(default=0.1, ge=0.0, le=0.5,
+                           description="Dropout applied between LSTM layers (ignored if num_layers=1)")
+
+
 # ==========================================
 # Global Model Registry
 # ==========================================
 
 # Union type for the Agent to choose from
-ModelConfigUnion = Union[PUNetConfig, AEConfig, TransformerConfig]
+ModelConfigUnion = Union[PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, RNNSeq2SeqConfig]
 
 def get_config_class(model_type: str) -> Optional[Type[BaseConfig]]:
     """Helper for the Orchestrator to map strings to Pydantic classes."""
@@ -120,6 +161,8 @@ def get_config_class(model_type: str) -> Optional[Type[BaseConfig]]:
         "punet": PUNetConfig,
         "fcnet": AEConfig,
         "transformer": TransformerConfig,
+        "wavenet": WaveNetConfig,
+        "rnn": RNNSeq2SeqConfig,
     }
     return mapping.get(model_type)
 
@@ -189,7 +232,7 @@ class TrainConfig(BaseModel):
     lr: float = Field(default=1e-4, ge=1e-6, le=1e-1)
     epochs: int = Field(default=10, ge=1, le=100)
     # --- Add batch ---
-    batch_size: int = Field(default=1, ge=1, le=128, description="Batch size for training")
+    batch_size: int = Field(default=1, ge=1, le=1024, description="Batch size for training")
     # ----------------------------
     optimizer_type: Literal["adam", "adamw", "sgd"] = "adamw"
     weight_decay: float = Field(default=1e-5, ge=0, le=1e-1)
@@ -205,7 +248,7 @@ class ExperimentConfig(BaseModel):
     """
     exp_id: str
     run_name: str
-    model_type: Literal["punet", "fcnet", "transformer"]
+    model_type: Literal["punet", "fcnet", "transformer", "wavenet", "rnn"]
     network_config: ModelConfigUnion # This uses the Union defined earlier
     train_config: TrainConfig
     loss_config: LossConfig
