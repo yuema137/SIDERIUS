@@ -11,6 +11,7 @@ from model_tools.models_format_sandbox import (
     PUNetConfig,
     AEConfig,
     TransformerConfig,
+    WaveNetConfig,
     LossConfig,
     TrainConfig,
     ExperimentConfig,
@@ -99,6 +100,31 @@ class TestTransformerConfig:
 
 
 # ==========================================
+# WaveNetConfig
+# ==========================================
+
+class TestWaveNetConfig:
+
+    def test_valid_default(self):
+        cfg = WaveNetConfig()
+        assert cfg.model_type == "wavenet"
+        assert cfg.gate_channels == 64
+        assert cfg.num_blocks == 10
+
+    def test_valid_custom(self):
+        cfg = WaveNetConfig(num_blocks=4, residual_channels=16, skip_channels=16)
+        assert cfg.num_blocks == 4
+
+    def test_odd_gate_channels_raises(self):
+        with pytest.raises(ValidationError, match="even"):
+            WaveNetConfig(gate_channels=33)
+
+    def test_even_gate_channels_passes(self):
+        cfg = WaveNetConfig(gate_channels=32)
+        assert cfg.gate_channels == 32
+
+
+# ==========================================
 # LossConfig — parameter nullification
 # ==========================================
 
@@ -135,6 +161,7 @@ def _make_experiment(model_type: str, loss_type: str) -> dict:
         "punet":       {"model_type": "punet", "segmentation_size": 1000},
         "fcnet":       {"model_type": "fcnet", "segmentation_size": 1000, "latent_dims": [100, 10]},
         "transformer": {"model_type": "transformer", "segmentation_size": 1000, "embedding_dim": 32, "nhead": 4},
+        "wavenet":     {"model_type": "wavenet", "segmentation_size": 1000},
     }
     return {
         "exp_id": "test_exp",
@@ -175,3 +202,11 @@ class TestExperimentConfig:
     def test_transformer_with_smooth_l1_raises(self):
         with pytest.raises(ValidationError, match="smooth_l1"):
             ExperimentConfig(**_make_experiment("transformer", "smooth_l1"))
+
+    def test_wavenet_with_ce_passes(self):
+        cfg = ExperimentConfig(**_make_experiment("wavenet", "ce"))
+        assert cfg.model_type == "wavenet"
+
+    def test_wavenet_with_smooth_l1_raises(self):
+        with pytest.raises(ValidationError, match="smooth_l1"):
+            ExperimentConfig(**_make_experiment("wavenet", "smooth_l1"))

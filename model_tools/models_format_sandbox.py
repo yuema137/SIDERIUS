@@ -108,11 +108,37 @@ class TransformerConfig(BaseConfig):
         return v
     
 # ==========================================
+# 5. WaveNet Configuration
+# ==========================================
+class WaveNetConfig(BaseConfig):
+    model_type: Literal["wavenet"] = "wavenet"
+    input_channels: int = Field(default=16, ge=4, le=64,
+                                description="Embedding output dimension")
+    residual_channels: int = Field(default=32, ge=8, le=128,
+                                   description="Channel width through residual blocks")
+    gate_channels: int = Field(default=64, ge=8, le=256,
+                               description="Channels for gated activation (must be even)")
+    skip_channels: int = Field(default=32, ge=8, le=128,
+                               description="Skip connection channels")
+    kernel_size: int = Field(default=12, ge=2, le=32,
+                             description="Causal convolution kernel size")
+    num_blocks: int = Field(default=10, ge=1, le=20,
+                            description="Number of WaveNet residual blocks")
+
+    @field_validator('gate_channels')
+    @classmethod
+    def gate_channels_must_be_even(cls, v: int) -> int:
+        if v % 2 != 0:
+            raise ValueError('gate_channels must be even (split in half for gated activation)')
+        return v
+
+
+# ==========================================
 # Global Model Registry
 # ==========================================
 
 # Union type for the Agent to choose from
-ModelConfigUnion = Union[PUNetConfig, AEConfig, TransformerConfig]
+ModelConfigUnion = Union[PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig]
 
 def get_config_class(model_type: str) -> Optional[Type[BaseConfig]]:
     """Helper for the Orchestrator to map strings to Pydantic classes."""
@@ -120,6 +146,7 @@ def get_config_class(model_type: str) -> Optional[Type[BaseConfig]]:
         "punet": PUNetConfig,
         "fcnet": AEConfig,
         "transformer": TransformerConfig,
+        "wavenet": WaveNetConfig,
     }
     return mapping.get(model_type)
 
@@ -205,7 +232,7 @@ class ExperimentConfig(BaseModel):
     """
     exp_id: str
     run_name: str
-    model_type: Literal["punet", "fcnet", "transformer"]
+    model_type: Literal["punet", "fcnet", "transformer", "wavenet"]
     network_config: ModelConfigUnion # This uses the Union defined earlier
     train_config: TrainConfig
     loss_config: LossConfig

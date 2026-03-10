@@ -8,7 +8,7 @@ from torch.utils.data import dataset
 import math
 from pydantic import BaseModel, Field, field_validator, model_validator 
 from typing import List, Literal, Union
-from models_format_sandbox import PUNetConfig, AEConfig, TransformerConfig
+from models_format_sandbox import PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig
 
 # Blocks used by networks
 
@@ -354,9 +354,87 @@ class TransformerModel(nn.Module):
         # Transpose to [Batch, 256, Time] to match Loss requirements
         return output.transpose(1, 2)
     
+# ==========================================
+# WaveNet
+# ==========================================
+
+class CausalConv1d(nn.Module):
+    """Causal convolution — no future information leakage."""
+    def __init__(self, in_channels, out_channels, kernel_size, dilation=1):
+        super().__init__()
+        self.padding = (kernel_size - 1) * dilation
+        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size,
+                              padding=self.padding, dilation=dilation)
+
+    def forward(self, x):
+        x = self.conv(x)
+        if self.padding > 0:
+            x = x[:, :, :-self.padding]
+        return x
+
+
+class WaveNetBlock(nn.Module):
+    """Single WaveNet residual block with dilated causal convolution."""
+    def __init__(self, residual_channels, gate_channels, skip_channels, kernel_size, dilation):
+        super().__init__()
+        self.causal_conv = CausalConv1d(residual_channels, gate_channels, kernel_size, dilation)
+        half = gate_channels // 2
+        self.gate_conv   = nn.Conv1d(half, half, 1)
+        self.filter_conv = nn.Conv1d(half, half, 1)
+        self.residual_conv = nn.Conv1d(half, residual_channels, 1)
+        self.skip_conv     = nn.Conv1d(half, skip_channels, 1)
+
+    def forward(self, x):
+        residual = x
+        x = self.causal_conv(x)
+        filter_part, gate_part = torch.chunk(x, 2, dim=1)
+        x = torch.tanh(self.filter_conv(filter_part)) * torch.sigmoid(self.gate_conv(gate_part))
+        skip = self.skip_conv(x)
+        res_out = self.residual_conv(x)
+        if res_out.size(-1) != residual.size(-1):
+            residual = residual[:, :, :res_out.size(-1)]
+        return residual + res_out, skip
+
+
+class SimpleWaveNet(nn.Module):
+    """
+    WaveNet-style model for ADC denoising.
+    Input:  [B, T]  — integer ADC values (0-255)
+    Output: [B, 256, T] — class logits per time step
+    """
+    def __init__(self, config: WaveNetConfig):
+        super().__init__()
+        self.embedding   = nn.Embedding(256, config.input_channels)
+        self.input_conv  = nn.Conv1d(config.input_channels, config.residual_channels, 1)
+        self.blocks = nn.ModuleList([
+            WaveNetBlock(config.residual_channels, config.gate_channels,
+                         config.skip_channels, config.kernel_size, 2 ** i)
+            for i in range(config.num_blocks)
+        ])
+        self.output_conv1 = nn.Conv1d(config.skip_channels, config.skip_channels, 1)
+        self.output_conv2 = nn.Conv1d(config.skip_channels, 256, 1)
+
+    def forward(self, x):
+        x = self.embedding(x.long())   # [B, T, input_channels]
+        x = x.transpose(1, 2)          # [B, input_channels, T]
+        x = self.input_conv(x)
+        skip_sum = None
+        for block in self.blocks:
+            x, skip = block(x)
+            if skip_sum is None:
+                skip_sum = skip
+            else:
+                min_len = min(skip_sum.size(-1), skip.size(-1))
+                skip_sum = skip_sum[:, :, :min_len] + skip[:, :, :min_len]
+        x = F.relu(skip_sum)
+        x = F.relu(self.output_conv1(x))
+        return self.output_conv2(x)    # [B, 256, T]
+
+
 # 2. Global Registry
 MODEL_REGISTRY = {
     "punet": PositionalUNet,
     "fcnet": AE,
     "transformer": TransformerModel,
+    "wavenet": SimpleWaveNet,
 }

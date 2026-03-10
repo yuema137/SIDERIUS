@@ -7,8 +7,8 @@ on CPU with synthetic inputs. Uses small segmentation_size for speed.
 import pytest
 import torch
 
-from model_tools.models_sandbox import PositionalUNet, AE, TransformerModel, MODEL_REGISTRY
-from model_tools.models_format_sandbox import PUNetConfig, AEConfig, TransformerConfig
+from model_tools.models_sandbox import PositionalUNet, AE, TransformerModel, SimpleWaveNet, MODEL_REGISTRY
+from model_tools.models_format_sandbox import PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig
 
 
 BATCH = 2
@@ -21,13 +21,14 @@ SEG_SIZE = 1000  # small for speed
 
 class TestModelRegistry:
 
-    def test_registry_contains_all_three_models(self):
-        assert set(MODEL_REGISTRY.keys()) == {"punet", "fcnet", "transformer"}
+    def test_registry_contains_all_models(self):
+        assert set(MODEL_REGISTRY.keys()) == {"punet", "fcnet", "transformer", "wavenet"}
 
     def test_registry_maps_to_correct_classes(self):
         assert MODEL_REGISTRY["punet"] is PositionalUNet
         assert MODEL_REGISTRY["fcnet"] is AE
         assert MODEL_REGISTRY["transformer"] is TransformerModel
+        assert MODEL_REGISTRY["wavenet"] is SimpleWaveNet
 
 
 # ==========================================
@@ -155,3 +156,47 @@ class TestTransformerModel:
         model = self._make_model()
         out = model(input_tensor)
         assert not torch.isnan(out).any()
+
+
+# ==========================================
+# SimpleWaveNet
+# ==========================================
+
+class TestSimpleWaveNet:
+
+    @pytest.fixture
+    def input_tensor(self):
+        """[Batch, SeqLen] integer tensor simulating ADC values (0-255)."""
+        return torch.randint(0, 256, (BATCH, SEG_SIZE))
+
+    def _make_model(self, num_blocks=3, **kwargs):
+        cfg = WaveNetConfig(
+            segmentation_size=SEG_SIZE,
+            input_channels=8,
+            residual_channels=16,
+            gate_channels=16,
+            skip_channels=16,
+            num_blocks=num_blocks,
+            **kwargs
+        )
+        return SimpleWaveNet(cfg)
+
+    def test_output_shape(self, input_tensor):
+        model = self._make_model()
+        out = model(input_tensor)
+        assert out.shape == (BATCH, 256, SEG_SIZE)
+
+    def test_output_is_float(self, input_tensor):
+        model = self._make_model()
+        out = model(input_tensor)
+        assert out.dtype == torch.float32
+
+    def test_no_nan_in_output(self, input_tensor):
+        model = self._make_model()
+        out = model(input_tensor)
+        assert not torch.isnan(out).any()
+
+    def test_more_blocks(self, input_tensor):
+        model = self._make_model(num_blocks=5)
+        out = model(input_tensor)
+        assert out.shape == (BATCH, 256, SEG_SIZE)

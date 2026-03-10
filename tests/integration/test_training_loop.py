@@ -16,7 +16,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from train_engine_sandbox import TIDMADDataset, run_experiment
-from models_format_sandbox import PUNetConfig, AEConfig, TransformerConfig, TrainConfig, LossConfig
+from models_format_sandbox import PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, TrainConfig, LossConfig
 
 
 SEG_SIZE = 1000
@@ -37,6 +37,9 @@ def make_model_cfg(model_type):
         return AEConfig(segmentation_size=SEG_SIZE, latent_dims=[200, 20])
     elif model_type == "transformer":
         return TransformerConfig(segmentation_size=SEG_SIZE, embedding_dim=32, nhead=4, num_layers=2)
+    elif model_type == "wavenet":
+        return WaveNetConfig(segmentation_size=SEG_SIZE, input_channels=8, residual_channels=16,
+                             gate_channels=16, skip_channels=16, num_blocks=3)
 
 
 def make_loader(synthetic_h5, model_cfg):
@@ -129,6 +132,30 @@ class TestTransformerTraining:
     @pytest.mark.parametrize("loss_type", ["ce", "focal", "focal_cw"])
     def test_transformer_model_is_loadable(self, loss_type, synthetic_h5, tmp_path):
         _, model_path = run_one("transformer", loss_type, synthetic_h5, tmp_path)
+        state = torch.load(model_path, map_location="cpu")
+        assert isinstance(state, dict)
+        assert len(state) > 0
+
+
+# ==========================================
+# wavenet — classification losses only
+# ==========================================
+
+class TestWaveNetTraining:
+
+    @pytest.mark.parametrize("loss_type", ["ce", "focal", "focal_cw"])
+    def test_wavenet_trains_and_saves_model(self, loss_type, synthetic_h5, tmp_path):
+        results, model_path = run_one("wavenet", loss_type, synthetic_h5, tmp_path)
+
+        assert "final_loss" in results
+        assert "loss_history" in results
+        assert len(results["loss_history"]) == 1
+        assert isinstance(results["final_loss"], float)
+        assert os.path.exists(model_path), f"Model not saved at {model_path}"
+
+    @pytest.mark.parametrize("loss_type", ["ce", "focal", "focal_cw"])
+    def test_wavenet_model_is_loadable(self, loss_type, synthetic_h5, tmp_path):
+        _, model_path = run_one("wavenet", loss_type, synthetic_h5, tmp_path)
         state = torch.load(model_path, map_location="cpu")
         assert isinstance(state, dict)
         assert len(state) > 0

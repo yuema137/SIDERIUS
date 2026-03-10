@@ -30,7 +30,7 @@ siderius/
 │
 ├── model_tools/                # Model definitions and Pydantic config schemas
 │   ├── models_sandbox.py       # Network architectures + MODEL_REGISTRY
-│   ├── models_format_sandbox.py# Pydantic configs: PUNetConfig, AEConfig, TransformerConfig, etc.
+│   ├── models_format_sandbox.py# Pydantic configs: PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, etc.
 │   └── loss_models_sandbox.py  # Loss functions + get_criterion factory
 │
 ├── execute_tools/              # Physical execution scripts (called as subprocesses)
@@ -62,15 +62,16 @@ All models operate on SQUID time-series data (ADC values 0–255, sequence lengt
 | `punet` | `PositionalUNet` | 1D convolutional U-Net with sinusoidal positional encoding at every layer. Depth and channel multiplier are agent-adjustable. |
 | `fcnet` | `AE` | Fully connected AutoEncoder with configurable hidden layer dimensions (`latent_dims`). Supports both classification (CE/focal) and regression (smooth_l1) modes. |
 | `transformer` | `TransformerModel` | Transformer encoder with embedding + positional encoding, projecting to 256 ADC classes. Use `segmentation_size <= 20000` to avoid OOM. |
+| `wavenet` | `SimpleWaveNet` | WaveNet-style model with dilated causal convolutions and gated activations. Configurable `num_blocks`, `residual_channels`, `gate_channels`. |
 
 ## Implemented Loss Functions
 
 | Key | Class | Compatible Models | Notes |
 |---|---|---|---|
-| `focal` | `FocalLoss1D` | `punet`, `transformer`, `fcnet` | Standard focal loss, tunable `alpha` and `gamma` |
-| `focal_cw` | `FocalLoss1DCW` | `punet`, `transformer`, `fcnet` | Class-weighted focal loss |
-| `ce` | `nn.CrossEntropyLoss` | `punet`, `transformer`, `fcnet` | Baseline classification loss |
-| `smooth_l1` | `nn.SmoothL1Loss` | `fcnet` only | Waveform regression mode; incompatible with `punet`/`transformer` |
+| `focal` | `FocalLoss1D` | `punet`, `transformer`, `fcnet`, `wavenet` | Standard focal loss, tunable `alpha` and `gamma` |
+| `focal_cw` | `FocalLoss1DCW` | `punet`, `transformer`, `fcnet`, `wavenet` | Class-weighted focal loss |
+| `ce` | `nn.CrossEntropyLoss` | `punet`, `transformer`, `fcnet`, `wavenet` | Baseline classification loss |
+| `smooth_l1` | `nn.SmoothL1Loss` | `fcnet` only | Waveform regression mode; incompatible with `punet`/`transformer`/`wavenet` |
 
 ---
 

@@ -51,7 +51,7 @@ def process_batch(index, inputarr, targetarr, model, args, current_loss_type):
         input_seq = input_seq.squeeze(1)
 
     # 3. Model-Specific Execution & Type Casting
-    if args.denoising_model in ["punet", "transformer"]:
+    if args.denoising_model in ["punet", "transformer", "wavenet"]:
         # Embedding layer requires Long/Int tensors
         input_seq = input_seq.long().to(DEVICE)
     else:

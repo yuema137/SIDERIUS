@@ -68,12 +68,22 @@ MODEL_CONFIGS = {
         "num_layers": 1,
         "dim_feedforward": 64,
     },
+    "wavenet": {
+        "model_type": "wavenet",
+        "segmentation_size": 40000,
+        "input_channels": 8,
+        "residual_channels": 16,
+        "gate_channels": 16,
+        "skip_channels": 16,
+        "num_blocks": 4,
+    },
 }
 
 LOSS_CONFIGS = {
     "punet":       [{"loss_type": "ce"}, {"loss_type": "focal"}, {"loss_type": "focal_cw"}],
     "fcnet":       [{"loss_type": "ce"}, {"loss_type": "focal"}, {"loss_type": "focal_cw"}, {"loss_type": "smooth_l1"}],
     "transformer": [{"loss_type": "ce"}, {"loss_type": "focal"}, {"loss_type": "focal_cw"}],
+    "wavenet":     [{"loss_type": "ce"}, {"loss_type": "focal"}, {"loss_type": "focal_cw"}],
 }
 
 TRAIN_CONFIG = {"lr": 1e-4, "epochs": 1, "batch_size": 1, "device": "cuda"}
@@ -202,6 +212,11 @@ class TestRealRunGemini:
         record = run_one_loop("gemini", "transformer", loss_cfg, str(tmp_path))
         assert record["status"] == "success"
 
+    @pytest.mark.parametrize("loss_cfg", LOSS_CONFIGS["wavenet"])
+    def test_wavenet_gemini(self, loss_cfg, tmp_path):
+        record = run_one_loop("gemini", "wavenet", loss_cfg, str(tmp_path))
+        assert record["status"] == "success"
+
 
 # ==========================================
 # OpenAI — all model/loss combinations
@@ -226,4 +241,9 @@ class TestRealRunOpenAI:
     @pytest.mark.parametrize("loss_cfg", LOSS_CONFIGS["transformer"])
     def test_transformer_openai(self, loss_cfg, tmp_path):
         record = run_one_loop("openai", "transformer", loss_cfg, str(tmp_path))
+        assert record["status"] == "success"
+
+    @pytest.mark.parametrize("loss_cfg", LOSS_CONFIGS["wavenet"])
+    def test_wavenet_openai(self, loss_cfg, tmp_path):
+        record = run_one_loop("openai", "wavenet", loss_cfg, str(tmp_path))
         assert record["status"] == "success"
