@@ -74,9 +74,18 @@ def main():
         raise ValueError("Config Manual not provided.")
 
     # --- 2. Autonomous Research Loop ---
-    for iteration in range(1, args.max_rounds + 1):
+    # Only rounds with a feasible config count toward max_rounds.
+    # Infeasible (OOM-risk) attempts are saved to memory but do NOT consume a round slot.
+    # A hard cap of max_rounds * 3 total attempts prevents infinite loops.
+    completed_rounds = 0
+    total_attempts   = 0
+    max_attempts     = args.max_rounds * 3
+
+    while completed_rounds < args.max_rounds and total_attempts < max_attempts:
+        total_attempts   += 1
+        iteration         = completed_rounds + 1   # display number of the *next* round to complete
         try:
-            print(f"\n\n{'='*60}\n🔄 ROUND {iteration}/{args.max_rounds}: Planning...\n{'='*60}")
+            print(f"\n\n{'='*60}\n🔄 ROUND {iteration}/{args.max_rounds} (attempt {total_attempts}): Planning...\n{'='*60}")
 
             # A. OBSERVE: Retrieve full Research Memory from summary.json
             memory_history = sandbox.get_summary()
@@ -106,6 +115,33 @@ def main():
                 "train_config": decision.get("train_config", {}),
                 "loss_config": decision.get("loss_config", {})
             }
+
+            print(f"\n[Step 0/3] Resource check...")
+            resource_check = run_skill("evaluate_resource_skill", sandbox, **active_params)
+            if resource_check.get("status") == "error":
+                raise RuntimeError(f"Resource check error: {resource_check.get('message')}")
+            if not resource_check.get("feasible", True):
+                print(f"⛔ Resource check FAILED — this attempt does NOT count as a round.")
+                print(f"   Verdict   : {resource_check.get('verdict', '')}")
+                print(f"   Suggestion: {resource_check.get('suggestion', '')}")
+                # Save to memory so the agent learns to propose smaller configs next time
+                sandbox.save_record({
+                    "exp_id":    exp_id,
+                    "status":    "skipped_oom_risk",
+                    "model_type": model_type,
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "params":    active_params,
+                    "results":   {},
+                    "denoising_score": None,
+                    "memory": {
+                        "expert_advice_followed": args.expert_advice,
+                        "hypothesis": hypothesis,
+                        "conclusion": f"Skipped: estimated VRAM ({resource_check.get('estimated_gb', '?')} GB) exceeds 80% safety limit ({resource_check.get('limit_gb', '?')} GB).",
+                        "discovery":  resource_check.get("verdict", ""),
+                        "memory_update": resource_check.get("suggestion", "Reduce batch_size or segmentation_size."),
+                    },
+                })
+                continue  # attempt consumed but completed_rounds NOT incremented
 
             print(f"\n[Step 1/3] Training...")
             train_status = run_skill("training_skill", sandbox, **active_params)
@@ -155,8 +191,9 @@ def main():
             }
             
             sandbox.save_record(final_record)
-            
-            print(f"✅ Round {iteration} Complete. Score: {combined_results.get('denoising_score', 'N/A')}")
+
+            completed_rounds += 1
+            print(f"✅ Round {completed_rounds}/{args.max_rounds} Complete. Score: {combined_results.get('denoising_score', 'N/A')}")
 
             # Cool-down to avoid API rate limits
             time.sleep(2)
@@ -166,7 +203,10 @@ def main():
             traceback.print_exc()
             time.sleep(5)
 
-    print("\n🏁 Reached maximum rounds. Research loop terminated.")
+    if completed_rounds >= args.max_rounds:
+        print(f"\n🏁 Completed {completed_rounds} research rounds. Loop terminated.")
+    else:
+        print(f"\n⚠️  Reached attempt limit ({max_attempts}) with only {completed_rounds}/{args.max_rounds} rounds completed.")
 
 if __name__ == "__main__":
     main()
