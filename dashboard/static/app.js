@@ -150,6 +150,13 @@ function computeBestScoreCurve(records) {
   });
 }
 
+function computeCurrentScoreCurve(records) {
+  return records.map(r => {
+    const score = r.denoising_score;
+    return (score !== null && score !== undefined) ? score : null;
+  });
+}
+
 function computeMemoryCurve(records) {
   return records.map(r => {
     const params = r.results?.model_params;
@@ -169,8 +176,9 @@ function updateCharts() {
   state.series.forEach(s => {
     const label = `${s.model} / ${s.run} (n=${s.limit})`;
 
-    const scoreData  = computeBestScoreCurve(s.records);
-    const memoryData = computeMemoryCurve(s.records);
+    const scoreData   = computeBestScoreCurve(s.records);
+    const currentData = computeCurrentScoreCurve(s.records);
+    const memoryData  = computeMemoryCurve(s.records);
 
     const commonStyle = {
       borderColor:          s.color,
@@ -181,10 +189,17 @@ function updateCharts() {
       borderWidth:          2,
       tension:              0.3,
       fill:                 false,
-      spanGaps:             false,  // leave gaps where value is null
+      spanGaps:             false,
     };
 
-    scoreDatasets.push({ label, data: scoreData, ...commonStyle });
+    scoreDatasets.push({ label: `${label} (best)`, data: scoreData, ...commonStyle });
+    scoreDatasets.push({
+      label: `${label} (current)`,
+      data: currentData,
+      ...commonStyle,
+      borderDash: [5, 5],
+      pointRadius: 2,
+    });
     memoryDatasets.push({ label, data: memoryData, ...commonStyle });
   });
 
