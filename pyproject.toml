@@ -21,3 +21,15 @@ dependencies = [
     "torch>=2.10.0",
     "tqdm>=4.67.3",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "model_tools", "execute_tools"]
+markers = [
+    "real_run: requires API keys and real TIDMAD data. Run locally only with: pytest -m real_run",
+]

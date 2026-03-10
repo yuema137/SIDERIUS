@@ -99,12 +99,12 @@ class TransformerConfig(BaseConfig):
             pass
         return self
 
-    @field_validator('embedding_dim')
+    @field_validator('nhead')
     @classmethod
     def check_nhead_divisibility(cls, v: int, info) -> int:
-        nhead = info.data.get('nhead')
-        if nhead and v % nhead != 0:
-            raise ValueError(f"embedding_dim {v} must be divisible by nhead {nhead}")
+        embedding_dim = info.data.get('embedding_dim')
+        if embedding_dim and embedding_dim % v != 0:
+            raise ValueError(f"embedding_dim {embedding_dim} must be divisible by nhead {v}")
         return v
     
 # ==========================================

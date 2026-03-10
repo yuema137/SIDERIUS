@@ -30,6 +30,8 @@ def get_parser():
     parser.add_argument("--run_name", type=str,  default="test_run",
                         help="Run name for the auto-exploration.")
     parser.add_argument('--model_path', type=str, help="Path to the .pth state_dict")
+    parser.add_argument('--output_dir', type=str, default=None,
+                        help="Directory to write denoised H5 output. Defaults to data_dir.")
     return parser
 
 def process_batch(index, inputarr, targetarr, model, args, current_loss_type):
@@ -155,10 +157,11 @@ def main():
 
     # 4. Save Output
     idx_str = str(args.file_index).zfill(4)
+    out_dir = args.output_dir if args.output_dir else args.data_dir
     if args.mode == 'fix':
-        out_name = os.path.join(args.data_dir, f"abra_validation_denoised_{args.denoising_model}_{idx_str}.h5")
+        out_name = os.path.join(out_dir, f"abra_validation_denoised_{args.denoising_model}_{idx_str}.h5")
     else:
-        out_name = os.path.join(args.data_dir, f"abra_validation_denoised_{args.denoising_model}_{args.run_name}_{args.exp_id}_{idx_str}.h5")
+        out_name = os.path.join(out_dir, f"abra_validation_denoised_{args.denoising_model}_{args.run_name}_{args.exp_id}_{idx_str}.h5")
 
     # Clean up old files before writing new one
     if os.path.exists(out_name):
