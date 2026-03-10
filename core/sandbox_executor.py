@@ -4,7 +4,7 @@ import json
 import subprocess
 import datetime
 from typing import Dict, Any, Optional
-from models_format_sandbox import get_config_class, TrainConfig, LossConfig, ExperimentConfig
+from model_tools.models_format_sandbox import get_config_class, TrainConfig, LossConfig, ExperimentConfig
 
 # --- Storage Strategies ---
 
@@ -141,7 +141,7 @@ class TidmadSandbox:
 
             print(f">>> [Executor] Running training for {exp_id}...")
             result = subprocess.run(
-                    ["python", "train_engine_sandbox.py", 
+                    ["python", "execute_tools/train_engine_sandbox.py", 
                     "--model_cfg", paths["m"], 
                     "--train_cfg", paths["t"], 
                     "--loss_cfg", paths["l"],
@@ -173,7 +173,7 @@ class TidmadSandbox:
         try:
             print(f">>> [Executor] Running inference for {exp_id}...")
             result = subprocess.run(
-                ["python", "inference_single.py", "--mode", "agent", "-m", model_type, 
+                ["python", "execute_tools/inference_single.py", "--mode", "agent", "-m", model_type, 
                  "--model_cfg", m_path, "--loss_cfg", l_path, 
                  "--model_path", model_path, "--exp_id", exp_id, "--run_name", run_name,], 
                 check=True, capture_output=True, text=True, cwd=os.getcwd()
@@ -196,7 +196,7 @@ class TidmadSandbox:
         try:
             print(f">>> [Executor] Running scoring for {exp_id}...")
             result = subprocess.run(
-                ["python", "denoising_score_single.py", "--mode", "agent", "-m", model_type, 
+                ["python", "execute_tools/denoising_score_single.py", "--mode", "agent", "-m", model_type, 
                  "--exp_id", exp_id, "--run_name", run_name, "--output_json", actual_json_path], 
                 check=True, capture_output=True, text=True, cwd=os.getcwd()
             )
