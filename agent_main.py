@@ -169,13 +169,95 @@ def main():
 
             # D. REFLECT: Analyze results and generate insights
             print(f"\n🤔 Generating Research Memory...")
-            reflection = brain.reflect(exp_id, hypothesis, score_res["results"])
-            
+
+            # Build reflection context so the reflector can judge results correctly
+            current_score = score_res["results"].get("denoising_score")
+            current_loss_type = active_params["loss_config"].get("loss_type")
+            successful = [
+                r for r in memory_history
+                if r.get("status") == "success" and r.get("denoising_score") is not None
+            ]
+            baseline_record = next(
+                (r for r in memory_history if "baseline" in r.get("exp_id", "")), None
+            )
+            all_scores = [r["denoising_score"] for r in successful]
+            best_score = max(all_scores) if all_scores else None
+            best_record = max(successful, key=lambda r: r["denoising_score"]) if successful else None
+            sorted_scores = sorted(all_scores, reverse=True)
+            rank = sorted_scores.index(current_score) + 1 if current_score in sorted_scores else None
+            same_loss_finals = [
+                r["results"]["final_loss"]
+                for r in successful
+                if r.get("params", {}).get("loss_config", {}).get("loss_type") == current_loss_type
+                and r.get("results", {}).get("final_loss") is not None
+            ]
+
+            # Rank current final_loss within same-loss-type experiments (1 = lowest = best)
+            current_final_loss = score_res["results"].get("final_loss")
+            if current_final_loss is not None:
+                all_same_loss_finals = same_loss_finals + [current_final_loss]
+                sorted_finals = sorted(all_same_loss_finals)
+                same_loss_loss_rank = sorted_finals.index(current_final_loss) + 1
+                same_loss_total = len(all_same_loss_finals)
+            else:
+                same_loss_loss_rank = None
+                same_loss_total = len(same_loss_finals)
+
+            # Efficiency context — compare params and epochs against baseline
+            current_params = score_res["results"].get("model_params")
+            current_epochs = active_params["train_config"].get("epochs")
+            baseline_params = baseline_record.get("results", {}).get("model_params") if baseline_record else None
+            baseline_epochs = baseline_record.get("params", {}).get("train_config", {}).get("epochs") if baseline_record else None
+            params_ratio = round(current_params / baseline_params, 3) if (current_params and baseline_params) else None
+            epochs_ratio = round(current_epochs / baseline_epochs, 3) if (current_epochs and baseline_epochs) else None
+
+            # Is this model more efficient than the current best?
+            # "Efficient" = denoising_score within 5% of the (best - worst) range, but fewer params or fewer epochs
+            # Using range-based threshold because scores can be negative (higher is still better).
+            worst_score = min(all_scores) if all_scores else None
+            score_range = (best_score - worst_score) if (best_score is not None and worst_score is not None and best_score != worst_score) else None
+            score_threshold = (best_score - 0.05 * score_range) if score_range is not None else best_score
+            best_params = best_record.get("results", {}).get("model_params") if best_record else None
+            best_epochs = best_record.get("params", {}).get("train_config", {}).get("epochs") if best_record else None
+            is_more_efficient = (
+                score_threshold is not None
+                and current_score is not None
+                and current_score >= score_threshold
+                and (
+                    (current_params is not None and best_params is not None and current_params < best_params)
+                    or (current_epochs is not None and best_epochs is not None and current_epochs < best_epochs)
+                )
+            )
+
+            reflection_context = {
+                "baseline_score":            baseline_record.get("denoising_score") if baseline_record else None,
+                "best_score_so_far":         best_score,
+                "is_new_best":               current_score is not None and (best_score is None or current_score > best_score),
+                "rank":                      rank,
+                "total_experiments":         len(successful),
+                "best_config_so_far":        best_record.get("params") if best_record else None,
+                "best_same_loss_final_loss":  min(same_loss_finals) if same_loss_finals else None,
+                "current_loss_type":         current_loss_type,
+                "same_loss_loss_rank":       same_loss_loss_rank,
+                "same_loss_total":           same_loss_total,
+                # Efficiency
+                "baseline_params":           baseline_params,
+                "baseline_epochs":           baseline_epochs,
+                "current_params":            current_params,
+                "current_epochs":            current_epochs,
+                "params_ratio":              params_ratio,
+                "epochs_ratio":              epochs_ratio,
+                "is_more_efficient":         is_more_efficient,
+            }
+
+            reflection = brain.reflect(exp_id, hypothesis, score_res["results"], reflection_context)
+
             # Console Feedback for Reflection
             print(f"{'-'*30}")
             print(f"📊 RESEARCH REFLECTION for {exp_id}:")
-            print(f"📝 Conclusion: {reflection.get('conclusion', 'N/A')}")
-            print(f"💡 Discovery: {reflection.get('discovery', 'N/A')}")
+            print(f"📝 Conclusion  : {reflection.get('conclusion', 'N/A')}")
+            print(f"🔑 Key Factor  : {reflection.get('key_factor', 'N/A')}")
+            print(f"💡 Discovery   : {reflection.get('discovery', 'N/A')}")
             print(f"🧠 Memory Update: {reflection.get('memory_update', 'N/A')}")
             print(f"{'-'*30}")
 
@@ -198,6 +280,7 @@ def main():
                     "expert_advice_followed": args.expert_advice,
                     "hypothesis": hypothesis,
                     "conclusion": reflection.get("conclusion"),
+                    "key_factor": reflection.get("key_factor"),
                     "discovery": reflection.get("discovery"),
                     "memory_update": reflection.get("memory_update")
                 }
