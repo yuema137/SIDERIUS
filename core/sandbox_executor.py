@@ -1,5 +1,6 @@
 # core/sandbox_executor.py
 import os
+import sys
 import json
 import subprocess
 import datetime
@@ -181,7 +182,7 @@ class TidmadSandbox:
 
             print(f">>> [Executor] Running training for {exp_id}...")
             result = subprocess.run(
-                    ["python", "execute_tools/train_engine_sandbox.py",
+                    [sys.executable, "execute_tools/train_engine_sandbox.py",
                     "--model_cfg", paths["m"],
                     "--train_cfg", paths["t"],
                     "--loss_cfg", paths["l"],
@@ -208,19 +209,29 @@ class TidmadSandbox:
             print(f"!!! [Executor Internal Error] !!!: {str(e)}") 
             return {"status": "error", "message": str(e)}
 
+    # Inference batch sizes matching the original TIDMAD paper (inference.py).
+    # These were chosen to keep GPU memory under ~2 GB per model.
+    # transformer=1 due to O(T²) attention memory; rnn=10 due to LSTM hidden states.
+    _INFERENCE_BATCH_SIZE = {
+        "punet": 25, "wavenet": 25, "fcnet": 25,
+        "rnn": 10,
+        "transformer": 1,
+    }
+
     def execute_inference(self, exp_id: str, run_name: str, model_type: str, m_cfg: Dict, l_cfg: Dict):
         """Executes the inference physical script."""
         m_path = os.path.abspath(os.path.join(self.dirs["configs"], f"model_config_{exp_id}.json"))
         l_path = os.path.abspath(os.path.join(self.dirs["configs"], f"loss_config_{exp_id}.json"))
         model_path = os.path.abspath(os.path.join(self.dirs["models"], f"model_{model_type}_{exp_id}_agent.pth"))
-        
+        inf_bs = str(self._INFERENCE_BATCH_SIZE.get(model_type, 25))
+
         try:
             print(f">>> [Executor] Running inference for {exp_id}...")
             result = subprocess.run(
-                ["python", "execute_tools/inference_single.py", "--mode", "agent", "-m", model_type,
+                [sys.executable, "execute_tools/inference_single.py", "--mode", "agent", "-m", model_type,
                  "--model_cfg", m_path, "--loss_cfg", l_path,
                  "--model_path", model_path, "--exp_id", exp_id, "--run_name", run_name,
-                 "--output_dir", self.base_dir, "--inference_batch_size", "256"],
+                 "--output_dir", self.base_dir, "--inference_batch_size", inf_bs],
                 check=True,
                 stdout=None if self.progress_bar else subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -250,7 +261,7 @@ class TidmadSandbox:
 
             print(f">>> [Executor] Running scoring for {exp_id}...")
             result = subprocess.run(
-                ["python", "execute_tools/denoising_score_single.py", "--mode", "agent", "-m", model_type,
+                [sys.executable, "execute_tools/denoising_score_single.py", "--mode", "agent", "-m", model_type,
                  "--exp_id", exp_id, "--run_name", run_name, "--output_json", score_json_path,
                  "--data_dir", self.base_dir],
                 check=True,
