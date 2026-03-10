@@ -1,0 +1,36 @@
+{
+  "name": "evaluate_resource_skill",
+  "description": "Evaluate whether a proposed experiment configuration fits within available GPU VRAM (80% safety limit). Must be called before training to prevent OOM crashes.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "model_type": {
+        "type": "string",
+        "enum": ["fcnet", "punet", "transformer", "wavenet", "rnn"],
+        "description": "The model architecture to evaluate."
+      },
+      "model_config": {
+        "type": "object",
+        "description": "Model configuration dict (same as passed to training_skill)."
+      },
+      "train_config": {
+        "type": "object",
+        "description": "Training configuration dict — batch_size is the key field.",
+        "properties": {
+          "batch_size": { "type": "integer" },
+          "device": { "type": "string" }
+        },
+        "required": ["batch_size"]
+      },
+      "loss_config": {
+        "type": "object",
+        "description": "Loss configuration dict — loss_type determines extra memory (focal needs one_hot).",
+        "properties": {
+          "loss_type": { "type": "string" }
+        },
+        "required": ["loss_type"]
+      }
+    },
+    "required": ["model_type", "model_config", "train_config", "loss_config"]
+  }
+}

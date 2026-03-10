@@ -108,7 +108,8 @@ def _ensure_dir(path: str) -> None:
 
 class TidmadSandbox:
     def __init__(self, metadata_source: str = "local", mongodb_uri: Optional[str] = None,
-                 run_name: str = "test_run", workspace: str = "./siderius_workspace"):
+                 run_name: str = "test_run", workspace: str = "./siderius_workspace",
+                 progress_bar: bool = False):
         self.base_dir = os.path.abspath(workspace)
         self.dirs = {
             "configs": os.path.join(self.base_dir, "configs", run_name),
@@ -121,6 +122,7 @@ class TidmadSandbox:
                 _ensure_dir(d)
 
         self.run_name = run_name
+        self.progress_bar = progress_bar
         # Initialize Recorder based on strategy
         if metadata_source == "mongodb" and mongodb_uri:
             self.recorder = MongoRecorder(mongodb_uri, "tidmad_db")
@@ -187,17 +189,19 @@ class TidmadSandbox:
                     "--run_name", run_name,
                     "--sandbox_dir", self.base_dir,],
                     check=True,
-                    capture_output=True,
+                    stdout=None if self.progress_bar else subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                     text=True,
                     cwd=os.getcwd(),
                     env=_subprocess_env(),
                 )
-            
-            if result.stdout: print(f"--- Train Script Output ---\n{result.stdout}")
+
+            if not self.progress_bar and result.stdout:
+                print(f"--- Train Script Output ---\n{result.stdout}")
             return {"status": "success", "message": "Training finished."}
 
         except subprocess.CalledProcessError as e:
-            error_msg = e.stderr if e.stderr else e.stdout
+            error_msg = e.stderr if e.stderr else ""
             print(f"--- Train Script Error ---\n{error_msg}")
             return {"status": "error", "message": error_msg}
         except Exception as e:
@@ -217,13 +221,17 @@ class TidmadSandbox:
                  "--model_cfg", m_path, "--loss_cfg", l_path,
                  "--model_path", model_path, "--exp_id", exp_id, "--run_name", run_name,
                  "--output_dir", self.base_dir, "--inference_batch_size", "256"],
-                check=True, capture_output=True, text=True, cwd=os.getcwd(),
+                check=True,
+                stdout=None if self.progress_bar else subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True, cwd=os.getcwd(),
                 env=_subprocess_env(),
             )
-            if result.stdout: print(f"--- Inference Output ---\n{result.stdout}")
+            if not self.progress_bar and result.stdout:
+                print(f"--- Inference Output ---\n{result.stdout}")
             return {"status": "success", "message": "Inference finished."}
         except subprocess.CalledProcessError as e:
-            error_msg = e.stderr if e.stderr else e.stdout
+            error_msg = e.stderr if e.stderr else ""
             print(f"--- Inference Error ---\n{error_msg}")
             return {"status": "error", "message": error_msg}
 
@@ -245,7 +253,10 @@ class TidmadSandbox:
                 ["python", "execute_tools/denoising_score_single.py", "--mode", "agent", "-m", model_type,
                  "--exp_id", exp_id, "--run_name", run_name, "--output_json", score_json_path,
                  "--data_dir", self.base_dir],
-                check=True, capture_output=True, text=True, cwd=os.getcwd(),
+                check=True,
+                stdout=None if self.progress_bar else subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True, cwd=os.getcwd(),
                 env=_subprocess_env(),
             )
 
