@@ -149,6 +149,7 @@ class FrontendConfig(BaseModel):
     data_source_type: str
     models: list[str]
     default_run_name: str
+    theme: str = "dark"
 
 
 # ---------------------------------------------------------------------------

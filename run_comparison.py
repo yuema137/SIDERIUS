@@ -97,26 +97,32 @@ def run_baseline(model_type: str, baseline_workspace: str, progress_bar: bool = 
     print()
 
     # --- Train ---
+    t0 = time.time()
     train_result = sandbox.execute_training(
         exp_id=exp_id, run_name=run_name, model_type=model_type,
         m_cfg=m_cfg, t_cfg=t_cfg, l_cfg=l_cfg,
     )
+    train_time = round(time.time() - t0, 1)
     if train_result["status"] != "success":
         raise RuntimeError(f"Baseline training failed:\n{train_result.get('message')}")
 
     # --- Inference ---
+    t0 = time.time()
     inf_result = sandbox.execute_inference(
         exp_id=exp_id, run_name=run_name, model_type=model_type,
         m_cfg=m_cfg, l_cfg=l_cfg,
     )
+    inference_time = round(time.time() - t0, 1)
     if inf_result["status"] != "success":
         raise RuntimeError(f"Baseline inference failed:\n{inf_result.get('message')}")
 
     # --- Score ---
+    t0 = time.time()
     score_result = sandbox.execute_scoring(
         exp_id=exp_id, run_name=run_name, model_type=model_type,
         m_cfg=m_cfg, t_cfg=t_cfg, l_cfg=l_cfg,
     )
+    scoring_time = round(time.time() - t0, 1)
     if score_result["status"] != "success":
         raise RuntimeError(f"Baseline scoring failed:\n{score_result.get('message')}")
 
@@ -142,6 +148,11 @@ def run_baseline(model_type: str, baseline_workspace: str, progress_bar: bool = 
         },
         "results":        combined,
         "denoising_score": combined.get("denoising_score"),
+        "timing": {
+            "train_time_s":     train_time,
+            "inference_time_s": inference_time,
+            "scoring_time_s":   scoring_time,
+        },
         "memory": {
             "expert_advice_followed": "Legacy TIDMAD paper baseline — no agent involvement.",
             "hypothesis": "Original hardcoded baseline configuration from the TIDMAD paper.",

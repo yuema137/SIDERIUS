@@ -20,11 +20,13 @@ from loss_models_sandbox import get_criterion
 # ==========================================
 
 class TIDMADDataset(Dataset):
-    def __init__(self, fpath: str, fname_list: list, segmentation_size: int, sample_size: int = 20):
+    def __init__(self, fpath: str, fname_list: list, segmentation_size: int,
+                 sample_size: int = 20, max_segments: int = None):
         self.filepath = fpath
         self.filelist = fname_list if isinstance(fname_list, list) else [fname_list]
         self.seg_size = segmentation_size
         self.sample_size = sample_size
+        self.max_segments = max_segments
         self.idict = {}
         self.tdict = {}
         self.class_count = torch.ones(256)
@@ -62,6 +64,8 @@ class TIDMADDataset(Dataset):
                 for i in range(num_segments): evlist.append((filename, i))
                 del alltrain, alltarget
                 gc.collect()
+        if self.max_segments is not None:
+            evlist = evlist[:self.max_segments]
         return evlist
 
 # ==========================================

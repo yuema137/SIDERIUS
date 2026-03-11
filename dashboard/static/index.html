@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -16,6 +16,7 @@
       Refreshing in <span id="countdown">—</span>s
       <button class="secondary" onclick="App.refresh()" style="padding:4px 10px;font-size:11px;">↺ Now</button>
     </span>
+    <button class="secondary" id="theme-toggle" onclick="App.toggleTheme()" style="padding:4px 10px;font-size:11px;">☀ Light</button>
   </div>
 </header>
 
@@ -51,36 +52,70 @@
   <!-- Charts -->
   <div class="charts-grid">
 
-    <!-- Chart 1: Best denoising score -->
+    <!-- Chart 1: Denoising score -->
     <div class="card">
-      <div class="card-title">Best denoising score vs research loop</div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:12px;">
-        Cumulative best score at each loop — higher is better (even if negative)
+      <div class="card-title">Denoising score vs research loop</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">
+        Solid = cumulative best · Dashed = current experiment · Higher is better
       </div>
-      <div class="chart-wrap">
-        <canvas id="chart-score"></canvas>
-        <div class="chart-empty" id="empty-score">Add a series to begin</div>
+      <div class="axis-controls">
+        <span class="axis-label">X:</span>
+        <button class="axis-btn active" onclick="App.setAxisType('chart-score','x','linear',this)">Linear</button>
+        <button class="axis-btn"        onclick="App.setAxisType('chart-score','x','log',this)">Log</button>
+        <span class="axis-label" style="margin-left:10px;">Y:</span>
+        <button class="axis-btn active" onclick="App.setAxisType('chart-score','y','linear',this)">Linear</button>
+        <button class="axis-btn"        onclick="App.setAxisType('chart-score','y','log',this)">Log</button>
       </div>
+      <div class="range-controls">
+        <span class="axis-label">X range:</span>
+        <input class="range-input" id="score-xmin" type="number" placeholder="min" />
+        <span class="axis-label">–</span>
+        <input class="range-input" id="score-xmax" type="number" placeholder="max" />
+        <span class="axis-label" style="margin-left:10px;">Y range:</span>
+        <input class="range-input" id="score-ymin" type="number" placeholder="min" />
+        <span class="axis-label">–</span>
+        <input class="range-input" id="score-ymax" type="number" placeholder="max" />
+        <button class="axis-btn" onclick="App.applyRange('chart-score','score')">Apply</button>
+        <button class="axis-btn" onclick="App.resetRange('chart-score','score')">Reset</button>
+      </div>
+      <div id="chart-score" class="chart-wrap"></div>
     </div>
 
-    <!-- Chart 2: Memory usage -->
+    <!-- Chart 2: Model parameters -->
     <div class="card">
       <div class="card-title">Model parameters vs research loop</div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:12px;">
-        Number of trainable parameters per experiment (proxy for model size / memory)
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">
+        Number of trainable parameters per experiment (proxy for model size)
       </div>
-      <div class="chart-wrap">
-        <canvas id="chart-memory"></canvas>
-        <div class="chart-empty" id="empty-memory">Add a series to begin</div>
+      <div class="axis-controls">
+        <span class="axis-label">X:</span>
+        <button class="axis-btn active" onclick="App.setAxisType('chart-memory','x','linear',this)">Linear</button>
+        <button class="axis-btn"        onclick="App.setAxisType('chart-memory','x','log',this)">Log</button>
+        <span class="axis-label" style="margin-left:10px;">Y:</span>
+        <button class="axis-btn active" onclick="App.setAxisType('chart-memory','y','linear',this)">Linear</button>
+        <button class="axis-btn"        onclick="App.setAxisType('chart-memory','y','log',this)">Log</button>
       </div>
+      <div class="range-controls">
+        <span class="axis-label">X range:</span>
+        <input class="range-input" id="memory-xmin" type="number" placeholder="min" />
+        <span class="axis-label">–</span>
+        <input class="range-input" id="memory-xmax" type="number" placeholder="max" />
+        <span class="axis-label" style="margin-left:10px;">Y range:</span>
+        <input class="range-input" id="memory-ymin" type="number" placeholder="min" />
+        <span class="axis-label">–</span>
+        <input class="range-input" id="memory-ymax" type="number" placeholder="max" />
+        <button class="axis-btn" onclick="App.applyRange('chart-memory','memory')">Apply</button>
+        <button class="axis-btn" onclick="App.resetRange('chart-memory','memory')">Reset</button>
+      </div>
+      <div id="chart-memory" class="chart-wrap"></div>
     </div>
 
   </div>
 
 </main>
 
-<!-- Chart.js from CDN -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+<!-- Plotly.js from CDN -->
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist@2.35.2/plotly.min.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>
