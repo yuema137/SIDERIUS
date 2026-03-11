@@ -93,6 +93,7 @@ def create_app(settings: DashboardSettings) -> FastAPI:
         data_source_type=ds_type,
         models=data_source.list_models(),
         default_run_name=settings.dashboard.default_run_name,
+        theme=settings.dashboard.theme,
     )
 
     # Inject into router (module-level, safe for single-process deployment)

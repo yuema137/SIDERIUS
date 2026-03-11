@@ -55,6 +55,7 @@ class DashboardDisplaySettings(BaseModel):
     refresh_interval_seconds: int = 30
     max_records_per_run: int = 200
     default_run_name: str = "v1"
+    theme: Literal["dark", "light"] = "dark"
 
 
 class DashboardSettings(BaseModel):

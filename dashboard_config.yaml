@@ -25,3 +25,4 @@ dashboard:
   refresh_interval_seconds: 30
   max_records_per_run: 200
   default_run_name: v1
+  theme: dark           # "dark" | "light"

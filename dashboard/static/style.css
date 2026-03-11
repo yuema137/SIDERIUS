@@ -2,7 +2,8 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-:root {
+/* ── Dark theme (default) ── */
+:root, [data-theme="dark"] {
   --bg:        #0f1117;
   --surface:   #1a1d27;
   --border:    #2a2d3a;
@@ -17,12 +18,27 @@
   --font:      'Inter', 'Segoe UI', system-ui, sans-serif;
 }
 
+/* ── Light theme ── */
+[data-theme="light"] {
+  --bg:        #f5f6fa;
+  --surface:   #ffffff;
+  --border:    #dde0ea;
+  --accent:    #2563eb;
+  --accent2:   #7c3aed;
+  --text:      #1a1d27;
+  --muted:     #6b6e80;
+  --success:   #16a34a;
+  --warn:      #d97706;
+  --danger:    #dc2626;
+}
+
 body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
   font-size: 14px;
   min-height: 100vh;
+  transition: background .2s, color .2s;
 }
 
 /* ── Header ── */
@@ -52,6 +68,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px 28px; display: flex; fle
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 20px 24px;
+  transition: background .2s, border-color .2s;
 }
 .card-title {
   font-size: 13px;
@@ -130,36 +147,65 @@ button.danger { background: var(--danger); }
   border-radius: 50%;
 }
 .series-tag button:hover { background: var(--danger); color: #fff; opacity: 1; }
+.series-tag .highlight-btn { color: var(--muted); }
+.series-tag .highlight-btn:hover { background: var(--warn); color: #fff; }
+.series-tag .highlight-btn.active { background: none; color: var(--warn); font-size: 15px; }
+.series-tag .highlight-btn.active:hover { background: var(--warn); color: #fff; }
 
 /* ── Charts ── */
 .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
 @media (max-width: 900px) { .charts-grid { grid-template-columns: 1fr; } }
 
-.chart-wrap { position: relative; height: 340px; }
-.chart-wrap canvas { width: 100% !important; height: 100% !important; }
+.chart-wrap { height: 360px; }
 
-.chart-empty {
-  position: absolute;
-  inset: 0;
+/* ── Axis scale controls ── */
+.axis-controls {
   display: flex;
   align-items: center;
-  justify-content: center;
-  color: var(--muted);
-  font-size: 13px;
-  pointer-events: none;
+  gap: 6px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
 }
-
-/* ── Metric selector ── */
-.metric-bar { display: flex; gap: 8px; margin-bottom: 14px; }
-.metric-btn {
-  background: var(--bg);
+.axis-label {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 500;
+}
+.axis-btn {
+  background: var(--border);
   color: var(--muted);
   border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 5px 14px;
-  font-size: 12px;
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 400;
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
 }
-.metric-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.axis-btn:hover { opacity: 1; background: var(--surface); color: var(--text); border-color: var(--accent); }
+.axis-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* ── Axis range controls ── */
+.range-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.range-input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 3px 8px;
+  font-size: 11px;
+  width: 72px;
+  outline: none;
+  transition: border-color .15s;
+}
+.range-input:focus { border-color: var(--accent); }
+.range-input::placeholder { color: var(--muted); }
 
 /* ── Refresh bar ── */
 #refresh-bar {
