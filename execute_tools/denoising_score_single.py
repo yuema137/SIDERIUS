@@ -120,7 +120,7 @@ parser.add_argument('--data_dir', '-d', type=str, default="/home/klz/Data/TIDMAD
 parser.add_argument('--denoising_model', '-m', type=str, default='punet')
 parser.add_argument('--exp_id', type=str, default="default_run", help="Experiment ID (Required for Agent mode)")
 parser.add_argument("--run_name", type=str,  default="test_run", help="Run name for the auto-exploration.")
-parser.add_argument('--file_index', '-i', type=int, default=0)
+parser.add_argument('--file_index', '-i', type=int, default=6)
 parser.add_argument('-c', '--coarse', action='store_true')
 parser.add_argument('-p', '--parallel', action='store_true')
 parser.add_argument('-n', '--num_workers', type=int, default=8)

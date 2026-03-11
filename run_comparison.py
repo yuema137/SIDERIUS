@@ -62,7 +62,7 @@ def _agent_env() -> dict:
 # Phase 1: Baseline
 # ==========================================
 
-def run_baseline(model_type: str, baseline_workspace: str, progress_bar: bool = False) -> dict:
+def run_baseline(model_type: str, baseline_workspace: str, progress_bar: bool = False, file_index: int = 6) -> dict:
     """
     Runs the full pipeline (train -> inference -> score) with the exact legacy config
     from the TIDMAD paper. Returns the final record dict.
@@ -86,6 +86,7 @@ def run_baseline(model_type: str, baseline_workspace: str, progress_bar: bool = 
         run_name=run_name,
         workspace=baseline_workspace,
         progress_bar=progress_bar,
+        file_index=file_index,
     )
 
     print(f"\n{'='*60}")
@@ -138,6 +139,7 @@ def run_baseline(model_type: str, baseline_workspace: str, progress_bar: bool = 
         "status":       "success",
         "model_type":   model_type,
         "timestamp":    time.strftime("%Y-%m-%d %H:%M:%S"),
+        "file_index":   file_index,
         "params": {
             "exp_id":        exp_id,
             "run_name":      run_name,
@@ -213,7 +215,8 @@ def seed_agent_memory(baseline_record: dict, agent_workspace: str, agent_run_nam
 # ==========================================
 
 def run_agent(model_type: str, agent_workspace: str, agent_run_name: str,
-              provider: str, model_id: str, max_rounds: int, progress_bar: bool = False):
+              provider: str, model_id: str, max_rounds: int, progress_bar: bool = False,
+              file_index: int = 6):
     """
     Launches agent_main.py as a subprocess, locked to model_type, for max_rounds rounds.
     """
@@ -222,6 +225,7 @@ def run_agent(model_type: str, agent_workspace: str, agent_run_name: str,
         "while not exceeding the limit of GPU memory. "
         "The baseline result is already in your memory — "
         "your goal is to find configurations that outperform it."
+        "CRITICAL: We are using an RTX 5090 (32GB VRAM), the single model should not use more than 10GB VRAM, but you should try to verify batch size and segmentation to make the best usage of the 10GB limit"
     )
 
     cmd = [
@@ -234,6 +238,7 @@ def run_agent(model_type: str, agent_workspace: str, agent_run_name: str,
         "--run_name",    agent_run_name,
         "--workspace",   agent_workspace,
         "--expert_advice", expert_advice,
+        "--file_index",  str(file_index),
     ]
     if progress_bar:
         cmd.append("--progress_bar")
@@ -293,6 +298,10 @@ def main():
             "Without this flag the script will error if the run_name already exists."
         ),
     )
+    parser.add_argument(
+        "--file_index", type=int, default=6,
+        help="Validation/training file index (default: 6).",
+    )
     args = parser.parse_args()
 
     model_type         = args.model
@@ -347,7 +356,8 @@ def main():
             pass
 
     if not baseline_done:
-        baseline_record = run_baseline(model_type, baseline_workspace, progress_bar=args.progress_bar)
+        baseline_record = run_baseline(model_type, baseline_workspace, progress_bar=args.progress_bar,
+                                       file_index=args.file_index)
 
     # --- Phase 2: Seed agent memory ---
     seed_agent_memory(baseline_record, agent_workspace, agent_run_name)
@@ -361,6 +371,7 @@ def main():
         model_id=args.model_id,
         max_rounds=args.max_rounds,
         progress_bar=args.progress_bar,
+        file_index=args.file_index,
     )
 
     print(f"\n{'#'*60}")

@@ -110,7 +110,7 @@ def _ensure_dir(path: str) -> None:
 class TidmadSandbox:
     def __init__(self, metadata_source: str = "local", mongodb_uri: Optional[str] = None,
                  run_name: str = "test_run", workspace: str = "./siderius_workspace",
-                 progress_bar: bool = False):
+                 progress_bar: bool = False, file_index: int = 6):
         self.base_dir = os.path.abspath(workspace)
         self.dirs = {
             "configs": os.path.join(self.base_dir, "configs", run_name),
@@ -124,6 +124,7 @@ class TidmadSandbox:
 
         self.run_name = run_name
         self.progress_bar = progress_bar
+        self.file_index = file_index
         # Initialize Recorder based on strategy
         if metadata_source == "mongodb" and mongodb_uri:
             self.recorder = MongoRecorder(mongodb_uri, "tidmad_db")
@@ -188,7 +189,8 @@ class TidmadSandbox:
                     "--loss_cfg", paths["l"],
                     "--exp_id", exp_id,
                     "--run_name", run_name,
-                    "--sandbox_dir", self.base_dir,],
+                    "--sandbox_dir", self.base_dir,
+                    "--file_index", str(self.file_index)],
                     check=True,
                     stdout=None if self.progress_bar else subprocess.PIPE,
                     stderr=subprocess.PIPE,
@@ -231,7 +233,8 @@ class TidmadSandbox:
                 [sys.executable, "execute_tools/inference_single.py", "--mode", "agent", "-m", model_type,
                  "--model_cfg", m_path, "--loss_cfg", l_path,
                  "--model_path", model_path, "--exp_id", exp_id, "--run_name", run_name,
-                 "--output_dir", self.base_dir, "--inference_batch_size", inf_bs],
+                 "--output_dir", self.base_dir, "--inference_batch_size", inf_bs,
+                 "--file_index", str(self.file_index)],
                 check=True,
                 stdout=None if self.progress_bar else subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -263,7 +266,7 @@ class TidmadSandbox:
             result = subprocess.run(
                 [sys.executable, "execute_tools/denoising_score_single.py", "--mode", "agent", "-m", model_type,
                  "--exp_id", exp_id, "--run_name", run_name, "--output_json", score_json_path,
-                 "--data_dir", self.base_dir],
+                 "--data_dir", self.base_dir, "--file_index", str(self.file_index)],
                 check=True,
                 stdout=None if self.progress_bar else subprocess.PIPE,
                 stderr=subprocess.PIPE,

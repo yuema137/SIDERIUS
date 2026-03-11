@@ -51,12 +51,14 @@ def main():
                         help="Root directory for all agent-generated outputs: configs, cached models, and records.")
     parser.add_argument("--progress_bar", action="store_true",
                         help="Stream live tqdm progress bars from training/inference subprocesses.")
+    parser.add_argument("--file_index", type=int, default=6,
+                        help="Validation/training file index (default: 6).")
 
     args = parser.parse_args()
 
     # Initialize "Body" (Sandbox) and "Brain" (LLM Bridge)
     sandbox = TidmadSandbox(metadata_source="local", run_name=args.run_name, workspace=args.workspace,
-                            progress_bar=args.progress_bar)
+                            progress_bar=args.progress_bar, file_index=args.file_index)
     brain = LLMBridge(provider=args.provider, model_id=args.model_id)
 
     # Save run configuration once — written at startup, never modified
@@ -66,6 +68,7 @@ def main():
         "run_name":    args.run_name,
         "force_model": args.force_model,
         "max_rounds":  args.max_rounds,
+        "file_index":  args.file_index,
         "started_at":  time.strftime("%Y-%m-%d %H:%M:%S"),
     }
     run_config_path = os.path.join(args.workspace, f"run_config_{args.run_name}.json")
@@ -143,6 +146,7 @@ def main():
                     "status":    "skipped_oom_risk",
                     "model_type": model_type,
                     "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "file_index": args.file_index,
                     "params":    active_params,
                     "results":   {},
                     "denoising_score": None,
@@ -276,9 +280,10 @@ def main():
                 
             final_record = {
                 "exp_id": exp_id,
-                "status": "success", 
+                "status": "success",
                 "model_type": model_type,
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "file_index": args.file_index,
                 "params": active_params,
                 "results": combined_results,
                 "denoising_score": combined_results.get("denoising_score"),
