@@ -21,7 +21,7 @@ def get_parser():
     parser.add_argument('--mode', type=str, choices=['fix', 'agent'], default='fix')
     parser.add_argument('--data_dir', '-d', type=str, default="/home/klz/Data/TIDMAD/")
     parser.add_argument('--denoising_model', '-m', type=str, default='punet')
-    parser.add_argument('--file_index', '-i', type=int, default=0)
+    parser.add_argument('--file_index', '-i', type=int, default=6)
     
     # Agent Mode Specific Args
     parser.add_argument('--model_cfg', type=str, help="Path to model config JSON")
@@ -32,7 +32,7 @@ def get_parser():
     parser.add_argument('--model_path', type=str, help="Path to the .pth state_dict")
     parser.add_argument('--output_dir', type=str, default=None,
                         help="Directory to write denoised H5 output. Defaults to data_dir.")
-    parser.add_argument('--inference_batch_size', type=int, default=25,
+    parser.add_argument('--inference_batch_size', type=int, default=10,
                         help="Number of segments per GPU forward pass. Per-model defaults set in sandbox_executor.py (punet/wavenet/fcnet=25, rnn=10, transformer=1).")
     return parser
 

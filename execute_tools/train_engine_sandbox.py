@@ -158,7 +158,7 @@ def main():
     parser.add_argument("--loss_cfg", type=str, required=True)
     parser.add_argument("--data_dir", type=str, default="/home/klz/Data/TIDMAD/")
     parser.add_argument("--sandbox_dir", type=str, default="/home/klz/Data/TIDMAD_Sandbox/")
-    parser.add_argument("--file_index", type=int, default=0)
+    parser.add_argument("--file_index", type=int, default=6)
     parser.add_argument("--exp_id", type=str, default="default_exp")
     parser.add_argument("--run_name", type=str,  default="test_run",
                         help="Run name for the auto-exploration.")
