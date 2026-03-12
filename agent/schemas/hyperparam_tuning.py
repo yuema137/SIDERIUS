@@ -79,7 +79,7 @@ class ExperimentRecord(BaseModel):
     status: Literal["success", "error", "skipped_oom_risk"]
     model_type: str
     timestamp: str
-    file_index: int
+    file_index: int = Field(default=6, description="Training/validation file index. Defaults to the standard split used in the TIDMAD paper.")
     params: Dict[str, Any]
     results: Dict[str, Any]
     denoising_score: Optional[float] = None
