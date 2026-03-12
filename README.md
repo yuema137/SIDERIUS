@@ -73,6 +73,10 @@ siderius/
 │   ├── inference_single.py         # Inference over validation set
 │   └── denoising_score_single.py   # Denoising score computation
 │
+├── nodes/                          # Runnable node implementations (typed directed graph)
+│   ├── ml_hyperparameter_tune_agent.py
+│   └── result_interpretation_agent.py
+│
 ├── agent_generated/                # LLM-generated plugins (gitignored *.py)
 │   ├── models/                     # Agent-written model plugins
 │   └── tests/                      # Agent-written model tests
@@ -165,24 +169,24 @@ python env_validation/test_agent_env.py
 
 ```bash
 # Minimal run — agent picks the model, 1 round
-python ml_hyperparameter_tune_agent.py --max_rounds 1 --run_name first_run
+python nodes/ml_hyperparameter_tune_agent.py --max_rounds 1 --run_name first_run
 
 # Force a specific model with expert guidance
-python ml_hyperparameter_tune_agent.py \
+python nodes/ml_hyperparameter_tune_agent.py \
     --force_model transformer \
     --expert_advice "Set segmentation_size=10000 to avoid OOM. Use nhead=4." \
     --max_rounds 5 \
     --run_name transformer_v1
 
 # Use OpenAI instead of Gemini
-python ml_hyperparameter_tune_agent.py \
+python nodes/ml_hyperparameter_tune_agent.py \
     --provider openai \
     --model_id gpt-4o \
     --max_rounds 5 \
     --run_name openai_run
 ```
 
-### CLI Reference — `ml_hyperparameter_tune_agent.py`
+### CLI Reference — `nodes/ml_hyperparameter_tune_agent.py`
 
 | Argument | Default | Description |
 |---|---|---|

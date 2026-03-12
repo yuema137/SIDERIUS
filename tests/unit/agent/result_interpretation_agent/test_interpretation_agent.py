@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 
 from agent.schemas.interpretation import InterpretationInput, InterpretationOutput
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
-from result_interpretation_agent import ResultInterpretationAgent
+from nodes.result_interpretation_agent import ResultInterpretationAgent
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +68,7 @@ OOM_RECORD = {
 
 @pytest.fixture
 def agent():
-    with patch("result_interpretation_agent.LLMBridge") as MockBridge:
+    with patch("nodes.result_interpretation_agent.LLMBridge") as MockBridge:
         MockBridge.return_value.generate.return_value = FAKE_LLM_RESPONSE
         a = ResultInterpretationAgent(provider="gemini", model_id="test-model")
         a.bridge = MockBridge.return_value

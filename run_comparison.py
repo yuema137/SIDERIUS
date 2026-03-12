@@ -230,7 +230,7 @@ def run_agent(model_type: str, agent_workspace: str, agent_run_name: str,
 
     cmd = [
         sys.executable,
-        os.path.join(SIDERIUS_ROOT, "ml_hyperparameter_tune_agent.py"),
+        os.path.join(SIDERIUS_ROOT, "nodes", "ml_hyperparameter_tune_agent.py"),
         "--provider",    provider,
         "--model_id",    model_id,
         "--force_model", model_type,

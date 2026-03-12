@@ -15,7 +15,7 @@ import pytest
 from dotenv import load_dotenv
 
 from agent.schemas.interpretation import InterpretationInput, InterpretationOutput
-from result_interpretation_agent import ResultInterpretationAgent
+from nodes.result_interpretation_agent import ResultInterpretationAgent
 
 load_dotenv()
 

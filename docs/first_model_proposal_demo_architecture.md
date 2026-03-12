@@ -81,7 +81,7 @@ successful pass.
 
 ### Step 1 — `result_interpretation_agent` (simplest node, establishes the pattern)
 
-**File**: `result_interpretation_agent.py` at project root.
+**File**: `nodes/result_interpretation_agent.py`.
 
 **What to build**:
 - `class ResultInterpretationAgent` with `run(input: InterpretationInput) -> InterpretationOutput`
@@ -102,7 +102,7 @@ summarisation, not design. The LLM reads records and extracts patterns.
 
 ### Step 2 — `ml_model_proposal_agent`
 
-**File**: `ml_model_proposal_agent.py` at project root.
+**File**: `nodes/ml_model_proposal_agent.py`.
 
 **What to build**:
 - `class MLModelProposalAgent` with `run(input: ProposalInput) -> ProposalOutput`
@@ -125,7 +125,7 @@ summarisation, not design. The LLM reads records and extracts patterns.
 
 ### Step 3 — `ml_model_implementor`
 
-**File**: `ml_model_implementor.py` at project root.
+**File**: `nodes/ml_model_implementor.py`.
 
 **What to build**:
 - `class MLModelImplementor` with `run(input: ImplementorInput) -> ImplementorOutput`
@@ -147,7 +147,7 @@ substitutes `{model_name}`, `{ModelClass}`, then fills LLM-generated sections.
 
 ### Step 4 — `code_validator_agent`
 
-**File**: `code_validator_agent.py` at project root.
+**File**: `nodes/code_validator_agent.py`.
 
 **What to build**:
 - `class CodeValidatorAgent` with `run(input: ValidatorInput) -> ValidatorOutput`
