@@ -35,8 +35,10 @@ def valid_input_dict():
         "expert_advice": "try deeper architectures",
         "llm_provider":  "gemini",
         "llm_model_id":  "gemini-3.1-flash-lite-preview",
-        "run_name":      "v1",
-        "workspace":     "./workspace",
+        "storage": {
+            "backend": "local",
+            "local": {"workspace": "./workspace", "run_name": "v1"},
+        },
         "progress_bar":  False,
     }
 
@@ -157,6 +159,24 @@ class TestHyperparamTuningInput:
         with pytest.raises(ValidationError) as exc:
             HyperparamTuningInput.model_validate(valid_input_dict)
         assert "model_type" in str(exc.value)
+
+    def test_storage_local_workspace_and_run_name(self, valid_input_dict):
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        assert inp.storage.backend == "local"
+        assert inp.storage.local.workspace == "./workspace"
+        assert inp.storage.local.run_name == "v1"
+
+    def test_storage_defaults_when_omitted(self):
+        inp = HyperparamTuningInput(model_type="punet")
+        assert inp.storage.backend == "local"
+        assert inp.storage.local.workspace == "./siderius_workspace"
+        assert inp.storage.local.run_name == "v1"
+
+    def test_storage_invalid_backend_raises(self, valid_input_dict):
+        valid_input_dict["storage"] = {"backend": "redis"}
+        with pytest.raises(ValidationError) as exc:
+            HyperparamTuningInput.model_validate(valid_input_dict)
+        assert "backend" in str(exc.value)
 
 
 # ---------------------------------------------------------------------------

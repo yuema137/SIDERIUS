@@ -14,6 +14,8 @@ from __future__ import annotations
 from typing import Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, Field
 
+from agent.schemas.storage import StorageConfig, LocalStorageConfig
+
 
 # ---------------------------------------------------------------------------
 # Expert advice — two protocols
@@ -145,13 +147,13 @@ class HyperparamTuningInput(BaseModel):
     )
 
     # --- Infra ---
-    run_name: str = Field(
-        default="v1",
-        description="Identifier for this run. Used to namespace output files.",
-    )
-    workspace: str = Field(
-        default="./siderius_workspace",
-        description="Root directory for all agent-generated outputs.",
+    storage: StorageConfig = Field(
+        default_factory=lambda: StorageConfig(
+            backend="local",
+            local=LocalStorageConfig(workspace="./siderius_workspace", run_name="v1"),
+        ),
+        description="Where this node reads its inputs and writes its outputs. "
+                    "Supports local filesystem now; postgres backend is a placeholder.",
     )
     progress_bar: bool = Field(
         default=False,

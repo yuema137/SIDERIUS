@@ -72,18 +72,22 @@ def main():
         "expert_advice": args.expert_advice,
         "llm_provider": args.provider,
         "llm_model_id": args.model_id,
-        "run_name":     args.run_name,
-        "workspace":    args.workspace,
+        "storage": {
+            "backend": "local",
+            "local": {"workspace": args.workspace, "run_name": args.run_name},
+        },
         "progress_bar": args.progress_bar,
     })
+    workspace = agent_input.storage.local.workspace
+    run_name  = agent_input.storage.local.run_name
     print(f"✅ Input validated: model={agent_input.model_type} | rounds={agent_input.max_rounds} "
           f"| file_index={agent_input.file_index} | provider={agent_input.llm_provider}")
 
     # --- 3. Initialize sandbox and brain ---
     sandbox = TidmadSandbox(
         metadata_source="local",
-        run_name=args.run_name,
-        workspace=args.workspace,
+        run_name=run_name,
+        workspace=workspace,
         progress_bar=args.progress_bar,
         file_index=args.file_index,
     )
@@ -100,7 +104,7 @@ def main():
         "file_index":  args.file_index,
         "started_at":  started_at,
     }
-    run_config_path = os.path.join(args.workspace, f"run_config_{args.run_name}.json")
+    run_config_path = os.path.join(workspace, f"run_config_{run_name}.json")
     with open(run_config_path, "w", encoding="utf-8") as f:
         json.dump(run_config, f, indent=4)
 
@@ -356,7 +360,7 @@ def main():
     top_record = max(successful_records, key=lambda r: r["denoising_score"]) if successful_records else None
 
     agent_output = HyperparamTuningOutput.model_validate({
-        "run_name":            args.run_name,
+        "run_name":            run_name,
         "model_type":          args.force_model,
         "file_index":          args.file_index,
         "status":              run_status,
@@ -370,7 +374,7 @@ def main():
         "finished_at":         finished_at,
     })
 
-    output_path = os.path.join(args.workspace, f"run_output_{args.run_name}.json")
+    output_path = os.path.join(workspace, f"run_output_{run_name}.json")
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(agent_output.model_dump_json(indent=4))
     print(f"✅ Output validated and saved → {output_path}")
