@@ -38,8 +38,8 @@ set -euo pipefail
 SIDERIUS_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG_DIR="/home/klz/Data/SIDEREIS_DATA/logs"
 PYTHON="$SIDERIUS_DIR/.venv/bin/python"
-RUN_NAME="v1"
-MAX_ROUNDS=50
+RUN_NAME="v2_file6"
+MAX_ROUNDS=20
 POLL_INTERVAL=30   # seconds between checks for screen exit
 
 # ---------------------------------------------------------------------------
@@ -48,10 +48,9 @@ POLL_INTERVAL=30   # seconds between checks for screen exit
 # Groups themselves run sequentially.
 # ---------------------------------------------------------------------------
 MODEL_GROUPS=(
-    "punet wavenet"   # Group 1 — light models (run in parallel)
-    "rnn"             # Group 2 — separate to avoid concurrent GPU OOM
-    "fcnet"           # Group 3 — large model (323M params, ~5 GB)
-    "transformer"     # Group 4 — attention-heavy (~6 GB)
+    "punet wavenet fcnet"          # Group 1 — light models (run in parallel)
+    "transformer"     # Group 2 — attention-heavy (~6 GB)
+    "rnn"             # Group 3 — separate to avoid concurrent GPU OOM
 )
 
 mkdir -p "$LOG_DIR"
