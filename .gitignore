@@ -18,3 +18,10 @@ env/
 # Operating System files
 .DS_Store
 .claude/
+
+# Notebooks
+notebooks/
+
+# Agent-generated models and tests (outputs, not source — tracked via .gitkeep)
+agent_generated/models/*.py
+agent_generated/tests/*.py

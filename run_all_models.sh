@@ -24,11 +24,11 @@
 #   Ctrl+A D   (detach)
 #
 # Monitor a running model:
-#   screen -r siderius-punet
+#   screen -r siderius-punet-{RUN_NAME}
 #   Ctrl+A D
 #
 # Follow a log live:
-#   tail -f /home/klz/Data/SIDEREIS_DATA/logs/punet_v1.log
+#   tail -f /home/klz/Data/SIDEREIS_DATA/logs/punet_{RUN_NAME}.log
 #
 # Clean a log after run (strip tqdm escape codes):
 #   col -b < punet_v1.log > punet_v1_clean.log
@@ -38,8 +38,11 @@ set -euo pipefail
 SIDERIUS_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG_DIR="/home/klz/Data/SIDEREIS_DATA/logs"
 PYTHON="$SIDERIUS_DIR/.venv/bin/python"
-RUN_NAME="v1"
-MAX_ROUNDS=50
+RUN_NAME="v2_file6"
+MAX_ROUNDS=20
+FILE_INDEX=6
+PROVIDER="gemini"
+MODEL_ID="gemini-3.1-flash-lite-preview"
 POLL_INTERVAL=30   # seconds between checks for screen exit
 
 # ---------------------------------------------------------------------------
@@ -48,10 +51,9 @@ POLL_INTERVAL=30   # seconds between checks for screen exit
 # Groups themselves run sequentially.
 # ---------------------------------------------------------------------------
 MODEL_GROUPS=(
-    "punet wavenet"   # Group 1 — light models (run in parallel)
-    "rnn"             # Group 2 — separate to avoid concurrent GPU OOM
-    "fcnet"           # Group 3 — large model (323M params, ~5 GB)
-    "transformer"     # Group 4 — attention-heavy (~6 GB)
+    "punet wavenet fcnet"          # Group 1 — light models (run in parallel)
+    "transformer"     # Group 2 — attention-heavy (~6 GB)
+    "rnn"             # Group 3 — separate to avoid concurrent GPU OOM
 )
 
 mkdir -p "$LOG_DIR"
@@ -63,6 +65,8 @@ echo "  SIDERIUS — Full Comparison Run (grouped parallel)"
 echo "  Started    : $(date)"
 echo "  Log dir    : $LOG_DIR"
 echo "  Rounds     : $MAX_ROUNDS per model"
+echo "  File index : $FILE_INDEX"
+echo "  Provider   : $PROVIDER / $MODEL_ID"
 echo "  Groups     : ${#MODEL_GROUPS[@]}"
 for i in "${!MODEL_GROUPS[@]}"; do
     echo "    Group $((i+1)): ${MODEL_GROUPS[$i]}"
@@ -75,7 +79,7 @@ echo ""
 # ---------------------------------------------------------------------------
 launch_model() {
     local model="$1"
-    local SCREEN_NAME="siderius-${model}"
+    local SCREEN_NAME="siderius-${model}-${RUN_NAME}"
     local LOG_FILE="$LOG_DIR/${model}_${RUN_NAME}.log"
     local EXIT_CODE_FILE="/tmp/siderius_${model}_exit"
 
@@ -94,6 +98,9 @@ launch_model() {
             --model \"${model}\" \
             --max_rounds \"${MAX_ROUNDS}\" \
             --run_name \"${RUN_NAME}\" \
+            --file_index \"${FILE_INDEX}\" \
+            --provider \"${PROVIDER}\" \
+            --model_id \"${MODEL_ID}\" \
             --progress_bar
         echo \$? > \"${EXIT_CODE_FILE}\"
     "
@@ -115,7 +122,7 @@ wait_for_group() {
     while [ "$all_done" = false ]; do
         all_done=true
         for model in "${models[@]}"; do
-            if screen -list | grep -q "siderius-${model}"; then
+            if screen -list | grep -q "siderius-${model}-${RUN_NAME}"; then
                 all_done=false
                 break
             fi

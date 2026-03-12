@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, ConfigDict
 
 
 # ---------------------------------------------------------------------------
-# Experiment record — mirrors the schema written by agent_main.py
+# Experiment record — mirrors the schema written by ml_hyperparameter_tune_agent.py
 # ---------------------------------------------------------------------------
 
 class TrainConfig(BaseModel):

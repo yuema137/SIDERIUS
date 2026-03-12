@@ -104,7 +104,7 @@ def _calculate_score(data_dir, fname, coarse, parallel, num_workers):
     fpath = os.path.join(data_dir, fname)
     with h5py.File(fpath, 'r') as f:
         length = f['/timeseries/channel0001/timeseries'].shape[0]
-    n = length // 10_000_000
+    n = min(length // 10_000_000, 200)  # cap at 200: single-file addressing assumes start < 200
     if coarse:
         n = max(1, n // 10)
 

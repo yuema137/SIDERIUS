@@ -5,7 +5,7 @@ import json
 import subprocess
 import datetime
 from typing import Dict, Any, Optional
-from model_tools.models_format_sandbox import get_config_class, TrainConfig, LossConfig, ExperimentConfig
+from model_tools.models_format_sandbox import get_config_class, TrainConfig, LossConfig, ExperimentConfig, PLUGIN_CONFIG_REGISTRY
 
 
 def _subprocess_env() -> dict:
@@ -136,7 +136,7 @@ class TidmadSandbox:
             )
 
     def save_record(self, record: Dict[str, Any]):
-        """Direct access for agent_main to save finalized research records."""
+        """Direct access for ml_hyperparameter_tune_agent to save finalized research records."""
         self.recorder.save_record(record)
 
     def get_summary(self) -> list:
@@ -144,28 +144,38 @@ class TidmadSandbox:
         return self.recorder.get_summary()
 
     def _validate_configs(self, model_type: str, m_cfg: Dict, t_cfg: Dict, l_cfg: Dict, exp_id: str, run_name: str):
-        """Internal helper to validate dicts using the Global ExperimentConfig."""
+        """Internal helper to validate dicts using the appropriate config schema.
+
+        Plugin models bypass ExperimentConfig (which has hardcoded Literals for core
+        model types) and are validated directly against their own config class.
+        """
+        # Plugin model: validate against the plugin's own config class
+        if model_type in PLUGIN_CONFIG_REGISTRY:
+            try:
+                validated_m = PLUGIN_CONFIG_REGISTRY[model_type](**m_cfg).model_dump()
+                validated_t = TrainConfig(**t_cfg).model_dump()
+                validated_l = LossConfig(**l_cfg).model_dump()
+                return validated_m, validated_t, validated_l
+            except Exception as e:
+                raise ValueError(f"Plugin Experiment Configuration Rejected: {str(e)}")
+
+        # Core model: use the strict ExperimentConfig with cross-validation
         try:
-            # Consolidate all dicts into one global check
             full_payload = {
                 "exp_id": exp_id,
                 "run_name": run_name,
                 "model_type": model_type,
                 "network_config": m_cfg,
                 "train_config": t_cfg,
-                "loss_config": l_cfg
+                "loss_config": l_cfg,
             }
-            
-            # This single line performs all individual AND cross-object validations
             exp_config = ExperimentConfig(**full_payload)
-            
             return (
                 exp_config.network_config.model_dump(),
                 exp_config.train_config.model_dump(),
-                exp_config.loss_config.model_dump()
+                exp_config.loss_config.model_dump(),
             )
         except Exception as e:
-            # The agent receives this specific error message and can correct its plan
             raise ValueError(f"Experiment Configuration Rejected: {str(e)}")
 
     def execute_training(self, exp_id: str, run_name: str, model_type: str, m_cfg: Dict, t_cfg: Dict, l_cfg: Dict):
@@ -285,7 +295,7 @@ class TidmadSandbox:
             if os.path.exists(score_json_path): os.remove(score_json_path)
             
             # Note: We NO LONGER call self.recorder.save_record(record) here.
-            # We return results to agent_main.py, which adds LLM memory and then saves.
+            # We return results to ml_hyperparameter_tune_agent.py, which adds LLM memory and then saves.
             return {"status": "success", "results": results}
         except Exception as e:
             print(f"--- Scoring Internal Error ---\n{str(e)}")

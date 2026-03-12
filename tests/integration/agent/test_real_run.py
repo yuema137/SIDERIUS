@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 
 from core.sandbox_executor import TidmadSandbox
 from agent.llm_bridge import LLMBridge
+from agent.schemas.hyperparam_tuning import HyperparamTuningInput, ExperimentRecord
 
 load_dotenv()
 
@@ -51,7 +52,7 @@ MODEL_CONFIGS = {
         "model_type": "punet",
         "segmentation_size": 40000,
         "depth": 2,
-        "multi": 8,
+        "multi": 16,
         "kernel_size": 7,
         "embedding_dim": 8,
     },
@@ -168,6 +169,9 @@ def run_one_loop(provider: str, model_type: str, loss_cfg: dict, workspace: str,
     """
     Runs one full agent loop iteration:
       plan -> train -> inference -> score -> reflect -> save record
+
+    Input is validated against HyperparamTuningInput.
+    Output record is validated against ExperimentRecord.
     """
     run_name = f"real_{provider}_{model_type}_{loss_cfg['loss_type']}"
     exp_id = f"exp_{model_type}_{loss_cfg['loss_type']}_{int(time.time())}"
@@ -176,6 +180,19 @@ def run_one_loop(provider: str, model_type: str, loss_cfg: dict, workspace: str,
         "gemini": "gemini-3.1-flash-lite-preview",
         "openai": "gpt-4o",
     }
+
+    # --- Validate input against schema ---
+    expert_advice = f"Test run: use {model_type} with {loss_cfg['loss_type']} loss. Use minimal epochs."
+    HyperparamTuningInput(
+        model_type=model_type,
+        llm_provider=provider,
+        llm_model_id=model_ids[provider],
+        expert_advice=expert_advice,
+        run_name=run_name,
+        workspace=workspace,
+        max_rounds=1,
+    )
+
     sandbox = TidmadSandbox(workspace=workspace, run_name=run_name)
     brain = LLMBridge(provider=provider, model_id=model_ids[provider])
 
@@ -183,7 +200,7 @@ def run_one_loop(provider: str, model_type: str, loss_cfg: dict, workspace: str,
     memory_history = sandbox.get_summary()
     decision = brain.plan(
         memory_history=memory_history,
-        expert_advice=f"Test run: use {model_type} with {loss_cfg['loss_type']} loss. Use minimal epochs.",
+        expert_advice=expert_advice,
         force_model=model_type,
     )
     assert "model_config" in decision or "model_type" in decision, \
@@ -245,16 +262,22 @@ def run_one_loop(provider: str, model_type: str, loss_cfg: dict, workspace: str,
         "status": "success",
         "model_type": model_type,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "file_index": sandbox.file_index,
         "params": params,
         "results": score_result.get("results", {}),
         "denoising_score": score_result.get("results", {}).get("denoising_score"),
         "memory": {
+            "expert_advice_followed": expert_advice,
             "hypothesis": decision.get("hypothesis"),
             "conclusion": reflection.get("conclusion"),
             "discovery": reflection.get("discovery"),
             "memory_update": reflection.get("memory_update"),
         },
     }
+
+    # --- Validate output record against schema ---
+    ExperimentRecord(**record)
+
     sandbox.save_record(record)
 
     # --- Verify summary was written ---
