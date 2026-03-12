@@ -24,11 +24,11 @@
 #   Ctrl+A D   (detach)
 #
 # Monitor a running model:
-#   screen -r siderius-punet
+#   screen -r siderius-punet-{RUN_NAME}
 #   Ctrl+A D
 #
 # Follow a log live:
-#   tail -f /home/klz/Data/SIDEREIS_DATA/logs/punet_v1.log
+#   tail -f /home/klz/Data/SIDEREIS_DATA/logs/punet_{RUN_NAME}.log
 #
 # Clean a log after run (strip tqdm escape codes):
 #   col -b < punet_v1.log > punet_v1_clean.log
@@ -79,7 +79,7 @@ echo ""
 # ---------------------------------------------------------------------------
 launch_model() {
     local model="$1"
-    local SCREEN_NAME="siderius-${model}"
+    local SCREEN_NAME="siderius-${model}-${RUN_NAME}"
     local LOG_FILE="$LOG_DIR/${model}_${RUN_NAME}.log"
     local EXIT_CODE_FILE="/tmp/siderius_${model}_exit"
 
@@ -122,7 +122,7 @@ wait_for_group() {
     while [ "$all_done" = false ]; do
         all_done=true
         for model in "${models[@]}"; do
-            if screen -list | grep -q "siderius-${model}"; then
+            if screen -list | grep -q "siderius-${model}-${RUN_NAME}"; then
                 all_done=false
                 break
             fi
