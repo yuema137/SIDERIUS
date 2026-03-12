@@ -39,7 +39,7 @@ sys.path.insert(0, SIDERIUS_ROOT)
 from core.sandbox_executor import TidmadSandbox
 
 ROOT_DATA_DIR = "/home/klz/Data/SIDEREIS_DATA"
-LEGACY_CONFIGS_PATH = os.path.join(SIDERIUS_ROOT, "model_tools", "legacy_baseline_configs.json")
+LEGACY_CONFIGS_PATH = os.path.join(SIDERIUS_ROOT, "ml_models", "legacy_baseline_configs.json")
 
 
 def _agent_env() -> dict:
@@ -49,7 +49,7 @@ def _agent_env() -> dict:
     """
     extra = [
         SIDERIUS_ROOT,
-        os.path.join(SIDERIUS_ROOT, "model_tools"),
+        os.path.join(SIDERIUS_ROOT, "ml_models"),
         os.path.join(SIDERIUS_ROOT, "execute_tools"),
     ]
     env = os.environ.copy()

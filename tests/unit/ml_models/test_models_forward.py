@@ -1,5 +1,5 @@
 """
-Tests for model_tools/models_sandbox.py
+Tests for ml_models/models_sandbox.py
 
 Verifies that each model's forward pass produces the correct output shape
 on CPU with synthetic inputs. Uses small segmentation_size for speed.
@@ -7,8 +7,8 @@ on CPU with synthetic inputs. Uses small segmentation_size for speed.
 import pytest
 import torch
 
-from model_tools.models_sandbox import PositionalUNet, AE, TransformerModel, SimpleWaveNet, RNNSeq2Seq, MODEL_REGISTRY
-from model_tools.models_format_sandbox import PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, RNNSeq2SeqConfig
+from ml_models.models_sandbox import PositionalUNet, AE, TransformerModel, SimpleWaveNet, RNNSeq2Seq, MODEL_REGISTRY
+from ml_models.models_format_sandbox import PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, RNNSeq2SeqConfig
 
 
 BATCH = 2

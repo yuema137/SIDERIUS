@@ -19,9 +19,9 @@ Memory model (worst-case, float32 training):
 import sys
 import os
 
-# Allow flat imports from model_tools and execute_tools
+# Allow flat imports from ml_models and execute_tools
 _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-for _p in [os.path.join(_project_root, "model_tools"), os.path.join(_project_root, "execute_tools")]:
+for _p in [os.path.join(_project_root, "ml_models"), os.path.join(_project_root, "execute_tools")]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
 

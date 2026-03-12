@@ -1,5 +1,5 @@
 """
-Tests for model_tools/models_format_sandbox.py
+Tests for ml_models/models_format_sandbox.py
 
 Verifies that all Pydantic config classes correctly accept valid inputs
 and reject invalid inputs with meaningful errors.
@@ -7,7 +7,7 @@ and reject invalid inputs with meaningful errors.
 import pytest
 from pydantic import ValidationError
 
-from model_tools.models_format_sandbox import (
+from ml_models.models_format_sandbox import (
     PUNetConfig,
     AEConfig,
     TransformerConfig,

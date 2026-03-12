@@ -63,7 +63,7 @@ siderius/
 │   ├── sandbox_executor.py         # TidmadSandbox: config validation, subprocess dispatch
 │   └── plugin_loader.py            # Loads agent_generated/models/ into MODEL_REGISTRY
 │
-├── model_tools/                    # Built-in model definitions and Pydantic config schemas
+├── ml_models/                    # Built-in model definitions and Pydantic config schemas
 │   ├── models_sandbox.py           # Network architectures + MODEL_REGISTRY
 │   ├── models_format_sandbox.py    # PUNetConfig, AEConfig, TransformerConfig, etc.
 │   └── loss_models_sandbox.py      # Loss functions + get_criterion factory
@@ -89,7 +89,7 @@ siderius/
 │   ├── unit/
 │   │   ├── agent/                  # Per-node schema and skill tests
 │   │   ├── core/                   # Sandbox executor and plugin loader tests
-│   │   └── model_tools/            # Model and loss function tests
+│   │   └── ml_models/            # Model and loss function tests
 │   └── integration/                # Real-data and real-GPU tests (requires API keys)
 │
 ├── env_validation/
