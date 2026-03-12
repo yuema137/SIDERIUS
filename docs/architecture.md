@@ -289,3 +289,21 @@ test suite.
 └── raw_baseline/
     └── raw_baseline_score_file_{index:04d}.json  # undenoised reference scores
 ```
+
+---
+
+## TODO: Multi-Dataset Support
+
+The current execution layer (`execute_tools/`, `core/sandbox_executor.py`, `ml_models/`) is
+tightly coupled to the TIDMAD dataset (HDF5 format, ADC 0–255 values, denoising score metric,
+`file_index` split scheme). The agent layer above it is already dataset-agnostic.
+
+When a second dataset is introduced, extract a backend interface:
+
+- Move TIDMAD-specific code into `backends/tidmad/`
+- Define a thin `DatasetBackend` protocol that `sandbox_executor` calls
+- Each new dataset implements its own backend (data loading, scoring metric, split scheme)
+- The agent nodes and schemas remain unchanged
+
+**Do not design this abstraction speculatively.** Extract it when there is a second concrete
+use case — at that point the right interface boundary will be obvious.
