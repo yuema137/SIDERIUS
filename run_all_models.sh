@@ -40,6 +40,9 @@ LOG_DIR="/home/klz/Data/SIDEREIS_DATA/logs"
 PYTHON="$SIDERIUS_DIR/.venv/bin/python"
 RUN_NAME="v2_file6"
 MAX_ROUNDS=20
+FILE_INDEX=6
+PROVIDER="gemini"
+MODEL_ID="gemini-3.1-flash-lite-preview"
 POLL_INTERVAL=30   # seconds between checks for screen exit
 
 # ---------------------------------------------------------------------------
@@ -62,6 +65,8 @@ echo "  SIDERIUS — Full Comparison Run (grouped parallel)"
 echo "  Started    : $(date)"
 echo "  Log dir    : $LOG_DIR"
 echo "  Rounds     : $MAX_ROUNDS per model"
+echo "  File index : $FILE_INDEX"
+echo "  Provider   : $PROVIDER / $MODEL_ID"
 echo "  Groups     : ${#MODEL_GROUPS[@]}"
 for i in "${!MODEL_GROUPS[@]}"; do
     echo "    Group $((i+1)): ${MODEL_GROUPS[$i]}"
@@ -93,6 +98,9 @@ launch_model() {
             --model \"${model}\" \
             --max_rounds \"${MAX_ROUNDS}\" \
             --run_name \"${RUN_NAME}\" \
+            --file_index \"${FILE_INDEX}\" \
+            --provider \"${PROVIDER}\" \
+            --model_id \"${MODEL_ID}\" \
             --progress_bar
         echo \$? > \"${EXIT_CODE_FILE}\"
     "
