@@ -136,7 +136,7 @@ class TidmadSandbox:
             )
 
     def save_record(self, record: Dict[str, Any]):
-        """Direct access for agent_main to save finalized research records."""
+        """Direct access for ml_hyperparameter_tune_agent to save finalized research records."""
         self.recorder.save_record(record)
 
     def get_summary(self) -> list:
@@ -295,7 +295,7 @@ class TidmadSandbox:
             if os.path.exists(score_json_path): os.remove(score_json_path)
             
             # Note: We NO LONGER call self.recorder.save_record(record) here.
-            # We return results to agent_main.py, which adds LLM memory and then saves.
+            # We return results to ml_hyperparameter_tune_agent.py, which adds LLM memory and then saves.
             return {"status": "success", "results": results}
         except Exception as e:
             print(f"--- Scoring Internal Error ---\n{str(e)}")
