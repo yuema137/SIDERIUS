@@ -62,7 +62,7 @@ class LLMBridge:
         # pass the manual into prompt
         final_user_prompt = user_prompt + manual_context
         
-        return self._generate_json_response(system_prompt, final_user_prompt)
+        return self.generate(system_prompt, final_user_prompt)
         
     def reflect(self, exp_id: str, hypothesis: str, actual_results: Dict,
                 reflection_context: Optional[Dict] = None) -> Dict:
@@ -74,12 +74,13 @@ class LLMBridge:
         system_prompt = REFLECTOR_PROMPT
         user_prompt = get_reflector_user_prompt(exp_id, hypothesis, actual_results, reflection_context)
 
-        return self._generate_json_response(system_prompt, user_prompt)
+        return self.generate(system_prompt, user_prompt)
 
-    def _generate_json_response(self, system_prompt: str, user_prompt: str) -> Dict:
+    def generate(self, system_prompt: str, user_prompt: str) -> Dict:
         """
-        Internal helper to get strictly formatted JSON from LLM.
+        Call the LLM with a system prompt and user prompt, return a JSON dict.
         Uses native JSON modes for both Gemini and OpenAI.
+        This is the generic transport method used by all nodes.
         """
         if self.provider == "gemini":
             # Gemini 3 Flash native JSON mode
