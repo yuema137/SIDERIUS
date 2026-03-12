@@ -61,14 +61,15 @@ successful pass.
 | Schemas for all 4 new nodes | Created `interpretation.py`, `proposal.py`, `implementor.py`, `validator.py` in `agent/schemas/`. All include `storage: StorageConfig`. |
 | `agent/schemas/protocols/__init__.py` | Protocols directory created and ready. |
 | `HyperparamTuningInput` updated | Replaced raw `workspace: str` and `run_name: str` fields with `storage: StorageConfig`. Agent code updated to extract `workspace` and `run_name` from `agent_input.storage.local`. |
-| Unit tests | Added `test_storage.py` (11 tests), `test_interpretation_schemas.py` (7), `test_proposal_schemas.py` (7), `test_implementor_schemas.py` (7), `test_validator_schemas.py` (7). Fixed `valid_input_dict` fixture in existing hyperparam tests. **225 unit tests passing.** |
+| Unit tests | Added `test_storage.py` (11 tests), `test_interpretation_schemas.py` (7), `test_proposal_schemas.py` (7), `test_implementor_schemas.py` (7), `test_validator_schemas.py` (7). Fixed `valid_input_dict` fixture in existing hyperparam tests. **233 unit tests passing.** |
+| `nodes/result_interpretation_agent.py` | Implemented `ResultInterpretationAgent.run()`. One LLM call: deterministic pre-computation (best score, best config) merged with LLM-generated `key_findings`, `bottlenecks`, `take_home_message`. Writes `interpretation_{run_name}.json`. Unit tests added (`test_interpretation_agent.py`, 8 tests). |
 
 ### Remaining
 
 | Step | Status |
 |------|--------|
-| Implement `result_interpretation_agent` | ⬜ next |
-| Implement `ml_model_proposal_agent` | ⬜ |
+| Implement `result_interpretation_agent` | ✅ done |
+| Implement `ml_model_proposal_agent` | ⬜ next |
 | Implement `ml_model_implementor` | ⬜ |
 | Implement `code_validator_agent` | ⬜ |
 | Add `run()` to `tune_ml_hyperparam_agent` + wire `seed_records` | ⬜ |
@@ -319,11 +320,12 @@ agent/
 ├── prompts.py                            ✅ exists (new prompts to be added)
 └── llm_bridge.py                         ✅ done (generate() now public)
 
-ml_hyperparameter_tune_agent.py           ✅ storage updated, run() ⬜
-result_interpretation_agent.py            ⬜
-ml_model_proposal_agent.py               ⬜
-ml_model_implementor.py                  ⬜
-code_validator_agent.py                  ⬜
+nodes/
+├── ml_hyperparameter_tune_agent.py       ✅ storage updated, run() ⬜
+├── result_interpretation_agent.py        ✅ done
+├── ml_model_proposal_agent.py           ⬜
+├── ml_model_implementor.py              ⬜
+└── code_validator_agent.py              ⬜
 
 demo/
 └── run_model_proposal_demo.py            ⬜
@@ -332,7 +334,7 @@ tests/
 └── unit/
     └── agent/
         ├── tune_ml_hyperparam_agent/     ✅ 35 tests (storage tests added)
-        ├── result_interpretation_agent/  ✅ schema tests done, node tests ⬜
+        ├── result_interpretation_agent/  ✅ schema tests + node tests done (8 tests)
         ├── ml_model_proposal_agent/      ✅ schema tests done, node tests ⬜
         ├── ml_model_implementor/         ✅ schema tests done, node tests ⬜
         └── code_validator_agent/         ✅ schema tests done, node tests ⬜
@@ -342,7 +344,7 @@ tests/unit/core/
     └── ...
 ```
 
-**Total unit tests: 225 passing.**
+**Total unit tests: 233 passing.**
 
 ---
 
@@ -351,11 +353,11 @@ tests/unit/core/
 ```python
 # demo/run_model_proposal_demo.py
 import sys, json
-from result_interpretation_agent import ResultInterpretationAgent
-from ml_model_proposal_agent import MLModelProposalAgent
-from ml_model_implementor import MLModelImplementor
-from code_validator_agent import CodeValidatorAgent
-from ml_hyperparameter_tune_agent import HyperparamTuningAgent
+from nodes.result_interpretation_agent import ResultInterpretationAgent
+from nodes.ml_model_proposal_agent import MLModelProposalAgent
+from nodes.ml_model_implementor import MLModelImplementor
+from nodes.code_validator_agent import CodeValidatorAgent
+from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
 from agent.schemas.protocols.hyperparam_to_interpretation import hyperparam_to_interpretation_v1
 from agent.schemas.protocols.interpretation_to_proposal import interpretation_to_proposal_v1
