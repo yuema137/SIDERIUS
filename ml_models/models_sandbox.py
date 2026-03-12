@@ -504,7 +504,7 @@ MODEL_REGISTRY = {
 try:
     import os as _os, sys as _sys
     _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
-    from core.plugin_loader import extend_registries as _extend_registries
+    from ml_models.plugin_loader import extend_registries as _extend_registries
     from models_format_sandbox import PLUGIN_CONFIG_REGISTRY as _plugin_cfg_reg
     _extend_registries(MODEL_REGISTRY, _plugin_cfg_reg)
 except Exception as _e:

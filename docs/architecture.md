@@ -265,7 +265,7 @@ Agent-generated models (`ml_model_implementor` outputs) are dropped into
 - `PLUGIN_CONFIG_CLASS: BaseModel` — Pydantic config schema
 - `PLUGIN_MODEL_CLASS: nn.Module` — model class with forward contract `[B, T] int → [B, 256, T] float`
 
-`core/plugin_loader.py` scans this directory at import time and extends `MODEL_REGISTRY`
+`ml_models/plugin_loader.py` scans this directory at import time and extends `MODEL_REGISTRY`
 and `PLUGIN_CONFIG_REGISTRY` in-place. The core codebase is never modified by agents.
 Agent-generated tests live in `agent_generated/tests/` and are excluded from the main
 test suite.

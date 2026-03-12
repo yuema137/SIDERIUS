@@ -167,7 +167,7 @@ def get_config_class(model_type: str) -> Optional[Type[BaseConfig]]:
     return mapping.get(model_type) or PLUGIN_CONFIG_REGISTRY.get(model_type)
 
 
-# Plugin config registry — populated at runtime by core/plugin_loader.py.
+# Plugin config registry — populated at runtime by ml_models/plugin_loader.py.
 # Agents must not modify this dict directly; use extend_registries() instead.
 PLUGIN_CONFIG_REGISTRY: dict = {}
 

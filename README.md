@@ -108,7 +108,7 @@ Agent-generated models are dropped into `agent_generated/models/` as `.py` files
 - `PLUGIN_CONFIG_CLASS: BaseModel` — Pydantic config schema
 - `PLUGIN_MODEL_CLASS: nn.Module` — model with forward contract `[B, T] int64 → [B, 256, T] float32`
 
-`core/plugin_loader.py` scans this directory at import time and extends `MODEL_REGISTRY` in-place. The core codebase is never modified by agents.
+`ml_models/plugin_loader.py` scans this directory at import time and extends `MODEL_REGISTRY` in-place. The core codebase is never modified by agents.
 
 ---
 

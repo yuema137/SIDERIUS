@@ -151,7 +151,7 @@ substitutes `{model_name}`, `{ModelClass}`, then fills LLM-generated sections.
 
 **What to build**:
 - `class CodeValidatorAgent` with `run(input: ValidatorInput) -> ValidatorOutput`
-- Step 1 — plugin registration check: call `core/plugin_loader._load_plugin(model_file_path)`
+- Step 1 — plugin registration check: call `ml_models/plugin_loader._load_plugin(model_file_path)`
   and verify it returns a non-None result with correct attributes
 - Step 2 — run tests: `subprocess.run(["pytest", test_file_path, "-v"])` and capture
   stdout/stderr

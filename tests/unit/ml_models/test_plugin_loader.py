@@ -1,5 +1,5 @@
 """
-Tests for core/plugin_loader.py
+Tests for ml_models/plugin_loader.py
 
 Verifies that agent-generated plugin models are correctly discovered, registered,
 and callable in the same way as core models.
@@ -13,7 +13,7 @@ import importlib
 import pytest
 import torch
 
-from core.plugin_loader import extend_registries, _load_plugin
+from ml_models.plugin_loader import extend_registries, _load_plugin
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +120,7 @@ class TestExtendRegistries:
         config_reg = {}
 
         # Patch the loader's AGENT_GENERATED_DIR to point at our tmp models dir
-        import core.plugin_loader as pl
+        import ml_models.plugin_loader as pl
         original_dir = pl.AGENT_GENERATED_DIR
         pl.AGENT_GENERATED_DIR = str(models_dir)
         try:
@@ -140,7 +140,7 @@ class TestExtendRegistries:
 
         model_reg  = {}
         config_reg = {}
-        import core.plugin_loader as pl
+        import ml_models.plugin_loader as pl
         original_dir = pl.AGENT_GENERATED_DIR
         pl.AGENT_GENERATED_DIR = str(models_dir)
         try:
@@ -153,7 +153,7 @@ class TestExtendRegistries:
     def test_missing_directory_returns_empty(self, tmp_path):
         model_reg  = {}
         config_reg = {}
-        import core.plugin_loader as pl
+        import ml_models.plugin_loader as pl
         original_dir = pl.AGENT_GENERATED_DIR
         pl.AGENT_GENERATED_DIR = str(tmp_path / "nonexistent")
         try:
@@ -180,7 +180,7 @@ class TestPluginModelCallable:
 
         model_reg  = {}
         config_reg = {}
-        import core.plugin_loader as pl
+        import ml_models.plugin_loader as pl
         original_dir = pl.AGENT_GENERATED_DIR
         pl.AGENT_GENERATED_DIR = str(models_dir)
         try:
