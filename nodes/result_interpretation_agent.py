@@ -68,6 +68,7 @@ Rules:
 def _build_user_prompt(
     inp: InterpretationInput,
     best_score: Optional[float],
+    worst_score: Optional[float],
     best_config: Optional[Dict[str, Any]],
     model_description: str,
 ) -> str:
@@ -80,7 +81,8 @@ def _build_user_prompt(
         "---",
         f"Total experiments in history: {len(inp.summary_records)}",
         f"Records shown to you: {len(records_to_show)} (most recent)",
-        f"Best denoising score achieved: {best_score if best_score is not None else 'none yet'}",
+        f"Best denoising score achieved:  {best_score  if best_score  is not None else 'none yet'}",
+        f"Worst denoising score achieved: {worst_score if worst_score is not None else 'none yet'}",
         f"Config that produced best score:\n{json.dumps(best_config, indent=2) if best_config else 'none'}",
         "",
         "Experiment records:",
@@ -107,15 +109,17 @@ class ResultInterpretationAgent:
             r for r in inp.summary_records
             if r.get("status") == "success" and r.get("denoising_score") is not None
         ]
-        best_record = max(successful, key=lambda r: r["denoising_score"]) if successful else None
-        best_score = best_record["denoising_score"] if best_record else None
-        best_config = best_record.get("params") if best_record else None
+        best_record  = max(successful, key=lambda r: r["denoising_score"]) if successful else None
+        worst_record = min(successful, key=lambda r: r["denoising_score"]) if successful else None
+        best_score  = best_record["denoising_score"]  if best_record  else None
+        worst_score = worst_record["denoising_score"] if worst_record else None
+        best_config = best_record.get("params")       if best_record  else None
 
         print(f"🔍 Interpreting {len(inp.summary_records)} records for {inp.model_type} "
               f"(best score: {best_score})")
 
         # --- LLM call ---
-        user_prompt = _build_user_prompt(inp, best_score, best_config, model_description)
+        user_prompt = _build_user_prompt(inp, best_score, worst_score, best_config, model_description)
         llm_response = self.bridge.generate(INTERPRETATION_SYSTEM_PROMPT, user_prompt)
 
         # --- Build and validate output ---
@@ -124,6 +128,7 @@ class ResultInterpretationAgent:
             "model_description":     model_description,
             "total_experiments":     len(inp.summary_records),
             "best_denoising_score":  best_score,
+            "worst_denoising_score": worst_score,
             "best_config":           best_config,
             "key_findings":          llm_response.get("key_findings", []),
             "bottlenecks":           llm_response.get("bottlenecks", []),
@@ -191,6 +196,7 @@ def main():
     print(f"{'='*60}")
     print(f"  Total experiments : {output.total_experiments}")
     print(f"  Best score        : {output.best_denoising_score}")
+    print(f"  Worst score       : {output.worst_denoising_score}")
     print(f"\n  Key findings:")
     for finding in output.key_findings:
         print(f"    - {finding}")

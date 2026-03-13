@@ -71,6 +71,11 @@ class InterpretationOutput(BaseModel):
         default=None,
         description="Highest denoising score observed across all successful experiments.",
     )
+    worst_denoising_score: Optional[float] = Field(
+        default=None,
+        description="Lowest denoising score observed across all successful experiments. "
+                    "Together with best_denoising_score this gives the full performance range.",
+    )
     best_config: Optional[Dict[str, Any]] = Field(
         default=None,
         description="The params dict (model_config, train_config, loss_config) that "

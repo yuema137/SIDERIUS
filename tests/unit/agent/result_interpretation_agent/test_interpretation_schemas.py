@@ -47,6 +47,7 @@ class TestInterpretationOutput:
             model_description="# PUNet\nA 1D U-Net with positional encoding.",
             total_experiments=10,
             best_denoising_score=1.5,
+            worst_denoising_score=0.3,
             best_config={"model_config": {}},
             key_findings=["focal loss outperforms ce"],
             bottlenecks=["architecture plateau at depth=3"],
@@ -55,6 +56,7 @@ class TestInterpretationOutput:
         assert out.total_experiments == 10
         assert len(out.key_findings) == 1
         assert "PUNet" in out.model_description
+        assert out.worst_denoising_score == 0.3
 
     def test_valid_minimal(self):
         out = InterpretationOutput(
