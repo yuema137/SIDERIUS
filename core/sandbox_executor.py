@@ -5,18 +5,18 @@ import json
 import subprocess
 import datetime
 from typing import Dict, Any, Optional
-from model_tools.models_format_sandbox import get_config_class, TrainConfig, LossConfig, ExperimentConfig, PLUGIN_CONFIG_REGISTRY
+from ml_models.models_format_sandbox import get_config_class, TrainConfig, LossConfig, ExperimentConfig, PLUGIN_CONFIG_REGISTRY
 
 
 def _subprocess_env() -> dict:
     """
-    Returns an env dict for subprocesses with model_tools and execute_tools
+    Returns an env dict for subprocesses with ml_models and execute_tools
     added to PYTHONPATH, so flat imports in those scripts resolve correctly
     regardless of the working directory.
     """
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     extra_paths = [
-        os.path.join(project_root, "model_tools"),
+        os.path.join(project_root, "ml_models"),
         os.path.join(project_root, "execute_tools"),
     ]
     env = os.environ.copy()

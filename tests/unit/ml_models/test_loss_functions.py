@@ -1,5 +1,5 @@
 """
-Tests for model_tools/loss_models_sandbox.py
+Tests for ml_models/loss_models_sandbox.py
 
 Verifies that all loss functions compute correctly on synthetic tensors
 and that get_criterion instantiates the right class for each loss_type.
@@ -7,8 +7,8 @@ and that get_criterion instantiates the right class for each loss_type.
 import pytest
 import torch
 
-from model_tools.loss_models_sandbox import FocalLoss1D, FocalLoss1DCW, get_criterion
-from model_tools.models_format_sandbox import LossConfig
+from ml_models.loss_models_sandbox import FocalLoss1D, FocalLoss1DCW, get_criterion
+from ml_models.models_format_sandbox import LossConfig
 
 
 # ==========================================

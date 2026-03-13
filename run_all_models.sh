@@ -38,7 +38,7 @@ set -euo pipefail
 SIDERIUS_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG_DIR="/home/klz/Data/SIDEREIS_DATA/logs"
 PYTHON="$SIDERIUS_DIR/.venv/bin/python"
-RUN_NAME="v2_file6"
+RUN_NAME="v3_file6"
 MAX_ROUNDS=20
 FILE_INDEX=6
 PROVIDER="gemini"

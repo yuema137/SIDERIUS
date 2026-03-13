@@ -15,7 +15,7 @@ class BaseConfig(BaseModel):
 # ==========================================
 class PUNetConfig(BaseConfig):
     model_type: Literal["punet"] = "punet"
-    multi: int = Field(default=40, ge=16, le=128, description="Base channel multiplier")
+    multi: int = Field(default=40, ge=8, le=128, description="Base channel multiplier")
     depth: int = Field(default=4, ge=1, le=5, description="Number of downsampling steps")
     bilinear: bool = Field(default=True, description="Whether to use bilinear upsampling or conv transpose")
     pe_factor: float = Field(default=1.0, ge=0.0, le=10.0, description="Positional encoding weight")
@@ -167,7 +167,7 @@ def get_config_class(model_type: str) -> Optional[Type[BaseConfig]]:
     return mapping.get(model_type) or PLUGIN_CONFIG_REGISTRY.get(model_type)
 
 
-# Plugin config registry — populated at runtime by core/plugin_loader.py.
+# Plugin config registry — populated at runtime by ml_models/plugin_loader.py.
 # Agents must not modify this dict directly; use extend_registries() instead.
 PLUGIN_CONFIG_REGISTRY: dict = {}
 

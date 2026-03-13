@@ -8,7 +8,7 @@ Phases:
                if already present.
   2. Seed:     Pre-populate the agent's summary.json with the baseline result so the
                agent knows what benchmark it must beat from round 1.
-  3. Agent:    Launch ml_hyperparameter_tune_agent.py for --max_rounds exploration rounds, locked to
+  3. Agent:    Launch nodes/ml_hyperparameter_tune_agent.py for --max_rounds exploration rounds, locked to
                the same model type but free to vary config, loss, and train hparams.
 
 Output structure:
@@ -39,17 +39,17 @@ sys.path.insert(0, SIDERIUS_ROOT)
 from core.sandbox_executor import TidmadSandbox
 
 ROOT_DATA_DIR = "/home/klz/Data/SIDEREIS_DATA"
-LEGACY_CONFIGS_PATH = os.path.join(SIDERIUS_ROOT, "model_tools", "legacy_baseline_configs.json")
+LEGACY_CONFIGS_PATH = os.path.join(SIDERIUS_ROOT, "ml_models", "legacy_baseline_configs.json")
 
 
 def _agent_env() -> dict:
     """
     Build a subprocess environment with all SIDERIUS paths on PYTHONPATH
-    so that flat imports in ml_hyperparameter_tune_agent.py, train_engine_sandbox.py, etc. resolve.
+    so that flat imports in nodes/ml_hyperparameter_tune_agent.py, train_engine_sandbox.py, etc. resolve.
     """
     extra = [
         SIDERIUS_ROOT,
-        os.path.join(SIDERIUS_ROOT, "model_tools"),
+        os.path.join(SIDERIUS_ROOT, "ml_models"),
         os.path.join(SIDERIUS_ROOT, "execute_tools"),
     ]
     env = os.environ.copy()
@@ -218,7 +218,7 @@ def run_agent(model_type: str, agent_workspace: str, agent_run_name: str,
               provider: str, model_id: str, max_rounds: int, progress_bar: bool = False,
               file_index: int = 6):
     """
-    Launches ml_hyperparameter_tune_agent.py as a subprocess, locked to model_type, for max_rounds rounds.
+    Launches nodes/ml_hyperparameter_tune_agent.py as a subprocess, locked to model_type, for max_rounds rounds.
     """
     expert_advice = (
         "You should actively try different model configs, loss types and train configs, "
@@ -230,7 +230,7 @@ def run_agent(model_type: str, agent_workspace: str, agent_run_name: str,
 
     cmd = [
         sys.executable,
-        os.path.join(SIDERIUS_ROOT, "ml_hyperparameter_tune_agent.py"),
+        os.path.join(SIDERIUS_ROOT, "nodes", "ml_hyperparameter_tune_agent.py"),
         "--provider",    provider,
         "--model_id",    model_id,
         "--force_model", model_type,

@@ -209,11 +209,10 @@ class TestExperimentRecordSuccess:
             ExperimentRecord.model_validate(valid_success_record)
         assert "status" in str(exc.value)
 
-    def test_missing_file_index_raises(self, valid_success_record):
+    def test_missing_file_index_uses_default(self, valid_success_record):
         del valid_success_record["file_index"]
-        with pytest.raises(ValidationError) as exc:
-            ExperimentRecord.model_validate(valid_success_record)
-        assert "file_index" in str(exc.value)
+        record = ExperimentRecord.model_validate(valid_success_record)
+        assert record.file_index == ExperimentRecord.model_fields["file_index"].default
 
     def test_missing_expert_advice_followed_in_memory_raises(self, valid_success_record):
         del valid_success_record["memory"]["expert_advice_followed"]
@@ -242,11 +241,10 @@ class TestExperimentRecordOOM:
         rec = ExperimentRecord.model_validate(valid_oom_record)
         assert rec.memory is None
 
-    def test_oom_missing_file_index_raises(self, valid_oom_record):
+    def test_oom_missing_file_index_uses_default(self, valid_oom_record):
         del valid_oom_record["file_index"]
-        with pytest.raises(ValidationError) as exc:
-            ExperimentRecord.model_validate(valid_oom_record)
-        assert "file_index" in str(exc.value)
+        record = ExperimentRecord.model_validate(valid_oom_record)
+        assert record.file_index == ExperimentRecord.model_fields["file_index"].default
 
 
 # ---------------------------------------------------------------------------

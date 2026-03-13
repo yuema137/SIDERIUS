@@ -3,7 +3,7 @@
 Input and output schemas for code_validator_agent.
 
 This node receives the file paths written by ml_model_implementor,
-attempts to load the plugin via core/plugin_loader, and runs the
+attempts to load the plugin via ml_models/plugin_loader, and runs the
 generated pytest test file. No LLM calls. Fully deterministic.
 """
 

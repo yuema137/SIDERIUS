@@ -1,4 +1,4 @@
-# core/plugin_loader.py
+# ml_models/plugin_loader.py
 """
 Plugin loader for agent-generated models.
 

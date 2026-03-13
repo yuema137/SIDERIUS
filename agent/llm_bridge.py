@@ -80,10 +80,9 @@ class LLMBridge:
         """
         Call the LLM with a system prompt and user prompt, return a JSON dict.
         Uses native JSON modes for both Gemini and OpenAI.
-        This is the generic transport method used by all nodes.
+        This is the generic transport method used by all nodes for structured output.
         """
         if self.provider == "gemini":
-            # Gemini 3 Flash native JSON mode
             model = genai.GenerativeModel(
                 model_name=self.model_name,
                 system_instruction=system_prompt
@@ -93,7 +92,6 @@ class LLMBridge:
                 generation_config={"response_mime_type": "application/json"}
             )
             try:
-                # Basic cleanup in case of markdown blocks, though response_mime_type usually handles it
                 text = response.text.strip()
                 if text.startswith("```json"):
                     text = text[7:-3]
@@ -112,6 +110,29 @@ class LLMBridge:
                 response_format={"type": "json_object"}
             )
             return json.loads(response.choices[0].message.content)
+
+    def generate_text(self, system_prompt: str, user_prompt: str) -> str:
+        """
+        Call the LLM with a system prompt and user prompt, return plain text.
+        Used for free-form reasoning steps where JSON mode would constrain output quality.
+        """
+        if self.provider == "gemini":
+            model = genai.GenerativeModel(
+                model_name=self.model_name,
+                system_instruction=system_prompt
+            )
+            response = model.generate_content(user_prompt)
+            return response.text.strip()
+
+        elif self.provider == "openai":
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+            )
+            return response.choices[0].message.content.strip()
 
     def request(self, system_prompt: str, messages: List[Dict], tools: List[Dict]) -> Any:
         """Standard tool-calling interface for backward compatibility with other skills."""

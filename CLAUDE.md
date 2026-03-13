@@ -10,6 +10,7 @@
 - **Avoid deep dependency between modules**: we always want each module could be tested indivially, and be pluggable and decoupled.
 - **Always think what test we can add for each single module**: pytest is a powerful tool. We should always equip our code with that. 
 - **Be humble and curious**: if you are not sure about something, for example the detail of the desired feature, or the format of data, please don't guess by yourself, but ASK the user explicitely.
+- **Be strict to the user and always double check**: what I say is not always correct. If you feel that are some wrong statement made by me, or some ideas are not pratically, you need to ask for clarification and state your objection clearly.
 
 ## Reference Project Guidelines
 - You have read access to `legacy_repo`: /home/tidmad/TIDMAD. 
