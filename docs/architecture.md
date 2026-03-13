@@ -100,22 +100,27 @@ structure:
 | Governed by input/output schema | ✅ | ✅ |
 | Makes LLM calls internally | may | no |
 | Calls other nodes via `run()` | no | yes |
-| Applies protocols to wire nodes | no | yes |
+| Selects and applies protocols on edges | no | yes |
 | Can loop or branch | no | yes |
 | Stateless between calls | yes | yes |
 
-### 6. Orchestrators select and traverse paths
+### 6. Orchestrators select paths and choose protocols
 
 An orchestrator does not define the graph — the graph is defined by the nodes and their
-protocols, and is fixed. The orchestrator's job is to **select a path** (or multiple
-paths) through the graph, apply the relevant protocol on each edge, call each node's
-`run()` method, and decide when to stop.
+protocols, and is fixed. The orchestrator has two distinct responsibilities:
+
+1. **Select a path** — decide which nodes to visit and in what order.
+2. **Choose the protocol on each edge** — since multiple protocols can exist between the
+   same two nodes, the orchestrator selects which protocol to apply at each traversal.
+   This is not a passive lookup; it is an active decision. The same edge can be crossed
+   with a different protocol on the next iteration of a loop, or by a different
+   orchestrator entirely.
 
 This is a strict separation:
 - **Graph topology** (which nodes exist, which edges exist, which protocols are defined)
   is static and declared independently of any orchestrator.
-- **Execution** (which path to take, how many times to traverse a cycle, what to do on
-  failure) is the orchestrator's responsibility alone.
+- **Execution** (which path to take, which protocol to apply, how many times to traverse
+  a cycle, what to do on failure) is the orchestrator's responsibility alone.
 
 ### 7. Cycles are driven by orchestrators, not nodes
 
