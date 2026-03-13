@@ -83,6 +83,22 @@ It is not embedded inside any orchestrator. Any orchestrator — or a human — 
 without touching either node. Adding a new orchestrator never requires modifying an
 existing protocol or node.
 
+**Current role — explicit documentation and canonical wiring.**
+Today, protocols are called explicitly by humans, demo scripts, or integration tests.
+Their primary value is making the data transformation between two nodes typed, visible,
+and independently testable. Calling the protocol is the preferred way to wire nodes —
+even when a caller could technically construct the target input by hand, using the
+protocol is the correct practice because it expresses the intended edge and keeps
+wiring consistent across the codebase.
+
+**Future role — programmatic discovery by orchestrators.**
+As orchestrators are implemented, they will query the protocol registry
+(`agent/schemas/protocols/`), select a protocol by name for each edge, and call it.
+At that point the protocol transitions from documentation to an executable contract
+that the orchestrator discovers and applies automatically. The registry is the
+interface through which orchestrators learn what transformations are available on
+each edge and which transport variants exist.
+
 ### 5. Orchestrators are nodes too
 
 An orchestrator has its own input schema, output schema, and `run()` method. It is a
