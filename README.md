@@ -34,12 +34,6 @@ ml_model_proposal_agent
         │  ml_model_propose_to_ml_model_impl :: local_full_spec
         ▼
 ml_model_implementor
-        │  ml_model_impl_to_ml_model_valid :: local_files          ⬜ protocol pending
-        ▼
-code_validator_agent                                                ⬜ node pending
-        │  ml_model_valid_to_ml_model_tune :: local_with_advice    ⬜ protocol pending
-        ▼
-tune_ml_hyperparam_agent  (new model, closes the loop)
 ```
 
 ---
