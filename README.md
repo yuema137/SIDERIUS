@@ -24,19 +24,7 @@ See [`docs/architecture.md`](docs/architecture.md) for the full design and [`doc
 ### Current node graph
 
 ```
-tune_ml_hyperparam_agent ────────────► result_interpretation_agent
-                                                  │
-                                                  ▼
-                                       ml_model_proposal_agent
-                                          │              │
-                                          ▼              ▼
-                                  ml_model_implementor   tune_ml_hyperparam_agent
-                                          │
-                                          ▼
-                                  code_validator_agent
-                                          │
-                                          ▼
-                                  tune_ml_hyperparam_agent  (new model)
+tune_ml_hyperparam_agent ─────────────────────────────► result_interpretation_agent
 ```
 
 ---
@@ -46,13 +34,13 @@ tune_ml_hyperparam_agent ────────────► result_interpre
 ```
 siderius/
 ├── agent/
-│   ├── llm_bridge.py               # LLM transport — generate(), plan(), reflect()
+│   ├── llm_bridge.py               # LLM transport — generate() (JSON), generate_text() (plain), plan(), reflect()
 │   ├── prompts.py                  # System prompts for planner and reflector
 │   ├── tools_schema.py             # Skill loader
 │   ├── schemas/                    # Pydantic input/output schemas for every node
 │   │   ├── storage.py              # StorageConfig — shared per-node storage config
 │   │   ├── hyperparam_tuning.py    # HyperparamTuningInput / Output / ExpertAdvice
-│   │   ├── interpretation.py       # InterpretationInput / Output
+│   │   ├── interpretation.py       # InterpretationInput / Output / SummaryGroup
 │   │   ├── proposal.py             # ProposalInput / Output
 │   │   ├── implementor.py          # ImplementorInput / Output
 │   │   ├── validator.py            # ValidatorInput / Output
@@ -60,13 +48,19 @@ siderius/
 │   └── skills/                     # Atomic research skills (training, inference, scoring)
 │
 ├── core/
-│   ├── sandbox_executor.py         # TidmadSandbox: config validation, subprocess dispatch
-│   └── plugin_loader.py            # Loads agent_generated/models/ into MODEL_REGISTRY
+│   └── sandbox_executor.py         # TidmadSandbox: config validation, subprocess dispatch
 │
-├── ml_models/                    # Built-in model definitions and Pydantic config schemas
+├── ml_models/                      # Built-in model definitions and Pydantic config schemas
 │   ├── models_sandbox.py           # Network architectures + MODEL_REGISTRY
 │   ├── models_format_sandbox.py    # PUNetConfig, AEConfig, TransformerConfig, etc.
-│   └── loss_models_sandbox.py      # Loss functions + get_criterion factory
+│   ├── loss_models_sandbox.py      # Loss functions + get_criterion factory
+│   ├── model_descriptions.py       # Loader: ml_models/{model_type}/description.md
+│   ├── plugin_loader.py            # Loads agent_generated/models/ into MODEL_REGISTRY
+│   ├── punet/description.md
+│   ├── fcnet/description.md
+│   ├── transformer/description.md
+│   ├── wavenet/description.md
+│   └── rnn/description.md
 │
 ├── execute_tools/                  # Physical execution scripts (called as subprocesses)
 │   ├── train_engine_sandbox.py     # Training loop
@@ -77,8 +71,15 @@ siderius/
 │   ├── ml_hyperparameter_tune_agent.py
 │   └── result_interpretation_agent.py
 │
+├── dashboard/                      # Web dashboard for browsing experiment results
+│   ├── main.py                     # FastAPI + uvicorn server
+│   ├── settings.py                 # Dashboard configuration
+│   ├── api/                        # REST API routes and response models
+│   ├── data_sources/               # Local JSON and Postgres data source backends
+│   └── static/                     # Frontend (index.html, app.js, style.css)
+│
 ├── agent_generated/                # LLM-generated plugins (gitignored *.py)
-│   ├── models/                     # Agent-written model plugins
+│   ├── models/                     # Agent-written model plugins (+ description.md per plugin)
 │   └── tests/                      # Agent-written model tests
 │
 ├── docs/
@@ -89,13 +90,16 @@ siderius/
 │   ├── unit/
 │   │   ├── agent/                  # Per-node schema and skill tests
 │   │   ├── core/                   # Sandbox executor and plugin loader tests
-│   │   └── ml_models/            # Model and loss function tests
-│   └── integration/                # Real-data and real-GPU tests (requires API keys)
+│   │   └── ml_models/              # Model and loss function tests
+│   └── integration/
+│       ├── nodes/                  # Tier 1 — single node, real API (no other nodes)
+│       ├── protocols/              # Tier 2 — one graph edge, source → target, real API
+│       ├── orchestrator/           # Tier 3 — multi-hop critical loops, real API + GPU
+│       ├── dashboard/              # Dashboard API integration tests
+│       └── execute_tools/          # Training loop integration tests
 │
-├── env_validation/
-│   └── test_agent_env.py           # Validate Gemini / OpenAI API keys
-│
-└── ml_hyperparameter_tune_agent.py # Entry point: autonomous hyperparameter tuning loop
+└── env_validation/
+    └── test_agent_env.py           # Validate Gemini / OpenAI API keys
 ```
 
 ---
@@ -107,8 +111,22 @@ Agent-generated models are dropped into `agent_generated/models/` as `.py` files
 - `PLUGIN_MODEL_TYPE: str` — unique model type key
 - `PLUGIN_CONFIG_CLASS: BaseModel` — Pydantic config schema
 - `PLUGIN_MODEL_CLASS: nn.Module` — model with forward contract `[B, T] int64 → [B, 256, T] float32`
+- `description.md` — plain-English + math description alongside the plugin file; required by the interpretation agent
 
-`ml_models/plugin_loader.py` scans this directory at import time and extends `MODEL_REGISTRY` in-place. The core codebase is never modified by agents.
+`ml_models/plugin_loader.py` scans `agent_generated/models/` at import time and extends `MODEL_REGISTRY` and `PLUGIN_CONFIG_REGISTRY` in-place. The core codebase is never modified by agents.
+
+---
+
+## Nodes
+
+| Node | Role | GPU | LLM | Status |
+|---|---|---|---|---|
+| `tune_ml_hyperparam_agent` | Trains, infers, and scores a model; optimises hyperparameters over N rounds | yes | yes | ✅ implemented |
+| `result_interpretation_agent` | Synthesises experiment records across models; surfaces bottlenecks and patterns | no | yes | ✅ implemented |
+| `ml_model_proposal_agent` | Reads interpretation → proposes a new architecture + expert advice | no | yes | ⬜ planned |
+| `ml_model_implementor` | Takes a proposal → writes PyTorch plugin code + unit tests | no | yes | ⬜ planned |
+| `code_validator_agent` | Runs generated tests; verifies plugin interface compliance | no | no | ⬜ planned |
+| `data_analysis_agent` | Profiles dataset properties; detects distribution shifts | no | yes | ⬜ planned |
 
 ---
 
@@ -200,6 +218,31 @@ python nodes/ml_hyperparameter_tune_agent.py \
 | `--file_index` | `6` | Training/validation file index |
 | `--progress_bar` | off | Stream live tqdm progress bars from subprocesses |
 
+### 4. Open the dashboard
+
+```bash
+# Edit dashboard_config.yaml to point at your data directory, then:
+python dashboard/main.py
+
+# Development mode (auto-reload on code changes)
+uvicorn dashboard.main:app --reload
+```
+
+Open `http://localhost:8000` in your browser. Key config options in `dashboard_config.yaml`:
+
+```yaml
+data_source:
+  type: local           # "local" or "postgres"
+  local:
+    root_data_dir: /path/to/SIDEREIS_DATA
+    models: [punet, wavenet, rnn, fcnet, transformer]  # leave [] to auto-discover
+
+server:
+  port: 8000
+```
+
+---
+
 ### Output layout
 
 ```
@@ -216,10 +259,25 @@ python nodes/ml_hyperparameter_tune_agent.py \
 
 ## Running Tests
 
+| Category | Scope | LLM | GPU | Location | When to run |
+|---|---|---|---|---|---|
+| Unit | Single node, mocked LLM | mock | no | `tests/unit/` | Every commit |
+| Integration Tier 1 | Single node, real API | real | depends | `tests/integration/nodes/` | On demand |
+| Integration Tier 2 | One graph edge (source → target) | real | depends | `tests/integration/protocols/` | On demand |
+| Integration Tier 3 | Critical multi-hop loop | real | yes | `tests/integration/orchestrator/` | Before releases |
+
 ```bash
-# All unit tests
+# Unit tests (always pass, no API key needed)
 pytest tests/unit/ -v
 
-# Integration tests (requires API keys + GPU)
+# Tier 1 — individual node with real LLM (requires API key)
+pytest tests/integration/nodes/ -m real_run -v
+
+# Tier 2 — one protocol edge end-to-end
+pytest tests/integration/protocols/ -m real_run -v
+
+# All real-run tests at once
 pytest tests/integration/ -m real_run -v
 ```
+
+Tests marked `real_run` skip automatically when the required API key or data is absent. They never run in CI.

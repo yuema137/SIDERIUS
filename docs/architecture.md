@@ -56,11 +56,22 @@ def protocol_name(output: NodeAOutput) -> NodeBInput:
     ...
 ```
 
-- The protocol is **dual-sided**: it explicitly documents what it consumes from the
-  source and what it populates in the target. Both sides are typed and visible.
+A protocol is **strictly directional**: `A → B` and `B → A` are two separate protocols.
+There is no bidirectional or symmetric protocol. Each protocol arrow has one source and
+one target, and data always flows in one direction per traversal.
+
+A protocol is also **transparent on both ends**: the function signature explicitly names
+what it reads from the source (`NodeAOutput`) and what it produces for the target
+(`NodeBInput`). There is no implicit field mapping or automatic wiring — every field
+consumed and every field populated is visible in the function body.
+
+**Loops are allowed**, but they do not change the directionality of individual protocols.
+When a cycle exists in the graph (e.g. `A → B → C → A`), each edge in the cycle is
+still a one-way protocol. The loop is created by an orchestrator repeatedly traversing
+the same directed edges — not by any protocol becoming bidirectional.
+
 - Output and input schemas do **not** need to match exactly. The protocol is the
-  translation layer. What is required is that a valid, explicit protocol exists — there
-  is no implicit or automatic wiring.
+  translation layer between them.
 - **Multiple protocols can exist on the same edge.** Different orchestrators, or
   different stages of the same workflow, may apply different protocols between the same
   two nodes. Each protocol is a distinct, named function.
@@ -71,6 +82,22 @@ A protocol between two nodes exists as a standalone function in `agent/schemas/p
 It is not embedded inside any orchestrator. Any orchestrator — or a human — can use it
 without touching either node. Adding a new orchestrator never requires modifying an
 existing protocol or node.
+
+**Current role — explicit documentation and canonical wiring.**
+Today, protocols are called explicitly by humans, demo scripts, or integration tests.
+Their primary value is making the data transformation between two nodes typed, visible,
+and independently testable. Calling the protocol is the preferred way to wire nodes —
+even when a caller could technically construct the target input by hand, using the
+protocol is the correct practice because it expresses the intended edge and keeps
+wiring consistent across the codebase.
+
+**Future role — programmatic discovery by orchestrators.**
+As orchestrators are implemented, they will query the protocol registry
+(`agent/schemas/protocols/`), select a protocol by name for each edge, and call it.
+At that point the protocol transitions from documentation to an executable contract
+that the orchestrator discovers and applies automatically. The registry is the
+interface through which orchestrators learn what transformations are available on
+each edge and which transport variants exist.
 
 ### 5. Orchestrators are nodes too
 
@@ -89,22 +116,27 @@ structure:
 | Governed by input/output schema | ✅ | ✅ |
 | Makes LLM calls internally | may | no |
 | Calls other nodes via `run()` | no | yes |
-| Applies protocols to wire nodes | no | yes |
+| Selects and applies protocols on edges | no | yes |
 | Can loop or branch | no | yes |
 | Stateless between calls | yes | yes |
 
-### 6. Orchestrators select and traverse paths
+### 6. Orchestrators select paths and choose protocols
 
 An orchestrator does not define the graph — the graph is defined by the nodes and their
-protocols, and is fixed. The orchestrator's job is to **select a path** (or multiple
-paths) through the graph, apply the relevant protocol on each edge, call each node's
-`run()` method, and decide when to stop.
+protocols, and is fixed. The orchestrator has two distinct responsibilities:
+
+1. **Select a path** — decide which nodes to visit and in what order.
+2. **Choose the protocol on each edge** — since multiple protocols can exist between the
+   same two nodes, the orchestrator selects which protocol to apply at each traversal.
+   This is not a passive lookup; it is an active decision. The same edge can be crossed
+   with a different protocol on the next iteration of a loop, or by a different
+   orchestrator entirely.
 
 This is a strict separation:
 - **Graph topology** (which nodes exist, which edges exist, which protocols are defined)
   is static and declared independently of any orchestrator.
-- **Execution** (which path to take, how many times to traverse a cycle, what to do on
-  failure) is the orchestrator's responsibility alone.
+- **Execution** (which path to take, which protocol to apply, how many times to traverse
+  a cycle, what to do on failure) is the orchestrator's responsibility alone.
 
 ### 7. Cycles are driven by orchestrators, not nodes
 
@@ -112,6 +144,30 @@ A node is always stateless. It has no memory of previous calls. Cycles in the gr
 exist as potential paths — they become actual loops only when an orchestrator explicitly
 traverses them repeatedly, passing updated inputs on each iteration. The nodes in the
 cycle are unaware that a loop is happening.
+
+### 8. Schemas define format; storage defines location
+
+Input and output schemas define the **data contract** — what a node receives and
+produces. They specify types, field names, and validation rules. They are completely
+**transport-agnostic**: a node does not know or care whether its input arrived from
+memory, a local file, or a database.
+
+`StorageConfig` is a separate concern. It specifies **where** data is persisted and
+**how** to retrieve or write it. It is passed through the system by the orchestrator
+and injected into each node's input at traversal time.
+
+This separation has one critical implication for protocols: **a protocol must always
+return a fully populated input schema**, regardless of the transport it uses. A
+`database_*` protocol reads from the database and populates the schema completely
+before handing it to the node. The node on the receiving end never sees a half-empty
+schema or a storage handle — it always receives the full, validated data contract.
+
+```
+Node A output schema  ──► protocol (local or database) ──► Node B input schema (fully populated)
+                                         ▲
+                                  StorageConfig
+                              (injected by orchestrator)
+```
 
 ---
 

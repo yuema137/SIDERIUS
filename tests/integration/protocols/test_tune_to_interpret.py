@@ -1,8 +1,13 @@
 """
 End-to-end integration test: tune_ml_hyperparam_agent → result_interpretation_agent.
 
-Runs a real training loop (one record), feeds the output directly into the
-interpretation agent, and validates the full InterpretationOutput.
+Exercises the full edge:
+  1. Run a real training loop (one record) via tune_ml_hyperparam_agent
+  2. Apply the protocol local_all_records to produce InterpretationInput
+  3. Run result_interpretation_agent and validate InterpretationOutput
+
+This is a Tier 2 protocol test — it verifies that the protocol correctly
+connects the two nodes, not just that each node works in isolation.
 
 Requires:
   - Real TIDMAD data at /home/klz/Data/TIDMAD/
@@ -10,7 +15,7 @@ Requires:
   - CUDA GPU
 
 Run with:
-  uv run pytest -m real_run tests/integration/agent/test_tune_to_interpret.py -v -s
+  uv run pytest -m real_run tests/integration/protocols/test_tune_to_interpret.py -v -s
 
 DO NOT run in CI.
 """
@@ -18,7 +23,9 @@ import os
 import pytest
 from dotenv import load_dotenv
 
-from agent.schemas.interpretation import InterpretationInput, SummaryGroup
+from agent.schemas.hyperparam_tuning import HyperparamTuningOutput, ExperimentRecord
+from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.protocols.ml_model_tune_to_ml_result_interp import local_all_records
 from nodes.result_interpretation_agent import ResultInterpretationAgent
 from tests.integration.nodes.test_tune_ml_hyperparam_agent import run_one_loop, _skip_if_no_data
 
@@ -66,14 +73,23 @@ class TestTuneToInterpret:
         assert record["status"] == "success"
         assert record["denoising_score"] is not None
 
-        # --- Step 2: feed the record into the interpretation agent ---
-        inp = InterpretationInput(
-            summaries=[SummaryGroup(model_type="fcnet", run_name="tune_to_interpret", records=[record])],
-            storage={
-                "backend": "local",
-                "local": {"workspace": str(tmp_path), "run_name": "tune_to_interpret"},
-            },
+        # --- Step 2: apply the protocol to produce InterpretationInput ---
+        tuning_output = HyperparamTuningOutput(
+            run_name="tune_to_interpret",
+            model_type="fcnet",
+            file_index=6,
+            status="completed",
+            completed_rounds=1,
+            total_attempts=1,
+            all_records=[ExperimentRecord.model_validate(record)],
+            started_at="2026-01-01T00:00:00",
+            finished_at="2026-01-01T01:00:00",
         )
+        storage = StorageConfig(
+            backend="local",
+            local=LocalStorageConfig(workspace=str(tmp_path), run_name="tune_to_interpret"),
+        )
+        inp = local_all_records(tuning_output, storage)
 
         agent = ResultInterpretationAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview")
         output = agent.run(inp)
