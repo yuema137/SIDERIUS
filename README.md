@@ -24,22 +24,8 @@ See [`docs/architecture.md`](docs/architecture.md) for the full design and [`doc
 ### Current node graph
 
 ```
-data_analysis_agent ──────────────────────────────────► result_interpretation_agent
-data_analysis_agent ──────────────────────────────────► ml_model_proposal_agent
-
 tune_ml_hyperparam_agent ─────────────────────────────► result_interpretation_agent
-
-result_interpretation_agent ──────────────────────────► ml_model_proposal_agent
-
-ml_model_proposal_agent ──────────────────────────────► tune_ml_hyperparam_agent
-ml_model_proposal_agent ──────────────────────────────► ml_model_implementor
-
-ml_model_implementor ─────────────────────────────────► code_validator_agent
-code_validator_agent ─────────────────────────────────► tune_ml_hyperparam_agent
 ```
-
-The core research cycle is:
-`tune → interpret → propose → implement → validate → tune`
 
 ---
 
@@ -85,6 +71,13 @@ siderius/
 │   ├── ml_hyperparameter_tune_agent.py
 │   └── result_interpretation_agent.py
 │
+├── dashboard/                      # Web dashboard for browsing experiment results
+│   ├── main.py                     # FastAPI + uvicorn server
+│   ├── settings.py                 # Dashboard configuration
+│   ├── api/                        # REST API routes and response models
+│   ├── data_sources/               # Local JSON and Postgres data source backends
+│   └── static/                     # Frontend (index.html, app.js, style.css)
+│
 ├── agent_generated/                # LLM-generated plugins (gitignored *.py)
 │   ├── models/                     # Agent-written model plugins (+ description.md per plugin)
 │   └── tests/                      # Agent-written model tests
@@ -101,12 +94,12 @@ siderius/
 │   └── integration/
 │       ├── nodes/                  # Tier 1 — single node, real API (no other nodes)
 │       ├── protocols/              # Tier 2 — one graph edge, source → target, real API
-│       └── orchestrator/           # Tier 3 — multi-hop critical loops, real API + GPU
+│       ├── orchestrator/           # Tier 3 — multi-hop critical loops, real API + GPU
+│       ├── dashboard/              # Dashboard API integration tests
+│       └── execute_tools/          # Training loop integration tests
 │
-├── env_validation/
-│   └── test_agent_env.py           # Validate Gemini / OpenAI API keys
-│
-└── ml_hyperparameter_tune_agent.py # Entry point: autonomous hyperparameter tuning loop
+└── env_validation/
+    └── test_agent_env.py           # Validate Gemini / OpenAI API keys
 ```
 
 ---
