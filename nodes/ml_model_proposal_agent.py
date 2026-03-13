@@ -61,6 +61,8 @@ In your reasoning, cover all of the following:
    Justify your choice by connecting it directly to the identified bottlenecks.
 4. What are the key design choices (depth, width, kernel sizes, attention heads, etc.)
    for a safe, moderate baseline configuration that fits within the GPU budget?
+   Note: keep the mathematical_definition abstract (computational principles, not shapes).
+   Concrete dimensions belong only in baseline_config.
 5. What are the likely failure modes of this architecture?
    What should the hyperparameter tuning agent watch out for?
 
@@ -77,7 +79,7 @@ Output a JSON object with exactly these fields:
 {
   "model_name": "short_snake_case_key",
   "model_description": "One paragraph plain-English description of the architecture and why it is expected to improve on the current best.",
-  "mathematical_definition": "Precise, layer-by-layer specification of the architecture. Include: input embedding, all layer types with dimensions, activation functions, skip/residual connections, and the full forward pass data flow. Must be concrete enough for an LLM implementor to write complete PyTorch code directly from this description — no ambiguity allowed.",
+  "mathematical_definition": "Abstract architectural framework: describe the key computational stages, the mathematical operations at each stage (e.g. convolution, attention, SSM state update), and how data flows through them. Do NOT include concrete layer dimensions, kernel sizes, or channel counts — those belong in baseline_config. Focus on the structural novelty and the mathematical principles that differentiate this architecture from existing ones.",
   "motivation": "Why this specific architecture addresses the bottlenecks from the interpretation. Must reference the take-home message directly and name at least one specific bottleneck.",
   "expert_advice": {
     "focus_areas": ["What to prioritise during hyperparameter tuning for this architecture"],
@@ -177,6 +179,32 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
     for c in inp.constraints:
         lines.append(f"  - {c}")
     lines.append("")
+
+    if inp.human_advice:
+        lines.append("## Human Expert Advice (high priority — address these explicitly)")
+        if isinstance(inp.human_advice, str):
+            lines.append(inp.human_advice)
+        else:
+            adv = inp.human_advice
+            if adv.focus_areas:
+                lines.append("### Focus areas")
+                for item in adv.focus_areas:
+                    lines.append(f"  - {item}")
+            if adv.constraints:
+                lines.append("### Additional constraints")
+                for item in adv.constraints:
+                    lines.append(f"  - {item}")
+            if adv.known_failures:
+                lines.append("### Known failures to avoid")
+                for item in adv.known_failures:
+                    lines.append(f"  - {item}")
+            if adv.suggested_directions:
+                lines.append("### Suggested directions")
+                for item in adv.suggested_directions:
+                    lines.append(f"  - {item}")
+            if adv.rationale:
+                lines += ["### Rationale", adv.rationale]
+        lines.append("")
 
     return "\n".join(lines)
 

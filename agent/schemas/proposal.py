@@ -9,10 +9,10 @@ for consumption by both ml_model_implementor and tune_ml_hyperparam_agent.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
-from agent.schemas.hyperparam_tuning import ExpertAdvice
+from agent.schemas.hyperparam_tuning import ExpertAdvice, ExpertAdviceInput
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 
 
@@ -37,6 +37,14 @@ class ProposalInput(BaseModel):
         default_factory=list,
         description="Hard limits the proposed architecture must respect "
                     "(e.g. 'VRAM < 10 GB', 'params < 50M', 'no external dependencies').",
+    )
+    human_advice: Optional[ExpertAdviceInput] = Field(
+        default=None,
+        description="Optional human-provided guidance for the proposal agent. "
+                    "Accepts either a plain string or a structured ExpertAdvice object. "
+                    "When present, the agent treats this as high-priority input — "
+                    "it should explicitly address the stated focus areas, respect the "
+                    "constraints, and consider the suggested directions.",
     )
     storage: StorageConfig = Field(
         default_factory=lambda: StorageConfig(
