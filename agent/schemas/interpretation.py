@@ -58,6 +58,12 @@ class InterpretationOutput(BaseModel):
     model_type: str = Field(
         description="The model architecture that was analysed.",
     )
+    model_description: str = Field(
+        description="Full markdown description of the model architecture, "
+                    "loaded from ml_models/{model_type}/description.md. "
+                    "Carried forward to ml_model_proposal_agent so it understands "
+                    "what currently exists before proposing something new.",
+    )
     total_experiments: int = Field(
         description="Total number of experiment records analysed (including OOM-skipped).",
     )

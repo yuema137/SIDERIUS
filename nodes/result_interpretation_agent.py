@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 from agent.llm_bridge import LLMBridge
 from agent.schemas.interpretation import InterpretationInput, InterpretationOutput
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from ml_models.model_descriptions import get_model_description
 
 
 # ---------------------------------------------------------------------------
@@ -68,10 +69,15 @@ def _build_user_prompt(
     inp: InterpretationInput,
     best_score: Optional[float],
     best_config: Optional[Dict[str, Any]],
+    model_description: str,
 ) -> str:
     records_to_show = inp.summary_records[-inp.max_records:]
     lines = [
-        f"Model architecture: {inp.model_type}",
+        f"## Model Architecture: {inp.model_type}",
+        "",
+        model_description,
+        "",
+        "---",
         f"Total experiments in history: {len(inp.summary_records)}",
         f"Records shown to you: {len(records_to_show)} (most recent)",
         f"Best denoising score achieved: {best_score if best_score is not None else 'none yet'}",
@@ -93,6 +99,9 @@ class ResultInterpretationAgent:
         self.bridge = LLMBridge(provider=provider, model_id=model_id)
 
     def run(self, inp: InterpretationInput) -> InterpretationOutput:
+        # --- Look up model description (raises if not found) ---
+        model_description = get_model_description(inp.model_type)
+
         # --- Deterministic pre-computation (never delegated to LLM) ---
         successful = [
             r for r in inp.summary_records
@@ -106,12 +115,13 @@ class ResultInterpretationAgent:
               f"(best score: {best_score})")
 
         # --- LLM call ---
-        user_prompt = _build_user_prompt(inp, best_score, best_config)
+        user_prompt = _build_user_prompt(inp, best_score, best_config, model_description)
         llm_response = self.bridge.generate(INTERPRETATION_SYSTEM_PROMPT, user_prompt)
 
         # --- Build and validate output ---
         output = InterpretationOutput.model_validate({
             "model_type":            inp.model_type,
+            "model_description":     model_description,
             "total_experiments":     len(inp.summary_records),
             "best_denoising_score":  best_score,
             "best_config":           best_config,

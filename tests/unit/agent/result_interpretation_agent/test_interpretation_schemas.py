@@ -44,6 +44,7 @@ class TestInterpretationOutput:
     def test_valid_full(self):
         out = InterpretationOutput(
             model_type="punet",
+            model_description="# PUNet\nA 1D U-Net with positional encoding.",
             total_experiments=10,
             best_denoising_score=1.5,
             best_config={"model_config": {}},
@@ -53,10 +54,12 @@ class TestInterpretationOutput:
         )
         assert out.total_experiments == 10
         assert len(out.key_findings) == 1
+        assert "PUNet" in out.model_description
 
     def test_valid_minimal(self):
         out = InterpretationOutput(
             model_type="punet",
+            model_description="# PUNet\nA 1D U-Net with positional encoding.",
             total_experiments=0,
             key_findings=[],
             bottlenecks=[],
