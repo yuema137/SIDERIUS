@@ -1,16 +1,18 @@
-# result_interpretation_agent.py
+# nodes/result_interpretation_agent.py
 """
 result_interpretation_agent — Node 2 in the SIDERIUS graph.
 
-Reads experiment records produced by tune_ml_hyperparam_agent and produces
-a structured interpretation: key findings, bottlenecks, and a take-home message
-that directly motivates proposing a new architecture.
+Reads experiment records from one or more tuning runs, loads the architectural
+description for every model type involved, and produces a structured interpretation:
+key findings, per-model score ranges, bottlenecks, and a take-home message that
+directly motivates proposing a new architecture.
 
 Consumed by ml_model_proposal_agent via interpretation_to_proposal_v1.
 
 Node contract:
   run(input: InterpretationInput) -> InterpretationOutput
-  CLI: --workspace, --run_name, --model_type, --max_records, --provider, --model_id
+  CLI: --workspace, --run_name, --model_type, --max_records_per_group,
+       --provider, --model_id
 """
 
 import os
@@ -19,7 +21,9 @@ import argparse
 from typing import Any, Dict, List, Optional
 
 from agent.llm_bridge import LLMBridge
-from agent.schemas.interpretation import InterpretationInput, InterpretationOutput
+from agent.schemas.interpretation import (
+    InterpretationInput, InterpretationOutput, SummaryGroup,
+)
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from ml_models.model_descriptions import get_model_description
 
@@ -31,20 +35,19 @@ from ml_models.model_descriptions import get_model_description
 INTERPRETATION_SYSTEM_PROMPT = """\
 You are a senior ML research analyst specialising in deep learning for signal denoising.
 
-Your task: read a log of hyperparameter tuning experiments for a specific model architecture
-and produce a structured, evidence-based interpretation.
+Your task: read the architectural descriptions and hyperparameter tuning experiment logs
+for one or more model architectures, then produce a structured, evidence-based interpretation.
 
 You will receive:
-- The model architecture being evaluated
-- The best denoising score achieved and the config that produced it
-- A list of experiment records, each containing the config tested, the result,
-  and the agent's own reflection (hypothesis, conclusion, discovery, memory_update)
+- The architectural description of each model (markdown + math)
+- Per-model best and worst denoising scores
+- Experiment records for each model, containing configs, results, and agent reflections
 
 Produce a JSON object with exactly these three fields:
 
 {
   "key_findings": [
-    "Finding ranked #1 — most important, concrete, references actual values",
+    "Finding ranked #1 — most important, concrete, references actual values and model names",
     "Finding ranked #2 — ...",
     ...
   ],
@@ -56,9 +59,10 @@ Produce a JSON object with exactly these three fields:
 }
 
 Rules:
-- key_findings: ranked by importance, evidence-based, reference actual scores/configs/loss types
-- bottlenecks: identify root causes (e.g. 'architecture capacity ceiling') not symptoms (e.g. 'score is not improving')
+- key_findings: ranked by importance, evidence-based, reference actual scores/configs/models
+- bottlenecks: identify root causes (e.g. 'architecture capacity ceiling') not symptoms
 - take_home_message: exactly one sentence, must directly motivate why a new architecture is needed
+- If multiple models are provided, compare them and surface cross-model insights
 - Do not repeat information across fields
 - Do not include vague statements like 'more experiments needed' or 'results are promising'
 - Output only the JSON object — no preamble, no commentary, no markdown
@@ -67,27 +71,59 @@ Rules:
 
 def _build_user_prompt(
     inp: InterpretationInput,
-    best_score: Optional[float],
-    worst_score: Optional[float],
-    best_config: Optional[Dict[str, Any]],
-    model_description: str,
+    model_descriptions: Dict[str, str],
+    per_model_best: Dict[str, Optional[float]],
+    per_model_worst: Dict[str, Optional[float]],
+    overall_best_score: Optional[float],
+    overall_worst_score: Optional[float],
+    overall_best_config: Optional[Dict[str, Any]],
 ) -> str:
-    records_to_show = inp.summary_records[-inp.max_records:]
-    lines = [
-        f"## Model Architecture: {inp.model_type}",
+    lines = []
+
+    # --- Score summary ---
+    lines += [
+        "## Performance Summary",
+        f"Overall best denoising score : {overall_best_score  if overall_best_score  is not None else 'none'}",
+        f"Overall worst denoising score: {overall_worst_score if overall_worst_score is not None else 'none'}",
+        f"Config that produced overall best:\n{json.dumps(overall_best_config, indent=2) if overall_best_config else 'none'}",
         "",
-        model_description,
-        "",
-        "---",
-        f"Total experiments in history: {len(inp.summary_records)}",
-        f"Records shown to you: {len(records_to_show)} (most recent)",
-        f"Best denoising score achieved:  {best_score  if best_score  is not None else 'none yet'}",
-        f"Worst denoising score achieved: {worst_score if worst_score is not None else 'none yet'}",
-        f"Config that produced best score:\n{json.dumps(best_config, indent=2) if best_config else 'none'}",
-        "",
-        "Experiment records:",
-        json.dumps(records_to_show, indent=2),
     ]
+
+    # --- Per-model sections ---
+    for model_type, description in model_descriptions.items():
+        lines += [
+            f"---",
+            f"## Model: {model_type}",
+            f"Best score : {per_model_best.get(model_type)}",
+            f"Worst score: {per_model_worst.get(model_type)}",
+            "",
+            "### Architecture Description",
+            description,
+            "",
+        ]
+
+        # Append experiment records for this model
+        model_records = []
+        for group in inp.summaries:
+            if group.model_type == model_type:
+                truncated = group.records[-inp.max_records_per_group:]
+                model_records.append({
+                    "run_name": group.run_name,
+                    "total_records": len(group.records),
+                    "records_shown": len(truncated),
+                    "records": truncated,
+                })
+
+        if model_records:
+            lines += [
+                "### Experiment Records",
+                json.dumps(model_records, indent=2),
+            ]
+        else:
+            lines.append("### Experiment Records\nNo experiment records provided for this model.")
+
+        lines.append("")
+
     return "\n".join(lines)
 
 
@@ -101,35 +137,74 @@ class ResultInterpretationAgent:
         self.bridge = LLMBridge(provider=provider, model_id=model_id)
 
     def run(self, inp: InterpretationInput) -> InterpretationOutput:
-        # --- Look up model description (raises if not found) ---
-        model_description = get_model_description(inp.model_type)
+        # --- Effective model types (union of summaries and explicit model_types) ---
+        effective_types = sorted(
+            {g.model_type for g in inp.summaries} | set(inp.model_types or [])
+        )
 
-        # --- Deterministic pre-computation (never delegated to LLM) ---
-        successful = [
-            r for r in inp.summary_records
-            if r.get("status") == "success" and r.get("denoising_score") is not None
-        ]
-        best_record  = max(successful, key=lambda r: r["denoising_score"]) if successful else None
-        worst_record = min(successful, key=lambda r: r["denoising_score"]) if successful else None
-        best_score  = best_record["denoising_score"]  if best_record  else None
-        worst_score = worst_record["denoising_score"] if worst_record else None
-        best_config = best_record.get("params")       if best_record  else None
+        # --- Load descriptions (raises FileNotFoundError if any missing) ---
+        model_descriptions = {mt: get_model_description(mt) for mt in effective_types}
 
-        print(f"🔍 Interpreting {len(inp.summary_records)} records for {inp.model_type} "
-              f"(best score: {best_score})")
+        # --- Deterministic pre-computation ---
+        per_model_best:   Dict[str, Optional[float]] = {}
+        per_model_worst:  Dict[str, Optional[float]] = {}
+        overall_best_score:  Optional[float] = None
+        overall_worst_score: Optional[float] = None
+        overall_best_config: Optional[Dict[str, Any]] = None
+        total_experiments = 0
+
+        for group in inp.summaries:
+            total_experiments += len(group.records)
+            successful = [
+                r for r in group.records
+                if r.get("status") == "success" and r.get("denoising_score") is not None
+            ]
+            if successful:
+                group_best  = max(successful, key=lambda r: r["denoising_score"])
+                group_worst = min(successful, key=lambda r: r["denoising_score"])
+                mt = group.model_type
+
+                # Per-model best
+                if per_model_best.get(mt) is None or group_best["denoising_score"] > per_model_best[mt]:
+                    per_model_best[mt] = group_best["denoising_score"]
+                # Per-model worst
+                if per_model_worst.get(mt) is None or group_worst["denoising_score"] < per_model_worst[mt]:
+                    per_model_worst[mt] = group_worst["denoising_score"]
+                # Overall best
+                if overall_best_score is None or group_best["denoising_score"] > overall_best_score:
+                    overall_best_score  = group_best["denoising_score"]
+                    overall_best_config = group_best.get("params")
+                # Overall worst
+                if overall_worst_score is None or group_worst["denoising_score"] < overall_worst_score:
+                    overall_worst_score = group_worst["denoising_score"]
+
+        # Fill None for model types with no summaries
+        for mt in effective_types:
+            per_model_best.setdefault(mt, None)
+            per_model_worst.setdefault(mt, None)
+
+        print(f"🔍 Interpreting {len(inp.summaries)} summary group(s) across "
+              f"{len(effective_types)} model(s): {effective_types} "
+              f"(overall best: {overall_best_score})")
 
         # --- LLM call ---
-        user_prompt = _build_user_prompt(inp, best_score, worst_score, best_config, model_description)
+        user_prompt = _build_user_prompt(
+            inp, model_descriptions,
+            per_model_best, per_model_worst,
+            overall_best_score, overall_worst_score, overall_best_config,
+        )
         llm_response = self.bridge.generate(INTERPRETATION_SYSTEM_PROMPT, user_prompt)
 
         # --- Build and validate output ---
         output = InterpretationOutput.model_validate({
-            "model_type":            inp.model_type,
-            "model_description":     model_description,
-            "total_experiments":     len(inp.summary_records),
-            "best_denoising_score":  best_score,
-            "worst_denoising_score": worst_score,
-            "best_config":           best_config,
+            "model_types":           effective_types,
+            "model_descriptions":    model_descriptions,
+            "total_experiments":     total_experiments,
+            "per_model_best":        per_model_best,
+            "per_model_worst":       per_model_worst,
+            "best_denoising_score":  overall_best_score,
+            "worst_denoising_score": overall_worst_score,
+            "best_config":           overall_best_config,
             "key_findings":          llm_response.get("key_findings", []),
             "bottlenecks":           llm_response.get("bottlenecks", []),
             "take_home_message":     llm_response.get("take_home_message", ""),
@@ -138,7 +213,7 @@ class ResultInterpretationAgent:
         # --- Persist ---
         if inp.storage.backend == "local" and inp.storage.local:
             workspace = inp.storage.local.workspace
-            run_name = inp.storage.local.run_name
+            run_name  = inp.storage.local.run_name
             os.makedirs(workspace, exist_ok=True)
             out_path = os.path.join(workspace, f"interpretation_{run_name}.json")
             with open(out_path, "w", encoding="utf-8") as f:
@@ -155,18 +230,18 @@ class ResultInterpretationAgent:
 def main():
     parser = argparse.ArgumentParser(description="SIDERIUS result_interpretation_agent")
     parser.add_argument("--workspace",   type=str, default="./siderius_workspace",
-                        help="Root directory containing summary_{run_name}.json")
+                        help="Root directory for reading summaries and writing output")
     parser.add_argument("--run_name",    type=str, default="v1",
                         help="Run name — reads summary_{run_name}.json, writes interpretation_{run_name}.json")
     parser.add_argument("--model_type",  type=str, required=True,
-                        help="Model architecture that was tuned (e.g. 'punet', 'fcnet')")
-    parser.add_argument("--max_records", type=int, default=50,
-                        help="Maximum number of records passed to the LLM (most recent)")
+                        help="Model architecture (e.g. 'punet'). Used as both model_types and summary lookup.")
+    parser.add_argument("--max_records_per_group", type=int, default=50,
+                        help="Maximum records passed to the LLM per summary group")
     parser.add_argument("--provider",    type=str, default="gemini", choices=["gemini", "openai"])
     parser.add_argument("--model_id",    type=str, default="gemini-3.1-flash-lite-preview")
     args = parser.parse_args()
 
-    # Load summary records from workspace
+    # Load summary from workspace
     summary_path = os.path.join(args.workspace, f"summary_{args.run_name}.json")
     if not os.path.exists(summary_path):
         raise FileNotFoundError(
@@ -174,35 +249,36 @@ def main():
             f"Run tune_ml_hyperparam_agent first, or check --workspace and --run_name."
         )
     with open(summary_path, "r", encoding="utf-8") as f:
-        summary_records = json.load(f)
+        records = json.load(f)
 
     agent_input = InterpretationInput.model_validate({
-        "summary_records": summary_records,
-        "model_type":      args.model_type,
-        "max_records":     args.max_records,
+        "summaries": [{"model_type": args.model_type, "run_name": args.run_name, "records": records}],
+        "max_records_per_group": args.max_records_per_group,
         "storage": {
             "backend": "local",
             "local": {"workspace": args.workspace, "run_name": args.run_name},
         },
     })
-    print(f"✅ Input validated: model={agent_input.model_type} | "
-          f"records={len(agent_input.summary_records)} | max_records={agent_input.max_records}")
+    print(f"✅ Input validated: model={args.model_type} | "
+          f"records={len(records)} | max_records_per_group={args.max_records_per_group}")
 
     agent = ResultInterpretationAgent(provider=args.provider, model_id=args.model_id)
     output = agent.run(agent_input)
 
     print(f"\n{'='*60}")
-    print(f"  Interpretation — {output.model_type}")
+    print(f"  Interpretation — {output.model_types}")
     print(f"{'='*60}")
     print(f"  Total experiments : {output.total_experiments}")
-    print(f"  Best score        : {output.best_denoising_score}")
-    print(f"  Worst score       : {output.worst_denoising_score}")
+    print(f"  Overall best      : {output.best_denoising_score}")
+    print(f"  Overall worst     : {output.worst_denoising_score}")
+    for mt in output.model_types:
+        print(f"  {mt}: best={output.per_model_best.get(mt)} worst={output.per_model_worst.get(mt)}")
     print(f"\n  Key findings:")
-    for finding in output.key_findings:
-        print(f"    - {finding}")
+    for f in output.key_findings:
+        print(f"    - {f}")
     print(f"\n  Bottlenecks:")
-    for bottleneck in output.bottlenecks:
-        print(f"    - {bottleneck}")
+    for b in output.bottlenecks:
+        print(f"    - {b}")
     print(f"\n  Take-home message:")
     print(f"    {output.take_home_message}")
     print(f"{'='*60}\n")
