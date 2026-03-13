@@ -75,15 +75,16 @@ successful pass.
 | `ml_model_tune_to_ml_result_interp` protocol | ✅ done (`local_all_records`, `database_all_records` placeholder) |
 | `ml_result_interp_to_ml_model_propose` protocol | ✅ done (`local_full_context`, `database_full_context` placeholder) |
 | Unit + integration tests for proposal agent | ✅ done (26 unit, Tier 1 + Tier 2 real-API) |
+| `ml_model_implementor` | ✅ done (two-call CoT, template assembly, description.md) |
+| `ml_model_propose_to_ml_model_impl` protocol | ✅ done (`local_full_spec`, `database_full_spec` placeholder) |
+| Unit + integration tests for implementor | ✅ done (node unit ×34, schema unit ×7, protocol unit ×9, Tier 1 + Tier 2 real-API) |
 
 ### Remaining
 
 | Step | Status |
 |------|--------|
-| Implement `ml_model_implementor` | ⬜ next |
-| Implement `code_validator_agent` | ⬜ |
+| Implement `code_validator_agent` | ⬜ next |
 | Add `run()` to `tune_ml_hyperparam_agent` + wire `seed_records` | ⬜ |
-| `ml_model_propose_to_ml_model_impl` protocol | ⬜ |
 | `ml_model_impl_to_ml_model_valid` protocol | ⬜ |
 | `ml_model_valid_to_ml_model_tune` protocol | ⬜ |
 | `demo/run_model_proposal_demo.py` | ⬜ |
@@ -173,22 +174,47 @@ cares which transport was used.
 
 ---
 
-### Step 3 — `ml_model_implementor`
+### Step 3 — `ml_model_implementor` ✅ done
 
 **File**: `nodes/ml_model_implementor.py`.
 
-**What to build**:
+**What was built**:
 - `class MLModelImplementor` with `run(input: ImplementorInput) -> ImplementorOutput`
-- One LLM call: given the `mathematical_definition` and `baseline_config`, generate
-  the model body (config fields, `__init__`, `forward`) to fill into the fixed template
-- LLM is given the filled template structure and asked to complete only the marked sections
-- The implementor assembles the final file by substituting LLM output into the template
-  (no free-form file generation — the template is rendered server-side)
-- Writes two files:
+- Two LLM calls (chain of thought):
+  1. **Reasoning call** (`generate_text()`): free-text reasoning covering submodules needed,
+     tensor shape trace through the full forward pass, config fields, import requirements,
+     and potential shape alignment issues. No JSON constraints so the model can reason freely.
+  2. **Code commit call** (`generate()`): given the reasoning, outputs a strict JSON object
+     with exactly five fields: `extra_imports`, `config_fields_code`, `config_fields`,
+     `init_body`, `forward_body`.
+- Template assembly: the five LLM sections are substituted into a fixed `PLUGIN_TEMPLATE`;
+  all boilerplate (`PLUGIN_MODEL_TYPE`, `PLUGIN_CONFIG_CLASS`, `PLUGIN_MODEL_CLASS`,
+  forward contract comment, class scaffolding) is pre-written and never generated.
+- `_class_name()` helper: `gated_dilated_tcn` → `GatedDilatedTcn`.
+- Post-generation patch: replaces `self.embedding(input)` with `self.embedding(x)` after
+  the LLM commit — a recurring LLM mistake that the hard constraint in the code prompt
+  alone was not always sufficient to prevent.
+- Writes three files:
   - `{plugin_dir}/{model_name}.py` — the plugin file
-  - `{test_dir}/test_{model_name}.py` — the test file
+  - `{plugin_dir}/{model_name}/description.md` — architecture description for the interpretation pipeline
+  - `{test_dir}/test_{model_name}.py` — test skeleton (fully fixed, no LLM generation)
 - Writes output record to `{storage.local.workspace}/implementor_{run_name}.json`
-- Returns `ImplementorOutput` with absolute paths and `config_fields` summary
+- Returns `ImplementorOutput` with absolute paths, `config_fields` summary, and `description_file_path`
+
+**Key design insight — description.md for agent-generated models**:
+The `result_interpretation_agent` calls `get_model_description(model_type)`, which raises
+`FileNotFoundError` if no description exists. The loader already searched
+`agent_generated/models/{model_type}/description.md` as a fallback path, but nothing wrote
+it. The implementor now writes this file alongside the plugin, populated from
+`ImplementorInput.model_description` and `mathematical_definition`. This closes the gap:
+a model proposed and implemented by agents can be interpreted by the interpretation agent
+in the next iteration of the loop, without any human-written description.
+
+**Key design insight — import deduplication**:
+The LLM frequently included `import torch`, `import torch.nn as nn`, etc. in `extra_imports`
+even though the fixed template already contains them. The assembler filters these out by
+comparing each line against a set of already-present imports, preventing `ImportError`s
+from duplicate imports.
 
 **Template rendering**: the implementor holds the template as a string in the module,
 substitutes `{model_name}`, `{ModelClass}`, then fills LLM-generated sections.
@@ -310,6 +336,7 @@ At least one model type must be reachable (via `summaries` or `model_types`); ot
 
 **Output schema** (`ImplementorOutput`):
 - `model_type: str`
+- `description_file_path: str` — absolute path to the written `description.md`
 - `model_file_path: str`
 - `test_file_path: str`
 - `config_fields: Dict`
@@ -346,7 +373,7 @@ Input/output schemas already defined in `agent/schemas/hyperparam_tuning.py`.
 |------|--------|----------|--------|
 | `tune → interpret` | `ml_model_tune_to_ml_result_interp` | `local_all_records` | ✅ done |
 | `interpret → propose` | `ml_result_interp_to_ml_model_propose` | `local_full_context` | ✅ done |
-| `propose → implement` | `ml_model_propose_to_ml_model_impl` | `local_full_spec` | ⬜ |
+| `propose → implement` | `ml_model_propose_to_ml_model_impl` | `local_full_spec` | ✅ done |
 | `implement → validate` | `ml_model_impl_to_ml_model_valid` | `local_files` | ⬜ |
 | `validate → tune` | `ml_model_valid_to_ml_model_tune` | `local_with_advice` | ⬜ |
 
@@ -371,7 +398,7 @@ agent/
 │       ├── __init__.py                               ✅ done (registry with edge aliases)
 │       ├── ml_model_tune_to_ml_result_interp.py      ✅ done (local_all_records)
 │       ├── ml_result_interp_to_ml_model_propose.py   ✅ done (local_full_context)
-│       ├── ml_model_propose_to_ml_model_impl.py      ⬜
+│       ├── ml_model_propose_to_ml_model_impl.py      ✅ done (local_full_spec)
 │       ├── ml_model_impl_to_ml_model_valid.py        ⬜
 │       └── ml_model_valid_to_ml_model_tune.py        ⬜
 ├── skills/                               ✅ unchanged
@@ -391,7 +418,7 @@ nodes/
 ├── ml_hyperparameter_tune_agent.py       ✅ storage updated, run() ⬜
 ├── result_interpretation_agent.py        ✅ done (multi-model, cross-run, descriptions)
 ├── ml_model_proposal_agent.py            ✅ done (two-call CoT, human_advice, duplicate guard)
-├── ml_model_implementor.py              ⬜
+├── ml_model_implementor.py               ✅ done (two-call CoT, template assembly, description.md)
 └── code_validator_agent.py              ⬜
 
 demo/
@@ -405,18 +432,21 @@ tests/
         ├── test_llm_bridge.py            ✅ 11 tests (generate + generate_text, both providers)
         ├── ml_model_proposal_agent/      ✅ 26 tests (18 node + 8 schema)
         ├── protocols/                    ✅ 22 tests (11 per protocol module)
-        ├── ml_model_implementor/         ✅ schema tests done, node tests ⬜
+        ├── ml_model_implementor/         ✅ done (34 node tests + 7 schema tests)
+        ├── protocols/                    ✅ done (9 tests for propose→implement protocol)
         └── code_validator_agent/         ✅ schema tests done, node tests ⬜
 
 tests/integration/nodes/              ✅ Tier 1 — single node, real API
     ├── test_llm_bridge.py                ✅ 4 tests (Gemini + OpenAI, generate + generate_text)
     ├── test_result_interpretation_agent.py ✅ 4 tests (Gemini + OpenAI, single + multi-model)
     ├── test_ml_model_proposal_agent.py   ✅ 2 tests (Gemini + OpenAI)
+    ├── test_ml_model_implementor.py      ✅ 2 tests (Gemini + OpenAI, validates plugin + description.md)
     └── test_tune_ml_hyperparam_agent.py  ✅ (skip if no API key + data)
 
 tests/integration/protocols/         ✅ Tier 2 — one graph edge end-to-end
     ├── test_tune_to_interpret.py         ✅ 1 test (real fcnet loop → interpretation agent)
-    └── test_interp_to_propose.py         ✅ 2 tests (Gemini + OpenAI, no GPU needed)
+    ├── test_interp_to_propose.py         ✅ 2 tests (Gemini + OpenAI, no GPU needed)
+    └── test_propose_to_implement.py      ✅ 2 tests (Gemini + OpenAI, proposal → implementor edge)
 
 tests/integration/orchestrator/      ⬜ Tier 3 — multi-hop critical loops (empty, ready)
 
@@ -425,7 +455,7 @@ tests/unit/core/
     └── ...
 ```
 
-**Total unit tests: ~282 passing.**
+**Total unit tests: ~332 passing.**
 
 ---
 
