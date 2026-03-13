@@ -21,10 +21,14 @@ Node contract:
 """
 
 import ast
+import re
 import os
+import sys
 import json
+import types
 import textwrap
 import argparse
+import tempfile
 
 from agent.llm_bridge import LLMBridge
 from agent.schemas.implementor import ImplementorInput, ImplementorOutput
@@ -38,6 +42,104 @@ from agent.schemas.storage import StorageConfig, LocalStorageConfig
 def _class_name(model_name: str) -> str:
     """Convert snake_case model name to CamelCase class name."""
     return "".join(word.capitalize() for word in model_name.split("_"))
+
+
+# Fields provided by the fixed template — LLM must not redefine them,
+# but may reference them in init_body / forward_body.
+_TEMPLATE_CONFIG_FIELDS = {"segmentation_size", "batch_size"}
+
+
+def _check_config_field_consistency(code: dict) -> list[str]:
+    """
+    Parse init_body for all ``config.<field>`` references and verify that
+    each field is declared in config_fields_code (or is a template-provided
+    field like segmentation_size / batch_size).
+
+    Returns a list of missing field names (empty list = all good).
+    """
+    init_body = code.get("init_body", "")
+    config_fields_code = code.get("config_fields_code", "")
+
+    # All config.X references in init_body
+    referenced = set(re.findall(r"config\.(\w+)", init_body))
+
+    # Fields declared in config_fields_code (e.g. "    channels: int = Field(...)")
+    declared = set(re.findall(r"^\s*(\w+)\s*:", config_fields_code, re.MULTILINE))
+
+    # Also accept fields from the config_fields dict (belt-and-suspenders)
+    config_fields_dict = code.get("config_fields", {})
+    declared.update(config_fields_dict.keys())
+
+    # Template fields are always available
+    declared.update(_TEMPLATE_CONFIG_FIELDS)
+
+    return sorted(referenced - declared)
+
+
+def _smoke_test_plugin(plugin_src: str, model_name: str) -> str | None:
+    """
+    Dynamically load *plugin_src*, instantiate the model with default config,
+    and run a dummy forward pass ``[1, 64] int64 → expected [1, 256, 64] float32``.
+
+    Returns ``None`` on success, or a human-readable error string on failure.
+    The function never raises — all errors are caught and described.
+    """
+    import torch  # deferred so module-level import stays lightweight
+
+    # Write to a temp file so importlib can load it
+    tmp_dir = tempfile.mkdtemp(prefix="siderius_smoke_")
+    tmp_path = os.path.join(tmp_dir, f"{model_name}.py")
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(plugin_src)
+
+        # Load the module
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(model_name, tmp_path)
+        if spec is None or spec.loader is None:
+            return f"Could not create import spec for {tmp_path}"
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        # Check required attributes
+        for attr in ("PLUGIN_MODEL_TYPE", "PLUGIN_CONFIG_CLASS", "PLUGIN_MODEL_CLASS"):
+            if not hasattr(mod, attr):
+                return f"Plugin missing required attribute: {attr}"
+
+        # Instantiate
+        config = mod.PLUGIN_CONFIG_CLASS()
+        model = mod.PLUGIN_MODEL_CLASS(config)
+        model.eval()
+
+        # Forward pass
+        T = 64
+        x = torch.randint(0, 256, (1, T))
+        with torch.no_grad():
+            out = model(x)
+
+        # Shape check
+        expected = (1, 256, T)
+        if out.shape != expected:
+            return (
+                f"Forward pass shape mismatch: expected {expected}, "
+                f"got {tuple(out.shape)}"
+            )
+
+        # NaN check
+        if torch.isnan(out).any():
+            return "Forward pass produced NaN values"
+
+        return None  # success
+
+    except Exception as e:
+        return f"{type(e).__name__}: {e}"
+    finally:
+        # Clean up temp file
+        try:
+            os.remove(tmp_path)
+            os.rmdir(tmp_dir)
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +297,17 @@ Hard constraints — violating any of these makes the code invalid:
 Output only the JSON object — no preamble, no markdown fences, no commentary."""
 
 
+IMPLEMENTOR_REPAIR_PROMPT = """\
+Your previous code attempt failed validation. Fix the issue and return a corrected
+JSON object with the same 5 fields: extra_imports, config_fields_code, config_fields,
+init_body, forward_body.
+
+All the hard constraints from the previous prompt still apply.
+Focus specifically on the error described below — do not rewrite unrelated code.
+
+Output only the JSON object — no preamble, no markdown fences, no commentary."""
+
+
 # ---------------------------------------------------------------------------
 # Prompt builders
 # ---------------------------------------------------------------------------
@@ -236,6 +349,20 @@ def _build_code_prompt(reasoning: str, inp: ImplementorInput) -> str:
         f"## Class name: `{_class_name(inp.model_name)}`\n"
         f"## Baseline model_config (use these as Field defaults): {json.dumps(model_cfg)}\n\n"
         "Now output the JSON code sections."
+    )
+
+
+def _build_repair_prompt(code: dict, error: str, inp: ImplementorInput) -> str:
+    model_cfg = inp.baseline_config.get("model_config", {})
+    return (
+        f"## Previous code (failed)\n\n"
+        f"```json\n{json.dumps(code, indent=2)}\n```\n\n"
+        f"## Error\n\n{error}\n\n"
+        f"---\n\n"
+        f"## Model name: `{inp.model_name}`\n"
+        f"## Class name: `{_class_name(inp.model_name)}`\n"
+        f"## Baseline model_config: {json.dumps(model_cfg)}\n\n"
+        "Fix the error and output the corrected JSON code sections."
     )
 
 
@@ -303,10 +430,65 @@ class MLModelImplementor:
     def __init__(self, provider: str = "gemini", model_id: str = "gemini-3.1-flash-lite-preview"):
         self.bridge = LLMBridge(provider=provider, model_id=model_id)
 
+    # ------------------------------------------------------------------
+    # Validation helpers (used in the generate-validate-repair loop)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _patch_common_mistakes(code: dict) -> dict:
+        """Fix known LLM quirks in generated code sections (in-place + return)."""
+        for field in ("init_body", "forward_body"):
+            if field not in code:
+                continue
+            src = code[field]
+            src = src.replace("self.embedding(input)", "self.embedding(x)")
+            src = "\n".join(line.rstrip("$") for line in src.splitlines())
+            code[field] = src
+        return code
+
+    @staticmethod
+    def _validate_code(code: dict, inp: ImplementorInput) -> str | None:
+        """
+        Run all three pre-write checks on *code*.
+
+        Returns ``None`` if all checks pass, or a human-readable error string
+        describing the first failure.
+        """
+        # Check 1: config field consistency
+        missing = _check_config_field_consistency(code)
+        if missing:
+            return (
+                f"Config field consistency: init_body references config fields "
+                f"not declared in config_fields_code: {missing}. "
+                f"Each config.<field> used in __init__ must have a corresponding "
+                f"Pydantic Field definition."
+            )
+
+        # Check 2: syntax
+        plugin_src = _assemble_plugin(inp, code)
+        try:
+            ast.parse(plugin_src)
+        except SyntaxError as e:
+            return (
+                f"Syntax error in assembled plugin: {e}. "
+                f"Check for undefined helper classes or malformed expressions."
+            )
+
+        # Check 3: smoke test (instantiate + forward pass)
+        smoke_error = _smoke_test_plugin(plugin_src, inp.model_name)
+        if smoke_error:
+            return f"Smoke test failed: {smoke_error}"
+
+        return None  # all good
+
+    # ------------------------------------------------------------------
+    # Main entry point
+    # ------------------------------------------------------------------
+
     def run(self, inp: ImplementorInput) -> ImplementorOutput:
         print(f"🔧 Implementing model '{inp.model_name}' ...")
 
-        # --- Call 1: reasoning (free text) ---
+        # --- Call 1: reasoning (free text, runs once) ---
         reasoning_prompt = _build_reasoning_prompt(inp)
         reasoning = self.bridge.generate_text(IMPLEMENTOR_REASONING_PROMPT, reasoning_prompt)
         print(f"   Reasoning complete ({len(reasoning)} chars).")
@@ -314,31 +496,33 @@ class MLModelImplementor:
         # --- Call 2: code commit (strict JSON) ---
         code_prompt = _build_code_prompt(reasoning, inp)
         code = self.bridge.generate(IMPLEMENTOR_CODE_PROMPT, code_prompt)
+        code = self._patch_common_mistakes(code)
 
-        # --- Assemble files ---
-        # Patch common LLM mistakes in generated code sections
-        for field in ("init_body", "forward_body"):
-            if field not in code:
-                continue
-            src = code[field]
-            # 'input' instead of 'x' (Python builtin collision)
-            src = src.replace("self.embedding(input)", "self.embedding(x)")
-            # Trailing '$' characters (JSON/markdown artifact from some models)
-            src = "\n".join(line.rstrip("$") for line in src.splitlines())
-            code[field] = src
+        # --- Validate → repair loop ---
+        max_retries = inp.max_retries
+        error = self._validate_code(code, inp)
+        attempt = 0
+        while error is not None and attempt < max_retries:
+            attempt += 1
+            print(f"   ⚠ Attempt {attempt + 1}/{max_retries + 1}: {error}")
+            repair_prompt = _build_repair_prompt(code, error, inp)
+            code = self.bridge.generate(IMPLEMENTOR_REPAIR_PROMPT, repair_prompt)
+            code = self._patch_common_mistakes(code)
+            error = self._validate_code(code, inp)
 
-        # Validate that the assembled source is syntactically valid Python before writing.
-        # This catches LLM mistakes (undefined helper classes, malformed expressions)
-        # early with a clear error rather than silently writing broken code.
-        plugin_src = _assemble_plugin(inp, code)
-        try:
-            ast.parse(plugin_src)
-        except SyntaxError as e:
+        # If still failing after retries, raise with the last error
+        if error is not None:
+            plugin_src = _assemble_plugin(inp, code)
             raise ValueError(
-                f"Generated plugin has a syntax error: {e}\n\n"
-                f"Hint: check for undefined helper classes or malformed expressions "
-                f"in init_body / forward_body.\n\n{plugin_src}"
-            ) from e
+                f"Code generation failed after {max_retries + 1} attempts "
+                f"for '{inp.model_name}': {error}\n\n"
+                f"The assembled plugin source:\n{plugin_src}"
+            )
+
+        if attempt > 0:
+            print(f"   ✅ Self-correction succeeded on attempt {attempt + 1}.")
+
+        plugin_src = _assemble_plugin(inp, code)
         test_src   = _assemble_test(inp.model_name)
 
         # --- Write plugin file ---

@@ -47,6 +47,14 @@ class ImplementorInput(BaseModel):
         description="Directory where the test file will be written. "
                     "This is a fixed output destination independent of storage.local.workspace.",
     )
+    max_retries: int = Field(
+        default=2,
+        ge=0,
+        description="Maximum self-correction attempts after the initial code commit. "
+                    "On each retry the LLM receives the validation error and its previous "
+                    "code, and produces a targeted fix. Total attempts = 1 + max_retries. "
+                    "Set to 0 to disable self-correction.",
+    )
     storage: StorageConfig = Field(
         default_factory=lambda: StorageConfig(
             backend="local",
