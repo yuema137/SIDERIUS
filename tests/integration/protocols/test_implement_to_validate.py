@@ -196,7 +196,7 @@ class TestImplementToValidateOpenAI:
         Full edge via OpenAI: implementor -> local_all_fields protocol -> validator.
         """
         provider = "openai"
-        model_id = "gpt-4o-mini"
+        model_id = "gpt-5-mini"
         storage  = StorageConfig(
             backend="local",
             local=LocalStorageConfig(workspace=str(tmp_path), run_name="impl_to_valid"),
@@ -211,7 +211,7 @@ class TestImplementToValidateOpenAI:
         val_input = local_all_fields(impl_output, storage)
 
         # Step 3: run validator
-        val_output = MLCodeValidatorAgent(provider="openai", model_id="gpt-4o-mini").run(val_input)
+        val_output = MLCodeValidatorAgent(provider="openai", model_id="gpt-5-mini").run(val_input)
 
         # Step 4: validate
         _assert_validator_output(val_output, impl_output.model_type, tmp_path)

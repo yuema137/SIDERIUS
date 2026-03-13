@@ -179,7 +179,7 @@ class TestMLModelImplementorOpenAI:
         _skip_if_no_key("openai")
 
     def test_implementation(self, tmp_path):
-        agent = MLModelImplementor(provider="openai", model_id="gpt-4o-mini")
+        agent = MLModelImplementor(provider="openai", model_id="gpt-5-mini")
         output = agent.run(_make_input(tmp_path))
 
         _assert_output(output, tmp_path)
