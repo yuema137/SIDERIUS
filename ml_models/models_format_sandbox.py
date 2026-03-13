@@ -15,7 +15,7 @@ class BaseConfig(BaseModel):
 # ==========================================
 class PUNetConfig(BaseConfig):
     model_type: Literal["punet"] = "punet"
-    multi: int = Field(default=40, ge=16, le=128, description="Base channel multiplier")
+    multi: int = Field(default=40, ge=8, le=128, description="Base channel multiplier")
     depth: int = Field(default=4, ge=1, le=5, description="Number of downsampling steps")
     bilinear: bool = Field(default=True, description="Whether to use bilinear upsampling or conv transpose")
     pe_factor: float = Field(default=1.0, ge=0.0, le=10.0, description="Positional encoding weight")
