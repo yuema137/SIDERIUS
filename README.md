@@ -218,6 +218,31 @@ python nodes/ml_hyperparameter_tune_agent.py \
 | `--file_index` | `6` | Training/validation file index |
 | `--progress_bar` | off | Stream live tqdm progress bars from subprocesses |
 
+### 4. Open the dashboard
+
+```bash
+# Edit dashboard_config.yaml to point at your data directory, then:
+python dashboard/main.py
+
+# Development mode (auto-reload on code changes)
+uvicorn dashboard.main:app --reload
+```
+
+Open `http://localhost:8000` in your browser. Key config options in `dashboard_config.yaml`:
+
+```yaml
+data_source:
+  type: local           # "local" or "postgres"
+  local:
+    root_data_dir: /path/to/SIDEREIS_DATA
+    models: [punet, wavenet, rnn, fcnet, transformer]  # leave [] to auto-discover
+
+server:
+  port: 8000
+```
+
+---
+
 ### Output layout
 
 ```
