@@ -73,6 +73,8 @@ class TestImplementorOutput:
             model_file_path="/abs/agent_generated/models/attn_unet.py",
             test_file_path="/abs/agent_generated/tests/test_attn_unet.py",
             config_fields={"depth": 2, "num_heads": 4},
+            model_description="A gated TCN.",
+            mathematical_definition="y = tanh * sigmoid",
         )
         assert out.model_type == "attn_unet"
         assert out.config_fields["depth"] == 2
@@ -83,5 +85,43 @@ class TestImplementorOutput:
                 model_type="attn_unet",
                 test_file_path="/abs/test.py",
                 config_fields={},
+                model_description="x",
+                mathematical_definition="x",
             )
         assert "model_file_path" in str(exc.value)
+
+    def test_model_description_present(self):
+        out = ImplementorOutput(
+            model_type="attn_unet",
+            description_file_path="/abs/desc.md",
+            model_file_path="/abs/model.py",
+            test_file_path="/abs/test.py",
+            config_fields={},
+            model_description="A gated TCN for denoising.",
+            mathematical_definition="y = tanh(Wf*x) * sigmoid(Wg*x)",
+        )
+        assert "gated TCN" in out.model_description
+
+    def test_mathematical_definition_present(self):
+        out = ImplementorOutput(
+            model_type="attn_unet",
+            description_file_path="/abs/desc.md",
+            model_file_path="/abs/model.py",
+            test_file_path="/abs/test.py",
+            config_fields={},
+            model_description="x",
+            mathematical_definition="y = tanh(Wf*x) * sigmoid(Wg*x)",
+        )
+        assert "tanh" in out.mathematical_definition
+
+    def test_missing_model_description_raises(self):
+        with pytest.raises(ValidationError) as exc:
+            ImplementorOutput(
+                model_type="attn_unet",
+                description_file_path="/abs/desc.md",
+                model_file_path="/abs/model.py",
+                test_file_path="/abs/test.py",
+                config_fields={},
+                mathematical_definition="y = tanh(Wf*x) * sigmoid(Wg*x)",
+            )
+        assert "model_description" in str(exc.value)

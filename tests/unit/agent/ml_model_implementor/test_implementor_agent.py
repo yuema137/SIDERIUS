@@ -242,6 +242,14 @@ class TestOutputCorrectness:
         output = agent_with_mocks.run(inp)
         assert output.config_fields == {"channels": 64, "depth": 4}
 
+    def test_model_description_from_input(self, agent_with_mocks, inp):
+        output = agent_with_mocks.run(inp)
+        assert output.model_description == inp.model_description
+
+    def test_mathematical_definition_from_input(self, agent_with_mocks, inp):
+        output = agent_with_mocks.run(inp)
+        assert output.mathematical_definition == inp.mathematical_definition
+
 
 # ---------------------------------------------------------------------------
 # TestDescriptionFile

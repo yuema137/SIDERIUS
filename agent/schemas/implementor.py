@@ -90,3 +90,11 @@ class ImplementorOutput(BaseModel):
                     "Keys are field names, values are their default values. "
                     "Used for logging and downstream context.",
     )
+    model_description: str = Field(
+        description="Plain-English description of the architecture, passed through from ImplementorInput. "
+                    "Carried forward so ml_code_validator_agent can provide it to the LLM code reviewer.",
+    )
+    mathematical_definition: str = Field(
+        description="Precise mathematical/architectural specification from the proposal, passed through "
+                    "from ImplementorInput. Used by ml_code_validator_agent to verify implementation matches spec.",
+    )
