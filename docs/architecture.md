@@ -56,11 +56,22 @@ def protocol_name(output: NodeAOutput) -> NodeBInput:
     ...
 ```
 
-- The protocol is **dual-sided**: it explicitly documents what it consumes from the
-  source and what it populates in the target. Both sides are typed and visible.
+A protocol is **strictly directional**: `A → B` and `B → A` are two separate protocols.
+There is no bidirectional or symmetric protocol. Each protocol arrow has one source and
+one target, and data always flows in one direction per traversal.
+
+A protocol is also **transparent on both ends**: the function signature explicitly names
+what it reads from the source (`NodeAOutput`) and what it produces for the target
+(`NodeBInput`). There is no implicit field mapping or automatic wiring — every field
+consumed and every field populated is visible in the function body.
+
+**Loops are allowed**, but they do not change the directionality of individual protocols.
+When a cycle exists in the graph (e.g. `A → B → C → A`), each edge in the cycle is
+still a one-way protocol. The loop is created by an orchestrator repeatedly traversing
+the same directed edges — not by any protocol becoming bidirectional.
+
 - Output and input schemas do **not** need to match exactly. The protocol is the
-  translation layer. What is required is that a valid, explicit protocol exists — there
-  is no implicit or automatic wiring.
+  translation layer between them.
 - **Multiple protocols can exist on the same edge.** Different orchestrators, or
   different stages of the same workflow, may apply different protocols between the same
   two nodes. Each protocol is a distinct, named function.
