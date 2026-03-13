@@ -14,7 +14,7 @@ ml_model_proposal_agent
         ↓  [ml_model_propose_to_ml_model_impl :: local_full_spec]
 ml_model_implementor
         ↓  [ml_model_impl_to_ml_model_valid :: local_files]
-code_validator_agent
+ml_code_validator_agent
         ↓  [ml_model_valid_to_ml_model_tune :: local_with_advice]
 tune_ml_hyperparam_agent  (new model, end node)
 ```
@@ -34,7 +34,7 @@ successful pass.
 - **No orchestrator** — a flat demo script selects and traverses the path manually.
   This is the human-as-orchestrator principle: a human (or script) applies protocols
   and calls `node.run()` in sequence.
-- **No retry loop** — if `code_validator_agent` returns `passed=False`, the demo stops.
+- **No retry loop** — if `ml_code_validator_agent` returns `passed=False`, the demo stops.
   This is acceptable. Retry logic belongs in an orchestrator, which comes after the demo.
 - **All nodes follow the standard contract** — each node is a pure function with a
   `run(input) -> output` method, validated Pydantic schemas at entry and exit, and a
@@ -83,7 +83,7 @@ successful pass.
 
 | Step | Status |
 |------|--------|
-| Implement `code_validator_agent` | ⬜ next |
+| Implement `ml_code_validator_agent` | ⬜ next |
 | Add `run()` to `tune_ml_hyperparam_agent` + wire `seed_records` | ⬜ |
 | `ml_model_impl_to_ml_model_valid` protocol | ⬜ |
 | `ml_model_valid_to_ml_model_tune` protocol | ⬜ |
@@ -228,7 +228,7 @@ a clear error message rather than silently writing broken code to disk.
 Prompt constraints (no helper classes, scalar config fields, Pydantic V2 kwargs, `config`
 not in scope in `forward`) are best-effort guidance — LLMs do not always honour them. This
 is expected. Constraints reduce the failure rate but are not the enforcement mechanism.
-Programmatic validation in the `code_validator_agent` (Node 5) is the correct place to
+Programmatic validation in the `ml_code_validator_agent` (Node 5) is the correct place to
 enforce correctness. The implementor's early `ast.parse()` check is a lightweight pre-flight
 only; deep semantic validation belongs downstream.
 
@@ -237,12 +237,12 @@ substitutes `{model_name}`, `{ModelClass}`, then fills LLM-generated sections.
 
 ---
 
-### Step 4 — `code_validator_agent`
+### Step 4 — `ml_code_validator_agent`
 
-**File**: `nodes/code_validator_agent.py`.
+**File**: `nodes/ml_code_validator_agent.py`.
 
 **What to build**:
-- `class CodeValidatorAgent` with `run(input: ValidatorInput) -> ValidatorOutput`
+- `class MLCodeValidatorAgent` with `run(input: ValidatorInput) -> ValidatorOutput`
 - Step 1 — plugin registration check: call `ml_models/plugin_loader._load_plugin(model_file_path)`
   and verify it returns a non-None result with correct attributes
 - Step 2 — run tests: `subprocess.run(["pytest", test_file_path, "-v"])` and capture
@@ -359,7 +359,7 @@ At least one model type must be reachable (via `summaries` or `model_types`); ot
 
 ---
 
-### 4. `code_validator_agent`
+### 4. `ml_code_validator_agent`
 
 **Input schema** (`ValidatorInput`):
 - `model_type: str`
@@ -435,7 +435,7 @@ nodes/
 ├── result_interpretation_agent.py        ✅ done (multi-model, cross-run, descriptions)
 ├── ml_model_proposal_agent.py            ✅ done (two-call CoT, human_advice, duplicate guard)
 ├── ml_model_implementor.py               ✅ done (two-call CoT, template assembly, description.md)
-└── code_validator_agent.py              ⬜
+└── ml_code_validator_agent.py              ⬜
 
 demo/
 └── run_model_proposal_demo.py            ⬜
@@ -450,7 +450,7 @@ tests/
         ├── protocols/                    ✅ 22 tests (11 per protocol module)
         ├── ml_model_implementor/         ✅ done (34 node tests + 7 schema tests)
         ├── protocols/                    ✅ done (9 tests for propose→implement protocol)
-        └── code_validator_agent/         ✅ schema tests done, node tests ⬜
+        └── ml_code_validator_agent/         ✅ schema tests done, node tests ⬜
 
 tests/integration/nodes/              ✅ Tier 1 — single node, real API
     ├── test_llm_bridge.py                ✅ 4 tests (Gemini + OpenAI, generate + generate_text)
@@ -483,7 +483,7 @@ import sys, json
 from nodes.result_interpretation_agent import ResultInterpretationAgent
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
 from nodes.ml_model_implementor import MLModelImplementor
-from nodes.code_validator_agent import CodeValidatorAgent
+from nodes.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
 from agent.schemas.protocols.ml_model_tune_to_ml_result_interp import local_all_records
@@ -518,7 +518,7 @@ implementor_output = MLModelImplementor().run(
 print("Written to:", implementor_output.model_file_path)
 
 # Edge 4: implement → validate
-validation = CodeValidatorAgent().run(
+validation = MLCodeValidatorAgent().run(
     local_files(implementor_output, storage)
 )
 if not validation.passed:

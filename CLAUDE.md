@@ -29,16 +29,29 @@ Do not consider a node "done" until all 8 are complete.
 | 6 | Protocol integration test (real API, Tier 2) | `tests/integration/protocols/test_{source}_to_{target}.py` |
 | 7 | **Connection audit** — verify end-to-end schema compatibility: every field required by the downstream node's input schema is present in this node's output schema, and every field required by this node's input schema is present in the upstream node's output schema. Check that each protocol function correctly maps all fields without silent defaults or missing keys. Run the full unit test suite to confirm nothing is broken. | (no new file — audit existing files) |
 
-**Agent naming convention**: agent names are concise, modular, and prefixed by their domain module.
-The prefix identifies the domain the agent belongs to; the suffix describes its specific role.
+**Agent design principle**: each agent is scoped to one well-defined category of task within
+its module, and should be flexible enough to handle that task well. Cross-task and cross-module
+flexibility is the responsibility of the infrastructure (orchestrators, protocols) — not the
+agent. An agent that tries to be general-purpose becomes unpredictable and hard to test.
+Concretely: `ml_code_validator_agent` validates ML model plugin code — it does not validate
+arbitrary code, and it knows about the ML plugin interface contract specifically.
 
-| Prefix | Domain | Example agents |
+**Agent naming convention**: agent names are prefixed by the module they belong to, followed
+by a concise, specific descriptor of their task. The prefix is not universal — it reflects
+which module the agent lives in. As new modules are added (e.g. a data module, a reporting
+module), they will introduce their own prefixes. Do not use a prefix from a different module
+just because it sounds close.
+
+| Prefix | Module | Example agents |
 |--------|--------|----------------|
-| `ml_` | Machine learning pipeline | `ml_hyperparameter_tune_agent`, `ml_model_proposal_agent`, `ml_model_implementor` |
+| `ml_` | Machine learning pipeline | `ml_hyperparameter_tune_agent`, `ml_model_proposal_agent`, `ml_model_implementor`, `ml_code_validator_agent` |
 | `data_` | Data processing / analysis | `data_analysis_agent` |
 
-When naming a new agent: choose the appropriate prefix for its domain, then a short snake_case
-descriptor of what it does. Avoid generic suffixes like `_processor` or `_handler` — be specific.
+When naming a new agent: identify which module it belongs to, use that module's prefix, then
+add a short snake_case descriptor of the specific task. Avoid generic suffixes like `_processor`
+or `_handler` — be specific. A name like `code_validator_agent` (no prefix) is wrong because it
+implies generality across modules; `ml_code_validator_agent` is correct because it is explicitly
+scoped to the ML pipeline.
 
 **Protocol naming convention**: one file per directed edge, named `{source_code}_to_{target_code}.py`.
 Node codes: `ml_model_tune`, `ml_result_interp`, `ml_model_propose`, `ml_model_impl`, `ml_model_valid`.
