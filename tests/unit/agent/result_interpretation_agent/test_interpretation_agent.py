@@ -138,3 +138,17 @@ class TestResultInterpretationAgentRun:
         output = agent.run(inp)
         assert isinstance(output, InterpretationOutput)
         assert output.model_type == "punet"
+
+    def test_model_description_loaded_into_output(self, agent, tmp_path):
+        inp = make_input([SUCCESS_RECORD], workspace=str(tmp_path))
+        output = agent.run(inp)
+        assert isinstance(output.model_description, str)
+        assert len(output.model_description) > 100, "description is suspiciously short"
+        assert "PUNet" in output.model_description
+
+    def test_unknown_model_type_raises(self, tmp_path):
+        inp = make_input([SUCCESS_RECORD], workspace=str(tmp_path))
+        inp = inp.model_copy(update={"model_type": "nonexistent_model"})
+        agent = ResultInterpretationAgent(provider="gemini", model_id="test-model")
+        with pytest.raises(FileNotFoundError, match="nonexistent_model"):
+            agent.run(inp)
