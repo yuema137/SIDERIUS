@@ -363,15 +363,24 @@ At least one model type must be reachable (via `summaries` or `model_types`); ot
 
 **Input schema** (`ValidatorInput`):
 - `model_type: str`
-- `model_file_path: str`
-- `test_file_path: str`
+- `model_file_path: str` — from `ImplementorOutput` via protocol
+- `test_file_path: str` — from `ImplementorOutput` via protocol
+- `description_file_path: str` — from `ImplementorOutput` via protocol
+- `config_fields: Dict[str, Any]` — from `ImplementorOutput` via protocol; used to verify all fields are scalar
 - `storage: StorageConfig`
 
+All file paths come directly from `ImplementorOutput` mapped by the protocol — the validator
+never reads from storage to discover them (inter-node communication principle).
+
 **Output schema** (`ValidatorOutput`):
-- `passed: bool`
+- `passed: bool` — True only if all four checks below pass
 - `model_type: str`
-- `plugin_registered: bool`
-- `error_message: Optional[str]`
+- `plugin_registered: bool` — plugin loads with correct interface attributes
+- `tests_passed: bool` — all pytest tests in the generated test file pass
+- `description_valid: bool` — `description.md` exists and is non-empty (>50 chars)
+- `config_fields_valid: bool` — all config fields are scalar types (int, float, bool)
+- `test_output: Optional[str]` — full pytest stdout/stderr on both pass and fail
+- `error_message: Optional[str]` — human-readable summary of what failed; None if passed
 
 ---
 

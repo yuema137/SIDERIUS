@@ -169,6 +169,28 @@ Node A output schema  ──► protocol (local or database) ──► Node B in
                               (injected by orchestrator)
 ```
 
+### 9. Inter-node communication uses exactly three mechanisms
+
+Nodes communicate exclusively through **schema**, **storage**, and **protocols**. No other
+form of inter-node communication is permitted.
+
+- **Schema**: the input and output `BaseModel` of each node is the complete, explicit
+  contract for what data flows in and out. Every field that a downstream node needs must
+  appear in the upstream node's output schema and be mapped by the protocol. There are no
+  hidden contracts or implicit field sharing.
+- **Storage**: each node writes its own output record to the workspace for persistence and
+  recovery. This is a **log**, not a communication channel. Downstream nodes never read the
+  upstream node's output file to discover their input — they receive data through the
+  protocol function in memory.
+- **Protocols**: the only place field mapping happens. The protocol function receives the
+  full upstream `*Output` object and constructs the fully populated downstream `*Input`.
+  No field should be silently dropped.
+
+This constraint is what keeps the graph clean as it grows. Any shortcut — reading a file
+by naming convention, sharing state through the filesystem, passing a path as a proxy for
+data — creates a hidden dependency invisible to the protocol system. Such shortcuts make
+nodes untestable in isolation and fragile when the graph is rearranged.
+
 ---
 
 ## Node Contract
@@ -200,8 +222,8 @@ result_interpretation_agent ─────────────────�
 ml_model_proposal_agent ──────────────────────────────► tune_ml_hyperparam_agent
 ml_model_proposal_agent ──────────────────────────────► ml_model_implementor
 
-ml_model_implementor ─────────────────────────────────► code_validator_agent
-code_validator_agent ─────────────────────────────────► tune_ml_hyperparam_agent
+ml_model_implementor ─────────────────────────────────► ml_code_validator_agent
+ml_code_validator_agent ─────────────────────────────────► tune_ml_hyperparam_agent
 ```
 
 Each edge has at least one named protocol. The cycle
@@ -244,7 +266,7 @@ conditional branching, and loops by re-traversing cycles.
 2. result_interpretation_agent → identify bottlenecks              [hyperparam_to_interpretation_full_v1]
 3. ml_model_proposal_agent     → propose new architecture          [interpretation_to_proposal_v1]
 4. ml_model_implementor        → write model code + tests          [proposal_to_implementor_v1]
-5. code_validator_agent        → run tests, confirm valid          [implementor_to_validator_v1]
+5. ml_code_validator_agent        → run tests, confirm valid          [implementor_to_validator_v1]
 6. tune_ml_hyperparam_agent    → tune the new model                [validator_to_hyperparam_v1]
 7. goto 2                      → repeat until convergence
 ```
@@ -259,7 +281,7 @@ Human / Top-level CLI
     │   ├── result_interpretation_agent     ← Level 0
     │   ├── ml_model_proposal_agent         ← Level 0
     │   ├── ml_model_implementor            ← Level 0
-    │   └── code_validator_agent            ← Level 0
+    │   └── ml_code_validator_agent            ← Level 0
     ├── data_analysis_agent                 ← Level 0
     └── result_interpretation_agent         ← Level 0 (final cross-model summary)
 ```
@@ -307,7 +329,7 @@ Load memory → Propose hypothesis + config (LLM) → Resource check
 | `result_interpretation_agent` | Synthesizes experiment results, surfaces bottlenecks and patterns | no | no | yes |
 | `ml_model_proposal_agent` | Reads interpretation → proposes new model architecture + expert advice | no | no | yes |
 | `ml_model_implementor` | Takes a model proposal → writes PyTorch code + unit tests | no | yes | yes |
-| `code_validator_agent` | Runs generated tests, verifies plugin interface | no | no | no |
+| `ml_code_validator_agent` | Runs generated tests, verifies plugin interface | no | no | no |
 | `data_analysis_agent` | Profiles dataset properties, detects distribution shifts | no | no | yes |
 
 ---
