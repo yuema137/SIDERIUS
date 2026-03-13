@@ -45,6 +45,17 @@ Node codes: `ml_model_tune`, `ml_result_interp`, `ml_model_propose`, `ml_model_i
 Functions inside the file: `{transport}_{data_scope}` (e.g. `local_all_records`, `database_full_context`).
 Always add a `database_*` placeholder (raises `NotImplementedError`) alongside every `local_*` function.
 
+**Integration test tiers** — tiers describe how many nodes are exercised in a single real-API test,
+not API load or cost. All tiers skip automatically if the required API key is not set.
+
+| Tier | Scope | Location | What it tests |
+|------|-------|----------|---------------|
+| **Tier 1** | One node in isolation | `tests/integration/nodes/` | A hand-crafted synthetic input is passed directly to `node.run()`. Validates that the node itself works end-to-end with a real LLM call. No other node is involved. |
+| **Tier 2** | One directed edge (two nodes) | `tests/integration/protocols/` | The upstream node runs with a real LLM call, the protocol function maps its output to the downstream node's input, and the downstream node runs. Validates that the wiring between two specific nodes is correct. |
+| **Tier 3** | Multi-hop path (3+ nodes) | `tests/integration/orchestrator/` | A sequence of nodes traversed end-to-end. Validates that a complete sub-path of the graph works correctly. Not yet implemented. |
+
+Steps 5 and 6 in the node checklist correspond to Tier 1 and Tier 2 respectively.
+
 ## Reference Project Guidelines
 - You have read access to `legacy_repo`: /home/tidmad/TIDMAD. 
 - **CRITICAL**: The legacy project is unoptimized and contains deprecated patterns. 
