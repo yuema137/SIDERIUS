@@ -1,18 +1,20 @@
 """
-Tests for result_interpretation_agent.py
+Tests for nodes/result_interpretation_agent.py
 
 LLM calls are mocked — these tests validate:
-  - Deterministic pre-computation (best score/config extracted correctly)
-  - LLM response is merged correctly into InterpretationOutput
-  - Output is validated against the schema
-  - Output file is written to the correct path
-  - Empty records are handled gracefully
+  - Deterministic pre-computation (best/worst scores extracted correctly, per-model and overall)
+  - LLM response merged correctly into InterpretationOutput
+  - Output validated against schema
+  - Output file written to correct path
+  - Multiple summary groups handled correctly
+  - Empty summaries with model_types handled correctly
+  - Unknown model type raises FileNotFoundError
 """
 import json
 import pytest
 from unittest.mock import MagicMock, patch
 
-from agent.schemas.interpretation import InterpretationInput, InterpretationOutput
+from agent.schemas.interpretation import InterpretationInput, InterpretationOutput, SummaryGroup
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from nodes.result_interpretation_agent import ResultInterpretationAgent
 
@@ -32,37 +34,28 @@ FAKE_LLM_RESPONSE = {
     "take_home_message": "The current architecture has saturated; a fundamentally different design is needed.",
 }
 
-SUCCESS_RECORD = {
-    "exp_id": "punet_v1_001",
-    "status": "success",
-    "model_type": "punet",
-    "timestamp": "2026-01-01 00:00:00",
-    "file_index": 6,
+RECORD_A = {
+    "exp_id": "punet_v1_001", "status": "success", "model_type": "punet",
+    "timestamp": "2026-01-01 00:00:00", "file_index": 6,
     "params": {"model_config": {"depth": 3}, "train_config": {"lr": 1e-4}, "loss_config": {"loss_type": "focal"}},
-    "results": {"denoising_score": 1.5, "final_loss": 0.1},
-    "denoising_score": 1.5,
+    "results": {"denoising_score": 1.5}, "denoising_score": 1.5,
 }
-
-BETTER_RECORD = {
-    "exp_id": "punet_v1_002",
-    "status": "success",
-    "model_type": "punet",
-    "timestamp": "2026-01-01 01:00:00",
-    "file_index": 6,
+RECORD_B = {
+    "exp_id": "punet_v1_002", "status": "success", "model_type": "punet",
+    "timestamp": "2026-01-01 01:00:00", "file_index": 6,
     "params": {"model_config": {"depth": 4}, "train_config": {"lr": 3e-4}, "loss_config": {"loss_type": "focal"}},
-    "results": {"denoising_score": 1.8, "final_loss": 0.08},
-    "denoising_score": 1.8,
+    "results": {"denoising_score": 1.8}, "denoising_score": 1.8,
 }
-
-OOM_RECORD = {
-    "exp_id": "punet_v1_003",
-    "status": "skipped_oom_risk",
-    "model_type": "punet",
-    "timestamp": "2026-01-01 02:00:00",
-    "file_index": 6,
-    "params": {},
-    "results": {},
-    "denoising_score": None,
+RECORD_OOM = {
+    "exp_id": "punet_v1_003", "status": "skipped_oom_risk", "model_type": "punet",
+    "timestamp": "2026-01-01 02:00:00", "file_index": 6,
+    "params": {}, "results": {}, "denoising_score": None,
+}
+RECORD_FCNET = {
+    "exp_id": "fcnet_v1_001", "status": "success", "model_type": "fcnet",
+    "timestamp": "2026-01-01 03:00:00", "file_index": 6,
+    "params": {"model_config": {}, "train_config": {}, "loss_config": {}},
+    "results": {"denoising_score": 0.9}, "denoising_score": 0.9,
 }
 
 
@@ -75,80 +68,172 @@ def agent():
         yield a
 
 
-def make_input(records, workspace="/tmp/interp_test", run_name="r1"):
-    return InterpretationInput.model_validate({
-        "summary_records": records,
-        "model_type": "punet",
-        "storage": {"backend": "local", "local": {"workspace": workspace, "run_name": run_name}},
-    })
+def make_input(records, model_type="punet", run_name="r1", workspace="/tmp/interp_test"):
+    return InterpretationInput(
+        summaries=[SummaryGroup(model_type=model_type, run_name=run_name, records=records)],
+        storage={"backend": "local", "local": {"workspace": workspace, "run_name": run_name}},
+    )
+
+
+def make_multi_input(groups, workspace="/tmp/interp_test", run_name="r1"):
+    return InterpretationInput(
+        summaries=[SummaryGroup(**g) for g in groups],
+        storage={"backend": "local", "local": {"workspace": workspace, "run_name": run_name}},
+    )
 
 
 # ---------------------------------------------------------------------------
-# Tests
+# Single-group tests
 # ---------------------------------------------------------------------------
 
-class TestResultInterpretationAgentRun:
+class TestSingleGroup:
 
-    def test_best_score_extracted_correctly(self, agent, tmp_path):
-        inp = make_input([SUCCESS_RECORD, BETTER_RECORD], workspace=str(tmp_path))
+    def test_best_score_extracted(self, agent, tmp_path):
+        inp = make_input([RECORD_A, RECORD_B], workspace=str(tmp_path))
         output = agent.run(inp)
         assert output.best_denoising_score == 1.8
 
-    def test_best_config_is_from_best_record(self, agent, tmp_path):
-        inp = make_input([SUCCESS_RECORD, BETTER_RECORD], workspace=str(tmp_path))
+    def test_worst_score_extracted(self, agent, tmp_path):
+        inp = make_input([RECORD_A, RECORD_B], workspace=str(tmp_path))
+        output = agent.run(inp)
+        assert output.worst_denoising_score == 1.5
+
+    def test_best_config_from_best_record(self, agent, tmp_path):
+        inp = make_input([RECORD_A, RECORD_B], workspace=str(tmp_path))
         output = agent.run(inp)
         assert output.best_config["model_config"]["depth"] == 4
 
-    def test_oom_records_excluded_from_best(self, agent, tmp_path):
-        inp = make_input([OOM_RECORD], workspace=str(tmp_path))
+    def test_oom_excluded_from_scores(self, agent, tmp_path):
+        inp = make_input([RECORD_OOM], workspace=str(tmp_path))
         output = agent.run(inp)
         assert output.best_denoising_score is None
-        assert output.best_config is None
+        assert output.worst_denoising_score is None
 
     def test_total_experiments_includes_oom(self, agent, tmp_path):
-        inp = make_input([SUCCESS_RECORD, OOM_RECORD], workspace=str(tmp_path))
+        inp = make_input([RECORD_A, RECORD_OOM], workspace=str(tmp_path))
         output = agent.run(inp)
         assert output.total_experiments == 2
 
-    def test_llm_findings_merged_into_output(self, agent, tmp_path):
-        inp = make_input([SUCCESS_RECORD], workspace=str(tmp_path))
+    def test_per_model_scores_populated(self, agent, tmp_path):
+        inp = make_input([RECORD_A, RECORD_B], workspace=str(tmp_path))
+        output = agent.run(inp)
+        assert output.per_model_best["punet"] == 1.8
+        assert output.per_model_worst["punet"] == 1.5
+
+    def test_llm_findings_merged(self, agent, tmp_path):
+        inp = make_input([RECORD_A], workspace=str(tmp_path))
         output = agent.run(inp)
         assert output.key_findings == FAKE_LLM_RESPONSE["key_findings"]
         assert output.bottlenecks == FAKE_LLM_RESPONSE["bottlenecks"]
         assert output.take_home_message == FAKE_LLM_RESPONSE["take_home_message"]
 
     def test_output_written_to_file(self, agent, tmp_path):
-        inp = make_input([SUCCESS_RECORD], workspace=str(tmp_path), run_name="myrun")
+        inp = make_input([RECORD_A], workspace=str(tmp_path), run_name="myrun")
         agent.run(inp)
         out_path = tmp_path / "interpretation_myrun.json"
         assert out_path.exists()
         data = json.loads(out_path.read_text())
-        assert data["model_type"] == "punet"
+        assert "punet" in data["model_types"]
         assert data["best_denoising_score"] == 1.5
 
-    def test_empty_records_returns_valid_output(self, agent, tmp_path):
-        inp = make_input([], workspace=str(tmp_path))
-        output = agent.run(inp)
-        assert output.total_experiments == 0
-        assert output.best_denoising_score is None
-        assert isinstance(output.key_findings, list)
-
     def test_output_is_valid_interpretation_output(self, agent, tmp_path):
-        inp = make_input([SUCCESS_RECORD, BETTER_RECORD], workspace=str(tmp_path))
+        inp = make_input([RECORD_A, RECORD_B], workspace=str(tmp_path))
         output = agent.run(inp)
         assert isinstance(output, InterpretationOutput)
-        assert output.model_type == "punet"
+        assert "punet" in output.model_types
 
-    def test_model_description_loaded_into_output(self, agent, tmp_path):
-        inp = make_input([SUCCESS_RECORD], workspace=str(tmp_path))
+    def test_model_description_loaded(self, agent, tmp_path):
+        inp = make_input([RECORD_A], workspace=str(tmp_path))
         output = agent.run(inp)
-        assert isinstance(output.model_description, str)
-        assert len(output.model_description) > 100, "description is suspiciously short"
-        assert "PUNet" in output.model_description
+        assert "punet" in output.model_descriptions
+        assert len(output.model_descriptions["punet"]) > 100
+        assert "PUNet" in output.model_descriptions["punet"]
+
+
+# ---------------------------------------------------------------------------
+# Multi-group tests
+# ---------------------------------------------------------------------------
+
+class TestMultiGroup:
+
+    def test_two_models_both_in_output(self, agent, tmp_path):
+        inp = make_multi_input([
+            {"model_type": "punet", "run_name": "v1", "records": [RECORD_A, RECORD_B]},
+            {"model_type": "fcnet", "run_name": "v1", "records": [RECORD_FCNET]},
+        ], workspace=str(tmp_path))
+        output = agent.run(inp)
+        assert "punet" in output.model_types
+        assert "fcnet" in output.model_types
+
+    def test_overall_best_is_cross_model_max(self, agent, tmp_path):
+        inp = make_multi_input([
+            {"model_type": "punet", "run_name": "v1", "records": [RECORD_A, RECORD_B]},
+            {"model_type": "fcnet", "run_name": "v1", "records": [RECORD_FCNET]},
+        ], workspace=str(tmp_path))
+        output = agent.run(inp)
+        assert output.best_denoising_score == 1.8
+        assert output.worst_denoising_score == 0.9
+
+    def test_per_model_scores_independent(self, agent, tmp_path):
+        inp = make_multi_input([
+            {"model_type": "punet", "run_name": "v1", "records": [RECORD_A, RECORD_B]},
+            {"model_type": "fcnet", "run_name": "v1", "records": [RECORD_FCNET]},
+        ], workspace=str(tmp_path))
+        output = agent.run(inp)
+        assert output.per_model_best["punet"] == 1.8
+        assert output.per_model_best["fcnet"] == 0.9
+
+    def test_total_experiments_across_all_groups(self, agent, tmp_path):
+        inp = make_multi_input([
+            {"model_type": "punet", "run_name": "v1", "records": [RECORD_A, RECORD_B]},
+            {"model_type": "fcnet", "run_name": "v1", "records": [RECORD_FCNET]},
+        ], workspace=str(tmp_path))
+        output = agent.run(inp)
+        assert output.total_experiments == 3
+
+    def test_descriptions_loaded_for_all_models(self, agent, tmp_path):
+        inp = make_multi_input([
+            {"model_type": "punet", "run_name": "v1", "records": [RECORD_A]},
+            {"model_type": "fcnet", "run_name": "v1", "records": [RECORD_FCNET]},
+        ], workspace=str(tmp_path))
+        output = agent.run(inp)
+        assert "punet" in output.model_descriptions
+        assert "fcnet" in output.model_descriptions
+
+
+# ---------------------------------------------------------------------------
+# model_types only (no summaries)
+# ---------------------------------------------------------------------------
+
+class TestModelTypesOnly:
+
+    def test_descriptions_only_no_summaries(self, agent, tmp_path):
+        inp = InterpretationInput(
+            model_types=["punet"],
+            storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
+        )
+        output = agent.run(inp)
+        assert "punet" in output.model_types
+        assert "punet" in output.model_descriptions
+        assert output.total_experiments == 0
+        assert output.best_denoising_score is None
+
+
+# ---------------------------------------------------------------------------
+# Error cases
+# ---------------------------------------------------------------------------
+
+class TestErrorCases:
 
     def test_unknown_model_type_raises(self, tmp_path):
-        inp = make_input([SUCCESS_RECORD], workspace=str(tmp_path))
-        inp = inp.model_copy(update={"model_type": "nonexistent_model"})
+        inp = InterpretationInput(
+            summaries=[SummaryGroup(model_type="nonexistent_model", run_name="v1", records=[])],
+            storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
+        )
         agent = ResultInterpretationAgent(provider="gemini", model_id="test-model")
         with pytest.raises(FileNotFoundError, match="nonexistent_model"):
             agent.run(inp)
+
+    def test_no_model_provided_raises(self):
+        with pytest.raises(Exception, match="At least one model type"):
+            InterpretationInput()
