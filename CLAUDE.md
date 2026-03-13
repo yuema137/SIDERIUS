@@ -12,6 +12,31 @@
 - **Be humble and curious**: if you are not sure about something, for example the detail of the desired feature, or the format of data, please don't guess by yourself, but ASK the user explicitely.
 - **Be strict to the user and always double check**: what I say is not always correct. If you feel that are some wrong statement made by me, or some ideas are not pratically, you need to ask for clarification and state your objection clearly.
 
+## Inter-Node Communication Principle
+
+**Nodes communicate exclusively through three mechanisms — schema, storage, and protocols.
+No other form of inter-node communication is permitted.**
+
+- **Schema**: the input and output `BaseModel` of each node is the complete, explicit contract
+  for what data flows in and out. Every field that a downstream node needs must be present in
+  the upstream node's output schema and mapped by the protocol. There are no hidden contracts.
+- **Storage**: each node writes its own output record to `{storage.local.workspace}/{node}_{run_name}.json`
+  for persistence and recovery. This is NOT the communication channel — it is a log. Downstream
+  nodes never read the upstream node's output file from storage; they receive data through the
+  protocol function in memory.
+- **Protocols**: typed functions that transform one node's output schema into the next node's
+  input schema. The protocol is the only place where field mapping happens. It has full access
+  to the upstream `*Output` object and must map all fields the downstream node needs — none
+  should be silently dropped.
+
+**Why this matters**: as the graph grows, any shortcut (reading files by convention, sharing
+state through the filesystem, passing paths instead of data) creates hidden dependencies between
+nodes that are invisible to the protocol system. This makes the graph untestable in isolation
+and fragile when nodes are reordered or replaced. The schema + storage + protocol triad keeps
+every edge in the graph explicit, typed, and independently testable.
+
+---
+
 ## Graph Architecture — Adding a New Node
 
 SIDERIUS has a **directed graph structure** where nodes are agents or processing modules
@@ -29,16 +54,29 @@ Do not consider a node "done" until all 8 are complete.
 | 6 | Protocol integration test (real API, Tier 2) | `tests/integration/protocols/test_{source}_to_{target}.py` |
 | 7 | **Connection audit** — verify end-to-end schema compatibility: every field required by the downstream node's input schema is present in this node's output schema, and every field required by this node's input schema is present in the upstream node's output schema. Check that each protocol function correctly maps all fields without silent defaults or missing keys. Run the full unit test suite to confirm nothing is broken. | (no new file — audit existing files) |
 
-**Agent naming convention**: agent names are concise, modular, and prefixed by their domain module.
-The prefix identifies the domain the agent belongs to; the suffix describes its specific role.
+**Agent design principle**: each agent is scoped to one well-defined category of task within
+its module, and should be flexible enough to handle that task well. Cross-task and cross-module
+flexibility is the responsibility of the infrastructure (orchestrators, protocols) — not the
+agent. An agent that tries to be general-purpose becomes unpredictable and hard to test.
+Concretely: `ml_code_validator_agent` validates ML model plugin code — it does not validate
+arbitrary code, and it knows about the ML plugin interface contract specifically.
 
-| Prefix | Domain | Example agents |
+**Agent naming convention**: agent names are prefixed by the module they belong to, followed
+by a concise, specific descriptor of their task. The prefix is not universal — it reflects
+which module the agent lives in. As new modules are added (e.g. a data module, a reporting
+module), they will introduce their own prefixes. Do not use a prefix from a different module
+just because it sounds close.
+
+| Prefix | Module | Example agents |
 |--------|--------|----------------|
-| `ml_` | Machine learning pipeline | `ml_hyperparameter_tune_agent`, `ml_model_proposal_agent`, `ml_model_implementor` |
+| `ml_` | Machine learning pipeline | `ml_hyperparameter_tune_agent`, `ml_model_proposal_agent`, `ml_model_implementor`, `ml_code_validator_agent` |
 | `data_` | Data processing / analysis | `data_analysis_agent` |
 
-When naming a new agent: choose the appropriate prefix for its domain, then a short snake_case
-descriptor of what it does. Avoid generic suffixes like `_processor` or `_handler` — be specific.
+When naming a new agent: identify which module it belongs to, use that module's prefix, then
+add a short snake_case descriptor of the specific task. Avoid generic suffixes like `_processor`
+or `_handler` — be specific. A name like `code_validator_agent` (no prefix) is wrong because it
+implies generality across modules; `ml_code_validator_agent` is correct because it is explicitly
+scoped to the ML pipeline.
 
 **Protocol naming convention**: one file per directed edge, named `{source_code}_to_{target_code}.py`.
 Node codes: `ml_model_tune`, `ml_result_interp`, `ml_model_propose`, `ml_model_impl`, `ml_model_valid`.

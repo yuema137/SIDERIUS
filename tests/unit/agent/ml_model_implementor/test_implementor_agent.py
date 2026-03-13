@@ -36,12 +36,18 @@ Tests cover:
 """
 import json
 import os
+import textwrap
 import pytest
 from unittest.mock import MagicMock, patch, call
 
 from agent.schemas.implementor import ImplementorInput, ImplementorOutput
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
-from nodes.ml_model_implementor import MLModelImplementor, _class_name
+from nodes.ml_model_implementor import (
+    MLModelImplementor,
+    _class_name,
+    _check_config_field_consistency,
+    _smoke_test_plugin,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +248,14 @@ class TestOutputCorrectness:
         output = agent_with_mocks.run(inp)
         assert output.config_fields == {"channels": 64, "depth": 4}
 
+    def test_model_description_from_input(self, agent_with_mocks, inp):
+        output = agent_with_mocks.run(inp)
+        assert output.model_description == inp.model_description
+
+    def test_mathematical_definition_from_input(self, agent_with_mocks, inp):
+        output = agent_with_mocks.run(inp)
+        assert output.mathematical_definition == inp.mathematical_definition
+
 
 # ---------------------------------------------------------------------------
 # TestDescriptionFile
@@ -301,3 +315,270 @@ class TestFilePersistence:
         agent_with_mocks.run(inp)
         data = json.loads((tmp_path / "implementor_unit_test.json").read_text())
         assert data["model_type"] == "gated_dilated_tcn"
+
+
+# ---------------------------------------------------------------------------
+# TestConfigFieldConsistency
+# ---------------------------------------------------------------------------
+
+class TestConfigFieldConsistency:
+    """Tests for _check_config_field_consistency()."""
+
+    def test_all_fields_declared_returns_empty(self):
+        code = {
+            "config_fields_code": "    channels: int = Field(default=64)",
+            "config_fields": {"channels": 64},
+            "init_body": "        self.conv = nn.Conv1d(config.channels, 256, 1)",
+        }
+        assert _check_config_field_consistency(code) == []
+
+    def test_missing_field_returns_name(self):
+        code = {
+            "config_fields_code": "    channels: int = Field(default=64)",
+            "config_fields": {"channels": 64},
+            "init_body": "        self.emb = nn.Embedding(256, config.embed_dim)",
+        }
+        assert _check_config_field_consistency(code) == ["embed_dim"]
+
+    def test_multiple_missing_fields(self):
+        code = {
+            "config_fields_code": "",
+            "config_fields": {},
+            "init_body": (
+                "        self.emb = nn.Embedding(256, config.embed_dim)\n"
+                "        self.layers = nn.ModuleList([nn.Linear(config.hidden_dim, config.hidden_dim)])"
+            ),
+        }
+        missing = _check_config_field_consistency(code)
+        assert "embed_dim" in missing
+        assert "hidden_dim" in missing
+
+    def test_template_fields_accepted(self):
+        """segmentation_size and batch_size are template-provided — should not flag."""
+        code = {
+            "config_fields_code": "",
+            "config_fields": {},
+            "init_body": "        self.size = config.segmentation_size",
+        }
+        assert _check_config_field_consistency(code) == []
+
+    def test_config_fields_dict_sufficient(self):
+        """If field is in config_fields dict but not config_fields_code, still OK."""
+        code = {
+            "config_fields_code": "",
+            "config_fields": {"channels": 64},
+            "init_body": "        self.conv = nn.Conv1d(config.channels, 256, 1)",
+        }
+        assert _check_config_field_consistency(code) == []
+
+    def test_empty_init_body_returns_empty(self):
+        code = {
+            "config_fields_code": "    channels: int = Field(default=64)",
+            "config_fields": {},
+            "init_body": "",
+        }
+        assert _check_config_field_consistency(code) == []
+
+    def test_run_raises_on_missing_config_field(self, inp):
+        """Integration: run() raises ValueError when LLM omits a config field."""
+        bad_code = {
+            "extra_imports": "",
+            "config_fields_code": "    channels: int = Field(default=64, ge=8)",
+            "config_fields": {"channels": 64},
+            "init_body": "        self.emb = nn.Embedding(256, config.embed_dim)",
+            "forward_body": "        return self.emb(x).transpose(1,2)",
+        }
+        agent = MLModelImplementor.__new__(MLModelImplementor)
+        agent.bridge = MagicMock()
+        agent.bridge.generate_text.return_value = "reasoning..."
+        agent.bridge.generate.return_value = bad_code
+
+        with pytest.raises(ValueError, match="embed_dim"):
+            agent.run(inp)
+
+
+# ---------------------------------------------------------------------------
+# TestSmokeTest
+# ---------------------------------------------------------------------------
+
+class TestSmokeTest:
+    """Tests for _smoke_test_plugin()."""
+
+    VALID_PLUGIN = textwrap.dedent("""\
+        import torch
+        import torch.nn as nn
+        from pydantic import BaseModel, Field
+
+        PLUGIN_MODEL_TYPE = "test_model"
+
+        class TestModelConfig(BaseModel):
+            segmentation_size: int = Field(default=40000, ge=1)
+            batch_size: int = Field(default=1, ge=1)
+            channels: int = Field(default=64, ge=8)
+
+        PLUGIN_CONFIG_CLASS = TestModelConfig
+
+        class TestModel(nn.Module):
+            def __init__(self, config: "TestModelConfig"):
+                super().__init__()
+                self.embedding = nn.Embedding(256, config.channels)
+                self.conv_out = nn.Conv1d(config.channels, 256, 1)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = self.embedding(x.long()).transpose(1, 2)
+                return self.conv_out(x)
+
+        PLUGIN_MODEL_CLASS = TestModel
+    """)
+
+    def test_valid_plugin_returns_none(self):
+        assert _smoke_test_plugin(self.VALID_PLUGIN, "test_model") is None
+
+    def test_missing_attribute_returns_error(self):
+        # Plugin with no PLUGIN_MODEL_CLASS
+        bad = self.VALID_PLUGIN.replace("PLUGIN_MODEL_CLASS = TestModel", "")
+        result = _smoke_test_plugin(bad, "test_model")
+        assert result is not None
+        assert "PLUGIN_MODEL_CLASS" in result
+
+    def test_shape_mismatch_returns_error(self):
+        # Make forward return wrong shape [B, 128, T] instead of [B, 256, T]
+        bad = self.VALID_PLUGIN.replace(
+            "nn.Conv1d(config.channels, 256, 1)",
+            "nn.Conv1d(config.channels, 128, 1)",
+        )
+        result = _smoke_test_plugin(bad, "test_model")
+        assert result is not None
+        assert "shape mismatch" in result
+
+    def test_runtime_error_returns_error(self):
+        # Reference a config field that doesn't exist
+        bad = self.VALID_PLUGIN.replace(
+            "nn.Embedding(256, config.channels)",
+            "nn.Embedding(256, config.embed_dim)",
+        )
+        result = _smoke_test_plugin(bad, "test_model")
+        assert result is not None
+        assert "embed_dim" in result
+
+    def test_run_raises_after_retries_exhausted(self, inp):
+        """run() raises after MAX_RETRIES when smoke test keeps failing."""
+        bad_code = {
+            "extra_imports": "",
+            "config_fields_code": "    channels: int = Field(default=64, ge=8)",
+            "config_fields": {"channels": 64},
+            "init_body": (
+                "        self.embedding = nn.Embedding(256, config.channels)\n"
+                "        self.conv_out = nn.Conv1d(config.channels, 128, 1)"
+            ),
+            "forward_body": (
+                "        x = self.embedding(x.long()).transpose(1, 2)\n"
+                "        return self.conv_out(x)"
+            ),
+        }
+        agent = MLModelImplementor.__new__(MLModelImplementor)
+        agent.bridge = MagicMock()
+        agent.bridge.generate_text.return_value = "reasoning..."
+        # All attempts return the same bad code
+        agent.bridge.generate.return_value = bad_code
+
+        with pytest.raises(ValueError, match="Code generation failed after"):
+            agent.run(inp)
+
+
+# ---------------------------------------------------------------------------
+# TestSelfCorrection
+# ---------------------------------------------------------------------------
+
+class TestSelfCorrection:
+    """Tests for the generate → validate → repair loop."""
+
+    def test_successful_first_attempt_no_repair(self, agent_with_mocks, inp):
+        """When first attempt passes, generate is called once (no repair)."""
+        agent_with_mocks.run(inp)
+        # generate_text once (reasoning) + generate once (code commit)
+        assert agent_with_mocks.bridge.generate.call_count == 1
+
+    def test_repair_called_on_first_failure(self, inp):
+        """When first attempt fails but repair succeeds, generate is called twice."""
+        bad_code = {
+            "extra_imports": "",
+            "config_fields_code": "    channels: int = Field(default=64, ge=8)",
+            "config_fields": {"channels": 64},
+            "init_body": "        self.emb = nn.Embedding(256, config.embed_dim)",
+            "forward_body": "        return self.emb(x).transpose(1,2)",
+        }
+        good_code = FAKE_CODE_RESPONSE.copy()
+
+        agent = MLModelImplementor.__new__(MLModelImplementor)
+        agent.bridge = MagicMock()
+        agent.bridge.generate_text.return_value = FAKE_REASONING
+        # First call returns bad code, second (repair) returns good code
+        agent.bridge.generate.side_effect = [bad_code, good_code]
+
+        output = agent.run(inp)
+        assert isinstance(output, ImplementorOutput)
+        # generate called twice: initial + 1 repair
+        assert agent.bridge.generate.call_count == 2
+
+    def test_repair_prompt_contains_error(self, inp):
+        """The repair call receives the validation error in the prompt."""
+        bad_code = {
+            "extra_imports": "",
+            "config_fields_code": "    channels: int = Field(default=64, ge=8)",
+            "config_fields": {"channels": 64},
+            "init_body": "        self.emb = nn.Embedding(256, config.embed_dim)",
+            "forward_body": "        return self.emb(x).transpose(1,2)",
+        }
+        good_code = FAKE_CODE_RESPONSE.copy()
+
+        agent = MLModelImplementor.__new__(MLModelImplementor)
+        agent.bridge = MagicMock()
+        agent.bridge.generate_text.return_value = FAKE_REASONING
+        agent.bridge.generate.side_effect = [bad_code, good_code]
+
+        agent.run(inp)
+        # Second generate call is the repair — check its user prompt
+        repair_user_prompt = agent.bridge.generate.call_args_list[1][0][1]
+        assert "embed_dim" in repair_user_prompt
+        assert "Error" in repair_user_prompt
+
+    def test_max_retries_exhausted_raises(self, inp):
+        """When all retries fail, ValueError is raised with attempt count."""
+        bad_code = {
+            "extra_imports": "",
+            "config_fields_code": "    channels: int = Field(default=64, ge=8)",
+            "config_fields": {"channels": 64},
+            "init_body": "        self.emb = nn.Embedding(256, config.embed_dim)",
+            "forward_body": "        return self.emb(x).transpose(1,2)",
+        }
+        agent = MLModelImplementor.__new__(MLModelImplementor)
+        agent.bridge = MagicMock()
+        agent.bridge.generate_text.return_value = FAKE_REASONING
+        agent.bridge.generate.return_value = bad_code
+
+        with pytest.raises(ValueError, match="Code generation failed after 3 attempts"):
+            agent.run(inp)
+        # 1 initial + 2 retries = 3 generate calls
+        assert agent.bridge.generate.call_count == 3
+
+    def test_second_retry_succeeds(self, inp):
+        """When first repair fails but second repair succeeds."""
+        bad_code = {
+            "extra_imports": "",
+            "config_fields_code": "    channels: int = Field(default=64, ge=8)",
+            "config_fields": {"channels": 64},
+            "init_body": "        self.emb = nn.Embedding(256, config.embed_dim)",
+            "forward_body": "        return self.emb(x).transpose(1,2)",
+        }
+        good_code = FAKE_CODE_RESPONSE.copy()
+
+        agent = MLModelImplementor.__new__(MLModelImplementor)
+        agent.bridge = MagicMock()
+        agent.bridge.generate_text.return_value = FAKE_REASONING
+        # First two fail, third succeeds
+        agent.bridge.generate.side_effect = [bad_code, bad_code, good_code]
+
+        output = agent.run(inp)
+        assert isinstance(output, ImplementorOutput)
+        assert agent.bridge.generate.call_count == 3

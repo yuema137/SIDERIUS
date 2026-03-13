@@ -34,6 +34,12 @@ ml_model_proposal_agent
         │  ml_model_propose_to_ml_model_impl :: local_full_spec
         ▼
 ml_model_implementor
+        │  ml_model_impl_to_ml_model_valid :: local_all_fields
+        ▼
+ml_code_validator_agent
+        │  ml_model_valid_to_ml_model_tune :: local_validated_model
+        ▼
+tune_ml_hyperparam_agent  (new model, loop)
 ```
 
 ---
@@ -74,13 +80,15 @@ siderius/
 ├── execute_tools/                  # Physical execution scripts (called as subprocesses)
 │   ├── train_engine_sandbox.py     # Training loop
 │   ├── inference_single.py         # Inference over validation set
-│   └── denoising_score_single.py   # Denoising score computation
+│   ├── denoising_score_single.py   # Denoising score computation
+│   └── array2h5.py                 # Array-to-HDF5 conversion utility
 │
 ├── nodes/                          # Runnable node implementations (typed directed graph)
 │   ├── ml_hyperparameter_tune_agent.py
 │   ├── result_interpretation_agent.py
 │   ├── ml_model_proposal_agent.py
-│   └── ml_model_implementor.py
+│   ├── ml_model_implementor.py
+│   └── ml_code_validator_agent.py
 │
 ├── dashboard/                      # Web dashboard for browsing experiment results
 │   ├── main.py                     # FastAPI + uvicorn server
@@ -135,8 +143,8 @@ Agent-generated models are dropped into `agent_generated/models/` as `.py` files
 | `tune_ml_hyperparam_agent` | Trains, infers, and scores a model; optimises hyperparameters over N rounds | yes | yes | ✅ implemented |
 | `result_interpretation_agent` | Synthesises experiment records across models; surfaces bottlenecks and patterns | no | yes | ✅ implemented |
 | `ml_model_proposal_agent` | Reads interpretation → proposes a new architecture + expert advice for the tuner | no | yes | ✅ implemented |
-| `ml_model_implementor` | Takes a proposal → writes PyTorch plugin file, test skeleton, and description.md | no | yes | ✅ implemented |
-| `code_validator_agent` | Runs generated tests; verifies plugin interface compliance | no | no | ⬜ next |
+| `ml_model_implementor` | Takes a proposal → writes PyTorch plugin file, test skeleton, and description.md; self-correction loop validates code (config consistency, syntax, smoke test) and retries on failure | no | yes | ✅ implemented |
+| `ml_code_validator_agent` | 7 checks: plugin load, pytest, description, config fields, instantiation, gradient flow, LLM code review with runtime diagnosis | no | yes | ✅ implemented |
 | `data_analysis_agent` | Profiles dataset properties; detects distribution shifts | no | yes | ⬜ planned |
 
 ---

@@ -169,6 +169,28 @@ Node A output schema  ──► protocol (local or database) ──► Node B in
                               (injected by orchestrator)
 ```
 
+### 9. Inter-node communication uses exactly three mechanisms
+
+Nodes communicate exclusively through **schema**, **storage**, and **protocols**. No other
+form of inter-node communication is permitted.
+
+- **Schema**: the input and output `BaseModel` of each node is the complete, explicit
+  contract for what data flows in and out. Every field that a downstream node needs must
+  appear in the upstream node's output schema and be mapped by the protocol. There are no
+  hidden contracts or implicit field sharing.
+- **Storage**: each node writes its own output record to the workspace for persistence and
+  recovery. This is a **log**, not a communication channel. Downstream nodes never read the
+  upstream node's output file to discover their input — they receive data through the
+  protocol function in memory.
+- **Protocols**: the only place field mapping happens. The protocol function receives the
+  full upstream `*Output` object and constructs the fully populated downstream `*Input`.
+  No field should be silently dropped.
+
+This constraint is what keeps the graph clean as it grows. Any shortcut — reading a file
+by naming convention, sharing state through the filesystem, passing a path as a proxy for
+data — creates a hidden dependency invisible to the protocol system. Such shortcuts make
+nodes untestable in isolation and fragile when the graph is rearranged.
+
 ---
 
 ## Node Contract
@@ -200,8 +222,8 @@ result_interpretation_agent ─────────────────�
 ml_model_proposal_agent ──────────────────────────────► tune_ml_hyperparam_agent
 ml_model_proposal_agent ──────────────────────────────► ml_model_implementor
 
-ml_model_implementor ─────────────────────────────────► code_validator_agent
-code_validator_agent ─────────────────────────────────► tune_ml_hyperparam_agent
+ml_model_implementor ─────────────────────────────────► ml_code_validator_agent
+ml_code_validator_agent ─────────────────────────────────► tune_ml_hyperparam_agent
 ```
 
 Each edge has at least one named protocol. The cycle
@@ -215,19 +237,25 @@ is the core research loop, traversed by an orchestrator.
 Protocols live in `agent/schemas/protocols/`. Each is a plain Python function, named
 and versioned, with fully typed arguments and return value.
 
-### Current and planned protocols
+### Implemented protocols
 
-| Edge | Protocol | Consumes from source | Populates in target |
-|------|----------|----------------------|---------------------|
-| `tune → result_interpretation` | `hyperparam_to_interpretation_full_v1` | full `HyperparamTuningOutput` | all experiment records, model type, file index |
-| `tune → result_interpretation` | `hyperparam_to_interpretation_summary_v1` | `best_exp_id`, `best_denoising_score`, `best_config` | summary-only view |
-| `result_interpretation → ml_model_proposal` | `interpretation_to_proposal_v1` | bottlenecks, patterns, saturation signals | `prior_analysis`, `suggested_focus` |
-| `ml_model_proposal → tune` | `proposal_to_hyperparam_advice_v1` | proposal rationale + architecture description | `expert_advice: ExpertAdvice` |
-| `ml_model_proposal → tune` | `proposal_to_hyperparam_seeded_v1` | proposal + known baselines | `expert_advice` + `seed_records` |
-| `ml_model_proposal → ml_model_implementor` | `proposal_to_implementor_v1` | architecture spec, forward contract | `model_spec`, `test_requirements` |
-| `code_validator → tune` | `validator_to_hyperparam_v1` | validated model type, plugin path | `model_type`, updated `expert_advice` |
-| `data_analysis → result_interpretation` | `data_to_interpretation_v1` | dataset statistics, shift signals | `dataset_context` |
-| `data_analysis → ml_model_proposal` | `data_to_proposal_v1` | distribution properties | `data_constraints` |
+Naming convention: one file per directed edge, named `{source_code}_to_{target_code}.py`.
+Each file contains `local_*` (in-memory) and `database_*` (NotImplementedError placeholder) variants.
+
+| Edge | File | Function | Consumes from source | Populates in target |
+|------|------|----------|----------------------|---------------------|
+| `tune → interpret` | `ml_model_tune_to_ml_result_interp.py` | `local_all_records` | full `HyperparamTuningOutput` | all experiment records as `SummaryGroup`, model type |
+| `interpret → propose` | `ml_result_interp_to_ml_model_propose.py` | `local_full_context` | full `InterpretationOutput` | serialised interpretation, existing model types, constraints |
+| `propose → implement` | `ml_model_propose_to_ml_model_impl.py` | `local_full_spec` | `ProposalOutput` | model name, math definition, description, baseline config |
+| `implement → validate` | `ml_model_impl_to_ml_model_valid.py` | `local_all_fields` | `ImplementorOutput` | file paths, config fields, model description, math definition |
+| `validate → tune` | `ml_model_valid_to_ml_model_tune.py` | `local_validated_model` | `ValidatorOutput` | model type, tuning budget, LLM config |
+
+### Planned protocols
+
+| Edge | Description |
+|------|-------------|
+| `data_analysis → result_interpretation` | dataset statistics, shift signals → `dataset_context` |
+| `data_analysis → ml_model_proposal` | distribution properties → `data_constraints` |
 
 ---
 
@@ -244,7 +272,7 @@ conditional branching, and loops by re-traversing cycles.
 2. result_interpretation_agent → identify bottlenecks              [hyperparam_to_interpretation_full_v1]
 3. ml_model_proposal_agent     → propose new architecture          [interpretation_to_proposal_v1]
 4. ml_model_implementor        → write model code + tests          [proposal_to_implementor_v1]
-5. code_validator_agent        → run tests, confirm valid          [implementor_to_validator_v1]
+5. ml_code_validator_agent        → run tests, confirm valid          [implementor_to_validator_v1]
 6. tune_ml_hyperparam_agent    → tune the new model                [validator_to_hyperparam_v1]
 7. goto 2                      → repeat until convergence
 ```
@@ -259,7 +287,7 @@ Human / Top-level CLI
     │   ├── result_interpretation_agent     ← Level 0
     │   ├── ml_model_proposal_agent         ← Level 0
     │   ├── ml_model_implementor            ← Level 0
-    │   └── code_validator_agent            ← Level 0
+    │   └── ml_code_validator_agent            ← Level 0
     ├── data_analysis_agent                 ← Level 0
     └── result_interpretation_agent         ← Level 0 (final cross-model summary)
 ```
@@ -307,7 +335,7 @@ Load memory → Propose hypothesis + config (LLM) → Resource check
 | `result_interpretation_agent` | Synthesizes experiment results, surfaces bottlenecks and patterns | no | no | yes |
 | `ml_model_proposal_agent` | Reads interpretation → proposes new model architecture + expert advice | no | no | yes |
 | `ml_model_implementor` | Takes a model proposal → writes PyTorch code + unit tests | no | yes | yes |
-| `code_validator_agent` | Runs generated tests, verifies plugin interface | no | no | no |
+| `ml_code_validator_agent` | 7 checks: plugin load, pytest, description, config fields, instantiation, gradient flow, LLM code review with runtime diagnosis | no | no | yes |
 | `data_analysis_agent` | Profiles dataset properties, detects distribution shifts | no | no | yes |
 
 ---
@@ -320,6 +348,9 @@ Agent-generated models (`ml_model_implementor` outputs) are dropped into
 - `PLUGIN_MODEL_TYPE: str` — unique model type key
 - `PLUGIN_CONFIG_CLASS: BaseModel` — Pydantic config schema
 - `PLUGIN_MODEL_CLASS: nn.Module` — model class with forward contract `[B, T] int → [B, 256, T] float`
+- `description.md` — plain-English + math description alongside the plugin file (at
+  `agent_generated/models/{model_type}/description.md`); required by the interpretation agent
+  to include the model in cross-model analysis
 
 `ml_models/plugin_loader.py` scans this directory at import time and extends `MODEL_REGISTRY`
 and `PLUGIN_CONFIG_REGISTRY` in-place. The core codebase is never modified by agents.
