@@ -129,6 +129,30 @@ exist as potential paths — they become actual loops only when an orchestrator 
 traverses them repeatedly, passing updated inputs on each iteration. The nodes in the
 cycle are unaware that a loop is happening.
 
+### 8. Schemas define format; storage defines location
+
+Input and output schemas define the **data contract** — what a node receives and
+produces. They specify types, field names, and validation rules. They are completely
+**transport-agnostic**: a node does not know or care whether its input arrived from
+memory, a local file, or a database.
+
+`StorageConfig` is a separate concern. It specifies **where** data is persisted and
+**how** to retrieve or write it. It is passed through the system by the orchestrator
+and injected into each node's input at traversal time.
+
+This separation has one critical implication for protocols: **a protocol must always
+return a fully populated input schema**, regardless of the transport it uses. A
+`database_*` protocol reads from the database and populates the schema completely
+before handing it to the node. The node on the receiving end never sees a half-empty
+schema or a storage handle — it always receives the full, validated data contract.
+
+```
+Node A output schema  ──► protocol (local or database) ──► Node B input schema (fully populated)
+                                         ▲
+                                  StorageConfig
+                              (injected by orchestrator)
+```
+
 ---
 
 ## Node Contract
