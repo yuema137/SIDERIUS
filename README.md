@@ -80,7 +80,8 @@ siderius/
 ├── execute_tools/                  # Physical execution scripts (called as subprocesses)
 │   ├── train_engine_sandbox.py     # Training loop
 │   ├── inference_single.py         # Inference over validation set
-│   └── denoising_score_single.py   # Denoising score computation
+│   ├── denoising_score_single.py   # Denoising score computation
+│   └── array2h5.py                 # Array-to-HDF5 conversion utility
 │
 ├── nodes/                          # Runnable node implementations (typed directed graph)
 │   ├── ml_hyperparameter_tune_agent.py

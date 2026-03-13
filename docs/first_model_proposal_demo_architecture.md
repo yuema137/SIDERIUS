@@ -295,13 +295,13 @@ Each protocol is a plain typed function. The tricky one is `validator_to_hyperpa
 which takes both `ValidatorOutput` and `ProposalOutput` as arguments (the validator
 only confirms validity; the expert advice comes from the proposal).
 
-| File | Protocol | Signature |
+| File | Function | Signature |
 |------|----------|-----------|
-| `hyperparam_to_interpretation.py` | `hyperparam_to_interpretation_v1` | `(output: HyperparamTuningOutput, storage: StorageConfig) -> InterpretationInput` |
-| `interpretation_to_proposal.py` | `interpretation_to_proposal_v1` | `(output: InterpretationOutput, storage: StorageConfig) -> ProposalInput` |
-| `proposal_to_implementor.py` | `proposal_to_implementor_v1` | `(output: ProposalOutput, storage: StorageConfig) -> ImplementorInput` |
-| `implementor_to_validator.py` | `implementor_to_validator_v1` | `(output: ImplementorOutput, storage: StorageConfig) -> ValidatorInput` |
-| `validator_to_hyperparam.py` | `validator_to_hyperparam_v1` | `(validation: ValidatorOutput, proposal: ProposalOutput, storage: StorageConfig, file_index: int, max_rounds: int) -> HyperparamTuningInput` |
+| `ml_model_tune_to_ml_result_interp.py` | `local_all_records` | `(output: HyperparamTuningOutput, storage: StorageConfig) -> InterpretationInput` |
+| `ml_result_interp_to_ml_model_propose.py` | `local_full_context` | `(output: InterpretationOutput, storage: StorageConfig) -> ProposalInput` |
+| `ml_model_propose_to_ml_model_impl.py` | `local_full_spec` | `(output: ProposalOutput, storage: StorageConfig) -> ImplementorInput` |
+| `ml_model_impl_to_ml_model_valid.py` | `local_all_fields` | `(output: ImplementorOutput, storage: StorageConfig) -> ValidatorInput` |
+| `ml_model_valid_to_ml_model_tune.py` | `local_validated_model` | `(output: ValidatorOutput, storage: StorageConfig, max_rounds, file_index, llm_provider, llm_model_id) -> HyperparamTuningInput` |
 
 ---
 
@@ -515,7 +515,7 @@ tests/unit/core/
     └── ...
 ```
 
-**Total unit tests: 466 passing.**
+**Total unit tests: 458 passing.**
 
 ---
 
