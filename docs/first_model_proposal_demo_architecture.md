@@ -85,24 +85,21 @@ successful pass.
 
 ## Next Steps in Detail
 
-### Step 1 — `result_interpretation_agent` (simplest node, establishes the pattern)
+### Step 1 — `result_interpretation_agent` ✅ done
 
 **File**: `nodes/result_interpretation_agent.py`.
 
-**What to build**:
+**What was built**:
 - `class ResultInterpretationAgent` with `run(input: InterpretationInput) -> InterpretationOutput`
-- One LLM call: `bridge.generate(INTERPRETATION_SYSTEM_PROMPT, user_prompt)`
-- User prompt injects the experiment records (truncated to `max_records`), model type,
-  best score so far, and best config
-- System prompt instructs the LLM to produce: `key_findings`, `bottlenecks`,
-  `take_home_message` as strict JSON matching `InterpretationOutput`
+- Accepts multiple summary groups across multiple model types (`summaries: List[SummaryGroup]`)
+- Deterministically computes per-model and cross-model best/worst scores before the LLM call
+- Loads architecture descriptions from `ml_models/{model_type}/description.md` for all models;
+  raises `FileNotFoundError` if any description is missing
+- One LLM call: injects all model descriptions + experiment records; LLM produces
+  `key_findings`, `bottlenecks`, `take_home_message` as strict JSON
 - Writes output to `{storage.local.workspace}/interpretation_{run_name}.json`
-- CLI: `--workspace`, `--run_name`, `--model_type`, `--max_records`, `--provider`, `--model_id`
-- Validates input with `InterpretationInput.model_validate()` at entry
-- Validates output with `InterpretationOutput.model_validate()` at exit
-
-**Prompt strategy**: single structured prompt. No CoT needed here — the task is
-summarisation, not design. The LLM reads records and extracts patterns.
+- Validates input at entry and output at exit via Pydantic `model_validate()`
+- 20 unit tests + 4 real-API integration tests (Gemini + OpenAI, single-model + multi-model)
 
 ---
 
@@ -362,8 +359,15 @@ tests/
         ├── ml_model_implementor/         ✅ schema tests done, node tests ⬜
         └── code_validator_agent/         ✅ schema tests done, node tests ⬜
 
-tests/integration/agent/
-    └── test_llm_bridge_real.py           ✅ 4 tests (skip if no API key)
+tests/integration/nodes/              ✅ Tier 1 — single node, real API
+    ├── test_llm_bridge.py                ✅ 4 tests (Gemini + OpenAI, generate + generate_text)
+    ├── test_result_interpretation_agent.py ✅ 4 tests (Gemini + OpenAI, single + multi-model)
+    └── test_tune_ml_hyperparam_agent.py  ✅ (skip if no API key + data)
+
+tests/integration/protocols/         ✅ Tier 2 — one graph edge end-to-end
+    └── test_tune_to_interpret.py         ✅ 1 test (real fcnet loop → interpretation agent)
+
+tests/integration/orchestrator/      ⬜ Tier 3 — multi-hop critical loops (empty, ready)
 
 tests/unit/core/
     ├── test_storage.py                   ✅ done (11 tests)
