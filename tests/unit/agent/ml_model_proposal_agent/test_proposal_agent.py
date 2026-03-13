@@ -92,11 +92,13 @@ def agent():
         yield a
 
 
-def make_input(workspace, run_name="r1", existing_model_types=None, constraints=None):
+def make_input(workspace, run_name="r1", existing_model_types=None, constraints=None,
+               human_advice=None):
     return ProposalInput(
         interpretation=FAKE_INTERPRETATION,
         existing_model_types=existing_model_types or [],
         constraints=constraints or [],
+        human_advice=human_advice,
         storage={"backend": "local", "local": {"workspace": str(workspace), "run_name": run_name}},
     )
 
@@ -193,6 +195,57 @@ class TestFilePersistence:
         data = json.loads((tmp_path / "proposal_r1.json").read_text())
         assert "expert_advice" in data
         assert "constraints" in data["expert_advice"]
+
+
+# ---------------------------------------------------------------------------
+# Human advice injection
+# ---------------------------------------------------------------------------
+
+class TestHumanAdviceInjection:
+
+    def test_plain_string_advice_injected_into_reasoning_prompt(self, agent, tmp_path):
+        inp = make_input(tmp_path, human_advice="Avoid transformers — too slow on CPU.")
+        agent.run(inp)
+        reasoning_user_prompt = agent.bridge.generate_text.call_args[0][1]
+        assert "Avoid transformers" in reasoning_user_prompt
+
+    def test_structured_advice_focus_areas_injected(self, agent, tmp_path):
+        adv = ExpertAdvice(
+            focus_areas=["reduce depth first"],
+            constraints=["VRAM < 8 GB"],
+            known_failures=["large batch_size"],
+            suggested_directions=["try dilated convolutions"],
+            rationale="prior plateau at depth=4",
+        )
+        inp = make_input(tmp_path, human_advice=adv)
+        agent.run(inp)
+        reasoning_user_prompt = agent.bridge.generate_text.call_args[0][1]
+        assert "reduce depth first" in reasoning_user_prompt
+
+    def test_structured_advice_rationale_injected(self, agent, tmp_path):
+        adv = ExpertAdvice(
+            focus_areas=[],
+            constraints=[],
+            known_failures=[],
+            suggested_directions=[],
+            rationale="plateau at depth=4 confirmed across 3 runs",
+        )
+        inp = make_input(tmp_path, human_advice=adv)
+        agent.run(inp)
+        reasoning_user_prompt = agent.bridge.generate_text.call_args[0][1]
+        assert "plateau at depth=4 confirmed across 3 runs" in reasoning_user_prompt
+
+    def test_no_advice_does_not_inject_human_section(self, agent, tmp_path):
+        inp = make_input(tmp_path, human_advice=None)
+        agent.run(inp)
+        reasoning_user_prompt = agent.bridge.generate_text.call_args[0][1]
+        assert "Human Expert Advice" not in reasoning_user_prompt
+
+    def test_plain_string_advice_injects_human_section_header(self, agent, tmp_path):
+        inp = make_input(tmp_path, human_advice="Use attention.")
+        agent.run(inp)
+        reasoning_user_prompt = agent.bridge.generate_text.call_args[0][1]
+        assert "Human Expert Advice" in reasoning_user_prompt
 
 
 # ---------------------------------------------------------------------------

@@ -37,6 +37,40 @@ class TestProposalInput:
         )
         assert inp.storage.local.run_name == "r1"
 
+    def test_human_advice_defaults_to_none(self):
+        inp = ProposalInput(interpretation={})
+        assert inp.human_advice is None
+
+    def test_human_advice_accepts_plain_string(self):
+        inp = ProposalInput(
+            interpretation={},
+            human_advice="Focus on reducing parameter count.",
+        )
+        assert inp.human_advice == "Focus on reducing parameter count."
+
+    def test_human_advice_accepts_structured_expert_advice(self):
+        adv = ExpertAdvice(
+            focus_areas=["depth over width"],
+            constraints=["VRAM < 8 GB"],
+            known_failures=["large kernel_size"],
+            suggested_directions=["try dilation_base=3"],
+            rationale="prior runs show width saturation",
+        )
+        inp = ProposalInput(interpretation={}, human_advice=adv)
+        assert isinstance(inp.human_advice, ExpertAdvice)
+        assert inp.human_advice.rationale == "prior runs show width saturation"
+
+    def test_human_advice_accepts_expert_advice_as_dict(self):
+        adv_dict = {
+            "focus_areas": ["depth over width"],
+            "constraints": [],
+            "known_failures": [],
+            "suggested_directions": [],
+            "rationale": "test",
+        }
+        inp = ProposalInput(interpretation={}, human_advice=adv_dict)
+        assert isinstance(inp.human_advice, ExpertAdvice)
+
 
 class TestProposalOutput:
 
