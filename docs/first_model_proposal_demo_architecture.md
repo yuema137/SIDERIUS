@@ -78,15 +78,16 @@ successful pass.
 | `ml_model_implementor` | ✅ done (two-call CoT, template assembly, description.md) |
 | `ml_model_propose_to_ml_model_impl` protocol | ✅ done (`local_full_spec`, `database_full_spec` placeholder) |
 | Unit + integration tests for implementor | ✅ done (node unit ×34, schema unit ×7, protocol unit ×9, Tier 1 + Tier 2 real-API) |
+| `ml_code_validator_agent` | ✅ done (7 checks: plugin load, pytest, description, config fields, instantiation, gradient flow, LLM code review with runtime evidence) |
+| `ml_model_impl_to_ml_model_valid` protocol | ✅ done (`local_all_fields`, `database_all_fields` placeholder) |
+| `ml_model_valid_to_ml_model_tune` protocol | ✅ done (`local_validated_model`, `database_validated_model` placeholder) |
+| Unit + integration tests for validator | ✅ done (85 unit, Tier 1 + Tier 2 real-API) |
 
 ### Remaining
 
 | Step | Status |
 |------|--------|
-| Implement `ml_code_validator_agent` | ⬜ next |
-| Add `run()` to `tune_ml_hyperparam_agent` + wire `seed_records` | ⬜ |
-| `ml_model_impl_to_ml_model_valid` protocol | ⬜ |
-| `ml_model_valid_to_ml_model_tune` protocol | ⬜ |
+| Add `run()` to `tune_ml_hyperparam_agent` + wire `seed_records` | ⬜ next |
 | `demo/run_model_proposal_demo.py` | ⬜ |
 
 ---
@@ -237,19 +238,40 @@ substitutes `{model_name}`, `{ModelClass}`, then fills LLM-generated sections.
 
 ---
 
-### Step 4 — `ml_code_validator_agent`
+### Step 4 — `ml_code_validator_agent` ✅ done
 
 **File**: `nodes/ml_code_validator_agent.py`.
 
-**What to build**:
+**What was built**:
 - `class MLCodeValidatorAgent` with `run(input: ValidatorInput) -> ValidatorOutput`
-- Step 1 — plugin registration check: call `ml_models/plugin_loader._load_plugin(model_file_path)`
-  and verify it returns a non-None result with correct attributes
-- Step 2 — run tests: `subprocess.run(["pytest", test_file_path, "-v"])` and capture
-  stdout/stderr
-- Returns `ValidatorOutput(passed=..., plugin_registered=..., error_message=...)`
-- Writes output to `{storage.local.workspace}/validation_{run_name}.json`
-- No LLM calls. Fully deterministic.
+- Seven checks in sequence, with short-circuit logic:
+  1. **Plugin load** — importlib loads the file, verifies `PLUGIN_MODEL_TYPE`, `PLUGIN_CONFIG_CLASS`, `PLUGIN_MODEL_CLASS` are all present.
+  2. **Pytest** — subprocess pytest on the generated test file, stdout/stderr captured on both pass and fail.
+  3. **Description valid** — `description.md` exists and has >50 characters of content.
+  4. **Config fields scalar** — all `config_fields` values are `int`, `float`, or `bool`. Rejects `List`, `Dict`, `None`.
+  5. **In-process instantiation** — loads plugin, calls `PLUGIN_CONFIG_CLASS()` and `PLUGIN_MODEL_CLASS(config)`, runs a small dummy forward pass `[1, 64] int64 → [1, 256, 64] float32`. Shape-checked.
+  6. **Gradient flow** — `loss.backward()` on the forward output; verifies all trainable parameters received non-None gradients.
+  7. **LLM code review** — passes plugin source, model description, mathematical definition, and (when present) runtime errors to the LLM. Returns a structured `LLMCodeReview` with `spec_alignment`, `trainability_concerns`, `implementation_issues`, `passed`, `notes`.
+- Checks 5+6 only run if check 1 passed (plugin loaded). LLM review runs if the plugin file is readable.
+- When runtime errors are present (failed pytest output or instantiation error), they are injected directly into the LLM review prompt so the LLM diagnoses the precise root cause rather than speculating from static analysis.
+- Writes `validation_{run_name}.json` to workspace.
+- 85 unit tests + Tier 1 (18 tests, real Gemini API) + Tier 2 (real Gemini + OpenAI, full implement→validate chain).
+
+**Key design insight — runtime evidence for LLM review**:
+Static code analysis by the LLM often misidentifies the root cause of subtle bugs (e.g.
+flagging `x * residual` as wrong when the actual fault is incorrect dilated convolution
+padding). By injecting the exact `RuntimeError` and pytest traceback into the review
+prompt, the LLM shifts from speculation to diagnosis — it receives the evidence needed to
+pinpoint the precise failure (e.g. `padding=kernel_size//2` vs. the correct
+`dilation*(kernel_size-1)//2`). This makes `implementation_issues` an actionable fix list
+for the orchestrator's retry loop rather than a guessed critique.
+
+**Key design insight — validator as a diagnostic, not a gatekeeper**:
+The validator's `passed=False` output is not a terminal failure — it is structured
+diagnostic data for the orchestrator. `error_message` summarises all failures in one
+string; individual boolean fields (`tests_passed`, `instantiation_passed`, etc.) indicate
+which checks failed; `llm_review_implementation_issues` provides a targeted fix list. The
+orchestrator retry loop will feed this directly back to the implementor.
 
 ---
 
@@ -356,6 +378,8 @@ At least one model type must be reachable (via `summaries` or `model_types`); ot
 - `model_file_path: str`
 - `test_file_path: str`
 - `config_fields: Dict`
+- `model_description: str` — pass-through from `ImplementorInput`; forwarded to validator via protocol
+- `mathematical_definition: str` — pass-through from `ImplementorInput`; forwarded to validator via protocol
 
 ---
 
@@ -367,20 +391,33 @@ At least one model type must be reachable (via `summaries` or `model_types`); ot
 - `test_file_path: str` — from `ImplementorOutput` via protocol
 - `description_file_path: str` — from `ImplementorOutput` via protocol
 - `config_fields: Dict[str, Any]` — from `ImplementorOutput` via protocol; used to verify all fields are scalar
+- `model_description: str` — pass-through from `ImplementorOutput`; injected into LLM review prompt
+- `mathematical_definition: str` — pass-through from `ImplementorOutput`; injected into LLM review prompt
+- `llm_provider: Literal["gemini", "openai"]` (default: `"gemini"`)
+- `llm_model_id: str` (default: `"gemini-3.1-flash-lite-preview"`)
 - `storage: StorageConfig`
 
 All file paths come directly from `ImplementorOutput` mapped by the protocol — the validator
 never reads from storage to discover them (inter-node communication principle).
+`model_description` and `mathematical_definition` travel as pass-through fields through
+`ImplementorOutput`, avoiding a fan-in edge from the proposal node.
 
 **Output schema** (`ValidatorOutput`):
-- `passed: bool` — True only if all four checks below pass
+- `passed: bool` — True only if all seven checks pass
 - `model_type: str`
-- `plugin_registered: bool` — plugin loads with correct interface attributes
+- `plugin_registered: bool` — plugin loads and exposes all three required attributes
 - `tests_passed: bool` — all pytest tests in the generated test file pass
 - `description_valid: bool` — `description.md` exists and is non-empty (>50 chars)
 - `config_fields_valid: bool` — all config fields are scalar types (int, float, bool)
+- `instantiation_passed: bool` — in-process forward pass produces shape `[1, 256, 64]`
+- `gradient_check_passed: bool` — backward pass succeeds; all trainable params have non-None gradients
+- `llm_review_passed: bool` — LLM code review concludes implementation is sound
 - `test_output: Optional[str]` — full pytest stdout/stderr on both pass and fail
-- `error_message: Optional[str]` — human-readable summary of what failed; None if passed
+- `llm_review_spec_alignment: Optional[bool]`
+- `llm_review_trainability_concerns: Optional[List[str]]`
+- `llm_review_implementation_issues: Optional[List[str]]` — precise root-cause diagnosis when runtime errors provided
+- `llm_review_notes: Optional[str]`
+- `error_message: Optional[str]` — combined summary of all failures; None if passed
 
 ---
 
@@ -399,12 +436,8 @@ Input/output schemas already defined in `agent/schemas/hyperparam_tuning.py`.
 | `tune → interpret` | `ml_model_tune_to_ml_result_interp` | `local_all_records` | ✅ done |
 | `interpret → propose` | `ml_result_interp_to_ml_model_propose` | `local_full_context` | ✅ done |
 | `propose → implement` | `ml_model_propose_to_ml_model_impl` | `local_full_spec` | ✅ done |
-| `implement → validate` | `ml_model_impl_to_ml_model_valid` | `local_files` | ⬜ |
-| `validate → tune` | `ml_model_valid_to_ml_model_tune` | `local_with_advice` | ⬜ |
-
-Note: `ml_model_valid_to_ml_model_tune::local_with_advice` takes both `ValidatorOutput`
-and `ProposalOutput` as arguments — the validator only confirms the plugin is valid;
-expert advice comes from the proposal node.
+| `implement → validate` | `ml_model_impl_to_ml_model_valid` | `local_all_fields` | ✅ done |
+| `validate → tune` | `ml_model_valid_to_ml_model_tune` | `local_validated_model` | ✅ done |
 
 ---
 
@@ -424,8 +457,8 @@ agent/
 │       ├── ml_model_tune_to_ml_result_interp.py      ✅ done (local_all_records)
 │       ├── ml_result_interp_to_ml_model_propose.py   ✅ done (local_full_context)
 │       ├── ml_model_propose_to_ml_model_impl.py      ✅ done (local_full_spec)
-│       ├── ml_model_impl_to_ml_model_valid.py        ⬜
-│       └── ml_model_valid_to_ml_model_tune.py        ⬜
+│       ├── ml_model_impl_to_ml_model_valid.py        ✅ done (local_all_fields)
+│       └── ml_model_valid_to_ml_model_tune.py        ✅ done (local_validated_model)
 ├── skills/                               ✅ unchanged
 ├── prompts.py                            ✅ exists (new prompts to be added)
 └── llm_bridge.py                         ✅ done (generate() JSON mode + generate_text() plain text)
@@ -444,7 +477,7 @@ nodes/
 ├── result_interpretation_agent.py        ✅ done (multi-model, cross-run, descriptions)
 ├── ml_model_proposal_agent.py            ✅ done (two-call CoT, human_advice, duplicate guard)
 ├── ml_model_implementor.py               ✅ done (two-call CoT, template assembly, description.md)
-└── ml_code_validator_agent.py              ⬜
+└── ml_code_validator_agent.py              ✅ done (7 checks, LLM review with runtime evidence)
 
 demo/
 └── run_model_proposal_demo.py            ⬜
@@ -458,20 +491,22 @@ tests/
         ├── ml_model_proposal_agent/      ✅ 26 tests (18 node + 8 schema)
         ├── protocols/                    ✅ 22 tests (11 per protocol module)
         ├── ml_model_implementor/         ✅ done (34 node tests + 7 schema tests)
-        ├── protocols/                    ✅ done (9 tests for propose→implement protocol)
-        └── ml_code_validator_agent/         ✅ schema tests done, node tests ⬜
+        ├── protocols/                    ✅ done (9 tests for propose→implement protocol, 11 for impl→valid, 11 for valid→tune)
+        └── ml_code_validator_agent/      ✅ done (85 tests: 52 node + 33 schema)
 
 tests/integration/nodes/              ✅ Tier 1 — single node, real API
     ├── test_llm_bridge.py                ✅ 4 tests (Gemini + OpenAI, generate + generate_text)
     ├── test_result_interpretation_agent.py ✅ 4 tests (Gemini + OpenAI, single + multi-model)
     ├── test_ml_model_proposal_agent.py   ✅ 2 tests (Gemini + OpenAI)
     ├── test_ml_model_implementor.py      ✅ 2 tests (Gemini + OpenAI, validates plugin + description.md)
+    ├── test_ml_code_validator_agent.py   ✅ 18 tests (Gemini API, all-pass + all failure modes)
     └── test_tune_ml_hyperparam_agent.py  ✅ (skip if no API key + data)
 
 tests/integration/protocols/         ✅ Tier 2 — one graph edge end-to-end
     ├── test_tune_to_interpret.py         ✅ 1 test (real fcnet loop → interpretation agent)
     ├── test_interp_to_propose.py         ✅ 2 tests (Gemini + OpenAI, no GPU needed)
-    └── test_propose_to_implement.py      ✅ 2 tests (Gemini + OpenAI, proposal → implementor edge)
+    ├── test_propose_to_implement.py      ✅ 2 tests (Gemini + OpenAI, proposal → implementor edge)
+    └── test_implement_to_validate.py     ✅ 2 tests (Gemini + OpenAI, full implement → validate chain)
 
 tests/integration/orchestrator/      ⬜ Tier 3 — multi-hop critical loops (empty, ready)
 
@@ -480,7 +515,7 @@ tests/unit/core/
     └── ...
 ```
 
-**Total unit tests: 350 passing.**
+**Total unit tests: 466 passing.**
 
 ---
 
@@ -498,8 +533,8 @@ from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
 from agent.schemas.protocols.ml_model_tune_to_ml_result_interp import local_all_records
 from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import local_full_context
 from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full_spec
-from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_files
-from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import local_with_advice
+from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_all_fields
+from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import local_validated_model
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 
 storage = StorageConfig(backend="local", local=LocalStorageConfig(workspace="<workspace>", run_name="<run_name>"))
@@ -528,16 +563,16 @@ print("Written to:", implementor_output.model_file_path)
 
 # Edge 4: implement → validate
 validation = MLCodeValidatorAgent().run(
-    local_files(implementor_output, storage)
+    local_all_fields(implementor_output, storage)
 )
 if not validation.passed:
     print("Validation failed:", validation.error_message)
     sys.exit(1)
 print("Model validated.")
 
-# Edge 5: validate → tune (expert_advice from proposal, not validator)
+# Edge 5: validate → tune
 tuning_output = HyperparamTuningAgent().run(
-    local_with_advice(validation, proposal, storage, file_index=6, max_rounds=10)
+    local_validated_model(validation, storage, file_index=6, max_rounds=10)
 )
 print("Best score:", tuning_output.best_denoising_score)
 ```
