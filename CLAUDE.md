@@ -12,6 +12,31 @@
 - **Be humble and curious**: if you are not sure about something, for example the detail of the desired feature, or the format of data, please don't guess by yourself, but ASK the user explicitely.
 - **Be strict to the user and always double check**: what I say is not always correct. If you feel that are some wrong statement made by me, or some ideas are not pratically, you need to ask for clarification and state your objection clearly.
 
+## Inter-Node Communication Principle
+
+**Nodes communicate exclusively through three mechanisms — schema, storage, and protocols.
+No other form of inter-node communication is permitted.**
+
+- **Schema**: the input and output `BaseModel` of each node is the complete, explicit contract
+  for what data flows in and out. Every field that a downstream node needs must be present in
+  the upstream node's output schema and mapped by the protocol. There are no hidden contracts.
+- **Storage**: each node writes its own output record to `{storage.local.workspace}/{node}_{run_name}.json`
+  for persistence and recovery. This is NOT the communication channel — it is a log. Downstream
+  nodes never read the upstream node's output file from storage; they receive data through the
+  protocol function in memory.
+- **Protocols**: typed functions that transform one node's output schema into the next node's
+  input schema. The protocol is the only place where field mapping happens. It has full access
+  to the upstream `*Output` object and must map all fields the downstream node needs — none
+  should be silently dropped.
+
+**Why this matters**: as the graph grows, any shortcut (reading files by convention, sharing
+state through the filesystem, passing paths instead of data) creates hidden dependencies between
+nodes that are invisible to the protocol system. This makes the graph untestable in isolation
+and fragile when nodes are reordered or replaced. The schema + storage + protocol triad keeps
+every edge in the graph explicit, typed, and independently testable.
+
+---
+
 ## Graph Architecture — Adding a New Node
 
 SIDERIUS has a **directed graph structure** where nodes are agents or processing modules
