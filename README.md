@@ -143,7 +143,7 @@ Agent-generated models are dropped into `agent_generated/models/` as `.py` files
 | `tune_ml_hyperparam_agent` | Trains, infers, and scores a model; optimises hyperparameters over N rounds | yes | yes | ✅ implemented |
 | `result_interpretation_agent` | Synthesises experiment records across models; surfaces bottlenecks and patterns | no | yes | ✅ implemented |
 | `ml_model_proposal_agent` | Reads interpretation → proposes a new architecture + expert advice for the tuner | no | yes | ✅ implemented |
-| `ml_model_implementor` | Takes a proposal → writes PyTorch plugin file, test skeleton, and description.md | no | yes | ✅ implemented |
+| `ml_model_implementor` | Takes a proposal → writes PyTorch plugin file, test skeleton, and description.md; self-correction loop validates code (config consistency, syntax, smoke test) and retries on failure | no | yes | ✅ implemented |
 | `ml_code_validator_agent` | 7 checks: plugin load, pytest, description, config fields, instantiation, gradient flow, LLM code review with runtime diagnosis | no | yes | ✅ implemented |
 | `data_analysis_agent` | Profiles dataset properties; detects distribution shifts | no | yes | ⬜ planned |
 

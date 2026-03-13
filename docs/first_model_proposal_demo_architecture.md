@@ -13,9 +13,9 @@ result_interpretation_agent
 ml_model_proposal_agent
         ↓  [ml_model_propose_to_ml_model_impl :: local_full_spec]
 ml_model_implementor
-        ↓  [ml_model_impl_to_ml_model_valid :: local_files]
+        ↓  [ml_model_impl_to_ml_model_valid :: local_all_fields]
 ml_code_validator_agent
-        ↓  [ml_model_valid_to_ml_model_tune :: local_with_advice]
+        ↓  [ml_model_valid_to_ml_model_tune :: local_validated_model]
 tune_ml_hyperparam_agent  (new model, end node)
 ```
 
@@ -75,10 +75,10 @@ successful pass.
 | `ml_model_tune_to_ml_result_interp` protocol | ✅ done (`local_all_records`, `database_all_records` placeholder) |
 | `ml_result_interp_to_ml_model_propose` protocol | ✅ done (`local_full_context`, `database_full_context` placeholder) |
 | Unit + integration tests for proposal agent | ✅ done (35 unit, Tier 1 + Tier 2 real-API) |
-| `ml_model_implementor` | ✅ done (two-call CoT, template assembly, description.md) |
+| `ml_model_implementor` | ✅ done (two-call CoT, template assembly, description.md, self-correction loop with 3 pre-write checks) |
 | `ml_model_propose_to_ml_model_impl` protocol | ✅ done (`local_full_spec`, `database_full_spec` placeholder) |
-| Unit + integration tests for implementor | ✅ done (node unit ×34, schema unit ×7, protocol unit ×9, Tier 1 + Tier 2 real-API) |
-| `ml_code_validator_agent` | ✅ done (7 checks: plugin load, pytest, description, config fields, instantiation, gradient flow, LLM code review with runtime evidence) |
+| Unit + integration tests for implementor | ✅ done (node unit ×52, schema unit ×10, protocol unit ×9, Tier 1 + Tier 2 real-API) |
+| `ml_code_validator_agent` | ✅ done (7 checks: plugin load, pytest, description, config fields, instantiation, gradient flow, LLM code review — prompt calibrated to distinguish bugs from suggestions) |
 | `ml_model_impl_to_ml_model_valid` protocol | ✅ done (`local_all_fields`, `database_all_fields` placeholder) |
 | `ml_model_valid_to_ml_model_tune` protocol | ✅ done (`local_validated_model`, `database_validated_model` placeholder) |
 | Unit + integration tests for validator | ✅ done (85 unit, Tier 1 + Tier 2 real-API) |
@@ -195,12 +195,24 @@ cares which transport was used.
 - Post-generation patch: replaces `self.embedding(input)` with `self.embedding(x)` after
   the LLM commit — a recurring LLM mistake that the hard constraint in the code prompt
   alone was not always sufficient to prevent.
+- **Three pre-write validation checks** (run before any files are written to disk):
+  1. **Config field consistency** — regex-parses `init_body` for all `config.X` references
+     and verifies each has a matching Pydantic Field declaration in `config_fields_code`.
+  2. **Syntax check** — `ast.parse()` on the assembled plugin source.
+  3. **Smoke test** — dynamically loads the assembled plugin in a temp file, instantiates
+     the model with default config, and runs a `[1, 64] int64 → [1, 256, 64] float32`
+     forward pass with NaN check.
+- **Self-correction loop** — if any validation check fails, the error message + previous
+  code are sent back to the LLM via a repair prompt. The LLM produces a targeted fix.
+  Up to `max_retries` repair attempts (default 2, configurable via `ImplementorInput`).
+  The reasoning call runs once; only the code-commit step is retried.
 - Writes three files:
   - `{plugin_dir}/{model_name}.py` — the plugin file
   - `{plugin_dir}/{model_name}/description.md` — architecture description for the interpretation pipeline
   - `{test_dir}/test_{model_name}.py` — test skeleton (fully fixed, no LLM generation)
 - Writes output record to `{storage.local.workspace}/implementor_{run_name}.json`
 - Returns `ImplementorOutput` with absolute paths, `config_fields` summary, and `description_file_path`
+- 52 node unit tests + 10 schema unit tests + Tier 1 real-API integration tests (Gemini + OpenAI)
 
 **Key design insight — description.md for agent-generated models**:
 The `result_interpretation_agent` calls `get_model_description(model_type)`, which raises
@@ -220,18 +232,14 @@ filter also drops any line that is not a valid import statement (does not start 
 which would cause a `SyntaxError`. Trailing `$` characters (a JSON/markdown artifact
 from some models) are stripped from all code lines.
 
-**Key design insight — early syntax validation**:
-The assembled plugin source is passed through `ast.parse()` before any file is written.
-This catches undefined helper classes, malformed expressions, and other LLM mistakes with
-a clear error message rather than silently writing broken code to disk.
-
-**Key design insight — prompt constraints vs. validation layers**:
-Prompt constraints (no helper classes, scalar config fields, Pydantic V2 kwargs, `config`
-not in scope in `forward`) are best-effort guidance — LLMs do not always honour them. This
-is expected. Constraints reduce the failure rate but are not the enforcement mechanism.
-Programmatic validation in the `ml_code_validator_agent` (Node 5) is the correct place to
-enforce correctness. The implementor's early `ast.parse()` check is a lightweight pre-flight
-only; deep semantic validation belongs downstream.
+**Key design insight — self-correction vs. downstream validation**:
+The implementor's three pre-write checks are **minimum viability** — "can this code run at
+all?" They catch missing config fields, syntax errors, and runtime crashes. These are
+failures an LLM can reliably fix when given the exact error message, so self-correction is
+effective here. The downstream `ml_code_validator_agent` performs deeper semantic checks
+(gradient flow, LLM code review against the mathematical spec) that require judgement and
+are not self-healable within the implementor. This separation keeps each node focused:
+the implementor ensures runnable code, the validator ensures correct code.
 
 **Template rendering**: the implementor holds the template as a string in the module,
 substitutes `{model_name}`, `{ModelClass}`, then fills LLM-generated sections.
@@ -256,6 +264,15 @@ substitutes `{model_name}`, `{ModelClass}`, then fills LLM-generated sections.
 - When runtime errors are present (failed pytest output or instantiation error), they are injected directly into the LLM review prompt so the LLM diagnoses the precise root cause rather than speculating from static analysis.
 - Writes `validation_{run_name}.json` to workspace.
 - 85 unit tests + Tier 1 (18 tests, real Gemini API) + Tier 2 (real Gemini + OpenAI, full implement→validate chain).
+
+**Key design insight — calibrated LLM review prompt**:
+The LLM review prompt explicitly distinguishes **concrete bugs** (spec contradiction, shape
+errors, gradient-breaking ops — hard fail) from **theoretical concerns** (edge-case worries,
+style suggestions, hyperparameter range concerns — put in `trainability_concerns`/`notes`,
+not in `passed`). Without this calibration, smarter LLMs tend to over-reject working
+implementations for theoretical concerns that don't affect correctness. The prompt also
+clarifies that the `[B,T] int64` input format with `nn.Embedding` is system-specified and
+always correct, preventing the LLM from questioning it.
 
 **Key design insight — runtime evidence for LLM review**:
 Static code analysis by the LLM often misidentifies the root cause of subtle bugs (e.g.
@@ -370,6 +387,7 @@ At least one model type must be reachable (via `summaries` or `model_types`); ot
 - `baseline_config: Dict`
 - `plugin_dir: str` (default: `agent_generated/models`)
 - `test_dir: str` (default: `agent_generated/tests`)
+- `max_retries: int` (default: 2, ge=0) — self-correction attempts after initial code commit; total attempts = 1 + max_retries
 - `storage: StorageConfig`
 
 **Output schema** (`ImplementorOutput`):
@@ -476,8 +494,8 @@ nodes/
 ├── ml_hyperparameter_tune_agent.py       ✅ storage updated, run() ⬜
 ├── result_interpretation_agent.py        ✅ done (multi-model, cross-run, descriptions)
 ├── ml_model_proposal_agent.py            ✅ done (two-call CoT, human_advice, duplicate guard)
-├── ml_model_implementor.py               ✅ done (two-call CoT, template assembly, description.md)
-└── ml_code_validator_agent.py              ✅ done (7 checks, LLM review with runtime evidence)
+├── ml_model_implementor.py               ✅ done (two-call CoT, template assembly, description.md, self-correction loop)
+└── ml_code_validator_agent.py              ✅ done (7 checks, calibrated LLM review)
 
 demo/
 └── run_model_proposal_demo.py            ⬜
@@ -485,14 +503,13 @@ demo/
 tests/
 └── unit/
     └── agent/
-        ├── tune_ml_hyperparam_agent/     ✅ 35 tests (storage tests added)
-        ├── result_interpretation_agent/  ✅ 32 tests (20 node tests + 12 schema tests)
+        ├── tune_ml_hyperparam_agent/     ✅ 38 tests (28 schema + 10 skill)
+        ├── result_interpretation_agent/  ✅ 32 tests (18 node + 14 schema)
         ├── test_llm_bridge.py            ✅ 11 tests (generate + generate_text, both providers)
-        ├── ml_model_proposal_agent/      ✅ 26 tests (18 node + 8 schema)
-        ├── protocols/                    ✅ 22 tests (11 per protocol module)
-        ├── ml_model_implementor/         ✅ done (34 node tests + 7 schema tests)
-        ├── protocols/                    ✅ done (9 tests for propose→implement protocol, 11 for impl→valid, 11 for valid→tune)
-        └── ml_code_validator_agent/      ✅ done (85 tests: 52 node + 33 schema)
+        ├── ml_model_proposal_agent/      ✅ 35 tests (23 node + 12 schema)
+        ├── ml_model_implementor/         ✅ 62 tests (52 node + 10 schema)
+        ├── ml_code_validator_agent/      ✅ 85 tests (55 node + 30 schema)
+        └── protocols/                    ✅ 56 tests (5 protocol modules)
 
 tests/integration/nodes/              ✅ Tier 1 — single node, real API
     ├── test_llm_bridge.py                ✅ 4 tests (Gemini + OpenAI, generate + generate_text)
@@ -515,7 +532,7 @@ tests/unit/core/
     └── ...
 ```
 
-**Total unit tests: 458 passing.**
+**Total unit tests: 475 passing.**
 
 ---
 
