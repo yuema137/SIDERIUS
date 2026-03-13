@@ -7,20 +7,21 @@ full model proposal loop:
 
 ```
 tune_ml_hyperparam_agent  (existing results, starting node)
-        ↓  [hyperparam_to_interpretation_v1]
+        ↓  [ml_model_tune_to_ml_result_interp :: local_all_records]
 result_interpretation_agent
-        ↓  [interpretation_to_proposal_v1]
+        ↓  [ml_result_interp_to_ml_model_propose :: local_full_context]
 ml_model_proposal_agent
-        ↓  [proposal_to_implementor_v1]
+        ↓  [ml_model_propose_to_ml_model_impl :: local_full_spec]
 ml_model_implementor
-        ↓  [implementor_to_validator_v1]
+        ↓  [ml_model_impl_to_ml_model_valid :: local_files]
 code_validator_agent
-        ↓  [validator_to_hyperparam_v1]
+        ↓  [ml_model_valid_to_ml_model_tune :: local_with_advice]
 tune_ml_hyperparam_agent  (new model, end node)
 ```
 
 Each arrow is a named protocol — an explicit, typed function that maps one node's output
 schema to the next node's input schema, exactly as defined in `architecture.md`.
+Protocol naming convention: `{source_code}_to_{target_code}` per file, `{transport}_{data_scope}` per function.
 
 This is a **linear, single-pass path through the graph**. There is no orchestrator and
 no retry loop. If any node fails, the path stops. For the demo we need one clean
@@ -69,16 +70,23 @@ successful pass.
 | `InterpretationOutput` overhaul | Added `model_types: List[str]`, `model_descriptions: Dict[str, str]`, `per_model_best: Dict[str, Optional[float]]`, `per_model_worst: Dict[str, Optional[float]]`, `worst_denoising_score`. Carries full architecture knowledge forward to the proposal agent. |
 | `result_interpretation_agent` rewrite | Now handles multiple summary groups across multiple model types. Computes per-model and overall best/worst deterministically before the LLM call. Loads descriptions for all effective model types (raises `FileNotFoundError` if any missing). Injects all model descriptions + experiment records into the LLM prompt. 20 unit tests (up from 8), organised in `TestSingleGroup`, `TestMultiGroup`, `TestModelTypesOnly`, `TestErrorCases`. |
 
+| `ml_model_proposal_agent` | ✅ done (two-call CoT, human_advice, duplicate guard) |
+| Protocol structure + naming convention | ✅ done (one-file-per-edge, `local_*`/`database_*` variants) |
+| `ml_model_tune_to_ml_result_interp` protocol | ✅ done (`local_all_records`, `database_all_records` placeholder) |
+| `ml_result_interp_to_ml_model_propose` protocol | ✅ done (`local_full_context`, `database_full_context` placeholder) |
+| Unit + integration tests for proposal agent | ✅ done (35 unit, Tier 1 + Tier 2 real-API) |
+| `ml_model_implementor` | ✅ done (two-call CoT, template assembly, description.md) |
+| `ml_model_propose_to_ml_model_impl` protocol | ✅ done (`local_full_spec`, `database_full_spec` placeholder) |
+| Unit + integration tests for implementor | ✅ done (node unit ×34, schema unit ×7, protocol unit ×9, Tier 1 + Tier 2 real-API) |
+
 ### Remaining
 
 | Step | Status |
 |------|--------|
-| Implement `result_interpretation_agent` | ✅ done (multi-model, descriptions, worst score) |
-| Implement `ml_model_proposal_agent` | ⬜ next |
-| Implement `ml_model_implementor` | ⬜ |
-| Implement `code_validator_agent` | ⬜ |
+| Implement `code_validator_agent` | ⬜ next |
 | Add `run()` to `tune_ml_hyperparam_agent` + wire `seed_records` | ⬜ |
-| Protocols (all 5) | ⬜ |
+| `ml_model_impl_to_ml_model_valid` protocol | ⬜ |
+| `ml_model_valid_to_ml_model_tune` protocol | ⬜ |
 | `demo/run_model_proposal_demo.py` | ⬜ |
 
 ---
@@ -103,45 +111,126 @@ successful pass.
 
 ---
 
-### Step 2 — `ml_model_proposal_agent`
+### Step 2 — `ml_model_proposal_agent` ✅ done
 
 **File**: `nodes/ml_model_proposal_agent.py`.
 
-**What to build**:
+**What was built**:
 - `class MLModelProposalAgent` with `run(input: ProposalInput) -> ProposalOutput`
 - Two LLM calls (chain of thought):
-  1. **Reasoning call**: given the interpretation and constraints, reason freely about
-     what architectural properties would address the bottlenecks. Output: free-form
-     reasoning text (not validated).
-  2. **Commit call**: given the reasoning, commit to a specific design. Output: strict
-     JSON matching `ProposalOutput`.
-- The `mathematical_definition` field must be concrete enough for the implementor:
-  layer types, dimensions, skip connections, forward data flow, activation functions.
-- `expert_advice` must reference `ExpertAdvice` schema with safe starting ranges for
-  the proposed architecture.
+  1. **Reasoning call** (`generate_text()`): unconstrained architectural reasoning — no JSON
+     constraints, so the LLM can think deeply about bottlenecks, architecture families, and
+     tradeoffs. Covers: structural weakness, architecture families, tradeoff analysis, design
+     choices, and likely failure modes.
+  2. **Commit call** (`generate()`): given the reasoning text, commit to a specific design
+     as strict JSON matching `ProposalOutput`.
+- `mathematical_definition` is **abstract** — describes the computational stages and
+  mathematical principles (e.g. SSM state update, gated convolution). Concrete layer
+  dimensions and channel counts belong only in `baseline_config`.
+- Duplicate model name guard: raises `ValueError` if the LLM proposes a name already
+  in `existing_model_types`.
+- `ProposalInput.human_advice`: optional `ExpertAdviceInput` (plain string or structured
+  `ExpertAdvice`) — injected into the reasoning prompt as high-priority guidance, enabling
+  human-in-the-loop steering of the proposal.
 - Writes output to `{storage.local.workspace}/proposal_{run_name}.json`
-- Must be prompted to treat the forward contract as a hard constraint:
-  `input [B, T] int64 → output [B, 256, T] float32`
-- Must not propose a model name already in `existing_model_types`
+- 35 unit tests (18 node + 13 schema + 4 human_advice injection) + Tier 1 real-API integration test (Gemini + OpenAI)
+
+**Key design insight — abstract mathematical definition**:
+Early prompting produced mathematical definitions with concrete layer shapes
+(e.g. `Conv1d(1, 64, kernel_size=7)`). This was corrected: the definition should describe
+the *architectural principles* (what mathematical operations, how data flows, what structural
+novelty), while concrete dimensions live exclusively in `baseline_config.model_config`.
+This keeps the definition stable across hyperparameter searches and makes it more useful
+for the implementor.
 
 ---
 
-### Step 3 — `ml_model_implementor`
+### Step 2b — Protocol structure ✅ done
+
+**Files**: `agent/schemas/protocols/`
+
+Formalised one-file-per-directed-edge naming convention with hierarchical node codes
+(`ml-model-tune`, `ml-result-interp`, `ml-model-propose`, etc.) and transport-scoped
+function names (`local_*`, `database_*`).
+
+- `ml_model_tune_to_ml_result_interp.py`: `local_all_records` (serialises `all_records`
+  into a `SummaryGroup`), `database_all_records` (NotImplementedError placeholder)
+- `ml_result_interp_to_ml_model_propose.py`: `local_full_context` (serialises full
+  `InterpretationOutput` dict into `ProposalInput`), `database_full_context` placeholder
+- `__init__.py`: registry with flat aliases for all edge-protocol combinations
+
+**Key design insight — protocols as documentation today, discovery tomorrow**:
+Protocols currently serve as explicit documentation of the canonical wiring between nodes.
+Calling a protocol is preferred over constructing inputs by hand, but not strictly required —
+a human can pass arguments directly. In the future, orchestrators will query the protocol
+registry programmatically to select edges at traversal time. This two-phase design means
+the same protocol files serve both roles without change.
+
+**Key design insight — `database_*` placeholders enforce Principle 8**:
+The `database_*` variants raise `NotImplementedError` but their docstrings specify that,
+when implemented, they will read from the database and return a *fully populated schema* —
+never a partially filled one. This enforces Principle 8: the calling node never knows or
+cares which transport was used.
+
+---
+
+### Step 3 — `ml_model_implementor` ✅ done
 
 **File**: `nodes/ml_model_implementor.py`.
 
-**What to build**:
+**What was built**:
 - `class MLModelImplementor` with `run(input: ImplementorInput) -> ImplementorOutput`
-- One LLM call: given the `mathematical_definition` and `baseline_config`, generate
-  the model body (config fields, `__init__`, `forward`) to fill into the fixed template
-- LLM is given the filled template structure and asked to complete only the marked sections
-- The implementor assembles the final file by substituting LLM output into the template
-  (no free-form file generation — the template is rendered server-side)
-- Writes two files:
+- Two LLM calls (chain of thought):
+  1. **Reasoning call** (`generate_text()`): free-text reasoning covering submodules needed,
+     tensor shape trace through the full forward pass, config fields, import requirements,
+     and potential shape alignment issues. No JSON constraints so the model can reason freely.
+  2. **Code commit call** (`generate()`): given the reasoning, outputs a strict JSON object
+     with exactly five fields: `extra_imports`, `config_fields_code`, `config_fields`,
+     `init_body`, `forward_body`.
+- Template assembly: the five LLM sections are substituted into a fixed `PLUGIN_TEMPLATE`;
+  all boilerplate (`PLUGIN_MODEL_TYPE`, `PLUGIN_CONFIG_CLASS`, `PLUGIN_MODEL_CLASS`,
+  forward contract comment, class scaffolding) is pre-written and never generated.
+- `_class_name()` helper: `gated_dilated_tcn` → `GatedDilatedTcn`.
+- Post-generation patch: replaces `self.embedding(input)` with `self.embedding(x)` after
+  the LLM commit — a recurring LLM mistake that the hard constraint in the code prompt
+  alone was not always sufficient to prevent.
+- Writes three files:
   - `{plugin_dir}/{model_name}.py` — the plugin file
-  - `{test_dir}/test_{model_name}.py` — the test file
+  - `{plugin_dir}/{model_name}/description.md` — architecture description for the interpretation pipeline
+  - `{test_dir}/test_{model_name}.py` — test skeleton (fully fixed, no LLM generation)
 - Writes output record to `{storage.local.workspace}/implementor_{run_name}.json`
-- Returns `ImplementorOutput` with absolute paths and `config_fields` summary
+- Returns `ImplementorOutput` with absolute paths, `config_fields` summary, and `description_file_path`
+
+**Key design insight — description.md for agent-generated models**:
+The `result_interpretation_agent` calls `get_model_description(model_type)`, which raises
+`FileNotFoundError` if no description exists. The loader already searched
+`agent_generated/models/{model_type}/description.md` as a fallback path, but nothing wrote
+it. The implementor now writes this file alongside the plugin, populated from
+`ImplementorInput.model_description` and `mathematical_definition`. This closes the gap:
+a model proposed and implemented by agents can be interpreted by the interpretation agent
+in the next iteration of the loop, without any human-written description.
+
+**Key design insight — import deduplication and sanitisation**:
+The LLM frequently included `import torch`, `import torch.nn as nn`, etc. in `extra_imports`
+even though the fixed template already contains them. The assembler filters these out by
+comparing each line against a set of already-present imports. Beyond deduplication, the
+filter also drops any line that is not a valid import statement (does not start with
+`import` or `from`) — some models emit partial fragments like `torch.nn.functional as F`
+which would cause a `SyntaxError`. Trailing `$` characters (a JSON/markdown artifact
+from some models) are stripped from all code lines.
+
+**Key design insight — early syntax validation**:
+The assembled plugin source is passed through `ast.parse()` before any file is written.
+This catches undefined helper classes, malformed expressions, and other LLM mistakes with
+a clear error message rather than silently writing broken code to disk.
+
+**Key design insight — prompt constraints vs. validation layers**:
+Prompt constraints (no helper classes, scalar config fields, Pydantic V2 kwargs, `config`
+not in scope in `forward`) are best-effort guidance — LLMs do not always honour them. This
+is expected. Constraints reduce the failure rate but are not the enforcement mechanism.
+Programmatic validation in the `code_validator_agent` (Node 5) is the correct place to
+enforce correctness. The implementor's early `ast.parse()` check is a lightweight pre-flight
+only; deep semantic validation belongs downstream.
 
 **Template rendering**: the implementor holds the template as a string in the module,
 substitutes `{model_name}`, `{ModelClass}`, then fills LLM-generated sections.
@@ -237,6 +326,7 @@ At least one model type must be reachable (via `summaries` or `model_types`); ot
 - `interpretation: Dict` — serialised `InterpretationOutput`
 - `existing_model_types: List[str]`
 - `constraints: List[str]`
+- `human_advice: Optional[ExpertAdviceInput]` — plain string or structured `ExpertAdvice`; injected as high-priority guidance into the reasoning prompt
 - `storage: StorageConfig`
 
 **Output schema** (`ProposalOutput`):
@@ -262,6 +352,7 @@ At least one model type must be reachable (via `summaries` or `model_types`); ot
 
 **Output schema** (`ImplementorOutput`):
 - `model_type: str`
+- `description_file_path: str` — absolute path to the written `description.md`
 - `model_file_path: str`
 - `test_file_path: str`
 - `config_fields: Dict`
@@ -294,17 +385,17 @@ Input/output schemas already defined in `agent/schemas/hyperparam_tuning.py`.
 
 ## Protocols
 
-| Edge | Protocol | Consumes from source | Populates in target |
-|------|----------|----------------------|---------------------|
-| `tune → interpret` | `hyperparam_to_interpretation_v1` | `all_records`, `model_type`, `run_name` | `summaries: [SummaryGroup(model_type, run_name, records)]` in `InterpretationInput` |
-| `interpret → propose` | `interpretation_to_proposal_v1` | full `InterpretationOutput` | `interpretation`, `existing_model_types` in `ProposalInput` |
-| `propose → implement` | `proposal_to_implementor_v1` | `model_name`, `mathematical_definition`, `model_description`, `baseline_config` | all fields of `ImplementorInput` |
-| `implement → validate` | `implementor_to_validator_v1` | `model_type`, `model_file_path`, `test_file_path` | all fields of `ValidatorInput` |
-| `validate → tune` | `validator_to_hyperparam_v1` | `model_type` from `ValidatorOutput` + `expert_advice` from `ProposalOutput` | `model_type`, `expert_advice`, `seed_records` in `HyperparamTuningInput` |
+| Edge | Module | Function | Status |
+|------|--------|----------|--------|
+| `tune → interpret` | `ml_model_tune_to_ml_result_interp` | `local_all_records` | ✅ done |
+| `interpret → propose` | `ml_result_interp_to_ml_model_propose` | `local_full_context` | ✅ done |
+| `propose → implement` | `ml_model_propose_to_ml_model_impl` | `local_full_spec` | ✅ done |
+| `implement → validate` | `ml_model_impl_to_ml_model_valid` | `local_files` | ⬜ |
+| `validate → tune` | `ml_model_valid_to_ml_model_tune` | `local_with_advice` | ⬜ |
 
-Note: `validator_to_hyperparam_v1` takes both `ValidatorOutput` and `ProposalOutput`
-as arguments — the validator only confirms the plugin is valid; expert advice comes
-from the proposal node.
+Note: `ml_model_valid_to_ml_model_tune::local_with_advice` takes both `ValidatorOutput`
+and `ProposalOutput` as arguments — the validator only confirms the plugin is valid;
+expert advice comes from the proposal node.
 
 ---
 
@@ -320,12 +411,12 @@ agent/
 │   ├── implementor.py                    ✅ done
 │   ├── validator.py                      ✅ done
 │   └── protocols/
-│       ├── __init__.py                   ✅ done
-│       ├── hyperparam_to_interpretation.py   ⬜
-│       ├── interpretation_to_proposal.py     ⬜
-│       ├── proposal_to_implementor.py        ⬜
-│       ├── implementor_to_validator.py       ⬜
-│       └── validator_to_hyperparam.py        ⬜
+│       ├── __init__.py                               ✅ done (registry with edge aliases)
+│       ├── ml_model_tune_to_ml_result_interp.py      ✅ done (local_all_records)
+│       ├── ml_result_interp_to_ml_model_propose.py   ✅ done (local_full_context)
+│       ├── ml_model_propose_to_ml_model_impl.py      ✅ done (local_full_spec)
+│       ├── ml_model_impl_to_ml_model_valid.py        ⬜
+│       └── ml_model_valid_to_ml_model_tune.py        ⬜
 ├── skills/                               ✅ unchanged
 ├── prompts.py                            ✅ exists (new prompts to be added)
 └── llm_bridge.py                         ✅ done (generate() JSON mode + generate_text() plain text)
@@ -342,8 +433,8 @@ ml_models/
 nodes/
 ├── ml_hyperparameter_tune_agent.py       ✅ storage updated, run() ⬜
 ├── result_interpretation_agent.py        ✅ done (multi-model, cross-run, descriptions)
-├── ml_model_proposal_agent.py           ⬜
-├── ml_model_implementor.py              ⬜
+├── ml_model_proposal_agent.py            ✅ done (two-call CoT, human_advice, duplicate guard)
+├── ml_model_implementor.py               ✅ done (two-call CoT, template assembly, description.md)
 └── code_validator_agent.py              ⬜
 
 demo/
@@ -355,17 +446,23 @@ tests/
         ├── tune_ml_hyperparam_agent/     ✅ 35 tests (storage tests added)
         ├── result_interpretation_agent/  ✅ 32 tests (20 node tests + 12 schema tests)
         ├── test_llm_bridge.py            ✅ 11 tests (generate + generate_text, both providers)
-        ├── ml_model_proposal_agent/      ✅ schema tests done, node tests ⬜
-        ├── ml_model_implementor/         ✅ schema tests done, node tests ⬜
+        ├── ml_model_proposal_agent/      ✅ 26 tests (18 node + 8 schema)
+        ├── protocols/                    ✅ 22 tests (11 per protocol module)
+        ├── ml_model_implementor/         ✅ done (34 node tests + 7 schema tests)
+        ├── protocols/                    ✅ done (9 tests for propose→implement protocol)
         └── code_validator_agent/         ✅ schema tests done, node tests ⬜
 
 tests/integration/nodes/              ✅ Tier 1 — single node, real API
     ├── test_llm_bridge.py                ✅ 4 tests (Gemini + OpenAI, generate + generate_text)
     ├── test_result_interpretation_agent.py ✅ 4 tests (Gemini + OpenAI, single + multi-model)
+    ├── test_ml_model_proposal_agent.py   ✅ 2 tests (Gemini + OpenAI)
+    ├── test_ml_model_implementor.py      ✅ 2 tests (Gemini + OpenAI, validates plugin + description.md)
     └── test_tune_ml_hyperparam_agent.py  ✅ (skip if no API key + data)
 
 tests/integration/protocols/         ✅ Tier 2 — one graph edge end-to-end
-    └── test_tune_to_interpret.py         ✅ 1 test (real fcnet loop → interpretation agent)
+    ├── test_tune_to_interpret.py         ✅ 1 test (real fcnet loop → interpretation agent)
+    ├── test_interp_to_propose.py         ✅ 2 tests (Gemini + OpenAI, no GPU needed)
+    └── test_propose_to_implement.py      ✅ 2 tests (Gemini + OpenAI, proposal → implementor edge)
 
 tests/integration/orchestrator/      ⬜ Tier 3 — multi-hop critical loops (empty, ready)
 
@@ -374,7 +471,7 @@ tests/unit/core/
     └── ...
 ```
 
-**Total unit tests: 260 passing.**
+**Total unit tests: 350 passing.**
 
 ---
 
@@ -389,11 +486,11 @@ from nodes.ml_model_implementor import MLModelImplementor
 from nodes.code_validator_agent import CodeValidatorAgent
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
-from agent.schemas.protocols.hyperparam_to_interpretation import hyperparam_to_interpretation_v1
-from agent.schemas.protocols.interpretation_to_proposal import interpretation_to_proposal_v1
-from agent.schemas.protocols.proposal_to_implementor import proposal_to_implementor_v1
-from agent.schemas.protocols.implementor_to_validator import implementor_to_validator_v1
-from agent.schemas.protocols.validator_to_hyperparam import validator_to_hyperparam_v1
+from agent.schemas.protocols.ml_model_tune_to_ml_result_interp import local_all_records
+from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import local_full_context
+from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full_spec
+from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_files
+from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import local_with_advice
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 
 storage = StorageConfig(backend="local", local=LocalStorageConfig(workspace="<workspace>", run_name="<run_name>"))
@@ -404,25 +501,25 @@ with open("<workspace>/run_output_<run_name>.json") as f:
 
 # Edge 1: tune → interpret
 interpretation = ResultInterpretationAgent().run(
-    hyperparam_to_interpretation_v1(tuning_output, storage)
+    local_all_records(tuning_output, storage)
 )
 print("Take-home:", interpretation.take_home_message)
 
 # Edge 2: interpret → propose
 proposal = MLModelProposalAgent().run(
-    interpretation_to_proposal_v1(interpretation, storage)
+    local_full_context(interpretation, storage)
 )
 print("Proposed model:", proposal.model_name)
 
 # Edge 3: propose → implement
 implementor_output = MLModelImplementor().run(
-    proposal_to_implementor_v1(proposal, storage)
+    local_full_spec(proposal, storage)
 )
 print("Written to:", implementor_output.model_file_path)
 
 # Edge 4: implement → validate
 validation = CodeValidatorAgent().run(
-    implementor_to_validator_v1(implementor_output, storage)
+    local_files(implementor_output, storage)
 )
 if not validation.passed:
     print("Validation failed:", validation.error_message)
@@ -431,7 +528,7 @@ print("Model validated.")
 
 # Edge 5: validate → tune (expert_advice from proposal, not validator)
 tuning_output = HyperparamTuningAgent().run(
-    validator_to_hyperparam_v1(validation, proposal, storage, file_index=6, max_rounds=10)
+    local_with_advice(validation, proposal, storage, file_index=6, max_rounds=10)
 )
 print("Best score:", tuning_output.best_denoising_score)
 ```

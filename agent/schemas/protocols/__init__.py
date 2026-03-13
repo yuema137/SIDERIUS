@@ -12,8 +12,9 @@ Orchestrators import from this module and choose which protocol to apply.
 
 Implemented edges
 -----------------
-ml_model_tune_to_ml_result_interp      tune_ml_hyperparam_agent → result_interpretation_agent
-ml_result_interp_to_ml_model_propose   result_interpretation_agent → ml_model_proposal_agent
+ml_model_tune_to_ml_result_interp      tune_ml_hyperparam_agent -> result_interpretation_agent
+ml_result_interp_to_ml_model_propose   result_interpretation_agent -> ml_model_proposal_agent
+ml_model_propose_to_ml_model_impl      ml_model_proposal_agent -> ml_model_implementor
 """
 
 from agent.schemas.protocols.ml_model_tune_to_ml_result_interp import (
@@ -24,10 +25,16 @@ from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import (
     local_full_context    as interp_to_propose__local_full_context,
     database_full_context as interp_to_propose__database_full_context,
 )
+from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import (
+    local_full_spec    as propose_to_impl__local_full_spec,
+    database_full_spec as propose_to_impl__database_full_spec,
+)
 
 __all__ = [
     "tune_to_interp__local_all_records",
     "tune_to_interp__database_all_records",
     "interp_to_propose__local_full_context",
     "interp_to_propose__database_full_context",
+    "propose_to_impl__local_full_spec",
+    "propose_to_impl__database_full_spec",
 ]

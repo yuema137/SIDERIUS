@@ -69,6 +69,7 @@ class TestImplementorOutput:
     def test_valid(self):
         out = ImplementorOutput(
             model_type="attn_unet",
+            description_file_path="/abs/agent_generated/models/attn_unet/description.md",
             model_file_path="/abs/agent_generated/models/attn_unet.py",
             test_file_path="/abs/agent_generated/tests/test_attn_unet.py",
             config_fields={"depth": 2, "num_heads": 4},

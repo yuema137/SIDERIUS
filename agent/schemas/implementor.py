@@ -71,6 +71,12 @@ class ImplementorOutput(BaseModel):
         description="The PLUGIN_MODEL_TYPE key written into the plugin file. "
                     "Same as the input model_name.",
     )
+    description_file_path: str = Field(
+        description="Absolute path to the written description.md "
+                    "(e.g. .../agent_generated/models/attn_unet/description.md). "
+                    "Used by result_interpretation_agent to load the model description "
+                    "when interpreting results from this agent-generated model.",
+    )
     model_file_path: str = Field(
         description="Absolute path to the written plugin file "
                     "(e.g. .../agent_generated/models/attn_unet.py).",
