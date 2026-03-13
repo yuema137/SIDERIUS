@@ -74,7 +74,7 @@ successful pass.
 | Protocol structure + naming convention | ✅ done (one-file-per-edge, `local_*`/`database_*` variants) |
 | `ml_model_tune_to_ml_result_interp` protocol | ✅ done (`local_all_records`, `database_all_records` placeholder) |
 | `ml_result_interp_to_ml_model_propose` protocol | ✅ done (`local_full_context`, `database_full_context` placeholder) |
-| Unit + integration tests for proposal agent | ✅ done (26 unit, Tier 1 + Tier 2 real-API) |
+| Unit + integration tests for proposal agent | ✅ done (35 unit, Tier 1 + Tier 2 real-API) |
 | `ml_model_implementor` | ✅ done (two-call CoT, template assembly, description.md) |
 | `ml_model_propose_to_ml_model_impl` protocol | ✅ done (`local_full_spec`, `database_full_spec` placeholder) |
 | Unit + integration tests for implementor | ✅ done (node unit ×34, schema unit ×7, protocol unit ×9, Tier 1 + Tier 2 real-API) |
@@ -133,7 +133,7 @@ successful pass.
   `ExpertAdvice`) — injected into the reasoning prompt as high-priority guidance, enabling
   human-in-the-loop steering of the proposal.
 - Writes output to `{storage.local.workspace}/proposal_{run_name}.json`
-- 26 unit tests + Tier 1 real-API integration test (Gemini + OpenAI)
+- 35 unit tests (18 node + 13 schema + 4 human_advice injection) + Tier 1 real-API integration test (Gemini + OpenAI)
 
 **Key design insight — abstract mathematical definition**:
 Early prompting produced mathematical definitions with concrete layer shapes
@@ -210,11 +210,27 @@ it. The implementor now writes this file alongside the plugin, populated from
 a model proposed and implemented by agents can be interpreted by the interpretation agent
 in the next iteration of the loop, without any human-written description.
 
-**Key design insight — import deduplication**:
+**Key design insight — import deduplication and sanitisation**:
 The LLM frequently included `import torch`, `import torch.nn as nn`, etc. in `extra_imports`
 even though the fixed template already contains them. The assembler filters these out by
-comparing each line against a set of already-present imports, preventing `ImportError`s
-from duplicate imports.
+comparing each line against a set of already-present imports. Beyond deduplication, the
+filter also drops any line that is not a valid import statement (does not start with
+`import` or `from`) — some models emit partial fragments like `torch.nn.functional as F`
+which would cause a `SyntaxError`. Trailing `$` characters (a JSON/markdown artifact
+from some models) are stripped from all code lines.
+
+**Key design insight — early syntax validation**:
+The assembled plugin source is passed through `ast.parse()` before any file is written.
+This catches undefined helper classes, malformed expressions, and other LLM mistakes with
+a clear error message rather than silently writing broken code to disk.
+
+**Key design insight — prompt constraints vs. validation layers**:
+Prompt constraints (no helper classes, scalar config fields, Pydantic V2 kwargs, `config`
+not in scope in `forward`) are best-effort guidance — LLMs do not always honour them. This
+is expected. Constraints reduce the failure rate but are not the enforcement mechanism.
+Programmatic validation in the `code_validator_agent` (Node 5) is the correct place to
+enforce correctness. The implementor's early `ast.parse()` check is a lightweight pre-flight
+only; deep semantic validation belongs downstream.
 
 **Template rendering**: the implementor holds the template as a string in the module,
 substitutes `{model_name}`, `{ModelClass}`, then fills LLM-generated sections.
@@ -455,7 +471,7 @@ tests/unit/core/
     └── ...
 ```
 
-**Total unit tests: ~332 passing.**
+**Total unit tests: 350 passing.**
 
 ---
 
