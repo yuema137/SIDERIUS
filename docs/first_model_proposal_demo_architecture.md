@@ -63,12 +63,17 @@ successful pass.
 | `HyperparamTuningInput` updated | Replaced raw `workspace: str` and `run_name: str` fields with `storage: StorageConfig`. Agent code updated to extract `workspace` and `run_name` from `agent_input.storage.local`. |
 | Unit tests | Added `test_storage.py` (11 tests), `test_interpretation_schemas.py` (7), `test_proposal_schemas.py` (7), `test_implementor_schemas.py` (7), `test_validator_schemas.py` (7). Fixed `valid_input_dict` fixture in existing hyperparam tests. **233 unit tests passing.** |
 | `nodes/result_interpretation_agent.py` | Implemented `ResultInterpretationAgent.run()`. One LLM call: deterministic pre-computation (best score, best config) merged with LLM-generated `key_findings`, `bottlenecks`, `take_home_message`. Writes `interpretation_{run_name}.json`. Unit tests added (`test_interpretation_agent.py`, 8 tests). |
+| `LLMBridge.generate_text()` | Added plain-text transport alongside `generate()` (JSON mode). Used for free-form reasoning steps where JSON mode constrains quality. 11 unit tests + 4 integration tests (skip if no API key). |
+| Per-model `description.md` files | Added `ml_models/{punet,fcnet,transformer,wavenet,rnn}/description.md` — markdown + math descriptions of each architecture. Added `ml_models/model_descriptions.py` loader: searches `ml_models/{model_type}/description.md` then `agent_generated/models/{model_type}/description.md`; raises `FileNotFoundError` if missing. |
+| `InterpretationInput` overhaul | Replaced `summary_records + model_type` with `summaries: List[SummaryGroup]` + `model_types: Optional[List[str]]`. New `SummaryGroup(model_type, run_name, records)`. Validator enforces at least one model reachable (from summaries or explicit `model_types`); empty `[]` for `model_types` is an error. |
+| `InterpretationOutput` overhaul | Added `model_types: List[str]`, `model_descriptions: Dict[str, str]`, `per_model_best: Dict[str, Optional[float]]`, `per_model_worst: Dict[str, Optional[float]]`, `worst_denoising_score`. Carries full architecture knowledge forward to the proposal agent. |
+| `result_interpretation_agent` rewrite | Now handles multiple summary groups across multiple model types. Computes per-model and overall best/worst deterministically before the LLM call. Loads descriptions for all effective model types (raises `FileNotFoundError` if any missing). Injects all model descriptions + experiment records into the LLM prompt. 20 unit tests (up from 8), organised in `TestSingleGroup`, `TestMultiGroup`, `TestModelTypesOnly`, `TestErrorCases`. |
 
 ### Remaining
 
 | Step | Status |
 |------|--------|
-| Implement `result_interpretation_agent` | ✅ done |
+| Implement `result_interpretation_agent` | ✅ done (multi-model, descriptions, worst score) |
 | Implement `ml_model_proposal_agent` | ⬜ next |
 | Implement `ml_model_implementor` | ⬜ |
 | Implement `code_validator_agent` | ⬜ |
@@ -205,16 +210,24 @@ the final tuning run.
 ### 1. `result_interpretation_agent`
 
 **Input schema** (`InterpretationInput`):
-- `summary_records: List[Dict]` — experiment records
-- `model_type: str`
-- `max_records: int` (default: 50)
+- `summaries: List[SummaryGroup]` — experiment records grouped by `(model_type, run_name)`; can be empty if `model_types` is set
+- `model_types: Optional[List[str]]` — explicit list of model types whose descriptions to include; `None` = derive from summaries; empty list `[]` is an error
+- `max_records_per_group: int` (default: 50) — most-recent records preferred when truncating
 - `storage: StorageConfig`
 
+`SummaryGroup` fields: `model_type: str`, `run_name: str`, `records: List[Dict]`.
+
+At least one model type must be reachable (via `summaries` or `model_types`); otherwise validation raises.
+
 **Output schema** (`InterpretationOutput`):
-- `model_type: str`
-- `total_experiments: int`
-- `best_denoising_score: Optional[float]`
-- `best_config: Optional[Dict]`
+- `model_types: List[str]` — all model types analysed
+- `model_descriptions: Dict[str, str]` — full markdown descriptions loaded from `description.md`; carried forward to proposal agent
+- `total_experiments: int` — all records across all groups (including OOM-skipped)
+- `per_model_best: Dict[str, Optional[float]]` — best denoising score per model
+- `per_model_worst: Dict[str, Optional[float]]` — worst denoising score per model
+- `best_denoising_score: Optional[float]` — cross-model maximum
+- `worst_denoising_score: Optional[float]` — cross-model minimum
+- `best_config: Optional[Dict]` — params dict that produced the overall best score
 - `key_findings: List[str]`
 - `bottlenecks: List[str]`
 - `take_home_message: str`
@@ -286,7 +299,7 @@ Input/output schemas already defined in `agent/schemas/hyperparam_tuning.py`.
 
 | Edge | Protocol | Consumes from source | Populates in target |
 |------|----------|----------------------|---------------------|
-| `tune → interpret` | `hyperparam_to_interpretation_v1` | `all_records`, `model_type` | `summary_records`, `model_type` in `InterpretationInput` |
+| `tune → interpret` | `hyperparam_to_interpretation_v1` | `all_records`, `model_type`, `run_name` | `summaries: [SummaryGroup(model_type, run_name, records)]` in `InterpretationInput` |
 | `interpret → propose` | `interpretation_to_proposal_v1` | full `InterpretationOutput` | `interpretation`, `existing_model_types` in `ProposalInput` |
 | `propose → implement` | `proposal_to_implementor_v1` | `model_name`, `mathematical_definition`, `model_description`, `baseline_config` | all fields of `ImplementorInput` |
 | `implement → validate` | `implementor_to_validator_v1` | `model_type`, `model_file_path`, `test_file_path` | all fields of `ValidatorInput` |
@@ -304,8 +317,8 @@ from the proposal node.
 agent/
 ├── schemas/
 │   ├── storage.py                        ✅ done
-│   ├── hyperparam_tuning.py              ✅ done (storage added)
-│   ├── interpretation.py                 ✅ done
+│   ├── hyperparam_tuning.py              ✅ done (storage added, file_index default=6)
+│   ├── interpretation.py                 ✅ done (SummaryGroup, multi-model overhaul)
 │   ├── proposal.py                       ✅ done
 │   ├── implementor.py                    ✅ done
 │   ├── validator.py                      ✅ done
@@ -318,11 +331,20 @@ agent/
 │       └── validator_to_hyperparam.py        ⬜
 ├── skills/                               ✅ unchanged
 ├── prompts.py                            ✅ exists (new prompts to be added)
-└── llm_bridge.py                         ✅ done (generate() now public)
+└── llm_bridge.py                         ✅ done (generate() JSON mode + generate_text() plain text)
+
+ml_models/
+├── model_descriptions.py                 ✅ done (loader, raises FileNotFoundError if missing)
+├── punet/description.md                  ✅ done
+├── fcnet/description.md                  ✅ done
+├── transformer/description.md            ✅ done
+├── wavenet/description.md                ✅ done
+├── rnn/description.md                    ✅ done
+└── plugin_loader.py                      ✅ done (moved from core/)
 
 nodes/
 ├── ml_hyperparameter_tune_agent.py       ✅ storage updated, run() ⬜
-├── result_interpretation_agent.py        ✅ done
+├── result_interpretation_agent.py        ✅ done (multi-model, cross-run, descriptions)
 ├── ml_model_proposal_agent.py           ⬜
 ├── ml_model_implementor.py              ⬜
 └── code_validator_agent.py              ⬜
@@ -334,17 +356,21 @@ tests/
 └── unit/
     └── agent/
         ├── tune_ml_hyperparam_agent/     ✅ 35 tests (storage tests added)
-        ├── result_interpretation_agent/  ✅ schema tests + node tests done (8 tests)
+        ├── result_interpretation_agent/  ✅ 32 tests (20 node tests + 12 schema tests)
+        ├── test_llm_bridge.py            ✅ 11 tests (generate + generate_text, both providers)
         ├── ml_model_proposal_agent/      ✅ schema tests done, node tests ⬜
         ├── ml_model_implementor/         ✅ schema tests done, node tests ⬜
         └── code_validator_agent/         ✅ schema tests done, node tests ⬜
+
+tests/integration/agent/
+    └── test_llm_bridge_real.py           ✅ 4 tests (skip if no API key)
 
 tests/unit/core/
     ├── test_storage.py                   ✅ done (11 tests)
     └── ...
 ```
 
-**Total unit tests: 233 passing.**
+**Total unit tests: 260 passing.**
 
 ---
 

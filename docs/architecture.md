@@ -292,6 +292,93 @@ test suite.
 
 ---
 
+## Testing Strategy
+
+Agent tests have four categories. Unit tests run on every commit. The three integration
+tiers require external resources and are always gated by `pytest.mark.real_run` — they
+must never run in CI.
+
+### Unit tests
+
+**What**: Test a single node in complete isolation. All LLM calls are mocked (e.g.
+`patch("nodes.foo.LLMBridge")`). No GPU, no real data, no API key required.
+
+**What to test**:
+- Deterministic pre-computation is correct (score extraction, record counting, etc.)
+- LLM response is merged into the output schema correctly
+- Output validates against the Pydantic schema
+- Output file is written to the correct path
+- Error cases raise the expected exceptions
+
+**Location**: `tests/unit/agent/{node_name}/`
+
+**Rule**: 100% of unit tests must always pass. Adding a node means adding unit tests
+before merging.
+
+---
+
+### Integration Tier 1 — Individual node
+
+**What**: Call a single node end-to-end with a real LLM. No other nodes involved.
+
+**What to test**:
+- Node produces a valid, non-empty output with a real API response
+- Output validates against the Pydantic schema
+- Output file is written correctly
+- Both Gemini and OpenAI providers work (where applicable)
+
+**Location**: `tests/integration/nodes/test_{node_name}.py`
+
+**Rule**: One file per node. Tests skip automatically when the required API key or
+data is missing. Do NOT parametrise over every model/loss combination — one or two
+representative configs are enough.
+
+---
+
+### Integration Tier 2 — Protocol (predecessor → successor)
+
+**What**: Test one directed edge in the graph. Run the source node for real, apply the
+protocol function, then run the target node for real. Both nodes run; all others absent.
+
+**What to test**:
+- The protocol function correctly maps source output to target input
+- The target node accepts the protocol output without validation errors
+- Key fields in the target output are non-empty and structurally correct
+
+**Location**: `tests/integration/protocols/test_{source}_to_{target}.py`
+
+**Rule**: One file per directed edge in the graph. One representative config per file.
+
+---
+
+### Integration Tier 3 — Orchestrator (critical loops)
+
+**What**: Test a critical multi-hop path through the graph — two or more protocol
+edges traversed in sequence, representing a real research workflow.
+
+**What to test**:
+- A full traversal of the core research loop produces coherent outputs at every stage
+- The orchestrator's control logic (loop termination, error handling) works on a real run
+
+**Location**: `tests/integration/orchestrator/test_{loop_name}.py`
+
+**Rule**: Test only the critical paths, not every combination. Combinatorial coverage
+belongs in unit tests. A Tier 3 test that takes more than ~10 minutes is doing too much
+— break it into smaller Tier 2 tests instead. One representative config per loop.
+
+---
+
+### Summary
+
+| Category | Scope | LLM | GPU | Location | When to run |
+|----------|-------|-----|-----|----------|-------------|
+| Unit | Single node, mocked LLM | mock | no | `tests/unit/` | Every commit |
+| Integration Tier 1 | Single node, real API | real | depends | `tests/integration/nodes/` | On demand |
+| Integration Tier 2 | One edge (source → target) | real | depends | `tests/integration/protocols/` | On demand |
+| Integration Tier 3 | Critical multi-hop loop | real | yes | `tests/integration/orchestrator/` | Before releases |
+
+---
+
 ## TODO: Multi-Dataset Support
 
 The current execution layer (`execute_tools/`, `core/sandbox_executor.py`, `ml_models/`) is
