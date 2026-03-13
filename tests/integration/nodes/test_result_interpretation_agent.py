@@ -14,7 +14,7 @@ import os
 import pytest
 from dotenv import load_dotenv
 
-from agent.schemas.interpretation import InterpretationInput, InterpretationOutput
+from agent.schemas.interpretation import InterpretationInput, InterpretationOutput, SummaryGroup
 from nodes.result_interpretation_agent import ResultInterpretationAgent
 
 load_dotenv()
@@ -36,7 +36,7 @@ def _skip_if_no_key(provider: str):
 # Synthetic records that look like a real tuning run
 # ---------------------------------------------------------------------------
 
-SYNTHETIC_RECORDS = [
+PUNET_RECORDS = [
     {
         "exp_id": "punet_v1_001",
         "status": "success",
@@ -139,54 +139,156 @@ SYNTHETIC_RECORDS = [
     },
 ]
 
+FCNET_RECORDS = [
+    {
+        "exp_id": "fcnet_v1_001",
+        "status": "success",
+        "model_type": "fcnet",
+        "timestamp": "2026-01-01 00:00:00",
+        "file_index": 6,
+        "params": {
+            "model_config": {"latent_dims": [400, 40]},
+            "train_config": {"lr": 1e-4, "epochs": 10, "batch_size": 128},
+            "loss_config":  {"loss_type": "ce"},
+        },
+        "results": {"denoising_score": 0.85},
+        "denoising_score": 0.85,
+        "memory": {
+            "hypothesis": "Baseline FCNet with CE loss",
+            "conclusion": "FCNet lags behind PUNet — likely insufficient temporal modelling",
+            "discovery": "Fully connected arch struggles with long-range temporal dependencies",
+            "memory_update": "FCNet architecture is fundamentally limited for this task",
+        },
+    },
+    {
+        "exp_id": "fcnet_v1_002",
+        "status": "success",
+        "model_type": "fcnet",
+        "timestamp": "2026-01-01 01:00:00",
+        "file_index": 6,
+        "params": {
+            "model_config": {"latent_dims": [800, 200, 40]},
+            "train_config": {"lr": 3e-4, "epochs": 15, "batch_size": 64},
+            "loss_config":  {"loss_type": "focal", "gamma": 2.0},
+        },
+        "results": {"denoising_score": 0.9},
+        "denoising_score": 0.9,
+        "memory": {
+            "hypothesis": "Wider/deeper FCNet with focal loss",
+            "conclusion": "Marginal improvement — still well below PUNet",
+            "discovery": "Capacity increases yield diminishing returns for FCNet",
+            "memory_update": "FCNet has hit its ceiling; architecture change needed",
+        },
+    },
+]
+
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Input helpers
 # ---------------------------------------------------------------------------
 
-def _make_input(tmp_path, model_type="punet"):
-    return InterpretationInput.model_validate({
-        "summary_records": SYNTHETIC_RECORDS,
-        "model_type":      model_type,
-        "max_records":     50,
-        "storage": {
+def _make_single_model_input(tmp_path) -> InterpretationInput:
+    """Single summary group — one model, one run."""
+    return InterpretationInput(
+        summaries=[SummaryGroup(model_type="punet", run_name="v1", records=PUNET_RECORDS)],
+        storage={
             "backend": "local",
             "local": {"workspace": str(tmp_path), "run_name": "real_api_test"},
         },
-    })
+    )
 
 
-def _assert_valid_output(output: InterpretationOutput):
+def _make_multi_model_input(tmp_path) -> InterpretationInput:
+    """Two summary groups — punet and fcnet compared together."""
+    return InterpretationInput(
+        summaries=[
+            SummaryGroup(model_type="punet",  run_name="v1", records=PUNET_RECORDS),
+            SummaryGroup(model_type="fcnet",  run_name="v1", records=FCNET_RECORDS),
+        ],
+        storage={
+            "backend": "local",
+            "local": {"workspace": str(tmp_path), "run_name": "real_api_multimodel"},
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Assertions
+# ---------------------------------------------------------------------------
+
+def _assert_single_model_output(output: InterpretationOutput):
     assert isinstance(output, InterpretationOutput)
-    assert output.total_experiments == len(SYNTHETIC_RECORDS)
+    assert "punet" in output.model_types
+    assert "punet" in output.model_descriptions
+    assert len(output.model_descriptions["punet"]) > 100, "model description suspiciously short"
+    assert output.total_experiments == len(PUNET_RECORDS)
     assert output.best_denoising_score == 1.57
-    assert len(output.key_findings) > 0, "LLM produced no key findings"
+    assert output.worst_denoising_score == 1.2
+    assert output.per_model_best["punet"] == 1.57
+    assert output.per_model_worst["punet"] == 1.2
+    assert output.best_config is not None
+    assert len(output.key_findings) > 0, "LLM produced no key_findings"
     assert len(output.bottlenecks) > 0, "LLM produced no bottlenecks"
     assert len(output.take_home_message) > 10, "take_home_message is suspiciously short"
-    for finding in output.key_findings:
-        assert isinstance(finding, str) and len(finding) > 0
-    for bottleneck in output.bottlenecks:
-        assert isinstance(bottleneck, str) and len(bottleneck) > 0
+    for f in output.key_findings:
+        assert isinstance(f, str) and len(f) > 0
+    for b in output.bottlenecks:
+        assert isinstance(b, str) and len(b) > 0
+
+
+def _assert_multi_model_output(output: InterpretationOutput):
+    assert isinstance(output, InterpretationOutput)
+    assert "punet" in output.model_types
+    assert "fcnet" in output.model_types
+    assert "punet" in output.model_descriptions
+    assert "fcnet" in output.model_descriptions
+    assert output.total_experiments == len(PUNET_RECORDS) + len(FCNET_RECORDS)
+    assert output.best_denoising_score == 1.57   # cross-model max
+    assert output.worst_denoising_score == 0.85  # cross-model min
+    assert output.per_model_best["punet"] == 1.57
+    assert output.per_model_best["fcnet"] == 0.9
+    assert output.per_model_worst["punet"] == 1.2
+    assert output.per_model_worst["fcnet"] == 0.85
+    assert len(output.key_findings) > 0
+    assert len(output.bottlenecks) > 0
+    assert len(output.take_home_message) > 10
 
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 
-class TestInterpretationRealAPI:
+class TestInterpretationRealGemini:
 
-    def test_gemini_produces_valid_output(self, tmp_path):
+    def setup_method(self):
         _skip_if_no_key("gemini")
-        agent = ResultInterpretationAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview")
-        output = agent.run(_make_input(tmp_path))
-        _assert_valid_output(output)
-        out_file = tmp_path / "interpretation_real_api_test.json"
-        assert out_file.exists(), "Output file was not written"
 
-    def test_openai_produces_valid_output(self, tmp_path):
+    def test_single_model(self, tmp_path):
+        agent = ResultInterpretationAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview")
+        output = agent.run(_make_single_model_input(tmp_path))
+        _assert_single_model_output(output)
+        assert (tmp_path / "interpretation_real_api_test.json").exists()
+
+    def test_multi_model(self, tmp_path):
+        agent = ResultInterpretationAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview")
+        output = agent.run(_make_multi_model_input(tmp_path))
+        _assert_multi_model_output(output)
+        assert (tmp_path / "interpretation_real_api_multimodel.json").exists()
+
+
+class TestInterpretationRealOpenAI:
+
+    def setup_method(self):
         _skip_if_no_key("openai")
-        agent = ResultInterpretationAgent(provider="openai", model_id="gpt-4o")
-        output = agent.run(_make_input(tmp_path))
-        _assert_valid_output(output)
-        out_file = tmp_path / "interpretation_real_api_test.json"
-        assert out_file.exists(), "Output file was not written"
+
+    def test_single_model(self, tmp_path):
+        agent = ResultInterpretationAgent(provider="openai", model_id="gpt-4o-mini")
+        output = agent.run(_make_single_model_input(tmp_path))
+        _assert_single_model_output(output)
+        assert (tmp_path / "interpretation_real_api_test.json").exists()
+
+    def test_multi_model(self, tmp_path):
+        agent = ResultInterpretationAgent(provider="openai", model_id="gpt-4o-mini")
+        output = agent.run(_make_multi_model_input(tmp_path))
+        _assert_multi_model_output(output)
+        assert (tmp_path / "interpretation_real_api_multimodel.json").exists()

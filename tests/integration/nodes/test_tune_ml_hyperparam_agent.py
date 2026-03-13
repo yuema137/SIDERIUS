@@ -188,9 +188,8 @@ def run_one_loop(provider: str, model_type: str, loss_cfg: dict, workspace: str,
         llm_provider=provider,
         llm_model_id=model_ids[provider],
         expert_advice=expert_advice,
-        run_name=run_name,
-        workspace=workspace,
         max_rounds=1,
+        storage={"backend": "local", "local": {"workspace": workspace, "run_name": run_name}},
     )
 
     sandbox = TidmadSandbox(workspace=workspace, run_name=run_name)
