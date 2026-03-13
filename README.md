@@ -24,7 +24,22 @@ See [`docs/architecture.md`](docs/architecture.md) for the full design and [`doc
 ### Current node graph
 
 ```
-tune_ml_hyperparam_agent ─────────────────────────────► result_interpretation_agent
+tune_ml_hyperparam_agent
+        │  ml_model_tune_to_ml_result_interp :: local_all_records
+        ▼
+result_interpretation_agent
+        │  ml_result_interp_to_ml_model_propose :: local_full_context
+        ▼
+ml_model_proposal_agent
+        │  ml_model_propose_to_ml_model_impl :: local_full_spec
+        ▼
+ml_model_implementor
+        │  ml_model_impl_to_ml_model_valid :: local_files          ⬜ protocol pending
+        ▼
+code_validator_agent                                                ⬜ node pending
+        │  ml_model_valid_to_ml_model_tune :: local_with_advice    ⬜ protocol pending
+        ▼
+tune_ml_hyperparam_agent  (new model, closes the loop)
 ```
 
 ---
@@ -69,7 +84,9 @@ siderius/
 │
 ├── nodes/                          # Runnable node implementations (typed directed graph)
 │   ├── ml_hyperparameter_tune_agent.py
-│   └── result_interpretation_agent.py
+│   ├── result_interpretation_agent.py
+│   ├── ml_model_proposal_agent.py
+│   └── ml_model_implementor.py
 │
 ├── dashboard/                      # Web dashboard for browsing experiment results
 │   ├── main.py                     # FastAPI + uvicorn server
@@ -123,9 +140,9 @@ Agent-generated models are dropped into `agent_generated/models/` as `.py` files
 |---|---|---|---|---|
 | `tune_ml_hyperparam_agent` | Trains, infers, and scores a model; optimises hyperparameters over N rounds | yes | yes | ✅ implemented |
 | `result_interpretation_agent` | Synthesises experiment records across models; surfaces bottlenecks and patterns | no | yes | ✅ implemented |
-| `ml_model_proposal_agent` | Reads interpretation → proposes a new architecture + expert advice | no | yes | ⬜ planned |
-| `ml_model_implementor` | Takes a proposal → writes PyTorch plugin code + unit tests | no | yes | ⬜ planned |
-| `code_validator_agent` | Runs generated tests; verifies plugin interface compliance | no | no | ⬜ planned |
+| `ml_model_proposal_agent` | Reads interpretation → proposes a new architecture + expert advice for the tuner | no | yes | ✅ implemented |
+| `ml_model_implementor` | Takes a proposal → writes PyTorch plugin file, test skeleton, and description.md | no | yes | ✅ implemented |
+| `code_validator_agent` | Runs generated tests; verifies plugin interface compliance | no | no | ⬜ next |
 | `data_analysis_agent` | Profiles dataset properties; detects distribution shifts | no | yes | ⬜ planned |
 
 ---
