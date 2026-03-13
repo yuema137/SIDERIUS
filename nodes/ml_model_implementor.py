@@ -176,8 +176,14 @@ Hard constraints — violating any of these makes the code invalid:
 - Do NOT define or reference any helper classes (e.g. ResidualBlock, GatedBlock) — there is no
   slot in the template for class definitions outside __init__ and forward. All logic must be
   written inline using nn.ModuleList, nn.Sequential, or standard PyTorch primitives only.
-- config_fields_code field names must exactly match what is used in init_body via config.<field>.
-- config_fields dict must contain the same fields as config_fields_code, with their default values.
+- When building a list of modules dynamically, always use a list comprehension — NEVER pass a
+  generator expression to nn.ModuleList or nn.Sequential. Correct: `nn.ModuleList([... for ...])`.
+  Wrong: `nn.ModuleList(... for ...)`. Generator expressions are not accepted by PyTorch containers.
+- Every `config.<field>` reference in init_body MUST have a matching field defined in
+  config_fields_code. Accessing a config attribute that is not declared will cause an
+  AttributeError at runtime. Before finalising, scan your init_body for every `config.X`
+  and confirm that X appears in config_fields_code.
+- config_fields dict must contain exactly the same field names as config_fields_code, with their default values.
 - All config fields must be scalar types (int, float, bool) — do NOT use List, Dict, or other
   container types, as the hyperparameter tuner searches scalar dimensions only.
 - Do NOT include segmentation_size or batch_size in config_fields_code — those are already in the template.
@@ -379,6 +385,8 @@ class MLModelImplementor:
             model_file_path=model_file_path,
             test_file_path=test_file_path,
             config_fields=config_fields,
+            model_description=inp.model_description,
+            mathematical_definition=inp.mathematical_definition,
         )
 
         # --- Persist output record ---
