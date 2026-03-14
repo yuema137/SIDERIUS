@@ -19,15 +19,9 @@ Memory model (worst-case, float32 training):
 import sys
 import os
 
-# Allow flat imports from ml_models and execute_tools
-_project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-for _p in [os.path.join(_project_root, "ml_models"), os.path.join(_project_root, "execute_tools")]:
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
 import torch
-from models_sandbox import MODEL_REGISTRY
-from models_format_sandbox import get_config_class
+from ml_models.models_sandbox import MODEL_REGISTRY
+from ml_models.models_format_sandbox import get_config_class
 
 
 # ── constants ────────────────────────────────────────────────────────────────
