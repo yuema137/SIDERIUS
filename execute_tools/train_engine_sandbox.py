@@ -106,12 +106,14 @@ def run_experiment(model_cfg, train_cfg: TrainConfig, loss_cfg: LossConfig, data
             input_seq = input_batch.to(device)
             target_seq = target_batch.to(device)
 
-            # --- KEY FIX: Type conversion based on LOSS and MODEL requirements ---
+            # --- Type conversion based on LOSS and MODEL requirements ---
             # 1. Input: Based on Architecture
-            if model_cfg.model_type in ("punet", "transformer", "wavenet", "rnn"):
-                input_seq = input_seq.int()   # Embedding layers expect discrete ADC values
-            else:
+            # The forward contract is [B, T] int64 for all embedding-based models.
+            # Only fcnet (AE) uses float input for regression.
+            if model_cfg.model_type == "fcnet":
                 input_seq = input_seq.float() # AE/FCNet expects floats
+            else:
+                input_seq = input_seq.int()   # All others: Embedding layers expect discrete ADC values
 
             # 2. Target: Based on Loss Type
             if loss_cfg.loss_type in ["ce", "focal", "focal_cw"]:
