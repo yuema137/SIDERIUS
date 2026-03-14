@@ -67,6 +67,13 @@ class ModelRunSummary(BaseModel):
         description="One-line conclusion from each round's LLM reflection. "
                     "Extracted from the 'memory.conclusion' field of each record.",
     )
+    model_description: Optional[str] = Field(
+        default=None,
+        description="Architecture description (markdown + math). For built-in models "
+                    "this is loaded from description.md by the interpretation agent. "
+                    "For agent-generated models, the workflow passes it directly so "
+                    "the interpretation agent doesn't need filesystem access.",
+    )
 
 
 class InterpretationInput(BaseModel):

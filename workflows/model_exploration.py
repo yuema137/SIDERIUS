@@ -382,8 +382,12 @@ def run_workflow(
 
         # --- Accumulate results for next iteration ---
         all_model_types.append(proposal.model_name)
-        new_groups = tuning_outputs_to_summaries([tune_output])
-        summary_groups.extend(new_groups)
+        new_summaries = tuning_outputs_to_summaries([tune_output])
+        # Attach model description so iteration 2+ interpretation agent
+        # can find it without filesystem access to the attempt directory
+        for s in new_summaries:
+            s.model_description = proposal.model_description
+        summary_groups.extend(new_summaries)
 
         # --- Check score target ---
         if tune_output.best_denoising_score is not None:

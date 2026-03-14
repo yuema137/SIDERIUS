@@ -223,8 +223,22 @@ class ResultInterpretationAgent:
             {s.model_type for s in inp.summaries} | set(inp.model_types or [])
         )
 
-        # --- Load descriptions (raises FileNotFoundError if any missing) ---
-        model_descriptions = {mt: get_model_description(mt) for mt in effective_types}
+        # --- Load descriptions ---
+        # For agent-generated models, the description may be passed directly
+        # in ModelRunSummary.model_description (avoiding filesystem dependency).
+        # For built-in models, load from description.md on disk.
+        model_descriptions: Dict[str, str] = {}
+        for mt in effective_types:
+            # Check if any summary carries the description inline
+            inline_desc = None
+            for s in inp.summaries:
+                if s.model_type == mt and s.model_description:
+                    inline_desc = s.model_description
+                    break
+            if inline_desc:
+                model_descriptions[mt] = inline_desc
+            else:
+                model_descriptions[mt] = get_model_description(mt)
 
         # --- Deterministic pre-computation from summaries ---
         per_model_best:   Dict[str, Optional[float]] = {}
