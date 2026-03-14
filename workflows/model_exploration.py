@@ -25,20 +25,21 @@ The workflow retries propose→implement→validate on validation failure, feedi
 error messages back to the proposal agent. Full retry/rerouting logic belongs
 in a future orchestrator.
 
-Storage layout:
+Storage layout (run_name is consistent across all files):
   {workspace}/{run_name}/
   ├── workflow_{run_name}.json
   ├── iteration_001/
-  │   ├── interpretation.json
+  │   ├── interpretation_{run_name}.json
   │   ├── attempt_001/
-  │   │   ├── proposal.json
-  │   │   ├── implementor.json
-  │   │   ├── validation.json
+  │   │   ├── proposal_{run_name}.json
+  │   │   ├── implementor_{run_name}.json
+  │   │   ├── validation_{run_name}.json
   │   │   ├── models/{model_name}.py
   │   │   └── tests/test_{model_name}.py
   │   └── {model_name}/              (tuning output, named by proposed model)
-  │       ├── run_output.json
-  │       ├── summary.json
+  │       ├── run_output_{run_name}.json
+  │       ├── summary_{run_name}.json
+  │       ├── run_config_{run_name}.json
   │       ├── cached_models/
   │       ├── configs/
   │       └── records/
@@ -252,7 +253,6 @@ def run_workflow(
     for iteration in range(1, max_iterations + 1):
         iter_dir = os.path.join(run_dir, f"iteration_{iteration:03d}")
         os.makedirs(iter_dir, exist_ok=True)
-        iter_run_name = f"{run_name}_iter{iteration:03d}"
 
         print(f"\n{'='*60}")
         print(f"  ITERATION {iteration}/{max_iterations}")
@@ -260,7 +260,7 @@ def run_workflow(
         print(f"{'='*60}\n")
 
         # --- Interpret (once per iteration, with accumulated results) ---
-        interp_storage = _make_storage(iter_dir, iter_run_name)
+        interp_storage = _make_storage(iter_dir, run_name)
         interp_input = InterpretationInput(
             summaries=summary_groups,
             human_advice=human_advice_interpret,
@@ -284,8 +284,7 @@ def run_workflow(
         for attempt in range(1, max_proposal_attempts + 1):
             attempt_dir = os.path.join(iter_dir, f"attempt_{attempt:03d}")
             os.makedirs(attempt_dir, exist_ok=True)
-            attempt_run_name = f"{iter_run_name}_att{attempt:03d}"
-            attempt_storage = _make_storage(attempt_dir, attempt_run_name)
+            attempt_storage = _make_storage(attempt_dir, run_name)
 
             print(f"  [{iteration}.{attempt}] Proposing new model (attempt {attempt}/{max_proposal_attempts})...")
 
@@ -357,8 +356,7 @@ def run_workflow(
         # --- Tune ---
         tuning_dir = os.path.join(iter_dir, proposal.model_name)
         os.makedirs(tuning_dir, exist_ok=True)
-        tuning_run_name = f"{iter_run_name}_{proposal.model_name}"
-        tuning_storage = _make_storage(tuning_dir, tuning_run_name)
+        tuning_storage = _make_storage(tuning_dir, run_name)
 
         print(f"  [{iteration}] Tuning '{proposal.model_name}' for {max_rounds} rounds...")
         tune_llm = llm_config.get("tune")
