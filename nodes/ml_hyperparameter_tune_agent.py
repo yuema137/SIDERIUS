@@ -173,7 +173,13 @@ class HyperparamTuningAgent:
                     config_manual=config_manual_data,
                 )
 
-                model_type = decision.get("model_type", "fcnet")
+                # When force_model is set, override the LLM's model_type choice.
+                # The LLM may pick a built-in model if it doesn't recognize the
+                # agent-generated model type in the config manual.
+                if model_type_setting != "auto":
+                    model_type = model_type_setting
+                else:
+                    model_type = decision.get("model_type", "fcnet")
                 exp_id = f"{model_type}_{run_name}_{total_attempts:03d}"
                 hypothesis = decision.get("hypothesis", "N/A")
 
@@ -182,11 +188,14 @@ class HyperparamTuningAgent:
                 print(f"Reasoning: {decision.get('reasoning', 'No reasoning provided.')}")
 
                 # C. ACT: Execute the Atomic Skill Pipeline (Train -> Inf -> Score)
+                model_config = decision.get("model_config", {})
+                # Ensure model_config.model_type matches the forced model type
+                model_config["model_type"] = model_type
                 active_params = {
                     "exp_id":       exp_id,
                     "run_name":     run_name,
                     "model_type":   model_type,
-                    "model_config": decision.get("model_config", {}),
+                    "model_config": model_config,
                     "train_config": decision.get("train_config", {}),
                     "loss_config":  decision.get("loss_config", {}),
                 }
