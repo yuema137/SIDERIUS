@@ -185,6 +185,7 @@ def _register_plugin(impl_output, model_name: str):
         print(f"    Plugin registered → {dest_plugin}")
     else:
         print(f"    Warning: plugin file not found at {impl_output.model_file_path}, skipping registration")
+        return
 
     # Copy description
     if os.path.isfile(impl_output.description_file_path):
@@ -195,6 +196,21 @@ def _register_plugin(impl_output, model_name: str):
         print(f"    Description registered → {dest_desc}")
     else:
         print(f"    Warning: description not found at {impl_output.description_file_path}, skipping registration")
+
+    # Extend the already-cached MODEL_REGISTRY so the tuning agent can
+    # find the new model type without re-importing models_sandbox.
+    try:
+        from ml_models.models_sandbox import MODEL_REGISTRY
+        from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
+        from ml_models.plugin_loader import _load_plugin
+
+        plugin_data = _load_plugin(dest_plugin)
+        if plugin_data:
+            MODEL_REGISTRY[plugin_data["model_type"]] = plugin_data["model_class"]
+            PLUGIN_CONFIG_REGISTRY[plugin_data["model_type"]] = plugin_data["config_class"]
+            print(f"    Model '{model_name}' added to MODEL_REGISTRY")
+    except Exception as e:
+        print(f"    Warning: could not extend MODEL_REGISTRY: {e}")
 
 
 # ---------------------------------------------------------------------------
