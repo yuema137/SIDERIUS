@@ -74,6 +74,7 @@ class ProposalOutput(BaseModel):
     """
 
     model_name: str = Field(
+        min_length=1,
         description="Short, unique, snake_case identifier for the proposed model "
                     "(e.g. 'attn_unet', 'dilated_rnn'). Must not clash with existing model types.",
     )

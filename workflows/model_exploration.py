@@ -288,55 +288,63 @@ def run_workflow(
 
             print(f"  [{iteration}.{attempt}] Proposing new model (attempt {attempt}/{max_proposal_attempts})...")
 
-            # --- Propose ---
-            propose_input = local_full_context(interpretation, attempt_storage)
-            propose_input.existing_model_types = list(all_model_types)
-            if human_advice_propose is not None:
-                propose_input.human_advice = human_advice_propose
-            if previous_failures:
-                propose_input.previous_failures = previous_failures
+            try:
+                # --- Propose ---
+                propose_input = local_full_context(interpretation, attempt_storage)
+                propose_input.existing_model_types = list(all_model_types)
+                if human_advice_propose is not None:
+                    propose_input.human_advice = human_advice_propose
+                if previous_failures:
+                    propose_input.previous_failures = previous_failures
 
-            proposal = MLModelProposalAgent(
-                **llm_config.get("propose"),
-            ).run(propose_input)
-            print(f"    Proposed: {proposal.model_name}")
+                proposal = MLModelProposalAgent(
+                    **llm_config.get("propose"),
+                ).run(propose_input)
+                print(f"    Proposed: {proposal.model_name}")
 
-            # --- Implement ---
-            print(f"  [{iteration}.{attempt}] Implementing...")
-            impl_input = local_full_spec(proposal, attempt_storage)
-            # Route plugin files into the attempt directory (not the default
-            # agent_generated/ in the working dir)
-            impl_input.plugin_dir = os.path.join(attempt_dir, "models")
-            impl_input.test_dir = os.path.join(attempt_dir, "tests")
-            if human_advice_implement is not None:
-                impl_input.human_advice = human_advice_implement
+                # --- Implement ---
+                print(f"  [{iteration}.{attempt}] Implementing...")
+                impl_input = local_full_spec(proposal, attempt_storage)
+                # Route plugin files into the attempt directory (not the default
+                # agent_generated/ in the working dir)
+                impl_input.plugin_dir = os.path.join(attempt_dir, "models")
+                impl_input.test_dir = os.path.join(attempt_dir, "tests")
+                if human_advice_implement is not None:
+                    impl_input.human_advice = human_advice_implement
 
-            impl_output = MLModelImplementor(
-                **llm_config.get("implement"),
-            ).run(impl_input)
-            print(f"    Plugin: {impl_output.model_file_path}")
+                impl_output = MLModelImplementor(
+                    **llm_config.get("implement"),
+                ).run(impl_input)
+                print(f"    Plugin: {impl_output.model_file_path}")
 
-            # --- Validate ---
-            print(f"  [{iteration}.{attempt}] Validating...")
-            valid_llm = llm_config.get("validate")
-            valid_input = local_all_fields(
-                impl_output, attempt_storage,
-                llm_provider=valid_llm.get("provider", "gemini"),
-                llm_model_id=valid_llm.get("model_id", "gemini-3.1-flash-lite-preview"),
-            )
-            if human_advice_validate is not None:
-                valid_input.human_advice = human_advice_validate
+                # --- Validate ---
+                print(f"  [{iteration}.{attempt}] Validating...")
+                valid_llm = llm_config.get("validate")
+                valid_input = local_all_fields(
+                    impl_output, attempt_storage,
+                    llm_provider=valid_llm.get("provider", "gemini"),
+                    llm_model_id=valid_llm.get("model_id", "gemini-3.1-flash-lite-preview"),
+                )
+                if human_advice_validate is not None:
+                    valid_input.human_advice = human_advice_validate
 
-            validation = MLCodeValidatorAgent(
-                **valid_llm,
-            ).run(valid_input)
+                validation = MLCodeValidatorAgent(
+                    **valid_llm,
+                ).run(valid_input)
 
-            if validation.passed:
-                print(f"    All 7 checks passed.\n")
-                break
-            else:
-                print(f"    Validation FAILED: {validation.error_message}")
-                previous_failures.append(validation.error_message or "Unknown validation error")
+                if validation.passed:
+                    print(f"    All 7 checks passed.\n")
+                    break
+                else:
+                    print(f"    Validation FAILED: {validation.error_message}")
+                    previous_failures.append(validation.error_message or "Unknown validation error")
+                    if attempt < max_proposal_attempts:
+                        print(f"    Retrying with failure feedback...\n")
+
+            except Exception as e:
+                error_msg = f"Node error: {type(e).__name__}: {e}"
+                print(f"    ERROR: {error_msg}")
+                previous_failures.append(error_msg)
                 if attempt < max_proposal_attempts:
                     print(f"    Retrying with failure feedback...\n")
 
