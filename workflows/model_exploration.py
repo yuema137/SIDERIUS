@@ -304,6 +304,10 @@ def run_workflow(
             # --- Implement ---
             print(f"  [{iteration}.{attempt}] Implementing...")
             impl_input = local_full_spec(proposal, attempt_storage)
+            # Route plugin files into the attempt directory (not the default
+            # agent_generated/ in the working dir)
+            impl_input.plugin_dir = os.path.join(attempt_dir, "models")
+            impl_input.test_dir = os.path.join(attempt_dir, "tests")
             if human_advice_implement is not None:
                 impl_input.human_advice = human_advice_implement
 
