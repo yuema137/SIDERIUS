@@ -1,7 +1,7 @@
 """
 Unit tests for agent/llm_bridge.py
 
-Mocks provider SDKs (google.generativeai, openai) to verify:
+Mocks provider SDKs (google.genai, openai) to verify:
   - generate()      returns a Dict (JSON mode)
   - generate_text() returns a str  (plain-text mode)
   - Both methods work for both providers
@@ -27,8 +27,10 @@ VALID_JSON_DICT = {"color": "blue", "clouds": True}
 PLAIN_TEXT      = "The sky is blue with scattered clouds."
 
 
-def _gemini_json_response(text: str) -> MagicMock:
-    return MagicMock(text=text)
+def _gemini_response(text: str) -> MagicMock:
+    response = MagicMock()
+    response.text = text
+    return response
 
 
 def _openai_response(content: str) -> MagicMock:
@@ -48,32 +50,34 @@ def _openai_response(content: str) -> MagicMock:
 class TestGeminiGenerate:
 
     def test_returns_dict(self):
-        with patch("agent.llm_bridge.genai.GenerativeModel") as MockModel:
-            MockModel.return_value.generate_content.return_value = _gemini_json_response(VALID_JSON_STR)
+        with patch("agent.llm_bridge.genai.Client") as MockClient:
+            MockClient.return_value.models.generate_content.return_value = _gemini_response(VALID_JSON_STR)
             bridge = LLMBridge(provider="gemini", model_id="test-model")
             result = bridge.generate(SYSTEM_PROMPT, USER_PROMPT)
         assert result == VALID_JSON_DICT
 
     def test_json_mode_requested(self):
-        with patch("agent.llm_bridge.genai.GenerativeModel") as MockModel:
-            mock_instance = MockModel.return_value
-            mock_instance.generate_content.return_value = _gemini_json_response(VALID_JSON_STR)
+        with patch("agent.llm_bridge.genai.Client") as MockClient:
+            mock_generate = MockClient.return_value.models.generate_content
+            mock_generate.return_value = _gemini_response(VALID_JSON_STR)
             bridge = LLMBridge(provider="gemini", model_id="test-model")
             bridge.generate(SYSTEM_PROMPT, USER_PROMPT)
-            call_kwargs = mock_instance.generate_content.call_args
-            assert call_kwargs.kwargs.get("generation_config", {}).get("response_mime_type") == "application/json"
+            call_kwargs = mock_generate.call_args.kwargs
+            config = call_kwargs.get("config")
+            assert config is not None
+            assert config.response_mime_type == "application/json"
 
     def test_malformed_json_returns_empty_dict(self):
-        with patch("agent.llm_bridge.genai.GenerativeModel") as MockModel:
-            MockModel.return_value.generate_content.return_value = _gemini_json_response("not valid json {{")
+        with patch("agent.llm_bridge.genai.Client") as MockClient:
+            MockClient.return_value.models.generate_content.return_value = _gemini_response("not valid json {{")
             bridge = LLMBridge(provider="gemini", model_id="test-model")
             result = bridge.generate(SYSTEM_PROMPT, USER_PROMPT)
         assert result == {}
 
     def test_markdown_fenced_json_is_parsed(self):
         fenced = "```json\n" + VALID_JSON_STR + "\n```"
-        with patch("agent.llm_bridge.genai.GenerativeModel") as MockModel:
-            MockModel.return_value.generate_content.return_value = _gemini_json_response(fenced)
+        with patch("agent.llm_bridge.genai.Client") as MockClient:
+            MockClient.return_value.models.generate_content.return_value = _gemini_response(fenced)
             bridge = LLMBridge(provider="gemini", model_id="test-model")
             result = bridge.generate(SYSTEM_PROMPT, USER_PROMPT)
         assert result == VALID_JSON_DICT
@@ -86,22 +90,23 @@ class TestGeminiGenerate:
 class TestGeminiGenerateText:
 
     def test_returns_str(self):
-        with patch("agent.llm_bridge.genai.GenerativeModel") as MockModel:
-            MockModel.return_value.generate_content.return_value = _gemini_json_response(PLAIN_TEXT)
+        with patch("agent.llm_bridge.genai.Client") as MockClient:
+            MockClient.return_value.models.generate_content.return_value = _gemini_response(PLAIN_TEXT)
             bridge = LLMBridge(provider="gemini", model_id="test-model")
             result = bridge.generate_text(SYSTEM_PROMPT, USER_PROMPT)
         assert isinstance(result, str)
         assert result == PLAIN_TEXT
 
     def test_no_json_mode_requested(self):
-        with patch("agent.llm_bridge.genai.GenerativeModel") as MockModel:
-            mock_instance = MockModel.return_value
-            mock_instance.generate_content.return_value = _gemini_json_response(PLAIN_TEXT)
+        with patch("agent.llm_bridge.genai.Client") as MockClient:
+            mock_generate = MockClient.return_value.models.generate_content
+            mock_generate.return_value = _gemini_response(PLAIN_TEXT)
             bridge = LLMBridge(provider="gemini", model_id="test-model")
             bridge.generate_text(SYSTEM_PROMPT, USER_PROMPT)
-            call_kwargs = mock_instance.generate_content.call_args
-            # generate_text should not pass generation_config with response_mime_type
-            assert "generation_config" not in (call_kwargs.kwargs or {})
+            call_kwargs = mock_generate.call_args.kwargs
+            config = call_kwargs.get("config")
+            # generate_text should not request JSON mime type
+            assert config is None or getattr(config, "response_mime_type", None) is None
 
 
 # ---------------------------------------------------------------------------
