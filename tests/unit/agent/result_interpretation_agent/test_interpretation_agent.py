@@ -23,13 +23,27 @@ from nodes.result_interpretation_agent import ResultInterpretationAgent
 # Fixtures
 # ---------------------------------------------------------------------------
 
-FAKE_LLM_RESPONSE = {
+# Phase 1 response (per-model summarization)
+FAKE_PER_MODEL_RESPONSE = {
     "key_findings": [
         "focal loss with gamma=2 consistently outperforms ce by ~0.05",
         "increasing depth beyond 3 yields diminishing returns",
     ],
     "bottlenecks": [
         "architecture capacity ceiling at depth=3 — score plateaued across 8 experiments",
+    ],
+    "best_config_analysis": "Depth 4 with focal loss gamma=2 yielded the best result.",
+    "score_trend": "Scores improved initially but plateaued after depth=3.",
+}
+
+# Phase 2 response (cross-model synthesis)
+FAKE_SYNTHESIS_RESPONSE = {
+    "key_findings": [
+        "punet outperforms fcnet by 0.9 points at best",
+        "both models plateau at similar training budgets",
+    ],
+    "bottlenecks": [
+        "all current architectures hit a capacity ceiling",
     ],
     "take_home_message": "The current architecture has saturated; a fundamentally different design is needed.",
 }
@@ -62,10 +76,21 @@ RECORD_FCNET = {
 @pytest.fixture
 def agent():
     with patch("nodes.result_interpretation_agent.LLMBridge") as MockBridge:
-        MockBridge.return_value.generate.return_value = FAKE_LLM_RESPONSE
+        # First call(s) = phase 1 (per-model), last call = phase 2 (synthesis)
+        # For single-model tests, only phase 1 is called (synthesis skipped).
+        # For multi-model tests, N phase 1 calls + 1 phase 2 call.
+        MockBridge.return_value.generate.side_effect = _llm_dispatch
         a = ResultInterpretationAgent(provider="gemini", model_id="test-model")
         a.bridge = MockBridge.return_value
         yield a
+
+
+def _llm_dispatch(system_prompt: str, user_prompt: str) -> dict:
+    """Route mock LLM calls to the right fake response based on the system prompt."""
+    if "ONE model architecture" in system_prompt:
+        return FAKE_PER_MODEL_RESPONSE
+    else:
+        return FAKE_SYNTHESIS_RESPONSE
 
 
 def make_input(records, model_type="punet", run_name="r1", workspace="/tmp/interp_test"):
@@ -121,11 +146,19 @@ class TestSingleGroup:
         assert output.per_model_worst["punet"] == 1.5
 
     def test_llm_findings_merged(self, agent, tmp_path):
+        """Single-model: phase 1 findings used directly, synthesis skipped."""
         inp = make_input([RECORD_A], workspace=str(tmp_path))
         output = agent.run(inp)
-        assert output.key_findings == FAKE_LLM_RESPONSE["key_findings"]
-        assert output.bottlenecks == FAKE_LLM_RESPONSE["bottlenecks"]
-        assert output.take_home_message == FAKE_LLM_RESPONSE["take_home_message"]
+        assert output.key_findings == FAKE_PER_MODEL_RESPONSE["key_findings"]
+        assert output.bottlenecks == FAKE_PER_MODEL_RESPONSE["bottlenecks"]
+        # take_home_message is constructed from per-model summary in single-model mode
+        assert "punet" in output.take_home_message.lower() or "plateau" in output.take_home_message.lower()
+
+    def test_per_model_summaries_populated(self, agent, tmp_path):
+        inp = make_input([RECORD_A, RECORD_B], workspace=str(tmp_path))
+        output = agent.run(inp)
+        assert "punet" in output.per_model_summaries
+        assert output.per_model_summaries["punet"]["key_findings"] == FAKE_PER_MODEL_RESPONSE["key_findings"]
 
     def test_output_written_to_file(self, agent, tmp_path):
         inp = make_input([RECORD_A], workspace=str(tmp_path), run_name="myrun")
@@ -190,6 +223,26 @@ class TestMultiGroup:
         ], workspace=str(tmp_path))
         output = agent.run(inp)
         assert output.total_experiments == 3
+
+    def test_synthesis_used_for_multi_model(self, agent, tmp_path):
+        """Multi-model: phase 2 synthesis call produces the final findings."""
+        inp = make_multi_input([
+            {"model_type": "punet", "run_name": "v1", "records": [RECORD_A]},
+            {"model_type": "fcnet", "run_name": "v1", "records": [RECORD_FCNET]},
+        ], workspace=str(tmp_path))
+        output = agent.run(inp)
+        # Synthesis response should be used for final output
+        assert output.key_findings == FAKE_SYNTHESIS_RESPONSE["key_findings"]
+        assert output.take_home_message == FAKE_SYNTHESIS_RESPONSE["take_home_message"]
+
+    def test_per_model_summaries_for_all_models(self, agent, tmp_path):
+        inp = make_multi_input([
+            {"model_type": "punet", "run_name": "v1", "records": [RECORD_A]},
+            {"model_type": "fcnet", "run_name": "v1", "records": [RECORD_FCNET]},
+        ], workspace=str(tmp_path))
+        output = agent.run(inp)
+        assert "punet" in output.per_model_summaries
+        assert "fcnet" in output.per_model_summaries
 
     def test_descriptions_loaded_for_all_models(self, agent, tmp_path):
         inp = make_multi_input([

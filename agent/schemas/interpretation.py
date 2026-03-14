@@ -143,7 +143,15 @@ class InterpretationOutput(BaseModel):
         description="The params dict that produced the overall best denoising score.",
     )
 
-    # --- LLM-generated analysis ---
+    # --- Per-model summaries (Phase 1 output) ---
+    per_model_summaries: Dict[str, Dict[str, Any]] = Field(
+        default_factory=dict,
+        description="model_type → structured summary from Phase 1 (per-model LLM call). "
+                    "Each summary contains key_findings, bottlenecks, best_config_analysis, "
+                    "and score_trend. Carried forward for debugging and downstream consumption.",
+    )
+
+    # --- LLM-generated analysis (Phase 2 output) ---
     key_findings: List[str] = Field(
         description="Concrete, ranked observations extracted from the experiment history.",
     )
