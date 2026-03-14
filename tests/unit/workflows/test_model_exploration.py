@@ -54,7 +54,7 @@ from agent.schemas.validator import ValidatorOutput
 
 from workflows.model_exploration import (
     load_tuning_outputs,
-    tuning_outputs_to_summary_groups,
+    tuning_outputs_to_summaries,
     run_workflow,
 )
 
@@ -204,26 +204,31 @@ class TestLoadTuningOutputs:
 
 
 # ---------------------------------------------------------------------------
-# tuning_outputs_to_summary_groups tests
+# tuning_outputs_to_summaries tests
 # ---------------------------------------------------------------------------
 
-class TestTuningOutputsToSummaryGroups:
+class TestTuningOutputsToSummaries:
 
     def test_converts_single_output(self):
-        groups = tuning_outputs_to_summary_groups([_make_tuning_output()])
-        assert len(groups) == 1
-        assert groups[0].model_type == "punet"
+        summaries = tuning_outputs_to_summaries([_make_tuning_output()])
+        assert len(summaries) == 1
+        assert summaries[0].model_type == "punet"
 
     def test_converts_multiple_outputs(self):
-        groups = tuning_outputs_to_summary_groups([
+        summaries = tuning_outputs_to_summaries([
             _make_tuning_output(model_type="punet"),
             _make_tuning_output(model_type="wavenet", score=1.2),
         ])
-        assert len(groups) == 2
+        assert len(summaries) == 2
 
-    def test_preserves_records(self):
-        groups = tuning_outputs_to_summary_groups([_make_tuning_output()])
-        assert groups[0].records[0]["denoising_score"] == 1.5
+    def test_preserves_best_score(self):
+        summaries = tuning_outputs_to_summaries([_make_tuning_output()])
+        assert summaries[0].best_denoising_score == 1.5
+
+    def test_extracts_round_scores(self):
+        summaries = tuning_outputs_to_summaries([_make_tuning_output()])
+        assert len(summaries[0].round_scores) == 1
+        assert summaries[0].round_scores[0] == 1.5
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +339,8 @@ class TestRunWorkflowSingleIteration:
             workspace=workflow_env["workspace"],
             run_name="test_run",
         )
-        summary_path = os.path.join(workflow_env["workspace"], "workflow_test_run.json")
+        run_dir = os.path.join(workflow_env["workspace"], "test_run")
+        summary_path = os.path.join(run_dir, "workflow_test_run.json")
         assert os.path.exists(summary_path)
         with open(summary_path) as f:
             summary = json.load(f)
@@ -349,10 +355,12 @@ class TestRunWorkflowSingleIteration:
             workspace=workflow_env["workspace"],
             run_name="test_run",
         )
-        iter_dir = os.path.join(workflow_env["workspace"], "iteration_001")
+        run_dir = os.path.join(workflow_env["workspace"], "test_run")
+        iter_dir = os.path.join(run_dir, "iteration_001")
         assert os.path.isdir(iter_dir)
         assert os.path.isdir(os.path.join(iter_dir, "attempt_001"))
-        assert os.path.isdir(os.path.join(iter_dir, "tuning"))
+        # Tuning dir is named by the proposed model
+        assert os.path.isdir(os.path.join(iter_dir, "gated_tcn"))
 
 
 # ---------------------------------------------------------------------------
@@ -483,6 +491,7 @@ class TestRunWorkflowValidationRetry:
             workspace=workflow_env["workspace"],
             run_name="test_run",
         )
-        iter_dir = os.path.join(workflow_env["workspace"], "iteration_001")
+        run_dir = os.path.join(workflow_env["workspace"], "test_run")
+        iter_dir = os.path.join(run_dir, "iteration_001")
         assert os.path.isdir(os.path.join(iter_dir, "attempt_001"))
         assert os.path.isdir(os.path.join(iter_dir, "attempt_002"))

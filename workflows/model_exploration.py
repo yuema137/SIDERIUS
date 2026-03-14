@@ -26,19 +26,22 @@ error messages back to the proposal agent. Full retry/rerouting logic belongs
 in a future orchestrator.
 
 Storage layout:
-  {workspace}/
+  {workspace}/{run_name}/
   ├── workflow_{run_name}.json
   ├── iteration_001/
   │   ├── interpretation.json
   │   ├── attempt_001/
   │   │   ├── proposal.json
   │   │   ├── implementor.json
-  │   │   └── validation.json
-  │   ├── attempt_002/          (if attempt 1 failed)
-  │   │   └── ...
-  │   └── tuning/
+  │   │   ├── validation.json
+  │   │   ├── models/{model_name}.py
+  │   │   └── tests/test_{model_name}.py
+  │   └── {model_name}/              (tuning output, named by proposed model)
   │       ├── run_output.json
-  │       └── ...
+  │       ├── summary.json
+  │       ├── cached_models/
+  │       ├── configs/
+  │       └── records/
   ├── iteration_002/
   │   └── ...
 
@@ -64,8 +67,9 @@ SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, SIDERIUS_ROOT)
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
-from agent.schemas.interpretation import InterpretationInput, SummaryGroup
+from agent.schemas.interpretation import InterpretationInput, ModelRunSummary
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
 
 from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import local_full_context
 from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full_spec
@@ -134,23 +138,17 @@ def load_tuning_outputs(
     return outputs
 
 
-def tuning_outputs_to_summary_groups(
+def tuning_outputs_to_summaries(
     outputs: list[HyperparamTuningOutput],
-) -> list[SummaryGroup]:
+) -> list[ModelRunSummary]:
     """
-    Convert a list of HyperparamTuningOutput objects into SummaryGroup objects
-    suitable for InterpretationInput.
+    Convert a list of HyperparamTuningOutput objects into condensed
+    ModelRunSummary objects suitable for InterpretationInput.
+
+    Raw experiment records are NOT carried forward — only aggregates
+    and per-round scores/conclusions are extracted.
     """
-    groups = []
-    for output in outputs:
-        records = [r.model_dump() if hasattr(r, "model_dump") else r
-                   for r in output.all_records]
-        groups.append(SummaryGroup(
-            model_type=output.model_type,
-            run_name=output.run_name,
-            records=records,
-        ))
-    return groups
+    return [tuning_output_to_model_run_summary(o) for o in outputs]
 
 
 def _make_storage(workspace: str, run_name: str) -> StorageConfig:
@@ -215,7 +213,10 @@ def run_workflow(
     """
     if llm_config is None:
         llm_config = WorkflowLLMConfig()
-    os.makedirs(workspace, exist_ok=True)
+
+    # All workflow output goes under {workspace}/{run_name}/
+    run_dir = os.path.join(workspace, run_name)
+    os.makedirs(run_dir, exist_ok=True)
     started_at = time.strftime("%Y-%m-%d %H:%M:%S")
 
     print(f"\n{'='*60}")
@@ -236,7 +237,7 @@ def run_workflow(
     # --- Step 0: Load existing tuning outputs ---
     print("Step 0: Loading existing tuning outputs...")
     tuning_outputs = load_tuning_outputs(data_dir, model_types, source_run_name)
-    summary_groups = tuning_outputs_to_summary_groups(tuning_outputs)
+    summary_groups = tuning_outputs_to_summaries(tuning_outputs)
     print(f"  Loaded {len(tuning_outputs)} tuning outputs "
           f"across {len(set(o.model_type for o in tuning_outputs))} model types.\n")
 
@@ -249,7 +250,7 @@ def run_workflow(
 
     # --- Iteration loop ---
     for iteration in range(1, max_iterations + 1):
-        iter_dir = os.path.join(workspace, f"iteration_{iteration:03d}")
+        iter_dir = os.path.join(run_dir, f"iteration_{iteration:03d}")
         os.makedirs(iter_dir, exist_ok=True)
         iter_run_name = f"{run_name}_iter{iteration:03d}"
 
@@ -354,9 +355,9 @@ def run_workflow(
             break
 
         # --- Tune ---
-        tuning_dir = os.path.join(iter_dir, "tuning")
+        tuning_dir = os.path.join(iter_dir, proposal.model_name)
         os.makedirs(tuning_dir, exist_ok=True)
-        tuning_run_name = f"{iter_run_name}_tune"
+        tuning_run_name = f"{iter_run_name}_{proposal.model_name}"
         tuning_storage = _make_storage(tuning_dir, tuning_run_name)
 
         print(f"  [{iteration}] Tuning '{proposal.model_name}' for {max_rounds} rounds...")
@@ -376,7 +377,7 @@ def run_workflow(
 
         # --- Accumulate results for next iteration ---
         all_model_types.append(proposal.model_name)
-        new_groups = tuning_outputs_to_summary_groups([tune_output])
+        new_groups = tuning_outputs_to_summaries([tune_output])
         summary_groups.extend(new_groups)
 
         # --- Check score target ---
@@ -406,7 +407,7 @@ def run_workflow(
     print(f"{'='*60}\n")
 
     _save_workflow_summary(
-        workspace, run_name, started_at, finished_at,
+        run_dir, run_name, started_at, finished_at,
         iteration_results, best_score_overall,
     )
 

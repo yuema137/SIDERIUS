@@ -12,18 +12,18 @@ Protocol naming convention: {transport}_{data_scope}
 
 Implemented
 -----------
-local_all_records       Direct in-memory transfer of the full experiment history.
+local_all_records       Converts HyperparamTuningOutput to a condensed ModelRunSummary
+                        (scores, trajectory, conclusions) and wraps it in InterpretationInput.
 
 Planned
 -------
-database_all_records    DB-backed transfer: tune agent writes records to the database,
-                        interp agent reads them from the database. Requires a Postgres
-                        StorageConfig backend. Raises NotImplementedError until wired.
+database_all_records    DB-backed transfer. Raises NotImplementedError until wired.
 """
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
 from agent.schemas.interpretation import InterpretationInput
 from agent.schemas.storage import StorageConfig
+from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
 
 
 def local_all_records(
@@ -31,29 +31,24 @@ def local_all_records(
     storage: StorageConfig,
 ) -> InterpretationInput:
     """
-    Local in-memory protocol — transfers the full experiment history directly.
+    Local in-memory protocol — converts tuning output to a condensed summary.
 
     Consumes from ml-model-tune (HyperparamTuningOutput):
-      - all_records  : full experiment history (success, error, OOM-skipped)
-      - model_type   : architecture key
-      - run_name     : run identifier
+      - model_type, run_name, status, completed_rounds
+      - best_denoising_score, best_config
+      - all_records (used to extract round_scores and round_conclusions,
+        then discarded — raw records are NOT passed to the interpretation agent)
 
     Populates in ml-result-interp (InterpretationInput):
-      - summaries    : [SummaryGroup(model_type, run_name, records)]
-      - storage      : passed through from the orchestrator
+      - summaries    : [ModelRunSummary] — condensed run summary
+      - storage      : passed through from the workflow
     """
-    records = [r.model_dump() for r in output.all_records]
+    summary = tuning_output_to_model_run_summary(output)
 
-    return InterpretationInput.model_validate({
-        "summaries": [
-            {
-                "model_type": output.model_type,
-                "run_name":   output.run_name,
-                "records":    records,
-            }
-        ],
-        "storage": storage.model_dump(),
-    })
+    return InterpretationInput(
+        summaries=[summary],
+        storage=storage,
+    )
 
 
 def database_all_records(
@@ -61,19 +56,8 @@ def database_all_records(
     storage: StorageConfig,
 ) -> InterpretationInput:
     """
-    Database-backed protocol — reads all experiment records from the database
-    and returns a fully populated InterpretationInput. The receiving node sees
-    the same complete schema as with local_all_records; it never touches storage
-    directly.
-
-    Consumes from ml-model-tune (HyperparamTuningOutput):
-      - model_type   : used to query the correct DB partition
-      - run_name     : used to query the correct run in the DB
-
-    Populates in ml-result-interp (InterpretationInput):
-      - summaries    : [SummaryGroup(model_type, run_name, records)] — fully populated
-                       by fetching all records from the database
-      - storage      : passed through from the orchestrator
+    Database-backed protocol — reads run summary from the database and returns
+    a fully populated InterpretationInput. Raises NotImplementedError until wired.
     """
     raise NotImplementedError(
         "database_all_records is not yet implemented. "
