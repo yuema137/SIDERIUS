@@ -474,7 +474,21 @@ class MLModelImplementor:
                 f"Pydantic Field definition."
             )
 
-        # Check 2: syntax
+        # Check 2: config fields must be scalar (int, float, bool)
+        config_fields = code.get("config_fields", {})
+        non_scalar = {
+            k: type(v).__name__ for k, v in config_fields.items()
+            if not isinstance(v, (int, float, bool))
+        }
+        if non_scalar:
+            return (
+                f"Non-scalar config fields: {non_scalar}. "
+                f"All config fields must be int, float, or bool — "
+                f"the hyperparameter tuner only searches scalar dimensions. "
+                f"Remove or replace string/list/dict fields with scalar alternatives."
+            )
+
+        # Check 3: syntax
         plugin_src = _assemble_plugin(inp, code)
         try:
             ast.parse(plugin_src)
