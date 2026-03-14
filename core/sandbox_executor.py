@@ -153,6 +153,9 @@ class TidmadSandbox:
         if model_type in PLUGIN_CONFIG_REGISTRY:
             try:
                 validated_m = PLUGIN_CONFIG_REGISTRY[model_type](**m_cfg).model_dump()
+                # Ensure model_type is in the serialized config so the training
+                # subprocess can look up the correct model class.
+                validated_m["model_type"] = model_type
                 validated_t = TrainConfig(**t_cfg).model_dump()
                 validated_l = LossConfig(**l_cfg).model_dump()
                 return validated_m, validated_t, validated_l
