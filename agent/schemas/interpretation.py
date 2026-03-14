@@ -63,6 +63,12 @@ class InterpretationInput(BaseModel):
         description="Maximum number of records passed to the LLM per summary group "
                     "(most recent records preferred when truncating).",
     )
+    human_advice: Optional[str] = Field(
+        default=None,
+        description="Optional human-provided guidance for the interpretation agent. "
+                    "When present, injected into the LLM prompt as high-priority context "
+                    "(e.g. 'focus on comparing training stability across models').",
+    )
     storage: StorageConfig = Field(
         default_factory=lambda: StorageConfig(
             backend="local",

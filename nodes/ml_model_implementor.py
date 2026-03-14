@@ -337,6 +337,15 @@ def _build_reasoning_prompt(inp: ImplementorInput) -> str:
         "  input:  [B, T]       int64   — raw ADC signal",
         "  output: [B, 256, T]  float32 — per-timestep logits",
     ]
+
+    # --- Human advice (injected by workflow) ---
+    if inp.human_advice:
+        lines += [
+            "",
+            "## Human Guidance (high priority)",
+            inp.human_advice,
+        ]
+
     return "\n".join(lines)
 
 

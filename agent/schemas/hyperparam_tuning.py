@@ -122,8 +122,17 @@ class HyperparamTuningInput(BaseModel):
     expert_advice: ExpertAdviceInput = Field(
         default="",
         description=(
-            "Steering guidance for the LLM planner. "
-            "Accepts a plain string (human input) or a structured ExpertAdvice object (agent input)."
+            "Structured guidance from upstream agents (e.g. ml_model_proposal_agent). "
+            "Accepts a plain string or a structured ExpertAdvice object. "
+            "Populated by the validate→tune protocol; not intended for direct human input."
+        ),
+    )
+    human_advice: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional human-provided guidance for the tuning agent. "
+            "When present, injected into the LLM planner prompt alongside expert_advice "
+            "(e.g. 'keep epochs <= 5 for this test run')."
         ),
     )
 

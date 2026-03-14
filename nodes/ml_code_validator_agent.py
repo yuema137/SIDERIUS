@@ -123,6 +123,10 @@ def _build_review_prompt(
     else:
         parts.append("No runtime errors observed. Review the implementation against the specification above.")
 
+    # --- Human advice (injected by workflow) ---
+    if inp.human_advice:
+        parts.append(f"\n\n## Human Guidance (high priority)\n\n{inp.human_advice}\n")
+
     return "".join(parts)
 
 

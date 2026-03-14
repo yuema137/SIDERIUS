@@ -77,6 +77,12 @@ class ValidatorInput(BaseModel):
         default="gemini-3.1-flash-lite-preview",
         description="Specific model ID passed to the provider for code review.",
     )
+    human_advice: Optional[str] = Field(
+        default=None,
+        description="Optional human-provided guidance for the validator agent. "
+                    "When present, injected into the LLM code review prompt as high-priority "
+                    "context (e.g. 'pay special attention to the dilated convolution padding').",
+    )
     storage: StorageConfig = Field(
         default_factory=lambda: StorageConfig(
             backend="local",

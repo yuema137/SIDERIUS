@@ -124,6 +124,15 @@ def _build_user_prompt(
 
         lines.append("")
 
+    # --- Human advice (injected by workflow) ---
+    if inp.human_advice:
+        lines += [
+            "---",
+            "## Human Guidance (high priority)",
+            inp.human_advice,
+            "",
+        ]
+
     return "\n".join(lines)
 
 
