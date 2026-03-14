@@ -63,9 +63,12 @@ import glob
 import argparse
 import time
 
-# Ensure SIDERIUS root is importable
+# Ensure SIDERIUS root and ml_models/ are importable.
+# ml_models/ uses flat internal imports (e.g. from models_format_sandbox import ...)
+# which require ml_models/ on sys.path.
 SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, SIDERIUS_ROOT)
+sys.path.insert(0, os.path.join(SIDERIUS_ROOT, "ml_models"))
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
 from agent.schemas.interpretation import InterpretationInput, ModelRunSummary
