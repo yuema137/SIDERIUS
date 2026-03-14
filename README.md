@@ -19,7 +19,21 @@ SIDERIUS is built on a single unifying idea: **the whole system is a typed, dire
 - **Edges** are directed data dependencies between nodes. Two nodes can only be connected if an explicit, typed **protocol** function exists on that edge.
 - **Workflows** execute pre-designed, deterministic paths through the graph — applying protocols and calling `node.run()` in a fixed sequence. **Orchestrators** are LLM-powered agents that pursue a goal autonomously — they query a skill registry, select which skills to invoke, and adapt at runtime. Both are nodes with `run(input) -> output`.
 
-See [`docs/architecture.md`](docs/architecture.md) for the full design and [`docs/first_model_proposal_demo_architecture.md`](docs/first_model_proposal_demo_architecture.md) for the first end-to-end demo plan.
+See [`docs/architecture.md`](docs/architecture.md) for the full design and [`docs/first_model_proposal_demo_architecture.md`](docs/first_model_proposal_demo_architecture.md) for the implementation details.
+
+### Model exploration workflow
+
+The first workflow (`workflows/model_exploration.py`) implements an iterative closed-loop:
+
+1. **Interpret** existing tuning results (two-phase: per-model summarization + cross-model synthesis)
+2. **Propose** a new model architecture (LLM-driven, with human advice and previous failure feedback)
+3. **Implement** the model as a PyTorch plugin (template-constrained code generation with self-correction)
+4. **Validate** the implementation (7 checks: plugin load, pytest, description, config fields, instantiation, gradient flow, LLM code review)
+5. **Tune** hyperparameters on real data (N rounds of plan → train → infer → score → reflect)
+6. **Accumulate** results and repeat from step 1
+
+Stop conditions: `max_iterations` count or `target_score` threshold. Validation failures trigger
+automatic retry with error feedback. Per-node LLM configuration via `WorkflowLLMConfig`.
 
 ### Current node graph
 
@@ -55,7 +69,7 @@ siderius/
 │   ├── schemas/                    # Pydantic input/output schemas for every node
 │   │   ├── storage.py              # StorageConfig — shared per-node storage config
 │   │   ├── hyperparam_tuning.py    # HyperparamTuningInput / Output / ExpertAdvice
-│   │   ├── interpretation.py       # InterpretationInput / Output / SummaryGroup
+│   │   ├── interpretation.py       # InterpretationInput / Output / ModelRunSummary
 │   │   ├── proposal.py             # ProposalInput / Output
 │   │   ├── implementor.py          # ImplementorInput / Output
 │   │   ├── validator.py            # ValidatorInput / Output
