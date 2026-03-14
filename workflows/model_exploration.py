@@ -60,6 +60,7 @@ import os
 import sys
 import json
 import glob
+import shutil
 import argparse
 import time
 
@@ -161,6 +162,39 @@ def _make_storage(workspace: str, run_name: str) -> StorageConfig:
         backend="local",
         local=LocalStorageConfig(workspace=workspace, run_name=run_name),
     )
+
+
+def _register_plugin(impl_output, model_name: str):
+    """
+    Copy validated plugin files to agent_generated/models/ so the tuning
+    agent's plugin loader can find and register the model.
+
+    Copies:
+      - {model_file_path} → agent_generated/models/{model_name}.py
+      - {description_file_path} → agent_generated/models/{model_name}/description.md
+
+    Skips gracefully if source files don't exist (e.g. in unit tests with mocks).
+    """
+    dest_dir = os.path.join(SIDERIUS_ROOT, "agent_generated", "models")
+
+    # Copy plugin file
+    if os.path.isfile(impl_output.model_file_path):
+        os.makedirs(dest_dir, exist_ok=True)
+        dest_plugin = os.path.join(dest_dir, f"{model_name}.py")
+        shutil.copy2(impl_output.model_file_path, dest_plugin)
+        print(f"    Plugin registered → {dest_plugin}")
+    else:
+        print(f"    Warning: plugin file not found at {impl_output.model_file_path}, skipping registration")
+
+    # Copy description
+    if os.path.isfile(impl_output.description_file_path):
+        desc_dest_dir = os.path.join(dest_dir, model_name)
+        os.makedirs(desc_dest_dir, exist_ok=True)
+        dest_desc = os.path.join(desc_dest_dir, "description.md")
+        shutil.copy2(impl_output.description_file_path, dest_desc)
+        print(f"    Description registered → {dest_desc}")
+    else:
+        print(f"    Warning: description not found at {impl_output.description_file_path}, skipping registration")
 
 
 # ---------------------------------------------------------------------------
@@ -362,6 +396,9 @@ def run_workflow(
             print(f"\n  Iteration {iteration}: exhausted {max_proposal_attempts} proposal "
                   f"attempts without passing validation. Workflow stopping.")
             break
+
+        # --- Register validated plugin so the tuning agent can load it ---
+        _register_plugin(impl_output, proposal.model_name)
 
         # --- Tune ---
         tuning_dir = os.path.join(iter_dir, proposal.model_name)
