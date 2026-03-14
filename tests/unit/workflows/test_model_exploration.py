@@ -164,7 +164,7 @@ def _write_tuning_output(tmp_path, model_type="punet", run="v1", score=1.5):
     agent_dir = tmp_path / "data" / model_type / run / "agent"
     agent_dir.mkdir(parents=True)
     output = _make_tuning_output(model_type=model_type, run_name=run, score=score)
-    (agent_dir / f"run_output_{run}.json").write_text(output.model_dump_json(indent=2))
+    (agent_dir / f"run_output_{run}_agent.json").write_text(output.model_dump_json(indent=2))
 
 
 # ---------------------------------------------------------------------------
@@ -175,33 +175,32 @@ class TestLoadTuningOutputs:
 
     def test_loads_valid_json(self, tmp_path):
         _write_tuning_output(tmp_path, "punet")
-        results = load_tuning_outputs(str(tmp_path / "data"), ["punet"])
+        results = load_tuning_outputs(str(tmp_path / "data"), ["punet"], "v1")
         assert len(results) == 1
         assert results[0].model_type == "punet"
 
-    def test_skips_invalid_json(self, tmp_path):
+    def test_raises_on_invalid_json(self, tmp_path):
         agent_dir = tmp_path / "data" / "punet" / "v1" / "agent"
         agent_dir.mkdir(parents=True)
-        (agent_dir / "run_output_v1.json").write_text("not valid json {{{")
+        (agent_dir / "run_output_v1_agent.json").write_text("not valid json {{{")
         with pytest.raises(FileNotFoundError):
-            load_tuning_outputs(str(tmp_path / "data"), ["punet"])
+            load_tuning_outputs(str(tmp_path / "data"), ["punet"], "v1")
 
     def test_raises_when_no_outputs_found(self, tmp_path):
-        with pytest.raises(FileNotFoundError, match="No HyperparamTuningOutput"):
-            load_tuning_outputs(str(tmp_path / "data"), ["punet"])
+        with pytest.raises(FileNotFoundError, match="Missing tuning outputs"):
+            load_tuning_outputs(str(tmp_path / "data"), ["punet"], "v1")
 
     def test_loads_multiple_model_types(self, tmp_path):
         _write_tuning_output(tmp_path, "punet")
         _write_tuning_output(tmp_path, "wavenet")
-        results = load_tuning_outputs(str(tmp_path / "data"), ["punet", "wavenet"])
+        results = load_tuning_outputs(str(tmp_path / "data"), ["punet", "wavenet"], "v1")
         assert len(results) == 2
         assert {r.model_type for r in results} == {"punet", "wavenet"}
 
-    def test_loads_multiple_runs_per_model(self, tmp_path):
-        _write_tuning_output(tmp_path, "punet", run="v1")
-        _write_tuning_output(tmp_path, "punet", run="v2")
-        results = load_tuning_outputs(str(tmp_path / "data"), ["punet"])
-        assert len(results) == 2
+    def test_raises_when_model_missing(self, tmp_path):
+        _write_tuning_output(tmp_path, "punet")
+        with pytest.raises(FileNotFoundError, match="wavenet"):
+            load_tuning_outputs(str(tmp_path / "data"), ["punet", "wavenet"], "v1")
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +269,7 @@ class TestRunWorkflowSingleIteration:
         results = run_workflow(
             data_dir=workflow_env["data_dir"],
             model_types=["punet"],
+            source_run_name="v1",
             workspace=workflow_env["workspace"],
             run_name="test_run",
         )
@@ -280,6 +280,7 @@ class TestRunWorkflowSingleIteration:
         run_workflow(
             data_dir=workflow_env["data_dir"],
             model_types=["punet"],
+            source_run_name="v1",
             workspace=workflow_env["workspace"],
             run_name="test_run",
         )
@@ -298,6 +299,7 @@ class TestRunWorkflowSingleIteration:
         run_workflow(
             data_dir=workflow_env["data_dir"],
             model_types=["punet"],
+            source_run_name="v1",
             workspace=workflow_env["workspace"],
             run_name="test_run",
         )
@@ -316,6 +318,7 @@ class TestRunWorkflowSingleIteration:
         run_workflow(
             data_dir=workflow_env["data_dir"],
             model_types=["punet"],
+            source_run_name="v1",
             workspace=workflow_env["workspace"],
             run_name="test_run",
         )
@@ -327,6 +330,7 @@ class TestRunWorkflowSingleIteration:
         run_workflow(
             data_dir=workflow_env["data_dir"],
             model_types=["punet"],
+            source_run_name="v1",
             workspace=workflow_env["workspace"],
             run_name="test_run",
         )
@@ -341,6 +345,7 @@ class TestRunWorkflowSingleIteration:
         run_workflow(
             data_dir=workflow_env["data_dir"],
             model_types=["punet"],
+            source_run_name="v1",
             workspace=workflow_env["workspace"],
             run_name="test_run",
         )
@@ -366,6 +371,7 @@ class TestRunWorkflowMultiIteration:
         results = run_workflow(
             data_dir=workflow_env["data_dir"],
             model_types=["punet"],
+            source_run_name="v1",
             workspace=workflow_env["workspace"],
             run_name="test_run",
             max_iterations=3,
@@ -381,6 +387,7 @@ class TestRunWorkflowMultiIteration:
         run_workflow(
             data_dir=workflow_env["data_dir"],
             model_types=["punet"],
+            source_run_name="v1",
             workspace=workflow_env["workspace"],
             run_name="test_run",
             max_iterations=2,
@@ -400,6 +407,7 @@ class TestRunWorkflowMultiIteration:
         results = run_workflow(
             data_dir=workflow_env["data_dir"],
             model_types=["punet"],
+            source_run_name="v1",
             workspace=workflow_env["workspace"],
             run_name="test_run",
             max_iterations=5,
@@ -424,6 +432,7 @@ class TestRunWorkflowValidationRetry:
         results = run_workflow(
             data_dir=workflow_env["data_dir"],
             model_types=["punet"],
+            source_run_name="v1",
             workspace=workflow_env["workspace"],
             run_name="test_run",
         )
@@ -439,6 +448,7 @@ class TestRunWorkflowValidationRetry:
         run_workflow(
             data_dir=workflow_env["data_dir"],
             model_types=["punet"],
+            source_run_name="v1",
             workspace=workflow_env["workspace"],
             run_name="test_run",
         )
@@ -452,6 +462,7 @@ class TestRunWorkflowValidationRetry:
         results = run_workflow(
             data_dir=workflow_env["data_dir"],
             model_types=["punet"],
+            source_run_name="v1",
             workspace=workflow_env["workspace"],
             run_name="test_run",
             max_proposal_attempts=2,
@@ -468,6 +479,7 @@ class TestRunWorkflowValidationRetry:
         run_workflow(
             data_dir=workflow_env["data_dir"],
             model_types=["punet"],
+            source_run_name="v1",
             workspace=workflow_env["workspace"],
             run_name="test_run",
         )

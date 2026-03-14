@@ -83,36 +83,52 @@ from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 # Helpers
 # ---------------------------------------------------------------------------
 
-def load_tuning_outputs(data_dir: str, model_types: list[str]) -> list[HyperparamTuningOutput]:
+def load_tuning_outputs(
+    data_dir: str,
+    model_types: list[str],
+    source_run_name: str,
+) -> list[HyperparamTuningOutput]:
     """
-    Scan data_dir for existing HyperparamTuningOutput JSON files.
+    Load one HyperparamTuningOutput per model from a specific run.
 
     Looks for:
-      {data_dir}/{model_type}/*/agent/run_output_*.json
+      {data_dir}/{model_type}/{source_run_name}/agent/run_output_{source_run_name}_agent.json
 
-    Returns a list of validated HyperparamTuningOutput objects.
-    Raises if no outputs are found.
+    Args:
+        data_dir: Root data directory (e.g. /home/klz/Data/SIDEREIS_DATA).
+        model_types: Model type keys to load (e.g. ["punet", "wavenet"]).
+        source_run_name: The run name to load from (e.g. "v3_file6").
+
+    Returns:
+        List of validated HyperparamTuningOutput objects (one per model).
+        Raises FileNotFoundError if any model's output is missing.
     """
     outputs = []
+    missing = []
     for model_type in model_types:
-        pattern = os.path.join(data_dir, model_type, "*", "agent", "run_output_*.json")
-        matches = sorted(glob.glob(pattern))
-        for path in matches:
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                output = HyperparamTuningOutput.model_validate(data)
-                outputs.append(output)
-                print(f"  Loaded: {path} "
-                      f"({output.model_type}, {len(output.all_records)} records, "
-                      f"best={output.best_denoising_score})")
-            except Exception as e:
-                print(f"  Warning: skipping {path} — {e}")
+        path = os.path.join(
+            data_dir, model_type, source_run_name, "agent",
+            f"run_output_{source_run_name}_agent.json",
+        )
+        if not os.path.exists(path):
+            missing.append(f"  {model_type}: {path}")
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            output = HyperparamTuningOutput.model_validate(data)
+            outputs.append(output)
+            print(f"  Loaded: {path} "
+                  f"({output.model_type}, {len(output.all_records)} records, "
+                  f"best={output.best_denoising_score})")
+        except Exception as e:
+            missing.append(f"  {model_type}: {path} — {e}")
 
-    if not outputs:
+    if missing:
         raise FileNotFoundError(
-            f"No HyperparamTuningOutput files found in {data_dir} "
-            f"for models {model_types}. Run tune_ml_hyperparam_agent first."
+            f"Missing tuning outputs for run '{source_run_name}':\n"
+            + "\n".join(missing)
+            + "\nRun tune_ml_hyperparam_agent for these models first."
         )
     return outputs
 
@@ -151,6 +167,7 @@ def _make_storage(workspace: str, run_name: str) -> StorageConfig:
 def run_workflow(
     data_dir: str,
     model_types: list[str],
+    source_run_name: str,
     workspace: str,
     run_name: str,
     max_iterations: int = 1,
@@ -174,7 +191,10 @@ def run_workflow(
 
     Args:
         data_dir: Root data directory containing existing tuning results.
-        model_types: List of model types to include in initial interpretation.
+        model_types: List of model types to load from source_run_name.
+        source_run_name: The run name to load initial tuning results from
+            (e.g. "v3_file6"). One output per model is loaded from
+            {data_dir}/{model_type}/{source_run_name}/agent/.
         workspace: Root output directory for this workflow run.
         run_name: Unique name for this workflow run.
         max_iterations: Number of successful iterations (validated + tuned).
@@ -199,6 +219,7 @@ def run_workflow(
     print(f"\n{'='*60}")
     print(f"  SIDERIUS Model Exploration Workflow")
     print(f"  Started       : {started_at}")
+    print(f"  Source run    : {source_run_name}")
     print(f"  Models        : {model_types}")
     print(f"  Workspace     : {workspace}")
     print(f"  Run name      : {run_name}")
@@ -212,7 +233,7 @@ def run_workflow(
 
     # --- Step 0: Load existing tuning outputs ---
     print("Step 0: Loading existing tuning outputs...")
-    tuning_outputs = load_tuning_outputs(data_dir, model_types)
+    tuning_outputs = load_tuning_outputs(data_dir, model_types, source_run_name)
     summary_groups = tuning_outputs_to_summary_groups(tuning_outputs)
     print(f"  Loaded {len(tuning_outputs)} tuning outputs "
           f"across {len(set(o.model_type for o in tuning_outputs))} model types.\n")
@@ -428,6 +449,11 @@ def main():
         help="Model types to include in initial interpretation (e.g. punet wavenet rnn).",
     )
     parser.add_argument(
+        "--source_run_name", type=str, required=True,
+        help="Run name to load initial tuning results from (e.g. 'v3_file6'). "
+             "One output per model is loaded from {data_dir}/{model}/{source_run_name}/agent/.",
+    )
+    parser.add_argument(
         "--workspace", type=str, default="./workflow_output",
         help="Root output directory for this workflow run.",
     )
@@ -492,6 +518,7 @@ def main():
     run_workflow(
         data_dir=args.data_dir,
         model_types=args.models,
+        source_run_name=args.source_run_name,
         workspace=args.workspace,
         run_name=args.run_name,
         max_iterations=args.max_iterations,

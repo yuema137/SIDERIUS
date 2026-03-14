@@ -94,21 +94,47 @@ successful pass.
 
 ## Next Steps in Detail
 
-### Step 1 — `result_interpretation_agent` ✅ done
+### Step 1 — `result_interpretation_agent` ⚠️ refactoring to two-phase
 
 **File**: `nodes/result_interpretation_agent.py`.
 
-**What was built**:
+**What was built (original — single LLM call, being replaced)**:
 - `class ResultInterpretationAgent` with `run(input: InterpretationInput) -> InterpretationOutput`
 - Accepts multiple summary groups across multiple model types (`summaries: List[SummaryGroup]`)
 - Deterministically computes per-model and cross-model best/worst scores before the LLM call
-- Loads architecture descriptions from `ml_models/{model_type}/description.md` for all models;
-  raises `FileNotFoundError` if any description is missing
 - One LLM call: injects all model descriptions + experiment records; LLM produces
   `key_findings`, `bottlenecks`, `take_home_message` as strict JSON
 - Writes output to `{storage.local.workspace}/interpretation_{run_name}.json`
 - Validates input at entry and output at exit via Pydantic `model_validate()`
 - 20 unit tests + 4 real-API integration tests (Gemini + OpenAI, single-model + multi-model)
+
+**Refactoring to two-phase interpretation**:
+
+The original single-LLM-call design dumps all experiment records from all models into one
+prompt. This does not scale — with 20+ records per model and multiple models, the prompt
+exceeds token limits and produces poor results. The fix is a two-phase approach:
+
+1. **Phase 1 — Per-model summarization**: for each model type, call the LLM once with
+   only that model's records and architecture description. Produces a structured JSON
+   summary per model (key findings, best config, score trends, bottlenecks).
+2. **Phase 2 — Cross-model synthesis**: take the structured per-model summaries (not
+   raw records) and call the LLM once more to produce the final `InterpretationOutput`
+   (comparative analysis, overall bottlenecks, take-home message).
+
+This keeps each LLM call focused and within token limits. The per-model summaries are
+explicit, inspectable, and stored alongside the final output.
+
+**Current implementation**: Option A — both phases inside `ResultInterpretationAgent.run()`.
+The node's input/output schemas are unchanged; the internal logic changes from one LLM
+call to N+1 calls (N per-model + 1 synthesis).
+
+**Future evolution**: Option B — split into two separate nodes (`per_model_summarizer`
+and `cross_model_interpreter`) with a protocol between them. This gives the orchestrator
+the ability to run per-model summarization in parallel, cache individual summaries, and
+re-synthesize without re-summarizing. The split should happen when:
+- Parallelism matters (many models, slow LLM)
+- The orchestrator needs to selectively re-summarize specific models
+- The per-model summary becomes a reusable artefact consumed by multiple downstream nodes
 
 ---
 
