@@ -604,3 +604,37 @@ After the first model proposal demo is running end-to-end:
    the skill registry, selects skills to invoke (including workflows as sub-skills),
    applies protocols between them, and iterates until the goal is met or a budget is
    exhausted.
+
+---
+
+## TODO: Structured Node Failure Outputs
+
+Currently, when a node fails (e.g. `ml_model_implementor` exhausts its self-correction
+retries), it raises a Python exception. The workflow catches this in a `try/except` and
+treats it as a failed attempt. This works but has limitations:
+
+- The error message is unstructured (a string extracted from the exception)
+- The workflow cannot distinguish between different failure modes
+- Downstream retry logic (proposal agent's `previous_failures`) receives a raw error
+  string rather than structured diagnostic data
+
+**Long-term solution**: each node's output schema should support a failure mode. For
+example, `ImplementorOutput` could include:
+
+```python
+class ImplementorOutput(BaseModel):
+    status: Literal["success", "failed"] = "success"
+    error_message: Optional[str] = None
+    error_category: Optional[str] = None  # e.g. "syntax_error", "shape_mismatch"
+    # ... existing fields (only populated when status="success")
+```
+
+This mirrors how `ValidatorOutput` already works (`passed: bool` + `error_message`).
+With structured failure outputs:
+- The workflow never needs `try/except` around node calls — it checks `output.status`
+- The proposal agent receives categorised failure data, not raw tracebacks
+- Failure modes are part of the schema contract, not implicit exceptions
+
+**When to implement**: after the first demo workflow runs successfully end-to-end.
+Start with `ImplementorOutput`, then consider `ProposalOutput` (for cases like empty
+`model_name` or duplicate name detection).
