@@ -77,6 +77,7 @@ from nodes.ml_model_proposal_agent import MLModelProposalAgent
 from nodes.ml_model_implementor import MLModelImplementor
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
+from workflows.llm_config import WorkflowLLMConfig, NodeLLMConfig
 
 
 # ---------------------------------------------------------------------------
@@ -175,8 +176,7 @@ def run_workflow(
     max_proposal_attempts: int = 3,
     target_score: float | None = None,
     file_index: int = 6,
-    llm_provider: str = "gemini",
-    llm_model_id: str = "gemini-3.1-flash-lite-preview",
+    llm_config: WorkflowLLMConfig | None = None,
     human_advice_interpret: str | None = None,
     human_advice_propose: str | None = None,
     human_advice_implement: str | None = None,
@@ -202,8 +202,8 @@ def run_workflow(
         max_proposal_attempts: Max propose→implement→validate retries per iteration.
         target_score: Optional early stop — halt if best score >= target.
         file_index: Training/validation file index.
-        llm_provider: LLM provider for all nodes.
-        llm_model_id: LLM model ID for all nodes.
+        llm_config: Per-node LLM configuration. If None, each node uses its
+            own built-in default. See WorkflowLLMConfig for details.
         human_advice_interpret: Human guidance for interpretation steps.
         human_advice_propose: Human guidance for proposal steps.
         human_advice_implement: Human guidance for implementation steps.
@@ -213,6 +213,8 @@ def run_workflow(
     Returns:
         List of HyperparamTuningOutput objects, one per successful iteration.
     """
+    if llm_config is None:
+        llm_config = WorkflowLLMConfig()
     os.makedirs(workspace, exist_ok=True)
     started_at = time.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -223,7 +225,7 @@ def run_workflow(
     print(f"  Models        : {model_types}")
     print(f"  Workspace     : {workspace}")
     print(f"  Run name      : {run_name}")
-    print(f"  LLM           : {llm_provider}/{llm_model_id}")
+    print(f"  LLM config    : {llm_config.model_dump(exclude_none=True)}")
     print(f"  Iterations    : {max_iterations}")
     print(f"  Tune rounds   : {max_rounds} per iteration")
     print(f"  Proposal tries: {max_proposal_attempts} per iteration")
@@ -266,7 +268,7 @@ def run_workflow(
 
         print(f"  [{iteration}] Interpreting experiment results...")
         interpretation = ResultInterpretationAgent(
-            provider=llm_provider, model_id=llm_model_id,
+            **llm_config.get("interpret"),
         ).run(interp_input)
         print(f"    Take-home: {interpretation.take_home_message}")
         print(f"    Best score: {interpretation.best_denoising_score}")
@@ -295,7 +297,7 @@ def run_workflow(
                 propose_input.previous_failures = previous_failures
 
             proposal = MLModelProposalAgent(
-                provider=llm_provider, model_id=llm_model_id,
+                **llm_config.get("propose"),
             ).run(propose_input)
             print(f"    Proposed: {proposal.model_name}")
 
@@ -306,22 +308,23 @@ def run_workflow(
                 impl_input.human_advice = human_advice_implement
 
             impl_output = MLModelImplementor(
-                provider=llm_provider, model_id=llm_model_id,
+                **llm_config.get("implement"),
             ).run(impl_input)
             print(f"    Plugin: {impl_output.model_file_path}")
 
             # --- Validate ---
             print(f"  [{iteration}.{attempt}] Validating...")
+            valid_llm = llm_config.get("validate")
             valid_input = local_all_fields(
                 impl_output, attempt_storage,
-                llm_provider=llm_provider,
-                llm_model_id=llm_model_id,
+                llm_provider=valid_llm.get("provider", "gemini"),
+                llm_model_id=valid_llm.get("model_id", "gemini-3.1-flash-lite-preview"),
             )
             if human_advice_validate is not None:
                 valid_input.human_advice = human_advice_validate
 
             validation = MLCodeValidatorAgent(
-                provider=llm_provider, model_id=llm_model_id,
+                **valid_llm,
             ).run(valid_input)
 
             if validation.passed:
@@ -345,12 +348,13 @@ def run_workflow(
         tuning_storage = _make_storage(tuning_dir, tuning_run_name)
 
         print(f"  [{iteration}] Tuning '{proposal.model_name}' for {max_rounds} rounds...")
+        tune_llm = llm_config.get("tune")
         tune_input = local_validated_model(
             validation, proposal, tuning_storage,
             max_rounds=max_rounds,
             file_index=file_index,
-            llm_provider=llm_provider,
-            llm_model_id=llm_model_id,
+            llm_provider=tune_llm.get("provider", "gemini"),
+            llm_model_id=tune_llm.get("model_id", "gemini-3.1-flash-lite-preview"),
         )
         if human_advice_tune is not None:
             tune_input.human_advice = human_advice_tune
@@ -481,13 +485,20 @@ def main():
         "--file_index", type=int, default=6,
         help="Training/validation file index (default: 6).",
     )
+    # LLM configuration
     parser.add_argument(
-        "--provider", type=str, default="gemini", choices=["gemini", "openai"],
-        help="LLM provider for all nodes (default: gemini).",
+        "--llm_config", type=str, default=None,
+        help="Path to a JSON file with per-node LLM config. "
+             "Format: {\"interpret\": {\"provider\": \"gemini\", \"model_id\": \"...\"}, ...}. "
+             "Nodes not listed use their built-in defaults.",
     )
     parser.add_argument(
-        "--model_id", type=str, default="gemini-3.1-flash-lite-preview",
-        help="LLM model ID for all nodes.",
+        "--provider", type=str, default=None, choices=["gemini", "openai"],
+        help="LLM provider for ALL nodes (shorthand — overridden by --llm_config).",
+    )
+    parser.add_argument(
+        "--model_id", type=str, default=None,
+        help="LLM model ID for ALL nodes (shorthand — overridden by --llm_config).",
     )
 
     # Human advice per step (all optional)
@@ -515,6 +526,16 @@ def main():
     )
     args = parser.parse_args()
 
+    # Build LLM config: --llm_config file takes precedence, then --provider/--model_id
+    if args.llm_config:
+        wf_llm_config = WorkflowLLMConfig.from_json(args.llm_config)
+    elif args.provider and args.model_id:
+        wf_llm_config = WorkflowLLMConfig.uniform(args.provider, args.model_id)
+    elif args.provider:
+        wf_llm_config = WorkflowLLMConfig.uniform(args.provider, "gemini-3.1-flash-lite-preview")
+    else:
+        wf_llm_config = None  # each node uses its own default
+
     run_workflow(
         data_dir=args.data_dir,
         model_types=args.models,
@@ -526,8 +547,7 @@ def main():
         max_proposal_attempts=args.max_proposal_attempts,
         target_score=args.target_score,
         file_index=args.file_index,
-        llm_provider=args.provider,
-        llm_model_id=args.model_id,
+        llm_config=wf_llm_config,
         human_advice_interpret=args.advice_interpret,
         human_advice_propose=args.advice_propose,
         human_advice_implement=args.advice_implement,
