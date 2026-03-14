@@ -88,7 +88,7 @@ successful pass.
 | Step | Status |
 |------|--------|
 | Add `run()` to `tune_ml_hyperparam_agent` + wire `seed_records` | ⬜ next |
-| `demo/run_model_proposal_demo.py` | ⬜ |
+| `workflows/model_exploration.py` | ⬜ |
 
 ---
 
@@ -318,11 +318,11 @@ only confirms validity; the expert advice comes from the proposal).
 | `ml_result_interp_to_ml_model_propose.py` | `local_full_context` | `(output: InterpretationOutput, storage: StorageConfig) -> ProposalInput` |
 | `ml_model_propose_to_ml_model_impl.py` | `local_full_spec` | `(output: ProposalOutput, storage: StorageConfig) -> ImplementorInput` |
 | `ml_model_impl_to_ml_model_valid.py` | `local_all_fields` | `(output: ImplementorOutput, storage: StorageConfig) -> ValidatorInput` |
-| `ml_model_valid_to_ml_model_tune.py` | `local_validated_model` | `(output: ValidatorOutput, storage: StorageConfig, max_rounds, file_index, llm_provider, llm_model_id) -> HyperparamTuningInput` |
+| `ml_model_valid_to_ml_model_tune.py` | `local_validated_model` | `(output: ValidatorOutput, proposal: ProposalOutput, storage: StorageConfig, max_rounds, file_index, llm_provider, llm_model_id) -> HyperparamTuningInput` |
 
 ---
 
-### Step 7 — `demo/run_model_proposal_demo.py`
+### Step 7 — `workflows/model_exploration.py`
 
 A linear script that ties everything together. Accepts CLI args for workspace, run_name,
 model_type (for the initial tuning results to read), LLM provider, and max_rounds for
@@ -497,8 +497,8 @@ nodes/
 ├── ml_model_implementor.py               ✅ done (two-call CoT, template assembly, description.md, self-correction loop)
 └── ml_code_validator_agent.py              ✅ done (7 checks, calibrated LLM review)
 
-demo/
-└── run_model_proposal_demo.py            ⬜
+workflows/
+└── model_exploration.py                 ⬜
 
 tests/
 └── unit/
@@ -525,7 +525,7 @@ tests/integration/protocols/         ✅ Tier 2 — one graph edge end-to-end
     ├── test_propose_to_implement.py      ✅ 2 tests (Gemini + OpenAI, proposal → implementor edge)
     └── test_implement_to_validate.py     ✅ 2 tests (Gemini + OpenAI, full implement → validate chain)
 
-tests/integration/orchestrator/      ⬜ Tier 3 — multi-hop critical loops (empty, ready)
+tests/integration/workflows/         ⬜ Tier 3 — multi-hop workflow tests (empty, ready)
 
 tests/unit/core/
     ├── test_storage.py                   ✅ done (11 tests)
@@ -539,7 +539,7 @@ tests/unit/core/
 ## Demo Script Outline
 
 ```python
-# demo/run_model_proposal_demo.py
+# workflows/model_exploration.py
 import sys, json
 from nodes.result_interpretation_agent import ResultInterpretationAgent
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
@@ -587,9 +587,9 @@ if not validation.passed:
     sys.exit(1)
 print("Model validated.")
 
-# Edge 5: validate → tune
+# Edge 5: validate → tune (fan-in: validator + proposal)
 tuning_output = HyperparamTuningAgent().run(
-    local_validated_model(validation, storage, file_index=6, max_rounds=10)
+    local_validated_model(validation, proposal, storage, file_index=6, max_rounds=10)
 )
 print("Best score:", tuning_output.best_denoising_score)
 ```

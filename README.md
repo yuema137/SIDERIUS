@@ -17,7 +17,7 @@ SIDERIUS is built on a single unifying idea: **the whole system is a typed, dire
 
 - Every component is a **node** — it has a validated input schema (`BaseModel`) and a validated output schema, and exposes a `run(input) -> output` method.
 - **Edges** are directed data dependencies between nodes. Two nodes can only be connected if an explicit, typed **protocol** function exists on that edge.
-- **Orchestrators** are nodes too — they select paths through the graph, apply protocols, and call `node.run()`. Cycles in the graph become loops when an orchestrator traverses them repeatedly.
+- **Workflows** execute pre-designed, deterministic paths through the graph — applying protocols and calling `node.run()` in a fixed sequence. **Orchestrators** are LLM-powered agents that pursue a goal autonomously — they query a skill registry, select which skills to invoke, and adapt at runtime. Both are nodes with `run(input) -> output`.
 
 See [`docs/architecture.md`](docs/architecture.md) for the full design and [`docs/first_model_proposal_demo_architecture.md`](docs/first_model_proposal_demo_architecture.md) for the first end-to-end demo plan.
 
@@ -60,7 +60,7 @@ siderius/
 │   │   ├── implementor.py          # ImplementorInput / Output
 │   │   ├── validator.py            # ValidatorInput / Output
 │   │   └── protocols/              # Typed edge functions (NodeAOutput → NodeBInput)
-│   └── skills/                     # Atomic research skills (training, inference, scoring)
+│   └── skills/                     # Atomic research tools (training, inference, scoring)
 │
 ├── core/
 │   └── sandbox_executor.py         # TidmadSandbox: config validation, subprocess dispatch
@@ -101,19 +101,22 @@ siderius/
 │   ├── models/                     # Agent-written model plugins (+ description.md per plugin)
 │   └── tests/                      # Agent-written model tests
 │
+├── workflows/                      # Pre-designed graph traversals (deterministic)
+│   └── model_exploration.py       # First end-to-end demo (⬜ planned)
+│
 ├── docs/
 │   ├── architecture.md             # Full system design
 │   └── first_model_proposal_demo_architecture.md
 │
 ├── tests/
 │   ├── unit/
-│   │   ├── agent/                  # Per-node schema and skill tests
+│   │   ├── agent/                  # Per-node schema and tool tests
 │   │   ├── core/                   # Sandbox executor and plugin loader tests
 │   │   └── ml_models/              # Model and loss function tests
 │   └── integration/
 │       ├── nodes/                  # Tier 1 — single node, real API (no other nodes)
 │       ├── protocols/              # Tier 2 — one graph edge, source → target, real API
-│       ├── orchestrator/           # Tier 3 — multi-hop critical loops, real API + GPU
+│       ├── workflows/              # Tier 3 — multi-hop workflow tests, real API + GPU
 │       ├── dashboard/              # Dashboard API integration tests
 │       └── execute_tools/          # Training loop integration tests
 │
@@ -283,7 +286,7 @@ server:
 | Unit | Single node, mocked LLM | mock | no | `tests/unit/` | Every commit |
 | Integration Tier 1 | Single node, real API | real | depends | `tests/integration/nodes/` | On demand |
 | Integration Tier 2 | One graph edge (source → target) | real | depends | `tests/integration/protocols/` | On demand |
-| Integration Tier 3 | Critical multi-hop loop | real | yes | `tests/integration/orchestrator/` | Before releases |
+| Integration Tier 3 | Critical multi-hop workflow | real | yes | `tests/integration/workflows/` | Before releases |
 
 ```bash
 # Unit tests (always pass, no API key needed)

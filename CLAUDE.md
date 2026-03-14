@@ -10,7 +10,7 @@
 - **Avoid deep dependency between modules**: we always want each module could be tested indivially, and be pluggable and decoupled.
 - **Always think what test we can add for each single module**: pytest is a powerful tool. We should always equip our code with that. 
 - **Be humble and curious**: if you are not sure about something, for example the detail of the desired feature, or the format of data, please don't guess by yourself, but ASK the user explicitely.
-- **Be strict to the user and always double check**: what I say is not always correct. If you feel that are some wrong statement made by me, or some ideas are not pratically, you need to ask for clarification and state your objection clearly.
+- **Be strict to the user and always double check**: what I say is not always correct. If you feel that are some wrong statement made by me, or some ideas are not pratical, you need to ask for clarification and state your objection clearly.
 
 ## Inter-Node Communication Principle
 
@@ -19,15 +19,18 @@ No other form of inter-node communication is permitted.**
 
 - **Schema**: the input and output `BaseModel` of each node is the complete, explicit contract
   for what data flows in and out. Every field that a downstream node needs must be present in
-  the upstream node's output schema and mapped by the protocol. There are no hidden contracts.
+  one or more upstream node output schemas and mapped by the protocol. The input schema is the
+  completeness contract — it validates that all required fields are present, regardless of how
+  many sources contributed. There are no hidden contracts.
 - **Storage**: each node writes its own output record to `{storage.local.workspace}/{node}_{run_name}.json`
   for persistence and recovery. This is NOT the communication channel — it is a log. Downstream
   nodes never read the upstream node's output file from storage; they receive data through the
   protocol function in memory.
-- **Protocols**: typed functions that transform one node's output schema into the next node's
-  input schema. The protocol is the only place where field mapping happens. It has full access
-  to the upstream `*Output` object and must map all fields the downstream node needs — none
-  should be silently dropped.
+- **Protocols**: typed functions that assemble a target node's input from one or more upstream
+  node outputs. The protocol is the only place where field mapping happens. It receives the
+  required upstream `*Output` objects and must produce a fully populated downstream `*Input`.
+  No field should be silently dropped. Simple protocols take one source; fan-in protocols
+  aggregate multiple sources when the target needs data from non-adjacent nodes.
 
 **Why this matters**: as the graph grows, any shortcut (reading files by convention, sharing
 state through the filesystem, passing paths instead of data) creates hidden dependencies between
@@ -90,9 +93,37 @@ not API load or cost. All tiers skip automatically if the required API key is no
 |------|-------|----------|---------------|
 | **Tier 1** | One node in isolation | `tests/integration/nodes/` | A hand-crafted synthetic input is passed directly to `node.run()`. Validates that the node itself works end-to-end with a real LLM call. No other node is involved. |
 | **Tier 2** | One directed edge (two nodes) | `tests/integration/protocols/` | The upstream node runs with a real LLM call, the protocol function maps its output to the downstream node's input, and the downstream node runs. Validates that the wiring between two specific nodes is correct. |
-| **Tier 3** | Multi-hop path (3+ nodes) | `tests/integration/orchestrator/` | A sequence of nodes traversed end-to-end. Validates that a complete sub-path of the graph works correctly. Not yet implemented. |
+| **Tier 3** | Multi-hop path (3+ nodes) | `tests/integration/workflows/` | A sequence of nodes traversed end-to-end. Validates that a complete sub-path of the graph works correctly. Not yet implemented. |
 
 Steps 5 and 6 in the node checklist correspond to Tier 1 and Tier 2 respectively.
+
+## Skill Architecture (Universal Callable Contract)
+
+**Every callable in the system is a skill.** Agents, atomic tools, and orchestrators all
+conform to a single interface: `{name, description, input_schema, output_schema}`. From the
+caller's perspective, there is no structural difference between a deterministic function and
+an LLM-powered agent — both are skills with typed inputs and outputs.
+
+The hierarchy describes internal composition, not the external interface:
+
+```
+Orchestrator  (LLM-powered, goal-driven, selects skills autonomously)
+  └── Workflows  (pre-designed paths through the graph, deterministic)
+       └── Agents  (LLM-powered, run(input)->output, may use tools internally)
+            └── Tools  (atomic operations: training, inference, scoring)
+```
+
+**Workflows vs. Orchestrators**:
+- **Workflows**: execute a pre-designed, deterministic path through the graph. The sequence
+  of nodes and protocols is hardcoded. Workflows are scripts, not agents. Used for the
+  first demo and well-understood sequences.
+- **Orchestrators**: LLM-powered agents that pursue a goal autonomously. They query a skill
+  registry, select which skills to invoke (including workflows as sub-skills), apply
+  protocols, and iterate until the goal is met. This is the long-term target.
+
+**Current naming convention**: `agent/skills/` holds atomic tools (training, inference, etc.)
+used internally by agents. This will be renamed to `agent/tools/` after the first demo, to
+reserve "skill" for the universal contract. See `docs/architecture.md` for the full plan.
 
 ## Reference Project Guidelines
 - You have read access to `legacy_repo`: /home/tidmad/TIDMAD. 
