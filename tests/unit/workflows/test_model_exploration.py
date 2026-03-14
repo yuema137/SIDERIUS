@@ -358,7 +358,8 @@ class TestRunWorkflowSingleIteration:
         run_dir = os.path.join(workflow_env["workspace"], "test_run")
         iter_dir = os.path.join(run_dir, "iteration_001")
         assert os.path.isdir(iter_dir)
-        assert os.path.isdir(os.path.join(iter_dir, "attempt_001"))
+        # Attempt dir includes model name
+        assert os.path.isdir(os.path.join(iter_dir, "attempt_001_gated_tcn"))
         # Tuning dir is named by the proposed model
         assert os.path.isdir(os.path.join(iter_dir, "gated_tcn"))
 
@@ -493,5 +494,5 @@ class TestRunWorkflowValidationRetry:
         )
         run_dir = os.path.join(workflow_env["workspace"], "test_run")
         iter_dir = os.path.join(run_dir, "iteration_001")
-        assert os.path.isdir(os.path.join(iter_dir, "attempt_001"))
-        assert os.path.isdir(os.path.join(iter_dir, "attempt_002"))
+        assert os.path.isdir(os.path.join(iter_dir, "attempt_001_gated_tcn"))
+        assert os.path.isdir(os.path.join(iter_dir, "attempt_002_gated_tcn"))

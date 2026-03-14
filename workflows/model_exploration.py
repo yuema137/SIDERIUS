@@ -282,11 +282,12 @@ def run_workflow(
         previous_failures: list[str] = []
 
         for attempt in range(1, max_proposal_attempts + 1):
+            print(f"  [{iteration}.{attempt}] Proposing new model (attempt {attempt}/{max_proposal_attempts})...")
+
+            # Create a temporary attempt dir; renamed after model name is known
             attempt_dir = os.path.join(iter_dir, f"attempt_{attempt:03d}")
             os.makedirs(attempt_dir, exist_ok=True)
             attempt_storage = _make_storage(attempt_dir, run_name)
-
-            print(f"  [{iteration}.{attempt}] Proposing new model (attempt {attempt}/{max_proposal_attempts})...")
 
             try:
                 # --- Propose ---
@@ -301,6 +302,12 @@ def run_workflow(
                     **llm_config.get("propose"),
                 ).run(propose_input)
                 print(f"    Proposed: {proposal.model_name}")
+
+                # Rename attempt dir to include model name
+                named_dir = os.path.join(iter_dir, f"attempt_{attempt:03d}_{proposal.model_name}")
+                os.rename(attempt_dir, named_dir)
+                attempt_dir = named_dir
+                attempt_storage = _make_storage(attempt_dir, run_name)
 
                 # --- Implement ---
                 print(f"  [{iteration}.{attempt}] Implementing...")
