@@ -436,7 +436,7 @@ def _assemble_test(model_name: str) -> str:
 
 class MLModelImplementor:
 
-    def __init__(self, provider: str = "gemini", model_id: str = "gemini-3.1-flash-lite-preview"):
+    def __init__(self, provider: str = "gemini", model_id: str = "gemini-3.1-pro-preview"):
         self.bridge = LLMBridge(provider=provider, model_id=model_id)
 
     # ------------------------------------------------------------------
@@ -604,7 +604,7 @@ def main():
     parser.add_argument("--workspace", type=str, default="./siderius_workspace")
     parser.add_argument("--run_name",  type=str, default="v1")
     parser.add_argument("--provider",  type=str, default="gemini", choices=["gemini", "openai"])
-    parser.add_argument("--model_id",  type=str, default="gemini-3.1-flash-lite-preview")
+    parser.add_argument("--model_id",  type=str, default="gemini-3.1-pro-preview")
     args = parser.parse_args()
 
     proposal_path = os.path.join(args.workspace, f"proposal_{args.run_name}.json")
