@@ -2,23 +2,45 @@
 """
 workflows/model_exploration.py — First SIDERIUS workflow.
 
-A single-pass traversal of the core research loop:
+Iterative model exploration loop:
 
-  tune (existing results)
-    → interpret     [local_all_records]
-    → propose       [local_full_context]
-    → implement     [local_full_spec]
-    → validate      [local_all_fields]
-    → tune          [local_validated_model]  (fan-in: validator + proposal)
+  for each iteration:
+      interpret (all accumulated results)
+      for each attempt (up to max_proposal_attempts):
+          propose (with previous failures if retrying)
+          implement
+          validate
+          if passed → break
+      tune the validated model
+      accumulate results for next iteration
+
+Stop conditions (whichever comes first):
+  - max_iterations reached (successful iterations = validated + tuned)
+  - target_score achieved (best_denoising_score >= target)
+
+Single-pass mode is max_iterations=1 (the default).
 
 This is a workflow, not an orchestrator — the path is fixed and deterministic.
-If any node fails, the workflow stops. Retry logic belongs in a future
-orchestrator, not here.
+The workflow retries propose→implement→validate on validation failure, feeding
+error messages back to the proposal agent. Full retry/rerouting logic belongs
+in a future orchestrator.
 
-Inputs:
-  - A directory containing existing HyperparamTuningOutput JSON files
-    (from previous runs of tune_ml_hyperparam_agent via run_comparison.py).
-  - CLI args for LLM provider, tuning budget, etc.
+Storage layout:
+  {workspace}/
+  ├── workflow_{run_name}.json
+  ├── iteration_001/
+  │   ├── interpretation.json
+  │   ├── attempt_001/
+  │   │   ├── proposal.json
+  │   │   ├── implementor.json
+  │   │   └── validation.json
+  │   ├── attempt_002/          (if attempt 1 failed)
+  │   │   └── ...
+  │   └── tuning/
+  │       ├── run_output.json
+  │       └── ...
+  ├── iteration_002/
+  │   └── ...
 
 Usage:
   python workflows/model_exploration.py \\
@@ -26,6 +48,7 @@ Usage:
       --models punet wavenet \\
       --workspace ./workflow_output \\
       --run_name explore_v1 \\
+      --max_iterations 3 \\
       --max_rounds 10
 """
 
@@ -41,10 +64,9 @@ SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, SIDERIUS_ROOT)
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
-from agent.schemas.interpretation import SummaryGroup
+from agent.schemas.interpretation import InterpretationInput, SummaryGroup
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 
-from agent.schemas.protocols.ml_model_tune_to_ml_result_interp import local_all_records
 from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import local_full_context
 from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full_spec
 from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_all_fields
@@ -114,6 +136,14 @@ def tuning_outputs_to_summary_groups(
     return groups
 
 
+def _make_storage(workspace: str, run_name: str) -> StorageConfig:
+    """Create a StorageConfig pointing at a specific workspace directory."""
+    return StorageConfig(
+        backend="local",
+        local=LocalStorageConfig(workspace=workspace, run_name=run_name),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Workflow
 # ---------------------------------------------------------------------------
@@ -123,7 +153,10 @@ def run_workflow(
     model_types: list[str],
     workspace: str,
     run_name: str,
+    max_iterations: int = 1,
     max_rounds: int = 10,
+    max_proposal_attempts: int = 3,
+    target_score: float | None = None,
     file_index: int = 6,
     llm_provider: str = "gemini",
     llm_model_id: str = "gemini-3.1-flash-lite-preview",
@@ -132,42 +165,49 @@ def run_workflow(
     human_advice_implement: str | None = None,
     human_advice_validate: str | None = None,
     human_advice_tune: str | None = None,
-):
+) -> list[HyperparamTuningOutput]:
     """
-    Execute the model exploration workflow: interpret → propose → implement →
-    validate → tune.
+    Execute the model exploration workflow for one or more iterations.
+
+    Each iteration: interpret → (propose → implement → validate) → tune.
+    The propose→implement→validate inner loop retries on validation failure.
 
     Args:
         data_dir: Root data directory containing existing tuning results.
-        model_types: List of model types to include in interpretation.
-        workspace: Output directory for this workflow run.
+        model_types: List of model types to include in initial interpretation.
+        workspace: Root output directory for this workflow run.
         run_name: Unique name for this workflow run.
-        max_rounds: Tuning budget for the new model.
+        max_iterations: Number of successful iterations (validated + tuned).
+        max_rounds: Tuning budget per iteration.
+        max_proposal_attempts: Max propose→implement→validate retries per iteration.
+        target_score: Optional early stop — halt if best score >= target.
         file_index: Training/validation file index.
         llm_provider: LLM provider for all nodes.
         llm_model_id: LLM model ID for all nodes.
-        human_advice_interpret: Human guidance for the interpretation step.
-        human_advice_propose: Human guidance for the proposal step.
-        human_advice_implement: Human guidance for the implementation step.
-        human_advice_validate: Human guidance for the validation step.
-        human_advice_tune: Human guidance for the tuning step.
+        human_advice_interpret: Human guidance for interpretation steps.
+        human_advice_propose: Human guidance for proposal steps.
+        human_advice_implement: Human guidance for implementation steps.
+        human_advice_validate: Human guidance for validation steps.
+        human_advice_tune: Human guidance for tuning steps.
+
+    Returns:
+        List of HyperparamTuningOutput objects, one per successful iteration.
     """
     os.makedirs(workspace, exist_ok=True)
     started_at = time.strftime("%Y-%m-%d %H:%M:%S")
 
-    storage = StorageConfig(
-        backend="local",
-        local=LocalStorageConfig(workspace=workspace, run_name=run_name),
-    )
-
     print(f"\n{'='*60}")
     print(f"  SIDERIUS Model Exploration Workflow")
-    print(f"  Started   : {started_at}")
-    print(f"  Models    : {model_types}")
-    print(f"  Workspace : {workspace}")
-    print(f"  Run name  : {run_name}")
-    print(f"  LLM       : {llm_provider}/{llm_model_id}")
-    print(f"  Tune rounds: {max_rounds}")
+    print(f"  Started       : {started_at}")
+    print(f"  Models        : {model_types}")
+    print(f"  Workspace     : {workspace}")
+    print(f"  Run name      : {run_name}")
+    print(f"  LLM           : {llm_provider}/{llm_model_id}")
+    print(f"  Iterations    : {max_iterations}")
+    print(f"  Tune rounds   : {max_rounds} per iteration")
+    print(f"  Proposal tries: {max_proposal_attempts} per iteration")
+    if target_score is not None:
+        print(f"  Target score  : {target_score}")
     print(f"{'='*60}\n")
 
     # --- Step 0: Load existing tuning outputs ---
@@ -177,137 +217,192 @@ def run_workflow(
     print(f"  Loaded {len(tuning_outputs)} tuning outputs "
           f"across {len(set(o.model_type for o in tuning_outputs))} model types.\n")
 
-    # --- Edge 1: tune → interpret ---
-    # We have multiple tuning outputs, so we build InterpretationInput directly
-    # from summary groups rather than using local_all_records (which handles
-    # a single HyperparamTuningOutput). This is equivalent — same schema,
-    # same validation.
-    from agent.schemas.interpretation import InterpretationInput
-    interp_input = InterpretationInput(
-        summaries=summary_groups,
-        human_advice=human_advice_interpret,
-        storage=storage,
-    )
+    # Track all model types seen (for duplicate name guard)
+    all_model_types = list({o.model_type for o in tuning_outputs})
 
-    print("Step 1: Interpreting experiment results...")
-    interpretation = ResultInterpretationAgent(
-        provider=llm_provider, model_id=llm_model_id,
-    ).run(interp_input)
-    print(f"  Take-home: {interpretation.take_home_message}")
-    print(f"  Best score: {interpretation.best_denoising_score}")
-    print(f"  Models analysed: {interpretation.model_types}\n")
+    # Collect results across iterations
+    iteration_results: list[HyperparamTuningOutput] = []
+    best_score_overall: float | None = None
 
-    # --- Edge 2: interpret → propose ---
-    print("Step 2: Proposing new model architecture...")
-    propose_input = local_full_context(interpretation, storage)
-    if human_advice_propose is not None:
-        propose_input.human_advice = human_advice_propose
-    proposal = MLModelProposalAgent(
-        provider=llm_provider, model_id=llm_model_id,
-    ).run(propose_input)
-    print(f"  Proposed model: {proposal.model_name}")
-    print(f"  Motivation: {proposal.motivation[:120]}...")
-    print()
+    # --- Iteration loop ---
+    for iteration in range(1, max_iterations + 1):
+        iter_dir = os.path.join(workspace, f"iteration_{iteration:03d}")
+        os.makedirs(iter_dir, exist_ok=True)
+        iter_run_name = f"{run_name}_iter{iteration:03d}"
 
-    # --- Edge 3: propose → implement ---
-    print("Step 3: Implementing proposed model...")
-    impl_input = local_full_spec(proposal, storage)
-    if human_advice_implement is not None:
-        impl_input.human_advice = human_advice_implement
-    impl_output = MLModelImplementor(
-        provider=llm_provider, model_id=llm_model_id,
-    ).run(impl_input)
-    print(f"  Plugin file: {impl_output.model_file_path}")
-    print(f"  Test file  : {impl_output.test_file_path}")
-    print(f"  Description: {impl_output.description_file_path}")
-    print()
+        print(f"\n{'='*60}")
+        print(f"  ITERATION {iteration}/{max_iterations}")
+        print(f"  Directory: {iter_dir}")
+        print(f"{'='*60}\n")
 
-    # --- Edge 4: implement → validate ---
-    print("Step 4: Validating implemented model...")
-    valid_input = local_all_fields(impl_output, storage,
-                                   llm_provider=llm_provider,
-                                   llm_model_id=llm_model_id)
-    if human_advice_validate is not None:
-        valid_input.human_advice = human_advice_validate
-    validation = MLCodeValidatorAgent(
-        provider=llm_provider, model_id=llm_model_id,
-    ).run(valid_input)
+        # --- Interpret (once per iteration, with accumulated results) ---
+        interp_storage = _make_storage(iter_dir, iter_run_name)
+        interp_input = InterpretationInput(
+            summaries=summary_groups,
+            human_advice=human_advice_interpret,
+            storage=interp_storage,
+        )
 
-    if not validation.passed:
-        print(f"\n  Validation FAILED: {validation.error_message}")
-        print(f"  The workflow stops here. In a future orchestrator, this would")
-        print(f"  trigger a retry loop back to the implementor.")
+        print(f"  [{iteration}] Interpreting experiment results...")
+        interpretation = ResultInterpretationAgent(
+            provider=llm_provider, model_id=llm_model_id,
+        ).run(interp_input)
+        print(f"    Take-home: {interpretation.take_home_message}")
+        print(f"    Best score: {interpretation.best_denoising_score}")
+        print(f"    Models: {interpretation.model_types}\n")
 
-        # Save workflow status
-        _save_workflow_status(workspace, run_name, started_at,
-                              status="failed_validation",
-                              proposal=proposal, validation=validation)
-        sys.exit(1)
+        # --- Propose → Implement → Validate (retry loop) ---
+        proposal = None
+        impl_output = None
+        validation = None
+        previous_failures: list[str] = []
 
-    print(f"  All 7 checks passed.")
-    print()
+        for attempt in range(1, max_proposal_attempts + 1):
+            attempt_dir = os.path.join(iter_dir, f"attempt_{attempt:03d}")
+            os.makedirs(attempt_dir, exist_ok=True)
+            attempt_run_name = f"{iter_run_name}_att{attempt:03d}"
+            attempt_storage = _make_storage(attempt_dir, attempt_run_name)
 
-    # --- Edge 5: validate → tune (fan-in: validator + proposal) ---
-    print(f"Step 5: Tuning new model '{proposal.model_name}' for {max_rounds} rounds...")
-    tune_input = local_validated_model(
-        validation, proposal, storage,
-        max_rounds=max_rounds,
-        file_index=file_index,
-        llm_provider=llm_provider,
-        llm_model_id=llm_model_id,
-    )
-    if human_advice_tune is not None:
-        tune_input.human_advice = human_advice_tune
-    tune_output = HyperparamTuningAgent().run(tune_input)
+            print(f"  [{iteration}.{attempt}] Proposing new model (attempt {attempt}/{max_proposal_attempts})...")
 
-    # --- Summary ---
+            # --- Propose ---
+            propose_input = local_full_context(interpretation, attempt_storage)
+            propose_input.existing_model_types = list(all_model_types)
+            if human_advice_propose is not None:
+                propose_input.human_advice = human_advice_propose
+            if previous_failures:
+                propose_input.previous_failures = previous_failures
+
+            proposal = MLModelProposalAgent(
+                provider=llm_provider, model_id=llm_model_id,
+            ).run(propose_input)
+            print(f"    Proposed: {proposal.model_name}")
+
+            # --- Implement ---
+            print(f"  [{iteration}.{attempt}] Implementing...")
+            impl_input = local_full_spec(proposal, attempt_storage)
+            if human_advice_implement is not None:
+                impl_input.human_advice = human_advice_implement
+
+            impl_output = MLModelImplementor(
+                provider=llm_provider, model_id=llm_model_id,
+            ).run(impl_input)
+            print(f"    Plugin: {impl_output.model_file_path}")
+
+            # --- Validate ---
+            print(f"  [{iteration}.{attempt}] Validating...")
+            valid_input = local_all_fields(
+                impl_output, attempt_storage,
+                llm_provider=llm_provider,
+                llm_model_id=llm_model_id,
+            )
+            if human_advice_validate is not None:
+                valid_input.human_advice = human_advice_validate
+
+            validation = MLCodeValidatorAgent(
+                provider=llm_provider, model_id=llm_model_id,
+            ).run(valid_input)
+
+            if validation.passed:
+                print(f"    All 7 checks passed.\n")
+                break
+            else:
+                print(f"    Validation FAILED: {validation.error_message}")
+                previous_failures.append(validation.error_message or "Unknown validation error")
+                if attempt < max_proposal_attempts:
+                    print(f"    Retrying with failure feedback...\n")
+
+        if not validation or not validation.passed:
+            print(f"\n  Iteration {iteration}: exhausted {max_proposal_attempts} proposal "
+                  f"attempts without passing validation. Workflow stopping.")
+            break
+
+        # --- Tune ---
+        tuning_dir = os.path.join(iter_dir, "tuning")
+        os.makedirs(tuning_dir, exist_ok=True)
+        tuning_run_name = f"{iter_run_name}_tune"
+        tuning_storage = _make_storage(tuning_dir, tuning_run_name)
+
+        print(f"  [{iteration}] Tuning '{proposal.model_name}' for {max_rounds} rounds...")
+        tune_input = local_validated_model(
+            validation, proposal, tuning_storage,
+            max_rounds=max_rounds,
+            file_index=file_index,
+            llm_provider=llm_provider,
+            llm_model_id=llm_model_id,
+        )
+        if human_advice_tune is not None:
+            tune_input.human_advice = human_advice_tune
+
+        tune_output = HyperparamTuningAgent().run(tune_input)
+        iteration_results.append(tune_output)
+
+        # --- Accumulate results for next iteration ---
+        all_model_types.append(proposal.model_name)
+        new_groups = tuning_outputs_to_summary_groups([tune_output])
+        summary_groups.extend(new_groups)
+
+        # --- Check score target ---
+        if tune_output.best_denoising_score is not None:
+            if best_score_overall is None or tune_output.best_denoising_score > best_score_overall:
+                best_score_overall = tune_output.best_denoising_score
+
+        print(f"\n  [{iteration}] Complete: {proposal.model_name} "
+              f"best_score={tune_output.best_denoising_score}")
+
+        if target_score is not None and best_score_overall is not None and best_score_overall >= target_score:
+            print(f"\n  Target score {target_score} reached "
+                  f"(best={best_score_overall}). Stopping early.")
+            break
+
+    # --- Final summary ---
     finished_at = time.strftime("%Y-%m-%d %H:%M:%S")
     print(f"\n{'='*60}")
     print(f"  Workflow Complete")
-    print(f"  Started  : {started_at}")
-    print(f"  Finished : {finished_at}")
-    print(f"  New model: {proposal.model_name}")
-    print(f"  Tuning   : {tune_output.completed_rounds}/{max_rounds} rounds")
-    print(f"  Best score: {tune_output.best_denoising_score}")
+    print(f"  Started     : {started_at}")
+    print(f"  Finished    : {finished_at}")
+    print(f"  Iterations  : {len(iteration_results)}/{max_iterations}")
+    print(f"  Best overall: {best_score_overall}")
+    for i, result in enumerate(iteration_results, 1):
+        print(f"    Iteration {i}: {result.model_type} "
+              f"score={result.best_denoising_score}")
     print(f"{'='*60}\n")
 
-    _save_workflow_status(workspace, run_name, started_at,
-                          status="completed",
-                          proposal=proposal, validation=validation,
-                          tune_output=tune_output, finished_at=finished_at)
+    _save_workflow_summary(
+        workspace, run_name, started_at, finished_at,
+        iteration_results, best_score_overall,
+    )
 
-    return tune_output
+    return iteration_results
 
 
-def _save_workflow_status(
+def _save_workflow_summary(
     workspace: str,
     run_name: str,
     started_at: str,
-    status: str,
-    proposal=None,
-    validation=None,
-    tune_output=None,
-    finished_at=None,
+    finished_at: str,
+    iteration_results: list[HyperparamTuningOutput],
+    best_score_overall: float | None,
 ):
-    """Save a JSON summary of the workflow run for later inspection."""
+    """Save a JSON summary of the full workflow run."""
     summary = {
         "workflow": "model_exploration",
         "run_name": run_name,
-        "status": status,
+        "status": "completed" if iteration_results else "failed",
         "started_at": started_at,
-        "finished_at": finished_at or time.strftime("%Y-%m-%d %H:%M:%S"),
+        "finished_at": finished_at,
+        "total_iterations": len(iteration_results),
+        "best_score_overall": best_score_overall,
+        "iterations": [
+            {
+                "model_type": r.model_type,
+                "best_score": r.best_denoising_score,
+                "completed_rounds": r.completed_rounds,
+                "status": r.status,
+            }
+            for r in iteration_results
+        ],
     }
-    if proposal:
-        summary["proposed_model"] = proposal.model_name
-        summary["motivation"] = proposal.motivation
-    if validation:
-        summary["validation_passed"] = validation.passed
-        summary["validation_error"] = validation.error_message
-    if tune_output:
-        summary["tuning_status"] = tune_output.status
-        summary["tuning_rounds"] = tune_output.completed_rounds
-        summary["best_score"] = tune_output.best_denoising_score
-
     path = os.path.join(workspace, f"workflow_{run_name}.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=4)
@@ -321,8 +416,8 @@ def _save_workflow_status(
 def main():
     parser = argparse.ArgumentParser(
         description="SIDERIUS Model Exploration Workflow — "
-                    "interpret existing results, propose and implement a new model, "
-                    "validate it, and tune its hyperparameters.",
+                    "iteratively interpret results, propose new models, implement, "
+                    "validate, and tune.",
     )
     parser.add_argument(
         "--data_dir", type=str, default="/home/klz/Data/SIDEREIS_DATA",
@@ -330,19 +425,31 @@ def main():
     )
     parser.add_argument(
         "--models", type=str, nargs="+", required=True,
-        help="Model types to include in interpretation (e.g. punet wavenet rnn).",
+        help="Model types to include in initial interpretation (e.g. punet wavenet rnn).",
     )
     parser.add_argument(
         "--workspace", type=str, default="./workflow_output",
-        help="Output directory for this workflow run.",
+        help="Root output directory for this workflow run.",
     )
     parser.add_argument(
         "--run_name", type=str, default="explore_v1",
         help="Unique name for this workflow run.",
     )
     parser.add_argument(
+        "--max_iterations", type=int, default=1,
+        help="Number of successful iterations (default: 1 = single pass).",
+    )
+    parser.add_argument(
         "--max_rounds", type=int, default=10,
-        help="Tuning budget for the new model (default: 10).",
+        help="Tuning budget per iteration (default: 10).",
+    )
+    parser.add_argument(
+        "--max_proposal_attempts", type=int, default=3,
+        help="Max propose→implement→validate retries per iteration (default: 3).",
+    )
+    parser.add_argument(
+        "--target_score", type=float, default=None,
+        help="Optional early stop: halt if best score >= target.",
     )
     parser.add_argument(
         "--file_index", type=int, default=6,
@@ -360,24 +467,24 @@ def main():
     # Human advice per step (all optional)
     parser.add_argument(
         "--advice_interpret", type=str, default=None,
-        help="Human guidance for the interpretation step.",
+        help="Human guidance for interpretation steps.",
     )
     parser.add_argument(
         "--advice_propose", type=str, default=None,
-        help="Human guidance for the proposal step "
+        help="Human guidance for proposal steps "
              "(e.g. 'propose a lightweight model with < 100K params').",
     )
     parser.add_argument(
         "--advice_implement", type=str, default=None,
-        help="Human guidance for the implementation step.",
+        help="Human guidance for implementation steps.",
     )
     parser.add_argument(
         "--advice_validate", type=str, default=None,
-        help="Human guidance for the validation step.",
+        help="Human guidance for validation steps.",
     )
     parser.add_argument(
         "--advice_tune", type=str, default=None,
-        help="Human guidance for the tuning step "
+        help="Human guidance for tuning steps "
              "(e.g. 'keep epochs <= 3 for quick testing').",
     )
     args = parser.parse_args()
@@ -387,7 +494,10 @@ def main():
         model_types=args.models,
         workspace=args.workspace,
         run_name=args.run_name,
+        max_iterations=args.max_iterations,
         max_rounds=args.max_rounds,
+        max_proposal_attempts=args.max_proposal_attempts,
+        target_score=args.target_score,
         file_index=args.file_index,
         llm_provider=args.provider,
         llm_model_id=args.model_id,

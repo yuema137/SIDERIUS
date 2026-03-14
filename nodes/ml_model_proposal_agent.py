@@ -180,6 +180,12 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
         lines.append(f"  - {c}")
     lines.append("")
 
+    if inp.previous_failures:
+        lines.append("## Previous Failed Proposals (DO NOT repeat these mistakes)")
+        for i, failure in enumerate(inp.previous_failures, 1):
+            lines.append(f"  {i}. {failure}")
+        lines.append("")
+
     if inp.human_advice:
         lines.append("## Human Expert Advice (high priority — address these explicitly)")
         if isinstance(inp.human_advice, str):
