@@ -2,17 +2,18 @@
 """
 Input and output schemas for result_interpretation_agent.
 
-This node consumes experiment records from one or more tuning runs and produces
-a structured interpretation — key findings, bottlenecks, and a take-home message
-— for consumption by ml_model_proposal_agent.
+This node consumes run-level summaries (one per model) and produces a structured
+interpretation — key findings, bottlenecks, and a take-home message — for
+consumption by ml_model_proposal_agent.
 
 InterpretationInput accepts:
-  - summaries: a list of SummaryGroup objects (one per model/run combination)
+  - summaries: a list of ModelRunSummary objects (one per model)
   - model_types: an explicit list of model types whose descriptions to include
   - Either summaries or model_types must be non-empty (or both)
 
-InterpretationOutput carries descriptions for all effective model types so that
-ml_model_proposal_agent knows exactly what already exists before proposing something new.
+ModelRunSummary is a condensed view of a HyperparamTuningOutput — it contains
+the run-level aggregates (best/worst score, best config, status) and a condensed
+per-round trajectory (scores + conclusions), but NOT the raw experiment records.
 """
 
 from __future__ import annotations
@@ -23,15 +24,55 @@ from pydantic import BaseModel, Field, model_validator
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 
 
-class SummaryGroup(BaseModel):
+class ModelRunSummary(BaseModel):
     """
-    One group of experiment records from a single (model_type, run_name) tuning run.
+    Condensed summary of one tuning run for one model type.
+
+    Built from HyperparamTuningOutput by extracting aggregates and condensing
+    per-round information. The raw experiment records are NOT included — only
+    the score trajectory and one-line conclusions from each round.
     """
-    model_type: str = Field(description="Architecture key (e.g. 'punet', 'fcnet').")
-    run_name:   str = Field(description="Run identifier matching the summary filename.")
-    records:    List[Dict[str, Any]] = Field(
+    model_type: str = Field(
+        description="Architecture key (e.g. 'punet', 'fcnet').",
+    )
+    run_name: str = Field(
+        description="Run identifier (e.g. 'v3_file6').",
+    )
+    status: str = Field(
+        description="Run status: 'completed', 'partial', or 'failed'.",
+    )
+    completed_rounds: int = Field(
+        description="Number of successfully completed experiment rounds.",
+    )
+    best_denoising_score: Optional[float] = Field(
+        default=None,
+        description="Highest denoising score achieved in this run.",
+    )
+    worst_denoising_score: Optional[float] = Field(
+        default=None,
+        description="Lowest denoising score achieved in this run (excluding OOM-skipped).",
+    )
+    best_config: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="The params dict (model_config, train_config, loss_config) "
+                    "that produced the best denoising score.",
+    )
+    round_scores: List[Optional[float]] = Field(
         default_factory=list,
-        description="Experiment records from summary_{run_name}.json.",
+        description="Denoising score per round in chronological order. "
+                    "None entries indicate OOM-skipped or failed rounds.",
+    )
+    round_conclusions: List[str] = Field(
+        default_factory=list,
+        description="One-line conclusion from each round's LLM reflection. "
+                    "Extracted from the 'memory.conclusion' field of each record.",
+    )
+    model_description: Optional[str] = Field(
+        default=None,
+        description="Architecture description (markdown + math). For built-in models "
+                    "this is loaded from description.md by the interpretation agent. "
+                    "For agent-generated models, the workflow passes it directly so "
+                    "the interpretation agent doesn't need filesystem access.",
     )
 
 
@@ -39,16 +80,16 @@ class InterpretationInput(BaseModel):
     """
     Input to result_interpretation_agent.
 
-    Accepts experiment records from multiple runs and/or multiple model types.
-    Descriptions are always loaded for every effective model type.
+    Accepts run-level summaries from one or more models. Each summary is a
+    condensed view of a tuning run — NOT the raw experiment records.
 
     Constraint: at least one model type must be reachable — either derived from
     summaries or listed explicitly in model_types.
     """
 
-    summaries: List[SummaryGroup] = Field(
+    summaries: List[ModelRunSummary] = Field(
         default_factory=list,
-        description="Experiment records grouped by (model_type, run_name). "
+        description="One condensed summary per model tuning run. "
                     "Can be empty if model_types is provided.",
     )
     model_types: Optional[List[str]] = Field(
@@ -57,11 +98,11 @@ class InterpretationInput(BaseModel):
                     "When None, model types are derived from summaries. "
                     "Cannot be an empty list — use None to derive from summaries.",
     )
-    max_records_per_group: int = Field(
-        default=50,
-        ge=1,
-        description="Maximum number of records passed to the LLM per summary group "
-                    "(most recent records preferred when truncating).",
+    human_advice: Optional[str] = Field(
+        default=None,
+        description="Optional human-provided guidance for the interpretation agent. "
+                    "When present, injected into the LLM prompt as high-priority context "
+                    "(e.g. 'focus on comparing training stability across models').",
     )
     storage: StorageConfig = Field(
         default_factory=lambda: StorageConfig(
@@ -78,7 +119,7 @@ class InterpretationInput(BaseModel):
                 "model_types cannot be an empty list. "
                 "Use None to derive model types from summaries."
             )
-        derived = {g.model_type for g in self.summaries}
+        derived = {s.model_type for s in self.summaries}
         effective = derived | set(self.model_types or [])
         if not effective:
             raise ValueError(
@@ -108,38 +149,46 @@ class InterpretationOutput(BaseModel):
 
     # --- Experiment counts ---
     total_experiments: int = Field(
-        description="Total experiment records across all summary groups (including OOM-skipped).",
+        description="Total completed rounds across all summaries.",
     )
 
     # --- Per-model scores ---
     per_model_best: Dict[str, Optional[float]] = Field(
         default_factory=dict,
-        description="model_type → best denoising score across all its runs. "
+        description="model_type → best denoising score. "
                     "None if the model has no successful experiments.",
     )
     per_model_worst: Dict[str, Optional[float]] = Field(
         default_factory=dict,
-        description="model_type → worst denoising score across all its runs. "
+        description="model_type → worst denoising score. "
                     "None if the model has no successful experiments.",
     )
 
     # --- Overall best ---
     best_denoising_score: Optional[float] = Field(
         default=None,
-        description="Highest denoising score observed across all models and runs.",
+        description="Highest denoising score observed across all models.",
     )
     worst_denoising_score: Optional[float] = Field(
         default=None,
-        description="Lowest denoising score observed across all models and runs.",
+        description="Lowest denoising score observed across all models.",
     )
     best_config: Optional[Dict[str, Any]] = Field(
         default=None,
         description="The params dict that produced the overall best denoising score.",
     )
 
-    # --- LLM-generated analysis ---
+    # --- Per-model summaries (from Phase 1) ---
+    per_model_summaries: Dict[str, Dict[str, Any]] = Field(
+        default_factory=dict,
+        description="model_type → structured summary from Phase 1 (per-model LLM call). "
+                    "Each summary contains key_findings, bottlenecks, best_config_analysis, "
+                    "and score_trend. Carried forward for debugging and downstream consumption.",
+    )
+
+    # --- LLM-generated analysis (from Phase 2) ---
     key_findings: List[str] = Field(
-        description="Concrete, ranked observations extracted from the experiment history.",
+        description="Concrete, ranked observations extracted from the run summaries.",
     )
     bottlenecks: List[str] = Field(
         description="Root causes currently limiting further improvement.",

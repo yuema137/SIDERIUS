@@ -4,8 +4,9 @@ Unit tests for agent/schemas/protocols/ml_model_tune_to_ml_result_interp.py
 Tests cover:
   local_all_records
     - Returns a valid InterpretationInput
-    - summaries contains exactly one SummaryGroup with correct model_type and run_name
-    - records are fully serialised from ExperimentRecord objects
+    - summaries contains exactly one ModelRunSummary
+    - ModelRunSummary has correct model_type, run_name, scores
+    - round_scores and round_conclusions extracted from records
     - storage is passed through correctly
     - works with empty all_records
 
@@ -15,7 +16,7 @@ Tests cover:
 import pytest
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput, ExperimentRecord
-from agent.schemas.interpretation import InterpretationInput
+from agent.schemas.interpretation import InterpretationInput, ModelRunSummary
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from agent.schemas.protocols.ml_model_tune_to_ml_result_interp import (
     local_all_records,
@@ -46,6 +47,11 @@ def record_success():
         params={"model_config": {"depth": 3}, "train_config": {"lr": 1e-4}},
         results={"denoising_score": 1.5},
         denoising_score=1.5,
+        memory={
+            "expert_advice_followed": "",
+            "hypothesis": "Try depth 3",
+            "conclusion": "Improved score to 1.5.",
+        },
     )
 
 
@@ -59,17 +65,24 @@ def record_oom():
         file_index=6,
         params={},
         results={},
+        memory={
+            "expert_advice_followed": "",
+            "hypothesis": "Large batch",
+            "conclusion": "Skipped due to OOM risk.",
+        },
     )
 
 
-def make_tuning_output(model_type, run_name, records):
+def make_tuning_output(model_type, run_name, records, best_score=None, best_config=None):
     return HyperparamTuningOutput(
         run_name=run_name,
         model_type=model_type,
         file_index=6,
         status="completed",
-        completed_rounds=len(records),
+        completed_rounds=len([r for r in records if r.status == "success"]),
         total_attempts=len(records),
+        best_denoising_score=best_score,
+        best_config=best_config,
         all_records=records,
         started_at="2026-01-01T00:00:00",
         finished_at="2026-01-01T01:00:00",
@@ -83,53 +96,56 @@ def make_tuning_output(model_type, run_name, records):
 class TestLocalAllRecords:
 
     def test_returns_interpretation_input(self, storage, record_success):
-        output = make_tuning_output("punet", "v1", [record_success])
+        output = make_tuning_output("punet", "v1", [record_success], best_score=1.5)
         result = local_all_records(output, storage)
         assert isinstance(result, InterpretationInput)
 
-    def test_single_summary_group(self, storage, record_success):
-        output = make_tuning_output("punet", "v1", [record_success])
+    def test_single_summary(self, storage, record_success):
+        output = make_tuning_output("punet", "v1", [record_success], best_score=1.5)
         result = local_all_records(output, storage)
         assert len(result.summaries) == 1
+        assert isinstance(result.summaries[0], ModelRunSummary)
 
-    def test_summary_group_model_type(self, storage, record_success):
-        output = make_tuning_output("fcnet", "run2", [record_success])
+    def test_model_type_passed(self, storage, record_success):
+        output = make_tuning_output("fcnet", "run2", [record_success], best_score=1.5)
         result = local_all_records(output, storage)
         assert result.summaries[0].model_type == "fcnet"
 
-    def test_summary_group_run_name(self, storage, record_success):
-        output = make_tuning_output("punet", "my_run", [record_success])
+    def test_run_name_passed(self, storage, record_success):
+        output = make_tuning_output("punet", "my_run", [record_success], best_score=1.5)
         result = local_all_records(output, storage)
         assert result.summaries[0].run_name == "my_run"
 
-    def test_records_fully_serialised(self, storage, record_success):
-        output = make_tuning_output("punet", "v1", [record_success])
+    def test_best_score_passed(self, storage, record_success):
+        output = make_tuning_output("punet", "v1", [record_success], best_score=1.5)
         result = local_all_records(output, storage)
-        records = result.summaries[0].records
-        assert len(records) == 1
-        assert isinstance(records[0], dict)
-        assert records[0]["exp_id"] == "exp_001"
-        assert records[0]["denoising_score"] == 1.5
+        assert result.summaries[0].best_denoising_score == 1.5
 
-    def test_all_records_included(self, storage, record_success, record_oom):
-        output = make_tuning_output("punet", "v1", [record_success, record_oom])
+    def test_worst_score_computed(self, storage, record_success):
+        output = make_tuning_output("punet", "v1", [record_success], best_score=1.5)
         result = local_all_records(output, storage)
-        assert len(result.summaries[0].records) == 2
+        assert result.summaries[0].worst_denoising_score == 1.5
 
-    def test_oom_record_serialised(self, storage, record_oom):
-        output = make_tuning_output("punet", "v1", [record_oom])
+    def test_round_scores_extracted(self, storage, record_success, record_oom):
+        output = make_tuning_output("punet", "v1", [record_success, record_oom], best_score=1.5)
         result = local_all_records(output, storage)
-        assert result.summaries[0].records[0]["status"] == "skipped_oom_risk"
+        assert result.summaries[0].round_scores == [1.5, None]
+
+    def test_round_conclusions_extracted(self, storage, record_success, record_oom):
+        output = make_tuning_output("punet", "v1", [record_success, record_oom], best_score=1.5)
+        result = local_all_records(output, storage)
+        assert result.summaries[0].round_conclusions[0] == "Improved score to 1.5."
+        assert "OOM" in result.summaries[0].round_conclusions[1]
 
     def test_empty_records(self, storage):
         output = make_tuning_output("punet", "v1", [])
         result = local_all_records(output, storage)
-        assert result.summaries[0].records == []
+        assert result.summaries[0].round_scores == []
+        assert result.summaries[0].completed_rounds == 0
 
     def test_storage_passed_through(self, storage, record_success):
-        output = make_tuning_output("punet", "v1", [record_success])
+        output = make_tuning_output("punet", "v1", [record_success], best_score=1.5)
         result = local_all_records(output, storage)
-        assert result.storage.backend == "local"
         assert result.storage.local.workspace == "/tmp/proto_test"
         assert result.storage.local.run_name == "r1"
 

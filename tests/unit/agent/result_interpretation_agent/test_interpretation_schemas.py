@@ -5,24 +5,35 @@ import pytest
 from pydantic import ValidationError
 
 from agent.schemas.interpretation import (
-    InterpretationInput, InterpretationOutput, SummaryGroup,
+    InterpretationInput, InterpretationOutput, ModelRunSummary,
 )
 
 
 # ---------------------------------------------------------------------------
-# SummaryGroup
+# ModelRunSummary
 # ---------------------------------------------------------------------------
 
-class TestSummaryGroup:
+class TestModelRunSummary:
 
     def test_valid(self):
-        g = SummaryGroup(model_type="punet", run_name="v1", records=[{"exp_id": "x"}])
-        assert g.model_type == "punet"
-        assert len(g.records) == 1
+        s = ModelRunSummary(
+            model_type="punet", run_name="v1", status="completed",
+            completed_rounds=10, best_denoising_score=1.5,
+            worst_denoising_score=0.3, best_config={"model_config": {}},
+            round_scores=[0.3, 0.8, 1.2, 1.5],
+            round_conclusions=["Bad", "Better", "Good", "Best"],
+        )
+        assert s.model_type == "punet"
+        assert s.completed_rounds == 10
+        assert len(s.round_scores) == 4
 
-    def test_empty_records_allowed(self):
-        g = SummaryGroup(model_type="fcnet", run_name="v1")
-        assert g.records == []
+    def test_minimal(self):
+        s = ModelRunSummary(
+            model_type="fcnet", run_name="v1", status="completed",
+            completed_rounds=0,
+        )
+        assert s.round_scores == []
+        assert s.best_denoising_score is None
 
 
 # ---------------------------------------------------------------------------
@@ -33,9 +44,11 @@ class TestInterpretationInput:
 
     def test_valid_with_summaries(self):
         inp = InterpretationInput(
-            summaries=[SummaryGroup(model_type="punet", run_name="v1")],
+            summaries=[ModelRunSummary(
+                model_type="punet", run_name="v1", status="completed",
+                completed_rounds=5,
+            )],
         )
-        assert inp.max_records_per_group == 50
         assert inp.storage.backend == "local"
 
     def test_valid_with_model_types(self):
@@ -45,7 +58,10 @@ class TestInterpretationInput:
 
     def test_valid_with_both(self):
         inp = InterpretationInput(
-            summaries=[SummaryGroup(model_type="punet", run_name="v1")],
+            summaries=[ModelRunSummary(
+                model_type="punet", run_name="v1", status="completed",
+                completed_rounds=5,
+            )],
             model_types=["fcnet"],
         )
         assert len(inp.summaries) == 1
@@ -58,13 +74,6 @@ class TestInterpretationInput:
     def test_empty_model_types_raises(self):
         with pytest.raises(ValidationError, match="model_types cannot be an empty list"):
             InterpretationInput(model_types=[])
-
-    def test_zero_max_records_raises(self):
-        with pytest.raises(ValidationError):
-            InterpretationInput(
-                summaries=[SummaryGroup(model_type="punet", run_name="v1")],
-                max_records_per_group=0,
-            )
 
     def test_storage_custom(self):
         inp = InterpretationInput(

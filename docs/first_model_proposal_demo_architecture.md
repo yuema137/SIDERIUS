@@ -88,27 +88,53 @@ successful pass.
 | Step | Status |
 |------|--------|
 | Add `run()` to `tune_ml_hyperparam_agent` + wire `seed_records` | ⬜ next |
-| `demo/run_model_proposal_demo.py` | ⬜ |
+| `workflows/model_exploration.py` | ⬜ |
 
 ---
 
 ## Next Steps in Detail
 
-### Step 1 — `result_interpretation_agent` ✅ done
+### Step 1 — `result_interpretation_agent` ⚠️ refactoring to two-phase
 
 **File**: `nodes/result_interpretation_agent.py`.
 
-**What was built**:
+**What was built (original — single LLM call, being replaced)**:
 - `class ResultInterpretationAgent` with `run(input: InterpretationInput) -> InterpretationOutput`
 - Accepts multiple summary groups across multiple model types (`summaries: List[SummaryGroup]`)
 - Deterministically computes per-model and cross-model best/worst scores before the LLM call
-- Loads architecture descriptions from `ml_models/{model_type}/description.md` for all models;
-  raises `FileNotFoundError` if any description is missing
 - One LLM call: injects all model descriptions + experiment records; LLM produces
   `key_findings`, `bottlenecks`, `take_home_message` as strict JSON
 - Writes output to `{storage.local.workspace}/interpretation_{run_name}.json`
 - Validates input at entry and output at exit via Pydantic `model_validate()`
 - 20 unit tests + 4 real-API integration tests (Gemini + OpenAI, single-model + multi-model)
+
+**Refactoring to two-phase interpretation**:
+
+The original single-LLM-call design dumps all experiment records from all models into one
+prompt. This does not scale — with 20+ records per model and multiple models, the prompt
+exceeds token limits and produces poor results. The fix is a two-phase approach:
+
+1. **Phase 1 — Per-model summarization**: for each model type, call the LLM once with
+   only that model's records and architecture description. Produces a structured JSON
+   summary per model (key findings, best config, score trends, bottlenecks).
+2. **Phase 2 — Cross-model synthesis**: take the structured per-model summaries (not
+   raw records) and call the LLM once more to produce the final `InterpretationOutput`
+   (comparative analysis, overall bottlenecks, take-home message).
+
+This keeps each LLM call focused and within token limits. The per-model summaries are
+explicit, inspectable, and stored alongside the final output.
+
+**Current implementation**: Option A — both phases inside `ResultInterpretationAgent.run()`.
+The node's input/output schemas are unchanged; the internal logic changes from one LLM
+call to N+1 calls (N per-model + 1 synthesis).
+
+**Future evolution**: Option B — split into two separate nodes (`per_model_summarizer`
+and `cross_model_interpreter`) with a protocol between them. This gives the orchestrator
+the ability to run per-model summarization in parallel, cache individual summaries, and
+re-synthesize without re-summarizing. The split should happen when:
+- Parallelism matters (many models, slow LLM)
+- The orchestrator needs to selectively re-summarize specific models
+- The per-model summary becomes a reusable artefact consumed by multiple downstream nodes
 
 ---
 
@@ -318,11 +344,11 @@ only confirms validity; the expert advice comes from the proposal).
 | `ml_result_interp_to_ml_model_propose.py` | `local_full_context` | `(output: InterpretationOutput, storage: StorageConfig) -> ProposalInput` |
 | `ml_model_propose_to_ml_model_impl.py` | `local_full_spec` | `(output: ProposalOutput, storage: StorageConfig) -> ImplementorInput` |
 | `ml_model_impl_to_ml_model_valid.py` | `local_all_fields` | `(output: ImplementorOutput, storage: StorageConfig) -> ValidatorInput` |
-| `ml_model_valid_to_ml_model_tune.py` | `local_validated_model` | `(output: ValidatorOutput, storage: StorageConfig, max_rounds, file_index, llm_provider, llm_model_id) -> HyperparamTuningInput` |
+| `ml_model_valid_to_ml_model_tune.py` | `local_validated_model` | `(output: ValidatorOutput, proposal: ProposalOutput, storage: StorageConfig, max_rounds, file_index, llm_provider, llm_model_id) -> HyperparamTuningInput` |
 
 ---
 
-### Step 7 — `demo/run_model_proposal_demo.py`
+### Step 7 — `workflows/model_exploration.py`
 
 A linear script that ties everything together. Accepts CLI args for workspace, run_name,
 model_type (for the initial tuning results to read), LLM provider, and max_rounds for
@@ -497,8 +523,8 @@ nodes/
 ├── ml_model_implementor.py               ✅ done (two-call CoT, template assembly, description.md, self-correction loop)
 └── ml_code_validator_agent.py              ✅ done (7 checks, calibrated LLM review)
 
-demo/
-└── run_model_proposal_demo.py            ⬜
+workflows/
+└── model_exploration.py                 ⬜
 
 tests/
 └── unit/
@@ -525,7 +551,7 @@ tests/integration/protocols/         ✅ Tier 2 — one graph edge end-to-end
     ├── test_propose_to_implement.py      ✅ 2 tests (Gemini + OpenAI, proposal → implementor edge)
     └── test_implement_to_validate.py     ✅ 2 tests (Gemini + OpenAI, full implement → validate chain)
 
-tests/integration/orchestrator/      ⬜ Tier 3 — multi-hop critical loops (empty, ready)
+tests/integration/workflows/         ⬜ Tier 3 — multi-hop workflow tests (empty, ready)
 
 tests/unit/core/
     ├── test_storage.py                   ✅ done (11 tests)
@@ -539,7 +565,7 @@ tests/unit/core/
 ## Demo Script Outline
 
 ```python
-# demo/run_model_proposal_demo.py
+# workflows/model_exploration.py
 import sys, json
 from nodes.result_interpretation_agent import ResultInterpretationAgent
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
@@ -587,9 +613,9 @@ if not validation.passed:
     sys.exit(1)
 print("Model validated.")
 
-# Edge 5: validate → tune
+# Edge 5: validate → tune (fan-in: validator + proposal)
 tuning_output = HyperparamTuningAgent().run(
-    local_validated_model(validation, storage, file_index=6, max_rounds=10)
+    local_validated_model(validation, proposal, storage, file_index=6, max_rounds=10)
 )
 print("Best score:", tuning_output.best_denoising_score)
 ```

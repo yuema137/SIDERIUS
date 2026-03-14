@@ -45,30 +45,56 @@ class MyNode:
 This applies to every node without exception — leaf agents, orchestrators, validators,
 and utility modules alike.
 
-### 3. Edges require a protocol
+### 3. Protocols assemble node inputs
 
-Two nodes can only be connected if a **protocol** exists on that edge. A protocol is a
-named, versioned, explicit function that maps the source node's output schema to the
-target node's input schema:
+A **protocol** is a named, typed function that assembles a fully populated input schema
+for a target node from one or more upstream node outputs. It is the only place where
+field mapping between nodes happens.
 
 ```python
-def protocol_name(output: NodeAOutput) -> NodeBInput:
+# Simple protocol — one source
+def protocol_name(output: NodeAOutput, storage: StorageConfig) -> NodeBInput:
+    ...
+
+# Aggregation protocol — multiple sources (fan-in)
+def protocol_name(output_a: NodeAOutput, output_c: NodeCOutput, storage: StorageConfig) -> NodeBInput:
     ...
 ```
 
-A protocol is **strictly directional**: `A → B` and `B → A` are two separate protocols.
-There is no bidirectional or symmetric protocol. Each protocol arrow has one source and
-one target, and data always flows in one direction per traversal.
+The **target node's input schema is the completeness contract**. It defines what fields
+are required, with Pydantic validation. The protocol's job is to satisfy that contract
+— the target node does not know or care how many sources contributed to its input.
 
-A protocol is also **transparent on both ends**: the function signature explicitly names
-what it reads from the source (`NodeAOutput`) and what it produces for the target
-(`NodeBInput`). There is no implicit field mapping or automatic wiring — every field
-consumed and every field populated is visible in the function body.
+A protocol is **strictly directional**: it always produces a specific target node's
+input. `A → B` and `B → A` are two separate protocols. Data always flows in one
+direction per traversal.
+
+A protocol is also **transparent**: the function signature explicitly names every
+source output it reads from and the target input it produces. There is no implicit
+field mapping or automatic wiring — every field consumed and every field populated is
+visible in the function body.
+
+**Fan-in** — when a target node needs data from multiple non-adjacent sources, the
+protocol takes multiple output arguments. The workflow (or orchestrator) holds all
+intermediate outputs and passes them to the protocol. The protocol file is named by
+the **primary triggering edge** (the adjacent upstream node), with fan-in sources
+documented in the function signature and docstring.
+
+```
+Node A output ──┐
+                 ├──► protocol ──► Node B input (fully populated)
+Node C output ──┘        ▲
+                    StorageConfig
+```
+
+**Fan-out** — a node's output can be consumed by multiple downstream protocols. Each
+protocol reads the fields it needs from the same output object. No special mechanism
+is required; this is just multiple protocols referencing the same source type.
 
 **Loops are allowed**, but they do not change the directionality of individual protocols.
 When a cycle exists in the graph (e.g. `A → B → C → A`), each edge in the cycle is
-still a one-way protocol. The loop is created by an orchestrator repeatedly traversing
-the same directed edges — not by any protocol becoming bidirectional.
+still a one-way protocol. The loop is created by a workflow or orchestrator repeatedly
+traversing the same directed edges — not by any protocol becoming bidirectional.
 
 - Output and input schemas do **not** need to match exactly. The protocol is the
   translation layer between them.
@@ -123,7 +149,7 @@ structure:
 ### 6. Orchestrators select paths and choose protocols
 
 An orchestrator does not define the graph — the graph is defined by the nodes and their
-protocols, and is fixed. The orchestrator has two distinct responsibilities:
+protocols, and is fixed. The orchestrator has three distinct responsibilities:
 
 1. **Select a path** — decide which nodes to visit and in what order.
 2. **Choose the protocol on each edge** — since multiple protocols can exist between the
@@ -131,12 +157,17 @@ protocols, and is fixed. The orchestrator has two distinct responsibilities:
    This is not a passive lookup; it is an active decision. The same edge can be crossed
    with a different protocol on the next iteration of a loop, or by a different
    orchestrator entirely.
+3. **Supply fan-in outputs** — when a protocol aggregates multiple sources, the
+   orchestrator (or workflow) holds all intermediate outputs and passes the required
+   ones to the protocol. The orchestrator is the only component that has visibility
+   across the full traversal path.
 
 This is a strict separation:
 - **Graph topology** (which nodes exist, which edges exist, which protocols are defined)
   is static and declared independently of any orchestrator.
-- **Execution** (which path to take, which protocol to apply, how many times to traverse
-  a cycle, what to do on failure) is the orchestrator's responsibility alone.
+- **Execution** (which path to take, which protocol to apply, which outputs to pass to
+  fan-in protocols, how many times to traverse a cycle, what to do on failure) is the
+  orchestrator's responsibility alone.
 
 ### 7. Cycles are driven by orchestrators, not nodes
 
@@ -157,16 +188,18 @@ memory, a local file, or a database.
 and injected into each node's input at traversal time.
 
 This separation has one critical implication for protocols: **a protocol must always
-return a fully populated input schema**, regardless of the transport it uses. A
-`database_*` protocol reads from the database and populates the schema completely
-before handing it to the node. The node on the receiving end never sees a half-empty
-schema or a storage handle — it always receives the full, validated data contract.
+return a fully populated input schema**, regardless of the transport it uses or how
+many sources it aggregates. A `database_*` protocol reads from the database and
+populates the schema completely before handing it to the node. The node on the
+receiving end never sees a half-empty schema or a storage handle — it always receives
+the full, validated data contract.
 
 ```
-Node A output schema  ──► protocol (local or database) ──► Node B input schema (fully populated)
-                                         ▲
-                                  StorageConfig
-                              (injected by orchestrator)
+Node A output ──┐
+                 ├──► protocol (local or database) ──► Node B input schema (fully populated)
+Node C output ──┘              ▲
+(optional fan-in)        StorageConfig
+                     (injected by workflow)
 ```
 
 ### 9. Inter-node communication uses exactly three mechanisms
@@ -176,14 +209,14 @@ form of inter-node communication is permitted.
 
 - **Schema**: the input and output `BaseModel` of each node is the complete, explicit
   contract for what data flows in and out. Every field that a downstream node needs must
-  appear in the upstream node's output schema and be mapped by the protocol. There are no
-  hidden contracts or implicit field sharing.
+  be present in one or more upstream node output schemas and mapped by the protocol. There
+  are no hidden contracts or implicit field sharing.
 - **Storage**: each node writes its own output record to the workspace for persistence and
   recovery. This is a **log**, not a communication channel. Downstream nodes never read the
   upstream node's output file to discover their input — they receive data through the
   protocol function in memory.
-- **Protocols**: the only place field mapping happens. The protocol function receives the
-  full upstream `*Output` object and constructs the fully populated downstream `*Input`.
+- **Protocols**: the only place field mapping happens. The protocol function receives one
+  or more upstream `*Output` objects and constructs the fully populated downstream `*Input`.
   No field should be silently dropped.
 
 This constraint is what keeps the graph clean as it grows. Any shortcut — reading a file
@@ -235,12 +268,16 @@ is the core research loop, traversed by an orchestrator.
 ## Protocols
 
 Protocols live in `agent/schemas/protocols/`. Each is a plain Python function, named
-and versioned, with fully typed arguments and return value.
+and versioned, with fully typed arguments and return value. A protocol assembles a
+complete input for a target node from one or more source outputs. Most protocols are
+simple (one source), but fan-in protocols aggregate multiple sources when the target
+node needs data from non-adjacent nodes in the graph.
 
 ### Implemented protocols
 
-Naming convention: one file per directed edge, named `{source_code}_to_{target_code}.py`.
-Each file contains `local_*` (in-memory) and `database_*` (NotImplementedError placeholder) variants.
+Naming convention: one file per primary directed edge, named `{source_code}_to_{target_code}.py`.
+Each file contains `local_*` (in-memory) and `database_*` (NotImplementedError placeholder)
+variants. Fan-in sources are additional function parameters beyond the primary source.
 
 | Edge | File | Function | Consumes from source | Populates in target |
 |------|------|----------|----------------------|---------------------|
@@ -248,7 +285,7 @@ Each file contains `local_*` (in-memory) and `database_*` (NotImplementedError p
 | `interpret → propose` | `ml_result_interp_to_ml_model_propose.py` | `local_full_context` | full `InterpretationOutput` | serialised interpretation, existing model types, constraints |
 | `propose → implement` | `ml_model_propose_to_ml_model_impl.py` | `local_full_spec` | `ProposalOutput` | model name, math definition, description, baseline config |
 | `implement → validate` | `ml_model_impl_to_ml_model_valid.py` | `local_all_fields` | `ImplementorOutput` | file paths, config fields, model description, math definition |
-| `validate → tune` | `ml_model_valid_to_ml_model_tune.py` | `local_validated_model` | `ValidatorOutput` | model type, tuning budget, LLM config |
+| `validate → tune` | `ml_model_valid_to_ml_model_tune.py` | `local_validated_model` | `ValidatorOutput` + `ProposalOutput` (fan-in) | model type, expert advice, tuning budget, LLM config |
 
 ### Planned protocols
 
@@ -265,7 +302,7 @@ An orchestrator selects a path through the graph, applies protocols on each edge
 and calls `node.run()` at each step. It introduces control flow — sequential execution,
 conditional branching, and loops by re-traversing cycles.
 
-### Example: model exploration loop (Level 1 orchestrator)
+### Example: model exploration loop (Level 1 workflow)
 
 ```
 1. tune_ml_hyperparam_agent    → initial tuning run (N rounds)
@@ -281,8 +318,8 @@ conditional branching, and loops by re-traversing cycles.
 
 ```
 Human / Top-level CLI
-└── research_campaign_orchestrator          ← Level 2
-    ├── model_exploration_orchestrator      ← Level 1
+└── research_campaign_orchestrator          ← Level 2 (orchestrator)
+    ├── model_exploration_workflow          ← Level 1 (workflow)
     │   ├── tune_ml_hyperparam_agent        ← Level 0
     │   ├── result_interpretation_agent     ← Level 0
     │   ├── ml_model_proposal_agent         ← Level 0
@@ -292,8 +329,74 @@ Human / Top-level CLI
     └── result_interpretation_agent         ← Level 0 (final cross-model summary)
 ```
 
-A human can substitute for any orchestrator at any level by manually applying protocols
-and calling nodes via CLI.
+A human can substitute for any workflow or orchestrator at any level by manually
+applying protocols and calling nodes via CLI.
+
+### Workflows vs. Orchestrators
+
+There are two distinct levels of control in the system:
+
+**Workflows** execute a pre-designed path through the graph. The sequence of nodes and
+protocols is hardcoded — the workflow's only runtime decisions are when to stop and how
+to handle errors. Workflows are deterministic and predictable. The first model proposal
+demo is an example: it traverses `tune → interpret → propose → implement → validate →
+tune` exactly once. Workflows are scripts, not agents.
+
+**Orchestrators** are LLM-powered agents that choose their own path through the graph
+at runtime. Given a goal (e.g. "achieve denoising score > X on dataset Y"), the
+orchestrator inspects the available skills and protocols, decides which to invoke next,
+observes the result, and adapts. This is the long-term target — a research agent that
+autonomously navigates the full graph to pursue scientific hypotheses.
+
+Workflows are the right starting point. They validate that all nodes, schemas, and
+protocols work end-to-end before introducing LLM-driven path selection. Orchestrators
+will be built on top of the same graph infrastructure — same nodes, same protocols,
+same registry — with an LLM replacing the hardcoded traversal logic. An orchestrator
+may invoke workflows as sub-skills when a known-good sequence is appropriate.
+
+### Skill architecture (universal callable contract)
+
+**High-level principle**: every callable in the system — whether it is an atomic tool
+(training, inference, scoring), an LLM-powered agent (proposal, implementor), or an
+orchestrator — conforms to a single **skill contract**: `{name, description,
+input_schema, output_schema}`. This is the same uniform interface used by modern
+tool-use APIs (OpenAI function calling, Anthropic tool use, MCP). From the caller's
+perspective, there is no structural difference between invoking a deterministic
+function and invoking a full agent — both are skills with typed inputs and outputs.
+
+This matters for orchestrators: they see a flat catalogue of skills and select which
+to invoke based on descriptions and schemas, without needing to know whether a skill
+is a 3-line function, a full agent, or a workflow. The graph topology (which skills
+can follow which) and the protocol registry (how to transform one skill's output into
+the next skill's input) constrain the orchestrator's choices, but the invocation
+mechanism is uniform.
+
+**Current naming conflict and planned resolution**:
+The directory `agent/skills/` currently holds a specific subset of atomic tools used
+internally by the tuning agent (training, inference, scoring, config check, resource
+evaluation). These are skills in the universal sense, but the directory name suggests
+they are the *only* skills. The planned resolution (deferred until after the first
+demo):
+
+1. Rename `agent/skills/` → `agent/tools/` to clarify these are atomic,
+   non-LLM operations used internally by agents.
+2. Reserve "skill" for the universal interface contract that all callables satisfy.
+3. Introduce a **skill registry** that indexes all available skills (tools, agents,
+   workflows, orchestrators) with their names, descriptions, and schemas. Workflows
+   do not need this registry (they hardcode the path), but orchestrators will query
+   it to discover what they can invoke.
+
+The hierarchy is:
+
+```
+Orchestrator  (LLM-powered, goal-driven, selects skills autonomously)
+  └── Workflows  (pre-designed paths through the graph, deterministic)
+       └── Agents  (LLM-powered, run(input)->output, may use tools internally)
+            └── Tools  (atomic operations: training, inference, scoring)
+```
+
+All three levels satisfy the same skill contract. The hierarchy describes *internal
+composition*, not the external interface.
 
 ---
 
@@ -447,7 +550,7 @@ edges traversed in sequence, representing a real research workflow.
 - A full traversal of the core research loop produces coherent outputs at every stage
 - The orchestrator's control logic (loop termination, error handling) works on a real run
 
-**Location**: `tests/integration/orchestrator/test_{loop_name}.py`
+**Location**: `tests/integration/workflows/test_{workflow_name}.py`
 
 **Rule**: Test only the critical paths, not every combination. Combinatorial coverage
 belongs in unit tests. A Tier 3 test that takes more than ~10 minutes is doing too much
@@ -462,7 +565,7 @@ belongs in unit tests. A Tier 3 test that takes more than ~10 minutes is doing t
 | Unit | Single node, mocked LLM | mock | no | `tests/unit/` | Every commit |
 | Integration Tier 1 | Single node, real API | real | depends | `tests/integration/nodes/` | On demand |
 | Integration Tier 2 | One edge (source → target) | real | depends | `tests/integration/protocols/` | On demand |
-| Integration Tier 3 | Critical multi-hop loop | real | yes | `tests/integration/orchestrator/` | Before releases |
+| Integration Tier 3 | Critical multi-hop loop | real | yes | `tests/integration/workflows/` | Before releases |
 
 ---
 
@@ -481,3 +584,57 @@ When a second dataset is introduced, extract a backend interface:
 
 **Do not design this abstraction speculatively.** Extract it when there is a second concrete
 use case — at that point the right interface boundary will be obvious.
+
+---
+
+## TODO: Skill Architecture Refactor
+
+After the first model proposal demo is running end-to-end:
+
+1. **Rename `agent/skills/` → `agent/tools/`** — update all imports and references.
+   These are atomic, non-LLM operations (training, inference, scoring, config check,
+   resource evaluation) used internally by agents.
+2. **Define the skill schema** — a Pydantic `SkillDescriptor` with `name`, `description`,
+   `input_schema`, `output_schema`, and metadata (e.g. `requires_gpu`, `requires_llm`,
+   `estimated_cost`). All nodes, tools, and orchestrators must be describable by this schema.
+3. **Build the skill registry** — a module that discovers and indexes all available skills
+   from `nodes/`, `agent/tools/`, `workflows/`, and `orchestrators/`. Orchestrators will
+   query this registry to decide what to invoke.
+4. **Build the first orchestrator** — an LLM-powered agent that receives a goal, queries
+   the skill registry, selects skills to invoke (including workflows as sub-skills),
+   applies protocols between them, and iterates until the goal is met or a budget is
+   exhausted.
+
+---
+
+## TODO: Structured Node Failure Outputs
+
+Currently, when a node fails (e.g. `ml_model_implementor` exhausts its self-correction
+retries), it raises a Python exception. The workflow catches this in a `try/except` and
+treats it as a failed attempt. This works but has limitations:
+
+- The error message is unstructured (a string extracted from the exception)
+- The workflow cannot distinguish between different failure modes
+- Downstream retry logic (proposal agent's `previous_failures`) receives a raw error
+  string rather than structured diagnostic data
+
+**Long-term solution**: each node's output schema should support a failure mode. For
+example, `ImplementorOutput` could include:
+
+```python
+class ImplementorOutput(BaseModel):
+    status: Literal["success", "failed"] = "success"
+    error_message: Optional[str] = None
+    error_category: Optional[str] = None  # e.g. "syntax_error", "shape_mismatch"
+    # ... existing fields (only populated when status="success")
+```
+
+This mirrors how `ValidatorOutput` already works (`passed: bool` + `error_message`).
+With structured failure outputs:
+- The workflow never needs `try/except` around node calls — it checks `output.status`
+- The proposal agent receives categorised failure data, not raw tracebacks
+- Failure modes are part of the schema contract, not implicit exceptions
+
+**When to implement**: after the first demo workflow runs successfully end-to-end.
+Start with `ImplementorOutput`, then consider `ProposalOutput` (for cases like empty
+`model_name` or duplicate name detection).

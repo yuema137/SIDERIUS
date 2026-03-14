@@ -157,6 +157,7 @@ PLUGIN_MODEL_TYPE = "{model_name}"
 
 
 class {ModelClass}Config(BaseModel):
+    model_type: str = Field(default="{model_name}", description="Plugin model type key.")
     segmentation_size: int = Field(default={segmentation_size}, ge=1)
     batch_size: int = Field(default={batch_size}, ge=1)
 {config_fields_code}
@@ -337,6 +338,15 @@ def _build_reasoning_prompt(inp: ImplementorInput) -> str:
         "  input:  [B, T]       int64   — raw ADC signal",
         "  output: [B, 256, T]  float32 — per-timestep logits",
     ]
+
+    # --- Human advice (injected by workflow) ---
+    if inp.human_advice:
+        lines += [
+            "",
+            "## Human Guidance (high priority)",
+            inp.human_advice,
+        ]
+
     return "\n".join(lines)
 
 
@@ -427,7 +437,7 @@ def _assemble_test(model_name: str) -> str:
 
 class MLModelImplementor:
 
-    def __init__(self, provider: str = "gemini", model_id: str = "gemini-3.1-flash-lite-preview"):
+    def __init__(self, provider: str = "gemini", model_id: str = "gemini-3.1-pro-preview"):
         self.bridge = LLMBridge(provider=provider, model_id=model_id)
 
     # ------------------------------------------------------------------
@@ -464,7 +474,21 @@ class MLModelImplementor:
                 f"Pydantic Field definition."
             )
 
-        # Check 2: syntax
+        # Check 2: config fields must be scalar (int, float, bool)
+        config_fields = code.get("config_fields", {})
+        non_scalar = {
+            k: type(v).__name__ for k, v in config_fields.items()
+            if not isinstance(v, (int, float, bool))
+        }
+        if non_scalar:
+            return (
+                f"Non-scalar config fields: {non_scalar}. "
+                f"All config fields must be int, float, or bool — "
+                f"the hyperparameter tuner only searches scalar dimensions. "
+                f"Remove or replace string/list/dict fields with scalar alternatives."
+            )
+
+        # Check 3: syntax
         plugin_src = _assemble_plugin(inp, code)
         try:
             ast.parse(plugin_src)
@@ -595,7 +619,7 @@ def main():
     parser.add_argument("--workspace", type=str, default="./siderius_workspace")
     parser.add_argument("--run_name",  type=str, default="v1")
     parser.add_argument("--provider",  type=str, default="gemini", choices=["gemini", "openai"])
-    parser.add_argument("--model_id",  type=str, default="gemini-3.1-flash-lite-preview")
+    parser.add_argument("--model_id",  type=str, default="gemini-3.1-pro-preview")
     args = parser.parse_args()
 
     proposal_path = os.path.join(args.workspace, f"proposal_{args.run_name}.json")

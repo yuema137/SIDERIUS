@@ -8,13 +8,15 @@ Each module contains protocol functions named {transport}_{data_scope}.
   transport  : how data moves (local = in-memory, database = via Postgres)
   data_scope : what subset of the source output is transferred
 
-Orchestrators import from this module and choose which protocol to apply.
+Workflows and orchestrators import from this module and choose which protocol to apply.
 
 Implemented edges
 -----------------
 ml_model_tune_to_ml_result_interp      tune_ml_hyperparam_agent -> result_interpretation_agent
 ml_result_interp_to_ml_model_propose   result_interpretation_agent -> ml_model_proposal_agent
 ml_model_propose_to_ml_model_impl      ml_model_proposal_agent -> ml_model_implementor
+ml_model_impl_to_ml_model_valid        ml_model_implementor -> ml_code_validator_agent
+ml_model_valid_to_ml_model_tune        ml_code_validator_agent -> tune_ml_hyperparam_agent (fan-in: also consumes ProposalOutput)
 """
 
 from agent.schemas.protocols.ml_model_tune_to_ml_result_interp import (
@@ -29,6 +31,14 @@ from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import (
     local_full_spec    as propose_to_impl__local_full_spec,
     database_full_spec as propose_to_impl__database_full_spec,
 )
+from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import (
+    local_all_fields    as impl_to_valid__local_all_fields,
+    database_all_fields as impl_to_valid__database_all_fields,
+)
+from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import (
+    local_validated_model    as valid_to_tune__local_validated_model,
+    database_validated_model as valid_to_tune__database_validated_model,
+)
 
 __all__ = [
     "tune_to_interp__local_all_records",
@@ -37,4 +47,8 @@ __all__ = [
     "interp_to_propose__database_full_context",
     "propose_to_impl__local_full_spec",
     "propose_to_impl__database_full_spec",
+    "impl_to_valid__local_all_fields",
+    "impl_to_valid__database_all_fields",
+    "valid_to_tune__local_validated_model",
+    "valid_to_tune__database_validated_model",
 ]

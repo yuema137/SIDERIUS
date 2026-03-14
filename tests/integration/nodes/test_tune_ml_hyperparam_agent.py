@@ -1,13 +1,18 @@
 """
-Real-run integration tests for the full agent research loop.
+Tier 1 integration test for tune_ml_hyperparam_agent.
+
+Tests HyperparamTuningAgent.run() end-to-end with real LLM API + GPU.
+Each test runs 1 round with a given model/loss/train config and verifies
+that the output conforms to HyperparamTuningOutput.
 
 Requires:
   - Real TIDMAD data at /home/klz/Data/TIDMAD/
   - GEMINI_API_KEY and/or OPENAI_API_KEY set in the environment (or .env file)
+  - GPU (CUDA)
 
 These tests are skipped automatically when API keys are missing.
 Run locally with:
-  uv run pytest -m real_run -v
+  uv run pytest -m real_run tests/integration/nodes/test_tune_ml_hyperparam_agent.py -v -s
 
 DO NOT run these in CI (GitHub Actions or equivalent).
 """
@@ -16,9 +21,9 @@ import time
 import pytest
 from dotenv import load_dotenv
 
-from core.sandbox_executor import TidmadSandbox
-from agent.llm_bridge import LLMBridge
-from agent.schemas.hyperparam_tuning import HyperparamTuningInput, ExperimentRecord
+from agent.schemas.hyperparam_tuning import HyperparamTuningInput, HyperparamTuningOutput
+from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 
 load_dotenv()
 
@@ -165,126 +170,68 @@ FLEX_CONFIGS = {
 
 
 def run_one_loop(provider: str, model_type: str, loss_cfg: dict, workspace: str,
-                 model_cfg: dict = None, train_cfg: dict = None):
+                 model_cfg: dict = None, train_cfg: dict = None) -> HyperparamTuningOutput:
     """
-    Runs one full agent loop iteration:
-      plan -> train -> inference -> score -> reflect -> save record
+    Runs HyperparamTuningAgent.run() for 1 round with the given config.
 
-    Input is validated against HyperparamTuningInput.
-    Output record is validated against ExperimentRecord.
+    Uses the standard node contract: HyperparamTuningInput → run() → HyperparamTuningOutput.
+    The agent internally handles plan → resource check → train → infer → score → reflect.
+
+    The expert_advice forces the agent to use the exact model/loss/train config provided,
+    bypassing LLM-driven config selection.
     """
-    run_name = f"real_{provider}_{model_type}_{loss_cfg['loss_type']}"
-    exp_id = f"exp_{model_type}_{loss_cfg['loss_type']}_{int(time.time())}"
+    run_name = f"real_{provider}_{model_type}_{loss_cfg['loss_type']}_{int(time.time())}"
 
     model_ids = {
         "gemini": "gemini-3.1-flash-lite-preview",
-        "openai": "gpt-4o",
+        "openai": "gpt-5-mini",
     }
-
-    # --- Validate input against schema ---
-    expert_advice = f"Test run: use {model_type} with {loss_cfg['loss_type']} loss. Use minimal epochs."
-    HyperparamTuningInput(
-        model_type=model_type,
-        llm_provider=provider,
-        llm_model_id=model_ids[provider],
-        expert_advice=expert_advice,
-        max_rounds=1,
-        storage={"backend": "local", "local": {"workspace": workspace, "run_name": run_name}},
-    )
-
-    sandbox = TidmadSandbox(workspace=workspace, run_name=run_name)
-    brain = LLMBridge(provider=provider, model_id=model_ids[provider])
-
-    # --- THINK: get plan from LLM ---
-    memory_history = sandbox.get_summary()
-    decision = brain.plan(
-        memory_history=memory_history,
-        expert_advice=expert_advice,
-        force_model=model_type,
-    )
-    assert "model_config" in decision or "model_type" in decision, \
-        f"LLM plan response missing expected keys: {decision}"
 
     m_cfg = model_cfg if model_cfg is not None else MODEL_CONFIGS[model_type]
     t_cfg = train_cfg if train_cfg is not None else TRAIN_CONFIG
 
-    params = {
-        "exp_id": exp_id,
-        "run_name": run_name,
-        "model_type": model_type,
-        "model_config": m_cfg,
-        "train_config": t_cfg,
-        "loss_config": loss_cfg,
-    }
-
-    # --- ACT: train -> inference -> score ---
-    train_result = sandbox.execute_training(
-        exp_id=exp_id, run_name=run_name, model_type=model_type,
-        m_cfg=m_cfg, t_cfg=t_cfg, l_cfg=loss_cfg,
-    )
-    assert train_result["status"] == "success", (
-        f"Training failed for {model_type}/{loss_cfg['loss_type']}:\n"
-        f"{train_result.get('message', '(no message)')}"
+    expert_advice = (
+        f"CRITICAL: You MUST use exactly this configuration. "
+        f"model_type: {model_type}. "
+        f"model_config: {m_cfg}. "
+        f"train_config: {t_cfg}. "
+        f"loss_config: {loss_cfg}. "
+        f"Do NOT deviate from these values."
     )
 
-    inf_result = sandbox.execute_inference(
-        exp_id=exp_id, run_name=run_name, model_type=model_type,
-        m_cfg=m_cfg, l_cfg=loss_cfg,
+    agent_input = HyperparamTuningInput(
+        model_type=model_type,
+        file_index=6,
+        max_rounds=1,
+        expert_advice=expert_advice,
+        llm_provider=provider,
+        llm_model_id=model_ids[provider],
+        storage=StorageConfig(
+            backend="local",
+            local=LocalStorageConfig(workspace=workspace, run_name=run_name),
+        ),
+        progress_bar=False,
     )
-    assert inf_result["status"] == "success", (
-        f"Inference failed for {model_type}/{loss_cfg['loss_type']}:\n"
-        f"{inf_result.get('message', '(no message)')}"
-    )
 
-    score_result = sandbox.execute_scoring(
-        exp_id=exp_id, run_name=run_name, model_type=model_type,
-        m_cfg=m_cfg, t_cfg=t_cfg, l_cfg=loss_cfg,
-    )
-    assert score_result["status"] == "success", (
-        f"Scoring failed for {model_type}/{loss_cfg['loss_type']}:\n"
-        f"{score_result.get('message', '(no message)')}"
-    )
-    assert "denoising_score" in score_result["results"] or "results" in score_result
+    agent = HyperparamTuningAgent()
+    output = agent.run(agent_input)
 
-    # --- REFLECT ---
-    reflection = brain.reflect(
-        exp_id=exp_id,
-        hypothesis=decision.get("hypothesis", "Test run"),
-        actual_results=score_result["results"],
-    )
-    assert "conclusion" in reflection, f"Reflection missing 'conclusion': {reflection}"
-    assert "discovery" in reflection, f"Reflection missing 'discovery': {reflection}"
+    # --- Validate output against schema ---
+    assert isinstance(output, HyperparamTuningOutput)
+    HyperparamTuningOutput.model_validate(output.model_dump())
 
-    # --- COMMIT ---
-    record = {
-        "exp_id": exp_id,
-        "status": "success",
-        "model_type": model_type,
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "file_index": sandbox.file_index,
-        "params": params,
-        "results": score_result.get("results", {}),
-        "denoising_score": score_result.get("results", {}).get("denoising_score"),
-        "memory": {
-            "expert_advice_followed": expert_advice,
-            "hypothesis": decision.get("hypothesis"),
-            "conclusion": reflection.get("conclusion"),
-            "discovery": reflection.get("discovery"),
-            "memory_update": reflection.get("memory_update"),
-        },
-    }
+    # --- Verify key fields ---
+    assert output.status in ("completed", "partial")
+    assert output.run_name == run_name
+    assert output.model_type == model_type
+    assert len(output.all_records) >= 1
 
-    # --- Validate output record against schema ---
-    ExperimentRecord(**record)
+    # --- Verify output file was written ---
+    import os
+    output_path = os.path.join(workspace, f"run_output_{run_name}.json")
+    assert os.path.exists(output_path), f"Output file not found: {output_path}"
 
-    sandbox.save_record(record)
-
-    # --- Verify summary was written ---
-    summary = sandbox.get_summary()
-    assert any(r["exp_id"] == exp_id for r in summary), \
-        "Record was not found in summary after save"
-
-    return record
+    return output
 
 
 # ==========================================
@@ -299,58 +246,58 @@ class TestRealRunGemini:
 
     @pytest.mark.parametrize("loss_cfg", LOSS_CONFIGS["punet"])
     def test_punet_gemini(self, loss_cfg, tmp_path):
-        record = run_one_loop("gemini", "punet", loss_cfg, str(tmp_path))
-        assert record["status"] == "success"
+        output = run_one_loop("gemini", "punet", loss_cfg, str(tmp_path))
+        assert output.status == "completed"
 
     @pytest.mark.parametrize("loss_cfg", LOSS_CONFIGS["fcnet"])
     def test_fcnet_gemini(self, loss_cfg, tmp_path):
-        record = run_one_loop("gemini", "fcnet", loss_cfg, str(tmp_path))
-        assert record["status"] == "success"
+        output = run_one_loop("gemini", "fcnet", loss_cfg, str(tmp_path))
+        assert output.status == "completed"
 
     @pytest.mark.parametrize("loss_cfg", LOSS_CONFIGS["transformer"])
     def test_transformer_gemini(self, loss_cfg, tmp_path):
-        record = run_one_loop("gemini", "transformer", loss_cfg, str(tmp_path))
-        assert record["status"] == "success"
+        output = run_one_loop("gemini", "transformer", loss_cfg, str(tmp_path))
+        assert output.status == "completed"
 
     @pytest.mark.parametrize("loss_cfg", LOSS_CONFIGS["wavenet"])
     def test_wavenet_gemini(self, loss_cfg, tmp_path):
-        record = run_one_loop("gemini", "wavenet", loss_cfg, str(tmp_path))
-        assert record["status"] == "success"
+        output = run_one_loop("gemini", "wavenet", loss_cfg, str(tmp_path))
+        assert output.status == "completed"
 
     @pytest.mark.parametrize("loss_cfg", LOSS_CONFIGS["rnn"])
     def test_rnn_gemini(self, loss_cfg, tmp_path):
-        record = run_one_loop("gemini", "rnn", loss_cfg, str(tmp_path))
-        assert record["status"] == "success"
+        output = run_one_loop("gemini", "rnn", loss_cfg, str(tmp_path))
+        assert output.status == "completed"
 
     @pytest.mark.parametrize("cfg", FLEX_CONFIGS["punet"])
     def test_punet_flexibility_gemini(self, cfg, tmp_path):
-        record = run_one_loop("gemini", "punet", cfg["loss_cfg"], str(tmp_path),
+        output = run_one_loop("gemini", "punet", cfg["loss_cfg"], str(tmp_path),
                               model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
-        assert record["status"] == "success"
+        assert output.status == "completed"
 
     @pytest.mark.parametrize("cfg", FLEX_CONFIGS["fcnet"])
     def test_fcnet_flexibility_gemini(self, cfg, tmp_path):
-        record = run_one_loop("gemini", "fcnet", cfg["loss_cfg"], str(tmp_path),
+        output = run_one_loop("gemini", "fcnet", cfg["loss_cfg"], str(tmp_path),
                               model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
-        assert record["status"] == "success"
+        assert output.status == "completed"
 
     @pytest.mark.parametrize("cfg", FLEX_CONFIGS["transformer"])
     def test_transformer_flexibility_gemini(self, cfg, tmp_path):
-        record = run_one_loop("gemini", "transformer", cfg["loss_cfg"], str(tmp_path),
+        output = run_one_loop("gemini", "transformer", cfg["loss_cfg"], str(tmp_path),
                               model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
-        assert record["status"] == "success"
+        assert output.status == "completed"
 
     @pytest.mark.parametrize("cfg", FLEX_CONFIGS["wavenet"])
     def test_wavenet_flexibility_gemini(self, cfg, tmp_path):
-        record = run_one_loop("gemini", "wavenet", cfg["loss_cfg"], str(tmp_path),
+        output = run_one_loop("gemini", "wavenet", cfg["loss_cfg"], str(tmp_path),
                               model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
-        assert record["status"] == "success"
+        assert output.status == "completed"
 
     @pytest.mark.parametrize("cfg", FLEX_CONFIGS["rnn"])
     def test_rnn_flexibility_gemini(self, cfg, tmp_path):
-        record = run_one_loop("gemini", "rnn", cfg["loss_cfg"], str(tmp_path),
+        output = run_one_loop("gemini", "rnn", cfg["loss_cfg"], str(tmp_path),
                               model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
-        assert record["status"] == "success"
+        assert output.status == "completed"
 
 
 # ==========================================
@@ -365,55 +312,55 @@ class TestRealRunOpenAI:
 
     @pytest.mark.parametrize("loss_cfg", LOSS_CONFIGS["punet"])
     def test_punet_openai(self, loss_cfg, tmp_path):
-        record = run_one_loop("openai", "punet", loss_cfg, str(tmp_path))
-        assert record["status"] == "success"
+        output = run_one_loop("openai", "punet", loss_cfg, str(tmp_path))
+        assert output.status == "completed"
 
     @pytest.mark.parametrize("loss_cfg", LOSS_CONFIGS["fcnet"])
     def test_fcnet_openai(self, loss_cfg, tmp_path):
-        record = run_one_loop("openai", "fcnet", loss_cfg, str(tmp_path))
-        assert record["status"] == "success"
+        output = run_one_loop("openai", "fcnet", loss_cfg, str(tmp_path))
+        assert output.status == "completed"
 
     @pytest.mark.parametrize("loss_cfg", LOSS_CONFIGS["transformer"])
     def test_transformer_openai(self, loss_cfg, tmp_path):
-        record = run_one_loop("openai", "transformer", loss_cfg, str(tmp_path))
-        assert record["status"] == "success"
+        output = run_one_loop("openai", "transformer", loss_cfg, str(tmp_path))
+        assert output.status == "completed"
 
     @pytest.mark.parametrize("loss_cfg", LOSS_CONFIGS["wavenet"])
     def test_wavenet_openai(self, loss_cfg, tmp_path):
-        record = run_one_loop("openai", "wavenet", loss_cfg, str(tmp_path))
-        assert record["status"] == "success"
+        output = run_one_loop("openai", "wavenet", loss_cfg, str(tmp_path))
+        assert output.status == "completed"
 
     @pytest.mark.parametrize("loss_cfg", LOSS_CONFIGS["rnn"])
     def test_rnn_openai(self, loss_cfg, tmp_path):
-        record = run_one_loop("openai", "rnn", loss_cfg, str(tmp_path))
-        assert record["status"] == "success"
+        output = run_one_loop("openai", "rnn", loss_cfg, str(tmp_path))
+        assert output.status == "completed"
 
     @pytest.mark.parametrize("cfg", FLEX_CONFIGS["punet"])
     def test_punet_flexibility_openai(self, cfg, tmp_path):
-        record = run_one_loop("openai", "punet", cfg["loss_cfg"], str(tmp_path),
+        output = run_one_loop("openai", "punet", cfg["loss_cfg"], str(tmp_path),
                               model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
-        assert record["status"] == "success"
+        assert output.status == "completed"
 
     @pytest.mark.parametrize("cfg", FLEX_CONFIGS["fcnet"])
     def test_fcnet_flexibility_openai(self, cfg, tmp_path):
-        record = run_one_loop("openai", "fcnet", cfg["loss_cfg"], str(tmp_path),
+        output = run_one_loop("openai", "fcnet", cfg["loss_cfg"], str(tmp_path),
                               model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
-        assert record["status"] == "success"
+        assert output.status == "completed"
 
     @pytest.mark.parametrize("cfg", FLEX_CONFIGS["transformer"])
     def test_transformer_flexibility_openai(self, cfg, tmp_path):
-        record = run_one_loop("openai", "transformer", cfg["loss_cfg"], str(tmp_path),
+        output = run_one_loop("openai", "transformer", cfg["loss_cfg"], str(tmp_path),
                               model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
-        assert record["status"] == "success"
+        assert output.status == "completed"
 
     @pytest.mark.parametrize("cfg", FLEX_CONFIGS["wavenet"])
     def test_wavenet_flexibility_openai(self, cfg, tmp_path):
-        record = run_one_loop("openai", "wavenet", cfg["loss_cfg"], str(tmp_path),
+        output = run_one_loop("openai", "wavenet", cfg["loss_cfg"], str(tmp_path),
                               model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
-        assert record["status"] == "success"
+        assert output.status == "completed"
 
     @pytest.mark.parametrize("cfg", FLEX_CONFIGS["rnn"])
     def test_rnn_flexibility_openai(self, cfg, tmp_path):
-        record = run_one_loop("openai", "rnn", cfg["loss_cfg"], str(tmp_path),
+        output = run_one_loop("openai", "rnn", cfg["loss_cfg"], str(tmp_path),
                               model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
-        assert record["status"] == "success"
+        assert output.status == "completed"

@@ -9,7 +9,7 @@ that is verified by code_validator_agent.
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from pydantic import BaseModel, Field
 
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
@@ -54,6 +54,12 @@ class ImplementorInput(BaseModel):
                     "On each retry the LLM receives the validation error and its previous "
                     "code, and produces a targeted fix. Total attempts = 1 + max_retries. "
                     "Set to 0 to disable self-correction.",
+    )
+    human_advice: Optional[str] = Field(
+        default=None,
+        description="Optional human-provided guidance for the implementor agent. "
+                    "When present, injected into the LLM prompt as high-priority context "
+                    "(e.g. 'use grouped convolutions instead of standard conv1d').",
     )
     storage: StorageConfig = Field(
         default_factory=lambda: StorageConfig(

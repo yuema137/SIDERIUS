@@ -46,6 +46,13 @@ class ProposalInput(BaseModel):
                     "it should explicitly address the stated focus areas, respect the "
                     "constraints, and consider the suggested directions.",
     )
+    previous_failures: List[str] = Field(
+        default_factory=list,
+        description="Validation error messages from previous failed attempts in this "
+                    "iteration. The workflow populates this when retrying after a "
+                    "validation failure so the proposal agent avoids the same mistakes. "
+                    "Each entry is the error_message from a ValidatorOutput.",
+    )
     storage: StorageConfig = Field(
         default_factory=lambda: StorageConfig(
             backend="local",
@@ -67,6 +74,7 @@ class ProposalOutput(BaseModel):
     """
 
     model_name: str = Field(
+        min_length=1,
         description="Short, unique, snake_case identifier for the proposed model "
                     "(e.g. 'attn_unet', 'dilated_rnn'). Must not clash with existing model types.",
     )

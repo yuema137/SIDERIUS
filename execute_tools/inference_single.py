@@ -53,12 +53,12 @@ def process_batch(index, inputarr, targetarr, model, args, current_loss_type):
         input_seq = input_seq.squeeze(1)
 
     # 3. Model-Specific Execution & Type Casting
-    if args.denoising_model in ["punet", "transformer", "wavenet", "rnn"]:
-        # Embedding layer requires Long/Int tensors
-        input_seq = input_seq.long().to(DEVICE)
-    else:
-        # FCNet/AE (Linear layers) requires Float tensors
+    # The forward contract is [B, T] int64 for all embedding-based models.
+    # Only fcnet (AE) uses float input for regression.
+    if args.denoising_model == "fcnet":
         input_seq = input_seq.float().to(DEVICE)
+    else:
+        input_seq = input_seq.long().to(DEVICE)
 
     with torch.no_grad():
         output = model(input_seq)

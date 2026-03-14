@@ -2,17 +2,16 @@
 """
 result_interpretation_agent — Node 2 in the SIDERIUS graph.
 
-Reads experiment records from one or more tuning runs, loads the architectural
-description for every model type involved, and produces a structured interpretation:
-key findings, per-model score ranges, bottlenecks, and a take-home message that
-directly motivates proposing a new architecture.
-
-Consumed by ml_model_proposal_agent via interpretation_to_proposal_v1.
+Two-phase interpretation:
+  Phase 1 — Per-model summarization: one LLM call per model type, receiving
+            the condensed ModelRunSummary (scores, trajectory, conclusions)
+            — NOT raw experiment records.
+  Phase 2 — Cross-model synthesis: one LLM call consuming all per-model
+            summaries to produce the final interpretation.
 
 Node contract:
   run(input: InterpretationInput) -> InterpretationOutput
-  CLI: --workspace, --run_name, --model_type, --max_records_per_group,
-       --provider, --model_id
+  CLI: --workspace, --run_name, --model_type, --provider, --model_id
 """
 
 import os
@@ -22,107 +21,189 @@ from typing import Any, Dict, List, Optional
 
 from agent.llm_bridge import LLMBridge
 from agent.schemas.interpretation import (
-    InterpretationInput, InterpretationOutput, SummaryGroup,
+    InterpretationInput, InterpretationOutput, ModelRunSummary,
 )
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from ml_models.model_descriptions import get_model_description
 
 
 # ---------------------------------------------------------------------------
-# Prompts
+# Phase 1 — Per-model summarization
 # ---------------------------------------------------------------------------
 
-INTERPRETATION_SYSTEM_PROMPT = """\
+PER_MODEL_SYSTEM_PROMPT = """\
 You are a senior ML research analyst specialising in deep learning for signal denoising.
 
-Your task: read the architectural descriptions and hyperparameter tuning experiment logs
-for one or more model architectures, then produce a structured, evidence-based interpretation.
+Your task: analyse the tuning run summary for ONE model architecture and produce a
+structured summary of what was learned.
 
 You will receive:
-- The architectural description of each model (markdown + math)
-- Per-model best and worst denoising scores
-- Experiment records for each model, containing configs, results, and agent reflections
+- The model's architectural description (markdown + math)
+- Best and worst denoising scores
+- Best configuration
+- Score trajectory across rounds
+- Per-round conclusions from the tuning agent's reflections
+
+Produce a JSON object with exactly these fields:
+
+{
+  "key_findings": [
+    "Most important finding — concrete, references actual scores and configs",
+    ...
+  ],
+  "bottlenecks": [
+    "Root cause preventing further improvement for this specific model",
+    ...
+  ],
+  "best_config_analysis": "Why the best config worked — what made it better than others",
+  "score_trend": "How scores evolved across rounds — improving, plateauing, or erratic"
+}
+
+Rules:
+- key_findings: ranked by importance, evidence-based, reference actual values
+- bottlenecks: root causes (e.g. 'architecture capacity ceiling'), not symptoms
+- best_config_analysis: be specific about which hyperparameters mattered most
+- score_trend: identify whether the model has saturated or still has room to improve
+- Output only the JSON object — no preamble, no commentary, no markdown
+"""
+
+
+def _build_per_model_prompt(
+    summary: ModelRunSummary,
+    description: str,
+    human_advice: Optional[str] = None,
+) -> str:
+    """Build the user prompt for a single model's summarization."""
+    lines = [
+        f"## Model: {summary.model_type}",
+        f"Run: {summary.run_name} | Status: {summary.status} | Rounds: {summary.completed_rounds}",
+        f"Best denoising score : {summary.best_denoising_score}",
+        f"Worst denoising score: {summary.worst_denoising_score}",
+        "",
+        "### Architecture Description",
+        description,
+        "",
+        "### Best Config",
+        json.dumps(summary.best_config, indent=2) if summary.best_config else "none",
+        "",
+        "### Score Trajectory (chronological)",
+    ]
+
+    for i, (score, conclusion) in enumerate(
+        zip(summary.round_scores, summary.round_conclusions), 1
+    ):
+        score_str = f"{score:.4f}" if score is not None else "skipped"
+        lines.append(f"  Round {i}: score={score_str} — {conclusion}")
+
+    # Handle case where scores and conclusions have different lengths
+    if len(summary.round_scores) > len(summary.round_conclusions):
+        for i in range(len(summary.round_conclusions), len(summary.round_scores)):
+            score = summary.round_scores[i]
+            score_str = f"{score:.4f}" if score is not None else "skipped"
+            lines.append(f"  Round {i+1}: score={score_str}")
+
+    if human_advice:
+        lines += [
+            "",
+            "---",
+            "## Human Guidance (high priority)",
+            human_advice,
+        ]
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — Cross-model synthesis
+# ---------------------------------------------------------------------------
+
+SYNTHESIS_SYSTEM_PROMPT = """\
+You are a senior ML research analyst specialising in deep learning for signal denoising.
+
+Your task: read structured summaries of multiple model architectures and produce a
+cross-model interpretation that identifies the overall state of the research and
+motivates the next step.
+
+You will receive:
+- Per-model summaries (key findings, bottlenecks, config analysis, score trends)
+- Per-model best and worst scores
+- Overall best score and the config that produced it
 
 Produce a JSON object with exactly these three fields:
 
 {
   "key_findings": [
-    "Finding ranked #1 — most important, concrete, references actual values and model names",
-    "Finding ranked #2 — ...",
+    "Cross-model finding #1 — most important, compares models, references scores",
     ...
   ],
   "bottlenecks": [
-    "Root cause #1 preventing further improvement",
+    "Cross-model root cause #1 — what is fundamentally limiting ALL current models",
     ...
   ],
   "take_home_message": "One sentence: the single most critical insight that motivates designing a new architecture."
 }
 
 Rules:
-- key_findings: ranked by importance, evidence-based, reference actual scores/configs/models
-- bottlenecks: identify root causes (e.g. 'architecture capacity ceiling') not symptoms
+- key_findings: ranked by importance, MUST compare across models, reference actual scores
+- bottlenecks: focus on fundamental limitations shared across architectures, not per-model issues
 - take_home_message: exactly one sentence, must directly motivate why a new architecture is needed
-- If multiple models are provided, compare them and surface cross-model insights
-- Do not repeat information across fields
-- Do not include vague statements like 'more experiments needed' or 'results are promising'
+- Do not repeat per-model findings verbatim — synthesise and draw cross-model conclusions
 - Output only the JSON object — no preamble, no commentary, no markdown
 """
 
 
-def _build_user_prompt(
-    inp: InterpretationInput,
-    model_descriptions: Dict[str, str],
+def _build_synthesis_prompt(
+    per_model_summaries: Dict[str, Dict],
     per_model_best: Dict[str, Optional[float]],
     per_model_worst: Dict[str, Optional[float]],
     overall_best_score: Optional[float],
     overall_worst_score: Optional[float],
-    overall_best_config: Optional[Dict[str, Any]],
+    overall_best_config: Optional[Dict],
+    human_advice: Optional[str] = None,
 ) -> str:
-    lines = []
-
-    # --- Score summary ---
-    lines += [
-        "## Performance Summary",
-        f"Overall best denoising score : {overall_best_score  if overall_best_score  is not None else 'none'}",
-        f"Overall worst denoising score: {overall_worst_score if overall_worst_score is not None else 'none'}",
+    """Build the user prompt for cross-model synthesis."""
+    lines = [
+        "## Overall Performance",
+        f"Best score across all models : {overall_best_score}",
+        f"Worst score across all models: {overall_worst_score}",
         f"Config that produced overall best:\n{json.dumps(overall_best_config, indent=2) if overall_best_config else 'none'}",
         "",
     ]
 
-    # --- Per-model sections ---
-    for model_type, description in model_descriptions.items():
+    for model_type, summary in per_model_summaries.items():
         lines += [
-            f"---",
+            "---",
             f"## Model: {model_type}",
             f"Best score : {per_model_best.get(model_type)}",
             f"Worst score: {per_model_worst.get(model_type)}",
             "",
-            "### Architecture Description",
-            description,
+            "### Key Findings",
+        ]
+        for f in summary.get("key_findings", []):
+            lines.append(f"  - {f}")
+        lines += [
+            "",
+            "### Bottlenecks",
+        ]
+        for b in summary.get("bottlenecks", []):
+            lines.append(f"  - {b}")
+        lines += [
+            "",
+            f"### Best Config Analysis",
+            summary.get("best_config_analysis", "N/A"),
+            "",
+            f"### Score Trend",
+            summary.get("score_trend", "N/A"),
             "",
         ]
 
-        # Append experiment records for this model
-        model_records = []
-        for group in inp.summaries:
-            if group.model_type == model_type:
-                truncated = group.records[-inp.max_records_per_group:]
-                model_records.append({
-                    "run_name": group.run_name,
-                    "total_records": len(group.records),
-                    "records_shown": len(truncated),
-                    "records": truncated,
-                })
-
-        if model_records:
-            lines += [
-                "### Experiment Records",
-                json.dumps(model_records, indent=2),
-            ]
-        else:
-            lines.append("### Experiment Records\nNo experiment records provided for this model.")
-
-        lines.append("")
+    if human_advice:
+        lines += [
+            "---",
+            "## Human Guidance (high priority)",
+            human_advice,
+            "",
+        ]
 
     return "\n".join(lines)
 
@@ -137,63 +218,120 @@ class ResultInterpretationAgent:
         self.bridge = LLMBridge(provider=provider, model_id=model_id)
 
     def run(self, inp: InterpretationInput) -> InterpretationOutput:
-        # --- Effective model types (union of summaries and explicit model_types) ---
+        # --- Effective model types ---
         effective_types = sorted(
-            {g.model_type for g in inp.summaries} | set(inp.model_types or [])
+            {s.model_type for s in inp.summaries} | set(inp.model_types or [])
         )
 
-        # --- Load descriptions (raises FileNotFoundError if any missing) ---
-        model_descriptions = {mt: get_model_description(mt) for mt in effective_types}
+        # --- Load descriptions ---
+        # For agent-generated models, the description may be passed directly
+        # in ModelRunSummary.model_description (avoiding filesystem dependency).
+        # For built-in models, load from description.md on disk.
+        model_descriptions: Dict[str, str] = {}
+        for mt in effective_types:
+            # Check if any summary carries the description inline
+            inline_desc = None
+            for s in inp.summaries:
+                if s.model_type == mt and s.model_description:
+                    inline_desc = s.model_description
+                    break
+            if inline_desc:
+                model_descriptions[mt] = inline_desc
+            else:
+                model_descriptions[mt] = get_model_description(mt)
 
-        # --- Deterministic pre-computation ---
+        # --- Deterministic pre-computation from summaries ---
         per_model_best:   Dict[str, Optional[float]] = {}
         per_model_worst:  Dict[str, Optional[float]] = {}
+        per_model_best_config: Dict[str, Optional[Dict]] = {}
         overall_best_score:  Optional[float] = None
         overall_worst_score: Optional[float] = None
         overall_best_config: Optional[Dict[str, Any]] = None
         total_experiments = 0
 
-        for group in inp.summaries:
-            total_experiments += len(group.records)
-            successful = [
-                r for r in group.records
-                if r.get("status") == "success" and r.get("denoising_score") is not None
-            ]
-            if successful:
-                group_best  = max(successful, key=lambda r: r["denoising_score"])
-                group_worst = min(successful, key=lambda r: r["denoising_score"])
-                mt = group.model_type
+        # Map model_type → ModelRunSummary
+        per_model_summary_input: Dict[str, ModelRunSummary] = {}
 
-                # Per-model best
-                if per_model_best.get(mt) is None or group_best["denoising_score"] > per_model_best[mt]:
-                    per_model_best[mt] = group_best["denoising_score"]
-                # Per-model worst
-                if per_model_worst.get(mt) is None or group_worst["denoising_score"] < per_model_worst[mt]:
-                    per_model_worst[mt] = group_worst["denoising_score"]
-                # Overall best
-                if overall_best_score is None or group_best["denoising_score"] > overall_best_score:
-                    overall_best_score  = group_best["denoising_score"]
-                    overall_best_config = group_best.get("params")
-                # Overall worst
-                if overall_worst_score is None or group_worst["denoising_score"] < overall_worst_score:
-                    overall_worst_score = group_worst["denoising_score"]
+        for s in inp.summaries:
+            mt = s.model_type
+            per_model_summary_input[mt] = s
+            total_experiments += s.completed_rounds
+
+            if s.best_denoising_score is not None:
+                if per_model_best.get(mt) is None or s.best_denoising_score > per_model_best[mt]:
+                    per_model_best[mt] = s.best_denoising_score
+                    per_model_best_config[mt] = s.best_config
+                if overall_best_score is None or s.best_denoising_score > overall_best_score:
+                    overall_best_score = s.best_denoising_score
+                    overall_best_config = s.best_config
+
+            if s.worst_denoising_score is not None:
+                if per_model_worst.get(mt) is None or s.worst_denoising_score < per_model_worst[mt]:
+                    per_model_worst[mt] = s.worst_denoising_score
+                if overall_worst_score is None or s.worst_denoising_score < overall_worst_score:
+                    overall_worst_score = s.worst_denoising_score
 
         # Fill None for model types with no summaries
         for mt in effective_types:
             per_model_best.setdefault(mt, None)
             per_model_worst.setdefault(mt, None)
+            per_model_best_config.setdefault(mt, None)
 
-        print(f"🔍 Interpreting {len(inp.summaries)} summary group(s) across "
+        print(f"Interpreting {len(inp.summaries)} model summary(ies) across "
               f"{len(effective_types)} model(s): {effective_types} "
               f"(overall best: {overall_best_score})")
 
-        # --- LLM call ---
-        user_prompt = _build_user_prompt(
-            inp, model_descriptions,
-            per_model_best, per_model_worst,
-            overall_best_score, overall_worst_score, overall_best_config,
-        )
-        llm_response = self.bridge.generate(INTERPRETATION_SYSTEM_PROMPT, user_prompt)
+        # --- Phase 1: Per-model summarization ---
+        per_model_summaries: Dict[str, Dict] = {}
+        for mt in effective_types:
+            if mt not in per_model_summary_input:
+                per_model_summaries[mt] = {
+                    "key_findings": ["No tuning run available for this model."],
+                    "bottlenecks": [],
+                    "best_config_analysis": "N/A",
+                    "score_trend": "N/A",
+                }
+                continue
+
+            summary = per_model_summary_input[mt]
+            print(f"  Phase 1: Summarizing {mt} ({summary.completed_rounds} rounds)...")
+            per_model_prompt = _build_per_model_prompt(
+                summary=summary,
+                description=model_descriptions[mt],
+                human_advice=inp.human_advice,
+            )
+            per_model_response = self.bridge.generate(PER_MODEL_SYSTEM_PROMPT, per_model_prompt)
+            per_model_summaries[mt] = per_model_response
+            print(f"    {mt}: {len(per_model_response.get('key_findings', []))} findings, "
+                  f"{len(per_model_response.get('bottlenecks', []))} bottlenecks")
+
+        # --- Phase 2: Cross-model synthesis ---
+        if len(effective_types) == 1:
+            single_mt = effective_types[0]
+            summary = per_model_summaries[single_mt]
+            llm_findings = summary.get("key_findings", [])
+            llm_bottlenecks = summary.get("bottlenecks", [])
+            llm_take_home = (
+                f"The {single_mt} model shows: "
+                + summary.get("score_trend", "unclear trend")
+                + ". " + (summary.get("best_config_analysis", "") or "")
+            )
+            print(f"  Phase 2: Single model — skipping synthesis.")
+        else:
+            print(f"  Phase 2: Synthesizing across {len(effective_types)} models...")
+            synthesis_prompt = _build_synthesis_prompt(
+                per_model_summaries=per_model_summaries,
+                per_model_best=per_model_best,
+                per_model_worst=per_model_worst,
+                overall_best_score=overall_best_score,
+                overall_worst_score=overall_worst_score,
+                overall_best_config=overall_best_config,
+                human_advice=inp.human_advice,
+            )
+            synthesis_response = self.bridge.generate(SYNTHESIS_SYSTEM_PROMPT, synthesis_prompt)
+            llm_findings = synthesis_response.get("key_findings", [])
+            llm_bottlenecks = synthesis_response.get("bottlenecks", [])
+            llm_take_home = synthesis_response.get("take_home_message", "")
 
         # --- Build and validate output ---
         output = InterpretationOutput.model_validate({
@@ -205,9 +343,10 @@ class ResultInterpretationAgent:
             "best_denoising_score":  overall_best_score,
             "worst_denoising_score": overall_worst_score,
             "best_config":           overall_best_config,
-            "key_findings":          llm_response.get("key_findings", []),
-            "bottlenecks":           llm_response.get("bottlenecks", []),
-            "take_home_message":     llm_response.get("take_home_message", ""),
+            "per_model_summaries":   per_model_summaries,
+            "key_findings":          llm_findings,
+            "bottlenecks":           llm_bottlenecks,
+            "take_home_message":     llm_take_home,
         })
 
         # --- Persist ---
@@ -218,7 +357,7 @@ class ResultInterpretationAgent:
             out_path = os.path.join(workspace, f"interpretation_{run_name}.json")
             with open(out_path, "w", encoding="utf-8") as f:
                 f.write(output.model_dump_json(indent=4))
-            print(f"✅ Interpretation saved → {out_path}")
+            print(f"Interpretation saved -> {out_path}")
 
         return output
 
@@ -234,33 +373,31 @@ def main():
     parser.add_argument("--run_name",    type=str, default="v1",
                         help="Run name — reads summary_{run_name}.json, writes interpretation_{run_name}.json")
     parser.add_argument("--model_type",  type=str, required=True,
-                        help="Model architecture (e.g. 'punet'). Used as both model_types and summary lookup.")
-    parser.add_argument("--max_records_per_group", type=int, default=50,
-                        help="Maximum records passed to the LLM per summary group")
+                        help="Model architecture (e.g. 'punet').")
     parser.add_argument("--provider",    type=str, default="gemini", choices=["gemini", "openai"])
     parser.add_argument("--model_id",    type=str, default="gemini-3.1-flash-lite-preview")
     args = parser.parse_args()
 
-    # Load summary from workspace
-    summary_path = os.path.join(args.workspace, f"summary_{args.run_name}.json")
-    if not os.path.exists(summary_path):
+    # Load run output from workspace
+    output_path = os.path.join(args.workspace, f"run_output_{args.run_name}.json")
+    if not os.path.exists(output_path):
         raise FileNotFoundError(
-            f"Summary file not found: {summary_path}\n"
+            f"Run output not found: {output_path}\n"
             f"Run tune_ml_hyperparam_agent first, or check --workspace and --run_name."
         )
-    with open(summary_path, "r", encoding="utf-8") as f:
-        records = json.load(f)
+    with open(output_path, "r", encoding="utf-8") as f:
+        run_data = json.load(f)
 
-    agent_input = InterpretationInput.model_validate({
-        "summaries": [{"model_type": args.model_type, "run_name": args.run_name, "records": records}],
-        "max_records_per_group": args.max_records_per_group,
-        "storage": {
-            "backend": "local",
-            "local": {"workspace": args.workspace, "run_name": args.run_name},
-        },
-    })
-    print(f"✅ Input validated: model={args.model_type} | "
-          f"records={len(records)} | max_records_per_group={args.max_records_per_group}")
+    # Build ModelRunSummary from run output
+    from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
+    tune_output = HyperparamTuningOutput.model_validate(run_data)
+    summary = tuning_output_to_model_run_summary(tune_output)
+
+    agent_input = InterpretationInput(
+        summaries=[summary],
+        storage={"backend": "local", "local": {"workspace": args.workspace, "run_name": args.run_name}},
+    )
+    print(f"Input validated: model={args.model_type} | rounds={summary.completed_rounds}")
 
     agent = ResultInterpretationAgent(provider=args.provider, model_id=args.model_id)
     output = agent.run(agent_input)
@@ -282,6 +419,51 @@ def main():
     print(f"\n  Take-home message:")
     print(f"    {output.take_home_message}")
     print(f"{'='*60}\n")
+
+
+# ---------------------------------------------------------------------------
+# Utility: convert HyperparamTuningOutput → ModelRunSummary
+# ---------------------------------------------------------------------------
+
+def tuning_output_to_model_run_summary(
+    output: "HyperparamTuningOutput",
+) -> ModelRunSummary:
+    """
+    Convert a HyperparamTuningOutput to a condensed ModelRunSummary.
+
+    Extracts aggregates and per-round trajectory from the all_records field.
+    The raw records are NOT carried forward — only scores and conclusions.
+    """
+    records = output.all_records
+    # Extract per-round data
+    round_scores: List[Optional[float]] = []
+    round_conclusions: List[str] = []
+
+    for r in records:
+        rec = r.model_dump() if hasattr(r, "model_dump") else r
+        round_scores.append(rec.get("denoising_score"))
+        memory = rec.get("memory") or {}
+        if isinstance(memory, dict):
+            round_conclusions.append(memory.get("conclusion") or "")
+        else:
+            conclusion = getattr(memory, "conclusion", None) or ""
+            round_conclusions.append(conclusion)
+
+    # Compute worst score from records
+    valid_scores = [s for s in round_scores if s is not None]
+    worst_score = min(valid_scores) if valid_scores else None
+
+    return ModelRunSummary(
+        model_type=output.model_type,
+        run_name=output.run_name,
+        status=output.status,
+        completed_rounds=output.completed_rounds,
+        best_denoising_score=output.best_denoising_score,
+        worst_denoising_score=worst_score,
+        best_config=output.best_config,
+        round_scores=round_scores,
+        round_conclusions=round_conclusions,
+    )
 
 
 if __name__ == "__main__":

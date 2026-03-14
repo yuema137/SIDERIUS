@@ -21,8 +21,9 @@ SEG_SIZE = 1000  # small for speed
 
 class TestModelRegistry:
 
-    def test_registry_contains_all_models(self):
-        assert set(MODEL_REGISTRY.keys()) == {"punet", "fcnet", "transformer", "wavenet", "rnn"}
+    def test_registry_contains_all_builtin_models(self):
+        expected = {"punet", "fcnet", "transformer", "wavenet", "rnn"}
+        assert expected.issubset(set(MODEL_REGISTRY.keys()))
 
     def test_registry_maps_to_correct_classes(self):
         assert MODEL_REGISTRY["punet"] is PositionalUNet

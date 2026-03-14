@@ -1,0 +1,321 @@
+"""
+Tests for nodes/ml_hyperparameter_tune_agent.py
+
+LLM calls and skills are mocked — these tests validate:
+
+  _serialize_expert_advice:
+    - String passthrough
+    - Empty string passthrough
+    - ExpertAdvice with all fields populated
+    - ExpertAdvice with only some fields populated
+    - ExpertAdvice with no fields populated (empty object)
+
+  HyperparamTuningAgent.run():
+    - Returns valid HyperparamTuningOutput
+    - Output validates against schema
+    - Output file written to correct path
+    - Completed status when all rounds finish
+    - Partial status when OOM skips exhaust attempts
+    - Best score extracted correctly
+    - All records included (success + OOM)
+    - Expert advice (string) passed to brain.plan()
+    - Expert advice (ExpertAdvice) serialized and passed to brain.plan()
+    - Run config file written at startup
+"""
+import json
+import pytest
+from unittest.mock import MagicMock, patch, call
+
+from agent.schemas.hyperparam_tuning import (
+    HyperparamTuningInput,
+    HyperparamTuningOutput,
+    ExpertAdvice,
+)
+from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from nodes.ml_hyperparameter_tune_agent import (
+    HyperparamTuningAgent,
+    _serialize_expert_advice,
+)
+
+
+# ---------------------------------------------------------------------------
+# _serialize_expert_advice tests
+# ---------------------------------------------------------------------------
+
+class TestSerializeExpertAdvice:
+
+    def test_string_passthrough(self):
+        assert _serialize_expert_advice("try deeper models") == "try deeper models"
+
+    def test_empty_string_passthrough(self):
+        assert _serialize_expert_advice("") == ""
+
+    def test_full_expert_advice(self):
+        advice = ExpertAdvice(
+            focus_areas=["depth", "width"],
+            constraints=["VRAM < 8 GB"],
+            known_failures=["batch_size > 8 OOMs"],
+            suggested_directions=["try focal loss"],
+            rationale="Current model is too shallow.",
+        )
+        result = _serialize_expert_advice(advice)
+        assert "Focus areas: depth; width" in result
+        assert "Constraints: VRAM < 8 GB" in result
+        assert "Known failures: batch_size > 8 OOMs" in result
+        assert "Suggested directions: try focal loss" in result
+        assert "Rationale: Current model is too shallow." in result
+
+    def test_partial_expert_advice(self):
+        advice = ExpertAdvice(
+            focus_areas=["learning rate"],
+            constraints=[],
+            known_failures=[],
+            suggested_directions=[],
+            rationale="",
+        )
+        result = _serialize_expert_advice(advice)
+        assert "Focus areas: learning rate" in result
+        assert "Constraints" not in result
+        assert "Known failures" not in result
+
+    def test_empty_expert_advice(self):
+        advice = ExpertAdvice()
+        result = _serialize_expert_advice(advice)
+        assert result == ""
+
+
+# ---------------------------------------------------------------------------
+# HyperparamTuningAgent.run() tests — fixtures
+# ---------------------------------------------------------------------------
+
+FAKE_PLAN_RESPONSE = {
+    "model_type": "punet",
+    "hypothesis": "Deeper architecture with focal loss should improve score.",
+    "reasoning": "Previous runs show depth correlates with score.",
+    "model_config": {"depth": 4, "segmentation_size": 40000, "batch_size": 1},
+    "train_config": {"epochs": 5, "lr": 1e-4},
+    "loss_config": {"loss_type": "focal", "gamma": 2.0},
+}
+
+FAKE_REFLECT_RESPONSE = {
+    "conclusion": "Score improved with depth=4.",
+    "key_factor": "Increased depth.",
+    "discovery": "Focal loss gamma=2 works well for this architecture.",
+    "memory_update": "Depth 4 is promising, try depth 5 next.",
+}
+
+FAKE_CONFIG_MANUAL = {
+    "status": "success",
+    "data": {"punet": {"fields": ["depth", "segmentation_size"]}},
+}
+
+FAKE_RESOURCE_CHECK_OK = {"status": "success", "feasible": True}
+
+FAKE_RESOURCE_CHECK_OOM = {
+    "status": "success",
+    "feasible": False,
+    "estimated_gb": 12.0,
+    "limit_gb": 8.0,
+    "verdict": "Estimated 12 GB exceeds 8 GB limit.",
+    "suggestion": "Reduce batch_size.",
+}
+
+FAKE_TRAIN_RESULT = {
+    "status": "success",
+    "results": {"final_loss": 0.5, "model_params": 100000},
+}
+
+FAKE_INFERENCE_RESULT = {"status": "success", "results": {}}
+
+FAKE_SCORE_RESULT = {
+    "status": "success",
+    "results": {"denoising_score": 1.75, "final_loss": 0.5, "model_params": 100000},
+}
+
+
+def _make_input(tmp_path, max_rounds=1, expert_advice="", model_type="punet"):
+    return HyperparamTuningInput(
+        model_type=model_type,
+        file_index=6,
+        max_rounds=max_rounds,
+        expert_advice=expert_advice,
+        llm_provider="gemini",
+        llm_model_id="test-model",
+        storage=StorageConfig(
+            backend="local",
+            local=LocalStorageConfig(workspace=str(tmp_path), run_name="test_run"),
+        ),
+        progress_bar=False,
+    )
+
+
+def _mock_run_skill(skill_folder, sandbox, **params):
+    """Dispatch fake skill results based on skill_folder."""
+    skill_results = {
+        "check_config_format_skill": FAKE_CONFIG_MANUAL,
+        "evaluate_resource_skill": FAKE_RESOURCE_CHECK_OK,
+        "training_skill": FAKE_TRAIN_RESULT,
+        "inference_skill": FAKE_INFERENCE_RESULT,
+        "denoising_score_skill": FAKE_SCORE_RESULT,
+    }
+    return skill_results.get(skill_folder, {"status": "error", "message": "unknown skill"})
+
+
+# ---------------------------------------------------------------------------
+# HyperparamTuningAgent.run() tests
+# ---------------------------------------------------------------------------
+
+class TestHyperparamTuningAgentRun:
+
+    @pytest.fixture
+    def agent_and_mocks(self):
+        with patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge, \
+             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox, \
+             patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill):
+
+            mock_brain = MockBridge.return_value
+            mock_brain.plan.return_value = FAKE_PLAN_RESPONSE
+            mock_brain.reflect.return_value = FAKE_REFLECT_RESPONSE
+
+            # Track saved records so get_summary returns them
+            saved_records = []
+            mock_sandbox = MockSandbox.return_value
+            mock_sandbox.get_summary.side_effect = lambda: list(saved_records)
+            mock_sandbox.save_record.side_effect = lambda r: saved_records.append(r)
+
+            agent = HyperparamTuningAgent()
+            yield agent, mock_brain, mock_sandbox
+
+    def test_returns_valid_output(self, agent_and_mocks, tmp_path):
+        agent, _, _ = agent_and_mocks
+        output = agent.run(_make_input(tmp_path))
+        assert isinstance(output, HyperparamTuningOutput)
+
+    def test_output_validates_against_schema(self, agent_and_mocks, tmp_path):
+        agent, _, _ = agent_and_mocks
+        output = agent.run(_make_input(tmp_path))
+        # Re-validate to confirm schema compliance
+        HyperparamTuningOutput.model_validate(output.model_dump())
+
+    def test_completed_status(self, agent_and_mocks, tmp_path):
+        agent, _, _ = agent_and_mocks
+        output = agent.run(_make_input(tmp_path, max_rounds=1))
+        assert output.status == "completed"
+        assert output.completed_rounds == 1
+
+    def test_best_score_extracted(self, agent_and_mocks, tmp_path):
+        agent, _, _ = agent_and_mocks
+        output = agent.run(_make_input(tmp_path))
+        assert output.best_denoising_score == 1.75
+
+    def test_best_config_present(self, agent_and_mocks, tmp_path):
+        agent, _, _ = agent_and_mocks
+        output = agent.run(_make_input(tmp_path))
+        assert output.best_config is not None
+        assert output.best_config["model_type"] == "punet"
+
+    def test_all_records_included(self, agent_and_mocks, tmp_path):
+        agent, _, _ = agent_and_mocks
+        output = agent.run(_make_input(tmp_path, max_rounds=2))
+        assert output.completed_rounds == 2
+        assert len(output.all_records) == 2
+
+    def test_output_file_written(self, agent_and_mocks, tmp_path):
+        agent, _, _ = agent_and_mocks
+        agent.run(_make_input(tmp_path))
+        output_path = tmp_path / "run_output_test_run.json"
+        assert output_path.exists()
+        data = json.loads(output_path.read_text())
+        assert data["status"] == "completed"
+
+    def test_run_config_file_written(self, agent_and_mocks, tmp_path):
+        agent, _, _ = agent_and_mocks
+        agent.run(_make_input(tmp_path))
+        config_path = tmp_path / "run_config_test_run.json"
+        assert config_path.exists()
+        data = json.loads(config_path.read_text())
+        assert data["force_model"] == "punet"
+        assert data["max_rounds"] == 1
+
+    def test_string_expert_advice_passed_to_plan(self, agent_and_mocks, tmp_path):
+        agent, mock_brain, _ = agent_and_mocks
+        agent.run(_make_input(tmp_path, expert_advice="focus on depth"))
+        mock_brain.plan.assert_called_once()
+        _, kwargs = mock_brain.plan.call_args
+        assert kwargs["expert_advice"] == "focus on depth"
+
+    def test_structured_expert_advice_serialized(self, agent_and_mocks, tmp_path):
+        agent, mock_brain, _ = agent_and_mocks
+        advice = ExpertAdvice(
+            focus_areas=["depth"],
+            constraints=["VRAM < 8 GB"],
+        )
+        agent.run(_make_input(tmp_path, expert_advice=advice))
+        mock_brain.plan.assert_called_once()
+        _, kwargs = mock_brain.plan.call_args
+        assert "Focus areas: depth" in kwargs["expert_advice"]
+        assert "Constraints: VRAM < 8 GB" in kwargs["expert_advice"]
+
+    def test_model_type_in_output(self, agent_and_mocks, tmp_path):
+        agent, _, _ = agent_and_mocks
+        output = agent.run(_make_input(tmp_path, model_type="fcnet"))
+        assert output.model_type == "fcnet"
+
+    def test_timing_fields_present(self, agent_and_mocks, tmp_path):
+        agent, _, _ = agent_and_mocks
+        output = agent.run(_make_input(tmp_path))
+        assert output.started_at
+        assert output.finished_at
+
+    def test_run_name_in_output(self, agent_and_mocks, tmp_path):
+        agent, _, _ = agent_and_mocks
+        output = agent.run(_make_input(tmp_path))
+        assert output.run_name == "test_run"
+
+
+class TestHyperparamTuningAgentOOM:
+    """Tests for OOM-skip behaviour within run()."""
+
+    @pytest.fixture
+    def agent_oom(self):
+        with patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge, \
+             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox, \
+             patch("nodes.ml_hyperparameter_tune_agent._run_skill") as mock_skill:
+
+            mock_brain = MockBridge.return_value
+            mock_brain.plan.return_value = FAKE_PLAN_RESPONSE
+            mock_brain.reflect.return_value = FAKE_REFLECT_RESPONSE
+
+            saved_records = []
+            mock_sandbox = MockSandbox.return_value
+            mock_sandbox.get_summary.side_effect = lambda: list(saved_records)
+            mock_sandbox.save_record.side_effect = lambda r: saved_records.append(r)
+
+            # All resource checks return OOM
+            def all_oom(skill_folder, sandbox, **params):
+                if skill_folder == "check_config_format_skill":
+                    return FAKE_CONFIG_MANUAL
+                return FAKE_RESOURCE_CHECK_OOM
+
+            mock_skill.side_effect = all_oom
+
+            agent = HyperparamTuningAgent()
+            yield agent, mock_brain, mock_sandbox, saved_records
+
+    def test_partial_status_on_all_oom(self, agent_oom, tmp_path):
+        agent, _, _, _ = agent_oom
+        output = agent.run(_make_input(tmp_path, max_rounds=2))
+        assert output.status == "partial"
+        assert output.completed_rounds == 0
+
+    def test_oom_records_saved(self, agent_oom, tmp_path):
+        agent, _, _, saved_records = agent_oom
+        agent.run(_make_input(tmp_path, max_rounds=1))
+        # max_rounds=1 → max_attempts=3, all OOM → 3 records saved
+        assert len(saved_records) == 3
+        assert all(r["status"] == "skipped_oom_risk" for r in saved_records)
+
+    def test_oom_record_has_expert_advice(self, agent_oom, tmp_path):
+        agent, _, _, saved_records = agent_oom
+        agent.run(_make_input(tmp_path, max_rounds=1, expert_advice="test advice"))
+        assert saved_records[0]["memory"]["expert_advice_followed"] == "test advice"
