@@ -157,6 +157,7 @@ PLUGIN_MODEL_TYPE = "{model_name}"
 
 
 class {ModelClass}Config(BaseModel):
+    model_type: str = Field(default="{model_name}", description="Plugin model type key.")
     segmentation_size: int = Field(default={segmentation_size}, ge=1)
     batch_size: int = Field(default={batch_size}, ge=1)
 {config_fields_code}

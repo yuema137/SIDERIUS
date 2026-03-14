@@ -184,10 +184,6 @@ def main():
         raise ValueError(f"Unknown model_type in config: {model_type}")
 
     model_cfg = config_class(**m_data)
-    # Ensure model_type is accessible on the config object (plugin configs
-    # may not define this field — attach it if missing).
-    if not hasattr(model_cfg, "model_type") or model_cfg.model_type is None:
-        object.__setattr__(model_cfg, "model_type", model_type)
     train_cfg = TrainConfig(**t_data)
     loss_cfg = LossConfig(**l_data)
 
