@@ -115,16 +115,8 @@ function makePlotLayout(yLabel) {
       tickfont:  { size: 10, color: t.muted },
       showspikes: true,
     },
-    legend: {
-      font:        { size: 10, color: t.text },
-      bgcolor:     'rgba(0,0,0,0)',
-      orientation: 'h',
-      x:           0.5,
-      xanchor:     'center',
-      y:           1.15,
-      yanchor:     'bottom',
-    },
-    margin: { t: 80, r: 20, b: 50, l: 60 },
+    showlegend: false,
+    margin: { t: 20, r: 20, b: 50, l: 60 },
     hovermode: 'x unified',
   };
 }
@@ -469,6 +461,27 @@ function updateCharts() {
 
   Plotly.react('chart-score',  scoreTraces,  scoreLayout,  PLOT_CONFIG);
   Plotly.react('chart-memory', memoryTraces, memoryLayout, PLOT_CONFIG);
+  renderChartLegends();
+}
+
+function renderChartLegends() {
+  // Build HTML legend items — one per series, 4 per row
+  const items = state.series.map(s => {
+    const c = getSeriesColor(s);
+    const alpha = getSeriesOpacity(s);
+    const label = `${s.model} / ${s.run}`;
+    const tag = s.isExploration ? '🔬' : '';
+    return `<span class="chart-legend-item" style="opacity:${alpha};">
+      <span class="chart-legend-dot" style="background:${c};"></span>
+      <span class="chart-legend-label">${tag}${label}</span>
+    </span>`;
+  }).join('');
+
+  // Render into both legend containers
+  ['legend-score', 'legend-memory'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = items || '<span style="color:var(--muted);font-size:11px;">No series</span>';
+  });
 }
 
 // Incremental update — called on auto-refresh.
