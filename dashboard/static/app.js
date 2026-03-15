@@ -122,7 +122,7 @@ async function bootstrap() {
     state.refreshInterval = cfg.refresh_interval_seconds;
     state.countdownValue  = cfg.refresh_interval_seconds;
     state.theme           = cfg.theme || 'dark';
-    populateModelDropdown(cfg.models);
+    await populateRunDropdown(cfg.models);
     setHealth(true);
   } catch (e) {
     setHealth(false);
@@ -154,31 +154,54 @@ function toggleTheme() {
   updateCharts();   // re-render with new theme colours
 }
 
-function populateModelDropdown(models) {
-  const sel = document.getElementById('inp-model');
-  sel.innerHTML = models.map(m => `<option value="${m}">${m}</option>`).join('');
-  // Load runs for the first model
-  sel.addEventListener('change', () => populateRunDropdown(sel.value));
-  if (models.length > 0) populateRunDropdown(models[0]);
+async function populateRunDropdown(models) {
+  // Collect all unique run names across all models
+  const runSet = new Set();
+  const runsPerModel = {};   // model → [run_names]
+
+  await Promise.all(models.map(async (model) => {
+    try {
+      const data = await fetchJSON(`/api/models/${model}/runs`);
+      const runs = data.runs || [];
+      runsPerModel[model] = runs;
+      runs.forEach(r => runSet.add(r));
+    } catch (e) {
+      runsPerModel[model] = [];
+      console.warn('Failed to load runs for', model, e);
+    }
+  }));
+
+  // Store for model filtering
+  state.runsPerModel = runsPerModel;
+  state.allModels = models;
+
+  const runSel = document.getElementById('inp-run');
+  const allRuns = Array.from(runSet).sort();
+  if (allRuns.length === 0) {
+    runSel.innerHTML = '<option value="">no runs found</option>';
+  } else {
+    runSel.innerHTML = allRuns.map(r => `<option value="${r}">${r}</option>`).join('');
+  }
+
+  // When run changes, update model dropdown to show models that have this run
+  runSel.addEventListener('change', () => populateModelDropdown(runSel.value));
+  if (allRuns.length > 0) populateModelDropdown(allRuns[0]);
 }
 
-async function populateRunDropdown(model) {
-  const sel = document.getElementById('inp-run');
-  if (!model) {
-    sel.innerHTML = '<option value="">-- select model first --</option>';
+function populateModelDropdown(selectedRun) {
+  const modelSel = document.getElementById('inp-model');
+  if (!selectedRun || !state.runsPerModel) {
+    modelSel.innerHTML = '<option value="">-- select run first --</option>';
     return;
   }
-  try {
-    const data = await fetchJSON(`/api/models/${model}/runs`);
-    const runs = data.runs || [];
-    if (runs.length === 0) {
-      sel.innerHTML = '<option value="">no runs found</option>';
-    } else {
-      sel.innerHTML = runs.map(r => `<option value="${r}">${r}</option>`).join('');
-    }
-  } catch (e) {
-    sel.innerHTML = '<option value="">error loading runs</option>';
-    console.warn('Failed to load runs for', model, e);
+  // Show only models that have this run
+  const available = state.allModels.filter(m =>
+    (state.runsPerModel[m] || []).includes(selectedRun)
+  );
+  if (available.length === 0) {
+    modelSel.innerHTML = '<option value="">no models for this run</option>';
+  } else {
+    modelSel.innerHTML = available.map(m => `<option value="${m}">${m}</option>`).join('');
   }
 }
 
