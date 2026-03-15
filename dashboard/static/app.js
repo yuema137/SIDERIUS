@@ -157,6 +157,29 @@ function toggleTheme() {
 function populateModelDropdown(models) {
   const sel = document.getElementById('inp-model');
   sel.innerHTML = models.map(m => `<option value="${m}">${m}</option>`).join('');
+  // Load runs for the first model
+  sel.addEventListener('change', () => populateRunDropdown(sel.value));
+  if (models.length > 0) populateRunDropdown(models[0]);
+}
+
+async function populateRunDropdown(model) {
+  const sel = document.getElementById('inp-run');
+  if (!model) {
+    sel.innerHTML = '<option value="">-- select model first --</option>';
+    return;
+  }
+  try {
+    const data = await fetchJSON(`/api/models/${model}/runs`);
+    const runs = data.runs || [];
+    if (runs.length === 0) {
+      sel.innerHTML = '<option value="">no runs found</option>';
+    } else {
+      sel.innerHTML = runs.map(r => `<option value="${r}">${r}</option>`).join('');
+    }
+  } catch (e) {
+    sel.innerHTML = '<option value="">error loading runs</option>';
+    console.warn('Failed to load runs for', model, e);
+  }
 }
 
 // ── Series management ────────────────────────────────────────────────────────
