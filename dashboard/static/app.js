@@ -118,13 +118,13 @@ function makePlotLayout(yLabel) {
     legend: {
       font:        { size: 10, color: t.text },
       bgcolor:     'rgba(0,0,0,0)',
-      orientation: 'v',
-      x:           1.02,
-      xanchor:     'left',
-      y:           1.0,
-      yanchor:     'top',
+      orientation: 'h',
+      x:           0.5,
+      xanchor:     'center',
+      y:           1.15,
+      yanchor:     'bottom',
     },
-    margin: { t: 20, r: 180, b: 50, l: 60 },
+    margin: { t: 80, r: 20, b: 50, l: 60 },
     hovermode: 'x unified',
   };
 }
