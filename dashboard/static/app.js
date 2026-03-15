@@ -123,6 +123,7 @@ async function bootstrap() {
     state.countdownValue  = cfg.refresh_interval_seconds;
     state.theme           = cfg.theme || 'dark';
     await populateRunDropdown(cfg.models);
+    await loadExplorationRuns();
     setHealth(true);
   } catch (e) {
     setHealth(false);
@@ -202,6 +203,80 @@ function populateModelDropdown(selectedRun) {
     modelSel.innerHTML = '<option value="">no models for this run</option>';
   } else {
     modelSel.innerHTML = available.map(m => `<option value="${m}">${m}</option>`).join('');
+  }
+}
+
+// ── Exploration dropdowns ─────────────────────────────────────────────────────
+async function loadExplorationRuns() {
+  const sel = document.getElementById('inp-explore-run');
+  try {
+    const data = await fetchJSON('/api/exploration/runs');
+    const runs = data.runs || [];
+    if (runs.length === 0) {
+      sel.innerHTML = '<option value="">no exploration runs</option>';
+    } else {
+      sel.innerHTML = runs.map(r => `<option value="${r}">${r}</option>`).join('');
+      loadExplorationModels(runs[0]);
+    }
+    sel.addEventListener('change', () => loadExplorationModels(sel.value));
+  } catch (e) {
+    sel.innerHTML = '<option value="">error</option>';
+  }
+}
+
+async function loadExplorationModels(runName) {
+  const sel = document.getElementById('inp-explore-model');
+  if (!runName) {
+    sel.innerHTML = '<option value="">-- select run first --</option>';
+    return;
+  }
+  try {
+    const data = await fetchJSON(`/api/exploration/runs/${runName}/models`);
+    const models = data.models || [];
+    if (models.length === 0) {
+      sel.innerHTML = '<option value="">no models found</option>';
+    } else {
+      sel.innerHTML = models.map(m => `<option value="${m}">${m}</option>`).join('');
+    }
+  } catch (e) {
+    sel.innerHTML = '<option value="">error</option>';
+  }
+}
+
+async function addExplorationSeries() {
+  const run   = document.getElementById('inp-explore-run').value.trim();
+  const model = document.getElementById('inp-explore-model').value.trim();
+  const limit = parseInt(document.getElementById('inp-explore-limit').value) || 50;
+
+  if (!run || !model) { alert('Please select exploration run and model.'); return; }
+
+  // Remove duplicate if re-adding
+  state.series = state.series.filter(s => !(s.model === model && s.run === run && s.limit === limit));
+
+  const colorIndex = state.nextColorIndex++;
+  const series = {
+    id: `explore_${model}_${run}_${limit}_${Date.now()}`,
+    model, run, limit, colorIndex,
+    records: [], renderedCount: 0, runningBest: null, highlightBest: false,
+    isExploration: true,
+  };
+  state.series.push(series);
+
+  await loadExplorationData(series);
+  renderSeriesTags();
+  updateCharts();
+}
+
+async function loadExplorationData(series) {
+  try {
+    const url = `/api/exploration/runs/${series.run}/models/${series.model}?limit=${series.limit}&status=success`;
+    const data = await fetchJSON(url);
+    series.records = data.records || [];
+    series.error   = null;
+  } catch (e) {
+    series.records = [];
+    series.error   = e.message;
+    console.warn(`Failed to load exploration ${series.model}/${series.run}:`, e);
   }
 }
 
@@ -439,7 +514,9 @@ function renderSeriesTags() {
 // ── Refresh ──────────────────────────────────────────────────────────────────
 async function refresh() {
   resetCountdown();
-  await Promise.all(state.series.map(loadSeriesData));
+  await Promise.all(state.series.map(s =>
+    s.isExploration ? loadExplorationData(s) : loadSeriesData(s)
+  ));
   extendCharts();
   renderSeriesTags();
 
@@ -525,7 +602,7 @@ function resetRange(divId, prefix) {
 }
 
 // ── Public API (called from HTML) ────────────────────────────────────────────
-window.App = { addSeries, removeSeries, refresh, toggleTheme, setAxisType, applyRange, resetRange, toggleHighlight };
+window.App = { addSeries, addExplorationSeries, removeSeries, refresh, toggleTheme, setAxisType, applyRange, resetRange, toggleHighlight };
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', bootstrap);
