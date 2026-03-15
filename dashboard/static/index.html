@@ -64,6 +64,22 @@
       <button onclick="App.addExplorationSeries()" style="align-self:flex-end;">+ Add series</button>
     </div>
 
+    <div class="card-title" style="margin-top:16px;">Opacity</div>
+    <div class="add-series-form" style="gap:20px;">
+      <label>Original data
+        <input type="range" min="0" max="1" step="0.05" value="1"
+               oninput="App.setAlpha('original', parseFloat(this.value)); this.nextElementSibling.textContent=this.value"
+               style="width:120px;" />
+        <span style="font-size:11px;color:var(--muted);">1</span>
+      </label>
+      <label>Agent-generated
+        <input type="range" min="0" max="1" step="0.05" value="1"
+               oninput="App.setAlpha('exploration', parseFloat(this.value)); this.nextElementSibling.textContent=this.value"
+               style="width:120px;" />
+        <span style="font-size:11px;color:var(--muted);">1</span>
+      </label>
+    </div>
+
     <div id="series-list">
       <span style="color:var(--muted);font-size:12px;">No series added yet.</span>
     </div>

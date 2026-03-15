@@ -39,6 +39,24 @@ function getSeriesColor(series) {
   return palette[series.colorIndex % palette.length];
 }
 
+function getSeriesOpacity(series) {
+  return series.isExploration ? state.alphaExploration : state.alphaOriginal;
+}
+
+function colorWithAlpha(hexColor, alpha) {
+  // Convert #rrggbb to rgba(r,g,b,a)
+  const r = parseInt(hexColor.slice(1, 3), 16);
+  const g = parseInt(hexColor.slice(3, 5), 16);
+  const b = parseInt(hexColor.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function setAlpha(group, value) {
+  if (group === 'original') state.alphaOriginal = value;
+  else state.alphaExploration = value;
+  updateCharts();
+}
+
 // ── Theme definitions ─────────────────────────────────────────────────────────
 const THEMES = {
   dark: {
@@ -72,6 +90,8 @@ const state = {
   countdownValue:  30,
   countdownTimer:  null,
   theme:           'dark',   // overridden by /api/config on load
+  alphaOriginal:   1.0,
+  alphaExploration: 1.0,
 };
 
 // ── Plotly layout factory ────────────────────────────────────────────────────
@@ -377,6 +397,8 @@ function updateCharts() {
     const xs    = Array.from({ length: n }, (_, i) => i + 1);
     const label = `${s.model} / ${s.run}`;
     const c     = getSeriesColor(s);
+    const alpha = getSeriesOpacity(s);
+    const ca    = colorWithAlpha(c, alpha);
 
     const bestData    = computeBestScoreCurve(s.records);
     const currentData = computeCurrentScoreCurve(s.records);
@@ -392,24 +414,27 @@ function updateCharts() {
       x: xs, y: bestData,
       name: `${label} (best)`,
       mode: 'lines+markers',
-      line: { color: c, width: 2 },
-      marker: { color: c, size: 4 },
+      line: { color: ca, width: 2 },
+      marker: { color: ca, size: 4 },
+      opacity: alpha,
       connectgaps: false,
     });
     scoreTraces.push({
       x: xs, y: currentData,
       name: `${label} (current)`,
       mode: 'lines+markers',
-      line: { color: c, width: 1.5, dash: 'dot' },
-      marker: { color: c, size: 3 },
+      line: { color: ca, width: 1.5, dash: 'dot' },
+      marker: { color: ca, size: 3 },
+      opacity: alpha,
       connectgaps: false,
     });
     scoreTraces.push({
       x: nb.xs, y: nb.scoreYs,
       name: `${label} (new best)`,
       mode: 'markers',
-      marker: { symbol: 'star', color: c, size: 14,
+      marker: { symbol: 'star', color: ca, size: 14,
                 line: { color: THEMES[state.theme].paper_bg, width: 1.5 } },
+      opacity: alpha,
       visible: s.highlightBest,
       showlegend: s.highlightBest,
     });
@@ -419,16 +444,18 @@ function updateCharts() {
       x: xs, y: memData,
       name: label,
       mode: 'lines+markers',
-      line: { color: c, width: 2 },
-      marker: { color: c, size: 4 },
+      line: { color: ca, width: 2 },
+      marker: { color: ca, size: 4 },
+      opacity: alpha,
       connectgaps: false,
     });
     memoryTraces.push({
       x: nb.xs, y: nb.memYs,
       name: `${label} (new best)`,
       mode: 'markers',
-      marker: { symbol: 'star', color: c, size: 14,
+      marker: { symbol: 'star', color: ca, size: 14,
                 line: { color: THEMES[state.theme].paper_bg, width: 1.5 } },
+      opacity: alpha,
       visible: s.highlightBest,
       showlegend: false,
     });
@@ -602,7 +629,7 @@ function resetRange(divId, prefix) {
 }
 
 // ── Public API (called from HTML) ────────────────────────────────────────────
-window.App = { addSeries, addExplorationSeries, removeSeries, refresh, toggleTheme, setAxisType, applyRange, resetRange, toggleHighlight };
+window.App = { addSeries, addExplorationSeries, removeSeries, refresh, toggleTheme, setAxisType, applyRange, resetRange, toggleHighlight, setAlpha };
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', bootstrap);
