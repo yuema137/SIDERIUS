@@ -156,7 +156,7 @@ button.danger { background: var(--danger); }
 .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
 @media (max-width: 900px) { .charts-grid { grid-template-columns: 1fr; } }
 
-.chart-wrap { height: 500px; min-height: 400px; resize: vertical; overflow: hidden; }
+.chart-wrap { height: 400px; min-height: 300px; resize: vertical; overflow: hidden; }
 
 /* ── Axis scale controls ── */
 .axis-controls {

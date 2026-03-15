@@ -102,7 +102,6 @@ function makePlotLayout(yLabel) {
     paper_bgcolor: t.paper_bg,
     plot_bgcolor:  t.plot_bg,
     font:       { color: t.text, size: 11 },
-    margin:     { t: 20, r: 20, b: 50, l: 60 },
     xaxis: {
       title:     { text: 'Research loop', font: { size: 11, color: t.muted } },
       gridcolor:  t.grid,
@@ -118,15 +117,14 @@ function makePlotLayout(yLabel) {
     },
     legend: {
       font:        { size: 10, color: t.text },
-      bgcolor:     t.paper_bg === '#ffffff' ? 'rgba(255,255,255,0.85)' : 'rgba(26,29,39,0.85)',
-      bordercolor: t.grid,
-      borderwidth: 1,
+      bgcolor:     'rgba(0,0,0,0)',
       orientation: 'v',
-      x:           1.0,
-      xanchor:     'right',
+      x:           1.02,
+      xanchor:     'left',
       y:           1.0,
       yanchor:     'top',
     },
+    margin: { t: 20, r: 180, b: 50, l: 60 },
     hovermode: 'x unified',
   };
 }
