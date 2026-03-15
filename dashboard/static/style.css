@@ -160,17 +160,15 @@ button.danger { background: var(--danger); }
 
 .chart-legend {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
+  flex-direction: column;
+  gap: 2px;
   padding: 4px 0 8px 0;
   font-size: 11px;
 }
 .chart-legend-item {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 4px;
-  flex: 0 0 calc(25% - 16px);    /* 4 items per row */
-  min-width: 120px;
+  gap: 6px;
 }
 .chart-legend-dot {
   display: inline-block;
@@ -180,9 +178,6 @@ button.danger { background: var(--danger); }
   flex-shrink: 0;
 }
 .chart-legend-label {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   color: var(--text);
 }
 
