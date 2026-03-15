@@ -167,9 +167,9 @@ async function addSeries() {
 
   if (!model || !run) { alert('Please set model and run name.'); return; }
 
-  if (state.series.find(s => s.model === model && s.run === run && s.limit === limit)) {
-    alert(`Series ${model}/${run} (limit ${limit}) already added.`); return;
-  }
+  // Remove any existing series with the same model/run/limit before re-adding
+  // (handles the case where user removes via ✕ then re-adds)
+  state.series = state.series.filter(s => !(s.model === model && s.run === run && s.limit === limit));
 
   const colorIndex = state.nextColorIndex++;
 
