@@ -23,6 +23,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from dashboard.api.models import FrontendConfig
 from dashboard.api.router import router, set_data_source, set_frontend_config
@@ -104,6 +106,16 @@ def create_app(settings: DashboardSettings) -> FastAPI:
     app.include_router(router, prefix="/api")
 
     # --- Static files (frontend UI) ---
+    # Disable caching so browser always gets fresh JS/HTML during development
+    class NoCacheMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            response = await call_next(request)
+            if request.url.path.startswith("/static"):
+                response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            return response
+
+    app.add_middleware(NoCacheMiddleware)
+
     if os.path.isdir(_STATIC_DIR):
         app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
     else:

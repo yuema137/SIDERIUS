@@ -156,7 +156,30 @@ button.danger { background: var(--danger); }
 .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
 @media (max-width: 900px) { .charts-grid { grid-template-columns: 1fr; } }
 
-.chart-wrap { height: 360px; }
+.chart-wrap { height: 400px; min-height: 300px; resize: vertical; overflow: hidden; }
+
+.chart-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0 8px 0;
+  font-size: 11px;
+}
+.chart-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.chart-legend-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.chart-legend-label {
+  color: var(--text);
+}
 
 /* ── Axis scale controls ── */
 .axis-controls {

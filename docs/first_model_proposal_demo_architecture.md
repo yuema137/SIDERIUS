@@ -1,132 +1,118 @@
-# First Model Proposal Demo — Architecture & Plan
+# First Model Proposal Demo — Architecture & Implementation
 
-## Goal
+## Status: COMPLETE
 
-Demonstrate one complete end-to-end traversal of the SIDERIUS node graph — the first
-full model proposal loop:
+The first model exploration demo is **fully implemented, tested, and running in
+production**. All 5 nodes conform to the `run(input) -> output` node contract,
+all 5 protocols are wired, and the workflow chains them in an iterative closed-loop.
+519 unit tests passing. A full exploration run (50 iterations, 20 rounds/iteration,
+target score 10.0) is running with punet + wavenet + fcnet as input models.
+
+## Architecture
+
+The workflow implements an iterative closed-loop traversal of the SIDERIUS node graph:
 
 ```
-tune_ml_hyperparam_agent  (existing results, starting node)
-        ↓  [ml_model_tune_to_ml_result_interp :: local_all_records]
-result_interpretation_agent
-        ↓  [ml_result_interp_to_ml_model_propose :: local_full_context]
-ml_model_proposal_agent
-        ↓  [ml_model_propose_to_ml_model_impl :: local_full_spec]
-ml_model_implementor
-        ↓  [ml_model_impl_to_ml_model_valid :: local_all_fields]
-ml_code_validator_agent
-        ↓  [ml_model_valid_to_ml_model_tune :: local_validated_model]
-tune_ml_hyperparam_agent  (new model, end node)
+for each iteration:
+    result_interpretation_agent  (all accumulated results)
+            ↓  [ml_model_tune_to_ml_result_interp :: local_all_records]
+    for each attempt (up to max_proposal_attempts):
+        ml_model_proposal_agent  (with previous failure feedback)
+                ↓  [ml_result_interp_to_ml_model_propose :: local_full_context]
+        ml_model_implementor
+                ↓  [ml_model_propose_to_ml_model_impl :: local_full_spec]
+        ml_code_validator_agent
+                ↓  [ml_model_impl_to_ml_model_valid :: local_all_fields]
+        if passed → break
+    tune_ml_hyperparam_agent  (fan-in: validator + proposal)
+            ↓  [ml_model_valid_to_ml_model_tune :: local_validated_model]
+    accumulate results → next iteration
 ```
 
-Each arrow is a named protocol — an explicit, typed function that maps one node's output
-schema to the next node's input schema, exactly as defined in `architecture.md`.
-Protocol naming convention: `{source_code}_to_{target_code}` per file, `{transport}_{data_scope}` per function.
+Stop conditions: `max_iterations` count OR `target_score` threshold.
 
-This is a **linear, single-pass path through the graph**. There is no orchestrator and
-no retry loop. If any node fails, the path stops. For the demo we need one clean
-successful pass.
+## Design Decisions
 
----
-
-## Scope Decisions
-
-- **No orchestrator** — a flat demo script selects and traverses the path manually.
-  This is the human-as-orchestrator principle: a human (or script) applies protocols
-  and calls `node.run()` in sequence.
-- **No retry loop** — if `ml_code_validator_agent` returns `passed=False`, the demo stops.
-  This is acceptable. Retry logic belongs in an orchestrator, which comes after the demo.
+- **Workflow, not orchestrator** — the path is fixed and deterministic. LLM-driven
+  path selection (orchestrator) is deferred to a future phase.
+- **Validation retry with feedback** — on validation failure, the workflow retries
+  propose→implement→validate with the error message fed back to the proposal agent
+  via `previous_failures`. Node exceptions are caught and treated as failures.
 - **All nodes follow the standard contract** — each node is a pure function with a
   `run(input) -> output` method, validated Pydantic schemas at entry and exit, and a
-  CLI interface. No special-casing for the demo.
-- **CoT inside the proposal node** — the demo script never sees intermediate reasoning
-  steps. Only the final `ProposalOutput` is returned. The chain of thought is an
-  internal implementation detail of the node.
+  CLI interface.
+- **Two-phase interpretation** — Phase 1: per-model LLM summarization from condensed
+  `ModelRunSummary` (not raw records). Phase 2: cross-model synthesis. Keeps each LLM
+  call focused and within token limits.
 - **Template-constrained code generation** — the implementor node fills in a fixed
-  template rather than generating free-form code. This is the key reliability mechanism
-  for a single-pass demo. See the section below.
+  template rather than generating free-form code. Self-correction loop (4 checks:
+  config consistency, scalar fields, syntax, smoke test) retries before writing files.
+- **Fan-in protocol** — `validate→tune` consumes both `ValidatorOutput` and
+  `ProposalOutput`. The workflow holds all intermediate outputs and passes them to
+  the protocol.
+- **Per-node LLM config** — `WorkflowLLMConfig` allows each node to use a different
+  LLM provider/model. The implementor defaults to `gemini-3.1-pro-preview` (stronger
+  for code generation); others default to `gemini-3.1-flash-lite-preview`.
+- **Human advice** — every node accepts optional `human_advice: str` to steer its
+  LLM prompt. Separate from `expert_advice` (agent-to-agent structured guidance).
+- **Plugin registration** — after validation passes, plugin files are copied to
+  `agent_generated/models/` and `MODEL_REGISTRY` is extended at runtime so the
+  tuning subprocess can find the new model.
 
 ---
 
-## Progress
+## Implementation Summary
 
-### Completed
+| Component | Status | Details |
+|-----------|--------|---------|
+| **Nodes (5/5)** | ✅ | All conform to `run(input) -> output` contract |
+| **Protocols (5/5)** | ✅ | All with `local_*` + `database_*` placeholder; fan-in on `validate→tune` |
+| **Workflow** | ✅ | Iterative closed-loop with retry, per-node LLM config, human advice, plugin registration |
+| **Schemas** | ✅ | `ModelRunSummary` (condensed, no raw records), `WorkflowLLMConfig`, `human_advice` on all nodes |
+| **Unit tests** | ✅ | 519 passing |
+| **Integration tests** | ✅ | Tier 1 (all nodes) + Tier 2 (tune→interpret edge) with real API + GPU |
+| **End-to-end tests** | ✅ | Single-loop and 2-iteration closed-loop verified |
+| **Production run** | ✅ | 50-iteration exploration running with punet + wavenet + fcnet |
 
-| Step | What was done |
-|------|---------------|
-| Architecture alignment | Reviewed codebase against `architecture.md`. Identified and resolved all structural gaps before building new nodes. |
-| `architecture.md` rewrite | Replaced `AgentCommunicationInterface` abstraction with the correct typed directed graph model. Added Core Principles (7), Agent Dependency Graph, Protocols section, Orchestration Graph. |
-| Delete `core/recorder.py` | Removed legacy `TidmadRecorder` class — duplicate of `LocalRecorder` in `sandbox_executor.py`. |
-| `LLMBridge.generate()` | Renamed `_generate_json_response` → `generate` (public). All new nodes call `bridge.generate(system_prompt, user_prompt)` directly. `plan()` and `reflect()` on the bridge still work for the existing tuning agent. |
-| `agent/schemas/storage.py` | Created `StorageConfig` with `LocalStorageConfig` (implemented) and `PostgresStorageConfig` (placeholder — schema defined, backend not yet wired). Every node's input schema now includes `storage: StorageConfig` so each node knows where to read its inputs and write its outputs, and can be run standalone. |
-| Schemas for all 4 new nodes | Created `interpretation.py`, `proposal.py`, `implementor.py`, `validator.py` in `agent/schemas/`. All include `storage: StorageConfig`. |
-| `agent/schemas/protocols/__init__.py` | Protocols directory created and ready. |
-| `HyperparamTuningInput` updated | Replaced raw `workspace: str` and `run_name: str` fields with `storage: StorageConfig`. Agent code updated to extract `workspace` and `run_name` from `agent_input.storage.local`. |
-| Unit tests | Added `test_storage.py` (11 tests), `test_interpretation_schemas.py` (7), `test_proposal_schemas.py` (7), `test_implementor_schemas.py` (7), `test_validator_schemas.py` (7). Fixed `valid_input_dict` fixture in existing hyperparam tests. **233 unit tests passing.** |
-| `nodes/result_interpretation_agent.py` | Implemented `ResultInterpretationAgent.run()`. One LLM call: deterministic pre-computation (best score, best config) merged with LLM-generated `key_findings`, `bottlenecks`, `take_home_message`. Writes `interpretation_{run_name}.json`. Unit tests added (`test_interpretation_agent.py`, 8 tests). |
-| `LLMBridge.generate_text()` | Added plain-text transport alongside `generate()` (JSON mode). Used for free-form reasoning steps where JSON mode constrains quality. 11 unit tests + 4 integration tests (skip if no API key). |
-| Per-model `description.md` files | Added `ml_models/{punet,fcnet,transformer,wavenet,rnn}/description.md` — markdown + math descriptions of each architecture. Added `ml_models/model_descriptions.py` loader: searches `ml_models/{model_type}/description.md` then `agent_generated/models/{model_type}/description.md`; raises `FileNotFoundError` if missing. |
-| `InterpretationInput` overhaul | Replaced `summary_records + model_type` with `summaries: List[SummaryGroup]` + `model_types: Optional[List[str]]`. New `SummaryGroup(model_type, run_name, records)`. Validator enforces at least one model reachable (from summaries or explicit `model_types`); empty `[]` for `model_types` is an error. |
-| `InterpretationOutput` overhaul | Added `model_types: List[str]`, `model_descriptions: Dict[str, str]`, `per_model_best: Dict[str, Optional[float]]`, `per_model_worst: Dict[str, Optional[float]]`, `worst_denoising_score`. Carries full architecture knowledge forward to the proposal agent. |
-| `result_interpretation_agent` rewrite | Now handles multiple summary groups across multiple model types. Computes per-model and overall best/worst deterministically before the LLM call. Loads descriptions for all effective model types (raises `FileNotFoundError` if any missing). Injects all model descriptions + experiment records into the LLM prompt. 20 unit tests (up from 8), organised in `TestSingleGroup`, `TestMultiGroup`, `TestModelTypesOnly`, `TestErrorCases`. |
+### Bugs found and fixed during end-to-end testing
 
-| `ml_model_proposal_agent` | ✅ done (two-call CoT, human_advice, duplicate guard) |
-| Protocol structure + naming convention | ✅ done (one-file-per-edge, `local_*`/`database_*` variants) |
-| `ml_model_tune_to_ml_result_interp` protocol | ✅ done (`local_all_records`, `database_all_records` placeholder) |
-| `ml_result_interp_to_ml_model_propose` protocol | ✅ done (`local_full_context`, `database_full_context` placeholder) |
-| Unit + integration tests for proposal agent | ✅ done (35 unit, Tier 1 + Tier 2 real-API) |
-| `ml_model_implementor` | ✅ done (two-call CoT, template assembly, description.md, self-correction loop with 3 pre-write checks) |
-| `ml_model_propose_to_ml_model_impl` protocol | ✅ done (`local_full_spec`, `database_full_spec` placeholder) |
-| Unit + integration tests for implementor | ✅ done (node unit ×52, schema unit ×10, protocol unit ×9, Tier 1 + Tier 2 real-API) |
-| `ml_code_validator_agent` | ✅ done (7 checks: plugin load, pytest, description, config fields, instantiation, gradient flow, LLM code review — prompt calibrated to distinguish bugs from suggestions) |
-| `ml_model_impl_to_ml_model_valid` protocol | ✅ done (`local_all_fields`, `database_all_fields` placeholder) |
-| `ml_model_valid_to_ml_model_tune` protocol | ✅ done (`local_validated_model`, `database_validated_model` placeholder) |
-| Unit + integration tests for validator | ✅ done (85 unit, Tier 1 + Tier 2 real-API) |
-
-### Remaining
-
-| Step | Status |
-|------|--------|
-| Add `run()` to `tune_ml_hyperparam_agent` + wire `seed_records` | ⬜ next |
-| `workflows/model_exploration.py` | ⬜ |
+| Bug | Root cause | Fix |
+|-----|-----------|-----|
+| `models_format_sandbox` import error | `ml_models/` not on `sys.path` in workflow | Added to `sys.path` at workflow startup |
+| Plugin not loadable by tuning subprocess | Plugin only in attempt dir, not in `agent_generated/models/` | Copy plugin after validation; extend `MODEL_REGISTRY` at runtime |
+| `model_type` missing on plugin config | Plugin template didn't include `model_type` field | Added `model_type` to template config class |
+| Training crash: `nn.Embedding` got float | Hardcoded model type whitelist for int input | Flipped default: all models get int, only fcnet gets float |
+| LLM planner ignored `force_model` | Planner picked built-in model types from config manual | Override `model_type` in code after `brain.plan()` returns |
+| Non-scalar config fields | LLM added `activation: str` despite prompt rule | Added scalar check to implementor self-correction loop |
+| Empty `model_name` from LLM | Proposal agent accepted `""` | Added `min_length=1` to `ProposalOutput.model_name` |
+| Gemini SDK deprecation | `google.generativeai` deprecated | Migrated to `google.genai` |
 
 ---
 
 ## Next Steps in Detail
 
-### Step 1 — `result_interpretation_agent` ⚠️ refactoring to two-phase
+### Step 1 — `result_interpretation_agent` ✅ done (two-phase)
 
 **File**: `nodes/result_interpretation_agent.py`.
 
-**What was built (original — single LLM call, being replaced)**:
+**What was built**:
 - `class ResultInterpretationAgent` with `run(input: InterpretationInput) -> InterpretationOutput`
-- Accepts multiple summary groups across multiple model types (`summaries: List[SummaryGroup]`)
-- Deterministically computes per-model and cross-model best/worst scores before the LLM call
-- One LLM call: injects all model descriptions + experiment records; LLM produces
-  `key_findings`, `bottlenecks`, `take_home_message` as strict JSON
-- Writes output to `{storage.local.workspace}/interpretation_{run_name}.json`
-- Validates input at entry and output at exit via Pydantic `model_validate()`
-- 20 unit tests + 4 real-API integration tests (Gemini + OpenAI, single-model + multi-model)
-
-**Refactoring to two-phase interpretation**:
-
-The original single-LLM-call design dumps all experiment records from all models into one
-prompt. This does not scale — with 20+ records per model and multiple models, the prompt
-exceeds token limits and produces poor results. The fix is a two-phase approach:
-
-1. **Phase 1 — Per-model summarization**: for each model type, call the LLM once with
-   only that model's records and architecture description. Produces a structured JSON
-   summary per model (key findings, best config, score trends, bottlenecks).
-2. **Phase 2 — Cross-model synthesis**: take the structured per-model summaries (not
-   raw records) and call the LLM once more to produce the final `InterpretationOutput`
-   (comparative analysis, overall bottlenecks, take-home message).
-
-This keeps each LLM call focused and within token limits. The per-model summaries are
-explicit, inspectable, and stored alongside the final output.
-
-**Current implementation**: Option A — both phases inside `ResultInterpretationAgent.run()`.
-The node's input/output schemas are unchanged; the internal logic changes from one LLM
-call to N+1 calls (N per-model + 1 synthesis).
+- **Two-phase LLM interpretation** (replaces the original single-call design):
+  1. **Phase 1 — Per-model summarization**: one LLM call per model type, receiving a
+     condensed `ModelRunSummary` (scores, trajectory, conclusions — NOT raw experiment
+     records). Produces structured JSON: `key_findings`, `bottlenecks`,
+     `best_config_analysis`, `score_trend`.
+  2. **Phase 2 — Cross-model synthesis**: one LLM call consuming all per-model summaries
+     to produce the final `InterpretationOutput`. Skipped for single-model input.
+- Input schema uses `ModelRunSummary` (not raw records): `model_type`, `run_name`,
+  `status`, `completed_rounds`, `best/worst_denoising_score`, `best_config`,
+  `round_scores: List[float]`, `round_conclusions: List[str]`,
+  `model_description: Optional[str]` (inline for agent-generated models).
+- `tuning_output_to_model_run_summary()` utility converts `HyperparamTuningOutput` →
+  `ModelRunSummary`, extracting aggregates and discarding raw records.
+- Descriptions loaded from disk for built-in models, inline from `ModelRunSummary` for
+  agent-generated models (enables closed-loop iteration without filesystem coupling).
+- 35 unit tests + Tier 1 and Tier 2 real-API integration tests.
 
 **Future evolution**: Option B — split into two separate nodes (`per_model_summarizer`
 and `cross_model_interpreter`) with a protocol between them. This gives the orchestrator
@@ -318,25 +304,33 @@ orchestrator retry loop will feed this directly back to the implementor.
 
 ---
 
-### Step 5 — Add `run()` to `tune_ml_hyperparam_agent`
+### Step 5 — `tune_ml_hyperparam_agent` refactor ✅ done
 
-**What to build**:
-- Extract the core loop logic from `main()` into a shared internal function
-- Add `class HyperparamTuningAgent` with `run(input: HyperparamTuningInput) -> HyperparamTuningOutput`
-- Wire `seed_records`: if `input.seed_records` is non-empty, write them to the sandbox
-  summary file before the loop starts (so the agent treats them as prior memory)
-- `main()` becomes a thin CLI wrapper that parses args, constructs `HyperparamTuningInput`,
-  and calls `HyperparamTuningAgent().run(agent_input)`
+**File**: `nodes/ml_hyperparameter_tune_agent.py`.
+
+**What was built**:
+- `class HyperparamTuningAgent` with `run(input: HyperparamTuningInput) -> HyperparamTuningOutput`
+- `main()` is now a thin CLI wrapper that parses args and calls `run()`
+- `_serialize_expert_advice()`: converts structured `ExpertAdvice` objects to
+  LLM-readable strings for `brain.plan()` and experiment record storage
+- `human_advice` field: appended alongside `expert_advice` with clear labeling
+- `force_model` override: when not `"auto"`, the agent overrides the LLM planner's
+  `model_type` choice in code (not just in the prompt), ensuring agent-generated
+  models are used correctly
+- `model_config["model_type"]` is explicitly set to match the forced model type
+- `MODEL_REGISTRY` import moved to `main()` only (class is cleanly importable
+  without PYTHONPATH dependency)
+- 21 unit tests (serialize, run success, run OOM, expert advice passthrough)
 
 ---
 
-### Step 6 — Protocols (all 5)
+### Step 6 — Protocols (all 5) ✅ done
 
 **Files**: one module per edge in `agent/schemas/protocols/`.
 
-Each protocol is a plain typed function. The tricky one is `validator_to_hyperparam_v1`
-which takes both `ValidatorOutput` and `ProposalOutput` as arguments (the validator
-only confirms validity; the expert advice comes from the proposal).
+Each protocol is a plain typed function. The `validate→tune` protocol is a fan-in:
+it takes both `ValidatorOutput` and `ProposalOutput` as arguments (the validator
+only confirms validity; the expert advice and baseline config come from the proposal).
 
 | File | Function | Signature |
 |------|----------|-----------|
@@ -348,11 +342,32 @@ only confirms validity; the expert advice comes from the proposal).
 
 ---
 
-### Step 7 — `workflows/model_exploration.py`
+### Step 7 — `workflows/model_exploration.py` ✅ done
 
-A linear script that ties everything together. Accepts CLI args for workspace, run_name,
-model_type (for the initial tuning results to read), LLM provider, and max_rounds for
-the final tuning run.
+**File**: `workflows/model_exploration.py`.
+
+**What was built**:
+- Iterative closed-loop workflow: interpret → (propose → implement → validate) → tune → accumulate → repeat
+- **Stop conditions**: `max_iterations` count OR `target_score` threshold (whichever first)
+- **Validation retry**: on failure, retries propose→implement→validate up to `max_proposal_attempts`,
+  feeding `previous_failures` error messages back to the proposal agent
+- **Node exception handling**: `try/except` wraps the inner loop — node crashes (e.g. implementor
+  `ValueError`) are caught, added to `previous_failures`, and retried
+- **Per-node LLM config** via `WorkflowLLMConfig`: each node can use a different provider/model.
+  Loaded from JSON file or constructed programmatically. Nodes not configured use built-in defaults.
+- **Human advice** per node: `human_advice_interpret`, `human_advice_propose`,
+  `human_advice_implement`, `human_advice_validate`, `human_advice_tune`
+- **Storage layout**: `{workspace}/{run_name}/iteration_NNN/attempt_NNN_{model_name}/` for
+  propose/implement/validate, `{workspace}/{run_name}/iteration_NNN/{model_name}/` for tuning.
+  Consistent `run_name` across all files.
+- **Plugin registration**: after validation passes, plugin files are copied to
+  `agent_generated/models/` and `MODEL_REGISTRY` is extended at runtime
+- **Summary accumulation**: `ModelRunSummary` with inline `model_description` enables
+  iteration N+1 to see all prior models without filesystem coupling
+- **Data loading**: `load_tuning_outputs()` loads one specific run per model via
+  `source_run_name` (not globbing all runs)
+- 22 unit tests (single iteration, multi-iteration, target score, validation retry, storage layout)
+- Successfully tested: single-loop and 2-iteration closed-loop with real API + GPU
 
 ---
 
@@ -517,107 +532,120 @@ ml_models/
 └── plugin_loader.py                      ✅ done (moved from core/)
 
 nodes/
-├── ml_hyperparameter_tune_agent.py       ✅ storage updated, run() ⬜
-├── result_interpretation_agent.py        ✅ done (multi-model, cross-run, descriptions)
-├── ml_model_proposal_agent.py            ✅ done (two-call CoT, human_advice, duplicate guard)
-├── ml_model_implementor.py               ✅ done (two-call CoT, template assembly, description.md, self-correction loop)
-└── ml_code_validator_agent.py              ✅ done (7 checks, calibrated LLM review)
+├── ml_hyperparameter_tune_agent.py       ✅ done (run() refactor, force_model override, human_advice)
+├── result_interpretation_agent.py        ✅ done (two-phase: per-model + synthesis, ModelRunSummary)
+├── ml_model_proposal_agent.py            ✅ done (two-call CoT, human_advice, duplicate guard, previous_failures)
+├── ml_model_implementor.py               ✅ done (two-call CoT, template with model_type, 4 self-correction checks)
+└── ml_code_validator_agent.py            ✅ done (7 checks, calibrated LLM review)
 
 workflows/
-└── model_exploration.py                 ⬜
+├── __init__.py
+├── llm_config.py                        ✅ done (WorkflowLLMConfig, per-node LLM config)
+└── model_exploration.py                 ✅ done (iterative closed-loop, validation retry, plugin registration)
 
 tests/
-└── unit/
-    └── agent/
-        ├── tune_ml_hyperparam_agent/     ✅ 38 tests (28 schema + 10 skill)
-        ├── result_interpretation_agent/  ✅ 32 tests (18 node + 14 schema)
-        ├── test_llm_bridge.py            ✅ 11 tests (generate + generate_text, both providers)
-        ├── ml_model_proposal_agent/      ✅ 35 tests (23 node + 12 schema)
-        ├── ml_model_implementor/         ✅ 62 tests (52 node + 10 schema)
-        ├── ml_code_validator_agent/      ✅ 85 tests (55 node + 30 schema)
-        └── protocols/                    ✅ 56 tests (5 protocol modules)
-
-tests/integration/nodes/              ✅ Tier 1 — single node, real API
-    ├── test_llm_bridge.py                ✅ 4 tests (Gemini + OpenAI, generate + generate_text)
-    ├── test_result_interpretation_agent.py ✅ 4 tests (Gemini + OpenAI, single + multi-model)
-    ├── test_ml_model_proposal_agent.py   ✅ 2 tests (Gemini + OpenAI)
-    ├── test_ml_model_implementor.py      ✅ 2 tests (Gemini + OpenAI, validates plugin + description.md)
-    ├── test_ml_code_validator_agent.py   ✅ 18 tests (Gemini API, all-pass + all failure modes)
-    └── test_tune_ml_hyperparam_agent.py  ✅ (skip if no API key + data)
-
-tests/integration/protocols/         ✅ Tier 2 — one graph edge end-to-end
-    ├── test_tune_to_interpret.py         ✅ 1 test (real fcnet loop → interpretation agent)
-    ├── test_interp_to_propose.py         ✅ 2 tests (Gemini + OpenAI, no GPU needed)
-    ├── test_propose_to_implement.py      ✅ 2 tests (Gemini + OpenAI, proposal → implementor edge)
-    └── test_implement_to_validate.py     ✅ 2 tests (Gemini + OpenAI, full implement → validate chain)
-
-tests/integration/workflows/         ⬜ Tier 3 — multi-hop workflow tests (empty, ready)
-
-tests/unit/core/
-    ├── test_storage.py                   ✅ done (11 tests)
+├── unit/
+│   ├── agent/
+│   │   ├── tune_ml_hyperparam_agent/    ✅ 59 tests (28 schema + 10 skill + 21 run/serialize)
+│   │   ├── result_interpretation_agent/ ✅ 35 tests (22 node + 13 schema)
+│   │   ├── test_llm_bridge.py           ✅ 11 tests (generate + generate_text, both providers)
+│   │   ├── ml_model_proposal_agent/     ✅ 35 tests (23 node + 12 schema)
+│   │   ├── ml_model_implementor/        ✅ 62 tests (52 node + 10 schema)
+│   │   ├── ml_code_validator_agent/     ✅ 85 tests (55 node + 30 schema)
+│   │   └── protocols/                   ✅ 56 tests (5 protocol modules)
+│   └── workflows/
+│       └── test_model_exploration.py    ✅ 22 tests (single/multi iteration, retry, storage)
+│
+├── integration/
+│   ├── nodes/                           ✅ Tier 1 — single node, real API
+│   │   ├── test_llm_bridge.py               ✅ 4 tests (Gemini + OpenAI)
+│   │   ├── test_result_interpretation_agent.py ✅ 4 tests (Gemini + OpenAI)
+│   │   ├── test_ml_model_proposal_agent.py  ✅ 2 tests (Gemini + OpenAI)
+│   │   ├── test_ml_model_implementor.py     ✅ 2 tests (Gemini + OpenAI)
+│   │   ├── test_ml_code_validator_agent.py  ✅ 18 tests (Gemini API)
+│   │   └── test_tune_ml_hyperparam_agent.py ✅ uses HyperparamTuningAgent.run()
+│   ├── protocols/                       ✅ Tier 2 — one graph edge end-to-end
+│   │   ├── test_tune_to_interpret.py        ✅ uses ModelRunSummary + real API + GPU
+│   │   ├── test_interp_to_propose.py        ✅ 2 tests (Gemini + OpenAI)
+│   │   ├── test_propose_to_implement.py     ✅ 2 tests (Gemini + OpenAI)
+│   │   └── test_implement_to_validate.py    ✅ 2 tests (Gemini + OpenAI)
+│   └── workflows/                       ✅ Tier 3 — tested manually (single-loop + 2-iteration)
+│
+└── unit/core/
+    ├── test_storage.py                  ✅ done (11 tests)
     └── ...
 ```
 
-**Total unit tests: 475 passing.**
+**Total unit tests: 519 passing.**
 
 ---
 
-## Demo Script Outline
+## Workflow Usage
 
 ```python
-# workflows/model_exploration.py
-import sys, json
-from nodes.result_interpretation_agent import ResultInterpretationAgent
-from nodes.ml_model_proposal_agent import MLModelProposalAgent
-from nodes.ml_model_implementor import MLModelImplementor
-from nodes.ml_code_validator_agent import MLCodeValidatorAgent
-from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
-from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
-from agent.schemas.protocols.ml_model_tune_to_ml_result_interp import local_all_records
-from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import local_full_context
-from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full_spec
-from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_all_fields
-from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import local_validated_model
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
+# Programmatic usage
+from workflows.llm_config import WorkflowLLMConfig, NodeLLMConfig
+from workflows.model_exploration import run_workflow
 
-storage = StorageConfig(backend="local", local=LocalStorageConfig(workspace="<workspace>", run_name="<run_name>"))
-
-# --- Load existing tuning output ---
-with open("<workspace>/run_output_<run_name>.json") as f:
-    tuning_output = HyperparamTuningOutput.model_validate(json.load(f))
-
-# Edge 1: tune → interpret
-interpretation = ResultInterpretationAgent().run(
-    local_all_records(tuning_output, storage)
+llm_config = WorkflowLLMConfig(
+    implement=NodeLLMConfig(provider="gemini", model_id="gemini-3.1-pro-preview"),
+    # all others use node defaults (gemini-3.1-flash-lite-preview)
 )
-print("Take-home:", interpretation.take_home_message)
 
-# Edge 2: interpret → propose
-proposal = MLModelProposalAgent().run(
-    local_full_context(interpretation, storage)
+results = run_workflow(
+    data_dir="/home/klz/Data/SIDEREIS_DATA",
+    model_types=["punet", "wavenet", "fcnet"],
+    source_run_name="v3_file6",
+    workspace="/home/klz/Data/SIDEREIS_DATA/exploration",
+    run_name="explore_v1",
+    max_iterations=20,
+    max_rounds=20,
+    max_proposal_attempts=10,
+    target_score=10.0,
+    llm_config=llm_config,
+    human_advice_propose="Propose simple, easy-to-implement models...",
+    human_advice_tune="Use batch_size=1.",
 )
-print("Proposed model:", proposal.model_name)
+```
 
-# Edge 3: propose → implement
-implementor_output = MLModelImplementor().run(
-    local_full_spec(proposal, storage)
-)
-print("Written to:", implementor_output.model_file_path)
+```bash
+# CLI usage
+python workflows/model_exploration.py \
+    --data_dir /home/klz/Data/SIDEREIS_DATA \
+    --models punet wavenet fcnet \
+    --source_run_name v3_file6 \
+    --workspace ./exploration \
+    --run_name explore_v1 \
+    --max_iterations 20 \
+    --max_rounds 20 \
+    --target_score 10.0 \
+    --llm_config llm_config.json \
+    --advice_propose "Propose simple models..." \
+    --advice_tune "Use batch_size=1."
+```
 
-# Edge 4: implement → validate
-validation = MLCodeValidatorAgent().run(
-    local_all_fields(implementor_output, storage)
-)
-if not validation.passed:
-    print("Validation failed:", validation.error_message)
-    sys.exit(1)
-print("Model validated.")
-
-# Edge 5: validate → tune (fan-in: validator + proposal)
-tuning_output = HyperparamTuningAgent().run(
-    local_validated_model(validation, proposal, storage, file_index=6, max_rounds=10)
-)
-print("Best score:", tuning_output.best_denoising_score)
+**Storage layout:**
+```
+{workspace}/{run_name}/
+├── workflow_{run_name}.json
+├── iteration_001/
+│   ├── interpretation_{run_name}.json
+│   ├── attempt_001_{model_name}/
+│   │   ├── proposal_{run_name}.json
+│   │   ├── implementor_{run_name}.json
+│   │   ├── validation_{run_name}.json
+│   │   ├── models/{model_name}.py
+│   │   ├── models/{model_name}/description.md
+│   │   └── tests/test_{model_name}.py
+│   └── {model_name}/
+│       ├── run_output_{run_name}.json
+│       ├── summary_{run_name}.json
+│       ├── run_config_{run_name}.json
+│       ├── cached_models/
+│       ├── configs/{run_name}/
+│       └── records/{run_name}/
+├── iteration_002/
+│   └── ...
 ```
 
 ---
@@ -640,8 +668,9 @@ from pydantic import BaseModel, Field
 
 PLUGIN_MODEL_TYPE = "{model_name}"        # substituted from ProposalOutput.model_name
 
-# LLM WRITES: config fields only
+# LLM WRITES: config fields only (must be scalar: int, float, bool)
 class {ModelClass}Config(BaseModel):
+    model_type: str = Field(default="{model_name}")   # FIXED — auto-set from model name
     segmentation_size: int = Field(default=40000, ge=1)
     batch_size: int = Field(default=1, ge=1)
     # <LLM adds architecture-specific fields here>

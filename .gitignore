@@ -22,6 +22,8 @@ env/
 # Notebooks
 notebooks/
 
-# Agent-generated models and tests (outputs, not source — tracked via .gitkeep)
-agent_generated/models/*.py
-agent_generated/tests/*.py
+# Agent-generated models and tests (outputs, not source)
+agent_generated/models/*
+!agent_generated/models/.gitkeep
+agent_generated/tests/*
+!agent_generated/tests/.gitkeep

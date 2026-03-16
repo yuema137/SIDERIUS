@@ -39,6 +39,24 @@ function getSeriesColor(series) {
   return palette[series.colorIndex % palette.length];
 }
 
+function getSeriesOpacity(series) {
+  return series.isExploration ? state.alphaExploration : state.alphaOriginal;
+}
+
+function colorWithAlpha(hexColor, alpha) {
+  // Convert #rrggbb to rgba(r,g,b,a)
+  const r = parseInt(hexColor.slice(1, 3), 16);
+  const g = parseInt(hexColor.slice(3, 5), 16);
+  const b = parseInt(hexColor.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function setAlpha(group, value) {
+  if (group === 'original') state.alphaOriginal = value;
+  else state.alphaExploration = value;
+  updateCharts();
+}
+
 // ── Theme definitions ─────────────────────────────────────────────────────────
 const THEMES = {
   dark: {
@@ -72,6 +90,8 @@ const state = {
   countdownValue:  30,
   countdownTimer:  null,
   theme:           'dark',   // overridden by /api/config on load
+  alphaOriginal:   1.0,
+  alphaExploration: 1.0,
 };
 
 // ── Plotly layout factory ────────────────────────────────────────────────────
@@ -82,7 +102,6 @@ function makePlotLayout(yLabel) {
     paper_bgcolor: t.paper_bg,
     plot_bgcolor:  t.plot_bg,
     font:       { color: t.text, size: 11 },
-    margin:     { t: 20, r: 20, b: 50, l: 60 },
     xaxis: {
       title:     { text: 'Research loop', font: { size: 11, color: t.muted } },
       gridcolor:  t.grid,
@@ -96,12 +115,8 @@ function makePlotLayout(yLabel) {
       tickfont:  { size: 10, color: t.muted },
       showspikes: true,
     },
-    legend: {
-      font:        { size: 11, color: t.text },
-      bgcolor:     'rgba(0,0,0,0)',
-      orientation: 'h',
-      y:           -0.2,
-    },
+    showlegend: false,
+    margin: { t: 20, r: 20, b: 50, l: 60 },
     hovermode: 'x unified',
   };
 }
@@ -122,7 +137,8 @@ async function bootstrap() {
     state.refreshInterval = cfg.refresh_interval_seconds;
     state.countdownValue  = cfg.refresh_interval_seconds;
     state.theme           = cfg.theme || 'dark';
-    populateModelDropdown(cfg.models);
+    await populateRunDropdown(cfg.models);
+    await loadExplorationRuns();
     setHealth(true);
   } catch (e) {
     setHealth(false);
@@ -154,9 +170,129 @@ function toggleTheme() {
   updateCharts();   // re-render with new theme colours
 }
 
-function populateModelDropdown(models) {
-  const sel = document.getElementById('inp-model');
-  sel.innerHTML = models.map(m => `<option value="${m}">${m}</option>`).join('');
+async function populateRunDropdown(models) {
+  // Collect all unique run names across all models
+  const runSet = new Set();
+  const runsPerModel = {};   // model → [run_names]
+
+  await Promise.all(models.map(async (model) => {
+    try {
+      const data = await fetchJSON(`/api/models/${model}/runs`);
+      const runs = data.runs || [];
+      runsPerModel[model] = runs;
+      runs.forEach(r => runSet.add(r));
+    } catch (e) {
+      runsPerModel[model] = [];
+      console.warn('Failed to load runs for', model, e);
+    }
+  }));
+
+  // Store for model filtering
+  state.runsPerModel = runsPerModel;
+  state.allModels = models;
+
+  const runSel = document.getElementById('inp-run');
+  const allRuns = Array.from(runSet).sort();
+  if (allRuns.length === 0) {
+    runSel.innerHTML = '<option value="">no runs found</option>';
+  } else {
+    runSel.innerHTML = allRuns.map(r => `<option value="${r}">${r}</option>`).join('');
+  }
+
+  // When run changes, update model dropdown to show models that have this run
+  runSel.addEventListener('change', () => populateModelDropdown(runSel.value));
+  if (allRuns.length > 0) populateModelDropdown(allRuns[0]);
+}
+
+function populateModelDropdown(selectedRun) {
+  const modelSel = document.getElementById('inp-model');
+  if (!selectedRun || !state.runsPerModel) {
+    modelSel.innerHTML = '<option value="">-- select run first --</option>';
+    return;
+  }
+  // Show only models that have this run
+  const available = state.allModels.filter(m =>
+    (state.runsPerModel[m] || []).includes(selectedRun)
+  );
+  if (available.length === 0) {
+    modelSel.innerHTML = '<option value="">no models for this run</option>';
+  } else {
+    modelSel.innerHTML = available.map(m => `<option value="${m}">${m}</option>`).join('');
+  }
+}
+
+// ── Exploration dropdowns ─────────────────────────────────────────────────────
+async function loadExplorationRuns() {
+  const sel = document.getElementById('inp-explore-run');
+  try {
+    const data = await fetchJSON('/api/exploration/runs');
+    const runs = data.runs || [];
+    if (runs.length === 0) {
+      sel.innerHTML = '<option value="">no exploration runs</option>';
+    } else {
+      sel.innerHTML = runs.map(r => `<option value="${r}">${r}</option>`).join('');
+      loadExplorationModels(runs[0]);
+    }
+    sel.addEventListener('change', () => loadExplorationModels(sel.value));
+  } catch (e) {
+    sel.innerHTML = '<option value="">error</option>';
+  }
+}
+
+async function loadExplorationModels(runName) {
+  const sel = document.getElementById('inp-explore-model');
+  if (!runName) {
+    sel.innerHTML = '<option value="">-- select run first --</option>';
+    return;
+  }
+  try {
+    const data = await fetchJSON(`/api/exploration/runs/${runName}/models`);
+    const models = data.models || [];
+    if (models.length === 0) {
+      sel.innerHTML = '<option value="">no models found</option>';
+    } else {
+      sel.innerHTML = models.map(m => `<option value="${m}">${m}</option>`).join('');
+    }
+  } catch (e) {
+    sel.innerHTML = '<option value="">error</option>';
+  }
+}
+
+async function addExplorationSeries() {
+  const run   = document.getElementById('inp-explore-run').value.trim();
+  const model = document.getElementById('inp-explore-model').value.trim();
+  const limit = parseInt(document.getElementById('inp-explore-limit').value) || 50;
+
+  if (!run || !model) { alert('Please select exploration run and model.'); return; }
+
+  // Remove duplicate if re-adding
+  state.series = state.series.filter(s => !(s.model === model && s.run === run && s.limit === limit));
+
+  const colorIndex = state.nextColorIndex++;
+  const series = {
+    id: `explore_${model}_${run}_${limit}_${Date.now()}`,
+    model, run, limit, colorIndex,
+    records: [], renderedCount: 0, runningBest: null, highlightBest: false,
+    isExploration: true,
+  };
+  state.series.push(series);
+
+  await loadExplorationData(series);
+  renderSeriesTags();
+  updateCharts();
+}
+
+async function loadExplorationData(series) {
+  try {
+    const url = `/api/exploration/runs/${series.run}/models/${series.model}?limit=${series.limit}&status=success`;
+    const data = await fetchJSON(url);
+    series.records = data.records || [];
+    series.error   = null;
+  } catch (e) {
+    series.records = [];
+    series.error   = e.message;
+    console.warn(`Failed to load exploration ${series.model}/${series.run}:`, e);
+  }
 }
 
 // ── Series management ────────────────────────────────────────────────────────
@@ -167,9 +303,9 @@ async function addSeries() {
 
   if (!model || !run) { alert('Please set model and run name.'); return; }
 
-  if (state.series.find(s => s.model === model && s.run === run && s.limit === limit)) {
-    alert(`Series ${model}/${run} (limit ${limit}) already added.`); return;
-  }
+  // Remove any existing series with the same model/run/limit before re-adding
+  // (handles the case where user removes via ✕ then re-adds)
+  state.series = state.series.filter(s => !(s.model === model && s.run === run && s.limit === limit));
 
   const colorIndex = state.nextColorIndex++;
 
@@ -256,6 +392,8 @@ function updateCharts() {
     const xs    = Array.from({ length: n }, (_, i) => i + 1);
     const label = `${s.model} / ${s.run}`;
     const c     = getSeriesColor(s);
+    const alpha = getSeriesOpacity(s);
+    const ca    = colorWithAlpha(c, alpha);
 
     const bestData    = computeBestScoreCurve(s.records);
     const currentData = computeCurrentScoreCurve(s.records);
@@ -271,24 +409,27 @@ function updateCharts() {
       x: xs, y: bestData,
       name: `${label} (best)`,
       mode: 'lines+markers',
-      line: { color: c, width: 2 },
-      marker: { color: c, size: 4 },
+      line: { color: ca, width: 2 },
+      marker: { color: ca, size: 4 },
+      opacity: alpha,
       connectgaps: false,
     });
     scoreTraces.push({
       x: xs, y: currentData,
       name: `${label} (current)`,
       mode: 'lines+markers',
-      line: { color: c, width: 1.5, dash: 'dot' },
-      marker: { color: c, size: 3 },
+      line: { color: ca, width: 1.5, dash: 'dot' },
+      marker: { color: ca, size: 3 },
+      opacity: alpha,
       connectgaps: false,
     });
     scoreTraces.push({
       x: nb.xs, y: nb.scoreYs,
       name: `${label} (new best)`,
       mode: 'markers',
-      marker: { symbol: 'star', color: c, size: 14,
+      marker: { symbol: 'star', color: ca, size: 14,
                 line: { color: THEMES[state.theme].paper_bg, width: 1.5 } },
+      opacity: alpha,
       visible: s.highlightBest,
       showlegend: s.highlightBest,
     });
@@ -298,16 +439,18 @@ function updateCharts() {
       x: xs, y: memData,
       name: label,
       mode: 'lines+markers',
-      line: { color: c, width: 2 },
-      marker: { color: c, size: 4 },
+      line: { color: ca, width: 2 },
+      marker: { color: ca, size: 4 },
+      opacity: alpha,
       connectgaps: false,
     });
     memoryTraces.push({
       x: nb.xs, y: nb.memYs,
       name: `${label} (new best)`,
       mode: 'markers',
-      marker: { symbol: 'star', color: c, size: 14,
+      marker: { symbol: 'star', color: ca, size: 14,
                 line: { color: THEMES[state.theme].paper_bg, width: 1.5 } },
+      opacity: alpha,
       visible: s.highlightBest,
       showlegend: false,
     });
@@ -318,6 +461,27 @@ function updateCharts() {
 
   Plotly.react('chart-score',  scoreTraces,  scoreLayout,  PLOT_CONFIG);
   Plotly.react('chart-memory', memoryTraces, memoryLayout, PLOT_CONFIG);
+  renderChartLegends();
+}
+
+function renderChartLegends() {
+  // Build HTML legend items — one per series, 4 per row
+  const items = state.series.map(s => {
+    const c = getSeriesColor(s);
+    const alpha = getSeriesOpacity(s);
+    const label = `${s.model} / ${s.run}`;
+    const tag = s.isExploration ? '🔬' : '';
+    return `<span class="chart-legend-item" style="opacity:${alpha};">
+      <span class="chart-legend-dot" style="background:${c};"></span>
+      <span class="chart-legend-label">${tag}${label}</span>
+    </span>`;
+  }).join('');
+
+  // Render into both legend containers
+  ['legend-score', 'legend-memory'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = items || '<span style="color:var(--muted);font-size:11px;">No series</span>';
+  });
 }
 
 // Incremental update — called on auto-refresh.
@@ -393,7 +557,9 @@ function renderSeriesTags() {
 // ── Refresh ──────────────────────────────────────────────────────────────────
 async function refresh() {
   resetCountdown();
-  await Promise.all(state.series.map(loadSeriesData));
+  await Promise.all(state.series.map(s =>
+    s.isExploration ? loadExplorationData(s) : loadSeriesData(s)
+  ));
   extendCharts();
   renderSeriesTags();
 
@@ -479,7 +645,7 @@ function resetRange(divId, prefix) {
 }
 
 // ── Public API (called from HTML) ────────────────────────────────────────────
-window.App = { addSeries, removeSeries, refresh, toggleTheme, setAxisType, applyRange, resetRange, toggleHighlight };
+window.App = { addSeries, addExplorationSeries, removeSeries, refresh, toggleTheme, setAxisType, applyRange, resetRange, toggleHighlight, setAlpha };
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', bootstrap);

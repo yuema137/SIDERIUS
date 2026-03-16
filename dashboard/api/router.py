@@ -6,6 +6,9 @@ Mounted at /api by main.py. The router depends only on the DataSource ABC
 and Pydantic response models — no storage-specific code lives here.
 """
 
+import os
+import glob
+import json
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -222,4 +225,80 @@ def leaderboard(
         top_n=top_n,
         status_filter=status,
         entries=[LeaderboardEntry(**e) for e in entries],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Exploration (agent-generated models)
+# ---------------------------------------------------------------------------
+
+@router.get("/exploration/runs", tags=["exploration"])
+def list_exploration_runs():
+    """List all exploration run names."""
+    ds = get_data_source()
+    exploration_dir = os.path.join(ds.root, "exploration")
+    if not os.path.isdir(exploration_dir):
+        return {"runs": []}
+    runs = sorted([
+        d for d in os.listdir(exploration_dir)
+        if os.path.isdir(os.path.join(exploration_dir, d))
+    ])
+    return {"runs": runs}
+
+
+@router.get("/exploration/runs/{run_name}/models", tags=["exploration"])
+def list_exploration_models(run_name: str):
+    """List all agent-generated models in an exploration run."""
+    ds = get_data_source()
+    run_dir = os.path.join(ds.root, "exploration", run_name)
+    if not os.path.isdir(run_dir):
+        raise HTTPException(status_code=404, detail=f"Exploration run '{run_name}' not found.")
+    models = []
+    for iter_dir in sorted(glob.glob(os.path.join(run_dir, "iteration_*"))):
+        for entry in os.listdir(iter_dir):
+            full = os.path.join(iter_dir, entry)
+            if os.path.isdir(full) and not entry.startswith("attempt_") and entry != "__pycache__":
+                summary = os.path.join(full, f"summary_{run_name}.json")
+                if os.path.isfile(summary):
+                    models.append(entry)
+    return {"run_name": run_name, "models": models}
+
+
+@router.get("/exploration/runs/{run_name}/models/{model_name}", tags=["exploration"])
+def get_exploration_records(
+    run_name: str,
+    model_name: str,
+    limit: int = Query(default=200, ge=1, le=1000),
+    status: Optional[str] = Query(default=None),
+):
+    """Get experiment records for an agent-generated model."""
+    ds = get_data_source()
+    run_dir = os.path.join(ds.root, "exploration", run_name)
+
+    # Find the summary file across iterations
+    records = []
+    for iter_dir in sorted(glob.glob(os.path.join(run_dir, "iteration_*"))):
+        summary_path = os.path.join(iter_dir, model_name, f"summary_{run_name}.json")
+        if os.path.isfile(summary_path):
+            with open(summary_path, "r") as f:
+                records = json.load(f)
+            break
+
+    if not records:
+        raise HTTPException(status_code=404, detail=f"Model '{model_name}' not found in exploration run '{run_name}'.")
+
+    if status:
+        records = [r for r in records if r.get("status") == status]
+
+    total = len(records)
+    records = records[:limit]
+
+    parsed = [ExperimentRecord.model_validate(r) for r in records]
+    return RunSummary(
+        model=model_name,
+        run_name=run_name,
+        total_count=total,
+        offset=0,
+        limit=limit,
+        records=parsed,
     )

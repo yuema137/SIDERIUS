@@ -27,13 +27,15 @@
     <div class="card-title">Series — each line = one (model · run · limit) combination</div>
 
     <div class="add-series-form">
-      <label>Model
-        <select id="inp-model">
+      <label>Run name
+        <select id="inp-run" style="min-width:140px;">
           <option value="">loading…</option>
         </select>
       </label>
-      <label>Run name
-        <input id="inp-run" type="text" placeholder="e.g. v1" value="v1" />
+      <label>Model
+        <select id="inp-model">
+          <option value="">-- select run first --</option>
+        </select>
       </label>
       <label>Limit (records)
         <input id="inp-limit" type="number" value="50" min="1" max="1000" style="min-width:80px;" />
@@ -42,6 +44,40 @@
         <button onclick="App.addSeries()">+ Add series</button>
       </label>
       <button onclick="App.addSeries()" style="align-self:flex-end;">+ Add series</button>
+    </div>
+
+    <div class="card-title" style="margin-top:16px;">Agent-generated models (exploration runs)</div>
+    <div class="add-series-form">
+      <label>Exploration run
+        <select id="inp-explore-run" style="min-width:140px;">
+          <option value="">loading…</option>
+        </select>
+      </label>
+      <label>Model
+        <select id="inp-explore-model" style="min-width:140px;">
+          <option value="">-- select run first --</option>
+        </select>
+      </label>
+      <label>Limit (records)
+        <input id="inp-explore-limit" type="number" value="50" min="1" max="1000" style="min-width:80px;" />
+      </label>
+      <button onclick="App.addExplorationSeries()" style="align-self:flex-end;">+ Add series</button>
+    </div>
+
+    <div class="card-title" style="margin-top:16px;">Opacity</div>
+    <div class="add-series-form" style="gap:20px;">
+      <label>Original data
+        <input type="range" min="0" max="1" step="0.05" value="1"
+               oninput="App.setAlpha('original', parseFloat(this.value)); this.nextElementSibling.textContent=this.value"
+               style="width:120px;" />
+        <span style="font-size:11px;color:var(--muted);">1</span>
+      </label>
+      <label>Agent-generated
+        <input type="range" min="0" max="1" step="0.05" value="1"
+               oninput="App.setAlpha('exploration', parseFloat(this.value)); this.nextElementSibling.textContent=this.value"
+               style="width:120px;" />
+        <span style="font-size:11px;color:var(--muted);">1</span>
+      </label>
     </div>
 
     <div id="series-list">
@@ -78,6 +114,7 @@
         <button class="axis-btn" onclick="App.applyRange('chart-score','score')">Apply</button>
         <button class="axis-btn" onclick="App.resetRange('chart-score','score')">Reset</button>
       </div>
+      <div id="legend-score" class="chart-legend"></div>
       <div id="chart-score" class="chart-wrap"></div>
     </div>
 
@@ -107,6 +144,7 @@
         <button class="axis-btn" onclick="App.applyRange('chart-memory','memory')">Apply</button>
         <button class="axis-btn" onclick="App.resetRange('chart-memory','memory')">Reset</button>
       </div>
+      <div id="legend-memory" class="chart-legend"></div>
       <div id="chart-memory" class="chart-wrap"></div>
     </div>
 
