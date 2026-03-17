@@ -410,8 +410,8 @@ def run_workflow(
 
         if not validation or not validation.passed:
             print(f"\n  Iteration {iteration}: exhausted {max_proposal_attempts} proposal "
-                  f"attempts without passing validation. Workflow stopping.")
-            break
+                  f"attempts without passing validation. Skipping to next iteration.")
+            continue
 
         # --- Register validated plugin so the tuning agent can load it ---
         _register_plugin(impl_output, proposal.model_name)
