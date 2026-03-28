@@ -371,6 +371,14 @@ can follow which) and the protocol registry (how to transform one skill's output
 the next skill's input) constrain the orchestrator's choices, but the invocation
 mechanism is uniform.
 
+**Tool-calling path**: the orchestrator will use **native LLM tool calling** (not
+free-form JSON prompting) to select skills. Each skill's `SkillSpec` is converted to
+an OpenAI-format tool definition and passed to `LLMBridge.tool_call()`. The LLM
+outputs a structured tool call (skill name + arguments), and the orchestrator dispatches
+it. This is structurally more reliable than asking the LLM to output JSON and parsing
+it — the model is constrained to emit valid calls matching the declared schemas.
+See "TODO: Skill Architecture Refactor" for the implementation roadmap.
+
 **Current naming conflict and planned resolution**:
 The directory `agent/skills/` currently holds a specific subset of atomic tools used
 internally by the tuning agent (training, inference, scoring, config check, resource
@@ -589,21 +597,74 @@ use case — at that point the right interface boundary will be obvious.
 
 ## TODO: Skill Architecture Refactor
 
-After the first model proposal demo is running end-to-end:
+The long-term goal is an LLM-powered orchestrator that sees every node, tool, and workflow
+as a callable **skill** and uses **native LLM tool calling** (not free-form JSON prompting)
+to select and invoke them. This is more reliable than prompting the LLM and parsing its
+output — the model is structurally constrained to emit valid tool calls with typed arguments.
 
-1. **Rename `agent/skills/` → `agent/tools/`** — update all imports and references.
-   These are atomic, non-LLM operations (training, inference, scoring, config check,
-   resource evaluation) used internally by agents.
-2. **Define the skill schema** — a Pydantic `SkillDescriptor` with `name`, `description`,
-   `input_schema`, `output_schema`, and metadata (e.g. `requires_gpu`, `requires_llm`,
-   `estimated_cost`). All nodes, tools, and orchestrators must be describable by this schema.
-3. **Build the skill registry** — a module that discovers and indexes all available skills
-   from `nodes/`, `agent/tools/`, `workflows/`, and `orchestrators/`. Orchestrators will
-   query this registry to decide what to invoke.
-4. **Build the first orchestrator** — an LLM-powered agent that receives a goal, queries
-   the skill registry, selects skills to invoke (including workflows as sub-skills),
-   applies protocols between them, and iterates until the goal is met or a budget is
-   exhausted.
+The roadmap is split into layers. Each layer is independently useful and testable.
+Do not skip ahead — each layer depends on the one before it.
+
+### Layer 0: Unified LLM transport (DONE)
+
+`agent/llm_bridge.py` uses a single `openai.OpenAI` client for all providers (OpenAI,
+Gemini, any OpenAI-compatible endpoint). This was completed in the Phase 1 refactor.
+
+### Layer 1: Tool-calling foundation (DONE)
+
+Two isolated pieces that prepare for the orchestrator without touching existing nodes:
+
+1. **`LLMBridge.tool_call(system_prompt, user_prompt, tools) → ToolCallResult`**
+   (`agent/llm_bridge.py`) — calls `chat.completions.create` with `tools=...` and
+   `tool_choice="auto"`. Returns a `ToolCallResult` (frozen dataclass) with:
+   - `name: str` — the tool the LLM chose to invoke
+   - `arguments: dict` — parsed from the JSON string (ready for `model_validate()`)
+   - `call_id: str` — API-level ID for multi-turn tool-result messages
+   Raises `ValueError` if the model responds with text instead of a tool call.
+
+2. **`SkillSpec`** (`agent/schemas/skill_spec.py`) — Pydantic model wrapping
+   `{name, description, input_schema, output_schema}`. Holds the actual Pydantic
+   **classes** (not pre-generated JSON), so the same class serves for:
+   - Generating OpenAI tool definitions: `spec.to_openai_tool()` calls
+     `input_schema.model_json_schema()` on the fly
+   - Validating tool-call arguments: `spec.input_schema.model_validate(result.arguments)`
+   - Validating node output: `spec.output_schema.model_validate(output)`
+
+Full `LLMBridge` public interface after Layer 0 + 1:
+- `generate(system_prompt, user_prompt) → dict` — JSON mode
+- `generate_text(system_prompt, user_prompt) → str` — plain text
+- `tool_call(system_prompt, user_prompt, tools) → ToolCallResult` — native tool calling
+- `list_models() → list[str]` — available model IDs
+
+These pieces are the **minimum bridge** between the current node-based architecture
+and the future orchestrator. They do not change how existing nodes or workflows operate.
+
+### Layer 2: Skill registry (LATER)
+
+A module that discovers and indexes all available skills from `nodes/`, `agent/tools/`,
+`workflows/`, and `orchestrators/`. It collects their `SkillSpec` definitions and
+provides query methods (e.g. "list all skills that don't require GPU").
+
+Prerequisite: Layer 1 is done. Next step is to have at least 2-3 nodes expose a
+`SkillSpec`, then build the registry around them.
+
+### Layer 3: Orchestrator (LATER)
+
+An LLM-powered agent that receives a goal, queries the skill registry for available
+`SkillSpec`s, converts them to OpenAI tool definitions, and uses `LLMBridge.tool_call()`
+to select which skill to invoke next. It applies protocols between skills, observes
+results, and iterates until the goal is met or a budget is exhausted.
+
+Prerequisite: Layer 2 (registry) and a working end-to-end workflow to validate against.
+
+### Housekeeping (deferred)
+
+- **Rename `agent/skills/` → `agent/tools/`** — update all imports and references.
+  These are atomic, non-LLM operations (training, inference, scoring, config check,
+  resource evaluation) used internally by agents. "Skill" is reserved for the universal
+  contract.
+- **Add metadata to `SkillSpec`** — `requires_gpu`, `requires_llm`, `estimated_cost`,
+  etc. Not needed until the orchestrator is making cost-aware decisions.
 
 ---
 
@@ -638,3 +699,32 @@ With structured failure outputs:
 **When to implement**: after the first demo workflow runs successfully end-to-end.
 Start with `ImplementorOutput`, then consider `ProposalOutput` (for cases like empty
 `model_name` or duplicate name detection).
+
+
+## Future Evolution: Toward a Global Science Mesh
+
+To achieve the vision of weaving a global network of scientific tools across domains (Physics, Biology, Chemistry), the architecture will evolve from a local graph to a federated, responsive mesh.
+
+### 10. Three-Layer Isolation for Scalability
+To prevent dependency bloat and allow massive-scale tool discovery, the system enforces a strict isolation between a node's definition and its execution:
+
+- **Schema Layer (Pure Logic)**: Lightweight Pydantic definitions only. This layer is indexed by orchestrators for path selection and LLM native tool calling, requiring zero heavy dependencies.
+- **Protocol Layer (Mapping)**: Standalone data transformation logic. It mediates between nodes without knowing their internal implementation.
+- **Runtime Layer (Heavy Compute)**: The actual execution environment (Docker, Remote gRPC, or GPU-bound Python). This layer is only initialized/activated when a node is explicitly triggered.
+
+### 11. Federated Graph Discovery
+SIDERIUS will support "Graphs of Graphs." A domain-specific graph (e.g., a Chemistry Synthesis Graph) can be registered as a single **Node** within a higher-level research graph.
+- **Recursive Discovery**: Orchestrators can query a global **Skill Registry** to "hook" remote nodes into the local workflow on-the-fly.
+- **Unit-Aware Protocols**: Protocols will move beyond basic type-checking to include **Dimensional Analysis**. The system will automatically detect unit mismatches (e.g., keV vs. Joule) and insert conversion units into the edge.
+
+### 12. From Edge-Protocols to Ingress-Contracts (Reactive Fan-in)
+To handle complex data dependencies where a node requires inputs from multiple asynchronous sources, the "Edge-Protocol" model evolves into an **Ingress Controller**:
+
+- **Input Buffering**: Each node maintains a persistent `PendingInputBuffer`.
+- **Completeness Contract**: Instead of being "called" by an upstream node, a node is **activated** when its Ingress Controller determines that the collective inputs (from one or many sources) satisfy its schema.
+- **Aggregation Protocols**: The protocol logic shifts from `A → B` to `f({A, C, ...}) → B`, allowing for sophisticated data fusion, timestamp alignment, and conflict resolution at the target node's doorstep.
+
+### 13. LLM-Native "Intent" Mapping
+The system will natively map the **Schema Layer** to LLM Tool-Calling formats (OpenAI/Gemini function specs). 
+- **Decoupled Invocation**: The LLM expresses an "Intent" based on the Schema. The Orchestrator resolves this Intent by selecting the appropriate Protocol and dispatching the task to the correct Runtime (Local, Container, or Remote).
+- **Dynamic Tool Injection**: Based on the research goal, the Orchestrator can dynamically "mount" new scientific tools into the LLM's context window by fetching their Schemas from the Registry without restarting the system.

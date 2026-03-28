@@ -2,17 +2,18 @@
 Unit tests for agent/llm_bridge.py
 
 Mocks the unified openai.OpenAI client to verify:
-  - __init__     resolves known/unknown providers correctly
-  - list_models  returns sorted model IDs
-  - generate()   returns a Dict (JSON mode), handles malformed JSON
+  - __init__       resolves known/unknown providers correctly
+  - list_models    returns sorted model IDs
+  - generate()     returns a Dict (JSON mode), handles malformed JSON
   - generate_text() returns a str (plain-text mode)
-  - Both methods are provider-agnostic (single code path)
+  - tool_call()    returns a ToolCallResult with parsed arguments
+  - All methods are provider-agnostic (single code path)
 """
 import json
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
 
-from agent.llm_bridge import LLMBridge, _KNOWN_PROVIDERS
+from agent.llm_bridge import LLMBridge, ToolCallResult, _KNOWN_PROVIDERS
 
 
 # ---------------------------------------------------------------------------
@@ -31,6 +32,23 @@ def _chat_response(content: str) -> MagicMock:
     """Build a mock OpenAI chat completion response."""
     msg = MagicMock()
     msg.content = content
+    msg.tool_calls = None
+    choice = MagicMock()
+    choice.message = msg
+    response = MagicMock()
+    response.choices = [choice]
+    return response
+
+
+def _tool_call_response(name: str, arguments: dict, call_id: str = "call_abc123") -> MagicMock:
+    """Build a mock OpenAI chat completion response with a tool call."""
+    tc = MagicMock()
+    tc.function.name = name
+    tc.function.arguments = json.dumps(arguments)
+    tc.id = call_id
+    msg = MagicMock()
+    msg.tool_calls = [tc]
+    msg.content = None
     choice = MagicMock()
     choice.message = msg
     response = MagicMock()
@@ -227,3 +245,85 @@ class TestGenerateText:
                 result = bridge.generate_text(SYSTEM_PROMPT, USER_PROMPT)
             assert result == PLAIN_TEXT
             mock_create.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# tool_call() — structured tool calling
+# ---------------------------------------------------------------------------
+
+SAMPLE_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search",
+            "description": "Search the knowledge base.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                },
+                "required": ["query"],
+            },
+        },
+    }
+]
+
+
+class TestToolCall:
+
+    def test_returns_tool_call_result(self):
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
+            mock_create = MockOpenAI.return_value.chat.completions.create
+            mock_create.return_value = _tool_call_response(
+                name="search", arguments={"query": "dark matter"}, call_id="call_001"
+            )
+            bridge = LLMBridge(provider="openai", model_id="gpt-4o")
+            result = bridge.tool_call(SYSTEM_PROMPT, USER_PROMPT, SAMPLE_TOOLS)
+
+        assert isinstance(result, ToolCallResult)
+        assert result.name == "search"
+        assert result.arguments == {"query": "dark matter"}
+        assert result.call_id == "call_001"
+
+    def test_arguments_are_parsed_dict(self):
+        """arguments should be a parsed dict, not a JSON string."""
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
+            mock_create = MockOpenAI.return_value.chat.completions.create
+            mock_create.return_value = _tool_call_response(
+                name="search", arguments={"query": "test", "max_results": 5}
+            )
+            bridge = LLMBridge(provider="gemini", model_id="test-model")
+            result = bridge.tool_call(SYSTEM_PROMPT, USER_PROMPT, SAMPLE_TOOLS)
+
+        assert isinstance(result.arguments, dict)
+        assert result.arguments["max_results"] == 5
+
+    def test_tools_passed_to_api(self):
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
+            mock_create = MockOpenAI.return_value.chat.completions.create
+            mock_create.return_value = _tool_call_response(
+                name="search", arguments={"query": "test"}
+            )
+            bridge = LLMBridge(provider="openai", model_id="gpt-4o")
+            bridge.tool_call(SYSTEM_PROMPT, USER_PROMPT, SAMPLE_TOOLS)
+
+            call_kwargs = mock_create.call_args.kwargs
+            assert call_kwargs["tools"] == SAMPLE_TOOLS
+            assert call_kwargs["tool_choice"] == "auto"
+
+    def test_raises_when_no_tool_call_returned(self):
+        """If the model responds with text instead of a tool call, raise ValueError."""
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
+            # _chat_response sets tool_calls=None
+            mock_create = MockOpenAI.return_value.chat.completions.create
+            mock_create.return_value = _chat_response("I can't use tools.")
+            bridge = LLMBridge(provider="openai", model_id="gpt-4o")
+
+            with pytest.raises(ValueError, match="did not return a tool call"):
+                bridge.tool_call(SYSTEM_PROMPT, USER_PROMPT, SAMPLE_TOOLS)
+
+    def test_tool_call_result_is_frozen(self):
+        """ToolCallResult is immutable (frozen dataclass)."""
+        result = ToolCallResult(name="x", arguments={"a": 1}, call_id="id")
+        with pytest.raises(AttributeError):
+            result.name = "y"

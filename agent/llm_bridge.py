@@ -7,6 +7,7 @@
 # 1. GENERIC TRANSPORT (provider-agnostic, used by all nodes):
 #    - generate(system_prompt, user_prompt) -> dict   (JSON mode)
 #    - generate_text(system_prompt, user_prompt) -> str (plain text)
+#    - tool_call(system_prompt, user_prompt, tools) -> ToolCallResult
 #    - list_models() -> list of model IDs
 #    All providers (OpenAI, Gemini, any OpenAI-compatible endpoint) are
 #    accessed through a single openai.OpenAI client routed via base_url.
@@ -28,7 +29,8 @@
 
 import os
 import json
-from typing import List, Dict, Optional
+from dataclasses import dataclass
+from typing import Any, List, Dict, Optional
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -38,6 +40,28 @@ from agent.prompts import (
     get_planner_user_prompt,
     get_reflector_user_prompt
 )
+
+
+# ---------------------------------------------------------------------------
+# Tool-call result — flattens the OpenAI SDK's nested response structure
+# so callers remain SDK-agnostic.
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class ToolCallResult:
+    """
+    Structured result from an LLM tool-call request.
+
+    Attributes:
+        name:      The tool (skill) name the LLM chose to invoke.
+        arguments: Parsed dict of the arguments the LLM provided.
+                   Ready to pass to ``input_schema.model_validate(arguments)``.
+        call_id:   The tool_call ID from the API (needed if you want to send
+                   a tool-result message back in a multi-turn conversation).
+    """
+
+    name: str
+    arguments: Dict[str, Any]
+    call_id: str
 
 # ---------------------------------------------------------------------------
 # Known providers — convenience defaults, not a restriction.
@@ -208,3 +232,54 @@ class LLMBridge:
             ],
         )
         return response.choices[0].message.content.strip()
+
+    def tool_call(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        tools: List[Dict[str, Any]],
+    ) -> ToolCallResult:
+        """
+        Ask the LLM to select a tool and provide arguments.
+
+        Uses the OpenAI ``tools`` parameter so the model is structurally
+        constrained to emit a valid tool call — no free-form JSON parsing.
+
+        Args:
+            system_prompt: System-level instruction for the LLM.
+            user_prompt:   The user message describing the goal or context.
+            tools:         List of OpenAI-format tool definitions.  Typically
+                           built via ``SkillSpec.to_openai_tool()``.
+
+        Returns:
+            A ``ToolCallResult`` with the chosen tool name, parsed arguments
+            dict, and the API's call ID.
+
+        Raises:
+            ValueError: If the model response does not contain a tool call
+                        (e.g. the model replied with plain text instead).
+        """
+        response = self.client.chat.completions.create(
+            model=self.model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            tools=tools,
+            tool_choice="auto",
+        )
+
+        message = response.choices[0].message
+
+        if not message.tool_calls:
+            raise ValueError(
+                f"[LLMBridge.tool_call] Model did not return a tool call. "
+                f"Response: {message.content!r}"
+            )
+
+        tc = message.tool_calls[0]
+        return ToolCallResult(
+            name=tc.function.name,
+            arguments=json.loads(tc.function.arguments),
+            call_id=tc.id,
+        )
