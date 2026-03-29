@@ -23,6 +23,8 @@ LLM calls and skills are mocked — these tests validate:
     - Run config file written at startup
 """
 import json
+import os
+import tempfile
 import pytest
 from unittest.mock import MagicMock, patch, call
 
@@ -171,7 +173,8 @@ class TestHyperparamTuningAgentRun:
     def agent_and_mocks(self):
         with patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge, \
              patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox, \
-             patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill):
+             patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill), \
+             tempfile.TemporaryDirectory() as configs_dir:
 
             mock_brain = MockBridge.return_value
             mock_brain.plan.return_value = FAKE_PLAN_RESPONSE
@@ -182,6 +185,7 @@ class TestHyperparamTuningAgentRun:
             mock_sandbox = MockSandbox.return_value
             mock_sandbox.get_summary.side_effect = lambda: list(saved_records)
             mock_sandbox.save_record.side_effect = lambda r: saved_records.append(r)
+            mock_sandbox.dirs = {"configs": configs_dir}
 
             agent = HyperparamTuningAgent()
             yield agent, mock_brain, mock_sandbox
@@ -280,7 +284,8 @@ class TestHyperparamTuningAgentOOM:
     def agent_oom(self):
         with patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge, \
              patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox, \
-             patch("nodes.ml_hyperparameter_tune_agent._run_skill") as mock_skill:
+             patch("nodes.ml_hyperparameter_tune_agent._run_skill") as mock_skill, \
+             tempfile.TemporaryDirectory() as configs_dir:
 
             mock_brain = MockBridge.return_value
             mock_brain.plan.return_value = FAKE_PLAN_RESPONSE
@@ -290,6 +295,7 @@ class TestHyperparamTuningAgentOOM:
             mock_sandbox = MockSandbox.return_value
             mock_sandbox.get_summary.side_effect = lambda: list(saved_records)
             mock_sandbox.save_record.side_effect = lambda r: saved_records.append(r)
+            mock_sandbox.dirs = {"configs": configs_dir}
 
             # All resource checks return OOM
             def all_oom(skill_folder, sandbox, **params):
@@ -319,3 +325,99 @@ class TestHyperparamTuningAgentOOM:
         agent, _, _, saved_records = agent_oom
         agent.run(_make_input(tmp_path, max_rounds=1, expert_advice="test advice"))
         assert saved_records[0]["memory"]["expert_advice_followed"] == "test advice"
+
+
+# ---------------------------------------------------------------------------
+# Dynamic trial/formal control tests
+# ---------------------------------------------------------------------------
+
+FAKE_PLAN_WITH_TRIAL = {
+    **FAKE_PLAN_RESPONSE,
+    "is_trial": True,
+    "trial_strategy": "snapshot",
+    "trial_portion": 0.1,
+}
+
+
+def _make_trial_input(tmp_path, max_rounds=1, is_trial=True):
+    return HyperparamTuningInput(
+        model_type="punet",
+        file_index=6,
+        max_rounds=max_rounds,
+        is_trial=is_trial,
+        expert_advice="",
+        llm_provider="gemini",
+        llm_model_id="test-model",
+        storage=StorageConfig(
+            backend="local",
+            local=LocalStorageConfig(workspace=str(tmp_path), run_name="test_run"),
+        ),
+        progress_bar=False,
+    )
+
+
+FAKE_SCORE_VECTOR_RESULT = ([float("nan")] * 20, 1.5)
+
+
+class TestDynamicTrialFormal:
+    """Tests for per-round trial/formal decision logic."""
+
+    @pytest.fixture
+    def agent_and_mocks(self):
+        with patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge, \
+             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox, \
+             patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill), \
+             patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map") as mock_anchor, \
+             patch("nodes.ml_hyperparameter_tune_agent.score_vector", return_value=FAKE_SCORE_VECTOR_RESULT), \
+             patch("os.path.exists", return_value=True), \
+             tempfile.TemporaryDirectory() as configs_dir:
+
+            mock_brain = MockBridge.return_value
+            mock_brain.plan.return_value = FAKE_PLAN_WITH_TRIAL
+            mock_brain.reflect.return_value = FAKE_REFLECT_RESPONSE
+
+            mock_anchor.return_value = {"anchors": {}, "s_max": 1.0}
+
+            saved_records = []
+            mock_sandbox = MockSandbox.return_value
+            mock_sandbox.get_summary.side_effect = lambda: list(saved_records)
+            mock_sandbox.save_record.side_effect = lambda r: saved_records.append(r)
+            mock_sandbox.dirs = {"configs": configs_dir, "data": configs_dir}
+
+            agent = HyperparamTuningAgent()
+            yield agent, mock_brain, mock_sandbox, saved_records
+
+    def test_final_round_always_formal(self, agent_and_mocks, tmp_path):
+        """max_rounds=1 + LLM returns is_trial=True → formal mode enforced."""
+        agent, mock_brain, _, saved_records = agent_and_mocks
+        mock_brain.plan.return_value = FAKE_PLAN_WITH_TRIAL
+        output = agent.run(_make_trial_input(tmp_path, max_rounds=1, is_trial=True))
+        assert output.status == "completed"
+        # Final round forced formal — record should NOT have is_trial=True
+        assert saved_records[0].get("is_trial", False) is False
+
+    def test_trial_allowed_false_forces_formal(self, agent_and_mocks, tmp_path):
+        """is_trial=False on input → all rounds formal, LLM's is_trial ignored."""
+        agent, mock_brain, _, saved_records = agent_and_mocks
+        mock_brain.plan.return_value = FAKE_PLAN_WITH_TRIAL
+        output = agent.run(_make_trial_input(tmp_path, max_rounds=1, is_trial=False))
+        assert output.status == "completed"
+        assert saved_records[0].get("is_trial", False) is False
+
+    def test_round_context_passed_to_plan(self, agent_and_mocks, tmp_path):
+        """Verify brain.plan() receives current_round and max_rounds kwargs."""
+        agent, mock_brain, _, _ = agent_and_mocks
+        agent.run(_make_trial_input(tmp_path, max_rounds=1, is_trial=True))
+        call_kwargs = mock_brain.plan.call_args
+        assert call_kwargs.kwargs.get("current_round") is not None
+        assert call_kwargs.kwargs.get("max_rounds") is not None
+        assert call_kwargs.kwargs.get("trial_allowed") is True
+
+    def test_invalid_trial_fields_fallback(self, agent_and_mocks, tmp_path):
+        """LLM returns trial_portion=5.0 → ExperimentPlan.with_defaults falls back."""
+        agent, mock_brain, _, saved_records = agent_and_mocks
+        bad_plan = {**FAKE_PLAN_RESPONSE, "trial_portion": 5.0, "is_trial": True}
+        mock_brain.plan.return_value = bad_plan
+        # max_rounds=1 → final round → formal anyway, but should not crash
+        output = agent.run(_make_trial_input(tmp_path, max_rounds=1, is_trial=True))
+        assert output.status == "completed"

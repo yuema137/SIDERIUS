@@ -17,7 +17,7 @@ import json
 import argparse
 import importlib
 import traceback
-from typing import Union
+from typing import Optional, Union
 
 from core.sandbox_executor import TidmadSandbox
 from agent.llm_bridge import LLMBridge
@@ -25,8 +25,12 @@ from agent.schemas.hyperparam_tuning import (
     HyperparamTuningInput,
     HyperparamTuningOutput,
     ExperimentRecord,
+    ExperimentPlan,
     ExpertAdvice,
 )
+from execute_tools.sample_set_builder import build_sample_set
+from execute_tools.scoring_utils import score_vector, SampleSet
+from execute_tools.build_anchor_map import load_anchor_map
 
 
 def _run_skill(skill_folder: str, sandbox: TidmadSandbox, **params) -> dict:
@@ -101,13 +105,15 @@ class HyperparamTuningAgent:
         model_type_setting = agent_input.model_type
         max_rounds = agent_input.max_rounds
         file_index = agent_input.file_index
+        trial_allowed = agent_input.is_trial
         expert_advice_str = _serialize_expert_advice(agent_input.expert_advice)
         if agent_input.human_advice:
             human_section = f"\n[Human Guidance (high priority)]:\n{agent_input.human_advice}"
             expert_advice_str = (expert_advice_str + human_section) if expert_advice_str else agent_input.human_advice
 
         print(f"Input validated: model={model_type_setting} | rounds={max_rounds} "
-              f"| file_index={file_index} | provider={agent_input.llm_provider}")
+              f"| file_index={file_index} | trial_allowed={trial_allowed} "
+              f"| provider={agent_input.llm_provider}")
 
         # --- Initialize sandbox and brain ---
         sandbox = TidmadSandbox(
@@ -122,16 +128,32 @@ class HyperparamTuningAgent:
             model_id=agent_input.llm_model_id,
         )
 
+        # --- Pre-load anchor map if any round might use trial mode ---
+        anchor_map_data: Optional[dict] = None
+        if trial_allowed:
+            anchor_map_path = os.path.join(
+                sandbox.dirs["data"], "segment_anchors.json"
+            )
+            if os.path.exists(anchor_map_path):
+                anchor_map_data = load_anchor_map(anchor_map_path)
+            else:
+                raise FileNotFoundError(
+                    f"Trial mode requires segment_anchors.json at {anchor_map_path}. "
+                    "Run execute_tools/build_anchor_map.py first."
+                )
+            print(f"Trial mode enabled: anchor map loaded.")
+
         # Save run configuration once
         started_at = time.strftime("%Y-%m-%d %H:%M:%S")
         run_config = {
-            "provider":    agent_input.llm_provider,
-            "model_id":    agent_input.llm_model_id,
-            "run_name":    run_name,
-            "force_model": model_type_setting,
-            "max_rounds":  max_rounds,
-            "file_index":  file_index,
-            "started_at":  started_at,
+            "provider":       agent_input.llm_provider,
+            "model_id":       agent_input.llm_model_id,
+            "run_name":       run_name,
+            "force_model":    model_type_setting,
+            "max_rounds":     max_rounds,
+            "file_index":     file_index,
+            "trial_allowed":  trial_allowed,
+            "started_at":     started_at,
         }
         run_config_path = os.path.join(workspace, f"run_config_{run_name}.json")
         with open(run_config_path, "w", encoding="utf-8") as f:
@@ -171,24 +193,88 @@ class HyperparamTuningAgent:
                     expert_advice=expert_advice_str,
                     force_model=model_type_setting,
                     config_manual=config_manual_data,
+                    current_round=iteration,
+                    max_rounds=max_rounds,
+                    trial_allowed=trial_allowed,
                 )
 
+                # Validate LLM output into ExperimentPlan (with fallback)
+                plan = ExperimentPlan.with_defaults(decision)
+
+                # Override chain: expert constraint → final-round constraint
+                is_last_needed_round = (completed_rounds == max_rounds - 1)
+                if not trial_allowed:
+                    plan.is_trial = False
+                if is_last_needed_round:
+                    plan.is_trial = False
+
+                # Build per-round SampleSet
+                # trial_allowed=True:
+                #   Trial rounds → sparse SampleSet per plan's strategy/portion.
+                #   Formal rounds (final) → full SampleSet (all 20 files × 200 segments).
+                # trial_allowed=False (legacy):
+                #   No SampleSet — single-file mode using file_index.
+                if plan.is_trial:
+                    sample_set = build_sample_set(
+                        is_trial=True,
+                        trial_strategy=plan.trial_strategy,
+                        trial_portion=plan.trial_portion,
+                        target_files=plan.target_files or None,
+                    )
+                    print(f"  Trial mode: strategy={plan.trial_strategy} "
+                          f"| portion={plan.trial_portion} "
+                          f"| files={sorted(sample_set.keys())}")
+                elif trial_allowed:
+                    # Formal round within a trial-allowed run: full 20-file evaluation
+                    sample_set = build_sample_set(
+                        is_trial=True,
+                        trial_strategy="snapshot",
+                        trial_portion=1.0,
+                    )
+                    print(f"  Formal mode: all 20 files, all segments")
+                else:
+                    # Legacy single-file mode (trial_allowed=False)
+                    sample_set = None
+                    print(f"  Legacy mode: file_index={file_index}")
+
                 # When force_model is set, override the LLM's model_type choice.
-                # The LLM may pick a built-in model if it doesn't recognize the
-                # agent-generated model type in the config manual.
                 if model_type_setting != "auto":
                     model_type = model_type_setting
                 else:
-                    model_type = decision.get("model_type", "fcnet")
+                    model_type = plan.model_type
                 exp_id = f"{model_type}_{run_name}_{total_attempts:03d}"
-                hypothesis = decision.get("hypothesis", "N/A")
+                hypothesis = plan.hypothesis
 
                 print(f"Action: {model_type.upper()} | ID: {exp_id}")
                 print(f"Hypothesis: {hypothesis}")
-                print(f"Reasoning: {decision.get('reasoning', 'No reasoning provided.')}")
+                print(f"Reasoning: {plan.reasoning or 'No reasoning provided.'}")
+
+                # Save trial_config — always written, makes the mode explicit
+                trial_config = {
+                    "is_trial": plan.is_trial,
+                    "mode": "trial" if plan.is_trial else ("formal" if trial_allowed else "single_file"),
+                }
+                if plan.is_trial:
+                    trial_config["trial_strategy"] = plan.trial_strategy
+                    trial_config["trial_portion"] = plan.trial_portion
+                    trial_config["train_validation_align"] = plan.train_validation_align
+                    if plan.trial_strategy == "target":
+                        trial_config["target_files"] = plan.target_files
+                elif trial_allowed:
+                    # Formal round: full 20-file evaluation
+                    trial_config["trial_strategy"] = "snapshot"
+                    trial_config["trial_portion"] = 1.0
+                else:
+                    # Legacy single-file mode
+                    trial_config["file_index"] = file_index
+                trial_config_path = os.path.join(
+                    sandbox.dirs["configs"], f"trial_config_{exp_id}.json"
+                )
+                with open(trial_config_path, "w", encoding="utf-8") as f:
+                    json.dump(trial_config, f, indent=2)
 
                 # C. ACT: Execute the Atomic Skill Pipeline (Train -> Inf -> Score)
-                model_config = decision.get("model_config", {})
+                model_config = plan.model_cfg.copy()
                 # Ensure model_config.model_type matches the forced model type
                 model_config["model_type"] = model_type
                 active_params = {
@@ -196,8 +282,9 @@ class HyperparamTuningAgent:
                     "run_name":     run_name,
                     "model_type":   model_type,
                     "model_config": model_config,
-                    "train_config": decision.get("train_config", {}),
-                    "loss_config":  decision.get("loss_config", {}),
+                    "train_config": plan.train_cfg,
+                    "loss_config":  plan.loss_cfg,
+                    "sample_set":   sample_set,
                 }
 
                 print(f"\n[Step 0/3] Resource check...")
@@ -250,7 +337,29 @@ class HyperparamTuningAgent:
 
                 print(f"[Step 3/3] Scoring...")
                 t0 = time.time()
-                score_res = _run_skill("denoising_score_skill", sandbox, **active_params)
+                if anchor_map_data is not None:
+                    # Anchor-normalized scoring (both trial and formal modes).
+                    # Trial: sparse SampleSet. Formal: full SampleSet (all 20 × 200).
+                    def _denoised_fn(fi):
+                        return f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_{fi:04d}.h5"
+                    file_vector, final_scalar = score_vector(
+                        data_dir=sandbox.base_dir,
+                        sample_set=sample_set,
+                        anchor_map=anchor_map_data["anchors"],
+                        s_max=anchor_map_data["s_max"],
+                        denoised_filename_fn=_denoised_fn,
+                        raw_data_dir=sandbox.dirs["data"],
+                    )
+                    score_res = {
+                        "status": "success",
+                        "results": {
+                            "denoising_score": final_scalar,
+                            "file_vector": file_vector,
+                        },
+                    }
+                else:
+                    # Legacy single-file mode (trial_allowed=False, no anchor map)
+                    score_res = _run_skill("denoising_score_skill", sandbox, **active_params)
                 scoring_time = round(time.time() - t0, 1)
 
                 # D. REFLECT: Analyze results and generate insights
@@ -369,6 +478,16 @@ class HyperparamTuningAgent:
                         "memory_update": reflection.get("memory_update"),
                     },
                 }
+                # Trial/formal context — recorded per-round from the plan.
+                # Both modes produce a file_vector via score_vector().
+                final_record["file_vector"] = combined_results.get("file_vector")
+                if plan.is_trial:
+                    final_record["is_trial"] = True
+                    final_record["trial_strategy"] = plan.trial_strategy
+                    final_record["trial_portion"] = plan.trial_portion
+                    final_record["train_validation_align"] = plan.train_validation_align
+                    if plan.trial_strategy == "target":
+                        final_record["target_files"] = plan.target_files
 
                 ExperimentRecord.model_validate(final_record)
                 sandbox.save_record(final_record)
@@ -404,6 +523,7 @@ class HyperparamTuningAgent:
             "best_exp_id":          top_record.get("exp_id") if top_record else None,
             "best_denoising_score": top_record.get("denoising_score") if top_record else None,
             "best_config":          top_record.get("params") if top_record else None,
+            "best_file_vector":     top_record.get("file_vector") if top_record else None,
             "all_records":          all_records,
             "started_at":           started_at,
             "finished_at":          finished_at,
