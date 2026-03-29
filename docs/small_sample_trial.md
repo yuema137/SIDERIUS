@@ -1,6 +1,6 @@
 # Proposal: Physics-Anchored Multi-Fidelity Tuning for TIDMAD
 
-## Status: Phase 6 logic complete — formal mode blocked by data loader memory (Phase 4b)
+## Status: Phase 4b design ready — streaming data loader + train/eval SampleSet split
 
 ---
 
@@ -149,11 +149,9 @@ samples = 1 second). Partial PSD segments are strictly prohibited.
 alongside existing functions, never replacing them. The existing single-file flow
 (`sandbox_executor` → CLI → `calculateBenchmark`) is untouched.
 
-### A. The SampleSet: Single Source of Truth
+### A. The SampleSet and the Train/Eval Split
 
-In trial mode, training, inference, and scoring all need to agree on **which segments from
-which files** to operate on. This is the `SampleSet` — determined once by the sampling
-strategy and passed consistently through all three stages.
+A `SampleSet` specifies which segments from which files to operate on:
 
 ```
 SampleSet = {
@@ -162,18 +160,43 @@ SampleSet = {
 }
 ```
 
-The current single-file flow is a special case: `SampleSet = {file_index: all_segments}`.
+**Each round produces two SampleSets** with different purposes:
 
-### B. Three-Layer Data Flow (Current vs Trial)
+- **`train_sample_set`**: what the model trains on. Always sparse — training does not
+  need every segment, and memory constraints prohibit loading full files. Controls the
+  *cost* of a round.
+- **`eval_sample_set`**: what inference and scoring run on. Determines the *fidelity*
+  of the score. Can range from sparse (trial) to full (formal).
 
-| Layer | Current flow | Trial mode |
-|-------|-------------|------------|
-| **Training** | Load full file by `file_index` via `TIDMADDataset` | Load specific segments from specific files per `SampleSet` |
-| **Inference** | Denoise full file by `file_index` | Denoise only the segments in `SampleSet` |
-| **Scoring** | `denoising_score_single.py` CLI: score all segments in one file, file-local normalization | New function: score only `SampleSet` segments, anchor-normalized |
+The relationship between them is the key design axis:
 
-All three layers receive the same `SampleSet`. This ensures the model is scored on exactly
-the data it was trained on (or a controlled offset if `train_validation_align=False`).
+| Mode | `train_sample_set` | `eval_sample_set` | Relationship |
+|------|---|---|---|
+| **Trial, aligned** | snapshot 2%, seed=S | snapshot 2%, seed=S | Identical — model scored on exactly what it trained on. Best for fast hyperparameter search. |
+| **Trial, unaligned** | snapshot 2%, seed=A | snapshot 2%, seed=B | Same strategy and portion, different segments. Tests generalization within the trial budget. |
+| **Formal** | snapshot 10%, files 0–19 | snapshot 100%, files 0–19 | Train on a representative subsample; evaluate on everything. Definitive score. |
+| **Legacy single-file** | file 6, all segments | file 6, all segments | Identical. Backward compatible with pre-trial code. |
+
+The `train_validation_align` flag controls whether train and eval use the same segments
+(aligned) or different seeds (unaligned). In formal mode, they are always different by
+construction — training uses a subsample, evaluation uses all.
+
+**Why training is always sparse**: the legacy TIDMAD `train.py` trains on 10% of each
+file (`sample_size=10`) and produced the paper's published results. Full-file training
+is unnecessary and would exceed memory (see Phase 4b). The `train_portion` parameter
+controls this independently of the eval scope.
+
+### B. Three-Layer Data Flow
+
+| Layer | `train_sample_set` | `eval_sample_set` | Notes |
+|-------|---|---|---|
+| **Training** | ✓ | — | Trains on `train_sample_set` only. One file at a time (streaming). |
+| **Inference** | — | ✓ | Denoises all segments in `eval_sample_set`. Already streams per-file. |
+| **Scoring** | — | ✓ | Scores all segments in `eval_sample_set` via `score_vector()`. |
+
+Training and evaluation use **different** SampleSets. This is the correct separation —
+the model should be evaluated on data it hasn't necessarily trained on (especially in
+formal mode, where eval covers everything but training uses a subsample).
 
 ### C. Changes to `execute_tools/denoising_score_single.py`
 
@@ -559,52 +582,210 @@ The `exp_id` is unique per experiment, and trial parameters are recorded in the
 
 **Total unit tests after Phase 0–4:** 572 passed, 0 broken.
 
-**⚠ CRITICAL LIMITATION — Memory model does not scale to formal mode (all 20 files):**
+**⚠ CRITICAL LIMITATION — Memory model does not scale to formal mode (all 20 files).**
+See Phase 4b below for full analysis and fix design.
+
+---
+
+### Phase 4b: Streaming data loader and train/eval SampleSet split
+
+**What:** Fix the training data loader to stream one file at a time (instead of
+accumulating all files in memory), and separate the SampleSet into a `train_sample_set`
+and `eval_sample_set` so training can use a memory-efficient subsample while
+inference/scoring evaluates at full fidelity.
+
+#### Problem: current memory model
 
 The `_pull_events_from_sample_set()` method in `TIDMADDataset` loads **all files'
 segments into memory simultaneously** via `self.idict` and `self.tdict`. This works for
 trial mode (sparse sampling → small total data), but **causes OOM when used for formal
-mode** (all 200 segments × 20 files = 4000 PSD segments ≈ 40+ GB of training data in RAM).
+mode** (all 200 segments × 20 files = 4000 PSD segments).
 
-This was confirmed during Phase 6 integration testing: the formal round (final round,
-`trial_portion=1.0, snapshot, all 20 files`) triggered a kernel OOM kill at ~50 GB RSS
-on a 61 GB machine.
+Confirmed during Phase 6 integration testing: the formal round (`snapshot, portion=1.0,
+all 20 files`) triggered a kernel OOM kill at ~50 GB RSS on a 61 GB machine.
 
 **Root cause:** The data loader accumulates extracted segments from every file into
-in-memory dicts (`idict[filename] = array`, `tdict[filename] = array`), then shuffles
-across all files. This cross-file shuffling requires all data to be resident
-simultaneously. Additionally, each file is loaded in full (`np.array(f[...])`) even
-when only a subset of segments is needed — HDF5 direct slicing is not used.
+in-memory dicts, then shuffles across all files. This cross-file shuffling requires all
+data resident simultaneously. Additionally, each file is loaded in full
+(`np.array(f[...])`) even when only a subset of segments is needed.
 
 **How the legacy scripts (`/home/tidmad/TIDMAD/`) avoid this:**
 
-| Script | Strategy | Peak memory per file | All-files memory |
-|--------|----------|---------------------|-----------------|
-| `train.py` | **Sequential file streaming** — trains on one file at a time, frees it, moves to next. No cross-file shuffling. | ~400 MB (2 GB / subsample) | ~400 MB (one file at a time) |
-| `train_nosplit.py` | **Aggressive subsampling** — loads all 20 files but keeps only 1/5 of each (`sample_size=5`), stores as `int8`. | ~400 MB | ~8 GB (20 × 400 MB) |
-| **Our code** | **Full accumulation** — loads all requested segments from all files into memory, stores CH2 as `int16`. | ~2 GB (full file load) + extracted segments | **40+ GB for formal mode** |
+| Script | Strategy | Peak memory | Total memory |
+|--------|----------|-------------|--------------|
+| `train.py` | **Sequential streaming** — one file at a time, free before next. `sample_size=10` keeps 1/10 of segments. | ~200 MB | ~200 MB |
+| `train_nosplit.py` | **Aggressive subsampling** — all 20 files but 1/5 each, `int8`. | ~400 MB | ~8 GB |
+| **Our code** | **Full accumulation** — all files in `idict`/`tdict`, no streaming. | ~2 GB per file load | **40+ GB** |
 
-**Two-part fix required (Phase 4b — not yet implemented):**
+#### Design: two SampleSets per round
 
-1. **HDF5 direct slicing**: Instead of `np.array(f['timeseries'][...])` (loads entire
-   2 GB file), read only the needed segments directly from HDF5:
-   `chunk = f['timeseries']['channel0001']['timeseries'][start:end]`. This eliminates
-   the peak ~2 GB per-file overhead during extraction.
+Every round produces two SampleSets:
 
-2. **Sequential file training (streaming)**: Follow `train.py`'s pattern — train on
-   one file's segments, free them, move to the next file. This means no cross-file
-   shuffling within an epoch, but each epoch sees all files in sequence. This limits
-   peak memory to one file's extracted segments (~200 MB at `segmentation_size=10000`).
+- **`train_sample_set`**: sparse subsample for training. Controls memory usage.
+  Built from `train_portion` (default 0.1, matching legacy `sample_size=10`).
+  Training is always sparse — the paper's published results used 10% and it worked.
+- **`eval_sample_set`**: the data to inference and score on. Controls score fidelity.
+  In trial mode, this is sparse (per LLM's `trial_portion`). In formal mode, this
+  is all segments of all 20 files.
 
-   The tradeoff: cross-file shuffling may improve generalization, but the legacy
-   approach without it produced the paper's published results — so sequential training
-   is validated and sufficient.
+How the agent loop builds them:
 
-**Impact on formal mode:** Until this fix is implemented, formal mode (all 20 files ×
-all 200 segments) will OOM on machines with < ~60 GB free RAM. Trial mode with small
-portions (≤ 10%) works fine. The same limitation applies to inference
-(`inference_single.py`), though inference processes files one at a time already and is
-less affected.
+```python
+# Trial round
+train_sample_set = build_sample_set(strategy, train_portion, seed=seed_t)
+eval_sample_set  = build_sample_set(strategy, trial_portion, seed=seed_e)
+# seed_t == seed_e when train_validation_align=True
+
+# Formal round (final)
+train_sample_set = build_sample_set("snapshot", train_portion=0.1)
+eval_sample_set  = build_sample_set("snapshot", trial_portion=1.0)
+
+# Legacy single-file (trial_allowed=False)
+train_sample_set = {file_index: all_segments}
+eval_sample_set  = {file_index: all_segments}
+```
+
+The `train_portion` field is added to `ExperimentPlan` (with default 0.1) and
+`HyperparamTuningInput` (with the same default). The LLM can adjust it, but the
+default matches the validated legacy setting. In formal mode, `train_portion` is
+used regardless of what the LLM suggests for eval — training is always sparse.
+
+#### Design: streaming file training
+
+The training loop changes from:
+
+```python
+# CURRENT (Phase 4): front-load all files into memory, then train
+dataset = TIDMADDataset(sample_set=full_sample_set)  # OOM here
+loader = DataLoader(dataset, batch_size=...)
+for epoch in range(epochs):
+    for batch in loader:
+        forward → loss → backward → step
+```
+
+To:
+
+```python
+# PHASE 4b: stream one file at a time, re-create dataset per file
+for epoch in range(epochs):
+    file_order = shuffled(train_sample_set.keys())
+    for file_index in file_order:
+        segments = train_sample_set[file_index]
+        dataset = TIDMADSingleFileDataset(file_index, segments)  # one file
+        loader = DataLoader(dataset, batch_size=..., shuffle=True)
+        for batch in loader:
+            forward → loss → backward → step
+        del dataset, loader
+        gc.collect()
+```
+
+**Key properties:**
+- Peak memory = one file's extracted segments. At `train_portion=0.1` and
+  `segmentation_size=10000`: 20 PSD segments × 1000 ML segments × 10000 bytes
+  ≈ **200 MB**. At `train_portion=1.0` (all segments of one file): ≈ **2 GB**.
+  Both are safe on any modern machine.
+- File order is shuffled each epoch — so over many epochs the model sees files
+  in different orders, reducing ordering bias.
+- Segments within each file are shuffled by the DataLoader (`shuffle=True`).
+- No cross-file shuffling within a single pass through one file. This matches
+  the legacy `train.py` pattern which produced the paper's published results.
+- Model weights carry over across files — learning accumulates.
+- HDF5 direct slicing: read only the requested PSD segments from disk, never
+  the full 2 GB file.
+
+#### Design: `TIDMADSingleFileDataset`
+
+Replace the multi-file `TIDMADDataset._pull_events_from_sample_set()` with a
+lightweight single-file dataset:
+
+```python
+class TIDMADSingleFileDataset(Dataset):
+    """Loads segments from ONE file. Created and destroyed per file per epoch."""
+
+    def __init__(self, file_path: str, file_index: int,
+                 psd_segment_indices: list[int], seg_size: int):
+        ml_segs_per_psd = PSD_SEGMENT_LENGTH // seg_size
+        chunks_ch1, chunks_ch2 = [], []
+        with h5py.File(file_path, 'r') as f:
+            ch1 = f['timeseries']['channel0001']['timeseries']
+            ch2 = f['timeseries']['channel0002']['timeseries']
+            for psd_idx in psd_segment_indices:
+                start = psd_idx * PSD_SEGMENT_LENGTH
+                end = start + PSD_SEGMENT_LENGTH
+                chunks_ch1.append(np.array(ch1[start:end]).reshape(ml_segs_per_psd, seg_size))
+                chunks_ch2.append(np.array(ch2[start:end]).reshape(ml_segs_per_psd, seg_size))
+        self.inputs = np.concatenate(chunks_ch1, axis=0)   # int8
+        self.targets = np.concatenate(chunks_ch2, axis=0)   # int8
+
+    def __len__(self):
+        return len(self.inputs)
+
+    def __getitem__(self, idx):
+        return (self.inputs[idx].astype(np.int16) + 128,
+                self.targets[idx].astype(np.int16) + 128)
+```
+
+Key differences from current `TIDMADDataset`:
+- Uses HDF5 direct slicing (`ch1[start:end]`) — never loads the full 2 GB file.
+- No `idict`/`tdict` — data is a flat numpy array, freed when the dataset is deleted.
+- No `class_count` accumulation across files — `class_weights` for focal loss must
+  be handled differently (pre-computed or accumulated incrementally).
+
+#### Changes required
+
+**`execute_tools/train_engine_sandbox.py`:**
+- Add `TIDMADSingleFileDataset` class (as above).
+- Refactor `run_experiment()` to accept `train_sample_set` (dict) instead of a
+  pre-built `DataLoader`. The file-streaming epoch loop goes inside `run_experiment()`.
+- Keep the existing `TIDMADDataset` for legacy single-file mode (no regression).
+
+**`execute_tools/sample_set_builder.py`:**
+- `build_sample_set()` already supports all needed parameters. No change needed —
+  the agent loop calls it twice (once for train, once for eval) with different portions.
+
+**`agent/schemas/hyperparam_tuning.py`:**
+- Add `train_portion: float = Field(default=0.1, ge=0.01, le=1.0)` to
+  `ExperimentPlan` and `HyperparamTuningInput`.
+- Add `train_portion` to `ExperimentRecord` trial context fields.
+
+**`nodes/ml_hyperparameter_tune_agent.py`:**
+- Build two SampleSets per round: `train_sample_set` and `eval_sample_set`.
+- Pass `train_sample_set` to training skill, `eval_sample_set` to inference and
+  scoring skills.
+- Save both in `trial_config_{exp_id}.json` for traceability.
+
+**`core/sandbox_executor.py`:**
+- `execute_training()` passes `train_sample_set` (may differ from `eval_sample_set`).
+- `execute_inference()` passes `eval_sample_set` (unchanged from current behavior).
+
+**`agent/prompts.py`:**
+- Add `train_portion` to the OUTPUT FORMAT and TRIAL vs FORMAL MODE explanation.
+
+#### Class weight handling for focal loss
+
+The current `TIDMADDataset` accumulates `class_count` across all files during loading
+to compute focal loss class weights. With streaming, we have two options:
+
+1. **Pre-compute once**: run a one-time scan (like `build_anchor_map`) to compute
+   global class distribution across all training files. Store alongside
+   `segment_anchors.json`. Load at the start of each run.
+2. **Use uniform weights**: focal loss with `use_class_weights=False` (already the
+   default in `LossConfig`). The legacy `train.py` uses `FocalLoss1D()` without
+   class weights — so this is validated.
+
+Option 2 is simpler and matches the legacy behavior. Option 1 is deferred unless
+class-weighted focal loss proves necessary.
+
+#### Tests
+
+- Unit test: `TIDMADSingleFileDataset` with synthetic HDF5 file — verify correct
+  segment extraction, shape, dtype.
+- Unit test: `run_experiment()` with mock dataset — verify file-streaming epoch
+  loop structure (correct number of files visited per epoch).
+- Integration test: 2-round trial→formal with real data — verify formal round no
+  longer OOMs and produces correct scores.
+
+**Depends on:** Phase 4 (current data loading infrastructure).
 
 ---
 
@@ -710,12 +891,9 @@ due to the Phase 4 data loader memory model. The agent logic is correct — it c
 builds the full SampleSet and attempts training. The failure is in the data pipeline, not
 the trial/formal control logic.
 
-**Options to unblock:**
-1. **Fix the data loader** (Phase 4b): implement sequential file streaming as described
-   in the Phase 4 limitation section. This is the correct long-term fix.
-2. **Reduce formal scope for testing**: use a smaller formal round in the integration
-   test (e.g. fewer files) to validate the trial→formal transition mechanism without
-   triggering OOM. This validates the code path but not production-scale formal mode.
+Phase 4b (streaming data loader + train/eval split) will resolve this: training uses a
+sparse `train_sample_set` (e.g. 10% per file, streamed one file at a time → ~200 MB
+peak), while inference/scoring uses the full `eval_sample_set`.
 
 **Depends on:** Phase 5 (static trial wiring). Full formal mode depends on Phase 4b
 (data loader fix).
@@ -755,7 +933,7 @@ Phase 2 (schemas) ✓         Phase 3 (SampleSet builder) ✓
                 │
           Phase 4 (data loading) ✓
                 │
-          Phase 4b (streaming data loader) ← BLOCKS formal mode
+          Phase 4b (streaming loader + train/eval split) ← CURRENT
                 │
           Phase 5 (static trial wiring) ✓
                 │
