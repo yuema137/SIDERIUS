@@ -302,3 +302,102 @@ class TestHyperparamTuningOutput:
         valid_output_dict["all_records"] = [{"status": "bad_status", "exp_id": "x"}]
         with pytest.raises(ValidationError):
             HyperparamTuningOutput.model_validate(valid_output_dict)
+
+
+# ---------------------------------------------------------------------------
+# Trial-mode fields — backward compatibility and new behavior
+# ---------------------------------------------------------------------------
+
+class TestTrialFieldsInput:
+    """Verify trial fields on HyperparamTuningInput are optional and default to normal mode."""
+
+    def test_defaults_to_normal_mode(self, valid_input_dict):
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        assert inp.is_trial is False
+        assert inp.trial_portion == 0.1
+        assert inp.trial_strategy == "snapshot"
+        assert inp.target_files == []
+        assert inp.train_validation_align is True
+
+    def test_existing_input_without_trial_fields_validates(self, valid_input_dict):
+        """Existing callers that don't pass trial fields should still work."""
+        assert "is_trial" not in valid_input_dict
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        assert inp.is_trial is False
+
+    def test_trial_mode_with_snapshot(self, valid_input_dict):
+        valid_input_dict["is_trial"] = True
+        valid_input_dict["trial_strategy"] = "snapshot"
+        valid_input_dict["trial_portion"] = 0.2
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        assert inp.is_trial is True
+        assert inp.trial_strategy == "snapshot"
+        assert inp.trial_portion == 0.2
+
+    def test_trial_mode_with_target(self, valid_input_dict):
+        valid_input_dict["is_trial"] = True
+        valid_input_dict["trial_strategy"] = "target"
+        valid_input_dict["target_files"] = [0, 1, 2, 3]
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        assert inp.target_files == [0, 1, 2, 3]
+
+    def test_invalid_trial_strategy_raises(self, valid_input_dict):
+        valid_input_dict["trial_strategy"] = "invalid_strategy"
+        with pytest.raises(ValidationError):
+            HyperparamTuningInput.model_validate(valid_input_dict)
+
+    def test_trial_portion_out_of_range_raises(self, valid_input_dict):
+        valid_input_dict["trial_portion"] = 1.5
+        with pytest.raises(ValidationError):
+            HyperparamTuningInput.model_validate(valid_input_dict)
+
+
+class TestTrialFieldsExperimentRecord:
+    """Verify trial fields on ExperimentRecord are optional and default correctly."""
+
+    def test_existing_record_without_trial_fields(self, valid_success_record):
+        """Records from before the trial feature should still validate."""
+        assert "is_trial" not in valid_success_record
+        rec = ExperimentRecord.model_validate(valid_success_record)
+        assert rec.is_trial is False
+        assert rec.trial_strategy is None
+        assert rec.trial_portion is None
+        assert rec.train_validation_align is None
+        assert rec.target_files is None
+        assert rec.file_vector is None
+
+    def test_record_with_trial_context(self, valid_success_record):
+        valid_success_record["is_trial"] = True
+        valid_success_record["trial_strategy"] = "snapshot"
+        valid_success_record["trial_portion"] = 0.1
+        valid_success_record["train_validation_align"] = True
+        valid_success_record["file_vector"] = [float("nan")] * 20
+        valid_success_record["file_vector"][6] = 0.85
+        rec = ExperimentRecord.model_validate(valid_success_record)
+        assert rec.is_trial is True
+        assert rec.trial_strategy == "snapshot"
+        assert rec.file_vector[6] == 0.85
+
+    def test_record_with_target_strategy(self, valid_success_record):
+        valid_success_record["is_trial"] = True
+        valid_success_record["trial_strategy"] = "target"
+        valid_success_record["target_files"] = [0, 10, 19]
+        rec = ExperimentRecord.model_validate(valid_success_record)
+        assert rec.target_files == [0, 10, 19]
+
+
+class TestTrialFieldsOutput:
+    """Verify best_file_vector on HyperparamTuningOutput is optional."""
+
+    def test_output_without_file_vector(self, valid_output_dict):
+        """Existing outputs should still validate without best_file_vector."""
+        assert "best_file_vector" not in valid_output_dict
+        out = HyperparamTuningOutput.model_validate(valid_output_dict)
+        assert out.best_file_vector is None
+
+    def test_output_with_file_vector(self, valid_output_dict):
+        valid_output_dict["best_file_vector"] = [float("nan")] * 20
+        valid_output_dict["best_file_vector"][6] = 1.23
+        out = HyperparamTuningOutput.model_validate(valid_output_dict)
+        assert out.best_file_vector[6] == 1.23
+        assert len(out.best_file_vector) == 20

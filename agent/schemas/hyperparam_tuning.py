@@ -86,6 +86,32 @@ class ExperimentRecord(BaseModel):
     timing: Optional[ExperimentTiming] = None
     memory: Optional[ExperimentMemory] = None
 
+    # --- Trial context (optional — absent or default in normal mode) ---
+    is_trial: bool = Field(
+        default=False,
+        description="Whether this experiment ran in trial-explore mode with sparse sampling.",
+    )
+    trial_strategy: Optional[Literal["snapshot", "anchors", "target"]] = Field(
+        default=None,
+        description="Sampling strategy used. Only meaningful when is_trial=True.",
+    )
+    trial_portion: Optional[float] = Field(
+        default=None,
+        description="Fraction of segments sampled per file. Only meaningful when is_trial=True.",
+    )
+    train_validation_align: Optional[bool] = Field(
+        default=None,
+        description="Whether validation used the same segments as training.",
+    )
+    target_files: Optional[List[int]] = Field(
+        default=None,
+        description="File indices sampled (only for 'target' strategy).",
+    )
+    file_vector: Optional[List[float]] = Field(
+        default=None,
+        description="Length-20 score vector. NaN for files not included in the run.",
+    )
+
 
 # ---------------------------------------------------------------------------
 # Agent input
@@ -97,10 +123,15 @@ class HyperparamTuningInput(BaseModel):
 
     Fields are grouped by concern:
       - Research:  what to explore and how hard to push
+      - Trial:     optional sparse-sampling mode for fast iteration (default = off)
       - Guidance:  expert advice steering the LLM planner
       - Seeding:   pre-existing records the agent should treat as prior knowledge
       - LLM:       which model drives the planning and reflection steps
       - Infra:     storage paths (managed by the communication interface in production)
+
+    When ``is_trial=False`` (the default), the agent runs in normal single-file
+    mode using ``file_index``. All trial fields are ignored. When ``is_trial=True``,
+    the agent builds a SampleSet from the trial strategy and ignores ``file_index``.
     """
 
     # --- Research ---
@@ -110,12 +141,36 @@ class HyperparamTuningInput(BaseModel):
     file_index: int = Field(
         default=6,
         ge=0,
-        description="Validation/training file index (0-39). Default 6 matches the paper's standard split.",
+        description="Validation/training file index (0-39). Default 6 matches the paper's standard split. Ignored when is_trial=True.",
     )
     max_rounds: int = Field(
         default=50,
         ge=1,
         description="Maximum number of completed experiment rounds (OOM-skipped attempts do not count).",
+    )
+
+    # --- Trial mode (optional — all defaults preserve normal single-file behavior) ---
+    is_trial: bool = Field(
+        default=False,
+        description="When True, run in trial-explore mode with sparse sampling across multiple files.",
+    )
+    trial_portion: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of segments to sample per file. Only used when is_trial=True.",
+    )
+    trial_strategy: Literal["snapshot", "anchors", "target"] = Field(
+        default="snapshot",
+        description="Sampling strategy: 'snapshot' (all 20 files), 'anchors' (files 0/10/19), 'target' (specific files). Only used when is_trial=True.",
+    )
+    target_files: List[int] = Field(
+        default_factory=list,
+        description="File indices to sample from. Required when trial_strategy='target'.",
+    )
+    train_validation_align: bool = Field(
+        default=True,
+        description="When True, validation uses the same segments as training. Only used when is_trial=True.",
     )
 
     # --- Guidance ---
@@ -210,6 +265,10 @@ class HyperparamTuningOutput(BaseModel):
     best_config: Optional[Dict[str, Any]] = Field(
         default=None,
         description="model_config + train_config + loss_config that produced best_denoising_score.",
+    )
+    best_file_vector: Optional[List[float]] = Field(
+        default=None,
+        description="Length-20 score vector from the best experiment. NaN for files not included.",
     )
 
     # --- Full history ---
