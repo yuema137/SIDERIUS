@@ -1,6 +1,6 @@
 # Proposal: Physics-Anchored Multi-Fidelity Tuning for TIDMAD
 
-## Status: DESIGN COMPLETE — ready for implementation
+## Status: Phase 6 logic complete — formal mode blocked by data loader memory (Phase 4b)
 
 ---
 
@@ -309,38 +309,62 @@ file_vector: Optional[List[float]] = None  # length 20, NaN for excluded files
 
 ## 7. Iteration Control: Who Decides Trial vs Formal
 
-The decision of *whether* to run trial mode and *which strategy* to use is split between
-two levels. The split follows a simple rule: **hard constraints are enforced by code,
-adaptive choices are made by the LLM.**
+The decision of *whether* to run trial mode and *which strategy* to use is governed by
+three levels of authority. The hierarchy is: **hard constraints (code) > expert advice
+(upstream agent or human) > LLM judgment (brain.plan).**
 
-### A. The workflow enforces the final-iteration constraint
+### A. The agent loop enforces the final-round constraint
 
-The final iteration of a tuning run **must** be formal (`is_trial=False`). This is not
-a suggestion to the LLM — it is enforced in code by the workflow/orchestrator:
+The final round of a tuning run **must** be formal (`is_trial=False`). This is not a
+suggestion — it is enforced in code inside the agent's `run()` loop:
 
 ```python
-for iteration in range(max_iterations):
-    is_last = (iteration == max_iterations - 1)
+while completed_rounds < max_rounds and total_attempts < max_attempts:
+    is_last_round = (completed_rounds == max_rounds - 1)
 
-    if is_last:
-        # Hard constraint: final iteration is always formal.
-        trial_params = {"is_trial": False}
+    if is_last_round:
+        # Hard constraint: final round is always formal.
+        is_trial_this_round = False
+        sample_set = None
     else:
-        # LLM decides trial strategy (see below).
-        trial_params = llm_plan.get("trial_params", {"is_trial": True})
-
-    tuning_input = HyperparamTuningInput(
-        ...existing_fields...,
-        **trial_params,
-    )
+        # LLM decides, within expert-advice constraints (see below).
+        is_trial_this_round = decision.get("is_trial", True)
+        if is_trial_this_round:
+            sample_set = build_sample_set(...)
+        else:
+            sample_set = None
 ```
 
 This guarantees every tuning run ends with a complete, formal score over all 20 files,
-regardless of what the LLM decided in earlier iterations.
+regardless of what the LLM or expert advice chose in earlier rounds.
 
-### B. The LLM decides strategy for non-final iterations
+**Special case: `max_rounds=1`.** When there is only one round, it is both the first
+and last round — formal mode is enforced. The `is_trial` input field is ignored. This
+means single-round runs always produce a definitive score.
 
-For all iterations except the last, the LLM planner chooses:
+### B. Expert advice constrains LLM choices
+
+Expert advice (from upstream agents or human input via `expert_advice` / `human_advice`)
+can constrain the LLM's trial/formal decisions for non-final rounds. This follows the
+same pattern as hyperparameter guidance — the agent respects expert constraints but
+retains autonomy within those bounds.
+
+Examples of expert-advice constraints:
+- `"Always use trial mode with snapshot strategy for the first 5 rounds"` — the LLM
+  must use trial/snapshot but can choose `trial_portion` and other params.
+- `"Use formal mode for all rounds"` — the LLM cannot use trial mode at all. The
+  final-round constraint is redundant but still enforced.
+- `"trial_portion must be >= 0.2"` — the LLM can choose portion freely above 0.2.
+- `"Focus on files [0, 1, 2, 3] using target strategy"` — the LLM uses target mode
+  with those files but can choose portion and alignment.
+
+When no expert advice mentions trial parameters, the LLM has full autonomy (subject
+to the final-round constraint).
+
+### C. The LLM decides strategy for non-final rounds
+
+For all rounds except the last (and within expert-advice constraints), the LLM planner
+chooses:
 - **Whether to use trial mode** (`is_trial`): the LLM may choose formal mode early if
   it believes the current config is promising and wants a definitive score.
 - **Which strategy** (`trial_strategy`): snapshot for broad exploration, anchors for
@@ -350,17 +374,16 @@ For all iterations except the last, the LLM planner chooses:
 - **Validation alignment** (`train_validation_align`): True for peak performance
   measurement, False to test generalization.
 
-The LLM sees the full research memory (including `file_vector` from prior iterations)
+The LLM sees the full research memory (including `file_vector` from prior rounds)
 and can adapt its strategy. For example:
-1. Iterations 1–5: snapshot at 10% — broad hyperparameter search.
-2. Iterations 6–8: target on files [0, 1, 2, 3] at 30% — the vector showed these are
-   weak.
-3. Iteration 9 (final): formal — full pass over all 20 files, enforced by code.
+1. Rounds 1–5: snapshot at 10% — broad hyperparameter search.
+2. Rounds 6–8: target on files [0, 1, 2, 3] at 30% — the vector showed these are weak.
+3. Round 9 (final): formal — full pass over all 20 files, enforced by code.
 
-### C. What the LLM planner outputs
+### D. What the LLM planner outputs
 
-The existing `plan()` method returns a config dict. In trial mode, the LLM additionally
-outputs trial parameters alongside the usual hyperparameter decisions:
+The existing `plan()` method returns a config dict. The LLM additionally outputs trial
+parameters alongside the usual hyperparameter decisions:
 
 ```json
 {
@@ -375,8 +398,23 @@ outputs trial parameters alongside the usual hyperparameter decisions:
 }
 ```
 
-When the workflow overrides `is_trial=False` on the final iteration, the LLM's trial
-fields are simply ignored.
+When the agent overrides `is_trial=False` on the final round, the LLM's trial fields
+are simply ignored. When expert advice constrains a field (e.g. forces
+`trial_strategy="snapshot"`), the LLM's value for that field is overridden.
+
+### E. Schema implications
+
+The `HyperparamTuningInput` field `is_trial` changes meaning. Previously it was a
+static flag for the entire run. Now:
+
+- **`is_trial` on input**: serves as the **default** for non-final rounds when the LLM
+  does not specify. When `is_trial=False` on input, the agent runs in formal mode for
+  all rounds (the LLM cannot override this to trial — it is treated as an expert
+  constraint). When `is_trial=True`, the LLM has autonomy to choose per-round.
+- **`trial_strategy`, `trial_portion`, etc. on input**: serve as defaults / constraints
+  that the LLM can adjust within bounds.
+- **Per-round decisions**: stored in each `ExperimentRecord` so the research memory
+  accurately reflects what mode each experiment used.
 
 ---
 
@@ -521,50 +559,166 @@ The `exp_id` is unique per experiment, and trial parameters are recorded in the
 
 **Total unit tests after Phase 0–4:** 572 passed, 0 broken.
 
+**⚠ CRITICAL LIMITATION — Memory model does not scale to formal mode (all 20 files):**
+
+The `_pull_events_from_sample_set()` method in `TIDMADDataset` loads **all files'
+segments into memory simultaneously** via `self.idict` and `self.tdict`. This works for
+trial mode (sparse sampling → small total data), but **causes OOM when used for formal
+mode** (all 200 segments × 20 files = 4000 PSD segments ≈ 40+ GB of training data in RAM).
+
+This was confirmed during Phase 6 integration testing: the formal round (final round,
+`trial_portion=1.0, snapshot, all 20 files`) triggered a kernel OOM kill at ~50 GB RSS
+on a 61 GB machine.
+
+**Root cause:** The data loader accumulates extracted segments from every file into
+in-memory dicts (`idict[filename] = array`, `tdict[filename] = array`), then shuffles
+across all files. This cross-file shuffling requires all data to be resident
+simultaneously. Additionally, each file is loaded in full (`np.array(f[...])`) even
+when only a subset of segments is needed — HDF5 direct slicing is not used.
+
+**How the legacy scripts (`/home/tidmad/TIDMAD/`) avoid this:**
+
+| Script | Strategy | Peak memory per file | All-files memory |
+|--------|----------|---------------------|-----------------|
+| `train.py` | **Sequential file streaming** — trains on one file at a time, frees it, moves to next. No cross-file shuffling. | ~400 MB (2 GB / subsample) | ~400 MB (one file at a time) |
+| `train_nosplit.py` | **Aggressive subsampling** — loads all 20 files but keeps only 1/5 of each (`sample_size=5`), stores as `int8`. | ~400 MB | ~8 GB (20 × 400 MB) |
+| **Our code** | **Full accumulation** — loads all requested segments from all files into memory, stores CH2 as `int16`. | ~2 GB (full file load) + extracted segments | **40+ GB for formal mode** |
+
+**Two-part fix required (Phase 4b — not yet implemented):**
+
+1. **HDF5 direct slicing**: Instead of `np.array(f['timeseries'][...])` (loads entire
+   2 GB file), read only the needed segments directly from HDF5:
+   `chunk = f['timeseries']['channel0001']['timeseries'][start:end]`. This eliminates
+   the peak ~2 GB per-file overhead during extraction.
+
+2. **Sequential file training (streaming)**: Follow `train.py`'s pattern — train on
+   one file's segments, free them, move to the next file. This means no cross-file
+   shuffling within an epoch, but each epoch sees all files in sequence. This limits
+   peak memory to one file's extracted segments (~200 MB at `segmentation_size=10000`).
+
+   The tradeoff: cross-file shuffling may improve generalization, but the legacy
+   approach without it produced the paper's published results — so sequential training
+   is validated and sufficient.
+
+**Impact on formal mode:** Until this fix is implemented, formal mode (all 20 files ×
+all 200 segments) will OOM on machines with < ~60 GB free RAM. Trial mode with small
+portions (≤ 10%) works fine. The same limitation applies to inference
+(`inference_single.py`), though inference processes files one at a time already and is
+less affected.
+
 ---
 
-### Phase 5: Wire into tuning agent
+### Phase 5: Wire into tuning agent (static trial mode) — DONE (partial)
 
 **What:** Connect the trial fields in `HyperparamTuningInput` to the actual execution
 pipeline. When `is_trial=True`, the agent builds a `SampleSet`, passes it to training/
 inference/scoring, and records trial context in `ExperimentRecord`.
 
-**Files:**
-- `nodes/ml_hyperparameter_tune_agent.py` — add trial-mode branch in `run()`:
-  build SampleSet, pass to executor, use `score_vector()` instead of `calculateBenchmark()`
-- `agent/prompts.py` — extend planner prompt to include trial parameters in its output
-  schema (so the LLM can choose strategy)
+**Completed:**
+- `nodes/ml_hyperparameter_tune_agent.py` — trial-mode branch in `run()`: builds
+  SampleSet once at startup, passes to training/inference skills, uses `score_vector()`
+  for scoring, records trial context in `ExperimentRecord`.
+- `agent/skills/training_skill/wrapper.py` — passes `sample_set` to executor.
+- `agent/skills/inference_skill/wrapper.py` — passes `sample_set` to executor.
+- Integration test: `TestTrialModeGemini::test_punet_trial_snapshot` in
+  `tests/integration/nodes/test_tune_ml_hyperparam_agent.py`.
 
-**Tests:**
-- Unit test (mocked LLM): verify that when `is_trial=True`, the agent:
-  - Builds a SampleSet from the input parameters
-  - Records trial context in ExperimentRecord
-  - Produces a `file_vector` in results
-- Unit test (mocked LLM): verify that when `is_trial=False`, behavior is identical
-  to current (regression)
-- Integration test (real API + data, `@real_run`): run a 1-round trial on real data
+**Limitation:** trial mode is currently **static** — `is_trial` is read once from input
+and applied identically to every round. The LLM cannot choose trial vs formal per round,
+and there is no final-round formal enforcement.
+
+**Known bug (found during Phase 5 testing):** `score_segments()` reads the denoised file
+using the original PSD segment index (e.g. 185), but trial-mode inference packs segments
+contiguously (segment 185 → local position 1). Fix: use `local_idx` (enumerate position)
+for the denoised file, original `seg_idx` for the raw file and anchor lookup. See
+`execute_tools/scoring_utils.py:206`.
 
 **Depends on:** Phase 2 (schemas), Phase 3 (SampleSet), Phase 4 (data loading).
 
 ---
 
-### Phase 6: Workflow iteration control
+### Phase 6: Dynamic per-round trial/formal control — DONE (partial)
 
-**What:** Add the final-iteration enforcement and LLM-driven strategy selection to the
-workflow loop.
+**What:** Upgrade the agent's internal loop from static `is_trial` to dynamic per-round
+decisions. The agent's `brain.plan()` returns trial parameters each round, and the loop
+enforces the final-round formal constraint in code.
 
-**Files:**
-- `workflows/model_exploration.py` — add final-iteration `is_trial=False` override
-  and pass-through of LLM-chosen trial params for non-final iterations
+**Completed:**
 
-**Tests:**
-- Unit test (`test_model_exploration.py`): verify:
-  - Final iteration always has `is_trial=False` regardless of LLM output
-  - Non-final iterations pass through LLM's trial params
-  - Workflow with `max_iterations=1` runs in formal mode (final = only iteration)
-- Existing workflow tests must still pass unchanged
+1. **`ExperimentPlan` schema** (`agent/schemas/hyperparam_tuning.py`):
+   Pydantic model validating `brain.plan()` output. Hyperparameter fields (`model_type`,
+   `hypothesis`, `reasoning`, `model_cfg`, `train_cfg`, `loss_cfg`) plus per-round trial
+   fields (`is_trial`, `trial_strategy`, `trial_portion`, `target_files`,
+   `train_validation_align`). Defaults bias toward trial mode (`is_trial=True`,
+   `trial_portion=0.02`). `with_defaults()` classmethod strips invalid trial fields on
+   `ValidationError` and retries with defaults. `model_config` is aliased to `model_cfg`
+   because `model_config` is reserved by Pydantic v2.
 
-**Depends on:** Phase 5 (tuning agent wired up).
+2. **Agent loop** (`nodes/ml_hyperparameter_tune_agent.py`):
+   - SampleSet built **per-round** inside the loop from `ExperimentPlan`.
+   - Override chain: `not trial_allowed` → formal; `completed_rounds == max_rounds - 1`
+     → formal. Formal mode builds a full SampleSet (`snapshot, portion=1.0`).
+   - Legacy single-file mode preserved when `trial_allowed=False` (`sample_set=None`).
+   - `trial_config_{exp_id}.json` written before each round — makes the mode explicit
+     (trial, formal, or single_file) with all structured parameters.
+   - All `decision.get()` replaced with validated `plan.X` fields.
+   - Trial record fields populated from per-round `plan`, not static `agent_input`.
+
+3. **LLM planner** (`agent/prompts.py`):
+   - `### TRIAL vs FORMAL MODE` section added to system prompt explaining strategies,
+     portions, and when to use each mode.
+   - `get_planner_user_prompt()` extended with `current_round`, `max_rounds`,
+     `trial_allowed`. Round context section tells the LLM which round it's on and
+     whether this is the final round.
+   - OUTPUT FORMAT includes `is_trial`, `trial_strategy`, `trial_portion`.
+
+4. **LLM bridge** (`agent/llm_bridge.py`):
+   - `plan()` forwards `current_round`, `max_rounds`, `trial_allowed` to prompt generator.
+
+5. **Scoring**: Both trial and formal rounds use `score_vector()` with anchor-normalized
+   scoring. The legacy `denoising_score_single.py` is only used when `trial_allowed=False`.
+
+6. **Bug fix** (`execute_tools/scoring_utils.py`): `score_segments` local-index bug
+   fixed — uses `local_idx` (enumerate position) for denoised file, original `seg_idx`
+   for raw file and anchor lookup.
+
+**Files changed:**
+- `agent/schemas/hyperparam_tuning.py` — `ExperimentPlan` schema, `ConfigDict` import
+- `nodes/ml_hyperparameter_tune_agent.py` — per-round loop refactor, `trial_config` write
+- `agent/prompts.py` — trial mode system prompt, round context in user prompt
+- `agent/llm_bridge.py` — forward round context through `plan()`
+- `execute_tools/scoring_utils.py` — local-index bug fix
+
+**Unit tests (all pass, 611 total):**
+- `TestExperimentPlan`: 12 tests — validation, defaults, fallback, strategies
+- `TestDynamicTrialFormal`: 4 tests — final-round enforcement, trial_allowed=False,
+  round context passing, invalid field fallback
+- All 21 existing agent loop tests pass unchanged (regression confirmed)
+
+**Integration test status:**
+- Single-file legacy mode (`TestRealRunGemini::test_punet_gemini[loss_cfg0]`): **PASSED**
+- Trial→formal 2-round test (`TestTrialModeGemini::test_punet_trial_to_formal`):
+  **Round 1 (trial) PASSED, round 2 (formal) OOM-killed.** See Phase 4 limitation above.
+  The formal round builds `SampleSet(snapshot, portion=1.0)` = 4000 PSD segments across
+  20 files. The training data loader tries to hold all files' data in memory
+  simultaneously, exceeding available RAM (~50 GB RSS on a 61 GB machine).
+
+**⚠ BLOCKING LIMITATION for formal mode integration test:**
+
+The formal round (final round of a trial-allowed run) cannot complete on current hardware
+due to the Phase 4 data loader memory model. The agent logic is correct — it correctly
+builds the full SampleSet and attempts training. The failure is in the data pipeline, not
+the trial/formal control logic.
+
+**Options to unblock:**
+1. **Fix the data loader** (Phase 4b): implement sequential file streaming as described
+   in the Phase 4 limitation section. This is the correct long-term fix.
+2. **Reduce formal scope for testing**: use a smaller formal round in the integration
+   test (e.g. fewer files) to validate the trial→formal transition mechanism without
+   triggering OOM. This validates the code path but not production-scale formal mode.
+
+**Depends on:** Phase 5 (static trial wiring). Full formal mode depends on Phase 4b
+(data loader fix).
 
 ---
 
@@ -592,20 +746,23 @@ adds *enriched* support.
 ### Dependency graph
 
 ```
-Phase 0 (anchor map)
-    └── Phase 1 (scoring functions)
+Phase 0 (anchor map) ✓
+    └── Phase 1 (scoring functions) ✓
 
-Phase 2 (schemas)          Phase 3 (SampleSet builder)
+Phase 2 (schemas) ✓         Phase 3 (SampleSet builder) ✓
     │                           │
     └───────────┬───────────────┘
                 │
-          Phase 4 (data loading)
+          Phase 4 (data loading) ✓
                 │
-          Phase 5 (tuning agent)
+          Phase 4b (streaming data loader) ← BLOCKS formal mode
                 │
-          Phase 6 (workflow control)
+          Phase 5 (static trial wiring) ✓
+                │
+          Phase 6 (dynamic trial/formal) ✓ (formal round blocked by 4b)
                 │
           Phase 7 (downstream, optional)
 ```
 
 Phases 0, 2, and 3 have no dependencies on each other and can be built in parallel.
+Phase 6 logic is complete but formal-mode integration testing is blocked by Phase 4b.
