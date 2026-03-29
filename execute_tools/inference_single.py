@@ -34,6 +34,8 @@ def get_parser():
                         help="Directory to write denoised H5 output. Defaults to data_dir.")
     parser.add_argument('--inference_batch_size', type=int, default=10,
                         help="Number of segments per GPU forward pass. Per-model defaults set in sandbox_executor.py (punet/wavenet/fcnet=25, rnn=10, transformer=1).")
+    parser.add_argument('--sample_set_json', type=str, default=None,
+                        help="Path to SampleSet JSON for trial mode. Overrides --file_index.")
     return parser
 
 def process_batch(index, inputarr, targetarr, model, args, current_loss_type):
@@ -133,48 +135,114 @@ def main():
 
     model.eval()
 
-    # 3. Execution Loop
-    fname = f"abra_validation_{str(args.file_index).zfill(4)}.h5"
-    fpath = os.path.join(args.data_dir, fname)
-    
-    if not os.path.exists(fpath):
-        raise FileNotFoundError(f"Validation data missing at {fpath}")
+    # 3. Load sample set if provided (trial mode)
+    sample_set = None
+    if args.sample_set_json:
+        with open(args.sample_set_json, 'r') as f:
+            sample_set = json.load(f)
 
-    with h5py.File(fpath, 'r') as ABRAfile:
-        alltrain = np.array(ABRAfile['timeseries']['channel0001']['timeseries'])
-        alltarget = np.array(ABRAfile['timeseries']['channel0002']['timeseries'])
-        
-        # Reshape according to input_size from config
-        train_loader = alltrain.reshape(-1, 1, input_size)
-        target_loader = alltarget.reshape(-1, 1, input_size)
-        
-        dim1 = train_loader.shape[0]
-        denoised = np.zeros((dim1, input_size), dtype=np.int8)
-        injected = np.zeros((dim1, input_size), dtype=np.int8)
-        bs = args.inference_batch_size
+    # Number of raw samples per PSD segment (1 second at 10 MS/s)
+    PSD_SEGMENT_LENGTH = 10_000_000
 
-        for i in tqdm(range(0, dim1, bs), desc=f"Inference ({args.mode})"):
-            batch_in  = train_loader[i:i+bs]
-            batch_tgt = target_loader[i:i+bs]
-            _, dn, ij = process_batch(i, batch_in, batch_tgt, model, args, current_loss_type)
-            actual_n = batch_in.shape[0]
-            denoised[i:i+actual_n] = dn.reshape(actual_n, input_size)
-            injected[i:i+actual_n] = ij.reshape(actual_n, input_size)
+    if sample_set is not None:
+        # --- TRIAL MODE: denoise specific segments from multiple files ---
+        out_dir = args.output_dir if args.output_dir else args.data_dir
+        for file_index_str, psd_segment_indices in sorted(sample_set.items()):
+            file_index = int(file_index_str)
+            fname = f"abra_validation_{file_index:04d}.h5"
+            fpath = os.path.join(args.data_dir, fname)
 
-    # 4. Save Output
-    idx_str = str(args.file_index).zfill(4)
-    out_dir = args.output_dir if args.output_dir else args.data_dir
-    if args.mode == 'fix':
-        out_name = os.path.join(out_dir, f"abra_validation_denoised_{args.denoising_model}_{idx_str}.h5")
+            if not os.path.exists(fpath):
+                print(f"Warning: {fpath} not found, skipping.")
+                continue
+
+            with h5py.File(fpath, 'r') as ABRAfile:
+                raw_ch1 = np.array(ABRAfile['timeseries']['channel0001']['timeseries'])
+                raw_ch2 = np.array(ABRAfile['timeseries']['channel0002']['timeseries'])
+
+            # Extract requested PSD segments and reshape to ML segments
+            input_chunks = []
+            target_chunks = []
+            for psd_idx in psd_segment_indices:
+                start = psd_idx * PSD_SEGMENT_LENGTH
+                end = start + PSD_SEGMENT_LENGTH
+                input_chunks.append(raw_ch1[start:end])
+                target_chunks.append(raw_ch2[start:end])
+
+            all_input = np.concatenate(input_chunks)    # flat array
+            all_target = np.concatenate(target_chunks)   # flat array
+
+            train_loader = all_input.reshape(-1, 1, input_size)
+            target_loader = all_target.reshape(-1, 1, input_size)
+
+            dim1 = train_loader.shape[0]
+            denoised = np.zeros((dim1, input_size), dtype=np.int8)
+            injected = np.zeros((dim1, input_size), dtype=np.int8)
+            bs = args.inference_batch_size
+
+            for i in tqdm(range(0, dim1, bs), desc=f"Inference file {file_index} ({len(psd_segment_indices)} PSD segs)"):
+                batch_in  = train_loader[i:i+bs]
+                batch_tgt = target_loader[i:i+bs]
+                _, dn, ij = process_batch(i, batch_in, batch_tgt, model, args, current_loss_type)
+                actual_n = batch_in.shape[0]
+                denoised[i:i+actual_n] = dn.reshape(actual_n, input_size)
+                injected[i:i+actual_n] = ij.reshape(actual_n, input_size)
+
+            out_name = os.path.join(
+                out_dir,
+                f"abra_validation_denoised_{args.denoising_model}_{args.run_name}_{args.exp_id}_{file_index:04d}.h5"
+            )
+            if os.path.exists(out_name):
+                os.remove(out_name)
+            create_abra_file(out_name, denoised.flatten().astype(np.int8), injected.flatten().astype(np.int8), indexed=False)
+            print(f"Trial inference saved: {out_name}")
+
+            del raw_ch1, raw_ch2, all_input, all_target, denoised, injected
+            gc.collect()
+
     else:
-        out_name = os.path.join(out_dir, f"abra_validation_denoised_{args.denoising_model}_{args.run_name}_{args.exp_id}_{idx_str}.h5")
+        # --- NORMAL MODE: denoise all segments of a single file ---
+        fname = f"abra_validation_{str(args.file_index).zfill(4)}.h5"
+        fpath = os.path.join(args.data_dir, fname)
 
-    # Clean up old files before writing new one
-    if os.path.exists(out_name):
-        os.remove(out_name)
-    
-    create_abra_file(out_name, denoised.flatten().astype(np.int8), injected.flatten().astype(np.int8), indexed=False)
-    print(f"Inference complete. Saved to: {out_name}")
+        if not os.path.exists(fpath):
+            raise FileNotFoundError(f"Validation data missing at {fpath}")
+
+        with h5py.File(fpath, 'r') as ABRAfile:
+            alltrain = np.array(ABRAfile['timeseries']['channel0001']['timeseries'])
+            alltarget = np.array(ABRAfile['timeseries']['channel0002']['timeseries'])
+
+            # Reshape according to input_size from config
+            train_loader = alltrain.reshape(-1, 1, input_size)
+            target_loader = alltarget.reshape(-1, 1, input_size)
+
+            dim1 = train_loader.shape[0]
+            denoised = np.zeros((dim1, input_size), dtype=np.int8)
+            injected = np.zeros((dim1, input_size), dtype=np.int8)
+            bs = args.inference_batch_size
+
+            for i in tqdm(range(0, dim1, bs), desc=f"Inference ({args.mode})"):
+                batch_in  = train_loader[i:i+bs]
+                batch_tgt = target_loader[i:i+bs]
+                _, dn, ij = process_batch(i, batch_in, batch_tgt, model, args, current_loss_type)
+                actual_n = batch_in.shape[0]
+                denoised[i:i+actual_n] = dn.reshape(actual_n, input_size)
+                injected[i:i+actual_n] = ij.reshape(actual_n, input_size)
+
+        # 4. Save Output
+        idx_str = str(args.file_index).zfill(4)
+        out_dir = args.output_dir if args.output_dir else args.data_dir
+        if args.mode == 'fix':
+            out_name = os.path.join(out_dir, f"abra_validation_denoised_{args.denoising_model}_{idx_str}.h5")
+        else:
+            out_name = os.path.join(out_dir, f"abra_validation_denoised_{args.denoising_model}_{args.run_name}_{args.exp_id}_{idx_str}.h5")
+
+        # Clean up old files before writing new one
+        if os.path.exists(out_name):
+            os.remove(out_name)
+
+        create_abra_file(out_name, denoised.flatten().astype(np.int8), injected.flatten().astype(np.int8), indexed=False)
+        print(f"Inference complete. Saved to: {out_name}")
     
 if __name__ == "__main__":
     main()

@@ -486,25 +486,40 @@ sorted with no duplicates, same seed = identical results.
 
 ---
 
-### Phase 4: Training and inference with SampleSet
+### Phase 4: Training and inference with SampleSet — DONE
 
-**What:** Extend data loading (`TIDMADDataset`) and inference to accept a `SampleSet`
-specifying which segments from which files to process. When no `SampleSet` is provided,
-behavior is identical to today.
+**What:** Extend data loading, inference, and the sandbox executor to accept an optional
+`SampleSet`. When absent, all behavior is identical to before. When provided, training
+loads specific PSD segments from multiple files, and inference denoises only those
+segments, writing one H5 per file.
 
-**Files:**
-- `core/sandbox_executor.py` or `TIDMADDataset` — add optional `sample_set` parameter
-- `execute_tools/inference_single.py` — add optional segment-aware inference path
-- `execute_tools/train_engine_sandbox.py` — add optional segment-aware training path
+**Files changed:**
+- `execute_tools/train_engine_sandbox.py`:
+  - `TIDMADDataset`: added optional `sample_set` parameter and
+    `_pull_events_from_sample_set()` method. Each PSD segment (10M samples) is
+    subdivided into ML segments of `segmentation_size`. Normal mode path untouched.
+  - Added `--sample_set_json` CLI argument.
+- `execute_tools/inference_single.py`:
+  - Added `--sample_set_json` CLI argument. Trial mode loops over files in the
+    SampleSet, denoises only requested PSD segments, writes one H5 per file.
+    Normal mode path untouched.
+- `core/sandbox_executor.py`:
+  - `execute_training()` and `execute_inference()`: added optional `sample_set`
+    parameter. When provided, writes SampleSet to temp JSON and passes
+    `--sample_set_json` to the subprocess. When absent, identical to before.
 
 **Tests:**
-- Unit test: verify `TIDMADDataset` with `sample_set=None` returns same data as today
-- Unit test: verify `TIDMADDataset` with a `SampleSet` returns only the specified segments
-- Integration test (real data): training + inference on a small `SampleSet`, verify
-  output file contains only the expected segments
-- Regression: existing training/inference tests pass unchanged
+- No new unit tests — trial-mode data loading requires real HDF5 files.
+- All 572 existing unit tests pass unchanged (regression confirmed).
+- Real integration test deferred to Phase 5, where the full pipeline (build SampleSet
+  → train → infer → score) can be tested end-to-end.
 
-**Depends on:** Phase 3 (SampleSet builder).
+**Output convention:** trial-mode denoised files use the same naming as normal mode:
+`abra_validation_denoised_{model}_{run_name}_{exp_id}_{file_index:04d}.h5`.
+The `exp_id` is unique per experiment, and trial parameters are recorded in the
+`ExperimentRecord` — no separate naming needed.
+
+**Total unit tests after Phase 0–4:** 572 passed, 0 broken.
 
 ---
 

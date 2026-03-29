@@ -181,11 +181,18 @@ class TidmadSandbox:
         except Exception as e:
             raise ValueError(f"Experiment Configuration Rejected: {str(e)}")
 
-    def execute_training(self, exp_id: str, run_name: str, model_type: str, m_cfg: Dict, t_cfg: Dict, l_cfg: Dict):
-        """Executes the training physical script."""
+    def execute_training(self, exp_id: str, run_name: str, model_type: str, m_cfg: Dict, t_cfg: Dict, l_cfg: Dict,
+                         sample_set: Optional[Dict] = None):
+        """Executes the training physical script.
+
+        Args:
+            sample_set: Optional SampleSet dict for trial mode. When provided,
+                        a temp JSON file is written and passed via --sample_set_json,
+                        overriding --file_index in the subprocess.
+        """
         try:
             vm, vt, vl = self._validate_configs(model_type, m_cfg, t_cfg, l_cfg, exp_id, run_name)
-            
+
             paths = {
                 "m": os.path.abspath(os.path.join(self.dirs["configs"], f"model_config_{exp_id}.json")),
                 "t": os.path.abspath(os.path.join(self.dirs["configs"], f"train_config_{exp_id}.json")),
@@ -194,16 +201,25 @@ class TidmadSandbox:
             for k, v in zip(["m", "t", "l"], [vm, vt, vl]):
                 with open(paths[k], 'w') as f: json.dump(v, f)
 
-            print(f">>> [Executor] Running training for {exp_id}...")
-            result = subprocess.run(
-                    [sys.executable, "execute_tools/train_engine_sandbox.py",
+            cmd = [sys.executable, "execute_tools/train_engine_sandbox.py",
                     "--model_cfg", paths["m"],
                     "--train_cfg", paths["t"],
                     "--loss_cfg", paths["l"],
                     "--exp_id", exp_id,
                     "--run_name", run_name,
                     "--sandbox_dir", self.base_dir,
-                    "--file_index", str(self.file_index)],
+                    "--file_index", str(self.file_index)]
+
+            # Trial mode: write SampleSet to temp JSON and pass to subprocess
+            if sample_set is not None:
+                ss_path = os.path.abspath(os.path.join(self.dirs["configs"], f"sample_set_{exp_id}.json"))
+                with open(ss_path, 'w') as f:
+                    json.dump(sample_set, f)
+                cmd.extend(["--sample_set_json", ss_path])
+
+            print(f">>> [Executor] Running training for {exp_id}...")
+            result = subprocess.run(
+                    cmd,
                     check=True,
                     stdout=None if self.progress_bar else subprocess.PIPE,
                     stderr=subprocess.PIPE,
@@ -233,21 +249,38 @@ class TidmadSandbox:
         "transformer": 1,
     }
 
-    def execute_inference(self, exp_id: str, run_name: str, model_type: str, m_cfg: Dict, l_cfg: Dict):
-        """Executes the inference physical script."""
+    def execute_inference(self, exp_id: str, run_name: str, model_type: str, m_cfg: Dict, l_cfg: Dict,
+                          sample_set: Optional[Dict] = None):
+        """Executes the inference physical script.
+
+        Args:
+            sample_set: Optional SampleSet dict for trial mode. When provided,
+                        a temp JSON file is written and passed via --sample_set_json,
+                        overriding --file_index in the subprocess.
+        """
         m_path = os.path.abspath(os.path.join(self.dirs["configs"], f"model_config_{exp_id}.json"))
         l_path = os.path.abspath(os.path.join(self.dirs["configs"], f"loss_config_{exp_id}.json"))
         model_path = os.path.abspath(os.path.join(self.dirs["models"], f"model_{model_type}_{exp_id}_agent.pth"))
         inf_bs = str(self._INFERENCE_BATCH_SIZE.get(model_type, 25))
 
+        cmd = [sys.executable, "execute_tools/inference_single.py", "--mode", "agent", "-m", model_type,
+               "--model_cfg", m_path, "--loss_cfg", l_path,
+               "--model_path", model_path, "--exp_id", exp_id, "--run_name", run_name,
+               "--output_dir", self.base_dir, "--inference_batch_size", inf_bs,
+               "--file_index", str(self.file_index)]
+
+        # Trial mode: reuse the same SampleSet JSON written during training
+        if sample_set is not None:
+            ss_path = os.path.abspath(os.path.join(self.dirs["configs"], f"sample_set_{exp_id}.json"))
+            if not os.path.exists(ss_path):
+                with open(ss_path, 'w') as f:
+                    json.dump(sample_set, f)
+            cmd.extend(["--sample_set_json", ss_path])
+
         try:
             print(f">>> [Executor] Running inference for {exp_id}...")
             result = subprocess.run(
-                [sys.executable, "execute_tools/inference_single.py", "--mode", "agent", "-m", model_type,
-                 "--model_cfg", m_path, "--loss_cfg", l_path,
-                 "--model_path", model_path, "--exp_id", exp_id, "--run_name", run_name,
-                 "--output_dir", self.base_dir, "--inference_batch_size", inf_bs,
-                 "--file_index", str(self.file_index)],
+                cmd,
                 check=True,
                 stdout=None if self.progress_bar else subprocess.PIPE,
                 stderr=subprocess.PIPE,

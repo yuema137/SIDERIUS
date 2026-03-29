@@ -20,17 +20,38 @@ from loss_models_sandbox import get_criterion
 # ==========================================
 
 class TIDMADDataset(Dataset):
+    """
+    TIDMAD training dataset.
+
+    Supports two modes:
+      - **Normal mode** (default): load all segments from a single training file.
+        Pass ``fname_list=["abra_training_0006.h5"]``.
+      - **Trial mode**: load specific PSD segments from multiple training files.
+        Pass ``sample_set={file_index: [segment_indices], ...}`` and leave
+        ``fname_list`` empty.  Each PSD segment (10M samples) is subdivided
+        into ML segments of size ``segmentation_size``.
+    """
+
+    # Number of raw samples per PSD segment (1 second at 10 MS/s)
+    PSD_SEGMENT_LENGTH = 10_000_000
+
     def __init__(self, fpath: str, fname_list: list, segmentation_size: int,
-                 sample_size: int = 20, max_segments: int = None):
+                 sample_size: int = 20, max_segments: int = None,
+                 sample_set: dict = None):
         self.filepath = fpath
         self.filelist = fname_list if isinstance(fname_list, list) else [fname_list]
         self.seg_size = segmentation_size
         self.sample_size = sample_size
         self.max_segments = max_segments
+        self.sample_set = sample_set
         self.idict = {}
         self.tdict = {}
         self.class_count = torch.ones(256)
-        self.train_events = self.pull_event_from_dir(self.filelist)
+
+        if self.sample_set is not None:
+            self.train_events = self._pull_events_from_sample_set()
+        else:
+            self.train_events = self.pull_event_from_dir(self.filelist)
         self.size = len(self.train_events)
 
     def __len__(self): return self.size
@@ -47,6 +68,7 @@ class TIDMADDataset(Dataset):
         return weights
 
     def pull_event_from_dir(self, filelist):
+        """Original loading path: all segments from the given file(s)."""
         evlist = []
         for filename in tqdm(filelist, desc="Indexing H5 Data"):
             file_path = os.path.join(self.filepath, filename)
@@ -64,6 +86,60 @@ class TIDMADDataset(Dataset):
                 for i in range(num_segments): evlist.append((filename, i))
                 del alltrain, alltarget
                 gc.collect()
+        if self.max_segments is not None:
+            evlist = evlist[:self.max_segments]
+        return evlist
+
+    def _pull_events_from_sample_set(self):
+        """
+        Trial-mode loading: load specific PSD segments from multiple files.
+
+        Each PSD segment (10M samples) is subdivided into ML-level segments
+        of size ``self.seg_size``, producing ``PSD_SEGMENT_LENGTH // seg_size``
+        ML segments per PSD segment.
+        """
+        evlist = []
+        ml_segs_per_psd = self.PSD_SEGMENT_LENGTH // self.seg_size
+
+        for file_index, psd_segment_indices in sorted(self.sample_set.items()):
+            file_index = int(file_index)  # JSON keys may be strings
+            filename = f"abra_training_{file_index:04d}.h5"
+            file_path = os.path.join(self.filepath, filename)
+            if not os.path.exists(file_path):
+                print(f"Warning: {file_path} not found, skipping.")
+                continue
+
+            with h5py.File(file_path, 'r') as f:
+                raw_ch1 = np.array(f['timeseries']['channel0001']['timeseries']).astype(np.int8)
+                raw_ch2 = np.array(f['timeseries']['channel0002']['timeseries']).astype(np.int16)
+
+            # Extract only the requested PSD segments and reshape to ML segments
+            input_chunks = []
+            target_chunks = []
+            for psd_idx in psd_segment_indices:
+                start = psd_idx * self.PSD_SEGMENT_LENGTH
+                end = start + self.PSD_SEGMENT_LENGTH
+                chunk_ch1 = raw_ch1[start:end].reshape(ml_segs_per_psd, self.seg_size)
+                chunk_ch2 = raw_ch2[start:end].reshape(ml_segs_per_psd, self.seg_size).astype(np.int8)
+                input_chunks.append(chunk_ch1)
+                target_chunks.append(chunk_ch2)
+
+            if not input_chunks:
+                continue
+
+            input_arr = np.concatenate(input_chunks, axis=0)   # [N_ml_segs, seg_size]
+            target_arr = np.concatenate(target_chunks, axis=0)  # [N_ml_segs, seg_size]
+
+            self.idict[filename] = input_arr
+            self.tdict[filename] = target_arr
+            self.class_count += torch.Tensor(np.bincount(target_arr.flatten().astype(np.int16) + 128, minlength=256))
+
+            for i in range(len(input_arr)):
+                evlist.append((filename, i))
+
+            del raw_ch1, raw_ch2
+            gc.collect()
+
         if self.max_segments is not None:
             evlist = evlist[:self.max_segments]
         return evlist
@@ -164,6 +240,8 @@ def main():
     parser.add_argument("--exp_id", type=str, default="default_exp")
     parser.add_argument("--run_name", type=str,  default="test_run",
                         help="Run name for the auto-exploration.")
+    parser.add_argument("--sample_set_json", type=str, default=None,
+                        help="Path to SampleSet JSON for trial mode. Overrides --file_index.")
     args = parser.parse_args()
 
     # Define standard sandbox structure
@@ -189,7 +267,20 @@ def main():
     train_cfg = TrainConfig(**t_data)
     loss_cfg = LossConfig(**l_data)
 
-    dataset = TIDMADDataset(args.data_dir, [f"abra_training_{str(args.file_index).zfill(4)}.h5"], model_cfg.segmentation_size)
+    # Load sample set if provided (trial mode), otherwise use single file (normal mode)
+    sample_set = None
+    if args.sample_set_json:
+        with open(args.sample_set_json, 'r') as f:
+            sample_set = json.load(f)
+
+    if sample_set is not None:
+        dataset = TIDMADDataset(args.data_dir, [], model_cfg.segmentation_size,
+                                sample_set=sample_set)
+    else:
+        dataset = TIDMADDataset(args.data_dir,
+                                [f"abra_training_{str(args.file_index).zfill(4)}.h5"],
+                                model_cfg.segmentation_size)
+
     loader = DataLoader(dataset, batch_size=train_cfg.batch_size, shuffle=True, drop_last=True)
 
     results = run_experiment(model_cfg, train_cfg, loss_cfg, loader, sandbox_dirs, args.exp_id)
