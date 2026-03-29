@@ -12,7 +12,7 @@ Both are accepted wherever ExpertAdviceInput is used.
 from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 
@@ -114,6 +114,118 @@ class ExperimentRecord(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Experiment plan (validated output from brain.plan())
+# ---------------------------------------------------------------------------
+
+class ExperimentPlan(BaseModel):
+    """
+    Validated output from brain.plan() — one plan per round.
+
+    The LLM planner returns a raw dict with hyperparameter decisions and
+    (optionally) trial-mode parameters. This schema validates the output
+    and provides safe defaults when the LLM omits or returns invalid trial
+    fields.
+
+    The override chain applied by the agent loop after validation:
+      1. Expert constraint: if input says is_trial=False, force formal for all rounds.
+      2. Final-round constraint: last round is always formal (is_trial=False).
+
+    Note: ``model_config`` is a reserved attribute in Pydantic v2, so we use
+    ``model_cfg`` / ``train_cfg`` / ``loss_cfg`` as field names with
+    ``alias`` and ``populate_by_name=True`` so the LLM's JSON keys
+    (``model_config``, ``train_config``, ``loss_config``) are accepted.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    # --- Hyperparameter decisions ---
+    model_type: str = Field(
+        default="fcnet",
+        description="Architecture to use for this experiment.",
+    )
+    hypothesis: str = Field(
+        default="N/A",
+        description="Specific prediction for this experiment.",
+    )
+    reasoning: str = Field(
+        default="",
+        description="How this experiment aligns with expert advice and past memory.",
+    )
+    model_cfg: Dict[str, Any] = Field(
+        default_factory=dict,
+        alias="model_config",
+        description="Architecture-specific hyperparameters.",
+    )
+    train_cfg: Dict[str, Any] = Field(
+        default_factory=dict,
+        alias="train_config",
+        description="Training hyperparameters (lr, epochs, batch_size, device).",
+    )
+    loss_cfg: Dict[str, Any] = Field(
+        default_factory=dict,
+        alias="loss_config",
+        description="Loss function specification (loss_type, etc.).",
+    )
+
+    # --- Trial/formal decision (per-round) ---
+    is_trial: bool = Field(
+        default=True,
+        description="Whether this round uses trial (sparse) or formal (full) mode.",
+    )
+    trial_strategy: Literal["snapshot", "anchors", "target"] = Field(
+        default="snapshot",
+        description="Sampling strategy. Ignored when is_trial=False.",
+    )
+    trial_portion: float = Field(
+        default=0.02,
+        ge=0.01,
+        le=1.0,
+        description="Fraction of segments to sample per file. Ignored when is_trial=False.",
+    )
+    target_files: List[int] = Field(
+        default_factory=list,
+        description="File indices for 'target' strategy. Ignored otherwise.",
+    )
+    train_validation_align: bool = Field(
+        default=True,
+        description="Whether validation uses the same segments as training.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_target_files(self):
+        """target_files required when using trial target strategy."""
+        if self.is_trial and self.trial_strategy == "target" and not self.target_files:
+            raise ValueError(
+                "target_files required when is_trial=True and trial_strategy='target'."
+            )
+        return self
+
+    @classmethod
+    def with_defaults(cls, raw: Dict[str, Any]) -> "ExperimentPlan":
+        """
+        Validate raw LLM output, falling back to defaults on invalid trial fields.
+
+        If the full dict fails validation (e.g. trial_portion=5.0), strip the
+        trial fields and retry — preserving the LLM's experiment design while
+        falling back to safe trial defaults.
+        """
+        try:
+            return cls.model_validate(raw)
+        except Exception:
+            # Keep only experiment fields, let trial fields take defaults.
+            # Use alias names (model_config, train_config, loss_config) since
+            # that's what the LLM outputs.
+            _EXPERIMENT_KEYS = {
+                "model_type", "hypothesis", "reasoning",
+                "model_config", "train_config", "loss_config",
+            }
+            safe = {k: v for k, v in raw.items() if k in _EXPERIMENT_KEYS}
+            print(f"[ExperimentPlan] LLM returned invalid trial fields — "
+                  f"falling back to defaults. Kept keys: {list(safe.keys())}")
+            return cls.model_validate(safe)
+
+
+# ---------------------------------------------------------------------------
 # Agent input
 # ---------------------------------------------------------------------------
 
@@ -172,6 +284,15 @@ class HyperparamTuningInput(BaseModel):
         default=True,
         description="When True, validation uses the same segments as training. Only used when is_trial=True.",
     )
+
+    @model_validator(mode="after")
+    def _validate_trial_fields(self):
+        """Cross-field validation for trial mode parameters."""
+        if self.is_trial and self.trial_strategy == "target" and not self.target_files:
+            raise ValueError(
+                "target_files must be non-empty when is_trial=True and trial_strategy='target'."
+            )
+        return self
 
     # --- Guidance ---
     expert_advice: ExpertAdviceInput = Field(

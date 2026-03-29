@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from agent.schemas.hyperparam_tuning import (
     ExpertAdvice,
+    ExperimentPlan,
     HyperparamTuningInput,
     HyperparamTuningOutput,
     ExperimentRecord,
@@ -346,6 +347,22 @@ class TestTrialFieldsInput:
         with pytest.raises(ValidationError):
             HyperparamTuningInput.model_validate(valid_input_dict)
 
+    def test_target_strategy_empty_files_raises(self, valid_input_dict):
+        """target strategy with empty target_files should be caught at schema level."""
+        valid_input_dict["is_trial"] = True
+        valid_input_dict["trial_strategy"] = "target"
+        valid_input_dict["target_files"] = []
+        with pytest.raises(ValidationError, match="target_files must be non-empty"):
+            HyperparamTuningInput.model_validate(valid_input_dict)
+
+    def test_target_strategy_without_trial_mode_ok(self, valid_input_dict):
+        """target strategy is ignored when is_trial=False — no validation error."""
+        valid_input_dict["is_trial"] = False
+        valid_input_dict["trial_strategy"] = "target"
+        valid_input_dict["target_files"] = []
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        assert inp.is_trial is False
+
     def test_trial_portion_out_of_range_raises(self, valid_input_dict):
         valid_input_dict["trial_portion"] = 1.5
         with pytest.raises(ValidationError):
@@ -401,3 +418,122 @@ class TestTrialFieldsOutput:
         out = HyperparamTuningOutput.model_validate(valid_output_dict)
         assert out.best_file_vector[6] == 1.23
         assert len(out.best_file_vector) == 20
+
+
+# ---------------------------------------------------------------------------
+# ExperimentPlan validation
+# ---------------------------------------------------------------------------
+
+class TestExperimentPlan:
+    """Verify ExperimentPlan schema validates brain.plan() output correctly."""
+
+    def test_valid_full_plan(self):
+        """All fields present — validates correctly."""
+        plan = ExperimentPlan.model_validate({
+            "model_type": "punet",
+            "hypothesis": "Deeper architecture should help.",
+            "reasoning": "Previous runs showed depth matters.",
+            "model_config": {"depth": 4},
+            "train_config": {"lr": 1e-4, "epochs": 5},
+            "loss_config": {"loss_type": "focal"},
+            "is_trial": True,
+            "trial_strategy": "snapshot",
+            "trial_portion": 0.2,
+            "train_validation_align": False,
+        })
+        assert plan.model_type == "punet"
+        assert plan.is_trial is True
+        assert plan.trial_portion == 0.2
+        assert plan.train_validation_align is False
+
+    def test_defaults_when_trial_fields_omitted(self):
+        """Only experiment fields provided — trial fields get defaults."""
+        plan = ExperimentPlan.model_validate({
+            "model_type": "fcnet",
+            "model_config": {"depth": 2},
+            "train_config": {"lr": 1e-3},
+            "loss_config": {"loss_type": "ce"},
+        })
+        assert plan.is_trial is True  # default favors trial
+        assert plan.trial_strategy == "snapshot"
+        assert plan.trial_portion == 0.02
+        assert plan.target_files == []
+        assert plan.train_validation_align is True
+
+    def test_defaults_when_all_fields_omitted(self):
+        """Empty dict — all defaults apply."""
+        plan = ExperimentPlan.model_validate({})
+        assert plan.model_type == "fcnet"
+        assert plan.model_cfg == {}
+        assert plan.is_trial is True
+
+    def test_invalid_trial_portion_rejected(self):
+        """trial_portion=5.0 exceeds max — raises ValidationError."""
+        with pytest.raises(ValidationError):
+            ExperimentPlan.model_validate({
+                "model_type": "punet",
+                "trial_portion": 5.0,
+            })
+
+    def test_trial_portion_below_min_rejected(self):
+        """trial_portion=0.0 below min — raises ValidationError."""
+        with pytest.raises(ValidationError):
+            ExperimentPlan.model_validate({
+                "model_type": "punet",
+                "trial_portion": 0.0,
+            })
+
+    def test_with_defaults_fallback(self):
+        """Invalid trial fields stripped — experiment fields preserved."""
+        plan = ExperimentPlan.with_defaults({
+            "model_type": "punet",
+            "hypothesis": "Test hypothesis",
+            "model_config": {"depth": 4},
+            "train_config": {"lr": 1e-4},
+            "loss_config": {"loss_type": "focal"},
+            "trial_portion": 5.0,  # invalid
+        })
+        assert plan.model_type == "punet"
+        assert plan.hypothesis == "Test hypothesis"
+        assert plan.trial_portion == 0.02  # fell back to default
+
+    def test_with_defaults_preserves_valid(self):
+        """Valid input passes through with_defaults unchanged."""
+        plan = ExperimentPlan.with_defaults({
+            "model_type": "punet",
+            "trial_portion": 0.3,
+            "trial_strategy": "anchors",
+        })
+        assert plan.trial_portion == 0.3
+        assert plan.trial_strategy == "anchors"
+
+    def test_target_needs_files(self):
+        """target strategy + empty files → error."""
+        with pytest.raises(ValidationError, match="target_files required"):
+            ExperimentPlan.model_validate({
+                "is_trial": True,
+                "trial_strategy": "target",
+                "target_files": [],
+            })
+
+    def test_target_strategy_with_files(self):
+        plan = ExperimentPlan.model_validate({
+            "is_trial": True,
+            "trial_strategy": "target",
+            "target_files": [0, 10, 19],
+        })
+        assert plan.target_files == [0, 10, 19]
+
+    def test_formal_plan(self):
+        """is_trial=False validates without trial fields."""
+        plan = ExperimentPlan.model_validate({
+            "model_type": "punet",
+            "is_trial": False,
+        })
+        assert plan.is_trial is False
+
+    def test_invalid_strategy_rejected(self):
+        with pytest.raises(ValidationError):
+            ExperimentPlan.model_validate({
+                "trial_strategy": "nonexistent",
+            })
