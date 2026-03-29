@@ -364,3 +364,124 @@ class TestRealRunOpenAI:
         output = run_one_loop("openai", "rnn", cfg["loss_cfg"], str(tmp_path),
                               model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
         assert output.status == "completed"
+
+
+# ==========================================
+# Trial mode — end-to-end with real LLM + GPU
+# ==========================================
+
+ANCHOR_MAP_PATH = os.path.join(DATA_DIR, "segment_anchors.json")
+
+
+def _skip_if_no_anchor_map():
+    if not os.path.exists(ANCHOR_MAP_PATH):
+        pytest.skip(f"segment_anchors.json not found at {ANCHOR_MAP_PATH}")
+
+
+def run_trial_to_formal(provider: str, model_type: str, loss_cfg: dict, workspace: str,
+                        model_cfg: dict = None, train_cfg: dict = None,
+                        ) -> HyperparamTuningOutput:
+    """
+    Runs HyperparamTuningAgent.run() for 2 rounds in trial-allowed mode.
+
+    Round 1: LLM decides trial parameters (defaults to trial mode).
+    Round 2 (final): forced formal — all 20 files, all segments.
+
+    Expert advice forces the exact model/train/loss config so only the
+    trial/formal decision is left to the LLM.
+    """
+    run_name = f"trial_{provider}_{model_type}_{loss_cfg['loss_type']}_{int(time.time())}"
+
+    model_ids = {
+        "gemini": "gemini-3.1-flash-lite-preview",
+    }
+
+    m_cfg = model_cfg if model_cfg is not None else MODEL_CONFIGS[model_type]
+    t_cfg = train_cfg if train_cfg is not None else TRAIN_CONFIG
+
+    expert_advice = (
+        f"CRITICAL: You MUST use exactly this configuration for EVERY round. "
+        f"model_type: {model_type}. "
+        f"model_config: {m_cfg}. "
+        f"train_config: {t_cfg}. "
+        f"loss_config: {loss_cfg}. "
+        f"Do NOT deviate from these values. "
+        f"For trial parameters, you may choose freely."
+    )
+
+    agent_input = HyperparamTuningInput(
+        model_type=model_type,
+        max_rounds=2,
+        is_trial=True,
+        expert_advice=expert_advice,
+        llm_provider=provider,
+        llm_model_id=model_ids[provider],
+        storage=StorageConfig(
+            backend="local",
+            local=LocalStorageConfig(workspace=workspace, run_name=run_name),
+        ),
+        progress_bar=False,
+    )
+
+    agent = HyperparamTuningAgent()
+    output = agent.run(agent_input)
+
+    # --- Validate output against schema ---
+    assert isinstance(output, HyperparamTuningOutput)
+    HyperparamTuningOutput.model_validate(output.model_dump())
+
+    # --- Verify key fields ---
+    assert output.status in ("completed", "partial")
+    assert output.run_name == run_name
+    assert output.model_type == model_type
+
+    # --- Verify we got success records ---
+    success_records = [r for r in output.all_records if r.status == "success"]
+    assert len(success_records) >= 1, "Expected at least 1 successful experiment"
+
+    # --- All records should have file_vector (both trial and formal use score_vector) ---
+    for rec in success_records:
+        assert rec.file_vector is not None, f"{rec.exp_id} missing file_vector"
+        assert len(rec.file_vector) == 20, f"{rec.exp_id} file_vector not length 20"
+
+    # --- If 2 rounds completed, check trial→formal transition ---
+    if len(success_records) >= 2:
+        last_rec = success_records[-1]
+        # Final round should be formal (is_trial=False or absent)
+        assert last_rec.is_trial is False, (
+            f"Final round should be formal but got is_trial={last_rec.is_trial}"
+        )
+        # Formal round scores all 20 files — no NaN in file_vector
+        import math
+        non_nan = [v for v in last_rec.file_vector if not math.isnan(v)]
+        assert len(non_nan) == 20, (
+            f"Formal round should score all 20 files, got {len(non_nan)} non-NaN"
+        )
+
+    # --- Best file vector should be populated ---
+    assert output.best_file_vector is not None
+    assert len(output.best_file_vector) == 20
+
+    # --- Verify output file was written ---
+    output_path = os.path.join(workspace, f"run_output_{run_name}.json")
+    assert os.path.exists(output_path), f"Output file not found: {output_path}"
+
+    return output
+
+
+class TestTrialModeGemini:
+
+    def setup_method(self):
+        _skip_if_no_key("gemini")
+        _skip_if_no_data()
+        _skip_if_no_anchor_map()
+
+    def test_punet_trial_to_formal(self, tmp_path):
+        """2-round run: trial (round 1) → formal (round 2, forced by code)."""
+        cfg = FLEX_CONFIGS["punet"][0]
+        output = run_trial_to_formal(
+            "gemini", "punet", cfg["loss_cfg"], str(tmp_path),
+            model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"],
+        )
+        assert output.status == "completed"
+        assert output.completed_rounds == 2
