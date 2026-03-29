@@ -457,25 +457,32 @@ behavior change yet. Integration tests come at Phase 5 when the agent reads `is_
 
 ---
 
-### Phase 3: SampleSet builder
+### Phase 3: SampleSet builder — DONE
 
-**What:** Implement the sampling strategies that produce a `SampleSet` from trial
-parameters. This is a pure function: `(strategy, portion, target_files, n_segments_per_file) → SampleSet`.
+**What:** A pure function `build_sample_set()` that translates trial parameters into
+a concrete `SampleSet` (`dict[int, list[int]]` — file index → sorted segment indices).
+This is the single object passed to training, inference, and scoring.
 
-**Files:**
-- `execute_tools/sample_set_builder.py` (new) — `build_sample_set()` function
-  implementing snapshot, anchors, and target strategies
+**Inputs:** `is_trial`, `file_index`, `trial_strategy`, `trial_portion`, `target_files`,
+`seed`. These map directly to the `HyperparamTuningInput` fields from Phase 2 (except
+`seed`, which is controlled by the caller for `train_validation_align` behavior).
 
-**Tests:**
-- Unit test: for each strategy, verify:
-  - `snapshot`: all 20 files present, correct number of segments per file
-  - `anchors`: only files 0, 10, 19 present
-  - `target`: only specified files present
-  - Segment count matches `portion × total_segments` (within rounding)
-  - All segment indices are valid (0–199)
-  - Normal mode (single file_index): produces `{file_index: all_segments}`
+**Output:** `SampleSet` dict. Examples:
+- Normal mode: `{6: [0, 1, ..., 199]}`
+- Snapshot 10%: `{0: [6, 7, 8, ...], 1: [1, 6, 40, ...], ..., 19: [2, 17, ...]}`
+- Target [0,1,2,3] at 30%: `{0: [1, 6, 7, ...], 1: [8, 14, ...], ...}`
 
-**Depends on:** nothing — pure logic, no I/O.
+**Files created:**
+- `execute_tools/sample_set_builder.py` — `build_sample_set()` implementing all three
+  strategies (snapshot, anchors, target) plus normal mode. Pure function, deterministic
+  with seed, minimum 1 segment per file, no I/O.
+- `tests/unit/execute_tools/test_sample_set_builder.py` — 21 tests: normal mode (4),
+  snapshot (7), anchors (2), target (5), edge cases (3).
+
+**Verified interactively:** all modes produce correct file/segment counts, segments are
+sorted with no duplicates, same seed = identical results.
+
+**Total unit tests after Phase 0+1+2+3:** 572 passed, 0 broken.
 
 ---
 
