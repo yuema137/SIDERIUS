@@ -167,6 +167,7 @@ def score_segments(
     segment_indices: list[int],
     anchor_map: dict,
     s_max: float,
+    raw_data_dir: str | None = None,
 ) -> float:
     """
     Score specific segments of one denoised file using anchor-normalized weights.
@@ -175,16 +176,27 @@ def score_segments(
     multiplies by the pre-computed anchor weight ``anchor_snr / s_max``.
     Returns the mean of the weighted SNR values for this file.
 
+    **Trial-mode layout**: the denoised file contains only the requested
+    segments packed contiguously (original segment 185 may be stored at
+    local position 1). This function uses the local position to read from
+    the denoised file and the original segment index to read the raw file
+    and look up anchor weights.
+
     Args:
         data_dir:           Directory containing the denoised HDF5 file.
         denoised_filename:  Filename of the denoised file (e.g.
                             ``"abra_validation_denoised_punet_0006.h5"``).
         file_index:         Which validation file (0–19) this corresponds to.
-        segment_indices:    Which segments to score (0-based, within the file).
+        segment_indices:    Which segments to score (0-based, original indices
+                            within the full validation file). Order must match
+                            the packing order used by inference_single.py.
         anchor_map:         The ``"anchors"`` dict from ``segment_anchors.json``.
                             Keys are file indices as strings, values are lists
                             of per-segment CH2 SNR values.
         s_max:              Global maximum CH2 SNR from the anchor map.
+        raw_data_dir:       Directory containing the raw validation files
+                            (``abra_validation_XXXX.h5``). Defaults to
+                            ``data_dir`` when ``None``.
 
     Returns:
         The file-level score (weighted mean of denoised SNR for the sampled
@@ -193,17 +205,21 @@ def score_segments(
     if not segment_indices:
         return float("nan")
 
+    if raw_data_dir is None:
+        raw_data_dir = data_dir
+
     file_anchors = anchor_map[str(file_index)]
     weighted_snrs = []
 
-    for seg_idx in segment_indices:
-        # Compute denoised SNR (CH1) — use CH2 center freq from anchor
-        # We need the center freq from the raw validation file (CH2)
+    for local_idx, seg_idx in enumerate(segment_indices):
+        # CH2 center freq from raw validation file (use original segment index)
         raw_filename = f"abra_validation_{file_index:04d}.h5"
-        freq_ch2, psd_ch2 = get_one_sec_psd(data_dir, raw_filename, ch=2, start=seg_idx)
+        freq_ch2, psd_ch2 = get_one_sec_psd(raw_data_dir, raw_filename, ch=2, start=seg_idx)
         _, center_freq = get_snr(freq_ch2, psd_ch2)
 
-        freq_ch1, psd_ch1 = get_one_sec_psd(data_dir, denoised_filename, ch=1, start=seg_idx)
+        # CH1 SNR from denoised file (use local position — trial mode
+        # packs segments contiguously: original seg_idx → position local_idx)
+        freq_ch1, psd_ch1 = get_one_sec_psd(data_dir, denoised_filename, ch=1, start=local_idx)
         snr_squid = get_snr(freq_ch1, psd_ch1, target=center_freq)[0]
 
         # Anchor weight: pre-computed CH2 SNR / global max
@@ -219,12 +235,13 @@ def score_vector(
     anchor_map: dict,
     s_max: float,
     denoised_filename_fn: callable = None,
+    raw_data_dir: str | None = None,
 ) -> tuple[list[float], float]:
     """
     Score multiple files and return the length-20 score vector + scalar.
 
     Args:
-        data_dir:              Directory containing HDF5 files.
+        data_dir:              Directory containing the denoised HDF5 files.
         sample_set:            ``{file_index: [segment_indices]}`` — which
                                segments to score per file.
         anchor_map:            The ``"anchors"`` dict from ``segment_anchors.json``.
@@ -233,6 +250,9 @@ def score_vector(
                                Defaults to ``"abra_validation_denoised_{model}_{idx}.h5"``
                                pattern — but since the model name varies, the caller
                                should provide this.
+        raw_data_dir:          Directory containing the raw validation files
+                               (``abra_validation_XXXX.h5``). Defaults to
+                               ``data_dir`` when ``None``.
 
     Returns:
         (file_vector, final_scalar_score):
@@ -263,6 +283,7 @@ def score_vector(
             segment_indices=segment_indices,
             anchor_map=anchor_map,
             s_max=s_max,
+            raw_data_dir=raw_data_dir,
         )
 
     # Aggregate: mean of non-NaN entries
