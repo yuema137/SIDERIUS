@@ -430,29 +430,30 @@ rather than the file-local max (~9.3M), producing scores on a cross-file physica
 
 ---
 
-### Phase 2: Schema changes
+### Phase 2: Schema changes — DONE
 
 **What:** Extend `HyperparamTuningInput`, `ExperimentRecord`, and `HyperparamTuningOutput`
 with optional trial fields. All new fields have defaults that preserve current behavior.
 
-**Files:**
+**Files changed:**
 - `agent/schemas/hyperparam_tuning.py`:
-  - `HyperparamTuningInput`: add `is_trial`, `trial_portion`, `trial_strategy`,
-    `target_files`, `train_validation_align` (all optional with defaults)
-  - `ExperimentRecord`: add `is_trial`, `trial_strategy`, `trial_portion`,
-    `train_validation_align`, `target_files`, `file_vector` (all optional)
-  - `HyperparamTuningOutput`: add `best_file_vector: Optional[List[float]]`
-    alongside existing `best_denoising_score`
+  - `HyperparamTuningInput`: added 5 optional trial fields (`is_trial`, `trial_portion`,
+    `trial_strategy`, `target_files`, `train_validation_align`). All default to normal
+    mode — existing callers are unaffected.
+  - `ExperimentRecord`: added 6 optional trial context fields (`is_trial`,
+    `trial_strategy`, `trial_portion`, `train_validation_align`, `target_files`,
+    `file_vector`). All `None`/`False` by default.
+  - `HyperparamTuningOutput`: added `best_file_vector: Optional[List[float]] = None`.
+- `tests/unit/agent/tune_ml_hyperparam_agent/test_hyperparam_schemas.py`:
+  11 new tests covering backward compatibility, default values, trial-mode validation,
+  invalid strategy/portion rejection.
 
-**Tests:**
-- Unit test (`test_hyperparam_schemas.py`): verify:
-  - Existing inputs (no trial fields) still validate correctly
-  - New fields have correct defaults (`is_trial=False`, etc.)
-  - `ExperimentRecord` with trial fields validates
-  - `ExperimentRecord` without trial fields validates (backward compat)
-- Existing schema tests must all still pass unchanged.
+**All 28 existing schema tests pass unchanged. 39 total (28 + 11 new).**
 
-**Depends on:** nothing — pure schema, no runtime behavior change.
+**Note:** No real API call test added — trial fields are pure schema with no runtime
+behavior change yet. Integration tests come at Phase 5 when the agent reads `is_trial`.
+
+**Total unit tests after Phase 0+1+2:** 551 passed, 0 broken.
 
 ---
 
