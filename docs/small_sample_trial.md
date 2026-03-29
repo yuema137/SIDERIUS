@@ -385,44 +385,48 @@ fields are simply ignored.
 Phases are ordered by dependency. Each phase is independently testable and must not
 break existing behavior. After each phase, all existing tests must still pass.
 
-### Phase 0: Anchor map pre-computation
+### Phase 0: Anchor map pre-computation — DONE
 
 **What:** Build the `segment_anchors.json` file — the one-time pre-computation that
 scans all 20 raw validation files and produces per-segment CH2 SNR weights + global max.
 
-**Files:**
-- `execute_tools/build_anchor_map.py` (new) — standalone script using existing
-  `GetOneSecPSD()` and `getSNR()` from `denoising_score_single.py`
-- Output: `segment_anchors.json` in the data directory
+**Files created:**
+- `execute_tools/scoring_utils.py` — shared low-level functions (`get_one_sec_psd`,
+  `get_snr`, `find_peak`, `process_segment`) and constants (`SEGMENT_LENGTH`,
+  `SEGMENTS_PER_FILE`, `NUM_FILES`). Clean importable versions — the originals in
+  `denoising_score_single.py` are untouched.
+- `execute_tools/build_anchor_map.py` — `build_anchor_map()` for programmatic use,
+  `load_anchor_map()` for reading back, CLI for one-time generation.
+- `tests/unit/execute_tools/test_build_anchor_map.py` — 11 unit tests (mocked, no
+  real data needed).
 
-**Tests:**
-- Unit test: given synthetic SNR arrays, verify anchor map structure and `s_max` calculation
-- Integration test (real data, `@real_run`): run the script on actual TIDMAD files,
-  verify output has 20×200 entries and `s_max > 0`
-
-**Depends on:** nothing — can be built and tested independently.
+**Verified on real data:** ran on all 20 TIDMAD files, produced 78 KB JSON with 4000
+entries and `S_max = 295,715,731`.
 
 ---
 
-### Phase 1: New scoring functions
+### Phase 1: New scoring functions — DONE
 
-**What:** Add `score_segments()` and `score_vector()` to the scoring module. These use
-the anchor map for normalization instead of file-local normalization.
+**What:** Add `score_segments()` and `score_vector()` to `scoring_utils.py`. These use
+the pre-computed anchor map for normalization instead of file-local normalization.
 
-**Files:**
-- `execute_tools/denoising_score_single.py` — add new functions alongside existing ones.
-  `calculateBenchmark()` and the CLI block are untouched.
+**Design note:** new functions live in `scoring_utils.py` (not `denoising_score_single.py`)
+because that file's argparse runs at module level, making it un-importable.
+`denoising_score_single.py` and `calculateBenchmark()` are completely untouched.
 
-**Tests:**
-- Unit test: given a mock anchor map and mock SNR values, verify:
-  - `score_segments()` applies anchor weights correctly
-  - `score_vector()` returns length-20 list with NaN for excluded files
-  - `score_vector()` scalar matches manual calculation
-  - Existing `calculateBenchmark` still works (regression)
-- Integration test (real data, `@real_run`): run `score_vector()` on a real denoised
-  file with the real anchor map, verify non-empty results
+**Files changed:**
+- `execute_tools/scoring_utils.py` — added `score_segments()`, `score_vector()`, and
+  `SampleSet` type alias.
+- `tests/unit/execute_tools/test_scoring_utils.py` (new) — 11 unit tests covering
+  anchor weight application, averaging, NaN handling, scalar formula, edge cases.
 
-**Depends on:** Phase 0 (anchor map must exist).
+**Verified on real data:** scored file 6 (punet baseline denoised) with the real anchor
+map. Full-file anchor-normalized score: -0.2915. 10% sample (20 segments): -0.3670.
+The difference between the existing file-local score (1.7921) and anchor-normalized
+score (-0.2915) is expected — anchor normalization divides by the global S_max (~296M)
+rather than the file-local max (~9.3M), producing scores on a cross-file physical scale.
+
+**Total unit tests after Phase 0+1:** 540 passed (22 new), 0 broken.
 
 ---
 
