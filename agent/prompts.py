@@ -59,24 +59,44 @@ You can choose how much data to use for each experiment:
 - **Trial mode** (`is_trial=true`): Train and evaluate on a sparse sample of segments across
   multiple files. Fast iteration — use this for early exploration when you are still searching
   for good hyperparameters. Scores are anchor-normalized and comparable across runs.
-- **Formal mode** (`is_trial=false`): Train and evaluate on all data for a single file. Slower
-  but gives a definitive score. Use this when you have a promising config you want to validate.
+- **Formal mode** (`is_trial=false`): Train and evaluate on ALL segments across ALL 20 files.
+  Much slower but gives a definitive, comprehensive score. Use this when you have a promising
+  config and want to validate it on the full dataset.
 
 Trial strategies (only relevant when `is_trial=true`):
 - `"snapshot"`: Sample from all 20 validation files — broad generalization check.
 - `"anchors"`: Sample from files 0, 10, 19 only — quick extrema check.
 - `"target"`: Sample from specific files (provide `target_files`) — deep optimization of weak bands.
 
-`trial_portion` (0.01–1.0): fraction of segments per file for evaluation. Start small
-(0.02–0.1) for speed, increase (0.3–0.5) when narrowing in on a promising config.
+`trial_portion` (0.01–1.0): fraction of segments per file for the **training scope**.
+This determines how much data the model trains on. More data = better model but slower.
+Start small (0.02–0.05) for fast hyperparameter exploration. If scores are consistently
+poor, **increase trial_portion** (0.1–0.5) before changing hyperparameters — low scores
+often mean insufficient training data, not bad hyperparameters.
 
-`train_portion` (0.01–1.0): fraction of segments per file for training. Default 0.1.
-Training is always sparse — the published paper results used 10% subsampling.
-You rarely need to change this; focus on `trial_portion` for speed control.
+`eval_portion` (0.01–1.0): fraction of segments per file for **validation** (inference +
+scoring). Controls score fidelity. Can match trial_portion for fast checks, or be larger
+for more reliable scores. In formal mode this is always 1.0.
 
-When reviewing past experiments in Research Memory, check the `is_trial` and `file_vector`
-fields to understand what data each score was based on. Trial scores from different strategies
-or portions are comparable (anchor-normalized), but a formal score is always more definitive.
+`train_portion` (0.01–1.0): per-epoch subsample from the training scope. Default 0.1.
+Each epoch sees a different random 10% of the training scope. Over multiple epochs the
+model sees diverse data without loading everything at once.
+
+### DATA VOLUME AWARENESS — CRITICAL:
+- The baseline was trained on ALL segments (trial_portion=1.0). If your trial_portion is 0.05,
+  you are training on 20× less data. **Poor scores on sparse data do not mean the hyperparameters
+  are wrong** — they may mean the model needs more data.
+- **Before switching hyperparameters after poor results, consider increasing trial_portion.**
+  A 2× increase in trial_portion often helps more than changing loss_type or lr.
+- If 2+ consecutive rounds show no improvement despite hyperparameter changes, double your
+  trial_portion (e.g. 0.05 → 0.1 → 0.2).
+- When you find a config that works well on sparse data, increase eval_portion or switch to
+  formal mode to get a definitive score.
+
+When reviewing past experiments in Research Memory, check the `is_trial`, `trial_portion`,
+and `file_vector` fields to understand what data each score was based on. Trial scores from
+different strategies or portions are comparable (anchor-normalized), but scores from larger
+portions are more reliable. A formal score (eval_portion=1.0) is always the most definitive.
 
 ### OUTPUT REQUIREMENT:
 You must provide the next experiment setup in a strict JSON format.
@@ -227,13 +247,13 @@ def get_planner_user_prompt(
     "model_type": "punet | fcnet | transformer | wavenet | rnn",
     "reasoning": "How this experiment aligns with expert advice and past memory",
     "hypothesis": "Specific prediction for this run",
-    "is_trial": true,
+    "is_trial": "true | false (choose based on confidence in config)",
     "trial_strategy": "snapshot | anchors | target",
-    "trial_portion": 0.02,
-    "train_portion": 0.1,
+    "trial_portion": "0.02–1.0 (increase if scores are poor — more data helps)",
+    "train_portion": "0.1 (rarely change)",
     "eval_strategy": "snapshot | anchors | target",
-    "eval_portion": 0.02,
-    "train_validation_align": true,
+    "eval_portion": "0.02–1.0 (match trial_portion or larger for reliable scores)",
+    "train_validation_align": "true | false",
     "model_config": {{ ... }},
     "train_config": {{ "lr": ..., "epochs": ..., "batch_size": ..., "device": "cuda" }},
     "loss_config": {{ "loss_type": "ce/focal/smooth_l1", ... }}
