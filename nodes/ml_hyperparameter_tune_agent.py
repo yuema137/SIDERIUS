@@ -31,7 +31,49 @@ from agent.schemas.hyperparam_tuning import (
 )
 from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_utils import score_vector, SampleSet
+from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 from execute_tools.build_anchor_map import load_anchor_map
+
+
+def _validate_data_config(
+    trial_config: TrialConfig,
+    segmentation_size: int,
+    dataset_config=DATASET_CONFIG,
+) -> None:
+    """
+    Validate integer relationships between dataset, PSD segments, ML segments,
+    and sampling portions. Called in the agent loop where all configs converge.
+
+    Raises:
+        ValueError: If any constraint is violated.
+    """
+    psd = dataset_config.psd_segment_length
+    segs_per_file = dataset_config.segments_per_file
+
+    # 1. PSD segment must divide evenly into ML segments
+    if psd % segmentation_size != 0:
+        raise ValueError(
+            f"psd_segment_length ({psd}) must be divisible by "
+            f"segmentation_size ({segmentation_size}). "
+            f"Remainder: {psd % segmentation_size}."
+        )
+
+    # 2. trial_portion must produce at least 1 PSD segment per file
+    if trial_config.mode != "single_file":
+        eval_segs = max(1, round(trial_config.trial_portion * segs_per_file))
+        if eval_segs < 1:
+            raise ValueError(
+                f"trial_portion ({trial_config.trial_portion}) produces 0 segments "
+                f"from {segs_per_file} segments per file."
+            )
+
+        # 3. train_portion must produce at least 1 PSD segment from the scope
+        train_segs = max(1, round(trial_config.train_portion * eval_segs))
+        if train_segs < 1:
+            raise ValueError(
+                f"train_portion ({trial_config.train_portion}) of "
+                f"{eval_segs} scope segments produces 0 training segments."
+            )
 
 
 def _run_skill(skill_folder: str, sandbox: TidmadSandbox, **params) -> dict:
@@ -240,6 +282,9 @@ class HyperparamTuningAgent:
                     sampling_seed=sampling_seed,
                     train_base_seed=train_base_seed,
                 )
+
+                # Validate integer relationships between dataset, PSD, ML segments
+                _validate_data_config(trial_config, plan.model_cfg.get("segmentation_size", 10000))
 
                 # Build eval_sample_set = the data scope for this round.
                 # Training subsamples from this scope each epoch (train_portion).
