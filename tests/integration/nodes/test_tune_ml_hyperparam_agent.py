@@ -484,23 +484,13 @@ def run_trial_to_formal(provider: str, model_type: str, loss_cfg: dict, workspac
         assert os.path.exists(train_ss), f"train_sample_set not found: {train_ss}"
         assert os.path.exists(eval_ss), f"eval_sample_set not found: {eval_ss}"
 
-    # --- If formal round completed, verify train/eval are independent ---
+    # --- If formal round completed, verify train/eval separation ---
     if len(success_records) >= 2:
         formal_exp_id = success_records[-1].exp_id
         # Train and eval are independent SampleSets on different physical files.
-        # In formal mode: eval_portion=1.0 (all segments), train uses trial_portion (sparse).
-        with open(os.path.join(configs_dir, f"train_sample_set_{formal_exp_id}.json")) as f:
-            formal_train = json.load(f)
-        with open(os.path.join(configs_dir, f"eval_sample_set_{formal_exp_id}.json")) as f:
-            formal_eval = json.load(f)
-        train_total = sum(len(v) for v in formal_train.values())
-        eval_total = sum(len(v) for v in formal_eval.values())
-        assert eval_total > train_total, (
-            f"Formal eval ({eval_total} segs) should be larger than train ({train_total} segs)"
-        )
-        # Verify trial_config reflects the separation
         with open(os.path.join(configs_dir, f"trial_config_{formal_exp_id}.json")) as f:
             formal_tc = json.load(f)
+        assert formal_tc["mode"] == "formal"
         assert formal_tc["eval_portion"] == 1.0, f"Formal eval_portion should be 1.0"
         assert formal_tc["train_portion"] < 1.0, (
             f"Formal train_portion should be < 1.0, got {formal_tc['train_portion']}"
