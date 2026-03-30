@@ -144,6 +144,55 @@ class TIDMADDataset(Dataset):
             evlist = evlist[:self.max_segments]
         return evlist
 
+class TIDMADSingleFileDataset(Dataset):
+    """
+    Lightweight dataset that loads segments from ONE HDF5 file.
+
+    Created and destroyed per file per epoch in the streaming training loop.
+    Uses HDF5 direct slicing — never loads the full 2 GB file into memory.
+
+    Peak memory: ``len(psd_segment_indices) * PSD_SEGMENT_LENGTH / seg_size * seg_size``
+    bytes per channel. E.g. 20 PSD segments × 10M / 10000 × 10000 = 200 MB.
+    """
+
+    PSD_SEGMENT_LENGTH = 10_000_000
+
+    def __init__(self, file_path: str, psd_segment_indices: list[int], seg_size: int):
+        """
+        Args:
+            file_path:            Path to a single HDF5 training file.
+            psd_segment_indices:  Which PSD segments (0-based) to load from this file.
+            seg_size:             ML segmentation size (e.g. 10000).
+        """
+        ml_segs_per_psd = self.PSD_SEGMENT_LENGTH // seg_size
+        chunks_ch1, chunks_ch2 = [], []
+
+        with h5py.File(file_path, 'r') as f:
+            ch1 = f['timeseries']['channel0001']['timeseries']
+            ch2 = f['timeseries']['channel0002']['timeseries']
+            for psd_idx in psd_segment_indices:
+                start = psd_idx * self.PSD_SEGMENT_LENGTH
+                end = start + self.PSD_SEGMENT_LENGTH
+                chunks_ch1.append(
+                    np.array(ch1[start:end], dtype=np.int8).reshape(ml_segs_per_psd, seg_size)
+                )
+                chunks_ch2.append(
+                    np.array(ch2[start:end], dtype=np.int8).reshape(ml_segs_per_psd, seg_size)
+                )
+
+        self.inputs = np.concatenate(chunks_ch1, axis=0)
+        self.targets = np.concatenate(chunks_ch2, axis=0)
+
+    def __len__(self):
+        return len(self.inputs)
+
+    def __getitem__(self, idx):
+        return (
+            self.inputs[idx].astype(np.int16) + 128,
+            self.targets[idx].astype(np.int16) + 128,
+        )
+
+
 # ==========================================
 # 2. Refactored Training Engine
 # ==========================================
@@ -225,6 +274,127 @@ def run_experiment(model_cfg, train_cfg: TrainConfig, loss_cfg: LossConfig, data
     gc.collect()
     return summary
 
+
+def run_experiment_streaming(
+    model_cfg,
+    train_cfg: TrainConfig,
+    loss_cfg: LossConfig,
+    sample_set: dict,
+    data_dir: str,
+    sandbox_dirs: dict,
+    exp_id: str,
+):
+    """
+    Streaming training: process one file at a time, never hold multiple files in RAM.
+
+    Follows the legacy ``train.py`` pattern: for each epoch, iterate through files
+    in shuffled order, load one file's segments, train on them, free memory, move
+    to the next file. Model weights carry over across files.
+
+    Args:
+        model_cfg:    Pydantic model config.
+        train_cfg:    Pydantic training config.
+        loss_cfg:     Pydantic loss config.
+        sample_set:   ``{file_index: [segment_indices]}`` — training data to use.
+        data_dir:     Directory containing ``abra_training_XXXX.h5`` files.
+        sandbox_dirs: ``{"models": ..., "results": ...}`` for saving outputs.
+        exp_id:       Experiment identifier for file naming.
+    """
+    import random
+
+    device = torch.device(train_cfg.device if torch.cuda.is_available() else "cpu")
+    seg_size = model_cfg.segmentation_size
+
+    # Model initialization (once)
+    model_class = MODEL_REGISTRY.get(model_cfg.model_type)
+    if model_class is None:
+        raise ValueError(f"Model type {model_cfg.model_type} not found in MODEL_REGISTRY")
+
+    if model_cfg.model_type == "fcnet":
+        model = model_class(model_cfg, loss_type=loss_cfg.loss_type).to(device)
+    else:
+        model = model_class(model_cfg).to(device)
+
+    # Criterion — no class weights in streaming mode (matches legacy train.py)
+    criterion = get_criterion(loss_cfg, class_weights=None)
+
+    # Optimizer (once)
+    if train_cfg.optimizer_type == "adamw":
+        optimizer = torch.optim.AdamW(model.parameters(), lr=train_cfg.lr, weight_decay=train_cfg.weight_decay)
+    elif train_cfg.optimizer_type == "adam":
+        optimizer = torch.optim.Adam(model.parameters(), lr=train_cfg.lr)
+    else:
+        optimizer = torch.optim.SGD(model.parameters(), lr=train_cfg.lr)
+
+    file_keys = list(sample_set.keys())
+    history = []
+
+    for ep in range(train_cfg.epochs):
+        model.train()
+        batch_losses = []
+        random.shuffle(file_keys)
+
+        for file_key in file_keys:
+            file_index = int(file_key)
+            file_path = os.path.join(data_dir, f"abra_training_{file_index:04d}.h5")
+            if not os.path.exists(file_path):
+                print(f"Warning: {file_path} not found, skipping.")
+                continue
+
+            segments = sample_set[file_key]
+            dataset = TIDMADSingleFileDataset(file_path, segments, seg_size)
+            loader = DataLoader(dataset, batch_size=train_cfg.batch_size,
+                                shuffle=True, drop_last=True)
+
+            for input_batch, target_batch in tqdm(
+                loader,
+                desc=f"Epoch {ep} | File {file_index:04d} ({len(segments)} PSD segs)",
+                file=sys.stdout,
+            ):
+                input_seq = input_batch.to(device)
+                target_seq = target_batch.to(device)
+
+                if model_cfg.model_type == "fcnet":
+                    input_seq = input_seq.float()
+                else:
+                    input_seq = input_seq.int()
+
+                if loss_cfg.loss_type in ["ce", "focal", "focal_cw"]:
+                    target_seq = target_seq.long()
+                else:
+                    target_seq = target_seq.float()
+
+                optimizer.zero_grad()
+                output = model(input_seq)
+                loss = criterion(output, target_seq)
+                loss.backward()
+                optimizer.step()
+                batch_losses.append(loss.item())
+
+            del dataset, loader
+            gc.collect()
+
+        avg_loss = np.mean(batch_losses) if batch_losses else float("nan")
+        history.append(float(avg_loss))
+        print(f"Epoch {ep} | Avg Loss: {avg_loss:.6f}")
+
+    # Result summary
+    summary = {
+        "final_loss": history[-1] if history else float("nan"),
+        "loss_history": history,
+        "model_params": sum(p.numel() for p in model.parameters() if p.requires_grad),
+    }
+
+    save_path = os.path.join(sandbox_dirs["models"], f"model_{model_cfg.model_type}_{exp_id}_agent.pth")
+    torch.save(model.state_dict(), save_path)
+    print(f"Model saved to: {save_path}")
+
+    del model, optimizer, criterion
+    torch.cuda.empty_cache()
+    gc.collect()
+    return summary
+
+
 # ==========================================
 # 3. Main Entry Point
 # ==========================================
@@ -267,23 +437,28 @@ def main():
     train_cfg = TrainConfig(**t_data)
     loss_cfg = LossConfig(**l_data)
 
-    # Load sample set if provided (trial mode), otherwise use single file (normal mode)
+    # Load sample set if provided, otherwise use single file (normal mode)
     sample_set = None
     if args.sample_set_json:
         with open(args.sample_set_json, 'r') as f:
             sample_set = json.load(f)
 
     if sample_set is not None:
-        dataset = TIDMADDataset(args.data_dir, [], model_cfg.segmentation_size,
-                                sample_set=sample_set)
+        # Streaming mode: one file at a time, memory-efficient
+        results = run_experiment_streaming(
+            model_cfg, train_cfg, loss_cfg,
+            sample_set=sample_set,
+            data_dir=args.data_dir,
+            sandbox_dirs=sandbox_dirs,
+            exp_id=args.exp_id,
+        )
     else:
+        # Legacy single-file mode: pre-load entire file into TIDMADDataset
         dataset = TIDMADDataset(args.data_dir,
                                 [f"abra_training_{str(args.file_index).zfill(4)}.h5"],
                                 model_cfg.segmentation_size)
-
-    loader = DataLoader(dataset, batch_size=train_cfg.batch_size, shuffle=True, drop_last=True)
-
-    results = run_experiment(model_cfg, train_cfg, loss_cfg, loader, sandbox_dirs, args.exp_id)
+        loader = DataLoader(dataset, batch_size=train_cfg.batch_size, shuffle=True, drop_last=True)
+        results = run_experiment(model_cfg, train_cfg, loss_cfg, loader, sandbox_dirs, args.exp_id)
     
     # Save final JSON
     final_res_dir = os.path.join(sandbox_dirs['results'], args.run_name)
