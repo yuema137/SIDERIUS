@@ -421,3 +421,67 @@ class TestDynamicTrialFormal:
         # max_rounds=1 → final round → formal anyway, but should not crash
         output = agent.run(_make_trial_input(tmp_path, max_rounds=1, is_trial=True))
         assert output.status == "completed"
+
+    def test_trial_config_written(self, agent_and_mocks, tmp_path):
+        """Verify trial_config_{exp_id}.json is written with correct fields."""
+        agent, mock_brain, mock_sandbox, _ = agent_and_mocks
+        configs_dir = mock_sandbox.dirs["configs"]
+        agent.run(_make_trial_input(tmp_path, max_rounds=1, is_trial=True))
+        # Find the trial_config file
+        trial_configs = [f for f in os.listdir(configs_dir) if f.startswith("trial_config_")]
+        assert len(trial_configs) >= 1, "trial_config file not written"
+        with open(os.path.join(configs_dir, trial_configs[0])) as f:
+            tc = json.load(f)
+        assert "is_trial" in tc
+        assert "mode" in tc
+        assert "train_portion" in tc
+
+    def test_inference_receives_eval_sample_set(self, agent_and_mocks, tmp_path):
+        """Verify inference skill receives eval_sample_set, not train sample_set."""
+        agent, _, _, _ = agent_and_mocks
+        skill_calls = []
+        original_mock = _mock_run_skill
+
+        def tracking_mock(skill_folder, sandbox, **params):
+            skill_calls.append((skill_folder, params))
+            return original_mock(skill_folder, sandbox, **params)
+
+        with patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=tracking_mock):
+            agent.run(_make_trial_input(tmp_path, max_rounds=1, is_trial=True))
+
+        # Find inference call
+        inference_calls = [(f, p) for f, p in skill_calls if f == "inference_skill"]
+        assert len(inference_calls) >= 1, "inference_skill not called"
+        inf_params = inference_calls[0][1]
+        assert "eval_sample_set" in inf_params, "eval_sample_set not passed to inference"
+
+    def test_formal_round_splits_train_eval(self, agent_and_mocks, tmp_path):
+        """Formal round: train_sample_set should be sparse, eval_sample_set should be full."""
+        agent, _, _, _ = agent_and_mocks
+        skill_calls = []
+        original_mock = _mock_run_skill
+
+        def tracking_mock(skill_folder, sandbox, **params):
+            skill_calls.append((skill_folder, params))
+            return original_mock(skill_folder, sandbox, **params)
+
+        with patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=tracking_mock), \
+             patch("nodes.ml_hyperparameter_tune_agent.build_sample_set") as mock_build:
+            # build_sample_set called with different portions for train vs eval
+            call_count = [0]
+            def fake_build(**kwargs):
+                call_count[0] += 1
+                # Return a minimal valid-looking SampleSet
+                return {0: [0, 1], 6: [0, 1]}
+            mock_build.side_effect = fake_build
+
+            agent.run(_make_trial_input(tmp_path, max_rounds=1, is_trial=True))
+
+            # Final round (max_rounds=1) → formal mode → build_sample_set called twice:
+            # once for train (train_portion), once for eval (portion=1.0)
+            build_calls = mock_build.call_args_list
+            assert len(build_calls) == 2, f"Expected 2 build_sample_set calls for formal, got {len(build_calls)}"
+            # First call: train (portion = train_portion default 0.1)
+            assert build_calls[0].kwargs.get("trial_portion") == 0.1
+            # Second call: eval (portion = 1.0)
+            assert build_calls[1].kwargs.get("trial_portion") == 1.0

@@ -67,8 +67,12 @@ Trial strategies (only relevant when `is_trial=true`):
 - `"anchors"`: Sample from files 0, 10, 19 only — quick extrema check.
 - `"target"`: Sample from specific files (provide `target_files`) — deep optimization of weak bands.
 
-`trial_portion` (0.01–1.0): fraction of segments per file. Start small (0.05–0.1) for speed,
-increase (0.3–0.5) when narrowing in on a promising config.
+`trial_portion` (0.01–1.0): fraction of segments per file for evaluation. Start small
+(0.02–0.1) for speed, increase (0.3–0.5) when narrowing in on a promising config.
+
+`train_portion` (0.01–1.0): fraction of segments per file for training. Default 0.1.
+Training is always sparse — the published paper results used 10% subsampling.
+You rarely need to change this; focus on `trial_portion` for speed control.
 
 When reviewing past experiments in Research Memory, check the `is_trial` and `file_vector`
 fields to understand what data each score was based on. Trial scores from different strategies
@@ -226,6 +230,7 @@ def get_planner_user_prompt(
     "is_trial": true,
     "trial_strategy": "snapshot | anchors | target",
     "trial_portion": 0.02,
+    "train_portion": 0.1,
     "model_config": {{ ... }},
     "train_config": {{ "lr": ..., "epochs": ..., "batch_size": ..., "device": "cuda" }},
     "loss_config": {{ "loss_type": "ce/focal/smooth_l1", ... }}

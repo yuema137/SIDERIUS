@@ -12,5 +12,5 @@ def run_skill(sandbox: TidmadSandbox, **kwargs):
         model_type=kwargs["model_type"],
         m_cfg=kwargs["model_config"],
         l_cfg=kwargs["loss_config"],
-        sample_set=kwargs.get("sample_set"),
+        sample_set=kwargs.get("eval_sample_set"),
     )

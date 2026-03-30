@@ -27,6 +27,7 @@ from agent.schemas.hyperparam_tuning import (
     ExperimentRecord,
     ExperimentPlan,
     ExpertAdvice,
+    TrialConfig,
 )
 from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_utils import score_vector, SampleSet
@@ -208,33 +209,62 @@ class HyperparamTuningAgent:
                 if is_last_needed_round:
                     plan.is_trial = False
 
-                # Build per-round SampleSet
-                # trial_allowed=True:
-                #   Trial rounds → sparse SampleSet per plan's strategy/portion.
-                #   Formal rounds (final) → full SampleSet (all 20 files × 200 segments).
-                # trial_allowed=False (legacy):
-                #   No SampleSet — single-file mode using file_index.
+                # Build and validate TrialConfig from plan + overrides
                 if plan.is_trial:
-                    sample_set = build_sample_set(
-                        is_trial=True,
-                        trial_strategy=plan.trial_strategy,
-                        trial_portion=plan.trial_portion,
-                        target_files=plan.target_files or None,
-                    )
-                    print(f"  Trial mode: strategy={plan.trial_strategy} "
-                          f"| portion={plan.trial_portion} "
-                          f"| files={sorted(sample_set.keys())}")
+                    mode = "trial"
                 elif trial_allowed:
-                    # Formal round within a trial-allowed run: full 20-file evaluation
-                    sample_set = build_sample_set(
+                    mode = "formal"
+                else:
+                    mode = "single_file"
+
+                trial_config = TrialConfig(
+                    is_trial=plan.is_trial,
+                    mode=mode,
+                    trial_strategy=plan.trial_strategy if plan.is_trial else "snapshot",
+                    trial_portion=plan.trial_portion,
+                    train_portion=plan.train_portion,
+                    train_validation_align=plan.train_validation_align,
+                    target_files=plan.target_files if plan.is_trial else [],
+                    file_index=file_index if mode == "single_file" else None,
+                )
+
+                # Build per-round train and eval SampleSets from validated TrialConfig
+                if trial_config.mode == "trial":
+                    eval_sample_set = build_sample_set(
+                        is_trial=True,
+                        trial_strategy=trial_config.trial_strategy,
+                        trial_portion=trial_config.trial_portion,
+                        target_files=trial_config.target_files or None,
+                    )
+                    if trial_config.train_validation_align:
+                        train_sample_set = eval_sample_set
+                    else:
+                        train_sample_set = build_sample_set(
+                            is_trial=True,
+                            trial_strategy=trial_config.trial_strategy,
+                            trial_portion=trial_config.train_portion,
+                            target_files=trial_config.target_files or None,
+                        )
+                    print(f"  Trial mode: strategy={trial_config.trial_strategy} "
+                          f"| eval_portion={trial_config.trial_portion} "
+                          f"| train_portion={trial_config.train_portion} "
+                          f"| files={sorted(eval_sample_set.keys())}")
+                elif trial_config.mode == "formal":
+                    train_sample_set = build_sample_set(
+                        is_trial=True,
+                        trial_strategy="snapshot",
+                        trial_portion=trial_config.train_portion,
+                    )
+                    eval_sample_set = build_sample_set(
                         is_trial=True,
                         trial_strategy="snapshot",
                         trial_portion=1.0,
                     )
-                    print(f"  Formal mode: all 20 files, all segments")
+                    print(f"  Formal mode: train_portion={trial_config.train_portion} "
+                          f"| eval=all 20 files, all segments")
                 else:
-                    # Legacy single-file mode (trial_allowed=False)
-                    sample_set = None
+                    train_sample_set = None
+                    eval_sample_set = None
                     print(f"  Legacy mode: file_index={file_index}")
 
                 # When force_model is set, override the LLM's model_type choice.
@@ -249,42 +279,26 @@ class HyperparamTuningAgent:
                 print(f"Hypothesis: {hypothesis}")
                 print(f"Reasoning: {plan.reasoning or 'No reasoning provided.'}")
 
-                # Save trial_config — always written, makes the mode explicit
-                trial_config = {
-                    "is_trial": plan.is_trial,
-                    "mode": "trial" if plan.is_trial else ("formal" if trial_allowed else "single_file"),
-                }
-                if plan.is_trial:
-                    trial_config["trial_strategy"] = plan.trial_strategy
-                    trial_config["trial_portion"] = plan.trial_portion
-                    trial_config["train_validation_align"] = plan.train_validation_align
-                    if plan.trial_strategy == "target":
-                        trial_config["target_files"] = plan.target_files
-                elif trial_allowed:
-                    # Formal round: full 20-file evaluation
-                    trial_config["trial_strategy"] = "snapshot"
-                    trial_config["trial_portion"] = 1.0
-                else:
-                    # Legacy single-file mode
-                    trial_config["file_index"] = file_index
+                # Save validated TrialConfig
                 trial_config_path = os.path.join(
                     sandbox.dirs["configs"], f"trial_config_{exp_id}.json"
                 )
                 with open(trial_config_path, "w", encoding="utf-8") as f:
-                    json.dump(trial_config, f, indent=2)
+                    json.dump(trial_config.model_dump(), f, indent=2)
 
                 # C. ACT: Execute the Atomic Skill Pipeline (Train -> Inf -> Score)
                 model_config = plan.model_cfg.copy()
                 # Ensure model_config.model_type matches the forced model type
                 model_config["model_type"] = model_type
                 active_params = {
-                    "exp_id":       exp_id,
-                    "run_name":     run_name,
-                    "model_type":   model_type,
-                    "model_config": model_config,
-                    "train_config": plan.train_cfg,
-                    "loss_config":  plan.loss_cfg,
-                    "sample_set":   sample_set,
+                    "exp_id":           exp_id,
+                    "run_name":         run_name,
+                    "model_type":       model_type,
+                    "model_config":     model_config,
+                    "train_config":     plan.train_cfg,
+                    "loss_config":      plan.loss_cfg,
+                    "sample_set":       train_sample_set,    # training
+                    "eval_sample_set":  eval_sample_set,     # inference + scoring
                 }
 
                 print(f"\n[Step 0/3] Resource check...")
@@ -344,7 +358,7 @@ class HyperparamTuningAgent:
                         return f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_{fi:04d}.h5"
                     file_vector, final_scalar = score_vector(
                         data_dir=sandbox.base_dir,
-                        sample_set=sample_set,
+                        sample_set=eval_sample_set,
                         anchor_map=anchor_map_data["anchors"],
                         s_max=anchor_map_data["s_max"],
                         denoised_filename_fn=_denoised_fn,
@@ -481,13 +495,14 @@ class HyperparamTuningAgent:
                 # Trial/formal context — recorded per-round from the plan.
                 # Both modes produce a file_vector via score_vector().
                 final_record["file_vector"] = combined_results.get("file_vector")
-                if plan.is_trial:
+                if trial_config.is_trial:
                     final_record["is_trial"] = True
-                    final_record["trial_strategy"] = plan.trial_strategy
-                    final_record["trial_portion"] = plan.trial_portion
-                    final_record["train_validation_align"] = plan.train_validation_align
-                    if plan.trial_strategy == "target":
-                        final_record["target_files"] = plan.target_files
+                    final_record["trial_strategy"] = trial_config.trial_strategy
+                    final_record["trial_portion"] = trial_config.trial_portion
+                    final_record["train_portion"] = trial_config.train_portion
+                    final_record["train_validation_align"] = trial_config.train_validation_align
+                    if trial_config.trial_strategy == "target":
+                        final_record["target_files"] = trial_config.target_files
 
                 ExperimentRecord.model_validate(final_record)
                 sandbox.save_record(final_record)
