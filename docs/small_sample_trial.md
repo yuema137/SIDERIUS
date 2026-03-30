@@ -1,6 +1,6 @@
 # Proposal: Physics-Anchored Multi-Fidelity Tuning for TIDMAD
 
-## Status: Phase 4b implementation in progress — streaming data loader + train/eval split
+## Status: Phase 4b complete — streaming data loader + train/eval split with cross-file shuffling
 
 ---
 
@@ -731,7 +731,7 @@ Key differences from current `TIDMADDataset`:
 - No `class_count` accumulation across files — `class_weights` for focal loss must
   be handled differently (pre-computed or accumulated incrementally).
 
-#### Implementation status — IN PROGRESS
+#### Implementation status — DONE
 
 **Completed:**
 
@@ -739,61 +739,114 @@ Key differences from current `TIDMADDataset`:
   - `TIDMADSingleFileDataset`: lightweight per-file dataset with HDF5 direct slicing.
     Reads only requested PSD segments via `h5f[...][start:end]`, never the full 2 GB
     file. Stores both channels as `int8`.
-  - `run_experiment_streaming()`: file-streaming epoch loop. For each epoch, shuffles
-    file order, creates a `TIDMADSingleFileDataset` + `DataLoader` per file, trains,
-    frees, moves to next. Model/optimizer/criterion created once before the loop.
-    No class weights (matches legacy `train.py`).
+  - `TIDMADEpochDataset`: multi-file dataset that loads subsampled segments from all
+    files in the scope. Created fresh each epoch with a different random subsample
+    (seeded by `hash(exp_id) + epoch` for reproducibility). Enables cross-file
+    shuffling via `DataLoader(shuffle=True)`. `freeze_subsample=True` option uses
+    the same seed every epoch for controlled experiments.
+  - `run_experiment_streaming()`: each epoch builds a `TIDMADEpochDataset` with
+    `train_portion` of the scope, trains on it with global cross-file shuffling,
+    frees before next epoch. Model/optimizer/criterion created once.
   - `main()`: dispatches to `run_experiment_streaming()` when `sample_set` is provided,
-    legacy `run_experiment()` + `TIDMADDataset` when not.
+    legacy `run_experiment()` + `TIDMADDataset` when not. CLI args: `--train_portion`,
+    `--freeze_subsample`.
   - Existing `TIDMADDataset` and `run_experiment()` preserved for legacy single-file mode.
 - `agent/schemas/hyperparam_tuning.py`:
+  - `TrialConfig`: validated trial/formal config per round. `trial_portion` defines
+    the data scope (eval), `train_portion` controls per-epoch training subsample.
+    `train_validation_align` removed (train is always a per-epoch subsample of eval).
   - `train_portion` added to `ExperimentPlan` (default 0.1), `HyperparamTuningInput`
     (default 0.1), and `ExperimentRecord` (optional, trial context).
+  - `validate_sample_set()`: lightweight validator at serialization boundary.
 - `nodes/ml_hyperparameter_tune_agent.py`:
-  - Agent loop builds `train_sample_set` and `eval_sample_set` per round.
-  - Trial aligned: `train_sample_set == eval_sample_set`.
-  - Trial unaligned: different seeds/portions for train vs eval.
-  - Formal: `train_sample_set` sparse (train_portion), `eval_sample_set` full (1.0).
-  - `active_params` carries both: `sample_set` (train) and `eval_sample_set` (eval).
-  - `trial_config` includes `train_portion`.
+  - Agent loop builds one `eval_sample_set` (data scope) per round. Training receives
+    the same scope + `train_portion` for per-epoch subsampling.
+  - `active_params` carries `sample_set` (scope), `train_portion`, and `eval_sample_set`.
+  - `trial_config` serialized via `TrialConfig.model_dump()`.
   - Scoring uses `eval_sample_set`.
+- `core/sandbox_executor.py`:
+  - `execute_training()`: passes `train_portion` and `train_base_seed` to subprocess,
+    validates SampleSet.
+  - `execute_inference()`: validates and writes `model_config`/`loss_config` (self-contained),
+    validates SampleSet. Separate files: `train_sample_set_{exp_id}.json`,
+    `eval_sample_set_{exp_id}.json`.
+- `agent/skills/training_skill/wrapper.py`: passes `train_portion` and `train_base_seed`.
 - `agent/skills/inference_skill/wrapper.py`: uses `eval_sample_set` key.
 - `agent/prompts.py`: `train_portion` in OUTPUT FORMAT and TRIAL vs FORMAL MODE section.
-- All 611 unit tests pass (0 broken).
+- `execute_tools/scoring_utils.py`: `score_vector()` parallelized with
+  `ProcessPoolExecutor` (8 workers, ~3x speedup for formal scoring).
+
+**Data flow per round:**
+
+```
+trial_portion → eval_sample_set (data scope, fixed for round)
+                    ├── Inference: denoise all segments in scope
+                    ├── Scoring: score all segments in scope (parallel)
+                    └── Training (each epoch):
+                            train_portion × scope → TIDMADEpochDataset
+                            (different random subsample each epoch,
+                             cross-file shuffled, freed after epoch)
+```
+
+**Reproducibility — all random seeds are stored:**
+
+Every round generates two deterministic seeds from `SHA-256(run_name + attempt)`:
+
+| Seed | Stored in | Used by | Controls |
+|------|-----------|---------|----------|
+| `sampling_seed` | `TrialConfig` → `trial_config_{exp_id}.json` | `build_sample_set(seed=...)` | Which PSD segments form the data scope |
+| `train_base_seed` | `TrialConfig` → `trial_config_{exp_id}.json`, passed via CLI `--train_base_seed` | `run_experiment_streaming()` | Per-epoch training subsample: epoch `n` uses `train_base_seed + n` |
+
+`freeze_subsample=True` option: every epoch uses `train_base_seed` (without `+n`),
+giving the same training data each epoch.
+
+The concrete eval SampleSet is also stored as `eval_sample_set_{exp_id}.json` — the
+actual segment indices are recoverable from the file without needing the seed.
 
 **Class weight handling**: uses uniform weights (`use_class_weights=False`), matching
-legacy `train.py` which uses `FocalLoss1D()` without class weights. Pre-computed class
-weights deferred unless needed.
+legacy `train.py`. Pre-computed class weights deferred unless needed.
 
 #### Memory estimates (punet Config A, `segmentation_size=10000`)
 
-**Round 1 — Trial (snapshot, `trial_portion=0.02`, aligned):**
+Peak training memory = `train_portion × trial_portion × total_data`:
 
-| Stage | Peak CPU RAM | Peak GPU VRAM | Notes |
-|-------|-------------|---------------|-------|
-| Training | **~80 MB** | **~1.5-2 GB** | 4 PSD segs/file, streaming one file at a time |
-| Inference | **~4 GB** | **~1-2 GB** | Full raw file load per file (not yet optimized) |
-| Scoring | **~200 MB** | — | PSD + FFT per segment |
+| Mode | train_portion | trial_portion | Training peak CPU | Inference peak CPU |
+|------|--------------|---------------|-------------------|-------------------|
+| Trial (default) | 0.1 | 0.05 | **~20 MB** | ~4 GB (full file load) |
+| Formal | 0.1 | 1.0 | **~400 MB** | ~4 GB (full file load) |
 
-**Round 2 — Formal (`train_portion=0.1`, `eval_portion=1.0`):**
-
-| Stage | Peak CPU RAM | Peak GPU VRAM | Notes |
-|-------|-------------|---------------|-------|
-| Training | **~200 MB** | **~1.5-2 GB** | 20 PSD segs/file, streaming one file at a time |
-| Inference | **~4 GB** | **~1-2 GB** | Full raw file load per file |
-| Scoring | **~200 MB** | — | PSD + FFT per segment |
-
-Previous formal training peak was **40+ GB (OOM kill)**. Now **~200 MB**.
+Previous formal training peak was **40+ GB (OOM kill)**. Now **~400 MB**.
+GPU peak: ~1.5-2 GB (model + batch, unchanged).
 
 **Known remaining inefficiency**: `inference_single.py` still loads the full 2 GB raw
-file per file via `np.array(ABRAfile[...])`, even when only a few PSD segments are
-needed. Peak ~4 GB per file is acceptable on current hardware (61 GB RAM, 48 GB
-available). HDF5 direct slicing for inference is deferred as a future optimization.
+file per file via `np.array(ABRAfile[...])`. HDF5 direct slicing for inference is
+deferred as a future optimization (Phase 4d).
+
+#### Actual timing (from integration tests, punet)
+
+**Single-file legacy mode** (Config default, `segmentation_size=40000`, `batch_size=1`):
+
+| Stage | Time |
+|-------|------|
+| Training | 37.8 sec |
+| Inference | 50.9 sec |
+| Scoring | 0.7 sec |
+| **Total** | **96.8 sec** |
+
+**Trial→formal 2-round** (Config A, `segmentation_size=10000`, `batch_size=128`):
+
+| Stage | Round 1 (trial, 10 segs/file) | Round 2 (formal, 200 segs/file) |
+|-------|------|------|
+| Training | 119 sec | 235 sec |
+| Inference | 304 sec | 969 sec |
+| Scoring (parallel 8 workers) | 46 sec | 913 sec |
+| **Total** | **469 sec (7.8 min)** | **2117 sec (35 min)** |
 
 #### Tests
 
-- All 611 existing unit tests pass (regression confirmed).
-- Integration test pending: 2-round trial→formal with real data.
+- 622 unit tests pass (0 broken).
+- Integration: single-file legacy PASSED (97 sec, score 1.41).
+- Integration: trial→formal 2-round PASSED (43 min total).
 
 **Depends on:** Phase 4 (current data loading infrastructure).
 
@@ -1063,6 +1116,50 @@ Not blocking for correctness.
 
 ---
 
+### Phase 4f: GPU-accelerated batch scoring
+
+**What:** Scoring is the slowest stage in formal mode. The current implementation
+computes FFT per segment sequentially using `numpy.fft.rfft()` on CPU. Formal mode
+requires 4000 segments × 2 channels = 8000 FFT calls on 10M-sample arrays.
+
+**Current state:** Phase 4b added `ProcessPoolExecutor`-based file-level parallelism
+(8 workers, ~5-6x speedup). This reduces ~60 min to ~10-12 min for formal scoring.
+
+**Proposed: GPU batch FFT** using `torch.fft.rfft()`:
+
+1. **Batch data loading**: instead of reading one segment at a time via
+   `get_one_sec_psd()`, load all segments for a file into a single tensor
+   `[N_segments, SEGMENT_LENGTH]`.
+2. **Batch FFT**: `torch.fft.rfft(batch_tensor)` computes all FFTs in one GPU
+   kernel launch. GPU FFT on 10M samples: ~5 ms vs ~500 ms on CPU (**~100x**).
+3. **Batch SNR**: vectorize the peak-finding and SNR computation across all
+   segments simultaneously.
+
+**Estimated performance:**
+
+| Approach | 4000 segments | 80 segments (trial) |
+|----------|--------------|---------------------|
+| Serial CPU (baseline) | ~60 min | ~1.5 min |
+| Multiprocessing 8 workers (current) | ~10-12 min | ~15 sec |
+| GPU batch FFT | **~30 sec** | **~2 sec** |
+
+**Implementation notes:**
+- Requires refactoring `score_segments()` from a per-segment loop to a batched
+  tensor operation. The `get_one_sec_psd()` → `get_snr()` → `find_peak()` chain
+  would need vectorized equivalents.
+- GPU memory for batch FFT: `200 segments × 10M samples × 4 bytes (float32)`
+  = ~8 GB per file. May need to sub-batch (e.g. 50 segments at a time).
+- The anchor weight lookup and final aggregation remain on CPU (trivial).
+- Multiprocessing and GPU don't combine well (GPU context sharing). GPU batch
+  replaces multiprocessing, not complements it.
+
+**Priority:** Medium-high for production (formal scoring on 20 files is a frequent
+operation). Not blocking for correctness.
+
+**Depends on:** Phase 1 (scoring functions).
+
+---
+
 ### Dependency graph
 
 ```
@@ -1075,21 +1172,22 @@ Phase 2 (schemas) ✓         Phase 3 (SampleSet builder) ✓
                 │
           Phase 4 (data loading) ✓
                 │
-          Phase 4b (streaming loader + train/eval split) ← IN PROGRESS
+          Phase 4b (streaming loader + train/eval split) ✓
                 │
           Phase 4c (scoring as subprocess) — low priority
           Phase 4d (configurable inference params) — medium priority
           Phase 4e (resource usage instrumentation) — medium priority, independent
+          Phase 4f (GPU batch scoring) — medium-high priority for production
                 │
           Phase 5 (static trial wiring) ✓
                 │
-          Phase 6 (dynamic trial/formal) ✓ (formal round blocked by 4b)
+          Phase 6 (dynamic trial/formal) ✓
                 │
           Phase 7 (downstream, optional)
 ```
 
 Phases 0, 2, and 3 have no dependencies on each other and can be built in parallel.
-Phase 6 logic is complete but formal-mode integration testing is blocked by Phase 4b.
+Phase 4b and 6 are complete. Formal-mode integration test passes.
 Phase 4c is an architectural clean-up with no correctness impact — can be deferred.
 Phase 4d affects performance and plugin model correctness — medium priority.
 Phase 4e is independent and can be done in parallel with any phase.
