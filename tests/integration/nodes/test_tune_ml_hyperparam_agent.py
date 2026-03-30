@@ -484,18 +484,25 @@ def run_trial_to_formal(provider: str, model_type: str, loss_cfg: dict, workspac
         assert os.path.exists(train_ss), f"train_sample_set not found: {train_ss}"
         assert os.path.exists(eval_ss), f"eval_sample_set not found: {eval_ss}"
 
-    # --- If formal round completed, verify train/eval split ---
+    # --- If formal round completed, verify scope and train_portion ---
     if len(success_records) >= 2:
         formal_exp_id = success_records[-1].exp_id
+        # Both train and eval use the same scope (eval_sample_set).
+        # Training subsamples via train_portion inside the streaming loop.
         with open(os.path.join(configs_dir, f"train_sample_set_{formal_exp_id}.json")) as f:
             formal_train = json.load(f)
         with open(os.path.join(configs_dir, f"eval_sample_set_{formal_exp_id}.json")) as f:
             formal_eval = json.load(f)
-        # Eval should have more segments than train (eval=100%, train=10%)
         train_total = sum(len(v) for v in formal_train.values())
         eval_total = sum(len(v) for v in formal_eval.values())
-        assert eval_total > train_total, (
-            f"Formal eval ({eval_total} segs) should be larger than train ({train_total} segs)"
+        assert train_total == eval_total, (
+            f"Train and eval should use same scope, got train={train_total} eval={eval_total}"
+        )
+        # Verify trial_config has train_portion < 1.0 (training subsamples)
+        with open(os.path.join(configs_dir, f"trial_config_{formal_exp_id}.json")) as f:
+            formal_tc = json.load(f)
+        assert formal_tc["train_portion"] < 1.0, (
+            f"Formal train_portion should be < 1.0, got {formal_tc['train_portion']}"
         )
 
     return output
