@@ -1,6 +1,6 @@
 # Proposal: Physics-Anchored Multi-Fidelity Tuning for TIDMAD
 
-## Status: Phase 4b complete — streaming data loader + train/eval split with cross-file shuffling
+## Status: Phase 4b complete — streaming loader, DatasetConfig, reproducible seeds, parallel scoring
 
 ---
 
@@ -775,6 +775,17 @@ Key differences from current `TIDMADDataset`:
 - `agent/prompts.py`: `train_portion` in OUTPUT FORMAT and TRIAL vs FORMAL MODE section.
 - `execute_tools/scoring_utils.py`: `score_vector()` parallelized with
   `ProcessPoolExecutor` (8 workers, ~3x speedup for formal scoring).
+- `execute_tools/dataset_config.py` (new): `DatasetConfig` Pydantic model centralizing
+  physical constants (`psd_segment_length`, `segments_per_file`, `num_files`,
+  `sampling_frequency`, file patterns). TIDMAD is the default instance. All modules
+  import from here instead of hardcoding constants. Other datasets override by creating
+  a new `DatasetConfig` instance.
+- `agent/schemas/hyperparam_tuning.py`: optional `sampling_seed` and `train_base_seed`
+  fields on `HyperparamTuningInput` for replay — when provided, override auto-generated
+  seeds. When omitted (default `None`), seeds are derived from `SHA-256(run_name + attempt)`.
+- `nodes/ml_hyperparameter_tune_agent.md` (new): full documentation for the tuner node —
+  config file table, data flow diagram, seed reproducibility, replay instructions,
+  schema reference, downstream module list.
 
 **Data flow per round:**
 
