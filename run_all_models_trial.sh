@@ -76,6 +76,7 @@ launch_model() {
             --max_rounds \"${MAX_ROUNDS}\" \
             --run_name \"${RUN_NAME}\" \
             --is_trial \
+            --override_old_run \
             --provider \"${PROVIDER}\" \
             --model_id \"${MODEL_ID}\" \
             --progress_bar
