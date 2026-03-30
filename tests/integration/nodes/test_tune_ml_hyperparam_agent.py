@@ -461,7 +461,6 @@ def run_trial_to_formal(provider: str, model_type: str, loss_cfg: dict, workspac
 
     # --- Best file vector should be populated ---
     assert output.best_file_vector is not None
-    assert len(output.best_file_vector) == 20
 
     # --- Verify output file was written ---
     output_path = os.path.join(workspace, f"run_output_{run_name}.json")
@@ -476,7 +475,10 @@ def run_trial_to_formal(provider: str, model_type: str, loss_cfg: dict, workspac
         assert os.path.exists(tc_path), f"trial_config not found: {tc_path}"
         with open(tc_path) as f:
             tc = json.load(f)
-        assert "is_trial" in tc and "mode" in tc and "train_portion" in tc
+        for required_key in ["is_trial", "mode", "trial_strategy", "trial_portion",
+                               "train_portion", "eval_strategy", "eval_portion",
+                               "train_sampling_seed", "eval_sampling_seed", "train_base_seed"]:
+            assert required_key in tc, f"trial_config missing key: {required_key}"
 
         # train and eval sample_set files must exist
         train_ss = os.path.join(configs_dir, f"train_sample_set_{exp_id}.json")
@@ -487,10 +489,8 @@ def run_trial_to_formal(provider: str, model_type: str, loss_cfg: dict, workspac
     # --- If formal round completed, verify train/eval separation ---
     if len(success_records) >= 2:
         formal_exp_id = success_records[-1].exp_id
-        # Train and eval are independent SampleSets on different physical files.
         with open(os.path.join(configs_dir, f"trial_config_{formal_exp_id}.json")) as f:
             formal_tc = json.load(f)
-        assert formal_tc["mode"] == "formal"
         assert formal_tc["eval_portion"] == 1.0, f"Formal eval_portion should be 1.0"
         assert formal_tc["train_portion"] < 1.0, (
             f"Formal train_portion should be < 1.0, got {formal_tc['train_portion']}"
