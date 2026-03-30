@@ -547,6 +547,9 @@ class TestExperimentPlan:
 class TestTrialConfig:
     """Verify TrialConfig schema validates trial/formal decisions correctly."""
 
+    # Common seed values for tests
+    _SEEDS = {"sampling_seed": 42, "train_base_seed": 123}
+
     def test_trial_mode(self):
         cfg = TrialConfig(
             is_trial=True,
@@ -554,16 +557,20 @@ class TestTrialConfig:
             trial_strategy="snapshot",
             trial_portion=0.05,
             train_portion=0.1,
+            **self._SEEDS,
         )
         assert cfg.is_trial is True
         assert cfg.mode == "trial"
         assert cfg.file_index is None
+        assert cfg.sampling_seed == 42
+        assert cfg.train_base_seed == 123
 
     def test_formal_mode(self):
         cfg = TrialConfig(
             is_trial=False,
             mode="formal",
             train_portion=0.1,
+            **self._SEEDS,
         )
         assert cfg.mode == "formal"
         assert cfg.file_index is None
@@ -573,13 +580,14 @@ class TestTrialConfig:
             is_trial=False,
             mode="single_file",
             file_index=6,
+            **self._SEEDS,
         )
         assert cfg.mode == "single_file"
         assert cfg.file_index == 6
 
     def test_single_file_without_file_index_raises(self):
         with pytest.raises(ValidationError, match="file_index required"):
-            TrialConfig(is_trial=False, mode="single_file")
+            TrialConfig(is_trial=False, mode="single_file", **self._SEEDS)
 
     def test_trial_target_without_files_raises(self):
         with pytest.raises(ValidationError, match="target_files required"):
@@ -588,6 +596,7 @@ class TestTrialConfig:
                 mode="trial",
                 trial_strategy="target",
                 target_files=[],
+                **self._SEEDS,
             )
 
     def test_trial_target_with_files(self):
@@ -596,23 +605,26 @@ class TestTrialConfig:
             mode="trial",
             trial_strategy="target",
             target_files=[0, 10, 19],
+            **self._SEEDS,
         )
         assert cfg.target_files == [0, 10, 19]
 
     def test_model_dump_roundtrip(self):
-        """Serialization and deserialization preserves all fields."""
+        """Serialization and deserialization preserves all fields including seeds."""
         cfg = TrialConfig(
             is_trial=True,
             mode="trial",
             trial_strategy="anchors",
             trial_portion=0.05,
             train_portion=0.2,
-            train_validation_align=False,
+            **self._SEEDS,
         )
         dumped = cfg.model_dump()
         restored = TrialConfig.model_validate(dumped)
         assert restored == cfg
+        assert dumped["sampling_seed"] == 42
+        assert dumped["train_base_seed"] == 123
 
     def test_invalid_mode_rejected(self):
         with pytest.raises(ValidationError):
-            TrialConfig(is_trial=True, mode="unknown")
+            TrialConfig(is_trial=True, mode="unknown", **self._SEEDS)

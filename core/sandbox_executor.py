@@ -183,13 +183,17 @@ class TidmadSandbox:
             raise ValueError(f"Experiment Configuration Rejected: {str(e)}")
 
     def execute_training(self, exp_id: str, run_name: str, model_type: str, m_cfg: Dict, t_cfg: Dict, l_cfg: Dict,
-                         sample_set: Optional[Dict] = None):
+                         sample_set: Optional[Dict] = None, train_portion: Optional[float] = None,
+                         train_base_seed: Optional[int] = None):
         """Executes the training physical script.
 
         Args:
-            sample_set: Optional SampleSet dict for trial mode. When provided,
-                        a temp JSON file is written and passed via --sample_set_json,
-                        overriding --file_index in the subprocess.
+            sample_set:      Optional SampleSet dict — the data scope. When provided,
+                             written to JSON and passed via --sample_set_json.
+            train_portion:   Fraction of the scope to subsample per epoch for training.
+                             Passed via --train_portion.
+            train_base_seed: Base seed for per-epoch subsampling reproducibility.
+                             Passed via --train_base_seed.
         """
         try:
             vm, vt, vl = self._validate_configs(model_type, m_cfg, t_cfg, l_cfg, exp_id, run_name)
@@ -211,13 +215,17 @@ class TidmadSandbox:
                     "--sandbox_dir", self.base_dir,
                     "--file_index", str(self.file_index)]
 
-            # Validate and write train SampleSet to JSON
+            # Validate and write data scope SampleSet to JSON
             if sample_set is not None:
                 sample_set = validate_sample_set(sample_set)
                 ss_path = os.path.abspath(os.path.join(self.dirs["configs"], f"train_sample_set_{exp_id}.json"))
                 with open(ss_path, 'w') as f:
                     json.dump(sample_set, f)
                 cmd.extend(["--sample_set_json", ss_path])
+                if train_portion is not None:
+                    cmd.extend(["--train_portion", str(train_portion)])
+                if train_base_seed is not None:
+                    cmd.extend(["--train_base_seed", str(train_base_seed)])
 
             print(f">>> [Executor] Running training for {exp_id}...")
             result = subprocess.run(

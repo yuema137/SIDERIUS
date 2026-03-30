@@ -127,7 +127,12 @@ class TrialConfig(BaseModel):
 
     Extracted from ``ExperimentPlan`` after override chain (final-round
     constraint, expert advice). Serialized to ``trial_config_{exp_id}.json``
-    and used to build train/eval SampleSets.
+    and used to build the eval SampleSet (data scope).
+
+    ``trial_portion`` defines the data scope — which segments are in play
+    for both eval and training. ``train_portion`` controls how much of that
+    scope is subsampled per epoch during training (for speed). Training
+    resamples a different subset each epoch for diversity.
 
     Every round has a TrialConfig — even legacy single-file mode, where
     ``mode="single_file"`` and ``file_index`` is set.
@@ -141,23 +146,19 @@ class TrialConfig(BaseModel):
     )
     trial_strategy: Literal["snapshot", "anchors", "target"] = Field(
         default="snapshot",
-        description="Sampling strategy for eval. Applies to trial and formal modes.",
+        description="Sampling strategy. Applies to trial and formal modes.",
     )
     trial_portion: float = Field(
         default=0.02,
         ge=0.01,
         le=1.0,
-        description="Fraction of segments per file for evaluation.",
+        description="Fraction of segments per file — defines the data scope for eval and training.",
     )
     train_portion: float = Field(
         default=0.1,
         ge=0.01,
         le=1.0,
-        description="Fraction of segments per file for training.",
-    )
-    train_validation_align: bool = Field(
-        default=True,
-        description="Whether training and eval use the same segments.",
+        description="Fraction of the scope subsampled per epoch for training (speed optimization).",
     )
     target_files: List[int] = Field(
         default_factory=list,
@@ -166,6 +167,14 @@ class TrialConfig(BaseModel):
     file_index: Optional[int] = Field(
         default=None,
         description="Training/validation file index. Only used in single_file mode.",
+    )
+
+    # --- Reproducibility seeds ---
+    sampling_seed: int = Field(
+        description="Seed used by build_sample_set() to select PSD segments for the data scope.",
+    )
+    train_base_seed: int = Field(
+        description="Base seed for per-epoch training subsampling. Epoch n uses seed = train_base_seed + n.",
     )
 
     @model_validator(mode="after")
@@ -366,6 +375,25 @@ class HyperparamTuningInput(BaseModel):
         description=(
             "Fraction of segments per file used for training. Independent of "
             "trial_portion (eval). Default 0.1 matches legacy TIDMAD subsampling."
+        ),
+    )
+
+    # --- Reproducibility seeds (optional — auto-generated when not provided) ---
+    sampling_seed: Optional[int] = Field(
+        default=None,
+        description=(
+            "Seed for build_sample_set() — determines which PSD segments form the "
+            "data scope. When None, auto-generated from SHA-256(run_name + attempt). "
+            "Set this to replay a previous run's exact data sampling. "
+            "Read from a previous trial_config_{exp_id}.json."
+        ),
+    )
+    train_base_seed: Optional[int] = Field(
+        default=None,
+        description=(
+            "Base seed for per-epoch training subsampling. Epoch n uses "
+            "train_base_seed + n. When None, auto-generated. "
+            "Read from a previous trial_config_{exp_id}.json."
         ),
     )
 

@@ -455,8 +455,9 @@ class TestDynamicTrialFormal:
         inf_params = inference_calls[0][1]
         assert "eval_sample_set" in inf_params, "eval_sample_set not passed to inference"
 
-    def test_formal_round_splits_train_eval(self, agent_and_mocks, tmp_path):
-        """Formal round: train_sample_set should be sparse, eval_sample_set should be full."""
+    def test_formal_round_builds_single_eval_scope(self, agent_and_mocks, tmp_path):
+        """Formal round: one build_sample_set call for eval scope (portion=1.0).
+        Training subsamples from the scope per-epoch via train_portion."""
         agent, _, _, _ = agent_and_mocks
         skill_calls = []
         original_mock = _mock_run_skill
@@ -467,21 +468,17 @@ class TestDynamicTrialFormal:
 
         with patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=tracking_mock), \
              patch("nodes.ml_hyperparameter_tune_agent.build_sample_set") as mock_build:
-            # build_sample_set called with different portions for train vs eval
-            call_count = [0]
-            def fake_build(**kwargs):
-                call_count[0] += 1
-                # Return a minimal valid-looking SampleSet
-                return {0: [0, 1], 6: [0, 1]}
-            mock_build.side_effect = fake_build
+            mock_build.return_value = {0: [0, 1], 6: [0, 1]}
 
             agent.run(_make_trial_input(tmp_path, max_rounds=1, is_trial=True))
 
-            # Final round (max_rounds=1) → formal mode → build_sample_set called twice:
-            # once for train (train_portion), once for eval (portion=1.0)
+            # Final round (max_rounds=1) → formal mode → one build_sample_set call
+            # for the eval scope (portion=1.0)
             build_calls = mock_build.call_args_list
-            assert len(build_calls) == 2, f"Expected 2 build_sample_set calls for formal, got {len(build_calls)}"
-            # First call: train (portion = train_portion default 0.1)
-            assert build_calls[0].kwargs.get("trial_portion") == 0.1
-            # Second call: eval (portion = 1.0)
-            assert build_calls[1].kwargs.get("trial_portion") == 1.0
+            assert len(build_calls) == 1, f"Expected 1 build_sample_set call for formal, got {len(build_calls)}"
+            assert build_calls[0].kwargs.get("trial_portion") == 1.0
+
+            # Training skill receives train_portion separately
+            train_calls = [(f, p) for f, p in skill_calls if f == "training_skill"]
+            assert len(train_calls) >= 1
+            assert train_calls[0][1].get("train_portion") == 0.1

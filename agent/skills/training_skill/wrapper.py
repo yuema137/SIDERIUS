@@ -12,4 +12,6 @@ def run_skill(sandbox, **kwargs):
         t_cfg=kwargs["train_config"],
         l_cfg=kwargs["loss_config"],
         sample_set=kwargs.get("sample_set"),
+        train_portion=kwargs.get("train_portion"),
+        train_base_seed=kwargs.get("train_base_seed"),
     )

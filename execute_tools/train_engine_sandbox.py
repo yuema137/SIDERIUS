@@ -148,7 +148,6 @@ class TIDMADSingleFileDataset(Dataset):
     """
     Lightweight dataset that loads segments from ONE HDF5 file.
 
-    Created and destroyed per file per epoch in the streaming training loop.
     Uses HDF5 direct slicing — never loads the full 2 GB file into memory.
 
     Peak memory: ``len(psd_segment_indices) * PSD_SEGMENT_LENGTH / seg_size * seg_size``
@@ -182,6 +181,89 @@ class TIDMADSingleFileDataset(Dataset):
 
         self.inputs = np.concatenate(chunks_ch1, axis=0)
         self.targets = np.concatenate(chunks_ch2, axis=0)
+
+    def __len__(self):
+        return len(self.inputs)
+
+    def __getitem__(self, idx):
+        return (
+            self.inputs[idx].astype(np.int16) + 128,
+            self.targets[idx].astype(np.int16) + 128,
+        )
+
+
+class TIDMADEpochDataset(Dataset):
+    """
+    Dataset that loads subsampled segments from multiple HDF5 files.
+
+    Created and destroyed each epoch. Collects ``train_portion`` of each
+    file's segments, loads them via HDF5 direct slicing, and concatenates
+    into a single shuffleable dataset. Cross-file shuffling happens
+    naturally via the DataLoader's ``shuffle=True``.
+
+    Peak memory: ``train_portion * sum(segments_per_file) * seg_size`` bytes
+    per channel. E.g. train_portion=0.1, 20 files × 10 segs = 200 PSD segs
+    → 200 × 1000 × 10000 = 200 MB per channel.
+    """
+
+    PSD_SEGMENT_LENGTH = 10_000_000
+
+    def __init__(
+        self,
+        data_dir: str,
+        sample_set: dict,
+        seg_size: int,
+        train_portion: float | None = None,
+        rng: "random.Random | None" = None,
+    ):
+        """
+        Args:
+            data_dir:       Directory containing ``abra_training_XXXX.h5``.
+            sample_set:     ``{file_index: [segment_indices]}`` — the data scope.
+            seg_size:       ML segmentation size (e.g. 10000).
+            train_portion:  Fraction of each file's segments to use. When None
+                            or 1.0, all segments in the scope are loaded.
+            rng:            Random instance for reproducible subsampling.
+        """
+        import random as _random
+        if rng is None:
+            rng = _random.Random()
+
+        ml_segs_per_psd = self.PSD_SEGMENT_LENGTH // seg_size
+        use_subsample = train_portion is not None and train_portion < 1.0
+        all_ch1, all_ch2 = [], []
+
+        for file_key in sorted(sample_set.keys(), key=int):
+            file_index = int(file_key)
+            file_path = os.path.join(data_dir, f"abra_training_{file_index:04d}.h5")
+            if not os.path.exists(file_path):
+                print(f"Warning: {file_path} not found, skipping.")
+                continue
+
+            scope_segments = sample_set[file_key]
+            if use_subsample:
+                n_keep = max(1, round(train_portion * len(scope_segments)))
+                segments = rng.sample(scope_segments, n_keep)
+            else:
+                segments = scope_segments
+
+            with h5py.File(file_path, 'r') as f:
+                ch1 = f['timeseries']['channel0001']['timeseries']
+                ch2 = f['timeseries']['channel0002']['timeseries']
+                for psd_idx in segments:
+                    start = psd_idx * self.PSD_SEGMENT_LENGTH
+                    end = start + self.PSD_SEGMENT_LENGTH
+                    all_ch1.append(
+                        np.array(ch1[start:end], dtype=np.int8).reshape(ml_segs_per_psd, seg_size)
+                    )
+                    all_ch2.append(
+                        np.array(ch2[start:end], dtype=np.int8).reshape(ml_segs_per_psd, seg_size)
+                    )
+
+            gc.collect()
+
+        self.inputs = np.concatenate(all_ch1, axis=0) if all_ch1 else np.empty((0, seg_size), dtype=np.int8)
+        self.targets = np.concatenate(all_ch2, axis=0) if all_ch2 else np.empty((0, seg_size), dtype=np.int8)
 
     def __len__(self):
         return len(self.inputs)
@@ -283,6 +365,9 @@ def run_experiment_streaming(
     data_dir: str,
     sandbox_dirs: dict,
     exp_id: str,
+    train_portion: float | None = None,
+    freeze_subsample: bool = False,
+    train_base_seed: int | None = None,
 ):
     """
     Streaming training: process one file at a time, never hold multiple files in RAM.
@@ -291,14 +376,26 @@ def run_experiment_streaming(
     in shuffled order, load one file's segments, train on them, free memory, move
     to the next file. Model weights carry over across files.
 
+    ``sample_set`` defines the data **scope** (which files and segments are in play).
+    ``train_portion`` controls how much of each file's scope is subsampled per epoch.
+    By default, a different random subsample is drawn each epoch for diversity.
+
     Args:
-        model_cfg:    Pydantic model config.
-        train_cfg:    Pydantic training config.
-        loss_cfg:     Pydantic loss config.
-        sample_set:   ``{file_index: [segment_indices]}`` — training data to use.
-        data_dir:     Directory containing ``abra_training_XXXX.h5`` files.
-        sandbox_dirs: ``{"models": ..., "results": ...}`` for saving outputs.
-        exp_id:       Experiment identifier for file naming.
+        model_cfg:         Pydantic model config.
+        train_cfg:         Pydantic training config.
+        loss_cfg:          Pydantic loss config.
+        sample_set:        ``{file_index: [segment_indices]}`` — the data scope.
+        data_dir:          Directory containing ``abra_training_XXXX.h5`` files.
+        sandbox_dirs:      ``{"models": ..., "results": ...}`` for saving outputs.
+        exp_id:            Experiment identifier for file naming.
+        train_portion:     Fraction of each file's segments to use per epoch (0.01–1.0).
+                           When None or 1.0, all segments in the scope are used.
+        freeze_subsample:  When True, every epoch uses the same subsample (same seed).
+                           When False (default), each epoch draws a different subsample.
+        train_base_seed:   Base seed for per-epoch subsampling. Epoch n uses
+                           ``train_base_seed + n`` (or just ``train_base_seed`` if
+                           ``freeze_subsample=True``). When None, derived from
+                           ``hash(exp_id)``.
     """
     import random
 
@@ -326,53 +423,54 @@ def run_experiment_streaming(
     else:
         optimizer = torch.optim.SGD(model.parameters(), lr=train_cfg.lr)
 
-    file_keys = list(sample_set.keys())
+    # Deterministic base seed for reproducible per-epoch subsampling
+    base_seed = train_base_seed if train_base_seed is not None else hash(exp_id) % (2**31)
     history = []
 
     for ep in range(train_cfg.epochs):
         model.train()
+
+        # Build a fresh dataset each epoch — subsamples train_portion from the
+        # scope, loads via HDF5 slicing, enables cross-file shuffling.
+        # Reproducible: base_seed from exp_id, +ep for diversity across epochs.
+        epoch_seed = base_seed if freeze_subsample else base_seed + ep
+        epoch_rng = random.Random(epoch_seed)
+        dataset = TIDMADEpochDataset(
+            data_dir=data_dir,
+            sample_set=sample_set,
+            seg_size=seg_size,
+            train_portion=train_portion,
+            rng=epoch_rng,
+        )
+        loader = DataLoader(dataset, batch_size=train_cfg.batch_size,
+                            shuffle=True, drop_last=True)
+
         batch_losses = []
-        random.shuffle(file_keys)
+        for input_batch, target_batch in tqdm(
+            loader, desc=f"Epoch {ep}", file=sys.stdout,
+        ):
+            input_seq = input_batch.to(device)
+            target_seq = target_batch.to(device)
 
-        for file_key in file_keys:
-            file_index = int(file_key)
-            file_path = os.path.join(data_dir, f"abra_training_{file_index:04d}.h5")
-            if not os.path.exists(file_path):
-                print(f"Warning: {file_path} not found, skipping.")
-                continue
+            if model_cfg.model_type == "fcnet":
+                input_seq = input_seq.float()
+            else:
+                input_seq = input_seq.int()
 
-            segments = sample_set[file_key]
-            dataset = TIDMADSingleFileDataset(file_path, segments, seg_size)
-            loader = DataLoader(dataset, batch_size=train_cfg.batch_size,
-                                shuffle=True, drop_last=True)
+            if loss_cfg.loss_type in ["ce", "focal", "focal_cw"]:
+                target_seq = target_seq.long()
+            else:
+                target_seq = target_seq.float()
 
-            for input_batch, target_batch in tqdm(
-                loader,
-                desc=f"Epoch {ep} | File {file_index:04d} ({len(segments)} PSD segs)",
-                file=sys.stdout,
-            ):
-                input_seq = input_batch.to(device)
-                target_seq = target_batch.to(device)
+            optimizer.zero_grad()
+            output = model(input_seq)
+            loss = criterion(output, target_seq)
+            loss.backward()
+            optimizer.step()
+            batch_losses.append(loss.item())
 
-                if model_cfg.model_type == "fcnet":
-                    input_seq = input_seq.float()
-                else:
-                    input_seq = input_seq.int()
-
-                if loss_cfg.loss_type in ["ce", "focal", "focal_cw"]:
-                    target_seq = target_seq.long()
-                else:
-                    target_seq = target_seq.float()
-
-                optimizer.zero_grad()
-                output = model(input_seq)
-                loss = criterion(output, target_seq)
-                loss.backward()
-                optimizer.step()
-                batch_losses.append(loss.item())
-
-            del dataset, loader
-            gc.collect()
+        del dataset, loader
+        gc.collect()
 
         avg_loss = np.mean(batch_losses) if batch_losses else float("nan")
         history.append(float(avg_loss))
@@ -412,6 +510,14 @@ def main():
                         help="Run name for the auto-exploration.")
     parser.add_argument("--sample_set_json", type=str, default=None,
                         help="Path to SampleSet JSON for trial mode. Overrides --file_index.")
+    parser.add_argument("--train_portion", type=float, default=None,
+                        help="Fraction of segments per file to subsample each epoch (0.01-1.0). "
+                             "When None, uses all segments in the scope.")
+    parser.add_argument("--freeze_subsample", action="store_true",
+                        help="Use the same subsample every epoch instead of resampling.")
+    parser.add_argument("--train_base_seed", type=int, default=None,
+                        help="Base seed for per-epoch subsampling. Epoch n uses seed = base + n. "
+                             "When None, derived from exp_id hash.")
     args = parser.parse_args()
 
     # Define standard sandbox structure
@@ -451,6 +557,9 @@ def main():
             data_dir=args.data_dir,
             sandbox_dirs=sandbox_dirs,
             exp_id=args.exp_id,
+            train_portion=args.train_portion,
+            freeze_subsample=args.freeze_subsample,
+            train_base_seed=args.train_base_seed,
         )
     else:
         # Legacy single-file mode: pre-load entire file into TIDMADDataset
