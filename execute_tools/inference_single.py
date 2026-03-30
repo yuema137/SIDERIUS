@@ -12,6 +12,7 @@ import json
 from models_sandbox import MODEL_REGISTRY, PositionalUNet, AE
 from models_format_sandbox import PUNetConfig, AEConfig, LossConfig, get_config_class
 from array2h5 import create_abra_file
+from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -141,8 +142,7 @@ def main():
         with open(args.sample_set_json, 'r') as f:
             sample_set = json.load(f)
 
-    # Number of raw samples per PSD segment (1 second at 10 MS/s)
-    PSD_SEGMENT_LENGTH = 10_000_000
+    # PSD_SEGMENT_LENGTH imported from dataset_config
 
     if sample_set is not None:
         # --- TRIAL MODE: denoise specific segments from multiple files ---

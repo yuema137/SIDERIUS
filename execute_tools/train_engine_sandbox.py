@@ -14,6 +14,7 @@ from torch.utils.data import Dataset, DataLoader
 from models_sandbox import MODEL_REGISTRY, PositionalUNet, AE, TransformerModel
 from models_format_sandbox import PUNetConfig, AEConfig, TrainConfig, LossConfig, get_config_class
 from loss_models_sandbox import get_criterion
+from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
 
 # ==========================================
 # 1. Dataset Logic
@@ -33,7 +34,6 @@ class TIDMADDataset(Dataset):
     """
 
     # Number of raw samples per PSD segment (1 second at 10 MS/s)
-    PSD_SEGMENT_LENGTH = 10_000_000
 
     def __init__(self, fpath: str, fname_list: list, segmentation_size: int,
                  sample_size: int = 20, max_segments: int = None,
@@ -99,7 +99,7 @@ class TIDMADDataset(Dataset):
         ML segments per PSD segment.
         """
         evlist = []
-        ml_segs_per_psd = self.PSD_SEGMENT_LENGTH // self.seg_size
+        ml_segs_per_psd = PSD_SEGMENT_LENGTH // self.seg_size
 
         for file_index, psd_segment_indices in sorted(self.sample_set.items()):
             file_index = int(file_index)  # JSON keys may be strings
@@ -117,8 +117,8 @@ class TIDMADDataset(Dataset):
             input_chunks = []
             target_chunks = []
             for psd_idx in psd_segment_indices:
-                start = psd_idx * self.PSD_SEGMENT_LENGTH
-                end = start + self.PSD_SEGMENT_LENGTH
+                start = psd_idx * PSD_SEGMENT_LENGTH
+                end = start + PSD_SEGMENT_LENGTH
                 chunk_ch1 = raw_ch1[start:end].reshape(ml_segs_per_psd, self.seg_size)
                 chunk_ch2 = raw_ch2[start:end].reshape(ml_segs_per_psd, self.seg_size).astype(np.int8)
                 input_chunks.append(chunk_ch1)
@@ -154,7 +154,6 @@ class TIDMADSingleFileDataset(Dataset):
     bytes per channel. E.g. 20 PSD segments × 10M / 10000 × 10000 = 200 MB.
     """
 
-    PSD_SEGMENT_LENGTH = 10_000_000
 
     def __init__(self, file_path: str, psd_segment_indices: list[int], seg_size: int):
         """
@@ -163,15 +162,15 @@ class TIDMADSingleFileDataset(Dataset):
             psd_segment_indices:  Which PSD segments (0-based) to load from this file.
             seg_size:             ML segmentation size (e.g. 10000).
         """
-        ml_segs_per_psd = self.PSD_SEGMENT_LENGTH // seg_size
+        ml_segs_per_psd = PSD_SEGMENT_LENGTH // seg_size
         chunks_ch1, chunks_ch2 = [], []
 
         with h5py.File(file_path, 'r') as f:
             ch1 = f['timeseries']['channel0001']['timeseries']
             ch2 = f['timeseries']['channel0002']['timeseries']
             for psd_idx in psd_segment_indices:
-                start = psd_idx * self.PSD_SEGMENT_LENGTH
-                end = start + self.PSD_SEGMENT_LENGTH
+                start = psd_idx * PSD_SEGMENT_LENGTH
+                end = start + PSD_SEGMENT_LENGTH
                 chunks_ch1.append(
                     np.array(ch1[start:end], dtype=np.int8).reshape(ml_segs_per_psd, seg_size)
                 )
@@ -206,7 +205,6 @@ class TIDMADEpochDataset(Dataset):
     → 200 × 1000 × 10000 = 200 MB per channel.
     """
 
-    PSD_SEGMENT_LENGTH = 10_000_000
 
     def __init__(
         self,
@@ -229,7 +227,7 @@ class TIDMADEpochDataset(Dataset):
         if rng is None:
             rng = _random.Random()
 
-        ml_segs_per_psd = self.PSD_SEGMENT_LENGTH // seg_size
+        ml_segs_per_psd = PSD_SEGMENT_LENGTH // seg_size
         use_subsample = train_portion is not None and train_portion < 1.0
         all_ch1, all_ch2 = [], []
 
@@ -251,8 +249,8 @@ class TIDMADEpochDataset(Dataset):
                 ch1 = f['timeseries']['channel0001']['timeseries']
                 ch2 = f['timeseries']['channel0002']['timeseries']
                 for psd_idx in segments:
-                    start = psd_idx * self.PSD_SEGMENT_LENGTH
-                    end = start + self.PSD_SEGMENT_LENGTH
+                    start = psd_idx * PSD_SEGMENT_LENGTH
+                    end = start + PSD_SEGMENT_LENGTH
                     all_ch1.append(
                         np.array(ch1[start:end], dtype=np.int8).reshape(ml_segs_per_psd, seg_size)
                     )

@@ -20,14 +20,7 @@ import gc
 import numpy as np
 import h5py
 
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-SEGMENT_LENGTH = 10_000_000  # 1-second PSD segment (10 MS/s sampling rate)
-SEGMENTS_PER_FILE = 200      # usable segments per validation file
-NUM_FILES = 20               # validation files 0–19
+from execute_tools.dataset_config import SEGMENT_LENGTH, SEGMENTS_PER_FILE, NUM_FILES
 
 
 # ---------------------------------------------------------------------------

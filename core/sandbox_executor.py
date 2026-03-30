@@ -17,6 +17,7 @@ def _subprocess_env() -> dict:
     """
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     extra_paths = [
+        project_root,
         os.path.join(project_root, "ml_models"),
         os.path.join(project_root, "execute_tools"),
     ]
