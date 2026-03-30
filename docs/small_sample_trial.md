@@ -1,6 +1,6 @@
 # Proposal: Physics-Anchored Multi-Fidelity Tuning for TIDMAD
 
-## Status: Phase 4b design ready — streaming data loader + train/eval SampleSet split
+## Status: Phase 4b implementation in progress — streaming data loader + train/eval split
 
 ---
 
@@ -731,59 +731,69 @@ Key differences from current `TIDMADDataset`:
 - No `class_count` accumulation across files — `class_weights` for focal loss must
   be handled differently (pre-computed or accumulated incrementally).
 
-#### Changes required
+#### Implementation status — IN PROGRESS
 
-**`execute_tools/train_engine_sandbox.py`:**
-- Add `TIDMADSingleFileDataset` class (as above).
-- Refactor `run_experiment()` to accept `train_sample_set` (dict) instead of a
-  pre-built `DataLoader`. The file-streaming epoch loop goes inside `run_experiment()`.
-- Keep the existing `TIDMADDataset` for legacy single-file mode (no regression).
+**Completed:**
 
-**`execute_tools/sample_set_builder.py`:**
-- `build_sample_set()` already supports all needed parameters. No change needed —
-  the agent loop calls it twice (once for train, once for eval) with different portions.
+- `execute_tools/train_engine_sandbox.py`:
+  - `TIDMADSingleFileDataset`: lightweight per-file dataset with HDF5 direct slicing.
+    Reads only requested PSD segments via `h5f[...][start:end]`, never the full 2 GB
+    file. Stores both channels as `int8`.
+  - `run_experiment_streaming()`: file-streaming epoch loop. For each epoch, shuffles
+    file order, creates a `TIDMADSingleFileDataset` + `DataLoader` per file, trains,
+    frees, moves to next. Model/optimizer/criterion created once before the loop.
+    No class weights (matches legacy `train.py`).
+  - `main()`: dispatches to `run_experiment_streaming()` when `sample_set` is provided,
+    legacy `run_experiment()` + `TIDMADDataset` when not.
+  - Existing `TIDMADDataset` and `run_experiment()` preserved for legacy single-file mode.
+- `agent/schemas/hyperparam_tuning.py`:
+  - `train_portion` added to `ExperimentPlan` (default 0.1), `HyperparamTuningInput`
+    (default 0.1), and `ExperimentRecord` (optional, trial context).
+- `nodes/ml_hyperparameter_tune_agent.py`:
+  - Agent loop builds `train_sample_set` and `eval_sample_set` per round.
+  - Trial aligned: `train_sample_set == eval_sample_set`.
+  - Trial unaligned: different seeds/portions for train vs eval.
+  - Formal: `train_sample_set` sparse (train_portion), `eval_sample_set` full (1.0).
+  - `active_params` carries both: `sample_set` (train) and `eval_sample_set` (eval).
+  - `trial_config` includes `train_portion`.
+  - Scoring uses `eval_sample_set`.
+- `agent/skills/inference_skill/wrapper.py`: uses `eval_sample_set` key.
+- `agent/prompts.py`: `train_portion` in OUTPUT FORMAT and TRIAL vs FORMAL MODE section.
+- All 611 unit tests pass (0 broken).
 
-**`agent/schemas/hyperparam_tuning.py`:**
-- Add `train_portion: float = Field(default=0.1, ge=0.01, le=1.0)` to
-  `ExperimentPlan` and `HyperparamTuningInput`.
-- Add `train_portion` to `ExperimentRecord` trial context fields.
+**Class weight handling**: uses uniform weights (`use_class_weights=False`), matching
+legacy `train.py` which uses `FocalLoss1D()` without class weights. Pre-computed class
+weights deferred unless needed.
 
-**`nodes/ml_hyperparameter_tune_agent.py`:**
-- Build two SampleSets per round: `train_sample_set` and `eval_sample_set`.
-- Pass `train_sample_set` to training skill, `eval_sample_set` to inference and
-  scoring skills.
-- Save both in `trial_config_{exp_id}.json` for traceability.
+#### Memory estimates (punet Config A, `segmentation_size=10000`)
 
-**`core/sandbox_executor.py`:**
-- `execute_training()` passes `train_sample_set` (may differ from `eval_sample_set`).
-- `execute_inference()` passes `eval_sample_set` (unchanged from current behavior).
+**Round 1 — Trial (snapshot, `trial_portion=0.02`, aligned):**
 
-**`agent/prompts.py`:**
-- Add `train_portion` to the OUTPUT FORMAT and TRIAL vs FORMAL MODE explanation.
+| Stage | Peak CPU RAM | Peak GPU VRAM | Notes |
+|-------|-------------|---------------|-------|
+| Training | **~80 MB** | **~1.5-2 GB** | 4 PSD segs/file, streaming one file at a time |
+| Inference | **~4 GB** | **~1-2 GB** | Full raw file load per file (not yet optimized) |
+| Scoring | **~200 MB** | — | PSD + FFT per segment |
 
-#### Class weight handling for focal loss
+**Round 2 — Formal (`train_portion=0.1`, `eval_portion=1.0`):**
 
-The current `TIDMADDataset` accumulates `class_count` across all files during loading
-to compute focal loss class weights. With streaming, we have two options:
+| Stage | Peak CPU RAM | Peak GPU VRAM | Notes |
+|-------|-------------|---------------|-------|
+| Training | **~200 MB** | **~1.5-2 GB** | 20 PSD segs/file, streaming one file at a time |
+| Inference | **~4 GB** | **~1-2 GB** | Full raw file load per file |
+| Scoring | **~200 MB** | — | PSD + FFT per segment |
 
-1. **Pre-compute once**: run a one-time scan (like `build_anchor_map`) to compute
-   global class distribution across all training files. Store alongside
-   `segment_anchors.json`. Load at the start of each run.
-2. **Use uniform weights**: focal loss with `use_class_weights=False` (already the
-   default in `LossConfig`). The legacy `train.py` uses `FocalLoss1D()` without
-   class weights — so this is validated.
+Previous formal training peak was **40+ GB (OOM kill)**. Now **~200 MB**.
 
-Option 2 is simpler and matches the legacy behavior. Option 1 is deferred unless
-class-weighted focal loss proves necessary.
+**Known remaining inefficiency**: `inference_single.py` still loads the full 2 GB raw
+file per file via `np.array(ABRAfile[...])`, even when only a few PSD segments are
+needed. Peak ~4 GB per file is acceptable on current hardware (61 GB RAM, 48 GB
+available). HDF5 direct slicing for inference is deferred as a future optimization.
 
 #### Tests
 
-- Unit test: `TIDMADSingleFileDataset` with synthetic HDF5 file — verify correct
-  segment extraction, shape, dtype.
-- Unit test: `run_experiment()` with mock dataset — verify file-streaming epoch
-  loop structure (correct number of files visited per epoch).
-- Integration test: 2-round trial→formal with real data — verify formal round no
-  longer OOMs and produces correct scores.
+- All 611 existing unit tests pass (regression confirmed).
+- Integration test pending: 2-round trial→formal with real data.
 
 **Depends on:** Phase 4 (current data loading infrastructure).
 
@@ -921,6 +931,138 @@ adds *enriched* support.
 
 ---
 
+### Phase 4c: Standardize scoring as a subprocess tool
+
+**What:** Currently, anchor-normalized scoring (`score_vector()`) is called directly
+in the agent loop as an in-memory function call, while training and inference follow
+the standard pattern: agent → skill wrapper → executor → subprocess with serialized
+configs. This inconsistency means:
+
+1. Scoring cannot be replayed from saved configs on disk — there is no CLI entry point
+   that reads `eval_sample_set_{exp_id}.json` and produces a score.
+2. The `eval_sample_set` used by scoring is not validated at the scoring boundary
+   (it was validated at the inference boundary, but not again before scoring).
+3. The architecture is asymmetric: two of three tools use the subprocess pattern,
+   one doesn't.
+
+**Fix:** Make scoring follow the same pattern as training and inference:
+
+- `agent/skills/scoring_skill/wrapper.py` — passes `eval_sample_set` + anchor map
+  path to the executor.
+- `core/sandbox_executor.py::execute_scoring_trial()` — validates `eval_sample_set`,
+  writes to `eval_sample_set_{exp_id}.json`, calls a scoring subprocess.
+- `execute_tools/scoring_single.py` (new) — CLI that reads `eval_sample_set` JSON +
+  `segment_anchors.json`, calls `score_vector()`, writes results JSON. The existing
+  `denoising_score_single.py` is preserved for legacy single-file scoring.
+
+**Impact:** scoring becomes a standalone, replayable tool. All three stages of the
+pipeline (train → infer → score) follow identical patterns with serialized configs
+and Pydantic validation at every boundary.
+
+**Priority:** Low — the current in-memory path is functionally correct and produces
+identical results. This is an architectural clean-up, not a correctness fix.
+
+**Depends on:** Phase 4b (train/eval split).
+
+---
+
+### Phase 4d: Configurable inference parameters
+
+**What:** Inference `batch_size` is currently hardcoded per model type in
+`core/sandbox_executor.py::TidmadSandbox._INFERENCE_BATCH_SIZE`:
+
+```python
+_INFERENCE_BATCH_SIZE = {
+    "punet": 25, "wavenet": 25, "fcnet": 25,
+    "rnn": 10, "transformer": 1,
+}
+```
+
+Plugin models (agent-generated) fall back to the default of 25, which may be wrong —
+a transformer-like plugin needs batch_size=1, while a lightweight model could use 200+.
+The workflow and LLM have no way to adjust this.
+
+**Problems:**
+1. **No adaptability for novel architectures**: the resource check skill estimates
+   training VRAM but not inference VRAM. A plugin model that passes the training
+   resource check may OOM during inference with batch_size=25.
+2. **Suboptimal performance for small models**: with tiny models (16K params), the
+   GPU is underutilized at batch_size=25. Formal-mode inference on 20 files takes
+   ~10 minutes but could be ~2 minutes with batch_size=200.
+3. **Not exposed in any schema**: `inference_batch_size` is not in `ExperimentPlan`,
+   `TrainConfig`, or any Pydantic model. It's invisible to the agent.
+
+**Fix options (pick one or combine):**
+1. **Add to model config**: each model (core or plugin) declares its recommended
+   inference batch size. The plugin interface contract includes
+   `PLUGIN_INFERENCE_BATCH_SIZE`. Core models keep their current values.
+2. **Add to ExperimentPlan**: the LLM can propose `inference_batch_size` alongside
+   other hyperparameters. The resource check skill validates it.
+3. **Auto-detect from resource check**: after training, the resource check skill
+   estimates the maximum safe inference batch size from available VRAM and model size.
+
+Option 3 is most robust (no human or LLM guessing), but requires extending the
+resource check skill. Option 1 is simplest and covers plugin models immediately.
+
+**Also consider**: HDF5 direct slicing for inference (same optimization as Phase 4b
+training). Currently `inference_single.py` loads the full 2 GB raw file even for
+trial mode with 4 PSD segments. Direct slicing would reduce peak CPU memory from
+~4 GB to ~80 MB per file in trial mode.
+
+**Priority:** Medium — affects performance and correctness for plugin models.
+Not blocking for core models.
+
+**Depends on:** Phase 4b (data pipeline).
+
+---
+
+### Phase 4e: Resource usage instrumentation
+
+**What:** Currently, only wall-clock timing is recorded per stage (`train_time_s`,
+`inference_time_s`, `scoring_time_s` in `ExperimentRecord.timing`). GPU memory, CPU
+memory, and LLM API call timing are not recorded. This makes it hard to:
+
+1. **Debug OOM failures**: when a round fails, we don't know peak memory — only that
+   the process was killed.
+2. **Optimize batch sizes**: without knowing actual GPU utilization, the agent and
+   human cannot make informed decisions about inference batch size.
+3. **Track cost**: LLM API call duration (plan + reflect) is invisible in the record.
+4. **Compare efficiency**: the agent sees `is_more_efficient` (fewer params/epochs)
+   but not actual resource consumption (memory, time per stage).
+
+**What to record per stage:**
+
+| Field | Source | Where to capture |
+|-------|--------|-----------------|
+| `gpu_peak_mb` | `torch.cuda.max_memory_allocated()` | After training, after inference (in subprocess, report back) |
+| `gpu_allocated_mb` | `torch.cuda.memory_allocated()` | Snapshot at key points |
+| `cpu_peak_mb` | `resource.getrusage(resource.RUSAGE_SELF).ru_maxrss` | After each stage in subprocess |
+| `plan_time_s` | `time.time()` around `brain.plan()` | Agent loop |
+| `reflect_time_s` | `time.time()` around `brain.reflect()` | Agent loop |
+| `resource_check_time_s` | `time.time()` around resource check | Agent loop |
+
+**Schema changes:**
+- Extend `ExperimentTiming` with `plan_time_s`, `reflect_time_s`, `resource_check_time_s`
+- Add `ExperimentResources` model: `train_gpu_peak_mb`, `train_cpu_peak_mb`,
+  `inference_gpu_peak_mb`, `inference_cpu_peak_mb`
+- Add `resources: Optional[ExperimentResources]` to `ExperimentRecord`
+
+**Subprocess reporting:** Training and inference run as subprocesses. GPU/CPU peak
+memory must be captured inside the subprocess and included in the return value (JSON
+result or stdout). The executor parses it and returns to the agent loop.
+
+**Why this matters for the agent:** If peak GPU memory is recorded per experiment,
+the LLM planner can see "experiment A used 4 GB GPU with batch_size=128" and make
+informed decisions about scaling. The resource check skill can also calibrate its
+estimates against actual measurements.
+
+**Priority:** Medium — important for production monitoring and informed optimization.
+Not blocking for correctness.
+
+**Depends on:** None (can be done independently).
+
+---
+
 ### Dependency graph
 
 ```
@@ -933,7 +1075,11 @@ Phase 2 (schemas) ✓         Phase 3 (SampleSet builder) ✓
                 │
           Phase 4 (data loading) ✓
                 │
-          Phase 4b (streaming loader + train/eval split) ← CURRENT
+          Phase 4b (streaming loader + train/eval split) ← IN PROGRESS
+                │
+          Phase 4c (scoring as subprocess) — low priority
+          Phase 4d (configurable inference params) — medium priority
+          Phase 4e (resource usage instrumentation) — medium priority, independent
                 │
           Phase 5 (static trial wiring) ✓
                 │
@@ -944,3 +1090,7 @@ Phase 2 (schemas) ✓         Phase 3 (SampleSet builder) ✓
 
 Phases 0, 2, and 3 have no dependencies on each other and can be built in parallel.
 Phase 6 logic is complete but formal-mode integration testing is blocked by Phase 4b.
+Phase 4c is an architectural clean-up with no correctness impact — can be deferred.
+Phase 4d affects performance and plugin model correctness — medium priority.
+Phase 4e is independent and can be done in parallel with any phase.
+Phase 4c is an architectural clean-up with no correctness impact — can be deferred.
