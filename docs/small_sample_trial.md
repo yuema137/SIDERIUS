@@ -1171,6 +1171,69 @@ operation). Not blocking for correctness.
 
 ---
 
+### Phase 8: LLM planner trial parameter awareness — CRITICAL
+
+**What:** The LLM planner does not actively use its autonomy over trial parameters.
+In the `small_sample_trial_v0` run (punet and wavenet, 6+ rounds each), the LLM
+kept `trial_portion=0.05`, `eval_portion=0.05`, `train_portion=0.1` every single
+round. It never increased portions, never chose formal mode, and never adjusted
+strategy. It only varied hyperparameters (lr, loss_type, epochs).
+
+**Impact:** The agent trains on 200× less data than the baseline (20 PSD segs total
+vs 4000), producing scores far below baseline. The LLM attributes poor scores to
+bad hyperparameters and keeps switching loss types — but the real cause is
+insufficient training data.
+
+**Root cause:** The LLM doesn't understand the relationship between `trial_portion`
+and training data volume. The prompt explains trial mode conceptually, but:
+1. The research memory doesn't show how much data each experiment used
+2. The LLM has no signal telling it "this score is low because of data, not config"
+3. The OUTPUT FORMAT example shows fixed trial values, biasing the LLM to copy them
+4. The cross-exploration rule forces loss_type changes when the issue is data volume
+
+**Evidence from `small_sample_trial_v0`:**
+
+| | Baseline (all data) | Agent trial (5% data) |
+|---|---|---|
+| punet score | 1.290 | best 0.141 (10× worse) |
+| wavenet score | 5.576 | best 4.807 (round 1 only, then collapsed to -3.x) |
+| Training PSD segs | 4000 | 20 |
+
+Wavenet round 1 (focal, lr=3e-3) scored 4.807 — close to baseline. But the
+cross-exploration rule forced the LLM to switch to CE, which collapsed to -3.x.
+The LLM never considered that the issue was switching loss types on sparse data.
+
+**Proposed solutions (in priority order):**
+
+1. **Add data volume to research memory**: Each experiment record should show
+   `training_psd_segments` and `eval_psd_segments` alongside the score. The LLM
+   can then see "experiment A trained on 20 segs and scored -0.8, baseline trained
+   on 4000 segs and scored 1.3 → data volume matters."
+
+2. **Reflection-driven data suggestions**: The reflector (`brain.reflect()`) should
+   analyze whether low scores correlate with low data volume. If the score is far
+   below baseline and `trial_portion` is small, the reflection should explicitly
+   suggest "consider increasing trial_portion."
+
+3. **Planner prompt: data-aware reasoning**: Add a section to the planner prompt:
+   "Before changing hyperparameters, consider whether the current data volume is
+   sufficient. If your score is consistently below baseline and trial_portion is
+   < 0.2, try doubling it before changing other parameters."
+
+4. **Progressive portion schedule**: The agent loop could enforce a minimum portion
+   increase when scores don't improve — e.g., "if 3 consecutive rounds show no
+   improvement, automatically increase trial_portion by 2×."
+
+5. **Remove cross-exploration rule for early rounds**: When `trial_portion` is small
+   (< 0.1), the cross-exploration rule (switch loss_type every 2 rounds) should be
+   relaxed — the LLM should be allowed to keep a working config and increase data
+   instead.
+
+**Depends on:** Phase 6 (dynamic trial/formal) — already implemented. This is a
+prompt/feedback engineering task, not a code architecture change.
+
+---
+
 ### Dependency graph
 
 ```
@@ -1195,6 +1258,7 @@ Phase 2 (schemas) ✓         Phase 3 (SampleSet builder) ✓
           Phase 6 (dynamic trial/formal) ✓
                 │
           Phase 7 (downstream, optional)
+          Phase 8 (LLM trial parameter awareness) ← CRITICAL, next priority
 ```
 
 Phases 0, 2, and 3 have no dependencies on each other and can be built in parallel.
