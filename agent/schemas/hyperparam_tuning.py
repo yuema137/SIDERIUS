@@ -107,10 +107,75 @@ class ExperimentRecord(BaseModel):
         default=None,
         description="File indices sampled (only for 'target' strategy).",
     )
+    train_portion: Optional[float] = Field(
+        default=None,
+        description="Fraction of segments per file used for training.",
+    )
     file_vector: Optional[List[float]] = Field(
         default=None,
         description="Length-20 score vector. NaN for files not included in the run.",
     )
+
+
+# ---------------------------------------------------------------------------
+# Trial config (validated trial/formal decision per round)
+# ---------------------------------------------------------------------------
+
+class TrialConfig(BaseModel):
+    """
+    Validated trial/formal configuration for a single round.
+
+    Extracted from ``ExperimentPlan`` after override chain (final-round
+    constraint, expert advice). Serialized to ``trial_config_{exp_id}.json``
+    and used to build train/eval SampleSets.
+
+    Every round has a TrialConfig — even legacy single-file mode, where
+    ``mode="single_file"`` and ``file_index`` is set.
+    """
+
+    is_trial: bool = Field(
+        description="Whether this round uses trial (sparse) or formal (full) mode.",
+    )
+    mode: Literal["trial", "formal", "single_file"] = Field(
+        description="Execution mode: trial (sparse multi-file), formal (full multi-file), or single_file (legacy).",
+    )
+    trial_strategy: Literal["snapshot", "anchors", "target"] = Field(
+        default="snapshot",
+        description="Sampling strategy for eval. Applies to trial and formal modes.",
+    )
+    trial_portion: float = Field(
+        default=0.02,
+        ge=0.01,
+        le=1.0,
+        description="Fraction of segments per file for evaluation.",
+    )
+    train_portion: float = Field(
+        default=0.1,
+        ge=0.01,
+        le=1.0,
+        description="Fraction of segments per file for training.",
+    )
+    train_validation_align: bool = Field(
+        default=True,
+        description="Whether training and eval use the same segments.",
+    )
+    target_files: List[int] = Field(
+        default_factory=list,
+        description="File indices for 'target' strategy.",
+    )
+    file_index: Optional[int] = Field(
+        default=None,
+        description="Training/validation file index. Only used in single_file mode.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_fields(self):
+        """Cross-field validation."""
+        if self.mode == "single_file" and self.file_index is None:
+            raise ValueError("file_index required when mode='single_file'.")
+        if self.is_trial and self.trial_strategy == "target" and not self.target_files:
+            raise ValueError("target_files required when is_trial=True and trial_strategy='target'.")
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +254,16 @@ class ExperimentPlan(BaseModel):
     train_validation_align: bool = Field(
         default=True,
         description="Whether validation uses the same segments as training.",
+    )
+    train_portion: float = Field(
+        default=0.1,
+        ge=0.01,
+        le=1.0,
+        description=(
+            "Fraction of segments per file used for training. Independent of "
+            "trial_portion (which controls eval). Default 0.1 matches the legacy "
+            "TIDMAD train.py subsampling rate."
+        ),
     )
 
     @model_validator(mode="after")
@@ -283,6 +358,15 @@ class HyperparamTuningInput(BaseModel):
     train_validation_align: bool = Field(
         default=True,
         description="When True, validation uses the same segments as training. Only used when is_trial=True.",
+    )
+    train_portion: float = Field(
+        default=0.1,
+        ge=0.01,
+        le=1.0,
+        description=(
+            "Fraction of segments per file used for training. Independent of "
+            "trial_portion (eval). Default 0.1 matches legacy TIDMAD subsampling."
+        ),
     )
 
     @model_validator(mode="after")

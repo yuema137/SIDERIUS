@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from agent.schemas.hyperparam_tuning import (
     ExpertAdvice,
     ExperimentPlan,
+    TrialConfig,
     HyperparamTuningInput,
     HyperparamTuningOutput,
     ExperimentRecord,
@@ -537,3 +538,81 @@ class TestExperimentPlan:
             ExperimentPlan.model_validate({
                 "trial_strategy": "nonexistent",
             })
+
+
+# ---------------------------------------------------------------------------
+# TrialConfig validation
+# ---------------------------------------------------------------------------
+
+class TestTrialConfig:
+    """Verify TrialConfig schema validates trial/formal decisions correctly."""
+
+    def test_trial_mode(self):
+        cfg = TrialConfig(
+            is_trial=True,
+            mode="trial",
+            trial_strategy="snapshot",
+            trial_portion=0.05,
+            train_portion=0.1,
+        )
+        assert cfg.is_trial is True
+        assert cfg.mode == "trial"
+        assert cfg.file_index is None
+
+    def test_formal_mode(self):
+        cfg = TrialConfig(
+            is_trial=False,
+            mode="formal",
+            train_portion=0.1,
+        )
+        assert cfg.mode == "formal"
+        assert cfg.file_index is None
+
+    def test_single_file_mode(self):
+        cfg = TrialConfig(
+            is_trial=False,
+            mode="single_file",
+            file_index=6,
+        )
+        assert cfg.mode == "single_file"
+        assert cfg.file_index == 6
+
+    def test_single_file_without_file_index_raises(self):
+        with pytest.raises(ValidationError, match="file_index required"):
+            TrialConfig(is_trial=False, mode="single_file")
+
+    def test_trial_target_without_files_raises(self):
+        with pytest.raises(ValidationError, match="target_files required"):
+            TrialConfig(
+                is_trial=True,
+                mode="trial",
+                trial_strategy="target",
+                target_files=[],
+            )
+
+    def test_trial_target_with_files(self):
+        cfg = TrialConfig(
+            is_trial=True,
+            mode="trial",
+            trial_strategy="target",
+            target_files=[0, 10, 19],
+        )
+        assert cfg.target_files == [0, 10, 19]
+
+    def test_model_dump_roundtrip(self):
+        """Serialization and deserialization preserves all fields."""
+        cfg = TrialConfig(
+            is_trial=True,
+            mode="trial",
+            trial_strategy="anchors",
+            trial_portion=0.05,
+            train_portion=0.2,
+            train_validation_align=False,
+        )
+        dumped = cfg.model_dump()
+        restored = TrialConfig.model_validate(dumped)
+        assert restored == cfg
+
+    def test_invalid_mode_rejected(self):
+        with pytest.raises(ValidationError):
+            TrialConfig(is_trial=True, mode="unknown")
