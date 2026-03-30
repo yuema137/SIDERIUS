@@ -231,6 +231,9 @@ def get_planner_user_prompt(
     "trial_strategy": "snapshot | anchors | target",
     "trial_portion": 0.02,
     "train_portion": 0.1,
+    "eval_strategy": "snapshot | anchors | target",
+    "eval_portion": 0.02,
+    "train_validation_align": true,
     "model_config": {{ ... }},
     "train_config": {{ "lr": ..., "epochs": ..., "batch_size": ..., "device": "cuda" }},
     "loss_config": {{ "loss_type": "ce/focal/smooth_l1", ... }}

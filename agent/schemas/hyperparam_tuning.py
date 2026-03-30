@@ -125,17 +125,22 @@ class TrialConfig(BaseModel):
     """
     Validated trial/formal configuration for a single round.
 
-    Extracted from ``ExperimentPlan`` after override chain (final-round
-    constraint, expert advice). Serialized to ``trial_config_{exp_id}.json``
-    and used to build the eval SampleSet (data scope).
+    Training and validation (inference + scoring) are **independent pipelines**
+    operating on different physical files (``abra_training_*.h5`` vs
+    ``abra_validation_*.h5``). They share the same file/segment index space
+    but the SampleSets are built independently.
 
-    ``trial_portion`` defines the data scope — which segments are in play
-    for both eval and training. ``train_portion`` controls how much of that
-    scope is subsampled per epoch during training (for speed). Training
-    resamples a different subset each epoch for diversity.
+    Training side:
+    - ``trial_strategy`` + ``trial_portion`` → training scope (which segments to train on)
+    - ``train_portion`` → per-epoch subsample from the training scope (speed optimization)
 
-    Every round has a TrialConfig — even legacy single-file mode, where
-    ``mode="single_file"`` and ``file_index`` is set.
+    Validation side:
+    - ``eval_strategy`` + ``eval_portion`` → validation scope (what to inference + score on)
+    - In formal mode: ``eval_portion=1.0`` (all segments)
+
+    ``train_validation_align``:
+    - True: train and eval scopes use the same seed → same file/segment indices
+    - False: independent seeds → potentially different segment selections
     """
 
     is_trial: bool = Field(
@@ -144,34 +149,60 @@ class TrialConfig(BaseModel):
     mode: Literal["trial", "formal", "single_file"] = Field(
         description="Execution mode: trial (sparse multi-file), formal (full multi-file), or single_file (legacy).",
     )
+
+    # --- Training data ---
     trial_strategy: Literal["snapshot", "anchors", "target"] = Field(
         default="snapshot",
-        description="Sampling strategy. Applies to trial and formal modes.",
+        description="Sampling strategy for training data — which files to train on.",
     )
     trial_portion: float = Field(
         default=0.02,
         ge=0.01,
         le=1.0,
-        description="Fraction of segments per file — defines the data scope for eval and training.",
+        description="Fraction of segments per file for the training scope.",
     )
     train_portion: float = Field(
         default=0.1,
         ge=0.01,
         le=1.0,
-        description="Fraction of the scope subsampled per epoch for training (speed optimization).",
+        description="Per-epoch subsample from the training scope (speed optimization).",
     )
     target_files: List[int] = Field(
         default_factory=list,
-        description="File indices for 'target' strategy.",
+        description="File indices for 'target' strategy (training).",
     )
+
+    # --- Validation (inference + scoring) data ---
+    eval_strategy: Literal["snapshot", "anchors", "target"] = Field(
+        default="snapshot",
+        description="Sampling strategy for validation data — which files to evaluate on.",
+    )
+    eval_portion: float = Field(
+        default=0.02,
+        ge=0.01,
+        le=1.0,
+        description="Fraction of segments per file for validation. 1.0 in formal mode.",
+    )
+
+    # --- Alignment ---
+    train_validation_align: bool = Field(
+        default=True,
+        description="When True, train and eval scopes use the same seed (same segment indices).",
+    )
+
+    # --- Legacy ---
     file_index: Optional[int] = Field(
         default=None,
         description="Training/validation file index. Only used in single_file mode.",
     )
 
     # --- Reproducibility seeds ---
-    sampling_seed: int = Field(
-        description="Seed used by build_sample_set() to select PSD segments for the data scope.",
+    train_sampling_seed: int = Field(
+        description="Seed for build_sample_set() to select training PSD segments.",
+    )
+    eval_sampling_seed: int = Field(
+        description="Seed for build_sample_set() to select validation PSD segments. "
+                    "Same as train_sampling_seed when train_validation_align=True.",
     )
     train_base_seed: int = Field(
         description="Base seed for per-epoch training subsampling. Epoch n uses seed = train_base_seed + n.",
@@ -184,6 +215,11 @@ class TrialConfig(BaseModel):
             raise ValueError("file_index required when mode='single_file'.")
         if self.is_trial and self.trial_strategy == "target" and not self.target_files:
             raise ValueError("target_files required when is_trial=True and trial_strategy='target'.")
+        if self.train_validation_align and self.train_sampling_seed != self.eval_sampling_seed:
+            raise ValueError(
+                "train_validation_align=True but seeds differ: "
+                f"train={self.train_sampling_seed}, eval={self.eval_sampling_seed}."
+            )
         return self
 
 
@@ -246,33 +282,45 @@ class ExperimentPlan(BaseModel):
         default=True,
         description="Whether this round uses trial (sparse) or formal (full) mode.",
     )
+
+    # Training data
     trial_strategy: Literal["snapshot", "anchors", "target"] = Field(
         default="snapshot",
-        description="Sampling strategy. Ignored when is_trial=False.",
+        description="Sampling strategy for training — which files to train on.",
     )
     trial_portion: float = Field(
         default=0.02,
         ge=0.01,
         le=1.0,
-        description="Fraction of segments to sample per file. Ignored when is_trial=False.",
+        description="Fraction of segments per file for the training scope.",
     )
     target_files: List[int] = Field(
         default_factory=list,
-        description="File indices for 'target' strategy. Ignored otherwise.",
-    )
-    train_validation_align: bool = Field(
-        default=True,
-        description="Whether validation uses the same segments as training.",
+        description="File indices for 'target' strategy.",
     )
     train_portion: float = Field(
         default=0.1,
         ge=0.01,
         le=1.0,
-        description=(
-            "Fraction of segments per file used for training. Independent of "
-            "trial_portion (which controls eval). Default 0.1 matches the legacy "
-            "TIDMAD train.py subsampling rate."
-        ),
+        description="Per-epoch subsample from training scope. Default 0.1 matches legacy TIDMAD.",
+    )
+
+    # Validation data
+    eval_strategy: Literal["snapshot", "anchors", "target"] = Field(
+        default="snapshot",
+        description="Sampling strategy for validation — which files to evaluate on.",
+    )
+    eval_portion: float = Field(
+        default=0.02,
+        ge=0.01,
+        le=1.0,
+        description="Fraction of segments per file for validation. Set to 1.0 for formal mode.",
+    )
+
+    # Alignment
+    train_validation_align: bool = Field(
+        default=True,
+        description="When True, train and eval scopes use the same segment indices.",
     )
 
     @model_validator(mode="after")
@@ -350,32 +398,45 @@ class HyperparamTuningInput(BaseModel):
         default=False,
         description="When True, run in trial-explore mode with sparse sampling across multiple files.",
     )
+
+    # Training data
+    trial_strategy: Literal["snapshot", "anchors", "target"] = Field(
+        default="snapshot",
+        description="Sampling strategy for training: 'snapshot' (all 20 files), 'anchors' (files 0/10/19), 'target' (specific files).",
+    )
     trial_portion: float = Field(
         default=0.1,
         ge=0.0,
         le=1.0,
-        description="Fraction of segments to sample per file. Only used when is_trial=True.",
-    )
-    trial_strategy: Literal["snapshot", "anchors", "target"] = Field(
-        default="snapshot",
-        description="Sampling strategy: 'snapshot' (all 20 files), 'anchors' (files 0/10/19), 'target' (specific files). Only used when is_trial=True.",
+        description="Fraction of segments per file for the training scope.",
     )
     target_files: List[int] = Field(
         default_factory=list,
         description="File indices to sample from. Required when trial_strategy='target'.",
     )
-    train_validation_align: bool = Field(
-        default=True,
-        description="When True, validation uses the same segments as training. Only used when is_trial=True.",
-    )
     train_portion: float = Field(
         default=0.1,
         ge=0.01,
         le=1.0,
-        description=(
-            "Fraction of segments per file used for training. Independent of "
-            "trial_portion (eval). Default 0.1 matches legacy TIDMAD subsampling."
-        ),
+        description="Per-epoch subsample from training scope. Default 0.1 matches legacy TIDMAD.",
+    )
+
+    # Validation data
+    eval_strategy: Literal["snapshot", "anchors", "target"] = Field(
+        default="snapshot",
+        description="Sampling strategy for validation.",
+    )
+    eval_portion: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of segments per file for validation. Set to 1.0 for formal mode.",
+    )
+
+    # Alignment
+    train_validation_align: bool = Field(
+        default=True,
+        description="When True, train and eval scopes use the same segment indices (different physical files).",
     )
 
     # --- Reproducibility seeds (optional — auto-generated when not provided) ---

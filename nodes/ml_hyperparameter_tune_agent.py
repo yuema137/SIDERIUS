@@ -260,48 +260,68 @@ class HyperparamTuningAgent:
                     mode = "single_file"
 
                 # In formal mode, eval uses all segments (portion=1.0).
-                # In trial mode, eval uses the LLM's trial_portion.
-                eval_portion = plan.trial_portion if mode == "trial" else 1.0
+                # In trial mode, eval uses the LLM's eval_portion.
+                eval_portion = plan.eval_portion if mode == "trial" else 1.0
 
-                # Seeds for reproducibility. Use input seeds if provided (replay mode),
-                # otherwise auto-generate from run_name + attempt.
+                # Generate deterministic seeds for reproducibility.
                 import hashlib
                 seed_input = f"{run_name}_{total_attempts}".encode()
                 seed_hash = int(hashlib.sha256(seed_input).hexdigest(), 16)
-                sampling_seed = agent_input.sampling_seed if agent_input.sampling_seed is not None else seed_hash % (2**31)
+                train_sampling_seed = agent_input.sampling_seed if agent_input.sampling_seed is not None else seed_hash % (2**31)
                 train_base_seed = agent_input.train_base_seed if agent_input.train_base_seed is not None else (seed_hash >> 31) % (2**31)
+                # Eval seed: same as train when aligned, different otherwise
+                if plan.train_validation_align:
+                    eval_sampling_seed = train_sampling_seed
+                else:
+                    eval_sampling_seed = (seed_hash >> 62) % (2**31)
 
                 trial_config = TrialConfig(
                     is_trial=plan.is_trial,
                     mode=mode,
-                    trial_strategy=plan.trial_strategy if plan.is_trial else "snapshot",
-                    trial_portion=eval_portion,
+                    # Training
+                    trial_strategy=plan.trial_strategy if mode != "single_file" else "snapshot",
+                    trial_portion=plan.trial_portion,
                     train_portion=plan.train_portion,
                     target_files=plan.target_files if plan.is_trial else [],
+                    # Validation
+                    eval_strategy=plan.eval_strategy if mode != "single_file" else "snapshot",
+                    eval_portion=eval_portion,
+                    # Alignment
+                    train_validation_align=plan.train_validation_align,
+                    # Legacy
                     file_index=file_index if mode == "single_file" else None,
-                    sampling_seed=sampling_seed,
+                    # Seeds
+                    train_sampling_seed=train_sampling_seed,
+                    eval_sampling_seed=eval_sampling_seed,
                     train_base_seed=train_base_seed,
                 )
 
                 # Validate integer relationships between dataset, PSD, ML segments
                 _validate_data_config(trial_config, plan.model_cfg.get("segmentation_size", 10000))
 
-                # Build eval_sample_set = the data scope for this round.
-                # Training subsamples from this scope each epoch (train_portion).
+                # Build TWO independent SampleSets — training and validation
                 if trial_config.mode in ("trial", "formal"):
-                    eval_sample_set = build_sample_set(
+                    train_sample_set = build_sample_set(
                         is_trial=True,
                         trial_strategy=trial_config.trial_strategy,
                         trial_portion=trial_config.trial_portion,
                         target_files=trial_config.target_files or None,
-                        seed=trial_config.sampling_seed,
+                        seed=trial_config.train_sampling_seed,
+                    )
+                    eval_sample_set = build_sample_set(
+                        is_trial=True,
+                        trial_strategy=trial_config.eval_strategy,
+                        trial_portion=trial_config.eval_portion,
+                        target_files=trial_config.target_files or None,
+                        seed=trial_config.eval_sampling_seed,
                     )
                     print(f"  {trial_config.mode.capitalize()} mode: "
-                          f"strategy={trial_config.trial_strategy} "
-                          f"| eval_portion={trial_config.trial_portion} "
-                          f"| train_portion={trial_config.train_portion} "
-                          f"| files={sorted(eval_sample_set.keys())}")
+                          f"train: {trial_config.trial_strategy} portion={trial_config.trial_portion} "
+                          f"| eval: {trial_config.eval_strategy} portion={trial_config.eval_portion} "
+                          f"| train_portion/epoch={trial_config.train_portion} "
+                          f"| align={trial_config.train_validation_align}")
                 else:
+                    train_sample_set = None
                     eval_sample_set = None
                     print(f"  Legacy mode: file_index={file_index}")
 
@@ -335,10 +355,10 @@ class HyperparamTuningAgent:
                     "model_config":      model_config,
                     "train_config":      plan.train_cfg,
                     "loss_config":       plan.loss_cfg,
-                    "sample_set":        eval_sample_set,     # data scope for training
+                    "sample_set":        train_sample_set,    # training data (from training files)
                     "train_portion":     trial_config.train_portion,
                     "train_base_seed":   trial_config.train_base_seed,
-                    "eval_sample_set":   eval_sample_set,     # inference + scoring
+                    "eval_sample_set":   eval_sample_set,     # validation data (from validation files)
                 }
 
                 print(f"\n[Step 0/3] Resource check...")

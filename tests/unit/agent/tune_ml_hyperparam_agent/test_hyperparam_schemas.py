@@ -548,7 +548,7 @@ class TestTrialConfig:
     """Verify TrialConfig schema validates trial/formal decisions correctly."""
 
     # Common seed values for tests
-    _SEEDS = {"sampling_seed": 42, "train_base_seed": 123}
+    _SEEDS = {"train_sampling_seed": 42, "eval_sampling_seed": 42, "train_base_seed": 123}
 
     def test_trial_mode(self):
         cfg = TrialConfig(
@@ -562,7 +562,8 @@ class TestTrialConfig:
         assert cfg.is_trial is True
         assert cfg.mode == "trial"
         assert cfg.file_index is None
-        assert cfg.sampling_seed == 42
+        assert cfg.train_sampling_seed == 42
+        assert cfg.eval_sampling_seed == 42
         assert cfg.train_base_seed == 123
 
     def test_formal_mode(self):
@@ -622,7 +623,8 @@ class TestTrialConfig:
         dumped = cfg.model_dump()
         restored = TrialConfig.model_validate(dumped)
         assert restored == cfg
-        assert dumped["sampling_seed"] == 42
+        assert dumped["train_sampling_seed"] == 42
+        assert dumped["eval_sampling_seed"] == 42
         assert dumped["train_base_seed"] == 123
 
     def test_invalid_mode_rejected(self):
