@@ -268,6 +268,21 @@ def score_segments(
     return float(np.mean(weighted_snrs))
 
 
+def _score_one_file(args: tuple) -> tuple[int, float]:
+    """Worker function for parallel scoring. Unpacks args for ProcessPoolExecutor."""
+    data_dir, denoised_filename, file_index, segment_indices, anchor_map, s_max, raw_data_dir = args
+    score = score_segments(
+        data_dir=data_dir,
+        denoised_filename=denoised_filename,
+        file_index=file_index,
+        segment_indices=segment_indices,
+        anchor_map=anchor_map,
+        s_max=s_max,
+        raw_data_dir=raw_data_dir,
+    )
+    return file_index, score
+
+
 def score_vector(
     data_dir: str,
     sample_set: SampleSet,
@@ -275,6 +290,8 @@ def score_vector(
     s_max: float,
     denoised_filename_fn: callable = None,
     raw_data_dir: str | None = None,
+    parallel: bool = True,
+    num_workers: int = 8,
 ) -> tuple[list[float], float]:
     """
     Score multiple files and return the length-20 score vector + scalar.
@@ -292,6 +309,8 @@ def score_vector(
         raw_data_dir:          Directory containing the raw validation files
                                (``abra_validation_XXXX.h5``). Defaults to
                                ``data_dir`` when ``None``.
+        parallel:              Use multiprocessing to score files in parallel.
+        num_workers:           Number of parallel workers.
 
     Returns:
         (file_vector, final_scalar_score):
@@ -304,6 +323,7 @@ def score_vector(
                     provided a way to resolve denoised filenames.
     """
     import math
+    import concurrent.futures
 
     if denoised_filename_fn is None:
         raise ValueError(
@@ -313,17 +333,23 @@ def score_vector(
 
     file_vector = [float("nan")] * NUM_FILES
 
+    # Build task args for each file
+    tasks = []
     for file_index, segment_indices in sample_set.items():
         denoised_filename = denoised_filename_fn(file_index)
-        file_vector[file_index] = score_segments(
-            data_dir=data_dir,
-            denoised_filename=denoised_filename,
-            file_index=file_index,
-            segment_indices=segment_indices,
-            anchor_map=anchor_map,
-            s_max=s_max,
-            raw_data_dir=raw_data_dir,
-        )
+        tasks.append((
+            data_dir, denoised_filename, file_index, segment_indices,
+            anchor_map, s_max, raw_data_dir,
+        ))
+
+    if parallel and len(tasks) > 1:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=min(num_workers, len(tasks))) as executor:
+            for fi, score in executor.map(_score_one_file, tasks):
+                file_vector[fi] = score
+    else:
+        for task_args in tasks:
+            fi, score = _score_one_file(task_args)
+            file_vector[fi] = score
 
     # Aggregate: mean of non-NaN entries
     valid_scores = [s for s in file_vector if not math.isnan(s)]
