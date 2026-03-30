@@ -649,11 +649,29 @@ def main():
     parser.add_argument("--progress_bar", action="store_true",
                         help="Stream live tqdm progress bars from training/inference subprocesses.")
     parser.add_argument("--file_index", type=int, default=6,
-                        help="Validation/training file index (default: 6).")
+                        help="Validation/training file index (default: 6). Ignored when --is_trial.")
+
+    # Trial mode arguments
+    parser.add_argument("--is_trial", action="store_true",
+                        help="Enable trial-explore mode with multi-file sparse sampling.")
+    parser.add_argument("--trial_strategy", type=str, default="snapshot",
+                        choices=["snapshot", "anchors", "target"],
+                        help="Training sampling strategy (default: snapshot).")
+    parser.add_argument("--trial_portion", type=float, default=0.1,
+                        help="Fraction of segments per file for training scope (default: 0.1).")
+    parser.add_argument("--eval_strategy", type=str, default="snapshot",
+                        choices=["snapshot", "anchors", "target"],
+                        help="Validation sampling strategy (default: snapshot).")
+    parser.add_argument("--eval_portion", type=float, default=0.1,
+                        help="Fraction of segments per file for validation (default: 0.1).")
+    parser.add_argument("--train_portion", type=float, default=0.1,
+                        help="Per-epoch subsample from training scope (default: 0.1).")
+    parser.add_argument("--human_advice", type=str, default=None,
+                        help="Human guidance for the agent (injected alongside expert_advice).")
 
     args = parser.parse_args()
 
-    agent_input = HyperparamTuningInput.model_validate({
+    input_dict = {
         "model_type":    args.force_model,
         "file_index":    args.file_index,
         "max_rounds":    args.max_rounds,
@@ -665,7 +683,20 @@ def main():
             "local": {"workspace": args.workspace, "run_name": args.run_name},
         },
         "progress_bar": args.progress_bar,
-    })
+        "is_trial":     args.is_trial,
+    }
+    if args.is_trial:
+        input_dict.update({
+            "trial_strategy":  args.trial_strategy,
+            "trial_portion":   args.trial_portion,
+            "eval_strategy":   args.eval_strategy,
+            "eval_portion":    args.eval_portion,
+            "train_portion":   args.train_portion,
+        })
+    if args.human_advice:
+        input_dict["human_advice"] = args.human_advice
+
+    agent_input = HyperparamTuningInput.model_validate(input_dict)
 
     agent = HyperparamTuningAgent()
     agent.run(agent_input)

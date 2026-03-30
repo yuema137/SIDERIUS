@@ -216,7 +216,7 @@ def seed_agent_memory(baseline_record: dict, agent_workspace: str, agent_run_nam
 
 def run_agent(model_type: str, agent_workspace: str, agent_run_name: str,
               provider: str, model_id: str, max_rounds: int, progress_bar: bool = False,
-              file_index: int = 6):
+              file_index: int = 6, is_trial: bool = False, human_advice: str = None):
     """
     Launches nodes/ml_hyperparameter_tune_agent.py as a subprocess, locked to model_type, for max_rounds rounds.
     """
@@ -238,8 +238,13 @@ def run_agent(model_type: str, agent_workspace: str, agent_run_name: str,
         "--run_name",    agent_run_name,
         "--workspace",   agent_workspace,
         "--expert_advice", expert_advice,
-        "--file_index",  str(file_index),
     ]
+    if is_trial:
+        cmd.append("--is_trial")
+    else:
+        cmd.extend(["--file_index", str(file_index)])
+    if human_advice:
+        cmd.extend(["--human_advice", human_advice])
     if progress_bar:
         cmd.append("--progress_bar")
 
@@ -300,7 +305,15 @@ def main():
     )
     parser.add_argument(
         "--file_index", type=int, default=6,
-        help="Validation/training file index (default: 6).",
+        help="Validation/training file index (default: 6). Ignored when --is_trial.",
+    )
+    parser.add_argument(
+        "--is_trial", action="store_true",
+        help="Enable trial-explore mode with multi-file sparse sampling.",
+    )
+    parser.add_argument(
+        "--human_advice", type=str, default=None,
+        help="Human guidance for the agent.",
     )
     args = parser.parse_args()
 
@@ -372,6 +385,8 @@ def main():
         max_rounds=args.max_rounds,
         progress_bar=args.progress_bar,
         file_index=args.file_index,
+        is_trial=args.is_trial,
+        human_advice=args.human_advice,
     )
 
     print(f"\n{'#'*60}")
