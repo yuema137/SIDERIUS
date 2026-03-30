@@ -160,6 +160,45 @@ SampleSet = dict[int, list[int]]
 """Mapping of file_index → list of segment indices to process."""
 
 
+def validate_sample_set(sample_set: dict) -> SampleSet:
+    """
+    Lightweight validation for a SampleSet dict.
+
+    Checks structure and types without a full Pydantic model. Normalizes
+    JSON string keys to int. Raises ValueError on invalid input.
+
+    Args:
+        sample_set: Raw dict, possibly from JSON (string keys).
+
+    Returns:
+        Validated SampleSet with int keys and sorted int segment lists.
+    """
+    if not isinstance(sample_set, dict):
+        raise ValueError(f"SampleSet must be a dict, got {type(sample_set).__name__}")
+    if not sample_set:
+        raise ValueError("SampleSet must not be empty.")
+
+    validated: SampleSet = {}
+    for key, segments in sample_set.items():
+        try:
+            file_index = int(key)
+        except (ValueError, TypeError):
+            raise ValueError(f"SampleSet key must be an integer, got {key!r}")
+        if not (0 <= file_index < NUM_FILES):
+            raise ValueError(f"SampleSet file_index {file_index} out of range [0, {NUM_FILES}).")
+        if not isinstance(segments, list) or not segments:
+            raise ValueError(f"SampleSet[{file_index}] must be a non-empty list, got {type(segments).__name__}")
+        for seg in segments:
+            if not isinstance(seg, int) or seg < 0 or seg >= SEGMENTS_PER_FILE:
+                raise ValueError(
+                    f"SampleSet[{file_index}] segment {seg!r} invalid — "
+                    f"must be int in [0, {SEGMENTS_PER_FILE})."
+                )
+        validated[file_index] = segments
+
+    return validated
+
+
 def score_segments(
     data_dir: str,
     denoised_filename: str,
