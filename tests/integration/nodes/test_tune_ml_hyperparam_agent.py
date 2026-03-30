@@ -17,6 +17,7 @@ Run locally with:
 DO NOT run these in CI (GitHub Actions or equivalent).
 """
 import os
+import json
 import time
 import pytest
 from dotenv import load_dotenv
@@ -465,6 +466,37 @@ def run_trial_to_formal(provider: str, model_type: str, loss_cfg: dict, workspac
     # --- Verify output file was written ---
     output_path = os.path.join(workspace, f"run_output_{run_name}.json")
     assert os.path.exists(output_path), f"Output file not found: {output_path}"
+
+    # --- Verify Phase 4b artifacts: trial_config and sample_set files ---
+    configs_dir = os.path.join(workspace, "configs", run_name)
+    for rec in success_records:
+        exp_id = rec.exp_id
+        # trial_config must exist for every round
+        tc_path = os.path.join(configs_dir, f"trial_config_{exp_id}.json")
+        assert os.path.exists(tc_path), f"trial_config not found: {tc_path}"
+        with open(tc_path) as f:
+            tc = json.load(f)
+        assert "is_trial" in tc and "mode" in tc and "train_portion" in tc
+
+        # train and eval sample_set files must exist
+        train_ss = os.path.join(configs_dir, f"train_sample_set_{exp_id}.json")
+        eval_ss = os.path.join(configs_dir, f"eval_sample_set_{exp_id}.json")
+        assert os.path.exists(train_ss), f"train_sample_set not found: {train_ss}"
+        assert os.path.exists(eval_ss), f"eval_sample_set not found: {eval_ss}"
+
+    # --- If formal round completed, verify train/eval split ---
+    if len(success_records) >= 2:
+        formal_exp_id = success_records[-1].exp_id
+        with open(os.path.join(configs_dir, f"train_sample_set_{formal_exp_id}.json")) as f:
+            formal_train = json.load(f)
+        with open(os.path.join(configs_dir, f"eval_sample_set_{formal_exp_id}.json")) as f:
+            formal_eval = json.load(f)
+        # Eval should have more segments than train (eval=100%, train=10%)
+        train_total = sum(len(v) for v in formal_train.values())
+        eval_total = sum(len(v) for v in formal_eval.values())
+        assert eval_total > train_total, (
+            f"Formal eval ({eval_total} segs) should be larger than train ({train_total} segs)"
+        )
 
     return output
 
