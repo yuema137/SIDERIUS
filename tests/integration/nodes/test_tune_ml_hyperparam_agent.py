@@ -506,12 +506,19 @@ class TestTrialModeGemini:
         _skip_if_no_data()
         _skip_if_no_anchor_map()
 
-    def test_punet_trial_to_formal(self, tmp_path):
-        """2-round run: trial (round 1) → formal (round 2, forced by code)."""
+    def test_punet_trial_to_formal(self):
+        """2-round run: trial (round 1) → formal (round 2, forced by code).
+        Uses persistent directory so results can be inspected after the test."""
+        import tempfile
+        workspace = os.path.join(
+            tempfile.gettempdir(), "siderius_integration_tests", "trial_to_formal"
+        )
+        os.makedirs(workspace, exist_ok=True)
         cfg = FLEX_CONFIGS["punet"][0]
         output = run_trial_to_formal(
-            "gemini", "punet", cfg["loss_cfg"], str(tmp_path),
+            "gemini", "punet", cfg["loss_cfg"], workspace,
             model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"],
         )
+        print(f"\n  Results saved to: {workspace}")
         assert output.status == "completed"
         assert output.completed_rounds == 2
