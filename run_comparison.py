@@ -209,9 +209,9 @@ def run_baseline_trial(model_type: str, baseline_workspace: str,
     run_name = f"baseline_{model_type}"
     exp_id = f"baseline_{model_type}_{int(time.time())}"
 
-    # Override epochs to match paper (5 epochs with 10% subsampling ≈ paper's training)
+    # Override epochs to match paper (10 epochs with 10% subsampling ≈ paper's training)
     t_cfg = dict(t_cfg)
-    t_cfg["epochs"] = 5
+    t_cfg["epochs"] = 10
 
     sandbox = TidmadSandbox(
         metadata_source="local",
