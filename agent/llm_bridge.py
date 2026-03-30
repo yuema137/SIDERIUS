@@ -151,10 +151,18 @@ class LLMBridge:
              memory_history: List[Dict],
              expert_advice: str = "None",
              force_model: str = "auto",
-             config_manual: Optional[Dict] = None) -> Dict:
+             config_manual: Optional[Dict] = None,
+             current_round: Optional[int] = None,
+             max_rounds: Optional[int] = None,
+             trial_allowed: bool = True) -> Dict:
         """
         Uses the Planner logic to observe Research Memory and decide next steps.
         Incorporates physical constraints from config_manual to prevent hallucinations.
+
+        Args:
+            current_round: Current round number (1-based). Forwarded to prompt.
+            max_rounds:    Total rounds in this run. Forwarded to prompt.
+            trial_allowed: Whether the LLM may choose trial mode. Forwarded to prompt.
         """
         system_prompt = PLANNER_PROMPT
 
@@ -167,7 +175,10 @@ class LLMBridge:
         user_prompt = get_planner_user_prompt(
             memory_history=memory_history,
             expert_advice=expert_advice,
-            force_model=force_model
+            force_model=force_model,
+            current_round=current_round,
+            max_rounds=max_rounds,
+            trial_allowed=trial_allowed,
         )
 
         # pass the manual into prompt

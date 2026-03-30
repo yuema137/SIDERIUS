@@ -14,6 +14,8 @@ from pydantic import ValidationError
 
 from agent.schemas.hyperparam_tuning import (
     ExpertAdvice,
+    ExperimentPlan,
+    TrialConfig,
     HyperparamTuningInput,
     HyperparamTuningOutput,
     ExperimentRecord,
@@ -302,3 +304,327 @@ class TestHyperparamTuningOutput:
         valid_output_dict["all_records"] = [{"status": "bad_status", "exp_id": "x"}]
         with pytest.raises(ValidationError):
             HyperparamTuningOutput.model_validate(valid_output_dict)
+
+
+# ---------------------------------------------------------------------------
+# Trial-mode fields — backward compatibility and new behavior
+# ---------------------------------------------------------------------------
+
+class TestTrialFieldsInput:
+    """Verify trial fields on HyperparamTuningInput are optional and default to normal mode."""
+
+    def test_defaults_to_normal_mode(self, valid_input_dict):
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        assert inp.is_trial is False
+        assert inp.trial_portion == 0.1
+        assert inp.trial_strategy == "snapshot"
+        assert inp.target_files == []
+        assert inp.train_validation_align is True
+
+    def test_existing_input_without_trial_fields_validates(self, valid_input_dict):
+        """Existing callers that don't pass trial fields should still work."""
+        assert "is_trial" not in valid_input_dict
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        assert inp.is_trial is False
+
+    def test_trial_mode_with_snapshot(self, valid_input_dict):
+        valid_input_dict["is_trial"] = True
+        valid_input_dict["trial_strategy"] = "snapshot"
+        valid_input_dict["trial_portion"] = 0.2
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        assert inp.is_trial is True
+        assert inp.trial_strategy == "snapshot"
+        assert inp.trial_portion == 0.2
+
+    def test_trial_mode_with_target(self, valid_input_dict):
+        valid_input_dict["is_trial"] = True
+        valid_input_dict["trial_strategy"] = "target"
+        valid_input_dict["target_files"] = [0, 1, 2, 3]
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        assert inp.target_files == [0, 1, 2, 3]
+
+    def test_invalid_trial_strategy_raises(self, valid_input_dict):
+        valid_input_dict["trial_strategy"] = "invalid_strategy"
+        with pytest.raises(ValidationError):
+            HyperparamTuningInput.model_validate(valid_input_dict)
+
+    def test_target_strategy_empty_files_raises(self, valid_input_dict):
+        """target strategy with empty target_files should be caught at schema level."""
+        valid_input_dict["is_trial"] = True
+        valid_input_dict["trial_strategy"] = "target"
+        valid_input_dict["target_files"] = []
+        with pytest.raises(ValidationError, match="target_files must be non-empty"):
+            HyperparamTuningInput.model_validate(valid_input_dict)
+
+    def test_target_strategy_without_trial_mode_ok(self, valid_input_dict):
+        """target strategy is ignored when is_trial=False — no validation error."""
+        valid_input_dict["is_trial"] = False
+        valid_input_dict["trial_strategy"] = "target"
+        valid_input_dict["target_files"] = []
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        assert inp.is_trial is False
+
+    def test_trial_portion_out_of_range_raises(self, valid_input_dict):
+        valid_input_dict["trial_portion"] = 1.5
+        with pytest.raises(ValidationError):
+            HyperparamTuningInput.model_validate(valid_input_dict)
+
+
+class TestTrialFieldsExperimentRecord:
+    """Verify trial fields on ExperimentRecord are optional and default correctly."""
+
+    def test_existing_record_without_trial_fields(self, valid_success_record):
+        """Records from before the trial feature should still validate."""
+        assert "is_trial" not in valid_success_record
+        rec = ExperimentRecord.model_validate(valid_success_record)
+        assert rec.is_trial is False
+        assert rec.trial_strategy is None
+        assert rec.trial_portion is None
+        assert rec.train_validation_align is None
+        assert rec.target_files is None
+        assert rec.file_vector is None
+
+    def test_record_with_trial_context(self, valid_success_record):
+        valid_success_record["is_trial"] = True
+        valid_success_record["trial_strategy"] = "snapshot"
+        valid_success_record["trial_portion"] = 0.1
+        valid_success_record["train_validation_align"] = True
+        valid_success_record["file_vector"] = [float("nan")] * 20
+        valid_success_record["file_vector"][6] = 0.85
+        rec = ExperimentRecord.model_validate(valid_success_record)
+        assert rec.is_trial is True
+        assert rec.trial_strategy == "snapshot"
+        assert rec.file_vector[6] == 0.85
+
+    def test_record_with_target_strategy(self, valid_success_record):
+        valid_success_record["is_trial"] = True
+        valid_success_record["trial_strategy"] = "target"
+        valid_success_record["target_files"] = [0, 10, 19]
+        rec = ExperimentRecord.model_validate(valid_success_record)
+        assert rec.target_files == [0, 10, 19]
+
+
+class TestTrialFieldsOutput:
+    """Verify best_file_vector on HyperparamTuningOutput is optional."""
+
+    def test_output_without_file_vector(self, valid_output_dict):
+        """Existing outputs should still validate without best_file_vector."""
+        assert "best_file_vector" not in valid_output_dict
+        out = HyperparamTuningOutput.model_validate(valid_output_dict)
+        assert out.best_file_vector is None
+
+    def test_output_with_file_vector(self, valid_output_dict):
+        valid_output_dict["best_file_vector"] = [float("nan")] * 20
+        valid_output_dict["best_file_vector"][6] = 1.23
+        out = HyperparamTuningOutput.model_validate(valid_output_dict)
+        assert out.best_file_vector[6] == 1.23
+        assert len(out.best_file_vector) == 20
+
+
+# ---------------------------------------------------------------------------
+# ExperimentPlan validation
+# ---------------------------------------------------------------------------
+
+class TestExperimentPlan:
+    """Verify ExperimentPlan schema validates brain.plan() output correctly."""
+
+    def test_valid_full_plan(self):
+        """All fields present — validates correctly."""
+        plan = ExperimentPlan.model_validate({
+            "model_type": "punet",
+            "hypothesis": "Deeper architecture should help.",
+            "reasoning": "Previous runs showed depth matters.",
+            "model_config": {"depth": 4},
+            "train_config": {"lr": 1e-4, "epochs": 5},
+            "loss_config": {"loss_type": "focal"},
+            "is_trial": True,
+            "trial_strategy": "snapshot",
+            "trial_portion": 0.2,
+            "train_validation_align": False,
+        })
+        assert plan.model_type == "punet"
+        assert plan.is_trial is True
+        assert plan.trial_portion == 0.2
+        assert plan.train_validation_align is False
+
+    def test_defaults_when_trial_fields_omitted(self):
+        """Only experiment fields provided — trial fields get defaults."""
+        plan = ExperimentPlan.model_validate({
+            "model_type": "fcnet",
+            "model_config": {"depth": 2},
+            "train_config": {"lr": 1e-3},
+            "loss_config": {"loss_type": "ce"},
+        })
+        assert plan.is_trial is True  # default favors trial
+        assert plan.trial_strategy == "snapshot"
+        assert plan.trial_portion == 0.02
+        assert plan.target_files == []
+        assert plan.train_validation_align is True
+
+    def test_defaults_when_all_fields_omitted(self):
+        """Empty dict — all defaults apply."""
+        plan = ExperimentPlan.model_validate({})
+        assert plan.model_type == "fcnet"
+        assert plan.model_cfg == {}
+        assert plan.is_trial is True
+
+    def test_invalid_trial_portion_rejected(self):
+        """trial_portion=5.0 exceeds max — raises ValidationError."""
+        with pytest.raises(ValidationError):
+            ExperimentPlan.model_validate({
+                "model_type": "punet",
+                "trial_portion": 5.0,
+            })
+
+    def test_trial_portion_below_min_rejected(self):
+        """trial_portion=0.0 below min — raises ValidationError."""
+        with pytest.raises(ValidationError):
+            ExperimentPlan.model_validate({
+                "model_type": "punet",
+                "trial_portion": 0.0,
+            })
+
+    def test_with_defaults_fallback(self):
+        """Invalid trial fields stripped — experiment fields preserved."""
+        plan = ExperimentPlan.with_defaults({
+            "model_type": "punet",
+            "hypothesis": "Test hypothesis",
+            "model_config": {"depth": 4},
+            "train_config": {"lr": 1e-4},
+            "loss_config": {"loss_type": "focal"},
+            "trial_portion": 5.0,  # invalid
+        })
+        assert plan.model_type == "punet"
+        assert plan.hypothesis == "Test hypothesis"
+        assert plan.trial_portion == 0.02  # fell back to default
+
+    def test_with_defaults_preserves_valid(self):
+        """Valid input passes through with_defaults unchanged."""
+        plan = ExperimentPlan.with_defaults({
+            "model_type": "punet",
+            "trial_portion": 0.3,
+            "trial_strategy": "anchors",
+        })
+        assert plan.trial_portion == 0.3
+        assert plan.trial_strategy == "anchors"
+
+    def test_target_needs_files(self):
+        """target strategy + empty files → error."""
+        with pytest.raises(ValidationError, match="target_files required"):
+            ExperimentPlan.model_validate({
+                "is_trial": True,
+                "trial_strategy": "target",
+                "target_files": [],
+            })
+
+    def test_target_strategy_with_files(self):
+        plan = ExperimentPlan.model_validate({
+            "is_trial": True,
+            "trial_strategy": "target",
+            "target_files": [0, 10, 19],
+        })
+        assert plan.target_files == [0, 10, 19]
+
+    def test_formal_plan(self):
+        """is_trial=False validates without trial fields."""
+        plan = ExperimentPlan.model_validate({
+            "model_type": "punet",
+            "is_trial": False,
+        })
+        assert plan.is_trial is False
+
+    def test_invalid_strategy_rejected(self):
+        with pytest.raises(ValidationError):
+            ExperimentPlan.model_validate({
+                "trial_strategy": "nonexistent",
+            })
+
+
+# ---------------------------------------------------------------------------
+# TrialConfig validation
+# ---------------------------------------------------------------------------
+
+class TestTrialConfig:
+    """Verify TrialConfig schema validates trial/formal decisions correctly."""
+
+    # Common seed values for tests
+    _SEEDS = {"sampling_seed": 42, "train_base_seed": 123}
+
+    def test_trial_mode(self):
+        cfg = TrialConfig(
+            is_trial=True,
+            mode="trial",
+            trial_strategy="snapshot",
+            trial_portion=0.05,
+            train_portion=0.1,
+            **self._SEEDS,
+        )
+        assert cfg.is_trial is True
+        assert cfg.mode == "trial"
+        assert cfg.file_index is None
+        assert cfg.sampling_seed == 42
+        assert cfg.train_base_seed == 123
+
+    def test_formal_mode(self):
+        cfg = TrialConfig(
+            is_trial=False,
+            mode="formal",
+            train_portion=0.1,
+            **self._SEEDS,
+        )
+        assert cfg.mode == "formal"
+        assert cfg.file_index is None
+
+    def test_single_file_mode(self):
+        cfg = TrialConfig(
+            is_trial=False,
+            mode="single_file",
+            file_index=6,
+            **self._SEEDS,
+        )
+        assert cfg.mode == "single_file"
+        assert cfg.file_index == 6
+
+    def test_single_file_without_file_index_raises(self):
+        with pytest.raises(ValidationError, match="file_index required"):
+            TrialConfig(is_trial=False, mode="single_file", **self._SEEDS)
+
+    def test_trial_target_without_files_raises(self):
+        with pytest.raises(ValidationError, match="target_files required"):
+            TrialConfig(
+                is_trial=True,
+                mode="trial",
+                trial_strategy="target",
+                target_files=[],
+                **self._SEEDS,
+            )
+
+    def test_trial_target_with_files(self):
+        cfg = TrialConfig(
+            is_trial=True,
+            mode="trial",
+            trial_strategy="target",
+            target_files=[0, 10, 19],
+            **self._SEEDS,
+        )
+        assert cfg.target_files == [0, 10, 19]
+
+    def test_model_dump_roundtrip(self):
+        """Serialization and deserialization preserves all fields including seeds."""
+        cfg = TrialConfig(
+            is_trial=True,
+            mode="trial",
+            trial_strategy="anchors",
+            trial_portion=0.05,
+            train_portion=0.2,
+            **self._SEEDS,
+        )
+        dumped = cfg.model_dump()
+        restored = TrialConfig.model_validate(dumped)
+        assert restored == cfg
+        assert dumped["sampling_seed"] == 42
+        assert dumped["train_base_seed"] == 123
+
+    def test_invalid_mode_rejected(self):
+        with pytest.raises(ValidationError):
+            TrialConfig(is_trial=True, mode="unknown", **self._SEEDS)

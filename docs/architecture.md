@@ -725,6 +725,67 @@ To handle complex data dependencies where a node requires inputs from multiple a
 - **Aggregation Protocols**: The protocol logic shifts from `A → B` to `f({A, C, ...}) → B`, allowing for sophisticated data fusion, timestamp alignment, and conflict resolution at the target node's doorstep.
 
 ### 13. LLM-Native "Intent" Mapping
-The system will natively map the **Schema Layer** to LLM Tool-Calling formats (OpenAI/Gemini function specs). 
+The system will natively map the **Schema Layer** to LLM Tool-Calling formats (OpenAI/Gemini function specs).
 - **Decoupled Invocation**: The LLM expresses an "Intent" based on the Schema. The Orchestrator resolves this Intent by selecting the appropriate Protocol and dispatching the task to the correct Runtime (Local, Container, or Remote).
+
+---
+
+## Planned Refactor: Node Directory Structure
+
+**Current state:** nodes are flat Python files in `nodes/`:
+
+```
+nodes/
+├── ml_hyperparameter_tune_agent.py
+├── ml_result_interpretation_agent.py
+├── ml_model_proposal_agent.py
+├── ml_model_implementor.py
+└── ml_code_validator_agent.py
+```
+
+**Target state:** each node is a self-contained directory with its own documentation:
+
+```
+nodes/
+├── ml_hyperparameter_tune_agent/
+│   ├── __init__.py          (re-exports HyperparamTuningAgent)
+│   ├── agent.py             (the run() logic)
+│   └── README.md            (dependency chain, config format, replay instructions)
+├── ml_result_interpretation_agent/
+│   ├── __init__.py
+│   ├── agent.py
+│   └── README.md
+├── ml_model_proposal_agent/
+│   ├── __init__.py
+│   ├── agent.py
+│   └── README.md
+├── ml_model_implementor/
+│   ├── __init__.py
+│   ├── agent.py
+│   └── README.md
+└── ml_code_validator_agent/
+    ├── __init__.py
+    ├── agent.py
+    └── README.md
+```
+
+**Why:** as nodes grow more complex (e.g. the tuning agent now has trial/formal
+modes, streaming training, SampleSet management, seed reproducibility), a flat file
+can't hold both implementation and documentation. A directory per node keeps the
+README co-located with the code and allows future splitting (e.g. helpers, prompts).
+
+**Migration plan:**
+1. For each node, create a directory with `__init__.py` that re-exports the agent class.
+2. Move the `.py` file into the directory as `agent.py`.
+3. Update all imports (`from nodes.ml_hyperparameter_tune_agent import ...`
+   → unchanged, because `__init__.py` re-exports).
+4. Move any existing `.md` file into the directory as `README.md`.
+5. Verify all tests pass after each node migration.
+
+**Current interim state:** `ml_hyperparameter_tune_agent.md` lives alongside the
+`.py` file in `nodes/`. This will become `README.md` inside the directory when the
+refactor happens.
+
+**Priority:** Low — no functional impact. Do this when adding significant new
+documentation to any node, or when the flat structure becomes confusing.
 - **Dynamic Tool Injection**: Based on the research goal, the Orchestrator can dynamically "mount" new scientific tools into the LLM's context window by fetching their Schemas from the Registry without restarting the system.

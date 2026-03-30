@@ -54,6 +54,30 @@ Your goal is to optimize the 'Denoising Score' for the TIDMAD dataset.
     - High training loss + poor denoising score → underfitting → propose larger model or more epochs.
     - Both improve together → the direction is correct, continue exploring.
 
+### TRIAL vs FORMAL MODE:
+You can choose how much data to use for each experiment:
+- **Trial mode** (`is_trial=true`): Train and evaluate on a sparse sample of segments across
+  multiple files. Fast iteration — use this for early exploration when you are still searching
+  for good hyperparameters. Scores are anchor-normalized and comparable across runs.
+- **Formal mode** (`is_trial=false`): Train and evaluate on all data for a single file. Slower
+  but gives a definitive score. Use this when you have a promising config you want to validate.
+
+Trial strategies (only relevant when `is_trial=true`):
+- `"snapshot"`: Sample from all 20 validation files — broad generalization check.
+- `"anchors"`: Sample from files 0, 10, 19 only — quick extrema check.
+- `"target"`: Sample from specific files (provide `target_files`) — deep optimization of weak bands.
+
+`trial_portion` (0.01–1.0): fraction of segments per file for evaluation. Start small
+(0.02–0.1) for speed, increase (0.3–0.5) when narrowing in on a promising config.
+
+`train_portion` (0.01–1.0): fraction of segments per file for training. Default 0.1.
+Training is always sparse — the published paper results used 10% subsampling.
+You rarely need to change this; focus on `trial_portion` for speed control.
+
+When reviewing past experiments in Research Memory, check the `is_trial` and `file_vector`
+fields to understand what data each score was based on. Trial scores from different strategies
+or portions are comparable (anchor-normalized), but a formal score is always more definitive.
+
 ### OUTPUT REQUIREMENT:
 You must provide the next experiment setup in a strict JSON format.
 """
@@ -111,13 +135,28 @@ You are a Research Analyst. Your job is to transform raw experiment results into
 # 2. USER PROMPT GENERATORS (The Context)
 # ==========================================
 
-def get_planner_user_prompt(memory_history, expert_advice="None", force_model="auto"):
+def get_planner_user_prompt(
+    memory_history,
+    expert_advice="None",
+    force_model="auto",
+    current_round=None,
+    max_rounds=None,
+    trial_allowed=True,
+):
     """
     Constructs the prompt for the Planner.
-    Incorporates Expert Advice and Model constraints.
+
+    Args:
+        memory_history: List of past experiment records.
+        expert_advice:  Serialized expert advice string.
+        force_model:    Model type constraint ("auto" = free choice).
+        current_round:  Current round number (1-based). None = omit round context.
+        max_rounds:     Total rounds in this run. None = omit round context.
+        trial_allowed:  Whether the LLM may choose trial mode. When False, the
+                        LLM must set is_trial=false.
     """
     history_context = json.dumps(memory_history, indent=2) if memory_history else "No previous experiments recorded."
-    
+
     # Handle the model constraint message
     model_constraint = ""
     if force_model != "auto":
@@ -149,27 +188,49 @@ def get_planner_user_prompt(memory_history, expert_advice="None", force_model="a
             f"You MUST propose a smaller config this round.\n"
         )
 
+    # Round context (when provided)
+    round_context = ""
+    if current_round is not None and max_rounds is not None:
+        is_final = (current_round == max_rounds)
+        round_context = (
+            f"\n### ROUND CONTEXT:\n"
+            f"- Current round: {current_round} / {max_rounds}\n"
+        )
+        if is_final:
+            round_context += "- **THIS IS THE FINAL ROUND** — you MUST use formal mode (`is_trial`: false).\n"
+        elif not trial_allowed:
+            round_context += "- Trial mode is DISABLED for this run. Set `is_trial`: false.\n"
+        else:
+            round_context += (
+                "- You may choose trial or formal mode.\n"
+                "- Use trial mode for fast exploration; switch to formal when you want a definitive score.\n"
+            )
+
     return f"""
 ### Human Expert Advice:
 {expert_advice}
 
 ### Current Research Memory:
 {history_context}
-{oom_warning}
+{oom_warning}{round_context}
 ### INSTRUCTIONS:
 1. **Review Memory**: Look for patterns and previous failures/successes.
    - Records with status='skipped_oom_risk' were NEVER trained — they exceeded GPU memory.
    - Always follow the `memory.memory_update` field of any skipped record before proposing the next config.
 2. **Follow Expert Advice**: Prioritize the direction suggested by the human expert.
 3. **Formulate Hypothesis**: Predict the outcome of this new trial.{model_constraint}
-4. **Propose Parameters**: Provide the JSON configuration for the next run.
+4. **Choose Trial or Formal Mode**: Decide whether to run a fast trial or a full formal evaluation.
+5. **Propose Parameters**: Provide the JSON configuration for the next run.
 
 ### OUTPUT FORMAT (Strict JSON):
 {{
-    "exp_id": "exp_NNN",
     "model_type": "punet | fcnet | transformer | wavenet | rnn",
     "reasoning": "How this experiment aligns with expert advice and past memory",
     "hypothesis": "Specific prediction for this run",
+    "is_trial": true,
+    "trial_strategy": "snapshot | anchors | target",
+    "trial_portion": 0.02,
+    "train_portion": 0.1,
     "model_config": {{ ... }},
     "train_config": {{ "lr": ..., "epochs": ..., "batch_size": ..., "device": "cuda" }},
     "loss_config": {{ "loss_type": "ce/focal/smooth_l1", ... }}

@@ -6,6 +6,7 @@ import subprocess
 import datetime
 from typing import Dict, Any, Optional
 from ml_models.models_format_sandbox import get_config_class, TrainConfig, LossConfig, ExperimentConfig, PLUGIN_CONFIG_REGISTRY
+from execute_tools.scoring_utils import validate_sample_set
 
 
 def _subprocess_env() -> dict:
@@ -16,6 +17,7 @@ def _subprocess_env() -> dict:
     """
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     extra_paths = [
+        project_root,
         os.path.join(project_root, "ml_models"),
         os.path.join(project_root, "execute_tools"),
     ]
@@ -181,11 +183,22 @@ class TidmadSandbox:
         except Exception as e:
             raise ValueError(f"Experiment Configuration Rejected: {str(e)}")
 
-    def execute_training(self, exp_id: str, run_name: str, model_type: str, m_cfg: Dict, t_cfg: Dict, l_cfg: Dict):
-        """Executes the training physical script."""
+    def execute_training(self, exp_id: str, run_name: str, model_type: str, m_cfg: Dict, t_cfg: Dict, l_cfg: Dict,
+                         sample_set: Optional[Dict] = None, train_portion: Optional[float] = None,
+                         train_base_seed: Optional[int] = None):
+        """Executes the training physical script.
+
+        Args:
+            sample_set:      Optional SampleSet dict — the data scope. When provided,
+                             written to JSON and passed via --sample_set_json.
+            train_portion:   Fraction of the scope to subsample per epoch for training.
+                             Passed via --train_portion.
+            train_base_seed: Base seed for per-epoch subsampling reproducibility.
+                             Passed via --train_base_seed.
+        """
         try:
             vm, vt, vl = self._validate_configs(model_type, m_cfg, t_cfg, l_cfg, exp_id, run_name)
-            
+
             paths = {
                 "m": os.path.abspath(os.path.join(self.dirs["configs"], f"model_config_{exp_id}.json")),
                 "t": os.path.abspath(os.path.join(self.dirs["configs"], f"train_config_{exp_id}.json")),
@@ -194,16 +207,30 @@ class TidmadSandbox:
             for k, v in zip(["m", "t", "l"], [vm, vt, vl]):
                 with open(paths[k], 'w') as f: json.dump(v, f)
 
-            print(f">>> [Executor] Running training for {exp_id}...")
-            result = subprocess.run(
-                    [sys.executable, "execute_tools/train_engine_sandbox.py",
+            cmd = [sys.executable, "execute_tools/train_engine_sandbox.py",
                     "--model_cfg", paths["m"],
                     "--train_cfg", paths["t"],
                     "--loss_cfg", paths["l"],
                     "--exp_id", exp_id,
                     "--run_name", run_name,
                     "--sandbox_dir", self.base_dir,
-                    "--file_index", str(self.file_index)],
+                    "--file_index", str(self.file_index)]
+
+            # Validate and write data scope SampleSet to JSON
+            if sample_set is not None:
+                sample_set = validate_sample_set(sample_set)
+                ss_path = os.path.abspath(os.path.join(self.dirs["configs"], f"train_sample_set_{exp_id}.json"))
+                with open(ss_path, 'w') as f:
+                    json.dump(sample_set, f)
+                cmd.extend(["--sample_set_json", ss_path])
+                if train_portion is not None:
+                    cmd.extend(["--train_portion", str(train_portion)])
+                if train_base_seed is not None:
+                    cmd.extend(["--train_base_seed", str(train_base_seed)])
+
+            print(f">>> [Executor] Running training for {exp_id}...")
+            result = subprocess.run(
+                    cmd,
                     check=True,
                     stdout=None if self.progress_bar else subprocess.PIPE,
                     stderr=subprocess.PIPE,
@@ -233,21 +260,55 @@ class TidmadSandbox:
         "transformer": 1,
     }
 
-    def execute_inference(self, exp_id: str, run_name: str, model_type: str, m_cfg: Dict, l_cfg: Dict):
-        """Executes the inference physical script."""
+    def _validate_model_and_loss(self, model_type: str, m_cfg: Dict, l_cfg: Dict):
+        """Validate model and loss configs via Pydantic. Used by inference."""
+        if model_type in PLUGIN_CONFIG_REGISTRY:
+            validated_m = PLUGIN_CONFIG_REGISTRY[model_type](**m_cfg).model_dump()
+            validated_m["model_type"] = model_type
+        else:
+            config_class = get_config_class(model_type)
+            if config_class is None:
+                raise ValueError(f"Unknown model_type: {model_type}")
+            validated_m = config_class(**m_cfg).model_dump()
+        validated_l = LossConfig(**l_cfg).model_dump()
+        return validated_m, validated_l
+
+    def execute_inference(self, exp_id: str, run_name: str, model_type: str, m_cfg: Dict, l_cfg: Dict,
+                          sample_set: Optional[Dict] = None):
+        """Executes the inference physical script.
+
+        Args:
+            m_cfg:      Model config dict — validated and written to JSON.
+            l_cfg:      Loss config dict — validated and written to JSON.
+            sample_set: Optional SampleSet dict. When provided, written to JSON
+                        and passed via --sample_set_json.
+        """
+        validated_m, validated_l = self._validate_model_and_loss(model_type, m_cfg, l_cfg)
         m_path = os.path.abspath(os.path.join(self.dirs["configs"], f"model_config_{exp_id}.json"))
         l_path = os.path.abspath(os.path.join(self.dirs["configs"], f"loss_config_{exp_id}.json"))
+        with open(m_path, 'w') as f: json.dump(validated_m, f)
+        with open(l_path, 'w') as f: json.dump(validated_l, f)
         model_path = os.path.abspath(os.path.join(self.dirs["models"], f"model_{model_type}_{exp_id}_agent.pth"))
         inf_bs = str(self._INFERENCE_BATCH_SIZE.get(model_type, 25))
+
+        cmd = [sys.executable, "execute_tools/inference_single.py", "--mode", "agent", "-m", model_type,
+               "--model_cfg", m_path, "--loss_cfg", l_path,
+               "--model_path", model_path, "--exp_id", exp_id, "--run_name", run_name,
+               "--output_dir", self.base_dir, "--inference_batch_size", inf_bs,
+               "--file_index", str(self.file_index)]
+
+        # Validate and write eval SampleSet to JSON
+        if sample_set is not None:
+            sample_set = validate_sample_set(sample_set)
+            ss_path = os.path.abspath(os.path.join(self.dirs["configs"], f"eval_sample_set_{exp_id}.json"))
+            with open(ss_path, 'w') as f:
+                json.dump(sample_set, f)
+            cmd.extend(["--sample_set_json", ss_path])
 
         try:
             print(f">>> [Executor] Running inference for {exp_id}...")
             result = subprocess.run(
-                [sys.executable, "execute_tools/inference_single.py", "--mode", "agent", "-m", model_type,
-                 "--model_cfg", m_path, "--loss_cfg", l_path,
-                 "--model_path", model_path, "--exp_id", exp_id, "--run_name", run_name,
-                 "--output_dir", self.base_dir, "--inference_batch_size", inf_bs,
-                 "--file_index", str(self.file_index)],
+                cmd,
                 check=True,
                 stdout=None if self.progress_bar else subprocess.PIPE,
                 stderr=subprocess.PIPE,

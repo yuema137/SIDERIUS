@@ -12,7 +12,7 @@ Both are accepted wherever ExpertAdviceInput is used.
 from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 
@@ -86,6 +86,228 @@ class ExperimentRecord(BaseModel):
     timing: Optional[ExperimentTiming] = None
     memory: Optional[ExperimentMemory] = None
 
+    # --- Trial context (optional — absent or default in normal mode) ---
+    is_trial: bool = Field(
+        default=False,
+        description="Whether this experiment ran in trial-explore mode with sparse sampling.",
+    )
+    trial_strategy: Optional[Literal["snapshot", "anchors", "target"]] = Field(
+        default=None,
+        description="Sampling strategy used. Only meaningful when is_trial=True.",
+    )
+    trial_portion: Optional[float] = Field(
+        default=None,
+        description="Fraction of segments sampled per file. Only meaningful when is_trial=True.",
+    )
+    train_validation_align: Optional[bool] = Field(
+        default=None,
+        description="Whether validation used the same segments as training.",
+    )
+    target_files: Optional[List[int]] = Field(
+        default=None,
+        description="File indices sampled (only for 'target' strategy).",
+    )
+    train_portion: Optional[float] = Field(
+        default=None,
+        description="Fraction of segments per file used for training.",
+    )
+    file_vector: Optional[List[float]] = Field(
+        default=None,
+        description="Length-20 score vector. NaN for files not included in the run.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Trial config (validated trial/formal decision per round)
+# ---------------------------------------------------------------------------
+
+class TrialConfig(BaseModel):
+    """
+    Validated trial/formal configuration for a single round.
+
+    Extracted from ``ExperimentPlan`` after override chain (final-round
+    constraint, expert advice). Serialized to ``trial_config_{exp_id}.json``
+    and used to build the eval SampleSet (data scope).
+
+    ``trial_portion`` defines the data scope — which segments are in play
+    for both eval and training. ``train_portion`` controls how much of that
+    scope is subsampled per epoch during training (for speed). Training
+    resamples a different subset each epoch for diversity.
+
+    Every round has a TrialConfig — even legacy single-file mode, where
+    ``mode="single_file"`` and ``file_index`` is set.
+    """
+
+    is_trial: bool = Field(
+        description="Whether this round uses trial (sparse) or formal (full) mode.",
+    )
+    mode: Literal["trial", "formal", "single_file"] = Field(
+        description="Execution mode: trial (sparse multi-file), formal (full multi-file), or single_file (legacy).",
+    )
+    trial_strategy: Literal["snapshot", "anchors", "target"] = Field(
+        default="snapshot",
+        description="Sampling strategy. Applies to trial and formal modes.",
+    )
+    trial_portion: float = Field(
+        default=0.02,
+        ge=0.01,
+        le=1.0,
+        description="Fraction of segments per file — defines the data scope for eval and training.",
+    )
+    train_portion: float = Field(
+        default=0.1,
+        ge=0.01,
+        le=1.0,
+        description="Fraction of the scope subsampled per epoch for training (speed optimization).",
+    )
+    target_files: List[int] = Field(
+        default_factory=list,
+        description="File indices for 'target' strategy.",
+    )
+    file_index: Optional[int] = Field(
+        default=None,
+        description="Training/validation file index. Only used in single_file mode.",
+    )
+
+    # --- Reproducibility seeds ---
+    sampling_seed: int = Field(
+        description="Seed used by build_sample_set() to select PSD segments for the data scope.",
+    )
+    train_base_seed: int = Field(
+        description="Base seed for per-epoch training subsampling. Epoch n uses seed = train_base_seed + n.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_fields(self):
+        """Cross-field validation."""
+        if self.mode == "single_file" and self.file_index is None:
+            raise ValueError("file_index required when mode='single_file'.")
+        if self.is_trial and self.trial_strategy == "target" and not self.target_files:
+            raise ValueError("target_files required when is_trial=True and trial_strategy='target'.")
+        return self
+
+
+# ---------------------------------------------------------------------------
+# Experiment plan (validated output from brain.plan())
+# ---------------------------------------------------------------------------
+
+class ExperimentPlan(BaseModel):
+    """
+    Validated output from brain.plan() — one plan per round.
+
+    The LLM planner returns a raw dict with hyperparameter decisions and
+    (optionally) trial-mode parameters. This schema validates the output
+    and provides safe defaults when the LLM omits or returns invalid trial
+    fields.
+
+    The override chain applied by the agent loop after validation:
+      1. Expert constraint: if input says is_trial=False, force formal for all rounds.
+      2. Final-round constraint: last round is always formal (is_trial=False).
+
+    Note: ``model_config`` is a reserved attribute in Pydantic v2, so we use
+    ``model_cfg`` / ``train_cfg`` / ``loss_cfg`` as field names with
+    ``alias`` and ``populate_by_name=True`` so the LLM's JSON keys
+    (``model_config``, ``train_config``, ``loss_config``) are accepted.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    # --- Hyperparameter decisions ---
+    model_type: str = Field(
+        default="fcnet",
+        description="Architecture to use for this experiment.",
+    )
+    hypothesis: str = Field(
+        default="N/A",
+        description="Specific prediction for this experiment.",
+    )
+    reasoning: str = Field(
+        default="",
+        description="How this experiment aligns with expert advice and past memory.",
+    )
+    model_cfg: Dict[str, Any] = Field(
+        default_factory=dict,
+        alias="model_config",
+        description="Architecture-specific hyperparameters.",
+    )
+    train_cfg: Dict[str, Any] = Field(
+        default_factory=dict,
+        alias="train_config",
+        description="Training hyperparameters (lr, epochs, batch_size, device).",
+    )
+    loss_cfg: Dict[str, Any] = Field(
+        default_factory=dict,
+        alias="loss_config",
+        description="Loss function specification (loss_type, etc.).",
+    )
+
+    # --- Trial/formal decision (per-round) ---
+    is_trial: bool = Field(
+        default=True,
+        description="Whether this round uses trial (sparse) or formal (full) mode.",
+    )
+    trial_strategy: Literal["snapshot", "anchors", "target"] = Field(
+        default="snapshot",
+        description="Sampling strategy. Ignored when is_trial=False.",
+    )
+    trial_portion: float = Field(
+        default=0.02,
+        ge=0.01,
+        le=1.0,
+        description="Fraction of segments to sample per file. Ignored when is_trial=False.",
+    )
+    target_files: List[int] = Field(
+        default_factory=list,
+        description="File indices for 'target' strategy. Ignored otherwise.",
+    )
+    train_validation_align: bool = Field(
+        default=True,
+        description="Whether validation uses the same segments as training.",
+    )
+    train_portion: float = Field(
+        default=0.1,
+        ge=0.01,
+        le=1.0,
+        description=(
+            "Fraction of segments per file used for training. Independent of "
+            "trial_portion (which controls eval). Default 0.1 matches the legacy "
+            "TIDMAD train.py subsampling rate."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate_target_files(self):
+        """target_files required when using trial target strategy."""
+        if self.is_trial and self.trial_strategy == "target" and not self.target_files:
+            raise ValueError(
+                "target_files required when is_trial=True and trial_strategy='target'."
+            )
+        return self
+
+    @classmethod
+    def with_defaults(cls, raw: Dict[str, Any]) -> "ExperimentPlan":
+        """
+        Validate raw LLM output, falling back to defaults on invalid trial fields.
+
+        If the full dict fails validation (e.g. trial_portion=5.0), strip the
+        trial fields and retry — preserving the LLM's experiment design while
+        falling back to safe trial defaults.
+        """
+        try:
+            return cls.model_validate(raw)
+        except Exception:
+            # Keep only experiment fields, let trial fields take defaults.
+            # Use alias names (model_config, train_config, loss_config) since
+            # that's what the LLM outputs.
+            _EXPERIMENT_KEYS = {
+                "model_type", "hypothesis", "reasoning",
+                "model_config", "train_config", "loss_config",
+            }
+            safe = {k: v for k, v in raw.items() if k in _EXPERIMENT_KEYS}
+            print(f"[ExperimentPlan] LLM returned invalid trial fields — "
+                  f"falling back to defaults. Kept keys: {list(safe.keys())}")
+            return cls.model_validate(safe)
+
 
 # ---------------------------------------------------------------------------
 # Agent input
@@ -97,10 +319,15 @@ class HyperparamTuningInput(BaseModel):
 
     Fields are grouped by concern:
       - Research:  what to explore and how hard to push
+      - Trial:     optional sparse-sampling mode for fast iteration (default = off)
       - Guidance:  expert advice steering the LLM planner
       - Seeding:   pre-existing records the agent should treat as prior knowledge
       - LLM:       which model drives the planning and reflection steps
       - Infra:     storage paths (managed by the communication interface in production)
+
+    When ``is_trial=False`` (the default), the agent runs in normal single-file
+    mode using ``file_index``. All trial fields are ignored. When ``is_trial=True``,
+    the agent builds a SampleSet from the trial strategy and ignores ``file_index``.
     """
 
     # --- Research ---
@@ -110,13 +337,74 @@ class HyperparamTuningInput(BaseModel):
     file_index: int = Field(
         default=6,
         ge=0,
-        description="Validation/training file index (0-39). Default 6 matches the paper's standard split.",
+        description="Validation/training file index (0-39). Default 6 matches the paper's standard split. Ignored when is_trial=True.",
     )
     max_rounds: int = Field(
         default=50,
         ge=1,
         description="Maximum number of completed experiment rounds (OOM-skipped attempts do not count).",
     )
+
+    # --- Trial mode (optional — all defaults preserve normal single-file behavior) ---
+    is_trial: bool = Field(
+        default=False,
+        description="When True, run in trial-explore mode with sparse sampling across multiple files.",
+    )
+    trial_portion: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of segments to sample per file. Only used when is_trial=True.",
+    )
+    trial_strategy: Literal["snapshot", "anchors", "target"] = Field(
+        default="snapshot",
+        description="Sampling strategy: 'snapshot' (all 20 files), 'anchors' (files 0/10/19), 'target' (specific files). Only used when is_trial=True.",
+    )
+    target_files: List[int] = Field(
+        default_factory=list,
+        description="File indices to sample from. Required when trial_strategy='target'.",
+    )
+    train_validation_align: bool = Field(
+        default=True,
+        description="When True, validation uses the same segments as training. Only used when is_trial=True.",
+    )
+    train_portion: float = Field(
+        default=0.1,
+        ge=0.01,
+        le=1.0,
+        description=(
+            "Fraction of segments per file used for training. Independent of "
+            "trial_portion (eval). Default 0.1 matches legacy TIDMAD subsampling."
+        ),
+    )
+
+    # --- Reproducibility seeds (optional — auto-generated when not provided) ---
+    sampling_seed: Optional[int] = Field(
+        default=None,
+        description=(
+            "Seed for build_sample_set() — determines which PSD segments form the "
+            "data scope. When None, auto-generated from SHA-256(run_name + attempt). "
+            "Set this to replay a previous run's exact data sampling. "
+            "Read from a previous trial_config_{exp_id}.json."
+        ),
+    )
+    train_base_seed: Optional[int] = Field(
+        default=None,
+        description=(
+            "Base seed for per-epoch training subsampling. Epoch n uses "
+            "train_base_seed + n. When None, auto-generated. "
+            "Read from a previous trial_config_{exp_id}.json."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate_trial_fields(self):
+        """Cross-field validation for trial mode parameters."""
+        if self.is_trial and self.trial_strategy == "target" and not self.target_files:
+            raise ValueError(
+                "target_files must be non-empty when is_trial=True and trial_strategy='target'."
+            )
+        return self
 
     # --- Guidance ---
     expert_advice: ExpertAdviceInput = Field(
@@ -210,6 +498,10 @@ class HyperparamTuningOutput(BaseModel):
     best_config: Optional[Dict[str, Any]] = Field(
         default=None,
         description="model_config + train_config + loss_config that produced best_denoising_score.",
+    )
+    best_file_vector: Optional[List[float]] = Field(
+        default=None,
+        description="Length-20 score vector from the best experiment. NaN for files not included.",
     )
 
     # --- Full history ---
