@@ -460,6 +460,21 @@ class HyperparamTuningAgent:
                 train_results = train_status.get("results", {})
                 score_results = score_res.get("results", {})
 
+                # Cleanup denoised files to save disk space
+                if agent_input.cleanup_denoised:
+                    import glob as _glob
+                    pattern = os.path.join(
+                        sandbox.base_dir,
+                        f"abra_validation_denoised_*_{exp_id}_*.h5",
+                    )
+                    denoised_files = _glob.glob(pattern)
+                    if denoised_files:
+                        total_bytes = sum(os.path.getsize(f) for f in denoised_files)
+                        for f in denoised_files:
+                            os.remove(f)
+                        print(f"  Cleaned up {len(denoised_files)} denoised files "
+                              f"({total_bytes / (1024**3):.1f} GB freed)")
+
                 # D. REFLECT: Analyze results and generate insights
                 print(f"\nGenerating Research Memory...")
 
@@ -701,6 +716,8 @@ def main():
                         help="Per-epoch subsample from training scope (default: 0.1).")
     parser.add_argument("--human_advice", type=str, default=None,
                         help="Human guidance for the agent (injected alongside expert_advice).")
+    parser.add_argument("--cleanup_denoised", action="store_true",
+                        help="Delete denoised HDF5 files after scoring each round to save disk space.")
 
     args = parser.parse_args()
 
@@ -715,8 +732,9 @@ def main():
             "backend": "local",
             "local": {"workspace": args.workspace, "run_name": args.run_name},
         },
-        "progress_bar": args.progress_bar,
-        "is_trial":     args.is_trial,
+        "progress_bar":      args.progress_bar,
+        "cleanup_denoised":  args.cleanup_denoised,
+        "is_trial":          args.is_trial,
     }
     if args.is_trial:
         input_dict.update({

@@ -22,6 +22,7 @@ RUN_NAME="small_sample_trial_v0"
 MAX_ROUNDS=20
 PROVIDER="gemini"
 MODEL_ID="gemini-3.1-flash-lite-preview"
+CLEANUP_DENOISED=true   # delete denoised H5 files after scoring to save disk
 POLL_INTERVAL=30
 
 # ---------------------------------------------------------------------------
@@ -79,7 +80,8 @@ launch_model() {
             --override_old_run \
             --provider \"${PROVIDER}\" \
             --model_id \"${MODEL_ID}\" \
-            --progress_bar
+            --progress_bar \
+            ${CLEANUP_DENOISED:+--cleanup_denoised}
         echo \$? > \"${EXIT_CODE_FILE}\"
     "
 }

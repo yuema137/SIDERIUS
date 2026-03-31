@@ -376,7 +376,8 @@ def seed_agent_memory(baseline_record: dict, agent_workspace: str, agent_run_nam
 
 def run_agent(model_type: str, agent_workspace: str, agent_run_name: str,
               provider: str, model_id: str, max_rounds: int, progress_bar: bool = False,
-              file_index: int = 6, is_trial: bool = False, human_advice: str = None):
+              file_index: int = 6, is_trial: bool = False, human_advice: str = None,
+              cleanup_denoised: bool = False):
     """
     Launches nodes/ml_hyperparameter_tune_agent.py as a subprocess, locked to model_type, for max_rounds rounds.
     """
@@ -407,6 +408,8 @@ def run_agent(model_type: str, agent_workspace: str, agent_run_name: str,
         cmd.extend(["--human_advice", human_advice])
     if progress_bar:
         cmd.append("--progress_bar")
+    if cleanup_denoised:
+        cmd.append("--cleanup_denoised")
 
     print(f"\n{'='*60}")
     print(f"  PHASE 3 — AGENT EXPLORATION: {model_type.upper()}")
@@ -474,6 +477,10 @@ def main():
     parser.add_argument(
         "--human_advice", type=str, default=None,
         help="Human guidance for the agent.",
+    )
+    parser.add_argument(
+        "--cleanup_denoised", action="store_true",
+        help="Delete denoised HDF5 files after scoring each round to save disk space.",
     )
     args = parser.parse_args()
 
@@ -556,6 +563,7 @@ def main():
         file_index=args.file_index,
         is_trial=args.is_trial,
         human_advice=args.human_advice,
+        cleanup_denoised=args.cleanup_denoised,
     )
 
     print(f"\n{'#'*60}")
