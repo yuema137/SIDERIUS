@@ -317,3 +317,52 @@ pytest tests/integration/ -m real_run -v
 ```
 
 Tests marked `real_run` skip automatically when the required API key or data is absent. They never run in CI.
+
+---
+
+## Server Migration Guide
+
+When deploying SIDERIUS on a new machine, update these files:
+
+### 1. Data paths — `tidmad_data_config.yaml`
+
+```yaml
+# Machine-specific data paths.
+tidmad_data_dir: /path/to/TIDMAD/          # Raw HDF5 data + segment_anchors.json
+siderius_data_dir: /path/to/SIDEREIS_DATA/  # Run outputs, models, logs
+```
+
+All Python modules and CLI tools read from this file via `execute_tools/data_paths.py`.
+No other code changes needed for data paths.
+
+### 2. API keys — `.env`
+
+```
+GEMINI_API_KEY=your_key_here
+OPENAI_API_KEY=your_key_here    # optional
+```
+
+### 3. Dashboard — `dashboard_config.yaml`
+
+```yaml
+data_source:
+  local:
+    root_data_dir: /path/to/SIDEREIS_DATA/  # Must match siderius_data_dir above
+```
+
+### 4. Pre-computation (one-time)
+
+The anchor map must be computed once for the TIDMAD dataset:
+
+```bash
+python execute_tools/build_anchor_map.py --parallel -n 8
+```
+
+This reads from `tidmad_data_dir` and writes `segment_anchors.json` into the same directory.
+
+### What does NOT need changing
+
+- All Python source code — reads paths from config
+- Shell scripts (`run_all_models.sh`, `run_all_models_trial.sh`) — reads from YAML
+- Tests — fall back gracefully if config is missing
+- Documentation — contains example paths for reference only
