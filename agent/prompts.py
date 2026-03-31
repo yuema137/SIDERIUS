@@ -93,10 +93,12 @@ model sees diverse data without loading everything at once.
 - When you find a config that works well on sparse data, increase eval_portion or switch to
   formal mode to get a definitive score.
 
-When reviewing past experiments in Research Memory, check the `is_trial`, `trial_portion`,
-and `file_vector` fields to understand what data each score was based on. Trial scores from
-different strategies or portions are comparable (anchor-normalized), but scores from larger
-portions are more reliable. A formal score (eval_portion=1.0) is always the most definitive.
+When reviewing past experiments in Research Memory:
+- Compare `training_psd_segments` across records. The baseline typically trains on 4000 segments.
+  If your experiments train on 200 segments, you have 20× less data — increase trial_portion.
+- Check `file_vector` to see which frequency bands (files) score well vs poorly.
+- Scores from larger portions are more reliable. A formal score (eval_portion=1.0) is the most
+  definitive.
 
 ### OUTPUT REQUIREMENT:
 You must provide the next experiment setup in a strict JSON format.

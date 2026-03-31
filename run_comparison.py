@@ -309,6 +309,8 @@ def run_baseline_trial(model_type: str, baseline_workspace: str,
         "trial_strategy":   "snapshot",
         "trial_portion":    1.0,
         "train_portion":    0.1,
+        "training_psd_segments": sum(len(v) for v in train_sample_set.values()),
+        "eval_psd_segments":     sum(len(v) for v in eval_sample_set.values()),
         "timing": {
             "train_time_s":     train_time,
             "inference_time_s": inference_time,
