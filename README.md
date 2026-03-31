@@ -205,13 +205,9 @@ All models take SQUID time-series data (ADC values 0–255) and produce a per-ti
 # Install uv (if not already installed)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-uv python install 3.12
 cd /path/to/siderius
-uv venv --python 3.12
+uv sync                     # installs all dependencies from uv.lock
 source .venv/bin/activate
-
-uv add torch numpy scipy h5py tqdm "jax[cpu]" iminuit matplotlib pandas \
-    requests scitokens openai google-generativeai pydantic python-dotenv
 ```
 
 ### 2. Configure API keys
@@ -352,43 +348,79 @@ Tests marked `real_run` skip automatically when the required API key or data is 
 
 ## Server Migration Guide
 
-When deploying SIDERIUS on a new machine, update these files:
+When deploying SIDERIUS on a new machine:
 
-### 1. Data paths — `tidmad_data_config.yaml`
+### Prerequisites
 
-```yaml
-# Machine-specific data paths.
-tidmad_data_dir: /path/to/TIDMAD/          # Raw HDF5 data + segment_anchors.json
-siderius_data_dir: /path/to/SIDEREIS_DATA/  # Run outputs, models, logs
+- Python 3.12+
+- NVIDIA GPU with CUDA support (training and inference require GPU)
+- ~50 GB disk for TIDMAD raw data, ~100 GB for run outputs
+- [uv](https://docs.astral.sh/uv/) package manager
+
+### Step-by-step
+
+#### 1. Clone and install dependencies
+
+```bash
+git clone git@github.com:Galileo-Sandbox/SIDERIUS.git
+cd SIDERIUS
+uv sync          # installs all dependencies from uv.lock
 ```
 
-All Python modules and CLI tools read from this file via `execute_tools/data_paths.py`.
-No other code changes needed for data paths.
+#### 2. Copy TIDMAD data
 
-### 2. API keys — `.env`
+Copy the raw HDF5 files to the new server:
+- `abra_training_0000.h5` through `abra_training_0019.h5` (20 training files)
+- `abra_validation_0000.h5` through `abra_validation_0019.h5` (20 validation files)
+
+#### 3. Update data paths — `tidmad_data_config.yaml`
+
+```yaml
+tidmad_data_dir: /your/path/to/TIDMAD/          # where you put the HDF5 files
+siderius_data_dir: /your/path/to/SIDEREIS_DATA/  # run outputs (will be created)
+```
+
+All Python modules read from this file. No code changes needed.
+
+#### 4. API keys — `.env`
 
 ```
 GEMINI_API_KEY=your_key_here
 OPENAI_API_KEY=your_key_here    # optional
 ```
 
-### 3. Dashboard — `dashboard_config.yaml`
+#### 5. Dashboard — `dashboard_config.yaml`
 
 ```yaml
 data_source:
   local:
-    root_data_dir: /path/to/SIDEREIS_DATA/  # Must match siderius_data_dir above
+    root_data_dir: /your/path/to/SIDEREIS_DATA/  # must match siderius_data_dir
 ```
 
-### 4. Pre-computation (one-time)
-
-The anchor map must be computed once for the TIDMAD dataset:
+#### 6. Pre-compute anchor map (one-time, ~30 min)
 
 ```bash
 python execute_tools/build_anchor_map.py --parallel -n 8
 ```
 
-This reads from `tidmad_data_dir` and writes `segment_anchors.json` into the same directory.
+Reads from `tidmad_data_dir`, writes `segment_anchors.json` into the same directory.
+Required for trial/formal mode scoring.
+
+#### 7. Verify setup
+
+```bash
+# Check data paths resolve
+python -c "from execute_tools.data_paths import TIDMAD_DATA_DIR, SIDERIUS_DATA_DIR; print(TIDMAD_DATA_DIR, SIDERIUS_DATA_DIR)"
+
+# Check API keys
+python env_validation/test_agent_env.py
+
+# Run unit tests (no GPU or API key needed)
+uv run pytest tests/unit/ -q
+
+# Quick single-file integration test (~2 min, needs GPU + API key)
+uv run pytest tests/integration/nodes/test_tune_ml_hyperparam_agent.py::TestRealRunGemini::test_punet_gemini[loss_cfg0] -v -s -m real_run
+```
 
 ### What does NOT need changing
 
