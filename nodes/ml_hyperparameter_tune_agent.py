@@ -326,8 +326,15 @@ class HyperparamTuningAgent:
                     print(f"  Legacy mode: file_index={file_index}")
 
                 # Segment counts for records and reflector context
-                train_psd_segments = sum(len(v) for v in train_sample_set.values()) if train_sample_set else 0
-                eval_psd_segments = sum(len(v) for v in eval_sample_set.values()) if eval_sample_set else 0
+                if train_sample_set:
+                    train_psd_segments = sum(len(v) for v in train_sample_set.values())
+                else:
+                    train_psd_segments = DATASET_CONFIG.segments_per_file  # legacy single-file
+
+                if eval_sample_set:
+                    eval_psd_segments = sum(len(v) for v in eval_sample_set.values())
+                else:
+                    eval_psd_segments = DATASET_CONFIG.segments_per_file  # legacy single-file
 
                 # When force_model is set, override the LLM's model_type choice.
                 if model_type_setting != "auto":
