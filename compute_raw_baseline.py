@@ -144,12 +144,11 @@ def main():
         epilog=__doc__,
     )
     parser.add_argument(
-        "--data_dir", "-d", type=str, default="/home/klz/Data/TIDMAD/",
-        help="Directory containing abra_validation_*.h5 files.",
+        "--data_dir", "-d", type=str, default=None,
+        help="Directory containing abra_validation_*.h5 files. Default: from tidmad_data_config.yaml.",
     )
     parser.add_argument(
-        "--output_dir", "-o", type=str,
-        default="/home/klz/Data/SIDEREIS_DATA/raw_baseline",
+        "--output_dir", "-o", type=str, default=None,
         help="Directory to write per-file JSON results.",
     )
     parser.add_argument(
@@ -170,6 +169,13 @@ def main():
         help="Number of parallel workers (used only with --parallel).",
     )
     args = parser.parse_args()
+
+    if args.data_dir is None:
+        from execute_tools.data_paths import TIDMAD_DATA_DIR
+        args.data_dir = TIDMAD_DATA_DIR
+    if args.output_dir is None:
+        from execute_tools.data_paths import SIDERIUS_DATA_DIR
+        args.output_dir = os.path.join(SIDERIUS_DATA_DIR, "raw_baseline")
 
     os.makedirs(args.output_dir, exist_ok=True)
 

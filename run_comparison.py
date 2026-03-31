@@ -37,8 +37,13 @@ SIDERIUS_ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SIDERIUS_ROOT)
 
 from core.sandbox_executor import TidmadSandbox
+from execute_tools.sample_set_builder import build_sample_set
+from execute_tools.scoring_utils import score_vector
+from execute_tools.build_anchor_map import load_anchor_map
+from execute_tools.data_paths import TIDMAD_DATA_DIR, SIDERIUS_DATA_DIR
 
-ROOT_DATA_DIR = "/home/klz/Data/SIDEREIS_DATA"
+ROOT_DATA_DIR = SIDERIUS_DATA_DIR
+DATA_DIR = TIDMAD_DATA_DIR
 LEGACY_CONFIGS_PATH = os.path.join(SIDERIUS_ROOT, "ml_models", "legacy_baseline_configs.json")
 
 
@@ -127,12 +132,9 @@ def run_baseline(model_type: str, baseline_workspace: str, progress_bar: bool = 
     if score_result["status"] != "success":
         raise RuntimeError(f"Baseline scoring failed:\n{score_result.get('message')}")
 
-    # Merge train + score results
-    combined = {}
-    if "results" in train_result:
-        combined.update(train_result["results"])
-    if "results" in score_result:
-        combined.update(score_result["results"])
+    # Extract results from each stage
+    train_res = train_result.get("results", {})
+    score_res = score_result.get("results", {})
 
     record = {
         "exp_id":       exp_id,
@@ -148,8 +150,10 @@ def run_baseline(model_type: str, baseline_workspace: str, progress_bar: bool = 
             "train_config":  t_cfg,
             "loss_config":   l_cfg,
         },
-        "results":        combined,
-        "denoising_score": combined.get("denoising_score"),
+        "final_loss":      train_res.get("final_loss"),
+        "loss_history":    train_res.get("loss_history"),
+        "model_params":    train_res.get("model_params"),
+        "denoising_score": score_res.get("denoising_score"),
         "timing": {
             "train_time_s":     train_time,
             "inference_time_s": inference_time,
@@ -176,6 +180,162 @@ def run_baseline(model_type: str, baseline_workspace: str, progress_bar: bool = 
 
     sandbox.save_record(record)
     print(f"\n  Baseline complete. Denoising score: {combined.get('denoising_score', 'N/A')}")
+    return record
+
+
+def run_baseline_trial(model_type: str, baseline_workspace: str,
+                       progress_bar: bool = False) -> dict:
+    """
+    Runs baseline with the TIDMAD paper config using the trial pipeline:
+    - Training: all 20 files, train_portion=0.1 (subsampled per epoch),
+      streamed via run_experiment_streaming
+    - Inference: all 20 files, all segments
+    - Scoring: anchor-normalized score_vector (parallel)
+
+    No LLM call — config is hardcoded from legacy_baseline_configs.json.
+    Produces scores on the same anchor-normalized scale as agent trial/formal runs.
+    """
+    with open(LEGACY_CONFIGS_PATH, "r") as f:
+        legacy = json.load(f)
+
+    if model_type not in legacy:
+        raise ValueError(f"No legacy config found for model '{model_type}' in {LEGACY_CONFIGS_PATH}")
+
+    cfg = legacy[model_type]
+    m_cfg = cfg["model_cfg"]
+    t_cfg = cfg["train_cfg"]
+    l_cfg = cfg["loss_cfg"]
+
+    run_name = f"baseline_{model_type}"
+    exp_id = f"baseline_{model_type}_{int(time.time())}"
+
+    # Override epochs to match paper (10 epochs with 10% subsampling ≈ paper's training)
+    t_cfg = dict(t_cfg)
+    t_cfg["epochs"] = 10
+
+    sandbox = TidmadSandbox(
+        metadata_source="local",
+        run_name=run_name,
+        workspace=baseline_workspace,
+        progress_bar=progress_bar,
+        file_index=6,  # unused in trial mode but required by TidmadSandbox
+    )
+
+    print(f"\n{'='*60}")
+    print(f"  PHASE 1 — BASELINE (trial pipeline): {model_type.upper()}")
+    print(f"{'='*60}")
+    print(f"  model_cfg   : {m_cfg}")
+    print(f"  train_cfg   : {t_cfg}")
+    print(f"  loss_cfg    : {l_cfg}")
+    print(f"  train scope : all 20 files, portion=1.0, train_portion=0.1/epoch")
+    print(f"  eval scope  : all 20 files, all segments")
+    print()
+
+    # Build SampleSets — full coverage, deterministic seed
+    train_sample_set = build_sample_set(
+        is_trial=True, trial_strategy="snapshot", trial_portion=1.0, seed=0,
+    )
+    eval_sample_set = build_sample_set(
+        is_trial=True, trial_strategy="snapshot", trial_portion=1.0, seed=0,
+    )
+
+    # --- Train (streaming, all 20 files, 10% subsample/epoch) ---
+    t0 = time.time()
+    train_result = sandbox.execute_training(
+        exp_id=exp_id, run_name=run_name, model_type=model_type,
+        m_cfg=m_cfg, t_cfg=t_cfg, l_cfg=l_cfg,
+        sample_set=train_sample_set,
+        train_portion=0.1,
+        train_base_seed=42,
+    )
+    train_time = round(time.time() - t0, 1)
+    if train_result["status"] != "success":
+        raise RuntimeError(f"Baseline training failed:\n{train_result.get('message')}")
+
+    # --- Inference (all 20 files, all segments) ---
+    t0 = time.time()
+    inf_result = sandbox.execute_inference(
+        exp_id=exp_id, run_name=run_name, model_type=model_type,
+        m_cfg=m_cfg, l_cfg=l_cfg,
+        sample_set=eval_sample_set,
+    )
+    inference_time = round(time.time() - t0, 1)
+    if inf_result["status"] != "success":
+        raise RuntimeError(f"Baseline inference failed:\n{inf_result.get('message')}")
+
+    # --- Score (anchor-normalized, parallel) ---
+    t0 = time.time()
+    anchor_map_path = os.path.join(DATA_DIR, "segment_anchors.json")
+    anchor_data = load_anchor_map(anchor_map_path)
+
+    def _denoised_fn(fi):
+        return f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_{fi:04d}.h5"
+
+    file_vector, final_scalar = score_vector(
+        data_dir=baseline_workspace,
+        sample_set=eval_sample_set,
+        anchor_map=anchor_data["anchors"],
+        s_max=anchor_data["s_max"],
+        denoised_filename_fn=_denoised_fn,
+        raw_data_dir=DATA_DIR,
+    )
+    scoring_time = round(time.time() - t0, 1)
+
+    # Extract training results
+    train_res = train_result.get("results", {})
+
+    record = {
+        "exp_id":       exp_id,
+        "status":       "success",
+        "model_type":   model_type,
+        "timestamp":    time.strftime("%Y-%m-%d %H:%M:%S"),
+        "file_index":   6,
+        "params": {
+            "exp_id":        exp_id,
+            "run_name":      run_name,
+            "model_type":    model_type,
+            "model_config":  m_cfg,
+            "train_config":  t_cfg,
+            "loss_config":   l_cfg,
+        },
+        "final_loss":       train_res.get("final_loss"),
+        "loss_history":     train_res.get("loss_history"),
+        "model_params":     train_res.get("model_params"),
+        "denoising_score":  final_scalar,
+        "file_vector":      file_vector,
+        "is_trial":         False,
+        "trial_strategy":   "snapshot",
+        "trial_portion":    1.0,
+        "train_portion":    0.1,
+        "training_psd_segments": sum(len(v) for v in train_sample_set.values()),
+        "eval_psd_segments":     sum(len(v) for v in eval_sample_set.values()),
+        "timing": {
+            "train_time_s":     train_time,
+            "inference_time_s": inference_time,
+            "scoring_time_s":   scoring_time,
+        },
+        "memory": {
+            "expert_advice_followed": "Legacy TIDMAD paper baseline — no agent involvement.",
+            "hypothesis": "Original paper configuration with anchor-normalized scoring.",
+            "conclusion": (
+                f"Baseline {model_type.upper()} achieved "
+                f"denoising_score={final_scalar:.4f} (anchor-normalized)."
+            ),
+            "discovery": (
+                "This is the paper's reference result scored with anchor normalization. "
+                "All subsequent agent experiments use the same scoring scale."
+            ),
+            "memory_update": (
+                f"Baseline {model_type.upper()} performance established. "
+                f"Anchor-normalized score: {final_scalar:.4f}. "
+                "Use this as the minimum target for improvement."
+            ),
+        },
+    }
+
+    sandbox.save_record(record)
+    print(f"\n  Baseline complete. Anchor-normalized score: {final_scalar:.4f}")
+    print(f"  Timing: train={train_time}s, infer={inference_time}s, score={scoring_time}s")
     return record
 
 
@@ -216,7 +376,7 @@ def seed_agent_memory(baseline_record: dict, agent_workspace: str, agent_run_nam
 
 def run_agent(model_type: str, agent_workspace: str, agent_run_name: str,
               provider: str, model_id: str, max_rounds: int, progress_bar: bool = False,
-              file_index: int = 6):
+              file_index: int = 6, is_trial: bool = False, human_advice: str = None):
     """
     Launches nodes/ml_hyperparameter_tune_agent.py as a subprocess, locked to model_type, for max_rounds rounds.
     """
@@ -238,8 +398,13 @@ def run_agent(model_type: str, agent_workspace: str, agent_run_name: str,
         "--run_name",    agent_run_name,
         "--workspace",   agent_workspace,
         "--expert_advice", expert_advice,
-        "--file_index",  str(file_index),
     ]
+    if is_trial:
+        cmd.append("--is_trial")
+    else:
+        cmd.extend(["--file_index", str(file_index)])
+    if human_advice:
+        cmd.extend(["--human_advice", human_advice])
     if progress_bar:
         cmd.append("--progress_bar")
 
@@ -300,14 +465,24 @@ def main():
     )
     parser.add_argument(
         "--file_index", type=int, default=6,
-        help="Validation/training file index (default: 6).",
+        help="Validation/training file index (default: 6). Ignored when --is_trial.",
+    )
+    parser.add_argument(
+        "--is_trial", action="store_true",
+        help="Enable trial-explore mode with multi-file sparse sampling.",
+    )
+    parser.add_argument(
+        "--human_advice", type=str, default=None,
+        help="Human guidance for the agent.",
     )
     args = parser.parse_args()
 
     model_type         = args.model
     model_root         = os.path.join(ROOT_DATA_DIR, model_type)
     run_dir            = os.path.join(model_root, args.run_name)
-    baseline_workspace = os.path.join(model_root, "baseline")       # shared across all runs
+    # Trial and single-file baselines are on different scoring scales — keep separate
+    baseline_subdir    = "baseline_trial" if args.is_trial else "baseline"
+    baseline_workspace = os.path.join(model_root, baseline_subdir)
     agent_workspace    = os.path.join(run_dir, "agent")
     agent_run_name     = f"{args.run_name}_agent"
 
@@ -356,8 +531,15 @@ def main():
             pass
 
     if not baseline_done:
-        baseline_record = run_baseline(model_type, baseline_workspace, progress_bar=args.progress_bar,
-                                       file_index=args.file_index)
+        if args.is_trial:
+            baseline_record = run_baseline_trial(
+                model_type, baseline_workspace, progress_bar=args.progress_bar,
+            )
+        else:
+            baseline_record = run_baseline(
+                model_type, baseline_workspace, progress_bar=args.progress_bar,
+                file_index=args.file_index,
+            )
 
     # --- Phase 2: Seed agent memory ---
     seed_agent_memory(baseline_record, agent_workspace, agent_run_name)
@@ -372,6 +554,8 @@ def main():
         max_rounds=args.max_rounds,
         progress_bar=args.progress_bar,
         file_index=args.file_index,
+        is_trial=args.is_trial,
+        human_advice=args.human_advice,
     )
 
     print(f"\n{'#'*60}")

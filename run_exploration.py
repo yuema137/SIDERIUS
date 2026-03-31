@@ -20,16 +20,17 @@ sys.path.insert(0, os.path.join(SIDERIUS_ROOT, "ml_models"))
 
 from workflows.llm_config import WorkflowLLMConfig, NodeLLMConfig
 from workflows.model_exploration import run_workflow
+from execute_tools.data_paths import SIDERIUS_DATA_DIR
 
 llm_config = WorkflowLLMConfig(
     implement=NodeLLMConfig(provider="gemini", model_id="gemini-3.1-pro-preview"),
 )
 
 results = run_workflow(
-    data_dir="/home/klz/Data/SIDEREIS_DATA",
+    data_dir=SIDERIUS_DATA_DIR,
     model_types=["punet", "wavenet", "fcnet"],
     source_run_name="v3_file6",
-    workspace="/home/klz/Data/SIDEREIS_DATA/exploration",
+    workspace=os.path.join(SIDERIUS_DATA_DIR, "exploration"),
     run_name="explore_v1",
     max_iterations=50,
     max_rounds=20,

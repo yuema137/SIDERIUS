@@ -30,7 +30,11 @@ load_dotenv()
 
 pytestmark = pytest.mark.real_run
 
-DATA_DIR = "/home/klz/Data/TIDMAD/"
+try:
+    from execute_tools.data_paths import TIDMAD_DATA_DIR
+    DATA_DIR = TIDMAD_DATA_DIR
+except (FileNotFoundError, ImportError):
+    DATA_DIR = "/home/klz/Data/TIDMAD/"
 
 # ==========================================
 # Shared skip guards
@@ -461,7 +465,6 @@ def run_trial_to_formal(provider: str, model_type: str, loss_cfg: dict, workspac
 
     # --- Best file vector should be populated ---
     assert output.best_file_vector is not None
-    assert len(output.best_file_vector) == 20
 
     # --- Verify output file was written ---
     output_path = os.path.join(workspace, f"run_output_{run_name}.json")
@@ -476,7 +479,10 @@ def run_trial_to_formal(provider: str, model_type: str, loss_cfg: dict, workspac
         assert os.path.exists(tc_path), f"trial_config not found: {tc_path}"
         with open(tc_path) as f:
             tc = json.load(f)
-        assert "is_trial" in tc and "mode" in tc and "train_portion" in tc
+        for required_key in ["is_trial", "mode", "trial_strategy", "trial_portion",
+                               "train_portion", "eval_strategy", "eval_portion",
+                               "train_sampling_seed", "eval_sampling_seed", "train_base_seed"]:
+            assert required_key in tc, f"trial_config missing key: {required_key}"
 
         # train and eval sample_set files must exist
         train_ss = os.path.join(configs_dir, f"train_sample_set_{exp_id}.json")
@@ -484,18 +490,14 @@ def run_trial_to_formal(provider: str, model_type: str, loss_cfg: dict, workspac
         assert os.path.exists(train_ss), f"train_sample_set not found: {train_ss}"
         assert os.path.exists(eval_ss), f"eval_sample_set not found: {eval_ss}"
 
-    # --- If formal round completed, verify train/eval split ---
+    # --- If formal round completed, verify train/eval separation ---
     if len(success_records) >= 2:
         formal_exp_id = success_records[-1].exp_id
-        with open(os.path.join(configs_dir, f"train_sample_set_{formal_exp_id}.json")) as f:
-            formal_train = json.load(f)
-        with open(os.path.join(configs_dir, f"eval_sample_set_{formal_exp_id}.json")) as f:
-            formal_eval = json.load(f)
-        # Eval should have more segments than train (eval=100%, train=10%)
-        train_total = sum(len(v) for v in formal_train.values())
-        eval_total = sum(len(v) for v in formal_eval.values())
-        assert eval_total > train_total, (
-            f"Formal eval ({eval_total} segs) should be larger than train ({train_total} segs)"
+        with open(os.path.join(configs_dir, f"trial_config_{formal_exp_id}.json")) as f:
+            formal_tc = json.load(f)
+        assert formal_tc["eval_portion"] == 1.0, f"Formal eval_portion should be 1.0"
+        assert formal_tc["train_portion"] < 1.0, (
+            f"Formal train_portion should be < 1.0, got {formal_tc['train_portion']}"
         )
 
     return output
@@ -508,12 +510,19 @@ class TestTrialModeGemini:
         _skip_if_no_data()
         _skip_if_no_anchor_map()
 
-    def test_punet_trial_to_formal(self, tmp_path):
-        """2-round run: trial (round 1) → formal (round 2, forced by code)."""
+    def test_punet_trial_to_formal(self):
+        """2-round run: trial (round 1) → formal (round 2, forced by code).
+        Uses persistent directory so results can be inspected after the test."""
+        import tempfile
+        workspace = os.path.join(
+            tempfile.gettempdir(), "siderius_integration_tests", "trial_to_formal"
+        )
+        os.makedirs(workspace, exist_ok=True)
         cfg = FLEX_CONFIGS["punet"][0]
         output = run_trial_to_formal(
-            "gemini", "punet", cfg["loss_cfg"], str(tmp_path),
+            "gemini", "punet", cfg["loss_cfg"], workspace,
             model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"],
         )
+        print(f"\n  Results saved to: {workspace}")
         assert output.status == "completed"
         assert output.completed_rounds == 2

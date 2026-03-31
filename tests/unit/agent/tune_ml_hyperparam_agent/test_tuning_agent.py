@@ -131,7 +131,7 @@ FAKE_INFERENCE_RESULT = {"status": "success", "results": {}}
 
 FAKE_SCORE_RESULT = {
     "status": "success",
-    "results": {"denoising_score": 1.75, "final_loss": 0.5, "model_params": 100000},
+    "results": {"denoising_score": 1.75},
 }
 
 
@@ -455,9 +455,9 @@ class TestDynamicTrialFormal:
         inf_params = inference_calls[0][1]
         assert "eval_sample_set" in inf_params, "eval_sample_set not passed to inference"
 
-    def test_formal_round_builds_single_eval_scope(self, agent_and_mocks, tmp_path):
-        """Formal round: one build_sample_set call for eval scope (portion=1.0).
-        Training subsamples from the scope per-epoch via train_portion."""
+    def test_formal_round_builds_two_sample_sets(self, agent_and_mocks, tmp_path):
+        """Formal round: two build_sample_set calls — one for train, one for eval.
+        Eval has portion=1.0, train has trial_portion (default 0.02)."""
         agent, _, _, _ = agent_and_mocks
         skill_calls = []
         original_mock = _mock_run_skill
@@ -472,13 +472,15 @@ class TestDynamicTrialFormal:
 
             agent.run(_make_trial_input(tmp_path, max_rounds=1, is_trial=True))
 
-            # Final round (max_rounds=1) → formal mode → one build_sample_set call
-            # for the eval scope (portion=1.0)
+            # Final round (max_rounds=1) → formal mode → two build_sample_set calls:
+            # one for training scope, one for eval scope (portion=1.0)
             build_calls = mock_build.call_args_list
-            assert len(build_calls) == 1, f"Expected 1 build_sample_set call for formal, got {len(build_calls)}"
-            assert build_calls[0].kwargs.get("trial_portion") == 1.0
+            assert len(build_calls) == 2, f"Expected 2 build_sample_set calls for formal, got {len(build_calls)}"
+            # One call should have portion=1.0 (eval)
+            portions = [c.kwargs.get("trial_portion") for c in build_calls]
+            assert 1.0 in portions, f"Expected eval portion=1.0, got {portions}"
 
-            # Training skill receives train_portion separately
+            # Training skill receives train_portion
             train_calls = [(f, p) for f, p in skill_calls if f == "training_skill"]
             assert len(train_calls) >= 1
             assert train_calls[0][1].get("train_portion") == 0.1

@@ -92,9 +92,14 @@ siderius/
 │   └── rnn/description.md
 │
 ├── execute_tools/                  # Physical execution scripts (called as subprocesses)
-│   ├── train_engine_sandbox.py     # Training loop
+│   ├── train_engine_sandbox.py     # Training loop (streaming + legacy modes)
 │   ├── inference_single.py         # Inference over validation set
-│   ├── denoising_score_single.py   # Denoising score computation
+│   ├── denoising_score_single.py   # Legacy single-file denoising score
+│   ├── scoring_utils.py            # Anchor-normalized scoring (score_vector, score_segments)
+│   ├── build_anchor_map.py         # One-time pre-computation of segment SNR anchors
+│   ├── sample_set_builder.py       # SampleSet builder for trial/formal strategies
+│   ├── dataset_config.py           # DatasetConfig — physical constants (TIDMAD defaults)
+│   ├── data_paths.py               # Machine-specific paths from tidmad_data_config.yaml
 │   └── array2h5.py                 # Array-to-HDF5 conversion utility
 │
 ├── nodes/                          # Runnable node implementations (typed directed graph)
@@ -116,10 +121,13 @@ siderius/
 │   └── tests/                      # Agent-written model tests
 │
 ├── workflows/                      # Pre-designed graph traversals (deterministic)
-│   └── model_exploration.py       # First end-to-end demo (⬜ planned)
+│   └── model_exploration.py       # Iterative closed-loop exploration workflow
+│
+├── tidmad_data_config.yaml         # Machine-specific data paths (edit when migrating)
 │
 ├── docs/
 │   ├── architecture.md             # Full system design
+│   ├── small_sample_trial.md       # Multi-fidelity trial/formal tuning design
 │   └── first_model_proposal_demo_architecture.md
 │
 ├── tests/
@@ -157,7 +165,7 @@ Agent-generated models are dropped into `agent_generated/models/` as `.py` files
 
 | Node | Role | GPU | LLM | Status |
 |---|---|---|---|---|
-| `tune_ml_hyperparam_agent` | Trains, infers, and scores a model; optimises hyperparameters over N rounds | yes | yes | ✅ implemented |
+| `tune_ml_hyperparam_agent` | Trains, infers, and scores a model; optimises hyperparameters over N rounds. Supports trial mode (sparse multi-file sampling) and formal mode (full 20-file evaluation). Per-round trial/formal decisions by LLM, final round forced formal. | yes | yes | ✅ implemented |
 | `result_interpretation_agent` | Synthesises experiment records across models; surfaces bottlenecks and patterns | no | yes | ✅ implemented |
 | `ml_model_proposal_agent` | Reads interpretation → proposes a new architecture + expert advice for the tuner | no | yes | ✅ implemented |
 | `ml_model_implementor` | Takes a proposal → writes PyTorch plugin file, test skeleton, and description.md; self-correction loop validates code (config consistency, syntax, smoke test) and retries on failure | no | yes | ✅ implemented |
@@ -232,6 +240,13 @@ python nodes/ml_hyperparameter_tune_agent.py \
     --max_rounds 5 \
     --run_name transformer_v1
 
+# Trial mode — multi-file sparse sampling (LLM controls portions per round)
+python nodes/ml_hyperparameter_tune_agent.py \
+    --is_trial \
+    --force_model punet \
+    --max_rounds 20 \
+    --run_name trial_v1
+
 # Use OpenAI instead of Gemini
 python nodes/ml_hyperparameter_tune_agent.py \
     --provider openai \
@@ -247,11 +262,18 @@ python nodes/ml_hyperparameter_tune_agent.py \
 | `--provider` | `gemini` | LLM backend (`gemini` or `openai`) |
 | `--model_id` | `gemini-3.1-flash-lite-preview` | Specific model ID |
 | `--expert_advice` | `"None"` | Human guidance injected into the planner prompt |
+| `--human_advice` | `None` | Additional human guidance (merged with expert_advice) |
 | `--max_rounds` | `10` | Maximum completed experiment rounds |
 | `--force_model` | `auto` | Lock the architecture or let the agent choose |
 | `--run_name` | `test_run` | Run identifier — scopes all saved files |
 | `--workspace` | `./siderius_workspace` | Root directory for all agent outputs |
-| `--file_index` | `6` | Training/validation file index |
+| `--file_index` | `6` | Training/validation file index (ignored when `--is_trial`) |
+| `--is_trial` | off | Enable trial mode: multi-file sparse sampling |
+| `--trial_strategy` | `snapshot` | Training sampling: `snapshot`, `anchors`, or `target` |
+| `--trial_portion` | `0.1` | Fraction of segments per file for training scope |
+| `--eval_strategy` | `snapshot` | Validation sampling strategy |
+| `--eval_portion` | `0.1` | Fraction of segments per file for validation |
+| `--train_portion` | `0.1` | Per-epoch subsample from training scope |
 | `--progress_bar` | off | Stream live tqdm progress bars from subprocesses |
 
 ### 4. Open the dashboard
@@ -283,13 +305,21 @@ server:
 
 ```
 {workspace}/
-├── summary_{run_name}.json         # all experiment records (agent memory)
-├── run_output_{run_name}.json      # validated HyperparamTuningOutput
-├── run_config_{run_name}.json      # startup config snapshot
-├── configs/{run_name}/             # per-experiment configs
-├── records/{run_name}/             # per-experiment detail JSONs
-└── cached_models/                  # trained model checkpoints
+├── summary_{run_name}.json           # all experiment records (agent research memory)
+├── run_output_{run_name}.json        # validated HyperparamTuningOutput
+├── run_config_{run_name}.json        # startup config snapshot
+├── configs/{run_name}/
+│   ├── trial_config_{exp_id}.json    # trial/formal params + seeds (Pydantic-validated)
+│   ├── train_sample_set_{exp_id}.json  # training SampleSet (which segments)
+│   ├── eval_sample_set_{exp_id}.json   # validation SampleSet
+│   ├── model_config_{exp_id}.json
+│   ├── train_config_{exp_id}.json
+│   └── loss_config_{exp_id}.json
+├── records/{run_name}/               # per-experiment training results
+└── cached_models/                    # trained model checkpoints (.pth)
 ```
+
+See [`nodes/ml_hyperparameter_tune_agent.md`](nodes/ml_hyperparameter_tune_agent.md) for the full config chain, data flow, and replay instructions.
 
 ---
 
@@ -317,3 +347,52 @@ pytest tests/integration/ -m real_run -v
 ```
 
 Tests marked `real_run` skip automatically when the required API key or data is absent. They never run in CI.
+
+---
+
+## Server Migration Guide
+
+When deploying SIDERIUS on a new machine, update these files:
+
+### 1. Data paths — `tidmad_data_config.yaml`
+
+```yaml
+# Machine-specific data paths.
+tidmad_data_dir: /path/to/TIDMAD/          # Raw HDF5 data + segment_anchors.json
+siderius_data_dir: /path/to/SIDEREIS_DATA/  # Run outputs, models, logs
+```
+
+All Python modules and CLI tools read from this file via `execute_tools/data_paths.py`.
+No other code changes needed for data paths.
+
+### 2. API keys — `.env`
+
+```
+GEMINI_API_KEY=your_key_here
+OPENAI_API_KEY=your_key_here    # optional
+```
+
+### 3. Dashboard — `dashboard_config.yaml`
+
+```yaml
+data_source:
+  local:
+    root_data_dir: /path/to/SIDEREIS_DATA/  # Must match siderius_data_dir above
+```
+
+### 4. Pre-computation (one-time)
+
+The anchor map must be computed once for the TIDMAD dataset:
+
+```bash
+python execute_tools/build_anchor_map.py --parallel -n 8
+```
+
+This reads from `tidmad_data_dir` and writes `segment_anchors.json` into the same directory.
+
+### What does NOT need changing
+
+- All Python source code — reads paths from config
+- Shell scripts (`run_all_models.sh`, `run_all_models_trial.sh`) — reads from YAML
+- Tests — fall back gracefully if config is missing
+- Documentation — contains example paths for reference only

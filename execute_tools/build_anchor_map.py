@@ -135,7 +135,7 @@ def main():
         description="Pre-compute the segment anchor map for physics-anchored scoring.",
     )
     parser.add_argument(
-        "--data_dir", "-d", type=str, default="/home/klz/Data/TIDMAD/",
+        "--data_dir", "-d", type=str, default=None,
         help="Directory containing abra_validation_XXXX.h5 files.",
     )
     parser.add_argument(
@@ -151,6 +151,10 @@ def main():
         help="Number of parallel workers.",
     )
     args = parser.parse_args()
+
+    if args.data_dir is None:
+        from execute_tools.data_paths import TIDMAD_DATA_DIR
+        args.data_dir = TIDMAD_DATA_DIR
 
     output_path = args.output or os.path.join(args.data_dir, "segment_anchors.json")
 

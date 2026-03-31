@@ -59,24 +59,64 @@ You can choose how much data to use for each experiment:
 - **Trial mode** (`is_trial=true`): Train and evaluate on a sparse sample of segments across
   multiple files. Fast iteration — use this for early exploration when you are still searching
   for good hyperparameters. Scores are anchor-normalized and comparable across runs.
-- **Formal mode** (`is_trial=false`): Train and evaluate on all data for a single file. Slower
-  but gives a definitive score. Use this when you have a promising config you want to validate.
+- **Formal mode** (`is_trial=false`): Train and evaluate on ALL segments across ALL 20 files.
+  Much slower but gives a definitive, comprehensive score. Use this when you have a promising
+  config and want to validate it on the full dataset.
 
 Trial strategies (only relevant when `is_trial=true`):
 - `"snapshot"`: Sample from all 20 validation files — broad generalization check.
 - `"anchors"`: Sample from files 0, 10, 19 only — quick extrema check.
 - `"target"`: Sample from specific files (provide `target_files`) — deep optimization of weak bands.
 
-`trial_portion` (0.01–1.0): fraction of segments per file for evaluation. Start small
-(0.02–0.1) for speed, increase (0.3–0.5) when narrowing in on a promising config.
+`trial_portion` (0.01–1.0): fraction of segments per file for the **training scope**.
+This determines how much data the model trains on. More data = better model but slower.
+Start small (0.02–0.05) for fast hyperparameter exploration. If scores are consistently
+poor, **increase trial_portion** (0.1–0.5) before changing hyperparameters — low scores
+often mean insufficient training data, not bad hyperparameters.
 
-`train_portion` (0.01–1.0): fraction of segments per file for training. Default 0.1.
-Training is always sparse — the published paper results used 10% subsampling.
-You rarely need to change this; focus on `trial_portion` for speed control.
+`eval_portion` (0.01–1.0): fraction of segments per file for **validation** (inference +
+scoring). Controls score fidelity. Can match trial_portion for fast checks, or be larger
+for more reliable scores. In formal mode this is always 1.0.
 
-When reviewing past experiments in Research Memory, check the `is_trial` and `file_vector`
-fields to understand what data each score was based on. Trial scores from different strategies
-or portions are comparable (anchor-normalized), but a formal score is always more definitive.
+`train_portion` (0.01–1.0): per-epoch subsample from the training scope. Default 0.1.
+Each epoch sees a different random 10% of the training scope. Over multiple epochs the
+model sees diverse data without loading everything at once.
+
+### DATA VOLUME AWARENESS — CRITICAL:
+- The baseline was trained on ALL segments (trial_portion=1.0). If your trial_portion is 0.05,
+  you are training on 20× less data. **Poor scores on sparse data do not mean the hyperparameters
+  are wrong** — they may mean the model needs more data.
+- **Before switching hyperparameters after poor results, consider increasing trial_portion.**
+  A 2× increase in trial_portion often helps more than changing loss_type or lr.
+- If 2+ consecutive rounds show no improvement despite hyperparameter changes, double your
+  trial_portion (e.g. 0.05 → 0.1 → 0.2).
+- When you find a config that works well on sparse data, increase eval_portion or switch to
+  formal mode to get a definitive score.
+
+When reviewing past experiments in Research Memory:
+- Compare `training_psd_segments` across records. The baseline typically trains on 4000 segments.
+  If your experiments train on 200 segments, you have 20× less data — increase trial_portion.
+- Scores from larger portions are more reliable. A formal score (eval_portion=1.0) is the most
+  definitive.
+
+### FILE VECTOR AND SCORING:
+Each experiment has a `file_vector`: a length-20 array of per-file denoising scores.
+Each file corresponds to a different injected signal frequency (log scale: file 0 =
+lowest, file 19 = highest). Files not included in the evaluation have value `NaN` —
+ignore those entries.
+
+How scoring works: each file's score measures how well the model recovers the injected
+signal relative to a physics-based anchor. A per-file score of ~1.0 means the model
+performs about the same as no denoising at all (raw data). Scores > 1.0 mean the model
+actively improves signal recovery. Scores << 1.0 mean the model makes things worse.
+The scalar `denoising_score` is `log_base_5.27(mean of non-NaN file scores)`.
+
+The difficulty varies by frequency — some files are inherently harder than others.
+Compare your `file_vector` against the baseline's to see where you improve or regress.
+- If scores vary significantly across files, consider using `"target"` strategy with
+  the weak file indices to focus training on those frequency ranges.
+- If scores are uniformly low across all files, the model likely needs more data
+  (increase trial_portion) or better hyperparameters.
 
 ### OUTPUT REQUIREMENT:
 You must provide the next experiment setup in a strict JSON format.
@@ -109,6 +149,16 @@ You are a Research Analyst. Your job is to transform raw experiment results into
 - A result is NEUTRAL if it matches previous scores.
 - A result is BAD if it is LOWER than most previous scores.
 - NEVER call a result a failure just because the score is negative.
+
+### CRITICAL — DATA VOLUME AWARENESS:
+- Check `training_psd_segments` and `baseline_psd_segments` in the context.
+- If this experiment trained on much LESS data than the baseline (e.g. 200 vs 4000 segments),
+  poor scores may be caused by **insufficient training data**, not bad hyperparameters.
+- In that case, the memory_update should recommend **increasing trial_portion** rather than
+  changing loss_type or lr. Example: "Score is 5× below baseline but trained on 20× less data.
+  Recommend increasing trial_portion from 0.05 to 0.2 before changing hyperparameters."
+- If training data is comparable to baseline but score is still poor → then the hyperparameters
+  are likely the issue.
 
 ### CRITICAL — HOW TO JUDGE THE TRAINING LOSS:
 - Training loss is only comparable across experiments that use the SAME loss_type.
@@ -227,10 +277,13 @@ def get_planner_user_prompt(
     "model_type": "punet | fcnet | transformer | wavenet | rnn",
     "reasoning": "How this experiment aligns with expert advice and past memory",
     "hypothesis": "Specific prediction for this run",
-    "is_trial": true,
+    "is_trial": "true | false (choose based on confidence in config)",
     "trial_strategy": "snapshot | anchors | target",
-    "trial_portion": 0.02,
-    "train_portion": 0.1,
+    "trial_portion": "0.02–1.0 (increase if scores are poor — more data helps)",
+    "train_portion": "0.1 (rarely change)",
+    "eval_strategy": "snapshot | anchors | target",
+    "eval_portion": "0.02–1.0 (match trial_portion or larger for reliable scores)",
+    "train_validation_align": "true | false",
     "model_config": {{ ... }},
     "train_config": {{ "lr": ..., "epochs": ..., "batch_size": ..., "device": "cuda" }},
     "loss_config": {{ "loss_type": "ce/focal/smooth_l1", ... }}
@@ -289,6 +342,14 @@ def get_reflector_user_prompt(exp_id, hypothesis, actual_results, reflection_con
   current_params        : {c.get('current_params', 'N/A')}
   current_epochs        : {c.get('current_epochs', 'N/A')}
 {efficiency_block}
+### Data Volume Context:
+  training_psd_segments : {c.get('training_psd_segments', 'N/A')}  (PSD segments used for training)
+  eval_psd_segments     : {c.get('eval_psd_segments', 'N/A')}  (PSD segments used for scoring)
+  baseline_psd_segments : {c.get('baseline_psd_segments', 'N/A')}  (baseline trained on this many)
+  trial_portion         : {c.get('trial_portion', 'N/A')}
+  eval_portion          : {c.get('eval_portion', 'N/A')}
+  ⚠ If training_psd_segments << baseline_psd_segments, poor scores may be from
+     insufficient data, NOT bad hyperparameters. Recommend increasing trial_portion.
 """
 
     return f"""

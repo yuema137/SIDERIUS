@@ -116,7 +116,7 @@ def calculateBenchmark(path, file, args):
 # ==========================================
 parser = argparse.ArgumentParser(description="Calculate Denoising Score for Fix or Agent mode.")
 parser.add_argument('--mode', type=str, choices=['fix', 'agent'], default='fix', help='Run calculation for baseline (fix) or Agent results.')
-parser.add_argument('--data_dir', '-d', type=str, default="/home/klz/Data/TIDMAD/")
+parser.add_argument('--data_dir', '-d', type=str, default=None)
 parser.add_argument('--denoising_model', '-m', type=str, default='punet')
 parser.add_argument('--exp_id', type=str, default="default_run", help="Experiment ID (Required for Agent mode)")
 parser.add_argument("--run_name", type=str,  default="test_run", help="Run name for the auto-exploration.")
@@ -128,6 +128,10 @@ parser.add_argument('-w', '--weak', action='store_true')
 parser.add_argument('--output_json', type=str, help="Optional: Path to update experiment results with score")
 
 args = parser.parse_args()
+
+if args.data_dir is None:
+    from execute_tools.data_paths import TIDMAD_DATA_DIR
+    args.data_dir = TIDMAD_DATA_DIR
 
 # Index logic
 actual_index = args.file_index + 20 if args.weak else args.file_index

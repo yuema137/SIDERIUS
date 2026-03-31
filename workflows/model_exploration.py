@@ -523,7 +523,7 @@ def main():
                     "validate, and tune.",
     )
     parser.add_argument(
-        "--data_dir", type=str, default="/home/klz/Data/SIDEREIS_DATA",
+        "--data_dir", type=str, default=None,
         help="Root data directory containing existing tuning results.",
     )
     parser.add_argument(
@@ -603,6 +603,10 @@ def main():
              "(e.g. 'keep epochs <= 3 for quick testing').",
     )
     args = parser.parse_args()
+
+    if args.data_dir is None:
+        from execute_tools.data_paths import SIDERIUS_DATA_DIR
+        args.data_dir = SIDERIUS_DATA_DIR
 
     # Build LLM config: --llm_config file takes precedence, then --provider/--model_id
     if args.llm_config:

@@ -31,7 +31,49 @@ from agent.schemas.hyperparam_tuning import (
 )
 from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_utils import score_vector, SampleSet
+from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 from execute_tools.build_anchor_map import load_anchor_map
+
+
+def _validate_data_config(
+    trial_config: TrialConfig,
+    segmentation_size: int,
+    dataset_config=DATASET_CONFIG,
+) -> None:
+    """
+    Validate integer relationships between dataset, PSD segments, ML segments,
+    and sampling portions. Called in the agent loop where all configs converge.
+
+    Raises:
+        ValueError: If any constraint is violated.
+    """
+    psd = dataset_config.psd_segment_length
+    segs_per_file = dataset_config.segments_per_file
+
+    # 1. PSD segment must divide evenly into ML segments
+    if psd % segmentation_size != 0:
+        raise ValueError(
+            f"psd_segment_length ({psd}) must be divisible by "
+            f"segmentation_size ({segmentation_size}). "
+            f"Remainder: {psd % segmentation_size}."
+        )
+
+    # 2. trial_portion must produce at least 1 PSD segment per file
+    if trial_config.mode != "single_file":
+        eval_segs = max(1, round(trial_config.trial_portion * segs_per_file))
+        if eval_segs < 1:
+            raise ValueError(
+                f"trial_portion ({trial_config.trial_portion}) produces 0 segments "
+                f"from {segs_per_file} segments per file."
+            )
+
+        # 3. train_portion must produce at least 1 PSD segment from the scope
+        train_segs = max(1, round(trial_config.train_portion * eval_segs))
+        if train_segs < 1:
+            raise ValueError(
+                f"train_portion ({trial_config.train_portion}) of "
+                f"{eval_segs} scope segments produces 0 training segments."
+            )
 
 
 def _run_skill(skill_folder: str, sandbox: TidmadSandbox, **params) -> dict:
@@ -218,47 +260,81 @@ class HyperparamTuningAgent:
                     mode = "single_file"
 
                 # In formal mode, eval uses all segments (portion=1.0).
-                # In trial mode, eval uses the LLM's trial_portion.
-                eval_portion = plan.trial_portion if mode == "trial" else 1.0
+                # In trial mode, eval uses the LLM's eval_portion.
+                eval_portion = plan.eval_portion if mode == "trial" else 1.0
 
-                # Seeds for reproducibility. Use input seeds if provided (replay mode),
-                # otherwise auto-generate from run_name + attempt.
+                # Generate deterministic seeds for reproducibility.
                 import hashlib
                 seed_input = f"{run_name}_{total_attempts}".encode()
                 seed_hash = int(hashlib.sha256(seed_input).hexdigest(), 16)
-                sampling_seed = agent_input.sampling_seed if agent_input.sampling_seed is not None else seed_hash % (2**31)
+                train_sampling_seed = agent_input.sampling_seed if agent_input.sampling_seed is not None else seed_hash % (2**31)
                 train_base_seed = agent_input.train_base_seed if agent_input.train_base_seed is not None else (seed_hash >> 31) % (2**31)
+                # Eval seed: same as train when aligned, different otherwise
+                if plan.train_validation_align:
+                    eval_sampling_seed = train_sampling_seed
+                else:
+                    eval_sampling_seed = (seed_hash >> 62) % (2**31)
 
                 trial_config = TrialConfig(
                     is_trial=plan.is_trial,
                     mode=mode,
-                    trial_strategy=plan.trial_strategy if plan.is_trial else "snapshot",
-                    trial_portion=eval_portion,
+                    # Training
+                    trial_strategy=plan.trial_strategy if mode != "single_file" else "snapshot",
+                    trial_portion=plan.trial_portion,
                     train_portion=plan.train_portion,
                     target_files=plan.target_files if plan.is_trial else [],
+                    # Validation
+                    eval_strategy=plan.eval_strategy if mode != "single_file" else "snapshot",
+                    eval_portion=eval_portion,
+                    # Alignment
+                    train_validation_align=plan.train_validation_align,
+                    # Legacy
                     file_index=file_index if mode == "single_file" else None,
-                    sampling_seed=sampling_seed,
+                    # Seeds
+                    train_sampling_seed=train_sampling_seed,
+                    eval_sampling_seed=eval_sampling_seed,
                     train_base_seed=train_base_seed,
                 )
 
-                # Build eval_sample_set = the data scope for this round.
-                # Training subsamples from this scope each epoch (train_portion).
+                # Validate integer relationships between dataset, PSD, ML segments
+                _validate_data_config(trial_config, plan.model_cfg.get("segmentation_size", 10000))
+
+                # Build TWO independent SampleSets — training and validation
                 if trial_config.mode in ("trial", "formal"):
-                    eval_sample_set = build_sample_set(
+                    train_sample_set = build_sample_set(
                         is_trial=True,
                         trial_strategy=trial_config.trial_strategy,
                         trial_portion=trial_config.trial_portion,
                         target_files=trial_config.target_files or None,
-                        seed=trial_config.sampling_seed,
+                        seed=trial_config.train_sampling_seed,
+                    )
+                    eval_sample_set = build_sample_set(
+                        is_trial=True,
+                        trial_strategy=trial_config.eval_strategy,
+                        trial_portion=trial_config.eval_portion,
+                        target_files=trial_config.target_files or None,
+                        seed=trial_config.eval_sampling_seed,
                     )
                     print(f"  {trial_config.mode.capitalize()} mode: "
-                          f"strategy={trial_config.trial_strategy} "
-                          f"| eval_portion={trial_config.trial_portion} "
-                          f"| train_portion={trial_config.train_portion} "
-                          f"| files={sorted(eval_sample_set.keys())}")
+                          f"train: {trial_config.trial_strategy} portion={trial_config.trial_portion} "
+                          f"| eval: {trial_config.eval_strategy} portion={trial_config.eval_portion} "
+                          f"| train_portion/epoch={trial_config.train_portion} "
+                          f"| align={trial_config.train_validation_align}")
                 else:
+                    train_sample_set = None
                     eval_sample_set = None
                     print(f"  Legacy mode: file_index={file_index}")
+
+                # Segment counts for records and reflector context
+                if train_sample_set:
+                    train_psd_segments = sum(len(v) for v in train_sample_set.values())
+                else:
+                    train_psd_segments = DATASET_CONFIG.segments_per_file  # legacy single-file
+
+                if eval_sample_set:
+                    eval_psd_segments = sum(len(v) for v in eval_sample_set.values())
+                else:
+                    eval_psd_segments = DATASET_CONFIG.segments_per_file  # legacy single-file
 
                 # When force_model is set, override the LLM's model_type choice.
                 if model_type_setting != "auto":
@@ -290,10 +366,20 @@ class HyperparamTuningAgent:
                     "model_config":      model_config,
                     "train_config":      plan.train_cfg,
                     "loss_config":       plan.loss_cfg,
-                    "sample_set":        eval_sample_set,     # data scope for training
+                    "sample_set":        train_sample_set,    # training data (from training files)
                     "train_portion":     trial_config.train_portion,
                     "train_base_seed":   trial_config.train_base_seed,
-                    "eval_sample_set":   eval_sample_set,     # inference + scoring
+                    "eval_sample_set":   eval_sample_set,     # validation data (from validation files)
+                }
+
+                # Clean params for records — exclude bulky SampleSet dicts
+                record_params = {
+                    "exp_id":       exp_id,
+                    "run_name":     run_name,
+                    "model_type":   model_type,
+                    "model_config": model_config,
+                    "train_config": plan.train_cfg,
+                    "loss_config":  plan.loss_cfg,
                 }
 
                 print(f"\n[Step 0/3] Resource check...")
@@ -312,8 +398,7 @@ class HyperparamTuningAgent:
                         "model_type":      model_type,
                         "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
                         "file_index":      file_index,
-                        "params":          active_params,
-                        "results":         {},
+                        "params":          record_params,
                         "denoising_score": None,
                         "memory": {
                             "expert_advice_followed": expert_advice_str,
@@ -371,10 +456,14 @@ class HyperparamTuningAgent:
                     score_res = _run_skill("denoising_score_skill", sandbox, **active_params)
                 scoring_time = round(time.time() - t0, 1)
 
+                # Extract results from each stage
+                train_results = train_status.get("results", {})
+                score_results = score_res.get("results", {})
+
                 # D. REFLECT: Analyze results and generate insights
                 print(f"\nGenerating Research Memory...")
 
-                current_score     = score_res["results"].get("denoising_score")
+                current_score     = score_results.get("denoising_score")
                 current_loss_type = active_params["loss_config"].get("loss_type")
                 successful = [
                     r for r in memory_history
@@ -390,12 +479,12 @@ class HyperparamTuningAgent:
                 rank = sorted_scores.index(current_score) + 1 if current_score in sorted_scores else None
 
                 same_loss_finals = [
-                    r["results"]["final_loss"]
+                    r["final_loss"]
                     for r in successful
                     if r.get("params", {}).get("loss_config", {}).get("loss_type") == current_loss_type
-                    and r.get("results", {}).get("final_loss") is not None
+                    and r.get("final_loss") is not None
                 ]
-                current_final_loss = score_res["results"].get("final_loss")
+                current_final_loss = train_results.get("final_loss")
                 if current_final_loss is not None:
                     all_same_loss_finals  = same_loss_finals + [current_final_loss]
                     sorted_finals         = sorted(all_same_loss_finals)
@@ -405,9 +494,9 @@ class HyperparamTuningAgent:
                     same_loss_loss_rank = None
                     same_loss_total     = len(same_loss_finals)
 
-                current_params  = score_res["results"].get("model_params")
+                current_params  = train_results.get("model_params")
                 current_epochs  = active_params["train_config"].get("epochs")
-                baseline_params = baseline_record.get("results", {}).get("model_params") if baseline_record else None
+                baseline_params = baseline_record.get("model_params") if baseline_record else None
                 baseline_epochs = baseline_record.get("params", {}).get("train_config", {}).get("epochs") if baseline_record else None
                 params_ratio    = round(current_params / baseline_params, 3) if (current_params and baseline_params) else None
                 epochs_ratio    = round(current_epochs / baseline_epochs, 3) if (current_epochs and baseline_epochs) else None
@@ -415,7 +504,7 @@ class HyperparamTuningAgent:
                 worst_score     = min(all_scores) if all_scores else None
                 score_range     = (best_score - worst_score) if (best_score is not None and worst_score is not None and best_score != worst_score) else None
                 score_threshold = (best_score - 0.05 * score_range) if score_range is not None else best_score
-                best_params     = best_record.get("results", {}).get("model_params") if best_record else None
+                best_params     = best_record.get("model_params") if best_record else None
                 best_epochs     = best_record.get("params", {}).get("train_config", {}).get("epochs") if best_record else None
                 is_more_efficient = (
                     score_threshold is not None
@@ -445,9 +534,16 @@ class HyperparamTuningAgent:
                     "params_ratio":             params_ratio,
                     "epochs_ratio":             epochs_ratio,
                     "is_more_efficient":        is_more_efficient,
+                    "training_psd_segments":    train_psd_segments,
+                    "eval_psd_segments":        eval_psd_segments,
+                    "baseline_psd_segments":    baseline_record.get("training_psd_segments") if baseline_record else None,
+                    "trial_portion":            trial_config.trial_portion if trial_config.mode != "single_file" else None,
+                    "eval_portion":             trial_config.eval_portion if trial_config.mode != "single_file" else None,
                 }
 
-                reflection = brain.reflect(exp_id, hypothesis, score_res["results"], reflection_context)
+                # Pass both training and scoring results to the reflector
+                reflect_results = {**train_results, **score_results}
+                reflection = brain.reflect(exp_id, hypothesis, reflect_results, reflection_context)
 
                 print(f"{'-'*30}")
                 print(f"RESEARCH REFLECTION for {exp_id}:")
@@ -458,21 +554,23 @@ class HyperparamTuningAgent:
                 print(f"{'-'*30}")
 
                 # E. COMMIT: Build, validate, and save the finalized record
-                combined_results = {}
-                if "results" in train_status:
-                    combined_results.update(train_status["results"])
-                if "results" in score_res:
-                    combined_results.update(score_res["results"])
-
                 final_record = {
                     "exp_id":     exp_id,
                     "status":     "success",
                     "model_type": model_type,
                     "timestamp":  time.strftime("%Y-%m-%d %H:%M:%S"),
                     "file_index": file_index,
-                    "params":     active_params,
-                    "results":    combined_results,
-                    "denoising_score": combined_results.get("denoising_score"),
+                    "params":     record_params,
+                    # Training results
+                    "final_loss":    train_results.get("final_loss"),
+                    "loss_history":  train_results.get("loss_history"),
+                    "model_params":  train_results.get("model_params"),
+                    # Scoring results
+                    "denoising_score": score_results.get("denoising_score"),
+                    "file_vector":     score_results.get("file_vector"),
+                    # Data volume
+                    "training_psd_segments": train_psd_segments,
+                    "eval_psd_segments":    eval_psd_segments,
                     "timing": {
                         "train_time_s":     train_time,
                         "inference_time_s": inference_time,
@@ -487,13 +585,13 @@ class HyperparamTuningAgent:
                         "memory_update": reflection.get("memory_update"),
                     },
                 }
-                # Trial/formal context — recorded per-round from the plan.
-                # Both modes produce a file_vector via score_vector().
-                final_record["file_vector"] = combined_results.get("file_vector")
+                # Trial context
                 if trial_config.is_trial:
                     final_record["is_trial"] = True
                     final_record["trial_strategy"] = trial_config.trial_strategy
                     final_record["trial_portion"] = trial_config.trial_portion
+                    final_record["eval_strategy"] = trial_config.eval_strategy
+                    final_record["eval_portion"] = trial_config.eval_portion
                     final_record["train_portion"] = trial_config.train_portion
                     if trial_config.trial_strategy == "target":
                         final_record["target_files"] = trial_config.target_files
@@ -503,7 +601,7 @@ class HyperparamTuningAgent:
 
                 completed_rounds += 1
                 print(f"Round {completed_rounds}/{max_rounds} Complete. "
-                      f"Score: {combined_results.get('denoising_score', 'N/A')}")
+                      f"Score: {score_results.get('denoising_score', 'N/A')}")
 
                 time.sleep(2)  # Cool-down to avoid API rate limits
 
@@ -584,11 +682,29 @@ def main():
     parser.add_argument("--progress_bar", action="store_true",
                         help="Stream live tqdm progress bars from training/inference subprocesses.")
     parser.add_argument("--file_index", type=int, default=6,
-                        help="Validation/training file index (default: 6).")
+                        help="Validation/training file index (default: 6). Ignored when --is_trial.")
+
+    # Trial mode arguments
+    parser.add_argument("--is_trial", action="store_true",
+                        help="Enable trial-explore mode with multi-file sparse sampling.")
+    parser.add_argument("--trial_strategy", type=str, default="snapshot",
+                        choices=["snapshot", "anchors", "target"],
+                        help="Training sampling strategy (default: snapshot).")
+    parser.add_argument("--trial_portion", type=float, default=0.1,
+                        help="Fraction of segments per file for training scope (default: 0.1).")
+    parser.add_argument("--eval_strategy", type=str, default="snapshot",
+                        choices=["snapshot", "anchors", "target"],
+                        help="Validation sampling strategy (default: snapshot).")
+    parser.add_argument("--eval_portion", type=float, default=0.1,
+                        help="Fraction of segments per file for validation (default: 0.1).")
+    parser.add_argument("--train_portion", type=float, default=0.1,
+                        help="Per-epoch subsample from training scope (default: 0.1).")
+    parser.add_argument("--human_advice", type=str, default=None,
+                        help="Human guidance for the agent (injected alongside expert_advice).")
 
     args = parser.parse_args()
 
-    agent_input = HyperparamTuningInput.model_validate({
+    input_dict = {
         "model_type":    args.force_model,
         "file_index":    args.file_index,
         "max_rounds":    args.max_rounds,
@@ -600,7 +716,20 @@ def main():
             "local": {"workspace": args.workspace, "run_name": args.run_name},
         },
         "progress_bar": args.progress_bar,
-    })
+        "is_trial":     args.is_trial,
+    }
+    if args.is_trial:
+        input_dict.update({
+            "trial_strategy":  args.trial_strategy,
+            "trial_portion":   args.trial_portion,
+            "eval_strategy":   args.eval_strategy,
+            "eval_portion":    args.eval_portion,
+            "train_portion":   args.train_portion,
+        })
+    if args.human_advice:
+        input_dict["human_advice"] = args.human_advice
+
+    agent_input = HyperparamTuningInput.model_validate(input_dict)
 
     agent = HyperparamTuningAgent()
     agent.run(agent_input)

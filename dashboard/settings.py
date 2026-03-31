@@ -27,7 +27,7 @@ DEFAULT_CONFIG_PATH = os.path.join(_PROJECT_ROOT, "dashboard_config.yaml")
 # ---------------------------------------------------------------------------
 
 class LocalDataSourceSettings(BaseModel):
-    root_data_dir: str = "/home/klz/Data/SIDEREIS_DATA"
+    root_data_dir: str = ""  # Set via dashboard_config.yaml or tidmad_data_config.yaml
     # If empty, models are auto-discovered by scanning root_data_dir subdirectories.
     models: list[str] = Field(default_factory=list)
 
