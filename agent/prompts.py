@@ -103,8 +103,13 @@ When reviewing past experiments in Research Memory:
 Each experiment has a `file_vector`: a length-20 array of per-file denoising scores.
 Each file corresponds to a different injected signal frequency (log scale: file 0 =
 lowest, file 19 = highest). Files not included in the evaluation have value `NaN` —
-ignore those entries. Use non-NaN entries to understand model performance across
-different frequency ranges and guide your strategy choices.
+ignore those entries.
+- Examine which files score well (high values) vs poorly (low or near-zero values).
+  This reveals which frequency ranges the model handles well vs struggles with.
+- If scores vary significantly across files, consider using `"target"` strategy with
+  the weak file indices to focus training on those frequency ranges.
+- If scores are uniformly low across all files, the model likely needs more data
+  (increase trial_portion) or better hyperparameters.
 
 ### OUTPUT REQUIREMENT:
 You must provide the next experiment setup in a strict JSON format.
