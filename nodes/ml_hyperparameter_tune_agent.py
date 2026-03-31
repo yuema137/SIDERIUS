@@ -399,7 +399,6 @@ class HyperparamTuningAgent:
                         "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
                         "file_index":      file_index,
                         "params":          record_params,
-                        "results":         {},
                         "denoising_score": None,
                         "memory": {
                             "expert_advice_followed": expert_advice_str,
@@ -457,10 +456,14 @@ class HyperparamTuningAgent:
                     score_res = _run_skill("denoising_score_skill", sandbox, **active_params)
                 scoring_time = round(time.time() - t0, 1)
 
+                # Extract results from each stage
+                train_results = train_status.get("results", {})
+                score_results = score_res.get("results", {})
+
                 # D. REFLECT: Analyze results and generate insights
                 print(f"\nGenerating Research Memory...")
 
-                current_score     = score_res["results"].get("denoising_score")
+                current_score     = score_results.get("denoising_score")
                 current_loss_type = active_params["loss_config"].get("loss_type")
                 successful = [
                     r for r in memory_history
@@ -476,12 +479,12 @@ class HyperparamTuningAgent:
                 rank = sorted_scores.index(current_score) + 1 if current_score in sorted_scores else None
 
                 same_loss_finals = [
-                    r["results"]["final_loss"]
+                    r["final_loss"]
                     for r in successful
                     if r.get("params", {}).get("loss_config", {}).get("loss_type") == current_loss_type
-                    and r.get("results", {}).get("final_loss") is not None
+                    and r.get("final_loss") is not None
                 ]
-                current_final_loss = score_res["results"].get("final_loss")
+                current_final_loss = train_results.get("final_loss")
                 if current_final_loss is not None:
                     all_same_loss_finals  = same_loss_finals + [current_final_loss]
                     sorted_finals         = sorted(all_same_loss_finals)
@@ -491,9 +494,9 @@ class HyperparamTuningAgent:
                     same_loss_loss_rank = None
                     same_loss_total     = len(same_loss_finals)
 
-                current_params  = score_res["results"].get("model_params")
+                current_params  = train_results.get("model_params")
                 current_epochs  = active_params["train_config"].get("epochs")
-                baseline_params = baseline_record.get("results", {}).get("model_params") if baseline_record else None
+                baseline_params = baseline_record.get("model_params") if baseline_record else None
                 baseline_epochs = baseline_record.get("params", {}).get("train_config", {}).get("epochs") if baseline_record else None
                 params_ratio    = round(current_params / baseline_params, 3) if (current_params and baseline_params) else None
                 epochs_ratio    = round(current_epochs / baseline_epochs, 3) if (current_epochs and baseline_epochs) else None
@@ -501,7 +504,7 @@ class HyperparamTuningAgent:
                 worst_score     = min(all_scores) if all_scores else None
                 score_range     = (best_score - worst_score) if (best_score is not None and worst_score is not None and best_score != worst_score) else None
                 score_threshold = (best_score - 0.05 * score_range) if score_range is not None else best_score
-                best_params     = best_record.get("results", {}).get("model_params") if best_record else None
+                best_params     = best_record.get("model_params") if best_record else None
                 best_epochs     = best_record.get("params", {}).get("train_config", {}).get("epochs") if best_record else None
                 is_more_efficient = (
                     score_threshold is not None
@@ -538,7 +541,9 @@ class HyperparamTuningAgent:
                     "eval_portion":             trial_config.eval_portion if trial_config.mode != "single_file" else None,
                 }
 
-                reflection = brain.reflect(exp_id, hypothesis, score_res["results"], reflection_context)
+                # Pass both training and scoring results to the reflector
+                reflect_results = {**train_results, **score_results}
+                reflection = brain.reflect(exp_id, hypothesis, reflect_results, reflection_context)
 
                 print(f"{'-'*30}")
                 print(f"RESEARCH REFLECTION for {exp_id}:")
@@ -549,12 +554,6 @@ class HyperparamTuningAgent:
                 print(f"{'-'*30}")
 
                 # E. COMMIT: Build, validate, and save the finalized record
-                combined_results = {}
-                if "results" in train_status:
-                    combined_results.update(train_status["results"])
-                if "results" in score_res:
-                    combined_results.update(score_res["results"])
-
                 final_record = {
                     "exp_id":     exp_id,
                     "status":     "success",
@@ -562,10 +561,16 @@ class HyperparamTuningAgent:
                     "timestamp":  time.strftime("%Y-%m-%d %H:%M:%S"),
                     "file_index": file_index,
                     "params":     record_params,
-                    "results":    combined_results,
-                    "denoising_score": combined_results.get("denoising_score"),
+                    # Training results
+                    "final_loss":    train_results.get("final_loss"),
+                    "loss_history":  train_results.get("loss_history"),
+                    "model_params":  train_results.get("model_params"),
+                    # Scoring results
+                    "denoising_score": score_results.get("denoising_score"),
+                    "file_vector":     score_results.get("file_vector"),
+                    # Data volume
                     "training_psd_segments": train_psd_segments,
-                    "eval_psd_segments": eval_psd_segments,
+                    "eval_psd_segments":    eval_psd_segments,
                     "timing": {
                         "train_time_s":     train_time,
                         "inference_time_s": inference_time,
@@ -580,13 +585,13 @@ class HyperparamTuningAgent:
                         "memory_update": reflection.get("memory_update"),
                     },
                 }
-                # Trial/formal context — recorded per-round from the plan.
-                # Both modes produce a file_vector via score_vector().
-                final_record["file_vector"] = combined_results.get("file_vector")
+                # Trial context
                 if trial_config.is_trial:
                     final_record["is_trial"] = True
                     final_record["trial_strategy"] = trial_config.trial_strategy
                     final_record["trial_portion"] = trial_config.trial_portion
+                    final_record["eval_strategy"] = trial_config.eval_strategy
+                    final_record["eval_portion"] = trial_config.eval_portion
                     final_record["train_portion"] = trial_config.train_portion
                     if trial_config.trial_strategy == "target":
                         final_record["target_files"] = trial_config.target_files
@@ -596,7 +601,7 @@ class HyperparamTuningAgent:
 
                 completed_rounds += 1
                 print(f"Round {completed_rounds}/{max_rounds} Complete. "
-                      f"Score: {combined_results.get('denoising_score', 'N/A')}")
+                      f"Score: {score_results.get('denoising_score', 'N/A')}")
 
                 time.sleep(2)  # Cool-down to avoid API rate limits
 

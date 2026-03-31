@@ -131,12 +131,9 @@ def run_baseline(model_type: str, baseline_workspace: str, progress_bar: bool = 
     if score_result["status"] != "success":
         raise RuntimeError(f"Baseline scoring failed:\n{score_result.get('message')}")
 
-    # Merge train + score results
-    combined = {}
-    if "results" in train_result:
-        combined.update(train_result["results"])
-    if "results" in score_result:
-        combined.update(score_result["results"])
+    # Extract results from each stage
+    train_res = train_result.get("results", {})
+    score_res = score_result.get("results", {})
 
     record = {
         "exp_id":       exp_id,
@@ -152,8 +149,10 @@ def run_baseline(model_type: str, baseline_workspace: str, progress_bar: bool = 
             "train_config":  t_cfg,
             "loss_config":   l_cfg,
         },
-        "results":        combined,
-        "denoising_score": combined.get("denoising_score"),
+        "final_loss":      train_res.get("final_loss"),
+        "loss_history":    train_res.get("loss_history"),
+        "model_params":    train_res.get("model_params"),
+        "denoising_score": score_res.get("denoising_score"),
         "timing": {
             "train_time_s":     train_time,
             "inference_time_s": inference_time,
@@ -281,12 +280,8 @@ def run_baseline_trial(model_type: str, baseline_workspace: str,
     )
     scoring_time = round(time.time() - t0, 1)
 
-    # Merge results
-    combined = {}
-    if "results" in train_result:
-        combined.update(train_result["results"])
-    combined["denoising_score"] = final_scalar
-    combined["file_vector"] = file_vector
+    # Extract training results
+    train_res = train_result.get("results", {})
 
     record = {
         "exp_id":       exp_id,
@@ -302,7 +297,9 @@ def run_baseline_trial(model_type: str, baseline_workspace: str,
             "train_config":  t_cfg,
             "loss_config":   l_cfg,
         },
-        "results":          combined,
+        "final_loss":       train_res.get("final_loss"),
+        "loss_history":     train_res.get("loss_history"),
+        "model_params":     train_res.get("model_params"),
         "denoising_score":  final_scalar,
         "file_vector":      file_vector,
         "is_trial":         False,

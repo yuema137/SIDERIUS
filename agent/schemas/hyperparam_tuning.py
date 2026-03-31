@@ -81,8 +81,41 @@ class ExperimentRecord(BaseModel):
     timestamp: str
     file_index: int = Field(default=6, description="Training/validation file index. Defaults to the standard split used in the TIDMAD paper.")
     params: Dict[str, Any]
-    results: Dict[str, Any]
-    denoising_score: Optional[float] = None
+
+    # --- Training results ---
+    final_loss: Optional[float] = Field(
+        default=None,
+        description="Final training loss (last epoch). Comparable only across same loss_type.",
+    )
+    loss_history: Optional[List[float]] = Field(
+        default=None,
+        description="Training loss per epoch.",
+    )
+    model_params: Optional[int] = Field(
+        default=None,
+        description="Number of trainable model parameters.",
+    )
+
+    # --- Scoring results ---
+    denoising_score: Optional[float] = Field(
+        default=None,
+        description="Anchor-normalized denoising score (validation).",
+    )
+    file_vector: Optional[List[float]] = Field(
+        default=None,
+        description="Length-20 score vector. NaN for files not included in the run.",
+    )
+
+    # --- Data volume ---
+    training_psd_segments: Optional[int] = Field(
+        default=None,
+        description="Number of PSD segments used for training.",
+    )
+    eval_psd_segments: Optional[int] = Field(
+        default=None,
+        description="Number of PSD segments used for evaluation.",
+    )
+
     timing: Optional[ExperimentTiming] = None
     memory: Optional[ExperimentMemory] = None
 
@@ -93,23 +126,27 @@ class ExperimentRecord(BaseModel):
     )
     trial_strategy: Optional[Literal["snapshot", "anchors", "target"]] = Field(
         default=None,
-        description="Sampling strategy used. Only meaningful when is_trial=True.",
+        description="Sampling strategy used for training.",
     )
     trial_portion: Optional[float] = Field(
         default=None,
-        description="Fraction of segments sampled per file. Only meaningful when is_trial=True.",
+        description="Fraction of segments per file for training scope.",
     )
-    train_validation_align: Optional[bool] = Field(
+    eval_strategy: Optional[Literal["snapshot", "anchors", "target"]] = Field(
         default=None,
-        description="Whether validation used the same segments as training.",
+        description="Sampling strategy used for validation.",
+    )
+    eval_portion: Optional[float] = Field(
+        default=None,
+        description="Fraction of segments per file for validation scope.",
+    )
+    train_portion: Optional[float] = Field(
+        default=None,
+        description="Per-epoch subsample from training scope.",
     )
     target_files: Optional[List[int]] = Field(
         default=None,
         description="File indices sampled (only for 'target' strategy).",
-    )
-    train_portion: Optional[float] = Field(
-        default=None,
-        description="Fraction of segments per file used for training.",
     )
     file_vector: Optional[List[float]] = Field(
         default=None,

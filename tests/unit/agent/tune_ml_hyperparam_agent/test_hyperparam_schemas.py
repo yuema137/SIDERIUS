@@ -54,8 +54,10 @@ def valid_success_record():
         "timestamp":  "2026-03-11 10:00:00",
         "file_index": 6,
         "params":     {"model_config": {}, "train_config": {}, "loss_config": {}},
-        "results":    {"denoising_score": 1.23, "final_loss": 0.5},
-        "denoising_score": 1.23,
+        "final_loss":       0.5,
+        "loss_history":     [0.8, 0.6, 0.5],
+        "model_params":     50000,
+        "denoising_score":  1.23,
         "timing": {
             "train_time_s":     120.0,
             "inference_time_s": 30.0,
@@ -80,7 +82,6 @@ def valid_oom_record():
         "timestamp":       "2026-03-11 10:05:00",
         "file_index":      6,
         "params":          {"model_config": {}, "train_config": {}, "loss_config": {}},
-        "results":         {},
         "denoising_score": None,
         "memory": {
             "expert_advice_followed": "try deeper architectures",
@@ -380,15 +381,21 @@ class TestTrialFieldsExperimentRecord:
         assert rec.is_trial is False
         assert rec.trial_strategy is None
         assert rec.trial_portion is None
-        assert rec.train_validation_align is None
+        assert rec.eval_strategy is None
+        assert rec.eval_portion is None
+        assert rec.train_portion is None
         assert rec.target_files is None
         assert rec.file_vector is None
+        assert rec.training_psd_segments is None
+        assert rec.eval_psd_segments is None
 
     def test_record_with_trial_context(self, valid_success_record):
         valid_success_record["is_trial"] = True
         valid_success_record["trial_strategy"] = "snapshot"
         valid_success_record["trial_portion"] = 0.1
-        valid_success_record["train_validation_align"] = True
+        valid_success_record["eval_strategy"] = "snapshot"
+        valid_success_record["eval_portion"] = 0.1
+        valid_success_record["train_portion"] = 0.1
         valid_success_record["file_vector"] = [float("nan")] * 20
         valid_success_record["file_vector"][6] = 0.85
         rec = ExperimentRecord.model_validate(valid_success_record)

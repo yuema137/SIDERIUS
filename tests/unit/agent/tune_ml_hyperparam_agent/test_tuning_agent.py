@@ -131,7 +131,7 @@ FAKE_INFERENCE_RESULT = {"status": "success", "results": {}}
 
 FAKE_SCORE_RESULT = {
     "status": "success",
-    "results": {"denoising_score": 1.75, "final_loss": 0.5, "model_params": 100000},
+    "results": {"denoising_score": 1.75},
 }
 
 
