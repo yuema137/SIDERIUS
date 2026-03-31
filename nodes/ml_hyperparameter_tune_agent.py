@@ -325,6 +325,10 @@ class HyperparamTuningAgent:
                     eval_sample_set = None
                     print(f"  Legacy mode: file_index={file_index}")
 
+                # Segment counts for records and reflector context
+                train_psd_segments = sum(len(v) for v in train_sample_set.values()) if train_sample_set else 0
+                eval_psd_segments = sum(len(v) for v in eval_sample_set.values()) if eval_sample_set else 0
+
                 # When force_model is set, override the LLM's model_type choice.
                 if model_type_setting != "auto":
                     model_type = model_type_setting
@@ -361,6 +365,16 @@ class HyperparamTuningAgent:
                     "eval_sample_set":   eval_sample_set,     # validation data (from validation files)
                 }
 
+                # Clean params for records — exclude bulky SampleSet dicts
+                record_params = {
+                    "exp_id":       exp_id,
+                    "run_name":     run_name,
+                    "model_type":   model_type,
+                    "model_config": model_config,
+                    "train_config": plan.train_cfg,
+                    "loss_config":  plan.loss_cfg,
+                }
+
                 print(f"\n[Step 0/3] Resource check...")
                 resource_check = _run_skill("evaluate_resource_skill", sandbox, **active_params)
                 if resource_check.get("status") == "error":
@@ -377,7 +391,7 @@ class HyperparamTuningAgent:
                         "model_type":      model_type,
                         "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
                         "file_index":      file_index,
-                        "params":          active_params,
+                        "params":          record_params,
                         "results":         {},
                         "denoising_score": None,
                         "memory": {
@@ -510,6 +524,11 @@ class HyperparamTuningAgent:
                     "params_ratio":             params_ratio,
                     "epochs_ratio":             epochs_ratio,
                     "is_more_efficient":        is_more_efficient,
+                    "training_psd_segments":    train_psd_segments,
+                    "eval_psd_segments":        eval_psd_segments,
+                    "baseline_psd_segments":    baseline_record.get("training_psd_segments") if baseline_record else None,
+                    "trial_portion":            trial_config.trial_portion if trial_config.mode != "single_file" else None,
+                    "eval_portion":             trial_config.eval_portion if trial_config.mode != "single_file" else None,
                 }
 
                 reflection = brain.reflect(exp_id, hypothesis, score_res["results"], reflection_context)
@@ -535,9 +554,11 @@ class HyperparamTuningAgent:
                     "model_type": model_type,
                     "timestamp":  time.strftime("%Y-%m-%d %H:%M:%S"),
                     "file_index": file_index,
-                    "params":     active_params,
+                    "params":     record_params,
                     "results":    combined_results,
                     "denoising_score": combined_results.get("denoising_score"),
+                    "training_psd_segments": train_psd_segments,
+                    "eval_psd_segments": eval_psd_segments,
                     "timing": {
                         "train_time_s":     train_time,
                         "inference_time_s": inference_time,

@@ -130,6 +130,16 @@ You are a Research Analyst. Your job is to transform raw experiment results into
 - A result is BAD if it is LOWER than most previous scores.
 - NEVER call a result a failure just because the score is negative.
 
+### CRITICAL — DATA VOLUME AWARENESS:
+- Check `training_psd_segments` and `baseline_psd_segments` in the context.
+- If this experiment trained on much LESS data than the baseline (e.g. 200 vs 4000 segments),
+  poor scores may be caused by **insufficient training data**, not bad hyperparameters.
+- In that case, the memory_update should recommend **increasing trial_portion** rather than
+  changing loss_type or lr. Example: "Score is 5× below baseline but trained on 20× less data.
+  Recommend increasing trial_portion from 0.05 to 0.2 before changing hyperparameters."
+- If training data is comparable to baseline but score is still poor → then the hyperparameters
+  are likely the issue.
+
 ### CRITICAL — HOW TO JUDGE THE TRAINING LOSS:
 - Training loss is only comparable across experiments that use the SAME loss_type.
 - If the current experiment uses a different loss_type than previous ones, DO NOT compare loss values.
@@ -312,6 +322,14 @@ def get_reflector_user_prompt(exp_id, hypothesis, actual_results, reflection_con
   current_params        : {c.get('current_params', 'N/A')}
   current_epochs        : {c.get('current_epochs', 'N/A')}
 {efficiency_block}
+### Data Volume Context:
+  training_psd_segments : {c.get('training_psd_segments', 'N/A')}  (PSD segments used for training)
+  eval_psd_segments     : {c.get('eval_psd_segments', 'N/A')}  (PSD segments used for scoring)
+  baseline_psd_segments : {c.get('baseline_psd_segments', 'N/A')}  (baseline trained on this many)
+  trial_portion         : {c.get('trial_portion', 'N/A')}
+  eval_portion          : {c.get('eval_portion', 'N/A')}
+  ⚠ If training_psd_segments << baseline_psd_segments, poor scores may be from
+     insufficient data, NOT bad hyperparameters. Recommend increasing trial_portion.
 """
 
     return f"""
