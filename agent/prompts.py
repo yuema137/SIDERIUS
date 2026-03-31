@@ -96,9 +96,15 @@ model sees diverse data without loading everything at once.
 When reviewing past experiments in Research Memory:
 - Compare `training_psd_segments` across records. The baseline typically trains on 4000 segments.
   If your experiments train on 200 segments, you have 20× less data — increase trial_portion.
-- Check `file_vector` to see which frequency bands (files) score well vs poorly.
 - Scores from larger portions are more reliable. A formal score (eval_portion=1.0) is the most
   definitive.
+
+### FILE VECTOR ANALYSIS:
+Each experiment has a `file_vector`: a length-20 array of per-file denoising scores.
+Each file corresponds to a different injected signal frequency (log scale: file 0 =
+lowest, file 19 = highest). Files not included in the evaluation have value `NaN` —
+ignore those entries. Use non-NaN entries to understand model performance across
+different frequency ranges and guide your strategy choices.
 
 ### OUTPUT REQUIREMENT:
 You must provide the next experiment setup in a strict JSON format.
