@@ -7,6 +7,11 @@ import datetime
 from typing import Dict, Any, Optional
 from ml_models.models_format_sandbox import get_config_class, TrainConfig, LossConfig, ExperimentConfig, PLUGIN_CONFIG_REGISTRY
 from execute_tools.scoring_utils import validate_sample_set
+from execute_tools.data_paths import TIDMAD_DATA_DIR
+
+
+def _tidmad_data_dir() -> str:
+    return TIDMAD_DATA_DIR
 
 
 def _subprocess_env() -> dict:
@@ -118,7 +123,7 @@ class TidmadSandbox:
             "configs": os.path.join(self.base_dir, "configs", run_name),
             "models": os.path.join(self.base_dir, "cached_models"),
             "records": os.path.join(self.base_dir, "records"),
-            "data": "/home/klz/Data/TIDMAD/"
+            "data": _tidmad_data_dir()
         }
         for key, d in self.dirs.items():
             if key != "data":  # data dir is read-only input, not agent-generated output

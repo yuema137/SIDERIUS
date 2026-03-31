@@ -40,9 +40,10 @@ from core.sandbox_executor import TidmadSandbox
 from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_utils import score_vector
 from execute_tools.build_anchor_map import load_anchor_map
+from execute_tools.data_paths import TIDMAD_DATA_DIR, SIDERIUS_DATA_DIR
 
-ROOT_DATA_DIR = "/home/klz/Data/SIDEREIS_DATA"
-DATA_DIR = "/home/klz/Data/TIDMAD/"
+ROOT_DATA_DIR = SIDERIUS_DATA_DIR
+DATA_DIR = TIDMAD_DATA_DIR
 LEGACY_CONFIGS_PATH = os.path.join(SIDERIUS_ROOT, "ml_models", "legacy_baseline_configs.json")
 
 

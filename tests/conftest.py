@@ -29,7 +29,11 @@ import h5py
 import pytest
 
 
-REAL_DATA_DIR  = "/home/klz/Data/TIDMAD/"
+try:
+    from execute_tools.data_paths import TIDMAD_DATA_DIR
+    REAL_DATA_DIR = TIDMAD_DATA_DIR
+except (FileNotFoundError, ImportError):
+    REAL_DATA_DIR = "/home/klz/Data/TIDMAD/"
 REAL_DATA_FILE = "abra_training_0000.h5"
 
 # Number of consecutive samples forming one group in TIDMADDataset.

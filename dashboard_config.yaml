@@ -7,6 +7,7 @@ data_source:
   type: local           # "local" | "postgres"
 
   local:
+    # Update this path when migrating. Should match siderius_data_dir in tidmad_data_config.json.
     root_data_dir: /home/klz/Data/SIDEREIS_DATA
     # Explicit model list. Leave empty ([]) to auto-discover from root_data_dir.
     models: [punet, wavenet, rnn, fcnet, transformer]

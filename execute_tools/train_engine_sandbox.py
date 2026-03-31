@@ -500,8 +500,10 @@ def main():
     parser.add_argument("--model_cfg", type=str, required=True)
     parser.add_argument("--train_cfg", type=str, required=True)
     parser.add_argument("--loss_cfg", type=str, required=True)
-    parser.add_argument("--data_dir", type=str, default="/home/klz/Data/TIDMAD/")
-    parser.add_argument("--sandbox_dir", type=str, default="/home/klz/Data/TIDMAD_Sandbox/")
+    parser.add_argument("--data_dir", type=str, default=None,
+                        help="Directory with TIDMAD training files. Default: from tidmad_data_config.json.")
+    parser.add_argument("--sandbox_dir", type=str, default=None,
+                        help="Sandbox output directory.")
     parser.add_argument("--file_index", type=int, default=6)
     parser.add_argument("--exp_id", type=str, default="default_exp")
     parser.add_argument("--run_name", type=str,  default="test_run",
@@ -517,6 +519,11 @@ def main():
                         help="Base seed for per-epoch subsampling. Epoch n uses seed = base + n. "
                              "When None, derived from exp_id hash.")
     args = parser.parse_args()
+
+    # Resolve defaults from config file
+    if args.data_dir is None:
+        from execute_tools.data_paths import TIDMAD_DATA_DIR
+        args.data_dir = TIDMAD_DATA_DIR
 
     # Define standard sandbox structure
     base_sandbox = args.sandbox_dir

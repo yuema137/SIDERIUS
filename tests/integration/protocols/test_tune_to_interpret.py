@@ -32,7 +32,11 @@ load_dotenv()
 
 pytestmark = pytest.mark.real_run
 
-DATA_DIR = "/home/klz/Data/TIDMAD/"
+try:
+    from execute_tools.data_paths import TIDMAD_DATA_DIR
+    DATA_DIR = TIDMAD_DATA_DIR
+except (FileNotFoundError, ImportError):
+    DATA_DIR = "/home/klz/Data/TIDMAD/"
 
 
 def _skip_if_no_key(provider: str):

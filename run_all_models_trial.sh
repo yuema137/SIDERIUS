@@ -16,7 +16,7 @@
 set -euo pipefail
 
 SIDERIUS_DIR="$(cd "$(dirname "$0")" && pwd)"
-LOG_DIR="/home/klz/Data/SIDEREIS_DATA/logs"
+LOG_DIR="$(python3 -c "import json; print(json.load(open('tidmad_data_config.json'))['siderius_data_dir'])" 2>/dev/null || echo '/home/klz/Data/SIDEREIS_DATA')/logs"
 PYTHON="$SIDERIUS_DIR/.venv/bin/python"
 RUN_NAME="small_sample_trial_v0"
 MAX_ROUNDS=20

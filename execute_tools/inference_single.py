@@ -20,7 +20,7 @@ def get_parser():
     """Defines the argument parser for both Fix and Agent modes."""
     parser = argparse.ArgumentParser(description="Inference with Fixed (Baseline) or Agent mode.")
     parser.add_argument('--mode', type=str, choices=['fix', 'agent'], default='fix')
-    parser.add_argument('--data_dir', '-d', type=str, default="/home/klz/Data/TIDMAD/")
+    parser.add_argument('--data_dir', '-d', type=str, default=None)
     parser.add_argument('--denoising_model', '-m', type=str, default='punet')
     parser.add_argument('--file_index', '-i', type=int, default=6)
     
@@ -82,6 +82,10 @@ def main():
     # 1. Parse arguments locally to avoid NameError scope issues
     parser = get_parser()
     args = parser.parse_args()
+
+    if args.data_dir is None:
+        from execute_tools.data_paths import TIDMAD_DATA_DIR
+        args.data_dir = TIDMAD_DATA_DIR
 
     # 2. Model Loading Logic
     if args.mode == 'fix':
