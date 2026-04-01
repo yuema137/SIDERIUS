@@ -29,9 +29,10 @@ POLL_INTERVAL=30
 # Model groups — same as run_all_models.sh
 # ---------------------------------------------------------------------------
 MODEL_GROUPS=(
-    "punet wavenet fcnet"    # Group 1 — light models (parallel)
-    "transformer"            # Group 2 — attention-heavy (~6 GB)
-    "rnn"                    # Group 3 — separate to avoid concurrent GPU OOM
+    "punet wavenet"          # Group 1 — light models (parallel)
+    "fcnet"                  # Group 2 — large model, needs full memory alone
+    "transformer"            # Group 3 — attention-heavy (~6 GB), seg_size=20000 → 2× batches
+    "rnn"                    # Group 4 — separate to avoid concurrent GPU OOM
 )
 
 mkdir -p "$LOG_DIR"
