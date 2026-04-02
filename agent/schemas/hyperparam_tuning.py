@@ -550,6 +550,14 @@ class HyperparamTuningInput(BaseModel):
         description="Where this node reads its inputs and writes its outputs. "
                     "Supports local filesystem now; postgres backend is a placeholder.",
     )
+    cleanup_denoised: bool = Field(
+        default=False,
+        description=(
+            "Delete denoised HDF5 files after scoring each round. "
+            "Saves disk space (~4 GB per file × 20 files = 80 GB per formal round). "
+            "Scores and file_vector are preserved in the experiment record."
+        ),
+    )
     progress_bar: bool = Field(
         default=False,
         description="Stream live tqdm progress bars from training/inference subprocesses.",

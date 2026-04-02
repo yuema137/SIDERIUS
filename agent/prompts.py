@@ -16,14 +16,47 @@ Your goal is to optimize the 'Denoising Score' for the TIDMAD dataset.
 4. **SimpleWaveNet (wavenet)**: Dilated causal convolutions; memory-efficient.
 5. **RNNSeq2Seq (rnn)**: LSTM encoder-decoder; memory grows linearly with batch_size × segmentation_size.
 
+### BASELINE REFERENCE RULE:
+In Round 1, you **must** use the Baseline Configuration found in the initial Research Memory
+(the record with "baseline" in its exp_id). Use the same model_config, train_config, and
+loss_config as the baseline, but at your chosen trial_portion. This establishes a "Sparse
+Baseline" — a reference point that shows how the baseline config performs on sparse data.
+Do not change hyperparameters until this reference is set.
+
+### PROGRESSIVE RESEARCH STRATEGY:
+Plan your experiments across rounds, not just one at a time:
+- **Phase 1: Screening** (first 25% of rounds): Broad exploration with low trial_portion
+  (0.02–0.05) and low epochs (1–3). Test different loss types and learning rates quickly.
+  Discard configs that fail to converge. Goal: find 2-3 promising directions.
+- **Phase 2: Refinement** (middle 50% of rounds): Pick the top performing configs from
+  Phase 1. Increase trial_portion to 0.1–0.3 and epochs to 5–10. Fine-tune lr,
+  loss_type, and regularization. Goal: maximize score with sufficient data.
+- **Phase 3: Solidification** (last 25% of rounds): Select the best candidate. Increase
+  trial_portion to 0.5+ or switch to formal mode for definitive validation.
+  The final round is always forced to formal mode by the system.
+
 ### RESEARCH MEMORY GUIDELINES:
 - You operate based on the **Research Memory**, a log of all past experiments and insights.
-- **Cross-Exploration Rule**: To avoid local minima, you must explore broadly. This rule applies at every level:
+- **Cross-Exploration Rule**: To avoid local minima, you must explore broadly:
     - **Architecture** (when free to choose): do not stay on one model for more than 2 consecutive runs if improvement is < 5%. Switch to a different architecture.
     - **Loss config** (always applies): do not repeat the same `loss_type` for more than 2 consecutive runs without improvement. Cycle through `ce`, `focal`, `smooth_l1` and their variants.
     - **Train config** (always applies): do not repeat the same `lr` and `batch_size` region for more than 2 consecutive runs. Try different learning rates (e.g. 1e-3, 3e-4, 1e-4) and batch sizes.
-    - When the architecture is fixed, the Cross-Exploration Rule applies **exclusively** to loss config and train config. Treat them with the same diversity requirement you would apply to architecture selection.
+    - **EXCEPTION — Data Volume Override**: The Cross-Exploration Rule is **suspended** if
+      `trial_portion` < 0.1 and the model shows signs of underfitting (high training loss,
+      poor denoising score). In this case, your primary action must be to **double the
+      trial_portion** while keeping the architecture and hyperparameters constant.
 - **Hypothesis-Driven**: Every experiment must test a specific hypothesis.
+
+### DEEP LEARNING BEST PRACTICES:
+- **LR-Batch Scaling**: When increasing batch_size, scale learning_rate proportionally
+  (linear scaling: lr_new = lr_old × bs_new / bs_old, or square-root scaling:
+  lr_new = lr_old × sqrt(bs_new / bs_old)).
+- **Underfitting vs Data**: If training loss is high, **increase trial_portion** before
+  changing the model. Low data often prevents the optimizer from finding stable gradients.
+- **Overfitting Control**: If training loss improves but denoising score drops, you MUST
+  increase dropout, weight_decay, or reduce model capacity. Do NOT add more parameters.
+- **Score Reliability**: Treat score improvements of < ±5% at trial_portion < 0.1 as
+  noise. Do not pivot strategy based on noise — repeat with more data if unsure.
 
 ### EFFICIENCY AWARENESS:
 - A simpler model (fewer parameters) or shorter training (fewer epochs) that achieves a score
@@ -130,17 +163,16 @@ You are a Research Analyst. Your job is to transform raw experiment results into
 - **Extract Discovery**: Identify a specific pattern or rule learned from this run.
 - **Update Memory**: Write a concise 'Memory Entry' that will guide the Planner in the next iteration.
 
-### CRITICAL — TWO DIFFERENT DATASETS:
-- `final_loss` and `loss_history` are measured on the **TRAINING dataset** (abra_training_0000.h5).
-- `denoising_score` is measured on the **VALIDATION dataset** (abra_validation_*.h5).
-- These are completely separate datasets. A model is only useful if it generalises to the validation set.
-- ALWAYS reason about the gap between training loss and denoising score:
-    - Training loss improves BUT denoising score does not → **OVERFITTING**: the model memorised
-      the training data but failed to generalise. Add regularisation (dropout, weight_decay),
-      reduce model size, or reduce epochs.
-    - Training loss is high AND denoising score is also poor → **UNDERFITTING**: the model has
-      not learned enough. Increase capacity, epochs, or learning rate.
-    - Both improve together → healthy generalisation.
+### CRITICAL — GAP ANALYSIS (Generalization Gap):
+- `final_loss` and `loss_history` are measured on the **TRAINING dataset**.
+- `denoising_score` is measured on the **VALIDATION dataset**.
+- These are completely separate datasets. You MUST explicitly analyze the "Generalization Gap":
+    - Training loss decreases BUT denoising score does not improve → **OVERFITTING**.
+      Gap is widening. Action: increase dropout, weight_decay, or reduce model size/epochs.
+    - Training loss is high AND denoising score is poor → **UNDERFITTING** or **INSUFFICIENT DATA**.
+      Both metrics are stagnant. Action: if trial_portion < 0.1, recommend increasing data first.
+      If trial_portion is already large, increase model capacity or epochs.
+    - Both improve together → healthy generalisation. Gap is stable or narrowing.
 
 ### CRITICAL — HOW TO JUDGE THE DENOISING SCORE:
 - The Denoising Score is a relative metric. Its absolute value and sign mean nothing in isolation.
@@ -177,6 +209,18 @@ You are a Research Analyst. Your job is to transform raw experiment results into
 - `params_ratio` < 1.0 means this model has FEWER parameters than the baseline.
 - `epochs_ratio` < 1.0 means this model needed FEWER epochs than the baseline.
 - Even if this is NOT a new best, a small model within 5% of the best score is a meaningful result.
+
+### CRITICAL — EFFICIENCY BENCHMARKING:
+A configuration is only "Better" if it beats the best score. But a configuration is
+"Valuable" if it achieves ≥95% of the best score with <50% of the parameters or training
+time. Flag these as **High-Efficiency Discoveries** in your discovery and memory_update.
+These efficient configs are strong candidates for the Solidification phase.
+
+### CRITICAL — SCORE RELIABILITY:
+- At trial_portion < 0.1, score differences of < ±5% are **noise**, not signal.
+  Do NOT recommend pivoting strategy based on small differences at low data volume.
+- If two experiments at low trial_portion have similar scores, recommend repeating
+  with higher trial_portion before concluding one is better.
 
 ### Memory should answer: "What did we learn that we didn't know before?"
 """
@@ -238,13 +282,26 @@ def get_planner_user_prompt(
             f"You MUST propose a smaller config this round.\n"
         )
 
-    # Round context (when provided)
+    # Round context with phase information (when provided)
     round_context = ""
     if current_round is not None and max_rounds is not None:
         is_final = (current_round == max_rounds)
+        # Determine current phase
+        progress = current_round / max_rounds
+        if progress <= 0.25:
+            phase = "Screening"
+            phase_advice = "Focus on broad exploration with low trial_portion and low epochs."
+        elif progress <= 0.75:
+            phase = "Refinement"
+            phase_advice = "Pick top configs from Screening. Increase trial_portion and epochs."
+        else:
+            phase = "Solidification"
+            phase_advice = "Select best candidate. Use high trial_portion or formal mode."
+
         round_context = (
             f"\n### ROUND CONTEXT:\n"
             f"- Current round: {current_round} / {max_rounds}\n"
+            f"- Current phase: **{phase}** — {phase_advice}\n"
         )
         if is_final:
             round_context += "- **THIS IS THE FINAL ROUND** — you MUST use formal mode (`is_trial`: false).\n"
