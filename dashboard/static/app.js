@@ -644,8 +644,124 @@ function resetRange(divId, prefix) {
   Plotly.relayout(divId, { 'xaxis.autorange': true, 'yaxis.autorange': true });
 }
 
+// ── Trial Details Table ─────────────────────────────────────────────────────
+
+function populateTrialDropdowns() {
+  // Reuse the same data from the main dropdowns
+  const runSel = document.getElementById('trial-run');
+  const mainRunSel = document.getElementById('inp-run');
+  runSel.innerHTML = mainRunSel.innerHTML;
+
+  runSel.addEventListener('change', () => {
+    const modelSel = document.getElementById('trial-model');
+    const selectedRun = runSel.value;
+    if (!selectedRun || !state.runsPerModel) {
+      modelSel.innerHTML = '<option value="">-- select run first --</option>';
+      return;
+    }
+    const models = state.allModels.filter(m =>
+      (state.runsPerModel[m] || []).includes(selectedRun)
+    );
+    modelSel.innerHTML = models.map(m => `<option value="${m}">${m}</option>`).join('');
+  });
+
+  if (runSel.value) runSel.dispatchEvent(new Event('change'));
+}
+
+async function loadTrialTable() {
+  const run = document.getElementById('trial-run').value;
+  const model = document.getElementById('trial-model').value;
+  const wrap = document.getElementById('trial-table-wrap');
+
+  if (!run || !model) {
+    wrap.innerHTML = '<p style="color:var(--muted);">Select a run and model first.</p>';
+    return;
+  }
+
+  wrap.innerHTML = '<p style="color:var(--muted);">Loading…</p>';
+
+  try {
+    const data = await fetchJSON(`/api/models/${model}/runs/${run}?limit=200`);
+    const records = data.records || [];
+
+    if (records.length === 0) {
+      wrap.innerHTML = '<p style="color:var(--muted);">No records found.</p>';
+      return;
+    }
+
+    const fmt = (v, d=2) => v != null ? Number(v).toFixed(d) : '—';
+    const fmtTime = (s) => {
+      if (s == null) return '—';
+      if (s < 60) return `${s.toFixed(0)}s`;
+      if (s < 3600) return `${(s/60).toFixed(1)}m`;
+      return `${(s/3600).toFixed(1)}h`;
+    };
+
+    let html = `<table class="trial-table">
+      <thead><tr>
+        <th>Round</th>
+        <th>Status</th>
+        <th>Score</th>
+        <th>Mode</th>
+        <th>Trial Strategy</th>
+        <th>Trial Portion</th>
+        <th>Eval Strategy</th>
+        <th>Eval Portion</th>
+        <th>Train Portion</th>
+        <th>Train Segs</th>
+        <th>Eval Segs</th>
+        <th>Loss Type</th>
+        <th>LR</th>
+        <th>Epochs</th>
+        <th>Final Loss</th>
+        <th>Train Time</th>
+        <th>Infer Time</th>
+        <th>Score Time</th>
+      </tr></thead><tbody>`;
+
+    for (const r of records) {
+      const isTrial = r.is_trial;
+      const mode = isTrial === true ? 'trial' : (isTrial === false ? 'formal' : '—');
+      const modeClass = isTrial === true ? 'mode-trial' : (isTrial === false ? 'mode-formal' : '');
+      const t = r.timing || {};
+      const p = r.params || {};
+      const tc = p.train_config || {};
+      const lc = p.loss_config || {};
+      const statusClass = r.status === 'success' ? 'status-ok' : 'status-fail';
+
+      html += `<tr>
+        <td>${r.exp_id.split('_').pop()}</td>
+        <td class="${statusClass}">${r.status}</td>
+        <td>${fmt(r.denoising_score, 3)}</td>
+        <td class="${modeClass}">${mode}</td>
+        <td>${r.trial_strategy || '—'}</td>
+        <td>${fmt(r.trial_portion)}</td>
+        <td>${r.eval_strategy || '—'}</td>
+        <td>${fmt(r.eval_portion)}</td>
+        <td>${fmt(r.train_portion)}</td>
+        <td>${r.training_psd_segments != null ? r.training_psd_segments : '—'}</td>
+        <td>${r.eval_psd_segments != null ? r.eval_psd_segments : '—'}</td>
+        <td>${lc.loss_type || '—'}</td>
+        <td>${tc.lr != null ? tc.lr : '—'}</td>
+        <td>${tc.epochs != null ? tc.epochs : '—'}</td>
+        <td>${fmt(r.final_loss, 4)}</td>
+        <td>${fmtTime(t.train_time_s)}</td>
+        <td>${fmtTime(t.inference_time_s)}</td>
+        <td>${fmtTime(t.scoring_time_s)}</td>
+      </tr>`;
+    }
+
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+  } catch (e) {
+    wrap.innerHTML = `<p style="color:red;">Error: ${e.message}</p>`;
+  }
+}
+
 // ── Public API (called from HTML) ────────────────────────────────────────────
-window.App = { addSeries, addExplorationSeries, removeSeries, refresh, toggleTheme, setAxisType, applyRange, resetRange, toggleHighlight, setAlpha };
+window.App = { addSeries, addExplorationSeries, removeSeries, refresh, toggleTheme, setAxisType, applyRange, resetRange, toggleHighlight, setAlpha, loadTrialTable };
 
 // ── Init ─────────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', bootstrap);
+document.addEventListener('DOMContentLoaded', () => {
+  bootstrap().then(() => populateTrialDropdowns());
+});

@@ -57,6 +57,14 @@ class MemoryRecord(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class TimingRecord(BaseModel):
+    train_time_s: Optional[float] = None
+    inference_time_s: Optional[float] = None
+    scoring_time_s: Optional[float] = None
+
+    model_config = ConfigDict(extra="allow")
+
+
 class ExperimentRecord(BaseModel):
     """
     Full experiment record as stored by the pipeline.
@@ -69,9 +77,25 @@ class ExperimentRecord(BaseModel):
     denoising_score: Optional[float] = None
     params: ExperimentParams = Field(default_factory=ExperimentParams)
     results: ExperimentResults = Field(default_factory=ExperimentResults)
+    timing: TimingRecord = Field(default_factory=TimingRecord)
     memory: MemoryRecord = Field(default_factory=MemoryRecord)
 
-    model_config = ConfigDict(extra="ignore")  # drop internal keys like _run_name
+    # Training results (new typed fields)
+    final_loss: Optional[float] = None
+    model_params: Optional[int] = None
+
+    # Trial context
+    is_trial: Optional[bool] = None
+    trial_strategy: Optional[str] = None
+    trial_portion: Optional[float] = None
+    eval_strategy: Optional[str] = None
+    eval_portion: Optional[float] = None
+    train_portion: Optional[float] = None
+    training_psd_segments: Optional[int] = None
+    eval_psd_segments: Optional[int] = None
+    file_vector: Optional[list[float]] = None
+
+    model_config = ConfigDict(extra="ignore")
 
 
 # ---------------------------------------------------------------------------

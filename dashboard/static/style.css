@@ -239,3 +239,14 @@ button.danger { background: var(--danger); }
   color: var(--muted);
 }
 #countdown { color: var(--accent); font-weight: 600; min-width: 24px; }
+
+/* Trial details table */
+.trial-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.trial-table th { background: var(--card-bg); padding: 6px 8px; text-align: left; border-bottom: 2px solid var(--border); white-space: nowrap; position: sticky; top: 0; }
+.trial-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.trial-table tr:hover { background: rgba(255,255,255,0.03); }
+.trial-table .mode-trial { color: #4fc3f7; }
+.trial-table .mode-formal { color: #81c784; font-weight: 600; }
+.trial-table .status-ok { color: #81c784; }
+.trial-table .status-fail { color: #e57373; }
+#trial-table-wrap { max-height: 500px; overflow-y: auto; }
