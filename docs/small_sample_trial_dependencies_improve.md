@@ -370,18 +370,18 @@ serialization.
 
 ---
 
-### Step 6: Update protocol `ml_result_interp_to_ml_model_propose`
+### Step 6: Update protocol `ml_result_interp_to_ml_model_propose` — DONE ✓
 
 **File:** `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py`
 
-**Status:** NOT STARTED
-
 **Checklist:**
-- [ ] Verify new `InterpretationOutput` fields are included in serialization
-- [ ] Pass `per_model_file_vectors`, `weak_frequency_files` through to `ProposalInput`
-- [ ] Pass `per_model_params`, `per_model_training_segments` through
-- [ ] Existing protocol unit tests pass
-- [ ] New protocol unit tests for new fields
+- [x] Verified `model_dump()` includes all new `InterpretationOutput` fields automatically
+- [x] `per_model_file_vectors`, `weak_frequency_files` flow through via `Dict[str, Any]`
+- [x] `per_model_params`, `per_model_training_segments` flow through
+- [x] Docstring updated to document new fields
+- [x] No code changes needed — protocol is already generic
+- [x] All 11 existing protocol tests pass
+- [ ] New protocol unit tests for new fields (deferred to Step 7)
 
 ---
 
@@ -414,7 +414,7 @@ Step 4 (InterpretationOutput schema) ✓
     │
 Step 5 (proposal agent prompts) ✓
     │
-Step 6 (protocol interp → proposal)
+Step 6 (protocol interp → proposal) ✓
     │
 Step 7 (end-to-end tests)
 ```
