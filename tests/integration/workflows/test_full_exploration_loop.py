@@ -267,13 +267,18 @@ class TestFullExplorationLoop:
         validate → tune (2 rounds: trial + forced formal).
         """
         from workflows.model_exploration import run_workflow
+        from workflows.llm_config import WorkflowLLMConfig
 
         workspace = str(tmp_path / "workflow_output")
         run_name = "test_full_loop"
 
+        # Use the most powerful Gemini model for reliability on large prompts
+        llm_config = WorkflowLLMConfig.uniform("gemini", "gemini-3.1-pro-preview")
+
         print(f"\n{'='*60}")
         print(f"  TIER 3 INTEGRATION TEST: Full 5-Agent Workflow")
         print(f"  Workspace: {workspace}")
+        print(f"  LLM: gemini-3.1-pro-preview")
         print(f"{'='*60}\n")
 
         results = run_workflow(
@@ -282,6 +287,7 @@ class TestFullExplorationLoop:
             source_run_name=SOURCE_RUN_NAME,
             workspace=workspace,
             run_name=run_name,
+            llm_config=llm_config,
             max_iterations=1,
             max_rounds=2,
             max_proposal_attempts=3,
