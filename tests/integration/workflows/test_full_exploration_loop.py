@@ -218,25 +218,26 @@ def validate_workflow_outputs(
     )
 
     # Both records should have file_vector (full data mode)
+    # Note: all_records contains ExperimentRecord Pydantic objects, not dicts
     for i, rec in enumerate(tune_output.all_records):
-        if rec.get("status") not in ("success",):
+        if rec.status != "success":
             continue
-        assert rec.get("file_vector") is not None, (
+        assert rec.file_vector is not None, (
             f"Record {i} missing file_vector"
         )
-        assert len(rec["file_vector"]) == 20, (
-            f"Record {i} file_vector has {len(rec['file_vector'])} entries, expected 20"
+        assert len(rec.file_vector) == 20, (
+            f"Record {i} file_vector has {len(rec.file_vector)} entries, expected 20"
         )
 
     # Last record should be formal (forced on final round)
     last_record = tune_output.all_records[-1]
-    assert last_record.get("is_trial") is False, (
-        f"Last record should be formal (is_trial=False), got is_trial={last_record.get('is_trial')}"
+    assert last_record.is_trial is False, (
+        f"Last record should be formal (is_trial=False), got is_trial={last_record.is_trial}"
     )
 
     # Formal record should have 20 non-NaN entries (all files evaluated)
-    if last_record.get("file_vector") is not None:
-        non_nan = [v for v in last_record["file_vector"] if not math.isnan(v)]
+    if last_record.file_vector is not None:
+        non_nan = [v for v in last_record.file_vector if not math.isnan(v)]
         assert len(non_nan) == 20, (
             f"Formal record has {len(non_nan)}/20 non-NaN file_vector entries"
         )
