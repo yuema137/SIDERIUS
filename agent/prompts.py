@@ -331,7 +331,7 @@ def get_planner_user_prompt(
 
 ### OUTPUT FORMAT (Strict JSON):
 {{
-    "model_type": "punet | fcnet | transformer | wavenet | rnn",
+    "model_type": "punet | fcnet | transformer | wavenet | rnn | gated_fno",
     "reasoning": "How this experiment aligns with expert advice and past memory",
     "hypothesis": "Specific prediction for this run",
     "is_trial": "true | false (choose based on confidence in config)",
