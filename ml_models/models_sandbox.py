@@ -535,12 +535,31 @@ class GatedFNO(nn.Module):
         
         # Gate Expansion: num_gates -> num_bins
         self.num_gates = config.num_gates
+        self.gate_mapping = config.gate_mapping
         if config.static_v is not None:
             # Register static_v as a buffer so it moves with the model
             v_tensor = torch.tensor(config.static_v, dtype=torch.float32).view(1, 1, -1)
             self.register_buffer('v_static', v_tensor)
         else:
             self.v_static = None
+
+        # Precompute gate-to-bin index mapping (registered as buffer for device movement)
+        if self.gate_mapping == "log":
+            # Log-spaced: denser at low frequencies, sparser at high.
+            # For each of the num_bins FFT bins, find the nearest gate index
+            # using log-spaced gate boundaries.
+            # Gate boundaries on log scale: gate k covers [10^(k/G * log10(N)), 10^((k+1)/G * log10(N)))
+            # where G = num_gates, N = num_bins
+            log_max = math.log10(self.num_bins)
+            # Map each bin to its gate index via log scale
+            bin_indices = torch.arange(self.num_bins, dtype=torch.float32)
+            # Avoid log(0): shift by 1
+            log_bins = torch.log10(bin_indices + 1)  # range [0, log10(num_bins)]
+            gate_indices = (log_bins / log_max * self.num_gates).long().clamp(0, self.num_gates - 1)
+            self.register_buffer('_gate_bin_map', gate_indices)
+        else:
+            # Linear: uniform mapping (same as F.interpolate nearest)
+            self._gate_bin_map = None
 
         # Iterative Layers
         self.fno_layers = nn.ModuleList([
@@ -565,9 +584,14 @@ class GatedFNO(nn.Module):
         
         # 1. Handle Gating
         if self.v_static is not None:
-            # Use static_v hyperparameter, expanded to full spectrum via nearest interpolation
-            v_expanded = F.interpolate(self.v_static, size=self.num_bins, mode='nearest')
-            mask = v_expanded.squeeze(1).repeat(batch_size, 1) # [B, num_bins]
+            if self._gate_bin_map is not None:
+                # Log-scale mapping: use precomputed bin→gate index
+                mask = self.v_static.squeeze(0).squeeze(0)[self._gate_bin_map]  # [num_bins]
+                mask = mask.unsqueeze(0).expand(batch_size, -1)  # [B, num_bins]
+            else:
+                # Linear mapping: uniform nearest-neighbor interpolation
+                v_expanded = F.interpolate(self.v_static, size=self.num_bins, mode='nearest')
+                mask = v_expanded.squeeze(1).expand(batch_size, -1)  # [B, num_bins]
         else:
             # Default behavior: AI processes everything
             mask = torch.ones((batch_size, self.num_bins), device=x.device)

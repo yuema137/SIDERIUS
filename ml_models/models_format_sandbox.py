@@ -161,9 +161,15 @@ class GatedFNOConfig(BaseConfig):
     width: int = Field(default=64, ge=16, le=256, description="Latent channel width")
     num_layers: int = Field(default=2, ge=1, le=5, description="Number of FNO blocks")
     num_gates: int = Field(default=128, ge=8, le=4096, description="Granularity of the gate vector")
+    gate_mapping: Literal["linear", "log"] = Field(
+        default="log",
+        description="How gate indices map to frequency bins. "
+                    "'log': denser at low frequencies (matches physics — signals are log-spaced). "
+                    "'linear': uniform spacing across the spectrum.",
+    )
     # Agent-tunable vector
     static_v: Optional[List[float]] = Field(
-        default=None, 
+        default=None,
         description="Static gate vector. Length must match num_gates."
     )
 

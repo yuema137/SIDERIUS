@@ -30,6 +30,7 @@ $$h_{l+1} = \text{GELU}(W \cdot h_l + \mathcal{F}^{-1}(\hat{z}))$$
 | `width` | 64 | 16–256 | Hidden channel dimension (latent width). More width = more capacity but more VRAM. | Start small (32), increase if underfitting. |
 | `num_layers` | 2 | 1–4 | Number of iterative Gated-FNO blocks. More layers = deeper spectral processing. | 2–3 is usually sufficient. Diminishing returns beyond 4. |
 | `num_gates` | 128 | 8–4096 | Granularity of the control vector $V$ across the spectrum. More gates = finer frequency-band control. | 128 is a good default. Increase to 256+ if you need precise frequency targeting. |
+| `gate_mapping` | "log" | "linear" or "log" | How gate indices map to FFT frequency bins. **"log"** (default): denser at low frequencies — gate[0] covers ~0.2 kHz, gate[127] covers ~400 kHz. **"linear"**: uniform — each gate covers ~39 kHz. Log is better for TIDMAD because signals are log-spaced in frequency. | Use "log" (default) unless you have reason to prefer uniform spacing. |
 | `static_v` | None | List[float], length=num_gates | **THE KEY HYPERPARAMETER.** Fixed gate values controlling which frequency bands the AI processes vs preserves. If None, defaults to all 1s (AI processes everything). | See "How to Tune static_v" below. |
 
 ### How to Tune `static_v`
@@ -39,9 +40,9 @@ $$h_{l+1} = \text{GELU}(W \cdot h_l + \mathcal{F}^{-1}(\hat{z}))$$
 - `v[i] = 0.0`: The signal in this band passes through unchanged (preserved exactly).
 - `v[i] = 0.5`: Half AI processing, half bypass (partial denoising).
 
-The vector maps to the full frequency spectrum via nearest-neighbor interpolation:
-- `v[0]` controls the lowest frequencies (DC and near-DC).
-- `v[num_gates-1]` controls the highest frequencies (near Nyquist).
+The vector maps to the full frequency spectrum (20001 FFT bins for seg=40000):
+- With `gate_mapping="log"` (default): gate indices are log-spaced. Gate[0] covers ~DC to 0.2 kHz (1 bin). Gate[127] covers ~4.6–5.0 MHz (1490 bins). This gives fine control at low frequencies where TIDMAD signals are hardest.
+- With `gate_mapping="linear"`: gate indices are uniform. Each gate covers ~39 kHz (~156 bins). Simpler but less precise at low frequencies.
 
 **Tuning strategy for `static_v`:**
 1. **Start with None** (all 1s) to establish a baseline with full AI processing.
