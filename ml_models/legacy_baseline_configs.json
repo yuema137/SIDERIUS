@@ -127,12 +127,12 @@
         }
     },
     "gated_fno": {
-        "_comment": "Pseudo-legacy baseline — no TIDMAD paper config exists. Sized to match FCNet (~323M params).",
+        "_comment": "Pseudo-legacy baseline — no TIDMAD paper config exists. Sized for ~6.5h baseline training (61M params).",
         "model_cfg": {
             "model_type": "gated_fno",
             "segmentation_size": 40000,
-            "width": 64,
-            "num_layers": 4,
+            "width": 32,
+            "num_layers": 3,
             "num_gates": 128
         },
         "loss_cfg": {
