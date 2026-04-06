@@ -286,22 +286,31 @@ def get_planner_user_prompt(
     round_context = ""
     if current_round is not None and max_rounds is not None:
         is_final = (current_round == max_rounds)
-        # Determine current phase
+        rounds_left = max_rounds - current_round
+        rounds_completed = current_round - 1
+
+        # Determine current phase and compute rounds remaining in this phase
         progress = current_round / max_rounds
         if progress <= 0.25:
             phase = "Screening"
+            phase_end = int(max_rounds * 0.25)
+            rounds_in_phase_left = phase_end - current_round + 1
             phase_advice = "Focus on broad exploration with low trial_portion and low epochs."
         elif progress <= 0.75:
             phase = "Refinement"
+            phase_end = int(max_rounds * 0.75)
+            rounds_in_phase_left = phase_end - current_round + 1
             phase_advice = "Pick top configs from Screening. Increase trial_portion and epochs."
         else:
             phase = "Solidification"
+            rounds_in_phase_left = rounds_left + 1  # includes current round
             phase_advice = "Select best candidate. Use high trial_portion or formal mode."
 
         round_context = (
             f"\n### ROUND CONTEXT:\n"
-            f"- Current round: {current_round} / {max_rounds}\n"
-            f"- Current phase: **{phase}** — {phase_advice}\n"
+            f"- Current round: {current_round} / {max_rounds} "
+            f"({rounds_completed} completed, {rounds_left} remaining after this one)\n"
+            f"- Current phase: **{phase}** ({rounds_in_phase_left} rounds left in this phase) — {phase_advice}\n"
         )
         if is_final:
             round_context += "- **THIS IS THE FINAL ROUND** — you MUST use formal mode (`is_trial`: false).\n"
