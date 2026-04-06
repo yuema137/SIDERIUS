@@ -38,6 +38,8 @@ import json
 import os
 import subprocess
 import sys
+
+from agent.schemas.hyperparam_tuning import serialize_expert_advice
 import argparse
 
 import torch
@@ -122,6 +124,11 @@ def _build_review_prompt(
         )
     else:
         parts.append("No runtime errors observed. Review the implementation against the specification above.")
+
+    # --- Expert advice (from upstream agents) ---
+    expert_advice_str = serialize_expert_advice(inp.expert_advice) if inp.expert_advice else ""
+    if expert_advice_str:
+        parts.append(f"\n\n## Expert Guidance (from upstream agents)\n\n{expert_advice_str}\n")
 
     # --- Human advice (injected by workflow) ---
     if inp.human_advice:

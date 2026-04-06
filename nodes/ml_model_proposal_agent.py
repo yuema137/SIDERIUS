@@ -26,6 +26,7 @@ import argparse
 from agent.llm_bridge import LLMBridge
 from agent.schemas.proposal import ProposalInput, ProposalOutput
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.hyperparam_tuning import serialize_expert_advice
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +248,15 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
         for i, failure in enumerate(inp.previous_failures, 1):
             lines.append(f"  {i}. {failure}")
         lines.append("")
+
+    # --- Expert advice (from upstream agents) ---
+    expert_advice_str = serialize_expert_advice(inp.expert_advice) if inp.expert_advice else ""
+    if expert_advice_str:
+        lines += [
+            "## Expert Guidance (from upstream agents)",
+            expert_advice_str,
+            "",
+        ]
 
     if inp.human_advice:
         lines.append("## Human Expert Advice (high priority — address these explicitly)")
