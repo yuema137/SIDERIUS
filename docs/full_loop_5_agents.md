@@ -367,16 +367,159 @@ scanning the iteration directory.
 
 ---
 
-## 5. Changes Required Before Implementation
+## 5. Plugin Output Type: Classifier vs Regressor
 
-All completed:
+### The problem
+
+The current `ExperimentConfig` validator hardcodes loss compatibility:
+
+```python
+if l_type == "smooth_l1" and m_type != "fcnet":
+    raise ValueError("smooth_l1 is for fcnet only")
+```
+
+This breaks for plugin models: ALL plugins are blocked from `smooth_l1`, even if they're
+regressors. And the LLM planner has no way to know which loss types are valid for a
+newly proposed model — it follows the Cross-Exploration Rule and tries `smooth_l1`,
+which crashes the training subprocess.
+
+### The fix: per-model output type metadata
+
+Each model (built-in and plugin) declares its **output type**, which determines valid loss types:
+
+| Output type | Forward contract | Valid losses | Example models |
+|------------|-----------------|-------------|----------------|
+| `"classifier"` | `[B, 256, T] float32` | `ce`, `focal`, `focal_cw` | punet, transformer, wavenet, rnn, gated_fno |
+| `"regressor"` | `[B, T] float32` | `smooth_l1` | fcnet |
+
+### Implementation plan
+
+#### Step 1: Add `PLUGIN_OUTPUT_TYPE` to the plugin contract
+
+Each plugin file already exports 3 constants. Add a 4th:
+
+```python
+PLUGIN_MODEL_TYPE = "my_model"
+PLUGIN_CONFIG_CLASS = MyModelConfig
+PLUGIN_MODEL_CLASS = MyModel
+PLUGIN_OUTPUT_TYPE = "classifier"  # or "regressor"
+```
+
+**Built-in models**: define a `BUILTIN_OUTPUT_TYPES` dict in `models_sandbox.py`:
+
+```python
+BUILTIN_OUTPUT_TYPES = {
+    "punet": "classifier",
+    "fcnet": "regressor",
+    "transformer": "classifier",
+    "wavenet": "classifier",
+    "rnn": "classifier",
+    "gated_fno": "classifier",
+}
+```
+
+#### Step 2: Implementor writes `PLUGIN_OUTPUT_TYPE`
+
+The implementor agent already knows the forward contract from the proposal's
+`mathematical_definition`. Update the plugin file template to include:
+
+```python
+PLUGIN_OUTPUT_TYPE = "classifier"  # [B, 256, T] → 256-class classification
+```
+
+The LLM decides this based on the architecture. The validator checks it in Step 3.
+
+#### Step 3: Validator checks output type consistency
+
+Add an 8th validation check: verify that `PLUGIN_OUTPUT_TYPE` matches the actual
+forward pass output shape:
+
+- If output shape is `[B, 256, T]` → must be `"classifier"`
+- If output shape is `[B, T]` → must be `"regressor"`
+- Mismatch → validation fails with clear error
+
+#### Step 4: Plugin loader collects output types
+
+`ml_models/plugin_loader.py` already loads `PLUGIN_MODEL_TYPE`, `PLUGIN_CONFIG_CLASS`,
+`PLUGIN_MODEL_CLASS`. Add:
+
+```python
+PLUGIN_OUTPUT_TYPE_REGISTRY: dict[str, str] = {}
+# Populated at load time: {"my_model": "classifier", ...}
+```
+
+Add a helper function:
+
+```python
+def get_output_type(model_type: str) -> str:
+    """Return 'classifier' or 'regressor' for any model (built-in or plugin)."""
+    if model_type in BUILTIN_OUTPUT_TYPES:
+        return BUILTIN_OUTPUT_TYPES[model_type]
+    if model_type in PLUGIN_OUTPUT_TYPE_REGISTRY:
+        return PLUGIN_OUTPUT_TYPE_REGISTRY[model_type]
+    raise ValueError(f"Unknown model type: {model_type}")
+```
+
+#### Step 5: Update `ExperimentConfig` validator
+
+Replace the hardcoded check with a registry lookup:
+
+```python
+@model_validator(mode='after')
+def validate_architecture_loss_match(self) -> 'ExperimentConfig':
+    output_type = get_output_type(self.model_type)
+    l_type = self.loss_config.loss_type
+
+    if l_type == "smooth_l1" and output_type == "classifier":
+        raise ValueError(
+            f"'{self.model_type}' is a classifier — use 'ce' or 'focal', not 'smooth_l1'."
+        )
+    if l_type in ["ce", "focal", "focal_cw"] and output_type == "regressor":
+        raise ValueError(
+            f"'{self.model_type}' is a regressor — use 'smooth_l1', not '{l_type}'."
+        )
+    return self
+```
+
+#### Step 6: Tell the LLM
+
+In the planner prompt, when `force_model` is set, inject the output type:
+
+```
+This model is a CLASSIFIER (output: [B, 256, T] float32).
+Valid loss types: ce, focal, focal_cw.
+Do NOT use smooth_l1 — it is only for regressor models.
+```
+
+This comes from `get_output_type(force_model)` at prompt construction time.
+
+#### Files to change
+
+| File | Change |
+|------|--------|
+| `ml_models/models_sandbox.py` | Add `BUILTIN_OUTPUT_TYPES` dict |
+| `ml_models/plugin_loader.py` | Load `PLUGIN_OUTPUT_TYPE`, add `PLUGIN_OUTPUT_TYPE_REGISTRY`, add `get_output_type()` |
+| `ml_models/models_format_sandbox.py` | Update `ExperimentConfig` validator to use `get_output_type()` |
+| `nodes/ml_model_implementor.py` | Add `PLUGIN_OUTPUT_TYPE` to plugin template |
+| `nodes/ml_code_validator_agent.py` | Add 8th check: output type vs forward shape consistency |
+| `agent/prompts.py` | Inject output type + valid losses when `force_model` is set |
+| `agent_generated/models/*.py` | Backfill `PLUGIN_OUTPUT_TYPE = "classifier"` to existing plugins |
+| Tests | Update plugin loader tests, validator tests, prompt tests |
+
+---
+
+## 6. Earlier Changes (completed)
 
 - [x] Add trial mode parameters to `local_validated_model()` protocol
 - [x] Add trial mode parameters to `run_workflow()`
 - [x] Pass trial params from `run_workflow()` through to `local_validated_model()` call
 - [x] Update `run_exploration.py` to use full data mode
 - [x] Add unit tests for new protocol parameters
-- [x] All 678 unit tests pass
+- [x] Fix `ExperimentConfig.model_type` to accept plugin models (`str` instead of `Literal`)
+- [x] Fix planner prompt to show `force_model` when locked
+- [x] Remove hardcoded model type restrictions (CLI, skill configs, dashboard)
+- [x] Save error records on training/inference failure with OOM detection
+- [x] Register GatedFNO in MODEL_REGISTRY and all config mappings
 
 ---
 
