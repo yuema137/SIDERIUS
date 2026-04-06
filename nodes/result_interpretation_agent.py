@@ -431,17 +431,23 @@ def tuning_output_to_model_run_summary(
     """
     Convert a HyperparamTuningOutput to a condensed ModelRunSummary.
 
-    Extracts aggregates and per-round trajectory from the all_records field.
-    The raw records are NOT carried forward — only scores and conclusions.
+    Extracts aggregates, per-round trajectory, file_vector, data volume,
+    and efficiency metrics from the all_records field. The raw records
+    are NOT carried forward — only the condensed summary.
     """
     records = output.all_records
-    # Extract per-round data
+
+    # Per-round extraction
     round_scores: List[Optional[float]] = []
     round_conclusions: List[str] = []
+    round_trial_portions: List[Optional[float]] = []
+    round_model_params: List[Optional[int]] = []
 
     for r in records:
         rec = r.model_dump() if hasattr(r, "model_dump") else r
         round_scores.append(rec.get("denoising_score"))
+        round_trial_portions.append(rec.get("trial_portion"))
+        round_model_params.append(rec.get("model_params"))
         memory = rec.get("memory") or {}
         if isinstance(memory, dict):
             round_conclusions.append(memory.get("conclusion") or "")
@@ -449,7 +455,23 @@ def tuning_output_to_model_run_summary(
             conclusion = getattr(memory, "conclusion", None) or ""
             round_conclusions.append(conclusion)
 
-    # Compute worst score from records
+    # Find best record (highest denoising_score)
+    success = [
+        (r.model_dump() if hasattr(r, "model_dump") else r)
+        for r in records
+        if (r.status if hasattr(r, "status") else r.get("status")) == "success"
+        and (r.denoising_score if hasattr(r, "denoising_score") else r.get("denoising_score")) is not None
+    ]
+    best_rec = max(success, key=lambda r: r["denoising_score"]) if success else None
+
+    # Find formal round (last record with is_trial=False)
+    formal_rec = None
+    for r in reversed(success):
+        if not r.get("is_trial", True):
+            formal_rec = r
+            break
+
+    # Compute worst score
     valid_scores = [s for s in round_scores if s is not None]
     worst_score = min(valid_scores) if valid_scores else None
 
@@ -463,6 +485,19 @@ def tuning_output_to_model_run_summary(
         best_config=output.best_config,
         round_scores=round_scores,
         round_conclusions=round_conclusions,
+        # Per-file performance
+        best_file_vector=best_rec.get("file_vector") if best_rec else None,
+        formal_score=formal_rec.get("denoising_score") if formal_rec else None,
+        formal_file_vector=formal_rec.get("file_vector") if formal_rec else None,
+        # Efficiency
+        best_model_params=best_rec.get("model_params") if best_rec else None,
+        # Data volume
+        training_psd_segments=best_rec.get("training_psd_segments") if best_rec else None,
+        eval_psd_segments=best_rec.get("eval_psd_segments") if best_rec else None,
+        trial_portion=best_rec.get("trial_portion") if best_rec else None,
+        # Per-round trends
+        round_trial_portions=round_trial_portions,
+        round_model_params=round_model_params,
     )
 
 
