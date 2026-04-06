@@ -33,11 +33,13 @@ MOCK_ANCHOR_MAP = {
 
 
 def _mock_get_one_sec_psd(data_dir, files, ch, start=0):
-    """Return dummy freq/psd arrays that produce predictable SNR."""
-    freq = np.linspace(0, 5e6, 5_000_000)
-    # Build a PSD with a clear peak so get_snr returns a predictable value.
-    # We use a simple approach: set a spike at index 100.
-    psd = np.ones(5_000_000) * 0.001
+    """Return dummy freq/psd arrays that produce predictable SNR.
+
+    Uses small arrays (1000 elements) since get_snr is also mocked —
+    the actual array content doesn't matter for scoring unit tests.
+    """
+    freq = np.linspace(0, 5e6, 1000)
+    psd = np.ones(1000) * 0.001
     psd[100] = 10.0  # dominant peak
     return freq, psd
 
