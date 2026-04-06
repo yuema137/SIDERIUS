@@ -351,22 +351,22 @@ serialization.
 
 ---
 
-### Step 5: Update proposal agent prompts
+### Step 5: Update proposal agent prompts — DONE ✓
 
 **File:** `nodes/ml_model_proposal_agent.py`
 
-**Status:** NOT STARTED
-
 **Checklist:**
-- [ ] Call 1 (Reasoning) prompt: inject per-model `file_vector` patterns
-- [ ] Call 1 (Reasoning) prompt: inject per-model `params` for efficiency context
-- [ ] Call 1 (Reasoning) prompt: inject data volume context
-- [ ] Call 1 (Reasoning) prompt: inject `weak_frequency_files` for targeted design
-- [ ] Call 2 (Commit) prompt: instruct to include trial parameter guidance in `expert_advice.suggested_directions`
-- [ ] Call 2 (Commit) prompt: instruct to include recommended `trial_portion`, `epochs`, strategy
-- [ ] Call 2 (Commit) prompt: instruct to include frequency-specific training advice
-- [ ] Existing proposal unit tests pass
-- [ ] New unit tests for enriched expert_advice output
+- [x] Reasoning system prompt: add point 6 — frequency analysis and trial strategy guidance
+- [x] Reasoning prompt: inject `per_model_file_vectors` (weak/strong file indices)
+- [x] Reasoning prompt: inject `weak_frequency_files` for targeted design
+- [x] Reasoning prompt: inject `per_model_params` for efficiency context
+- [x] Reasoning prompt: inject `per_model_training_segments` for data volume context
+- [x] Reasoning prompt: inject `frequency_comparison` and `efficiency_comparison`
+- [x] Commit prompt: `expert_advice.suggested_directions` expanded with trial guidance
+  (trial_portion, epochs, strategy, frequency-specific advice, data volume needs)
+- [x] Commit prompt: `expert_advice.rationale` includes data volume reasoning
+- [x] All 401 existing agent tests pass
+- [ ] New unit tests for enriched expert_advice output (deferred to Step 7)
 
 ---
 
@@ -412,7 +412,7 @@ Step 3 (interpretation agent prompts) ✓
     │
 Step 4 (InterpretationOutput schema) ✓
     │
-Step 5 (proposal agent prompts)
+Step 5 (proposal agent prompts) ✓
     │
 Step 6 (protocol interp → proposal)
     │
