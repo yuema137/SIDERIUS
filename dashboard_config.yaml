@@ -8,13 +8,13 @@ data_source:
 
   local:
     # Update this path when migrating. Should match siderius_data_dir in tidmad_data_config.json.
-    root_data_dir: /home/klz/Data/SIDEREIS_DATA
+    root_data_dir: /expanse/lustre/projects/ddp433/ym137/siderius_workspace
     # Explicit model list. Leave empty ([]) to auto-discover from root_data_dir.
     models: [punet, wavenet, rnn, fcnet, transformer]
 
   postgres:
     # Used only when type=postgres. Ignored otherwise.
-    connection_string: "postgresql+asyncpg://user:password@localhost:5432/siderius"
+    connection_string: "/expanse/lustre/projects/ddp433/ym137/siderius_workspace"
     schema: public
 
 server:
