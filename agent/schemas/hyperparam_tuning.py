@@ -55,6 +55,32 @@ class ExpertAdvice(BaseModel):
 ExpertAdviceInput = Union[str, ExpertAdvice]
 
 
+def serialize_expert_advice(advice: ExpertAdviceInput) -> str:
+    """
+    Serialize ExpertAdvice to a human-readable string for LLM prompts.
+
+    If advice is already a string, return it as-is.
+    If it is a structured ExpertAdvice object, format it into a multi-line
+    string. Returns empty string if no advice is provided.
+
+    Used by all nodes to inject expert_advice into LLM prompts.
+    """
+    if isinstance(advice, str):
+        return advice
+    parts = []
+    if advice.focus_areas:
+        parts.append("Focus areas: " + "; ".join(advice.focus_areas))
+    if advice.constraints:
+        parts.append("Constraints: " + "; ".join(advice.constraints))
+    if advice.known_failures:
+        parts.append("Known failures: " + "; ".join(advice.known_failures))
+    if advice.suggested_directions:
+        parts.append("Suggested directions: " + "; ".join(advice.suggested_directions))
+    if advice.rationale:
+        parts.append("Rationale: " + advice.rationale)
+    return "\n".join(parts) if parts else ""
+
+
 # ---------------------------------------------------------------------------
 # Per-experiment record (mirrors what is written to summary_{run_name}.json)
 # ---------------------------------------------------------------------------

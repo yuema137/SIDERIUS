@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, model_validator
 
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.hyperparam_tuning import ExpertAdviceInput
 
 
 class ModelRunSummary(BaseModel):
@@ -146,11 +147,15 @@ class InterpretationInput(BaseModel):
                     "When None, model types are derived from summaries. "
                     "Cannot be an empty list — use None to derive from summaries.",
     )
+    expert_advice: ExpertAdviceInput = Field(
+        default="",
+        description="Structured guidance from upstream agents or orchestrators. "
+                    "Accepts a plain string or a structured ExpertAdvice object.",
+    )
     human_advice: Optional[str] = Field(
         default=None,
-        description="Optional human-provided guidance for the interpretation agent. "
-                    "When present, injected into the LLM prompt as high-priority context "
-                    "(e.g. 'focus on comparing training stability across models').",
+        description="Optional human-provided guidance (highest priority — overrides expert_advice). "
+                    "When present, injected into the LLM prompt as high-priority context.",
     )
     storage: StorageConfig = Field(
         default_factory=lambda: StorageConfig(
