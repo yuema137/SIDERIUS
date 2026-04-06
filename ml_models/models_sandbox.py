@@ -8,7 +8,7 @@ from torch.utils.data import dataset
 import math
 from pydantic import BaseModel, Field, field_validator, model_validator 
 from typing import List, Literal, Union
-from models_format_sandbox import PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, RNNSeq2SeqConfig
+from models_format_sandbox import PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, RNNSeq2SeqConfig, GatedFNOConfig
 
 # Blocks used by networks
 
@@ -509,3 +509,104 @@ try:
     _extend_registries(MODEL_REGISTRY, _plugin_cfg_reg)
 except Exception as _e:
     print(f"[PluginLoader] Warning: could not load plugins: {_e}")
+    
+# Add to ml_models/models_sandbox.py
+
+class FullSpectrumGatedConv1d(nn.Module):
+    """
+    Spectral Convolution layer that applies a learnable complex weight 
+    and a manual gate across the entire RFFT spectrum.
+    """
+    def __init__(self, in_channels, out_channels, num_bins):
+        super().__init__()
+        self.num_bins = num_bins
+        # R weight matrix: [in_channels, out_channels, num_bins]
+        scale = (1 / (in_channels * out_channels))
+        self.weights = nn.Parameter(
+            scale * torch.rand(in_channels, out_channels, self.num_bins, dtype=torch.cfloat)
+        )
+
+    def forward(self, x_ft, mask):
+        # x_ft: [Batch, In_Channels, Num_Bins]
+        # AI-proposed denoising transformation
+        weighted_ft = torch.einsum("bix,iox->box", x_ft, self.weights)
+        
+        # mask_b: [Batch, 1, Num_Bins] for broadcasting across channels
+        mask_b = mask.unsqueeze(1).to(torch.cfloat)
+        
+        # Manual Attention Routing: Linear mixture of AI proposal and raw bypass
+        return (mask_b * weighted_ft) + ((1.0 - mask_b) * x_ft)
+
+class GatedFNO(nn.Module):
+    """
+    Baseline implementation of the Gated Fourier Neural Operator.
+    Contract: [B, T] int64 -> [B, 256, T] float32
+    """
+    def __init__(self, config: GatedFNOConfig):
+        super().__init__()
+        self.width = config.width
+        self.num_layers = config.num_layers
+        self.seg_size = config.segmentation_size
+        self.num_bins = self.seg_size // 2 + 1
+        
+        # Initial Embedding: [B, T] (0-255) -> [B, T, Width]
+        self.embedding = nn.Embedding(256, self.width)
+        
+        # Gate Expansion: num_gates -> num_bins
+        self.num_gates = config.num_gates
+        if config.static_v is not None:
+            # Register static_v as a buffer so it moves with the model
+            v_tensor = torch.tensor(config.static_v, dtype=torch.float32).view(1, 1, -1)
+            self.register_buffer('v_static', v_tensor)
+        else:
+            self.v_static = None
+
+        # Iterative Layers
+        self.fno_layers = nn.ModuleList([
+            FullSpectrumGatedConv1d(self.width, self.width, self.num_bins)
+            for _ in range(self.num_layers)
+        ])
+        self.w_layers = nn.ModuleList([
+            nn.Conv1d(self.width, self.width, 1) # 1x1 Linear Path
+            for _ in range(self.num_layers)
+        ])
+
+        # Output projection to 256 logits
+        self.projection = nn.Sequential(
+            nn.Conv1d(self.width, 128, 1),
+            nn.GELU(),
+            nn.Conv1d(128, 256, 1)
+        )
+
+    def forward(self, x):
+        # x: [B, T]
+        batch_size = x.size(0)
+        
+        # 1. Handle Gating
+        if self.v_static is not None:
+            # Use static_v hyperparameter, expanded to full spectrum via nearest interpolation
+            v_expanded = F.interpolate(self.v_static, size=self.num_bins, mode='nearest')
+            mask = v_expanded.squeeze(1).repeat(batch_size, 1) # [B, num_bins]
+        else:
+            # Default behavior: AI processes everything
+            mask = torch.ones((batch_size, self.num_bins), device=x.device)
+
+        # 2. Lifting
+        h = self.embedding(x.long()).transpose(1, 2) # [B, Width, T]
+
+        # 3. FNO Iterations
+        for fno, w in zip(self.fno_layers, self.w_layers):
+            h_ft = torch.fft.rfft(h)
+            
+            # Spectral Path
+            h_freq_ft = fno(h_ft, mask)
+            h_freq = torch.fft.irfft(h_freq_ft, n=self.seg_size)
+            
+            # Temporal Path
+            h_time = w(h)
+            
+            # Non-linear Fusion
+            h = F.gelu(h_freq + h_time)
+
+        # 4. Projection to ADC Logits
+        return self.projection(h)
