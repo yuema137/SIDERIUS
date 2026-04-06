@@ -132,6 +132,51 @@ class TestLocalValidatedModel:
         )
         assert result.llm_model_id == "gpt-4o"
 
+    # --- Trial mode parameters ---
+
+    def test_default_is_trial_false(self, validator_output, proposal_output, storage):
+        result = local_validated_model(validator_output, proposal_output, storage)
+        assert result.is_trial is False
+
+    def test_trial_mode_passed_through(self, validator_output, proposal_output, storage):
+        result = local_validated_model(
+            validator_output, proposal_output, storage,
+            is_trial=True,
+            trial_strategy="snapshot",
+            trial_portion=0.2,
+            train_portion=0.15,
+            eval_strategy="anchors",
+            eval_portion=0.5,
+            train_validation_align=False,
+            sampling_seed=42,
+            train_base_seed=99,
+        )
+        assert result.is_trial is True
+        assert result.trial_strategy == "snapshot"
+        assert result.trial_portion == 0.2
+        assert result.train_portion == 0.15
+        assert result.eval_strategy == "anchors"
+        assert result.eval_portion == 0.5
+        assert result.train_validation_align is False
+        assert result.sampling_seed == 42
+        assert result.train_base_seed == 99
+
+    def test_target_files_passed_through(self, validator_output, proposal_output, storage):
+        result = local_validated_model(
+            validator_output, proposal_output, storage,
+            is_trial=True,
+            trial_strategy="target",
+            target_files=[0, 5, 10],
+        )
+        assert result.target_files == [0, 5, 10]
+
+    def test_cleanup_denoised_passed_through(self, validator_output, proposal_output, storage):
+        result = local_validated_model(
+            validator_output, proposal_output, storage,
+            cleanup_denoised=True,
+        )
+        assert result.cleanup_denoised is True
+
 
 # ---------------------------------------------------------------------------
 # database_validated_model
