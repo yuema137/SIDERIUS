@@ -241,7 +241,114 @@ These efficient configs are strong candidates for the Solidification phase.
 """
 
 # ==========================================
-# 2. USER PROMPT GENERATORS (The Context)
+# 2. EXPLORATION CHECKLIST
+# ==========================================
+
+# Fields to exclude from the checklist (not meaningful to tune)
+_CHECKLIST_SKIP_FIELDS = {"model_type", "batch_size"}
+
+
+def build_exploration_checklist(
+    config_schema: dict,
+    memory_history: list,
+) -> str:
+    """
+    Build a parameter exploration checklist from the config schema and past records.
+
+    For each tunable field in model_config, loss_config, and train_config,
+    shows what values have been tried and flags under-explored parameters.
+
+    Args:
+        config_schema: The model's config JSON schema (from ConfigClass.model_json_schema()).
+        memory_history: List of past experiment record dicts.
+
+    Returns:
+        Markdown checklist string for injection into the planner prompt.
+    """
+    if not memory_history:
+        return ""
+
+    # Collect tried values per parameter from successful + error records
+    model_cfg_tried: dict[str, set] = {}
+    loss_cfg_tried: dict[str, set] = {}
+    train_cfg_tried: dict[str, set] = {}
+
+    for rec in memory_history:
+        params = rec.get("params", {})
+        for key, val in params.get("model_config", {}).items():
+            if key in _CHECKLIST_SKIP_FIELDS:
+                continue
+            model_cfg_tried.setdefault(key, set())
+            # Convert lists/dicts to string for set storage
+            model_cfg_tried[key].add(str(val) if isinstance(val, (list, dict)) else val)
+
+        for key, val in params.get("loss_config", {}).items():
+            loss_cfg_tried.setdefault(key, set())
+            loss_cfg_tried[key].add(val)
+
+        for key, val in params.get("train_config", {}).items():
+            if key in _CHECKLIST_SKIP_FIELDS:
+                continue
+            train_cfg_tried.setdefault(key, set())
+            train_cfg_tried[key].add(val)
+
+    # Build checklist lines
+    lines = ["### EXPLORATION CHECKLIST"]
+    lines.append("Review which parameters have been explored. Under-explored parameters "
+                 "deserve attention — do not ignore model_config fields.\n")
+
+    # Model config fields from schema
+    schema_props = config_schema.get("properties", {})
+    lines.append("**model_config:**")
+    for field, spec in schema_props.items():
+        if field in _CHECKLIST_SKIP_FIELDS:
+            continue
+        tried = model_cfg_tried.get(field, set())
+        default = spec.get("default")
+        desc = spec.get("description", "")
+
+        if len(tried) == 0:
+            status = "NEVER TRIED"
+            marker = "[ ]"
+        elif len(tried) == 1:
+            status = "only 1 value tried"
+            marker = "[ ]"
+        else:
+            status = f"{len(tried)} values tried"
+            marker = "[x]"
+
+        # Format tried values concisely
+        if tried:
+            tried_str = ", ".join(str(v) for v in sorted(tried, key=str))
+            if len(tried_str) > 80:
+                tried_str = tried_str[:77] + "..."
+        else:
+            tried_str = f"default={default}"
+
+        lines.append(f"- {marker} `{field}`: {tried_str} — {status}")
+
+    # Loss config
+    lines.append("\n**loss_config:**")
+    for key, tried in loss_cfg_tried.items():
+        tried_str = ", ".join(str(v) for v in sorted(tried, key=str))
+        marker = "[x]" if len(tried) >= 2 else "[ ]"
+        lines.append(f"- {marker} `{key}`: {tried_str}")
+
+    # Train config (just lr and epochs — most impactful)
+    lines.append("\n**train_config:**")
+    for key in ["lr", "epochs", "optimizer_type", "weight_decay"]:
+        tried = train_cfg_tried.get(key, set())
+        if not tried:
+            continue
+        tried_str = ", ".join(str(v) for v in sorted(tried, key=str))
+        marker = "[x]" if len(tried) >= 2 else "[ ]"
+        lines.append(f"- {marker} `{key}`: {tried_str}")
+
+    return "\n".join(lines)
+
+
+# ==========================================
+# 3. USER PROMPT GENERATORS (The Context)
 # ==========================================
 
 def get_planner_user_prompt(

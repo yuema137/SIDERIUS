@@ -155,6 +155,7 @@ class LLMBridge:
              force_model: str = "auto",
              config_manual: Optional[Dict] = None,
              model_description: Optional[str] = None,
+             exploration_checklist: str = "",
              current_round: Optional[int] = None,
              max_rounds: Optional[int] = None,
              trial_allowed: bool = True) -> Dict:
@@ -189,8 +190,11 @@ class LLMBridge:
             trial_allowed=trial_allowed,
         )
 
-        # pass the manual into prompt
-        final_user_prompt = user_prompt + manual_context
+        # Assemble final prompt: user prompt + checklist + description + manual
+        final_user_prompt = user_prompt
+        if exploration_checklist:
+            final_user_prompt += f"\n\n{exploration_checklist}"
+        final_user_prompt += manual_context
 
         return self.generate(system_prompt, final_user_prompt)
 

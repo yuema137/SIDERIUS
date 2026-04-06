@@ -218,6 +218,16 @@ class HyperparamTuningAgent:
                 # A. OBSERVE: Retrieve full Research Memory from summary.json
                 memory_history = sandbox.get_summary()
 
+                # Build exploration checklist from config schema + past records
+                from agent.prompts import build_exploration_checklist
+                from ml_models.models_format_sandbox import get_config_class
+                config_cls = get_config_class(model_type_setting)
+                config_schema = config_cls.model_json_schema() if config_cls else {}
+                checklist = build_exploration_checklist(
+                    config_schema=config_schema,
+                    memory_history=memory_history,
+                )
+
                 # B. THINK: Plan next experiment
                 decision = brain.plan(
                     memory_history,
@@ -225,6 +235,7 @@ class HyperparamTuningAgent:
                     force_model=model_type_setting,
                     config_manual=config_manual_data,
                     model_description=model_description,
+                    exploration_checklist=checklist,
                     current_round=iteration,
                     max_rounds=max_rounds,
                     trial_allowed=trial_allowed,
