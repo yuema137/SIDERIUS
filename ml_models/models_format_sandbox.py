@@ -149,11 +149,51 @@ class RNNSeq2SeqConfig(BaseConfig):
 
 
 # ==========================================
+# 7. GatedFNO Configuration
+# ==========================================
+
+class GatedFNOConfig(BaseConfig):
+    """
+    Configuration for Gated Fourier Neural Operator.
+    Enables frequency-domain denoising with manual signal protection.
+    """
+    model_type: Literal["gated_fno"] = "gated_fno"
+    width: int = Field(default=64, ge=16, le=256, description="Latent channel width")
+    num_layers: int = Field(default=2, ge=1, le=5, description="Number of FNO blocks")
+    num_gates: int = Field(default=128, ge=8, le=4096, description="Granularity of the gate vector")
+    gate_mapping: Literal["linear", "log"] = Field(
+        default="log",
+        description="How gate indices map to frequency bins. "
+                    "'log': denser at low frequencies (matches physics — signals are log-spaced). "
+                    "'linear': uniform spacing across the spectrum.",
+    )
+    # Agent-tunable vector
+    static_v: Optional[List[float]] = Field(
+        default=None,
+        description="Static gate vector. Length must match num_gates."
+    )
+
+    @field_validator('static_v')
+    @classmethod
+    def validate_v_length(cls, v: Optional[List[float]], info) -> Optional[List[float]]:
+        num_gates = info.data.get('num_gates')
+        if v is not None and num_gates is not None:
+            if len(v) != num_gates:
+                raise ValueError(f"static_v length ({len(v)}) must match num_gates ({num_gates})")
+        return v
+
+# Update ModelConfigUnion
+ModelConfigUnion = Union[PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, RNNSeq2SeqConfig, GatedFNOConfig]
+
+# Update get_config_class mapping
+# "gated_fno": GatedFNOConfig
+
+# ==========================================
 # Global Model Registry
 # ==========================================
 
 # Union type for the Agent to choose from
-ModelConfigUnion = Union[PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, RNNSeq2SeqConfig]
+ModelConfigUnion = Union[PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, RNNSeq2SeqConfig, GatedFNOConfig]
 
 def get_config_class(model_type: str) -> Optional[Type[BaseConfig]]:
     """Helper for the Orchestrator to map strings to Pydantic classes."""
@@ -163,6 +203,7 @@ def get_config_class(model_type: str) -> Optional[Type[BaseConfig]]:
         "transformer": TransformerConfig,
         "wavenet": WaveNetConfig,
         "rnn": RNNSeq2SeqConfig,
+        "gated_fno": GatedFNOConfig,
     }
     return mapping.get(model_type) or PLUGIN_CONFIG_REGISTRY.get(model_type)
 
@@ -253,31 +294,42 @@ class ExperimentConfig(BaseModel):
     """
     exp_id: str
     run_name: str
-    model_type: Literal["punet", "fcnet", "transformer", "wavenet", "rnn"]
-    network_config: ModelConfigUnion # This uses the Union defined earlier
+    model_type: str  # Accepts built-in and agent-generated plugin model types
+    network_config: ModelConfigUnion  # This uses the Union defined earlier
     train_config: TrainConfig
     loss_config: LossConfig
 
     @model_validator(mode='after')
     def validate_architecture_loss_match(self) -> 'ExperimentConfig':
         """
-        Enforce the physical constraint: 
-        Regression (SmoothL1) is only for AutoEncoders (fcnet).
-        Classification (CE/Focal) is for segmentors (punet/transformer).
+        Enforce the physical constraint: loss type must match model output type.
+
+        - Classifiers ([B, 256, T] output) use ce, focal, focal_cw.
+        - Regressors ([B, T] output) use smooth_l1.
+
+        Output type is looked up from BUILTIN_OUTPUT_TYPES (built-in models)
+        or PLUGIN_OUTPUT_TYPE_REGISTRY (agent-generated plugins). Unknown models
+        default to 'classifier'.
         """
-        m_type = self.model_type
+        from ml_models.plugin_loader import get_output_type
+
+        output_type = get_output_type(self.model_type)
         l_type = self.loss_config.loss_type
 
-        if l_type == "smooth_l1" and m_type != "fcnet":
+        # "hybrid" models (e.g. fcnet) accept any loss type
+        if output_type == "hybrid":
+            return self
+
+        if l_type == "smooth_l1" and output_type == "classifier":
             raise ValueError(
-                f"Incompatible Pair: 'smooth_l1' is for waveform regression (fcnet). "
-                f"Model '{m_type}' is a classifier (256 classes) and requires 'ce' or 'focal' loss."
+                f"Incompatible: '{self.model_type}' is a classifier (output [B, 256, T]) "
+                f"— use 'ce' or 'focal', not 'smooth_l1'."
             )
-        
-        if m_type == "fcnet" and l_type in ["ce", "focal", "focal_cw"]:
-            # Note: Your AE implementation supports classification, 
-            # but usually, agents might misuse this. 
-            # We can allow it or warn here.
-            pass
-            
+
+        if l_type in ["ce", "focal", "focal_cw"] and output_type == "regressor":
+            raise ValueError(
+                f"Incompatible: '{self.model_type}' is a regressor (output [B, T]) "
+                f"— use 'smooth_l1', not '{l_type}'."
+            )
+
         return self

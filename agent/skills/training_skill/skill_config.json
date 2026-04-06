@@ -10,8 +10,7 @@
       },
       "model_type": {
         "type": "string",
-        "enum": ["fcnet", "punet"],
-        "description": "The architecture to train."
+        "description": "The architecture to train (any model in MODEL_REGISTRY)."
       },
       "model_config": {
         "type": "object",

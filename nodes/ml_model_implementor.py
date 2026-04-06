@@ -177,6 +177,7 @@ class {ModelClass}(nn.Module):
 
 
 PLUGIN_MODEL_CLASS = {ModelClass}
+PLUGIN_OUTPUT_TYPE = "classifier"  # [B, 256, T] → 256-class classification
 """
 
 TEST_TEMPLATE = """\

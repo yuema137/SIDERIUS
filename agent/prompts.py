@@ -39,7 +39,8 @@ Plan your experiments across rounds, not just one at a time:
 - You operate based on the **Research Memory**, a log of all past experiments and insights.
 - **Cross-Exploration Rule**: To avoid local minima, you must explore broadly:
     - **Architecture** (when free to choose): do not stay on one model for more than 2 consecutive runs if improvement is < 5%. Switch to a different architecture.
-    - **Loss config** (always applies): do not repeat the same `loss_type` for more than 2 consecutive runs without improvement. Cycle through `ce`, `focal`, `smooth_l1` and their variants.
+    - **Model config** (always applies): explore ALL tunable fields in model_config. Read the MODEL DESCRIPTION and CONFIG MANUAL carefully — every field listed there is a tuning lever. Model-specific parameters (e.g. gate vectors, layer counts, channel widths) are equally important as loss and learning rate.
+    - **Loss config** (always applies): do not repeat the same `loss_type` for more than 2 consecutive runs without improvement. Cycle through the valid loss types for this model.
     - **Train config** (always applies): do not repeat the same `lr` and `batch_size` region for more than 2 consecutive runs. Try different learning rates (e.g. 1e-3, 3e-4, 1e-4) and batch sizes.
     - **EXCEPTION — Data Volume Override**: The Cross-Exploration Rule is **suspended** if
       `trial_portion` < 0.1 and the model shows signs of underfitting (high training loss,
@@ -97,9 +98,23 @@ You can choose how much data to use for each experiment:
   config and want to validate it on the full dataset.
 
 Trial strategies (only relevant when `is_trial=true`):
-- `"snapshot"`: Sample from all 20 validation files — broad generalization check.
-- `"anchors"`: Sample from files 0, 10, 19 only — quick extrema check.
-- `"target"`: Sample from specific files (provide `target_files`) — deep optimization of weak bands.
+- `"snapshot"`: Sample from **all 20 files**. Each file gets `trial_portion` fraction of its
+  200 PSD segments. Gives broad frequency coverage but spreads data thinly across files.
+  At trial_portion=0.05, you get ~10 segments/file × 20 files = ~200 segments total.
+  At trial_portion=0.5, you get ~100 segments/file × 20 files = ~2000 segments total.
+- `"anchors"`: Sample from **files 0, 10, 19 only** (lowest, mid, highest frequency).
+  3× more segments per file than snapshot at the same trial_portion, but zero coverage on
+  17 files. Useful when you want to quickly check performance across the frequency range
+  with denser per-file sampling. file_vector will have 17 NaN entries.
+- `"target"`: Sample from **specific files** you choose (provide `target_files` list).
+  Concentrates all data on those files. Useful when file_vector reveals specific weak
+  frequency bands — you can focus training and evaluation on just those files to iterate
+  faster. For example, if files 0-3 score < 1.0, use `target_files: [0, 1, 2, 3]` to
+  dedicate all training data to improving low-frequency denoising.
+
+**Key tradeoff**: snapshot gives broad but shallow coverage per file. anchors and target
+give deep coverage on fewer files. Consider your file_vector results — if performance is
+uniform across files, snapshot is efficient. If specific files are weak, target those files.
 
 `trial_portion` (0.01–1.0): fraction of segments per file for the **training scope**.
 This determines how much data the model trains on. More data = better model but slower.
@@ -226,7 +241,114 @@ These efficient configs are strong candidates for the Solidification phase.
 """
 
 # ==========================================
-# 2. USER PROMPT GENERATORS (The Context)
+# 2. EXPLORATION CHECKLIST
+# ==========================================
+
+# Fields to exclude from the checklist (not meaningful to tune)
+_CHECKLIST_SKIP_FIELDS = {"model_type", "batch_size"}
+
+
+def build_exploration_checklist(
+    config_schema: dict,
+    memory_history: list,
+) -> str:
+    """
+    Build a parameter exploration checklist from the config schema and past records.
+
+    For each tunable field in model_config, loss_config, and train_config,
+    shows what values have been tried and flags under-explored parameters.
+
+    Args:
+        config_schema: The model's config JSON schema (from ConfigClass.model_json_schema()).
+        memory_history: List of past experiment record dicts.
+
+    Returns:
+        Markdown checklist string for injection into the planner prompt.
+    """
+    if not memory_history:
+        return ""
+
+    # Collect tried values per parameter from successful + error records
+    model_cfg_tried: dict[str, set] = {}
+    loss_cfg_tried: dict[str, set] = {}
+    train_cfg_tried: dict[str, set] = {}
+
+    for rec in memory_history:
+        params = rec.get("params", {})
+        for key, val in params.get("model_config", {}).items():
+            if key in _CHECKLIST_SKIP_FIELDS:
+                continue
+            model_cfg_tried.setdefault(key, set())
+            # Convert lists/dicts to string for set storage
+            model_cfg_tried[key].add(str(val) if isinstance(val, (list, dict)) else val)
+
+        for key, val in params.get("loss_config", {}).items():
+            loss_cfg_tried.setdefault(key, set())
+            loss_cfg_tried[key].add(val)
+
+        for key, val in params.get("train_config", {}).items():
+            if key in _CHECKLIST_SKIP_FIELDS:
+                continue
+            train_cfg_tried.setdefault(key, set())
+            train_cfg_tried[key].add(val)
+
+    # Build checklist lines
+    lines = ["### EXPLORATION CHECKLIST"]
+    lines.append("Review which parameters have been explored. Under-explored parameters "
+                 "deserve attention — do not ignore model_config fields.\n")
+
+    # Model config fields from schema
+    schema_props = config_schema.get("properties", {})
+    lines.append("**model_config:**")
+    for field, spec in schema_props.items():
+        if field in _CHECKLIST_SKIP_FIELDS:
+            continue
+        tried = model_cfg_tried.get(field, set())
+        default = spec.get("default")
+        desc = spec.get("description", "")
+
+        if len(tried) == 0:
+            status = "NEVER TRIED"
+            marker = "[ ]"
+        elif len(tried) == 1:
+            status = "only 1 value tried"
+            marker = "[ ]"
+        else:
+            status = f"{len(tried)} values tried"
+            marker = "[x]"
+
+        # Format tried values concisely
+        if tried:
+            tried_str = ", ".join(str(v) for v in sorted(tried, key=str))
+            if len(tried_str) > 80:
+                tried_str = tried_str[:77] + "..."
+        else:
+            tried_str = f"default={default}"
+
+        lines.append(f"- {marker} `{field}`: {tried_str} — {status}")
+
+    # Loss config
+    lines.append("\n**loss_config:**")
+    for key, tried in loss_cfg_tried.items():
+        tried_str = ", ".join(str(v) for v in sorted(tried, key=str))
+        marker = "[x]" if len(tried) >= 2 else "[ ]"
+        lines.append(f"- {marker} `{key}`: {tried_str}")
+
+    # Train config (just lr and epochs — most impactful)
+    lines.append("\n**train_config:**")
+    for key in ["lr", "epochs", "optimizer_type", "weight_decay"]:
+        tried = train_cfg_tried.get(key, set())
+        if not tried:
+            continue
+        tried_str = ", ".join(str(v) for v in sorted(tried, key=str))
+        marker = "[x]" if len(tried) >= 2 else "[ ]"
+        lines.append(f"- {marker} `{key}`: {tried_str}")
+
+    return "\n".join(lines)
+
+
+# ==========================================
+# 3. USER PROMPT GENERATORS (The Context)
 # ==========================================
 
 def get_planner_user_prompt(
@@ -251,21 +373,47 @@ def get_planner_user_prompt(
     """
     history_context = json.dumps(memory_history, indent=2) if memory_history else "No previous experiments recorded."
 
-    # Handle the model constraint message
+    # Handle the model constraint message + output type / valid losses
     model_constraint = ""
     if force_model != "auto":
+        from ml_models.plugin_loader import get_output_type
+        output_type = get_output_type(force_model)
+        if output_type == "classifier":
+            loss_note = (
+                f"- This model is a **CLASSIFIER** (output [B, 256, T]). "
+                f"Valid loss types: **ce, focal, focal_cw**. "
+                f"Do NOT use smooth_l1 (regression only).\n"
+            )
+        elif output_type == "regressor":
+            loss_note = (
+                f"- This model is a **REGRESSOR** (output [B, T]). "
+                f"Valid loss types: **smooth_l1**. "
+                f"Do NOT use ce, focal, or focal_cw (classification only).\n"
+            )
+        else:  # hybrid
+            loss_note = (
+                f"- This model is a **HYBRID** — it supports ALL loss types: "
+                f"ce, focal, focal_cw, smooth_l1.\n"
+            )
+
         model_constraint = (
             f"\n### CRITICAL CONSTRAINT:\n"
             f"- You MUST use the '{force_model}' architecture. The model type is fixed and cannot be changed.\n"
+            f"{loss_note}"
             f"- Because the architecture is fixed, the Cross-Exploration Rule applies to "
-            f"**loss config and train config instead**. You must vary `loss_type`, `lr`, and `batch_size` "
-            f"across runs with the same rigor you would apply to switching architectures. "
-            f"Do not repeat the same loss_type or the same lr/batch_size for more than 2 consecutive runs without meaningful improvement."
+            f"**model_config, loss config, and train config**. You must explore ALL tunable "
+            f"parameters in model_config (see the CONFIG MANUAL and MODEL DESCRIPTION for the "
+            f"full list — every field is a tuning lever), as well as `loss_type`, `lr`, and "
+            f"`batch_size`. Do not repeat the same configuration for more than 2 consecutive "
+            f"runs without meaningful improvement. Model-specific parameters (e.g. gate vectors, "
+            f"layer counts, channel widths) are equally important as loss and learning rate."
         )
     else:
         model_constraint = (
             "\n- You are free to choose any architecture based on the Cross-Exploration Rule. "
-            "Even when switching architectures, continue to vary loss_type and train_config to explore the full search space."
+            "Even when switching architectures, continue to vary loss_type and train_config to explore the full search space.\n"
+            "- **Loss compatibility**: 'smooth_l1' is ONLY for regressor models (fcnet). "
+            "All other models are classifiers — use 'ce', 'focal', or 'focal_cw'."
         )
 
     # Build an OOM warning if any skipped_oom_risk records exist in memory
@@ -286,22 +434,31 @@ def get_planner_user_prompt(
     round_context = ""
     if current_round is not None and max_rounds is not None:
         is_final = (current_round == max_rounds)
-        # Determine current phase
+        rounds_left = max_rounds - current_round
+        rounds_completed = current_round - 1
+
+        # Determine current phase and compute rounds remaining in this phase
         progress = current_round / max_rounds
         if progress <= 0.25:
             phase = "Screening"
+            phase_end = int(max_rounds * 0.25)
+            rounds_in_phase_left = phase_end - current_round + 1
             phase_advice = "Focus on broad exploration with low trial_portion and low epochs."
         elif progress <= 0.75:
             phase = "Refinement"
+            phase_end = int(max_rounds * 0.75)
+            rounds_in_phase_left = phase_end - current_round + 1
             phase_advice = "Pick top configs from Screening. Increase trial_portion and epochs."
         else:
             phase = "Solidification"
+            rounds_in_phase_left = rounds_left + 1  # includes current round
             phase_advice = "Select best candidate. Use high trial_portion or formal mode."
 
         round_context = (
             f"\n### ROUND CONTEXT:\n"
-            f"- Current round: {current_round} / {max_rounds}\n"
-            f"- Current phase: **{phase}** — {phase_advice}\n"
+            f"- Current round: {current_round} / {max_rounds} "
+            f"({rounds_completed} completed, {rounds_left} remaining after this one)\n"
+            f"- Current phase: **{phase}** ({rounds_in_phase_left} rounds left in this phase) — {phase_advice}\n"
         )
         if is_final:
             round_context += "- **THIS IS THE FINAL ROUND** — you MUST use formal mode (`is_trial`: false).\n"
@@ -331,7 +488,7 @@ def get_planner_user_prompt(
 
 ### OUTPUT FORMAT (Strict JSON):
 {{
-    "model_type": "punet | fcnet | transformer | wavenet | rnn",
+    "model_type": "{force_model if force_model != 'auto' else 'punet | fcnet | transformer | wavenet | rnn | gated_fno'}",
     "reasoning": "How this experiment aligns with expert advice and past memory",
     "hypothesis": "Specific prediction for this run",
     "is_trial": "true | false (choose based on confidence in config)",

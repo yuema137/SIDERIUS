@@ -194,6 +194,15 @@ class HyperparamTuningAgent:
         else:
             raise ValueError("Config Manual not provided.")
 
+        # --- Load model description (architecture explanation for the LLM) ---
+        model_description = None
+        try:
+            from ml_models.model_descriptions import get_model_description
+            model_description = get_model_description(model_type_setting)
+            print(f"Loaded model description for '{model_type_setting}' ({len(model_description)} chars)")
+        except (FileNotFoundError, Exception) as e:
+            print(f"No model description found for '{model_type_setting}': {e}")
+
         # --- Autonomous Research Loop ---
         completed_rounds = 0
         total_attempts = 0
@@ -209,12 +218,24 @@ class HyperparamTuningAgent:
                 # A. OBSERVE: Retrieve full Research Memory from summary.json
                 memory_history = sandbox.get_summary()
 
+                # Build exploration checklist from config schema + past records
+                from agent.prompts import build_exploration_checklist
+                from ml_models.models_format_sandbox import get_config_class
+                config_cls = get_config_class(model_type_setting)
+                config_schema = config_cls.model_json_schema() if config_cls else {}
+                checklist = build_exploration_checklist(
+                    config_schema=config_schema,
+                    memory_history=memory_history,
+                )
+
                 # B. THINK: Plan next experiment
                 decision = brain.plan(
                     memory_history,
                     expert_advice=expert_advice_str,
                     force_model=model_type_setting,
                     config_manual=config_manual_data,
+                    model_description=model_description,
+                    exploration_checklist=checklist,
                     current_round=iteration,
                     max_rounds=max_rounds,
                     trial_allowed=trial_allowed,
@@ -223,12 +244,19 @@ class HyperparamTuningAgent:
                 # Validate LLM output into ExperimentPlan (with fallback)
                 plan = ExperimentPlan.with_defaults(decision)
 
-                # Override chain: expert constraint → final-round constraint
+                # Override chain: expert constraint → final-round constraint → hard caps
                 is_last_needed_round = (completed_rounds == max_rounds - 1)
                 if not trial_allowed:
                     plan.is_trial = False
                 if is_last_needed_round:
                     plan.is_trial = False
+
+                # Enforce max_epochs hard cap (prevents LLM from choosing excessively long training)
+                if agent_input.max_epochs is not None:
+                    planned_epochs = plan.train_cfg.get("epochs", 1)
+                    if planned_epochs > agent_input.max_epochs:
+                        print(f"  Clamping epochs: {planned_epochs} → {agent_input.max_epochs} (max_epochs)")
+                        plan.train_cfg["epochs"] = agent_input.max_epochs
 
                 # Build and validate TrialConfig from plan + overrides
                 if plan.is_trial:
@@ -399,6 +427,29 @@ class HyperparamTuningAgent:
                 train_status = _run_skill("training_skill", sandbox, **active_params)
                 train_time = round(time.time() - t0, 1)
                 if train_status.get("status") == "error":
+                    error_msg = train_status.get("message", "Unknown training error")
+                    is_oom = "CUDA out of memory" in error_msg or "OutOfMemoryError" in error_msg
+                    # Truncate long tracebacks — keep last 500 chars for the LLM
+                    short_msg = error_msg[-500:] if len(error_msg) > 500 else error_msg
+                    error_record = {
+                        "exp_id":          exp_id,
+                        "status":          "error_training_oom" if is_oom else "error_training",
+                        "model_type":      model_type,
+                        "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "file_index":      file_index,
+                        "params":          record_params,
+                        "denoising_score": None,
+                        "memory": {
+                            "expert_advice_followed": expert_advice_str,
+                            "hypothesis":    hypothesis,
+                            "conclusion":    f"Training failed: {short_msg}",
+                            "discovery":     "CUDA OOM — reduce model size, batch_size, or segmentation_size." if is_oom else f"Training crashed: {short_msg}",
+                            "memory_update": "This config exceeds GPU memory. Try smaller architecture." if is_oom else "Fix the error before retrying this config.",
+                        },
+                    }
+                    ExperimentRecord.model_validate(error_record)
+                    sandbox.save_record(error_record)
+                    print(f"  Saved error record: {error_record['status']}")
                     continue
 
                 print(f"[Step 2/3] Inference...")
@@ -406,6 +457,28 @@ class HyperparamTuningAgent:
                 inf_status = _run_skill("inference_skill", sandbox, **active_params)
                 inference_time = round(time.time() - t0, 1)
                 if inf_status.get("status") == "error":
+                    error_msg = inf_status.get("message", "Unknown inference error")
+                    is_oom = "CUDA out of memory" in error_msg or "OutOfMemoryError" in error_msg
+                    short_msg = error_msg[-500:] if len(error_msg) > 500 else error_msg
+                    error_record = {
+                        "exp_id":          exp_id,
+                        "status":          "error_inference_oom" if is_oom else "error_inference",
+                        "model_type":      model_type,
+                        "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "file_index":      file_index,
+                        "params":          record_params,
+                        "denoising_score": None,
+                        "memory": {
+                            "expert_advice_followed": expert_advice_str,
+                            "hypothesis":    hypothesis,
+                            "conclusion":    f"Inference failed: {short_msg}",
+                            "discovery":     "CUDA OOM during inference — reduce batch_size or model size." if is_oom else f"Inference crashed: {short_msg}",
+                            "memory_update": "Inference OOM — the model trained but can't infer. Try smaller batch." if is_oom else "Fix the inference error before retrying.",
+                        },
+                    }
+                    ExperimentRecord.model_validate(error_record)
+                    sandbox.save_record(error_record)
+                    print(f"  Saved error record: {error_record['status']}")
                     continue
 
                 print(f"[Step 3/3] Scoring...")

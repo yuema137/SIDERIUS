@@ -95,6 +95,13 @@ MODEL_CONFIGS = {
         "hidden_dim": 8,
         "num_layers": 1,
     },
+    "gated_fno": {
+        "model_type": "gated_fno",
+        "segmentation_size": 10000,
+        "width": 16,
+        "num_layers": 1,
+        "num_gates": 32,
+    },
 }
 
 LOSS_CONFIGS = {
@@ -103,6 +110,7 @@ LOSS_CONFIGS = {
     "transformer": [{"loss_type": "ce"}, {"loss_type": "focal"}, {"loss_type": "focal_cw"}],
     "wavenet":     [{"loss_type": "ce"}, {"loss_type": "focal"}, {"loss_type": "focal_cw"}],
     "rnn":         [{"loss_type": "ce"}, {"loss_type": "focal"}, {"loss_type": "focal_cw"}],
+    "gated_fno":   [{"loss_type": "ce"}, {"loss_type": "focal"}, {"loss_type": "focal_cw"}],
 }
 
 TRAIN_CONFIG = {"lr": 1e-4, "epochs": 1, "batch_size": 1, "device": "cuda"}
@@ -169,6 +177,18 @@ FLEX_CONFIGS = {
             "model_cfg":  {"model_type": "rnn", "segmentation_size": 10000, "embedding_dim": 16, "hidden_dim": 16, "num_layers": 2},
             "loss_cfg":   {"loss_type": "focal"},
             "train_cfg":  {"lr": 3e-4, "epochs": 1, "batch_size": 128, "device": "cuda"},
+        },
+    ],
+    "gated_fno": [
+        {
+            "model_cfg":  {"model_type": "gated_fno", "segmentation_size": 10000, "width": 16, "num_layers": 1, "num_gates": 32},
+            "loss_cfg":   {"loss_type": "ce"},
+            "train_cfg":  {"lr": 1e-4, "epochs": 1, "batch_size": 128, "device": "cuda"},
+        },
+        {
+            "model_cfg":  {"model_type": "gated_fno", "segmentation_size": 10000, "width": 32, "num_layers": 2, "num_gates": 64},
+            "loss_cfg":   {"loss_type": "focal"},
+            "train_cfg":  {"lr": 3e-4, "epochs": 1, "batch_size": 256, "device": "cuda"},
         },
     ],
 }
@@ -304,6 +324,17 @@ class TestRealRunGemini:
                               model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
         assert output.status == "completed"
 
+    @pytest.mark.parametrize("loss_cfg", LOSS_CONFIGS["gated_fno"])
+    def test_gated_fno_gemini(self, loss_cfg, tmp_path):
+        output = run_one_loop("gemini", "gated_fno", loss_cfg, str(tmp_path))
+        assert output.status == "completed"
+
+    @pytest.mark.parametrize("cfg", FLEX_CONFIGS["gated_fno"])
+    def test_gated_fno_flexibility_gemini(self, cfg, tmp_path):
+        output = run_one_loop("gemini", "gated_fno", cfg["loss_cfg"], str(tmp_path),
+                              model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
+        assert output.status == "completed"
+
 
 # ==========================================
 # OpenAI — all model/loss combinations
@@ -367,6 +398,17 @@ class TestRealRunOpenAI:
     @pytest.mark.parametrize("cfg", FLEX_CONFIGS["rnn"])
     def test_rnn_flexibility_openai(self, cfg, tmp_path):
         output = run_one_loop("openai", "rnn", cfg["loss_cfg"], str(tmp_path),
+                              model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
+        assert output.status == "completed"
+
+    @pytest.mark.parametrize("loss_cfg", LOSS_CONFIGS["gated_fno"])
+    def test_gated_fno_openai(self, loss_cfg, tmp_path):
+        output = run_one_loop("openai", "gated_fno", loss_cfg, str(tmp_path))
+        assert output.status == "completed"
+
+    @pytest.mark.parametrize("cfg", FLEX_CONFIGS["gated_fno"])
+    def test_gated_fno_flexibility_openai(self, cfg, tmp_path):
+        output = run_one_loop("openai", "gated_fno", cfg["loss_cfg"], str(tmp_path),
                               model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
         assert output.status == "completed"
 

@@ -102,7 +102,15 @@ class ExperimentMemory(BaseModel):
 
 class ExperimentRecord(BaseModel):
     exp_id: str
-    status: Literal["success", "error", "skipped_oom_risk"]
+    status: Literal[
+        "success",
+        "error",
+        "skipped_oom_risk",
+        "error_training",
+        "error_training_oom",
+        "error_inference",
+        "error_inference_oom",
+    ]
     model_type: str
     timestamp: str
     file_index: int = Field(default=6, description="Training/validation file index. Defaults to the standard split used in the TIDMAD paper.")
@@ -518,6 +526,18 @@ class HyperparamTuningInput(BaseModel):
             "Base seed for per-epoch training subsampling. Epoch n uses "
             "train_base_seed + n. When None, auto-generated. "
             "Read from a previous trial_config_{exp_id}.json."
+        ),
+    )
+
+    # --- Hard constraints on LLM plan output (enforced after plan, not by the LLM) ---
+    max_epochs: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Hard cap on epochs per round. When set, the tuner clamps the LLM's "
+            "planned epochs to min(planned_epochs, max_epochs). Use this to prevent "
+            "the LLM from choosing excessively long training in integration tests "
+            "or resource-constrained environments."
         ),
     )
 

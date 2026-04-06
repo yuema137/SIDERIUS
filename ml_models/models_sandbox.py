@@ -8,7 +8,7 @@ from torch.utils.data import dataset
 import math
 from pydantic import BaseModel, Field, field_validator, model_validator 
 from typing import List, Literal, Union
-from models_format_sandbox import PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, RNNSeq2SeqConfig
+from models_format_sandbox import PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, RNNSeq2SeqConfig, GatedFNOConfig
 
 # Blocks used by networks
 
@@ -491,13 +491,156 @@ class RNNSeq2Seq(nn.Module):
         return logits.transpose(1, 2)                             # [B, 256, T]
 
 
+# (MODEL_REGISTRY defined after all model classes — see end of file)
+
+class FullSpectrumGatedConv1d(nn.Module):
+    """
+    Spectral Convolution layer that applies a learnable complex weight 
+    and a manual gate across the entire RFFT spectrum.
+    """
+    def __init__(self, in_channels, out_channels, num_bins):
+        super().__init__()
+        self.num_bins = num_bins
+        # R weight matrix: [in_channels, out_channels, num_bins]
+        scale = (1 / (in_channels * out_channels))
+        self.weights = nn.Parameter(
+            scale * torch.rand(in_channels, out_channels, self.num_bins, dtype=torch.cfloat)
+        )
+
+    def forward(self, x_ft, mask):
+        # x_ft: [Batch, In_Channels, Num_Bins]
+        # AI-proposed denoising transformation
+        weighted_ft = torch.einsum("bix,iox->box", x_ft, self.weights)
+        
+        # mask_b: [Batch, 1, Num_Bins] for broadcasting across channels
+        mask_b = mask.unsqueeze(1).to(torch.cfloat)
+        
+        # Manual Attention Routing: Linear mixture of AI proposal and raw bypass
+        return (mask_b * weighted_ft) + ((1.0 - mask_b) * x_ft)
+
+class GatedFNO(nn.Module):
+    """
+    Baseline implementation of the Gated Fourier Neural Operator.
+    Contract: [B, T] int64 -> [B, 256, T] float32
+    """
+    def __init__(self, config: GatedFNOConfig):
+        super().__init__()
+        self.width = config.width
+        self.num_layers = config.num_layers
+        self.seg_size = config.segmentation_size
+        self.num_bins = self.seg_size // 2 + 1
+        
+        # Initial Embedding: [B, T] (0-255) -> [B, T, Width]
+        self.embedding = nn.Embedding(256, self.width)
+        
+        # Gate Expansion: num_gates -> num_bins
+        self.num_gates = config.num_gates
+        self.gate_mapping = config.gate_mapping
+        if config.static_v is not None:
+            # Register static_v as a buffer so it moves with the model
+            v_tensor = torch.tensor(config.static_v, dtype=torch.float32).view(1, 1, -1)
+            self.register_buffer('v_static', v_tensor)
+        else:
+            self.v_static = None
+
+        # Precompute gate-to-bin index mapping (registered as buffer for device movement)
+        if self.gate_mapping == "log":
+            # Log-spaced: denser at low frequencies, sparser at high.
+            # For each of the num_bins FFT bins, find the nearest gate index
+            # using log-spaced gate boundaries.
+            # Gate boundaries on log scale: gate k covers [10^(k/G * log10(N)), 10^((k+1)/G * log10(N)))
+            # where G = num_gates, N = num_bins
+            log_max = math.log10(self.num_bins)
+            # Map each bin to its gate index via log scale
+            bin_indices = torch.arange(self.num_bins, dtype=torch.float32)
+            # Avoid log(0): shift by 1
+            log_bins = torch.log10(bin_indices + 1)  # range [0, log10(num_bins)]
+            gate_indices = (log_bins / log_max * self.num_gates).long().clamp(0, self.num_gates - 1)
+            self.register_buffer('_gate_bin_map', gate_indices)
+        else:
+            # Linear: uniform mapping (same as F.interpolate nearest)
+            self._gate_bin_map = None
+
+        # Iterative Layers
+        self.fno_layers = nn.ModuleList([
+            FullSpectrumGatedConv1d(self.width, self.width, self.num_bins)
+            for _ in range(self.num_layers)
+        ])
+        self.w_layers = nn.ModuleList([
+            nn.Conv1d(self.width, self.width, 1) # 1x1 Linear Path
+            for _ in range(self.num_layers)
+        ])
+
+        # Output projection to 256 logits
+        self.projection = nn.Sequential(
+            nn.Conv1d(self.width, 128, 1),
+            nn.GELU(),
+            nn.Conv1d(128, 256, 1)
+        )
+
+    def forward(self, x):
+        # x: [B, T]
+        batch_size = x.size(0)
+        
+        # 1. Handle Gating
+        if self.v_static is not None:
+            if self._gate_bin_map is not None:
+                # Log-scale mapping: use precomputed bin→gate index
+                mask = self.v_static.squeeze(0).squeeze(0)[self._gate_bin_map]  # [num_bins]
+                mask = mask.unsqueeze(0).expand(batch_size, -1)  # [B, num_bins]
+            else:
+                # Linear mapping: uniform nearest-neighbor interpolation
+                v_expanded = F.interpolate(self.v_static, size=self.num_bins, mode='nearest')
+                mask = v_expanded.squeeze(1).expand(batch_size, -1)  # [B, num_bins]
+        else:
+            # Default behavior: AI processes everything
+            mask = torch.ones((batch_size, self.num_bins), device=x.device)
+
+        # 2. Lifting
+        h = self.embedding(x.long()).transpose(1, 2) # [B, Width, T]
+
+        # 3. FNO Iterations
+        for fno, w in zip(self.fno_layers, self.w_layers):
+            h_ft = torch.fft.rfft(h)
+            
+            # Spectral Path
+            h_freq_ft = fno(h_ft, mask)
+            h_freq = torch.fft.irfft(h_freq_ft, n=self.seg_size)
+            
+            # Temporal Path
+            h_time = w(h)
+            
+            # Non-linear Fusion
+            h = F.gelu(h_freq + h_time)
+
+        # 4. Projection to ADC Logits
+        return self.projection(h)
+
+
+# ==========================================
 # 2. Global Registry
+# ==========================================
+
 MODEL_REGISTRY = {
     "punet": PositionalUNet,
     "fcnet": AE,
     "transformer": TransformerModel,
     "wavenet": SimpleWaveNet,
     "rnn": RNNSeq2Seq,
+    "gated_fno": GatedFNO,
+}
+
+# Output type for each built-in model — determines valid loss types.
+# "classifier": output [B, 256, T] → ce, focal, focal_cw
+# "regressor":  output [B, T]      → smooth_l1
+# "hybrid":     output [B, 256, T] but supports ALL loss types (e.g. fcnet)
+BUILTIN_OUTPUT_TYPES = {
+    "punet": "classifier",
+    "fcnet": "hybrid",
+    "transformer": "classifier",
+    "wavenet": "classifier",
+    "rnn": "classifier",
+    "gated_fno": "classifier",
 }
 
 # Extend MODEL_REGISTRY with any agent-generated plugin models

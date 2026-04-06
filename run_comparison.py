@@ -431,8 +431,7 @@ def main():
     )
     parser.add_argument(
         "--model", type=str, required=True,
-        choices=["punet", "fcnet", "transformer", "wavenet", "rnn"],
-        help="Model architecture to explore.",
+        help="Model architecture to explore (any model in MODEL_REGISTRY or legacy_baseline_configs).",
     )
     parser.add_argument(
         "--provider", type=str, default="gemini", choices=["gemini", "openai"],

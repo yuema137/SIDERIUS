@@ -52,6 +52,14 @@ results = run_workflow(
     human_advice_tune=(
         "Use batch_size=1. Focus on finding the best hyperparameters within 20 rounds."
     ),
+    # Trial mode: multi-file sparse sampling with anchor-normalized scoring
+    is_trial=True,
+    trial_strategy="snapshot",
+    trial_portion=0.1,
+    train_portion=0.1,
+    eval_strategy="snapshot",
+    eval_portion=0.1,
+    cleanup_denoised=True,
 )
 
 print(f"\n\nFinal results: {len(results)} iterations completed")
