@@ -35,14 +35,17 @@ PER_MODEL_SYSTEM_PROMPT = """\
 You are a senior ML research analyst specialising in deep learning for signal denoising.
 
 Your task: analyse the tuning run summary for ONE model architecture and produce a
-structured summary of what was learned.
+structured analysis covering performance, frequency response, data sensitivity,
+training dynamics, efficiency, and strategy assessment.
 
 You will receive:
 - The model's architectural description (markdown + math)
-- Best and worst denoising scores
+- Best and worst denoising scores (trial best and formal score if available)
 - Best configuration
-- Score trajectory across rounds
+- Score trajectory across rounds (with trial portions and model sizes)
 - Per-round conclusions from the tuning agent's reflections
+- File vector: per-file denoising scores (20 files, frequency increases with index on log scale)
+- Data volume: how many PSD segments were used for training vs baseline
 
 Produce a JSON object with exactly these fields:
 
@@ -56,14 +59,22 @@ Produce a JSON object with exactly these fields:
     ...
   ],
   "best_config_analysis": "Why the best config worked — what made it better than others",
-  "score_trend": "How scores evolved across rounds — improving, plateauing, or erratic"
+  "score_trend": "How scores evolved across rounds — improving, plateauing, or erratic",
+  "frequency_analysis": "Which frequency bands (file indices) the model handles well vs poorly. Identify blind spots (near-zero scores) and strong ranges.",
+  "data_sensitivity": "How sensitive the model is to data volume. Did scores improve when trial_portion increased? How large is the trial-vs-formal gap?",
+  "efficiency_assessment": "Model parameter count vs performance. Is there a simpler config with similar score? Cost-performance tradeoff.",
+  "strategy_assessment": "Did the agent explore effectively? Did it increase data when needed? Did it follow screening→refinement→solidification phases?"
 }
 
 Rules:
 - key_findings: ranked by importance, evidence-based, reference actual values
-- bottlenecks: root causes (e.g. 'architecture capacity ceiling'), not symptoms
+- bottlenecks: root causes (e.g. 'architecture capacity ceiling', 'low-frequency blindness'), not symptoms
 - best_config_analysis: be specific about which hyperparameters mattered most
 - score_trend: identify whether the model has saturated or still has room to improve
+- frequency_analysis: reference specific file indices and score values from the file_vector
+- data_sensitivity: reference training_psd_segments, trial_portion changes across rounds
+- efficiency_assessment: reference model_params and training times if available
+- strategy_assessment: comment on whether the agent's exploration strategy was effective
 - Output only the JSON object — no preamble, no commentary, no markdown
 """
 
@@ -79,28 +90,75 @@ def _build_per_model_prompt(
         f"Run: {summary.run_name} | Status: {summary.status} | Rounds: {summary.completed_rounds}",
         f"Best denoising score : {summary.best_denoising_score}",
         f"Worst denoising score: {summary.worst_denoising_score}",
+    ]
+
+    # Formal score (if available and distinct from best)
+    if summary.formal_score is not None:
+        lines.append(f"Formal round score   : {summary.formal_score}")
+
+    # Model efficiency
+    if summary.best_model_params is not None:
+        lines.append(f"Best model params    : {summary.best_model_params:,}")
+
+    # Data volume context
+    if summary.training_psd_segments is not None:
+        lines.append(f"Training PSD segments: {summary.training_psd_segments} "
+                      f"(baseline typically uses 4000)")
+    if summary.eval_psd_segments is not None:
+        lines.append(f"Eval PSD segments    : {summary.eval_psd_segments}")
+    if summary.trial_portion is not None:
+        lines.append(f"Trial portion (best) : {summary.trial_portion}")
+
+    lines += [
         "",
         "### Architecture Description",
         description,
         "",
         "### Best Config",
         json.dumps(summary.best_config, indent=2) if summary.best_config else "none",
-        "",
-        "### Score Trajectory (chronological)",
     ]
 
-    for i, (score, conclusion) in enumerate(
-        zip(summary.round_scores, summary.round_conclusions), 1
-    ):
-        score_str = f"{score:.4f}" if score is not None else "skipped"
-        lines.append(f"  Round {i}: score={score_str} — {conclusion}")
+    # File vector (per-file performance)
+    if summary.best_file_vector is not None:
+        import math
+        lines += ["", "### File Vector (per-file denoising scores, best experiment)"]
+        lines.append("File index → frequency (log scale): 0=lowest, 19=highest")
+        for i, v in enumerate(summary.best_file_vector):
+            if math.isnan(v):
+                lines.append(f"  File {i:2d}: NaN (not evaluated)")
+            else:
+                lines.append(f"  File {i:2d}: {v:.4f}")
 
-    # Handle case where scores and conclusions have different lengths
-    if len(summary.round_scores) > len(summary.round_conclusions):
-        for i in range(len(summary.round_conclusions), len(summary.round_scores)):
-            score = summary.round_scores[i]
-            score_str = f"{score:.4f}" if score is not None else "skipped"
-            lines.append(f"  Round {i+1}: score={score_str}")
+    if summary.formal_file_vector is not None:
+        import math
+        lines += ["", "### File Vector (formal round — definitive)"]
+        for i, v in enumerate(summary.formal_file_vector):
+            if math.isnan(v):
+                lines.append(f"  File {i:2d}: NaN")
+            else:
+                lines.append(f"  File {i:2d}: {v:.4f}")
+
+    # Score trajectory with per-round trial portions and model params
+    lines += ["", "### Score Trajectory (chronological)"]
+
+    n_rounds = len(summary.round_scores)
+    for i in range(n_rounds):
+        score = summary.round_scores[i] if i < len(summary.round_scores) else None
+        conclusion = summary.round_conclusions[i] if i < len(summary.round_conclusions) else ""
+        trial_p = (summary.round_trial_portions[i]
+                   if summary.round_trial_portions and i < len(summary.round_trial_portions) else None)
+        params = (summary.round_model_params[i]
+                  if summary.round_model_params and i < len(summary.round_model_params) else None)
+
+        score_str = f"{score:.4f}" if score is not None else "skipped"
+        extras = []
+        if trial_p is not None:
+            extras.append(f"portion={trial_p}")
+        if params is not None:
+            extras.append(f"params={params:,}")
+        extra_str = f" [{', '.join(extras)}]" if extras else ""
+
+        lines.append(f"  Round {i+1}: score={score_str}{extra_str} — {conclusion}")
 
     if human_advice:
         lines += [
@@ -125,11 +183,14 @@ cross-model interpretation that identifies the overall state of the research and
 motivates the next step.
 
 You will receive:
-- Per-model summaries (key findings, bottlenecks, config analysis, score trends)
+- Per-model summaries (key findings, bottlenecks, config analysis, score trends,
+  frequency analysis, data sensitivity, efficiency, strategy assessment)
 - Per-model best and worst scores
+- Per-model file vectors (per-file performance across 20 frequency bands)
+- Per-model parameter counts and training data volumes
 - Overall best score and the config that produced it
 
-Produce a JSON object with exactly these three fields:
+Produce a JSON object with exactly these fields:
 
 {
   "key_findings": [
@@ -140,12 +201,16 @@ Produce a JSON object with exactly these three fields:
     "Cross-model root cause #1 — what is fundamentally limiting ALL current models",
     ...
   ],
+  "frequency_comparison": "Which frequency ranges are well-handled by all models vs which are universally weak. Identify if there are frequency bands where no model succeeds.",
+  "efficiency_comparison": "Compare model sizes (parameter counts) against scores. Identify the best score-per-parameter architecture.",
   "take_home_message": "One sentence: the single most critical insight that motivates designing a new architecture."
 }
 
 Rules:
 - key_findings: ranked by importance, MUST compare across models, reference actual scores
 - bottlenecks: focus on fundamental limitations shared across architectures, not per-model issues
+- frequency_comparison: reference specific file indices and per-model file_vector values
+- efficiency_comparison: reference actual parameter counts and scores
 - take_home_message: exactly one sentence, must directly motivate why a new architecture is needed
 - Do not repeat per-model findings verbatim — synthesise and draw cross-model conclusions
 - Output only the JSON object — no preamble, no commentary, no markdown
@@ -159,6 +224,9 @@ def _build_synthesis_prompt(
     overall_best_score: Optional[float],
     overall_worst_score: Optional[float],
     overall_best_config: Optional[Dict],
+    per_model_file_vectors: Optional[Dict[str, List[float]]] = None,
+    per_model_params: Optional[Dict[str, int]] = None,
+    per_model_training_segments: Optional[Dict[str, int]] = None,
     human_advice: Optional[str] = None,
 ) -> str:
     """Build the user prompt for cross-model synthesis."""
@@ -176,15 +244,16 @@ def _build_synthesis_prompt(
             f"## Model: {model_type}",
             f"Best score : {per_model_best.get(model_type)}",
             f"Worst score: {per_model_worst.get(model_type)}",
-            "",
-            "### Key Findings",
         ]
+        if per_model_params and model_type in per_model_params:
+            lines.append(f"Parameters : {per_model_params[model_type]:,}")
+        if per_model_training_segments and model_type in per_model_training_segments:
+            lines.append(f"Training PSD segments: {per_model_training_segments[model_type]}")
+
+        lines += ["", "### Key Findings"]
         for f in summary.get("key_findings", []):
             lines.append(f"  - {f}")
-        lines += [
-            "",
-            "### Bottlenecks",
-        ]
+        lines += ["", "### Bottlenecks"]
         for b in summary.get("bottlenecks", []):
             lines.append(f"  - {b}")
         lines += [
@@ -194,8 +263,29 @@ def _build_synthesis_prompt(
             "",
             f"### Score Trend",
             summary.get("score_trend", "N/A"),
-            "",
         ]
+        # New per-model analysis fields
+        for field in ["frequency_analysis", "data_sensitivity", "efficiency_assessment", "strategy_assessment"]:
+            val = summary.get(field)
+            if val:
+                lines += ["", f"### {field.replace('_', ' ').title()}", val]
+
+        # File vector summary
+        if per_model_file_vectors and model_type in per_model_file_vectors:
+            import math
+            fv = per_model_file_vectors[model_type]
+            non_nan = [(i, v) for i, v in enumerate(fv) if not math.isnan(v)]
+            if non_nan:
+                weak = [(i, v) for i, v in non_nan if v < 1.0]
+                strong = [(i, v) for i, v in non_nan if v >= 10.0]
+                lines += ["", f"### File Vector Summary (best experiment)"]
+                lines.append(f"  Files evaluated: {len(non_nan)}/20")
+                if weak:
+                    lines.append(f"  Weak files (score < 1.0): {[i for i,_ in weak]}")
+                if strong:
+                    lines.append(f"  Strong files (score >= 10): {[i for i,_ in strong]}")
+
+        lines.append("")
 
     if human_advice:
         lines += [
@@ -305,6 +395,27 @@ class ResultInterpretationAgent:
             print(f"    {mt}: {len(per_model_response.get('key_findings', []))} findings, "
                   f"{len(per_model_response.get('bottlenecks', []))} bottlenecks")
 
+        # --- Pre-compute enriched fields from summaries ---
+        per_model_file_vectors: Dict[str, List[float]] = {}
+        weak_frequency_files: Dict[str, List[int]] = {}
+        per_model_params: Dict[str, int] = {}
+        per_model_training_segments: Dict[str, int] = {}
+
+        import math
+        for s in inp.summaries:
+            mt = s.model_type
+            if s.best_file_vector is not None:
+                per_model_file_vectors[mt] = s.best_file_vector
+                # Weak files: non-NaN entries below 1.0 (raw data baseline)
+                weak = [i for i, v in enumerate(s.best_file_vector)
+                        if not math.isnan(v) and v < 1.0]
+                if weak:
+                    weak_frequency_files[mt] = weak
+            if s.best_model_params is not None:
+                per_model_params[mt] = s.best_model_params
+            if s.training_psd_segments is not None:
+                per_model_training_segments[mt] = s.training_psd_segments
+
         # --- Phase 2: Cross-model synthesis ---
         if len(effective_types) == 1:
             single_mt = effective_types[0]
@@ -326,6 +437,9 @@ class ResultInterpretationAgent:
                 overall_best_score=overall_best_score,
                 overall_worst_score=overall_worst_score,
                 overall_best_config=overall_best_config,
+                per_model_file_vectors=per_model_file_vectors or None,
+                per_model_params=per_model_params or None,
+                per_model_training_segments=per_model_training_segments or None,
                 human_advice=inp.human_advice,
             )
             synthesis_response = self.bridge.generate(SYNTHESIS_SYSTEM_PROMPT, synthesis_prompt)
@@ -346,6 +460,11 @@ class ResultInterpretationAgent:
             "per_model_summaries":   per_model_summaries,
             "key_findings":          llm_findings,
             "bottlenecks":           llm_bottlenecks,
+            # Enriched fields
+            "per_model_file_vectors":      per_model_file_vectors or None,
+            "weak_frequency_files":        weak_frequency_files or None,
+            "per_model_params":            per_model_params or None,
+            "per_model_training_segments": per_model_training_segments or None,
             "take_home_message":     llm_take_home,
         })
 
@@ -431,17 +550,23 @@ def tuning_output_to_model_run_summary(
     """
     Convert a HyperparamTuningOutput to a condensed ModelRunSummary.
 
-    Extracts aggregates and per-round trajectory from the all_records field.
-    The raw records are NOT carried forward — only scores and conclusions.
+    Extracts aggregates, per-round trajectory, file_vector, data volume,
+    and efficiency metrics from the all_records field. The raw records
+    are NOT carried forward — only the condensed summary.
     """
     records = output.all_records
-    # Extract per-round data
+
+    # Per-round extraction
     round_scores: List[Optional[float]] = []
     round_conclusions: List[str] = []
+    round_trial_portions: List[Optional[float]] = []
+    round_model_params: List[Optional[int]] = []
 
     for r in records:
         rec = r.model_dump() if hasattr(r, "model_dump") else r
         round_scores.append(rec.get("denoising_score"))
+        round_trial_portions.append(rec.get("trial_portion"))
+        round_model_params.append(rec.get("model_params"))
         memory = rec.get("memory") or {}
         if isinstance(memory, dict):
             round_conclusions.append(memory.get("conclusion") or "")
@@ -449,7 +574,23 @@ def tuning_output_to_model_run_summary(
             conclusion = getattr(memory, "conclusion", None) or ""
             round_conclusions.append(conclusion)
 
-    # Compute worst score from records
+    # Find best record (highest denoising_score)
+    success = [
+        (r.model_dump() if hasattr(r, "model_dump") else r)
+        for r in records
+        if (r.status if hasattr(r, "status") else r.get("status")) == "success"
+        and (r.denoising_score if hasattr(r, "denoising_score") else r.get("denoising_score")) is not None
+    ]
+    best_rec = max(success, key=lambda r: r["denoising_score"]) if success else None
+
+    # Find formal round (last record with is_trial=False)
+    formal_rec = None
+    for r in reversed(success):
+        if not r.get("is_trial", True):
+            formal_rec = r
+            break
+
+    # Compute worst score
     valid_scores = [s for s in round_scores if s is not None]
     worst_score = min(valid_scores) if valid_scores else None
 
@@ -463,6 +604,19 @@ def tuning_output_to_model_run_summary(
         best_config=output.best_config,
         round_scores=round_scores,
         round_conclusions=round_conclusions,
+        # Per-file performance
+        best_file_vector=best_rec.get("file_vector") if best_rec else None,
+        formal_score=formal_rec.get("denoising_score") if formal_rec else None,
+        formal_file_vector=formal_rec.get("file_vector") if formal_rec else None,
+        # Efficiency
+        best_model_params=best_rec.get("model_params") if best_rec else None,
+        # Data volume
+        training_psd_segments=best_rec.get("training_psd_segments") if best_rec else None,
+        eval_psd_segments=best_rec.get("eval_psd_segments") if best_rec else None,
+        trial_portion=best_rec.get("trial_portion") if best_rec else None,
+        # Per-round trends
+        round_trial_portions=round_trial_portions,
+        round_model_params=round_model_params,
     )
 
 

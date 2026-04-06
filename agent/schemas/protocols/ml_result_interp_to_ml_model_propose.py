@@ -38,9 +38,13 @@ def local_full_context(
       - model_descriptions   : full markdown descriptions of each architecture
       - per_model_best/worst, best_denoising_score, best_config
       - key_findings, bottlenecks, take_home_message
+      - per_model_file_vectors  : per-file denoising scores per model (frequency analysis)
+      - weak_frequency_files    : file indices where each model scores poorly
+      - per_model_params        : parameter count per model (efficiency)
+      - per_model_training_segments : training data volume per model
 
     Populates in ml-model-propose (ProposalInput):
-      - interpretation       : full serialised InterpretationOutput
+      - interpretation       : full serialised InterpretationOutput (all fields above)
       - existing_model_types : output.model_types (names the proposal must not reuse)
       - storage              : passed through from the orchestrator
     """

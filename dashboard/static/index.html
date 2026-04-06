@@ -150,6 +150,28 @@
 
   </div>
 
+  <!-- Trial Details Table -->
+  <div class="card" id="trial-panel">
+    <div class="card-title">Trial Details — per-round sampling and timing</div>
+    <div class="add-series-form">
+      <label>Run name
+        <select id="trial-run" style="min-width:140px;">
+          <option value="">loading…</option>
+        </select>
+      </label>
+      <label>Model
+        <select id="trial-model">
+          <option value="">-- select run first --</option>
+        </select>
+      </label>
+      <label style="visibility:hidden;">x
+        <button onclick="App.loadTrialTable()">Load</button>
+      </label>
+      <button onclick="App.loadTrialTable()" style="align-self:flex-end;">Load</button>
+    </div>
+    <div id="trial-table-wrap" style="overflow-x:auto; margin-top:12px;"></div>
+  </div>
+
 </main>
 
 <!-- Plotly.js from CDN -->

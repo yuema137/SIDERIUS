@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch, call
 from agent.schemas.proposal import ProposalInput, ProposalOutput
 from agent.schemas.hyperparam_tuning import ExpertAdvice
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
-from nodes.ml_model_proposal_agent import MLModelProposalAgent
+from nodes.ml_model_proposal_agent import MLModelProposalAgent, _build_reasoning_prompt
 
 
 # ---------------------------------------------------------------------------
@@ -268,3 +268,87 @@ class TestDuplicateNameGuard:
         inp = make_input(tmp_path, existing_model_types=["punet", "fcnet", "wavenet"])
         output = agent.run(inp)
         assert output.model_name == "attn_unet"
+
+
+# ---------------------------------------------------------------------------
+# Reasoning prompt enrichment tests
+# ---------------------------------------------------------------------------
+
+class TestBuildReasoningPromptEnriched:
+    """Tests that _build_reasoning_prompt includes new interpretation fields."""
+
+    def _make_enriched_input(self, **extra_interp):
+        interp = {
+            "model_types": ["punet"],
+            "total_experiments": 10,
+            "best_denoising_score": 1.8,
+            "worst_denoising_score": 0.5,
+            "per_model_best": {"punet": 1.8},
+            "per_model_worst": {"punet": 0.5},
+            "key_findings": ["test finding"],
+            "bottlenecks": ["test bottleneck"],
+            "take_home_message": "Need better architecture.",
+            "model_descriptions": {"punet": "PUNet description"},
+        }
+        interp.update(extra_interp)
+        return ProposalInput(
+            interpretation=interp,
+            existing_model_types=["punet"],
+            storage={"backend": "local", "local": {"workspace": "/tmp/test", "run_name": "r1"}},
+        )
+
+    def test_includes_file_vectors(self):
+        fv = [0.001, 0.01] + [5.0] * 18
+        inp = self._make_enriched_input(
+            per_model_file_vectors={"punet": fv},
+        )
+        prompt = _build_reasoning_prompt(inp)
+        assert "File Vector" in prompt
+        assert "weak files" in prompt.lower()
+
+    def test_includes_weak_frequency_files(self):
+        inp = self._make_enriched_input(
+            weak_frequency_files={"punet": [0, 1, 2, 3]},
+        )
+        prompt = _build_reasoning_prompt(inp)
+        assert "Weak Frequency" in prompt
+        assert "[0, 1, 2, 3]" in prompt
+
+    def test_includes_model_params(self):
+        inp = self._make_enriched_input(
+            per_model_params={"punet": 55000},
+        )
+        prompt = _build_reasoning_prompt(inp)
+        assert "55,000" in prompt
+        assert "Model Parameters" in prompt
+
+    def test_includes_training_segments(self):
+        inp = self._make_enriched_input(
+            per_model_training_segments={"punet": 200},
+        )
+        prompt = _build_reasoning_prompt(inp)
+        assert "200" in prompt
+        assert "Training Data Volume" in prompt
+
+    def test_includes_frequency_comparison(self):
+        inp = self._make_enriched_input(
+            frequency_comparison="All models struggle with files 0-3.",
+        )
+        prompt = _build_reasoning_prompt(inp)
+        assert "Frequency Comparison" in prompt
+        assert "files 0-3" in prompt
+
+    def test_includes_efficiency_comparison(self):
+        inp = self._make_enriched_input(
+            efficiency_comparison="PUNet has best score-per-parameter.",
+        )
+        prompt = _build_reasoning_prompt(inp)
+        assert "Efficiency Comparison" in prompt
+
+    def test_works_without_enriched_fields(self):
+        """Old-style interpretation (no enriched fields) still produces valid prompt."""
+        inp = self._make_enriched_input()
+        prompt = _build_reasoning_prompt(inp)
+        assert "punet" in prompt
+        assert "test bottleneck" in prompt
+        assert "File Vector" not in prompt

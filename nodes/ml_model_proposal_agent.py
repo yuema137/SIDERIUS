@@ -65,9 +65,18 @@ In your reasoning, cover all of the following:
    Concrete dimensions belong only in baseline_config.
 5. What are the likely failure modes of this architecture?
    What should the hyperparameter tuning agent watch out for?
+6. Frequency analysis and trial strategy guidance:
+   - Review the per-model file vectors to identify which frequency bands are weak.
+     If low-frequency files (0-4) score near zero across all models, the new architecture
+     should specifically address low-frequency signal recovery.
+   - Recommend a trial strategy for the hyperparameter tuner:
+     * What trial_portion to start with (based on model complexity — larger models need more data)
+     * How many epochs for initial screening vs refinement
+     * Whether to use "snapshot" (all files), "target" (weak files only), or "anchors" (extrema)
+     * Whether the architecture is data-hungry (needs high trial_portion) or data-efficient
 
-Think step by step. Be specific. Reference actual scores and model names from the
-interpretation. Do not produce JSON — that is the next step."""
+Think step by step. Be specific. Reference actual scores, model names, and file vector
+patterns from the interpretation. Do not produce JSON — that is the next step."""
 
 
 PROPOSAL_COMMIT_PROMPT = """\
@@ -85,8 +94,14 @@ Output a JSON object with exactly these fields:
     "focus_areas": ["What to prioritise during hyperparameter tuning for this architecture"],
     "constraints": ["Hard limits — must include at least one VRAM limit and one parameter count limit"],
     "known_failures": ["Configs or approaches to avoid, based on patterns in the interpretation"],
-    "suggested_directions": ["Concrete first experiments to try, e.g. 'start with depth=2, lr=1e-4'"],
-    "rationale": "Why this guidance is appropriate for this specific architecture."
+    "suggested_directions": [
+      "Concrete first experiments to try, e.g. 'start with depth=2, lr=1e-4'",
+      "Trial strategy guidance: recommended trial_portion (e.g. 0.1 for data-hungry models)",
+      "Recommended epochs for screening (1-3) vs refinement (5-10)",
+      "Whether to use snapshot/target/anchors strategy based on frequency weaknesses",
+      "Which frequency bands (file indices) to focus on if using target strategy"
+    ],
+    "rationale": "Why this guidance is appropriate for this specific architecture. Include reasoning about data volume needs and frequency-specific training."
   },
   "baseline_config": {
     "model_config": { ... architecture-specific hyperparameter fields ... },
@@ -157,6 +172,53 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
         interp.get("take_home_message", ""),
         "",
     ]
+
+    # Frequency analysis (from enriched interpretation)
+    freq_comp = interp.get("frequency_comparison")
+    if freq_comp:
+        lines += ["### Frequency Comparison (cross-model)", freq_comp, ""]
+
+    eff_comp = interp.get("efficiency_comparison")
+    if eff_comp:
+        lines += ["### Efficiency Comparison (cross-model)", eff_comp, ""]
+
+    # Per-model file vectors
+    file_vectors = interp.get("per_model_file_vectors")
+    if file_vectors:
+        import math
+        lines.append("### Per-model File Vectors (per-file denoising scores)")
+        lines.append("File index → frequency (log scale): 0=lowest, 19=highest")
+        for mt, fv in file_vectors.items():
+            non_nan = [(i, v) for i, v in enumerate(fv) if not math.isnan(v)]
+            weak = [i for i, v in non_nan if v < 1.0]
+            strong = [i for i, v in non_nan if v >= 10.0]
+            lines.append(f"  {mt}: weak files (score<1.0)={weak}, strong files (score>=10)={strong}")
+        lines.append("")
+
+    # Weak frequency files
+    weak_files = interp.get("weak_frequency_files")
+    if weak_files:
+        lines.append("### Weak Frequency Bands (score < 1.0 = no denoising effect)")
+        for mt, files in weak_files.items():
+            lines.append(f"  {mt}: files {files}")
+        lines.append("")
+
+    # Per-model efficiency
+    model_params = interp.get("per_model_params")
+    if model_params:
+        lines.append("### Model Parameters")
+        for mt, params in model_params.items():
+            score = per_best.get(mt)
+            lines.append(f"  {mt}: {params:,} params → score {score}")
+        lines.append("")
+
+    # Per-model training data volume
+    training_segs = interp.get("per_model_training_segments")
+    if training_segs:
+        lines.append("### Training Data Volume (PSD segments)")
+        for mt, segs in training_segs.items():
+            lines.append(f"  {mt}: {segs} segments (baseline=4000)")
+        lines.append("")
 
     descriptions = interp.get("model_descriptions", {})
     if descriptions:
