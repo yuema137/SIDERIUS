@@ -134,6 +134,8 @@ class LLMBridge:
 
         self.client = OpenAI(
             api_key=self.api_key,
+            max_retries=5,
+            timeout=120.0,
             **({"base_url": base_url} if base_url else {}),
         )
 
