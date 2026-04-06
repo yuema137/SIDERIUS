@@ -411,15 +411,203 @@ All completed:
 
 ### Phase 3: Slurm test mode
 
-- [ ] Create standalone runner: `sdsc_submission_scripts/run_exploration_test.py`
-- [ ] Create Slurm template: `sdsc_submission_scripts/submit_exploration_test.slurm`
+**Goal**: Run the same Tier 3 integration test on SDSC Expanse via Slurm, validating
+that the workflow works on HPC infrastructure with different data paths and GPU hardware.
+
+#### Step 3.1: Create standalone test runner
+
+**File**: `sdsc_submission_scripts/run_exploration_test.py`
+
+A standalone Python script (not pytest) that:
+1. Calls `run_workflow()` with the same minimal test parameters as Phase 1
+2. Calls `validate_workflow_outputs()` (imported from the test file)
+3. Prints PASS/FAIL and exits with code 0/1
+4. Accepts CLI args for workspace, run_name, and data paths
+
+This decouples execution from pytest — the Slurm job runs this script directly.
+
+```python
+# Usage: python sdsc_submission_scripts/run_exploration_test.py \
+#          --workspace /scratch/test_output --run_name test_full_loop
+```
+
+#### Step 3.2: Create Slurm submission script
+
+**File**: `sdsc_submission_scripts/submit_exploration_test.slurm`
+
+Follow the same pattern as `submit_hpt_agent.slurm`:
+- Fixed SBATCH headers: account, job-name, output/error log paths
+- Resource params via CLI: `--partition gpu-shared --gres gpu:v100:1 --mem 32G --time 00:30:00`
+- Environment setup: source .bashrc, activate .venv, set PYTHONPATH
+- Parse `tidmad_data_config.yaml` for data paths
+- Run `run_exploration_test.py`
+- Post-run verification: check output files exist and are non-empty
+
+```bash
+# Launch:
+sbatch --partition=gpu-shared --gres=gpu:v100:1 --mem=32G --time=00:30:00 \
+  sdsc_submission_scripts/submit_exploration_test.slurm \
+  --workspace /expanse/lustre/projects/ddp433/ym137/test_output \
+  --run_name test_full_loop
+```
+
+#### Step 3.3: Add Slurm execution mode to pytest
+
+Update `tests/integration/workflows/test_full_exploration_loop.py`:
+- Add `--execution-mode` pytest option in `conftest.py`
+- When `--execution-mode=slurm`:
+  1. Generate the `sbatch` command with appropriate resource flags
+  2. Submit via `subprocess.run(["sbatch", ...])`, capture job ID from stdout
+  3. Poll `squeue -j {job_id} -h` every 30s until job disappears (with 30 min timeout)
+  4. Read Slurm output log to check exit status
+  5. Read the workflow output directory (passed via `--workspace`)
+  6. Call `validate_workflow_outputs()` on the results
+
+- Additional pytest options for Slurm mode:
+  - `--slurm-partition` (default: `gpu-shared`)
+  - `--slurm-account` (default: `ddp433`)
+  - `--slurm-workspace` (required in Slurm mode — no tmp_path on compute nodes)
+
+#### Step 3.4: Verify on SDSC
+
+```bash
+# SSH to SDSC
+ssh sdsc_expanse
+
+# Pull latest code
+cd ~/SIDERIUS && git pull origin small_sample_trial_fixed_config
+
+# Option A: Run the standalone test directly on a compute node
+srun --partition=gpu-shared --gres=gpu:v100:1 --mem=32G --time=00:30:00 \
+  python sdsc_submission_scripts/run_exploration_test.py \
+  --workspace /expanse/lustre/projects/ddp433/ym137/test_output \
+  --run_name test_full_loop
+
+# Option B: Submit via Slurm
+sbatch --partition=gpu-shared --gres=gpu:v100:1 --mem=32G --time=00:30:00 \
+  sdsc_submission_scripts/submit_exploration_test.slurm
+
+# Option C: Run via pytest (from login node, submits Slurm job automatically)
+uv run pytest -m real_run tests/integration/workflows/test_full_exploration_loop.py \
+  -v -s --execution-mode=slurm \
+  --slurm-workspace /expanse/lustre/projects/ddp433/ym137/test_output
+```
+
+#### Step 3.5: Checklist
+
+- [ ] Create `sdsc_submission_scripts/run_exploration_test.py`
+- [ ] Create `sdsc_submission_scripts/submit_exploration_test.slurm`
+- [ ] Add `--execution-mode` pytest option to `conftest.py`
 - [ ] Add Slurm execution path in test (sbatch + poll + timeout)
-- [ ] Reuse validation function from Phase 1
-- [ ] Test on SDSC: `uv run pytest -m real_run ... --execution-mode=slurm`
+- [ ] Import and reuse `validate_workflow_outputs()` from Phase 1
+- [ ] Verify `tidmad_data_config.yaml` on SDSC has correct paths
+- [ ] Verify `segment_anchors.json` exists on SDSC
+- [ ] Verify tuning outputs exist: `{siderius_data}/{model}/v3_file6/agent/run_output_v3_file6_agent.json`
+- [ ] Run test on SDSC — all 5 stages pass
+- [ ] Verify cleanup: plugin files removed from `agent_generated/models/`
+
+---
 
 ### Phase 4: Production Slurm deployment
 
-- [ ] Create `sdsc_submission_scripts/submit_exploration.slurm` for production runs
-- [ ] Support multi-exploration GPU packing (N explorations per GPU)
-- [ ] Post-run verification (similar to `submit_hpt_agent.slurm`)
-- [ ] Update `run_exploration.py` with `--gpu_memory_limit_gb` default based on packing
+**Goal**: Run the full exploration workflow on SDSC for real research — multiple
+iterations, full tuning budgets, and GPU packing for SU efficiency.
+
+#### Step 4.1: Create production Slurm script
+
+**File**: `sdsc_submission_scripts/submit_exploration.slurm`
+
+Similar to `submit_hpt_agent.slurm` but calls `run_exploration.py` instead of
+`run_comparison.py`. Key differences from the test script:
+- Longer wall time: `--time=48:00:00` (production runs take hours/days)
+- More memory: `--mem=64G` (formal rounds load all 20 files)
+- Configurable parameters: `--max_iterations`, `--max_rounds`, `--gpu_memory_limit_gb`
+
+```bash
+sbatch --partition=gpu-shared --gres=gpu:v100:1 --mem=64G --time=48:00:00 \
+  sdsc_submission_scripts/submit_exploration.slurm \
+  --max_iterations 10 --max_rounds 20 --gpu_memory_limit_gb 24
+```
+
+#### Step 4.2: Multi-exploration GPU packing
+
+**File**: `sdsc_submission_scripts/run_multi_exploration.sh`
+
+Orchestrator script that launches N explorations on one GPU, similar to
+`run_all_models_trial_sdsc.sh` but for the workflow:
+
+```bash
+# Allocate 1 V100 (32 GB), run 3 explorations at 10 GB each
+#SBATCH --gres=gpu:v100:1
+#SBATCH --mem=96G
+
+python run_exploration.py --gpu_memory_limit_gb 10 --run_name explore_v1 &
+python run_exploration.py --gpu_memory_limit_gb 10 --run_name explore_v2 &
+python run_exploration.py --gpu_memory_limit_gb 10 --run_name explore_v3 &
+wait
+```
+
+Each process gets a hard VRAM cap via `torch.cuda.set_per_process_memory_fraction()`.
+The soft LLM constraint is set lower (e.g., "VRAM < 8 GB") to absorb overshoot.
+
+#### Step 4.3: Post-run verification
+
+The Slurm script should verify outputs after completion, same pattern as
+`submit_hpt_agent.slurm`:
+
+```bash
+# Check workflow summary exists
+SUMMARY_FILE="${WORKSPACE}/${RUN_NAME}/workflow_${RUN_NAME}.json"
+if [ ! -s "$SUMMARY_FILE" ]; then
+    echo "[FAIL] Workflow summary not found or empty: $SUMMARY_FILE"
+    exit 1
+fi
+
+# Check at least one iteration completed
+ITER_COUNT=$(python -c "import json; d=json.load(open('$SUMMARY_FILE')); print(d.get('completed_iterations', 0))")
+if [ "$ITER_COUNT" -eq 0 ]; then
+    echo "[FAIL] No iterations completed. Check logs for validation failures."
+    exit 1
+fi
+
+echo "[SUCCESS] $ITER_COUNT iterations completed. Results: $SUMMARY_FILE"
+```
+
+#### Step 4.4: Monitoring
+
+Production runs take hours/days. Monitoring options:
+- **Slurm logs**: `tail -f sdsc_submission_scripts/logs/exploration_{jobid}.out`
+- **Dashboard**: SSH tunnel + dashboard on port 8000 (already set up)
+- **squeue**: `squeue -u ym137` to check job status
+- **Iteration progress**: `ls {workspace}/{run_name}/iteration_*/` to count completed iterations
+
+#### Step 4.5: SDSC-specific considerations
+
+- **Lustre filesystem**: Use `$SCRATCH` (`/expanse/lustre/projects/ddp433/ym137/`) for
+  all I/O — home directory has quota limits
+- **Wall time**: gpu-shared partition has 48h limit. For longer runs, use checkpointing
+  (the workflow already saves state per iteration — restart by loading from last iteration)
+- **Network access**: SDSC compute nodes CAN access external APIs (Gemini, OpenAI) —
+  verified in existing `submit_hpt_agent.slurm` runs
+- **Module loads**: No special modules needed — Python venv handles all dependencies
+- **Data paths**: `tidmad_data_config.yaml` on SDSC points to Lustre paths. Verify with:
+  ```bash
+  cat ~/SIDERIUS/tidmad_data_config.yaml
+  # Should show: /expanse/lustre/projects/ddp433/ym137/...
+  ```
+
+#### Step 4.6: Checklist
+
+- [ ] Create `sdsc_submission_scripts/submit_exploration.slurm`
+- [ ] Create `sdsc_submission_scripts/run_multi_exploration.sh`
+- [ ] Implement `gpu_memory_limit_gb` (Phase 2 prerequisite)
+- [ ] Add post-run verification to Slurm script
+- [ ] Test single exploration on SDSC (1 iteration, 2 rounds)
+- [ ] Test multi-exploration packing (2 explorations on 1 GPU)
+- [ ] Verify dashboard shows results from SDSC runs
+- [ ] Document wall time estimates per packing configuration:
+  | Packing | VRAM budget | Est. time per iteration | Max iterations in 48h |
+  |---------|-------------|------------------------|-----------------------|
+  | 1-way   | 24 GB       | TBD                    | TBD                   |
+  | 2-way   | 12 GB       | TBD                    | TBD                   |
+  | 3-way   | 8 GB        | TBD                    | TBD                   |
