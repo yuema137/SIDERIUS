@@ -390,7 +390,11 @@ Each model (built-in and plugin) declares its **output type**, which determines 
 | Output type | Forward contract | Valid losses | Example models |
 |------------|-----------------|-------------|----------------|
 | `"classifier"` | `[B, 256, T] float32` | `ce`, `focal`, `focal_cw` | punet, transformer, wavenet, rnn, gated_fno |
-| `"regressor"` | `[B, T] float32` | `smooth_l1` | fcnet |
+| `"regressor"` | `[B, T] float32` | `smooth_l1` | (future regressor plugins) |
+| `"hybrid"` | `[B, 256, T] float32` | ALL (`ce`, `focal`, `focal_cw`, `smooth_l1`) | fcnet |
+
+Note: fcnet outputs `[B, 256, T]` like classifiers but supports regression-style
+training with `smooth_l1`. The "hybrid" type allows all loss types.
 
 ### Implementation plan
 

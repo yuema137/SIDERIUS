@@ -350,7 +350,7 @@ class TestCheckInstantiationAndGradient:
     def test_valid_plugin_returns_true_true_none(self, tmp_path):
         path = tmp_path / "valid_plugin.py"
         path.write_text(VALID_PLUGIN_SRC)
-        inst_ok, grad_ok, err = _check_instantiation_and_gradient(str(path))
+        inst_ok, grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
         assert inst_ok is True
         assert grad_ok is True
         assert err is None
@@ -358,7 +358,7 @@ class TestCheckInstantiationAndGradient:
     def test_import_error_returns_false_false_message(self, tmp_path):
         path = tmp_path / "bad_import.py"
         path.write_text("import nonexistent_module_xyz_abc\n")
-        inst_ok, grad_ok, err = _check_instantiation_and_gradient(str(path))
+        inst_ok, grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
         assert inst_ok is False
         assert grad_ok is False
         assert err is not None
@@ -388,7 +388,7 @@ class TestCheckInstantiationAndGradient:
         """)
         path = tmp_path / "wrong_shape.py"
         path.write_text(wrong_shape_src)
-        inst_ok, grad_ok, err = _check_instantiation_and_gradient(str(path))
+        inst_ok, grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
         assert inst_ok is False
         assert grad_ok is False
         assert err is not None
@@ -423,7 +423,7 @@ class TestCheckInstantiationAndGradient:
         """)
         path = tmp_path / "no_grad.py"
         path.write_text(no_grad_src)
-        inst_ok, grad_ok, err = _check_instantiation_and_gradient(str(path))
+        inst_ok, grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
         # instantiation and forward pass succeed (correct shape)
         assert inst_ok is True
         # gradient check fails because output is detached

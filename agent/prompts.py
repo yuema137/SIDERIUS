@@ -265,12 +265,33 @@ def get_planner_user_prompt(
     """
     history_context = json.dumps(memory_history, indent=2) if memory_history else "No previous experiments recorded."
 
-    # Handle the model constraint message
+    # Handle the model constraint message + output type / valid losses
     model_constraint = ""
     if force_model != "auto":
+        from ml_models.plugin_loader import get_output_type
+        output_type = get_output_type(force_model)
+        if output_type == "classifier":
+            loss_note = (
+                f"- This model is a **CLASSIFIER** (output [B, 256, T]). "
+                f"Valid loss types: **ce, focal, focal_cw**. "
+                f"Do NOT use smooth_l1 (regression only).\n"
+            )
+        elif output_type == "regressor":
+            loss_note = (
+                f"- This model is a **REGRESSOR** (output [B, T]). "
+                f"Valid loss types: **smooth_l1**. "
+                f"Do NOT use ce, focal, or focal_cw (classification only).\n"
+            )
+        else:  # hybrid
+            loss_note = (
+                f"- This model is a **HYBRID** — it supports ALL loss types: "
+                f"ce, focal, focal_cw, smooth_l1.\n"
+            )
+
         model_constraint = (
             f"\n### CRITICAL CONSTRAINT:\n"
             f"- You MUST use the '{force_model}' architecture. The model type is fixed and cannot be changed.\n"
+            f"{loss_note}"
             f"- Because the architecture is fixed, the Cross-Exploration Rule applies to "
             f"**loss config and train config instead**. You must vary `loss_type`, `lr`, and `batch_size` "
             f"across runs with the same rigor you would apply to switching architectures. "
@@ -279,7 +300,9 @@ def get_planner_user_prompt(
     else:
         model_constraint = (
             "\n- You are free to choose any architecture based on the Cross-Exploration Rule. "
-            "Even when switching architectures, continue to vary loss_type and train_config to explore the full search space."
+            "Even when switching architectures, continue to vary loss_type and train_config to explore the full search space.\n"
+            "- **Loss compatibility**: 'smooth_l1' is ONLY for regressor models (fcnet). "
+            "All other models are classifiers — use 'ce', 'focal', or 'focal_cw'."
         )
 
     # Build an OOM warning if any skipped_oom_risk records exist in memory

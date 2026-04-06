@@ -197,7 +197,7 @@ def validate_workflow_outputs(
     for check in [
         "plugin_registered", "tests_passed", "description_valid",
         "config_fields_valid", "instantiation_passed",
-        "gradient_check_passed", "llm_review_passed",
+        "gradient_check_passed", "output_type_valid", "llm_review_passed",
     ]:
         assert validation[check] is True, f"Validation check '{check}' failed"
     print(f"  [PASS] Validation: all 7 checks passed")
