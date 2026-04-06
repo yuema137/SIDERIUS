@@ -278,26 +278,148 @@ serialization.
 
 ## Implementation Order
 
+### Step 1: Enrich `ModelRunSummary` and `InterpretationOutput` schemas — DONE ✓
+
+**File:** `agent/schemas/interpretation.py`
+
+**Checklist:**
+- [x] `ModelRunSummary`: add `best_file_vector`, `formal_score`, `formal_file_vector`
+- [x] `ModelRunSummary`: add `best_model_params`
+- [x] `ModelRunSummary`: add `training_psd_segments`, `eval_psd_segments`, `trial_portion`
+- [x] `ModelRunSummary`: add `round_trial_portions`, `round_model_params`
+- [x] `InterpretationOutput`: add `per_model_file_vectors`, `weak_frequency_files`
+- [x] `InterpretationOutput`: add `per_model_params`, `per_model_training_segments`
+- [x] All new fields are `Optional` with `None` defaults (backward compatible)
+- [x] All 401 existing agent tests pass unchanged
+- [x] All 33 interpretation schema tests pass unchanged
+
+---
+
+### Step 2: Update protocol `ml_model_tune_to_ml_result_interp`
+
+**File:** `agent/schemas/protocols/ml_model_tune_to_ml_result_interp.py`
+
+**Status:** NOT STARTED
+
+**Checklist:**
+- [ ] `local_all_records()`: extract `best_file_vector` from best record
+- [ ] `local_all_records()`: find formal round, extract `formal_score` and `formal_file_vector`
+- [ ] `local_all_records()`: extract `best_model_params` from best record
+- [ ] `local_all_records()`: extract `training_psd_segments`, `eval_psd_segments`, `trial_portion`
+- [ ] `local_all_records()`: build `round_trial_portions` and `round_model_params` lists
+- [ ] Existing protocol unit tests still pass
+- [ ] New protocol unit tests for each extracted field
+- [ ] Integration test (Tier 2): tuner → interpretation edge with trial data
+
+---
+
+### Step 3: Update interpretation agent prompts
+
+**File:** `nodes/result_interpretation_agent.py`
+
+**Status:** NOT STARTED
+
+**Checklist:**
+- [ ] Phase 1 prompt: inject `file_vector` with frequency explanation
+- [ ] Phase 1 prompt: inject data volume context (`training_psd_segments` vs baseline)
+- [ ] Phase 1 prompt: inject formal vs trial distinction (`formal_score` vs `best_denoising_score`)
+- [ ] Phase 1 prompt: inject `best_model_params` for efficiency context
+- [ ] Phase 2 prompt: inject per-model `file_vector` comparison
+- [ ] Phase 2 prompt: inject per-model efficiency comparison (`per_model_params`)
+- [ ] Handle `None` gracefully (skip sections when data unavailable)
+- [ ] Populate `InterpretationOutput.per_model_file_vectors` from summaries
+- [ ] Populate `InterpretationOutput.weak_frequency_files` (compute threshold)
+- [ ] Populate `InterpretationOutput.per_model_params` from summaries
+- [ ] Populate `InterpretationOutput.per_model_training_segments` from summaries
+- [ ] Existing interpretation unit tests pass
+- [ ] New unit tests for enriched output fields
+
+---
+
+### Step 4: Verify `InterpretationOutput` schema (already done in Step 1)
+
+**File:** `agent/schemas/interpretation.py`
+
+**Status:** DONE ✓ (completed as part of Step 1)
+
+**Checklist:**
+- [x] `per_model_file_vectors` field added
+- [x] `weak_frequency_files` field added
+- [x] `per_model_params` field added
+- [x] `per_model_training_segments` field added
+
+---
+
+### Step 5: Update proposal agent prompts
+
+**File:** `nodes/ml_model_proposal_agent.py`
+
+**Status:** NOT STARTED
+
+**Checklist:**
+- [ ] Call 1 (Reasoning) prompt: inject per-model `file_vector` patterns
+- [ ] Call 1 (Reasoning) prompt: inject per-model `params` for efficiency context
+- [ ] Call 1 (Reasoning) prompt: inject data volume context
+- [ ] Call 1 (Reasoning) prompt: inject `weak_frequency_files` for targeted design
+- [ ] Call 2 (Commit) prompt: instruct to include trial parameter guidance in `expert_advice.suggested_directions`
+- [ ] Call 2 (Commit) prompt: instruct to include recommended `trial_portion`, `epochs`, strategy
+- [ ] Call 2 (Commit) prompt: instruct to include frequency-specific training advice
+- [ ] Existing proposal unit tests pass
+- [ ] New unit tests for enriched expert_advice output
+
+---
+
+### Step 6: Update protocol `ml_result_interp_to_ml_model_propose`
+
+**File:** `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py`
+
+**Status:** NOT STARTED
+
+**Checklist:**
+- [ ] Verify new `InterpretationOutput` fields are included in serialization
+- [ ] Pass `per_model_file_vectors`, `weak_frequency_files` through to `ProposalInput`
+- [ ] Pass `per_model_params`, `per_model_training_segments` through
+- [ ] Existing protocol unit tests pass
+- [ ] New protocol unit tests for new fields
+
+---
+
+### Step 7: End-to-end integration tests
+
+**Status:** NOT STARTED
+
+**Checklist:**
+- [ ] Unit test: `ModelRunSummary` with all new fields populated
+- [ ] Unit test: protocol `tuner → interp` extracts all new fields correctly
+- [ ] Unit test: interpretation agent produces enriched output with file_vector analysis
+- [ ] Unit test: protocol `interp → proposal` passes enriched fields
+- [ ] Unit test: proposal agent generates trial parameter guidance in expert_advice
+- [ ] Integration test (Tier 2): full tuner → interpretation edge with real trial data
+- [ ] Integration test (Tier 2): full interpretation → proposal edge
+- [ ] Verify backward compatibility: old records (without trial fields) produce None, no errors
+
+---
+
+### Dependency graph
+
 ```
-Step 1: ModelRunSummary schema (add fields)
+Step 1 (schemas) ✓
     │
-Step 2: Protocol tuner → interpretation (extract fields)
+Step 2 (protocol tuner → interp)
     │
-Step 3: Interpretation agent prompts (use fields in LLM context)
+Step 3 (interpretation agent prompts)
     │
-Step 4: InterpretationOutput schema (add fields)
+Step 4 (InterpretationOutput schema) ✓
     │
-Step 5: Proposal agent prompts (include trial guidance in expert_advice)
+Step 5 (proposal agent prompts)
     │
-Step 6: Protocol interpretation → proposal (pass fields through)
+Step 6 (protocol interp → proposal)
     │
-Step 7: Tests (all steps)
+Step 7 (end-to-end tests)
 ```
 
-Steps 1-2 can be tested independently (tuner → interpretation edge).
-Steps 3-4 can be tested independently (interpretation agent with enriched input).
-Steps 5-6 can be tested independently (proposal agent with enriched interpretation).
-Step 7 verifies end-to-end.
+Steps 1+4 are complete. Steps 2-3 can be tested independently. Steps 5-6 can be
+tested independently. Step 7 verifies the full chain.
 
 ---
 
