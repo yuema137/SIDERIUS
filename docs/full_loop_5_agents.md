@@ -394,7 +394,7 @@ Each model (built-in and plugin) declares its **output type**, which determines 
 
 ### Implementation plan
 
-#### Step 1: Add `PLUGIN_OUTPUT_TYPE` to the plugin contract
+#### Step 1: Add `PLUGIN_OUTPUT_TYPE` to the plugin contract and built-in registry
 
 Each plugin file already exports 3 constants. Add a 4th:
 
@@ -418,55 +418,65 @@ BUILTIN_OUTPUT_TYPES = {
 }
 ```
 
-#### Step 2: Implementor writes `PLUGIN_OUTPUT_TYPE`
+**Files**: `ml_models/models_sandbox.py`
 
-The implementor agent already knows the forward contract from the proposal's
-`mathematical_definition`. Update the plugin file template to include:
+**Checklist**:
+- [ ] Add `BUILTIN_OUTPUT_TYPES` dict after `MODEL_REGISTRY`
+- [ ] Verify all 6 built-in models have correct output types
+- [ ] Unit test: `test_builtin_output_types_covers_all_registry_models`
 
-```python
-PLUGIN_OUTPUT_TYPE = "classifier"  # [B, 256, T] → 256-class classification
-```
-
-The LLM decides this based on the architecture. The validator checks it in Step 3.
-
-#### Step 3: Validator checks output type consistency
-
-Add an 8th validation check: verify that `PLUGIN_OUTPUT_TYPE` matches the actual
-forward pass output shape:
-
-- If output shape is `[B, 256, T]` → must be `"classifier"`
-- If output shape is `[B, T]` → must be `"regressor"`
-- Mismatch → validation fails with clear error
-
-#### Step 4: Plugin loader collects output types
+#### Step 2: Plugin loader collects output types
 
 `ml_models/plugin_loader.py` already loads `PLUGIN_MODEL_TYPE`, `PLUGIN_CONFIG_CLASS`,
-`PLUGIN_MODEL_CLASS`. Add:
+`PLUGIN_MODEL_CLASS`. Extend to load `PLUGIN_OUTPUT_TYPE` and build a registry.
+
+Add a unified helper:
 
 ```python
 PLUGIN_OUTPUT_TYPE_REGISTRY: dict[str, str] = {}
-# Populated at load time: {"my_model": "classifier", ...}
-```
 
-Add a helper function:
-
-```python
 def get_output_type(model_type: str) -> str:
     """Return 'classifier' or 'regressor' for any model (built-in or plugin)."""
+    from ml_models.models_sandbox import BUILTIN_OUTPUT_TYPES
     if model_type in BUILTIN_OUTPUT_TYPES:
         return BUILTIN_OUTPUT_TYPES[model_type]
     if model_type in PLUGIN_OUTPUT_TYPE_REGISTRY:
         return PLUGIN_OUTPUT_TYPE_REGISTRY[model_type]
-    raise ValueError(f"Unknown model type: {model_type}")
+    # Unknown model — default to classifier (the standard forward contract)
+    return "classifier"
 ```
 
-#### Step 5: Update `ExperimentConfig` validator
+**Files**: `ml_models/plugin_loader.py`
 
-Replace the hardcoded check with a registry lookup:
+**Checklist**:
+- [ ] Add `PLUGIN_OUTPUT_TYPE_REGISTRY` dict
+- [ ] Load `PLUGIN_OUTPUT_TYPE` from each plugin file during `extend_registries()`
+- [ ] Default to `"classifier"` if `PLUGIN_OUTPUT_TYPE` is missing (backward compat)
+- [ ] Add `get_output_type()` function
+- [ ] Unit test: `test_plugin_output_type_loaded`
+- [ ] Unit test: `test_get_output_type_builtin`
+- [ ] Unit test: `test_get_output_type_plugin`
+- [ ] Unit test: `test_get_output_type_unknown_defaults_to_classifier`
+
+#### Step 3: Backfill existing plugins
+
+Add `PLUGIN_OUTPUT_TYPE = "classifier"` to all existing agent-generated plugins.
+These all follow the `[B, 256, T]` contract.
+
+**Files**: `agent_generated/models/*.py` (all existing plugins)
+
+**Checklist**:
+- [ ] Add `PLUGIN_OUTPUT_TYPE = "classifier"` to each plugin file, after `PLUGIN_MODEL_CLASS`
+- [ ] Verify with: `grep PLUGIN_OUTPUT_TYPE agent_generated/models/*.py`
+
+#### Step 4: Update `ExperimentConfig` validator
+
+Replace the hardcoded `m_type != "fcnet"` check with a registry lookup:
 
 ```python
 @model_validator(mode='after')
 def validate_architecture_loss_match(self) -> 'ExperimentConfig':
+    from ml_models.plugin_loader import get_output_type
     output_type = get_output_type(self.model_type)
     l_type = self.loss_config.loss_type
 
@@ -481,30 +491,86 @@ def validate_architecture_loss_match(self) -> 'ExperimentConfig':
     return self
 ```
 
-#### Step 6: Tell the LLM
+**Files**: `ml_models/models_format_sandbox.py`
 
-In the planner prompt, when `force_model` is set, inject the output type:
+**Checklist**:
+- [ ] Replace hardcoded check with `get_output_type()` lookup
+- [ ] Existing unit tests still pass (punet+smooth_l1 rejected, fcnet+ce allowed)
+- [ ] New test: `test_plugin_classifier_rejects_smooth_l1`
+- [ ] New test: `test_plugin_regressor_accepts_smooth_l1`
+- [ ] New test: `test_plugin_regressor_rejects_ce`
+
+#### Step 5: Implementor writes `PLUGIN_OUTPUT_TYPE` in plugin template
+
+The implementor assembles the plugin file from a template + LLM-generated code sections.
+Add `PLUGIN_OUTPUT_TYPE` to the fixed template portion.
+
+Since the current forward contract is always `[B, 256, T]` (classifier), the implementor
+can hardcode `"classifier"` for now. When we support regressor plugins, the LLM will need
+to decide based on the mathematical_definition, and the code prompt should ask it to
+specify the output type.
+
+**Files**: `nodes/ml_model_implementor.py`
+
+**Checklist**:
+- [ ] Find the `_assemble_plugin()` function that builds the plugin file
+- [ ] Add `PLUGIN_OUTPUT_TYPE = "classifier"` after `PLUGIN_MODEL_CLASS` in the template
+- [ ] Unit test: generated plugin file contains `PLUGIN_OUTPUT_TYPE`
+
+#### Step 6: Validator checks output type consistency (8th check)
+
+Add a new validation check in `_check_instantiation_and_gradient()` or as a separate
+function: after the forward pass produces output, verify the output shape matches
+the declared `PLUGIN_OUTPUT_TYPE`:
+
+- `"classifier"` → output shape must be `[B, 256, T]`
+- `"regressor"` → output shape must be `[B, T]`
+- Mismatch → return `(False, "PLUGIN_OUTPUT_TYPE is 'classifier' but output shape is [B, T]")`
+
+**Files**: `nodes/ml_code_validator_agent.py`
+
+**Checklist**:
+- [ ] Load `PLUGIN_OUTPUT_TYPE` from the plugin module
+- [ ] Check output shape vs declared type after forward pass
+- [ ] Add `output_type_valid` field to `ValidatorOutput` schema
+- [ ] Update `passed = all([...])` to include the new check
+- [ ] Unit test: classifier with `[B, 256, T]` output passes
+- [ ] Unit test: classifier with `[B, T]` output fails
+- [ ] Unit test: missing `PLUGIN_OUTPUT_TYPE` defaults to classifier
+
+#### Step 7: Tell the LLM in planner prompt
+
+In the planner prompt, when `force_model` is set, inject the output type and
+valid loss types so the LLM doesn't try incompatible losses:
 
 ```
-This model is a CLASSIFIER (output: [B, 256, T] float32).
-Valid loss types: ce, focal, focal_cw.
-Do NOT use smooth_l1 — it is only for regressor models.
+### MODEL OUTPUT TYPE:
+- This model is a CLASSIFIER (output: [B, 256, T] float32).
+- Valid loss types: ce, focal, focal_cw.
+- Do NOT use smooth_l1 — it is only for regressor models (like fcnet).
 ```
 
-This comes from `get_output_type(force_model)` at prompt construction time.
+This uses `get_output_type(force_model)` at prompt construction time.
+When `force_model="auto"`, include a general note about loss compatibility.
 
-#### Files to change
+**Files**: `agent/prompts.py`, `agent/llm_bridge.py` (pass output_type to prompt builder)
 
-| File | Change |
-|------|--------|
-| `ml_models/models_sandbox.py` | Add `BUILTIN_OUTPUT_TYPES` dict |
-| `ml_models/plugin_loader.py` | Load `PLUGIN_OUTPUT_TYPE`, add `PLUGIN_OUTPUT_TYPE_REGISTRY`, add `get_output_type()` |
-| `ml_models/models_format_sandbox.py` | Update `ExperimentConfig` validator to use `get_output_type()` |
-| `nodes/ml_model_implementor.py` | Add `PLUGIN_OUTPUT_TYPE` to plugin template |
-| `nodes/ml_code_validator_agent.py` | Add 8th check: output type vs forward shape consistency |
-| `agent/prompts.py` | Inject output type + valid losses when `force_model` is set |
-| `agent_generated/models/*.py` | Backfill `PLUGIN_OUTPUT_TYPE = "classifier"` to existing plugins |
-| Tests | Update plugin loader tests, validator tests, prompt tests |
+**Checklist**:
+- [ ] Import `get_output_type` in prompt builder
+- [ ] When `force_model != "auto"`: inject output type + valid losses
+- [ ] When `force_model == "auto"`: inject general compatibility note
+- [ ] Pass `output_type` info from tuner agent to `brain.plan()` if needed
+- [ ] Unit test: prompt contains "CLASSIFIER" when force_model is a classifier
+- [ ] Unit test: prompt contains "REGRESSOR" when force_model is fcnet
+- [ ] Unit test: prompt contains valid loss list
+
+#### Step 8: Run tests and verify end-to-end
+
+- [ ] All existing unit tests pass (no regressions)
+- [ ] Run GatedFNO cfg0 integration test (classifier, should reject smooth_l1)
+- [ ] Run FCNet cfg0 integration test (regressor, should accept smooth_l1)
+- [ ] Re-run full loop test — LLM should not try smooth_l1 on proposed classifier model
+- [ ] Verify error records contain clear message when wrong loss is used
 
 ---
 
