@@ -606,6 +606,19 @@ MODEL_REGISTRY = {
     "gated_fno": GatedFNO,
 }
 
+# Output type for each built-in model — determines valid loss types.
+# "classifier": output [B, 256, T] → ce, focal, focal_cw
+# "regressor":  output [B, T]      → smooth_l1
+# "hybrid":     output [B, 256, T] but supports ALL loss types (e.g. fcnet)
+BUILTIN_OUTPUT_TYPES = {
+    "punet": "classifier",
+    "fcnet": "hybrid",
+    "transformer": "classifier",
+    "wavenet": "classifier",
+    "rnn": "classifier",
+    "gated_fno": "classifier",
+}
+
 # Extend MODEL_REGISTRY with any agent-generated plugin models
 try:
     import os as _os, sys as _sys

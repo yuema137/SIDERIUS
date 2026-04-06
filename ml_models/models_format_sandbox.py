@@ -296,23 +296,34 @@ class ExperimentConfig(BaseModel):
     @model_validator(mode='after')
     def validate_architecture_loss_match(self) -> 'ExperimentConfig':
         """
-        Enforce the physical constraint: 
-        Regression (SmoothL1) is only for AutoEncoders (fcnet).
-        Classification (CE/Focal) is for segmentors (punet/transformer).
+        Enforce the physical constraint: loss type must match model output type.
+
+        - Classifiers ([B, 256, T] output) use ce, focal, focal_cw.
+        - Regressors ([B, T] output) use smooth_l1.
+
+        Output type is looked up from BUILTIN_OUTPUT_TYPES (built-in models)
+        or PLUGIN_OUTPUT_TYPE_REGISTRY (agent-generated plugins). Unknown models
+        default to 'classifier'.
         """
-        m_type = self.model_type
+        from ml_models.plugin_loader import get_output_type
+
+        output_type = get_output_type(self.model_type)
         l_type = self.loss_config.loss_type
 
-        if l_type == "smooth_l1" and m_type != "fcnet":
+        # "hybrid" models (e.g. fcnet) accept any loss type
+        if output_type == "hybrid":
+            return self
+
+        if l_type == "smooth_l1" and output_type == "classifier":
             raise ValueError(
-                f"Incompatible Pair: 'smooth_l1' is for waveform regression (fcnet). "
-                f"Model '{m_type}' is a classifier (256 classes) and requires 'ce' or 'focal' loss."
+                f"Incompatible: '{self.model_type}' is a classifier (output [B, 256, T]) "
+                f"— use 'ce' or 'focal', not 'smooth_l1'."
             )
-        
-        if m_type == "fcnet" and l_type in ["ce", "focal", "focal_cw"]:
-            # Note: Your AE implementation supports classification, 
-            # but usually, agents might misuse this. 
-            # We can allow it or warn here.
-            pass
-            
+
+        if l_type in ["ce", "focal", "focal_cw"] and output_type == "regressor":
+            raise ValueError(
+                f"Incompatible: '{self.model_type}' is a regressor (output [B, T]) "
+                f"— use 'smooth_l1', not '{l_type}'."
+            )
+
         return self
