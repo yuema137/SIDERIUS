@@ -125,5 +125,30 @@
             "weight_decay": 0,
             "device": "cuda"
         }
+    },
+    "gated_fno": {
+        "_comment": "Pseudo-legacy baseline — no TIDMAD paper config exists. Sized to match FCNet (~323M params).",
+        "model_cfg": {
+            "model_type": "gated_fno",
+            "segmentation_size": 40000,
+            "width": 64,
+            "num_layers": 4,
+            "num_gates": 128
+        },
+        "loss_cfg": {
+            "loss_type": "focal",
+            "alpha": 0.5,
+            "gamma": 2.0,
+            "reduction": "mean",
+            "use_class_weights": false
+        },
+        "train_cfg": {
+            "lr": 1e-3,
+            "epochs": 10,
+            "batch_size": 1,
+            "optimizer_type": "adam",
+            "weight_decay": 0,
+            "device": "cuda"
+        }
     }
 }
