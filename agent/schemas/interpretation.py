@@ -75,6 +75,54 @@ class ModelRunSummary(BaseModel):
                     "the interpretation agent doesn't need filesystem access.",
     )
 
+    # --- Per-file performance (from file_vector) ---
+    best_file_vector: Optional[List[float]] = Field(
+        default=None,
+        description="Length-20 score vector from the best experiment. Each index = one "
+                    "validation file (frequency, log scale: 0=lowest, 19=highest). "
+                    "NaN for files not evaluated. Reveals frequency-dependent weaknesses.",
+    )
+    formal_score: Optional[float] = Field(
+        default=None,
+        description="Denoising score from the formal (final) round specifically. "
+                    "Distinct from best_denoising_score which may come from a trial round.",
+    )
+    formal_file_vector: Optional[List[float]] = Field(
+        default=None,
+        description="File vector from the formal round. Definitive per-file performance.",
+    )
+
+    # --- Model efficiency ---
+    best_model_params: Optional[int] = Field(
+        default=None,
+        description="Number of trainable parameters in the best-scoring model.",
+    )
+
+    # --- Data volume context ---
+    training_psd_segments: Optional[int] = Field(
+        default=None,
+        description="PSD segments used for training in the best experiment. "
+                    "Compare against baseline (typically 4000) to assess data sufficiency.",
+    )
+    eval_psd_segments: Optional[int] = Field(
+        default=None,
+        description="PSD segments used for evaluation in the best experiment.",
+    )
+    trial_portion: Optional[float] = Field(
+        default=None,
+        description="Trial portion used in the best experiment (if trial mode).",
+    )
+
+    # --- Per-round detail (for trend analysis) ---
+    round_trial_portions: Optional[List[Optional[float]]] = Field(
+        default=None,
+        description="Trial portion used in each round. Shows if the agent adapted data volume.",
+    )
+    round_model_params: Optional[List[Optional[int]]] = Field(
+        default=None,
+        description="Model parameter count per round. Shows if the agent explored model sizes.",
+    )
+
 
 class InterpretationInput(BaseModel):
     """
@@ -195,4 +243,28 @@ class InterpretationOutput(BaseModel):
     )
     take_home_message: str = Field(
         description="Single critical insight that directly motivates proposing a new architecture.",
+    )
+
+    # --- Frequency analysis (from file_vector) ---
+    per_model_file_vectors: Optional[Dict[str, List[float]]] = Field(
+        default=None,
+        description="model_type → best file_vector. Enables the proposal agent to see "
+                    "which frequency ranges each architecture handles well.",
+    )
+    weak_frequency_files: Optional[Dict[str, List[int]]] = Field(
+        default=None,
+        description="model_type → list of file indices where the model scores poorly. "
+                    "Computed from file_vector analysis (scores below threshold).",
+    )
+
+    # --- Efficiency context ---
+    per_model_params: Optional[Dict[str, int]] = Field(
+        default=None,
+        description="model_type → parameter count of best model.",
+    )
+
+    # --- Data volume context ---
+    per_model_training_segments: Optional[Dict[str, int]] = Field(
+        default=None,
+        description="model_type → training PSD segments used in best experiment.",
     )
