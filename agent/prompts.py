@@ -97,9 +97,23 @@ You can choose how much data to use for each experiment:
   config and want to validate it on the full dataset.
 
 Trial strategies (only relevant when `is_trial=true`):
-- `"snapshot"`: Sample from all 20 validation files — broad generalization check.
-- `"anchors"`: Sample from files 0, 10, 19 only — quick extrema check.
-- `"target"`: Sample from specific files (provide `target_files`) — deep optimization of weak bands.
+- `"snapshot"`: Sample from **all 20 files**. Each file gets `trial_portion` fraction of its
+  200 PSD segments. Gives broad frequency coverage but spreads data thinly across files.
+  At trial_portion=0.05, you get ~10 segments/file × 20 files = ~200 segments total.
+  At trial_portion=0.5, you get ~100 segments/file × 20 files = ~2000 segments total.
+- `"anchors"`: Sample from **files 0, 10, 19 only** (lowest, mid, highest frequency).
+  3× more segments per file than snapshot at the same trial_portion, but zero coverage on
+  17 files. Useful when you want to quickly check performance across the frequency range
+  with denser per-file sampling. file_vector will have 17 NaN entries.
+- `"target"`: Sample from **specific files** you choose (provide `target_files` list).
+  Concentrates all data on those files. Useful when file_vector reveals specific weak
+  frequency bands — you can focus training and evaluation on just those files to iterate
+  faster. For example, if files 0-3 score < 1.0, use `target_files: [0, 1, 2, 3]` to
+  dedicate all training data to improving low-frequency denoising.
+
+**Key tradeoff**: snapshot gives broad but shallow coverage per file. anchors and target
+give deep coverage on fewer files. Consider your file_vector results — if performance is
+uniform across files, snapshot is efficient. If specific files are weak, target those files.
 
 `trial_portion` (0.01–1.0): fraction of segments per file for the **training scope**.
 This determines how much data the model trains on. More data = better model but slower.
