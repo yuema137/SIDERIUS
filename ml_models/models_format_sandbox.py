@@ -149,11 +149,45 @@ class RNNSeq2SeqConfig(BaseConfig):
 
 
 # ==========================================
+# 7. GatedFNO Configuration
+# ==========================================
+
+class GatedFNOConfig(BaseConfig):
+    """
+    Configuration for Gated Fourier Neural Operator.
+    Enables frequency-domain denoising with manual signal protection.
+    """
+    model_type: Literal["gated_fno"] = "gated_fno"
+    width: int = Field(default=64, ge=16, le=256, description="Latent channel width")
+    num_layers: int = Field(default=2, ge=1, le=5, description="Number of FNO blocks")
+    num_gates: int = Field(default=128, ge=8, le=4096, description="Granularity of the gate vector")
+    # Agent-tunable vector
+    static_v: Optional[List[float]] = Field(
+        default=None, 
+        description="Static gate vector. Length must match num_gates."
+    )
+
+    @field_validator('static_v')
+    @classmethod
+    def validate_v_length(cls, v: Optional[List[float]], info) -> Optional[List[float]]:
+        num_gates = info.data.get('num_gates')
+        if v is not None and num_gates is not None:
+            if len(v) != num_gates:
+                raise ValueError(f"static_v length ({len(v)}) must match num_gates ({num_gates})")
+        return v
+
+# Update ModelConfigUnion
+ModelConfigUnion = Union[PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, RNNSeq2SeqConfig, GatedFNOConfig]
+
+# Update get_config_class mapping
+# "gated_fno": GatedFNOConfig
+
+# ==========================================
 # Global Model Registry
 # ==========================================
 
 # Union type for the Agent to choose from
-ModelConfigUnion = Union[PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, RNNSeq2SeqConfig]
+ModelConfigUnion = Union[PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, RNNSeq2SeqConfig, GatedFNOConfig]
 
 def get_config_class(model_type: str) -> Optional[Type[BaseConfig]]:
     """Helper for the Orchestrator to map strings to Pydantic classes."""
@@ -163,6 +197,7 @@ def get_config_class(model_type: str) -> Optional[Type[BaseConfig]]:
         "transformer": TransformerConfig,
         "wavenet": WaveNetConfig,
         "rnn": RNNSeq2SeqConfig,
+        "gated_fno": GatedFNOConfig,
     }
     return mapping.get(model_type) or PLUGIN_CONFIG_REGISTRY.get(model_type)
 

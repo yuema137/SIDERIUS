@@ -491,26 +491,7 @@ class RNNSeq2Seq(nn.Module):
         return logits.transpose(1, 2)                             # [B, 256, T]
 
 
-# 2. Global Registry
-MODEL_REGISTRY = {
-    "punet": PositionalUNet,
-    "fcnet": AE,
-    "transformer": TransformerModel,
-    "wavenet": SimpleWaveNet,
-    "rnn": RNNSeq2Seq,
-}
-
-# Extend MODEL_REGISTRY with any agent-generated plugin models
-try:
-    import os as _os, sys as _sys
-    _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
-    from ml_models.plugin_loader import extend_registries as _extend_registries
-    from models_format_sandbox import PLUGIN_CONFIG_REGISTRY as _plugin_cfg_reg
-    _extend_registries(MODEL_REGISTRY, _plugin_cfg_reg)
-except Exception as _e:
-    print(f"[PluginLoader] Warning: could not load plugins: {_e}")
-    
-# Add to ml_models/models_sandbox.py
+# (MODEL_REGISTRY defined after all model classes — see end of file)
 
 class FullSpectrumGatedConv1d(nn.Module):
     """
@@ -610,3 +591,27 @@ class GatedFNO(nn.Module):
 
         # 4. Projection to ADC Logits
         return self.projection(h)
+
+
+# ==========================================
+# 2. Global Registry
+# ==========================================
+
+MODEL_REGISTRY = {
+    "punet": PositionalUNet,
+    "fcnet": AE,
+    "transformer": TransformerModel,
+    "wavenet": SimpleWaveNet,
+    "rnn": RNNSeq2Seq,
+    "gated_fno": GatedFNO,
+}
+
+# Extend MODEL_REGISTRY with any agent-generated plugin models
+try:
+    import os as _os, sys as _sys
+    _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+    from ml_models.plugin_loader import extend_registries as _extend_registries
+    from models_format_sandbox import PLUGIN_CONFIG_REGISTRY as _plugin_cfg_reg
+    _extend_registries(MODEL_REGISTRY, _plugin_cfg_reg)
+except Exception as _e:
+    print(f"[PluginLoader] Warning: could not load plugins: {_e}")
