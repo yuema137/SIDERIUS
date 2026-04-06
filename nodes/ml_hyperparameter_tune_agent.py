@@ -194,6 +194,15 @@ class HyperparamTuningAgent:
         else:
             raise ValueError("Config Manual not provided.")
 
+        # --- Load model description (architecture explanation for the LLM) ---
+        model_description = None
+        try:
+            from ml_models.model_descriptions import get_model_description
+            model_description = get_model_description(model_type_setting)
+            print(f"Loaded model description for '{model_type_setting}' ({len(model_description)} chars)")
+        except (FileNotFoundError, Exception) as e:
+            print(f"No model description found for '{model_type_setting}': {e}")
+
         # --- Autonomous Research Loop ---
         completed_rounds = 0
         total_attempts = 0
@@ -215,6 +224,7 @@ class HyperparamTuningAgent:
                     expert_advice=expert_advice_str,
                     force_model=model_type_setting,
                     config_manual=config_manual_data,
+                    model_description=model_description,
                     current_round=iteration,
                     max_rounds=max_rounds,
                     trial_allowed=trial_allowed,

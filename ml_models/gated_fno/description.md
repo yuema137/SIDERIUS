@@ -23,14 +23,37 @@ $$h_{l+1} = \text{GELU}(W \cdot h_l + \mathcal{F}^{-1}(\hat{z}))$$
 
 ---
 
-## Key Configuration Parameters
+## Key Configuration Parameters and Tuning Guide
 
-| Parameter | Default | Range | Effect |
-|---|---|---|---|
-| `width` | 64 | 16–256 | Hidden channel dimension (latent width). |
-| `num_layers` | 2 | 1–4 | Number of iterative Gated-FNO blocks. |
-| `num_gates` | 128 | 1–2048 | Granularity of the control vector $V$ across the spectrum. |
-| `static_v` | None | List[float] | Fixed gate values. If None, defaults to all 1s (full AI processing). |
+| Parameter | Default | Range | Effect | Tuning Strategy |
+|---|---|---|---|---|
+| `width` | 64 | 16–256 | Hidden channel dimension (latent width). More width = more capacity but more VRAM. | Start small (32), increase if underfitting. |
+| `num_layers` | 2 | 1–4 | Number of iterative Gated-FNO blocks. More layers = deeper spectral processing. | 2–3 is usually sufficient. Diminishing returns beyond 4. |
+| `num_gates` | 128 | 8–4096 | Granularity of the control vector $V$ across the spectrum. More gates = finer frequency-band control. | 128 is a good default. Increase to 256+ if you need precise frequency targeting. |
+| `static_v` | None | List[float], length=num_gates | **THE KEY HYPERPARAMETER.** Fixed gate values controlling which frequency bands the AI processes vs preserves. If None, defaults to all 1s (AI processes everything). | See "How to Tune static_v" below. |
+
+### How to Tune `static_v`
+
+`static_v` is a vector of length `num_gates`, where each element controls a frequency band:
+- `v[i] = 1.0`: The AI fully processes this frequency band (denoising enabled).
+- `v[i] = 0.0`: The signal in this band passes through unchanged (preserved exactly).
+- `v[i] = 0.5`: Half AI processing, half bypass (partial denoising).
+
+The vector maps to the full frequency spectrum via nearest-neighbor interpolation:
+- `v[0]` controls the lowest frequencies (DC and near-DC).
+- `v[num_gates-1]` controls the highest frequencies (near Nyquist).
+
+**Tuning strategy for `static_v`:**
+1. **Start with None** (all 1s) to establish a baseline with full AI processing.
+2. **Check the file_vector** from the baseline: files 0-3 are low frequency, files 15-19 are high frequency.
+3. **If low-frequency files score poorly** (score < 1.0 for files 0-3): the AI may be distorting the signal at those frequencies. Try setting `v[0:16] = 0.0` (protect low frequencies) while keeping `v[16:] = 1.0` (denoise high frequencies).
+4. **If high-frequency files score well**: the model is already good at high frequencies. Focus the gate on protecting the weak bands.
+5. **Iterate**: adjust the gate vector based on which files improve or regress after each experiment. The goal is to find the boundary between "AI helps" and "AI hurts" across the frequency spectrum.
+
+**Important constraints:**
+- `len(static_v)` MUST equal `num_gates`. If you change `num_gates`, you must also resize `static_v`.
+- Values should be between 0.0 and 1.0 (though values outside this range are technically allowed).
+- Setting all values to 0.0 makes the model a pure identity — no denoising at all.
 
 ---
 
@@ -38,3 +61,4 @@ $$h_{l+1} = \text{GELU}(W \cdot h_l + \mathcal{F}^{-1}(\hat{z}))$$
 - **Zero Distortion**: Mathematically guarantees signal preservation in bands where $v_k=0$ within the Fourier path.
 - **Global Receptive Field**: Fourier Path captures long-range periodic noise (e.g., 60Hz harmonics).
 - **Control Interface**: The `static_v` vector is the primary lever for the Agent to inject physical priors about signal locations.
+- **Parameter Count**: Scales as ~width² × (segmentation_size/2) × num_layers. With width=32, layers=3, seg=40000: ~61M params.

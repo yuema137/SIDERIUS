@@ -154,24 +154,30 @@ class LLMBridge:
              expert_advice: str = "None",
              force_model: str = "auto",
              config_manual: Optional[Dict] = None,
+             model_description: Optional[str] = None,
              current_round: Optional[int] = None,
              max_rounds: Optional[int] = None,
              trial_allowed: bool = True) -> Dict:
         """
         Uses the Planner logic to observe Research Memory and decide next steps.
-        Incorporates physical constraints from config_manual to prevent hallucinations.
+        Incorporates physical constraints from config_manual and architecture
+        knowledge from model_description to prevent hallucinations.
 
         Args:
-            current_round: Current round number (1-based). Forwarded to prompt.
-            max_rounds:    Total rounds in this run. Forwarded to prompt.
-            trial_allowed: Whether the LLM may choose trial mode. Forwarded to prompt.
+            config_manual:    JSON schema of the model's config fields.
+            model_description: Markdown description of the architecture and its physics.
+            current_round:    Current round number (1-based). Forwarded to prompt.
+            max_rounds:       Total rounds in this run. Forwarded to prompt.
+            trial_allowed:    Whether the LLM may choose trial mode. Forwarded to prompt.
         """
         system_prompt = PLANNER_PROMPT
 
-        # --- 2. Inject config manual ---
+        # --- 2. Inject model description + config manual ---
         manual_context = ""
+        if model_description:
+            manual_context += f"\n\n[MODEL ARCHITECTURE DESCRIPTION]:\n{model_description}"
         if config_manual:
-            manual_context = f"\n\n[STRICT PHYSICAL CONSTRAINTS / CONFIG MANUAL]:\n{json.dumps(config_manual, indent=2)}"
+            manual_context += f"\n\n[STRICT PHYSICAL CONSTRAINTS / CONFIG MANUAL]:\n{json.dumps(config_manual, indent=2)}"
 
         # Pass the new arguments to the prompt generator
         user_prompt = get_planner_user_prompt(
