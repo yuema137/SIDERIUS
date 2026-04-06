@@ -38,13 +38,15 @@ class ProposalInput(BaseModel):
         description="Hard limits the proposed architecture must respect "
                     "(e.g. 'VRAM < 10 GB', 'params < 50M', 'no external dependencies').",
     )
+    expert_advice: ExpertAdviceInput = Field(
+        default="",
+        description="Structured guidance from upstream agents or orchestrators. "
+                    "Accepts a plain string or a structured ExpertAdvice object.",
+    )
     human_advice: Optional[ExpertAdviceInput] = Field(
         default=None,
-        description="Optional human-provided guidance for the proposal agent. "
-                    "Accepts either a plain string or a structured ExpertAdvice object. "
-                    "When present, the agent treats this as high-priority input — "
-                    "it should explicitly address the stated focus areas, respect the "
-                    "constraints, and consider the suggested directions.",
+        description="Optional human-provided guidance (highest priority — overrides expert_advice). "
+                    "Accepts either a plain string or a structured ExpertAdvice object.",
     )
     previous_failures: List[str] = Field(
         default_factory=list,

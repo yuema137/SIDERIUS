@@ -25,6 +25,7 @@ from agent.schemas.interpretation import (
 )
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from ml_models.model_descriptions import get_model_description
+from agent.schemas.hyperparam_tuning import serialize_expert_advice
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +83,7 @@ Rules:
 def _build_per_model_prompt(
     summary: ModelRunSummary,
     description: str,
+    expert_advice_str: str = "",
     human_advice: Optional[str] = None,
 ) -> str:
     """Build the user prompt for a single model's summarization."""
@@ -160,11 +162,19 @@ def _build_per_model_prompt(
 
         lines.append(f"  Round {i+1}: score={score_str}{extra_str} — {conclusion}")
 
+    if expert_advice_str:
+        lines += [
+            "",
+            "---",
+            "## Expert Guidance",
+            expert_advice_str,
+        ]
+
     if human_advice:
         lines += [
             "",
             "---",
-            "## Human Guidance (high priority)",
+            "## Human Guidance (highest priority — overrides expert advice)",
             human_advice,
         ]
 
@@ -227,6 +237,7 @@ def _build_synthesis_prompt(
     per_model_file_vectors: Optional[Dict[str, List[float]]] = None,
     per_model_params: Optional[Dict[str, int]] = None,
     per_model_training_segments: Optional[Dict[str, int]] = None,
+    expert_advice_str: str = "",
     human_advice: Optional[str] = None,
 ) -> str:
     """Build the user prompt for cross-model synthesis."""
@@ -287,10 +298,18 @@ def _build_synthesis_prompt(
 
         lines.append("")
 
+    if expert_advice_str:
+        lines += [
+            "---",
+            "## Expert Guidance",
+            expert_advice_str,
+            "",
+        ]
+
     if human_advice:
         lines += [
             "---",
-            "## Human Guidance (high priority)",
+            "## Human Guidance (highest priority — overrides expert advice)",
             human_advice,
             "",
         ]
@@ -367,6 +386,9 @@ class ResultInterpretationAgent:
             per_model_worst.setdefault(mt, None)
             per_model_best_config.setdefault(mt, None)
 
+        # Serialize expert advice (soft edge input)
+        expert_advice_str = serialize_expert_advice(inp.expert_advice) if inp.expert_advice else ""
+
         print(f"Interpreting {len(inp.summaries)} model summary(ies) across "
               f"{len(effective_types)} model(s): {effective_types} "
               f"(overall best: {overall_best_score})")
@@ -388,6 +410,7 @@ class ResultInterpretationAgent:
             per_model_prompt = _build_per_model_prompt(
                 summary=summary,
                 description=model_descriptions[mt],
+                expert_advice_str=expert_advice_str,
                 human_advice=inp.human_advice,
             )
             per_model_response = self.bridge.generate(PER_MODEL_SYSTEM_PROMPT, per_model_prompt)
@@ -440,6 +463,7 @@ class ResultInterpretationAgent:
                 per_model_file_vectors=per_model_file_vectors or None,
                 per_model_params=per_model_params or None,
                 per_model_training_segments=per_model_training_segments or None,
+                expert_advice_str=expert_advice_str,
                 human_advice=inp.human_advice,
             )
             synthesis_response = self.bridge.generate(SYNTHESIS_SYSTEM_PROMPT, synthesis_prompt)

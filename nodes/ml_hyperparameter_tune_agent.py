@@ -28,6 +28,7 @@ from agent.schemas.hyperparam_tuning import (
     ExperimentPlan,
     ExpertAdvice,
     TrialConfig,
+    serialize_expert_advice,
 )
 from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_utils import score_vector, SampleSet
@@ -89,30 +90,8 @@ def _run_skill(skill_folder: str, sandbox: TidmadSandbox, **params) -> dict:
         return {"status": "error", "message": str(e)}
 
 
-def _serialize_expert_advice(advice: Union[str, ExpertAdvice]) -> str:
-    """
-    Serialize ExpertAdvice to a human-readable string for the LLM planner
-    and experiment record storage.
-
-    If advice is already a string, return it as-is.
-    If it is a structured ExpertAdvice object, format it into a multi-line
-    string that the LLM can parse naturally.
-    """
-    if isinstance(advice, str):
-        return advice
-    # Structured ExpertAdvice → readable string
-    parts = []
-    if advice.focus_areas:
-        parts.append("Focus areas: " + "; ".join(advice.focus_areas))
-    if advice.constraints:
-        parts.append("Constraints: " + "; ".join(advice.constraints))
-    if advice.known_failures:
-        parts.append("Known failures: " + "; ".join(advice.known_failures))
-    if advice.suggested_directions:
-        parts.append("Suggested directions: " + "; ".join(advice.suggested_directions))
-    if advice.rationale:
-        parts.append("Rationale: " + advice.rationale)
-    return "\n".join(parts) if parts else ""
+# _serialize_expert_advice is now shared — imported as serialize_expert_advice
+_serialize_expert_advice = serialize_expert_advice
 
 
 # ---------------------------------------------------------------------------

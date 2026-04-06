@@ -12,6 +12,8 @@ from __future__ import annotations
 from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
+from agent.schemas.hyperparam_tuning import ExpertAdviceInput
+
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 
 
@@ -77,11 +79,15 @@ class ValidatorInput(BaseModel):
         default="gemini-3.1-flash-lite-preview",
         description="Specific model ID passed to the provider for code review.",
     )
+    expert_advice: ExpertAdviceInput = Field(
+        default="",
+        description="Structured guidance from upstream agents or orchestrators. "
+                    "Accepts a plain string or a structured ExpertAdvice object.",
+    )
     human_advice: Optional[str] = Field(
         default=None,
-        description="Optional human-provided guidance for the validator agent. "
-                    "When present, injected into the LLM code review prompt as high-priority "
-                    "context (e.g. 'pay special attention to the dilated convolution padding').",
+        description="Optional human-provided guidance (highest priority — overrides expert_advice). "
+                    "When present, injected into the LLM prompt as high-priority context.",
     )
     storage: StorageConfig = Field(
         default_factory=lambda: StorageConfig(

@@ -33,6 +33,7 @@ import tempfile
 from agent.llm_bridge import LLMBridge
 from agent.schemas.implementor import ImplementorInput, ImplementorOutput
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.hyperparam_tuning import serialize_expert_advice
 
 
 # ---------------------------------------------------------------------------
@@ -338,6 +339,15 @@ def _build_reasoning_prompt(inp: ImplementorInput) -> str:
         "  input:  [B, T]       int64   — raw ADC signal",
         "  output: [B, 256, T]  float32 — per-timestep logits",
     ]
+
+    # --- Expert advice (from upstream agents) ---
+    expert_advice_str = serialize_expert_advice(inp.expert_advice) if inp.expert_advice else ""
+    if expert_advice_str:
+        lines += [
+            "",
+            "## Expert Guidance (from upstream agents)",
+            expert_advice_str,
+        ]
 
     # --- Human advice (injected by workflow) ---
     if inp.human_advice:

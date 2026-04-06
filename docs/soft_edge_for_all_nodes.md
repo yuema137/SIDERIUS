@@ -1,6 +1,6 @@
 # Soft Edges: Expert Advice for All Nodes
 
-## Status: DESIGN — ready for implementation
+## Status: COMPLETE
 
 ## Motivation
 
@@ -44,10 +44,10 @@ LLM's own judgment   (lowest — the node's internal LLM reasoning)
 | Node | `expert_advice` | `human_advice` | Status |
 |------|----------------|----------------|--------|
 | `tune_ml_hyperparam_agent` | ✅ `ExpertAdviceInput` | ✅ `Optional[str]` | Complete |
-| `result_interpretation_agent` | ❌ None | ✅ `Optional[str]` | Needs update |
-| `ml_model_proposal_agent` | ❌ None | ✅ `Optional[ExpertAdviceInput]` | Needs update |
-| `ml_model_implementor` | ❌ None | ✅ `Optional[str]` | Needs update |
-| `ml_code_validator_agent` | ❌ None | ✅ `Optional[str]` | Needs update |
+| `result_interpretation_agent` | ✅ `ExpertAdviceInput` | ✅ `Optional[str]` | Complete |
+| `ml_model_proposal_agent` | ✅ `ExpertAdviceInput` | ✅ `Optional[ExpertAdviceInput]` | Complete |
+| `ml_model_implementor` | ✅ `ExpertAdviceInput` | ✅ `Optional[str]` | Complete |
+| `ml_code_validator_agent` | ✅ `ExpertAdviceInput` | ✅ `Optional[str]` | Complete |
 
 ## Proposed Change
 

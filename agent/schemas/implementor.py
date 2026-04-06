@@ -13,6 +13,7 @@ from typing import Any, Dict, Optional
 from pydantic import BaseModel, Field
 
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.hyperparam_tuning import ExpertAdviceInput
 
 
 class ImplementorInput(BaseModel):
@@ -55,11 +56,15 @@ class ImplementorInput(BaseModel):
                     "code, and produces a targeted fix. Total attempts = 1 + max_retries. "
                     "Set to 0 to disable self-correction.",
     )
+    expert_advice: ExpertAdviceInput = Field(
+        default="",
+        description="Structured guidance from upstream agents or orchestrators. "
+                    "Accepts a plain string or a structured ExpertAdvice object.",
+    )
     human_advice: Optional[str] = Field(
         default=None,
-        description="Optional human-provided guidance for the implementor agent. "
-                    "When present, injected into the LLM prompt as high-priority context "
-                    "(e.g. 'use grouped convolutions instead of standard conv1d').",
+        description="Optional human-provided guidance (highest priority — overrides expert_advice). "
+                    "When present, injected into the LLM prompt as high-priority context.",
     )
     storage: StorageConfig = Field(
         default_factory=lambda: StorageConfig(
