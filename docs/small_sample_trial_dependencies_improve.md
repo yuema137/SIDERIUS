@@ -312,26 +312,28 @@ serialization.
 
 ---
 
-### Step 3: Update interpretation agent prompts
+### Step 3: Update interpretation agent prompts — DONE ✓
 
 **File:** `nodes/result_interpretation_agent.py`
 
-**Status:** NOT STARTED
-
 **Checklist:**
-- [ ] Phase 1 prompt: inject `file_vector` with frequency explanation
-- [ ] Phase 1 prompt: inject data volume context (`training_psd_segments` vs baseline)
-- [ ] Phase 1 prompt: inject formal vs trial distinction (`formal_score` vs `best_denoising_score`)
-- [ ] Phase 1 prompt: inject `best_model_params` for efficiency context
-- [ ] Phase 2 prompt: inject per-model `file_vector` comparison
-- [ ] Phase 2 prompt: inject per-model efficiency comparison (`per_model_params`)
-- [ ] Handle `None` gracefully (skip sections when data unavailable)
-- [ ] Populate `InterpretationOutput.per_model_file_vectors` from summaries
-- [ ] Populate `InterpretationOutput.weak_frequency_files` (compute threshold)
-- [ ] Populate `InterpretationOutput.per_model_params` from summaries
-- [ ] Populate `InterpretationOutput.per_model_training_segments` from summaries
-- [ ] Existing interpretation unit tests pass
-- [ ] New unit tests for enriched output fields
+- [x] Phase 1 prompt: inject `file_vector` with per-file scores and frequency explanation
+- [x] Phase 1 prompt: inject `formal_file_vector` separately when available
+- [x] Phase 1 prompt: inject data volume context (`training_psd_segments` vs baseline 4000)
+- [x] Phase 1 prompt: inject `formal_score` vs `best_denoising_score` distinction
+- [x] Phase 1 prompt: inject `best_model_params` for efficiency context
+- [x] Phase 1 prompt: inject `round_trial_portions` and `round_model_params` in trajectory
+- [x] Phase 1 output: 4 new LLM fields — `frequency_analysis`, `data_sensitivity`, `efficiency_assessment`, `strategy_assessment`
+- [x] Phase 2 prompt: inject per-model `file_vector` summaries (weak/strong files)
+- [x] Phase 2 prompt: inject per-model `params` and `training_segments`
+- [x] Phase 2 output: 2 new LLM fields — `frequency_comparison`, `efficiency_comparison`
+- [x] Handle `None` gracefully (skip sections when data unavailable)
+- [x] Populate `InterpretationOutput.per_model_file_vectors` from summaries
+- [x] Populate `InterpretationOutput.weak_frequency_files` (threshold: score < 1.0)
+- [x] Populate `InterpretationOutput.per_model_params` from summaries
+- [x] Populate `InterpretationOutput.per_model_training_segments` from summaries
+- [x] All 401 existing agent tests pass
+- [ ] New unit tests for enriched output fields (deferred to Step 7)
 
 ---
 
@@ -406,7 +408,7 @@ Step 1 (schemas) ✓
     │
 Step 2 (protocol tuner → interp) ✓
     │
-Step 3 (interpretation agent prompts)
+Step 3 (interpretation agent prompts) ✓
     │
 Step 4 (InterpretationOutput schema) ✓
     │
