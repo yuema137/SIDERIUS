@@ -288,7 +288,7 @@ class ExperimentConfig(BaseModel):
     """
     exp_id: str
     run_name: str
-    model_type: Literal["punet", "fcnet", "transformer", "wavenet", "rnn"]
+    model_type: Literal["punet", "fcnet", "transformer", "wavenet", "rnn", "gated_fno"]
     network_config: ModelConfigUnion # This uses the Union defined earlier
     train_config: TrainConfig
     loss_config: LossConfig
