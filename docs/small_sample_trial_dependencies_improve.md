@@ -295,21 +295,20 @@ serialization.
 
 ---
 
-### Step 2: Update protocol `ml_model_tune_to_ml_result_interp`
+### Step 2: Update protocol `ml_model_tune_to_ml_result_interp` — DONE ✓
 
-**File:** `agent/schemas/protocols/ml_model_tune_to_ml_result_interp.py`
-
-**Status:** NOT STARTED
+**File:** `nodes/result_interpretation_agent.py` (function `tuning_output_to_model_run_summary`)
 
 **Checklist:**
-- [ ] `local_all_records()`: extract `best_file_vector` from best record
-- [ ] `local_all_records()`: find formal round, extract `formal_score` and `formal_file_vector`
-- [ ] `local_all_records()`: extract `best_model_params` from best record
-- [ ] `local_all_records()`: extract `training_psd_segments`, `eval_psd_segments`, `trial_portion`
-- [ ] `local_all_records()`: build `round_trial_portions` and `round_model_params` lists
-- [ ] Existing protocol unit tests still pass
-- [ ] New protocol unit tests for each extracted field
-- [ ] Integration test (Tier 2): tuner → interpretation edge with trial data
+- [x] Extract `best_file_vector` from best record (highest `denoising_score`)
+- [x] Find formal round (last record with `is_trial=False`), extract `formal_score` and `formal_file_vector`
+- [x] Extract `best_model_params` from best record
+- [x] Extract `training_psd_segments`, `eval_psd_segments`, `trial_portion` from best record
+- [x] Build `round_trial_portions` and `round_model_params` per-round lists
+- [x] All 401 existing agent tests pass
+- [x] All 56 protocol tests pass
+- [ ] New protocol unit tests for each extracted field (deferred to Step 7)
+- [ ] Integration test (Tier 2): tuner → interpretation edge with trial data (deferred to Step 7)
 
 ---
 
@@ -405,7 +404,7 @@ serialization.
 ```
 Step 1 (schemas) ✓
     │
-Step 2 (protocol tuner → interp)
+Step 2 (protocol tuner → interp) ✓
     │
 Step 3 (interpretation agent prompts)
     │
