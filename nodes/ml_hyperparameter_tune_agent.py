@@ -244,12 +244,19 @@ class HyperparamTuningAgent:
                 # Validate LLM output into ExperimentPlan (with fallback)
                 plan = ExperimentPlan.with_defaults(decision)
 
-                # Override chain: expert constraint → final-round constraint
+                # Override chain: expert constraint → final-round constraint → hard caps
                 is_last_needed_round = (completed_rounds == max_rounds - 1)
                 if not trial_allowed:
                     plan.is_trial = False
                 if is_last_needed_round:
                     plan.is_trial = False
+
+                # Enforce max_epochs hard cap (prevents LLM from choosing excessively long training)
+                if agent_input.max_epochs is not None:
+                    planned_epochs = plan.train_cfg.get("epochs", 1)
+                    if planned_epochs > agent_input.max_epochs:
+                        print(f"  Clamping epochs: {planned_epochs} → {agent_input.max_epochs} (max_epochs)")
+                        plan.train_cfg["epochs"] = agent_input.max_epochs
 
                 # Build and validate TrialConfig from plan + overrides
                 if plan.is_trial:

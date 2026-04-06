@@ -529,6 +529,18 @@ class HyperparamTuningInput(BaseModel):
         ),
     )
 
+    # --- Hard constraints on LLM plan output (enforced after plan, not by the LLM) ---
+    max_epochs: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Hard cap on epochs per round. When set, the tuner clamps the LLM's "
+            "planned epochs to min(planned_epochs, max_epochs). Use this to prevent "
+            "the LLM from choosing excessively long training in integration tests "
+            "or resource-constrained environments."
+        ),
+    )
+
     @model_validator(mode="after")
     def _validate_trial_fields(self):
         """Cross-field validation for trial mode parameters."""

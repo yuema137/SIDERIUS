@@ -299,6 +299,7 @@ class TestFullExplorationLoop:
             eval_strategy="snapshot",
             eval_portion=0.02,
             cleanup_denoised=True,
+            max_epochs=1,
             # Force small models for speed
             human_advice_propose=(
                 "Propose a VERY simple architecture — no more than 3 layers, "

@@ -246,6 +246,7 @@ def run_workflow(
     sampling_seed: int | None = None,
     train_base_seed: int | None = None,
     cleanup_denoised: bool = False,
+    max_epochs: int | None = None,
 ) -> list[HyperparamTuningOutput]:
     """
     Execute the model exploration workflow for one or more iterations.
@@ -463,6 +464,7 @@ def run_workflow(
             sampling_seed=sampling_seed,
             train_base_seed=train_base_seed,
             cleanup_denoised=cleanup_denoised,
+            max_epochs=max_epochs,
         )
         if human_advice_tune is not None:
             tune_input.human_advice = human_advice_tune
