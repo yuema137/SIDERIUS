@@ -107,9 +107,9 @@ class ValidatorOutput(BaseModel):
     """
 
     passed: bool = Field(
-        description="True only if all seven checks pass: plugin loads, pytest passes, "
+        description="True only if all eight checks pass: plugin loads, pytest passes, "
                     "description valid, config fields scalar, in-process instantiation succeeds, "
-                    "gradient flow confirmed, and LLM review passes.",
+                    "gradient flow confirmed, output type consistent, and LLM review passes.",
     )
     model_type: str = Field(
         description="The model type key that was validated.",
@@ -134,6 +134,11 @@ class ValidatorOutput(BaseModel):
     gradient_check_passed: bool = Field(
         description="Whether a backward pass succeeded and all trainable parameters "
                     "received non-None gradients.",
+    )
+    output_type_valid: bool = Field(
+        default=True,
+        description="Whether PLUGIN_OUTPUT_TYPE matches the actual forward output dimensions. "
+                    "'classifier' expects [B, 256, T], 'regressor' expects [B, T].",
     )
     llm_review_passed: bool = Field(
         description="Whether the LLM code review concluded the implementation is sound.",
