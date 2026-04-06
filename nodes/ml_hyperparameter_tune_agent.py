@@ -399,6 +399,29 @@ class HyperparamTuningAgent:
                 train_status = _run_skill("training_skill", sandbox, **active_params)
                 train_time = round(time.time() - t0, 1)
                 if train_status.get("status") == "error":
+                    error_msg = train_status.get("message", "Unknown training error")
+                    is_oom = "CUDA out of memory" in error_msg or "OutOfMemoryError" in error_msg
+                    # Truncate long tracebacks — keep last 500 chars for the LLM
+                    short_msg = error_msg[-500:] if len(error_msg) > 500 else error_msg
+                    error_record = {
+                        "exp_id":          exp_id,
+                        "status":          "error_training_oom" if is_oom else "error_training",
+                        "model_type":      model_type,
+                        "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "file_index":      file_index,
+                        "params":          record_params,
+                        "denoising_score": None,
+                        "memory": {
+                            "expert_advice_followed": expert_advice_str,
+                            "hypothesis":    hypothesis,
+                            "conclusion":    f"Training failed: {short_msg}",
+                            "discovery":     "CUDA OOM — reduce model size, batch_size, or segmentation_size." if is_oom else f"Training crashed: {short_msg}",
+                            "memory_update": "This config exceeds GPU memory. Try smaller architecture." if is_oom else "Fix the error before retrying this config.",
+                        },
+                    }
+                    ExperimentRecord.model_validate(error_record)
+                    sandbox.save_record(error_record)
+                    print(f"  Saved error record: {error_record['status']}")
                     continue
 
                 print(f"[Step 2/3] Inference...")
@@ -406,6 +429,28 @@ class HyperparamTuningAgent:
                 inf_status = _run_skill("inference_skill", sandbox, **active_params)
                 inference_time = round(time.time() - t0, 1)
                 if inf_status.get("status") == "error":
+                    error_msg = inf_status.get("message", "Unknown inference error")
+                    is_oom = "CUDA out of memory" in error_msg or "OutOfMemoryError" in error_msg
+                    short_msg = error_msg[-500:] if len(error_msg) > 500 else error_msg
+                    error_record = {
+                        "exp_id":          exp_id,
+                        "status":          "error_inference_oom" if is_oom else "error_inference",
+                        "model_type":      model_type,
+                        "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "file_index":      file_index,
+                        "params":          record_params,
+                        "denoising_score": None,
+                        "memory": {
+                            "expert_advice_followed": expert_advice_str,
+                            "hypothesis":    hypothesis,
+                            "conclusion":    f"Inference failed: {short_msg}",
+                            "discovery":     "CUDA OOM during inference — reduce batch_size or model size." if is_oom else f"Inference crashed: {short_msg}",
+                            "memory_update": "Inference OOM — the model trained but can't infer. Try smaller batch." if is_oom else "Fix the inference error before retrying.",
+                        },
+                    }
+                    ExperimentRecord.model_validate(error_record)
+                    sandbox.save_record(error_record)
+                    print(f"  Saved error record: {error_record['status']}")
                     continue
 
                 print(f"[Step 3/3] Scoring...")

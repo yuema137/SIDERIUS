@@ -250,6 +250,48 @@ class TestExperimentRecordOOM:
         assert record.file_index == ExperimentRecord.model_fields["file_index"].default
 
 
+class TestExperimentRecordExecutionErrors:
+    """Test the training/inference error status values."""
+
+    def _make_error_record(self, status: str):
+        return {
+            "exp_id": "punet_v1_001",
+            "status": status,
+            "model_type": "punet",
+            "timestamp": "2026-04-05 12:00:00",
+            "file_index": 6,
+            "params": {"model_config": {}, "train_config": {}, "loss_config": {}},
+            "denoising_score": None,
+            "memory": {
+                "expert_advice_followed": "",
+                "hypothesis": "test hypothesis",
+                "conclusion": "Training failed: CUDA out of memory",
+                "discovery": "Model too large",
+                "memory_update": "Try smaller architecture.",
+            },
+        }
+
+    def test_error_training_accepted(self):
+        rec = ExperimentRecord.model_validate(self._make_error_record("error_training"))
+        assert rec.status == "error_training"
+
+    def test_error_training_oom_accepted(self):
+        rec = ExperimentRecord.model_validate(self._make_error_record("error_training_oom"))
+        assert rec.status == "error_training_oom"
+
+    def test_error_inference_accepted(self):
+        rec = ExperimentRecord.model_validate(self._make_error_record("error_inference"))
+        assert rec.status == "error_inference"
+
+    def test_error_inference_oom_accepted(self):
+        rec = ExperimentRecord.model_validate(self._make_error_record("error_inference_oom"))
+        assert rec.status == "error_inference_oom"
+
+    def test_invalid_status_rejected(self):
+        with pytest.raises(ValidationError):
+            ExperimentRecord.model_validate(self._make_error_record("error_scoring"))
+
+
 # ---------------------------------------------------------------------------
 # 3. Exit validation — HyperparamTuningOutput
 # ---------------------------------------------------------------------------

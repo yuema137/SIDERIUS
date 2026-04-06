@@ -102,7 +102,15 @@ class ExperimentMemory(BaseModel):
 
 class ExperimentRecord(BaseModel):
     exp_id: str
-    status: Literal["success", "error", "skipped_oom_risk"]
+    status: Literal[
+        "success",
+        "error",
+        "skipped_oom_risk",
+        "error_training",
+        "error_training_oom",
+        "error_inference",
+        "error_inference_oom",
+    ]
     model_type: str
     timestamp: str
     file_index: int = Field(default=6, description="Training/validation file index. Defaults to the standard split used in the TIDMAD paper.")
