@@ -64,6 +64,7 @@ from nodes.ml_code_validator_agent import (
     _check_config_fields,
     _run_tests,
     _check_instantiation_and_gradient,
+    _build_review_prompt,
 )
 
 
@@ -726,3 +727,60 @@ class TestLLMReview:
             agent.run(make_input(tmp_path, model_file_path=str(plugin_path)))
             user_prompt = instance.generate.call_args[0][1]
             assert "Runtime Error" in user_prompt
+
+
+# ---------------------------------------------------------------------------
+# Expert advice prompt injection tests
+# ---------------------------------------------------------------------------
+
+class TestExpertAdviceInReviewPrompt:
+    """Verify expert_advice flows into the LLM review prompt."""
+
+    def _make_input(self):
+        return ValidatorInput(
+            model_type="test_model",
+            model_file_path="/fake/model.py",
+            test_file_path="/fake/test_model.py",
+            description_file_path="/fake/description.md",
+            config_fields={"channels": 64},
+            model_description="A test model.",
+            mathematical_definition="Linear → ReLU → Linear",
+            storage={"backend": "local", "local": {"workspace": "/tmp/test", "run_name": "r1"}},
+        )
+
+    def test_includes_expert_advice_string(self):
+        inp = self._make_input()
+        inp.expert_advice = "Pay extra attention to gradient flow"
+        prompt = _build_review_prompt(inp, plugin_src="class Model: pass")
+        assert "Expert Guidance" in prompt
+        assert "gradient flow" in prompt
+
+    def test_excludes_expert_when_empty(self):
+        inp = self._make_input()
+        inp.expert_advice = ""
+        prompt = _build_review_prompt(inp, plugin_src="class Model: pass")
+        assert "Expert Guidance" not in prompt
+
+    def test_includes_structured_expert_advice(self):
+        from agent.schemas.hyperparam_tuning import ExpertAdvice
+        inp = self._make_input()
+        inp.expert_advice = ExpertAdvice(
+            focus_areas=["residual connections"],
+            constraints=["must pass within 2 attempts"],
+            known_failures=["vanishing gradients"],
+            suggested_directions=[],
+            rationale="Previous implementation failed gradient check.",
+        )
+        prompt = _build_review_prompt(inp, plugin_src="class Model: pass")
+        assert "Expert Guidance" in prompt
+        assert "residual connections" in prompt
+        assert "vanishing gradients" in prompt
+
+    def test_expert_advice_before_human_advice(self):
+        inp = self._make_input()
+        inp.expert_advice = "Expert says check padding"
+        inp.human_advice = "Human says check normalization"
+        prompt = _build_review_prompt(inp, plugin_src="class Model: pass")
+        expert_pos = prompt.index("Expert Guidance")
+        human_pos = prompt.index("Human Guidance")
+        assert expert_pos < human_pos

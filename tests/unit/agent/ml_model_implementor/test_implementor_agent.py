@@ -47,6 +47,7 @@ from nodes.ml_model_implementor import (
     _class_name,
     _check_config_field_consistency,
     _smoke_test_plugin,
+    _build_reasoning_prompt,
 )
 
 
@@ -582,3 +583,57 @@ class TestSelfCorrection:
         output = agent.run(inp)
         assert isinstance(output, ImplementorOutput)
         assert agent.bridge.generate.call_count == 3
+
+
+# ---------------------------------------------------------------------------
+# Expert advice prompt injection tests
+# ---------------------------------------------------------------------------
+
+class TestExpertAdviceInPrompt:
+    """Verify expert_advice flows into the reasoning prompt."""
+
+    def _make_input(self):
+        return ImplementorInput(
+            model_name="test_model",
+            model_description="A test model.",
+            mathematical_definition="Linear → ReLU → Linear",
+            baseline_config={"model_config": {"channels": 64}, "train_config": {}},
+            storage={"backend": "local", "local": {"workspace": "/tmp/test", "run_name": "r1"}},
+        )
+
+    def test_includes_expert_advice_string(self):
+        inp = self._make_input()
+        inp.expert_advice = "Use grouped convolutions instead of standard conv1d"
+        prompt = _build_reasoning_prompt(inp)
+        assert "Expert Guidance" in prompt
+        assert "grouped convolutions" in prompt
+
+    def test_excludes_expert_when_empty(self):
+        inp = self._make_input()
+        inp.expert_advice = ""
+        prompt = _build_reasoning_prompt(inp)
+        assert "Expert Guidance" not in prompt
+
+    def test_includes_structured_expert_advice(self):
+        from agent.schemas.hyperparam_tuning import ExpertAdvice
+        inp = self._make_input()
+        inp.expert_advice = ExpertAdvice(
+            focus_areas=["efficient conv layers"],
+            constraints=["no external dependencies"],
+            known_failures=[],
+            suggested_directions=["depthwise separable convolutions"],
+            rationale="Reduce parameter count.",
+        )
+        prompt = _build_reasoning_prompt(inp)
+        assert "Expert Guidance" in prompt
+        assert "efficient conv layers" in prompt
+        assert "depthwise separable" in prompt
+
+    def test_expert_advice_before_human_advice(self):
+        inp = self._make_input()
+        inp.expert_advice = "Expert guidance here"
+        inp.human_advice = "Human guidance here"
+        prompt = _build_reasoning_prompt(inp)
+        expert_pos = prompt.index("Expert Guidance")
+        human_pos = prompt.index("Human Guidance")
+        assert expert_pos < human_pos

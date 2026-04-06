@@ -469,3 +469,81 @@ class TestOutputEnrichedFields:
         assert output.weak_frequency_files is None
         assert output.per_model_params is None
         assert output.per_model_training_segments is None
+
+
+# ---------------------------------------------------------------------------
+# Expert advice prompt injection tests
+# ---------------------------------------------------------------------------
+
+class TestExpertAdviceInPrompts:
+    """Verify expert_advice appears in prompt text when provided."""
+
+    def test_per_model_prompt_includes_expert_advice_string(self):
+        prompt = _build_per_model_prompt(
+            summary=PUNET_SUMMARY,
+            description="PUNet description",
+            expert_advice_str="Focus on low-frequency performance",
+        )
+        assert "Expert Guidance" in prompt
+        assert "Focus on low-frequency performance" in prompt
+
+    def test_per_model_prompt_excludes_expert_when_empty(self):
+        prompt = _build_per_model_prompt(
+            summary=PUNET_SUMMARY,
+            description="PUNet description",
+            expert_advice_str="",
+        )
+        assert "Expert Guidance" not in prompt
+
+    def test_synthesis_prompt_includes_expert_advice_string(self):
+        prompt = _build_synthesis_prompt(
+            per_model_summaries={"punet": FAKE_PER_MODEL_RESPONSE},
+            per_model_best={"punet": 1.8},
+            per_model_worst={"punet": 0.5},
+            overall_best_score=1.8,
+            overall_worst_score=0.5,
+            overall_best_config=None,
+            expert_advice_str="Compare all models on same data volume",
+        )
+        assert "Expert Guidance" in prompt
+        assert "Compare all models on same data volume" in prompt
+
+    def test_synthesis_prompt_excludes_expert_when_empty(self):
+        prompt = _build_synthesis_prompt(
+            per_model_summaries={"punet": FAKE_PER_MODEL_RESPONSE},
+            per_model_best={"punet": 1.8},
+            per_model_worst={"punet": 0.5},
+            overall_best_score=1.8,
+            overall_worst_score=0.5,
+            overall_best_config=None,
+            expert_advice_str="",
+        )
+        assert "Expert Guidance" not in prompt
+
+    def test_expert_advice_before_human_advice_in_per_model(self):
+        """Expert advice section appears before human advice in prompt text."""
+        prompt = _build_per_model_prompt(
+            summary=PUNET_SUMMARY,
+            description="PUNet description",
+            expert_advice_str="Expert says focus here",
+            human_advice="Human says focus there",
+        )
+        expert_pos = prompt.index("Expert Guidance")
+        human_pos = prompt.index("Human Guidance")
+        assert expert_pos < human_pos
+
+    def test_expert_advice_before_human_advice_in_synthesis(self):
+        """Expert advice section appears before human advice in synthesis prompt."""
+        prompt = _build_synthesis_prompt(
+            per_model_summaries={"punet": FAKE_PER_MODEL_RESPONSE},
+            per_model_best={"punet": 1.8},
+            per_model_worst={"punet": 0.5},
+            overall_best_score=1.8,
+            overall_worst_score=0.5,
+            overall_best_config=None,
+            expert_advice_str="Expert says focus here",
+            human_advice="Human says focus there",
+        )
+        expert_pos = prompt.index("Expert Guidance")
+        human_pos = prompt.index("Human Guidance")
+        assert expert_pos < human_pos

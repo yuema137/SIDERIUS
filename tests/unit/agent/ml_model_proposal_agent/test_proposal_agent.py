@@ -352,3 +352,41 @@ class TestBuildReasoningPromptEnriched:
         assert "punet" in prompt
         assert "test bottleneck" in prompt
         assert "File Vector" not in prompt
+
+    def test_includes_expert_advice_string(self):
+        inp = self._make_enriched_input()
+        inp.expert_advice = "Prioritize architectures with skip connections"
+        prompt = _build_reasoning_prompt(inp)
+        assert "Expert Guidance" in prompt
+        assert "skip connections" in prompt
+
+    def test_excludes_expert_when_empty(self):
+        inp = self._make_enriched_input()
+        inp.expert_advice = ""
+        prompt = _build_reasoning_prompt(inp)
+        assert "Expert Guidance" not in prompt
+
+    def test_includes_structured_expert_advice(self):
+        from agent.schemas.hyperparam_tuning import ExpertAdvice
+        inp = self._make_enriched_input()
+        inp.expert_advice = ExpertAdvice(
+            focus_areas=["low-frequency denoising"],
+            constraints=["VRAM < 8 GB"],
+            known_failures=[],
+            suggested_directions=["try dilated convolutions"],
+            rationale="Files 0-3 consistently weak.",
+        )
+        prompt = _build_reasoning_prompt(inp)
+        assert "Expert Guidance" in prompt
+        assert "low-frequency denoising" in prompt
+        assert "VRAM < 8 GB" in prompt
+        assert "dilated convolutions" in prompt
+
+    def test_expert_advice_before_human_advice(self):
+        inp = self._make_enriched_input()
+        inp.expert_advice = "Expert says X"
+        inp.human_advice = "Human says Y"
+        prompt = _build_reasoning_prompt(inp)
+        expert_pos = prompt.index("Expert Guidance")
+        human_pos = prompt.index("Human Expert Advice")
+        assert expert_pos < human_pos
