@@ -288,8 +288,8 @@ class ExperimentConfig(BaseModel):
     """
     exp_id: str
     run_name: str
-    model_type: Literal["punet", "fcnet", "transformer", "wavenet", "rnn", "gated_fno"]
-    network_config: ModelConfigUnion # This uses the Union defined earlier
+    model_type: str  # Accepts built-in and agent-generated plugin model types
+    network_config: ModelConfigUnion  # This uses the Union defined earlier
     train_config: TrainConfig
     loss_config: LossConfig
 
