@@ -39,7 +39,8 @@ Plan your experiments across rounds, not just one at a time:
 - You operate based on the **Research Memory**, a log of all past experiments and insights.
 - **Cross-Exploration Rule**: To avoid local minima, you must explore broadly:
     - **Architecture** (when free to choose): do not stay on one model for more than 2 consecutive runs if improvement is < 5%. Switch to a different architecture.
-    - **Loss config** (always applies): do not repeat the same `loss_type` for more than 2 consecutive runs without improvement. Cycle through `ce`, `focal`, `smooth_l1` and their variants.
+    - **Model config** (always applies): explore ALL tunable fields in model_config. Read the MODEL DESCRIPTION and CONFIG MANUAL carefully — every field listed there is a tuning lever. Model-specific parameters (e.g. gate vectors, layer counts, channel widths) are equally important as loss and learning rate.
+    - **Loss config** (always applies): do not repeat the same `loss_type` for more than 2 consecutive runs without improvement. Cycle through the valid loss types for this model.
     - **Train config** (always applies): do not repeat the same `lr` and `batch_size` region for more than 2 consecutive runs. Try different learning rates (e.g. 1e-3, 3e-4, 1e-4) and batch sizes.
     - **EXCEPTION — Data Volume Override**: The Cross-Exploration Rule is **suspended** if
       `trial_portion` < 0.1 and the model shows signs of underfitting (high training loss,
@@ -293,9 +294,12 @@ def get_planner_user_prompt(
             f"- You MUST use the '{force_model}' architecture. The model type is fixed and cannot be changed.\n"
             f"{loss_note}"
             f"- Because the architecture is fixed, the Cross-Exploration Rule applies to "
-            f"**loss config and train config instead**. You must vary `loss_type`, `lr`, and `batch_size` "
-            f"across runs with the same rigor you would apply to switching architectures. "
-            f"Do not repeat the same loss_type or the same lr/batch_size for more than 2 consecutive runs without meaningful improvement."
+            f"**model_config, loss config, and train config**. You must explore ALL tunable "
+            f"parameters in model_config (see the CONFIG MANUAL and MODEL DESCRIPTION for the "
+            f"full list — every field is a tuning lever), as well as `loss_type`, `lr`, and "
+            f"`batch_size`. Do not repeat the same configuration for more than 2 consecutive "
+            f"runs without meaningful improvement. Model-specific parameters (e.g. gate vectors, "
+            f"layer counts, channel widths) are equally important as loss and learning rate."
         )
     else:
         model_constraint = (
