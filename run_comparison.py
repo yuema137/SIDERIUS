@@ -475,13 +475,41 @@ def main():
     )
     parser.add_argument(
         "--human_advice", type=str, default=None,
-        help="Human guidance for the agent.",
+        help="Human guidance for the agent (free-form string, single value).",
+    )
+    parser.add_argument(
+        "--human_advice_file", type=str, default=None,
+        help=(
+            "Path to a per-agent human advice JSON file. The file must contain a "
+            "single key matching the agent receiving the advice — for the tuner, "
+            "use {\"tune\": \"...\"}. Strict subset of the aggregated advice file "
+            "format used at workflow/chain levels (which has all 5 agent keys). "
+            "If both --human_advice and --human_advice_file are given, the file "
+            "takes precedence."
+        ),
     )
     parser.add_argument(
         "--cleanup_denoised", action="store_true",
         help="Delete denoised HDF5 files after scoring each round to save disk space.",
     )
     args = parser.parse_args()
+
+    # --- Resolve human advice (file > CLI flag > None) ---
+    human_advice: str = args.human_advice or ""
+    if args.human_advice_file:
+        if not os.path.exists(args.human_advice_file):
+            raise SystemExit(
+                f"\n[ERROR] --human_advice_file not found: {args.human_advice_file}"
+            )
+        with open(args.human_advice_file, "r", encoding="utf-8") as f:
+            advice_blob = json.load(f)
+        if not isinstance(advice_blob, dict) or "tune" not in advice_blob:
+            raise SystemExit(
+                f"\n[ERROR] Per-agent advice file for the tuner must contain a "
+                f"'tune' key. Got keys: {list(advice_blob.keys()) if isinstance(advice_blob, dict) else type(advice_blob).__name__}"
+            )
+        human_advice = advice_blob["tune"] or ""
+        print(f"  Loaded human advice from: {args.human_advice_file}")
 
     model_type         = args.model
     model_root         = os.path.join(ROOT_DATA_DIR, model_type)
@@ -550,6 +578,50 @@ def main():
     # --- Phase 2: Seed agent memory ---
     seed_agent_memory(baseline_record, agent_workspace, agent_run_name)
 
+    # --- Write tuner-level run metadata before launching the agent ---
+    from datetime import datetime, timezone
+    from agent.schemas.hyperparam_tuning import ExpertAdvice
+    from agent.schemas.run_metadata import (
+        TunerRunMetadata, PerAgentAdvice,
+        capture_git_info, capture_env_info, write_metadata,
+    )
+
+    # Legacy free-form preamble used by run_agent() — captured here so the
+    # metadata snapshot reflects exactly what the tuner will see in its prompt.
+    legacy_expert_preamble = (
+        "You should actively try different model configs, loss types and train configs, "
+        "while not exceeding the limit of GPU memory. "
+        "The baseline result is already in your memory — "
+        "your goal is to find configurations that outperform it."
+        "CRITICAL: We are using an RTX 5090 (32GB VRAM), the single model should not use more than 10GB VRAM, but you should try to verify batch size and segmentation to make the best usage of the 10GB limit"
+    )
+
+    tuner_meta = TunerRunMetadata(
+        run_name=agent_run_name,
+        workspace=os.path.abspath(agent_workspace),
+        started_at=datetime.now(timezone.utc).isoformat(),
+        git=capture_git_info(repo_root=SIDERIUS_ROOT),
+        env=capture_env_info(),
+        argv=list(sys.argv),
+        advice={
+            "tune": PerAgentAdvice(
+                human=human_advice,
+                expert=ExpertAdvice(freeform_notes=legacy_expert_preamble),
+            ),
+        },
+        human_advice_file=args.human_advice_file,
+        model_type=model_type,
+        llm_provider=args.provider,
+        llm_model_id=args.model_id,
+        max_rounds=args.max_rounds,
+        file_index=None if args.is_trial else args.file_index,
+        is_trial=args.is_trial,
+        baseline_score=baseline_record.get("denoising_score"),
+    )
+    metadata_path = os.path.join(agent_workspace, "tuner_run_metadata.json")
+    write_metadata(tuner_meta, metadata_path)
+    print(f"  Tuner run metadata written: {metadata_path}")
+
     # --- Phase 3: Agent exploration ---
     run_agent(
         model_type=model_type,
@@ -561,7 +633,7 @@ def main():
         progress_bar=args.progress_bar,
         file_index=args.file_index,
         is_trial=args.is_trial,
-        human_advice=args.human_advice,
+        human_advice=human_advice or None,
         cleanup_denoised=args.cleanup_denoised,
     )
 

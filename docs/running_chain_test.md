@@ -26,6 +26,21 @@ The shared advice file `sdsc_submission_scripts/human_advice_chain_test.json` is
 single source of truth for human guidance to the 5 agents. **Both lilab and
 SDSC tests load from it** — edit one file to retune both environments.
 
+### Two levels of human-advice files
+
+Human-advice files come in two distinct shapes, one per level of the run hierarchy.
+Do not confuse them:
+
+| Level | File shape | Used by | Example |
+|---|---|---|---|
+| **Aggregated** (workflow / chain) | Keyed by agent name — has all 5 keys, one per agent in the loop | `run_iteration_chain.sh`, `run_iteration_chain_lilab.sh`, `run_one_iteration.py` (chain test) | `{"interpret":"...", "propose":"...", "implement":"...", "validate":"...", "tune":"..."}` |
+| **Per-agent** (single-agent run) | One key matching the single agent the script invokes | `run_comparison.py` (single-model hyperparameter tuning) | `{"tune":"..."}` |
+
+The per-agent file is a strict subset of the aggregated file — pulling the
+relevant key out of the aggregated file gives you a valid per-agent file.
+Both formats are JSON; the chain runbook in this doc only uses the aggregated
+format.
+
 ---
 
 ## Pre-flight (both environments)
@@ -298,4 +313,5 @@ No zombies in the queue.
 - `sdsc_submission_scripts/human_advice_chain_test.json` — shared advice file (5 keys: interpret/propose/implement/validate/tune)
 - `tests/integration/workflows/test_full_exploration_loop.py` — lilab Tier 3 pytest tests
 - `workflows/model_exploration.py` — `run_workflow()` implementation
+- `agent/schemas/run_metadata.py` — typed `BaseRunMetadata` hierarchy. Today only `TunerRunMetadata` is implemented (written by `run_comparison.py` to `{agent_workspace}/tuner_run_metadata.json`); workflow-level and chain-level subclasses will land later and reference lower-level metadata files via `child_metadata_paths`.
 - `docs/full_loop_5_agents.md` — design doc (companion to this runbook)

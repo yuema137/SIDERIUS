@@ -49,6 +49,15 @@ class ExpertAdvice(BaseModel):
         default="",
         description="Why this guidance was given — context for the agent's planning phase.",
     )
+    freeform_notes: Optional[str] = Field(
+        default=None,
+        description=(
+            "Catch-all slot for unstructured advice text. Used by legacy entry "
+            "points (e.g. run_comparison.py) that pass a single free-form preamble "
+            "string instead of structured fields. Newer code paths should populate "
+            "the structured fields above and leave this None."
+        ),
+    )
 
 
 # Union type accepted wherever expert advice is expected
@@ -78,6 +87,8 @@ def serialize_expert_advice(advice: ExpertAdviceInput) -> str:
         parts.append("Suggested directions: " + "; ".join(advice.suggested_directions))
     if advice.rationale:
         parts.append("Rationale: " + advice.rationale)
+    if advice.freeform_notes:
+        parts.append("Notes: " + advice.freeform_notes)
     return "\n".join(parts) if parts else ""
 
 
