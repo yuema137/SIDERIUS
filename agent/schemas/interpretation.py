@@ -77,18 +77,18 @@ class ModelRunSummary(BaseModel):
     )
 
     # --- Per-file performance (from file_vector) ---
-    best_file_vector: Optional[List[float]] = Field(
+    best_file_vector: Optional[List[Optional[float]]] = Field(
         default=None,
         description="Length-20 score vector from the best experiment. Each index = one "
                     "validation file (frequency, log scale: 0=lowest, 19=highest). "
-                    "NaN for files not evaluated. Reveals frequency-dependent weaknesses.",
+                    "None for files not evaluated. Reveals frequency-dependent weaknesses.",
     )
     formal_score: Optional[float] = Field(
         default=None,
         description="Denoising score from the formal (final) round specifically. "
                     "Distinct from best_denoising_score which may come from a trial round.",
     )
-    formal_file_vector: Optional[List[float]] = Field(
+    formal_file_vector: Optional[List[Optional[float]]] = Field(
         default=None,
         description="File vector from the formal round. Definitive per-file performance.",
     )
@@ -251,7 +251,7 @@ class InterpretationOutput(BaseModel):
     )
 
     # --- Frequency analysis (from file_vector) ---
-    per_model_file_vectors: Optional[Dict[str, List[float]]] = Field(
+    per_model_file_vectors: Optional[Dict[str, List[Optional[float]]]] = Field(
         default=None,
         description="model_type → best file_vector. Enables the proposal agent to see "
                     "which frequency ranges each architecture handles well.",

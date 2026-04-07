@@ -17,6 +17,7 @@ All functions operate on raw HDF5 data and are stateless.
 
 import os
 import gc
+from typing import Optional
 import numpy as np
 import h5py
 
@@ -307,9 +308,9 @@ def score_vector(
 
     Returns:
         (file_vector, final_scalar_score):
-        - ``file_vector``: length-20 list. ``float('nan')`` for files not in
+        - ``file_vector``: length-20 list. ``None`` for files not in
           the sample set.
-        - ``final_scalar_score``: ``log_{5.27}(mean_of_non_nan + 1e-10)``.
+        - ``final_scalar_score``: ``log_{5.27}(mean_of_present_scores + 1e-10)``.
 
     Raises:
         ValueError: If ``denoised_filename_fn`` is None and the caller hasn't
@@ -324,7 +325,7 @@ def score_vector(
             "which denoised file to read for each file_index."
         )
 
-    file_vector = [float("nan")] * NUM_FILES
+    file_vector: list[Optional[float]] = [None] * NUM_FILES
 
     # Build task args for each file
     tasks = []
@@ -344,8 +345,8 @@ def score_vector(
             fi, score = _score_one_file(task_args)
             file_vector[fi] = score
 
-    # Aggregate: mean of non-NaN entries
-    valid_scores = [s for s in file_vector if not math.isnan(s)]
+    # Aggregate: mean of scored entries (skip None for files not in sample_set)
+    valid_scores = [s for s in file_vector if s is not None and not math.isnan(s)]
     if valid_scores:
         mean_score = sum(valid_scores) / len(valid_scores)
         final_scalar = math.log(mean_score + 1e-10, 5.27)

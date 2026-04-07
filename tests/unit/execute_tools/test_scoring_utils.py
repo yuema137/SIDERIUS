@@ -153,7 +153,7 @@ class TestScoreVector:
 
     @patch("execute_tools.scoring_utils.get_snr", side_effect=_mock_get_snr_fixed)
     @patch("execute_tools.scoring_utils.get_one_sec_psd", side_effect=_mock_get_one_sec_psd)
-    def test_excluded_files_are_nan(self, mock_psd, mock_snr):
+    def test_excluded_files_are_none(self, mock_psd, mock_snr):
         sample_set: SampleSet = {6: [0]}
         vector, _ = score_vector(
             data_dir="/fake",
@@ -162,12 +162,12 @@ class TestScoreVector:
             s_max=MOCK_S_MAX,
             denoised_filename_fn=self._filename_fn,
         )
-        # File 6 should have a real value
-        assert not math.isnan(vector[6])
-        # All others should be NaN
+        # File 6 should have a real numeric score
+        assert vector[6] is not None and not math.isnan(vector[6])
+        # All other files should be None (not in sample_set, so not scored)
         for i in range(NUM_FILES):
             if i != 6:
-                assert math.isnan(vector[i]), f"File {i} should be NaN"
+                assert vector[i] is None, f"File {i} should be None, got {vector[i]}"
 
     @patch("execute_tools.scoring_utils.get_snr", side_effect=_mock_get_snr_fixed)
     @patch("execute_tools.scoring_utils.get_one_sec_psd", side_effect=_mock_get_one_sec_psd)
@@ -213,7 +213,7 @@ class TestScoreVector:
     @patch("execute_tools.scoring_utils.get_snr", side_effect=_mock_get_snr_fixed)
     @patch("execute_tools.scoring_utils.get_one_sec_psd", side_effect=_mock_get_one_sec_psd)
     def test_empty_sample_set(self, mock_psd, mock_snr):
-        """Empty sample set: all NaN vector, -inf scalar."""
+        """Empty sample set: all-None vector, -inf scalar."""
         vector, scalar = score_vector(
             data_dir="/fake",
             sample_set={},
@@ -221,13 +221,13 @@ class TestScoreVector:
             s_max=MOCK_S_MAX,
             denoised_filename_fn=self._filename_fn,
         )
-        assert all(math.isnan(v) for v in vector)
+        assert all(v is None for v in vector)
         assert scalar == float("-inf")
 
     @patch("execute_tools.scoring_utils.get_snr", side_effect=_mock_get_snr_fixed)
     @patch("execute_tools.scoring_utils.get_one_sec_psd", side_effect=_mock_get_one_sec_psd)
     def test_normal_mode_single_file(self, mock_psd, mock_snr):
-        """Normal mode: single file with all segments — 1 real value, 19 NaN."""
+        """Normal mode: single file with all segments — 1 real value, 19 None."""
         all_segments = list(range(SEGMENTS_PER_FILE))
         sample_set: SampleSet = {6: all_segments}
         vector, scalar = score_vector(
@@ -237,6 +237,6 @@ class TestScoreVector:
             s_max=MOCK_S_MAX,
             denoised_filename_fn=self._filename_fn,
         )
-        non_nan = [v for v in vector if not math.isnan(v)]
-        assert len(non_nan) == 1
-        assert not math.isnan(vector[6])
+        present = [v for v in vector if v is not None]
+        assert len(present) == 1
+        assert vector[6] is not None and not math.isnan(vector[6])

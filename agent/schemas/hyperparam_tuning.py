@@ -135,9 +135,9 @@ class ExperimentRecord(BaseModel):
         default=None,
         description="Anchor-normalized denoising score (validation).",
     )
-    file_vector: Optional[List[float]] = Field(
+    file_vector: Optional[List[Optional[float]]] = Field(
         default=None,
-        description="Length-20 score vector. NaN for files not included in the run.",
+        description="Length-20 score vector. None for files not included in the run.",
     )
 
     # --- Data volume ---
@@ -182,9 +182,9 @@ class ExperimentRecord(BaseModel):
         default=None,
         description="File indices sampled (only for 'target' strategy).",
     )
-    file_vector: Optional[List[float]] = Field(
+    file_vector: Optional[List[Optional[float]]] = Field(
         default=None,
-        description="Length-20 score vector. NaN for files not included in the run.",
+        description="Length-20 score vector. None for files not included in the run.",
     )
 
 
@@ -651,9 +651,9 @@ class HyperparamTuningOutput(BaseModel):
         default=None,
         description="model_config + train_config + loss_config that produced best_denoising_score.",
     )
-    best_file_vector: Optional[List[float]] = Field(
+    best_file_vector: Optional[List[Optional[float]]] = Field(
         default=None,
-        description="Length-20 score vector from the best experiment. NaN for files not included.",
+        description="Length-20 score vector from the best experiment. None for files not included.",
     )
 
     # --- Full history ---

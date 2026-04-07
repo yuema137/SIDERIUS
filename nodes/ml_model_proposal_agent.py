@@ -190,9 +190,12 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
         lines.append("### Per-model File Vectors (per-file denoising scores)")
         lines.append("File index → frequency (log scale): 0=lowest, 19=highest")
         for mt, fv in file_vectors.items():
-            non_nan = [(i, v) for i, v in enumerate(fv) if not math.isnan(v)]
-            weak = [i for i, v in non_nan if v < 1.0]
-            strong = [i for i, v in non_nan if v >= 10.0]
+            present = [
+                (i, v) for i, v in enumerate(fv)
+                if v is not None and not (isinstance(v, float) and math.isnan(v))
+            ]
+            weak = [i for i, v in present if v < 1.0]
+            strong = [i for i, v in present if v >= 10.0]
             lines.append(f"  {mt}: weak files (score<1.0)={weak}, strong files (score>=10)={strong}")
         lines.append("")
 
