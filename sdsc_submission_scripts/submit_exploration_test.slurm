@@ -4,7 +4,7 @@
 # ---------------------------------------------------------------------------
 # Runs the full 5-agent exploration workflow as a Slurm job.
 # Usage:
-#   sbatch --partition=gpu-shared --gres=gpu:v100:1 --mem=32G --time=01:30:00 \
+#   sbatch --partition=gpu-shared --gres=gpu:v100:1 --mem=24G --time=01:30:00 \
 #          --cpus-per-task=8 \
 #          sdsc_submission_scripts/submit_exploration_test.slurm
 #
