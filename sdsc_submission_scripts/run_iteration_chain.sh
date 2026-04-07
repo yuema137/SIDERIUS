@@ -21,7 +21,7 @@
 #       --seed_paths /scratch/.../seed_punet.json /scratch/.../seed_wavenet.json \
 #       --max_rounds 5 \
 #       --max_epochs 5 \
-#       --human_advice_file sdsc_submission_scripts/human_advice.json \
+#       --human_advice_file sdsc_submission_scripts/human_advice_chain_test.json \
 #       --partition gpu-shared \
 #       --time 06:00:00 \
 #       --mem 24G

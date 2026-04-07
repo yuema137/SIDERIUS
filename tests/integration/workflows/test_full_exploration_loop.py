@@ -40,7 +40,7 @@ from dotenv import load_dotenv
 # Single source of truth — edit one file to retune both environments.
 SHARED_ADVICE_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
-    "..", "..", "..", "sdsc_submission_scripts", "human_advice.json",
+    "..", "..", "..", "sdsc_submission_scripts", "human_advice_chain_test.json",
 )
 
 

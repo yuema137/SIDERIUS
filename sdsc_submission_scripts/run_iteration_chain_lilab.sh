@@ -20,7 +20,7 @@
 #       --seed_paths /home/klz/Data/SIDEREIS_DATA/punet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json \
 #       --max_rounds 5 \
 #       --max_epochs 5 \
-#       --human_advice_file sdsc_submission_scripts/human_advice.json
+#       --human_advice_file sdsc_submission_scripts/human_advice_chain_test.json
 #
 # If iteration N fails, the chain stops immediately (set -e). Inspect
 # ${WORKSPACE}/iter_NNN/ for the failure, fix, and rerun with a fresh

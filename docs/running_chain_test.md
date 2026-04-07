@@ -22,7 +22,7 @@ job. **Iterations always hand off via `manifest.json` files**, regardless of
 whether the previous iteration was a Python subprocess or a Slurm job. This
 keeps the two paths identical for debugging.
 
-The shared advice file `sdsc_submission_scripts/human_advice.json` is the
+The shared advice file `sdsc_submission_scripts/human_advice_chain_test.json` is the
 single source of truth for human guidance to the 5 agents. **Both lilab and
 SDSC tests load from it** — edit one file to retune both environments.
 
@@ -39,7 +39,7 @@ SDSC tests load from it** — edit one file to retune both environments.
 
 2. **Inspect / edit shared advice** if needed:
    ```bash
-   cat sdsc_submission_scripts/human_advice.json
+   cat sdsc_submission_scripts/human_advice_chain_test.json
    ```
    Five keys, one per agent: `interpret`, `propose`, `implement`, `validate`,
    `tune`. Any key may be empty (`""`) — empty strings are not forwarded.
@@ -113,7 +113,7 @@ bash sdsc_submission_scripts/run_iteration_chain_lilab.sh \
     --max_epochs 5 \
     --trial_portion 0.02 \
     --eval_portion 0.02 \
-    --human_advice_file sdsc_submission_scripts/human_advice.json \
+    --human_advice_file sdsc_submission_scripts/human_advice_chain_test.json \
     2>&1 | tee /tmp/lilab_real_chain.log
 ```
 Detach with `Ctrl-b d`. Reattach with `tmux attach -t lilab_real_chain`.
@@ -182,7 +182,7 @@ bash sdsc_submission_scripts/run_iteration_chain.sh \
     --seed_paths /expanse/lustre/projects/ddp433/ym137/siderius_workspace/punet/hpt_full_v1/agent/run_output_hpt_full_v1_agent.json \
     --max_rounds 5 \
     --max_epochs 5 \
-    --human_advice_file sdsc_submission_scripts/human_advice.json \
+    --human_advice_file sdsc_submission_scripts/human_advice_chain_test.json \
     --time 06:00:00 \
     --mem 24G \
     --cpus 8
@@ -295,7 +295,7 @@ No zombies in the queue.
 - `sdsc_submission_scripts/run_iteration_chain_lilab.sh` — lilab orchestrator (sources `_chain_common.sh`, defines `submit_iteration` to call `python3` in foreground)
 - `sdsc_submission_scripts/submit_one_iteration.slurm` — Slurm wrapper for one iteration (SDSC only)
 - `sdsc_submission_scripts/run_one_iteration.py` — Python runner: `run_workflow(max_iterations=1)` + manifest write (used by both lilab and SDSC)
-- `sdsc_submission_scripts/human_advice.json` — shared advice file (5 keys: interpret/propose/implement/validate/tune)
+- `sdsc_submission_scripts/human_advice_chain_test.json` — shared advice file (5 keys: interpret/propose/implement/validate/tune)
 - `tests/integration/workflows/test_full_exploration_loop.py` — lilab Tier 3 pytest tests
 - `workflows/model_exploration.py` — `run_workflow()` implementation
 - `docs/full_loop_5_agents.md` — design doc (companion to this runbook)
