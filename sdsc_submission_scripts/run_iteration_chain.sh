@@ -124,7 +124,11 @@ for ITER in $(seq 1 $NUM_ITERATIONS); do
     )
 
     if [ -n "$PREV_JOB_ID" ]; then
+        # afterok: only run if the previous job succeeds.
+        # kill-on-invalid-dep=yes: auto-cancel if previous job fails,
+        # so we don't leave zombies in the queue.
         SBATCH_ARGS+=(--dependency="afterok:${PREV_JOB_ID}")
+        SBATCH_ARGS+=(--kill-on-invalid-dep=yes)
     fi
 
     # Application args (passed after the .slurm filename)
