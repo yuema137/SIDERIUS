@@ -91,12 +91,18 @@ def write_manifest(iter_dir: str, run_name: str, results: list) -> dict:
         }
     else:
         tune_output = results[0]
-        # The tuning output is at {iter_dir}/{model_name}/run_output_{run_name}.json
+        # The tuning output is at {iter_dir}/iteration_001/{model_name}/run_output_{run_name}.json
+        # (run_workflow always wraps each iteration in iteration_NNN, even with max_iterations=1)
         model_name = tune_output.model_type
-        output_path = os.path.join(iter_dir, model_name, f"run_output_{run_name}.json")
+        output_path = os.path.join(
+            iter_dir, "iteration_001", model_name, f"run_output_{run_name}.json"
+        )
         if not os.path.exists(output_path):
             # Defensive: scan iter_dir for the actual file
-            candidates = glob.glob(os.path.join(iter_dir, "*", f"run_output_{run_name}.json"))
+            candidates = glob.glob(
+                os.path.join(iter_dir, "**", f"run_output_{run_name}.json"),
+                recursive=True,
+            )
             if candidates:
                 output_path = candidates[0]
         manifest = {

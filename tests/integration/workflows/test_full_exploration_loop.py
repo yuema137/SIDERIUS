@@ -409,8 +409,10 @@ class TestFullExplorationLoop:
             assert len(results_1) == 1, "Iteration 1 should produce one tuning output"
             iter1_model = results_1[0].model_type
             registered_models.append(iter1_model)
+            # run_workflow wraps each iteration in {run_name}/iteration_001/...
             iter1_output_path = os.path.join(
-                workspace, "iter_001", iter1_model, "run_output_iter_001.json"
+                workspace, "iter_001", "iteration_001", iter1_model,
+                "run_output_iter_001.json"
             )
             assert os.path.exists(iter1_output_path), (
                 f"Iteration 1 output not found at expected path: {iter1_output_path}"
