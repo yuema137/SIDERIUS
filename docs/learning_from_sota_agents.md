@@ -328,6 +328,111 @@ concrete, actionable lessons.
 | Adaptive search hyperparameters | Low | 1 day | Auto-adjust temperature/iterations | FM-Agent |
 | Tighter reflector prompts (specificity) | Low | 1 hour | More actionable memory entries | AI-Build-AI |
 
+## Open Question: Making "High Priority" Labels Actually Enforced
+
+### The problem
+
+We label some inputs as "high priority" in the prompt (e.g., `## Human Expert Advice
+(high priority — address these explicitly)`), but **this is just a markdown label**.
+The LLM may or may not follow it. There's no code-level enforcement, no retry on
+violation, no validation that the advice was actually addressed.
+
+Examples of soft constraints that the LLM ignored in practice:
+- "Use exactly 1 epoch" → LLM chose 50 epochs (fixed by adding `max_epochs` hard cap)
+- "Use specific loss type X" → LLM tried other losses (caught by `ExperimentConfig`
+  validator after-the-fact, wasted a round)
+- "static_v is the key parameter" → LLM didn't try static_v despite the model
+  description explaining it (fixed by adding model_config to Cross-Exploration Rule)
+
+The pattern is clear: **hierarchy of enforcement matters more than labels**.
+
+### Preliminary thoughts on solutions
+
+#### Option 1: Plan review pass (lightweight LLM call)
+
+After the LLM generates a plan, run a **second LLM call** that compares the plan
+against the human advice:
+
+```python
+plan = brain.plan(...)
+violations = brain.review_plan_against_advice(plan, human_advice)
+if violations:
+    plan = brain.replan(plan, violations)  # send back with explicit critique
+```
+
+Similar to MLEvolve's debug-on-failure pattern, applied to "advice violations"
+instead of "execution failures." Pros: general, works for any kind of advice.
+Cons: extra LLM call per round, ~5-15s latency.
+
+#### Option 2: Structured advice with hard fields
+
+Instead of (or alongside) free-text human advice, expose specific hard-cap fields
+on the input schema. We already have `max_epochs` — extend to:
+
+```python
+class HyperparamTuningInput(BaseModel):
+    max_epochs: Optional[int]
+    max_batch_size: Optional[int]
+    max_params: Optional[int]              # rejects models exceeding this
+    forced_loss_types: Optional[list[str]]  # only allow these
+    forced_trial_strategy: Optional[str]    # forces a specific strategy
+    ...
+```
+
+Pros: deterministic, no extra LLM call. Cons: hardcoded set of constraints,
+doesn't scale to "anything the human might want."
+
+#### Option 3: Tagged constraint extraction
+
+Use a structured `ExpertAdvice` schema with explicit constraint types:
+
+```python
+class Constraint(BaseModel):
+    type: Literal["max", "min", "equals", "in", "not_in"]
+    field: str          # e.g., "epochs", "model_config.width"
+    value: Any
+
+class ExpertAdvice(BaseModel):
+    constraints: list[Constraint]   # parsed list, not free text
+```
+
+The system **enforces these in code** (not just the prompt). The LLM still sees
+them in the prompt as guidance, but the post-plan validator checks each constraint
+against the plan and rejects violations.
+
+Pros: combines flexibility (any field) with enforcement.
+Cons: requires writing constraint parser, more complex schema, harder for users
+to write.
+
+#### Option 4: Hybrid (recommended direction)
+
+Combine the above based on what kind of constraint is being expressed:
+
+- **Hard caps for known fields** (Option 2): `max_epochs`, `max_params`,
+  `max_batch_size`, `forced_loss_types` — fast, deterministic, no LLM cost
+- **Plan review pass for nuanced advice** (Option 1): only triggered when
+  free-text `human_advice` is non-empty, catches subtle violations
+- **Structured constraints for advanced users** (Option 3): future, when we have
+  more agents producing `expert_advice` automatically and need machine-readable
+  constraint contracts
+
+### Mantra
+
+**Constraint enforcement should match constraint specificity.** If you can
+express it as a number (`max_epochs=1`), enforce it as a number. If you can
+only express it as English ("don't use complex models"), use a review pass.
+Never rely on prompt labels alone for things that matter.
+
+### Priority
+
+**Medium-high.** The current soft enforcement works most of the time but fails
+unpredictably. As we add more constraints (`gpu_memory_limit`, `max_params`, etc.),
+the gap between "what we say" and "what we enforce" will widen. Worth fixing
+before the next round of agent improvements — particularly the plan review pass
+(Option 1), which is the most general solution.
+
+---
+
 ## Top 3 Recommendations
 
 If we implement only three things from this list:
