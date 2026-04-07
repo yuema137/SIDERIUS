@@ -212,24 +212,26 @@ def _check_config_fields(config_fields: dict) -> tuple[bool, str | None]:
 
 def _check_instantiation_and_gradient(
     model_file_path: str,
-) -> tuple[bool, bool, str | None]:
+) -> tuple[bool, bool, bool, str | None]:
     """
-    Load plugin, instantiate config + model, run a dummy forward + backward pass.
+    Load plugin, instantiate config + model, run a dummy forward + backward pass,
+    and verify output type consistency.
 
-    Returns (instantiation_ok, gradient_ok, error_message_or_None).
+    Returns (instantiation_ok, gradient_ok, output_type_ok, error_message_or_None).
       - instantiation_ok: config instantiated, model instantiated, forward pass
                           produced the correct output shape [1, 256, 64].
       - gradient_ok:      backward pass succeeded and all trainable parameters
                           received non-None gradients.
+      - output_type_ok:   PLUGIN_OUTPUT_TYPE matches the actual forward output dims.
     """
     spec = importlib.util.spec_from_file_location("_validator_plugin_inst", model_file_path)
     if spec is None:
-        return False, False, f"Could not create module spec for {model_file_path}"
+        return False, False, False, f"Could not create module spec for {model_file_path}"
     module = importlib.util.module_from_spec(spec)
     try:
         spec.loader.exec_module(module)
     except Exception as e:
-        return False, False, f"Import error: {e}"
+        return False, False, False, f"Import error: {e}"
 
     # Instantiate config and model
     try:
@@ -237,34 +239,49 @@ def _check_instantiation_and_gradient(
         model = module.PLUGIN_MODEL_CLASS(config)
         model.train()
     except Exception as e:
-        return False, False, f"Model instantiation failed: {e}"
+        return False, False, False, f"Model instantiation failed: {e}"
 
     # Forward pass with small dummy input
     try:
         x = torch.randint(0, 256, (1, 64))
         out = model(x)
         if tuple(out.shape) != (1, 256, 64):
-            return False, False, (
+            return False, False, False, (
                 f"Forward output shape {tuple(out.shape)} does not match expected (1, 256, 64)"
             )
     except Exception as e:
-        return False, False, f"Forward pass failed: {e}"
+        return False, False, False, f"Forward pass failed: {e}"
+
+    # Output type consistency check
+    declared_type = getattr(module, "PLUGIN_OUTPUT_TYPE", "classifier")
+    actual_dims = len(out.shape)
+    if declared_type == "classifier" and actual_dims != 3:
+        return True, False, False, (
+            f"PLUGIN_OUTPUT_TYPE='classifier' but output has {actual_dims} dims "
+            f"(expected 3: [B, 256, T])"
+        )
+    if declared_type == "regressor" and actual_dims != 2:
+        return True, False, False, (
+            f"PLUGIN_OUTPUT_TYPE='regressor' but output has {actual_dims} dims "
+            f"(expected 2: [B, T])"
+        )
+    output_type_ok = True
 
     # Gradient flow check
     try:
         loss = out.sum()
         loss.backward()
     except Exception as e:
-        return True, False, f"Backward pass failed: {e}"
+        return True, False, output_type_ok, f"Backward pass failed: {e}"
 
     no_grad = [
         name for name, p in model.named_parameters()
         if p.requires_grad and p.grad is None
     ]
     if no_grad:
-        return True, False, f"Parameters with no gradient: {no_grad[:5]}"
+        return True, False, output_type_ok, f"Parameters with no gradient: {no_grad[:5]}"
 
-    return True, True, None
+    return True, True, output_type_ok, None
 
 
 # ---------------------------------------------------------------------------
@@ -293,11 +310,11 @@ class MLCodeValidatorAgent:
         # 4. Config fields
         cfg_ok, cfg_err = _check_config_fields(inp.config_fields)
 
-        # 5 + 6. In-process instantiation + gradient (only if plugin loaded)
+        # 5 + 6 + 8. In-process instantiation + gradient + output type (only if plugin loaded)
         if plugin_ok:
-            inst_ok, grad_ok, inst_err = _check_instantiation_and_gradient(inp.model_file_path)
+            inst_ok, grad_ok, otype_ok, inst_err = _check_instantiation_and_gradient(inp.model_file_path)
         else:
-            inst_ok, grad_ok, inst_err = False, False, "Skipped — plugin did not load"
+            inst_ok, grad_ok, otype_ok, inst_err = False, False, False, "Skipped — plugin did not load"
 
         # 7. LLM code review (only if plugin file is readable)
         if os.path.isfile(inp.model_file_path):
@@ -319,7 +336,7 @@ class MLCodeValidatorAgent:
             )
             llm_ok = False
 
-        passed = all([plugin_ok, tests_ok, desc_ok, cfg_ok, inst_ok, grad_ok, llm_ok])
+        passed = all([plugin_ok, tests_ok, desc_ok, cfg_ok, inst_ok, grad_ok, otype_ok, llm_ok])
 
         errors = [e for e in [plugin_err, desc_err, cfg_err, inst_err] if e is not None]
         if not tests_ok:
@@ -337,6 +354,7 @@ class MLCodeValidatorAgent:
             config_fields_valid=cfg_ok,
             instantiation_passed=inst_ok,
             gradient_check_passed=grad_ok,
+            output_type_valid=otype_ok,
             llm_review_passed=llm_ok,
             test_output=test_output if test_output.strip() else None,
             llm_review_spec_alignment=review.spec_alignment,

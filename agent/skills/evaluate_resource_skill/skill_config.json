@@ -6,8 +6,7 @@
     "properties": {
       "model_type": {
         "type": "string",
-        "enum": ["fcnet", "punet", "transformer", "wavenet", "rnn"],
-        "description": "The model architecture to evaluate."
+        "description": "The model architecture to evaluate (any model in MODEL_REGISTRY)."
       },
       "model_config": {
         "type": "object",

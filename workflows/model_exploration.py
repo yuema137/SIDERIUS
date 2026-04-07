@@ -234,6 +234,19 @@ def run_workflow(
     human_advice_implement: str | None = None,
     human_advice_validate: str | None = None,
     human_advice_tune: str | None = None,
+    # --- Trial mode (optional — defaults preserve single-file behavior) ---
+    is_trial: bool = False,
+    trial_strategy: str = "snapshot",
+    trial_portion: float = 0.1,
+    target_files: list[int] | None = None,
+    train_portion: float = 0.1,
+    eval_strategy: str = "snapshot",
+    eval_portion: float = 0.1,
+    train_validation_align: bool = True,
+    sampling_seed: int | None = None,
+    train_base_seed: int | None = None,
+    cleanup_denoised: bool = False,
+    max_epochs: int | None = None,
 ) -> list[HyperparamTuningOutput]:
     """
     Execute the model exploration workflow for one or more iterations.
@@ -253,7 +266,7 @@ def run_workflow(
         max_rounds: Tuning budget per iteration.
         max_proposal_attempts: Max propose→implement→validate retries per iteration.
         target_score: Optional early stop — halt if best score >= target.
-        file_index: Training/validation file index.
+        file_index: Training/validation file index (ignored when is_trial=True).
         llm_config: Per-node LLM configuration. If None, each node uses its
             own built-in default. See WorkflowLLMConfig for details.
         human_advice_interpret: Human guidance for interpretation steps.
@@ -261,6 +274,17 @@ def run_workflow(
         human_advice_implement: Human guidance for implementation steps.
         human_advice_validate: Human guidance for validation steps.
         human_advice_tune: Human guidance for tuning steps.
+        is_trial: Enable trial mode for the tuning agent.
+        trial_strategy: Sampling strategy ('snapshot', 'anchors', 'target').
+        trial_portion: Fraction of segments per file for training scope.
+        target_files: File indices for 'target' strategy.
+        train_portion: Per-epoch subsample from training scope.
+        eval_strategy: Sampling strategy for validation.
+        eval_portion: Fraction of segments per file for validation.
+        train_validation_align: When True, train and eval scopes share segment indices.
+        sampling_seed: Seed for SampleSet construction.
+        train_base_seed: Base seed for per-epoch training subsampling.
+        cleanup_denoised: Delete denoised H5 files after scoring.
 
     Returns:
         List of HyperparamTuningOutput objects, one per successful iteration.
@@ -429,6 +453,18 @@ def run_workflow(
             file_index=file_index,
             llm_provider=tune_llm.get("provider", "gemini"),
             llm_model_id=tune_llm.get("model_id", "gemini-3.1-flash-lite-preview"),
+            is_trial=is_trial,
+            trial_strategy=trial_strategy,
+            trial_portion=trial_portion,
+            target_files=target_files,
+            train_portion=train_portion,
+            eval_strategy=eval_strategy,
+            eval_portion=eval_portion,
+            train_validation_align=train_validation_align,
+            sampling_seed=sampling_seed,
+            train_base_seed=train_base_seed,
+            cleanup_denoised=cleanup_denoised,
+            max_epochs=max_epochs,
         )
         if human_advice_tune is not None:
             tune_input.human_advice = human_advice_tune

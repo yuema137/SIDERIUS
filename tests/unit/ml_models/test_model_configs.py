@@ -13,6 +13,7 @@ from ml_models.models_format_sandbox import (
     TransformerConfig,
     WaveNetConfig,
     RNNSeq2SeqConfig,
+    GatedFNOConfig,
     LossConfig,
     TrainConfig,
     ExperimentConfig,
@@ -247,3 +248,46 @@ class TestExperimentConfig:
     def test_rnn_with_smooth_l1_raises(self):
         with pytest.raises(ValidationError, match="smooth_l1"):
             ExperimentConfig(**_make_experiment("rnn", "smooth_l1"))
+
+
+# ==========================================
+# GatedFNOConfig
+# ==========================================
+
+class TestGatedFNOConfig:
+
+    def test_valid_default(self):
+        cfg = GatedFNOConfig()
+        assert cfg.model_type == "gated_fno"
+        assert cfg.width == 64
+        assert cfg.num_layers == 2
+        assert cfg.num_gates == 128
+        assert cfg.static_v is None
+
+    def test_valid_custom(self):
+        cfg = GatedFNOConfig(width=32, num_layers=3, num_gates=64)
+        assert cfg.width == 32
+        assert cfg.num_layers == 3
+        assert cfg.num_gates == 64
+
+    def test_valid_with_static_v(self):
+        v = [0.5] * 64
+        cfg = GatedFNOConfig(num_gates=64, static_v=v)
+        assert cfg.static_v == v
+        assert len(cfg.static_v) == 64
+
+    def test_static_v_length_mismatch_raises(self):
+        with pytest.raises(ValidationError, match="static_v length"):
+            GatedFNOConfig(num_gates=64, static_v=[0.5] * 32)
+
+    def test_width_below_min_raises(self):
+        with pytest.raises(ValidationError):
+            GatedFNOConfig(width=8)
+
+    def test_num_layers_below_min_raises(self):
+        with pytest.raises(ValidationError):
+            GatedFNOConfig(num_layers=0)
+
+    def test_num_gates_below_min_raises(self):
+        with pytest.raises(ValidationError):
+            GatedFNOConfig(num_gates=4)
