@@ -352,6 +352,53 @@ class TestRunWorkflowSingleIteration:
                 run_name="test_run",
             )
 
+    def test_chained_iterations_via_source_paths(self, workflow_env, tmp_path):
+        """
+        Simulate two sequential Slurm jobs: iteration 1 from seed only,
+        iteration 2 from seed + iteration 1's output. Verifies the
+        per-iteration chaining logic that the orchestrator script depends on.
+        """
+        seed_path = str(tmp_path / "data" / "punet" / "v1" / "agent" / "run_output_v1_agent.json")
+        workspace = workflow_env["workspace"]
+
+        # --- Iteration 1: just the seed ---
+        results_1 = run_workflow(
+            source_paths=[seed_path],
+            workspace=workspace,
+            run_name="iter_001",
+        )
+        assert len(results_1) == 1
+        # The interpretation agent should have received 1 summary (from the seed)
+        interp_input_1 = workflow_env["interp"].return_value.run.call_args_list[0][0][0]
+        assert len(interp_input_1.summaries) == 1
+        assert interp_input_1.summaries[0].model_type == "punet"
+
+        # --- Simulate iteration 1's output being available on disk ---
+        # In real Slurm chaining, iteration 1 would write run_output_iter_001.json
+        # at {workspace}/iter_001/{model_name}/. We fake that here.
+        iter_1_model = results_1[0].model_type
+        iter_1_output_dir = os.path.join(workspace, "iter_001", iter_1_model)
+        os.makedirs(iter_1_output_dir, exist_ok=True)
+        iter_1_output_path = os.path.join(iter_1_output_dir, "run_output_iter_001.json")
+        # Write a minimal valid HyperparamTuningOutput JSON
+        with open(iter_1_output_path, "w") as f:
+            json.dump(results_1[0].model_dump(), f, default=str)
+
+        # --- Iteration 2: seed + iteration 1's output ---
+        results_2 = run_workflow(
+            source_paths=[seed_path, iter_1_output_path],
+            workspace=workspace,
+            run_name="iter_002",
+        )
+        assert len(results_2) == 1
+        # The interpretation agent should now have received 2 summaries
+        # (call_args_list[1] = the call from iteration 2)
+        interp_input_2 = workflow_env["interp"].return_value.run.call_args_list[1][0][0]
+        assert len(interp_input_2.summaries) == 2, (
+            f"Iteration 2 should see seed + iter_001 output (2 summaries), "
+            f"got {len(interp_input_2.summaries)}"
+        )
+
     def test_all_five_nodes_called(self, workflow_env):
         run_workflow(
             data_dir=workflow_env["data_dir"],
