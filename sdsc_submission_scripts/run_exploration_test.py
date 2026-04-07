@@ -33,10 +33,10 @@ from workflows.llm_config import WorkflowLLMConfig
 
 # Reuse the validation function from the pytest test file
 sys.path.insert(0, os.path.join(SIDERIUS_ROOT, "tests/integration/workflows"))
-from test_full_exploration_loop import validate_workflow_outputs, SOURCE_MODELS, SOURCE_RUN_NAME
+from test_full_exploration_loop import validate_workflow_outputs
 
 
-def check_prerequisites() -> list[str]:
+def check_prerequisites(source_models: list[str], source_run_name: str) -> list[str]:
     """Return a list of missing prerequisites (empty if all present)."""
     missing = []
 
@@ -53,10 +53,10 @@ def check_prerequisites() -> list[str]:
     if not os.path.exists(anchor_map):
         missing.append(f"Segment anchor map not found: {anchor_map}")
 
-    for model in SOURCE_MODELS:
+    for model in source_models:
         path = os.path.join(
-            SIDERIUS_DATA_DIR, model, SOURCE_RUN_NAME, "agent",
-            f"run_output_{SOURCE_RUN_NAME}_agent.json",
+            SIDERIUS_DATA_DIR, model, source_run_name, "agent",
+            f"run_output_{source_run_name}_agent.json",
         )
         if not os.path.exists(path):
             missing.append(f"Tuning output not found: {path}")
@@ -100,6 +100,14 @@ def main():
         help="Hard cap on epochs per round (test should be fast)"
     )
     parser.add_argument(
+        "--source_models", type=str, nargs="+", default=["punet", "wavenet"],
+        help="Models to load as historical source data for the interpretation agent"
+    )
+    parser.add_argument(
+        "--source_run_name", type=str, default="small_sample_trial_v0",
+        help="Run name to load source data from (lilab default; use 'hpt_full_v1' on SDSC)"
+    )
+    parser.add_argument(
         "--no_cleanup", action="store_true",
         help="Skip plugin cleanup after test (for debugging)"
     )
@@ -107,15 +115,17 @@ def main():
 
     print("=" * 60)
     print("  SDSC TIER 3 INTEGRATION TEST: 5-Agent Workflow")
-    print(f"  Workspace : {args.workspace}")
-    print(f"  Run name  : {args.run_name}")
-    print(f"  LLM       : {args.llm_model}")
-    print(f"  Max rounds: {args.max_rounds}")
+    print(f"  Workspace      : {args.workspace}")
+    print(f"  Run name       : {args.run_name}")
+    print(f"  LLM            : {args.llm_model}")
+    print(f"  Max rounds     : {args.max_rounds}")
+    print(f"  Source models  : {args.source_models}")
+    print(f"  Source run     : {args.source_run_name}")
     print("=" * 60)
 
     # --- Prerequisites check ---
     print("\n[1/4] Checking prerequisites...")
-    missing = check_prerequisites()
+    missing = check_prerequisites(args.source_models, args.source_run_name)
     if missing:
         print("FAIL: Missing prerequisites:")
         for m in missing:
@@ -130,8 +140,8 @@ def main():
     try:
         results = run_workflow(
             data_dir=SIDERIUS_DATA_DIR,
-            model_types=SOURCE_MODELS,
-            source_run_name=SOURCE_RUN_NAME,
+            model_types=args.source_models,
+            source_run_name=args.source_run_name,
             workspace=args.workspace,
             run_name=args.run_name,
             llm_config=llm_config,

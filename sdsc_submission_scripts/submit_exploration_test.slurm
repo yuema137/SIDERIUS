@@ -62,16 +62,18 @@ RUN_NAME="test_full_loop_$(date +%m%d_%H%M)"
 MAX_ROUNDS=2
 LLM_MODEL="gemini-3.1-pro-preview"
 MAX_EPOCHS=1
+SOURCE_RUN_NAME="hpt_full_v1"   # SDSC default; lilab uses small_sample_trial_v0
 
 # --- Parse application-level args (after the .slurm filename) ---
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --run_name)     RUN_NAME="$2"; shift 2 ;;
-    --max_rounds)   MAX_ROUNDS="$2"; shift 2 ;;
-    --llm_model)    LLM_MODEL="$2"; shift 2 ;;
-    --max_epochs)   MAX_EPOCHS="$2"; shift 2 ;;
-    --*)            shift 2 ;; # Safely ignore Slurm resource flags
-    *)              shift ;;
+    --run_name)        RUN_NAME="$2"; shift 2 ;;
+    --max_rounds)      MAX_ROUNDS="$2"; shift 2 ;;
+    --llm_model)       LLM_MODEL="$2"; shift 2 ;;
+    --max_epochs)      MAX_EPOCHS="$2"; shift 2 ;;
+    --source_run_name) SOURCE_RUN_NAME="$2"; shift 2 ;;
+    --*)               shift 2 ;; # Safely ignore Slurm resource flags
+    *)                 shift ;;
   esac
 done
 
@@ -79,11 +81,12 @@ echo "############################################################"
 echo "  SIDERIUS TIER 3 INTEGRATION TEST"
 echo "------------------------------------------------------------"
 echo "  [EXECUTION CONTEXT]"
-echo "    Run name    : ${RUN_NAME}"
-echo "    Max rounds  : ${MAX_ROUNDS}"
-echo "    Max epochs  : ${MAX_EPOCHS}"
-echo "    LLM model   : ${LLM_MODEL}"
-echo "    Workspace   : ${TEST_WORKSPACE}"
+echo "    Run name      : ${RUN_NAME}"
+echo "    Source run    : ${SOURCE_RUN_NAME}"
+echo "    Max rounds    : ${MAX_ROUNDS}"
+echo "    Max epochs    : ${MAX_EPOCHS}"
+echo "    LLM model     : ${LLM_MODEL}"
+echo "    Workspace     : ${TEST_WORKSPACE}"
 echo ""
 echo "  [RUNTIME CONTEXT (Assigned by Slurm)]"
 echo "    Job ID      : ${SLURM_JOB_ID:-N/A}"
@@ -100,7 +103,9 @@ python sdsc_submission_scripts/run_exploration_test.py \
     --run_name "${RUN_NAME}" \
     --llm_model "${LLM_MODEL}" \
     --max_rounds "${MAX_ROUNDS}" \
-    --max_epochs "${MAX_EPOCHS}"
+    --max_epochs "${MAX_EPOCHS}" \
+    --source_run_name "${SOURCE_RUN_NAME}" \
+    --source_models punet wavenet
 PY_EXIT_CODE=$?
 set -e
 

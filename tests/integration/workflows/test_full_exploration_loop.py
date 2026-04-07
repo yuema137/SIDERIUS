@@ -47,9 +47,9 @@ except (FileNotFoundError, ImportError):
     TIDMAD_DATA_DIR = "/home/klz/Data/TIDMAD/"
     SIDERIUS_DATA_DIR = "/home/klz/Data/SIDEREIS_DATA/"
 
-SOURCE_RUN_NAME = "v3_file6"
-SOURCE_MODELS = ["punet", "fcnet", "wavenet"]
-EXISTING_BUILTIN_MODELS = ["punet", "fcnet", "wavenet", "transformer", "rnn"]
+SOURCE_RUN_NAME = "small_sample_trial_v0"
+SOURCE_MODELS = ["punet", "wavenet"]
+EXISTING_BUILTIN_MODELS = ["punet", "fcnet", "wavenet", "transformer", "rnn", "gated_fno"]
 
 ANCHOR_MAP_PATH = os.path.join(TIDMAD_DATA_DIR, "segment_anchors.json")
 
