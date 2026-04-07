@@ -28,6 +28,7 @@ WORKSPACE=""
 NUM_ITERATIONS=10
 SEED_PATHS=()
 MAX_ROUNDS=20
+MAX_EPOCHS=""
 LLM_MODEL="gemini-3.1-pro-preview"
 TRIAL_PORTION=0.1
 TRAIN_PORTION=0.1
@@ -53,6 +54,7 @@ while [[ $# -gt 0 ]]; do
       done
       ;;
     --max_rounds)             MAX_ROUNDS="$2"; shift 2 ;;
+    --max_epochs)             MAX_EPOCHS="$2"; shift 2 ;;
     --llm_model)              LLM_MODEL="$2"; shift 2 ;;
     --trial_portion)          TRIAL_PORTION="$2"; shift 2 ;;
     --train_portion)          TRAIN_PORTION="$2"; shift 2 ;;
@@ -142,6 +144,9 @@ for ITER in $(seq 1 $NUM_ITERATIONS); do
         --train_portion "$TRAIN_PORTION"
         --eval_portion "$EVAL_PORTION"
     )
+    if [ -n "$MAX_EPOCHS" ]; then
+        APP_ARGS+=(--max_epochs "$MAX_EPOCHS")
+    fi
     if [ -n "$HUMAN_ADVICE_PROPOSE" ]; then
         APP_ARGS+=(--human_advice_propose "$HUMAN_ADVICE_PROPOSE")
     fi
