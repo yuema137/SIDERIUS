@@ -5,16 +5,22 @@ The chain runs the 5-agent loop (interpret → propose → implement → validat
 tune) once per iteration, and feeds each iteration's output back as a seed for
 the next iteration.
 
-There are **two environments** for running this test:
+## The three entry points
 
-| Environment | Mechanism | Test entry point | Runtime |
-|---|---|---|---|
-| **lilab** (local GPU) | In-process: `run_workflow()` called twice in the same Python process | pytest (`test_chained_iterations`) | ~15–25 min |
-| **SDSC Expanse** (Slurm HPC) | One Slurm job per iteration, chained via `--dependency=afterok` | `run_iteration_chain.sh` | hours, async |
+| # | Entry point | Environment | Mechanism | Use when |
+|---|---|---|---|---|
+| 1 | `tests/integration/workflows/test_full_exploration_loop.py::test_chained_iterations` | lilab | pytest, `tmp_path` workspace, in-process two `run_workflow()` calls | Quick smoke test / regression. Throwaway artifacts. |
+| 2 | `sdsc_submission_scripts/run_iteration_chain_lilab.sh` | lilab | Bash orchestrator → `run_one_iteration.py` as foreground subprocess | **Real lilab run with durable workspace.** Mirrors the SDSC path 1:1. |
+| 3 | `sdsc_submission_scripts/run_iteration_chain.sh` | SDSC Expanse | Bash orchestrator → `sbatch` with `--dependency=afterok` | Real distributed run on the cluster. |
 
-Both paths exercise the same code (`run_workflow()`); the only difference is
-whether iterations run sequentially in one process (lilab) or as separate
-Slurm jobs that hand off via `manifest.json` files (SDSC).
+**Entries 2 and 3 share all logic** via `sdsc_submission_scripts/_chain_common.sh`
+(arg parsing, advice file loading, source-path building, APP_ARGS construction,
+per-iteration loop). The only difference is the `submit_iteration` function:
+on lilab it runs `python3 run_one_iteration.py` in the foreground, on SDSC it
+runs `sbatch ... submit_one_iteration.slurm` with a dependency on the previous
+job. **Iterations always hand off via `manifest.json` files**, regardless of
+whether the previous iteration was a Python subprocess or a Slurm job. This
+keeps the two paths identical for debugging.
 
 The shared advice file `sdsc_submission_scripts/human_advice.json` is the
 single source of truth for human guidance to the 5 agents. **Both lilab and
@@ -87,10 +93,77 @@ uv run pytest -m real_run -v -s \
 
 ---
 
-## SDSC Expanse — Slurm chain submission
+## Lilab — real durable chain run (entry point 2)
+
+When you want a *real* lilab run with a fixed, persistent workspace
+(not a pytest throwaway), use `run_iteration_chain_lilab.sh`. It is the
+non-Slurm sibling of `run_iteration_chain.sh` — same flags, same behavior,
+same shared logic — and the **only** legitimate difference is that
+iterations run as foreground Python subprocesses instead of Slurm jobs.
+
+### Submit
+```bash
+cd ~/SIDERIUS
+tmux new -s lilab_real_chain
+bash sdsc_submission_scripts/run_iteration_chain_lilab.sh \
+    --workspace /home/klz/Data/SIDEREIS_DATA/lilab_chain_v1 \
+    --num_iterations 2 \
+    --seed_paths /home/klz/Data/SIDEREIS_DATA/punet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json \
+    --max_rounds 5 \
+    --max_epochs 5 \
+    --trial_portion 0.02 \
+    --eval_portion 0.02 \
+    --human_advice_file sdsc_submission_scripts/human_advice.json \
+    2>&1 | tee /tmp/lilab_real_chain.log
+```
+Detach with `Ctrl-b d`. Reattach with `tmux attach -t lilab_real_chain`.
+
+### Monitor (other pane)
+```bash
+tail -f /tmp/lilab_real_chain.log
+nvidia-smi -l 5
+```
+
+### Success criteria (same as SDSC)
+- Script exits 0
+- Both `iter_001/manifest.json` and `iter_002/manifest.json` exist with
+  `"status": "completed"`
+- Round outputs present under `iter_NNN/iteration_001/{model}/`
+- Iter 2's interpretation step references iter 1's model name (proves the
+  manifest handoff carried real data)
+
+### If iter 1 fails
+The script aborts via `set -e`. Inspect `iter_001/` (the partial manifest
+will not exist; runner only writes it on clean exit). Fix the bug, and
+**always rerun with a fresh `--workspace`** — partial state from a killed
+run can confuse manifest resolution on the next attempt.
+
+### Differences vs the pytest test
+| Aspect | pytest `test_chained_iterations` | `run_iteration_chain_lilab.sh` |
+|---|---|---|
+| Workspace | `tmp_path` (pytest, throwaway) | Fixed durable path you choose |
+| Verification | strict assertions in test code | inspect manifests + outputs manually |
+| Plugin cleanup | auto-removes registered plugins | leaves everything in place |
+| Code path | calls `run_workflow()` directly in-process | calls `run_one_iteration.py` as a subprocess (same as SDSC) |
+| Use when | CI / quick smoke / regression | real exploration, want artifacts to keep |
+
+### Differences vs the SDSC orchestrator (entry point 3)
+| Aspect | SDSC (`run_iteration_chain.sh`) | lilab (`run_iteration_chain_lilab.sh`) |
+|---|---|---|
+| Execution | Each iteration = separate Slurm job | Each iteration = foreground Python subprocess |
+| Concurrency model | Async; orchestrator returns after submission | Sync; orchestrator blocks until chain finishes |
+| Failure handling | `--kill-on-invalid-dep=yes` cancels downstream jobs | `set -e` aborts the script |
+| Walltime cap | Slurm `--time` enforced by scheduler | None (runs until done or you Ctrl-C) |
+| Slurm-only flags | `--partition`, `--time`, `--mem`, `--gpus`, `--cpus` | accepted but ignored |
+| Shared code | `_chain_common.sh` | `_chain_common.sh` (same file) |
+
+---
+
+## SDSC Expanse — Slurm chain submission (entry point 3)
 
 The real distributed test. Each iteration is its own Slurm job; iteration N+1
-starts only after iteration N's `manifest.json` is written.
+starts only after iteration N's `manifest.json` is written. Shares all
+non-execution logic with the lilab orchestrator via `_chain_common.sh`.
 
 ### 1. Sync code on SDSC
 ```bash
@@ -217,10 +290,12 @@ No zombies in the queue.
 
 ## Files referenced
 
-- `sdsc_submission_scripts/run_iteration_chain.sh` — orchestrator (submits N chained Slurm jobs)
-- `sdsc_submission_scripts/submit_one_iteration.slurm` — Slurm wrapper for one iteration
-- `sdsc_submission_scripts/run_one_iteration.py` — Python runner: `run_workflow(max_iterations=1)` + manifest write
-- `sdsc_submission_scripts/human_advice.json` — shared advice file (5 keys)
-- `tests/integration/workflows/test_full_exploration_loop.py` — lilab Tier 3 tests
+- `sdsc_submission_scripts/_chain_common.sh` — shared logic for both orchestrators (defaults, arg parsing, advice loading, source-path building, APP_ARGS construction, chain loop)
+- `sdsc_submission_scripts/run_iteration_chain.sh` — SDSC orchestrator (sources `_chain_common.sh`, defines `submit_iteration` to call `sbatch` with dependency)
+- `sdsc_submission_scripts/run_iteration_chain_lilab.sh` — lilab orchestrator (sources `_chain_common.sh`, defines `submit_iteration` to call `python3` in foreground)
+- `sdsc_submission_scripts/submit_one_iteration.slurm` — Slurm wrapper for one iteration (SDSC only)
+- `sdsc_submission_scripts/run_one_iteration.py` — Python runner: `run_workflow(max_iterations=1)` + manifest write (used by both lilab and SDSC)
+- `sdsc_submission_scripts/human_advice.json` — shared advice file (5 keys: interpret/propose/implement/validate/tune)
+- `tests/integration/workflows/test_full_exploration_loop.py` — lilab Tier 3 pytest tests
 - `workflows/model_exploration.py` — `run_workflow()` implementation
 - `docs/full_loop_5_agents.md` — design doc (companion to this runbook)

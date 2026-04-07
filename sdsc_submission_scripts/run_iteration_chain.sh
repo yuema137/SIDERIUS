@@ -1,161 +1,52 @@
 #!/bin/bash
 # ---------------------------------------------------------------------------
-# SIDERIUS Iteration Chain Orchestrator
+# SIDERIUS Iteration Chain Orchestrator — SDSC (Slurm)
 # ---------------------------------------------------------------------------
 # Full runbook (lilab + SDSC): docs/running_chain_test.md
+# Shared logic: sdsc_submission_scripts/_chain_common.sh
 # ---------------------------------------------------------------------------
-# Submits N iteration jobs in sequence using --dependency=afterok for
-# automatic chaining. Each job's source paths = original seeds + all
-# previous iteration manifests.
+# SDSC equivalent of run_iteration_chain_lilab.sh. Submits N iteration
+# jobs in sequence using --dependency=afterok for automatic chaining.
+# Each job's source paths = original seeds + all previous iterations'
+# manifests (resolved at job execution time via the @manifest: prefix).
+#
+# Iterations chain through manifest.json files exactly the same way as
+# on lilab — only the execution mechanism differs (sbatch with
+# --dependency=afterok here, foreground subprocess on lilab).
 #
 # Usage:
 #   bash sdsc_submission_scripts/run_iteration_chain.sh \
 #       --workspace /expanse/lustre/projects/ddp433/ym137/exploration_v1 \
 #       --num_iterations 10 \
 #       --seed_paths /scratch/.../seed_punet.json /scratch/.../seed_wavenet.json \
-#       --max_rounds 20 \
+#       --max_rounds 5 \
+#       --max_epochs 5 \
+#       --human_advice_file sdsc_submission_scripts/human_advice.json \
 #       --partition gpu-shared \
-#       --time 04:00:00 \
+#       --time 06:00:00 \
 #       --mem 24G
 #
-# Each iteration job is independent. If iteration N fails, iterations N+1..M
-# are blocked by --dependency=afterok and automatically cancelled. Resubmit
-# them after fixing iteration N.
+# If iteration N fails, iterations N+1..M are blocked by --dependency=afterok
+# and automatically cancelled by --kill-on-invalid-dep=yes. Resubmit them
+# (with a fresh workspace) after fixing iteration N.
 
-set -e
-set -o pipefail
-
-# --- Defaults ---
-WORKSPACE=""
-NUM_ITERATIONS=10
-SEED_PATHS=()
-MAX_ROUNDS=20
-MAX_EPOCHS=""
-LLM_MODEL="gemini-3.1-pro-preview"
-TRIAL_PORTION=0.1
-TRAIN_PORTION=0.1
-EVAL_PORTION=0.1
-HUMAN_ADVICE_INTERPRET=""
-HUMAN_ADVICE_PROPOSE=""
-HUMAN_ADVICE_IMPLEMENT=""
-HUMAN_ADVICE_VALIDATE=""
-HUMAN_ADVICE_TUNE=""
-HUMAN_ADVICE_FILE=""
-PARTITION="gpu-shared"
-TIME="04:00:00"
-MEM="24G"
-GPUS=1
-CPUS=8
-
-# --- Argument parsing ---
-while [[ $# -gt 0 ]]; do
-  case $1 in
-    --workspace)              WORKSPACE="$2"; shift 2 ;;
-    --num_iterations)         NUM_ITERATIONS="$2"; shift 2 ;;
-    --seed_paths)
-      shift
-      while [[ $# -gt 0 && ! "$1" =~ ^-- ]]; do
-        SEED_PATHS+=("$1")
-        shift
-      done
-      ;;
-    --max_rounds)             MAX_ROUNDS="$2"; shift 2 ;;
-    --max_epochs)             MAX_EPOCHS="$2"; shift 2 ;;
-    --llm_model)              LLM_MODEL="$2"; shift 2 ;;
-    --trial_portion)          TRIAL_PORTION="$2"; shift 2 ;;
-    --train_portion)          TRAIN_PORTION="$2"; shift 2 ;;
-    --eval_portion)           EVAL_PORTION="$2"; shift 2 ;;
-    --human_advice_interpret) HUMAN_ADVICE_INTERPRET="$2"; shift 2 ;;
-    --human_advice_propose)   HUMAN_ADVICE_PROPOSE="$2"; shift 2 ;;
-    --human_advice_implement) HUMAN_ADVICE_IMPLEMENT="$2"; shift 2 ;;
-    --human_advice_validate)  HUMAN_ADVICE_VALIDATE="$2"; shift 2 ;;
-    --human_advice_tune)      HUMAN_ADVICE_TUNE="$2"; shift 2 ;;
-    --human_advice_file)      HUMAN_ADVICE_FILE="$2"; shift 2 ;;
-    --partition)              PARTITION="$2"; shift 2 ;;
-    --time)                   TIME="$2"; shift 2 ;;
-    --mem)                    MEM="$2"; shift 2 ;;
-    --gpus)                   GPUS="$2"; shift 2 ;;
-    --cpus)                   CPUS="$2"; shift 2 ;;
-    *)                        echo "Unknown arg: $1"; exit 1 ;;
-  esac
-done
-
-if [ -z "$WORKSPACE" ] || [ ${#SEED_PATHS[@]} -eq 0 ]; then
-    echo "Required: --workspace, --seed_paths" >&2
-    exit 1
-fi
-
-# Load human advice from JSON file if provided. The file should contain one
-# entry per agent in the 5-agent loop:
-#   {
-#     "interpret": "...", "propose": "...", "implement": "...",
-#     "validate":  "...", "tune":    "..."
-#   }
-# Any key may be missing or empty. Explicit --human_advice_<agent> flags take
-# precedence over file values.
-if [ -n "$HUMAN_ADVICE_FILE" ]; then
-    if [ ! -f "$HUMAN_ADVICE_FILE" ]; then
-        echo "Human advice file not found: $HUMAN_ADVICE_FILE" >&2
-        exit 1
-    fi
-    _read_advice() {
-        python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get(sys.argv[2],'') or '')" \
-            "$HUMAN_ADVICE_FILE" "$1"
-    }
-    FILE_INTERPRET=$(_read_advice interpret)
-    FILE_PROPOSE=$(_read_advice propose)
-    FILE_IMPLEMENT=$(_read_advice implement)
-    FILE_VALIDATE=$(_read_advice validate)
-    FILE_TUNE=$(_read_advice tune)
-    if [ -z "$HUMAN_ADVICE_INTERPRET" ]; then HUMAN_ADVICE_INTERPRET="$FILE_INTERPRET"; fi
-    if [ -z "$HUMAN_ADVICE_PROPOSE" ];   then HUMAN_ADVICE_PROPOSE="$FILE_PROPOSE"; fi
-    if [ -z "$HUMAN_ADVICE_IMPLEMENT" ]; then HUMAN_ADVICE_IMPLEMENT="$FILE_IMPLEMENT"; fi
-    if [ -z "$HUMAN_ADVICE_VALIDATE" ];  then HUMAN_ADVICE_VALIDATE="$FILE_VALIDATE"; fi
-    if [ -z "$HUMAN_ADVICE_TUNE" ];      then HUMAN_ADVICE_TUNE="$FILE_TUNE"; fi
-    echo "Loaded human advice from: $HUMAN_ADVICE_FILE"
-fi
-
-mkdir -p "$WORKSPACE"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "${SCRIPT_DIR}/_chain_common.sh"
 
 PROJECT_DIR="/home/ym137/SIDERIUS"
 SLURM_SCRIPT="${PROJECT_DIR}/sdsc_submission_scripts/submit_one_iteration.slurm"
 
-echo "############################################################"
-echo "  SIDERIUS Iteration Chain Orchestrator"
-echo "  Workspace        : $WORKSPACE"
-echo "  Num iterations   : $NUM_ITERATIONS"
-echo "  Seed paths       : ${#SEED_PATHS[@]} files"
-for p in "${SEED_PATHS[@]}"; do
-    echo "    - $p"
-done
-echo "  Max rounds       : $MAX_ROUNDS"
-echo "  LLM model        : $LLM_MODEL"
-echo "  Slurm: ${PARTITION}, ${GPUS} GPU, ${MEM}, ${TIME}, ${CPUS} CPUs"
-echo "############################################################"
-
-# --- Submit chain ---
+# State carried across iterations: previous Slurm job id for dependency chain.
 PREV_JOB_ID=""
 SUBMITTED_JOBS=()
 
-for ITER in $(seq 1 $NUM_ITERATIONS); do
-    # Build source paths for this iteration:
-    #   = original seeds + all previous iterations' run_output paths (read from manifests)
-    SOURCE_PATHS=("${SEED_PATHS[@]}")
-    for PREV_ITER in $(seq 1 $((ITER - 1))); do
-        PREV_ITER_DIR=$(printf "${WORKSPACE}/iter_%03d" "$PREV_ITER")
-        MANIFEST="${PREV_ITER_DIR}/manifest.json"
-        # The orchestrator can't read manifests until previous jobs finish,
-        # so we use a predictable wildcard pattern that the runner will
-        # resolve at job execution time. Workaround: pass a "hint path"
-        # that the runner can glob.
-        # SIMPLER: add a helper that reads the manifest at job start.
-        # For now, pass the manifest path itself; the runner resolves it.
-        # NOTE: This requires run_one_iteration.py to handle manifest paths.
-        SOURCE_PATHS+=("@manifest:${MANIFEST}")
-    done
+# Required by run_chain: submit one iteration as a Slurm job depending on
+# the previous one. SOURCE_PATHS and APP_ARGS are populated by the common
+# framework.
+submit_iteration() {
+    local iter=$1
 
-    # Build sbatch command
-    SBATCH_ARGS=(
+    local SBATCH_ARGS=(
         --partition="$PARTITION"
         --nodes=1
         --ntasks=1
@@ -171,44 +62,10 @@ for ITER in $(seq 1 $NUM_ITERATIONS); do
         # so we don't leave zombies in the queue.
         SBATCH_ARGS+=(--dependency="afterok:${PREV_JOB_ID}")
         SBATCH_ARGS+=(--kill-on-invalid-dep=yes)
-    fi
-
-    # Application args (passed after the .slurm filename)
-    APP_ARGS=(
-        --workspace "$WORKSPACE"
-        --iteration "$ITER"
-        --source_paths "${SOURCE_PATHS[@]}"
-        --max_rounds "$MAX_ROUNDS"
-        --llm_model "$LLM_MODEL"
-        --trial_portion "$TRIAL_PORTION"
-        --train_portion "$TRAIN_PORTION"
-        --eval_portion "$EVAL_PORTION"
-    )
-    if [ -n "$MAX_EPOCHS" ]; then
-        APP_ARGS+=(--max_epochs "$MAX_EPOCHS")
-    fi
-    if [ -n "$HUMAN_ADVICE_INTERPRET" ]; then
-        APP_ARGS+=(--human_advice_interpret "$HUMAN_ADVICE_INTERPRET")
-    fi
-    if [ -n "$HUMAN_ADVICE_PROPOSE" ]; then
-        APP_ARGS+=(--human_advice_propose "$HUMAN_ADVICE_PROPOSE")
-    fi
-    if [ -n "$HUMAN_ADVICE_IMPLEMENT" ]; then
-        APP_ARGS+=(--human_advice_implement "$HUMAN_ADVICE_IMPLEMENT")
-    fi
-    if [ -n "$HUMAN_ADVICE_VALIDATE" ]; then
-        APP_ARGS+=(--human_advice_validate "$HUMAN_ADVICE_VALIDATE")
-    fi
-    if [ -n "$HUMAN_ADVICE_TUNE" ]; then
-        APP_ARGS+=(--human_advice_tune "$HUMAN_ADVICE_TUNE")
-    fi
-
-    echo ""
-    echo "Submitting iteration $ITER..."
-    if [ -n "$PREV_JOB_ID" ]; then
         echo "  (depends on job $PREV_JOB_ID)"
     fi
 
+    local OUTPUT JOB_ID
     OUTPUT=$(sbatch "${SBATCH_ARGS[@]}" "$SLURM_SCRIPT" "${APP_ARGS[@]}")
     JOB_ID=$(echo "$OUTPUT" | grep -oP '\d+$')
     if [ -z "$JOB_ID" ]; then
@@ -218,9 +75,15 @@ for ITER in $(seq 1 $NUM_ITERATIONS); do
     fi
 
     echo "  Job ID: $JOB_ID"
-    SUBMITTED_JOBS+=("$ITER:$JOB_ID")
+    SUBMITTED_JOBS+=("$iter:$JOB_ID")
     PREV_JOB_ID="$JOB_ID"
-done
+}
+
+parse_chain_args "$@"
+load_advice_file
+print_chain_header "SDSC (Slurm)"
+echo "  Slurm: ${PARTITION}, ${GPUS} GPU, ${MEM}, ${TIME}, ${CPUS} CPUs"
+run_chain
 
 echo ""
 echo "############################################################"
