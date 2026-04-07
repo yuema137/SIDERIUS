@@ -200,7 +200,7 @@ def validate_workflow_outputs(
         "gradient_check_passed", "output_type_valid", "llm_review_passed",
     ]:
         assert validation[check] is True, f"Validation check '{check}' failed"
-    print(f"  [PASS] Validation: all 7 checks passed")
+    print(f"  [PASS] Validation: all 8 checks passed")
 
     # --- 5. Tuning ---
     from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
