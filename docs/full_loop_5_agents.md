@@ -721,106 +721,321 @@ uv run pytest -m real_run tests/integration/workflows/test_full_exploration_loop
 
 ---
 
-### Phase 4: Production Slurm deployment
+### Phase 4: Production Slurm deployment — Per-Iteration Job Model
 
-**Goal**: Run the full exploration workflow on SDSC for real research — multiple
-iterations, full tuning budgets, and GPU packing for SU efficiency.
+**Goal**: Run the full exploration workflow on SDSC with **one Slurm job per
+iteration**, not one job for the entire workflow. This solves the core SDSC pain
+point: long wall-time jobs (12-48h) are hard to schedule on shared partitions,
+while short jobs (1-4h) get scheduled quickly.
 
-#### Step 4.1: Create production Slurm script
+#### Why per-iteration, not per-tuning-round?
 
-**File**: `sdsc_submission_scripts/submit_exploration.slurm`
+| Granularity | Wall time per job | Pros | Cons |
+|---|---|---|---|
+| **1 job per workflow** (`max_iterations=N`) | 12-48h | Simplest code | Hard to schedule, all-or-nothing failure |
+| **1 job per iteration** ✓ | 1-4h | Easy scheduling, fault-tolerant per iteration | Need state passing between jobs |
+| **1 job per tuning round** | 5-20 min | Most fine-grained | Excessive overhead (queue + venv setup per round) |
 
-Similar to `submit_hpt_agent.slurm` but calls `run_exploration.py` instead of
-`run_comparison.py`. Key differences from the test script:
-- Longer wall time: `--time=48:00:00` (production runs take hours/days)
-- More memory: `--mem=64G` (formal rounds load all 20 files)
-- Configurable parameters: `--max_iterations`, `--max_rounds`, `--gpu_memory_limit_gb`
+Per-iteration is the sweet spot:
+- Each job runs `run_workflow(max_iterations=1)`: one full 5-agent loop
+- Job lifetime is bounded (~1-4 hours) — fits SDSC's `gpu-shared` queue easily
+- Multiple iteration jobs can pack onto a shared GPU (independent processes)
+- Failure in iteration N doesn't waste iterations 1..N-1
+- Each iteration's output is checkpointed before the next job starts
 
-```bash
-sbatch --partition=gpu-shared --gres=gpu:v100:1 --mem=64G --time=48:00:00 \
-  sdsc_submission_scripts/submit_exploration.slurm \
-  --max_iterations 10 --max_rounds 20 --gpu_memory_limit_gb 24
+#### State passing: how iteration N+1 sees iterations 1..N
+
+Currently `run_workflow()` accumulates state **in memory** during a single Python
+process: iteration N reads `summary_groups`, runs the 5-agent loop, then appends
+its output to `summary_groups` for iteration N+1.
+
+For per-job execution we need **on-disk state passing**: each job's output is
+discoverable by the next job. The orchestrator constructs the next job's source
+list as: `[original_seeds] + [all_previous_iteration_outputs]`.
+
+Currently iteration N sees:
+- Original seed (from `data_dir/{model_type}/{source_run_name}/agent/run_output_*.json`)
+- All previous iterations' tuning outputs (from in-memory `summary_groups`)
+
+After the change, iteration N (separate Slurm job) will see:
+- Original seed (loaded from explicit paths)
+- All previous iterations' outputs (loaded from explicit paths in the workspace)
+
+#### API change: explicit source paths
+
+**Current API:**
+```python
+run_workflow(
+    data_dir="/path/to/SIDEREIS_DATA",
+    model_types=["punet", "wavenet"],
+    source_run_name="small_sample_trial_v0",
+    max_iterations=10,
+    ...
+)
+# Loads: {data_dir}/punet/small_sample_trial_v0/agent/run_output_*.json
+#        {data_dir}/wavenet/small_sample_trial_v0/agent/run_output_*.json
 ```
 
-#### Step 4.2: Multi-exploration GPU packing
-
-**File**: `sdsc_submission_scripts/run_multi_exploration.sh`
-
-Orchestrator script that launches N explorations on one GPU, similar to
-`run_all_models_trial_sdsc.sh` but for the workflow:
-
-```bash
-# Allocate 1 V100 (32 GB), run 3 explorations at 10 GB each
-#SBATCH --gres=gpu:v100:1
-#SBATCH --mem=96G
-
-python run_exploration.py --gpu_memory_limit_gb 10 --run_name explore_v1 &
-python run_exploration.py --gpu_memory_limit_gb 10 --run_name explore_v2 &
-python run_exploration.py --gpu_memory_limit_gb 10 --run_name explore_v3 &
-wait
+**New API (additive, backward compatible):**
+```python
+run_workflow(
+    source_paths=[
+        "/scratch/SIDEREIS_DATA/punet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json",
+        "/scratch/SIDEREIS_DATA/wavenet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json",
+        "/scratch/exploration_v1/iteration_001/{model_a}/run_output_iteration_001.json",  # from iter 1
+        "/scratch/exploration_v1/iteration_002/{model_b}/run_output_iteration_002.json",  # from iter 2
+    ],
+    workspace="/scratch/exploration_v1",
+    run_name="iteration_003",
+    max_iterations=1,  # one iteration per job
+    ...
+)
 ```
 
-Each process gets a hard VRAM cap via `torch.cuda.set_per_process_memory_fraction()`.
-The soft LLM constraint is set lower (e.g., "VRAM < 8 GB") to absorb overshoot.
+**Backward compatibility**: when `source_paths` is None, fall back to constructing
+paths from `(data_dir, model_types, source_run_name)`. Existing tests and
+`run_exploration.py` keep working unchanged.
 
-#### Step 4.3: Post-run verification
+#### Step 4.1: Extend `load_tuning_outputs()` to accept explicit paths
 
-The Slurm script should verify outputs after completion, same pattern as
-`submit_hpt_agent.slurm`:
+**File**: `workflows/model_exploration.py`
 
-```bash
-# Check workflow summary exists
-SUMMARY_FILE="${WORKSPACE}/${RUN_NAME}/workflow_${RUN_NAME}.json"
-if [ ! -s "$SUMMARY_FILE" ]; then
-    echo "[FAIL] Workflow summary not found or empty: $SUMMARY_FILE"
-    exit 1
-fi
+Refactor to support both calling conventions:
 
-# Check at least one iteration completed
-ITER_COUNT=$(python -c "import json; d=json.load(open('$SUMMARY_FILE')); print(d.get('completed_iterations', 0))")
-if [ "$ITER_COUNT" -eq 0 ]; then
-    echo "[FAIL] No iterations completed. Check logs for validation failures."
-    exit 1
-fi
+```python
+def load_tuning_outputs_from_paths(paths: list[str]) -> list[HyperparamTuningOutput]:
+    """Load HyperparamTuningOutput from an explicit list of JSON file paths."""
+    outputs = []
+    missing = []
+    for path in paths:
+        if not os.path.exists(path):
+            missing.append(path)
+            continue
+        with open(path) as f:
+            data = json.load(f)
+        outputs.append(HyperparamTuningOutput.model_validate(data))
+    if missing:
+        raise FileNotFoundError(f"Missing source files:\n" + "\n".join(missing))
+    return outputs
 
-echo "[SUCCESS] $ITER_COUNT iterations completed. Results: $SUMMARY_FILE"
+
+def load_tuning_outputs(data_dir, model_types, source_run_name) -> list[HyperparamTuningOutput]:
+    """Backward-compat wrapper — constructs paths from the old API."""
+    paths = [
+        os.path.join(data_dir, m, source_run_name, "agent",
+                     f"run_output_{source_run_name}_agent.json")
+        for m in model_types
+    ]
+    return load_tuning_outputs_from_paths(paths)
 ```
 
-#### Step 4.4: Monitoring
+**Checklist:**
+- [ ] Add `load_tuning_outputs_from_paths(paths)` function
+- [ ] Refactor existing `load_tuning_outputs()` as backward-compat wrapper
+- [ ] Unit test: paths-based loading returns same result as legacy API
+- [ ] Unit test: missing path raises FileNotFoundError with clear message
+- [ ] Unit test: handles mix of seed paths + iteration output paths
 
-Production runs take hours/days. Monitoring options:
-- **Slurm logs**: `tail -f sdsc_submission_scripts/logs/exploration_{jobid}.out`
-- **Dashboard**: SSH tunnel + dashboard on port 8000 (already set up)
-- **squeue**: `squeue -u ym137` to check job status
-- **Iteration progress**: `ls {workspace}/{run_name}/iteration_*/` to count completed iterations
+#### Step 4.2: Add `source_paths` to `run_workflow()`
 
-#### Step 4.5: SDSC-specific considerations
+**File**: `workflows/model_exploration.py`
 
-- **Lustre filesystem**: Use `$SCRATCH` (`/expanse/lustre/projects/ddp433/ym137/`) for
-  all I/O — home directory has quota limits
-- **Wall time**: gpu-shared partition has 48h limit. For longer runs, use checkpointing
-  (the workflow already saves state per iteration — restart by loading from last iteration)
-- **Network access**: SDSC compute nodes CAN access external APIs (Gemini, OpenAI) —
-  verified in existing `submit_hpt_agent.slurm` runs
-- **Module loads**: No special modules needed — Python venv handles all dependencies
-- **Data paths**: `tidmad_data_config.yaml` on SDSC points to Lustre paths. Verify with:
-  ```bash
-  cat ~/SIDERIUS/tidmad_data_config.yaml
-  # Should show: /expanse/lustre/projects/ddp433/ym137/...
-  ```
+```python
+def run_workflow(
+    # New: explicit source paths (preferred)
+    source_paths: list[str] | None = None,
+    # Legacy: derive paths from data_dir + model_types + source_run_name
+    data_dir: str | None = None,
+    model_types: list[str] | None = None,
+    source_run_name: str | None = None,
+    # ... rest unchanged
+):
+    # Resolve source paths
+    if source_paths is None:
+        if not (data_dir and model_types and source_run_name):
+            raise ValueError("Must provide either source_paths OR (data_dir, model_types, source_run_name)")
+        tuning_outputs = load_tuning_outputs(data_dir, model_types, source_run_name)
+    else:
+        tuning_outputs = load_tuning_outputs_from_paths(source_paths)
+    summary_groups = tuning_outputs_to_summaries(tuning_outputs)
+    # ... rest unchanged
+```
 
-#### Step 4.6: Checklist
+**Checklist:**
+- [ ] Add `source_paths` parameter (Optional, defaults to None)
+- [ ] Update parameter resolution logic
+- [ ] Unit test: explicit `source_paths` works
+- [ ] Unit test: legacy API still works
+- [ ] Unit test: error if neither is provided
+- [ ] Update docstring with both calling conventions
 
-- [ ] Create `sdsc_submission_scripts/submit_exploration.slurm`
-- [ ] Create `sdsc_submission_scripts/run_multi_exploration.sh`
-- [ ] Implement `gpu_memory_limit_gb` (Phase 2 prerequisite)
-- [ ] Add post-run verification to Slurm script
-- [ ] Test single exploration on SDSC (1 iteration, 2 rounds)
-- [ ] Test multi-exploration packing (2 explorations on 1 GPU)
-- [ ] Verify dashboard shows results from SDSC runs
-- [ ] Document wall time estimates per packing configuration:
-  | Packing | VRAM budget | Est. time per iteration | Max iterations in 48h |
-  |---------|-------------|------------------------|-----------------------|
-  | 1-way   | 24 GB       | TBD                    | TBD                   |
-  | 2-way   | 12 GB       | TBD                    | TBD                   |
-  | 3-way   | 8 GB        | TBD                    | TBD                   |
+#### Step 4.3: Per-iteration runner script
+
+**File**: `sdsc_submission_scripts/run_one_iteration.py`
+
+Like `run_exploration_test.py` but for production: takes explicit source paths,
+runs `max_iterations=1`, outputs to a predictable iteration directory.
+
+```python
+# Usage:
+# python run_one_iteration.py \
+#     --workspace /scratch/exploration_v1 \
+#     --iteration 3 \
+#     --source_paths /scratch/.../seed_punet.json /scratch/.../seed_wavenet.json \
+#                    /scratch/exploration_v1/iter_001/{m}/run_output_iter_001.json \
+#                    /scratch/exploration_v1/iter_002/{m}/run_output_iter_002.json \
+#     --max_rounds 20 \
+#     --gpu_memory_limit_gb 10 \
+#     --llm_model gemini-3.1-pro-preview
+```
+
+The script:
+1. Resolves the iteration number → workspace subdirectory (`{workspace}/iter_{N:03d}`)
+2. Calls `run_workflow(source_paths=..., max_iterations=1, ...)`
+3. After completion, writes a **manifest file** (`{workspace}/iter_{N:03d}/manifest.json`)
+   that contains the tuning output path, model name, and best score — so the
+   next job can discover this iteration's output without scanning.
+
+**Checklist:**
+- [ ] Create `sdsc_submission_scripts/run_one_iteration.py`
+- [ ] CLI args: workspace, iteration, source_paths (nargs=+), max_rounds, gpu_memory_limit_gb, llm_model
+- [ ] Resolve iteration directory and create it
+- [ ] Call `run_workflow()` with explicit source_paths
+- [ ] Write manifest.json with output_path, model_name, best_score
+- [ ] Exit 0 on success, 1 on failure
+
+#### Step 4.4: Per-iteration Slurm submission script
+
+**File**: `sdsc_submission_scripts/submit_one_iteration.slurm`
+
+Single Slurm job that runs one iteration. The orchestrator (Step 4.5) submits
+multiple of these in sequence.
+
+```bash
+# Usage:
+# sbatch --partition=gpu-shared --nodes=1 --ntasks=1 --gpus=1 --mem=24G \
+#        --time=04:00:00 --cpus-per-task=8 \
+#        sdsc_submission_scripts/submit_one_iteration.slurm \
+#        --workspace /scratch/exploration_v1 --iteration 3 \
+#        --source_paths /scratch/.../a.json /scratch/.../b.json \
+#        --max_rounds 20 --gpu_memory_limit_gb 10
+```
+
+Same structure as `submit_exploration_test.slurm` but with:
+- Production-realistic time/mem (4h, 24GB)
+- Calls `run_one_iteration.py` instead of `run_exploration_test.py`
+- No cleanup (we keep the iteration outputs for the next job)
+- Post-run verification: check that `manifest.json` was written
+
+**Checklist:**
+- [ ] Create `sdsc_submission_scripts/submit_one_iteration.slurm`
+- [ ] Match the format of `submit_hpt_agent.slurm` (account, output, error paths)
+- [ ] Argument parsing for application-level args
+- [ ] Post-run verification: `manifest.json` exists and is non-empty
+- [ ] Document the sbatch invocation in the script header comment
+
+#### Step 4.5: Orchestrator script
+
+**File**: `sdsc_submission_scripts/run_iteration_chain.sh`
+
+Submits N iteration jobs in sequence using Slurm `--dependency=afterok:JOB_ID`
+for automatic chaining. Each job's source paths are constructed from the original
+seeds + all previous iteration manifests.
+
+```bash
+# Usage:
+# bash run_iteration_chain.sh \
+#   --workspace /scratch/exploration_v1 \
+#   --num_iterations 10 \
+#   --gpu_memory_limit_gb 10 \
+#   --seed_paths /scratch/.../seed_punet.json /scratch/.../seed_wavenet.json
+```
+
+The orchestrator:
+1. Builds the source path list for iteration 1 (just the seeds)
+2. Submits iteration 1 → captures job ID
+3. For iteration 2..N:
+   - Construct source paths = seeds + manifest paths from iterations 1..N-1
+     - Manifest paths use predictable pattern: `{workspace}/iter_{i:03d}/manifest.json`
+     - The runner reads each manifest to get the actual output_path
+   - Submit with `--dependency=afterok:{prev_job_id}` so it only runs after the prior succeeds
+4. Print all submitted job IDs
+
+**Note**: The runner script (Step 4.3) needs to handle two formats in its
+`--source_paths`:
+- Direct JSON file paths (for original seeds): `.../run_output_*.json`
+- Manifest file paths (for previous iterations): `.../manifest.json` → indirection to actual output
+
+OR simpler: pass actual `run_output_*.json` paths directly, and the orchestrator
+discovers them by reading `manifest.json` of each previous iteration.
+
+**Checklist:**
+- [ ] Create `sdsc_submission_scripts/run_iteration_chain.sh`
+- [ ] CLI args: workspace, num_iterations, seed_paths, gpu_memory_limit_gb
+- [ ] Submit iteration 1 with seed_paths only
+- [ ] For each subsequent iteration:
+  - [ ] Construct source list from seeds + previous manifests
+  - [ ] Submit with `--dependency=afterok:{prev_job_id}`
+- [ ] Print job ID chain
+- [ ] Document failure modes (what happens if iter N fails — chain breaks at N+1)
+
+#### Step 4.6: Workspace layout for per-iteration runs
+
+```
+{workspace}/
+├── exploration_v1/                     # set by run_name
+│   ├── iter_001/
+│   │   ├── interpretation_iter_001.json
+│   │   ├── attempt_001_{model_a}/
+│   │   │   ├── proposal_iter_001.json
+│   │   │   ├── implementor_iter_001.json
+│   │   │   ├── validation_iter_001.json
+│   │   │   ├── models/{model_a}.py
+│   │   │   └── tests/test_{model_a}.py
+│   │   ├── {model_a}/
+│   │   │   ├── run_output_iter_001.json     ← input for iter_002
+│   │   │   └── ...
+│   │   └── manifest.json                     ← {output_path, model_name, score}
+│   ├── iter_002/                             ← built from seeds + iter_001/manifest.json
+│   │   └── ... same structure
+│   └── iter_003/
+└── ...
+```
+
+#### Step 4.7: SDSC-specific considerations
+
+- **Lustre filesystem**: All workspace I/O goes to `/expanse/lustre/projects/ddp433/ym137/`
+- **Wall time per iteration**: 1-4h is sufficient for one iteration with reasonable rounds
+- **Network access**: SDSC compute nodes can reach Gemini API (verified)
+- **GPU packing via memory limit**: see Phase 2 (`gpu_memory_limit_gb`) — 2-4 iterations
+  per GPU is feasible
+- **Failure recovery**: if iteration N fails, manually rerun it. Iterations N+1..M are
+  blocked by `--dependency=afterok` and automatically cancelled — resubmit them after
+  fixing iteration N.
+
+#### Step 4.8: Documentation update
+
+- [ ] Update `run_exploration.py` docstring to mention the per-iteration model
+- [ ] Add a section to README about running on SDSC
+- [ ] Document the orchestrator script usage with examples
+- [ ] Document the manifest.json schema
+
+#### Step 4.9: Top-level checklist (Phase 4)
+
+- [ ] **Code changes** (works on lilab and SDSC):
+  - [ ] Add `load_tuning_outputs_from_paths()` (Step 4.1)
+  - [ ] Add `source_paths` parameter to `run_workflow()` (Step 4.2)
+  - [ ] Unit tests for both, with backward-compat verification
+- [ ] **SDSC scripts**:
+  - [ ] `run_one_iteration.py` (Step 4.3)
+  - [ ] `submit_one_iteration.slurm` (Step 4.4)
+  - [ ] `run_iteration_chain.sh` (Step 4.5)
+- [ ] **GPU memory packing** (Phase 2 prerequisite):
+  - [ ] Implement `gpu_memory_limit_gb` end-to-end
+  - [ ] Test 2 iterations sharing one GPU on SDSC
+- [ ] **End-to-end test on SDSC**:
+  - [ ] Submit 3-iteration chain
+  - [ ] Verify each iteration uses the previous iteration's output
+  - [ ] Verify final iteration sees seeds + all 2 previous outputs
+  - [ ] Verify dashboard shows all iterations
+- [ ] **Documentation** (Step 4.8)
