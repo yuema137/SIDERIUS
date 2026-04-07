@@ -93,35 +93,28 @@ from workflows.llm_config import WorkflowLLMConfig, NodeLLMConfig
 # Helpers
 # ---------------------------------------------------------------------------
 
-def load_tuning_outputs(
-    data_dir: str,
-    model_types: list[str],
-    source_run_name: str,
+def load_tuning_outputs_from_paths(
+    paths: list[str],
 ) -> list[HyperparamTuningOutput]:
     """
-    Load one HyperparamTuningOutput per model from a specific run.
+    Load HyperparamTuningOutput from an explicit list of JSON file paths.
 
-    Looks for:
-      {data_dir}/{model_type}/{source_run_name}/agent/run_output_{source_run_name}_agent.json
+    Used by per-iteration Slurm runs where each iteration's source data
+    is a heterogeneous list of paths (original seeds + previous iterations'
+    outputs), which can't be derived from a single run_name pattern.
 
     Args:
-        data_dir: Root data directory (e.g. /home/klz/Data/SIDEREIS_DATA).
-        model_types: Model type keys to load (e.g. ["punet", "wavenet"]).
-        source_run_name: The run name to load from (e.g. "v3_file6").
+        paths: List of explicit paths to run_output_*.json files.
 
     Returns:
-        List of validated HyperparamTuningOutput objects (one per model).
-        Raises FileNotFoundError if any model's output is missing.
+        List of validated HyperparamTuningOutput objects (one per path).
+        Raises FileNotFoundError if any path is missing or invalid.
     """
     outputs = []
     missing = []
-    for model_type in model_types:
-        path = os.path.join(
-            data_dir, model_type, source_run_name, "agent",
-            f"run_output_{source_run_name}_agent.json",
-        )
+    for path in paths:
         if not os.path.exists(path):
-            missing.append(f"  {model_type}: {path}")
+            missing.append(f"  not found: {path}")
             continue
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -132,15 +125,47 @@ def load_tuning_outputs(
                   f"({output.model_type}, {len(output.all_records)} records, "
                   f"best={output.best_denoising_score})")
         except Exception as e:
-            missing.append(f"  {model_type}: {path} — {e}")
+            missing.append(f"  invalid: {path} — {e}")
 
     if missing:
         raise FileNotFoundError(
-            f"Missing tuning outputs for run '{source_run_name}':\n"
+            f"Missing or invalid source files:\n"
             + "\n".join(missing)
-            + "\nRun tune_ml_hyperparam_agent for these models first."
         )
     return outputs
+
+
+def load_tuning_outputs(
+    data_dir: str,
+    model_types: list[str],
+    source_run_name: str,
+) -> list[HyperparamTuningOutput]:
+    """
+    Backward-compat wrapper: load HyperparamTuningOutput from a single run by
+    constructing paths from (data_dir, model_types, source_run_name).
+
+    Looks for:
+      {data_dir}/{model_type}/{source_run_name}/agent/run_output_{source_run_name}_agent.json
+
+    Prefer ``load_tuning_outputs_from_paths()`` for new code.
+
+    Args:
+        data_dir: Root data directory (e.g. /home/klz/Data/SIDEREIS_DATA).
+        model_types: Model type keys to load (e.g. ["punet", "wavenet"]).
+        source_run_name: The run name to load from (e.g. "small_sample_trial_v0").
+
+    Returns:
+        List of validated HyperparamTuningOutput objects (one per model).
+        Raises FileNotFoundError if any model's output is missing.
+    """
+    paths = [
+        os.path.join(
+            data_dir, model_type, source_run_name, "agent",
+            f"run_output_{source_run_name}_agent.json",
+        )
+        for model_type in model_types
+    ]
+    return load_tuning_outputs_from_paths(paths)
 
 
 def tuning_outputs_to_summaries(
@@ -218,11 +243,13 @@ def _register_plugin(impl_output, model_name: str):
 # ---------------------------------------------------------------------------
 
 def run_workflow(
-    data_dir: str,
-    model_types: list[str],
-    source_run_name: str,
     workspace: str,
     run_name: str,
+    # --- Source data: provide either source_paths OR (data_dir + model_types + source_run_name) ---
+    source_paths: list[str] | None = None,
+    data_dir: str | None = None,
+    model_types: list[str] | None = None,
+    source_run_name: str | None = None,
     max_iterations: int = 1,
     max_rounds: int = 10,
     max_proposal_attempts: int = 3,
@@ -255,13 +282,20 @@ def run_workflow(
     The propose→implement→validate inner loop retries on validation failure.
 
     Args:
-        data_dir: Root data directory containing existing tuning results.
-        model_types: List of model types to load from source_run_name.
-        source_run_name: The run name to load initial tuning results from
-            (e.g. "v3_file6"). One output per model is loaded from
-            {data_dir}/{model_type}/{source_run_name}/agent/.
         workspace: Root output directory for this workflow run.
         run_name: Unique name for this workflow run.
+        source_paths: (preferred) Explicit list of HyperparamTuningOutput JSON file
+            paths to load as historical context. Use this when chaining iterations
+            across separate Slurm jobs — each iteration's source list = original
+            seeds + all previous iteration outputs.
+        data_dir: (legacy) Root data directory containing existing tuning results.
+            Used only when source_paths is None.
+        model_types: (legacy) List of model types to load from source_run_name.
+            Used only when source_paths is None.
+        source_run_name: (legacy) The run name to load initial tuning results from
+            (e.g. "small_sample_trial_v0"). One output per model is loaded from
+            {data_dir}/{model_type}/{source_run_name}/agent/. Used only when
+            source_paths is None.
         max_iterations: Number of successful iterations (validated + tuned).
         max_rounds: Tuning budget per iteration.
         max_proposal_attempts: Max propose→implement→validate retries per iteration.
@@ -300,8 +334,13 @@ def run_workflow(
     print(f"\n{'='*60}")
     print(f"  SIDERIUS Model Exploration Workflow")
     print(f"  Started       : {started_at}")
-    print(f"  Source run    : {source_run_name}")
-    print(f"  Models        : {model_types}")
+    if source_paths is not None:
+        print(f"  Source paths  : {len(source_paths)} files")
+        for p in source_paths:
+            print(f"    - {p}")
+    else:
+        print(f"  Source run    : {source_run_name}")
+        print(f"  Models        : {model_types}")
     print(f"  Workspace     : {workspace}")
     print(f"  Run name      : {run_name}")
     print(f"  LLM config    : {llm_config.model_dump(exclude_none=True)}")
@@ -314,7 +353,15 @@ def run_workflow(
 
     # --- Step 0: Load existing tuning outputs ---
     print("Step 0: Loading existing tuning outputs...")
-    tuning_outputs = load_tuning_outputs(data_dir, model_types, source_run_name)
+    if source_paths is not None:
+        tuning_outputs = load_tuning_outputs_from_paths(source_paths)
+    elif data_dir and model_types and source_run_name:
+        tuning_outputs = load_tuning_outputs(data_dir, model_types, source_run_name)
+    else:
+        raise ValueError(
+            "Must provide either source_paths OR "
+            "(data_dir + model_types + source_run_name)."
+        )
     summary_groups = tuning_outputs_to_summaries(tuning_outputs)
     print(f"  Loaded {len(tuning_outputs)} tuning outputs "
           f"across {len(set(o.model_type for o in tuning_outputs))} model types.\n")
