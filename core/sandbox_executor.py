@@ -14,6 +14,37 @@ def _tidmad_data_dir() -> str:
     return TIDMAD_DATA_DIR
 
 
+def _format_subprocess_error(e: subprocess.CalledProcessError, label: str = "Subprocess") -> str:
+    """
+    Format a CalledProcessError into a useful diagnostic message.
+
+    Combines stderr, stdout, exit code, and signal info so silent crashes
+    (segfault, OOM-killed, GPU watchdog timeout) still leave a trace.
+    """
+    parts = [f"{label} failed with exit code {e.returncode}"]
+
+    # Negative exit code = killed by signal
+    if e.returncode is not None and e.returncode < 0:
+        signal_num = -e.returncode
+        signal_names = {
+            9: "SIGKILL (likely OOM-killed by OS)",
+            11: "SIGSEGV (segfault — likely C extension or driver crash)",
+            6: "SIGABRT (assertion or abort)",
+            15: "SIGTERM (terminated)",
+        }
+        sig_desc = signal_names.get(signal_num, f"signal {signal_num}")
+        parts.append(f"Killed by {sig_desc}")
+
+    if e.stderr:
+        parts.append(f"--- stderr ---\n{e.stderr}")
+    if e.stdout:
+        parts.append(f"--- stdout ---\n{e.stdout}")
+    if not e.stderr and not e.stdout:
+        parts.append("(no stdout/stderr captured — process may have crashed silently)")
+
+    return "\n".join(parts)
+
+
 def _subprocess_env() -> dict:
     """
     Returns an env dict for subprocesses with ml_models and execute_tools
@@ -249,7 +280,7 @@ class TidmadSandbox:
             return {"status": "success", "message": "Training finished."}
 
         except subprocess.CalledProcessError as e:
-            error_msg = e.stderr if e.stderr else ""
+            error_msg = _format_subprocess_error(e, "Train")
             print(f"--- Train Script Error ---\n{error_msg}")
             return {"status": "error", "message": error_msg}
         except Exception as e:
@@ -324,7 +355,7 @@ class TidmadSandbox:
                 print(f"--- Inference Output ---\n{result.stdout}")
             return {"status": "success", "message": "Inference finished."}
         except subprocess.CalledProcessError as e:
-            error_msg = e.stderr if e.stderr else ""
+            error_msg = _format_subprocess_error(e, "Inference")
             print(f"--- Inference Error ---\n{error_msg}")
             return {"status": "error", "message": error_msg}
 
