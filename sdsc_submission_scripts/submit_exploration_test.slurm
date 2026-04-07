@@ -19,8 +19,8 @@
 #SBATCH --output="/home/ym137/SIDERIUS/sdsc_submission_scripts/logs/tier3_%j.out"
 #SBATCH --error="/home/ym137/SIDERIUS/sdsc_submission_scripts/logs/tier3_%j.err"
 
-# NOTE: Resource parameters (partition, gres, mem, time, cpus) must be
-# provided via sbatch CLI to ensure full compliance with the bank_limit plugin.
+# NOTE: Resource parameters (nodes, ntasks, partition, gpus, mem, time, cpus-per-task)
+# must be provided via sbatch CLI to ensure full compliance with the bank_limit plugin.
 
 # --- Robust Error Handling ---
 set -e
