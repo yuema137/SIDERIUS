@@ -68,7 +68,9 @@ Two tests live in `tests/integration/workflows/test_full_exploration_loop.py`:
 | Test | What it does | Runtime |
 |---|---|---|
 | `test_full_loop` | One iteration of the full 5-agent loop. Validates the loop end-to-end. | ~5–10 min |
-| `test_chained_iterations` | Two sequential `run_workflow()` calls. Iteration 2 sees seeds + iteration 1's output. Mirrors the SDSC chain in-process. | ~15–25 min |
+| `test_chained_iterations` | Two sequential `run_workflow()` calls. Iteration 2 sees seeds + iteration 1's output. Mirrors the SDSC chain in-process. | ~20–30 min in practice |
+
+Both tests use the same pinned `max_rounds=2`, `max_epochs=1`, `trial_portion=0.02`, `eval_portion=0.02` smoke-test budget defined in the pytest source — they're not configurable from the command line.
 
 ### Run the chain test (the one that mirrors SDSC)
 ```bash
@@ -116,22 +118,35 @@ non-Slurm sibling of `run_iteration_chain.sh` — same flags, same behavior,
 same shared logic — and the **only** legitimate difference is that
 iterations run as foreground Python subprocesses instead of Slurm jobs.
 
-### Submit
+### Submit (validated smoke-test config matching the pytest budget)
 ```bash
 cd ~/SIDERIUS
 tmux new -s lilab_real_chain
 bash sdsc_submission_scripts/run_iteration_chain_lilab.sh \
     --workspace /home/klz/Data/SIDEREIS_DATA/lilab_chain_v1 \
     --num_iterations 2 \
-    --seed_paths /home/klz/Data/SIDEREIS_DATA/punet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json \
-    --max_rounds 5 \
-    --max_epochs 5 \
+    --seed_paths \
+        /home/klz/Data/SIDEREIS_DATA/punet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json \
+        /home/klz/Data/SIDEREIS_DATA/wavenet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json \
+    --max_rounds 2 \
+    --max_epochs 1 \
     --trial_portion 0.02 \
     --eval_portion 0.02 \
     --human_advice_file sdsc_submission_scripts/human_advice_chain_test.json \
     2>&1 | tee /tmp/lilab_real_chain.log
 ```
 Detach with `Ctrl-b d`. Reattach with `tmux attach -t lilab_real_chain`.
+
+This is the exact config of the run that completed successfully end-to-end on
+2026-04-07 (~25 min for both iterations on RTX 5090). Bumping `--max_rounds`
+or `--max_epochs` is fine for longer runs but expect proportionally longer
+runtime, especially because **the formal (last) round always evaluates on
+full data** regardless of `--eval_portion` (eval_portion is forced to 1.0
+in formal mode — see "Notes on trial vs formal mode" below).
+
+The lilab orchestrator auto-detects `uv` and uses `uv run python` to invoke
+`run_one_iteration.py` (so deps from `.venv` are picked up correctly).
+Falls back to plain `python3` when `uv` is absent.
 
 ### Monitor (other pane)
 ```bash
@@ -192,23 +207,25 @@ git log --oneline -3
 ### 2. Submit the chain (use a fresh workspace each time)
 ```bash
 bash sdsc_submission_scripts/run_iteration_chain.sh \
-    --workspace /expanse/lustre/projects/ddp433/ym137/siderius_workspace/exploration_chain_test_v3 \
+    --workspace /expanse/lustre/projects/ddp433/ym137/siderius_workspace/exploration_chain_test_v1 \
     --num_iterations 2 \
     --seed_paths /expanse/lustre/projects/ddp433/ym137/siderius_workspace/punet/hpt_full_v1/agent/run_output_hpt_full_v1_agent.json \
-    --max_rounds 5 \
-    --max_epochs 5 \
+    --max_rounds 2 \
+    --max_epochs 1 \
     --human_advice_file sdsc_submission_scripts/human_advice_chain_test.json \
     --time 06:00:00 \
     --mem 24G \
     --cpus 8
 ```
 
-Key flags:
-- `--max_epochs 5` — hard cap on epochs per round (LLM cannot override)
-- `--max_rounds 5` — total rounds per iteration (last round = formal mode)
-- `--human_advice_file ...` — loads all 5 advice keys from JSON
-- **Always use a fresh workspace** (`_v3`, `_v4`, …) — partial state from a
-  killed run will confuse the manifest resolution.
+Key flags (same shape as the lilab orchestrator — `_chain_common.sh` enforces this):
+- `--max_epochs 1` — hard cap on epochs per round (LLM cannot override)
+- `--max_rounds 2` — total rounds per iteration (last round = formal mode, see notes below)
+- `--human_advice_file ...` — loads all 5 advice keys from JSON (the same file lilab uses)
+- `--time 06:00:00` — Slurm walltime per iteration. **6 h is the empirically validated budget for `max_rounds=2, max_epochs=1` on `gpu-shared`**, and it leaves comfortable headroom for the formal round's full-data eval. Lower values (3 h, 4 h) start the job sooner but risk hitting the wall on a slow V100; bump to 8 h+ if you increase `max_rounds`.
+- **Always use a fresh workspace** (`_v1`, `_v2`, … bump on every resubmit) — partial state from a killed run will confuse the manifest resolution. After any failure, `rm -rf` the old workspace dir (or pick a new name) before resubmitting.
+
+For richer multi-round runs (smoke test passes, you want real signal), bump `--max_rounds`/`--max_epochs` and the walltime accordingly. Rough scaling: each additional trial round adds ~5–15 min on V100 with `max_epochs=1`; the formal round is always the long pole regardless.
 
 ### 3. Capture the two job IDs
 The script prints something like:
@@ -278,15 +295,46 @@ No zombies in the queue.
 
 ## Recommended order of operations
 
-1. **Lilab `test_chained_iterations` first.** It runs in ~20 min in-process
-   and exercises exactly the same code as SDSC. If this fails, do not burn
-   SDSC quota — diagnose locally first.
-2. **Once lilab passes, submit SDSC.** Watch iter 1 closely until you've
-   confirmed the manifest is written *and* iter 2 has started — that's the
-   moment of truth for the chain plumbing.
-3. **Don't run lilab and other GPU work simultaneously** — the test will
+1. **Lilab `test_chained_iterations` first** (entry point 1, ~25 min). The
+   pytest exercises exactly the same code path as the bash orchestrators;
+   it's the cheapest signal that the schema, advice loading, and manifest
+   round-trip all work on the latest code.
+2. **(Optional) `run_iteration_chain_lilab.sh` next** (entry point 2,
+   ~25 min). Same scope as the pytest but produces durable artifacts under
+   `/home/klz/Data/SIDEREIS_DATA/lilab_chain_v*` so you can inspect manifests
+   and per-round outputs after the run. Useful when debugging or when you
+   want to keep results.
+3. **Once lilab is green, submit SDSC** (entry point 3). Watch iter 1
+   closely until you've confirmed `iter_001/manifest.json` is written *and*
+   iter 2 (47913515 in the most recent run) has actually started — that's
+   the moment of truth for the chain plumbing on SDSC.
+4. **Don't run lilab and other GPU work simultaneously.** The test will
    conflict with anything else using the lilab GPU and may hit CUDA launch
-   timeouts (display GPU watchdog).
+   timeouts (display GPU watchdog kills kernels >2s when GPU is shared).
+   `nvidia-smi` before launching.
+
+---
+
+## Notes on trial vs formal mode (read this if walltime matters)
+
+Each iteration runs `max_rounds` rounds. The **last round of each iteration
+is forced into "formal" mode** by the tuner (`nodes/ml_hyperparameter_tune_agent.py`):
+
+- `is_trial = False` is forced on the last round.
+- `eval_portion` is forced to **`1.0`** (full evaluation data) regardless of
+  what the LLM picked or what `--eval_portion` was passed to the orchestrator.
+- `trial_portion` and `train_portion` (training data scope) remain
+  LLM-controlled — they are *not* overridden in formal mode, so the LLM is
+  free to pick a small training fraction even in the formal round.
+- `target_files` is forced empty, so any LLM that picked
+  `trial_strategy="target"` for the trial rounds must switch to `"snapshot"`
+  for the formal round.
+
+**Practical implication: the formal round is always the dominant cost** of an
+iteration, because eval has to inference + score every segment of all 20 files.
+Trimming `--trial_portion` / `--eval_portion` only speeds up the trial rounds,
+not the formal round. If you want a faster chain run, reduce `--max_rounds` or
+`--max_epochs`, not the data portions.
 
 ---
 
@@ -294,12 +342,15 @@ No zombies in the queue.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Iter 1 hits walltime, iter 2 auto-cancelled | Single round took too long (LLM picked too many epochs) | Confirm `--max_epochs` is set; tighten `tune` advice in JSON |
+| Iter 1 hits walltime, iter 2 auto-cancelled | Single round took too long (LLM picked too many epochs, or formal-round eval ran on full data) | Confirm `--max_epochs` is set; tighten `tune` advice in JSON; bump `--time` |
 | `manifest.json` missing after iter 1 "finished" | Workflow raised an exception before manifest write | Check `iter_XXXXX.err` — runner writes `manifest.json` only on clean exit |
 | Iter 2 fails with `Manifest not found` | Iter 1 was killed before writing manifest | Iter 2 should never have started — check that `--kill-on-invalid-dep=yes` was applied |
+| Iter 2 fails with `pydantic ValidationError: Input should be a valid number ... input_value=None` on `file_vector` | **Historical (fixed in `313c45c`)** — old-schema `Optional[List[float]]` rejected JSON `null` elements that pydantic produced from `NaN` floats. The schema is now `Optional[List[Optional[float]]]` and the writer uses Python `None`. | Should not recur. If it does, you're running pre-`313c45c` code somewhere — `git pull` and resubmit. |
 | `Resolved @manifest:... → ...` shows wrong model name in iter 2 | Stale workspace from previous run | Always use a fresh `--workspace` directory |
-| CUDA launch timeout on lilab only | Display GPU watchdog kills kernels >2s when GPU is shared | Don't run other GPU work concurrently |
+| CUDA launch timeout on lilab only | Display GPU watchdog kills kernels >2s when GPU is shared with other processes (e.g. another user's tensor job, or the X server) | Don't run lilab chain when GPU is contended; check `nvidia-smi` first |
 | `bank_limit plugin` rejection on SDSC | Missing `--ntasks=1` or wrong GPU spec | Already handled by `run_iteration_chain.sh`; don't edit the sbatch args block |
+| `Nodes required for job are DOWN, DRAINED or reserved` on SDSC | Specific GPU type is unavailable on `gpu-shared` at submission time (transient) | Wait a few minutes; if persistent, paste `scontrol show job <id>` output for diagnosis. Often resolves itself within an hour. |
+| Lilab orchestrator fails immediately with `ModuleNotFoundError: No module named 'dotenv'` | Old version of `run_iteration_chain_lilab.sh` invoked system `python3` instead of `uv run python` | **Historical (fixed in `86cee48`)**. Should not recur — script auto-detects `uv`. |
 
 ---
 
