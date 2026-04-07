@@ -32,11 +32,19 @@ source "${SCRIPT_DIR}/_chain_common.sh"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 RUNNER="${SCRIPT_DIR}/run_one_iteration.py"
 
+# Choose Python interpreter: prefer `uv run python` (lilab dev setup),
+# fall back to plain `python3` (when an activated venv has the deps).
+if command -v uv >/dev/null 2>&1; then
+    PY_CMD=(uv run python)
+else
+    PY_CMD=(python3)
+fi
+
 # Required by run_chain: execute one iteration in the foreground.
 # SOURCE_PATHS and APP_ARGS are populated by the common framework.
 submit_iteration() {
     local iter=$1
-    python3 "$RUNNER" "${APP_ARGS[@]}"
+    (cd "$PROJECT_DIR" && "${PY_CMD[@]}" "$RUNNER" "${APP_ARGS[@]}")
 }
 
 parse_chain_args "$@"
