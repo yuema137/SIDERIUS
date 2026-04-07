@@ -176,8 +176,20 @@ def main():
         help="Delete denoised H5 files after scoring (recommended for production)."
     )
     parser.add_argument(
+        "--human_advice_interpret", type=str, default=None,
+        help="Human guidance for the interpretation agent."
+    )
+    parser.add_argument(
         "--human_advice_propose", type=str, default=None,
         help="Human guidance for the proposal agent."
+    )
+    parser.add_argument(
+        "--human_advice_implement", type=str, default=None,
+        help="Human guidance for the implementor agent."
+    )
+    parser.add_argument(
+        "--human_advice_validate", type=str, default=None,
+        help="Human guidance for the validator agent."
     )
     parser.add_argument(
         "--human_advice_tune", type=str, default=None,
@@ -229,7 +241,10 @@ def main():
             eval_portion=args.eval_portion,
             cleanup_denoised=args.cleanup_denoised,
             max_epochs=args.max_epochs,
+            human_advice_interpret=args.human_advice_interpret,
             human_advice_propose=args.human_advice_propose,
+            human_advice_implement=args.human_advice_implement,
+            human_advice_validate=args.human_advice_validate,
             human_advice_tune=args.human_advice_tune,
         )
     except Exception as e:

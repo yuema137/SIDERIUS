@@ -33,8 +33,12 @@ LLM_MODEL="gemini-3.1-pro-preview"
 TRIAL_PORTION=0.1
 TRAIN_PORTION=0.1
 EVAL_PORTION=0.1
+HUMAN_ADVICE_INTERPRET=""
 HUMAN_ADVICE_PROPOSE=""
+HUMAN_ADVICE_IMPLEMENT=""
+HUMAN_ADVICE_VALIDATE=""
 HUMAN_ADVICE_TUNE=""
+HUMAN_ADVICE_FILE=""
 PARTITION="gpu-shared"
 TIME="04:00:00"
 MEM="24G"
@@ -59,8 +63,12 @@ while [[ $# -gt 0 ]]; do
     --trial_portion)          TRIAL_PORTION="$2"; shift 2 ;;
     --train_portion)          TRAIN_PORTION="$2"; shift 2 ;;
     --eval_portion)           EVAL_PORTION="$2"; shift 2 ;;
+    --human_advice_interpret) HUMAN_ADVICE_INTERPRET="$2"; shift 2 ;;
     --human_advice_propose)   HUMAN_ADVICE_PROPOSE="$2"; shift 2 ;;
+    --human_advice_implement) HUMAN_ADVICE_IMPLEMENT="$2"; shift 2 ;;
+    --human_advice_validate)  HUMAN_ADVICE_VALIDATE="$2"; shift 2 ;;
     --human_advice_tune)      HUMAN_ADVICE_TUNE="$2"; shift 2 ;;
+    --human_advice_file)      HUMAN_ADVICE_FILE="$2"; shift 2 ;;
     --partition)              PARTITION="$2"; shift 2 ;;
     --time)                   TIME="$2"; shift 2 ;;
     --mem)                    MEM="$2"; shift 2 ;;
@@ -73,6 +81,36 @@ done
 if [ -z "$WORKSPACE" ] || [ ${#SEED_PATHS[@]} -eq 0 ]; then
     echo "Required: --workspace, --seed_paths" >&2
     exit 1
+fi
+
+# Load human advice from JSON file if provided. The file should contain one
+# entry per agent in the 5-agent loop:
+#   {
+#     "interpret": "...", "propose": "...", "implement": "...",
+#     "validate":  "...", "tune":    "..."
+#   }
+# Any key may be missing or empty. Explicit --human_advice_<agent> flags take
+# precedence over file values.
+if [ -n "$HUMAN_ADVICE_FILE" ]; then
+    if [ ! -f "$HUMAN_ADVICE_FILE" ]; then
+        echo "Human advice file not found: $HUMAN_ADVICE_FILE" >&2
+        exit 1
+    fi
+    _read_advice() {
+        python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get(sys.argv[2],'') or '')" \
+            "$HUMAN_ADVICE_FILE" "$1"
+    }
+    FILE_INTERPRET=$(_read_advice interpret)
+    FILE_PROPOSE=$(_read_advice propose)
+    FILE_IMPLEMENT=$(_read_advice implement)
+    FILE_VALIDATE=$(_read_advice validate)
+    FILE_TUNE=$(_read_advice tune)
+    if [ -z "$HUMAN_ADVICE_INTERPRET" ]; then HUMAN_ADVICE_INTERPRET="$FILE_INTERPRET"; fi
+    if [ -z "$HUMAN_ADVICE_PROPOSE" ];   then HUMAN_ADVICE_PROPOSE="$FILE_PROPOSE"; fi
+    if [ -z "$HUMAN_ADVICE_IMPLEMENT" ]; then HUMAN_ADVICE_IMPLEMENT="$FILE_IMPLEMENT"; fi
+    if [ -z "$HUMAN_ADVICE_VALIDATE" ];  then HUMAN_ADVICE_VALIDATE="$FILE_VALIDATE"; fi
+    if [ -z "$HUMAN_ADVICE_TUNE" ];      then HUMAN_ADVICE_TUNE="$FILE_TUNE"; fi
+    echo "Loaded human advice from: $HUMAN_ADVICE_FILE"
 fi
 
 mkdir -p "$WORKSPACE"
@@ -147,8 +185,17 @@ for ITER in $(seq 1 $NUM_ITERATIONS); do
     if [ -n "$MAX_EPOCHS" ]; then
         APP_ARGS+=(--max_epochs "$MAX_EPOCHS")
     fi
+    if [ -n "$HUMAN_ADVICE_INTERPRET" ]; then
+        APP_ARGS+=(--human_advice_interpret "$HUMAN_ADVICE_INTERPRET")
+    fi
     if [ -n "$HUMAN_ADVICE_PROPOSE" ]; then
         APP_ARGS+=(--human_advice_propose "$HUMAN_ADVICE_PROPOSE")
+    fi
+    if [ -n "$HUMAN_ADVICE_IMPLEMENT" ]; then
+        APP_ARGS+=(--human_advice_implement "$HUMAN_ADVICE_IMPLEMENT")
+    fi
+    if [ -n "$HUMAN_ADVICE_VALIDATE" ]; then
+        APP_ARGS+=(--human_advice_validate "$HUMAN_ADVICE_VALIDATE")
     fi
     if [ -n "$HUMAN_ADVICE_TUNE" ]; then
         APP_ARGS+=(--human_advice_tune "$HUMAN_ADVICE_TUNE")

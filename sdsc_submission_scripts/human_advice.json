@@ -1,0 +1,7 @@
+{
+  "interpret": "",
+  "propose": "Propose only lightweight models suitable for fast iteration. Prioritize speed over peak accuracy. Avoid models with >50M parameters.",
+  "implement": "",
+  "validate": "",
+  "tune": "This is a smoke test of the iteration chain. Use small epochs (<=5), modest batch sizes, and conservative learning rates. Do not chase the absolute best score; focus on completing all rounds within the walltime budget."
+}
