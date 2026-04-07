@@ -1,6 +1,9 @@
 """
 Tier 3 integration test: full 5-agent model exploration workflow.
 
+See docs/running_chain_test.md for the full runbook (lilab + SDSC).
+
+
 Exercises the complete loop end-to-end with real LLM API calls and GPU:
   1. Load existing tuning outputs for punet, fcnet, wavenet
   2. Interpret results across all models
@@ -32,6 +35,26 @@ import os
 import shutil
 import pytest
 from dotenv import load_dotenv
+
+# Shared human-advice file used by both lilab and SDSC chain tests.
+# Single source of truth — edit one file to retune both environments.
+SHARED_ADVICE_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "..", "..", "..", "sdsc_submission_scripts", "human_advice.json",
+)
+
+
+def _load_shared_advice() -> dict:
+    """Load the shared human-advice JSON; missing keys default to empty string."""
+    with open(SHARED_ADVICE_FILE, "r", encoding="utf-8") as f:
+        d = json.load(f)
+    return {
+        "interpret": d.get("interpret", "") or "",
+        "propose":   d.get("propose",   "") or "",
+        "implement": d.get("implement", "") or "",
+        "validate":  d.get("validate",  "") or "",
+        "tune":      d.get("tune",      "") or "",
+    }
 
 load_dotenv()
 
@@ -300,21 +323,8 @@ class TestFullExplorationLoop:
             eval_portion=0.02,
             cleanup_denoised=True,
             max_epochs=1,
-            # Force small models for speed
-            human_advice_propose=(
-                "Propose a VERY simple architecture — no more than 3 layers, "
-                "fewer than 10K parameters. Use only basic PyTorch modules "
-                "(nn.Embedding, nn.Conv1d, nn.Linear, nn.ReLU). "
-                "Do NOT use attention, transformers, or complex gating. "
-                "The model must train and infer in under 30 seconds on a single GPU. "
-                "Use segmentation_size=10000 in baseline_config.train_config."
-            ),
-            human_advice_tune=(
-                "CRITICAL: Use exactly 1 epoch, batch_size=1, lr=1e-4, device=cuda. "
-                "Keep the model as small as possible — under 10K parameters. "
-                "This is an integration test — speed matters more than score. "
-                "You MUST use segmentation_size from the model_config as-is."
-            ),
+            # Shared advice file (same one used by SDSC chain orchestrator)
+            **{f"human_advice_{k}": v for k, v in _load_shared_advice().items()},
         )
 
         # --- Validate all 5 stages ---
@@ -356,18 +366,8 @@ class TestFullExplorationLoop:
         workspace = str(tmp_path / "workflow_output")
         llm_config = WorkflowLLMConfig.uniform("gemini", "gemini-3.1-pro-preview")
 
-        # Aggressive size constraints — force tiny models for fast formal round
-        propose_advice = (
-            "Propose a TINY architecture — 1-2 layers, fewer than 1000 parameters total. "
-            "Use only nn.Embedding(256, 4) + nn.Conv1d(4, 256, 1) or similar minimal designs. "
-            "The model must train AND infer in under 20 seconds total. "
-            "Set segmentation_size=10000 in baseline_config."
-        )
-        tune_advice = (
-            "CRITICAL: Use exactly 1 epoch, batch_size=1, lr=1e-4, device=cuda. "
-            "Keep the model under 1000 parameters. "
-            "This is an integration test — speed matters more than score."
-        )
+        # Shared advice file (same one used by SDSC chain orchestrator)
+        shared_advice = _load_shared_advice()
 
         # --- Construct seed paths from the existing source data ---
         seed_paths = []
@@ -402,8 +402,7 @@ class TestFullExplorationLoop:
                 eval_portion=0.02,
                 cleanup_denoised=True,
                 max_epochs=1,
-                human_advice_propose=propose_advice,
-                human_advice_tune=tune_advice,
+                **{f"human_advice_{k}": v for k, v in shared_advice.items()},
             )
 
             assert len(results_1) == 1, "Iteration 1 should produce one tuning output"
@@ -442,8 +441,7 @@ class TestFullExplorationLoop:
                 eval_portion=0.02,
                 cleanup_denoised=True,
                 max_epochs=1,
-                human_advice_propose=propose_advice,
-                human_advice_tune=tune_advice,
+                **{f"human_advice_{k}": v for k, v in shared_advice.items()},
             )
 
             assert len(results_2) == 1, "Iteration 2 should produce one tuning output"

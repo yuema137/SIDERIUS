@@ -1,7 +1,7 @@
 {
-  "interpret": "",
-  "propose": "Propose only lightweight models suitable for fast iteration. Prioritize speed over peak accuracy. Avoid models with >50M parameters.",
-  "implement": "",
-  "validate": "",
-  "tune": "This is a smoke test of the iteration chain. Use small epochs (<=5), modest batch sizes, and conservative learning rates. Do not chase the absolute best score; focus on completing all rounds within the walltime budget."
+  "interpret": "This is a smoke test of the iteration chain plumbing, not a research run. Summarize the seed records concisely. Do not over-analyze.",
+  "propose": "Propose a TINY architecture — at most 2-3 layers, fewer than 50K parameters total. Use only basic PyTorch building blocks (nn.Embedding, nn.Conv1d, nn.Linear, nn.ReLU). Do NOT use attention, transformers, deep FNOs, or large fcnet/wavenet stacks. The model must train and infer quickly. Set segmentation_size=10000 in baseline_config.train_config.",
+  "implement": "Keep the implementation minimal and standard. No exotic layers, no experimental tricks. Standard PyTorch building blocks only.",
+  "validate": "Apply standard validation. Reject plugins that import unusual libraries or have obvious bugs, but do not be overly strict about style.",
+  "tune": "CRITICAL CONSTRAINTS: epochs <= 5 in every round, batch_size <= 64, learning rate in [1e-4, 5e-3], device=cuda. Use segmentation_size from model_config as-is. This is a smoke test of the iteration chain — prioritize completing all rounds within the walltime budget over chasing the best score. Each round must finish in well under one hour."
 }

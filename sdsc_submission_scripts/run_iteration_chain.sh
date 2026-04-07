@@ -2,6 +2,8 @@
 # ---------------------------------------------------------------------------
 # SIDERIUS Iteration Chain Orchestrator
 # ---------------------------------------------------------------------------
+# Full runbook (lilab + SDSC): docs/running_chain_test.md
+# ---------------------------------------------------------------------------
 # Submits N iteration jobs in sequence using --dependency=afterok for
 # automatic chaining. Each job's source paths = original seeds + all
 # previous iteration manifests.
