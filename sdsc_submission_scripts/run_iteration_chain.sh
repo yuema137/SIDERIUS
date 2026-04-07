@@ -167,11 +167,13 @@ done
 echo ""
 echo "############################################################"
 echo "  CHAIN SUBMITTED — ${NUM_ITERATIONS} iterations"
+JOB_IDS_ONLY=()
 for entry in "${SUBMITTED_JOBS[@]}"; do
     IFS=':' read -r ITER JOB_ID <<< "$entry"
     echo "  iter $ITER → job $JOB_ID"
+    JOB_IDS_ONLY+=("$JOB_ID")
 done
 echo ""
 echo "  Monitor with: squeue -u \$USER"
-echo "  Cancel chain: scancel ${SUBMITTED_JOBS[*]}"
+echo "  Cancel chain: scancel ${JOB_IDS_ONLY[*]}"
 echo "############################################################"
