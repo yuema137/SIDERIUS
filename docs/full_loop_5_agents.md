@@ -18,6 +18,110 @@ Existing tuning outputs (punet, fcnet, wavenet)
 
 ---
 
+## 0. Two Execution Environments: Local Server vs HPC Cluster
+
+The workflow targets two fundamentally different deployment environments, and the
+**execution model differs between them** because of resource scheduling constraints.
+Understanding this distinction is essential before reading the rest of this document.
+
+### Lilab (local server)
+
+- **Single physical machine** with one GPU (RTX 5090, 32 GB VRAM) and direct shell access
+- **No job scheduler** — Python processes run directly via `screen`/`tmux` or pytest
+- **No wall-time limit** — long-running processes are fine
+- **One workflow = one Python process**: `run_workflow(max_iterations=N)` runs N iterations
+  in sequence inside a single Python interpreter, accumulating state in memory between iterations
+
+**Execution model**: monolithic. The `iter 1 → iter 2 → ... → iter N` chain happens
+inside one process. Each iteration's `summary_groups` (the historical context for the
+interpretation agent) lives in Python memory and grows with each iteration.
+
+### SDSC Expanse (HPC cluster)
+
+- **Shared cluster** with many GPUs distributed across nodes (V100, A100)
+- **Slurm job scheduler** required — no direct execution on compute nodes
+- **Hard wall-time limits**: 48h max on `gpu-shared`, longer jobs are very hard to schedule
+- **Multi-tenant fairness**: short jobs (1-4h) get scheduled in minutes; long jobs (12-48h)
+  may sit in the queue for hours or days
+- **Lustre filesystem** for I/O — home directory has tight quotas
+
+**Resource scheduling constraint**: requesting a single 48-hour job for the whole
+workflow is a **practical anti-pattern** on SDSC. The job will queue forever or get
+preempted. The cluster scheduler favors many short jobs over one long one.
+
+**Execution model**: per-iteration job submission. `iter 1 → iter 2 → ... → iter N` is
+a chain of N independent Slurm jobs, each running `run_workflow(max_iterations=1)`.
+State passing is **on disk**, not in memory: each iteration writes its tuning output
+to a known path, and the next job loads it via the new `source_paths` API.
+
+### Why the workflow code supports both
+
+The same `run_workflow()` function runs on both environments. The difference is:
+
+| | Lilab | SDSC |
+|---|---|---|
+| **Process model** | One process, N iterations | N processes (Slurm jobs), 1 iteration each |
+| **State passing** | In-memory (`summary_groups` list) | On-disk (`source_paths` list) |
+| **API used** | Legacy: `data_dir + model_types + source_run_name` | New: `source_paths=[...]` |
+| **Chaining** | Python `for` loop inside `run_workflow()` | Slurm `--dependency=afterok:JOB_ID` |
+| **Failure recovery** | Manual restart of the whole workflow | Resubmit the failed iteration only |
+| **Concurrency** | One workflow at a time | Multiple workflows can pack onto one GPU via `gpu_memory_limit_gb` |
+
+The new `source_paths` API (Phase 4) is **additive** — the legacy API still works on
+lilab, and existing tests/scripts are unchanged. Slurm-mode chaining is built on top
+of the new API without modifying the core workflow logic.
+
+### How chain dependency is enforced (SDSC)
+
+This is critical: on SDSC, **the next iteration must not start until the previous one
+completes successfully**. Otherwise iteration N+1 would either:
+- Start before iteration N writes its output → load fails
+- Run on stale data if iteration N was retried
+
+**Enforcement mechanism**: Slurm's native `--dependency=afterok:<job_id>` flag.
+
+The orchestrator script `run_iteration_chain.sh` submits all N jobs **upfront** in a
+single shell loop, with each job depending on the previous job's ID:
+
+```bash
+JOB_1=$(sbatch ... submit_one_iteration.slurm --iteration 1 ...)
+JOB_2=$(sbatch --dependency=afterok:$JOB_1 ... --iteration 2 ...)
+JOB_3=$(sbatch --dependency=afterok:$JOB_2 ... --iteration 3 ...)
+# ...
+```
+
+After submission, `squeue` shows the chain:
+
+```
+JOBID    STATE     REASON
+47882500 RUNNING   None             ← iter 1
+47882501 PENDING   Dependency       ← iter 2 (waiting on 47882500)
+47882502 PENDING   Dependency       ← iter 3 (waiting on 47882501)
+```
+
+Slurm handles the rest:
+
+| Event | Slurm behavior |
+|-------|---------------|
+| Iteration N completes (exit 0) | Iteration N+1 transitions PENDING → RUNNING |
+| Iteration N fails (exit non-zero) | Iteration N+1 is **automatically cancelled** with reason `DependencyNeverSatisfied` |
+| Iteration N is manually cancelled | Iteration N+1 is also cancelled |
+| Iteration N is still running | Iteration N+1 stays PENDING — never starts early |
+
+**This is enforced by the Slurm scheduler itself**, not by polling or custom code.
+Our orchestrator just submits all jobs in seconds and exits. There are no race
+conditions, no waiting loops, no daemons to maintain.
+
+**Requirement on the runner**: `run_one_iteration.py` must exit **non-zero** on any
+failure (workflow exception, validation failure, missing manifest) so Slurm sees
+the right exit code. This is verified in the runner's failure paths.
+
+**Failure recovery**: if iteration N fails, jobs N+1..M are auto-cancelled. After
+fixing the issue, manually resubmit with `run_iteration_chain.sh` starting from
+iteration N (a future enhancement could add a `--start_from N` flag).
+
+---
+
 ## 1. Data Mode: Full Data (not single-file)
 
 **The old single-file mode (`is_trial=False`, `file_index=N`) is OUTDATED.** It was an
