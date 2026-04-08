@@ -54,6 +54,7 @@ from agent.schemas.validator import ValidatorOutput
 
 from workflows.model_exploration import (
     load_tuning_outputs,
+    load_tuning_outputs_from_paths,
     tuning_outputs_to_summaries,
     run_workflow,
 )
@@ -187,7 +188,7 @@ class TestLoadTuningOutputs:
             load_tuning_outputs(str(tmp_path / "data"), ["punet"], "v1")
 
     def test_raises_when_no_outputs_found(self, tmp_path):
-        with pytest.raises(FileNotFoundError, match="Missing tuning outputs"):
+        with pytest.raises(FileNotFoundError, match="Missing or invalid source files"):
             load_tuning_outputs(str(tmp_path / "data"), ["punet"], "v1")
 
     def test_loads_multiple_model_types(self, tmp_path):
@@ -201,6 +202,57 @@ class TestLoadTuningOutputs:
         _write_tuning_output(tmp_path, "punet")
         with pytest.raises(FileNotFoundError, match="wavenet"):
             load_tuning_outputs(str(tmp_path / "data"), ["punet", "wavenet"], "v1")
+
+
+class TestLoadTuningOutputsFromPaths:
+    """Tests for the new explicit-path loader (used for per-iteration Slurm runs)."""
+
+    def test_loads_single_path(self, tmp_path):
+        _write_tuning_output(tmp_path, "punet")
+        path = str(tmp_path / "data" / "punet" / "v1" / "agent" / "run_output_v1_agent.json")
+        results = load_tuning_outputs_from_paths([path])
+        assert len(results) == 1
+        assert results[0].model_type == "punet"
+
+    def test_loads_heterogeneous_paths(self, tmp_path):
+        """Mix of seed paths and (simulated) iteration output paths from different dirs."""
+        _write_tuning_output(tmp_path, "punet")
+        _write_tuning_output(tmp_path, "wavenet")
+        # Simulate an iteration output at a non-standard location
+        iter_dir = tmp_path / "exploration" / "iter_001" / "model_x"
+        iter_dir.mkdir(parents=True)
+        # Reuse the punet output as the "iter_001" output
+        import shutil
+        seed_punet = tmp_path / "data" / "punet" / "v1" / "agent" / "run_output_v1_agent.json"
+        iter_output = iter_dir / "run_output_iter_001.json"
+        shutil.copy(seed_punet, iter_output)
+
+        paths = [
+            str(seed_punet),
+            str(tmp_path / "data" / "wavenet" / "v1" / "agent" / "run_output_v1_agent.json"),
+            str(iter_output),
+        ]
+        results = load_tuning_outputs_from_paths(paths)
+        assert len(results) == 3
+
+    def test_raises_on_missing_path(self, tmp_path):
+        with pytest.raises(FileNotFoundError, match="not found"):
+            load_tuning_outputs_from_paths([str(tmp_path / "nonexistent.json")])
+
+    def test_raises_on_invalid_json(self, tmp_path):
+        bad_file = tmp_path / "bad.json"
+        bad_file.write_text("not valid json {{{")
+        with pytest.raises(FileNotFoundError, match="invalid"):
+            load_tuning_outputs_from_paths([str(bad_file)])
+
+    def test_legacy_api_uses_new_function_internally(self, tmp_path):
+        """load_tuning_outputs() should produce identical output to from_paths()."""
+        _write_tuning_output(tmp_path, "punet")
+        path = str(tmp_path / "data" / "punet" / "v1" / "agent" / "run_output_v1_agent.json")
+        legacy_result = load_tuning_outputs(str(tmp_path / "data"), ["punet"], "v1")
+        new_result = load_tuning_outputs_from_paths([path])
+        assert len(legacy_result) == len(new_result)
+        assert legacy_result[0].model_type == new_result[0].model_type
 
 
 # ---------------------------------------------------------------------------
@@ -280,6 +332,72 @@ class TestRunWorkflowSingleIteration:
         )
         assert len(results) == 1
         assert isinstance(results[0], HyperparamTuningOutput)
+
+    def test_accepts_source_paths(self, workflow_env, tmp_path):
+        """New API: pass explicit source_paths instead of data_dir+model_types+source_run_name."""
+        path = str(tmp_path / "data" / "punet" / "v1" / "agent" / "run_output_v1_agent.json")
+        results = run_workflow(
+            source_paths=[path],
+            workspace=workflow_env["workspace"],
+            run_name="test_run",
+        )
+        assert len(results) == 1
+        assert isinstance(results[0], HyperparamTuningOutput)
+
+    def test_raises_when_no_source_provided(self, workflow_env):
+        """Must provide either source_paths OR (data_dir + model_types + source_run_name)."""
+        with pytest.raises(ValueError, match="Must provide either source_paths"):
+            run_workflow(
+                workspace=workflow_env["workspace"],
+                run_name="test_run",
+            )
+
+    def test_chained_iterations_via_source_paths(self, workflow_env, tmp_path):
+        """
+        Simulate two sequential Slurm jobs: iteration 1 from seed only,
+        iteration 2 from seed + iteration 1's output. Verifies the
+        per-iteration chaining logic that the orchestrator script depends on.
+        """
+        seed_path = str(tmp_path / "data" / "punet" / "v1" / "agent" / "run_output_v1_agent.json")
+        workspace = workflow_env["workspace"]
+
+        # --- Iteration 1: just the seed ---
+        results_1 = run_workflow(
+            source_paths=[seed_path],
+            workspace=workspace,
+            run_name="iter_001",
+        )
+        assert len(results_1) == 1
+        # The interpretation agent should have received 1 summary (from the seed)
+        interp_input_1 = workflow_env["interp"].return_value.run.call_args_list[0][0][0]
+        assert len(interp_input_1.summaries) == 1
+        assert interp_input_1.summaries[0].model_type == "punet"
+
+        # --- Simulate iteration 1's output being available on disk ---
+        # In real Slurm chaining, iteration 1 would write run_output_iter_001.json
+        # at {workspace}/iter_001/{model_name}/. We fake that here.
+        iter_1_model = results_1[0].model_type
+        iter_1_output_dir = os.path.join(workspace, "iter_001", iter_1_model)
+        os.makedirs(iter_1_output_dir, exist_ok=True)
+        iter_1_output_path = os.path.join(iter_1_output_dir, "run_output_iter_001.json")
+        # Write a minimal valid HyperparamTuningOutput JSON
+        with open(iter_1_output_path, "w") as f:
+            json.dump(results_1[0].model_dump(), f, default=str)
+
+        # --- Iteration 2: seed + iteration 1's output ---
+        results_2 = run_workflow(
+            source_paths=[seed_path, iter_1_output_path],
+            workspace=workspace,
+            run_name="iter_002",
+        )
+        assert len(results_2) == 1
+        # The interpretation agent should now have received 2 summaries
+        # (call_args_list[1] = the call from iteration 2)
+        interp_input_2 = workflow_env["interp"].return_value.run.call_args_list[1][0][0]
+        assert len(interp_input_2.summaries) == 2, (
+            f"Iteration 2 should see seed + iter_001 output (2 summaries), "
+            f"got {len(interp_input_2.summaries)}"
+        )
 
     def test_all_five_nodes_called(self, workflow_env):
         run_workflow(

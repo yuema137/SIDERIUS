@@ -152,6 +152,24 @@ class RNNSeq2SeqConfig(BaseConfig):
 # 7. GatedFNO Configuration
 # ==========================================
 
+def _build_gate_grid(step: float) -> List[float]:
+    """
+    Return the allowed static_v values for a given step size.
+
+    The grid is {0.0, step, 2*step, ..., 1.0}. The largest legal step is 1.0
+    (collapses to binary {0.0, 1.0}); smallest practical step is bounded only
+    by floating-point precision. Step must divide 1.0 evenly.
+    """
+    if not (0.0 < step <= 1.0):
+        raise ValueError(f"gate_step must be in (0, 1], got {step}")
+    n = round(1.0 / step)
+    if abs(n * step - 1.0) > 1e-9:
+        raise ValueError(
+            f"gate_step {step} must divide 1.0 evenly (got n*step = {n*step})"
+        )
+    return [round(i * step, 10) for i in range(n + 1)]
+
+
 class GatedFNOConfig(BaseConfig):
     """
     Configuration for Gated Fourier Neural Operator.
@@ -167,20 +185,88 @@ class GatedFNOConfig(BaseConfig):
                     "'log': denser at low frequencies (matches physics — signals are log-spaced). "
                     "'linear': uniform spacing across the spectrum.",
     )
-    # Agent-tunable vector
+    # --- Discrete grid for static_v values (per-instance hyperparameter) ---
+    gate_step: float = Field(
+        default=0.1,
+        gt=0.0, le=1.0,
+        description=(
+            "Step size for the discrete grid of allowed static_v values. "
+            "Allowed grid is {0.0, gate_step, 2*gate_step, ..., 1.0}. "
+            "Examples: 0.1 -> {0.0, 0.1, ..., 1.0} (11 levels, default), "
+            "0.2 -> {0.0, 0.2, 0.4, 0.6, 0.8, 1.0} (6 levels), "
+            "0.5 -> {0.0, 0.5, 1.0} (3 levels), "
+            "1.0 -> {0.0, 1.0} (binary on/off). "
+            "Must divide 1.0 evenly. Smaller step = finer granularity but a "
+            "larger search space; binary (1.0) loses smoothness."
+        ),
+    )
+    # --- Agent-tunable gate vector ---
     static_v: Optional[List[float]] = Field(
         default=None,
-        description="Static gate vector. Length must match num_gates."
+        description=(
+            "Static gate vector. Length must match num_gates. Each entry must "
+            "lie on the discrete grid defined by gate_step "
+            "(i.e. {0.0, gate_step, 2*gate_step, ..., 1.0}). "
+            "These are continuous attenuation factors (0.0 = fully blocked, "
+            "1.0 = fully passed) — NOT a binary mask unless gate_step=1.0. "
+            "You should explore intermediate values to produce smooth gating "
+            "curves: linear ramps, soft low-pass, soft band-pass, graded "
+            "attenuation. Examples (with gate_step=0.1): a smooth low-pass "
+            "[1.0, 1.0, 0.9, 0.7, 0.4, 0.1, 0.0, ...] or a band-pass "
+            "[0.0, 0.2, 0.6, 1.0, 1.0, 0.6, 0.2, 0.0, ...]."
+        ),
     )
+
+    @field_validator('gate_step')
+    @classmethod
+    def validate_gate_step(cls, v: float) -> float:
+        # Run _build_gate_grid for its side-effect (range + divisibility check).
+        _build_gate_grid(v)
+        return v
 
     @field_validator('static_v')
     @classmethod
-    def validate_v_length(cls, v: Optional[List[float]], info) -> Optional[List[float]]:
+    def validate_static_v(cls, v: Optional[List[float]], info) -> Optional[List[float]]:
+        if v is None:
+            return v
         num_gates = info.data.get('num_gates')
-        if v is not None and num_gates is not None:
-            if len(v) != num_gates:
-                raise ValueError(f"static_v length ({len(v)}) must match num_gates ({num_gates})")
-        return v
+        if num_gates is not None and len(v) != num_gates:
+            raise ValueError(
+                f"static_v length ({len(v)}) must match num_gates ({num_gates})"
+            )
+        # Resolve grid from this instance's gate_step. Falls back to the field
+        # default if gate_step failed earlier validation (then info.data omits it).
+        gate_step = info.data.get('gate_step', 0.1)
+        try:
+            grid = _build_gate_grid(gate_step)
+        except ValueError:
+            # gate_step itself was invalid; that error will surface separately.
+            return v
+        tol = 1e-6
+        snapped: List[float] = []
+        bad: List[tuple] = []
+        for i, x in enumerate(v):
+            if not isinstance(x, (int, float)):
+                bad.append((i, x))
+                continue
+            if not (-tol <= x <= 1.0 + tol):
+                bad.append((i, x))
+                continue
+            n = round(x / gate_step)
+            s = round(n * gate_step, 10)
+            if abs(s - x) > tol:
+                bad.append((i, x))
+                continue
+            snapped.append(s)
+        if bad:
+            preview = bad[:5]
+            more = "..." if len(bad) > 5 else ""
+            raise ValueError(
+                f"static_v entries must lie on the discrete grid {grid} "
+                f"(gate_step={gate_step}). Invalid entries (index, value): "
+                f"{preview}{more}"
+            )
+        return snapped
 
 # Update ModelConfigUnion
 ModelConfigUnion = Union[PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, RNNSeq2SeqConfig, GatedFNOConfig]

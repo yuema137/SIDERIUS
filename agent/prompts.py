@@ -297,6 +297,29 @@ def build_exploration_checklist(
     lines.append("Review which parameters have been explored. Under-explored parameters "
                  "deserve attention — do not ignore model_config fields.\n")
 
+    def _format_bounds(spec: dict) -> str:
+        """Render the field's allowed range / enum from a JSON-schema property."""
+        # Enum / Literal fields take precedence
+        if "enum" in spec:
+            return f"allowed={spec['enum']}"
+        lo_inclusive = spec.get("minimum")
+        lo_exclusive = spec.get("exclusiveMinimum")
+        hi_inclusive = spec.get("maximum")
+        hi_exclusive = spec.get("exclusiveMaximum")
+        lo_str = (
+            f"[{lo_inclusive}" if lo_inclusive is not None
+            else f"({lo_exclusive}" if lo_exclusive is not None
+            else "(-inf"
+        )
+        hi_str = (
+            f"{hi_inclusive}]" if hi_inclusive is not None
+            else f"{hi_exclusive})" if hi_exclusive is not None
+            else "+inf)"
+        )
+        if lo_inclusive is None and lo_exclusive is None and hi_inclusive is None and hi_exclusive is None:
+            return ""
+        return f"range={lo_str},{hi_str}"
+
     # Model config fields from schema
     schema_props = config_schema.get("properties", {})
     lines.append("**model_config:**")
@@ -306,6 +329,7 @@ def build_exploration_checklist(
         tried = model_cfg_tried.get(field, set())
         default = spec.get("default")
         desc = spec.get("description", "")
+        bounds = _format_bounds(spec)
 
         if len(tried) == 0:
             status = "NEVER TRIED"
@@ -325,7 +349,11 @@ def build_exploration_checklist(
         else:
             tried_str = f"default={default}"
 
-        lines.append(f"- {marker} `{field}`: {tried_str} — {status}")
+        # Append bounds so the LLM cannot propose out-of-range values
+        suffix = f" — {status}"
+        if bounds:
+            suffix += f" — {bounds}"
+        lines.append(f"- {marker} `{field}`: {tried_str}{suffix}")
 
     # Loss config
     lines.append("\n**loss_config:**")

@@ -35,25 +35,43 @@ $$h_{l+1} = \text{GELU}(W \cdot h_l + \mathcal{F}^{-1}(\hat{z}))$$
 
 ### How to Tune `static_v`
 
-`static_v` is a vector of length `num_gates`, where each element controls a frequency band:
+`static_v` is a vector of length `num_gates`. Each element is an **attenuation factor** for one frequency band — a continuous value, **not a binary mask**:
 - `v[i] = 1.0`: The AI fully processes this frequency band (denoising enabled).
 - `v[i] = 0.0`: The signal in this band passes through unchanged (preserved exactly).
 - `v[i] = 0.5`: Half AI processing, half bypass (partial denoising).
+- Any value `0.1, 0.2, 0.3, ..., 0.9` is equally valid — use them to build smooth curves.
+
+**Allowed values are restricted to a discrete grid** controlled by the `gate_step` hyperparameter:
+- `gate_step = 0.1` (default) → grid `{0.0, 0.1, 0.2, ..., 1.0}` (11 levels). Submitting `0.37` is rejected; `0.4` is fine.
+- `gate_step = 0.2` → grid `{0.0, 0.2, 0.4, 0.6, 0.8, 1.0}` (6 levels).
+- `gate_step = 0.5` → grid `{0.0, 0.5, 1.0}` (3 levels — coarse soft gating).
+- `gate_step = 1.0` → grid `{0.0, 1.0}` (binary on/off, equivalent to a hard mask).
+- Smaller `gate_step` = finer granularity but a much larger search space. Start with the default and only reduce step size if you have evidence that fractional values matter.
+
+`gate_step` is itself a tunable hyperparameter — choose it deliberately based on how smooth you expect the optimal gating curve to be. **Both `static_v` and `gate_step` must be consistent**: every entry in `static_v` must lie on the grid implied by the chosen `gate_step`, or the validator rejects the config.
 
 The vector maps to the full frequency spectrum (20001 FFT bins for seg=40000):
 - With `gate_mapping="log"` (default): gate indices are log-spaced. Gate[0] covers ~DC to 0.2 kHz (1 bin). Gate[127] covers ~4.6–5.0 MHz (1490 bins). This gives fine control at low frequencies where TIDMAD signals are hardest.
 - With `gate_mapping="linear"`: gate indices are uniform. Each gate covers ~39 kHz (~156 bins). Simpler but less precise at low frequencies.
 
+**Useful shapes (you should try multiple of these — DO NOT only try binary masks):**
+- **Smooth low-pass**: `[1.0, 1.0, 1.0, 0.9, 0.7, 0.5, 0.3, 0.1, 0.0, 0.0, ...]` — process low freqs fully, gradually let high freqs through unchanged.
+- **Smooth high-pass**: `[0.0, 0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0, 1.0, ...]` — preserve low freqs, gradually engage AI on high freqs.
+- **Soft band-pass**: `[0.0, 0.2, 0.6, 1.0, 1.0, 1.0, 0.6, 0.2, 0.0, ...]` — process a target frequency band, leave neighbors alone.
+- **Linear ramp**: `[1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.0, ...]` — uniform graded attenuation.
+- **Graded protection**: `[0.2, 0.4, 0.7, 1.0, 1.0, 1.0, ...]` — partially protect the weakest bands instead of fully zeroing them.
+- **Hard mask** (only as a last resort): `[1]*16 + [0]*112` — equivalent to step=1.0 binary gating.
+
 **Tuning strategy for `static_v`:**
 1. **Start with None** (all 1s) to establish a baseline with full AI processing.
 2. **Check the file_vector** from the baseline: files 0-3 are low frequency, files 15-19 are high frequency.
-3. **If low-frequency files score poorly** (score < 1.0 for files 0-3): the AI may be distorting the signal at those frequencies. Try setting `v[0:16] = 0.0` (protect low frequencies) while keeping `v[16:] = 1.0` (denoise high frequencies).
-4. **If high-frequency files score well**: the model is already good at high frequencies. Focus the gate on protecting the weak bands.
-5. **Iterate**: adjust the gate vector based on which files improve or regress after each experiment. The goal is to find the boundary between "AI helps" and "AI hurts" across the frequency spectrum.
+3. **If low-frequency files score poorly** (score < 1.0 for files 0-3): the AI may be distorting the signal at those frequencies. Try a smooth low-pass that gradually attenuates the AI on the weak bands rather than slamming the gate to 0 — e.g. `v[0:8] = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]` then `v[8:] = 1.0`.
+4. **If high-frequency files score well**: the model is already good at high frequencies. Use partial gating (0.3, 0.5, 0.7) on the weak bands rather than full 0.0 to find the sweet spot.
+5. **Iterate with curve shapes, not just boundaries**: do not just slide a binary cutoff back and forth across rounds. Vary the *shape* of the curve (steep vs shallow, low-pass vs band-pass, hard vs soft) to learn what the model actually needs.
 
 **Important constraints:**
 - `len(static_v)` MUST equal `num_gates`. If you change `num_gates`, you must also resize `static_v`.
-- Values should be between 0.0 and 1.0 (though values outside this range are technically allowed).
+- Values must be on the discrete grid `{0.0, 0.1, 0.2, ..., 1.0}` — the validator will reject anything else.
 - Setting all values to 0.0 makes the model a pure identity — no denoising at all.
 
 ---

@@ -121,24 +121,23 @@ def _build_per_model_prompt(
     ]
 
     # File vector (per-file performance)
+    import math
+
+    def _fmt_score(v):
+        if v is None or (isinstance(v, float) and math.isnan(v)):
+            return "not evaluated"
+        return f"{v:.4f}"
+
     if summary.best_file_vector is not None:
-        import math
         lines += ["", "### File Vector (per-file denoising scores, best experiment)"]
         lines.append("File index → frequency (log scale): 0=lowest, 19=highest")
         for i, v in enumerate(summary.best_file_vector):
-            if math.isnan(v):
-                lines.append(f"  File {i:2d}: NaN (not evaluated)")
-            else:
-                lines.append(f"  File {i:2d}: {v:.4f}")
+            lines.append(f"  File {i:2d}: {_fmt_score(v)}")
 
     if summary.formal_file_vector is not None:
-        import math
         lines += ["", "### File Vector (formal round — definitive)"]
         for i, v in enumerate(summary.formal_file_vector):
-            if math.isnan(v):
-                lines.append(f"  File {i:2d}: NaN")
-            else:
-                lines.append(f"  File {i:2d}: {v:.4f}")
+            lines.append(f"  File {i:2d}: {_fmt_score(v)}")
 
     # Score trajectory with per-round trial portions and model params
     lines += ["", "### Score Trajectory (chronological)"]
@@ -234,7 +233,7 @@ def _build_synthesis_prompt(
     overall_best_score: Optional[float],
     overall_worst_score: Optional[float],
     overall_best_config: Optional[Dict],
-    per_model_file_vectors: Optional[Dict[str, List[float]]] = None,
+    per_model_file_vectors: Optional[Dict[str, List[Optional[float]]]] = None,
     per_model_params: Optional[Dict[str, int]] = None,
     per_model_training_segments: Optional[Dict[str, int]] = None,
     expert_advice_str: str = "",
@@ -285,12 +284,15 @@ def _build_synthesis_prompt(
         if per_model_file_vectors and model_type in per_model_file_vectors:
             import math
             fv = per_model_file_vectors[model_type]
-            non_nan = [(i, v) for i, v in enumerate(fv) if not math.isnan(v)]
-            if non_nan:
-                weak = [(i, v) for i, v in non_nan if v < 1.0]
-                strong = [(i, v) for i, v in non_nan if v >= 10.0]
+            present = [
+                (i, v) for i, v in enumerate(fv)
+                if v is not None and not (isinstance(v, float) and math.isnan(v))
+            ]
+            if present:
+                weak = [(i, v) for i, v in present if v < 1.0]
+                strong = [(i, v) for i, v in present if v >= 10.0]
                 lines += ["", f"### File Vector Summary (best experiment)"]
-                lines.append(f"  Files evaluated: {len(non_nan)}/20")
+                lines.append(f"  Files evaluated: {len(present)}/20")
                 if weak:
                     lines.append(f"  Weak files (score < 1.0): {[i for i,_ in weak]}")
                 if strong:
@@ -419,7 +421,7 @@ class ResultInterpretationAgent:
                   f"{len(per_model_response.get('bottlenecks', []))} bottlenecks")
 
         # --- Pre-compute enriched fields from summaries ---
-        per_model_file_vectors: Dict[str, List[float]] = {}
+        per_model_file_vectors: Dict[str, List[Optional[float]]] = {}
         weak_frequency_files: Dict[str, List[int]] = {}
         per_model_params: Dict[str, int] = {}
         per_model_training_segments: Dict[str, int] = {}
@@ -429,9 +431,11 @@ class ResultInterpretationAgent:
             mt = s.model_type
             if s.best_file_vector is not None:
                 per_model_file_vectors[mt] = s.best_file_vector
-                # Weak files: non-NaN entries below 1.0 (raw data baseline)
-                weak = [i for i, v in enumerate(s.best_file_vector)
-                        if not math.isnan(v) and v < 1.0]
+                # Weak files: scored entries below 1.0 (raw data baseline)
+                weak = [
+                    i for i, v in enumerate(s.best_file_vector)
+                    if v is not None and not (isinstance(v, float) and math.isnan(v)) and v < 1.0
+                ]
                 if weak:
                     weak_frequency_files[mt] = weak
             if s.best_model_params is not None:
