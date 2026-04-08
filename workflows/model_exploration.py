@@ -500,6 +500,8 @@ def run_workflow(
             file_index=file_index,
             llm_provider=tune_llm.get("provider", "gemini"),
             llm_model_id=tune_llm.get("model_id", "gemini-3.1-flash-lite-preview"),
+            reflect_provider=tune_llm.get("reflect_provider"),
+            reflect_model_id=tune_llm.get("reflect_model_id"),
             is_trial=is_trial,
             trial_strategy=trial_strategy,
             trial_portion=trial_portion,

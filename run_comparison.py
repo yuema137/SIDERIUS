@@ -377,9 +377,16 @@ def seed_agent_memory(baseline_record: dict, agent_workspace: str, agent_run_nam
 def run_agent(model_type: str, agent_workspace: str, agent_run_name: str,
               provider: str, model_id: str, max_rounds: int, progress_bar: bool = False,
               file_index: int = 6, is_trial: bool = False, human_advice: str = None,
-              cleanup_denoised: bool = False):
+              cleanup_denoised: bool = False,
+              reflect_provider: str = None, reflect_model_id: str = None):
     """
-    Launches nodes/ml_hyperparameter_tune_agent.py as a subprocess, locked to model_type, for max_rounds rounds.
+    Launches nodes/ml_hyperparameter_tune_agent.py as a subprocess, locked to
+    model_type, for max_rounds rounds.
+
+    The tuner makes two distinct LLM calls per round (planner + reflector).
+    By default both use the same provider+model. Pass `reflect_provider`
+    and/or `reflect_model_id` to route the reflector to a different
+    provider+model than the planner.
     """
     expert_advice = (
         "You should actively try different model configs, loss types and train configs, "
@@ -400,6 +407,10 @@ def run_agent(model_type: str, agent_workspace: str, agent_run_name: str,
         "--workspace",   agent_workspace,
         "--expert_advice", expert_advice,
     ]
+    if reflect_provider:
+        cmd.extend(["--reflect_provider", reflect_provider])
+    if reflect_model_id:
+        cmd.extend(["--reflect_model_id", reflect_model_id])
     if is_trial:
         cmd.append("--is_trial")
     else:
@@ -415,7 +426,13 @@ def run_agent(model_type: str, agent_workspace: str, agent_run_name: str,
     print(f"  PHASE 3 — AGENT EXPLORATION: {model_type.upper()}")
     print(f"  Rounds:    {max_rounds}")
     print(f"  Workspace: {agent_workspace}")
-    print(f"  Provider:  {provider} / {model_id}")
+    print(f"  Planner:   {provider} / {model_id}")
+    if reflect_provider or reflect_model_id:
+        eff_reflect_provider = reflect_provider or provider
+        eff_reflect_model_id = reflect_model_id or model_id
+        print(f"  Reflector: {eff_reflect_provider} / {eff_reflect_model_id}")
+    else:
+        print(f"  Reflector: (same as planner)")
     print(f"{'='*60}\n")
 
     subprocess.run(cmd, cwd=SIDERIUS_ROOT, env=_agent_env(), check=True)
@@ -435,11 +452,28 @@ def main():
     )
     parser.add_argument(
         "--provider", type=str, default="gemini", choices=["gemini", "openai"],
-        help="LLM provider for the agent (default: gemini).",
+        help="LLM provider for the planner sub-call (default: gemini). "
+             "Also the default for the reflector when --reflect_provider is unset.",
     )
     parser.add_argument(
         "--model_id", type=str, default="gemini-3.1-flash-lite-preview",
-        help="LLM model ID (default: gemini-3.1-flash-lite-preview).",
+        help="Model ID for the planner sub-call (default: gemini-3.1-flash-lite-preview). "
+             "Also the default for the reflector when --reflect_model_id is unset.",
+    )
+    parser.add_argument(
+        "--reflect_provider", type=str, default=None, choices=["gemini", "openai"],
+        help="Optional separate provider for the reflector sub-call. "
+             "When unset, the reflector uses --provider. Set to a different "
+             "vendor (e.g. 'openai') to route the reflector to an entirely "
+             "different provider.",
+    )
+    parser.add_argument(
+        "--reflect_model_id", type=str, default=None,
+        help="Optional separate model for the reflector sub-call. "
+             "When unset for the gemini provider, defaults to 'gemini-2-flash' "
+             "(unlimited daily quota, GA model, well-suited for the templated "
+             "reflection step). When unset for non-gemini providers, falls "
+             "back to --model_id (legacy behavior).",
     )
     parser.add_argument(
         "--max_rounds", type=int, default=50,
@@ -493,6 +527,18 @@ def main():
         help="Delete denoised HDF5 files after scoring each round to save disk space.",
     )
     args = parser.parse_args()
+
+    # --- Resolve reflect provider/model defaults ---
+    # The reflector sub-call does templated extraction (not reasoning), so it
+    # benefits from a faster/cheaper/higher-quota model than the planner. For
+    # the gemini provider, default the reflector to gemini-2-flash (GA model,
+    # unlimited daily quota, strong JSON-mode). For other providers, leave
+    # unset = legacy behavior (reflector uses the planner's model).
+    reflect_provider = args.reflect_provider
+    reflect_model_id = args.reflect_model_id
+    if reflect_model_id is None and reflect_provider is None and args.provider == "gemini":
+        # Apply the gemini-specific default. Stays on the gemini provider.
+        reflect_model_id = "gemini-2-flash"
 
     # --- Resolve human advice (file > CLI flag > None) ---
     human_advice: str = args.human_advice or ""
@@ -613,6 +659,8 @@ def main():
         model_type=model_type,
         llm_provider=args.provider,
         llm_model_id=args.model_id,
+        reflect_provider=reflect_provider,
+        reflect_model_id=reflect_model_id,
         max_rounds=args.max_rounds,
         file_index=None if args.is_trial else args.file_index,
         is_trial=args.is_trial,
@@ -629,6 +677,8 @@ def main():
         agent_run_name=agent_run_name,
         provider=args.provider,
         model_id=args.model_id,
+        reflect_provider=reflect_provider,
+        reflect_model_id=reflect_model_id,
         max_rounds=args.max_rounds,
         progress_bar=args.progress_bar,
         file_index=args.file_index,

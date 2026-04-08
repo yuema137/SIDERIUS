@@ -147,7 +147,21 @@ def main():
     )
     parser.add_argument(
         "--llm_model", type=str, default="gemini-3.1-pro-preview",
-        help="Gemini model ID for all 5 agents."
+        help="Gemini model ID for all 5 agents (the planner sub-call of the "
+             "tuner uses this; the reflector sub-call uses --reflect_model_id "
+             "if set, else falls back to a provider-aware default)."
+    )
+    parser.add_argument(
+        "--reflect_provider", type=str, default=None, choices=["gemini", "openai"],
+        help="Optional separate provider for the tuner's reflector sub-call. "
+             "When unset, the reflector uses the same provider as the planner."
+    )
+    parser.add_argument(
+        "--reflect_model_id", type=str, default=None,
+        help="Optional separate model for the tuner's reflector sub-call. "
+             "When unset for the gemini provider, defaults to 'gemini-2-flash' "
+             "(GA model with unlimited daily quota). When unset for other "
+             "providers, falls back to --llm_model (legacy behavior)."
     )
     parser.add_argument(
         "--gpu_memory_limit_gb", type=int, default=None,
@@ -203,12 +217,27 @@ def main():
     os.makedirs(iter_dir, exist_ok=True)
 
     print("=" * 60)
+    # --- Resolve reflect provider/model defaults ---
+    # The tuner's reflector sub-call does templated extraction (not
+    # reasoning), so it benefits from a faster/cheaper/higher-quota model
+    # than the planner. For the gemini provider, default the reflector to
+    # gemini-2-flash (GA model, unlimited daily quota, strong JSON-mode).
+    # The planner stays on the main --llm_model.
+    reflect_provider = args.reflect_provider
+    reflect_model_id = args.reflect_model_id
+    if reflect_model_id is None and reflect_provider is None:
+        # Apply gemini-specific default (the chain runner only supports gemini today)
+        reflect_model_id = "gemini-2-flash"
+
     print(f"  SIDERIUS PER-ITERATION RUNNER")
     print(f"  Workspace      : {args.workspace}")
     print(f"  Iteration      : {args.iteration}")
     print(f"  Run name       : {run_name}")
     print(f"  Iter directory : {iter_dir}")
-    print(f"  LLM            : {args.llm_model}")
+    print(f"  LLM (planner)  : gemini / {args.llm_model}")
+    eff_reflect_provider = reflect_provider or "gemini"
+    eff_reflect_model_id = reflect_model_id or args.llm_model
+    print(f"  LLM (reflector): {eff_reflect_provider} / {eff_reflect_model_id}")
     print(f"  Source paths   : {len(args.source_paths)} entries")
     for p in args.source_paths:
         print(f"    - {p}")
@@ -222,7 +251,11 @@ def main():
         write_manifest(iter_dir, run_name, results=[])
         sys.exit(1)
 
-    llm_config = WorkflowLLMConfig.uniform("gemini", args.llm_model)
+    llm_config = WorkflowLLMConfig.uniform(
+        "gemini", args.llm_model,
+        reflect_provider=reflect_provider,
+        reflect_model_id=reflect_model_id,
+    )
 
     try:
         results = run_workflow(

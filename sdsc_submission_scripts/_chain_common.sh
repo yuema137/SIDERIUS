@@ -31,6 +31,8 @@ SEED_PATHS=()
 MAX_ROUNDS=5
 MAX_EPOCHS=""
 LLM_MODEL="gemini-3.1-pro-preview"
+REFLECT_PROVIDER=""
+REFLECT_MODEL_ID=""
 TRIAL_PORTION=0.02
 TRAIN_PORTION=1.0
 EVAL_PORTION=0.02
@@ -63,6 +65,8 @@ parse_chain_args() {
         --max_rounds)             MAX_ROUNDS="$2"; shift 2 ;;
         --max_epochs)             MAX_EPOCHS="$2"; shift 2 ;;
         --llm_model)              LLM_MODEL="$2"; shift 2 ;;
+        --reflect_provider)       REFLECT_PROVIDER="$2"; shift 2 ;;
+        --reflect_model_id)       REFLECT_MODEL_ID="$2"; shift 2 ;;
         --trial_portion)          TRIAL_PORTION="$2"; shift 2 ;;
         --train_portion)          TRAIN_PORTION="$2"; shift 2 ;;
         --eval_portion)           EVAL_PORTION="$2"; shift 2 ;;
@@ -148,6 +152,12 @@ build_app_args() {
     )
     if [ -n "$MAX_EPOCHS" ]; then
         APP_ARGS+=(--max_epochs "$MAX_EPOCHS")
+    fi
+    if [ -n "$REFLECT_PROVIDER" ]; then
+        APP_ARGS+=(--reflect_provider "$REFLECT_PROVIDER")
+    fi
+    if [ -n "$REFLECT_MODEL_ID" ]; then
+        APP_ARGS+=(--reflect_model_id "$REFLECT_MODEL_ID")
     fi
     if [ -n "$HUMAN_ADVICE_INTERPRET" ]; then
         APP_ARGS+=(--human_advice_interpret "$HUMAN_ADVICE_INTERPRET")

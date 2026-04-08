@@ -35,6 +35,8 @@ def local_validated_model(
     file_index: int = 6,
     llm_provider: str = "gemini",
     llm_model_id: str = "gemini-3.1-flash-lite-preview",
+    reflect_provider: Optional[Literal["gemini", "openai"]] = None,
+    reflect_model_id: Optional[str] = None,
     # --- Trial mode (optional — all defaults preserve normal single-file behavior) ---
     is_trial: bool = False,
     trial_strategy: Literal["snapshot", "anchors", "target"] = "snapshot",
@@ -65,8 +67,12 @@ def local_validated_model(
       - storage       : passed through from the workflow
       - max_rounds    : tuning budget (caller-supplied, default 50)
       - file_index    : data split index (caller-supplied, default 6; ignored when is_trial=True)
-      - llm_provider  : LLM backend (caller-supplied, default gemini)
-      - llm_model_id  : specific model ID (caller-supplied)
+      - llm_provider  : planner-call provider (caller-supplied, default gemini)
+      - llm_model_id  : planner-call model ID (caller-supplied)
+      - reflect_provider : optional separate provider for the tuner's
+        reflect() call. None means the reflector uses llm_provider.
+      - reflect_model_id : optional separate model for the tuner's
+        reflect() call. None means the reflector uses llm_model_id.
       - is_trial + trial_*: trial mode configuration (caller-supplied, defaults to single-file)
     """
     return HyperparamTuningInput(
@@ -76,6 +82,8 @@ def local_validated_model(
         expert_advice=proposal.expert_advice,
         llm_provider=llm_provider,
         llm_model_id=llm_model_id,
+        reflect_provider=reflect_provider,
+        reflect_model_id=reflect_model_id,
         storage=storage,
         is_trial=is_trial,
         trial_strategy=trial_strategy,

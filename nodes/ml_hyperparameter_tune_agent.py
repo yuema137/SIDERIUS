@@ -148,6 +148,8 @@ class HyperparamTuningAgent:
         brain = LLMBridge(
             provider=agent_input.llm_provider,
             model_id=agent_input.llm_model_id,
+            reflect_provider=agent_input.reflect_provider,
+            reflect_model_id=agent_input.reflect_model_id,
         )
 
         # --- Pre-load anchor map if any round might use trial mode ---
@@ -730,9 +732,15 @@ def main():
     parser = argparse.ArgumentParser(description="TIDMAD Autonomous Agent Kernel")
 
     parser.add_argument("--provider", type=str, choices=["gemini", "openai"], default="gemini",
-                        help="LLM provider for the decision brain.")
+                        help="LLM provider for the planner sub-call (default for reflector when not overridden).")
     parser.add_argument("--model_id", type=str, default="gemini-3.1-flash-lite-preview",
-                        help="Specific model ID (e.g., gemini-3.1-flash-lite-preview, gpt-4o).")
+                        help="Model ID for the planner sub-call (default for reflector when not overridden).")
+    parser.add_argument("--reflect_provider", type=str, choices=["gemini", "openai"], default=None,
+                        help="Optional separate provider for the reflector sub-call. "
+                             "When None, the reflector uses --provider.")
+    parser.add_argument("--reflect_model_id", type=str, default=None,
+                        help="Optional separate model for the reflector sub-call (e.g., gemini-2-flash). "
+                             "When None, the reflector uses --model_id.")
     parser.add_argument("--expert_advice", type=str, default="None",
                         help="Initial advice from a human expert to guide exploration.")
     parser.add_argument("--max_rounds", type=int, default=10,
@@ -774,12 +782,14 @@ def main():
     args = parser.parse_args()
 
     input_dict = {
-        "model_type":    args.force_model,
-        "file_index":    args.file_index,
-        "max_rounds":    args.max_rounds,
-        "expert_advice": args.expert_advice,
-        "llm_provider":  args.provider,
-        "llm_model_id":  args.model_id,
+        "model_type":      args.force_model,
+        "file_index":      args.file_index,
+        "max_rounds":      args.max_rounds,
+        "expert_advice":   args.expert_advice,
+        "llm_provider":    args.provider,
+        "llm_model_id":    args.model_id,
+        "reflect_provider": args.reflect_provider,
+        "reflect_model_id": args.reflect_model_id,
         "storage": {
             "backend": "local",
             "local": {"workspace": args.workspace, "run_name": args.run_name},
