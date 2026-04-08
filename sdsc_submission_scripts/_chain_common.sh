@@ -44,7 +44,7 @@ HUMAN_ADVICE_FILE=""
 # --- Slurm-only defaults (ignored by lilab caller) ---
 PARTITION="gpu-shared"
 TIME="04:00:00"
-MEM="24G"
+MEM="48G"
 GPUS=1
 CPUS=8
 

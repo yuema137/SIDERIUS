@@ -6,13 +6,13 @@
 # Shared logic: sdsc_submission_scripts/_chain_common.sh
 # ---------------------------------------------------------------------------
 # SDSC equivalent of run_iteration_chain_lilab.sh. Submits N iteration
-# jobs in sequence using --dependency=afterok for automatic chaining.
+# jobs in sequence using --dependency=afterany for automatic chaining.
 # Each job's source paths = original seeds + all previous iterations'
 # manifests (resolved at job execution time via the @manifest: prefix).
 #
 # Iterations chain through manifest.json files exactly the same way as
 # on lilab — only the execution mechanism differs (sbatch with
-# --dependency=afterok here, foreground subprocess on lilab).
+# --dependency=afterany here, foreground subprocess on lilab).
 #
 # Usage:
 #   bash sdsc_submission_scripts/run_iteration_chain.sh \
@@ -23,12 +23,19 @@
 #       --max_epochs 5 \
 #       --human_advice_file sdsc_submission_scripts/human_advice_chain_test.json \
 #       --partition gpu-shared \
-#       --time 06:00:00 \
-#       --mem 24G
+#       --time 06:00:00
 #
-# If iteration N fails, iterations N+1..M are blocked by --dependency=afterok
-# and automatically cancelled by --kill-on-invalid-dep=yes. Resubmit them
-# (with a fresh workspace) after fixing iteration N.
+# --mem defaults to 48G (host RAM cap). Do not set lower without
+# understanding the OOM risk in the formal-round parallel scoring step.
+#
+# If iteration N fails *at the python level* (no manifest written, or
+# manifest with status=failed), iteration N+1 will start anyway thanks to
+# afterany — and will then error cleanly when run_one_iteration.py tries
+# to resolve the @manifest: source path. The downstream iterations are
+# NOT auto-cancelled; you have to scancel them manually if you want to
+# stop the chain after a python-level failure. This is intentional: it
+# lets the chain survive transient OOM events that the OOM-tolerant tuner
+# can recover from on its own.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "${SCRIPT_DIR}/_chain_common.sh"
@@ -57,11 +64,23 @@ submit_iteration() {
     )
 
     if [ -n "$PREV_JOB_ID" ]; then
-        # afterok: only run if the previous job succeeds.
-        # kill-on-invalid-dep=yes: auto-cancel if previous job fails,
-        # so we don't leave zombies in the queue.
-        SBATCH_ARGS+=(--dependency="afterok:${PREV_JOB_ID}")
-        SBATCH_ARGS+=(--kill-on-invalid-dep=yes)
+        # afterany: run iteration N+1 regardless of iteration N's slurm-level
+        # exit state. The actual correctness check ('did iteration N produce
+        # a valid manifest?') is done by run_one_iteration.py at job start
+        # via the @manifest: indirection — if iteration N's manifest exists
+        # with status=completed, source-path resolution succeeds and the run
+        # proceeds; if it doesn't, the runner errors cleanly.
+        #
+        # Why not afterok: the SIDERIUS tuner is OOM-tolerant (catches OOM
+        # in any single training round, records error_training_oom, and
+        # continues with the next round). When this happens, the python
+        # workflow finishes cleanly and writes a valid manifest, but slurm
+        # permanently records OUT_OF_MEMORY in the job's accounting state.
+        # afterok would then incorrectly cancel the next iteration even
+        # though the python-level work succeeded. afterany sidesteps this
+        # by deferring the success check to the python layer where it
+        # belongs.
+        SBATCH_ARGS+=(--dependency="afterany:${PREV_JOB_ID}")
         echo "  (depends on job $PREV_JOB_ID)"
     fi
 

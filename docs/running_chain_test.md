@@ -11,7 +11,7 @@ the next iteration.
 |---|---|---|---|---|
 | 1 | `tests/integration/workflows/test_full_exploration_loop.py::test_chained_iterations` | lilab | pytest, `tmp_path` workspace, in-process two `run_workflow()` calls | Quick smoke test / regression. Throwaway artifacts. |
 | 2 | `sdsc_submission_scripts/run_iteration_chain_lilab.sh` | lilab | Bash orchestrator → `run_one_iteration.py` as foreground subprocess | **Real lilab run with durable workspace.** Mirrors the SDSC path 1:1. |
-| 3 | `sdsc_submission_scripts/run_iteration_chain.sh` | SDSC Expanse | Bash orchestrator → `sbatch` with `--dependency=afterok` | Real distributed run on the cluster. |
+| 3 | `sdsc_submission_scripts/run_iteration_chain.sh` | SDSC Expanse | Bash orchestrator → `sbatch` with `--dependency=afterany` | Real distributed run on the cluster. |
 
 **Entries 2 and 3 share all logic** via `sdsc_submission_scripts/_chain_common.sh`
 (arg parsing, advice file loading, source-path building, APP_ARGS construction,
@@ -182,7 +182,7 @@ run can confuse manifest resolution on the next attempt.
 |---|---|---|
 | Execution | Each iteration = separate Slurm job | Each iteration = foreground Python subprocess |
 | Concurrency model | Async; orchestrator returns after submission | Sync; orchestrator blocks until chain finishes |
-| Failure handling | `--kill-on-invalid-dep=yes` cancels downstream jobs | `set -e` aborts the script |
+| Failure handling | `afterany` lets next iter run; iter N+1's runner errors at source-path resolution if iter N's manifest is missing | `set -e` aborts the script |
 | Walltime cap | Slurm `--time` enforced by scheduler | None (runs until done or you Ctrl-C) |
 | Slurm-only flags | `--partition`, `--time`, `--mem`, `--gpus`, `--cpus` | accepted but ignored |
 | Shared code | `_chain_common.sh` | `_chain_common.sh` (same file) |
@@ -214,7 +214,7 @@ bash sdsc_submission_scripts/run_iteration_chain.sh \
     --max_epochs 1 \
     --human_advice_file sdsc_submission_scripts/human_advice_chain_test.json \
     --time 06:00:00 \
-    --mem 24G \
+    --mem 48G \
     --cpus 8
 ```
 
@@ -223,6 +223,7 @@ Key flags (same shape as the lilab orchestrator — `_chain_common.sh` enforces 
 - `--max_rounds 2` — total rounds per iteration (last round = formal mode, see notes below)
 - `--human_advice_file ...` — loads all 5 advice keys from JSON (the same file lilab uses)
 - `--time 06:00:00` — Slurm walltime per iteration. **6 h is the empirically validated budget for `max_rounds=2, max_epochs=1` on `gpu-shared`**, and it leaves comfortable headroom for the formal round's full-data eval. Lower values (3 h, 4 h) start the job sooner but risk hitting the wall on a slow V100; bump to 8 h+ if you increase `max_rounds`.
+- `--mem 48G` — host RAM cap. **24G is too low**: the formal-round scoring step uses 8 parallel `concurrent.futures` workers, each loading HDF5 files independently, and combined peak host RAM hits ~25–30 GB. The orchestrator's default is now 48G; only override downward if you understand what you're doing. (Note: this is **host CPU memory**, not GPU VRAM; the V100/A100 has its own 32–80 GB of VRAM that is not affected.)
 - **Always use a fresh workspace** (`_v1`, `_v2`, … bump on every resubmit) — partial state from a killed run will confuse the manifest resolution. After any failure, `rm -rf` the old workspace dir (or pick a new name) before resubmitting.
 
 For richer multi-round runs (smoke test passes, you want real signal), bump `--max_rounds`/`--max_epochs` and the walltime accordingly. Rough scaling: each additional trial round adds ~5–15 min on V100 with `max_epochs=1`; the formal round is always the long pole regardless.
@@ -231,7 +232,7 @@ For richer multi-round runs (smoke test passes, you want real signal), bump `--m
 The script prints something like:
 ```
   iter 1 → job XXXXXXXX
-  iter 2 → job YYYYYYYY  (depends on XXXXXXXX, kill-on-invalid-dep=yes)
+  iter 2 → job YYYYYYYY  (depends on XXXXXXXX via --dependency=afterany)
 ```
 Save them — you need them for monitoring.
 
@@ -282,14 +283,29 @@ ls /expanse/lustre/projects/ddp433/ym137/siderius_workspace/exploration_chain_te
   chain handoff carried real data, not just a path)
 
 ### If iter 1 fails
-Iter 2 auto-cancels (`State=CANCELLED` due to `--kill-on-invalid-dep=yes`).
-No zombies in the queue.
+With `--dependency=afterany`, iter 2 will start regardless of iter 1's
+slurm-level exit state. The runner inside iter 2 then tries to resolve
+the `@manifest:` source path and:
+- If iter 1's `manifest.json` exists with `status=completed`, iter 2 proceeds normally.
+- If iter 1's `manifest.json` is missing or has `status=failed`, the runner errors immediately at source-path resolution and writes a `failed` manifest of its own.
+
+This is intentional: it lets the chain survive transient OOM events that
+the OOM-tolerant tuner can recover from on its own. **Downstream iterations
+are NOT auto-cancelled** — if you decide a chain is unrecoverable, you
+must `scancel <iter_N+1_id> <iter_N+2_id> ...` manually.
+
+Diagnosing iter 1's failure:
 1. Read `sdsc_submission_scripts/logs/iter_XXXXXXXX.err` first.
 2. If it ends with `slurmstepd: ... CANCELLED ... DUE TO TIME LIMIT`, the
    walltime was too short — bump `--time` or reduce `--max_rounds` /
    `--max_epochs`, and check the runtime breakdown in `.out` (look for the
    gap between `[Step 1/3] Training...` and `[Step 2/3] Inference...`).
-3. Fix, choose a new workspace dir, resubmit.
+3. If `sacct -j <jobid>` shows `State=OUT_OF_MEMORY`, **iter 1's host RAM
+   exceeded `--mem`**. The python tuner may still have written a valid
+   manifest (see "Validated end-to-end on SDSC" — this is exactly what
+   happened in `exploration_chain_test_v1`). With `afterany` the chain
+   survives; with `--mem 48G` it shouldn't recur.
+4. Fix, choose a new workspace dir, resubmit.
 
 ---
 
@@ -342,15 +358,17 @@ not the formal round. If you want a faster chain run, reduce `--max_rounds` or
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Iter 1 hits walltime, iter 2 auto-cancelled | Single round took too long (LLM picked too many epochs, or formal-round eval ran on full data) | Confirm `--max_epochs` is set; tighten `tune` advice in JSON; bump `--time` |
+| Iter 1 hits walltime, iter 2 still runs but errors at source-path resolution | Single round took too long (LLM picked too many epochs, or formal-round eval ran on full data); iter 1 never wrote a manifest | Confirm `--max_epochs` is set; tighten `tune` advice in JSON; bump `--time` |
+| Iter 1 sacct shows `OUT_OF_MEMORY` but logs say "COMPLETED SUCCESSFULLY" | Cgroup OOM killer hit a child process during the run; the OOM-tolerant tuner caught it, recorded `error_training_oom`, and continued. Slurm permanently records the in-job OOM event in accounting state, even though the python workflow eventually succeeded. | **Historical (mitigated in `_chain_common.sh` defaulting to `--mem 48G`).** The chain now uses `afterany` (not `afterok`), so iter 2 still runs and reads iter 1's valid manifest. If you actually run out of host RAM at 48G too, bump higher. |
 | `manifest.json` missing after iter 1 "finished" | Workflow raised an exception before manifest write | Check `iter_XXXXX.err` — runner writes `manifest.json` only on clean exit |
-| Iter 2 fails with `Manifest not found` | Iter 1 was killed before writing manifest | Iter 2 should never have started — check that `--kill-on-invalid-dep=yes` was applied |
+| Iter 2 fails with `Manifest not found` at source-path resolution | Iter 1 truly failed at the python level (no manifest, or manifest with `status=failed`) | Diagnose iter 1's failure; with `afterany`, iter 2 was supposed to start anyway and surface the error. Don't use `--kill-on-invalid-dep=yes` to mask it. |
 | Iter 2 fails with `pydantic ValidationError: Input should be a valid number ... input_value=None` on `file_vector` | **Historical (fixed in `313c45c`)** — old-schema `Optional[List[float]]` rejected JSON `null` elements that pydantic produced from `NaN` floats. The schema is now `Optional[List[Optional[float]]]` and the writer uses Python `None`. | Should not recur. If it does, you're running pre-`313c45c` code somewhere — `git pull` and resubmit. |
 | `Resolved @manifest:... → ...` shows wrong model name in iter 2 | Stale workspace from previous run | Always use a fresh `--workspace` directory |
 | CUDA launch timeout on lilab only | Display GPU watchdog kills kernels >2s when GPU is shared with other processes (e.g. another user's tensor job, or the X server) | Don't run lilab chain when GPU is contended; check `nvidia-smi` first |
 | `bank_limit plugin` rejection on SDSC | Missing `--ntasks=1` or wrong GPU spec | Already handled by `run_iteration_chain.sh`; don't edit the sbatch args block |
 | `Nodes required for job are DOWN, DRAINED or reserved` on SDSC | Specific GPU type is unavailable on `gpu-shared` at submission time (transient) | Wait a few minutes; if persistent, paste `scontrol show job <id>` output for diagnosis. Often resolves itself within an hour. |
 | Lilab orchestrator fails immediately with `ModuleNotFoundError: No module named 'dotenv'` | Old version of `run_iteration_chain_lilab.sh` invoked system `python3` instead of `uv run python` | **Historical (fixed in `86cee48`)**. Should not recur — script auto-detects `uv`. |
+| SDSC slurm `.out` file empty for hours despite job running | Old slurm scripts didn't set `PYTHONUNBUFFERED=1`, so python's block-buffered stdout never flushed to disk until the process exited | **Historical (fixed in `331d7c1`)**. `submit_one_iteration.slurm` and `submit_hpt_agent.slurm` both export `PYTHONUNBUFFERED=1` now. |
 
 ---
 
