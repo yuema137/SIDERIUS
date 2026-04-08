@@ -53,6 +53,12 @@ fi
 
 export PYTHONPATH="${PROJECT_DIR}:${PROJECT_DIR}/ml_models:${PROJECT_DIR}/execute_tools:${PYTHONPATH:-}"
 
+# Force Python stdout/stderr to be unbuffered so progress lines appear in the
+# slurm .out file in real time, instead of being block-buffered in memory and
+# only flushed when the process exits. Affects every python child process in
+# this job session.
+export PYTHONUNBUFFERED=1
+
 # --- Application Defaults ---
 WORKSPACE=""
 ITERATION=""

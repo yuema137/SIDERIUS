@@ -43,6 +43,12 @@ fi
 # Ensure internal modules and models are discoverable
 export PYTHONPATH="${PROJECT_DIR}:${PROJECT_DIR}/ml_models:${PROJECT_DIR}/execute_tools:${PYTHONPATH:-}"
 
+# Force Python stdout/stderr to be unbuffered so progress lines appear in the
+# slurm .out file in real time, instead of being block-buffered in memory and
+# only flushed when the process exits. Affects every python child process in
+# this job session.
+export PYTHONUNBUFFERED=1
+
 # Dynamically retrieve workspace directory from project config for verification
 # We use a safer way to parse the YAML config
 WORKSPACE_DIR=$(grep 'siderius_data_dir' "${PROJECT_DIR}/tidmad_data_config.yaml" | cut -d: -f2 | tr -d ' ' | tr -d '"' | tr -d "'")
