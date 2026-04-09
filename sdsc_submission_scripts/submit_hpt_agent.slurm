@@ -59,6 +59,8 @@ RUN_NAME="hpt_$(date +%m%d_%H%M)"
 MAX_ROUNDS=20
 PROVIDER="gemini"
 MODEL_ID="gemini-3.1-flash-lite-preview"
+REFLECT_PROVIDER=""
+REFLECT_MODEL_ID=""
 HUMAN_ADVICE_FILE=""
 
 # --- Interface: Named Argument Parsing ---
@@ -70,6 +72,8 @@ while [[ $# -gt 0 ]]; do
     --max_rounds)        MAX_ROUNDS="$2"; shift 2 ;;
     --provider)          PROVIDER="$2"; shift 2 ;;
     --model_id)          MODEL_ID="$2"; shift 2 ;;
+    --reflect_provider)  REFLECT_PROVIDER="$2"; shift 2 ;;
+    --reflect_model_id)  REFLECT_MODEL_ID="$2"; shift 2 ;;
     --human_advice_file) HUMAN_ADVICE_FILE="$2"; shift 2 ;;
     --*)                 shift 2 ;; # Safely ignore resource-level flags like --nodes
     *)              shift ;;
@@ -83,7 +87,12 @@ echo "  [EXECUTION CONTEXT]"
 echo "    Model        : ${MODEL}"
 echo "    Run Name     : ${RUN_NAME}"
 echo "    Max Rounds   : ${MAX_ROUNDS}"
-echo "    LLM Agent    : ${PROVIDER} | ${MODEL_ID}"
+echo "    Planner LLM  : ${PROVIDER} | ${MODEL_ID}"
+if [ -n "${REFLECT_PROVIDER}" ] || [ -n "${REFLECT_MODEL_ID}" ]; then
+    echo "    Reflect LLM  : ${REFLECT_PROVIDER:-${PROVIDER}} | ${REFLECT_MODEL_ID:-${MODEL_ID}}"
+else
+    echo "    Reflect LLM  : (provider-aware default — gemini provider gets gemini-2.5-flash)"
+fi
 echo "    Advice File  : ${HUMAN_ADVICE_FILE:-(none)}"
 echo ""
 echo "  [RUNTIME CONTEXT (Assigned by Slurm)]"
@@ -108,6 +117,12 @@ PY_ARGS=(
     --progress_bar
     --cleanup_denoised
 )
+if [ -n "${REFLECT_PROVIDER}" ]; then
+    PY_ARGS+=(--reflect_provider "${REFLECT_PROVIDER}")
+fi
+if [ -n "${REFLECT_MODEL_ID}" ]; then
+    PY_ARGS+=(--reflect_model_id "${REFLECT_MODEL_ID}")
+fi
 if [ -n "${HUMAN_ADVICE_FILE}" ]; then
     PY_ARGS+=(--human_advice_file "${HUMAN_ADVICE_FILE}")
 fi

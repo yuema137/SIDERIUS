@@ -95,6 +95,8 @@ class LLMBridge:
         model_id: Optional[str] = None,
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
+        reflect_provider: Optional[str] = None,
+        reflect_model_id: Optional[str] = None,
     ):
         """
         Unified LLM bridge — every provider is accessed through ``openai.OpenAI``.
@@ -112,6 +114,34 @@ class LLMBridge:
                       the known-providers map.
             api_key:  Override the API key.  When ``None``, looked up from the
                       environment variable associated with the provider.
+            reflect_provider:
+                      Optional separate provider for the reflector method
+                      (``reflect()``). When set, the bridge instantiates a
+                      second OpenAI client pointed at this provider's
+                      base_url and uses its API key. When unset (default),
+                      ``reflect()`` uses the same provider/client as
+                      ``generate()``. Designed to let the reflector use a
+                      different vendor entirely (e.g. main planner on
+                      gemini, reflector on openai).
+            reflect_model_id:
+                      Optional separate model ID for the reflector method
+                      (``reflect()``). When set, ``reflect()`` uses this model
+                      while ``plan()`` and other methods continue to use
+                      ``model_id``. Designed to let cheaper/faster models
+                      handle the templated reflection step while keeping the
+                      main reasoning model for planning. When unset (default),
+                      both planner and reflector use ``model_id``.
+
+                      ``reflect_provider`` and ``reflect_model_id`` are
+                      independent — you can set either or both, or neither.
+                      Common patterns:
+                        - Both unset: planner and reflector use the same
+                          provider+model (legacy behavior).
+                        - Only ``reflect_model_id`` set: same provider, two
+                          different models (e.g. gemini-3.1-pro for planner,
+                          gemini-2.5-flash for reflector).
+                        - Both set: cross-provider routing (e.g. gemini for
+                          planner, openai for reflector).
         """
         load_dotenv()
         self.provider = provider.lower()
@@ -131,6 +161,9 @@ class LLMBridge:
         if model_id is None and known:
             model_id = known["default_model"]
         self.model_name = model_id
+        # Reflect model defaults to the main model when unset, so existing
+        # callers see no behavior change.
+        self.reflect_model_name = reflect_model_id or self.model_name
 
         self.client = OpenAI(
             api_key=self.api_key,
@@ -138,6 +171,42 @@ class LLMBridge:
             timeout=120.0,
             **({"base_url": base_url} if base_url else {}),
         )
+
+        # --- Reflect client setup (Phase A.2: cross-provider support) ---
+        # When reflect_provider is None or matches the main provider, the
+        # reflect client is the same object as the main client (no duplicate
+        # connections, no extra resource cost). When it differs, we
+        # instantiate a second OpenAI client with the reflect provider's
+        # credentials.
+        normalized_reflect_provider = (
+            reflect_provider.lower() if reflect_provider else self.provider
+        )
+        self.reflect_provider = normalized_reflect_provider
+
+        if normalized_reflect_provider == self.provider:
+            # Same provider — reuse the main client. Saves a connection
+            # and ensures both calls hit the same authenticated endpoint.
+            self.reflect_client = self.client
+        else:
+            # Different provider — resolve its credentials from
+            # _KNOWN_PROVIDERS and instantiate a second OpenAI client.
+            reflect_known = _KNOWN_PROVIDERS.get(normalized_reflect_provider)
+            if reflect_known is None:
+                raise ValueError(
+                    f"Unknown reflect_provider {normalized_reflect_provider!r}. "
+                    f"Known providers: {list(_KNOWN_PROVIDERS.keys())}. "
+                    f"For ad-hoc providers, instantiate the second client "
+                    f"manually and assign it to LLMBridge.reflect_client "
+                    f"after construction."
+                )
+            reflect_api_key = os.getenv(reflect_known["api_key_env"])
+            reflect_base_url = reflect_known["base_url"]
+            self.reflect_client = OpenAI(
+                api_key=reflect_api_key,
+                max_retries=5,
+                timeout=120.0,
+                base_url=reflect_base_url,
+            )
 
     def list_models(self) -> List[str]:
         """
@@ -204,21 +273,39 @@ class LLMBridge:
         Uses the Reflector logic to transform results into new Memory entries.
         reflection_context provides baseline/best score comparisons so the
         reflector can judge results correctly.
+
+        Routes through ``self.reflect_client`` and ``self.reflect_model_name``,
+        both of which default to the main client/model when ``reflect_provider``
+        and ``reflect_model_id`` were not passed to ``__init__``. When set
+        independently, the reflector can use a different provider AND/OR a
+        different model than the planner — it is a templated structured-
+        extraction task, not a reasoning task, and does not need a frontier
+        model.
         """
         system_prompt = REFLECTOR_PROMPT
         user_prompt = get_reflector_user_prompt(exp_id, hypothesis, actual_results, reflection_context)
 
-        return self.generate(system_prompt, user_prompt)
+        return self._chat_json(self.reflect_client, self.reflect_model_name,
+                               system_prompt, user_prompt)
 
-    def generate(self, system_prompt: str, user_prompt: str) -> Dict:
+    def _chat_json(self, client: OpenAI, model_name: str,
+                   system_prompt: str, user_prompt: str) -> Dict:
         """
-        Call the LLM with a system prompt and user prompt, return a JSON dict.
+        Internal helper: send a system+user prompt through a specific client
+        to a specific model, and return the parsed JSON response.
 
-        Uses ``response_format={"type": "json_object"}`` via the unified
-        OpenAI-compatible ``chat.completions.create`` endpoint for all providers.
+        Used by ``generate()`` (which always uses ``self.client`` and
+        ``self.model_name``) and by ``reflect()`` (which uses
+        ``self.reflect_client`` and ``self.reflect_model_name`` so callers
+        can route the reflector to a cheaper/faster/higher-quota model on
+        the same OR a different provider than the main planner).
+
+        The client and model are passed as explicit arguments so the helper
+        is fully decoupled from any per-method state — easy to mock and easy
+        to extend with future per-method routing.
         """
-        response = self.client.chat.completions.create(
-            model=self.model_name,
+        response = client.chat.completions.create(
+            model=model_name,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -237,8 +324,19 @@ class LLMBridge:
         try:
             return json.loads(text)
         except json.JSONDecodeError:
-            print(f"[LLMBridge.generate] Failed to parse JSON from {self.provider}/{self.model_name}: {text[:200]}")
+            print(f"[LLMBridge._chat_json] Failed to parse JSON from model={model_name}: {text[:200]}")
             return {}
+
+    def generate(self, system_prompt: str, user_prompt: str) -> Dict:
+        """
+        Call the main LLM (``self.client`` + ``self.model_name``) with a
+        system prompt and a user prompt, return a JSON dict.
+
+        Uses ``response_format={"type": "json_object"}`` via the unified
+        OpenAI-compatible ``chat.completions.create`` endpoint for all providers.
+        """
+        return self._chat_json(self.client, self.model_name,
+                               system_prompt, user_prompt)
 
     def generate_text(self, system_prompt: str, user_prompt: str) -> str:
         """

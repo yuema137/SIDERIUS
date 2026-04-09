@@ -226,6 +226,102 @@ Key flags (same shape as the lilab orchestrator — `_chain_common.sh` enforces 
 - `--mem 48G` — host RAM cap. **24G is too low**: the formal-round scoring step uses 8 parallel `concurrent.futures` workers, each loading HDF5 files independently, and combined peak host RAM hits ~25–30 GB. The orchestrator's default is now 48G; only override downward if you understand what you're doing. (Note: this is **host CPU memory**, not GPU VRAM; the V100/A100 has its own 32–80 GB of VRAM that is not affected.)
 - **Always use a fresh workspace** (`_v1`, `_v2`, … bump on every resubmit) — partial state from a killed run will confuse the manifest resolution. After any failure, `rm -rf` the old workspace dir (or pick a new name) before resubmitting.
 
+### Tuner planner / reflector model split (optional)
+
+The tuner agent makes two distinct LLM calls per round: a reasoning-heavy
+**planner** (`brain.plan()`) at the start of each round, and a templated
+**reflector** (`brain.reflect()`) at the end. They have very different
+cognitive demands, and as of commit `2dc688a` they can use different
+models — and even different providers — independently.
+
+The chain orchestrator exposes two new optional flags:
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--reflect_provider {gemini,openai}` | unset → falls back to gemini | Provider for the tuner's reflector sub-call. Set to `openai` to route reflect calls to a different vendor entirely (the bridge holds two clients in this case). |
+| `--reflect_model_id MODEL` | `gemini-2.5-flash` (auto-applied for gemini provider) | Model for the tuner's reflector sub-call. Defaults to `gemini-2.5-flash` (GA, **unlimited daily quota**, well-suited for templated JSON extraction). The planner stays on `--llm_model`. |
+
+**Example: same provider, two different models** (the recommended config —
+keeps the planner on the strong reasoning model, drops the reflector to
+flash for quota relief):
+
+```bash
+bash sdsc_submission_scripts/run_iteration_chain.sh \
+    --workspace ... \
+    --num_iterations 2 \
+    --seed_paths ... \
+    --max_rounds 2 \
+    --max_epochs 1 \
+    --llm_model gemini-3.1-pro-preview \
+    --reflect_model_id gemini-2.5-flash \
+    --human_advice_file sdsc_submission_scripts/human_advice_chain_test.json \
+    --time 06:00:00 --cpus 8
+```
+
+This is also the **default** when you don't pass `--reflect_*` flags at
+all — the chain runner auto-applies `gemini-2.5-flash` for the gemini
+provider. So in practice, the explicit flag is only needed when you want
+something different from the default (e.g., forcing the legacy
+single-model behavior for an apples-to-apples comparison, or routing
+the reflector to openai).
+
+**Example: cross-provider** (planner on gemini, reflector on openai —
+useful when gemini is rate-limited globally):
+
+```bash
+bash sdsc_submission_scripts/run_iteration_chain.sh \
+    --workspace ... \
+    --num_iterations 2 \
+    --seed_paths ... \
+    --reflect_provider openai \
+    --reflect_model_id gpt-4o-mini \
+    ...
+```
+
+The bridge instantiates a second `OpenAI()` client internally and routes
+the reflect call to it, while the planner keeps using the gemini client.
+
+**Why this matters for chain runs**: every iteration's tuner makes
+`max_rounds × 2` LLM calls. With `max_rounds=10` and 10 chain
+iterations, that's 200 calls per chain — enough to exhaust the daily
+gemini-3.1-pro quota of 250 requests. Splitting reflector to flash cuts
+the pro usage by ~50%, doubling your daily runway.
+
+**Quota math** (gemini provider, default split):
+
+| `max_rounds` × iterations | Pro calls before split | Pro calls after split | Reduction |
+|---|---|---|---|
+| 2 × 2 | 8 | 4 | 50% |
+| 5 × 5 | 50 | 25 | 50% |
+| 10 × 10 | 200 | 100 | 50% |
+| 20 × 20 | 800 | 400 | 50% |
+
+**Configuring per-agent in JSON config files**: If you maintain a
+declarative `WorkflowLLMConfig` JSON file (loaded via
+`WorkflowLLMConfig.from_json(...)`), the `tune` slot now uses a nested
+`TunerLLMConfig` structure with per-sub-call `NodeLLMConfig` slots:
+
+```json
+{
+  "tune": {
+    "planner": {
+      "provider": "gemini",
+      "model_id": "gemini-3.1-pro-preview"
+    },
+    "reflector": {
+      "provider": "gemini",
+      "model_id": "gemini-2.5-flash"
+    }
+  }
+}
+```
+
+This is the user-facing structural format. Each sub-call is a first-class
+`NodeLLMConfig` with its own provider and model. Future agents (interpret,
+validator) will follow the same nested-NodeLLMConfig pattern when their
+internal sub-calls grow distinct cognitive demands. See
+`docs/break_tuner_agent.md` §3.6 for the full design rationale.
+
 For richer multi-round runs (smoke test passes, you want real signal), bump `--max_rounds`/`--max_epochs` and the walltime accordingly. Rough scaling: each additional trial round adds ~5–15 min on V100 with `max_epochs=1`; the formal round is always the long pole regardless.
 
 ### 3. Capture the two job IDs

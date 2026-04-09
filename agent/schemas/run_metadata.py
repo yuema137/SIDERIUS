@@ -176,8 +176,24 @@ class TunerRunMetadata(BaseRunMetadata):
     level: Literal["tuner"] = "tuner"
 
     model_type: str = Field(description="Model architecture being tuned.")
-    llm_provider: str = Field(description="LLM provider used by the tuner.")
-    llm_model_id: str = Field(description="LLM model ID used by the tuner.")
+    llm_provider: str = Field(
+        description="LLM provider used by the tuner's planner sub-call. "
+                    "Also the default for the reflector when reflect_provider is None.",
+    )
+    llm_model_id: str = Field(
+        description="LLM model ID used by the tuner's planner sub-call. "
+                    "Also the default for the reflector when reflect_model_id is None.",
+    )
+    reflect_provider: Optional[str] = Field(
+        default=None,
+        description="Optional separate provider for the tuner's reflector "
+                    "sub-call. None means the reflector used llm_provider.",
+    )
+    reflect_model_id: Optional[str] = Field(
+        default=None,
+        description="Optional separate model ID for the tuner's reflector "
+                    "sub-call. None means the reflector used llm_model_id.",
+    )
 
     max_rounds: int = Field(description="Tuning round budget.")
     max_proposal_attempts: Optional[int] = Field(

@@ -422,7 +422,25 @@ class ExperimentPlan(BaseModel):
         If the full dict fails validation (e.g. trial_portion=5.0), strip the
         trial fields and retry — preserving the LLM's experiment design while
         falling back to safe trial defaults.
+
+        Defensive unwrap: LLMs occasionally emit a single-element list
+        ``[{...}]`` instead of ``{...}``. Unwrap that case before validation.
+        Any other non-dict input raises a clear TypeError.
         """
+        if isinstance(raw, list):
+            if len(raw) == 1 and isinstance(raw[0], dict):
+                print("[ExperimentPlan] LLM returned a single-element list — "
+                      "unwrapping to dict.")
+                raw = raw[0]
+            else:
+                raise TypeError(
+                    f"ExperimentPlan expected a dict, got list of length "
+                    f"{len(raw)}. LLM output is malformed."
+                )
+        if not isinstance(raw, dict):
+            raise TypeError(
+                f"ExperimentPlan expected a dict, got {type(raw).__name__}."
+            )
         try:
             return cls.model_validate(raw)
         except Exception:
@@ -588,14 +606,46 @@ class HyperparamTuningInput(BaseModel):
         ),
     )
 
-    # --- LLM ---
+    # --- LLM (planner) ---
     llm_provider: Literal["gemini", "openai"] = Field(
         default="gemini",
-        description="LLM provider for planning and reflection.",
+        description=(
+            "LLM provider for the planner sub-call (and the default for the "
+            "reflector when not overridden)."
+        ),
     )
     llm_model_id: str = Field(
         default="gemini-3.1-flash-lite-preview",
-        description="Specific model ID passed to the provider.",
+        description=(
+            "Model ID for the planner sub-call (and the default for the "
+            "reflector when not overridden)."
+        ),
+    )
+
+    # --- LLM (reflector — optional sub-agent override) ---
+    # The tuner makes two distinct LLM calls per round: a reasoning-heavy
+    # planner (uses llm_provider + llm_model_id above) and a templated
+    # reflector. The reflector can be routed to a different provider AND/OR
+    # a different model than the planner — see docs/break_tuner_agent.md.
+    # When both reflect_* fields are None (default), the reflector uses the
+    # planner's provider and model (legacy behavior).
+    reflect_provider: Optional[Literal["gemini", "openai"]] = Field(
+        default=None,
+        description=(
+            "Optional separate provider for the reflector sub-call. "
+            "When None, the reflector uses llm_provider. Set to a different "
+            "value (e.g. 'openai') to route the reflector to a different "
+            "vendor than the planner — the bridge will hold two clients."
+        ),
+    )
+    reflect_model_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional separate model ID for the reflector sub-call. "
+            "When None, the reflector uses llm_model_id. Set to a faster / "
+            "cheaper / higher-quota model (e.g. 'gemini-2.5-flash') to free "
+            "the main provider's quota for the reasoning-heavy planner."
+        ),
     )
 
     # --- Infra ---

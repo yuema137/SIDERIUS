@@ -181,6 +181,59 @@ class TestHyperparamTuningInput:
             HyperparamTuningInput.model_validate(valid_input_dict)
         assert "backend" in str(exc.value)
 
+    # --- reflect_provider / reflect_model_id (Phase B of break_tuner_agent.md) ---
+
+    def test_reflect_fields_default_to_none(self, valid_input_dict):
+        """When the new reflect_* fields are omitted, both default to None
+        (which means the reflector uses the planner's provider+model — the
+        legacy behavior)."""
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        assert inp.reflect_provider is None
+        assert inp.reflect_model_id is None
+
+    def test_reflect_model_id_only(self, valid_input_dict):
+        """Setting only reflect_model_id is valid: same provider, different
+        model. Used for the common pro/flash split within gemini."""
+        valid_input_dict["reflect_model_id"] = "gemini-2.5-flash"
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        assert inp.reflect_provider is None
+        assert inp.reflect_model_id == "gemini-2.5-flash"
+
+    def test_reflect_provider_and_model_id(self, valid_input_dict):
+        """Setting both fields is valid: cross-provider routing (e.g.
+        planner on gemini, reflector on openai)."""
+        valid_input_dict["reflect_provider"] = "openai"
+        valid_input_dict["reflect_model_id"] = "gpt-4o-mini"
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        assert inp.reflect_provider == "openai"
+        assert inp.reflect_model_id == "gpt-4o-mini"
+
+    def test_reflect_provider_invalid_value_raises(self, valid_input_dict):
+        """reflect_provider is constrained to the same Literal as llm_provider."""
+        valid_input_dict["reflect_provider"] = "anthropic"
+        with pytest.raises(ValidationError) as exc:
+            HyperparamTuningInput.model_validate(valid_input_dict)
+        assert "reflect_provider" in str(exc.value)
+
+    def test_reflect_fields_round_trip_through_json(self, valid_input_dict):
+        """reflect_provider and reflect_model_id survive a full
+        model_dump_json → model_validate_json round-trip."""
+        valid_input_dict["reflect_provider"] = "openai"
+        valid_input_dict["reflect_model_id"] = "gpt-4o-mini"
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        dumped = inp.model_dump_json()
+        reloaded = HyperparamTuningInput.model_validate_json(dumped)
+        assert reloaded.reflect_provider == "openai"
+        assert reloaded.reflect_model_id == "gpt-4o-mini"
+
+    def test_reflect_fields_round_trip_when_unset(self, valid_input_dict):
+        """The default-None case must also round-trip cleanly."""
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        dumped = inp.model_dump_json()
+        reloaded = HyperparamTuningInput.model_validate_json(dumped)
+        assert reloaded.reflect_provider is None
+        assert reloaded.reflect_model_id is None
+
 
 # ---------------------------------------------------------------------------
 # 2. Per-record validation — ExperimentRecord
@@ -556,6 +609,25 @@ class TestExperimentPlan:
         })
         assert plan.trial_portion == 0.3
         assert plan.trial_strategy == "anchors"
+
+    def test_with_defaults_unwraps_single_element_list(self):
+        """LLM occasionally emits [{...}] instead of {...} — unwrap it."""
+        plan = ExperimentPlan.with_defaults([{
+            "model_type": "punet",
+            "hypothesis": "Wrapped in list",
+            "trial_portion": 0.3,
+        }])
+        assert plan.model_type == "punet"
+        assert plan.hypothesis == "Wrapped in list"
+        assert plan.trial_portion == 0.3
+
+    def test_with_defaults_rejects_multi_element_list(self):
+        with pytest.raises(TypeError, match="list of length 2"):
+            ExperimentPlan.with_defaults([{"model_type": "punet"}, {"model_type": "wavenet"}])
+
+    def test_with_defaults_rejects_non_dict(self):
+        with pytest.raises(TypeError, match="expected a dict"):
+            ExperimentPlan.with_defaults("not a dict")
 
     def test_target_needs_files(self):
         """target strategy + empty files → error."""

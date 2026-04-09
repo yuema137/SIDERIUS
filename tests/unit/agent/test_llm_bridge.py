@@ -327,3 +327,248 @@ class TestToolCall:
         result = ToolCallResult(name="x", arguments={"a": 1}, call_id="id")
         with pytest.raises(AttributeError):
             result.name = "y"
+
+
+# ---------------------------------------------------------------------------
+# Reflect/planner model split (separate model for reflect() vs generate())
+# ---------------------------------------------------------------------------
+
+class TestReflectModelSplit:
+    """
+    Verify that LLMBridge can route reflect() to a different model than
+    generate(), to allow cheaper / higher-quota models for the templated
+    reflection step while keeping a frontier model for the planner.
+
+    The split is controlled by the optional `reflect_model_id` constructor
+    parameter. When unset, both methods use `model_id` (default behavior,
+    backward compatible).
+    """
+
+    REFLECT_PROMPT_FRAGMENT = "Research Analyst"  # part of REFLECTOR_PROMPT
+
+    def test_default_both_methods_use_same_model(self):
+        """When reflect_model_id is not passed, planner and reflector
+        share self.model_name (no behavior change for existing callers)."""
+        bridge = LLMBridge(provider="gemini", model_id="planner-model")
+        assert bridge.model_name == "planner-model"
+        assert bridge.reflect_model_name == "planner-model"
+
+    def test_explicit_none_falls_back_to_main_model(self):
+        """Passing reflect_model_id=None explicitly is equivalent to
+        not passing it (the parameter is optional with default None)."""
+        bridge = LLMBridge(provider="gemini", model_id="planner-model",
+                           reflect_model_id=None)
+        assert bridge.reflect_model_name == "planner-model"
+
+    def test_reflect_model_id_separates_planner_from_reflector(self):
+        """When reflect_model_id is set, the two attributes diverge."""
+        bridge = LLMBridge(provider="gemini",
+                           model_id="planner-model",
+                           reflect_model_id="reflector-model")
+        assert bridge.model_name == "planner-model"
+        assert bridge.reflect_model_name == "reflector-model"
+
+    def test_generate_always_uses_main_model(self):
+        """generate() must always pass model=self.model_name to the API,
+        regardless of whether reflect_model_id is set."""
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
+            mock_create = MockOpenAI.return_value.chat.completions.create
+            mock_create.return_value = _chat_response(VALID_JSON_STR)
+            bridge = LLMBridge(provider="gemini",
+                               model_id="planner-model",
+                               reflect_model_id="reflector-model")
+            bridge.generate(SYSTEM_PROMPT, USER_PROMPT)
+            assert mock_create.call_args.kwargs["model"] == "planner-model"
+
+    def test_reflect_uses_reflect_model_when_split(self):
+        """reflect() must pass model=self.reflect_model_name when
+        reflect_model_id was set in __init__."""
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
+            mock_create = MockOpenAI.return_value.chat.completions.create
+            mock_create.return_value = _chat_response(VALID_JSON_STR)
+            bridge = LLMBridge(provider="gemini",
+                               model_id="planner-model",
+                               reflect_model_id="reflector-model")
+            bridge.reflect(
+                exp_id="exp_001",
+                hypothesis="test hypothesis",
+                actual_results={"denoising_score": 1.5},
+            )
+            assert mock_create.call_args.kwargs["model"] == "reflector-model"
+
+    def test_reflect_uses_main_model_when_not_split(self):
+        """When reflect_model_id is not set, reflect() must use the
+        same model as generate() (backward-compat path)."""
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
+            mock_create = MockOpenAI.return_value.chat.completions.create
+            mock_create.return_value = _chat_response(VALID_JSON_STR)
+            bridge = LLMBridge(provider="gemini", model_id="single-model")
+            bridge.reflect(
+                exp_id="exp_001",
+                hypothesis="test hypothesis",
+                actual_results={"denoising_score": 1.5},
+            )
+            assert mock_create.call_args.kwargs["model"] == "single-model"
+
+    def test_reflect_uses_reflector_system_prompt(self):
+        """reflect() must use REFLECTOR_PROMPT (not PLANNER_PROMPT) as the
+        system prompt — it's still routed to the reflector regardless of
+        which model handles it."""
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
+            mock_create = MockOpenAI.return_value.chat.completions.create
+            mock_create.return_value = _chat_response(VALID_JSON_STR)
+            bridge = LLMBridge(provider="gemini",
+                               model_id="planner-model",
+                               reflect_model_id="reflector-model")
+            bridge.reflect(
+                exp_id="exp_001",
+                hypothesis="test hypothesis",
+                actual_results={"denoising_score": 1.5},
+            )
+            messages = mock_create.call_args.kwargs["messages"]
+            # The reflector system prompt should be present (signature
+            # phrase from REFLECTOR_PROMPT)
+            assert self.REFLECT_PROMPT_FRAGMENT in messages[0]["content"]
+
+    def test_two_calls_in_sequence_use_correct_models(self):
+        """A planner call followed by a reflector call on the same bridge
+        should produce two distinct API calls with different model= args.
+        This is the end-to-end signature of the split working."""
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
+            mock_create = MockOpenAI.return_value.chat.completions.create
+            mock_create.return_value = _chat_response(VALID_JSON_STR)
+            bridge = LLMBridge(provider="gemini",
+                               model_id="planner-model",
+                               reflect_model_id="reflector-model")
+            bridge.generate(SYSTEM_PROMPT, USER_PROMPT)
+            bridge.reflect(
+                exp_id="exp_001",
+                hypothesis="test hypothesis",
+                actual_results={"denoising_score": 1.5},
+            )
+            # Two API calls expected, with two distinct model values
+            assert mock_create.call_count == 2
+            first_model = mock_create.call_args_list[0].kwargs["model"]
+            second_model = mock_create.call_args_list[1].kwargs["model"]
+            assert first_model == "planner-model"
+            assert second_model == "reflector-model"
+
+
+# ---------------------------------------------------------------------------
+# Cross-provider reflect support (Phase A.2)
+# ---------------------------------------------------------------------------
+
+class TestReflectProviderSplit:
+    """
+    Verify that LLMBridge can route reflect() to a completely different
+    provider than generate(), instantiating a second OpenAI client when
+    the providers differ. This is the Phase A.2 extension on top of the
+    Phase A.1 model split.
+    """
+
+    def test_default_reflect_provider_falls_back_to_main_provider(self):
+        """When reflect_provider is not passed, both methods use the
+        same provider. self.reflect_provider equals self.provider."""
+        bridge = LLMBridge(provider="gemini", model_id="planner-model")
+        assert bridge.provider == "gemini"
+        assert bridge.reflect_provider == "gemini"
+
+    def test_explicit_same_provider_reuses_client(self):
+        """When reflect_provider equals provider, the bridge reuses the
+        main client (no duplicate connection)."""
+        bridge = LLMBridge(provider="gemini",
+                           model_id="planner-model",
+                           reflect_provider="gemini",
+                           reflect_model_id="reflector-model")
+        assert bridge.client is bridge.reflect_client
+        assert bridge.provider == "gemini"
+        assert bridge.reflect_provider == "gemini"
+
+    def test_cross_provider_creates_distinct_clients(self):
+        """When reflect_provider differs from provider, the bridge
+        instantiates a second OpenAI client. The two are distinct
+        objects (verified by `is not` identity check)."""
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
+            # Each call to OpenAI(...) returns a different mock instance
+            instances = [MagicMock(name="main_client"),
+                         MagicMock(name="reflect_client")]
+            MockOpenAI.side_effect = instances
+
+            bridge = LLMBridge(provider="gemini",
+                               model_id="planner-model",
+                               reflect_provider="openai",
+                               reflect_model_id="reflector-model")
+            assert bridge.client is not bridge.reflect_client
+            assert bridge.client is instances[0]
+            assert bridge.reflect_client is instances[1]
+            assert bridge.provider == "gemini"
+            assert bridge.reflect_provider == "openai"
+            # OpenAI() should have been called exactly twice — once for
+            # the main client, once for the reflect client
+            assert MockOpenAI.call_count == 2
+
+    def test_cross_provider_routes_reflect_to_second_client(self):
+        """When the bridge has two clients, reflect() must call the
+        SECOND client's chat.completions.create, not the first."""
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
+            main_client = MagicMock(name="main_client")
+            reflect_client = MagicMock(name="reflect_client")
+            main_client.chat.completions.create.return_value = _chat_response(VALID_JSON_STR)
+            reflect_client.chat.completions.create.return_value = _chat_response(VALID_JSON_STR)
+            MockOpenAI.side_effect = [main_client, reflect_client]
+
+            bridge = LLMBridge(provider="gemini",
+                               model_id="planner-model",
+                               reflect_provider="openai",
+                               reflect_model_id="reflector-model")
+
+            # generate() must hit the main client
+            bridge.generate(SYSTEM_PROMPT, USER_PROMPT)
+            assert main_client.chat.completions.create.call_count == 1
+            assert reflect_client.chat.completions.create.call_count == 0
+
+            # reflect() must hit the reflect client (NOT the main client)
+            bridge.reflect(
+                exp_id="exp_001",
+                hypothesis="test hypothesis",
+                actual_results={"denoising_score": 1.5},
+            )
+            assert main_client.chat.completions.create.call_count == 1  # unchanged
+            assert reflect_client.chat.completions.create.call_count == 1  # incremented
+
+            # And verify each client got the right model name
+            assert main_client.chat.completions.create.call_args.kwargs["model"] == "planner-model"
+            assert reflect_client.chat.completions.create.call_args.kwargs["model"] == "reflector-model"
+
+    def test_reflect_provider_only_no_model_override(self):
+        """reflect_provider can be set without reflect_model_id. In that
+        case the reflector hits the second provider but with the main
+        model name (which may or may not exist on that provider — the
+        bridge does not validate)."""
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
+            MockOpenAI.side_effect = [MagicMock(), MagicMock()]
+            bridge = LLMBridge(provider="gemini",
+                               model_id="shared-model-name",
+                               reflect_provider="openai")
+            assert bridge.reflect_model_name == "shared-model-name"
+            assert bridge.client is not bridge.reflect_client
+
+    def test_unknown_reflect_provider_raises(self):
+        """An unknown reflect_provider should fail-fast at construction
+        time with a clear error pointing at the known providers list."""
+        with pytest.raises(ValueError, match="Unknown reflect_provider"):
+            LLMBridge(provider="gemini",
+                      model_id="planner-model",
+                      reflect_provider="nonexistent",
+                      reflect_model_id="reflector-model")
+
+    def test_reflect_provider_is_lowercased(self):
+        """Like the main provider, reflect_provider should be normalized
+        to lowercase for consistency."""
+        bridge = LLMBridge(provider="gemini",
+                           model_id="planner-model",
+                           reflect_provider="GEMINI",
+                           reflect_model_id="reflector-model")
+        assert bridge.reflect_provider == "gemini"
+        # And same-after-lowercase should still reuse the client
+        assert bridge.client is bridge.reflect_client
