@@ -1,6 +1,6 @@
 # Break the Tuner Agent into Smaller Sub-Agents
 
-**Status**: Phases A + B + C + D complete; Phases E–F pending
+**Status**: implemented (Phases A–F complete; E8 lilab Tier 3 pytest passed 2026-04-08 in 2h36m; E9 SDSC slurm verification queued — jobs 47948203/47948204)
 **Author**: design discussion 2026-04-08
 **Motivation**: cost / quota / latency, plus a longer-term architectural cleanup
 
@@ -1625,6 +1625,39 @@ all sit in the working tree, ready to be committed at Phase F.
 
   **If this test passes, the chain workflow is mathematically guaranteed
   to be unaffected by the refactor in any unintended way.**
+
+- [ ] **E9.** SDSC chain smoke test — the lilab pytest validates the
+  Python wiring, but does NOT exercise the SDSC slurm flag forwarding
+  path (`_chain_common.sh` → `submit_one_iteration.slurm` →
+  `run_one_iteration.py`). Submit a 1-iteration chain on SDSC with the
+  new flags explicitly set, against a fresh `_v{N+1}` workspace and a
+  cached baseline model (e.g. `punet`) to keep wall-time under ~1h:
+  ```bash
+  cd ~/SIDERIUS
+  bash sdsc_submission_scripts/run_iteration_chain.sh \
+      --workspace_subdir exploration_chain_test_v3 \
+      --num_iterations 1 \
+      --max_rounds 2 \
+      --model_types punet \
+      --reflect_provider gemini \
+      --reflect_model_id gemini-2-flash
+  ```
+  - **Expected**:
+    1. `squeue -u ym137` shows the iter_001 job submitted.
+    2. The job's `iter_<JOB_ID>.out` log includes a line like
+       `LLM (reflector): gemini / gemini-2-flash` from
+       `run_one_iteration.py`'s startup banner.
+    3. The job completes (or makes meaningful progress) without the
+       wall-time / quota crash that motivated this refactor.
+    4. The resulting `tuner_run_metadata.json` for the iter contains
+       `reflect_provider: "gemini"` and `reflect_model_id: "gemini-2-flash"`.
+    5. Gemini AI Studio quota dashboard shows the expected ~50% drop in
+       `gemini-3.1-pro-preview` calls vs. an equivalent pre-refactor run.
+
+  **Why this is separate from E8**: lilab runs Python directly with no
+  slurm layer; SDSC routes args through three bash files before they
+  reach Python. A bug in the bash forwarding would pass E8 silently and
+  only break in production on SDSC.
 
 ### Phase F — Commit, push, and document
 
