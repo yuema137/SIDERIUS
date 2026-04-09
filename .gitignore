@@ -27,3 +27,8 @@ agent_generated/models/*
 !agent_generated/models/.gitkeep
 agent_generated/tests/*
 !agent_generated/tests/.gitkeep
+
+# Local persistent memories (private to each developer's checkout).
+# These are loaded by Claude via the auto-memory pointer in
+# ~/.claude/projects/.../memory/MEMORY.md but are not shared in git.
+docs/memories/
