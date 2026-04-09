@@ -422,7 +422,25 @@ class ExperimentPlan(BaseModel):
         If the full dict fails validation (e.g. trial_portion=5.0), strip the
         trial fields and retry — preserving the LLM's experiment design while
         falling back to safe trial defaults.
+
+        Defensive unwrap: LLMs occasionally emit a single-element list
+        ``[{...}]`` instead of ``{...}``. Unwrap that case before validation.
+        Any other non-dict input raises a clear TypeError.
         """
+        if isinstance(raw, list):
+            if len(raw) == 1 and isinstance(raw[0], dict):
+                print("[ExperimentPlan] LLM returned a single-element list — "
+                      "unwrapping to dict.")
+                raw = raw[0]
+            else:
+                raise TypeError(
+                    f"ExperimentPlan expected a dict, got list of length "
+                    f"{len(raw)}. LLM output is malformed."
+                )
+        if not isinstance(raw, dict):
+            raise TypeError(
+                f"ExperimentPlan expected a dict, got {type(raw).__name__}."
+            )
         try:
             return cls.model_validate(raw)
         except Exception:

@@ -610,6 +610,25 @@ class TestExperimentPlan:
         assert plan.trial_portion == 0.3
         assert plan.trial_strategy == "anchors"
 
+    def test_with_defaults_unwraps_single_element_list(self):
+        """LLM occasionally emits [{...}] instead of {...} — unwrap it."""
+        plan = ExperimentPlan.with_defaults([{
+            "model_type": "punet",
+            "hypothesis": "Wrapped in list",
+            "trial_portion": 0.3,
+        }])
+        assert plan.model_type == "punet"
+        assert plan.hypothesis == "Wrapped in list"
+        assert plan.trial_portion == 0.3
+
+    def test_with_defaults_rejects_multi_element_list(self):
+        with pytest.raises(TypeError, match="list of length 2"):
+            ExperimentPlan.with_defaults([{"model_type": "punet"}, {"model_type": "wavenet"}])
+
+    def test_with_defaults_rejects_non_dict(self):
+        with pytest.raises(TypeError, match="expected a dict"):
+            ExperimentPlan.with_defaults("not a dict")
+
     def test_target_needs_files(self):
         """target strategy + empty files → error."""
         with pytest.raises(ValidationError, match="target_files required"):

@@ -614,6 +614,14 @@ class HyperparamTuningAgent:
                 reflect_results = {**train_results, **score_results}
                 reflection = brain.reflect(exp_id, hypothesis, reflect_results, reflection_context)
 
+                # Defensive unwrap: LLM occasionally emits [{...}] instead of {...}.
+                if isinstance(reflection, list) and len(reflection) == 1 and isinstance(reflection[0], dict):
+                    print("[reflect] LLM returned a single-element list — unwrapping to dict.")
+                    reflection = reflection[0]
+                if not isinstance(reflection, dict):
+                    print(f"[reflect] LLM returned non-dict ({type(reflection).__name__}); using empty reflection.")
+                    reflection = {}
+
                 print(f"{'-'*30}")
                 print(f"RESEARCH REFLECTION for {exp_id}:")
                 print(f"Conclusion  : {reflection.get('conclusion', 'N/A')}")
