@@ -64,6 +64,13 @@ def resolve_source_paths(source_paths: list[str]) -> list[str]:
                 )
             with open(manifest_path) as f:
                 manifest = json.load(f)
+            status = manifest.get("status")
+            if status != "completed":
+                raise ValueError(
+                    f"Refusing to chain off manifest with status={status!r}: "
+                    f"{manifest_path}. Previous iteration did not produce a "
+                    f"valid score (best_score={manifest.get('best_score')!r})."
+                )
             output_path = manifest.get("output_path")
             if not output_path:
                 raise ValueError(f"Manifest has no output_path: {manifest_path}")
@@ -105,12 +112,18 @@ def write_manifest(iter_dir: str, run_name: str, results: list) -> dict:
             )
             if candidates:
                 output_path = candidates[0]
+        # An iteration is only "completed" if it produced a real score.
+        # A None best_denoising_score means every tuner round failed
+        # (e.g. uncaught LLM API error in reflect/plan); treat as failed
+        # so the next iteration's @manifest: resolution refuses to chain
+        # off this output instead of silently inheriting a poison record.
+        score = tune_output.best_denoising_score
         manifest = {
-            "status": "completed",
+            "status": "completed" if score is not None else "failed",
             "iteration_dir": iter_dir,
             "output_path": output_path,
             "model_name": model_name,
-            "best_score": tune_output.best_denoising_score,
+            "best_score": score,
             "completed_rounds": tune_output.completed_rounds,
         }
 
