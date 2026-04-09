@@ -232,36 +232,96 @@ def leaderboard(
 # Exploration (agent-generated models)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Exploration run discovery — supports two on-disk layouts:
+#
+# 1. **Legacy** (single workflow, multiple iterations under one run dir):
+#       {root}/exploration/{run_name}/iteration_NNN/{model}/summary_{run_name}.json
+#
+# 2. **Chain** (per-iteration slurm jobs, one chain workspace per submission):
+#       {root}/{chain_dir}/iter_NNN/iteration_001/{model}/summary_iter_NNN.json
+#       {root}/{chain_dir}/iter_NNN/manifest.json
+#
+# A directory is recognized as a chain workspace iff it contains at least
+# one `iter_*/manifest.json`. The chain layout's per-iteration `run_name`
+# is `iter_NNN`, but the dashboard's "run name" identity is the chain
+# workspace dir itself — that's the unit a user wants to browse.
+# ---------------------------------------------------------------------------
+
+def _is_chain_workspace(d: str) -> bool:
+    """A dir is a chain workspace if it has at least one iter_*/manifest.json."""
+    return bool(glob.glob(os.path.join(d, "iter_*", "manifest.json")))
+
+
+def _resolve_run_dir(root: str, run_name: str) -> Optional[tuple[str, str]]:
+    """Resolve a run_name to (run_dir, layout) where layout is 'legacy' or 'chain'.
+
+    Returns None if the run does not exist.
+    """
+    legacy_dir = os.path.join(root, "exploration", run_name)
+    if os.path.isdir(legacy_dir):
+        return legacy_dir, "legacy"
+    chain_dir = os.path.join(root, run_name)
+    if os.path.isdir(chain_dir) and _is_chain_workspace(chain_dir):
+        return chain_dir, "chain"
+    return None
+
+
 @router.get("/exploration/runs", tags=["exploration"])
 def list_exploration_runs():
-    """List all exploration run names."""
+    """List all exploration run names (both legacy and chain layouts)."""
     ds = get_data_source()
-    exploration_dir = os.path.join(ds.root, "exploration")
-    if not os.path.isdir(exploration_dir):
-        return {"runs": []}
-    runs = sorted([
-        d for d in os.listdir(exploration_dir)
-        if os.path.isdir(os.path.join(exploration_dir, d))
-    ])
-    return {"runs": runs}
+    runs: list[str] = []
+
+    # Legacy: {root}/exploration/{run_name}/
+    legacy_root = os.path.join(ds.root, "exploration")
+    if os.path.isdir(legacy_root):
+        runs.extend(
+            d for d in os.listdir(legacy_root)
+            if os.path.isdir(os.path.join(legacy_root, d))
+        )
+
+    # Chain: any top-level dir under root that contains iter_*/manifest.json
+    if os.path.isdir(ds.root):
+        for d in os.listdir(ds.root):
+            full = os.path.join(ds.root, d)
+            if os.path.isdir(full) and _is_chain_workspace(full):
+                runs.append(d)
+
+    return {"runs": sorted(set(runs))}
 
 
 @router.get("/exploration/runs/{run_name}/models", tags=["exploration"])
 def list_exploration_models(run_name: str):
     """List all agent-generated models in an exploration run."""
     ds = get_data_source()
-    run_dir = os.path.join(ds.root, "exploration", run_name)
-    if not os.path.isdir(run_dir):
+    resolved = _resolve_run_dir(ds.root, run_name)
+    if resolved is None:
         raise HTTPException(status_code=404, detail=f"Exploration run '{run_name}' not found.")
-    models = []
-    for iter_dir in sorted(glob.glob(os.path.join(run_dir, "iteration_*"))):
-        for entry in os.listdir(iter_dir):
-            full = os.path.join(iter_dir, entry)
-            if os.path.isdir(full) and not entry.startswith("attempt_") and entry != "__pycache__":
-                summary = os.path.join(full, f"summary_{run_name}.json")
-                if os.path.isfile(summary):
-                    models.append(entry)
-    return {"run_name": run_name, "models": models}
+    run_dir, layout = resolved
+
+    models: list[str] = []
+    if layout == "legacy":
+        for iter_dir in sorted(glob.glob(os.path.join(run_dir, "iteration_*"))):
+            for entry in os.listdir(iter_dir):
+                full = os.path.join(iter_dir, entry)
+                if os.path.isdir(full) and not entry.startswith("attempt_") and entry != "__pycache__":
+                    summary = os.path.join(full, f"summary_{run_name}.json")
+                    if os.path.isfile(summary):
+                        models.append(entry)
+    else:  # chain
+        for chain_iter_dir in sorted(glob.glob(os.path.join(run_dir, "iter_*"))):
+            iter_name = os.path.basename(chain_iter_dir)  # e.g. "iter_001"
+            for inner in glob.glob(os.path.join(chain_iter_dir, "iteration_*")):
+                for entry in os.listdir(inner):
+                    full = os.path.join(inner, entry)
+                    if os.path.isdir(full) and not entry.startswith("attempt_") and entry != "__pycache__":
+                        summary = os.path.join(full, f"summary_{iter_name}.json")
+                        if os.path.isfile(summary):
+                            models.append(entry)
+
+    # Dedup while preserving sorted order
+    return {"run_name": run_name, "models": sorted(set(models))}
 
 
 @router.get("/exploration/runs/{run_name}/models/{model_name}", tags=["exploration"])
@@ -271,18 +331,29 @@ def get_exploration_records(
     limit: int = Query(default=200, ge=1, le=1000),
     status: Optional[str] = Query(default=None),
 ):
-    """Get experiment records for an agent-generated model."""
+    """Get experiment records for an agent-generated model in an exploration run."""
     ds = get_data_source()
-    run_dir = os.path.join(ds.root, "exploration", run_name)
+    resolved = _resolve_run_dir(ds.root, run_name)
+    if resolved is None:
+        raise HTTPException(status_code=404, detail=f"Exploration run '{run_name}' not found.")
+    run_dir, layout = resolved
 
-    # Find the summary file across iterations
-    records = []
-    for iter_dir in sorted(glob.glob(os.path.join(run_dir, "iteration_*"))):
-        summary_path = os.path.join(iter_dir, model_name, f"summary_{run_name}.json")
-        if os.path.isfile(summary_path):
-            with open(summary_path, "r") as f:
-                records = json.load(f)
-            break
+    records: list[dict] = []
+    if layout == "legacy":
+        for iter_dir in sorted(glob.glob(os.path.join(run_dir, "iteration_*"))):
+            summary_path = os.path.join(iter_dir, model_name, f"summary_{run_name}.json")
+            if os.path.isfile(summary_path):
+                with open(summary_path, "r") as f:
+                    records = json.load(f)
+                break
+    else:  # chain — concatenate records from every chain iteration that ran this model
+        for chain_iter_dir in sorted(glob.glob(os.path.join(run_dir, "iter_*"))):
+            iter_name = os.path.basename(chain_iter_dir)
+            for inner in sorted(glob.glob(os.path.join(chain_iter_dir, "iteration_*"))):
+                summary_path = os.path.join(inner, model_name, f"summary_{iter_name}.json")
+                if os.path.isfile(summary_path):
+                    with open(summary_path, "r") as f:
+                        records.extend(json.load(f))
 
     if not records:
         raise HTTPException(status_code=404, detail=f"Model '{model_name}' not found in exploration run '{run_name}'.")
