@@ -277,7 +277,18 @@ class TidmadSandbox:
 
             if not self.progress_bar and result.stdout:
                 print(f"--- Train Script Output ---\n{result.stdout}")
-            return {"status": "success", "message": "Training finished."}
+
+            # Read the training-result JSON written by train_engine_sandbox.py
+            # so the caller gets final_loss / loss_history / model_params.
+            train_json_path = os.path.abspath(os.path.join(
+                self.dirs["records"], run_name,
+                f"experiment_results_{model_type}_{exp_id}.json",
+            ))
+            results = {}
+            if os.path.isfile(train_json_path):
+                with open(train_json_path, "r") as f:
+                    results = json.load(f)
+            return {"status": "success", "message": "Training finished.", "results": results}
 
         except subprocess.CalledProcessError as e:
             error_msg = _format_subprocess_error(e, "Train")
