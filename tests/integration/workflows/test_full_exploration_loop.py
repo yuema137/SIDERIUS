@@ -295,8 +295,16 @@ class TestFullExplorationLoop:
         workspace = str(tmp_path / "workflow_output")
         run_name = "test_full_loop"
 
-        # Use the most powerful Gemini model for reliability on large prompts
-        llm_config = WorkflowLLMConfig.uniform("gemini", "gemini-3.1-pro-preview")
+        # E8 validates the planner/reflector model split end-to-end:
+        # planner = pro, reflector = flash. Without the explicit
+        # reflect_model_id override, uniform() falls back to the planner
+        # model and the flash routing path is NOT exercised — which would
+        # silently miss bugs like an invalid model ID. Always pass the
+        # override here so E8 mirrors the SDSC E9 production config.
+        llm_config = WorkflowLLMConfig.uniform(
+            "gemini", "gemini-3.1-pro-preview",
+            reflect_model_id="gemini-2.5-flash",
+        )
 
         print(f"\n{'='*60}")
         print(f"  TIER 3 INTEGRATION TEST: Full 5-Agent Workflow")
