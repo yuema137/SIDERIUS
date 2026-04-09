@@ -22,7 +22,7 @@
 #       --max_epochs 5 \
 #       --human_advice_file sdsc_submission_scripts/human_advice_chain_test.json
 # Optional flags for the tuner planner/reflector split:
-#       --reflect_model_id gemini-2-flash    # cheaper model for the reflector
+#       --reflect_model_id gemini-2.5-flash    # cheaper model for the reflector
 #       --reflect_provider openai            # entirely different provider for the reflector
 #
 # If iteration N fails, the chain stops immediately (set -e). Inspect

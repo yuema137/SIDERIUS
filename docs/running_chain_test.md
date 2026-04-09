@@ -239,7 +239,7 @@ The chain orchestrator exposes two new optional flags:
 | Flag | Default | Purpose |
 |---|---|---|
 | `--reflect_provider {gemini,openai}` | unset → falls back to gemini | Provider for the tuner's reflector sub-call. Set to `openai` to route reflect calls to a different vendor entirely (the bridge holds two clients in this case). |
-| `--reflect_model_id MODEL` | `gemini-2-flash` (auto-applied for gemini provider) | Model for the tuner's reflector sub-call. Defaults to `gemini-2-flash` (GA, **unlimited daily quota**, well-suited for templated JSON extraction). The planner stays on `--llm_model`. |
+| `--reflect_model_id MODEL` | `gemini-2.5-flash` (auto-applied for gemini provider) | Model for the tuner's reflector sub-call. Defaults to `gemini-2.5-flash` (GA, **unlimited daily quota**, well-suited for templated JSON extraction). The planner stays on `--llm_model`. |
 
 **Example: same provider, two different models** (the recommended config —
 keeps the planner on the strong reasoning model, drops the reflector to
@@ -253,13 +253,13 @@ bash sdsc_submission_scripts/run_iteration_chain.sh \
     --max_rounds 2 \
     --max_epochs 1 \
     --llm_model gemini-3.1-pro-preview \
-    --reflect_model_id gemini-2-flash \
+    --reflect_model_id gemini-2.5-flash \
     --human_advice_file sdsc_submission_scripts/human_advice_chain_test.json \
     --time 06:00:00 --cpus 8
 ```
 
 This is also the **default** when you don't pass `--reflect_*` flags at
-all — the chain runner auto-applies `gemini-2-flash` for the gemini
+all — the chain runner auto-applies `gemini-2.5-flash` for the gemini
 provider. So in practice, the explicit flag is only needed when you want
 something different from the default (e.g., forcing the legacy
 single-model behavior for an apples-to-apples comparison, or routing
@@ -310,7 +310,7 @@ declarative `WorkflowLLMConfig` JSON file (loaded via
     },
     "reflector": {
       "provider": "gemini",
-      "model_id": "gemini-2-flash"
+      "model_id": "gemini-2.5-flash"
     }
   }
 }

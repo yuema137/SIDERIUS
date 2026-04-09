@@ -470,7 +470,7 @@ def main():
     parser.add_argument(
         "--reflect_model_id", type=str, default=None,
         help="Optional separate model for the reflector sub-call. "
-             "When unset for the gemini provider, defaults to 'gemini-2-flash' "
+             "When unset for the gemini provider, defaults to 'gemini-2.5-flash' "
              "(unlimited daily quota, GA model, well-suited for the templated "
              "reflection step). When unset for non-gemini providers, falls "
              "back to --model_id (legacy behavior).",
@@ -531,14 +531,14 @@ def main():
     # --- Resolve reflect provider/model defaults ---
     # The reflector sub-call does templated extraction (not reasoning), so it
     # benefits from a faster/cheaper/higher-quota model than the planner. For
-    # the gemini provider, default the reflector to gemini-2-flash (GA model,
+    # the gemini provider, default the reflector to gemini-2.5-flash (GA model,
     # unlimited daily quota, strong JSON-mode). For other providers, leave
     # unset = legacy behavior (reflector uses the planner's model).
     reflect_provider = args.reflect_provider
     reflect_model_id = args.reflect_model_id
     if reflect_model_id is None and reflect_provider is None and args.provider == "gemini":
         # Apply the gemini-specific default. Stays on the gemini provider.
-        reflect_model_id = "gemini-2-flash"
+        reflect_model_id = "gemini-2.5-flash"
 
     # --- Resolve human advice (file > CLI flag > None) ---
     human_advice: str = args.human_advice or ""

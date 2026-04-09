@@ -194,10 +194,10 @@ class TestHyperparamTuningInput:
     def test_reflect_model_id_only(self, valid_input_dict):
         """Setting only reflect_model_id is valid: same provider, different
         model. Used for the common pro/flash split within gemini."""
-        valid_input_dict["reflect_model_id"] = "gemini-2-flash"
+        valid_input_dict["reflect_model_id"] = "gemini-2.5-flash"
         inp = HyperparamTuningInput.model_validate(valid_input_dict)
         assert inp.reflect_provider is None
-        assert inp.reflect_model_id == "gemini-2-flash"
+        assert inp.reflect_model_id == "gemini-2.5-flash"
 
     def test_reflect_provider_and_model_id(self, valid_input_dict):
         """Setting both fields is valid: cross-provider routing (e.g.

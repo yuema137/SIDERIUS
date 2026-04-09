@@ -643,7 +643,7 @@ class HyperparamTuningInput(BaseModel):
         description=(
             "Optional separate model ID for the reflector sub-call. "
             "When None, the reflector uses llm_model_id. Set to a faster / "
-            "cheaper / higher-quota model (e.g. 'gemini-2-flash') to free "
+            "cheaper / higher-quota model (e.g. 'gemini-2.5-flash') to free "
             "the main provider's quota for the reasoning-heavy planner."
         ),
     )

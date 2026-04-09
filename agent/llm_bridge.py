@@ -139,7 +139,7 @@ class LLMBridge:
                           provider+model (legacy behavior).
                         - Only ``reflect_model_id`` set: same provider, two
                           different models (e.g. gemini-3.1-pro for planner,
-                          gemini-2-flash for reflector).
+                          gemini-2.5-flash for reflector).
                         - Both set: cross-provider routing (e.g. gemini for
                           planner, openai for reflector).
         """

@@ -5,7 +5,7 @@
 **Motivation**: cost / quota / latency, plus a longer-term architectural cleanup
 
 **Progress log**:
-- 2026-04-08: design written, decisions confirmed (`gemini-2-flash` as the
+- 2026-04-08: design written, decisions confirmed (`gemini-2.5-flash` as the
   default reflect model)
 - 2026-04-08: Phase A implemented and tested. `LLMBridge` now supports
   per-method model selection via the optional `reflect_model_id` constructor
@@ -45,7 +45,7 @@
   regressions.
 - 2026-04-08: Phase C implemented and tested. `run_comparison.py` has
   new `--reflect_provider` and `--reflect_model_id` CLI flags; the
-  resolution logic applies a gemini-specific default of `gemini-2-flash`
+  resolution logic applies a gemini-specific default of `gemini-2.5-flash`
   for the reflector when the user doesn't override and the planner is on
   gemini. `run_agent()` forwards the resolved values to the tuner
   subprocess. `TunerRunMetadata` has new optional `reflect_provider` and
@@ -68,7 +68,7 @@
   `run_workflow()` are extended to thread both new fields through.
   `run_one_iteration.py` exposes `--reflect_provider` and
   `--reflect_model_id` CLI flags with a gemini-specific default
-  (`gemini-2-flash`); `_chain_common.sh` parses and forwards both flags
+  (`gemini-2.5-flash`); `_chain_common.sh` parses and forwards both flags
   to the runner. Both `run_iteration_chain.sh` and
   `run_iteration_chain_lilab.sh` now mention the new flags in their
   header usage examples. New `tests/unit/workflows/test_llm_config.py`
@@ -135,7 +135,7 @@ the planner couldn't reason well enough about the `static_v` exploration axis).
   reasoning or multi-axis constraint satisfaction.
 
 A frontier model (gemini-3.1-pro) is overkill for the reflect step. A flash
-variant (gemini-3.1-flash-lite or gemini-2-flash) handles templated structured
+variant (gemini-3.1-flash-lite or gemini-2.5-flash) handles templated structured
 extraction perfectly well, at 2–3 orders of magnitude lower cost and ~10×
 higher daily quota.
 
@@ -242,7 +242,7 @@ instructions. That's a future refinement, not a blocker for v1.
 **Single-tuner caller path (Phase C)**
 
 7. Add `--reflect_model_id` CLI flag to `run_comparison.py`. Default
-   `gemini-2-flash` for the gemini provider, `None`
+   `gemini-2.5-flash` for the gemini provider, `None`
    otherwise. Forward to the tuner subprocess.
 8. Add `--reflect_model_id` to `sdsc_submission_scripts/submit_hpt_agent.slurm`'s
    argument parser, forward to `run_comparison.py`.
@@ -268,7 +268,7 @@ instructions. That's a future refinement, not a blocker for v1.
     `tune_llm.get("reflect_model_id")` and pass it through to
     `HyperparamTuningInput.reflect_model_id`.
 14. Add `--reflect_model_id` CLI flag to
-    `sdsc_submission_scripts/run_one_iteration.py`. Default `gemini-2-flash`
+    `sdsc_submission_scripts/run_one_iteration.py`. Default `gemini-2.5-flash`
     for the gemini provider. Use the value to construct
     `WorkflowLLMConfig.uniform(provider, model_id, reflect_model_id=...)`.
 15. Add `REFLECT_MODEL_ID` variable, CLI parsing, and forwarding to
@@ -303,7 +303,7 @@ instructions. That's a future refinement, not a blocker for v1.
 | `nodes/ml_hyperparameter_tune_agent.py` | B | Pass `reflect_model_id` to `LLMBridge()` constructor; add `--reflect_model_id` CLI flag in argparse block | ~10 |
 | `tests/unit/agent/tune_ml_hyperparam_agent/test_hyperparam_schemas.py` | B | Add round-trip test for `HyperparamTuningInput.reflect_model_id` | ~15 |
 | `agent/schemas/run_metadata.py` | C | Add `reflect_model_id: Optional[str] = None` field to `TunerRunMetadata` | ~5 |
-| `run_comparison.py` | C | Add `--reflect_model_id` CLI flag (default `gemini-2-flash` for gemini provider); forward to tuner subprocess; capture in `TunerRunMetadata` | ~15 |
+| `run_comparison.py` | C | Add `--reflect_model_id` CLI flag (default `gemini-2.5-flash` for gemini provider); forward to tuner subprocess; capture in `TunerRunMetadata` | ~15 |
 | `sdsc_submission_scripts/submit_hpt_agent.slurm` | C | Add `--reflect_model_id` to arg parser, forward to `run_comparison.py` | ~5 |
 | `workflows/llm_config.py` | D | Add new `TunerLLMConfig(BaseModel)` class with two named `NodeLLMConfig` slots (`planner` and `reflector`), each with sensible `default_factory`; change `WorkflowLLMConfig.tune` annotation to `Optional[TunerLLMConfig]`; update `WorkflowLLMConfig.get()` to flatten the tune slot into the legacy keys (`provider`, `model_id`, `reflect_provider`, `reflect_model_id`); update `WorkflowLLMConfig.uniform()` to accept `reflect_provider` + `reflect_model_id` and construct the tune slot as `TunerLLMConfig` with explicit `planner` and `reflector` `NodeLLMConfig` instances. Per-sub-call nested-NodeLLMConfig design (see §3.6). | ~30 |
 | `workflows/model_exploration.py` | D | In `run_workflow()`, read `tune_llm.get("reflect_model_id")` and pass to `HyperparamTuningInput.reflect_model_id` (around line 497–502) | ~5 |
@@ -330,7 +330,7 @@ Strictly preserved. When no caller passes `reflect_model_id`:
 - `HyperparamTuningInput.reflect_model_id` defaults to `None`. When `None`,
   the tuner doesn't pass the parameter to the bridge constructor at all.
 - `run_comparison.py` defaults `--reflect_model_id` to `None` for non-gemini
-  providers; for gemini it defaults to `gemini-2-flash`. Users
+  providers; for gemini it defaults to `gemini-2.5-flash`. Users
   who want the old behavior can pass `--reflect_model_id ""` or
   `--reflect_model_id $MODEL_ID` to force the same model.
 
@@ -356,7 +356,7 @@ fine after the change because the new field is `Optional` with default `None`.
    checking the daily quota dashboard at AI Studio.
 
 ### 3.5 Quota impact (assuming `gemini-3.1-pro-preview` for plan,
-`gemini-2-flash` for reflect)
+`gemini-2.5-flash` for reflect)
 
 #### Per single-tuner run (`run_comparison.py` path — Phases A+B+C)
 
@@ -533,12 +533,12 @@ class TunerLLMConfig(BaseModel):
     reflector: NodeLLMConfig = Field(
         default_factory=lambda: NodeLLMConfig(
             provider="gemini",
-            model_id="gemini-2-flash",
+            model_id="gemini-2.5-flash",
         ),
         description=(
             "Sub-agent config for the tuner's reflect() call. Templated "
             "extraction task — recommend a fast/cheap model. Default: "
-            "gemini-2-flash (GA, unlimited daily quota, strong JSON-mode)."
+            "gemini-2.5-flash (GA, unlimited daily quota, strong JSON-mode)."
         ),
     )
 
@@ -625,8 +625,8 @@ class WorkflowLLMConfig(BaseModel):
         When called with no reflector overrides, the tuner uses the same
         provider/model for both sub-calls (legacy behavior).
 
-        When called with `reflect_model_id="gemini-2-flash"`, the planner
-        keeps the main model and the reflector switches to gemini-2-flash
+        When called with `reflect_model_id="gemini-2.5-flash"`, the planner
+        keeps the main model and the reflector switches to gemini-2.5-flash
         on the same provider.
 
         When called with both `reflect_provider="openai"` and
@@ -666,7 +666,7 @@ class WorkflowLLMConfig(BaseModel):
   `TunerLLMConfig` because Pydantic auto-coerces dicts AND the new
   `planner`/`reflector` fields have `default_factory` values that fire
   when the JSON omits them. You can also write a partial config like
-  `{"tune": {"reflector": {"provider": "gemini", "model_id": "gemini-2-flash"}}}`
+  `{"tune": {"reflector": {"provider": "gemini", "model_id": "gemini-2.5-flash"}}}`
   and the planner picks up its default.
 - **Backward compatible at the Python level.** Existing callers that do
   `WorkflowLLMConfig.uniform("gemini", "model")` work unchanged — they
@@ -712,7 +712,7 @@ class WorkflowLLMConfig(BaseModel):
     },
     "reflector": {
       "provider": "gemini",
-      "model_id": "gemini-2-flash"
+      "model_id": "gemini-2.5-flash"
     }
   }
 }
@@ -756,7 +756,7 @@ one for each provider — and route `plan()` to the gemini client and
   "tune": {
     "reflector": {
       "provider": "gemini",
-      "model_id": "gemini-2-flash"
+      "model_id": "gemini-2.5-flash"
     }
   }
 }
@@ -782,7 +782,7 @@ cfg = WorkflowLLMConfig(
         ),
         reflector=NodeLLMConfig(
             provider="gemini",
-            model_id="gemini-2-flash",
+            model_id="gemini-2.5-flash",
         ),
     ),
 )
@@ -792,7 +792,7 @@ cfg = WorkflowLLMConfig(
 cfg = WorkflowLLMConfig.uniform(
     provider="gemini",
     model_id="gemini-3.1-pro-preview",
-    reflect_model_id="gemini-2-flash",   # only affects tune.reflector
+    reflect_model_id="gemini-2.5-flash",   # only affects tune.reflector
 )
 
 # Convenience constructor — cross-provider tuner reflector
@@ -811,11 +811,11 @@ cfg = WorkflowLLMConfig.uniform(
 )
 
 # Most minimal — just construct TunerLLMConfig with all defaults.
-# Picks gemini-3.1-pro-preview for planner and gemini-2-flash for reflector
+# Picks gemini-3.1-pro-preview for planner and gemini-2.5-flash for reflector
 # from the default_factory values.
 cfg_min = WorkflowLLMConfig(tune=TunerLLMConfig())
 print(cfg_min.tune.planner.model_id)    # gemini-3.1-pro-preview
-print(cfg_min.tune.reflector.model_id)  # gemini-2-flash
+print(cfg_min.tune.reflector.model_id)  # gemini-2.5-flash
 ```
 
 #### Example: how `run_workflow()` consumes the config
@@ -871,7 +871,7 @@ class InterpretationLLMConfig(BaseModel):
     per_model_summary: NodeLLMConfig = Field(
         default_factory=lambda: NodeLLMConfig(
             provider="gemini",
-            model_id="gemini-2-flash",
+            model_id="gemini-2.5-flash",
         ),
         description="Sub-agent for summarizing one source model's records (cheap).",
     )
@@ -894,7 +894,7 @@ JSON shape for an interpret-aware future config:
   "interpret": {
     "per_model_summary": {
       "provider": "gemini",
-      "model_id": "gemini-2-flash"
+      "model_id": "gemini-2.5-flash"
     },
     "cross_model_synthesis": {
       "provider": "gemini",
@@ -1048,7 +1048,7 @@ v1 of that idea.
 1. **Should the reflector default change in the codebase, or only in
    `run_comparison.py`?** I propose default `None` in the bridge and the
    schema (no behavior change for direct callers), and default
-   `gemini-2-flash` only at the `run_comparison.py` CLI level.
+   `gemini-2.5-flash` only at the `run_comparison.py` CLI level.
    This way, programmatic callers of `LLMBridge` and the tuner schema get
    identical-to-today behavior unless they opt in. Confirm this is the right
    default split.
@@ -1096,7 +1096,7 @@ v1 of that idea.
 **Confirm or correct any of the following before I write code**:
 
 1. **Default `reflect_model_id` for gemini in `run_comparison.py`**:
-   **`gemini-2-flash`** (✓ proposal). Reasons:
+   **`gemini-2.5-flash`** (✓ proposal). Reasons:
    - GA model, **not** a `*-preview` (stability matters for the reflector
      since it's called every round of every tuner run)
    - **Unlimited daily quota** — completely removes the reflector as a
@@ -1105,7 +1105,7 @@ v1 of that idea.
    - Lower latency than the 3.1 variants (~1–2s vs ~5–8s per call)
    - Backup option if quality is insufficient: `gemini-2.5-flash` (also GA,
      10K/day quota — way more than enough for any plausible workload)
-   - Avoid: `gemini-2-flash-lite` (too small for 6-field JSON output) and
+   - Avoid: `gemini-2.5-flash-lite` (too small for 6-field JSON output) and
      any `*-preview` model (stability risk)
 2. Default for non-gemini providers in `run_comparison.py`: `None`
    (= use main model). The flash recommendation is gemini-specific; for
@@ -1148,7 +1148,7 @@ intermediate state is committable and the existing test suite passes.
   existing `self.model_name = model_id` line.
   - ✅ **Verified** via inline smoke test:
     - bridge with no `reflect_model_id` → `model_name == reflect_model_name == "gemini-3.1-pro-preview"`
-    - bridge with `reflect_model_id="gemini-2-flash"` → divergent attributes (`gemini-3.1-pro-preview` and `gemini-2-flash`)
+    - bridge with `reflect_model_id="gemini-2.5-flash"` → divergent attributes (`gemini-3.1-pro-preview` and `gemini-2.5-flash`)
     - explicit `reflect_model_id=None` → falls back to `self.model_name`
 
 - [x] **A2.** Refactor `LLMBridge.generate()` to call a new private helper
@@ -1222,7 +1222,7 @@ first-class sub-agent with its own provider").
   - ✅ Verified via inline smoke test:
     - `b = LLMBridge('gemini', 'pro', reflect_provider='openai', reflect_model_id='gpt-4o-mini')`
       → `b.client is not b.reflect_client` ✓
-    - `b = LLMBridge('gemini', 'pro', reflect_model_id='gemini-2-flash')`
+    - `b = LLMBridge('gemini', 'pro', reflect_model_id='gemini-2.5-flash')`
       → `b.client is b.reflect_client` ✓
     - Unknown reflect_provider raises `ValueError("Unknown reflect_provider ...")` ✓
 
@@ -1337,10 +1337,10 @@ commits per phase or as a single multi-phase commit at Phase F.
   reflect_provider = args.reflect_provider
   reflect_model_id = args.reflect_model_id
   if reflect_model_id is None and reflect_provider is None and args.provider == "gemini":
-      reflect_model_id = "gemini-2-flash"
+      reflect_model_id = "gemini-2.5-flash"
   ```
   Pass the resolved values to `run_agent()`.
-  - ✅ **Verified**: gemini users automatically get `gemini-2-flash`
+  - ✅ **Verified**: gemini users automatically get `gemini-2.5-flash`
     for the reflector; non-gemini users keep legacy behavior.
 
 - [x] **C4.** Capture `reflect_provider` and `reflect_model_id` in
@@ -1371,7 +1371,7 @@ commits per phase or as a single multi-phase commit at Phase F.
 **Checkpoint C**: 🟢 **COMPLETE**. End-to-end the new flags flow from
 `submit_hpt_agent.slurm` → `run_comparison.py` → tuner subprocess →
 `LLMBridge` → reflect_client. Default behavior: gemini provider gets
-`gemini-2-flash` for reflect, other providers unchanged. The chain
+`gemini-2.5-flash` for reflect, other providers unchanged. The chain
 workflow path is still untouched — Phase D below.
 
 **Outstanding**: Phase C not yet committed. Phases A.1 + A.2 + B + C
@@ -1395,12 +1395,12 @@ design described in §3.6.
       planner:   NodeLLMConfig = Field(default_factory=lambda: NodeLLMConfig(
           provider="gemini", model_id="gemini-3.1-pro-preview"))
       reflector: NodeLLMConfig = Field(default_factory=lambda: NodeLLMConfig(
-          provider="gemini", model_id="gemini-2-flash"))
+          provider="gemini", model_id="gemini-2.5-flash"))
   ```
   **Do NOT add a `reflect_model_id` field to the base `NodeLLMConfig`** —
   the design treats each sub-call as a first-class sub-agent with its
   own `NodeLLMConfig`, not as an opt-in flat field on the parent.
-  - **Verify**: `uv run python -c "from workflows.llm_config import TunerLLMConfig, NodeLLMConfig; cfg = TunerLLMConfig(); assert isinstance(cfg.planner, NodeLLMConfig) and isinstance(cfg.reflector, NodeLLMConfig); assert cfg.planner.model_id == 'gemini-3.1-pro-preview'; assert cfg.reflector.model_id == 'gemini-2-flash'; print('OK')"`
+  - **Verify**: `uv run python -c "from workflows.llm_config import TunerLLMConfig, NodeLLMConfig; cfg = TunerLLMConfig(); assert isinstance(cfg.planner, NodeLLMConfig) and isinstance(cfg.reflector, NodeLLMConfig); assert cfg.planner.model_id == 'gemini-3.1-pro-preview'; assert cfg.reflector.model_id == 'gemini-2.5-flash'; print('OK')"`
 
 - [x] **D2.** Update `WorkflowLLMConfig.tune` type annotation from
   `Optional[NodeLLMConfig]` to `Optional[TunerLLMConfig]`. The other 4
@@ -1468,7 +1468,7 @@ design described in §3.6.
   if reflect_model_id is None and args.provider == "gemini":
       # Sensible default for the gemini provider
       reflect_provider = reflect_provider or "gemini"
-      reflect_model_id = "gemini-2-flash"
+      reflect_model_id = "gemini-2.5-flash"
   ```
   Pass both to `WorkflowLLMConfig.uniform(..., reflect_provider=...,
   reflect_model_id=...)`.
@@ -1495,7 +1495,7 @@ design described in §3.6.
     fi
     ```
   - **Verify**: `bash -n sdsc_submission_scripts/_chain_common.sh` clean;
-    a dry-run of `run_iteration_chain_lilab.sh --reflect_model_id gemini-2-flash ...`
+    a dry-run of `run_iteration_chain_lilab.sh --reflect_model_id gemini-2.5-flash ...`
     (with stub runner) shows the flag forwarded.
 
 - [x] **D8.** Update header usage examples in
@@ -1507,7 +1507,7 @@ design described in §3.6.
   `WorkflowLLMConfig.uniform()` behavior in
   `tests/unit/workflows/test_llm_config.py` (new file or extend existing):
   - `TunerLLMConfig` defaults: `planner.model_id == "gemini-3.1-pro-preview"`,
-    `reflector.model_id == "gemini-2-flash"`
+    `reflector.model_id == "gemini-2.5-flash"`
   - `TunerLLMConfig.planner` and `.reflector` are each independent
     `NodeLLMConfig` instances (full round-trip via `model_dump_json`)
   - `WorkflowLLMConfig.uniform(provider, model_id)` (no reflect overrides):
@@ -1582,10 +1582,10 @@ all sit in the working tree, ready to be committed at Phase F.
       --workspace /tmp/fake_ws_phase_d \
       --num_iterations 1 \
       --seed_paths /tmp/seed.json \
-      --reflect_model_id gemini-2-flash \
+      --reflect_model_id gemini-2.5-flash \
       ... 2>&1 | grep -E "reflect_model_id|REFLECT"
   ```
-  - **Expected**: the `--reflect_model_id gemini-2-flash` flag is forwarded
+  - **Expected**: the `--reflect_model_id gemini-2.5-flash` flag is forwarded
     to `run_one_iteration.py` in the captured args.
 
 - [ ] **E7.** Optional: a 1-round real-LLM smoke test on lilab to confirm
@@ -1599,10 +1599,10 @@ all sit in the working tree, ready to be committed at Phase F.
   ```
   - **Expected**:
     1. Run completes in ~5 min.
-    2. `tuner_run_metadata.json` contains `reflect_model_id: "gemini-2-flash"`.
+    2. `tuner_run_metadata.json` contains `reflect_model_id: "gemini-2.5-flash"`.
     3. The Gemini AI Studio quota dashboard shows **1 call** to
        `gemini-3.1-pro-preview` (the planner) and **1 call** to
-       `gemini-2-flash` (the reflector). NOT 2 calls to pro.
+       `gemini-2.5-flash` (the reflector). NOT 2 calls to pro.
 
 - [ ] **E8.** Lilab Tier 3 pytest regression check — the **load-bearing**
   workflow regression test:
@@ -1640,17 +1640,17 @@ all sit in the working tree, ready to be committed at Phase F.
       --max_rounds 2 \
       --model_types punet \
       --reflect_provider gemini \
-      --reflect_model_id gemini-2-flash
+      --reflect_model_id gemini-2.5-flash
   ```
   - **Expected**:
     1. `squeue -u ym137` shows the iter_001 job submitted.
     2. The job's `iter_<JOB_ID>.out` log includes a line like
-       `LLM (reflector): gemini / gemini-2-flash` from
+       `LLM (reflector): gemini / gemini-2.5-flash` from
        `run_one_iteration.py`'s startup banner.
     3. The job completes (or makes meaningful progress) without the
        wall-time / quota crash that motivated this refactor.
     4. The resulting `tuner_run_metadata.json` for the iter contains
-       `reflect_provider: "gemini"` and `reflect_model_id: "gemini-2-flash"`.
+       `reflect_provider: "gemini"` and `reflect_model_id: "gemini-2.5-flash"`.
     5. Gemini AI Studio quota dashboard shows the expected ~50% drop in
        `gemini-3.1-pro-preview` calls vs. an equivalent pre-refactor run.
 
@@ -1740,7 +1740,7 @@ If anything goes wrong:
 4. **If a real run produces malformed reflect output** (unlikely, but
    possible if flash mishandles the templated JSON output): revert
    the default in `run_comparison.py` and `run_one_iteration.py` from
-   `gemini-2-flash` to `None`, push, and rerun. The bridge-level and
+   `gemini-2.5-flash` to `None`, push, and rerun. The bridge-level and
    schema-level support stays in place but is no longer used by default.
 
 5. **Per-phase revert**: each phase A–D is committable independently. If

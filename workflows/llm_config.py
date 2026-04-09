@@ -91,12 +91,12 @@ class TunerLLMConfig(BaseModel):
     reflector: NodeLLMConfig = Field(
         default_factory=lambda: NodeLLMConfig(
             provider="gemini",
-            model_id="gemini-2-flash",
+            model_id="gemini-2.5-flash",
         ),
         description=(
             "Sub-agent config for the tuner's reflect() call. Templated "
             "extraction task — recommend a fast/cheap model. Default: "
-            "gemini-2-flash (GA, unlimited daily quota, strong JSON-mode)."
+            "gemini-2.5-flash (GA, unlimited daily quota, strong JSON-mode)."
         ),
     )
 
@@ -211,8 +211,8 @@ class WorkflowLLMConfig(BaseModel):
         When called with no reflector overrides, the tuner uses the same
         provider/model for both sub-calls (legacy behavior).
 
-        When called with `reflect_model_id="gemini-2-flash"`, the planner
-        keeps the main model and the reflector switches to gemini-2-flash
+        When called with `reflect_model_id="gemini-2.5-flash"`, the planner
+        keeps the main model and the reflector switches to gemini-2.5-flash
         on the same provider.
 
         When called with both `reflect_provider="openai"` and

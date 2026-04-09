@@ -37,10 +37,10 @@ class TestNodeLLMConfig:
             NodeLLMConfig(provider="anthropic", model_id="claude-3")
 
     def test_round_trip_through_json(self):
-        c = NodeLLMConfig(provider="gemini", model_id="gemini-2-flash")
+        c = NodeLLMConfig(provider="gemini", model_id="gemini-2.5-flash")
         loaded = NodeLLMConfig.model_validate_json(c.model_dump_json())
         assert loaded.provider == "gemini"
-        assert loaded.model_id == "gemini-2-flash"
+        assert loaded.model_id == "gemini-2.5-flash"
 
 
 # ---------------------------------------------------------------------------
@@ -50,14 +50,14 @@ class TestNodeLLMConfig:
 class TestTunerLLMConfig:
 
     def test_defaults(self):
-        """No args → planner = gemini-3.1-pro-preview, reflector = gemini-2-flash."""
+        """No args → planner = gemini-3.1-pro-preview, reflector = gemini-2.5-flash."""
         c = TunerLLMConfig()
         assert isinstance(c.planner, NodeLLMConfig)
         assert isinstance(c.reflector, NodeLLMConfig)
         assert c.planner.provider == "gemini"
         assert c.planner.model_id == "gemini-3.1-pro-preview"
         assert c.reflector.provider == "gemini"
-        assert c.reflector.model_id == "gemini-2-flash"
+        assert c.reflector.model_id == "gemini-2.5-flash"
 
     def test_planner_and_reflector_are_independent_objects(self):
         """The two slots must be distinct NodeLLMConfig instances so editing
@@ -69,7 +69,7 @@ class TestTunerLLMConfig:
         """The common case: same provider (gemini), two different models."""
         c = TunerLLMConfig(
             planner=NodeLLMConfig(provider="gemini", model_id="gemini-3.1-pro-preview"),
-            reflector=NodeLLMConfig(provider="gemini", model_id="gemini-2-flash"),
+            reflector=NodeLLMConfig(provider="gemini", model_id="gemini-2.5-flash"),
         )
         assert c.planner.provider == c.reflector.provider == "gemini"
         assert c.planner.model_id != c.reflector.model_id
@@ -102,16 +102,16 @@ class TestTunerLLMConfig:
         """A dict that omits the planner field should load cleanly, with
         planner taking its default_factory value."""
         loaded = TunerLLMConfig.model_validate({
-            "reflector": {"provider": "gemini", "model_id": "gemini-2-flash"},
+            "reflector": {"provider": "gemini", "model_id": "gemini-2.5-flash"},
         })
         assert loaded.planner.model_id == "gemini-3.1-pro-preview"  # default
-        assert loaded.reflector.model_id == "gemini-2-flash"
+        assert loaded.reflector.model_id == "gemini-2.5-flash"
 
     def test_empty_dict_loads_with_both_defaults(self):
         """An empty dict should load with both fields at default."""
         loaded = TunerLLMConfig.model_validate({})
         assert loaded.planner.model_id == "gemini-3.1-pro-preview"
-        assert loaded.reflector.model_id == "gemini-2-flash"
+        assert loaded.reflector.model_id == "gemini-2.5-flash"
 
 
 # ---------------------------------------------------------------------------
@@ -144,10 +144,10 @@ class TestWorkflowLLMConfig:
         """For interpret/propose/implement/validate, get() returns just
         provider + model_id (no reflect_* keys)."""
         cfg = WorkflowLLMConfig(
-            interpret=NodeLLMConfig(provider="gemini", model_id="gemini-2-flash"),
+            interpret=NodeLLMConfig(provider="gemini", model_id="gemini-2.5-flash"),
         )
         result = cfg.get("interpret")
-        assert result == {"provider": "gemini", "model_id": "gemini-2-flash"}
+        assert result == {"provider": "gemini", "model_id": "gemini-2.5-flash"}
         assert "reflect_provider" not in result
         assert "reflect_model_id" not in result
 
@@ -172,10 +172,10 @@ class TestWorkflowLLMConfig:
         """The "validate" key must resolve to validate_model (the field
         name with the alias)."""
         cfg = WorkflowLLMConfig(
-            validate=NodeLLMConfig(provider="gemini", model_id="gemini-2-flash"),
+            validate=NodeLLMConfig(provider="gemini", model_id="gemini-2.5-flash"),
         )
         result = cfg.get("validate")
-        assert result == {"provider": "gemini", "model_id": "gemini-2-flash"}
+        assert result == {"provider": "gemini", "model_id": "gemini-2.5-flash"}
 
 
 # ---------------------------------------------------------------------------
@@ -202,10 +202,10 @@ class TestWorkflowLLMConfigUniform:
         """Just override the reflector's model — same provider for both."""
         cfg = WorkflowLLMConfig.uniform(
             "gemini", "gemini-3.1-pro-preview",
-            reflect_model_id="gemini-2-flash",
+            reflect_model_id="gemini-2.5-flash",
         )
         assert cfg.tune.planner.model_id == "gemini-3.1-pro-preview"
-        assert cfg.tune.reflector.model_id == "gemini-2-flash"
+        assert cfg.tune.reflector.model_id == "gemini-2.5-flash"
         assert cfg.tune.planner.provider == "gemini"
         assert cfg.tune.reflector.provider == "gemini"
 
@@ -265,13 +265,13 @@ class TestWorkflowLLMConfigJSON:
             "validate":  {"provider": "gemini", "model_id": "gemini-3.1-flash-lite-preview"},
             "tune": {
                 "planner":   {"provider": "gemini", "model_id": "gemini-3.1-pro-preview"},
-                "reflector": {"provider": "gemini", "model_id": "gemini-2-flash"},
+                "reflector": {"provider": "gemini", "model_id": "gemini-2.5-flash"},
             },
         }
         cfg = WorkflowLLMConfig.model_validate(data)
         assert cfg.interpret.provider == "gemini"
         assert cfg.tune.planner.model_id == "gemini-3.1-pro-preview"
-        assert cfg.tune.reflector.model_id == "gemini-2-flash"
+        assert cfg.tune.reflector.model_id == "gemini-2.5-flash"
         # validate alias must resolve
         assert cfg.validate_model.model_id == "gemini-3.1-flash-lite-preview"
 
@@ -292,19 +292,19 @@ class TestWorkflowLLMConfigJSON:
         its default_factory value."""
         data = {
             "tune": {
-                "reflector": {"provider": "gemini", "model_id": "gemini-2-flash"},
+                "reflector": {"provider": "gemini", "model_id": "gemini-2.5-flash"},
             },
         }
         cfg = WorkflowLLMConfig.model_validate(data)
         assert cfg.tune.planner.model_id == "gemini-3.1-pro-preview"  # default
-        assert cfg.tune.reflector.model_id == "gemini-2-flash"
+        assert cfg.tune.reflector.model_id == "gemini-2.5-flash"
 
     def test_round_trip_via_model_dump_and_validate(self):
         cfg = WorkflowLLMConfig.uniform(
             "gemini", "gemini-3.1-pro-preview",
-            reflect_model_id="gemini-2-flash",
+            reflect_model_id="gemini-2.5-flash",
         )
         dumped = json.loads(cfg.model_dump_json(by_alias=True))
         loaded = WorkflowLLMConfig.model_validate(dumped)
         assert loaded.tune.planner.model_id == "gemini-3.1-pro-preview"
-        assert loaded.tune.reflector.model_id == "gemini-2-flash"
+        assert loaded.tune.reflector.model_id == "gemini-2.5-flash"

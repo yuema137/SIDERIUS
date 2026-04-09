@@ -747,7 +747,7 @@ def main():
                         help="Optional separate provider for the reflector sub-call. "
                              "When None, the reflector uses --provider.")
     parser.add_argument("--reflect_model_id", type=str, default=None,
-                        help="Optional separate model for the reflector sub-call (e.g., gemini-2-flash). "
+                        help="Optional separate model for the reflector sub-call (e.g., gemini-2.5-flash). "
                              "When None, the reflector uses --model_id.")
     parser.add_argument("--expert_advice", type=str, default="None",
                         help="Initial advice from a human expert to guide exploration.")

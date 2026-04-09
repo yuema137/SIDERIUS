@@ -22,7 +22,7 @@
 #       --max_rounds 5 \
 #       --max_epochs 5 \
 #       --human_advice_file sdsc_submission_scripts/human_advice_chain_test.json \
-#       --reflect_model_id gemini-2-flash  \  # optional: route the tuner's
+#       --reflect_model_id gemini-2.5-flash  \  # optional: route the tuner's
 #                                              # reflector sub-call to a cheaper
 #                                              # model than the planner
 #       --partition gpu-shared \

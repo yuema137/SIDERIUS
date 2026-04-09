@@ -159,7 +159,7 @@ def main():
     parser.add_argument(
         "--reflect_model_id", type=str, default=None,
         help="Optional separate model for the tuner's reflector sub-call. "
-             "When unset for the gemini provider, defaults to 'gemini-2-flash' "
+             "When unset for the gemini provider, defaults to 'gemini-2.5-flash' "
              "(GA model with unlimited daily quota). When unset for other "
              "providers, falls back to --llm_model (legacy behavior)."
     )
@@ -221,13 +221,13 @@ def main():
     # The tuner's reflector sub-call does templated extraction (not
     # reasoning), so it benefits from a faster/cheaper/higher-quota model
     # than the planner. For the gemini provider, default the reflector to
-    # gemini-2-flash (GA model, unlimited daily quota, strong JSON-mode).
+    # gemini-2.5-flash (GA model, unlimited daily quota, strong JSON-mode).
     # The planner stays on the main --llm_model.
     reflect_provider = args.reflect_provider
     reflect_model_id = args.reflect_model_id
     if reflect_model_id is None and reflect_provider is None:
         # Apply gemini-specific default (the chain runner only supports gemini today)
-        reflect_model_id = "gemini-2-flash"
+        reflect_model_id = "gemini-2.5-flash"
 
     print(f"  SIDERIUS PER-ITERATION RUNNER")
     print(f"  Workspace      : {args.workspace}")

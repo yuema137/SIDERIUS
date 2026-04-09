@@ -91,7 +91,7 @@ echo "    Planner LLM  : ${PROVIDER} | ${MODEL_ID}"
 if [ -n "${REFLECT_PROVIDER}" ] || [ -n "${REFLECT_MODEL_ID}" ]; then
     echo "    Reflect LLM  : ${REFLECT_PROVIDER:-${PROVIDER}} | ${REFLECT_MODEL_ID:-${MODEL_ID}}"
 else
-    echo "    Reflect LLM  : (provider-aware default — gemini provider gets gemini-2-flash)"
+    echo "    Reflect LLM  : (provider-aware default — gemini provider gets gemini-2.5-flash)"
 fi
 echo "    Advice File  : ${HUMAN_ADVICE_FILE:-(none)}"
 echo ""
