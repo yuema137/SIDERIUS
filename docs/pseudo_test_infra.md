@@ -138,27 +138,42 @@ class RecordingSandbox:
     # ... and so on
 ```
 
-### 4C. Fixture-based mode switching
+### 4C. Fixture-based mode switching (locked design: orthogonal axes)
 
-A pytest fixture decides which factories to inject based on a CLI flag.
+A pytest fixture decides which factories to inject based on a CLI flag, and the existing `pytest.mark.real_run` marker is preserved for a separate, orthogonal purpose.
 
-> **Open decision (asking the user to confirm)**: which mode-selection mechanism do we use?
->
-> **Option (a) — new CLI flag `--real-api-call`** (recommended). Pseudo mode is the default; real mode requires explicit opt-in. Most discoverable; future contributors don't accidentally burn quota.
-> ```bash
-> pytest tests/integration/                       # pseudo mode
-> pytest tests/integration/ --real-api-call       # real mode
-> ```
->
-> **Option (b) — reuse the existing `-m real_run` marker semantics**. The `real_run` marker already gates real-API tests; we could invert it so absence-of-marker means pseudo mode, presence means real mode. No new CLI flag, but conflates "selectable mode" with "test category".
-> ```bash
-> pytest tests/integration/                       # pseudo mode (everything that supports it)
-> pytest tests/integration/ -m real_run           # real mode (existing semantics)
-> ```
->
-> **Recommendation**: option (a). It's explicit, discoverable, and doesn't overload the existing marker. The `real_run` marker stays as the gate for "this test should never run in CI even in pseudo mode" — used for tests that exist only to validate real-LLM behavior and have no pseudo equivalent.
+**Two independent axes**:
 
-Fixture skeleton (assuming option a):
+| Concept | Mechanism | What it means |
+|---|---|---|
+| **Test category** | `pytest.mark.real_run` | "This test only works in real mode — it has no pseudo equivalent (e.g. it asserts on actual LLM output structure that no canned response could meaningfully validate)." Reserved for the rare case where pseudo mode genuinely cannot validate the thing. |
+| **Execution mode** | `--real-api-call` CLI flag | "When pytest runs today, use the real `LLMBridge` / `TidmadSandbox` instead of the recording fakes." Pseudo mode is the default; real mode requires explicit opt-in. |
+
+These axes are independent. A test can be:
+
+- **Dual-mode** (no marker): runs in pseudo mode by default; runs in real mode if `--real-api-call` is passed. **This is the recommended pattern for almost every test.**
+- **Real-only** (marked `real_run`): skipped by default; runs only when both the marker is selected AND the flag is passed. Reserved for tests that have no canned-response equivalent.
+
+**Combination matrix**:
+
+| Command | Dual-mode tests | Real-only tests (marked `real_run`) |
+|---|---|---|
+| `pytest tests/integration/` | run in **pseudo** mode | skipped |
+| `pytest tests/integration/ --real-api-call` | run in **real** mode | skipped (still need `-m`) |
+| `pytest tests/integration/ -m real_run` | skipped (no marker) | skipped (need flag too) |
+| `pytest tests/integration/ -m real_run --real-api-call` | skipped | run in real mode |
+
+**Why this design**:
+
+- **One concept does one thing**. The marker tells you *what kind of test* it is. The flag tells pytest *how to execute it today*. They never mean the same thing.
+- **Default is safe**. Without any flag or marker, you get pseudo mode for everything that supports it. No accidental quota burn.
+- **Composable**. A future test could be both `real_run`-marked and dual-mode-able if we ever need a third mode (e.g. record-and-replay) — the flag/marker combination handles it without redesign.
+- **Backward compatible**. The existing `real_run` marker keeps its meaning. Tests that use it today don't need to change; they just become real-only by default until someone migrates them.
+- **Discoverable**. `pytest --help` shows the new flag.
+
+**Rejected alternative**: reusing `-m real_run` as the mode selector. It's shorter to type but overloads the marker with two meanings (category AND mode), forcing every future test author to disambiguate. Trades long-term clarity for short-term keystrokes.
+
+Fixture skeleton:
 
 ```python
 # tests/conftest.py
@@ -236,11 +251,9 @@ Each item below is a **PR-size scoping decision**, not a technical limitation. T
 | **(3) Tier 2 (protocols) and Tier 3 (workflows) dual-mode** | high (unknown unknowns) | **high** | **strongly defer** | Tier 2 needs the fixture to thread factories into TWO nodes per test (e.g. `result_interpretation_agent` and `ml_model_proposal_agent` for the `interp_to_propose` protocol). Tier 3 runs an entire workflow that internally constructs many bridges and sandboxes — the fixture has to inject factories deep into workflow code. These are **new design problems**, not extensions of the Tier 1 pattern. We should validate Tier 1 works before extending to harder cases. |
 | **(4) Phase A's `pseudo_full_loop` test** (sub-task A.8 from `docs/adaptive_new_model_proposer.md`) | small (~100) | low | **defensible to pull in** | The most concrete validation of the new infra on the thing we actually built it for. The downside is conceptual — bundling "build the infra" with "use the infra to test Phase A" mixes ownership boundaries. The upside is that #4 is the first thing we'd write right after this PR merges anyway, and it's TINY. This is the most defensible item to pull into scope if we want a single end-to-end story. |
 
-**Default plan**: defer all four. Land this PR with the infra + one proof-of-concept dual-mode test, then immediately follow with PRs #1, #2, #4 (in some order). Item #3 waits until Tier 1 dual-mode is battle-tested.
+**Plan (locked)**: defer all four. Land this PR with the infra + one proof-of-concept dual-mode test, then immediately follow with PRs #1, #2, #4 (in some order). Item #3 waits until Tier 1 dual-mode is battle-tested.
 
-**Alternate plan** (if we want a single end-to-end story): pull #4 (Phase A's pseudo_full_loop test) into this PR, leaving #1, #2, #3 as follow-ups. Adds ~100 LOC and one test file. Defensible.
-
-**Not recommended**: pulling #1, #2, or #3 into this PR. The size or risk grows nonlinearly and the review burden compounds.
+This keeps each PR clear, concise, and independently reviewable. The follow-ups are sequenced for compounding leverage: first #1 (DI on the other 4 nodes) so the infra has multiple consumers, then #2 (migrate the rest of the same test file) so we have a dense pseudo-mode harness for the tuner, then #4 (Phase A's pseudo_full_loop test) which validates the regime_scores wiring on top of the now-mature infra.
 
 ## 6. Why this design is minimalist
 
@@ -257,7 +270,7 @@ The PR's blast radius is exactly: one new helpers directory, one new fixture, on
 
 ## 7. Open questions
 
-1. **Mode selector** (see §4C). Recommendation: option (a), new `--real-api-call` flag. Confirm before S.4.
+1. ☑ **Mode selector** (see §4C). **Resolved**: orthogonal axes — `--real-api-call` flag for execution mode + existing `pytest.mark.real_run` marker for test category. Two independent concepts; pseudo is the default.
 2. **Recording fakes location**. `tests/helpers/` vs `tests/fakes/` vs `tests/doubles/`. Recommendation: `tests/helpers/` — most conventional in the Python ecosystem.
 3. **Canned response API shape**. Should the recording fakes accept canned responses (a) at construction time as a dict, (b) at call time via a per-test `register_response()` method, or (c) both? Recommendation: both — dict at construction for simple cases, `register_response()` for round-by-round queues. Defer the decision until S.1/S.2 to see what's natural.
 4. **Should `RecordingSandbox` actually create the workspace dirs on disk** (mirroring `TidmadSandbox.__init__`'s `_ensure_dir` calls), or stay fully in-memory? In-memory is faster but breaks any node code that does `os.path.exists(sandbox.dirs["configs"])`. Recommendation: use `tmp_path` from pytest so the dirs exist on disk in a temp location, get cleaned up automatically. Decide at S.2.
