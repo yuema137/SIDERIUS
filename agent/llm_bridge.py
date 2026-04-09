@@ -29,6 +29,7 @@
 
 import os
 import json
+import time
 from dataclasses import dataclass
 from typing import Any, List, Dict, Optional
 from openai import OpenAI
@@ -89,6 +90,29 @@ _KNOWN_PROVIDERS: Dict[str, Dict[str, Optional[str]]] = {
 
 
 class LLMBridge:
+    """
+    Universal API gateway for all LLM calls in SIDERIUS.
+
+    **Architectural invariant**: this class is the ONLY place in the
+    `agent/`, `nodes/`, and `workflows/` codebase that constructs an
+    `OpenAI()` client. Every agent must route its LLM calls through an
+    `LLMBridge` instance. This is enforced by
+    ``tests/unit/agent/test_llm_bridge_singleton.py``, which fails if
+    any other file under those directories instantiates ``OpenAI()``
+    directly.
+
+    Why this matters: the retry policy, timeouts, provider routing,
+    planner/reflector model split, and any future cross-cutting
+    concerns (rate limiting, observability, fallbacks) all live in
+    one place. Bypassing the bridge silently opts an agent out of
+    every one of those guarantees — and the bug usually only surfaces
+    in production under load.
+
+    If you genuinely need a one-off client (e.g. a test or a
+    diagnostic script), put it under ``tests/`` or ``scripts/``,
+    where the singleton check does not run.
+    """
+
     def __init__(
         self,
         provider: str = "gemini",
@@ -165,9 +189,15 @@ class LLMBridge:
         # callers see no behavior change.
         self.reflect_model_name = reflect_model_id or self.model_name
 
+        # Retry policy: SDK retries are disabled (max_retries=0) and
+        # replaced with our own loop in _chat_json that uses a longer
+        # backoff schedule (2.5s, 5s, 10s, 20s, 40s — total ~77s).
+        # The default SDK schedule (capped at ~8s, ~25s total) gave up
+        # too fast on the E9 SDSC iter 47950268 503 (Google "high
+        # demand" / per-key QPM saturation under parallel runs).
         self.client = OpenAI(
             api_key=self.api_key,
-            max_retries=5,
+            max_retries=0,
             timeout=120.0,
             **({"base_url": base_url} if base_url else {}),
         )
@@ -203,7 +233,7 @@ class LLMBridge:
             reflect_base_url = reflect_known["base_url"]
             self.reflect_client = OpenAI(
                 api_key=reflect_api_key,
-                max_retries=5,
+                max_retries=0,
                 timeout=120.0,
                 base_url=reflect_base_url,
             )
@@ -288,6 +318,39 @@ class LLMBridge:
         return self._chat_json(self.reflect_client, self.reflect_model_name,
                                system_prompt, user_prompt)
 
+    # Retry policy for ALL OpenAI API calls. SDK-level retry is disabled
+    # (max_retries=0 in the client constructors), so this helper is the
+    # single source of truth for how we handle transient API failures.
+    # Schedule: 5 retries with 2.5s, 5s, 10s, 20s, 40s backoff (~77s total).
+    # Catches 429 (rate limit), 5xx (server errors incl. Google 503 "high
+    # demand"), and connection / timeout errors. Other 4xx errors (auth,
+    # bad request, model not found) are raised immediately — they will
+    # not heal on retry.
+    _RETRY_BACKOFF = [2.5, 5.0, 10.0, 20.0, 40.0]
+
+    def _call_with_retry(self, fn, label: str = "api_call"):
+        """Call an OpenAI API function with the bridge's retry policy."""
+        from openai import APIStatusError, APIConnectionError, APITimeoutError
+        last_exc = None
+        for attempt in range(len(self._RETRY_BACKOFF) + 1):
+            try:
+                return fn()
+            except (APIConnectionError, APITimeoutError) as e:
+                last_exc = e
+            except APIStatusError as e:
+                if e.status_code != 429 and not (500 <= e.status_code < 600):
+                    raise
+                last_exc = e
+            if attempt < len(self._RETRY_BACKOFF):
+                wait = self._RETRY_BACKOFF[attempt]
+                print(f"[LLMBridge.{label}] Attempt {attempt + 1} failed "
+                      f"({type(last_exc).__name__}: {last_exc}); "
+                      f"retrying in {wait}s...")
+                time.sleep(wait)
+        print(f"[LLMBridge.{label}] All {len(self._RETRY_BACKOFF) + 1} "
+              f"attempts failed; raising.")
+        raise last_exc
+
     def _chat_json(self, client: OpenAI, model_name: str,
                    system_prompt: str, user_prompt: str) -> Dict:
         """
@@ -304,13 +367,16 @@ class LLMBridge:
         is fully decoupled from any per-method state — easy to mock and easy
         to extend with future per-method routing.
         """
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            response_format={"type": "json_object"},
+        response = self._call_with_retry(
+            lambda: client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                response_format={"type": "json_object"},
+            ),
+            label="_chat_json",
         )
         text = response.choices[0].message.content.strip()
 
@@ -345,12 +411,15 @@ class LLMBridge:
         Used for free-form reasoning steps where JSON mode would constrain
         output quality.
         """
-        response = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
+        response = self._call_with_retry(
+            lambda: self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            ),
+            label="generate_text",
         )
         return response.choices[0].message.content.strip()
 
@@ -380,14 +449,17 @@ class LLMBridge:
             ValueError: If the model response does not contain a tool call
                         (e.g. the model replied with plain text instead).
         """
-        response = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            tools=tools,
-            tool_choice="auto",
+        response = self._call_with_retry(
+            lambda: self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                tools=tools,
+                tool_choice="auto",
+            ),
+            label="tool_call",
         )
 
         message = response.choices[0].message
