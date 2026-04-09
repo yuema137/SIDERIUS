@@ -150,6 +150,19 @@ class ExperimentRecord(BaseModel):
         default=None,
         description="Length-20 score vector. None for files not included in the run.",
     )
+    regime_scores: Dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "Per-frequency-regime aggregation of file_vector, computed "
+            "deterministically by execute_tools.regime_aggregator. Seed "
+            "regimes: low_freq_kHz (files 0-4, 1.1-9.0 kHz), mid_freq_10kHz "
+            "(files 5-10, 9.1-94 kHz), high_freq_MHz (files 11-19, "
+            "95 kHz-4.9 MHz), global (all files). Empty dict for legacy "
+            "records or runs without scoring. The dict shape is the "
+            "deliberate extension point for the future Data Analysis Agent: "
+            "new regime keys can be added without a schema migration."
+        ),
+    )
 
     # --- Data volume ---
     training_psd_segments: Optional[int] = Field(
