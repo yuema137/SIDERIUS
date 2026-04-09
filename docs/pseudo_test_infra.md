@@ -227,10 +227,20 @@ The phases below are independent enough that any subset is committable.
 
 ### Out of scope for this PR (deferred to follow-ups)
 
-- Adding DI to the other 4 nodes (`ml_model_proposal_agent`, `ml_model_implementor`, `ml_code_validator_agent`, `result_interpretation_agent`). Each is a small follow-up PR; together they cover the full graph.
-- Refactoring the other ~10 integration test methods in `test_tune_ml_hyperparam_agent.py` to dual-mode. These can migrate one by one.
-- Refactoring Tier 2 (protocols) and Tier 3 (workflows) integration tests to dual-mode. Same pattern applies but each test has its own context to set up.
-- Phase A's pseudo_full_loop test (sub-task A.8 from `docs/adaptive_new_model_proposer.md`). This will be a tiny follow-up PR that builds on the infrastructure landed here.
+Each item below is a **PR-size scoping decision**, not a technical limitation. The infrastructure built in this PR works for any node in the graph; the deferrals just keep this PR's blast radius small enough to review confidently. The table below makes the trade-off explicit so a future contributor (or the same contributor on a different day) can decide whether to pull any item back into scope.
+
+| Item | Approx. LOC | Risk | Recommendation | Why deferred |
+|---|---|---|---|---|
+| **(1) DI on the other 4 nodes** (`ml_model_proposal_agent`, `ml_model_implementor`, `ml_code_validator_agent`, `result_interpretation_agent`) | medium (~800, ~200/node) | low | defer | Each node has its own subtleties about *how* it uses the bridge and sandbox. `ml_model_implementor`, for example, runs subprocesses for `pytest` execution and plugin loading — we don't yet know whether `RecordingSandbox` covers those calls or whether they need their own injection points. Validating the pattern on one node first surfaces unknowns before they multiply across five. Each subsequent node is its own small follow-up PR. |
+| **(2) Refactor the other ~10 integration test methods in `test_tune_ml_hyperparam_agent.py` to dual-mode** | medium (~300) | low | defer to immediate follow-up | Mostly mechanical (copy-paste of the dual-mode pattern across loss/model parametrizations), but adds bulk that obscures the infra changes. Best as a separate "migrate test_tune_ml_hyperparam_agent.py to dual-mode" PR landing right after this one. The unmigrated tests still run in real mode exactly as today — they're not broken, just single-mode. |
+| **(3) Tier 2 (protocols) and Tier 3 (workflows) dual-mode** | high (unknown unknowns) | **high** | **strongly defer** | Tier 2 needs the fixture to thread factories into TWO nodes per test (e.g. `result_interpretation_agent` and `ml_model_proposal_agent` for the `interp_to_propose` protocol). Tier 3 runs an entire workflow that internally constructs many bridges and sandboxes — the fixture has to inject factories deep into workflow code. These are **new design problems**, not extensions of the Tier 1 pattern. We should validate Tier 1 works before extending to harder cases. |
+| **(4) Phase A's `pseudo_full_loop` test** (sub-task A.8 from `docs/adaptive_new_model_proposer.md`) | small (~100) | low | **defensible to pull in** | The most concrete validation of the new infra on the thing we actually built it for. The downside is conceptual — bundling "build the infra" with "use the infra to test Phase A" mixes ownership boundaries. The upside is that #4 is the first thing we'd write right after this PR merges anyway, and it's TINY. This is the most defensible item to pull into scope if we want a single end-to-end story. |
+
+**Default plan**: defer all four. Land this PR with the infra + one proof-of-concept dual-mode test, then immediately follow with PRs #1, #2, #4 (in some order). Item #3 waits until Tier 1 dual-mode is battle-tested.
+
+**Alternate plan** (if we want a single end-to-end story): pull #4 (Phase A's pseudo_full_loop test) into this PR, leaving #1, #2, #3 as follow-ups. Adds ~100 LOC and one test file. Defensible.
+
+**Not recommended**: pulling #1, #2, or #3 into this PR. The size or risk grows nonlinearly and the review burden compounds.
 
 ## 6. Why this design is minimalist
 
