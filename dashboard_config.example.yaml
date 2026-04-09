@@ -1,0 +1,43 @@
+# dashboard_config.example.yaml — TEMPLATE.
+# ------------------------------------------
+# This file is the tracked template. The real config lives in
+# `dashboard_config.yaml` (gitignored), which each developer creates
+# once on first checkout:
+#
+#     cp dashboard_config.example.yaml dashboard_config.yaml
+#     # then edit root_data_dir for your machine
+#
+# DO NOT edit this template with machine-specific paths — your edits
+# will be visible to every other developer through git.
+#
+# See dashboard/settings.py for the full schema and defaults.
+#
+# Reference values for the canonical machines:
+#   lilab:        root_data_dir: /home/klz/Data/SIDEREIS_DATA
+#   SDSC Expanse: root_data_dir: /expanse/lustre/projects/ddp433/ym137/siderius_workspace
+
+data_source:
+  type: local           # "local" | "postgres"
+
+  local:
+    # Must match siderius_data_dir in tidmad_data_config.yaml.
+    root_data_dir: /path/to/SIDEREIS_DATA
+    # Empty list = auto-discover all models from root_data_dir subdirectories.
+    # Explicit list example: [punet, wavenet, rnn, fcnet, transformer, gated_fno]
+    models: []
+
+  postgres:
+    # Used only when type=postgres. Ignored otherwise.
+    connection_string: "postgresql+asyncpg://user:password@localhost:5432/siderius"
+    schema: public
+
+server:
+  host: 0.0.0.0         # 0.0.0.0 = accessible remotely; 127.0.0.1 = local only
+  port: 8000
+  log_level: info       # debug | info | warning | error
+
+dashboard:
+  refresh_interval_seconds: 30
+  max_records_per_run: 200
+  default_run_name: v1
+  theme: dark           # "dark" | "light"

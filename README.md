@@ -214,10 +214,16 @@ source .venv/bin/activate
 
 ### 2. Configure data paths — `tidmad_data_config.yaml`
 
-```yaml
-tidmad_data_dir: /your/path/to/TIDMAD/          # where the raw HDF5 files live
-siderius_data_dir: /your/path/to/SIDEREIS_DATA/  # where run outputs will be written
+The repo only tracks `tidmad_data_config.example.yaml`. On first checkout, copy it and fill in the paths for your machine:
+
+```bash
+cp tidmad_data_config.example.yaml tidmad_data_config.yaml
+# then edit:
+#   tidmad_data_dir:   /your/path/to/TIDMAD/         (raw HDF5 files)
+#   siderius_data_dir: /your/path/to/SIDEREIS_DATA/  (run outputs)
 ```
+
+The real `tidmad_data_config.yaml` is gitignored, so `git pull` will never clobber your machine-specific paths.
 
 ### 3. Configure API keys — `.env`
 
@@ -374,8 +380,11 @@ bash sdsc_submission_scripts/run_iteration_chain.sh \
 Browse experiment results in a web UI. Supports both **standard tuner runs** and **chain exploration runs** in two layouts.
 
 ```bash
-# 1. Edit dashboard_config.yaml to point at your workspace
-#    (lilab: /home/klz/Data/SIDEREIS_DATA, SDSC: /expanse/.../siderius_workspace)
+# 1. On first checkout, copy the template and edit:
+cp dashboard_config.example.yaml dashboard_config.yaml
+# then edit root_data_dir for your machine
+# (lilab: /home/klz/Data/SIDEREIS_DATA, SDSC: /expanse/.../siderius_workspace)
+# The real dashboard_config.yaml is gitignored.
 
 # 2. Start the server
 python dashboard/main.py
@@ -440,14 +449,16 @@ The exploration loop writes new models to `agent_generated/models/`. Each plugin
 
 | File | What it controls | Tracked? |
 |---|---|---|
-| `tidmad_data_config.yaml` | Where TIDMAD HDF5 files and SIDERIUS outputs live | yes |
-| `dashboard_config.yaml` | Dashboard root path, model list, server port | yes |
+| `tidmad_data_config.example.yaml` | Template for the data-paths config | yes |
+| `tidmad_data_config.yaml` | Local copy with the actual machine-specific paths | **no (gitignored)** |
+| `dashboard_config.example.yaml` | Template for the dashboard config | yes |
+| `dashboard_config.yaml` | Local copy with the actual root path / port | **no (gitignored)** |
 | `.env` | API keys (`GEMINI_API_KEY`, `OPENAI_API_KEY`) | no (gitignored) |
 | `tuner_advice/*.json` | Per-experiment human advice for the tuner | yes |
 | `sdsc_submission_scripts/human_advice_chain_test.json` | Per-agent human advice for chain runs | yes |
 | `pyproject.toml` + `uv.lock` | Python dependencies (managed by `uv`) | yes |
 
-⚠️ `dashboard_config.yaml` is tracked, so its `root_data_dir` path can be clobbered by `git pull`. If you maintain different paths on lilab and SDSC, re-edit it after each pull (or set up a local override file in the future).
+The two `*.yaml` files containing machine-specific paths are gitignored: each developer copies them once from the `*.example.yaml` template on first checkout, and `git pull` thereafter never touches them. This is what prevents lilab paths from clobbering SDSC paths and vice versa.
 
 ---
 
@@ -497,7 +508,13 @@ When deploying SIDERIUS on a new machine:
 
 2. **Copy TIDMAD data** — `abra_training_0000.h5`..`0019.h5` and `abra_validation_0000.h5`..`0019.h5`.
 
-3. **Update paths** in `tidmad_data_config.yaml` and `dashboard_config.yaml`.
+3. **Create local config files from the templates**:
+   ```bash
+   cp tidmad_data_config.example.yaml tidmad_data_config.yaml
+   cp dashboard_config.example.yaml   dashboard_config.yaml
+   # then edit both for your machine's paths
+   ```
+   Both real files are gitignored, so future `git pull`s won't clobber them.
 
 4. **Set API keys** in `.env`.
 

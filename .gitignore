@@ -32,3 +32,9 @@ agent_generated/tests/*
 # These are loaded by Claude via the auto-memory pointer in
 # ~/.claude/projects/.../memory/MEMORY.md but are not shared in git.
 docs/memories/
+
+# Machine-specific config (copied from *.example.yaml on first checkout
+# and edited locally for each machine — never tracked, so git pull won't
+# clobber per-machine paths).
+tidmad_data_config.yaml
+dashboard_config.yaml
