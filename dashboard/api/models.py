@@ -93,7 +93,10 @@ class ExperimentRecord(BaseModel):
     train_portion: Optional[float] = None
     training_psd_segments: Optional[int] = None
     eval_psd_segments: Optional[int] = None
-    file_vector: Optional[list[float]] = None
+    # Inner Optional: per-file scores can be None for files that were
+    # not scored in this round (e.g. trial mode skipped them, or the
+    # file failed). Matches agent/schemas/hyperparam_tuning.py.
+    file_vector: Optional[list[Optional[float]]] = None
 
     model_config = ConfigDict(extra="ignore")
 
