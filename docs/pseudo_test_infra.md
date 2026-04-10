@@ -89,53 +89,243 @@ tests/helpers/
 
 #### `RecordingLLMBridge`
 
-A test double for `LLMBridge` that:
-- Implements the same public interface (`generate`, `reflect`, `generate_text`, `tool_call`).
-- Records every call: method name, system prompt, user prompt, returned value, timestamp.
-- Returns canned responses configured before the test runs. Supports per-call queueing (round 1 returns response A, round 2 returns response B).
-- Exposes the recorded calls as a list so tests can assert on prompt content, call count, call order.
+A drop-in replacement for `LLMBridge` that returns predefined responses and records every call. Minimal — does not parse, does not transform, does not synthesize. The predefined responses are dicts shaped exactly like the parsed output of a real `LLMBridge.generate()` / `reflect()` call.
 
-Sketch:
 ```python
 class RecordingLLMBridge:
-    def __init__(self, canned_responses: dict[str, list] | None = None):
-        self.calls: list[RecordedCall] = []
-        self._canned = canned_responses or {}
+    """Test double for LLMBridge. Returns predefined responses, records every call.
+
+    Predefined responses are dicts (the same shape the real bridge returns AFTER
+    parsing the LLM's JSON). Per-method FIFO queue: register one or more responses,
+    each call pops the next.
+    """
+
+    def __init__(self, responses: dict | None = None, **kwargs):
+        # **kwargs accepts (and silently ignores) the real LLMBridge constructor
+        # parameters (provider, model_id, reflect_provider, reflect_model_id, ...)
+        # so the agent can construct it via self._bridge_factory(**real_kwargs)
+        # without any test-side translation.
+        self._queues: dict[str, list] = {}
+        for method, value in (responses or {}).items():
+            self._queues[method] = list(value) if isinstance(value, list) else [value]
+        self.calls: list[tuple] = []
 
     def generate(self, system_prompt: str, user_prompt: str) -> dict:
-        return self._record_and_return("generate", system_prompt, user_prompt)
+        self.calls.append(("generate", system_prompt, user_prompt))
+        return self._pop("generate")
 
     def reflect(self, exp_id, hypothesis, results, context) -> dict:
-        return self._record_and_return("reflect", exp_id=exp_id, ...)
+        self.calls.append(("reflect", exp_id, hypothesis, results, context))
+        return self._pop("reflect")
 
-    # ... and so on for generate_text, tool_call
+    def generate_text(self, system_prompt: str, user_prompt: str) -> str:
+        self.calls.append(("generate_text", system_prompt, user_prompt))
+        return self._pop("generate_text")
+
+    def _pop(self, method: str):
+        if not self._queues.get(method):
+            raise RuntimeError(
+                f"RecordingLLMBridge: no canned response left for {method!r}. "
+                f"Did the test forget to register one?"
+            )
+        return self._queues[method].pop(0)
+
+    @classmethod
+    def for_agent(cls, agent_name: str) -> "RecordingLLMBridge":
+        """Build a bridge pre-loaded with the canned outputs for a specific agent.
+        Loads from tests/pseudo_data/api_call_outputs/{agent_name}/*.json — one
+        file per LLM method (generate.json, reflect.json, ...)."""
+        responses = _load_pseudo_data("api_call_outputs", agent_name)
+        return cls(responses=responses)
 ```
+
+**~30 LOC. No helper methods, no parsing dispatch, no factories. Tests inspect `bridge.calls` directly.**
 
 #### `RecordingSandbox`
 
-A test double for `TidmadSandbox` that:
-- Implements the same public interface (`execute_training`, `execute_inference`, `execute_scoring`, `save_record`, `dirs`, …).
-- Returns canned `train_status` / `inference_status` / `score_res` payloads configured before the test runs.
-- Records every call so tests can assert on what configs were passed to training, what file_index was used, etc.
-- Stores `save_record` calls in an internal list so tests can inspect the records the orchestration tried to persist.
+A drop-in replacement for `TidmadSandbox` that **mimics the real sandbox's persistence behavior as faithfully as possible** — real directories on disk under `tmp_path`, real JSON files written, real `save_record` semantics. The only thing skipped is the actual subprocess execution (training, inference, scoring): those return canned dicts directly instead of running.
 
-Sketch:
 ```python
 class RecordingSandbox:
-    def __init__(self, base_dir: str, canned: dict | None = None):
-        self.base_dir = base_dir
-        self.dirs = {"data": "/fake/data", "configs": "/fake/configs", ...}
-        self.calls: list[RecordedCall] = []
-        self.saved_records: list[dict] = []
-        self._canned = canned or {}
+    """Test double for TidmadSandbox. Mimics the real sandbox's persistence
+    behavior (real directories, real files written) but skips subprocess
+    execution: training/inference/scoring return predefined dicts instead.
+    """
 
-    def execute_training(self, exp_id, run_name, model_type, m_cfg, t_cfg, l_cfg, ...):
-        self.calls.append(...)
-        return self._canned.get("execute_training", {"status": "success", "results": {...}})
+    def __init__(
+        self,
+        base_dir: str,            # real tmp_path passed by the test
+        run_name: str = "test",
+        canned: dict | None = None,
+        **kwargs,                 # accept and ignore extras for drop-in compat
+    ):
+        self.base_dir = base_dir
+        self.run_name = run_name
+        self.dirs = {
+            "configs": os.path.join(base_dir, "configs", run_name),
+            "models":  os.path.join(base_dir, "cached_models"),
+            "records": os.path.join(base_dir, "records"),
+            "data":    os.path.join(base_dir, "data"),
+        }
+        for path in self.dirs.values():
+            os.makedirs(path, exist_ok=True)
+
+        # Stub anchor map so the tuner agent's load_anchor_map() works.
+        # Minimal valid shape; the canned execute_scoring result is what
+        # actually drives the test, not the real anchor data.
+        stub = {"anchors": {0: {0: 1.0}}, "s_max": 1.0}
+        with open(os.path.join(self.dirs["data"], "segment_anchors.json"), "w") as f:
+            json.dump(stub, f)
+
+        # Canned outputs FIFO queue per method
+        self._queues: dict[str, list] = {}
+        for method, value in (canned or {}).items():
+            self._queues[method] = list(value) if isinstance(value, list) else [value]
+
+        # Public attributes for test assertions
+        self.calls: list[tuple] = []
+        self.saved_records: list[dict] = []
+
+    def execute_training(self, exp_id, run_name, model_type, m_cfg, t_cfg, l_cfg, **kwargs):
+        self.calls.append(("execute_training", exp_id, model_type, m_cfg, t_cfg, l_cfg))
+        result = self._pop("execute_training")
+        # Mirror the real persistence: write the canned result to the same
+        # disk path the real subprocess would have written, so any code that
+        # reads it back works exactly like real mode.
+        result_path = os.path.join(
+            self.dirs["records"], run_name,
+            f"experiment_results_{model_type}_{exp_id}.json",
+        )
+        os.makedirs(os.path.dirname(result_path), exist_ok=True)
+        with open(result_path, "w") as f:
+            json.dump(result.get("results", {}), f)
+        return result
+
+    def execute_inference(self, exp_id, run_name, model_type, m_cfg, l_cfg, **kwargs):
+        self.calls.append(("execute_inference", exp_id, model_type))
+        return self._pop("execute_inference")
+        # NOTE: real inference produces .h5 denoised files. We skip those —
+        # scoring is also canned, so nothing reads them. If a future test
+        # specifically wants to exercise the .h5 path, it can write a stub.
+
+    def execute_scoring(self, exp_id, run_name, model_type, **kwargs):
+        self.calls.append(("execute_scoring", exp_id, model_type))
+        result = self._pop("execute_scoring")
+        score_path = os.path.join(
+            self.dirs["records"], run_name,
+            f"score_results_{model_type}_{exp_id}.json",
+        )
+        os.makedirs(os.path.dirname(score_path), exist_ok=True)
+        with open(score_path, "w") as f:
+            json.dump(result.get("results", {}), f)
+        return result
 
     def save_record(self, record: dict):
+        # In-memory list for fast test assertions
         self.saved_records.append(record)
-    # ... and so on
+        # Also write to disk like the real sandbox does (append to summary file)
+        summary_path = os.path.join(self.base_dir, f"summary_{self.run_name}.json")
+        existing = []
+        if os.path.exists(summary_path):
+            with open(summary_path) as f:
+                existing = json.load(f)
+        existing.append(record)
+        with open(summary_path, "w") as f:
+            json.dump(existing, f)
+
+    def _pop(self, method: str):
+        if not self._queues.get(method):
+            raise RuntimeError(
+                f"RecordingSandbox: no canned response left for {method!r}. "
+                f"Did the test forget to register one?"
+            )
+        return self._queues[method].pop(0)
+
+    @classmethod
+    def for_model(cls, model_type: str, base_dir: str, **kwargs) -> "RecordingSandbox":
+        """Build a sandbox pre-loaded with canned outputs for a specific built-in
+        model. Loads from tests/pseudo_data/train_outputs/{model_type}/*.json —
+        one file per execute method (execute_training.json, execute_inference.json,
+        execute_scoring.json)."""
+        canned = _load_pseudo_data("train_outputs", model_type)
+        return cls(base_dir=base_dir, canned=canned, **kwargs)
+```
+
+**~80 LOC. Real directories under tmp_path, real disk persistence, in-memory `saved_records` for fast assertions.**
+
+#### Pseudo data layout
+
+```
+tests/pseudo_data/
+├── api_call_outputs/
+│   ├── ml_hyperparameter_tune_agent/
+│   │   ├── generate.json                     # canned ExperimentPlan dict
+│   │   └── reflect.json                      # canned reflection dict
+│   ├── ml_model_proposal_agent/              # added by Phase B follow-up PR
+│   │   └── generate.json
+│   ├── ml_model_implementor/                 # added by follow-up PR
+│   │   └── generate.json
+│   ├── ml_code_validator_agent/              # added by follow-up PR
+│   │   └── generate.json
+│   └── result_interpretation_agent/          # added by follow-up PR
+│       ├── per_model_summary.json
+│       └── synthesis.json
+└── train_outputs/
+    ├── punet/                                 # v1 — only model in this PR
+    │   ├── execute_training.json
+    │   ├── execute_inference.json
+    │   └── execute_scoring.json
+    └── (wavenet/, fcnet/, gated_fno/, ...)    # added incrementally as needed
+```
+
+**v1 scope for this PR**: only `ml_hyperparameter_tune_agent/` under `api_call_outputs/`, only `punet/` under `train_outputs/`. Other agents/models added by follow-up PRs as their consumers come online.
+
+**Helper for loading**:
+
+```python
+# tests/helpers/_pseudo_data.py
+PSEUDO_DATA_ROOT = pathlib.Path(__file__).parent.parent / "pseudo_data"
+
+def _load_pseudo_data(category: str, name: str) -> dict[str, dict]:
+    """Load all *.json files under tests/pseudo_data/{category}/{name}/.
+    Returns {filename_without_ext: parsed_json_dict}."""
+    target_dir = PSEUDO_DATA_ROOT / category / name
+    if not target_dir.is_dir():
+        raise FileNotFoundError(
+            f"No pseudo_data directory at {target_dir}. "
+            f"Add canned outputs there before using for_agent/for_model."
+        )
+    out = {}
+    for json_file in sorted(target_dir.glob("*.json")):
+        with open(json_file) as f:
+            out[json_file.stem] = json.load(f)
+    return out
+```
+
+**~15 LOC.**
+
+#### How a test uses all of this
+
+```python
+def test_one_round_tuner(tmp_path):
+    bridge = RecordingLLMBridge.for_agent("ml_hyperparameter_tune_agent")
+    sandbox = RecordingSandbox.for_model("punet", base_dir=str(tmp_path))
+
+    agent = HyperparamTuningAgent(
+        bridge_factory=lambda **kw: bridge,
+        sandbox_factory=lambda **kw: sandbox,
+    )
+    output = agent.run(test_input)
+
+    # Inspect via in-memory list (fast)
+    assert sandbox.saved_records[0]["regime_scores"]["low_freq_kHz"] == pytest.approx(0.5)
+
+    # OR inspect via disk (also works because we mirror real persistence)
+    summary_path = os.path.join(tmp_path, "summary_test.json")
+    assert os.path.exists(summary_path)
+
+    # Inspect prompt content
+    assert "REGIME SCORES" in bridge.calls[0][1]  # planner system prompt
 ```
 
 ### 4C. Fixture-based mode switching (locked design: orthogonal axes)
@@ -146,22 +336,26 @@ A pytest fixture decides which factories to inject based on a CLI flag, and the 
 
 | Concept | Mechanism | What it means |
 |---|---|---|
-| **Test category** | `pytest.mark.real_run` | "This test only works in real mode — it has no pseudo equivalent (e.g. it asserts on actual LLM output structure that no canned response could meaningfully validate)." Reserved for the rare case where pseudo mode genuinely cannot validate the thing. |
-| **Execution mode** | `--real-api-call` CLI flag | "When pytest runs today, use the real `LLMBridge` / `TidmadSandbox` instead of the recording fakes." Pseudo mode is the default; real mode requires explicit opt-in. |
+| **Test category — dual-mode** | `pytest.mark.dual_mode` | "This test supports BOTH pseudo and real modes. By default (no flag) it runs in pseudo mode; with `--real-api-call` it runs in real mode against the real API." Almost every integration test in the future will be marked this way. |
+| **Test category — real-only** | `pytest.mark.real_run` | "This test ONLY works in real mode — it has no pseudo equivalent (e.g. it asserts on actual LLM output structure that no canned response could meaningfully validate)." Reserved for the rare case where pseudo mode genuinely cannot validate the thing. Skipped by default; needs both `-m real_run` AND `--real-api-call`. |
+| **Execution mode** | `--real-api-call` CLI flag | "When pytest runs today, use the real `LLMBridge` / `TidmadSandbox` instead of the recording fakes." Pseudo mode is the default; real mode requires explicit opt-in. Affects `dual_mode` tests (switches them from pseudo to real) and is required for `real_run` tests to actually execute. |
 
 These axes are independent. A test can be:
 
-- **Dual-mode** (no marker): runs in pseudo mode by default; runs in real mode if `--real-api-call` is passed. **This is the recommended pattern for almost every test.**
-- **Real-only** (marked `real_run`): skipped by default; runs only when both the marker is selected AND the flag is passed. Reserved for tests that have no canned-response equivalent.
+- **Dual-mode** (marked `dual_mode`): runs in pseudo mode by default; runs in real mode if `--real-api-call` is passed. **This is the recommended pattern for almost every integration test.** The marker is a structural label that says "this test supports both modes" — it makes the dual nature explicit and discoverable, and distinguishes the test from unmarked unit tests and from real-only `real_run` tests.
+- **Real-only** (marked `real_run`): skipped by default; runs only when both the `-m real_run` selector AND the `--real-api-call` flag are passed. Reserved for tests that have no canned-response equivalent.
+- **Unmarked**: regular unit tests under `tests/unit/`. Run in CI on every commit. Mocked at the function level, not at the LLM/sandbox boundary.
 
 **Combination matrix**:
 
-| Command | Dual-mode tests | Real-only tests (marked `real_run`) |
-|---|---|---|
-| `pytest tests/integration/` | run in **pseudo** mode | skipped |
-| `pytest tests/integration/ --real-api-call` | run in **real** mode | skipped (still need `-m`) |
-| `pytest tests/integration/ -m real_run` | skipped (no marker) | skipped (need flag too) |
-| `pytest tests/integration/ -m real_run --real-api-call` | skipped | run in real mode |
+| Command | Dual-mode tests (`dual_mode`) | Real-only tests (`real_run`) | Unit tests (no marker) |
+|---|---|---|---|
+| `pytest tests/` | run in **pseudo** mode | skipped | run normally |
+| `pytest tests/ --real-api-call` | run in **real** mode | skipped (still need `-m`) | run normally |
+| `pytest tests/ -m real_run` | skipped (different marker) | skipped (need flag too) | skipped (no marker) |
+| `pytest tests/ -m real_run --real-api-call` | skipped (different marker) | run in **real** mode | skipped (no marker) |
+| `pytest tests/ -m dual_mode` | run in **pseudo** mode (selected) | skipped | skipped |
+| `pytest tests/ -m dual_mode --real-api-call` | run in **real** mode (selected) | skipped | skipped |
 
 **Why this design**:
 
@@ -222,23 +416,31 @@ The PR is intentionally narrow: it builds the infrastructure and proves it works
 
 The phases below are independent enough that any subset is committable.
 
-- ☐ **S.1** Write `tests/helpers/recording_llm_bridge.py` with the `RecordingLLMBridge` class. Public interface mirrors `LLMBridge.generate / reflect / generate_text / tool_call / list_models`. Internal: per-call canned response queue, recorded call list, helpful repr for test debugging.
-- ☐ **S.2** Write `tests/helpers/recording_sandbox.py` with the `RecordingSandbox` class. Public interface mirrors `TidmadSandbox.execute_training / execute_inference / execute_scoring / save_record / dirs`. Internal: canned payloads keyed by method, recorded call list, `saved_records` list for persistence assertions.
-- ☐ **S.3** Write `tests/helpers/test_recording_doubles.py` — unit tests for the test doubles themselves. The doubles are infrastructure code and need their own tests so future contributors trust them. Cover: canned response delivery, call recording, queue exhaustion behavior, default-canned-response fallback.
-- ☐ **S.4** Add `pytest_addoption` and the `tuner_factories` fixture to `tests/conftest.py` (creating it if absent). The CLI flag `--real-api-call` is the primary mode selector. Pseudo is default.
-- ☐ **S.5** Add constructor DI to `HyperparamTuningAgent`: optional `bridge_factory` and `sandbox_factory` parameters defaulting to `LLMBridge` and `TidmadSandbox`. Replace internal `LLMBridge(...)` and `TidmadSandbox(...)` calls with `self._bridge_factory(...)` and `self._sandbox_factory(...)`. **No behavioral change in production**: when factories aren't passed, the agent constructs the real classes exactly as before.
-- ☐ **S.6** Refactor `tests/integration/nodes/test_tune_ml_hyperparam_agent.py::TestRealRunGemini::test_punet_gemini[loss_cfg0]` to dual-mode. Use the `tuner_factories` fixture. In pseudo mode, configure the recording fakes with a canned plan + canned reflection + canned train/score results, run the agent, assert on (a) the planner system prompt content, (b) the saved record's structure, (c) the reflector's input. In real mode, the same test runs end-to-end against the real API as it does today. **Zero change to behavior in real mode**; new behavior in pseudo mode.
-- ☐ **S.7** Run the full unit suite plus the new pseudo-mode test in CI configuration (no `--real-api-call`). All existing tests continue to pass. The newly-refactored test passes in pseudo mode.
-- ☐ **S.8** Update `docs/architecture.md`: new "Pseudo-full-loop tests" section after the existing Testing Strategy section, new principle 10 in Core Principles, updated taxonomy table.
-- ☐ **S.9** Update `CLAUDE.md` if needed (one-line addition under Coding Standards) referencing the new tier.
+- ☐ **S.1** Create `tests/helpers/__init__.py` and `tests/helpers/_pseudo_data.py` with the `_load_pseudo_data(category, name)` helper. ~15 LOC.
+- ☐ **S.2** Write `tests/helpers/recording_llm_bridge.py` with the `RecordingLLMBridge` class as specified in §4B. Constructor accepts `responses` dict and `**kwargs` (drop-in compat); exposes `calls` list; raises `RuntimeError` on queue exhaustion; classmethod `for_agent(name)` loads from `tests/pseudo_data/api_call_outputs/{name}/`. ~30 LOC.
+- ☐ **S.3** Write `tests/helpers/recording_sandbox.py` with the `RecordingSandbox` class as specified in §4B. Constructor accepts `base_dir` (real `tmp_path`), `run_name`, `canned`, and `**kwargs`. Creates real directories under `base_dir`; writes a stub `segment_anchors.json`; mirrors disk persistence in `execute_training` / `execute_scoring` / `save_record`; classmethod `for_model(model_type, base_dir)` loads from `tests/pseudo_data/train_outputs/{model_type}/`. ~80 LOC.
+- ☐ **S.4** Write `tests/helpers/test_recording_fakes.py` — small smoke tests for the recording fakes themselves so we trust the infrastructure. Cover: register-and-pop, queue exhaustion raises, `calls` list ordering, `for_agent`/`for_model` load JSONs from the right paths, real directories are created under `tmp_path`, `save_record` writes a JSON file to disk. ~50 LOC. (See open question E if you'd rather skip.)
+- ☐ **S.5** Create the v1 pseudo data:
+  - `tests/pseudo_data/api_call_outputs/ml_hyperparameter_tune_agent/generate.json` — a valid `ExperimentPlan`-shaped dict (small punet config).
+  - `tests/pseudo_data/api_call_outputs/ml_hyperparameter_tune_agent/reflect.json` — a valid reflection dict (`conclusion`, `key_factor`, `discovery`, `memory_update`).
+  - `tests/pseudo_data/train_outputs/punet/execute_training.json` — `{"status": "success", "results": {"final_loss": 0.5, "loss_history": [...], "model_params": 12345}}`.
+  - `tests/pseudo_data/train_outputs/punet/execute_inference.json` — `{"status": "success", "results": {}}` (inference produces .h5 files in real mode, nothing meaningful to return).
+  - `tests/pseudo_data/train_outputs/punet/execute_scoring.json` — `{"status": "success", "results": {"denoising_score": 0.69, "file_vector": [0.5, 0.5, 0.5, 0.5, 0.5, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9]}}` — chosen so the resulting `regime_scores` are easy to verify by hand.
+- ☐ **S.6** Add `pytest_addoption` for `--real-api-call` to `tests/conftest.py` (creating it if absent). Add a fixture `tuner_factories(request, tmp_path)` that returns `{"bridge_factory": ..., "sandbox_factory": ...}` based on the flag.
+- ☐ **S.7** Add constructor DI to `HyperparamTuningAgent`: optional `bridge_factory` and `sandbox_factory` parameters defaulting to `LLMBridge` and `TidmadSandbox`. Replace internal `LLMBridge(...)` and `TidmadSandbox(...)` calls with `self._bridge_factory(...)` and `self._sandbox_factory(...)`. **No behavioral change in production**: when factories aren't passed, the agent constructs the real classes exactly as before.
+- ☐ **S.8** Refactor `tests/integration/nodes/test_tune_ml_hyperparam_agent.py::TestRealRunGemini::test_punet_gemini[loss_cfg0]` to dual-mode. Use the `tuner_factories` fixture. **Replace** the `@pytest.mark.real_run` marker with a new `@pytest.mark.dual_mode` marker on this one test (registered in `tests/conftest.py` via `pytest_configure`). The `dual_mode` marker is a structural label that says "this test supports both pseudo and real modes" — distinct from `real_run` (real-only) and from unmarked unit tests. Default behavior: dual_mode tests run in pseudo mode in CI; they switch to real mode when `--real-api-call` is passed. In pseudo mode, the recording fakes are pre-loaded via `for_agent` / `for_model`; assertions are about prompt content + saved record structure + recorded subprocess calls. In real mode, the same test runs end-to-end against the real API as it does today.
+- ☐ **S.9** Run the full unit suite plus the new pseudo-mode test in CI configuration (no `--real-api-call`). All existing tests continue to pass. The newly-refactored test passes in pseudo mode in milliseconds.
+- ☐ **S.10** Update `docs/architecture.md`: new "Pseudo-full-loop tests" section after the existing Testing Strategy section, new principle 10 in Core Principles, updated taxonomy table.
+- ☐ **S.11** Update `CLAUDE.md` if needed (one-line addition under Coding Standards) referencing the new tier.
 
 ### Cross-step verification gates
 
-- After S.1, S.2, S.3: `uv run pytest tests/helpers/ -q` passes.
-- After S.5: `uv run pytest tests/unit/ -q` still passes (no production behavior change).
-- After S.6: `uv run pytest tests/integration/nodes/test_tune_ml_hyperparam_agent.py::TestRealRunGemini::test_punet_gemini -q` (pseudo mode, no `--real-api-call`) passes in milliseconds.
-- After S.6: `uv run pytest tests/integration/nodes/test_tune_ml_hyperparam_agent.py::TestRealRunGemini::test_punet_gemini -q --real-api-call -m real_run` (real mode) still passes — verifying the refactor didn't break the existing real-mode behavior.
-- After S.7: `uv run pytest tests/unit/ tests/helpers/ -q` is fully green.
+- After S.1–S.4: `uv run pytest tests/helpers/ -q` passes (the recording-fake smoke tests).
+- After S.5: the JSON files exist and parse cleanly. `python -c "import json; json.load(open('tests/pseudo_data/api_call_outputs/ml_hyperparameter_tune_agent/generate.json'))"` runs without error.
+- After S.7: `uv run pytest tests/unit/ -q` still passes (DI added but production path unchanged).
+- After S.8: `uv run pytest tests/integration/nodes/test_tune_ml_hyperparam_agent.py::TestRealRunGemini::test_punet_gemini -q` (pseudo mode, no flag) passes in milliseconds.
+- After S.8: `uv run pytest tests/integration/nodes/test_tune_ml_hyperparam_agent.py::TestRealRunGemini::test_punet_gemini -q --real-api-call` (real mode) still passes — verifying the refactor didn't break the existing real-mode behavior.
+- After S.9: `uv run pytest tests/unit/ tests/helpers/ -q` is fully green.
 
 ### Out of scope for this PR (deferred to follow-ups)
 
@@ -268,10 +470,21 @@ In keeping with the V2 design philosophy ("minimalist architecture, maximalist r
 
 The PR's blast radius is exactly: one new helpers directory, one new fixture, one node gains two optional constructor params, one existing test gains a pseudo path. Everything else is documentation.
 
-## 7. Open questions
+## 7. Open questions and decisions
 
-1. ☑ **Mode selector** (see §4C). **Resolved**: orthogonal axes — `--real-api-call` flag for execution mode + existing `pytest.mark.real_run` marker for test category. Two independent concepts; pseudo is the default.
-2. **Recording fakes location**. `tests/helpers/` vs `tests/fakes/` vs `tests/doubles/`. Recommendation: `tests/helpers/` — most conventional in the Python ecosystem.
-3. **Canned response API shape**. Should the recording fakes accept canned responses (a) at construction time as a dict, (b) at call time via a per-test `register_response()` method, or (c) both? Recommendation: both — dict at construction for simple cases, `register_response()` for round-by-round queues. Defer the decision until S.1/S.2 to see what's natural.
-4. **Should `RecordingSandbox` actually create the workspace dirs on disk** (mirroring `TidmadSandbox.__init__`'s `_ensure_dir` calls), or stay fully in-memory? In-memory is faster but breaks any node code that does `os.path.exists(sandbox.dirs["configs"])`. Recommendation: use `tmp_path` from pytest so the dirs exist on disk in a temp location, get cleaned up automatically. Decide at S.2.
-5. **How to handle the tuner's many-roles call sites**. The tuner builds `bridge` and `sandbox` once per `run()` call. Some sub-skills (training/inference/scoring wrappers) construct their own — those need to thread the factory through too. Decide concretely during S.5; the answer will inform whether other nodes need a similar audit before they can be retrofitted.
+### Resolved
+
+- ☑ **Mode selector** (§4C). **Orthogonal axes**: `--real-api-call` flag for execution mode + existing `pytest.mark.real_run` marker for test category. Two independent concepts; pseudo is the default.
+- ☑ **Recording fakes location**. `tests/helpers/` — most conventional, doesn't overload pytest's "fixtures" terminology.
+- ☑ **Pseudo data location and structure**. `tests/pseudo_data/{api_call_outputs,train_outputs}/{agent_or_model}/{method}.json`. JSON files, one per LLM/subprocess call type. v1 ships only `ml_hyperparameter_tune_agent/` and `punet/`; other agents/models added incrementally as their consumers come online.
+- ☑ **Canned response shape**. Predefined responses are plain Python dicts shaped exactly like the post-parse output of a real `LLMBridge.generate()` / `reflect()` or a real `TidmadSandbox.execute_*()`. No parsing dispatch, no string mode, no factories. The schema fidelity is maintained as a project invariant: pseudo data and real API response shapes are kept in sync as part of any schema change.
+- ☑ **Filesystem fidelity for `RecordingSandbox`**. Real directories under `tmp_path`, real disk persistence (`save_record` writes a real `summary_*.json`; `execute_training` writes a real `experiment_results_*.json` to mirror the subprocess output). Stub `segment_anchors.json` written by `__init__` so the tuner's anchor map check passes.
+- ☑ **Constructor signature mismatch**. `RecordingLLMBridge.__init__(self, responses=None, **kwargs)` and `RecordingSandbox.__init__(self, base_dir, run_name="test", canned=None, **kwargs)`. The `**kwargs` swallow real-bridge / real-sandbox constructor parameters so the agent code can construct them via the factory without test-side translation.
+- ☑ **Pseudo mode is NOT a substitute for real-mode tests for LLM-output validation**. The pseudo tier covers everything except "did the real LLM actually produce a valid response". Real-mode tests are still required for that one concern. Test authors should NOT try to use pseudo mode to detect API quirks or schema drift — that's what `--real-api-call` is for.
+
+### Newly resolved
+
+- ☑ **Multi-call per method (forward-looking)**. **Distinct files per sub-call**. When Phase B's proposal agent introduces two `generate(...)` calls per run, the canned data lives in `generate_reasoning.json` and `generate_architecture.json` (or similar) under `pseudo_data/api_call_outputs/ml_model_proposal_agent/`. Each file is one logical sub-call. The recording bridge's `for_agent()` classmethod will need a small update at that point to map sub-call names → which response to pop next, but that's a Phase-B follow-up concern. v1 stays simple: one method = one file.
+- ☑ **Refactored test marker**. **Replaced, not removed**: `@pytest.mark.real_run` on `test_punet_gemini[loss_cfg0]` becomes `@pytest.mark.dual_mode`. The new marker is registered in `tests/conftest.py` via `pytest_configure`. This makes the dual nature explicit and discoverable, distinguishes the test from unmarked unit tests, and keeps the matrix in §4C unambiguous. The other 10 tests in the same file keep `real_run` until they're migrated (each migration replaces `real_run` with `dual_mode` and adds the canned-data wiring).
+- ☑ **Unit tests for the recording fakes themselves (S.4)**. **Yes**, write them. ~50 LOC of smoke tests covering register-and-pop, queue exhaustion, calls list ordering, classmethod loading, real directory creation under tmp_path, save_record disk persistence. The fakes are load-bearing infrastructure for every future pseudo test.
+- ☑ **Tuner's sub-skill call sites**. **Grep performed; no audit needed.** All five sub-skill wrappers under `agent/skills/` (`training_skill`, `inference_skill`, `denoising_score_skill`, `evaluate_resource_skill`, `check_config_format_skill`) take `sandbox` as their first positional argument from the agent and forward method calls onto it. None construct their own `TidmadSandbox`. None construct their own `LLMBridge` (the singleton invariant test enforces this). The agent at `nodes/ml_hyperparameter_tune_agent.py` is the single point of construction for both. **DI at the agent constructor is therefore sufficient** — every sub-skill transparently uses whatever sandbox the agent passes in. No follow-up needed for sub-skill audits.
