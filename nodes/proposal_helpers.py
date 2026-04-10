@@ -38,12 +38,12 @@ def select_candidate_models(
         best_score, and any available metadata (file_vector, params, etc.).
     """
     model_types = interpretation.get("model_types", [])
-    per_best = interpretation.get("per_model_best", {})
-    per_worst = interpretation.get("per_model_worst", {})
-    file_vectors = interpretation.get("per_model_file_vectors", {})
-    model_params = interpretation.get("per_model_params", {})
-    descriptions = interpretation.get("model_descriptions", {})
-    training_segs = interpretation.get("per_model_training_segments", {})
+    per_best = interpretation.get("per_model_best") or {}
+    per_worst = interpretation.get("per_model_worst") or {}
+    file_vectors = interpretation.get("per_model_file_vectors") or {}
+    model_params = interpretation.get("per_model_params") or {}
+    descriptions = interpretation.get("model_descriptions") or {}
+    training_segs = interpretation.get("per_model_training_segments") or {}
 
     # Build a summary for each model
     all_models = []
