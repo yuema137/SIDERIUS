@@ -100,6 +100,33 @@ class TestFalsifiablePrediction:
         with pytest.raises(ValidationError):
             FalsifiablePrediction.model_validate(valid_prediction)
 
+    def test_boldness_property(self, valid_prediction):
+        fp = FalsifiablePrediction.model_validate(valid_prediction)
+        # current=1.5, predicted=2.0 → boldness = 0.5 / 1.5 = 0.333...
+        expected = abs(2.0 - 1.5) / abs(1.5)
+        assert abs(fp.boldness - expected) < 1e-10
+
+    def test_boldness_with_zero_current(self):
+        """When current_value is near zero, boldness uses 1e-6 as floor."""
+        fp = FalsifiablePrediction.model_validate({
+            "metric": "score",
+            "current_value": 0.0,
+            "predicted_value": 0.5,
+            "threshold_for_refutation": -0.1,
+            "rationale": "test",
+        })
+        assert fp.boldness == 0.5 / 1e-6  # very bold
+
+    def test_boldness_timid_prediction(self):
+        fp = FalsifiablePrediction.model_validate({
+            "metric": "score",
+            "current_value": 10.0,
+            "predicted_value": 10.01,
+            "threshold_for_refutation": 9.9,
+            "rationale": "test",
+        })
+        assert fp.boldness < 0.01  # timid
+
 
 # ---------------------------------------------------------------------------
 # InheritedComponent
@@ -286,6 +313,16 @@ class TestDiscoveryMemo:
         memo = DiscoveryMemo.model_validate(valid_memo)
         assert memo.proposed_vocab_links == []
 
+    def test_citations_max_5(self, valid_memo):
+        valid_memo["citation_sources"] = ["a", "b", "c", "d", "e", "f"]
+        with pytest.raises(ValidationError):
+            DiscoveryMemo.model_validate(valid_memo)
+
+    def test_citations_exactly_5_ok(self, valid_memo):
+        valid_memo["citation_sources"] = ["a", "b", "c", "d", "e"]
+        memo = DiscoveryMemo.model_validate(valid_memo)
+        assert len(memo.citation_sources) == 5
+
     def test_sota_mechanism_max_length(self, valid_memo):
         valid_memo["sota_mechanism"] = "x" * 601
         with pytest.raises(ValidationError):
@@ -419,6 +456,43 @@ class TestReasoningPipelineConfig:
         )
         assert config.model_selection.method == "human_specified"
         assert config.model_selection.params["models"] == ["wavenet", "gated_fno"]
+
+
+# ---------------------------------------------------------------------------
+# ProposalOutput — memo_consistency_notes (B.26)
+# ---------------------------------------------------------------------------
+
+class TestProposalOutputConsistencyNotes:
+
+    def _make_output(self, **overrides):
+        base = {
+            "model_name": "test_model",
+            "model_description": "A test model.",
+            "mathematical_definition": "Linear layers.",
+            "motivation": "Testing.",
+            "expert_advice": {
+                "focus_areas": [], "constraints": [], "known_failures": [],
+                "suggested_directions": [], "rationale": "",
+            },
+            "baseline_config": {"model_config": {}, "train_config": {}, "loss_config": {}},
+        }
+        base.update(overrides)
+        return base
+
+    def test_default_empty(self):
+        from agent.schemas.proposal import ProposalOutput
+        out = ProposalOutput.model_validate(self._make_output())
+        assert out.memo_consistency_notes == []
+
+    def test_with_notes(self):
+        from agent.schemas.proposal import ProposalOutput
+        out = ProposalOutput.model_validate(self._make_output(
+            memo_consistency_notes=[
+                "DiscoveryMemo claims FNO spectral layer but model uses only convolutions.",
+                "Proposed receptive field exceeds segmentation_size.",
+            ],
+        ))
+        assert len(out.memo_consistency_notes) == 2
 
 
 # ---------------------------------------------------------------------------

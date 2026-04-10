@@ -27,6 +27,11 @@ class FalsifiablePrediction(BaseModel):
 
     The reflector checks this prediction after the experiment runs and
     labels the hypothesis 'confirmed' / 'refuted' / 'partial' (Phase E).
+
+    The computed ``boldness`` property measures how ambitious the prediction
+    is relative to the current value. The pipeline runner checks
+    ``boldness >= policy.minimum_boldness`` at runtime — timid predictions
+    are rejected before the experiment runs. See ResearchPolicy.
     """
     metric: str = Field(
         description="What to measure. Free-text, guided by expert advice. "
@@ -48,6 +53,16 @@ class FalsifiablePrediction(BaseModel):
     rationale: str = Field(
         description="One sentence: why this specific predicted value."
     )
+
+    @property
+    def boldness(self) -> float:
+        """Relative magnitude of the prediction vs current.
+
+        ``abs(predicted - current) / max(abs(current), 1e-6)``.
+        The pipeline runner compares this against ``policy.minimum_boldness``.
+        The reflector uses it to compute information gain.
+        """
+        return abs(self.predicted_value - self.current_value) / max(abs(self.current_value), 1e-6)
 
     @model_validator(mode="after")
     def _prediction_differs_from_current(self):
@@ -251,8 +266,11 @@ class DiscoveryMemo(BaseModel):
     # --- Citations ---
     citation_sources: List[str] = Field(
         default_factory=list,
+        max_length=5,
         description="cite_id values of ExpertContextItems that materially "
-                    "shaped this memo."
+                    "shaped this memo. Max 5 — cite only items that changed "
+                    "your hypothesis. The pipeline runner verifies each cite_id "
+                    "appears in causal_hypothesis or proposed_change text.",
     )
 
     @model_validator(mode="after")
@@ -493,4 +511,11 @@ class ProposalOutput(BaseModel):
                     "Should use a conservative parameter count and GPU memory footprint "
                     "suitable for initial exploration. "
                     "Must include model_config, train_config, and loss_config keys.",
+    )
+    memo_consistency_notes: List[str] = Field(
+        default_factory=list,
+        description="Inconsistencies the proposing stage noticed between the "
+                    "DiscoveryMemo and what's physically implementable. "
+                    "Empty = no issues found. Non-empty = the validator surfaces "
+                    "these as warnings. This is a flag, not a veto.",
     )

@@ -1141,14 +1141,14 @@ This section breaks each phase from §5 into concrete sub-tasks, the files they 
 - ☑ B.18 Schema unit tests — 40 tests covering validators and cross-field checks for all Group 1 schemas. **Done** — `tests/unit/agent/ml_model_proposal_agent/test_phase_b_schemas.py`, commit `0c485bd`.
 - ☑ B.6a-seed `agent/schemas/vocab_seed.json` — 21 canonical entries: 11 features + 10 capabilities drawn from all 6 built-in models. All `related_to` fields are **empty** — feature→capability connections are discovered through experimentation via `ProposedVocabLink`. Added `vocab_seed: List[VocabEntry]` to `ProposalInput` (vocabulary flows as protocol data, not file reads). Added `ProposedVocabLink` schema and `proposed_vocab_links` field to `DiscoveryMemo`.
 
-#### Group 2b — Centrifugal-force schema additions (NEXT)
+#### Group 2b — Centrifugal-force schema additions (DONE)
 
 Schema and validator additions that prevent the system from collapsing into conservative local optima. See "Centrifugal forces" section in §2A for the full analysis.
 
-- ☐ B.24 Add `minimum_boldness` validator to `FalsifiablePrediction` (default 0.05). Predictions with `boldness < minimum_boldness` are rejected. Add computed `boldness` property. *(Concern #2: Predictive Risk Aversion)*
-- ☐ B.25 Add `max_length=5` to `DiscoveryMemo.citation_sources`. Add validator: each `cite_id` must appear verbatim in `causal_hypothesis` or `proposed_change` text. *(Concern #5: Citation Pollution)*
-- ☐ B.26 Add `memo_consistency_notes: List[str] = []` to `ProposalOutput`. Stage 3 flags inconsistencies between the DiscoveryMemo and what's physically implementable. *(Concern #3: Error Propagation)*
-- ☐ B.27 Unit tests for the new validators (boldness, citation inclusion, consistency notes).
+- ☑ B.24 Computed `boldness` property on `FalsifiablePrediction`. The pipeline runner (B.11) checks `boldness >= policy.minimum_boldness` at runtime. **Done** — `agent/schemas/proposal.py`.
+- ☑ B.25 `max_length=5` on `DiscoveryMemo.citation_sources`. Citation inclusion check (each cite_id in `causal_hypothesis` or `proposed_change` text) deferred to pipeline runner (B.11). **Done** — same file.
+- ☑ B.26 `memo_consistency_notes: List[str] = []` on `ProposalOutput`. Stage 3 flags inconsistencies. **Done** — same file.
+- ☑ B.27 Unit tests: 7 new tests (boldness computation, timid/bold/zero, citation max, consistency notes). 62 total in Phase B test file. **Done**.
 
 #### Group 3 — Prompt templates (as separate .md files)
 
