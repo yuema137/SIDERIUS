@@ -512,6 +512,9 @@ def run_workflow(
                 )
                 if human_advice_validate is not None:
                     valid_input.human_advice = human_advice_validate
+                # Pass inherited_components from the proposal for check #8
+                if hasattr(proposal, 'inherited_components') and proposal.inherited_components:
+                    valid_input.inherited_components = proposal.inherited_components
 
                 validation = MLCodeValidatorAgent(
                     **valid_llm,
