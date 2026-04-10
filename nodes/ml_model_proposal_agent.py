@@ -322,7 +322,10 @@ class MLModelProposalAgent:
     """
 
     def __init__(self, provider: str = "gemini", model_id: str = "gemini-3.1-flash-lite-preview",
-                 max_retries: int | None = None, bridge_factory=None):
+                 max_retries: int | None = None, bridge_factory=None, **kwargs):
+        # **kwargs absorbs per-stage kwargs from ProposalLLMConfig flattening
+        # (comparison_provider, reasoning_model_id, etc.) — these are for
+        # future per-stage bridge routing, currently unused.
         self._bridge_factory = bridge_factory or LLMBridge
         self.bridge = self._bridge_factory(
             provider=provider, model_id=model_id, max_retries=max_retries,
