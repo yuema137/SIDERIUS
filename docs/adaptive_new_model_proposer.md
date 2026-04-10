@@ -400,6 +400,60 @@ Four structural teeth:
 
 None of these requires a new node, a new agent, or a sidecar file. They are all schema constraints + prompt constraints + a configurable list of LLM calls.
 
+#### Centrifugal forces — preventing collapse into conservative local optima
+
+The four structural teeth above are **centripetal** — they pull the agent toward rigor, consistency, and evidence-based reasoning. But unchecked, they create five failure modes where the agent games the system by being *too* conservative. The following architectural mitigations counterbalance each one.
+
+**1. Innovation Stagnation (Centripetal Drift)**
+
+*Risk*: The vocabulary system creates a safe harbor — reusing canonical terms guarantees validation passes, so the LLM never proposes new features or capabilities.
+
+*Mitigation (Architecture + Advice)*:
+- The validator treats canonical and candidate vocab entries **equally**. Candidates are never penalized; canonicals are never rewarded. Both are valid for `inherited_components`.
+- The interpretation agent computes a **vocabulary diversity metric**: `n_candidate_entries_proposed / n_total_entries_referenced` across recent rounds. If this drops below a threshold (e.g., 0.1), the exploration mode resolver signals "vocabulary stagnation" and switches to `explore` mode.
+- The comparison stage prompt in explore mode explicitly asks: "Are there patterns in these models that suggest a NEW feature or capability not yet in the vocabulary?"
+- *Phase*: B (exploration resolver) + C (diversity metric in interpretation).
+
+**2. Predictive Risk Aversion (Metric Gaming)**
+
+*Risk*: The `FalsifiablePrediction` grading (confirmed/refuted) incentivizes trivial predictions (e.g., "score improves by 0.001") to maximize hit rate.
+
+*Mitigation (Architecture)*:
+- `FalsifiablePrediction` gains a computed `boldness` property: `abs(predicted - current) / max(abs(current), 1e-6)`. The reflector tracks both `prediction_outcome` and `information_gain = boldness × (1 if confirmed else 0)`.
+- The interpretation agent reports **average information gain** alongside hit rate. Bold confirmed predictions score higher than timid ones.
+- Schema validator: `minimum_boldness` threshold (default 0.05). Predictions below this are rejected as "too conservative to be informative."
+- *Phase*: B (boldness validator on schema) + E (information gain in reflector).
+
+**3. Error Propagation in Serial Reasoning**
+
+*Risk*: The 3-stage pipeline tethers Stage 3 to Stage 1's output. If Stage 1 hallucinates a SOTA mechanism, Stage 3 implements the hallucination.
+
+*Mitigation (Mostly Advice, small Architecture)*:
+- The experiment itself is the primary error-correction: hallucinated mechanisms lead to refuted `FalsifiablePrediction`s, which the next round's comparison stage can see.
+- `ProposalOutput` gains `memo_consistency_notes: List[str] = []`. The proposing stage (Stage 3) lists inconsistencies it noticed between the DiscoveryMemo and what's physically implementable. The validator surfaces these as warnings.
+- This is a **flag**, not a veto. A cross-verification loop would add LLM quota cost and create recursion problems (who vetos the veto?).
+- *Phase*: B (add field to ProposalOutput).
+
+**4. Promotion Spuriousness**
+
+*Risk*: A vocabulary entry is promoted because it co-occurred with high scores, not because it caused them. The promotion rule (≥3 runs + beating SOTA) is correlational.
+
+*Mitigation (Architecture)*:
+- The interpretation agent computes a **component delta** for each entry: `avg_score_with - avg_score_without`. This compares scores of runs that used the component vs runs that didn't.
+- Updated promotion rule adds two requirements: `delta > 0` (positive contribution when present vs absent) AND low confounding (≤2 other components changed between with/without runs).
+- The comparison stage prompt in exploit mode asks for **ablation suggestions**: "Which component should we remove from the SOTA to test whether it's actually contributing?" Ablation evidence is stronger than correlational evidence.
+- *Phase*: C (component delta in interpretation, ablation-aware promotion) + B (ablation prompt in comparison stage).
+
+**5. Citation Pollution (Over-citation)**
+
+*Risk*: The LLM cites every `ExpertContextItem` to appear rigorous, diluting the signal of which upstream findings actually mattered.
+
+*Mitigation (Architecture + Advice)*:
+- `DiscoveryMemo.citation_sources` gains `max_length=5` — hard cap on citations per memo.
+- Validator check: each `cite_id` in `citation_sources` must appear verbatim in either `causal_hypothesis` or `proposed_change` text. If you cite it, you must reference it in your reasoning.
+- Prompt: "Cite ONLY items that materially changed your hypothesis. If removing a citation would not change your proposal, do not include it."
+- *Phase*: B (validator + prompt).
+
 ---
 
 ### Composability principle (applies to §2A pipeline + §2B vocabulary + future extensions)
@@ -974,14 +1028,23 @@ This section breaks each phase from §5 into concrete sub-tasks, the files they 
 - ☑ B.18 Schema unit tests — 40 tests covering validators and cross-field checks for all Group 1 schemas. **Done** — `tests/unit/agent/ml_model_proposal_agent/test_phase_b_schemas.py`, commit `0c485bd`.
 - ☑ B.6a-seed `agent/schemas/vocab_seed.json` — 21 canonical entries: 11 features + 10 capabilities drawn from all 6 built-in models. All `related_to` fields are **empty** — feature→capability connections are discovered through experimentation via `ProposedVocabLink`. Added `vocab_seed: List[VocabEntry]` to `ProposalInput` (vocabulary flows as protocol data, not file reads). Added `ProposedVocabLink` schema and `proposed_vocab_links` field to `DiscoveryMemo`.
 
+#### Group 2b — Centrifugal-force schema additions (NEXT)
+
+Schema and validator additions that prevent the system from collapsing into conservative local optima. See "Centrifugal forces" section in §2A for the full analysis.
+
+- ☐ B.24 Add `minimum_boldness` validator to `FalsifiablePrediction` (default 0.05). Predictions with `boldness < minimum_boldness` are rejected. Add computed `boldness` property. *(Concern #2: Predictive Risk Aversion)*
+- ☐ B.25 Add `max_length=5` to `DiscoveryMemo.citation_sources`. Add validator: each `cite_id` must appear verbatim in `causal_hypothesis` or `proposed_change` text. *(Concern #5: Citation Pollution)*
+- ☐ B.26 Add `memo_consistency_notes: List[str] = []` to `ProposalOutput`. Stage 3 flags inconsistencies between the DiscoveryMemo and what's physically implementable. *(Concern #3: Error Propagation)*
+- ☐ B.27 Unit tests for the new validators (boldness, citation inclusion, consistency notes).
+
 #### Group 3 — Prompt templates (as separate .md files)
 
 Prompt templates live in `agent/prompts/proposal/` as `.md` files, NOT in `prompts.py`. The pipeline runner loads them at runtime. This keeps complex multi-paragraph prompts readable and version-controlled separately.
 
-- ☐ B.14 `agent/prompts/proposal/comparison_stage.md` — COMPARATIVE_ANALYSIS prompt. Instructs the LLM to produce `List[ModelComparison]`. Includes vocabulary-contributor sub-task. Two variants: exploration mode (honest uncertainty, diagnostic) and exploitation mode (leverage confirmed patterns).
-- ☐ B.15 `agent/prompts/proposal/causal_reasoning_stage.md` — CAUSAL_REASONING prompt. Four structural teeth: comparison-backed, falsifiable, devil's advocate, architectural tethering. Two mode variants.
-- ☐ B.16 `agent/prompts/proposal/proposing_stage.md` — ARCHITECTURE_DESIGN prompt. Requires references to memo's `proposed_change` and `inherited_components`. Two mode variants.
-- ☐ B.16a `_resolve_exploration_mode(records, pipeline)` — auto-detection logic (explore vs exploit based on evidence depth).
+- ☐ B.14 `agent/prompts/proposal/comparison_stage.md` — COMPARATIVE_ANALYSIS prompt. Instructs the LLM to produce `List[ModelComparison]` + `List[ProposedVocabLink]` hypotheses. Includes vocabulary-contributor sub-task and **ablation suggestion** sub-task ("which component should we remove to test its isolated contribution?"). Two variants: exploration mode (honest uncertainty, diagnostic, demand vocabulary growth) and exploitation mode (leverage confirmed links, reference prior ablation evidence).
+- ☐ B.15 `agent/prompts/proposal/causal_reasoning_stage.md` — CAUSAL_REASONING prompt. Four structural teeth: comparison-backed, falsifiable, devil's advocate, architectural tethering. **Bold prediction requirement**: "your prediction must have boldness ≥ 0.05 — timid predictions are rejected." Two mode variants.
+- ☐ B.16 `agent/prompts/proposal/proposing_stage.md` — ARCHITECTURE_DESIGN prompt. Requires references to memo's `proposed_change` and `inherited_components`. Must populate `memo_consistency_notes` if any physical impossibilities are noticed. **Citation discipline**: "cite ONLY items that materially changed your hypothesis." Two mode variants.
+- ☐ B.16a `_resolve_exploration_mode(records, pipeline)` — auto-detection logic. Checks evidence depth (agent-proposed records, distinct model types) AND **vocabulary diversity** (candidate/canonical ratio — stagnation triggers explore mode). *(Concern #1: Innovation Stagnation)*
 - ☐ B.17 Labeled-block rendering of `expert_context` items in all three stage prompts.
 
 #### Group 4 — Pipeline runner + model selection + DI
@@ -1008,11 +1071,17 @@ These are important for long-term robustness but not blocking for the initial pi
 
 ---
 
-### Phase C — `PRIMITIVE_VOCAB` + lineage validator + open-vocabulary promotion
+### Phase C — Vocabulary promotion + lineage validator + centrifugal metrics
 
-**Goal**: claimed inheritance becomes verifiable; the system grows its primitive vocabulary by structural promotion across runs.
+**Goal**: claimed inheritance becomes verifiable; the system grows its vocabulary by structural promotion across runs; confirmed `ProposedVocabLink` entries populate `VocabEntry.related_to`; centrifugal metrics prevent conservative collapse.
 
-**Depends on**: Phase B (the memo is where `inherited_components` lives).
+**Depends on**: Phase B (the memo is where `inherited_components` and `proposed_vocab_links` live).
+
+**Centrifugal-force items from Phase B analysis (deferred to Phase C)**:
+- Component delta scoring: `avg_score_with - avg_score_without` for each vocabulary entry. Promotion requires `delta > 0` AND low confounding. *(Concern #4: Promotion Spuriousness)*
+- Vocabulary diversity metric: `n_candidates / n_total` tracked by interpretation agent, surfaced to proposal agent. Stagnation triggers explore mode. *(Concern #1: Innovation Stagnation)*
+- `ProposedVocabLink` aggregation: links confirmed in ≥2 runs get promoted to `VocabEntry.related_to`. *(Hypothesis-test-verify loop from §2B)*
+- Information gain metric: `boldness × (1 if confirmed else 0)` tracked alongside hit rate. *(Concern #2: Predictive Risk Aversion — Phase E primary, Phase C aggregation)*
 
 **PR size**: medium.
 
