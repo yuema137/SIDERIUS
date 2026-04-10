@@ -1213,9 +1213,9 @@ Already done (in Phase B):
 **Sub-tasks** (ordered by priority):
 
 **Validator — verify claimed inheritance in code:**
-- ☐ C.2 Implement `check_inherited_components(plugin_source, claimed_components, vocab_seed)`. For each claimed component, look up its `pattern` in the vocab seed. If a pattern exists, regex-match against the plugin source. Returns list of unsubstantiated claims (empty = pass). Unknown vocab entries (no pattern) → soft skip with note.
-- ☐ C.3 Wire into `ml_code_validator_agent`'s existing check sequence as check #8. Only active when `inherited_components` is non-empty (backward compat).
-- ☐ C.10 Unit tests: (a) claim valid component with matching pattern → pass; (b) claim component not in source → fail; (c) unknown vocab entry → soft skip; (d) empty inherited_components → check skipped.
+- ☑ C.2 `_check_inherited_components()` — regex-matches each claimed component's pattern from the vocab seed against plugin source. Unknown entries soft-skipped. Case-insensitive. **Done** — `nodes/ml_code_validator_agent.py`.
+- ☑ C.3 Wired as check #8 in the validator's `run()`. Only active when `inherited_components` is non-empty. Also added `inherited_components` to `ProposalOutput` (copied from DiscoveryMemo) and `ValidatorInput`. **Done**.
+- ☑ C.10 9 unit tests: valid pass, missing fail, unknown skip, capability skip, empty list, mixed, no vocab, case insensitive, simple source fails. **Done** — `tests/unit/agent/ml_code_validator_agent/test_inheritance_check.py`.
 
 **Pipeline hardening:**
 - ☐ B.22 Memo validation failure → retry in the proposal agent. Deviation notes handling when Stage 3 flags inconsistencies.
