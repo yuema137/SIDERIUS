@@ -1,4 +1,4 @@
-# Machine-specific data paths — TEMPLATE.
+do# Machine-specific data paths — TEMPLATE.
 #
 # This file is the tracked template. The real config lives in
 # `tidmad_data_config.yaml` (gitignored), which each developer creates

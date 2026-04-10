@@ -38,3 +38,5 @@ docs/memories/
 # clobber per-machine paths).
 tidmad_data_config.yaml
 dashboard_config.yaml
+siderius_workspace/
+fm-agent-repo/
