@@ -82,7 +82,7 @@ class DiscoveryMemo(BaseModel):
 
     # --- Falsifiable prediction (the peer-review teeth) ---
     falsifiable_prediction: FalsifiablePrediction = Field(
-        description="A concrete numerical prediction tied to regime_scores. "
+        description="A concrete numerical prediction tied to a measurable metric. "
                     "The next round's reflector checks this prediction and "
                     "labels the hypothesis 'confirmed' / 'refuted' / 'partial'."
     )
@@ -114,8 +114,13 @@ class DiscoveryMemo(BaseModel):
 
 
 class FalsifiablePrediction(BaseModel):
-    regime: Literal["low_freq_kHz", "mid_freq_10kHz", "high_freq_MHz", "global"]
-    current_value: float          # from SOTA's regime_scores
+    metric: str = Field(
+        description="What to measure. Free-text, guided by expert advice. "
+                    "Examples: 'mean(file_vector[0:5])', 'denoising_score', "
+                    "'file_vector[17]'. The reflector evaluates the prediction "
+                    "by computing the metric from the actual results."
+    )
+    current_value: float          # from SOTA's actual results
     predicted_value: float        # what the new model should achieve
     threshold_for_refutation: float  # below this → hypothesis refuted
     rationale: str                # why this specific number
@@ -465,19 +470,22 @@ The user's research goal is scientific attribution. Citation is the audit trail:
 
 3. **Closing the falsification loop**. When the §2A `falsifiable_prediction` is refuted in a later round, the reflector can also flag the cited sources: "this prediction was refuted, and it cited `data_analysis_agent#psd_50hz_peak` — that finding may be misleading." This is the only mechanism that lets SIDERIUS tell apart "the LLM was wrong" from "the upstream evidence was wrong".
 
-#### Phase-A regime_scores as the empirical extension point
+#### Empirical extension point — `file_vector` + `ExpertContextItem` (replaces the reverted `regime_scores`)
 
-`regime_scores` (Phase A in §5) is per-experiment, per-frequency-band performance breakdown. It is **orthogonal** to `expert_context` (which is per-iteration, dataset-global advice) — but the two are deliberately structured to compose.
+> **Phase A was reverted** — see §Phase A in the implementation checklist (§5). The `regime_scores` field no longer exists. The extension point for the Data Analysis Agent is now `ExpertContextItem`, not a hardcoded field on `ExperimentRecord`.
 
-`regime_scores` is `Dict[str, float]`, not a fixed schema. The current seed regimes are `{low_freq_kHz, mid_freq_10kHz, high_freq_MHz, global}`, mirroring the per-file frequency band map. When the Data Analysis Agent comes online, it can:
+The raw 20-element `file_vector` on `ExperimentRecord` is the per-experiment empirical data. It is **orthogonal** to `expert_context` (which is per-iteration, dataset-global advice) — the two compose naturally:
 
-- **Propose new regime keys** — e.g. `harmonic_50hz`, `mains_pickup`, `psd_drift_window` — by emitting an `ExpertContextItem` whose content is "I recommend adding the regime `harmonic_50hz` defined as files X, Y, Z."
-- **Recompute regime_scores under the new definitions** retroactively from existing records (regime aggregation is deterministic Python on `file_vector`, so re-aggregation is cheap).
-- **Cite the new regime in its findings** — "the model's `harmonic_50hz` regime score has been below 0.4 for the last 5 rounds; this is the dominant remaining error."
+- `file_vector` = "here is what happened" (per-experiment raw scores, no interpretation)
+- `ExpertContextItem` = "here is what this means" (expert-provided frequency mapping, regime definitions, anomaly flags)
 
-Regime definitions themselves should be canonicalized via the same two-tier vocabulary mechanism we set up for `PRIMITIVE_VOCAB` in §2B (seed + open candidates + structural promotion). This is a pleasant symmetry: the same machinery handles both architectural primitives and empirical regimes. We call this out in §6 as a future consolidation rather than a Phase-A requirement, because Phase A only needs the `Dict[str, float]` shape, not the full vocabulary mechanism.
+When the Data Analysis Agent comes online, it provides interpretation of `file_vector` via `ExpertContextItem`:
 
-**Phase A is therefore extensible by construction**: the schema is a dict, the aggregation is deterministic Python over per-file scores, and any new regime the Data Analysis Agent later proposes can be added without a schema migration. We do not need to design Data Analysis Agent integration in Phase A — we only need to NOT box ourselves out of it, which the dict shape ensures.
+- **Propose named regimes** — e.g. "files 0-4 are the low-frequency kHz band (1.1–9.0 kHz), files 11-19 are the MHz band" — as an `ExpertContextItem` with `kind="empirical"`. The proposal agent reads the raw `file_vector` AND the expert's regime definition, and reasons across both.
+- **Flag anomalies** — e.g. "file 3 has a persistent 50 Hz artifact that makes its score unreliable" — as another `ExpertContextItem`. The proposal agent's `DiscoveryMemo` can then cite this finding.
+- **Compute derived metrics** — e.g. "mean score for files 0-4 is 0.15, which is the worst regime" — as structured content inside the `ExpertContextItem`. This is the SAME information that `regime_scores` used to provide, but now it lives in the expert context where it belongs, not in the schema.
+
+No schema migration is needed when the Data Analysis Agent adds new regime definitions. The `file_vector` stays fixed; the interpretation is layered on top via the existing `ExpertContextItem` interface.
 
 ---
 
@@ -509,7 +517,7 @@ These existing pieces are doing their job and need no change:
 
 | Phase | Change | Effort | Unlocks |
 |---|---|---|---|
-| **A** | Add `regime_scores: Dict[str, float]` (deterministic aggregation of `file_vector`) to `ExperimentRecord`. Reflector and proposal prompts read it. **Crucially, the dict shape is the extension point for the future Data Analysis Agent (§2D): new regime keys can be added without a schema migration.** Phase A only commits to the shape, not the full vocabulary mechanism. | small | The LLM gets a structured "gradient" instead of raw arrays. Foundation for §2A's `FalsifiablePrediction` AND for §2D's empirical extensibility. |
+| **A** | ~~`regime_scores`~~ **REVERTED** — see §Phase A below. No code changes remain from Phase A. The 20-element `file_vector` on `ExperimentRecord` stays as the raw source of truth. Any frequency-band interpretation belongs in expert advice, not in the schema. | — | — |
 | **B** | Add `DiscoveryMemo` schema and the reasoning sub-call inside `ml_model_proposal_agent`. Architecture sub-call is given the validated memo. Falsifiable prediction is recorded but not yet checked. Add `ExpertContextItem` (§2D) and the protocol-layer wrapping of legacy `human_advice` strings. The proposal agent's reasoning prompt iterates over `expert_context` instead of reading `human_advice`. | medium | Scientific peer review is now structurally enforced. Each proposal commits to a causal claim. **The polymorphic input slot for future upstream agents is in place.** |
 | **C** | Add `InheritedComponent` schema, `PRIMITIVE_VOCAB`, and the `check_inherited_components` validator check. Add `component_leaderboard` to `InterpretationOutput`. | medium | Lineage tracking is end-to-end. Empirical inheritance becomes the dominant signal in the next round's prompt. |
 | **D** | Add `ResearchDirective` schema and the three guardrail layers in §2C. | medium | Guided mode actually constrains the search. |
@@ -519,7 +527,7 @@ Each phase has its own tests. Each is independently revertable. Each is small en
 
 ## 6. Open questions
 
-1. **Falsifiable prediction granularity**. Predicting one regime score is the minimum. Should we also force a prediction on `global_score`? Risk: redundancy. Benefit: catches proposals that improve one regime at the cost of overall performance.
+1. **Falsifiable prediction granularity**. ~~Predicting one regime score is the minimum.~~ (Phase A regime_scores reverted — see §Phase A above.) The `metric` field is now free-text, so the LLM can predict on any measurable quantity: `denoising_score`, `mean(file_vector[0:5])`, a specific `file_vector[i]`, etc. Open question: should we constrain the metric to a known set of patterns (easier to evaluate programmatically) or leave it fully free-text (more flexible but harder for the reflector to parse)? **Recommendation**: start free-text with a few documented examples in the prompt; add pattern constraints only if the reflector can't reliably evaluate free-form metrics.
 2. **PRIMITIVE_VOCAB seeding**. We need an initial ~20-entry list for the canonical tier. Should it be hand-curated by the human, mined from the existing `description.md` files, or extracted by a one-off LLM pass over the registry? Hand-curated is most reliable but slowest. **Recommendation**: hand-curate the first ~10 from WaveNet + UNet + FNO descriptions to set the quality bar, then let the open-vocabulary promotion mechanism grow it organically.
 
 2a. **Promotion thresholds**. The default rule is "≥3 distinct runs AND at least one above SOTA AND semantic dedup AND pattern present". The numbers are guesses. After the first chain run with the vocabulary mechanism live, we should look at the candidate distribution and tune. Open question: should the SOTA threshold be "above the current iteration's best" (strict, raises the bar over time) or "above the seed-run baseline" (loose, freezes the bar)?
@@ -537,7 +545,7 @@ Each phase has its own tests. Each is independently revertable. Each is small en
    - How does it produce `cite_id` values that are stable across re-runs of the same analysis? Hash of the finding content? Timestamped slug?
    - How do we evaluate whether its findings are actually useful — citation hit rate (per §2D) is the right metric, but Phase B doesn't yet collect it.
 
-7. **Regime vocabulary consolidation**. `regime_scores` (Phase A) is a `Dict[str, float]` whose keys are currently hand-set. The natural symmetry with `PRIMITIVE_VOCAB` (§2B) suggests using the same two-tier seed-plus-promotion mechanism for regime keys: a hand-curated seed (`low_freq_kHz`, `mid_freq_10kHz`, `high_freq_MHz`, `global`) plus open candidates that the Data Analysis Agent can introduce and the interpretation agent can promote. Defer until Phase A's seed regimes have been stress-tested by real chain runs — premature consolidation would just be the V1 mistake under a different name.
+7. ~~**Regime vocabulary consolidation**~~. **Withdrawn** — Phase A reverted. Regime definitions now live in expert advice (`ExpertContextItem`), not in the schema. There is no regime vocabulary to consolidate. If the Data Analysis Agent eventually proposes named regimes, they flow through the same `ExpertContextItem` interface as all other expert context — no separate vocabulary mechanism needed.
 
 ---
 
@@ -554,43 +562,56 @@ This section breaks each phase from §5 into concrete sub-tasks, the files they 
 
 ---
 
-### Phase A — `regime_scores` foundation
+### Phase A — ~~`regime_scores`~~ REVERTED
 
-**Goal**: every experiment record carries a deterministic per-regime breakdown of `file_vector`, so the LLM gets a structured "gradient" instead of a raw 20-element array. Establishes the dict shape that §2D will later extend.
+**Status**: ❌ **implemented then reverted** (commit `c836904` → revert `392ef6b` / `06b70a0`).
 
-**Depends on**: nothing. This is the first phase.
+**What was built**: a `regime_scores: Dict[str, float]` field on `ExperimentRecord` with hardcoded frequency-band definitions (`low_freq_kHz` = files 0-4, `mid_freq_10kHz` = files 5-10, `high_freq_MHz` = files 11-19, `global` = all). A new `execute_tools/regime_aggregator.py` module computed these from `file_vector`. Planner and reflector prompts were extended with regime-aware sections.
 
-**PR size**: small.
+**Why it was reverted**: the low/mid/high frequency band division is **domain knowledge**, not infrastructure. Hardcoding it into `REGIME_DEFINITIONS` and baking it into `ExperimentRecord` violated the V2 design principle: domain knowledge should come from external expert advice (the `tuner_advice/*.json` files, or the future Data Analysis Agent via `ExpertContextItem` in §2D), not from the codebase.
 
-**Files**:
-- `agent/schemas/hyperparam_tuning.py` — add `regime_scores` field to `ExperimentRecord` (and `BestExperimentRecord` if it exists).
-- `execute_tools/scoring_utils.py` (or a new `regime_aggregator.py`) — add the deterministic aggregation function.
-- `nodes/ml_hyperparameter_tune_agent.py` — call the aggregator after scoring, write the result into the record before validation.
-- `agent/prompts.py` — extend the planner and reflector prompts to render `regime_scores` cleanly when present.
-- `tests/unit/agent/tune_ml_hyperparam_agent/test_regime_aggregation.py` (new) — unit tests for the aggregator.
-- `tests/unit/agent/tune_ml_hyperparam_agent/test_hyperparam_schemas.py` — extend with `regime_scores` round-trip tests.
+**What stays**:
+- `file_vector: Optional[List[Optional[float]]]` on `ExperimentRecord` — the raw 20-element per-file score array. This is the source of truth. The LLM already sees it in the prompt, and it already contains all per-frequency-band information.
+- The existing "FILE VECTOR AND SCORING" prompt section — explains what `file_vector` is without imposing any frequency-band interpretation.
+- `tuner_advice/gated_fno_freq_band_aware_v1.json` — the file-to-frequency mapping as expert advice. This is exactly where domain knowledge belongs: external, editable, per-experiment, not baked into the schema.
 
-**Sub-tasks**:
-- ☐ A.1 Define seed regime keys: `{"low_freq_kHz", "mid_freq_10kHz", "high_freq_MHz", "global"}`. The mapping from `file_index` to regime is documented inline (file 0–4 → low_freq_kHz, file 5–10 → mid_freq_10kHz, file 11–19 → high_freq_MHz, all files → global). Mirrors `tuner_advice/gated_fno_freq_band_aware_v1.json`.
-- ☐ A.2 Implement `aggregate_regime_scores(file_vector: List[Optional[float]]) -> Dict[str, float]`. Skips `None` entries. Returns `0.0` (not `None`) for regimes with all-None inputs so downstream code never has to None-check.
-- ☐ A.3 Add `regime_scores: Dict[str, float] = Field(default_factory=dict)` to `ExperimentRecord`. Default-empty for backward compatibility with existing records.
-- ☐ A.4 Wire the aggregator into the tuner's scoring path so every successful round populates `regime_scores`. Skipped/failed rounds default to `{}`.
-- ☐ A.5 Update the planner prompt template to render `regime_scores` as a small markdown table when non-empty.
-- ☐ A.6 Update the reflector prompt template the same way.
-- ☐ A.7 Unit tests: aggregator on (a) all-valid file_vector, (b) all-None, (c) mixed, (d) empty list. Schema round-trip with and without the field.
-- ☐ A.8 Smoke test: run a 1-round tuner on lilab and grep the resulting record JSON for `regime_scores`. Confirm the four seed keys all appear.
+**The extension point for the Data Analysis Agent** is now `ExpertContextItem` (§2D), NOT a hardcoded field on `ExperimentRecord`. When the Data Analysis Agent wants to provide aggregated regime scores, it emits them as an `ExpertContextItem` with `kind="empirical"` — the same interface every other upstream agent uses. No schema migration needed.
 
-**Verify**:
-- `uv run pytest tests/unit/agent/tune_ml_hyperparam_agent/ -q` — all tests pass including the new ones.
-- `uv run python nodes/ml_hyperparameter_tune_agent.py --max_rounds 1 --force_model punet --is_trial --run_name regime_smoke` — completes; the record contains a non-empty `regime_scores` dict.
+**Lesson learned**: infrastructure provides containers (`file_vector`, `ExpertContextItem`). Domain knowledge fills those containers (expert advice files, agent-generated findings). Don't mix the two.
 
 ---
 
 ### Phase B — `DiscoveryMemo` + `ExpertContextItem` (the polymorphic input slot)
 
+> **⚠️ NOTE FOR PHASE B DEVELOPER — `FalsifiablePrediction` redesign needed**
+>
+> The original `FalsifiablePrediction` schema (§2A) referenced hardcoded regime names:
+> ```python
+> regime: Literal["low_freq_kHz", "mid_freq_10kHz", "high_freq_MHz", "global"]
+> ```
+> These no longer exist (Phase A reverted). The replacement should reference **`file_vector` indices or free-text metric descriptions** instead:
+>
+> ```python
+> class FalsifiablePrediction(BaseModel):
+>     metric: str = Field(
+>         description="What to measure. Free-text, guided by expert advice. "
+>                     "Examples: 'mean(file_vector[0:5])', 'denoising_score', "
+>                     "'file_vector[17]'. The reflector evaluates it by parsing "
+>                     "the metric string or matching against known patterns."
+>     )
+>     current_value: float
+>     predicted_value: float
+>     threshold_for_refutation: float
+>     rationale: str
+> ```
+>
+> The LLM writes the metric description itself, guided by expert advice that explains which files cover which frequency bands (e.g. `tuner_advice/gated_fno_freq_band_aware_v1.json`). The reflector evaluates it. No hardcoded regime names in the schema.
+>
+> If the Data Analysis Agent later provides named regimes via `ExpertContextItem`, the `metric` field can reference those names — the schema stays the same, only the expert context changes. This is the right design for extensibility without schema migration.
+
 **Goal**: every proposal commits to a structured causal hypothesis with a falsifiable prediction; the proposal agent's input slot becomes polymorphic so future upstream agents can plug in without schema invention.
 
-**Depends on**: Phase A (the falsifiable prediction needs `regime_scores` to refer to).
+**Depends on**: nothing (Phase A was reverted). The `FalsifiablePrediction` now references free-text metrics derived from `file_vector` and expert advice, not from `regime_scores`.
 
 **PR size**: medium.
 
@@ -622,7 +643,7 @@ This section breaks each phase from §5 into concrete sub-tasks, the files they 
 **Verify**:
 - All unit tests pass: `uv run pytest tests/unit/agent/proposal_agent/ -q`.
 - Tier-1 integration: `uv run pytest tests/integration/nodes/test_ml_model_proposal_agent.py -m real_run -v`.
-- Manual: inspect a generated `DiscoveryMemo` JSON and confirm it cites `regime_scores` fields by name in `causal_hypothesis`.
+- Manual: inspect a generated `DiscoveryMemo` JSON and confirm it cites specific `file_vector` indices or expert-defined metrics in `causal_hypothesis`.
 
 ---
 
@@ -703,13 +724,13 @@ This section breaks each phase from §5 into concrete sub-tasks, the files they 
 
 **Goal**: every prediction made in `DiscoveryMemo.falsifiable_prediction` gets checked against actual results; the agent's hit rate becomes a measurable, monitorable quantity.
 
-**Depends on**: Phase A (regime_scores), Phase B (FalsifiablePrediction lives in DiscoveryMemo).
+**Depends on**: Phase B (FalsifiablePrediction lives in DiscoveryMemo). Phase A dependency removed (reverted).
 
 **PR size**: small.
 
 **Files**:
 - `agent/schemas/hyperparam_tuning.py` — add `prediction_outcome: Optional[Literal["confirmed", "refuted", "partial"]]` to `ExperimentRecord`.
-- `nodes/ml_hyperparameter_tune_agent.py` — in the reflector path, look up the previous round's `DiscoveryMemo.falsifiable_prediction` (if any), compare to the current round's `regime_scores`, label the outcome, write into the record.
+- `nodes/ml_hyperparameter_tune_agent.py` — in the reflector path, look up the previous round's `DiscoveryMemo.falsifiable_prediction` (if any), compute the predicted metric from the current round's `file_vector` and `denoising_score`, label the outcome, write into the record.
 - `nodes/result_interpretation_agent.py` — aggregate the hit rate across all records into `InterpretationOutput.scientific_accuracy: Dict[str, float]` (e.g. `{"confirmed": 0.38, "partial": 0.22, "refuted": 0.40}`).
 - `tests/unit/agent/tune_ml_hyperparam_agent/test_prediction_retrospective.py` (new).
 
