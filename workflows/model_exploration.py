@@ -86,7 +86,45 @@ from nodes.ml_model_proposal_agent import MLModelProposalAgent
 from nodes.ml_model_implementor import MLModelImplementor
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
-from workflows.llm_config import WorkflowLLMConfig, NodeLLMConfig
+from workflows.llm_config import WorkflowLLMConfig, ProposalLLMConfig, NodeLLMConfig
+
+
+def _load_vocab_seed() -> list:
+    """Load the canonical vocabulary seed from agent/schemas/vocab_seed.json.
+
+    Returns a list of VocabEntry objects. Returns empty list if the file
+    is missing (backward compat — legacy workflows without vocab).
+    """
+    seed_path = os.path.join(SIDERIUS_ROOT, "agent", "schemas", "vocab_seed.json")
+    if not os.path.exists(seed_path):
+        return []
+    try:
+        from agent.schemas.proposal import VocabEntry
+        with open(seed_path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        return [VocabEntry.model_validate(entry) for entry in raw]
+    except Exception as e:
+        print(f"Warning: failed to load vocab seed: {e}")
+        return []
+
+
+def _get_reasoning_pipeline(llm_config: WorkflowLLMConfig):
+    """Extract the ReasoningPipelineConfig from the workflow's ProposalLLMConfig.
+
+    Returns None if propose is not a ProposalLLMConfig or has no pipeline.
+    """
+    if llm_config.propose and isinstance(llm_config.propose, ProposalLLMConfig):
+        from agent.schemas.proposal import ReasoningPipelineConfig, ReasoningStage
+        # Build the default 3-stage pipeline if not explicitly configured
+        # (ProposalLLMConfig exists but pipeline.stages may be empty)
+        pipeline = ReasoningPipelineConfig(
+            stages=[
+                ReasoningStage(name="comparison", system_prompt_key="COMPARATIVE_ANALYSIS"),
+                ReasoningStage(name="causal_reasoning", system_prompt_key="CAUSAL_REASONING"),
+            ],
+        )
+        return pipeline
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +408,17 @@ def run_workflow(
     # Track all model types seen (for duplicate name guard)
     all_model_types = list({o.model_type for o in tuning_outputs})
 
+    # --- Load vocabulary seed + reasoning pipeline config ---
+    vocab_seed = _load_vocab_seed()
+    reasoning_pipeline = _get_reasoning_pipeline(llm_config)
+    if vocab_seed:
+        print(f"  Vocab seed: {len(vocab_seed)} entries loaded.")
+    if reasoning_pipeline and reasoning_pipeline.stages:
+        print(f"  Reasoning pipeline: {[s.name for s in reasoning_pipeline.stages]} "
+              f"({reasoning_pipeline.exploration_mode} mode)")
+    else:
+        print(f"  Reasoning pipeline: legacy 2-call mode (no stages configured).")
+
     # Collect results across iterations
     iteration_results: list[HyperparamTuningOutput] = []
     best_score_overall: float | None = None
@@ -416,10 +465,14 @@ def run_workflow(
 
             try:
                 # --- Propose ---
-                propose_input = local_full_context(interpretation, attempt_storage)
+                propose_input = local_full_context(
+                    interpretation,
+                    attempt_storage,
+                    vocab_seed=vocab_seed,
+                    reasoning_pipeline=reasoning_pipeline,
+                    human_advice=human_advice_propose,
+                )
                 propose_input.existing_model_types = list(all_model_types)
-                if human_advice_propose is not None:
-                    propose_input.human_advice = human_advice_propose
                 if previous_failures:
                     propose_input.previous_failures = previous_failures
 

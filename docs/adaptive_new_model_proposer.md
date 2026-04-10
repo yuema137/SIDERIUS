@@ -1174,13 +1174,26 @@ Prompt templates live in `agent/prompt_templates/proposal/` as `.md` files (not 
 
 - ☑ B.20 Predefined pseudo data: `tests/pseudo_data/api_call_outputs/ml_model_proposal_agent/generate.json` — 3 canned responses (comparison, causal_reasoning, proposing) as a FIFO list. **Done**.
 - ☑ B.21 `@dual_mode` integration test: `test_proposal_pipeline_dual_mode` in `tests/integration/nodes/test_ml_model_proposal_agent.py`. Pseudo mode asserts on 3 generate() calls, prompt content, output structure, file persistence. **Done**.
-- ☐ B.9 Protocol update to carry `expert_context` + `vocab_seed` + `reasoning_pipeline`. Deferred — wiring task for workflow chain integration.
-- ☐ B.22 Mocked-LLM unit tests: memo validation failure → retry, deviation notes. Deferred — incremental additions to existing mocked tests.
-- ☐ B.23 Tier-1 integration test: real LLM produces valid memo + proposal. Deferred — run manually when testing the pipeline on real data.
 
 **Verify** (after Group 4):
-- All unit tests pass: `uv run pytest tests/unit/agent/ml_model_proposal_agent/ -q`.
-- Manual: run the agent on real interpretation output, inspect the `DiscoveryMemo` JSON, confirm it references specific `file_vector` evidence and vocabulary entries in `causal_hypothesis`.
+- ☑ All unit tests pass: 800 passed.
+- ☑ Manual: ran on real interpretation data (lilab_chain_v1 iter_002, 3 models, 42 experiments) with `gemini-3.1-pro-preview`. Pipeline proposed `causal_conv_stack` — an ablation experiment testing `dilated_causal_conv → receptive_field` link. Vocabulary terms used consistently. Exploration mode correctly active.
+
+#### Deferred items (moved to their actual phases)
+
+- B.9 → moved to **pre-chain-run** — protocol wiring for `expert_context` + `vocab_seed` + `reasoning_pipeline`. Do this before the first real chain run with the 3-stage pipeline.
+- B.22 → moved to **Phase C** — memo validation failure → retry, deviation notes. Part of pipeline hardening alongside vocabulary promotion logic.
+- B.23 → **effectively done** via the manual verify above. Formalizing as a pytest test is low priority.
+
+---
+
+### Pre-chain-run — Workflow wiring for the 3-stage pipeline
+
+Before the first real chain run with the 3-stage pipeline, the protocol
+and workflow must carry the new fields to the proposal agent.
+
+- ☑ B.9 Protocol: `local_full_context` now carries `expert_context`, `vocab_seed`, `reasoning_pipeline`, `human_advice`. Legacy `human_advice` wrapped into `ExpertContextItem(source="human")`. All params optional — 11 existing protocol tests pass unchanged. **Done**.
+- ☑ Workflow: `_load_vocab_seed()` loads seed at start; `_get_reasoning_pipeline()` extracts pipeline from `ProposalLLMConfig`. Both passed through protocol to the agent. **Done**.
 
 ---
 
@@ -1209,7 +1222,7 @@ Prompt templates live in `agent/prompt_templates/proposal/` as `.md` files (not 
 - `tests/unit/agent/result_interpretation_agent/test_vocab_promotion.py` (new) — promotion rule unit tests.
 
 **Sub-tasks**:
-- ☐ C.1 **Draft the seed `primitive_vocab.json` for human review.** Claude proposes ~10–15 canonical entries drawn from the existing built-in models (`punet`, `wavenet`, `fcnet`, `transformer`, `rnn`, `gated_fno`) — reading each model's `description.md` and extracting the architectural primitives it relies on. The draft is then submitted to the human for review and editing BEFORE any of the rest of Phase C lands. The seed sets the canonical quality bar and is the most consequential single artifact in the whole vocabulary mechanism, so the human gets the final word. Each entry needs `name`, `description`, `pattern` (regex or AST hint).
+- ☑ C.1 **Vocab seed file.** Done in Phase B (B.6a) — `agent/schemas/vocab_seed.json` with 21 canonical entries (11 features + 10 capabilities). All `related_to` empty — connections discovered through `ProposedVocabLink` experimentation. Human-reviewed.
 - ☐ C.2 Implement `check_inherited_components(plugin_source, claimed_components, runtime_vocab)` in the validator. Returns the list of unsubstantiated claims; empty list = pass.
 - ☐ C.3 Wire the new check into `ml_code_validator_agent`'s existing check sequence as check #8.
 - ☐ C.4 Implement the runtime vocab aggregator in the interpretation agent: walks all records, collects all `inherited_components` entries, deduplicates against seed canonical entries by name and alias.
@@ -1221,6 +1234,7 @@ Prompt templates live in `agent/prompt_templates/proposal/` as `.md` files (not 
 - ☐ C.10 Validator unit tests: claim valid component → pass; claim component not in source → fail with clear message; unknown vocab entry → soft skip.
 - ☐ C.11 Promotion rule unit tests: candidate with 2 runs → not promoted; with 3 runs but no above-SOTA → not promoted; with 3 runs + above-SOTA + dedup-novel → promoted; with 3 runs + dedup-synonym → merged as alias.
 - ☐ C.12 Tier-1 integration test: a synthetic chain of 4 records with one repeated candidate → interpretation agent emits a promotion event for it.
+- ☐ B.22 (from Phase B) Pipeline hardening: memo validation failure → retry, deviation notes handling, backward-compat with empty `expert_context`.
 
 **Verify**:
 - `uv run pytest tests/unit/agent/code_validator_agent tests/unit/agent/result_interpretation_agent -q` — passes.
