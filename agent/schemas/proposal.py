@@ -345,10 +345,11 @@ class ResearchPolicy(BaseModel):
 class ReasoningPipelineConfig(BaseModel):
     """Configurable reasoning pipeline. Lives at the workflow level."""
     stages: List[ReasoningStage] = Field(
-        default_factory=lambda: [
-            ReasoningStage(name="comparison", system_prompt_key="COMPARATIVE_ANALYSIS"),
-            ReasoningStage(name="causal_reasoning", system_prompt_key="CAUSAL_REASONING"),
-        ],
+        default_factory=list,
+        description="Ordered list of reasoning stages. Empty = legacy 2-call mode. "
+                    "The standard 3-stage pipeline is configured at the workflow level: "
+                    "[comparison, causal_reasoning]. The proposing stage always runs "
+                    "last and is not listed here.",
     )
     model_selection: ModelSelectionStrategy = Field(
         default_factory=ModelSelectionStrategy,

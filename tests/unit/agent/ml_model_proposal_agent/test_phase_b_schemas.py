@@ -401,11 +401,11 @@ class TestProposedVocabLink:
 
 class TestReasoningPipelineConfig:
 
-    def test_default_pipeline(self):
+    def test_default_pipeline_empty(self):
+        """Default stages = empty (legacy 2-call mode). Pipeline stages are
+        configured at the workflow level, not defaulted on the schema."""
         config = ReasoningPipelineConfig()
-        assert len(config.stages) == 2
-        assert config.stages[0].name == "comparison"
-        assert config.stages[1].name == "causal_reasoning"
+        assert len(config.stages) == 0
         assert config.exploration_mode == "auto"
 
     def test_custom_stages(self):
