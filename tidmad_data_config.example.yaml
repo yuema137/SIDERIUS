@@ -1,0 +1,33 @@
+# Machine-specific data paths — TEMPLATE.
+#
+# This file is the tracked template. The real config lives in
+# `tidmad_data_config.yaml` (gitignored), which each developer creates
+# once on first checkout:
+#
+#     cp tidmad_data_config.example.yaml tidmad_data_config.yaml
+#     # then edit the paths below for your machine
+#
+# DO NOT edit this template with machine-specific paths — your edits
+# will be visible to every other developer through git.
+
+# Where the raw TIDMAD HDF5 files live
+# (abra_training_0000.h5..0019.h5 + abra_validation_0000.h5..0019.h5
+#  + segment_anchors.json after running build_anchor_map.py).
+tidmad_data_dir: /path/to/TIDMAD/
+
+# Where SIDERIUS run outputs are written
+# (per-model subdirs: punet/, wavenet/, fcnet/, gated_fno/, ...).
+siderius_data_dir: /path/to/SIDEREIS_DATA/
+
+# ----------------------------------------------------------------------
+# Reference values for the canonical machines (do NOT uncomment here —
+# copy them into your local tidmad_data_config.yaml instead):
+#
+# lilab:
+#   tidmad_data_dir: /home/klz/Data/TIDMAD/
+#   siderius_data_dir: /home/klz/Data/SIDEREIS_DATA/
+#
+# SDSC Expanse:
+#   tidmad_data_dir: /expanse/lustre/projects/ddp433/ym137/tidmad_data/
+#   siderius_data_dir: /expanse/lustre/projects/ddp433/ym137/siderius_workspace/
+# ----------------------------------------------------------------------

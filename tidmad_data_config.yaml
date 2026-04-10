@@ -1,5 +1,0 @@
-# Machine-specific data paths.
-# Update these when migrating to a new server.
-
-tidmad_data_dir: /home/klz/Data/TIDMAD/
-siderius_data_dir: /home/klz/Data/SIDEREIS_DATA/
