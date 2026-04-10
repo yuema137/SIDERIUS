@@ -19,7 +19,7 @@
     "batch_size": 1,
     "optimizer_type": "adamw",
     "weight_decay": 0.00001,
-    "device": "cuda"
+    "device": "cpu"
   },
   "loss_config": {
     "loss_type": "focal",
@@ -28,7 +28,7 @@
     "reduction": "mean",
     "use_class_weights": false
   },
-  "is_trial": true,
+  "is_trial": false,
   "trial_strategy": "snapshot",
   "trial_portion": 0.05,
   "target_files": [],

@@ -105,7 +105,25 @@ class HyperparamTuningAgent:
     Each round: plan (LLM) → resource check → train → infer → score → reflect (LLM).
     OOM-risk configs are skipped but saved to memory. A hard cap of max_rounds * 3
     total attempts prevents infinite loops.
+
+    Constructor dependency injection (see ``docs/pseudo_test_infra.md`` §4A):
+      * ``bridge_factory``: callable that constructs an ``LLMBridge``-compatible
+        object. Defaults to the real ``LLMBridge`` class. In pseudo-mode tests,
+        the ``tuner_factories`` fixture passes a factory that returns a
+        ``RecordingLLMBridge`` pre-loaded with canned responses.
+      * ``sandbox_factory``: callable that constructs a ``TidmadSandbox``-
+        compatible object. Defaults to the real ``TidmadSandbox``. In
+        pseudo-mode tests, the fixture passes a factory that returns a
+        ``RecordingSandbox`` pre-loaded with canned subprocess results.
+
+    Production code never passes these — the defaults are the real classes,
+    so the existing call ``HyperparamTuningAgent().run(input)`` continues to
+    work identically. Only tests inject the fakes.
     """
+
+    def __init__(self, bridge_factory=None, sandbox_factory=None):
+        self._bridge_factory = bridge_factory or LLMBridge
+        self._sandbox_factory = sandbox_factory or TidmadSandbox
 
     def run(self, agent_input: HyperparamTuningInput) -> HyperparamTuningOutput:
         """
@@ -137,15 +155,15 @@ class HyperparamTuningAgent:
               f"| file_index={file_index} | trial_allowed={trial_allowed} "
               f"| provider={agent_input.llm_provider}")
 
-        # --- Initialize sandbox and brain ---
-        sandbox = TidmadSandbox(
+        # --- Initialize sandbox and brain (via factory for DI / pseudo-mode) ---
+        sandbox = self._sandbox_factory(
             metadata_source="local",
             run_name=run_name,
             workspace=workspace,
             progress_bar=agent_input.progress_bar,
             file_index=file_index,
         )
-        brain = LLMBridge(
+        brain = self._bridge_factory(
             provider=agent_input.llm_provider,
             model_id=agent_input.llm_model_id,
             reflect_provider=agent_input.reflect_provider,

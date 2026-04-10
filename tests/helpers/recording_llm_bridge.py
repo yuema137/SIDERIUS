@@ -72,6 +72,17 @@ class RecordingLLMBridge:
         self.calls.append(("reflect", exp_id, hypothesis, results, context))
         return self._pop("reflect")
 
+    def plan(self, memory_history, expert_advice="None", force_model="auto",
+             config_manual=None, model_description=None,
+             exploration_checklist="", current_round=None,
+             max_rounds=None, trial_allowed=True) -> Dict[str, Any]:
+        """Mirror of :meth:`LLMBridge.plan`. In the real bridge, ``plan``
+        assembles a prompt and calls ``generate``. Here we record the call
+        and pop from the ``"generate"`` queue (since the predefined response
+        is the ExperimentPlan dict that ``plan`` would have returned)."""
+        self.calls.append(("plan", memory_history, expert_advice, force_model))
+        return self._pop("generate")
+
     def generate_text(self, system_prompt: str, user_prompt: str) -> str:
         """Mirror of :meth:`LLMBridge.generate_text`. Returns a plain string."""
         self.calls.append(("generate_text", system_prompt, user_prompt))

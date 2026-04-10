@@ -170,6 +170,12 @@ class RecordingSandbox:
     # Persistence (mirror TidmadSandbox.save_record)
     # ------------------------------------------------------------------
 
+    def get_summary(self) -> List[Dict[str, Any]]:
+        """Mirror of :meth:`TidmadSandbox.get_summary`. Returns all records
+        saved so far, in order. Reads from the in-memory list (identical to
+        what's on disk in ``summary_{run_name}.json``)."""
+        return list(self.saved_records)
+
     def save_record(self, record: Dict[str, Any]) -> None:
         """Mirror of :meth:`TidmadSandbox.save_record`. Appends to the
         in-memory ``saved_records`` list AND to the on-disk

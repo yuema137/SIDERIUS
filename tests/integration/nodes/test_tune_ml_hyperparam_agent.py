@@ -568,3 +568,140 @@ class TestTrialModeGemini:
         print(f"\n  Results saved to: {workspace}")
         assert output.status == "completed"
         assert output.completed_rounds == 2
+
+
+# ==========================================
+# Dual-mode test (pseudo_full_loop proof-of-concept)
+# ==========================================
+
+@pytest.mark.dual_mode
+@pytest.mark.parametrize("is_trial", [False, True], ids=["formal", "trial"])
+def test_punet_one_round_dual_mode(tmp_path, request, monkeypatch, is_trial):
+    """
+    Dual-mode proof-of-concept: runs the tuner agent for 1 round of punet
+    in EITHER pseudo mode (default, recording fakes) or real mode
+    (real LLM + real subprocess, requires ``--real-api-call``).
+
+    Parametrized over ``is_trial``:
+      - ``False`` (formal): scoring goes through ``sandbox.execute_scoring``.
+      - ``True`` (trial): scoring goes through ``score_vector()`` called
+        directly in agent code; monkeypatched in pseudo mode to return the
+        predefined file_vector + scalar.
+
+    Same assertions for both modes. Pseudo mode adds extra assertions on
+    prompt content and record structure.
+
+    See ``docs/pseudo_test_infra.md`` for the full dual-mode design.
+    """
+    is_real_mode = request.config.getoption("--real-api-call")
+
+    if is_real_mode:
+        _skip_if_no_key("gemini")
+        _skip_if_no_data()
+        if is_trial:
+            _skip_if_no_anchor_map()
+
+    run_name = f"dual_punet_{'trial' if is_trial else 'formal'}_{int(time.time())}"
+    workspace = str(tmp_path / "workspace")
+    os.makedirs(workspace, exist_ok=True)
+
+    agent_input = HyperparamTuningInput(
+        model_type="punet",
+        file_index=6,
+        max_rounds=1,
+        expert_advice=(
+            "CRITICAL: You MUST use exactly this configuration. "
+            "model_type: punet. "
+            f"model_config: {MODEL_CONFIGS['punet']}. "
+            f"train_config: {TRAIN_CONFIG}. "
+            "loss_config: {'loss_type': 'focal', 'alpha': 0.5, 'gamma': 2.0}. "
+            "Do NOT deviate from these values."
+        ),
+        llm_provider="gemini",
+        llm_model_id="gemini-3.1-flash-lite-preview",
+        storage=StorageConfig(
+            backend="local",
+            local=LocalStorageConfig(workspace=workspace, run_name=run_name),
+        ),
+        progress_bar=False,
+        is_trial=is_trial,
+    )
+
+    # --- Mode-dependent construction ---
+    bridge = None
+    sandbox = None
+
+    if is_real_mode:
+        agent = HyperparamTuningAgent()
+    else:
+        from tests.helpers.recording_llm_bridge import RecordingLLMBridge
+        from tests.helpers.recording_sandbox import RecordingSandbox
+
+        bridge = RecordingLLMBridge.for_agent("ml_hyperparameter_tune_agent")
+        sandbox = RecordingSandbox.for_model(
+            "punet", base_dir=workspace, run_name=run_name,
+        )
+        agent = HyperparamTuningAgent(
+            bridge_factory=lambda **kw: bridge,
+            sandbox_factory=lambda **kw: sandbox,
+        )
+
+        if is_trial:
+            # Trial mode: the agent calls score_vector() directly (not
+            # through the sandbox). Monkeypatch it to return the predefined
+            # file_vector and scalar from the predefined scoring data.
+            canned_fv = [0.5]*5 + [0.7]*6 + [0.9]*9
+            canned_scalar = 0.69
+            import nodes.ml_hyperparameter_tune_agent as tuner_module
+            monkeypatch.setattr(
+                tuner_module, "score_vector",
+                lambda **kw: (canned_fv, canned_scalar),
+            )
+
+    output = agent.run(agent_input)
+
+    # --- Assertions that hold in BOTH modes ---
+    assert isinstance(output, HyperparamTuningOutput)
+    HyperparamTuningOutput.model_validate(output.model_dump())
+    assert output.status in ("completed", "partial")
+    assert output.run_name == run_name
+    assert output.model_type == "punet"
+    assert len(output.all_records) >= 1
+
+    # --- Pseudo-mode-only assertions (orchestration wiring) ---
+    if not is_real_mode:
+        assert bridge is not None and sandbox is not None
+
+        # 1. First LLM call is the planner (plan method)
+        planner_call = bridge.calls[0]
+        assert planner_call[0] == "plan", (
+            f"First LLM call should be 'plan' (planner), got {planner_call[0]!r}"
+        )
+
+        # 2. The saved record has the expected fields from predefined results
+        assert len(sandbox.saved_records) >= 1, (
+            "At least one record should have been saved via sandbox.save_record()"
+        )
+        record = sandbox.saved_records[0]
+        assert record["status"] == "success"
+        assert record["model_type"] == "punet"
+        assert record["denoising_score"] is not None
+        assert record["file_vector"] is not None
+        assert len(record["file_vector"]) == 20
+        assert record["final_loss"] is not None
+        assert record["model_params"] is not None
+
+        # 3. The reflector was called and received scoring results
+        reflect_calls = [c for c in bridge.calls if c[0] == "reflect"]
+        assert len(reflect_calls) >= 1, "Reflector should have been called"
+        reflect_results = reflect_calls[0][3]
+        assert "denoising_score" in reflect_results
+        assert "file_vector" in reflect_results
+
+        # 4. Call sequence sanity: plan → train → score path → reflect → save
+        bridge_methods = [c[0] for c in bridge.calls]
+        assert bridge_methods[0] == "plan"
+        assert "reflect" in bridge_methods
+        sandbox_methods = [c[0] for c in sandbox.calls]
+        assert "execute_training" in sandbox_methods
+        assert "save_record" in sandbox_methods
