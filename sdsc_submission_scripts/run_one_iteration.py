@@ -203,6 +203,13 @@ def main():
         help="Delete denoised H5 files after scoring (recommended for production)."
     )
     parser.add_argument(
+        "--human_advice_file", type=str, default=None,
+        help="Path to a JSON file with human advice for each agent. "
+             "Schema: {\"interpret\":\"...\", \"propose\":\"...\", "
+             "\"implement\":\"...\", \"validate\":\"...\", \"tune\":\"...\"}. "
+             "Individual --human_advice_* flags override file values."
+    )
+    parser.add_argument(
         "--human_advice_interpret", type=str, default=None,
         help="Human guidance for the interpretation agent."
     )
@@ -223,6 +230,15 @@ def main():
         help="Human guidance for the tuning agent."
     )
     args = parser.parse_args()
+
+    # Load human advice from JSON file, with individual CLI flags as overrides.
+    if args.human_advice_file:
+        with open(args.human_advice_file) as f:
+            advice = json.load(f)
+        for key in ("interpret", "propose", "implement", "validate", "tune"):
+            attr = f"human_advice_{key}"
+            if getattr(args, attr) is None:
+                setattr(args, attr, advice.get(key) or None)
 
     # Iteration directory: {workspace}/iter_{N:03d}
     run_name = f"iter_{args.iteration:03d}"
