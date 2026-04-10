@@ -101,6 +101,57 @@ class TunerLLMConfig(BaseModel):
     )
 
 
+class ProposalLLMConfig(BaseModel):
+    """
+    LLM config for the proposal agent's three-stage reasoning pipeline.
+
+    Mirrors TunerLLMConfig's pattern (PR #22): each stage of the pipeline
+    is a first-class sub-agent with its own provider and model. The stages
+    have different cognitive demands:
+
+      - comparison → data-heavy analysis, can use a cheaper model
+      - reasoning  → causal hypothesis, needs strong reasoning
+      - proposing  → precise structured JSON, needs strong reasoning
+
+    The pipeline config (stages, model selection, exploration mode) is also
+    carried here so the entire proposal agent's behavior is configured in
+    one place at the workflow level.
+
+    See docs/adaptive_new_model_proposer.md §2A.
+    """
+
+    comparison: NodeLLMConfig = Field(
+        default_factory=lambda: NodeLLMConfig(
+            provider="gemini",
+            model_id="gemini-2.5-flash",
+        ),
+        description=(
+            "Sub-agent config for Stage 1 (comparison). Data-heavy analysis "
+            "of past models — can use a cheaper/faster model. Default: gemini-2.5-flash."
+        ),
+    )
+    reasoning: NodeLLMConfig = Field(
+        default_factory=lambda: NodeLLMConfig(
+            provider="gemini",
+            model_id="gemini-3.1-pro-preview",
+        ),
+        description=(
+            "Sub-agent config for Stage 2 (causal reasoning). Needs strong "
+            "reasoning ability. Default: gemini-3.1-pro-preview."
+        ),
+    )
+    proposing: NodeLLMConfig = Field(
+        default_factory=lambda: NodeLLMConfig(
+            provider="gemini",
+            model_id="gemini-3.1-pro-preview",
+        ),
+        description=(
+            "Sub-agent config for Stage 3 (architecture design). Needs precise "
+            "structured JSON output. Default: gemini-3.1-pro-preview."
+        ),
+    )
+
+
 class WorkflowLLMConfig(BaseModel):
     """
     Per-node LLM configuration for a workflow.
@@ -108,11 +159,13 @@ class WorkflowLLMConfig(BaseModel):
     Each field is optional. When None, the corresponding node uses its own
     built-in default (e.g. the implementor defaults to gemini-3.1-pro-preview).
 
-    The 4 single-sub-call agents (interpret, propose, implement, validate)
-    use a plain `NodeLLMConfig`. The tuner uses `TunerLLMConfig`, which
-    contains nested `NodeLLMConfig` slots (`planner` and `reflector`),
-    one per sub-call. Future agents that grow sub-call needs will define
-    their own typed config classes following the same pattern.
+    Agents with multiple sub-calls use nested config classes:
+      - The tuner uses `TunerLLMConfig` (planner + reflector).
+      - The proposal agent uses `ProposalLLMConfig` (comparison + reasoning + proposing).
+      - Single-sub-call agents (interpret, implement, validate) use plain `NodeLLMConfig`.
+
+    Future agents that grow sub-call needs define their own typed config
+    class following the same pattern.
     """
     model_config = {"populate_by_name": True}
 
@@ -120,9 +173,11 @@ class WorkflowLLMConfig(BaseModel):
         default=None,
         description="LLM config for the interpretation agent.",
     )
-    propose: Optional[NodeLLMConfig] = Field(
+    propose: Optional[ProposalLLMConfig] = Field(
         default=None,
-        description="LLM config for the proposal agent.",
+        description="LLM config for the proposal agent's three-stage pipeline. "
+                    "Has nested comparison/reasoning/proposing slots, each a full "
+                    "NodeLLMConfig. None = agent uses its built-in defaults.",
     )
     implement: Optional[NodeLLMConfig] = Field(
         default=None,
@@ -180,6 +235,21 @@ class WorkflowLLMConfig(BaseModel):
                 "model_id":         config.planner.model_id,
                 "reflect_provider": config.reflector.provider,
                 "reflect_model_id": config.reflector.model_id,
+            }
+        if isinstance(config, ProposalLLMConfig):
+            # Flatten the nested ProposalLLMConfig into per-stage kwargs.
+            # The proposal agent reads these to construct per-stage bridges.
+            return {
+                "comparison_provider":  config.comparison.provider,
+                "comparison_model_id":  config.comparison.model_id,
+                "reasoning_provider":   config.reasoning.provider,
+                "reasoning_model_id":   config.reasoning.model_id,
+                "proposing_provider":   config.proposing.provider,
+                "proposing_model_id":   config.proposing.model_id,
+                # Legacy compat: also provide top-level provider/model_id
+                # from the reasoning stage (the "main" model for the agent).
+                "provider":             config.reasoning.provider,
+                "model_id":             config.reasoning.model_id,
             }
         # Plain NodeLLMConfig — single-sub-call agent
         return {"provider": config.provider, "model_id": config.model_id}
