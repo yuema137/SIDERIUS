@@ -1168,14 +1168,13 @@ Prompt templates live in `agent/prompt_templates/proposal/` as `.md` files (not 
 - ☑ B.11 `_run_pipeline()` — 3-stage pipeline runner with accumulated context, prompt loading, vocab rendering. **Done** — `nodes/ml_model_proposal_agent.py`.
 - ☑ B.12 Proposing stage — consumes accumulated context, produces ProposalOutput. **Done** — integrated into `_run_pipeline()`.
 - ☑ B.19 18 unit tests (model selection, exploration resolver, DI, pipeline with mocked LLM). **Done** — 800 total passed.
-- ☐ B.9 Protocol update for `expert_context`. Deferred — wiring task for workflow integration.
-
 **Backward compat**: default `ReasoningPipelineConfig.stages` is empty (legacy 2-call mode). Pipeline mode activates only when stages are explicitly configured at the workflow level.
 
-#### Group 5 — Integration testing (deferred)
+#### Group 5 — Workflow wiring + integration testing (deferred)
 
-These are important for long-term robustness but not blocking for the initial pipeline implementation. Mock tests + running real loops directly is sufficient during active development.
+These complete the end-to-end integration. Not blocking for pipeline development — the pipeline runner works standalone with mocked LLM. Do these when wiring the pipeline into the full exploration workflow chain.
 
+- ☐ B.9 Update `local_full_context` protocol to carry `expert_context` + `vocab_seed` + `reasoning_pipeline`. Wrap legacy `human_advice` into `ExpertContextItem`. The workflow passes these to the protocol, NOT directly to the agent.
 - ☐ B.20 Predefined pseudo data for proposal agent stages.
 - ☐ B.21 `@dual_mode` integration test for the 3-stage pipeline.
 - ☐ B.22 Mocked-LLM unit tests: memo validation failure → retry, deviation notes, backward-compat with empty `expert_context`.
