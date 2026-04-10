@@ -27,6 +27,11 @@ class FalsifiablePrediction(BaseModel):
 
     The reflector checks this prediction after the experiment runs and
     labels the hypothesis 'confirmed' / 'refuted' / 'partial' (Phase E).
+
+    The computed ``boldness`` property measures how ambitious the prediction
+    is relative to the current value. The pipeline runner checks
+    ``boldness >= policy.minimum_boldness`` at runtime — timid predictions
+    are rejected before the experiment runs. See ResearchPolicy.
     """
     metric: str = Field(
         description="What to measure. Free-text, guided by expert advice. "
@@ -48,6 +53,16 @@ class FalsifiablePrediction(BaseModel):
     rationale: str = Field(
         description="One sentence: why this specific predicted value."
     )
+
+    @property
+    def boldness(self) -> float:
+        """Relative magnitude of the prediction vs current.
+
+        ``abs(predicted - current) / max(abs(current), 1e-6)``.
+        The pipeline runner compares this against ``policy.minimum_boldness``.
+        The reflector uses it to compute information gain.
+        """
+        return abs(self.predicted_value - self.current_value) / max(abs(self.current_value), 1e-6)
 
     @model_validator(mode="after")
     def _prediction_differs_from_current(self):
@@ -153,6 +168,34 @@ class ModelComparison(BaseModel):
     )
 
 
+# B.5a — Proposed vocabulary link (feature → capability hypothesis)
+class ProposedVocabLink(BaseModel):
+    """A hypothesized connection between a feature and a capability.
+
+    Proposed by the comparison stage based on model descriptions and
+    experiment results. Tested via FalsifiablePrediction in the next
+    experiment. Confirmed or refuted by the reflector.
+
+    Only confirmed links (≥2 runs) get promoted to VocabEntry.related_to
+    by the interpretation agent (Phase C).
+    """
+    feature: str = Field(
+        description="The feature entry name, e.g. 'dilated_causal_conv'."
+    )
+    capability: str = Field(
+        description="The capability entry name, e.g. 'receptive_field'."
+    )
+    evidence: str = Field(
+        max_length=300,
+        description="Why the agent thinks this link exists — must reference "
+                    "specific model results or architectural analysis."
+    )
+    status: Literal["proposed", "confirmed", "refuted"] = Field(
+        default="proposed",
+        description="Lifecycle: proposed → confirmed/refuted after experiment.",
+    )
+
+
 # B.5 — Discovery memo (output of Stages 1+2, input to Stage 3)
 class DiscoveryMemo(BaseModel):
     """The structured output of the reasoning pipeline (comparison + reasoning
@@ -205,17 +248,29 @@ class DiscoveryMemo(BaseModel):
     # --- Vocabulary candidates discovered during comparison ---
     proposed_vocab_candidates: List[Dict[str, str]] = Field(
         default_factory=list,
-        description="New features or concepts the comparison stage discovered "
+        description="New features or capabilities the comparison stage discovered "
                     "that aren't in the current vocabulary. Each entry has "
-                    "'name', 'kind' (feature/concept), 'description'. "
+                    "'name', 'kind' (feature/capability), 'description'. "
                     "These enter the candidate pool for future promotion."
+    )
+
+    # --- Feature → capability link hypotheses ---
+    proposed_vocab_links: List[ProposedVocabLink] = Field(
+        default_factory=list,
+        description="Hypothesized connections between features and capabilities. "
+                    "Proposed by the comparison stage, tested via the "
+                    "FalsifiablePrediction, confirmed/refuted by the reflector. "
+                    "Only confirmed links get promoted to VocabEntry.related_to."
     )
 
     # --- Citations ---
     citation_sources: List[str] = Field(
         default_factory=list,
+        max_length=5,
         description="cite_id values of ExpertContextItems that materially "
-                    "shaped this memo."
+                    "shaped this memo. Max 5 — cite only items that changed "
+                    "your hypothesis. The pipeline runner verifies each cite_id "
+                    "appears in causal_hypothesis or proposed_change text.",
     )
 
     @model_validator(mode="after")
@@ -245,6 +300,48 @@ class ModelSelectionStrategy(BaseModel):
     )
 
 
+class ResearchPolicy(BaseModel):
+    """Tunable parameters for the reasoning pipeline's validators and triggers.
+
+    The 'knobs' that control how aggressively the centrifugal forces are applied.
+    Different research strategies need different settings. All defaults are
+    conservative. Override via workflow config or ExpertContextItem(kind='strategy').
+
+    See §2A 'Policy-Mechanism Decoupling' in docs/adaptive_new_model_proposer.md.
+    """
+    # --- Prediction quality ---
+    minimum_boldness: float = Field(
+        default=0.05, ge=0.0, le=1.0,
+        description="Minimum abs(predicted - current) / abs(current). "
+                    "Predictions below this are rejected as too conservative.",
+    )
+
+    # --- Citation discipline ---
+    max_citations: int = Field(
+        default=5, ge=1,
+        description="Maximum ExpertContextItem citations per DiscoveryMemo.",
+    )
+
+    # --- Vocabulary health ---
+    vocab_stagnation_threshold: float = Field(
+        default=0.1, ge=0.0, le=1.0,
+        description="If candidate/total vocab ratio drops below this in auto "
+                    "mode, the exploration resolver triggers explore mode.",
+    )
+
+    # --- Promotion strictness ---
+    min_runs_for_promotion: int = Field(
+        default=3, ge=2,
+        description="Minimum distinct runs before a candidate vocab entry "
+                    "or a ProposedVocabLink can be promoted.",
+    )
+    require_positive_delta: bool = Field(
+        default=True,
+        description="Whether promotion requires component_delta > 0 "
+                    "(positive contribution when present vs absent).",
+    )
+
+
 class ReasoningPipelineConfig(BaseModel):
     """Configurable reasoning pipeline. Lives at the workflow level."""
     stages: List[ReasoningStage] = Field(
@@ -262,19 +359,27 @@ class ReasoningPipelineConfig(BaseModel):
                     "'explore': diagnostic experiments, honest uncertainty. "
                     "'exploit': build on confirmed patterns.",
     )
+    policy: ResearchPolicy = Field(
+        default_factory=ResearchPolicy,
+        description="Tunable thresholds for validators and exploration triggers. "
+                    "The 'software' that configures the 'hardware' of the pipeline. "
+                    "Override per-workflow or per-round via ExpertContextItem(kind='strategy').",
+    )
 
 
 # B.6a — Unified vocabulary entry (features + concepts)
 class VocabEntry(BaseModel):
-    """A single vocabulary entry — feature or concept.
+    """A single vocabulary entry — feature or capability.
 
     Adding a new kind (e.g. 'failure_pattern') requires NO code changes —
     just add entries with the new kind value. See §2B composability principle.
     """
     name: str = Field(description="Canonical snake_case name.")
     kind: str = Field(
-        description="'feature' (concrete building block) or 'concept' "
-                    "(scientific principle). New kinds can be added freely."
+        description="'feature' (concrete architectural building block, e.g. "
+                    "'dilated_causal_conv') or 'capability' (measurable "
+                    "architectural property the feature provides, e.g. "
+                    "'receptive_field'). New kinds can be added freely."
     )
     description: str = Field(max_length=200)
     related_to: List[str] = Field(
@@ -406,4 +511,11 @@ class ProposalOutput(BaseModel):
                     "Should use a conservative parameter count and GPU memory footprint "
                     "suitable for initial exploration. "
                     "Must include model_config, train_config, and loss_config keys.",
+    )
+    memo_consistency_notes: List[str] = Field(
+        default_factory=list,
+        description="Inconsistencies the proposing stage noticed between the "
+                    "DiscoveryMemo and what's physically implementable. "
+                    "Empty = no issues found. Non-empty = the validator surfaces "
+                    "these as warnings. This is a flag, not a veto.",
     )

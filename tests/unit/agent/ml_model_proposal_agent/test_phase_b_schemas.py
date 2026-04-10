@@ -7,6 +7,7 @@ Tests validators and cross-field checks for:
   - ExpertContextItem
   - ModelComparison
   - DiscoveryMemo
+  - ProposedVocabLink
   - ReasoningStage, ModelSelectionStrategy, ReasoningPipelineConfig
   - VocabEntry
 """
@@ -19,9 +20,11 @@ from agent.schemas.proposal import (
     ExpertContextItem,
     ModelComparison,
     DiscoveryMemo,
+    ProposedVocabLink,
     ReasoningStage,
     ModelSelectionStrategy,
     ReasoningPipelineConfig,
+    ResearchPolicy,
     VocabEntry,
 )
 
@@ -96,6 +99,33 @@ class TestFalsifiablePrediction:
         del valid_prediction["rationale"]
         with pytest.raises(ValidationError):
             FalsifiablePrediction.model_validate(valid_prediction)
+
+    def test_boldness_property(self, valid_prediction):
+        fp = FalsifiablePrediction.model_validate(valid_prediction)
+        # current=1.5, predicted=2.0 → boldness = 0.5 / 1.5 = 0.333...
+        expected = abs(2.0 - 1.5) / abs(1.5)
+        assert abs(fp.boldness - expected) < 1e-10
+
+    def test_boldness_with_zero_current(self):
+        """When current_value is near zero, boldness uses 1e-6 as floor."""
+        fp = FalsifiablePrediction.model_validate({
+            "metric": "score",
+            "current_value": 0.0,
+            "predicted_value": 0.5,
+            "threshold_for_refutation": -0.1,
+            "rationale": "test",
+        })
+        assert fp.boldness == 0.5 / 1e-6  # very bold
+
+    def test_boldness_timid_prediction(self):
+        fp = FalsifiablePrediction.model_validate({
+            "metric": "score",
+            "current_value": 10.0,
+            "predicted_value": 10.01,
+            "threshold_for_refutation": 9.9,
+            "rationale": "test",
+        })
+        assert fp.boldness < 0.01  # timid
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +300,29 @@ class TestDiscoveryMemo:
         memo = DiscoveryMemo.model_validate(valid_memo)
         assert len(memo.proposed_vocab_candidates) == 1
 
+    def test_with_proposed_vocab_links(self, valid_memo):
+        valid_memo["proposed_vocab_links"] = [
+            {"feature": "dilated_causal_conv", "capability": "receptive_field",
+             "evidence": "Wavenet uses dilated convs and scores well on high-freq files."},
+        ]
+        memo = DiscoveryMemo.model_validate(valid_memo)
+        assert len(memo.proposed_vocab_links) == 1
+        assert memo.proposed_vocab_links[0].status == "proposed"
+
+    def test_proposed_vocab_links_default_empty(self, valid_memo):
+        memo = DiscoveryMemo.model_validate(valid_memo)
+        assert memo.proposed_vocab_links == []
+
+    def test_citations_max_5(self, valid_memo):
+        valid_memo["citation_sources"] = ["a", "b", "c", "d", "e", "f"]
+        with pytest.raises(ValidationError):
+            DiscoveryMemo.model_validate(valid_memo)
+
+    def test_citations_exactly_5_ok(self, valid_memo):
+        valid_memo["citation_sources"] = ["a", "b", "c", "d", "e"]
+        memo = DiscoveryMemo.model_validate(valid_memo)
+        assert len(memo.citation_sources) == 5
+
     def test_sota_mechanism_max_length(self, valid_memo):
         valid_memo["sota_mechanism"] = "x" * 601
         with pytest.raises(ValidationError):
@@ -279,6 +332,67 @@ class TestDiscoveryMemo:
         valid_memo["proposed_change"] = "x" * 401
         with pytest.raises(ValidationError):
             DiscoveryMemo.model_validate(valid_memo)
+
+
+# ---------------------------------------------------------------------------
+# ReasoningStage / ModelSelectionStrategy / ReasoningPipelineConfig
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# ProposedVocabLink
+# ---------------------------------------------------------------------------
+
+class TestProposedVocabLink:
+
+    def test_valid(self):
+        link = ProposedVocabLink.model_validate({
+            "feature": "dilated_causal_conv",
+            "capability": "receptive_field",
+            "evidence": "Wavenet scores well on high-freq files and uses dilated convs.",
+        })
+        assert link.status == "proposed"  # default
+
+    def test_confirmed_status(self):
+        link = ProposedVocabLink.model_validate({
+            "feature": "spectral_conv",
+            "capability": "frequency_resolution",
+            "evidence": "Confirmed in rounds 2 and 4.",
+            "status": "confirmed",
+        })
+        assert link.status == "confirmed"
+
+    def test_refuted_status(self):
+        link = ProposedVocabLink.model_validate({
+            "feature": "bottleneck_compression",
+            "capability": "parameter_efficiency",
+            "evidence": "Smaller bottleneck did not improve score.",
+            "status": "refuted",
+        })
+        assert link.status == "refuted"
+
+    def test_invalid_status_raises(self):
+        with pytest.raises(ValidationError):
+            ProposedVocabLink.model_validate({
+                "feature": "test",
+                "capability": "test",
+                "evidence": "test",
+                "status": "maybe",
+            })
+
+    def test_evidence_max_length(self):
+        with pytest.raises(ValidationError):
+            ProposedVocabLink.model_validate({
+                "feature": "test",
+                "capability": "test",
+                "evidence": "x" * 301,
+            })
+
+    def test_missing_feature_raises(self):
+        with pytest.raises(ValidationError):
+            ProposedVocabLink.model_validate({
+                "capability": "receptive_field",
+                "evidence": "test",
+            })
 
 
 # ---------------------------------------------------------------------------
@@ -345,6 +459,96 @@ class TestReasoningPipelineConfig:
 
 
 # ---------------------------------------------------------------------------
+# ProposalOutput — memo_consistency_notes (B.26)
+# ---------------------------------------------------------------------------
+
+class TestProposalOutputConsistencyNotes:
+
+    def _make_output(self, **overrides):
+        base = {
+            "model_name": "test_model",
+            "model_description": "A test model.",
+            "mathematical_definition": "Linear layers.",
+            "motivation": "Testing.",
+            "expert_advice": {
+                "focus_areas": [], "constraints": [], "known_failures": [],
+                "suggested_directions": [], "rationale": "",
+            },
+            "baseline_config": {"model_config": {}, "train_config": {}, "loss_config": {}},
+        }
+        base.update(overrides)
+        return base
+
+    def test_default_empty(self):
+        from agent.schemas.proposal import ProposalOutput
+        out = ProposalOutput.model_validate(self._make_output())
+        assert out.memo_consistency_notes == []
+
+    def test_with_notes(self):
+        from agent.schemas.proposal import ProposalOutput
+        out = ProposalOutput.model_validate(self._make_output(
+            memo_consistency_notes=[
+                "DiscoveryMemo claims FNO spectral layer but model uses only convolutions.",
+                "Proposed receptive field exceeds segmentation_size.",
+            ],
+        ))
+        assert len(out.memo_consistency_notes) == 2
+
+
+# ---------------------------------------------------------------------------
+# VocabEntry
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# ResearchPolicy
+# ---------------------------------------------------------------------------
+
+class TestResearchPolicy:
+
+    def test_defaults(self):
+        policy = ResearchPolicy()
+        assert policy.minimum_boldness == 0.05
+        assert policy.max_citations == 5
+        assert policy.vocab_stagnation_threshold == 0.1
+        assert policy.min_runs_for_promotion == 3
+        assert policy.require_positive_delta is True
+
+    def test_high_risk_policy(self):
+        policy = ResearchPolicy(
+            minimum_boldness=0.15,
+            vocab_stagnation_threshold=0.2,
+            min_runs_for_promotion=2,
+        )
+        assert policy.minimum_boldness == 0.15
+        assert policy.min_runs_for_promotion == 2
+
+    def test_safety_first_policy(self):
+        policy = ResearchPolicy(
+            minimum_boldness=0.02,
+            min_runs_for_promotion=5,
+        )
+        assert policy.minimum_boldness == 0.02
+
+    def test_boldness_range(self):
+        with pytest.raises(ValidationError):
+            ResearchPolicy(minimum_boldness=1.5)
+
+    def test_min_runs_too_low(self):
+        with pytest.raises(ValidationError):
+            ResearchPolicy(min_runs_for_promotion=1)
+
+    def test_pipeline_config_carries_policy(self):
+        config = ReasoningPipelineConfig(
+            policy=ResearchPolicy(minimum_boldness=0.2),
+        )
+        assert config.policy.minimum_boldness == 0.2
+
+    def test_pipeline_config_default_policy(self):
+        config = ReasoningPipelineConfig()
+        assert config.policy.minimum_boldness == 0.05
+
+
+# ---------------------------------------------------------------------------
 # VocabEntry
 # ---------------------------------------------------------------------------
 
@@ -362,15 +566,15 @@ class TestVocabEntry:
         assert ve.tier == "canonical"
         assert ve.pattern is not None
 
-    def test_valid_concept(self):
+    def test_valid_capability(self):
         ve = VocabEntry.model_validate({
             "name": "receptive_field",
-            "kind": "concept",
+            "kind": "capability",
             "description": "How far back in time the model can see per layer.",
             "related_to": ["dilated_causal_conv", "depth"],
         })
         assert ve.tier == "candidate"  # default
-        assert ve.pattern is None  # concepts don't have patterns
+        assert ve.pattern is None  # capabilities don't have patterns
 
     def test_candidate_with_run(self):
         ve = VocabEntry.model_validate({
