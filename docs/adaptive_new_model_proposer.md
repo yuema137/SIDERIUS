@@ -1174,13 +1174,16 @@ Prompt templates live in `agent/prompt_templates/proposal/` as `.md` files (not 
 
 - ☑ B.20 Predefined pseudo data: `tests/pseudo_data/api_call_outputs/ml_model_proposal_agent/generate.json` — 3 canned responses (comparison, causal_reasoning, proposing) as a FIFO list. **Done**.
 - ☑ B.21 `@dual_mode` integration test: `test_proposal_pipeline_dual_mode` in `tests/integration/nodes/test_ml_model_proposal_agent.py`. Pseudo mode asserts on 3 generate() calls, prompt content, output structure, file persistence. **Done**.
-- ☐ B.9 Protocol update to carry `expert_context` + `vocab_seed` + `reasoning_pipeline`. Deferred — wiring task for workflow chain integration.
-- ☐ B.22 Mocked-LLM unit tests: memo validation failure → retry, deviation notes. Deferred — incremental additions to existing mocked tests.
-- ☐ B.23 Tier-1 integration test: real LLM produces valid memo + proposal. Deferred — run manually when testing the pipeline on real data.
 
 **Verify** (after Group 4):
-- All unit tests pass: `uv run pytest tests/unit/agent/ml_model_proposal_agent/ -q`.
-- Manual: run the agent on real interpretation output, inspect the `DiscoveryMemo` JSON, confirm it references specific `file_vector` evidence and vocabulary entries in `causal_hypothesis`.
+- ☑ All unit tests pass: 800 passed.
+- ☑ Manual: ran on real interpretation data (lilab_chain_v1 iter_002, 3 models, 42 experiments) with `gemini-3.1-pro-preview`. Pipeline proposed `causal_conv_stack` — an ablation experiment testing `dilated_causal_conv → receptive_field` link. Vocabulary terms used consistently. Exploration mode correctly active.
+
+#### Deferred items (moved to their actual phases)
+
+- B.9 → moved to **pre-chain-run** — protocol wiring for `expert_context` + `vocab_seed` + `reasoning_pipeline`. Do this before the first real chain run with the 3-stage pipeline.
+- B.22 → moved to **Phase C** — memo validation failure → retry, deviation notes. Part of pipeline hardening alongside vocabulary promotion logic.
+- B.23 → **effectively done** via the manual verify above. Formalizing as a pytest test is low priority.
 
 ---
 
