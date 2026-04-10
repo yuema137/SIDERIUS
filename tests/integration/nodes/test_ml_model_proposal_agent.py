@@ -179,3 +179,97 @@ class TestMLModelProposalAgentOpenAI:
 
         print(f"\n  proposed model  : {output.model_name}")
         print(f"  motivation      : {output.motivation[:200]}...")
+
+
+# ==========================================
+# Dual-mode test — 3-stage pipeline (B.21)
+# ==========================================
+
+@pytest.mark.dual_mode
+def test_proposal_pipeline_dual_mode(tmp_path, request):
+    """
+    Dual-mode test for the 3-stage reasoning pipeline.
+
+    Pseudo mode (default): RecordingLLMBridge returns predefined responses
+    for comparison, causal_reasoning, and proposing stages. Asserts on
+    call count, prompt content, and output structure. No API calls.
+
+    Real mode (--real-api-call): real LLMBridge makes real API calls.
+    Same assertions on output structure.
+    """
+    is_real_mode = request.config.getoption("--real-api-call")
+
+    if is_real_mode:
+        _skip_if_no_key("gemini")
+
+    from agent.schemas.proposal import ReasoningPipelineConfig, ReasoningStage
+
+    # Pipeline input with 2 reasoning stages
+    pipeline = ReasoningPipelineConfig(
+        stages=[
+            ReasoningStage(name="comparison", system_prompt_key="COMPARATIVE_ANALYSIS"),
+            ReasoningStage(name="causal_reasoning", system_prompt_key="CAUSAL_REASONING"),
+        ],
+    )
+    inp = ProposalInput(
+        interpretation=SYNTHETIC_INTERPRETATION,
+        existing_model_types=["punet", "wavenet", "fcnet"],
+        constraints=["VRAM < 10 GB", "params < 50M"],
+        reasoning_pipeline=pipeline,
+        storage=StorageConfig(
+            backend="local",
+            local=LocalStorageConfig(
+                workspace=str(tmp_path),
+                run_name="pipeline_test",
+            ),
+        ),
+    )
+
+    if is_real_mode:
+        agent = MLModelProposalAgent(provider="gemini", model_id="gemini-3.1-pro-preview")
+    else:
+        from tests.helpers.recording_llm_bridge import RecordingLLMBridge
+        bridge = RecordingLLMBridge.for_agent("ml_model_proposal_agent")
+        agent = MLModelProposalAgent(
+            provider="gemini", model_id="test",
+            bridge_factory=lambda **kw: bridge,
+        )
+
+    output = agent.run(inp)
+
+    # --- Assertions that hold in BOTH modes ---
+    assert isinstance(output, ProposalOutput)
+    ProposalOutput.model_validate(output.model_dump())
+    assert output.model_name  # non-empty
+    assert output.model_name not in inp.existing_model_types
+    assert output.model_description
+    assert output.mathematical_definition
+    assert output.motivation
+    assert output.expert_advice.constraints  # at least one constraint
+    assert output.baseline_config
+
+    # Output file should be written
+    out_path = tmp_path / "proposal_pipeline_test.json"
+    assert out_path.exists()
+
+    # --- Pseudo-mode-only assertions (orchestration wiring) ---
+    if not is_real_mode:
+        # 3 generate() calls: comparison, causal_reasoning, proposing
+        gen_calls = [c for c in bridge.calls if c[0] == "generate"]
+        assert len(gen_calls) == 3, (
+            f"Expected 3 generate() calls (comparison + reasoning + proposing), "
+            f"got {len(gen_calls)}"
+        )
+
+        # First call should contain vocabulary/comparison context
+        first_prompt = gen_calls[0][2]  # user_prompt
+        assert "candidates" in first_prompt.lower() or "model_type" in first_prompt.lower()
+
+        # Output should match the canned proposing response
+        assert output.model_name == "spectral_dilated_net"
+        assert "dilated" in output.mathematical_definition.lower()
+        assert output.memo_consistency_notes == []
+
+        print(f"\n  [pseudo] 3-stage pipeline completed successfully")
+        print(f"  [pseudo] {len(bridge.calls)} total bridge calls")
+        print(f"  [pseudo] proposed: {output.model_name}")

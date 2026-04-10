@@ -1,0 +1,109 @@
+[
+  {
+    "_comment": "Stage 1: Comparison output",
+    "comparisons": [
+      {
+        "model_type": "wavenet",
+        "source": "seed",
+        "best_score": 5.57,
+        "key_mechanism": "dilated_causal_conv provides exponential receptive field growth with O(log T) depth efficiency.",
+        "strengths": ["Strong on files 10-19 (high freq), scores above 8.0"],
+        "weaknesses": ["Near-zero on files 0-4 (low freq), suggesting receptive field insufficient for lowest bands"],
+        "lesson_for_next_proposal": "Inherit dilated_causal_conv and gated_activation, add spectral processing for low-freq."
+      },
+      {
+        "model_type": "punet",
+        "source": "seed",
+        "best_score": 1.80,
+        "key_mechanism": "encoder_decoder with skip_connection provides multi-scale aggregation.",
+        "strengths": ["Moderate generalization across all frequency bands"],
+        "weaknesses": ["Limited receptive field depth compared to wavenet"],
+        "lesson_for_next_proposal": "Multi-scale skip connections are valuable but insufficient alone."
+      }
+    ],
+    "proposed_vocab_links": [
+      {
+        "feature": "dilated_causal_conv",
+        "capability": "receptive_field",
+        "evidence": "Wavenet uses dilated_causal_conv and scores 5.57 overall with strong high-freq. Models without it score below 2.0.",
+        "status": "proposed"
+      }
+    ],
+    "proposed_vocab_candidates": [],
+    "sota_model_type": "wavenet",
+    "sota_score": 5.57,
+    "sota_mechanism": "Dilated causal convolutions with gated activation provide exponential receptive field growth, enabling strong high-frequency signal recovery."
+  },
+  {
+    "_comment": "Stage 2: Causal reasoning output",
+    "proposed_change": "Add spectral_conv layer after the dilated conv stack to enable direct frequency-domain processing.",
+    "causal_hypothesis": "WaveNet's dilated_causal_conv provides wide receptive_field for high-freq recovery but cannot directly process low-frequency components below its effective receptive field. Adding spectral_conv enables full-spectrum frequency_resolution, addressing the low-freq gap (files 0-4 near zero) while preserving the proven dilation-based high-freq mechanism.",
+    "falsifiable_prediction": {
+      "metric": "mean(file_vector[0:5])",
+      "current_value": 0.5,
+      "predicted_value": 2.0,
+      "threshold_for_refutation": 0.3,
+      "rationale": "Spectral conv directly processes low-freq components that temporal convolutions miss."
+    },
+    "predicted_failure_modes": [
+      "FNO spectral layer may double VRAM usage beyond 10 GB budget at segmentation_size > 20000.",
+      "Spectral and temporal paths may interfere, degrading high-freq performance."
+    ],
+    "inherited_components": [
+      {
+        "component": "dilated_causal_conv",
+        "from_model_type": "wavenet",
+        "contribution_evidence": "Core mechanism of wavenet's 5.57 SOTA score."
+      },
+      {
+        "component": "gated_activation",
+        "from_model_type": "wavenet",
+        "contribution_evidence": "Enables selective signal modulation in wavenet's gating blocks."
+      }
+    ]
+  },
+  {
+    "_comment": "Stage 3: Proposing output",
+    "model_name": "spectral_dilated_net",
+    "model_description": "A hybrid architecture combining WaveNet's dilated causal convolutions with an FNO spectral layer for full-spectrum denoising. The dilated path handles high-frequency recovery while the spectral path directly processes low-frequency components.",
+    "mathematical_definition": "Input embedding (256 -> d_model) -> N dilated causal conv blocks with gated activation and skip connections -> spectral_conv layer (RFFT, learnable complex weights, IRFFT) -> output projection (d_model -> 256). The spectral path operates on the full FFT spectrum, providing direct access to all frequency bins.",
+    "motivation": "Addresses the low-frequency gap identified in the DiscoveryMemo: WaveNet scores near-zero on files 0-4 because its receptive field, while exponentially growing, cannot capture the lowest frequency bands. The spectral_conv layer provides direct frequency_resolution for these bands while preserving the proven dilated_causal_conv mechanism for high-freq recovery.",
+    "expert_advice": {
+      "focus_areas": ["Low-frequency recovery (files 0-4)", "Spectral-temporal path balance"],
+      "constraints": ["VRAM < 10 GB", "Parameters < 50M"],
+      "known_failures": ["Pure spectral models (gated_fno) underperform on high-freq bands"],
+      "suggested_directions": [
+        "Start with depth=4 dilated blocks + 1 spectral layer",
+        "Use trial_portion=0.05 for initial screening, target strategy on files 0-4",
+        "If low-freq improves but high-freq degrades, reduce spectral layer width"
+      ],
+      "rationale": "The hybrid approach should inherit wavenet's high-freq strength while adding spectral processing for the low-freq gap."
+    },
+    "baseline_config": {
+      "model_config": {
+        "model_type": "spectral_dilated_net",
+        "segmentation_size": 10000,
+        "num_dilated_blocks": 4,
+        "dilation_channels": 16,
+        "skip_channels": 16,
+        "spectral_width": 32,
+        "embedding_dim": 8
+      },
+      "train_config": {
+        "lr": 0.0001,
+        "epochs": 5,
+        "batch_size": 128,
+        "optimizer_type": "adamw",
+        "weight_decay": 0.00001,
+        "device": "cuda"
+      },
+      "loss_config": {
+        "loss_type": "focal",
+        "alpha": 0.5,
+        "gamma": 2.0,
+        "reduction": "mean"
+      }
+    },
+    "memo_consistency_notes": []
+  }
+]
