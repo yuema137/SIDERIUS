@@ -1150,15 +1150,15 @@ Schema and validator additions that prevent the system from collapsing into cons
 - ☑ B.26 `memo_consistency_notes: List[str] = []` on `ProposalOutput`. Stage 3 flags inconsistencies. **Done** — same file.
 - ☑ B.27 Unit tests: 7 new tests (boldness computation, timid/bold/zero, citation max, consistency notes). 62 total in Phase B test file. **Done**.
 
-#### Group 3 — Prompt templates (as separate .md files)
+#### Group 3 — Prompt templates (DONE)
 
-Prompt templates live in `agent/prompts/proposal/` as `.md` files, NOT in `prompts.py`. The pipeline runner loads them at runtime. This keeps complex multi-paragraph prompts readable and version-controlled separately.
+Prompt templates live in `agent/prompt_templates/proposal/` as `.md` files (not `agent/prompts/` — that path conflicts with the existing `agent/prompts.py` tuner module). The pipeline runner loads them at runtime via `load_stage_prompt()`. Each stage has a base template + explore/exploit mode variants.
 
-- ☐ B.14 `agent/prompts/proposal/comparison_stage.md` — COMPARATIVE_ANALYSIS prompt. Instructs the LLM to produce `List[ModelComparison]` + `List[ProposedVocabLink]` hypotheses. Includes vocabulary-contributor sub-task and **ablation suggestion** sub-task ("which component should we remove to test its isolated contribution?"). Two variants: exploration mode (honest uncertainty, diagnostic, demand vocabulary growth) and exploitation mode (leverage confirmed links, reference prior ablation evidence).
-- ☐ B.15 `agent/prompts/proposal/causal_reasoning_stage.md` — CAUSAL_REASONING prompt. Four structural teeth: comparison-backed, falsifiable, devil's advocate, architectural tethering. **Bold prediction requirement**: "your prediction must have boldness ≥ 0.05 — timid predictions are rejected." Two mode variants.
-- ☐ B.16 `agent/prompts/proposal/proposing_stage.md` — ARCHITECTURE_DESIGN prompt. Requires references to memo's `proposed_change` and `inherited_components`. Must populate `memo_consistency_notes` if any physical impossibilities are noticed. **Citation discipline**: "cite ONLY items that materially changed your hypothesis." Two mode variants.
-- ☐ B.16a `_resolve_exploration_mode(records, pipeline)` — auto-detection logic. Checks evidence depth (agent-proposed records, distinct model types) AND **vocabulary diversity** (candidate/canonical ratio — stagnation triggers explore mode). *(Concern #1: Innovation Stagnation)*
-- ☐ B.17 Labeled-block rendering of `expert_context` items in all three stage prompts.
+- ☑ B.14 `agent/prompt_templates/proposal/comparison_stage.md` — COMPARATIVE_ANALYSIS prompt. Instructs the LLM to produce `List[ModelComparison]` + `List[ProposedVocabLink]` hypotheses. Includes vocabulary-contributor sub-task and **ablation suggestion** sub-task ("which component should we remove to test its isolated contribution?"). Two variants: exploration mode (honest uncertainty, diagnostic, demand vocabulary growth) and exploitation mode (leverage confirmed links, reference prior ablation evidence).
+- ☑ B.15 `agent/prompt_templates/proposal/causal_reasoning_stage.md` — CAUSAL_REASONING prompt. Four structural teeth: comparison-backed, falsifiable, devil's advocate, architectural tethering. **Bold prediction requirement**: "your prediction must have boldness ≥ 0.05 — timid predictions are rejected." Two mode variants.
+- ☑ B.16 `agent/prompt_templates/proposal/proposing_stage.md` — ARCHITECTURE_DESIGN prompt. Requires references to memo's `proposed_change` and `inherited_components`. Must populate `memo_consistency_notes` if any physical impossibilities are noticed. **Citation discipline**: "cite ONLY items that materially changed your hypothesis." Two mode variants.
+- ☐ B.16a `_resolve_exploration_mode(records, pipeline)` (deferred to Group 4 — pipeline runner) — auto-detection logic. Checks evidence depth (agent-proposed records, distinct model types) AND **vocabulary diversity** (candidate/canonical ratio — stagnation triggers explore mode). *(Concern #1: Innovation Stagnation)*
+- ☑ B.17 `render_expert_context()` + `load_stage_prompt()` in `agent/prompt_templates/proposal/__init__.py`. Groups by kind, labeled rendering, template variable substitution, mode block injection. **Done**.
 
 #### Group 4 — Pipeline runner + model selection + DI
 
