@@ -1,0 +1,7 @@
+{
+  "interpret": "This is a real research run of the iteration chain plumbing. Summarize the seed records detailedly and structured",
+  "propose": "Propose comparable architecture as wavenet, because that is the current SOTA model. You should learn from the wavenet description, wavenet design and concept, wavenet model config and train configs, and make incremental change each in each research loop.",
+  "implement": "You should learn from the wavenet structure.",
+  "validate": "Apply standard validation. Reject plugins that import unusual libraries or have obvious bugs, but do not be overly strict about style.",
+  "tune": "you should learn from the baseline config of wavenet, as that is the current sota model"
+}

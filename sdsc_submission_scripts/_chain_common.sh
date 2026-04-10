@@ -36,11 +36,6 @@ REFLECT_MODEL_ID=""
 TRIAL_PORTION=0.02
 TRAIN_PORTION=1.0
 EVAL_PORTION=0.02
-HUMAN_ADVICE_INTERPRET=""
-HUMAN_ADVICE_PROPOSE=""
-HUMAN_ADVICE_IMPLEMENT=""
-HUMAN_ADVICE_VALIDATE=""
-HUMAN_ADVICE_TUNE=""
 HUMAN_ADVICE_FILE=""
 
 # --- Slurm-only defaults (ignored by lilab caller) ---
@@ -70,11 +65,6 @@ parse_chain_args() {
         --trial_portion)          TRIAL_PORTION="$2"; shift 2 ;;
         --train_portion)          TRAIN_PORTION="$2"; shift 2 ;;
         --eval_portion)           EVAL_PORTION="$2"; shift 2 ;;
-        --human_advice_interpret) HUMAN_ADVICE_INTERPRET="$2"; shift 2 ;;
-        --human_advice_propose)   HUMAN_ADVICE_PROPOSE="$2"; shift 2 ;;
-        --human_advice_implement) HUMAN_ADVICE_IMPLEMENT="$2"; shift 2 ;;
-        --human_advice_validate)  HUMAN_ADVICE_VALIDATE="$2"; shift 2 ;;
-        --human_advice_tune)      HUMAN_ADVICE_TUNE="$2"; shift 2 ;;
         --human_advice_file)      HUMAN_ADVICE_FILE="$2"; shift 2 ;;
         # Slurm-only flags — silently accepted on lilab too (ignored)
         --partition)              PARTITION="$2"; shift 2 ;;
@@ -93,11 +83,9 @@ parse_chain_args() {
 }
 
 load_advice_file() {
-    # Load human advice from JSON file if provided. Schema:
-    #   {"interpret":"...", "propose":"...", "implement":"...",
-    #    "validate":"...",  "tune":"..."}
-    # Any key may be missing/empty. Explicit --human_advice_<agent> CLI
-    # flags take precedence over file values.
+    # Validate that the human advice file exists (if provided).
+    # The JSON is passed as a path to run_one_iteration.py, which loads
+    # and decomposes it into per-agent fields. No shell-side expansion needed.
     if [ -z "$HUMAN_ADVICE_FILE" ]; then
         return 0
     fi
@@ -105,22 +93,7 @@ load_advice_file() {
         echo "Human advice file not found: $HUMAN_ADVICE_FILE" >&2
         exit 1
     fi
-    _read_advice() {
-        python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get(sys.argv[2],'') or '')" \
-            "$HUMAN_ADVICE_FILE" "$1"
-    }
-    local FILE_INTERPRET FILE_PROPOSE FILE_IMPLEMENT FILE_VALIDATE FILE_TUNE
-    FILE_INTERPRET=$(_read_advice interpret)
-    FILE_PROPOSE=$(_read_advice propose)
-    FILE_IMPLEMENT=$(_read_advice implement)
-    FILE_VALIDATE=$(_read_advice validate)
-    FILE_TUNE=$(_read_advice tune)
-    if [ -z "$HUMAN_ADVICE_INTERPRET" ]; then HUMAN_ADVICE_INTERPRET="$FILE_INTERPRET"; fi
-    if [ -z "$HUMAN_ADVICE_PROPOSE" ];   then HUMAN_ADVICE_PROPOSE="$FILE_PROPOSE"; fi
-    if [ -z "$HUMAN_ADVICE_IMPLEMENT" ]; then HUMAN_ADVICE_IMPLEMENT="$FILE_IMPLEMENT"; fi
-    if [ -z "$HUMAN_ADVICE_VALIDATE" ];  then HUMAN_ADVICE_VALIDATE="$FILE_VALIDATE"; fi
-    if [ -z "$HUMAN_ADVICE_TUNE" ];      then HUMAN_ADVICE_TUNE="$FILE_TUNE"; fi
-    echo "Loaded human advice from: $HUMAN_ADVICE_FILE"
+    echo "Human advice file: $HUMAN_ADVICE_FILE (validated)"
 }
 
 # Build the source-path list for iteration $1.
@@ -159,20 +132,8 @@ build_app_args() {
     if [ -n "$REFLECT_MODEL_ID" ]; then
         APP_ARGS+=(--reflect_model_id "$REFLECT_MODEL_ID")
     fi
-    if [ -n "$HUMAN_ADVICE_INTERPRET" ]; then
-        APP_ARGS+=(--human_advice_interpret "$HUMAN_ADVICE_INTERPRET")
-    fi
-    if [ -n "$HUMAN_ADVICE_PROPOSE" ]; then
-        APP_ARGS+=(--human_advice_propose "$HUMAN_ADVICE_PROPOSE")
-    fi
-    if [ -n "$HUMAN_ADVICE_IMPLEMENT" ]; then
-        APP_ARGS+=(--human_advice_implement "$HUMAN_ADVICE_IMPLEMENT")
-    fi
-    if [ -n "$HUMAN_ADVICE_VALIDATE" ]; then
-        APP_ARGS+=(--human_advice_validate "$HUMAN_ADVICE_VALIDATE")
-    fi
-    if [ -n "$HUMAN_ADVICE_TUNE" ]; then
-        APP_ARGS+=(--human_advice_tune "$HUMAN_ADVICE_TUNE")
+    if [ -n "$HUMAN_ADVICE_FILE" ]; then
+        APP_ARGS+=(--human_advice_file "$HUMAN_ADVICE_FILE")
     fi
 }
 

@@ -69,8 +69,10 @@ LLM_MODEL="gemini-3.1-pro-preview"
 TRIAL_PORTION=0.1
 TRAIN_PORTION=0.1
 EVAL_PORTION=0.1
-HUMAN_ADVICE_PROPOSE=""
-HUMAN_ADVICE_TUNE=""
+MAX_EPOCHS=""
+REFLECT_PROVIDER=""
+REFLECT_MODEL_ID=""
+HUMAN_ADVICE_FILE=""
 
 # --- Argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -90,8 +92,10 @@ while [[ $# -gt 0 ]]; do
     --trial_portion)          TRIAL_PORTION="$2"; shift 2 ;;
     --train_portion)          TRAIN_PORTION="$2"; shift 2 ;;
     --eval_portion)           EVAL_PORTION="$2"; shift 2 ;;
-    --human_advice_propose)   HUMAN_ADVICE_PROPOSE="$2"; shift 2 ;;
-    --human_advice_tune)      HUMAN_ADVICE_TUNE="$2"; shift 2 ;;
+    --max_epochs)             MAX_EPOCHS="$2"; shift 2 ;;
+    --reflect_provider)       REFLECT_PROVIDER="$2"; shift 2 ;;
+    --reflect_model_id)       REFLECT_MODEL_ID="$2"; shift 2 ;;
+    --human_advice_file)      HUMAN_ADVICE_FILE="$2"; shift 2 ;;
     *)                        shift ;;  # ignore unknown flags
   esac
 done
@@ -137,11 +141,17 @@ RUNNER_ARGS=(
     --cleanup_denoised
 )
 
-if [ -n "$HUMAN_ADVICE_PROPOSE" ]; then
-    RUNNER_ARGS+=(--human_advice_propose "${HUMAN_ADVICE_PROPOSE}")
+if [ -n "$MAX_EPOCHS" ]; then
+    RUNNER_ARGS+=(--max_epochs "${MAX_EPOCHS}")
 fi
-if [ -n "$HUMAN_ADVICE_TUNE" ]; then
-    RUNNER_ARGS+=(--human_advice_tune "${HUMAN_ADVICE_TUNE}")
+if [ -n "$REFLECT_PROVIDER" ]; then
+    RUNNER_ARGS+=(--reflect_provider "${REFLECT_PROVIDER}")
+fi
+if [ -n "$REFLECT_MODEL_ID" ]; then
+    RUNNER_ARGS+=(--reflect_model_id "${REFLECT_MODEL_ID}")
+fi
+if [ -n "$HUMAN_ADVICE_FILE" ]; then
+    RUNNER_ARGS+=(--human_advice_file "${HUMAN_ADVICE_FILE}")
 fi
 
 # --- Execute the runner ---

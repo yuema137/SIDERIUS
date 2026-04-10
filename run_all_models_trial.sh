@@ -18,10 +18,10 @@ set -euo pipefail
 SIDERIUS_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG_DIR="$(grep 'siderius_data_dir' tidmad_data_config.yaml | cut -d: -f2 | tr -d ' ')/logs"
 PYTHON="$SIDERIUS_DIR/.venv/bin/python"
-RUN_NAME="small_sample_trial_v0"
+RUN_NAME="small_sample_trial_v1"
 MAX_ROUNDS=20
 PROVIDER="gemini"
-MODEL_ID="gemini-3.1-flash-lite-preview"
+MODEL_ID="gemini-3.1-pro-preview"
 CLEANUP_DENOISED=true   # delete denoised H5 files after scoring to save disk
 POLL_INTERVAL=30
 
@@ -29,10 +29,11 @@ POLL_INTERVAL=30
 # Model groups — same as run_all_models.sh
 # ---------------------------------------------------------------------------
 MODEL_GROUPS=(
-    "punet wavenet"          # Group 1 — light models (parallel)
-    "fcnet"                  # Group 2 — large model, needs full memory alone
-    "transformer"            # Group 3 — attention-heavy (~6 GB), seg_size=20000 → 2× batches
-    "rnn"                    # Group 4 — separate to avoid concurrent GPU OOM
+    # "punet wavenet"          # Group 1 — light models (parallel)
+    # "fcnet"                  # Group 2 — large model, needs full memory alone
+    # "transformer"            # Group 3 — attention-heavy (~6 GB), seg_size=20000 → 2× batches
+    # "rnn"                    # Group 4 — separate to avoid concurrent GPU OOM
+    "gated_fno"              # Group 5 — Gated FNO (~328M params, ~5 GB)
 )
 
 mkdir -p "$LOG_DIR"
