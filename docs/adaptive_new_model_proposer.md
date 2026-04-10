@@ -1187,6 +1187,16 @@ Prompt templates live in `agent/prompt_templates/proposal/` as `.md` files (not 
 
 ---
 
+### Pre-chain-run — Workflow wiring for the 3-stage pipeline
+
+Before the first real chain run with the 3-stage pipeline, the protocol
+and workflow must carry the new fields to the proposal agent.
+
+- ☐ B.9 Update `ml_result_interp_to_ml_model_propose.local_full_context` protocol to carry `expert_context` + `vocab_seed` + `reasoning_pipeline`. Wrap legacy `human_advice` into `ExpertContextItem`. The workflow passes these to the protocol, NOT directly to the agent.
+- ☐ Wire `ReasoningPipelineConfig` at the workflow level (`WorkflowLLMConfig.propose.pipeline` or equivalent) so the chain uses the 3-stage pipeline across all iterations.
+
+---
+
 ### Phase C — Vocabulary promotion + lineage validator + centrifugal metrics
 
 **Goal**: claimed inheritance becomes verifiable; the system grows its vocabulary by structural promotion across runs; confirmed `ProposedVocabLink` entries populate `VocabEntry.related_to`; centrifugal metrics prevent conservative collapse.
@@ -1212,7 +1222,7 @@ Prompt templates live in `agent/prompt_templates/proposal/` as `.md` files (not 
 - `tests/unit/agent/result_interpretation_agent/test_vocab_promotion.py` (new) — promotion rule unit tests.
 
 **Sub-tasks**:
-- ☐ C.1 **Draft the seed `primitive_vocab.json` for human review.** Claude proposes ~10–15 canonical entries drawn from the existing built-in models (`punet`, `wavenet`, `fcnet`, `transformer`, `rnn`, `gated_fno`) — reading each model's `description.md` and extracting the architectural primitives it relies on. The draft is then submitted to the human for review and editing BEFORE any of the rest of Phase C lands. The seed sets the canonical quality bar and is the most consequential single artifact in the whole vocabulary mechanism, so the human gets the final word. Each entry needs `name`, `description`, `pattern` (regex or AST hint).
+- ☑ C.1 **Vocab seed file.** Done in Phase B (B.6a) — `agent/schemas/vocab_seed.json` with 21 canonical entries (11 features + 10 capabilities). All `related_to` empty — connections discovered through `ProposedVocabLink` experimentation. Human-reviewed.
 - ☐ C.2 Implement `check_inherited_components(plugin_source, claimed_components, runtime_vocab)` in the validator. Returns the list of unsubstantiated claims; empty list = pass.
 - ☐ C.3 Wire the new check into `ml_code_validator_agent`'s existing check sequence as check #8.
 - ☐ C.4 Implement the runtime vocab aggregator in the interpretation agent: walks all records, collects all `inherited_components` entries, deduplicates against seed canonical entries by name and alias.
@@ -1224,6 +1234,7 @@ Prompt templates live in `agent/prompt_templates/proposal/` as `.md` files (not 
 - ☐ C.10 Validator unit tests: claim valid component → pass; claim component not in source → fail with clear message; unknown vocab entry → soft skip.
 - ☐ C.11 Promotion rule unit tests: candidate with 2 runs → not promoted; with 3 runs but no above-SOTA → not promoted; with 3 runs + above-SOTA + dedup-novel → promoted; with 3 runs + dedup-synonym → merged as alias.
 - ☐ C.12 Tier-1 integration test: a synthetic chain of 4 records with one repeated candidate → interpretation agent emits a promotion event for it.
+- ☐ B.22 (from Phase B) Pipeline hardening: memo validation failure → retry, deviation notes handling, backward-compat with empty `expert_context`.
 
 **Verify**:
 - `uv run pytest tests/unit/agent/code_validator_agent tests/unit/agent/result_interpretation_agent -q` — passes.
