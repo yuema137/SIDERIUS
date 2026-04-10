@@ -266,15 +266,17 @@ class ReasoningPipelineConfig(BaseModel):
 
 # B.6a — Unified vocabulary entry (features + concepts)
 class VocabEntry(BaseModel):
-    """A single vocabulary entry — feature or concept.
+    """A single vocabulary entry — feature or capability.
 
     Adding a new kind (e.g. 'failure_pattern') requires NO code changes —
     just add entries with the new kind value. See §2B composability principle.
     """
     name: str = Field(description="Canonical snake_case name.")
     kind: str = Field(
-        description="'feature' (concrete building block) or 'concept' "
-                    "(scientific principle). New kinds can be added freely."
+        description="'feature' (concrete architectural building block, e.g. "
+                    "'dilated_causal_conv') or 'capability' (measurable "
+                    "architectural property the feature provides, e.g. "
+                    "'receptive_field'). New kinds can be added freely."
     )
     description: str = Field(max_length=200)
     related_to: List[str] = Field(

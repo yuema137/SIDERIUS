@@ -362,15 +362,15 @@ class TestVocabEntry:
         assert ve.tier == "canonical"
         assert ve.pattern is not None
 
-    def test_valid_concept(self):
+    def test_valid_capability(self):
         ve = VocabEntry.model_validate({
             "name": "receptive_field",
-            "kind": "concept",
+            "kind": "capability",
             "description": "How far back in time the model can see per layer.",
             "related_to": ["dilated_causal_conv", "depth"],
         })
         assert ve.tier == "candidate"  # default
-        assert ve.pattern is None  # concepts don't have patterns
+        assert ve.pattern is None  # capabilities don't have patterns
 
     def test_candidate_with_run(self):
         ve = VocabEntry.model_validate({

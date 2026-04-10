@@ -15,7 +15,7 @@ SIDERIUS is currently stuck at a **scientific attribution failure**, not an engi
 
 ### The key design idea: structured vocabulary as a constraint bridge
 
-> **Natural language is diverse and messy. An LLM reasoning in free text will invent 50 different ways to say "dilated convolution" and lose the ability to track what it has tried. The V2 design solves this by introducing a structured vocabulary — currently features (concrete building blocks) and concepts (scientific principles) — as a constraint bridge that harnesses the LLM's reasoning process.**
+> **Natural language is diverse and messy. An LLM reasoning in free text will invent 50 different ways to say "dilated convolution" and lose the ability to track what it has tried. The V2 design solves this by introducing a structured vocabulary — currently features (concrete building blocks) and capabilities (measurable architectural properties) — as a constraint bridge that harnesses the LLM's reasoning process.**
 >
 > The vocabulary is NOT a database or a knowledge graph. It is a **shared language** that all pipeline stages use to refer to the same things consistently. When the comparison stage says "Model A uses **dilated_causal_conv** (feature) which enables **receptive_field** (concept)", the reasoning stage knows exactly what that means and can build on it: "I propose inheriting **dilated_causal_conv** because the **receptive_field** it provides is what the SOTA lacks." Without the vocabulary, the same insight would be expressed in different words at each stage, and the connection would be lost.
 >
@@ -410,8 +410,8 @@ None of these requires a new node, a new agent, or a sidecar file. They are all 
 >
 > Concretely:
 > - **Pipeline stages** conform to a single interface: `(system_prompt, accumulated_context) → stage_output`. The pipeline runner just loops. It doesn't know the difference between "comparison" and "physics_check" — both are entries in a list. Adding a stage = adding one entry + one prompt template. The runner's code doesn't change.
-> - **Vocabulary entries** conform to a single schema: `VocabEntry(name, kind, description, related_to, ...)`. The aggregation/promotion engine doesn't know the difference between a "feature" and a "concept" — both are entries with a `kind` field. Adding a new vocabulary type = adding entries with a new `kind` value. The engine's code doesn't change.
-> - **The combination** of vocabularies × stages is composable: any stage's prompt template can reference any vocabulary kind. The comparison stage uses both features and concepts today; a future "physics_check" stage could use a "physical_constraint" vocabulary kind. No wiring code changes.
+> - **Vocabulary entries** conform to a single schema: `VocabEntry(name, kind, description, related_to, ...)`. The aggregation/promotion engine doesn't know the difference between a "feature" and a "capability" — both are entries with a `kind` field. Adding a new vocabulary type = adding entries with a new `kind` value. The engine's code doesn't change.
+> - **The combination** of vocabularies × stages is composable: any stage's prompt template can reference any vocabulary kind. The comparison stage uses both features and capabilities today; a future "physics_check" stage could use a "physical_constraint" vocabulary kind. No wiring code changes.
 >
 > This composability is what makes the system extensible without accumulating technical debt. Every new capability is an additive plugin, not a cross-cutting modification.
 
@@ -463,7 +463,7 @@ class InheritedComponent(BaseModel):
     )
 ```
 
-**Open vocabulary with structured promotion** (unified `VocabEntry` — replaces the earlier `PRIMITIVE_VOCAB` concept with a broader system that tracks both features and concepts):
+**Open vocabulary with structured promotion** (unified `VocabEntry` — replaces the earlier `PRIMITIVE_VOCAB` concept with a broader system that tracks both features and capabilities):
 
 A pure fixed vocabulary blocks discovery; a pure free-text vocabulary destroys aggregation through spelling drift. The compromise is a **two-tier vocabulary that grows by structural promotion**:
 
@@ -498,7 +498,7 @@ class VocabEntry(BaseModel):
     kind: str = Field(
         description="What type of knowledge this entry represents. "
                     "Current kinds: 'feature' (concrete architectural building block, "
-                    "e.g. 'dilated_causal_conv') and 'concept' (higher-level scientific "
+                    "e.g. 'dilated_causal_conv') and 'capability' (measurable architectural property "
                     "idea, e.g. 'receptive_field'). New kinds can be added without "
                     "code changes — just add entries with the new kind value."
     )
@@ -530,14 +530,14 @@ class VocabEntry(BaseModel):
   {"name": "gated_activation", "kind": "feature", "description": "Sigmoid-gated element-wise multiplication of two conv branches", "related_to": ["selective_frequency_processing"], "pattern": "sigmoid.*\\*"},
   {"name": "skip_connection", "kind": "feature", "description": "Additive residual path bypassing one or more layers", "related_to": ["gradient_flow", "identity_preservation"], "pattern": "\\+.*residual|skip"},
   {"name": "fno_spectral_layer", "kind": "feature", "description": "Fourier Neural Operator layer processing the full FFT spectrum", "related_to": ["frequency_resolution", "receptive_field"]},
-  {"name": "receptive_field", "kind": "concept", "description": "How far back in time the model can see per layer — wider = better low-frequency capture", "related_to": ["dilated_causal_conv", "depth", "kernel_size"]},
-  {"name": "frequency_resolution", "kind": "concept", "description": "The model's ability to distinguish different frequency bands in the signal", "related_to": ["fno_spectral_layer", "segmentation_size", "dilated_causal_conv"]},
-  {"name": "selective_frequency_processing", "kind": "concept", "description": "Ability to attenuate or amplify specific frequency bands independently", "related_to": ["gated_activation", "static_v"]},
-  {"name": "parameter_efficiency", "kind": "concept", "description": "Achieving comparable performance with fewer trainable parameters", "related_to": ["depth", "width", "skip_connection"]}
+  {"name": "receptive_field", "kind": "capability", "description": "How far back in time the model can see per layer — wider = better low-frequency capture", "related_to": ["dilated_causal_conv", "depth", "kernel_size"]},
+  {"name": "frequency_resolution", "kind": "capability", "description": "The model's ability to distinguish different frequency bands in the signal", "related_to": ["fno_spectral_layer", "segmentation_size", "dilated_causal_conv"]},
+  {"name": "selective_frequency_processing", "kind": "capability", "description": "Ability to attenuate or amplify specific frequency bands independently", "related_to": ["gated_activation", "static_v"]},
+  {"name": "parameter_efficiency", "kind": "capability", "description": "Achieving comparable performance with fewer trainable parameters", "related_to": ["depth", "width", "skip_connection"]}
 ]
 ```
 
-The `InheritedComponent.component` field references entries from this unified vocabulary. The proposal agent's prompt includes the full `runtime_vocab` (both tiers, both kinds, clearly labeled) and is instructed: "Use canonical entries verbatim. When claiming an inherited component, specify whether it's a feature or a concept. Use `related_to` links to explain the connection between features and concepts."
+The `InheritedComponent.component` field references entries from this unified vocabulary. The proposal agent's prompt includes the full `runtime_vocab` (both tiers, both kinds, clearly labeled) and is instructed: "Use canonical entries verbatim. When claiming an inherited component, specify whether it's a feature or a capability. Use `related_to` links to explain the connection between features and capabilities."
 
 The comparison stage uses the vocabulary to structure its analysis:
 > "Model A uses **dilated_causal_conv** (feature, canonical) which enables wide **receptive_field** (concept, canonical). Its file_vector shows strong scores on files 11-19 (high frequency) but weak on files 0-4 (low frequency), suggesting the receptive_field is not wide enough for the lowest bands."
