@@ -1197,49 +1197,51 @@ and workflow must carry the new fields to the proposal agent.
 
 ---
 
-### Phase C — Vocabulary promotion + lineage validator + centrifugal metrics
+### Phase C — Vocabulary lifecycle + lineage verification
 
-**Goal**: claimed inheritance becomes verifiable; the system grows its vocabulary by structural promotion across runs; confirmed `ProposedVocabLink` entries populate `VocabEntry.related_to`; centrifugal metrics prevent conservative collapse.
+**Goal**: the vocabulary system becomes a living, accumulating knowledge base. Each round of the exploration loop runs the same pipeline; the vocabulary gets richer as records accumulate. Claimed inheritance is verified. Confirmed feature→capability links are promoted. The system learns what works and why.
 
-**Depends on**: Phase B (the memo is where `inherited_components` and `proposed_vocab_links` live).
+**Depends on**: Phase B (the DiscoveryMemo is where `inherited_components` and `proposed_vocab_links` live).
 
-**Centrifugal-force items from Phase B analysis (deferred to Phase C)**:
-- Component delta scoring: `avg_score_with - avg_score_without` for each vocabulary entry. Promotion requires `delta > 0` AND low confounding. *(Concern #4: Promotion Spuriousness)*
-- Vocabulary diversity metric: `n_candidates / n_total` tracked by interpretation agent, surfaced to proposal agent. Stagnation triggers explore mode. *(Concern #1: Innovation Stagnation)*
-- `ProposedVocabLink` aggregation: links confirmed in ≥2 runs get promoted to `VocabEntry.related_to`. *(Hypothesis-test-verify loop from §2B)*
-- Information gain metric: `boldness × (1 if confirmed else 0)` tracked alongside hit rate. *(Concern #2: Predictive Risk Aversion — Phase E primary, Phase C aggregation)*
+**Core principle**: the pipeline is iterative and repeatable. Every round produces the same kinds of outputs (comparisons, links, predictions). The difference between round 1 and round 20 is the **accumulated memory** — more records, more candidates, more confirmed links, richer runtime vocabulary. Phase C builds the infrastructure for this accumulation. All tasks below contribute to a single repeatable loop; they are ordered by implementation priority, not by a rigid schedule.
 
-**PR size**: medium.
+Already done (in Phase B):
+- ☑ C.1-seed: Vocab seed file (B.6a — 21 entries, human-reviewed).
+- ☑ C.9: Prompt rendering of vocab (pipeline runner renders from `inp.vocab_seed`).
+- ☑ C.8: Protocol carries `vocab_seed` (B.9 pre-chain-run wiring).
 
-**Files**:
-- `agent/schemas/primitive_vocab.json` (new, tracked) — hand-curated seed list of canonical entries.
-- `agent/schemas/primitive_vocab.py` (new) — `PrimitiveVocabEntry` schema, `load_seed_vocab()`, `COMPONENT_PATTERNS` regex/AST map.
-- `nodes/ml_code_validator_agent.py` — add `check_inherited_components` to the existing 7-check flow (becoming 8 checks).
-- `nodes/result_interpretation_agent.py` — implement open-vocabulary aggregation: walk all records, extract candidates, apply the structural promotion rule, emit `vocab_changes` events in the output.
-- `agent/schemas/interpretation.py` — add `current_canonical_vocab`, `current_candidates`, `vocab_changes` to `InterpretationOutput`.
-- `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py` — pass the runtime vocab union into `ProposalInput`.
-- `tests/unit/agent/code_validator_agent/test_inheritance_check.py` (new) — validator unit tests with positive/negative cases.
-- `tests/unit/agent/result_interpretation_agent/test_vocab_promotion.py` (new) — promotion rule unit tests.
+**Sub-tasks** (ordered by priority):
 
-**Sub-tasks**:
-- ☑ C.1 **Vocab seed file.** Done in Phase B (B.6a) — `agent/schemas/vocab_seed.json` with 21 canonical entries (11 features + 10 capabilities). All `related_to` empty — connections discovered through `ProposedVocabLink` experimentation. Human-reviewed.
-- ☐ C.2 Implement `check_inherited_components(plugin_source, claimed_components, runtime_vocab)` in the validator. Returns the list of unsubstantiated claims; empty list = pass.
-- ☐ C.3 Wire the new check into `ml_code_validator_agent`'s existing check sequence as check #8.
-- ☐ C.4 Implement the runtime vocab aggregator in the interpretation agent: walks all records, collects all `inherited_components` entries, deduplicates against seed canonical entries by name and alias.
-- ☐ C.5 Implement the structural promotion rule (≥3 distinct runs ∧ ≥1 above SOTA ∧ semantic dedup ∧ pattern present). Promotion produces a `vocab_changes` event in the output but does NOT mutate `primitive_vocab.json`.
-- ☐ C.6 Implement the semantic dedup step: a small reflector-model LLM call that compares a candidate's description against existing canonical entries and returns "novel" / "synonym of X" / "ambiguous". Fall back to "ambiguous → keep as candidate" on failure.
-- ☐ C.7 Add `current_canonical_vocab`, `current_candidates`, `vocab_changes` to `InterpretationOutput`.
-- ☐ C.8 Update the propose protocol to pass these into `ProposalInput`.
-- ☐ C.9 Update the proposal agent's reasoning prompt to render the runtime vocab as a labeled list (canonical + candidate tiers).
-- ☐ C.10 Validator unit tests: claim valid component → pass; claim component not in source → fail with clear message; unknown vocab entry → soft skip.
-- ☐ C.11 Promotion rule unit tests: candidate with 2 runs → not promoted; with 3 runs but no above-SOTA → not promoted; with 3 runs + above-SOTA + dedup-novel → promoted; with 3 runs + dedup-synonym → merged as alias.
-- ☐ C.12 Tier-1 integration test: a synthetic chain of 4 records with one repeated candidate → interpretation agent emits a promotion event for it.
-- ☐ B.22 (from Phase B) Pipeline hardening: memo validation failure → retry, deviation notes handling, backward-compat with empty `expert_context`.
+**Validator — verify claimed inheritance in code:**
+- ☑ C.2 `_check_inherited_components()` — regex-matches each claimed component's pattern from the vocab seed against plugin source. Unknown entries soft-skipped. Case-insensitive. **Done** — `nodes/ml_code_validator_agent.py`.
+- ☑ C.3 Wired as check #8 in the validator's `run()`. Only active when `inherited_components` is non-empty. Also added `inherited_components` to `ProposalOutput` (copied from DiscoveryMemo) and `ValidatorInput`. **Done**.
+- ☑ C.10 9 unit tests: valid pass, missing fail, unknown skip, capability skip, empty list, mixed, no vocab, case insensitive, simple source fails. **Done** — `tests/unit/agent/ml_code_validator_agent/test_inheritance_check.py`.
+
+**Pipeline hardening:**
+- ☐ B.22 Memo validation failure → retry in the proposal agent. Deviation notes handling when Stage 3 flags inconsistencies.
+
+**Interpretation agent — accumulate vocabulary from records:**
+- ☐ C.4 Runtime vocab aggregator: walk all records, collect `inherited_components` and `proposed_vocab_links`, merge with canonical seed, deduplicate by name. This runs every round — early rounds have few candidates; later rounds have many.
+- ☐ C.7 Add `runtime_vocab: List[VocabEntry]` and `proposed_links_summary` to `InterpretationOutput`.
+- ☐ C.7a Update protocol to pass `runtime_vocab` from interpretation → proposal (replaces static `_load_vocab_seed()` in the workflow).
+
+**Promotion — graduate candidates to canonical:**
+- ☐ C.5 Structural promotion rule: candidate appears in `≥ policy.min_runs_for_promotion` distinct runs ∧ ≥1 above SOTA ∧ `delta > 0` (if `policy.require_positive_delta`) ∧ pattern present. Produces `vocab_changes` event, does NOT mutate the seed file.
+- ☐ C.5a `ProposedVocabLink` promotion: links confirmed in ≥2 runs → populate `VocabEntry.related_to` on the corresponding entries in `runtime_vocab`.
+- ☐ C.6 Semantic dedup: LLM call comparing candidate description against existing canonicals. Returns "novel" / "synonym of X" / "ambiguous". Synonyms merged via `aliases` list.
+- ☐ C.11 Promotion rule unit tests.
+- ☐ C.12 Integration test: synthetic chain of records with repeated candidate → promotion event emitted.
+
+**Centrifugal metrics — prevent conservative collapse:**
+- ☐ Component delta scoring: `avg_score_with - avg_score_without` per vocabulary entry. *(Concern #4)*
+- ☐ Vocabulary diversity metric: `n_candidates / n_total` fed to exploration mode resolver. *(Concern #1)*
+- ☐ Information gain metric: `boldness × (1 if confirmed else 0)` tracked alongside hit rate. *(Concern #2)*
+- ☐ Strategy Performance Report: computed by interpretation agent, injected as `ExpertContextItem(kind="strategy_report")`. *(Feedback loop)*
 
 **Verify**:
-- `uv run pytest tests/unit/agent/code_validator_agent tests/unit/agent/result_interpretation_agent -q` — passes.
-- Manual: hand-curate the seed file and grep for at least one canonical entry per built-in model (`punet`, `wavenet`, `fcnet`, `gated_fno`).
-- Manual: examine an interpretation output JSON after a real chain run and confirm `vocab_changes` is present (may be empty initially).
+- `uv run pytest tests/unit/agent/ml_code_validator_agent/ -q` — all pass including inheritance tests.
+- Manual: run a chain round, inspect interpretation output for `runtime_vocab`, confirm accumulated candidates and links appear.
+- Manual: run a chain with a proposal claiming `dilated_causal_conv`, verify the validator checks for dilation in the code.
 
 ---
 

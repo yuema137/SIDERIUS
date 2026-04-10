@@ -141,6 +141,66 @@ def _build_review_prompt(
 # Deterministic check helpers
 # ---------------------------------------------------------------------------
 
+def _check_inherited_components(
+    plugin_source: str,
+    inherited_components: list,
+    vocab_seed: list | None = None,
+) -> tuple[bool, list[str]]:
+    """
+    Check #8: verify that claimed inherited components appear in the code.
+
+    For each claimed component, look up its ``pattern`` in the vocab seed.
+    If a pattern exists, regex-match against the plugin source. Components
+    without patterns are soft-skipped (noted but not failed).
+
+    Args:
+        plugin_source: Full source code of the plugin file.
+        inherited_components: List of InheritedComponent dicts or objects.
+        vocab_seed: List of VocabEntry dicts or objects for pattern lookup.
+
+    Returns:
+        (all_passed, notes): all_passed is True if every component with a
+        pattern was found. notes is a per-component list of results.
+    """
+    import re
+
+    if not inherited_components:
+        return True, []
+
+    # Build pattern lookup from vocab seed
+    patterns: dict[str, str | None] = {}
+    for entry in (vocab_seed or []):
+        name = entry.get("name") if isinstance(entry, dict) else getattr(entry, "name", None)
+        pattern = entry.get("pattern") if isinstance(entry, dict) else getattr(entry, "pattern", None)
+        if name:
+            patterns[name] = pattern
+
+    notes = []
+    all_passed = True
+
+    for ic in inherited_components:
+        component = ic.get("component") if isinstance(ic, dict) else getattr(ic, "component", None)
+        if not component:
+            continue
+
+        pattern = patterns.get(component)
+        if pattern is None:
+            notes.append(f"{component}: SKIPPED (no pattern in vocab seed)")
+            continue
+
+        try:
+            if re.search(pattern, plugin_source, re.IGNORECASE):
+                notes.append(f"{component}: FOUND (pattern '{pattern}' matched)")
+            else:
+                notes.append(f"{component}: NOT FOUND (pattern '{pattern}' not in source)")
+                all_passed = False
+        except re.error as e:
+            notes.append(f"{component}: REGEX ERROR ({e})")
+            all_passed = False
+
+    return all_passed, notes
+
+
 def _check_plugin(model_file_path: str) -> tuple[bool, str | None]:
     """
     Load the plugin file and verify the three required module-level attributes.
@@ -337,13 +397,44 @@ class MLCodeValidatorAgent:
             )
             llm_ok = False
 
-        passed = all([plugin_ok, tests_ok, desc_ok, cfg_ok, inst_ok, grad_ok, otype_ok, llm_ok])
+        # 8. Inheritance check (only if plugin source is readable and claims exist)
+        inherit_ok = True
+        inherit_notes = None
+        if inp.inherited_components and os.path.isfile(inp.model_file_path):
+            inherit_src = plugin_src if 'plugin_src' in dir() else open(inp.model_file_path).read()
+            # Load vocab seed for pattern lookup
+            vocab_for_check = None
+            try:
+                import json as _json
+                seed_path = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                    "agent", "schemas", "vocab_seed.json",
+                )
+                if os.path.exists(seed_path):
+                    with open(seed_path) as f:
+                        vocab_for_check = _json.load(f)
+            except Exception:
+                pass
+            inherit_ok, inherit_notes_list = _check_inherited_components(
+                inherit_src,
+                [ic.model_dump() if hasattr(ic, "model_dump") else ic
+                 for ic in inp.inherited_components],
+                vocab_for_check,
+            )
+            inherit_notes = inherit_notes_list if inherit_notes_list else None
+            if not inherit_ok:
+                print(f"  Inheritance check FAILED: {inherit_notes}")
+
+        passed = all([plugin_ok, tests_ok, desc_ok, cfg_ok, inst_ok, grad_ok, otype_ok, llm_ok, inherit_ok])
 
         errors = [e for e in [plugin_err, desc_err, cfg_err, inst_err] if e is not None]
         if not tests_ok:
             errors.append("pytest tests failed — see test_output for details")
         if not llm_ok:
             errors.append(f"LLM review did not pass: {review.notes}")
+        if not inherit_ok:
+            failed_claims = [n for n in (inherit_notes or []) if "NOT FOUND" in n]
+            errors.append(f"Inheritance check failed: {'; '.join(failed_claims)}")
         error_message = "; ".join(errors) if errors else None
 
         out = ValidatorOutput(
@@ -357,6 +448,8 @@ class MLCodeValidatorAgent:
             gradient_check_passed=grad_ok,
             output_type_valid=otype_ok,
             llm_review_passed=llm_ok,
+            inheritance_check_passed=inherit_ok,
+            inheritance_check_notes=inherit_notes,
             test_output=test_output if test_output.strip() else None,
             llm_review_spec_alignment=review.spec_alignment,
             llm_review_trainability_concerns=review.trainability_concerns,

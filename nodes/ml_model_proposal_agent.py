@@ -497,6 +497,12 @@ class MLModelProposalAgent:
                 f"Re-run or adjust the constraints."
             )
 
+        # --- Extract inherited_components from reasoning stages ---
+        inherited = []
+        reasoning_output = accumulated.get("causal_reasoning", {})
+        if isinstance(reasoning_output, dict):
+            inherited = reasoning_output.get("inherited_components", [])
+
         # --- Build and validate output ---
         output = ProposalOutput.model_validate({
             "model_name":              proposed_name,
@@ -505,6 +511,7 @@ class MLModelProposalAgent:
             "motivation":              raw.get("motivation", ""),
             "expert_advice":           raw.get("expert_advice", {}),
             "baseline_config":         raw.get("baseline_config", {}),
+            "inherited_components":    inherited,
             "memo_consistency_notes":  raw.get("memo_consistency_notes", []),
         })
         print(f"Proposed model (pipeline): '{output.model_name}'")

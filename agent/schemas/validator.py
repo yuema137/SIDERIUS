@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 from agent.schemas.hyperparam_tuning import ExpertAdviceInput
+from agent.schemas.proposal import InheritedComponent
 
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 
@@ -89,6 +90,13 @@ class ValidatorInput(BaseModel):
         description="Optional human-provided guidance (highest priority — overrides expert_advice). "
                     "When present, injected into the LLM prompt as high-priority context.",
     )
+    inherited_components: List[InheritedComponent] = Field(
+        default_factory=list,
+        description="Claimed architectural primitives from the DiscoveryMemo. "
+                    "When non-empty, the validator checks that each claimed "
+                    "component's pattern appears in the plugin source code. "
+                    "Empty list = check skipped (backward compat).",
+    )
     storage: StorageConfig = Field(
         default_factory=lambda: StorageConfig(
             backend="local",
@@ -142,6 +150,17 @@ class ValidatorOutput(BaseModel):
     )
     llm_review_passed: bool = Field(
         description="Whether the LLM code review concluded the implementation is sound.",
+    )
+    inheritance_check_passed: bool = Field(
+        default=True,
+        description="Whether all claimed inherited_components were found in the plugin source. "
+                    "True when inherited_components is empty (check skipped). "
+                    "False when at least one claimed component's pattern was not found.",
+    )
+    inheritance_check_notes: Optional[List[str]] = Field(
+        default=None,
+        description="Per-component results: which passed, which failed, which were skipped "
+                    "(no pattern). None when inherited_components is empty.",
     )
     test_output: Optional[str] = Field(
         default=None,

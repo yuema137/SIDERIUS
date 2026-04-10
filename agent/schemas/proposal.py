@@ -513,6 +513,12 @@ class ProposalOutput(BaseModel):
                     "suitable for initial exploration. "
                     "Must include model_config, train_config, and loss_config keys.",
     )
+    inherited_components: List[InheritedComponent] = Field(
+        default_factory=list,
+        description="Architectural primitives carried over from past winning runs. "
+                    "Copied from the DiscoveryMemo. The validator checks that each "
+                    "claimed component actually appears in the generated code.",
+    )
     memo_consistency_notes: List[str] = Field(
         default_factory=list,
         description="Inconsistencies the proposing stage noticed between the "
