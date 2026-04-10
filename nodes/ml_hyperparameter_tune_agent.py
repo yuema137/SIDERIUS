@@ -34,7 +34,6 @@ from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_utils import score_vector, SampleSet
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 from execute_tools.build_anchor_map import load_anchor_map
-from execute_tools.regime_aggregator import aggregate_regime_scores
 
 
 def _validate_data_config(
@@ -504,10 +503,6 @@ class HyperparamTuningAgent:
                         "results": {
                             "denoising_score": final_scalar,
                             "file_vector": file_vector,
-                            # Phase A: per-regime aggregation (deterministic; see
-                            # execute_tools.regime_aggregator). Surfaced here so the
-                            # reflector receives it via reflect_results = {**train, **score}.
-                            "regime_scores": aggregate_regime_scores(file_vector),
                         },
                     }
                 else:
@@ -650,12 +645,6 @@ class HyperparamTuningAgent:
                     # Scoring results
                     "denoising_score": score_results.get("denoising_score"),
                     "file_vector":     score_results.get("file_vector"),
-                    # Phase A: deterministic per-regime aggregation of file_vector
-                    # so the LLM gets a structured "gradient" instead of a 20-element
-                    # raw array. See execute_tools/regime_aggregator.py.
-                    "regime_scores":   aggregate_regime_scores(
-                        score_results.get("file_vector")
-                    ),
                     # Data volume
                     "training_psd_segments": train_psd_segments,
                     "eval_psd_segments":    eval_psd_segments,

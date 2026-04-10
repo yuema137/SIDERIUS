@@ -166,27 +166,6 @@ Compare your `file_vector` against the baseline's to see where you improve or re
 - If scores are uniformly low across all files, the model likely needs more data
   (increase trial_portion) or better hyperparameters.
 
-### REGIME SCORES (per-frequency-band aggregation of file_vector):
-Every experiment record now also carries a `regime_scores` dict that aggregates
-`file_vector` into a small number of per-frequency-band means. This is the
-preferred way to read scores at a glance — you should look at `regime_scores`
-FIRST to identify which band the model is failing on, then drill into
-`file_vector` only when you need per-file detail. The seed regimes are:
-
-  - `low_freq_kHz`   : mean of files 0–4   (1.1 kHz – 9.0 kHz, dense sampling)
-  - `mid_freq_10kHz` : mean of files 5–10  (9.1 kHz – 94 kHz, decade sampling)
-  - `high_freq_MHz`  : mean of files 11–19 (95 kHz – 4.9 MHz, sparse sampling)
-  - `global`         : mean of all 20 files
-
-A regime whose score is meaningfully below the others is the band the model is
-failing on. Use this as the diagnostic gradient: if `low_freq_kHz` is much lower
-than `high_freq_MHz`, the model is blind to low frequencies and you should
-adjust hyperparameters that affect long-range receptive field, low-frequency
-filtering, or use `target` strategy on files [0,1,2,3,4]. Similarly for the
-other regimes. A regime score of `0.0` means no files in that band were scored
-(typical in trial mode with a sparse sampling strategy) — treat it as missing
-data, not as a real zero.
-
 ### OUTPUT REQUIREMENT:
 You must provide the next experiment setup in a strict JSON format.
 """
@@ -236,21 +215,6 @@ You are a Research Analyst. Your job is to transform raw experiment results into
 ### CRITICAL — ATTRIBUTION:
 - Always identify the key factor that caused this result to differ from previous experiments.
 - Attribute results to specific hyperparameter choices: loss_type, lr, batch_size, latent_dims, epochs, etc.
-
-### CRITICAL — REGIME-AWARE DIAGNOSIS:
-- Every record carries `regime_scores`: a per-frequency-band aggregation of `file_vector`.
-  Seed regimes: `low_freq_kHz` (files 0-4, 1.1-9.0 kHz), `mid_freq_10kHz` (files 5-10,
-  9.1-94 kHz), `high_freq_MHz` (files 11-19, 95 kHz-4.9 MHz), `global` (all files).
-- Look at `regime_scores` BEFORE drilling into per-file `file_vector`. The regime breakdown
-  tells you which frequency band is failing — that's the diagnostic gradient.
-- A regime score of 0.0 means no files in that band were scored (typical in trial mode);
-  treat as missing data, not a real zero.
-- If one regime is meaningfully worse than the others, the discovery and memory_update
-  should explicitly name it. Example: "low_freq_kHz=0.12, but high_freq_MHz=0.84 — model
-  is blind to low frequencies. Recommend increasing receptive field via wider kernels or
-  more dilation steps."
-- If all regimes are uniformly low, the issue is data volume or hyperparameters, not
-  band-specific architecture.
 
 ### CRITICAL — EFFICIENCY AWARENESS:
 - If `is_more_efficient` is True in the context, this is a **valuable discovery**: a simpler or

@@ -556,8 +556,6 @@ This section breaks each phase from §5 into concrete sub-tasks, the files they 
 
 ### Phase A — `regime_scores` foundation
 
-**Status: ☑ implemented (commit pending). 19 unit tests, 6 modified files. The Phase A `pseudo_full_loop` integration test (sub-task A.8) is intentionally deferred — see note after the sub-tasks.**
-
 **Goal**: every experiment record carries a deterministic per-regime breakdown of `file_vector`, so the LLM gets a structured "gradient" instead of a raw 20-element array. Establishes the dict shape that §2D will later extend.
 
 **Depends on**: nothing. This is the first phase.
@@ -573,18 +571,14 @@ This section breaks each phase from §5 into concrete sub-tasks, the files they 
 - `tests/unit/agent/tune_ml_hyperparam_agent/test_hyperparam_schemas.py` — extend with `regime_scores` round-trip tests.
 
 **Sub-tasks**:
-- ☑ A.1 Defined seed regime keys `{"low_freq_kHz", "mid_freq_10kHz", "high_freq_MHz", "global"}` in `execute_tools/regime_aggregator.REGIME_DEFINITIONS`. Mirrors `tuner_advice/gated_fno_freq_band_aware_v1.json`.
-- ☑ A.2 Implemented `aggregate_regime_scores(file_vector: Optional[List[Optional[float]]]) -> Dict[str, float]` in the new `execute_tools/regime_aggregator.py`. Defensive against `None` input, short input, and all-None regimes (returns `0.0`, never `None`).
-- ☑ A.3 Added `regime_scores: Dict[str, float] = Field(default_factory=dict)` to `ExperimentRecord`. Backward compatible with legacy records (empty dict default).
-- ☑ A.4 Wired the aggregator into the tuner's scoring path. Two call sites: `score_res["results"]["regime_scores"]` (so the reflector receives it via `reflect_results`) and `final_record["regime_scores"]` (so it's persisted to the saved JSON).
-- ☑ A.5 Updated the planner prompt with a new "REGIME SCORES" section explaining the four seed regimes and how to use them as a diagnostic gradient.
-- ☑ A.6 Updated the reflector prompt with a new "CRITICAL — REGIME-AWARE DIAGNOSIS" section instructing the reflector to look at `regime_scores` BEFORE drilling into per-file `file_vector`.
-- ☑ A.7 Unit tests: 14 in `tests/unit/execute_tools/test_regime_aggregator.py` (aggregator correctness across all edge cases) + 5 in `tests/unit/agent/tune_ml_hyperparam_agent/test_hyperparam_schemas.py` (`ExperimentRecord.regime_scores` round-trip, extra-key acceptance for future Data Analysis Agent regimes, type validation, and an integration test that feeds a synthetic file_vector through the aggregator and validates the result against the schema). Total: 770 → 775 unit tests passing.
-- ☐ A.8 **Pseudo-full-loop test (DEFERRED — needs the test infrastructure from a separate PR)**. The original intent was a 1-round real-data smoke test on lilab, but per the testing-strategy decision (see note below), Phase A will instead get a `pseudo_full_loop` test that runs the full tuner round with a `RecordingLLMBridge` and `RecordingSandbox`, asserting that (a) the planner system prompt contains the new "REGIME SCORES" section, (b) the saved record's `regime_scores` matches the canned `file_vector`, and (c) the reflector's prompt context contains the just-computed regime_scores. This test cannot be written until the recording fakes exist, so it is deferred to a follow-up PR after the test infrastructure lands.
-
-> **Note on the testing strategy**: between this design doc and the Phase A implementation, we adopted a new testing tier called **`pseudo_full_loop`** (see `docs/architecture.md` once the test-infra PR lands). The principle: every real-API integration test should be written ONCE and run in either real mode (real LLM + real subprocess, requires `-m real_run`) or pseudo mode (recording fakes for both LLM and subprocess execution, runs in CI). Pseudo mode is the default; real mode is gated by the `real_run` marker. This eliminates the false dichotomy between "fast unit test of a tiny function" and "slow real-API integration test that burns quota every commit".
->
-> **The test infrastructure for `pseudo_full_loop` is being built in a separate PR on a separate branch (`feat/pseudo-full-loop-infra`)**. That PR introduces (a) `RecordingLLMBridge` and `RecordingSandbox` test doubles, (b) a fixture-based mode switching mechanism, (c) constructor dependency injection on `HyperparamTuningAgent` (and later the other 4 nodes), and (d) a refactor of one existing integration test as proof-of-concept. Phase A's pseudo_full_loop test (A.8 above) and every subsequent phase's mocked end-to-end tests will be built on top of that infrastructure.
+- ☐ A.1 Define seed regime keys: `{"low_freq_kHz", "mid_freq_10kHz", "high_freq_MHz", "global"}`. The mapping from `file_index` to regime is documented inline (file 0–4 → low_freq_kHz, file 5–10 → mid_freq_10kHz, file 11–19 → high_freq_MHz, all files → global). Mirrors `tuner_advice/gated_fno_freq_band_aware_v1.json`.
+- ☐ A.2 Implement `aggregate_regime_scores(file_vector: List[Optional[float]]) -> Dict[str, float]`. Skips `None` entries. Returns `0.0` (not `None`) for regimes with all-None inputs so downstream code never has to None-check.
+- ☐ A.3 Add `regime_scores: Dict[str, float] = Field(default_factory=dict)` to `ExperimentRecord`. Default-empty for backward compatibility with existing records.
+- ☐ A.4 Wire the aggregator into the tuner's scoring path so every successful round populates `regime_scores`. Skipped/failed rounds default to `{}`.
+- ☐ A.5 Update the planner prompt template to render `regime_scores` as a small markdown table when non-empty.
+- ☐ A.6 Update the reflector prompt template the same way.
+- ☐ A.7 Unit tests: aggregator on (a) all-valid file_vector, (b) all-None, (c) mixed, (d) empty list. Schema round-trip with and without the field.
+- ☐ A.8 Smoke test: run a 1-round tuner on lilab and grep the resulting record JSON for `regime_scores`. Confirm the four seed keys all appear.
 
 **Verify**:
 - `uv run pytest tests/unit/agent/tune_ml_hyperparam_agent/ -q` — all tests pass including the new ones.
