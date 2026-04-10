@@ -87,14 +87,17 @@ Node codes: `ml_model_tune`, `ml_result_interp`, `ml_model_propose`, `ml_model_i
 Functions inside the file: `{transport}_{data_scope}` (e.g. `local_all_records`, `database_full_context`).
 Always add a `database_*` placeholder (raises `NotImplementedError`) alongside every `local_*` function.
 
-**Integration test tiers** — tiers describe how many nodes are exercised in a single real-API test,
-not API load or cost. All tiers skip automatically if the required API key is not set.
+**Integration test tiers** — tiers describe how many nodes are exercised in a single test,
+not API load or cost. Real-API tiers skip automatically if the required API key is not set.
 
 | Tier | Scope | Location | What it tests |
 |------|-------|----------|---------------|
-| **Tier 1** | One node in isolation | `tests/integration/nodes/` | A hand-crafted synthetic input is passed directly to `node.run()`. Validates that the node itself works end-to-end with a real LLM call. No other node is involved. |
-| **Tier 2** | One directed edge (two nodes) | `tests/integration/protocols/` | The upstream node runs with a real LLM call, the protocol function maps its output to the downstream node's input, and the downstream node runs. Validates that the wiring between two specific nodes is correct. |
-| **Tier 3** | Multi-hop path (3+ nodes) | `tests/integration/workflows/` | A sequence of nodes traversed end-to-end. Validates that a complete sub-path of the graph works correctly. Not yet implemented. |
+| **Pseudo-full-loop** | Full node orchestration, predefined LLM + subprocess results | `tests/integration/` (`@dual_mode`) | The wiring between the agent's internal steps (plan → train → score → reflect → save) works correctly. Runs in milliseconds, no API key, no GPU. **Default mode for dual-mode tests.** |
+| **Tier 1** | One node in isolation | `tests/integration/nodes/` (`@real_run`) | A hand-crafted synthetic input is passed directly to `node.run()`. Validates that the node itself works end-to-end with a real LLM call. No other node is involved. |
+| **Tier 2** | One directed edge (two nodes) | `tests/integration/protocols/` (`@real_run`) | The upstream node runs with a real LLM call, the protocol function maps its output to the downstream node's input, and the downstream node runs. Validates that the wiring between two specific nodes is correct. |
+| **Tier 3** | Multi-hop path (3+ nodes) | `tests/integration/workflows/` (`@real_run`) | A sequence of nodes traversed end-to-end. Validates that a complete sub-path of the graph works correctly. |
+
+**Dual-mode tests** (`@pytest.mark.dual_mode`) run in pseudo mode by default (predefined responses from `tests/pseudo_data/`) and switch to real mode only when `--real-api-call` is passed. New integration tests should be dual-mode by default. See `docs/pseudo_test_infra.md` for the full design.
 
 Steps 5 and 6 in the node checklist correspond to Tier 1 and Tier 2 respectively.
 

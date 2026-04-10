@@ -224,6 +224,21 @@ by naming convention, sharing state through the filesystem, passing a path as a 
 data — creates a hidden dependency invisible to the protocol system. Such shortcuts make
 nodes untestable in isolation and fragile when the graph is rearranged.
 
+### 9a. Every external dependency is mockable
+
+The system has exactly two classes of external dependency: **LLM API calls** (through
+`LLMBridge`) and **subprocess execution** (through `TidmadSandbox`). Both are hidden
+behind constructor-injected factory parameters on every node, so a test can substitute
+recording fakes (`RecordingLLMBridge`, `RecordingSandbox`) without touching production
+code. This is what makes dual-mode testing possible: the same integration test runs
+against real dependencies or recording fakes, selected by a pytest fixture.
+
+The `LLMBridge` singleton invariant (enforced by
+`tests/unit/agent/test_llm_bridge_singleton.py`) guarantees no code outside
+`agent/llm_bridge.py` constructs an `OpenAI()` client. Combined with the DI factories,
+this means a single `--real-api-call` flag controls whether the entire system talks to
+real APIs or to recording fakes. See `docs/pseudo_test_infra.md` for the full design.
+
 ---
 
 ## Node Contract
@@ -492,9 +507,10 @@ test suite.
 
 ## Testing Strategy
 
-Agent tests have four categories. Unit tests run on every commit. The three integration
-tiers require external resources and are always gated by `pytest.mark.real_run` — they
-must never run in CI.
+Agent tests have five categories. Unit tests and pseudo-full-loop tests run on every
+commit (no external resources needed). The three real-API integration tiers require
+API keys and/or GPU and are gated by `pytest.mark.real_run` + the `--real-api-call`
+flag — they never run in CI. See `docs/pseudo_test_infra.md` for the dual-mode design.
 
 ### Unit tests
 
@@ -566,14 +582,51 @@ belongs in unit tests. A Tier 3 test that takes more than ~10 minutes is doing t
 
 ---
 
+### Pseudo-full-loop tests (dual-mode)
+
+**What**: Run the same integration test (Tier 1, 2, or 3) in **two modes** selected by
+a fixture:
+
+- **Pseudo mode (default)**: `RecordingLLMBridge` returns predefined LLM responses
+  from `tests/pseudo_data/api_call_outputs/`. `RecordingSandbox` returns predefined
+  subprocess results from `tests/pseudo_data/train_outputs/`. No real API calls, no
+  real training, no GPU. Runs in milliseconds. The test asserts on prompt content,
+  record structure, and call sequence — everything except real LLM behavior.
+- **Real mode** (`--real-api-call`): real `LLMBridge` + real `TidmadSandbox`. Same
+  assertions plus whatever the real API returns. Requires API keys + GPU. Slow.
+
+**Markers**:
+- `@pytest.mark.dual_mode`: the test supports both modes. Default = pseudo mode.
+  Switches to real mode when `--real-api-call` is passed.
+- `@pytest.mark.real_run`: the test only works in real mode (no pseudo equivalent).
+  Skipped by default; requires both `-m real_run` AND `--real-api-call`.
+
+**Predefined data**: `tests/pseudo_data/` holds JSON files shaped exactly like the
+real API outputs. These are the test's "expected inputs" from external systems.
+**Schema fidelity is the contributor's responsibility**: when a schema changes, the
+corresponding pseudo data must change in the same commit. See
+`tests/pseudo_data/README.md` for the invariant.
+
+**Location**: dual-mode tests live alongside real-only tests in the same files under
+`tests/integration/`. They are distinguished by the `dual_mode` marker.
+
+**Rule**: new integration tests should be dual-mode by default. Real-only tests are
+reserved for cases where no predefined response can meaningfully validate the behavior.
+
+See `docs/pseudo_test_infra.md` for the full design, implementation checklist, and
+rationale.
+
+---
+
 ### Summary
 
 | Category | Scope | LLM | GPU | Location | When to run |
 |----------|-------|-----|-----|----------|-------------|
 | Unit | Single node, mocked LLM | mock | no | `tests/unit/` | Every commit |
-| Integration Tier 1 | Single node, real API | real | depends | `tests/integration/nodes/` | On demand |
-| Integration Tier 2 | One edge (source → target) | real | depends | `tests/integration/protocols/` | On demand |
-| Integration Tier 3 | Critical multi-hop loop | real | yes | `tests/integration/workflows/` | Before releases |
+| Pseudo-full-loop | Full orchestration, predefined responses | predefined | no | `tests/integration/` (`dual_mode`) | Every commit |
+| Integration Tier 1 | Single node, real API | real | depends | `tests/integration/nodes/` (`real_run`) | On demand |
+| Integration Tier 2 | One edge (source → target) | real | depends | `tests/integration/protocols/` (`real_run`) | On demand |
+| Integration Tier 3 | Critical multi-hop loop | real | yes | `tests/integration/workflows/` (`real_run`) | Before releases |
 
 ---
 
