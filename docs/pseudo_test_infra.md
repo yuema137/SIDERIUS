@@ -328,6 +328,21 @@ def test_one_round_tuner(tmp_path):
     assert "REGIME SCORES" in bridge.calls[0][1]  # planner system prompt
 ```
 
+### ⚠️ PROJECT INVARIANT — read this before adding or editing any pseudo data
+
+> **Pseudo data depends on real schemas. By design.**
+>
+> The dual-mode test design has exactly one assumption that makes the entire thing work: **the predefined responses in `tests/pseudo_data/` must always match the real API output schema**. Pseudo mode does not parse, does not transform, does not synthesize — it returns the registered dict verbatim. So if the real `LLMBridge.generate()` starts returning a slightly different shape (e.g. a renamed field, a new required key, a tightened Pydantic constraint), the corresponding pseudo data file must change in the same commit.
+>
+> Concretely, this means:
+>
+> 1. **A schema change is a two-file change.** Updating `agent/schemas/hyperparam_tuning.py` (or any other schema consumed by the pseudo data) requires updating every relevant `tests/pseudo_data/.../*.json` file in the same PR. The reviewer should reject any schema change that doesn't.
+> 2. **Pseudo tests are NOT for detecting LLM API problems.** That is what real-mode tests (gated behind `--real-api-call`) exist for. Don't try to use pseudo mode to catch upstream API quirks; you will fool yourself.
+> 3. **Predefined responses are post-parse, not raw wire format.** The recording bridge does not strip markdown fences or call `json.loads`. Test authors register the parsed dict shape that the real bridge would have produced after parsing.
+> 4. **The schema-pseudo-data sync is a project invariant, not an opportunistic check.** No CI test enforces it (we deliberately did not write one — that would be circular). Contributors must enforce it manually as part of any schema change. The README at `tests/pseudo_data/README.md` repeats this so anyone navigating to add new canned data sees it first.
+>
+> The trade-off is intentional. Building automatic schema validation into the recording fakes (e.g. running `Schema.model_validate(canned_response)` at registration time) would catch sync drift early but would also (a) re-test the production schema's own validators, (b) require importing every schema into the test helpers, and (c) make the recording fakes opinionated about a specific schema layer they shouldn't know about. We chose simplicity + project discipline over enforced fidelity.
+
 ### 4C. Fixture-based mode switching (locked design: orthogonal axes)
 
 A pytest fixture decides which factories to inject based on a CLI flag, and the existing `pytest.mark.real_run` marker is preserved for a separate, orthogonal purpose.
