@@ -325,8 +325,9 @@ def _build_synthesis_prompt(
 
 class ResultInterpretationAgent:
 
-    def __init__(self, provider: str = "gemini", model_id: str = "gemini-3.1-flash-lite-preview"):
-        self.bridge = LLMBridge(provider=provider, model_id=model_id)
+    def __init__(self, provider: str = "gemini", model_id: str = "gemini-3.1-flash-lite-preview",
+                 max_retries: int | None = None):
+        self.bridge = LLMBridge(provider=provider, model_id=model_id, max_retries=max_retries)
 
     def run(self, inp: InterpretationInput) -> InterpretationOutput:
         # --- Effective model types ---

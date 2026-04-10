@@ -54,6 +54,15 @@ class NodeLLMConfig(BaseModel):
         default="gemini-3.1-flash-lite-preview",
         description="Specific model ID passed to the provider.",
     )
+    max_retries: Optional[int] = Field(
+        default=None,
+        description=(
+            "Maximum retry attempts for transient API errors (429, 5xx). "
+            "None (default) = retry indefinitely (Slurm wall time is the "
+            "natural timeout). Set to a positive integer for interactive "
+            "use (e.g. 6 for ~77s, 20 for ~15min)."
+        ),
+    )
 
 
 class TunerLLMConfig(BaseModel):
@@ -230,16 +239,20 @@ class WorkflowLLMConfig(BaseModel):
         if isinstance(config, TunerLLMConfig):
             # Flatten the nested TunerLLMConfig into the legacy flat keys
             # that HyperparamTuningInput / LLMBridge expect.
-            return {
+            result = {
                 "provider":         config.planner.provider,
                 "model_id":         config.planner.model_id,
                 "reflect_provider": config.reflector.provider,
                 "reflect_model_id": config.reflector.model_id,
             }
+            # The tuner creates one LLMBridge — use the planner's retry config.
+            if config.planner.max_retries is not None:
+                result["max_retries"] = config.planner.max_retries
+            return result
         if isinstance(config, ProposalLLMConfig):
             # Flatten the nested ProposalLLMConfig into per-stage kwargs.
             # The proposal agent reads these to construct per-stage bridges.
-            return {
+            result = {
                 "comparison_provider":  config.comparison.provider,
                 "comparison_model_id":  config.comparison.model_id,
                 "reasoning_provider":   config.reasoning.provider,
@@ -251,8 +264,14 @@ class WorkflowLLMConfig(BaseModel):
                 "provider":             config.reasoning.provider,
                 "model_id":             config.reasoning.model_id,
             }
+            if config.reasoning.max_retries is not None:
+                result["max_retries"] = config.reasoning.max_retries
+            return result
         # Plain NodeLLMConfig — single-sub-call agent
-        return {"provider": config.provider, "model_id": config.model_id}
+        result = {"provider": config.provider, "model_id": config.model_id}
+        if config.max_retries is not None:
+            result["max_retries"] = config.max_retries
+        return result
 
     @classmethod
     def from_json(cls, path: str) -> "WorkflowLLMConfig":
@@ -291,6 +310,11 @@ class WorkflowLLMConfig(BaseModel):
         """
         # Cast to Literal at runtime; pydantic will validate the value.
         base_cfg = NodeLLMConfig(provider=provider, model_id=model_id)  # type: ignore[arg-type]
+        propose_cfg = ProposalLLMConfig(
+            comparison=base_cfg,
+            reasoning=base_cfg,
+            proposing=base_cfg,
+        )
         tune_cfg = TunerLLMConfig(
             planner=base_cfg,
             reflector=NodeLLMConfig(
@@ -300,7 +324,7 @@ class WorkflowLLMConfig(BaseModel):
         )
         return cls(
             interpret=base_cfg,
-            propose=base_cfg,
+            propose=propose_cfg,
             implement=base_cfg,
             validate_model=base_cfg,
             tune=tune_cfg,

@@ -50,6 +50,7 @@ def local_validated_model(
     train_base_seed: Optional[int] = None,
     cleanup_denoised: bool = False,
     max_epochs: Optional[int] = None,
+    max_retries: Optional[int] = None,
 ) -> HyperparamTuningInput:
     """
     Map ValidatorOutput + ProposalOutput -> HyperparamTuningInput in-memory.
@@ -97,6 +98,7 @@ def local_validated_model(
         train_base_seed=train_base_seed,
         cleanup_denoised=cleanup_denoised,
         max_epochs=max_epochs,
+        max_retries=max_retries,
     )
 
 

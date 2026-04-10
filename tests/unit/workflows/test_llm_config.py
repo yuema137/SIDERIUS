@@ -192,11 +192,15 @@ class TestWorkflowLLMConfigUniform:
         assert cfg.tune.planner.model_id == "gemini-3.1-pro-preview"
         assert cfg.tune.reflector.provider == "gemini"
         assert cfg.tune.reflector.model_id == "gemini-3.1-pro-preview"
-        # And the 4 single-call slots
-        for slot in ("interpret", "propose", "implement", "validate_model"):
+        # Single-call slots
+        for slot in ("interpret", "implement", "validate_model"):
             cfg_slot = getattr(cfg, slot)
             assert cfg_slot.provider == "gemini"
             assert cfg_slot.model_id == "gemini-3.1-pro-preview"
+        # Proposal agent has nested per-stage configs
+        for stage in (cfg.propose.comparison, cfg.propose.reasoning, cfg.propose.proposing):
+            assert stage.provider == "gemini"
+            assert stage.model_id == "gemini-3.1-pro-preview"
 
     def test_reflect_model_id_only_same_provider(self):
         """Just override the reflector's model — same provider for both."""
@@ -219,9 +223,12 @@ class TestWorkflowLLMConfigUniform:
         assert cfg.tune.planner.provider == "gemini"
         assert cfg.tune.reflector.provider == "openai"
         assert cfg.tune.reflector.model_id == "gpt-4o-mini"
-        # The 4 single-call slots stay on gemini
-        for slot in ("interpret", "propose", "implement", "validate_model"):
+        # The single-call slots stay on gemini
+        for slot in ("interpret", "implement", "validate_model"):
             assert getattr(cfg, slot).provider == "gemini"
+        # Proposal agent's nested stages stay on gemini
+        for stage in (cfg.propose.comparison, cfg.propose.reasoning, cfg.propose.proposing):
+            assert stage.provider == "gemini"
 
     def test_reflect_provider_only_no_model_override(self):
         """reflect_provider set but reflect_model_id unset → reflector

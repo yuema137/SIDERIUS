@@ -168,6 +168,7 @@ class HyperparamTuningAgent:
             model_id=agent_input.llm_model_id,
             reflect_provider=agent_input.reflect_provider,
             reflect_model_id=agent_input.reflect_model_id,
+            max_retries=agent_input.max_retries,
         )
 
         # --- Pre-load anchor map if any round might use trial mode ---
