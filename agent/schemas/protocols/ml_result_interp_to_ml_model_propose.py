@@ -21,14 +21,26 @@ database_full_context   DB-backed transfer: interp agent writes the interpretati
                         StorageConfig backend. Raises NotImplementedError until wired.
 """
 
+from typing import List, Optional
+
 from agent.schemas.interpretation import InterpretationOutput
-from agent.schemas.proposal import ProposalInput
+from agent.schemas.proposal import (
+    ExpertContextItem,
+    ProposalInput,
+    ReasoningPipelineConfig,
+    VocabEntry,
+)
+from agent.schemas.hyperparam_tuning import ExpertAdviceInput, serialize_expert_advice
 from agent.schemas.storage import StorageConfig
 
 
 def local_full_context(
     output: InterpretationOutput,
     storage: StorageConfig,
+    expert_context: Optional[List[ExpertContextItem]] = None,
+    vocab_seed: Optional[List[VocabEntry]] = None,
+    reasoning_pipeline: Optional[ReasoningPipelineConfig] = None,
+    human_advice: Optional[ExpertAdviceInput] = None,
 ) -> ProposalInput:
     """
     Local in-memory protocol — transfers the complete interpretation directly.
@@ -43,16 +55,44 @@ def local_full_context(
       - per_model_params        : parameter count per model (efficiency)
       - per_model_training_segments : training data volume per model
 
+    Additional context (passed by the workflow, not by the interpretation agent):
+      - expert_context       : polymorphic upstream findings (human, agents, strategy reports)
+      - vocab_seed           : runtime vocabulary (canonical + promoted + candidates)
+      - reasoning_pipeline   : 3-stage pipeline config (stages, model selection, policy)
+      - human_advice         : legacy human advice — wrapped into ExpertContextItem if provided
+
     Populates in ml-model-propose (ProposalInput):
       - interpretation       : full serialised InterpretationOutput (all fields above)
       - existing_model_types : output.model_types (names the proposal must not reuse)
+      - expert_context       : merged list of ExpertContextItems
+      - vocab_seed           : runtime vocabulary entries
+      - reasoning_pipeline   : pipeline configuration
       - storage              : passed through from the orchestrator
     """
-    return ProposalInput.model_validate({
+    # Build expert_context — start with what's passed, wrap legacy human_advice
+    merged_context = list(expert_context or [])
+    if human_advice is not None:
+        advice_text = serialize_expert_advice(human_advice)
+        if advice_text:
+            merged_context.append(ExpertContextItem(
+                source="human",
+                kind="human",
+                content=advice_text,
+                cite_id="human_advice",
+            ))
+
+    result = {
         "interpretation":       output.model_dump(),
         "existing_model_types": list(output.model_types),
+        "expert_context":       [c.model_dump() for c in merged_context],
         "storage":              storage.model_dump(),
-    })
+    }
+    if vocab_seed:
+        result["vocab_seed"] = [v.model_dump() for v in vocab_seed]
+    if reasoning_pipeline:
+        result["reasoning_pipeline"] = reasoning_pipeline.model_dump()
+
+    return ProposalInput.model_validate(result)
 
 
 def database_full_context(
