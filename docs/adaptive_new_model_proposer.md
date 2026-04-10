@@ -2,7 +2,7 @@
 
 **Status**: design — not yet implemented. Supersedes the V1 proposal at the bottom of this file.
 
-## 0. The actual problem (re-framed)
+## 0. The actual problem and the key design idea
 
 SIDERIUS is currently stuck at a **scientific attribution failure**, not an engineering bottleneck:
 
@@ -12,6 +12,16 @@ SIDERIUS is currently stuck at a **scientific attribution failure**, not an engi
   1. **Comparative causal reasoning**: not "I propose X" but "X should beat WaveNet because the WaveNet mechanism Y is bottlenecked by Z, and X relaxes Z while preserving Y."
   2. **Component lineage**: knowing which architectural primitives (dilation, gating, residuals, …) come from which past winners, so successful primitives can be inherited rather than re-invented.
   3. **Scoped exploration**: when the human says "deep-dive on WaveNet", the agent must actually stay on WaveNet — not drift into transformers because that's where the LLM's prior wants to go.
+
+### The key design idea: structured vocabulary as a constraint bridge
+
+> **Natural language is diverse and messy. An LLM reasoning in free text will invent 50 different ways to say "dilated convolution" and lose the ability to track what it has tried. The V2 design solves this by introducing a structured vocabulary — currently features (concrete building blocks) and concepts (scientific principles) — as a constraint bridge that harnesses the LLM's reasoning process.**
+>
+> The vocabulary is NOT a database or a knowledge graph. It is a **shared language** that all pipeline stages use to refer to the same things consistently. When the comparison stage says "Model A uses **dilated_causal_conv** (feature) which enables **receptive_field** (concept)", the reasoning stage knows exactly what that means and can build on it: "I propose inheriting **dilated_causal_conv** because the **receptive_field** it provides is what the SOTA lacks." Without the vocabulary, the same insight would be expressed in different words at each stage, and the connection would be lost.
+>
+> The vocabulary is composable: adding a new type of constraint bridge (e.g. "failure_pattern", "physical_constraint") means adding entries with a new `kind` value — no code changes to the pipeline runner or the aggregation engine. The two-tier structure (canonical seed + agent-discovered candidates + structural promotion) keeps the vocabulary both stable enough for tracking and open enough for discovery.
+>
+> **This is the single most important design decision in V2.** Every other feature — the three-stage pipeline, the configurable stages, the expert context items, the falsifiable predictions — builds on the vocabulary as its foundation. If the vocabulary works, the LLM's reasoning compounds across iterations. If it doesn't, the system stays stuck in the random walk.
 
 The original V1 proposal (preserved at the bottom) names the right symptoms but bundles them with several premature abstractions and one architectural-invariant violation. V2 keeps the scientific ambition and discards the unnecessary scaffolding.
 
@@ -30,69 +40,316 @@ The two columns translate into a single design constraint: **every new field we 
 
 ## 2. The three concrete designs
 
-### 2A. Two-stage reasoning as forced scientific peer review
+### 2A. Three-stage configurable reasoning pipeline
 
-**Goal**: The proposal agent must perform a comparative causal analysis between its new hypothesis and the current SOTA *before* any code is written, and the architecture stage must be structurally tethered to that analysis.
+**Goal**: The proposal agent must (1) systematically compare all previously tested models, (2) form a causal hypothesis about what to try next, and (3) produce a concrete architecture tethered to that reasoning. These are three distinct cognitive tasks, each implemented as one LLM call in a configurable pipeline.
 
-**Lightweight implementation**: same node, two `LLMBridge` calls (mirroring the planner/reflector split that already works in the tuner). No new node, no new schema container — just a new sub-call in `ml_model_proposal_agent` and a new typed output for the first sub-call.
+**Implementation**: same node, three `LLMBridge` calls in a configurable pipeline, replacing the existing two-call pattern (`bridge.generate_text()` for free-text reasoning + `bridge.generate()` for structured JSON commit). No new node, no new schema container. The pipeline is a list of stages — adding, removing, or reordering stages is a configuration change, not a code change.
 
-> **Decision (locked)**: the two-stage approach is committed despite costing one additional LLM call per proposal attempt (~2× the proposal LLM cost; small fraction of total chain quota since most usage is in tuning rounds, not proposal). The scientific-attribution benefit outweighs the cost. The reasoning sub-call MAY be routed to a cheaper model (`gemini-2.5-flash`) in Phase B if structured output quality holds; this is left as a Phase B implementation choice, not a design constraint.
+> **Codebase context (verified against PRs 22-24)**: the proposal agent (`nodes/ml_model_proposal_agent.py`) ALREADY makes two LLM calls — a free-text reasoning call and a structured commit call. Phase B replaces this 2-call pattern with a 3-stage pipeline. The existing Call 1 (free-text reasoning) roughly maps to Stages 1+2 (comparison + causal reasoning). The existing Call 2 (structured commit) maps to Stage 3 (proposing). The constructor currently takes `(provider, model_id)` and constructs `LLMBridge` internally; Phase B adds DI while preserving this interface for backward compat. The workflow constructs the agent via `MLModelProposalAgent(**llm_config.get("propose"))`.
+
+> **Decision (locked)**: the three-stage approach is committed. Each stage costs one LLM call (~3× the proposal LLM cost; small fraction of total chain quota since most usage is in tuning rounds). The scientific-attribution benefit outweighs the cost. Individual stages MAY be routed to cheaper models (`gemini-2.5-flash`) if structured output quality holds; this is a per-stage implementation choice, not a design constraint.
+
+#### The configurable pipeline
+
+The reasoning pipeline is **configured at the workflow level** (not per-run), so a chain uses the same pipeline across all its iterations. The default is the 3-stage pipeline; customization is adding/removing/reordering entries in a list.
+
+```python
+class ReasoningStage(BaseModel):
+    """One stage in the reasoning pipeline. Each stage is one LLM call
+    that receives all prior stages' outputs as context."""
+    name: str                    # e.g. "comparison", "causal_reasoning"
+    system_prompt_key: str       # which prompt template to use
+    output_mode: Literal["json", "text"] = "json"  # json → bridge.generate(), text → bridge.generate_text()
+    enabled: bool = True         # disable per-workflow without removing
+
+class ModelSelectionStrategy(BaseModel):
+    """Pre-filter for which past models the comparison stage analyzes.
+    Controls token cost (how many models) while expert_context controls
+    focus (what to emphasize about those models)."""
+    method: str = Field(
+        default="top_n",
+        description="Pre-filter strategy. Options: "
+                    "'top_n' (N highest-scoring), "
+                    "'all' (everything — expensive), "
+                    "'feature_match' (models with a specific component), "
+                    "'human_specified' (exact list from human advice)."
+    )
+    params: Dict[str, Any] = Field(
+        default_factory=lambda: {"n": 10},
+        description="Strategy-specific parameters. "
+                    "top_n: {'n': 10}. "
+                    "feature_match: {'feature': 'dilated_causal_conv'}. "
+                    "human_specified: {'models': ['wavenet', 'gated_fno']}."
+    )
+
+class ReasoningPipelineConfig(BaseModel):
+    """Configurable reasoning pipeline for the proposal agent.
+    Lives at the workflow level (WorkflowLLMConfig or equivalent),
+    not per-run, so a chain uses the same pipeline across all iterations."""
+    stages: List[ReasoningStage] = Field(
+        default_factory=lambda: [
+            ReasoningStage(name="comparison", system_prompt_key="COMPARATIVE_ANALYSIS"),
+            ReasoningStage(name="causal_reasoning", system_prompt_key="CAUSAL_REASONING"),
+        ],
+        description="Ordered list of reasoning stages. Each stage is one LLM call. "
+                    "The 'proposing' stage (architecture design) always runs last and "
+                    "is not listed here — it's the fixed output stage. These stages "
+                    "produce the DiscoveryMemo; the proposing stage consumes it."
+    )
+    model_selection: ModelSelectionStrategy = Field(
+        default_factory=ModelSelectionStrategy,
+        description="How to pre-filter past models before the comparison stage."
+    )
+    exploration_mode: Literal["auto", "explore", "exploit"] = Field(
+        default="auto",
+        description="Controls the reasoning tone and prompt templates. "
+                    "'auto': system decides based on evidence depth (number of records, "
+                    "distinct model types tested, falsifiable-prediction hit rate). "
+                    "'explore': forced exploration — first few rounds or human override. "
+                    "Prompts emphasize diagnostic experimentation and honest uncertainty. "
+                    "'exploit': forced exploitation — later rounds or human override. "
+                    "Prompts emphasize building on confirmed patterns and beating SOTA."
+    )
+```
+
+**Customization examples**:
+- **Skip comparison, just reason**: set `stages[0].enabled = False`
+- **Add a physics check**: append `ReasoningStage(name="physics_check", system_prompt_key="PHYSICS_REVIEW")`
+- **Only compare WaveNet variants**: set `model_selection = {"method": "feature_match", "params": {"feature": "dilated_causal_conv"}}`
+- **Human says "focus on top 3"**: set `model_selection = {"method": "top_n", "params": {"n": 3}}`
+- **Human says "only look at these two"**: set `model_selection = {"method": "human_specified", "params": {"models": ["wavenet", "gated_fno"]}}`
+
+#### Design decisions (verified against codebase after PRs 22-24)
+
+> **Decision 1 — Where does `ReasoningPipelineConfig` live?**
 >
-> **Forward-looking intent — `DiscoveryMemo` as a "Final Verdict"**: the two-stage split in Phase B is the *minimum viable version* of a deeper reasoning process. The longer-term vision is that the reasoning stage will itself become a multi-turn dialogue: the proposal agent will exchange messages with upstream specialists (the Data Analysis Agent, the Physics Expert Agent, the Literature Review Agent — all surfaced through `expert_context` in §2D), refine its hypothesis through several rounds of question-and-answer, and only THEN emit a `DiscoveryMemo`. The memo is the *final verdict* of that thinking process, not the thinking itself. Phase B must therefore design the `DiscoveryMemo` schema to be the output of an arbitrarily deep reasoning chain, not just a one-shot LLM summary. Concretely, this means: (a) the schema must be rich enough to capture the *conclusion* of multi-step reasoning even if Phase B's implementation only does one step, (b) the reasoning sub-call must be replaceable with a multi-turn loop without changing any downstream code, (c) intermediate dialogue turns can be persisted as part of `ProposalOutput` for future audit even though Phase B doesn't generate any. Concretely actionable in Phase B: the reasoning sub-call lives behind a function `produce_discovery_memo(context) -> DiscoveryMemo` whose internal implementation can be replaced with a multi-turn loop later. Don't bake "1 LLM call" into the call site; bake "produce a memo from this context" into the call site.
+> Currently `WorkflowLLMConfig.propose` is a single `NodeLLMConfig` (one provider + one model_id). For the 3-stage pipeline, each stage might want its own model (comparison on flash, reasoning on pro). Following the precedent set by PR #22's `TunerLLMConfig` (which nests `planner` and `reflector` as separate `NodeLLMConfig` slots), the proposal agent gets a **`ProposalLLMConfig`** nested in `WorkflowLLMConfig`:
+>
+> ```python
+> class ProposalLLMConfig(BaseModel):
+>     """Per-stage LLM routing for the proposal agent's reasoning pipeline.
+>     Mirrors TunerLLMConfig's planner/reflector pattern from PR #22."""
+>     comparison: NodeLLMConfig = Field(default_factory=lambda: NodeLLMConfig(
+>         provider="gemini", model_id="gemini-2.5-flash"))  # cheap, data-heavy
+>     reasoning: NodeLLMConfig = Field(default_factory=lambda: NodeLLMConfig(
+>         provider="gemini", model_id="gemini-3.1-pro-preview"))  # needs strong reasoning
+>     proposing: NodeLLMConfig = Field(default_factory=lambda: NodeLLMConfig(
+>         provider="gemini", model_id="gemini-3.1-pro-preview"))  # needs precise JSON
+>     pipeline: ReasoningPipelineConfig = Field(default_factory=ReasoningPipelineConfig)
+> ```
+>
+> `WorkflowLLMConfig.propose` changes from `Optional[NodeLLMConfig]` to `Optional[ProposalLLMConfig]`. The `get()` method on `WorkflowLLMConfig` flattens this for backward compat (same pattern as the tuner's planner/reflector flattening).
 
-#### Stage 1: `Scientific_Reasoning` sub-call → `DiscoveryMemo`
+> **Decision 2 — How does `expert_context` reach the proposal agent?**
+>
+> Currently, `human_advice` is NOT carried by the protocol (`local_full_context`). It's injected by the workflow code separately. Per CLAUDE.md's inter-node communication principle ("schemas + protocols only"), `expert_context` should flow **through the protocol**, not be injected by the workflow as a side channel.
+>
+> The `local_full_context` protocol function gains an `expert_context` parameter:
+> ```python
+> def local_full_context(
+>     output: InterpretationOutput,
+>     storage: StorageConfig,
+>     expert_context: List[ExpertContextItem] | None = None,
+>     human_advice: ExpertAdviceInput | None = None,  # legacy, wrapped into expert_context
+> ) -> ProposalInput:
+> ```
+> The workflow passes `human_advice` (from CLI args or chain config) to the protocol, which wraps it into an `ExpertContextItem` with `source="human", kind="human"` and includes it in `expert_context`. This is the single clean path — no more workflow-level injection.
+>
+> Note: `ProposalInput.human_advice` is currently typed `Optional[ExpertAdviceInput]` (not `str`). The `ExpertContextItem` wrapping must handle both plain strings and structured `ExpertAdvice` objects.
 
-This is the "peer review of own hypothesis" stage. The sub-call's system prompt explicitly frames the LLM as a reviewer who must shoot down its own proposal before defending it.
+> **Decision 3 — Pipeline stages support both JSON and plain-text output modes.**
+>
+> The existing proposal agent uses `bridge.generate_text()` (plain text, no JSON constraint) for reasoning and `bridge.generate()` (JSON mode) for the structured commit. The pipeline runner must support both modes per stage. Each `ReasoningStage` carries an `output_mode`:
+> ```python
+> class ReasoningStage(BaseModel):
+>     name: str
+>     system_prompt_key: str
+>     output_mode: Literal["json", "text"] = "json"  # json → bridge.generate(), text → bridge.generate_text()
+>     enabled: bool = True
+> ```
+> Stages 1 (comparison) and 2 (reasoning) default to JSON (structured output that feeds into the DiscoveryMemo). But a future "free reasoning" stage could use text mode if needed.
+
+#### Execution flow
+
+```
+ProposalInput
+  ├── reasoning_pipeline: ReasoningPipelineConfig (workflow-level)
+  ├── expert_context: List[ExpertContextItem]
+  └── all_records (seeds + previously proposed models)
+          │
+          ▼
+  [Pre-filter] ← model_selection strategy (deterministic Python)
+          │ candidate_models (e.g. top 10 by score)
+          ▼
+  [Stage 1: Comparison] ← COMPARATIVE_ANALYSIS prompt + candidates + expert_context
+          │ List[ModelComparison] — per-model strengths/weaknesses/lessons
+          ▼
+  [Stage 2: Reasoning] ← CAUSAL_REASONING prompt + comparisons + expert_context
+          │ DiscoveryMemo core fields (hypothesis, prediction, failure modes)
+          ▼
+  [Stage 3: Proposing] ← ARCHITECTURE_DESIGN prompt + full DiscoveryMemo
+          │ ProposalOutput (model name, config, code)
+          ▼
+  Validator → Implementor → Tuner
+```
+
+Each `[Stage N]` is one `bridge.generate()` call. **Each stage receives ALL prior stages' outputs as context** — so Stage 2 sees Stage 1's comparisons, and Stage 3 sees both. The pipeline runner is a simple loop:
+
+```python
+def produce_discovery_memo(self, context: dict, pipeline: ReasoningPipelineConfig) -> DiscoveryMemo:
+    """Run the reasoning pipeline. Each enabled stage enriches the context."""
+    accumulated = dict(context)
+    for stage in pipeline.stages:
+        if not stage.enabled:
+            continue
+        system_prompt = PROMPTS[stage.system_prompt_key]
+        result = self.bridge.generate(system_prompt, json.dumps(accumulated))
+        accumulated[stage.name] = result  # next stage sees this stage's output
+    return DiscoveryMemo.model_validate(accumulated)
+```
+
+Adding a stage = appending to the list. The surrounding code never changes.
+
+#### Smart, adaptive model selection
+
+The model selection has two layers:
+
+**Layer 1 — Pre-filter (deterministic Python, before the LLM call)**: reduces ALL past models to a candidate set based on `ModelSelectionStrategy`. Controls **token cost** — passing 50 full model records to the LLM is expensive; passing 10 is reasonable.
+
+**Layer 2 — Focus (inside the LLM call, driven by expert_context)**: the expert advice tells the LLM what to emphasize **within** the candidate set. The same 10 models can be analyzed with different emphasis depending on the advice:
+- Human says "focus on low-frequency performance" → comparison emphasizes `file_vector[0:5]` per model
+- Human says "compare gating mechanisms" → comparison emphasizes models that use gating
+- No advice → default balanced comparison
+
+The pre-filter is the **budget control** (how many). The expert advice is the **focus control** (what to emphasize). Both are configurable, neither is hardcoded.
+
+#### Dynamic vocabulary growth — the comparison stage as a contributor
+
+The vocabulary doesn't just flow INTO the pipeline — the pipeline **grows** it. Specifically, the comparison stage has a dual role:
+
+1. **Consumer**: it uses the current vocabulary (canonical + candidates) to structure its analysis — "Model A uses **dilated_causal_conv** (feature), which enables **receptive_field** (concept)."
+2. **Contributor**: it identifies patterns in the experiment records that suggest a NEW feature or concept not yet in the vocabulary. When it does, it proposes the new entry as a candidate: "Models B and C both use a pattern I'd call **frequency_band_gating** — a gated activation that operates on log-spaced frequency bins. This isn't in the current vocabulary but appeared in 2 of the top 3 models."
+
+The candidate enters the vocabulary pool through the comparison's output (stored in the DiscoveryMemo, persisted in the experiment record, aggregated by the interpretation agent). Future rounds can reference it by name. If it appears in ≥3 runs and meets the promotion criteria, it becomes canonical.
+
+This means:
+- **Round 1**: vocabulary = canonical seed only. Comparison can reference seed features/concepts and may propose candidates based on the seed models' descriptions.
+- **Round N**: vocabulary = canonical seed + all candidates proposed across rounds 1 to N-1. Comparison has a richer language to work with AND continues to propose new candidates from the latest results.
+- **The vocabulary compounds over iterations**, just like the experiment records do. Each round adds both data (records) and language (vocabulary candidates) for the next round to build on.
+
+#### Exploration vs exploitation — the cold-start problem
+
+**The problem**: in round 1, the system has seed model baselines but zero agent-proposed models, zero confirmed/refuted hypotheses, zero empirical evidence about what features/concepts actually matter for TIDMAD performance. Forcing the full reasoning pipeline would produce **confidently wrong** causal claims — the LLM would state hypotheses as if evidence-based when they're actually just prior beliefs. This is worse than no reasoning, because it creates false rigor.
+
+**The solution**: the pipeline's `exploration_mode` controls the reasoning tone and prompt templates. The system explicitly distinguishes between two phases:
+
+| Mode | When (in `auto`) | Goal | Pipeline behavior |
+|---|---|---|---|
+| **Exploration** | Few records (<5 agent-proposed models), no confirmed patterns | Test hypotheses, gather evidence | Comparison is honest about uncertainty ("we have only seed baselines, no experimental evidence yet"). Reasoning proposes **diagnostic experiments** — "I want to test WHETHER receptive_field matters, so I'll compare a wide vs narrow model." Predictions are framed as conditional: "IF receptive_field matters, THEN file_vector[0:5] should improve by >0.1." |
+| **Exploitation** | Many records (≥5 agent-proposed), confirmed patterns exist | Build on what works, beat SOTA | Comparison leverages the full vocabulary + evidence base. Reasoning builds on confirmed patterns: "receptive_field was confirmed to matter in rounds 2, 4, and 6 (hit rate 75%). I'm now combining it with frequency_band_gating which was confirmed in round 5." Predictions reference prior evidence. |
+
+**In `auto` mode**, the pipeline runner checks before each iteration:
+```python
+def _resolve_exploration_mode(records, pipeline) -> str:
+    if pipeline.exploration_mode != "auto":
+        return pipeline.exploration_mode
+    agent_proposed = [r for r in records if r.get("source") != "seed"]
+    if len(agent_proposed) < 5:
+        return "explore"
+    # Could also check hit_rate, vocabulary growth rate, etc.
+    return "exploit"
+```
+
+**The prompts change based on the mode**:
+
+- **Exploration system prompt addition**: "You are in EXPLORATION mode. You have limited experimental evidence from this project. Your goal is NOT to beat the SOTA — it's to TEST a specific hypothesis. Propose a DIAGNOSTIC experiment that will confirm or refute one specific claim about a feature or concept. Frame your prediction as 'IF [concept] matters, THEN [metric] should change by [amount].' Be honest about what you don't know."
+
+- **Exploitation system prompt addition**: "You are in EXPLOITATION mode. You have N confirmed patterns from previous rounds (hit rate: X%). Build on what works. Combine confirmed features/concepts. Your prediction should be based on empirical evidence from this project, not generic ML knowledge. Reference specific prior rounds that confirmed the patterns you're building on."
+
+The human can override: `exploration_mode: "explore"` forces exploration even at round 20 (useful for testing a new direction); `exploration_mode: "exploit"` forces exploitation even at round 1 (useful when the human has strong prior knowledge via ExpertContextItem).
+
+#### Stage 1: Comparison — "What do we know?"
+
+Backward-looking systematic review of the pre-filtered candidate models. One `ModelComparison` per model.
+
+```python
+class ModelComparison(BaseModel):
+    """Structured analysis of one previously tested model."""
+    model_type: str
+    source: str = Field(
+        description="'seed' (from the initial seed records) or "
+                    "'proposed_iter_N' (proposed by the agent in iteration N)."
+    )
+    best_score: float
+    key_mechanism: str = Field(
+        max_length=300,
+        description="One sentence: what makes this model tick (or not). "
+                    "Must reference a specific architectural feature, not vague language."
+    )
+    strengths: List[str] = Field(
+        description="What this model does well, tied to file_vector or score evidence."
+    )
+    weaknesses: List[str] = Field(
+        description="Where this model fails, tied to file_vector or score evidence."
+    )
+    lesson_for_next_proposal: str = Field(
+        max_length=300,
+        description="What to inherit or avoid from this model in the next proposal."
+    )
+```
+
+The comparison stage's output is a `List[ModelComparison]` that feeds into Stage 2 as context.
+
+#### Stage 2: Reasoning — "What should we try?"
+
+Forward-looking causal hypothesis, building on the comparisons from Stage 1. This is where the DiscoveryMemo's core scientific fields are produced.
 
 ```python
 class DiscoveryMemo(BaseModel):
-    """The structured output of the reasoning sub-call. Forces the LLM
-    to articulate WHY before WHAT.
-    """
+    """The structured output of the reasoning pipeline (stages 1+2).
+    The 'Final Verdict' — forces the LLM to articulate WHY before WHAT.
+    Stage 3 (proposing) is structurally tethered to this memo."""
 
-    # --- Comparative anchor ---
+    # --- Comparative analysis (Stage 1 output) ---
+    comparative_analysis: List[ModelComparison] = Field(
+        description="Systematic comparison of selected past models. "
+                    "Produced by the comparison stage, consumed by the reasoning stage."
+    )
     sota_model_type: str = Field(
-        description="The current best-scoring model in the seed records. "
-                    "Identified deterministically by the proposal agent before the LLM call."
+        description="The current best-scoring model, identified from the comparisons."
     )
     sota_score: float
     sota_mechanism: str = Field(
         max_length=600,
-        description="One paragraph: WHY does the SOTA work on TIDMAD? "
-                    "Must reference physical/architectural mechanism, not vague language. "
-                    "E.g. 'dilated causal convolutions cover a receptive field of "
-                    "~16k samples, matching the lowest injected signal period of 0.9 ms.'"
+        description="WHY does the SOTA work? Must reference physical/architectural "
+                    "mechanism, not vague language."
     )
 
-    # --- The proposal as a delta against the SOTA ---
+    # --- Causal reasoning (Stage 2 output) ---
     proposed_change: str = Field(
         max_length=400,
-        description="One paragraph: what does the new proposal change "
-                    "RELATIVE TO the SOTA? Must be expressible as 'replace X with Y' "
-                    "or 'add Z'. Forbidden: 'completely new architecture'."
+        description="What the new proposal changes RELATIVE TO the SOTA. "
+                    "Must be expressible as 'replace X with Y' or 'add Z'. "
+                    "Forbidden: 'completely new architecture'."
     )
     causal_hypothesis: str = Field(
         max_length=600,
-        description="One paragraph: WHY the proposed change should improve the score. "
+        description="WHY the proposed change should improve the score. "
                     "Must reference (a) the SOTA mechanism it preserves, "
-                    "(b) the SOTA bottleneck it relaxes, and (c) the new mechanism "
-                    "it introduces. Vague language ('better', 'more powerful') is "
-                    "forbidden — the next round's validator will flag empty causal claims."
+                    "(b) the SOTA bottleneck it relaxes, (c) the new mechanism. "
+                    "Vague language forbidden."
     )
 
-    # --- Falsifiable prediction (the peer-review teeth) ---
+    # --- Falsifiable prediction ---
     falsifiable_prediction: FalsifiablePrediction = Field(
-        description="A concrete numerical prediction tied to a measurable metric. "
-                    "The next round's reflector checks this prediction and "
-                    "labels the hypothesis 'confirmed' / 'refuted' / 'partial'."
+        description="Concrete numerical prediction. The reflector checks it."
     )
 
-    # --- Devil's advocate clause ---
+    # --- Devil's advocate ---
     predicted_failure_modes: List[str] = Field(
         min_length=1, max_length=3,
-        description="At least one way the proposal could fail. The reasoning "
-                    "is rejected if this list is empty or if all entries are "
-                    "trivially low-probability."
+        description="At least one way the proposal could fail."
     )
 
     # --- Lineage (see §2B) ---
@@ -105,11 +362,7 @@ class DiscoveryMemo(BaseModel):
     citation_sources: List[str] = Field(
         default_factory=list,
         description="cite_id values of ExpertContextItems that materially "
-                    "shaped this memo's reasoning. The proposal agent is "
-                    "instructed to populate this honestly — not every item "
-                    "in expert_context need be cited, only the ones that "
-                    "actually influenced the proposal. Empty list = the "
-                    "memo was driven purely by past experiment records."
+                    "shaped this memo. Empty = driven purely by records."
     )
 
 
@@ -117,40 +370,56 @@ class FalsifiablePrediction(BaseModel):
     metric: str = Field(
         description="What to measure. Free-text, guided by expert advice. "
                     "Examples: 'mean(file_vector[0:5])', 'denoising_score', "
-                    "'file_vector[17]'. The reflector evaluates the prediction "
-                    "by computing the metric from the actual results."
+                    "'file_vector[17]'."
     )
-    current_value: float          # from SOTA's actual results
-    predicted_value: float        # what the new model should achieve
-    threshold_for_refutation: float  # below this → hypothesis refuted
-    rationale: str                # why this specific number
+    current_value: float
+    predicted_value: float
+    threshold_for_refutation: float
+    rationale: str
 ```
 
-#### Stage 2: `Architectural_Design` sub-call → existing `ProposalOutput` (extended)
+#### Stage 3: Proposing — "How exactly do we build it?"
 
-The second sub-call is given the validated `DiscoveryMemo` as part of its prompt context, and its system prompt forces it to:
+The proposing stage receives the complete `DiscoveryMemo` and produces the `ProposalOutput` (model name, model_config, train_config, loss_config, code). Its system prompt forces it to:
 
-- Reference the memo's `proposed_change` verbatim when describing what the architecture does.
+- Reference the memo's `proposed_change` verbatim.
 - Use the memo's `inherited_components` as a checklist — every listed component must appear in the proposed `model_config`.
-- Justify every architectural choice that is NOT in the memo, with a one-line "deviation note". A high deviation count is a red flag the validator surfaces.
+- Reference specific `ModelComparison` entries from Stage 1 when justifying architectural choices ("I'm using dilated convolutions because wavenet's comparison showed this was its key strength").
+- Justify every architectural choice that is NOT in the memo with a "deviation note". A high deviation count is a red flag the validator surfaces.
 
-The result: the architecture stage is structurally tethered to the reasoning stage. The LLM cannot quietly drift from "I'm going to add gating to WaveNet" in the memo to "I'm going to write a transformer" in the config — the validator will catch the mismatch.
+The result: the architecture is **structurally tethered to the reasoning**. The LLM cannot quietly drift from "I'm modifying WaveNet's gating" in the memo to "I'm writing a transformer" in the config — the validator catches the mismatch.
 
-#### Why this is "peer review" and not just "longer prompts"
+#### Why this is "scientific peer review" and not just "longer prompts"
 
-Three structural teeth, in order of importance:
+Four structural teeth:
 
-1. **Falsifiable prediction**: every proposal commits to a numerical outcome. The next round's reflector marks it confirmed/refuted/partial. Over time the agent's hit rate becomes a measurable quantity ("the proposal agent is right about its causal predictions 38% of the time"). That's the ground truth for whether scientific reasoning is improving.
-2. **Devil's advocate clause**: at least one failure mode must be named. Empty or trivial lists are rejected, forcing the LLM to actually consider downside.
-3. **Architectural tethering**: the second sub-call cannot diverge from the first without a deviation note. Drift is visible.
+1. **Systematic comparison**: every previously tested model is analyzed before any new proposal is made. The LLM can't ignore past failures or silently re-propose something that already failed.
+2. **Falsifiable prediction**: every proposal commits to a numerical outcome. The reflector checks it. Over time the hit rate becomes measurable.
+3. **Devil's advocate clause**: at least one failure mode must be named. Empty or trivial lists are rejected.
+4. **Architectural tethering**: Stage 3 cannot diverge from Stages 1+2 without deviation notes. Drift is visible.
 
-None of these requires a new node, a new agent, or a sidecar file. They are all schema constraints + prompt constraints + one new sub-call.
+None of these requires a new node, a new agent, or a sidecar file. They are all schema constraints + prompt constraints + a configurable list of LLM calls.
 
 ---
 
-### 2B. Component lineage and inheritance
+### Composability principle (applies to §2A pipeline + §2B vocabulary + future extensions)
 
-**Goal**: track which architectural primitives ("dilated causal conv", "gated activation", "residual skip", "log-spaced FNO gates") come from which past winners, so successful primitives can be inherited explicitly rather than re-invented.
+> **The runner is generic; the content is specific.**
+>
+> Both the reasoning pipeline (§2A) and the vocabulary system (§2B) follow the same architectural pattern: a **generic engine** that doesn't know about any specific domain concept, plus **pluggable content** that fills the engine with specific behavior. This is not runtime configuration (no YAML file) — it's code-level composability. Adding a new vocabulary type or a new pipeline stage means writing a new module and plugging it into an existing interface, NOT modifying existing code.
+>
+> Concretely:
+> - **Pipeline stages** conform to a single interface: `(system_prompt, accumulated_context) → stage_output`. The pipeline runner just loops. It doesn't know the difference between "comparison" and "physics_check" — both are entries in a list. Adding a stage = adding one entry + one prompt template. The runner's code doesn't change.
+> - **Vocabulary entries** conform to a single schema: `VocabEntry(name, kind, description, related_to, ...)`. The aggregation/promotion engine doesn't know the difference between a "feature" and a "concept" — both are entries with a `kind` field. Adding a new vocabulary type = adding entries with a new `kind` value. The engine's code doesn't change.
+> - **The combination** of vocabularies × stages is composable: any stage's prompt template can reference any vocabulary kind. The comparison stage uses both features and concepts today; a future "physics_check" stage could use a "physical_constraint" vocabulary kind. No wiring code changes.
+>
+> This composability is what makes the system extensible without accumulating technical debt. Every new capability is an additive plugin, not a cross-cutting modification.
+
+---
+
+### 2B. Vocabulary system — features, concepts, and lineage
+
+**Goal**: track the building blocks of model design at two levels of abstraction — **features** (concrete architectural primitives you can point to in code) and **concepts** (higher-level scientific ideas that explain why features matter) — and connect them so the reasoning pipeline can say structured things like "Model A uses **dilated_causal_conv** (feature) which gives it a wide **receptive_field** (concept), enabling strong low-frequency recovery."
 
 **Where the source of truth lives**: in the per-record `DiscoveryMemo.inherited_components`, NOT in `MODEL_REGISTRY`. Reasoning:
 
@@ -162,12 +431,14 @@ None of these requires a new node, a new agent, or a sidecar file. They are all 
 
 ```python
 class InheritedComponent(BaseModel):
-    """One architectural primitive carried over from a past winning run."""
+    """One building block carried over from a past winning run. Can be a
+    concrete feature ('dilated_causal_conv') or a higher-level concept
+    ('receptive_field') — both are tracked in the unified vocabulary."""
 
     component: str = Field(
-        description="Short canonical name. E.g. 'dilated_causal_conv', "
-                    "'gated_activation', 'log_spaced_fno_gates', 'residual_skip'. "
-                    "Drawn from a controlled vocabulary (see PRIMITIVE_VOCAB below) "
+        description="Short canonical name from the vocabulary. "
+                    "E.g. 'dilated_causal_conv' (feature) or 'receptive_field' (concept). "
+                    "Drawn from the unified vocabulary (see VocabEntry below) "
                     "to make aggregation possible."
     )
     from_model_type: str = Field(
@@ -192,7 +463,7 @@ class InheritedComponent(BaseModel):
     )
 ```
 
-**Open vocabulary with structured promotion** (`PRIMITIVE_VOCAB`):
+**Open vocabulary with structured promotion** (unified `VocabEntry` — replaces the earlier `PRIMITIVE_VOCAB` concept with a broader system that tracks both features and concepts):
 
 A pure fixed vocabulary blocks discovery; a pure free-text vocabulary destroys aggregation through spelling drift. The compromise is a **two-tier vocabulary that grows by structural promotion**:
 
@@ -211,23 +482,68 @@ The interpretation agent computes this union from records, marks promotions in i
 #### Schema additions
 
 ```python
-class PrimitiveVocabEntry(BaseModel):
-    """A single primitive — either canonical (from the tracked seed file)
-    or candidate (proposed by the agent and present in records)."""
+class VocabEntry(BaseModel):
+    """A single vocabulary entry — either a concrete feature or a higher-level
+    concept. Both live in the same two-tier vocabulary (canonical + candidate)
+    and use the same promotion mechanism. The `kind` field distinguishes them;
+    the `related_to` field connects them.
+
+    Adding a new kind (e.g. 'failure_pattern', 'physical_constraint') requires
+    NO code changes — just add entries with the new kind value to the seed file
+    or let the agent propose them as candidates. The aggregation engine, the
+    promotion rules, and the pipeline stages all treat VocabEntry generically.
+    This is the composability principle in action.
+    """
     name: str = Field(description="Canonical snake_case name.")
+    kind: str = Field(
+        description="What type of knowledge this entry represents. "
+                    "Current kinds: 'feature' (concrete architectural building block, "
+                    "e.g. 'dilated_causal_conv') and 'concept' (higher-level scientific "
+                    "idea, e.g. 'receptive_field'). New kinds can be added without "
+                    "code changes — just add entries with the new kind value."
+    )
     description: str = Field(max_length=200, description="One-sentence definition.")
+    related_to: List[str] = Field(
+        default_factory=list,
+        description="Names of other VocabEntry items this entry is connected to. "
+                    "Feature→concept: 'dilated_causal_conv' related_to ['receptive_field']. "
+                    "Concept→feature: 'receptive_field' related_to ['dilated_causal_conv', 'depth']. "
+                    "This graph enables the comparison stage to say structured things like "
+                    "'Model A uses [feature] which enables [concept], resulting in [performance]'."
+    )
     tier: Literal["canonical", "candidate"] = "candidate"
     pattern: Optional[str] = Field(
         default=None,
-        description="AST/regex hint the validator uses to verify implementations. "
-                    "Mandatory for canonical entries, optional for candidates."
+        description="AST/regex hint for features — the validator uses it to verify "
+                    "that a claimed inheritance actually appears in the code. "
+                    "Not applicable to concepts (set to None)."
     )
     proposed_by_run: Optional[str] = None  # candidates only
-    seen_in_runs: List[str] = []           # all runs that have used this primitive
+    seen_in_runs: List[str] = []           # all runs that have used this entry
     aliases: List[str] = []                # observed spelling variants the aggregator collapsed
 ```
 
-The existing `InheritedComponent.component` field continues to be a free-text name, but the proposal agent's prompt now includes the full `runtime_vocab` (both tiers, clearly labeled) and is instructed: "Prefer canonical entries verbatim. Use a candidate only if no canonical entry fits, and provide a one-sentence description and an optional regex hint when you do."
+**Seed file example** (`agent/schemas/vocab_seed.json`):
+```json
+[
+  {"name": "dilated_causal_conv", "kind": "feature", "description": "Causal convolution with exponentially increasing dilation factors", "related_to": ["receptive_field", "frequency_resolution"], "pattern": "dilation\\s*="},
+  {"name": "gated_activation", "kind": "feature", "description": "Sigmoid-gated element-wise multiplication of two conv branches", "related_to": ["selective_frequency_processing"], "pattern": "sigmoid.*\\*"},
+  {"name": "skip_connection", "kind": "feature", "description": "Additive residual path bypassing one or more layers", "related_to": ["gradient_flow", "identity_preservation"], "pattern": "\\+.*residual|skip"},
+  {"name": "fno_spectral_layer", "kind": "feature", "description": "Fourier Neural Operator layer processing the full FFT spectrum", "related_to": ["frequency_resolution", "receptive_field"]},
+  {"name": "receptive_field", "kind": "concept", "description": "How far back in time the model can see per layer — wider = better low-frequency capture", "related_to": ["dilated_causal_conv", "depth", "kernel_size"]},
+  {"name": "frequency_resolution", "kind": "concept", "description": "The model's ability to distinguish different frequency bands in the signal", "related_to": ["fno_spectral_layer", "segmentation_size", "dilated_causal_conv"]},
+  {"name": "selective_frequency_processing", "kind": "concept", "description": "Ability to attenuate or amplify specific frequency bands independently", "related_to": ["gated_activation", "static_v"]},
+  {"name": "parameter_efficiency", "kind": "concept", "description": "Achieving comparable performance with fewer trainable parameters", "related_to": ["depth", "width", "skip_connection"]}
+]
+```
+
+The `InheritedComponent.component` field references entries from this unified vocabulary. The proposal agent's prompt includes the full `runtime_vocab` (both tiers, both kinds, clearly labeled) and is instructed: "Use canonical entries verbatim. When claiming an inherited component, specify whether it's a feature or a concept. Use `related_to` links to explain the connection between features and concepts."
+
+The comparison stage uses the vocabulary to structure its analysis:
+> "Model A uses **dilated_causal_conv** (feature, canonical) which enables wide **receptive_field** (concept, canonical). Its file_vector shows strong scores on files 11-19 (high frequency) but weak on files 0-4 (low frequency), suggesting the receptive_field is not wide enough for the lowest bands."
+
+The reasoning stage uses it to justify proposals:
+> "I propose inheriting **dilated_causal_conv** from Model A and adding **fno_spectral_layer** from Model C. Both features enable **frequency_resolution** (concept), but FNO's spectral processing addresses the low-frequency gap that dilated convolutions alone cannot cover."
 
 #### Promotion rule (autonomous, conservative)
 
@@ -508,7 +824,7 @@ These existing pieces are doing their job and need no change:
 |---|---|
 | `InquiryContext` umbrella schema | Three of its four sub-fields already exist as `seed_records`, `human_advice`, and `description.md`. The fourth (Literature Agent) doesn't exist yet. Wrapping existing fields in a new container adds a layer without adding capability. **Defer until the Literature Agent appears**, then add it as a 4th typed field on `ProposalInput`. |
 | `Research Directive` as a prose field | Replaced by the structured `ResearchDirective` schema in §2C. Free-text directives are why the LLM currently ignores them. |
-| Splitting the proposal agent into two graph **nodes** (`Scientific_Reasoning_Subnode` and `Architectural_Design_Subnode`) | Replaced by two LLM **sub-calls inside one node** (§2A). Same scientific benefit, no graph surgery. Escalate to a node split only if a future Literature Agent needs to feed into the reasoning sub-call independently. |
+| Splitting the proposal agent into two graph **nodes** (`Scientific_Reasoning_Subnode` and `Architectural_Design_Subnode`) | Replaced by a **three-stage configurable pipeline inside one node** (§2A). Same scientific benefit, no graph surgery. Escalate to a node split only if a future Literature Agent needs to feed into a specific stage independently. |
 | `MemorySummarizer` as a new LLM agent | Replaced by the deterministic `component_leaderboard` derived field on `InterpretationOutput` (§2B). No new LLM call per round; quota stays flat. |
 | `UnifiedContextAssembler` | Already exists, called `protocols/`. Renaming would not add value. |
 | `Research_Journal.md` sidecar markdown file | **Hard veto.** Violates the "schemas + storage + protocols ONLY" invariant in `CLAUDE.md`. The same narrative can be derived from records on demand or live in one node's output schema. |
@@ -518,8 +834,8 @@ These existing pieces are doing their job and need no change:
 | Phase | Change | Effort | Unlocks |
 |---|---|---|---|
 | **A** | ~~`regime_scores`~~ **REVERTED** — see §Phase A below. No code changes remain from Phase A. The 20-element `file_vector` on `ExperimentRecord` stays as the raw source of truth. Any frequency-band interpretation belongs in expert advice, not in the schema. | — | — |
-| **B** | Add `DiscoveryMemo` schema and the reasoning sub-call inside `ml_model_proposal_agent`. Architecture sub-call is given the validated memo. Falsifiable prediction is recorded but not yet checked. Add `ExpertContextItem` (§2D) and the protocol-layer wrapping of legacy `human_advice` strings. The proposal agent's reasoning prompt iterates over `expert_context` instead of reading `human_advice`. | medium | Scientific peer review is now structurally enforced. Each proposal commits to a causal claim. **The polymorphic input slot for future upstream agents is in place.** |
-| **C** | Add `InheritedComponent` schema, `PRIMITIVE_VOCAB`, and the `check_inherited_components` validator check. Add `component_leaderboard` to `InterpretationOutput`. | medium | Lineage tracking is end-to-end. Empirical inheritance becomes the dominant signal in the next round's prompt. |
+| **B** | Replace the proposal agent's existing two-call pattern with the **three-stage configurable pipeline** from §2A: (1) comparison — systematic review of selected past models, (2) causal reasoning — forward-looking hypothesis building on comparisons, (3) proposing — concrete architecture tethered to the memo. Add `ReasoningPipelineConfig` at the workflow level. Add `ModelSelectionStrategy` for smart pre-filtering of candidate models. Add `ExpertContextItem` (§2D) for polymorphic upstream input. Add DI (`bridge_factory`) to the proposal agent. | large | Every proposal is backed by a structured `DiscoveryMemo` that compares past models, forms a causal hypothesis, and makes a falsifiable prediction. The pipeline is configurable — adding/removing/reordering stages is a config change, not a code change. The polymorphic input slot for future upstream agents is in place. |
+| **C** | Add `VocabEntry`-based lineage validator (`check_inherited_components` for features, concept-reference check for concepts). Add `component_leaderboard` to `InterpretationOutput`. Implement the promotion engine. Note: the `VocabEntry` schema and seed file now land in Phase B (B.6a); Phase C adds the validator + interpretation aggregation on top. | medium | Lineage tracking is end-to-end. Empirical inheritance becomes the dominant signal in the next round's prompt. |
 | **D** | Add `ResearchDirective` schema and the three guardrail layers in §2C. | medium | Guided mode actually constrains the search. |
 | **E** | Add the `falsifiable_prediction` retrospective check inside the reflector: confirmed / refuted / partial label, written into the record. Aggregate the hit rate in `InterpretationOutput`. | small | The proposal agent's scientific accuracy becomes a measurable, monitorable quantity. |
 
@@ -528,7 +844,7 @@ Each phase has its own tests. Each is independently revertable. Each is small en
 ## 6. Open questions
 
 1. **Falsifiable prediction granularity**. ~~Predicting one regime score is the minimum.~~ (Phase A regime_scores reverted — see §Phase A above.) The `metric` field is now free-text, so the LLM can predict on any measurable quantity: `denoising_score`, `mean(file_vector[0:5])`, a specific `file_vector[i]`, etc. Open question: should we constrain the metric to a known set of patterns (easier to evaluate programmatically) or leave it fully free-text (more flexible but harder for the reflector to parse)? **Recommendation**: start free-text with a few documented examples in the prompt; add pattern constraints only if the reflector can't reliably evaluate free-form metrics.
-2. **PRIMITIVE_VOCAB seeding**. We need an initial ~20-entry list for the canonical tier. Should it be hand-curated by the human, mined from the existing `description.md` files, or extracted by a one-off LLM pass over the registry? Hand-curated is most reliable but slowest. **Recommendation**: hand-curate the first ~10 from WaveNet + UNet + FNO descriptions to set the quality bar, then let the open-vocabulary promotion mechanism grow it organically.
+2. **Vocabulary seeding** (now `VocabEntry`, unified features + concepts). The seed file needs ~10 features + ~5 concepts drawn from the built-in models. Moved to Phase B sub-task B.6a (was Phase C.1). Claude drafts, human reviews before the rest of Phase B lands.
 
 2a. **Promotion thresholds**. The default rule is "≥3 distinct runs AND at least one above SOTA AND semantic dedup AND pattern present". The numbers are guesses. After the first chain run with the vocabulary mechanism live, we should look at the candidate distribution and tune. Open question: should the SOTA threshold be "above the current iteration's best" (strict, raises the bar over time) or "above the seed-run baseline" (loose, freezes the bar)?
 
@@ -581,61 +897,49 @@ This section breaks each phase from §5 into concrete sub-tasks, the files they 
 
 ---
 
-### Phase B — `DiscoveryMemo` + `ExpertContextItem` (the polymorphic input slot)
+### Phase B — Three-stage reasoning pipeline + `ExpertContextItem`
 
-> **⚠️ NOTE FOR PHASE B DEVELOPER — `FalsifiablePrediction` redesign needed**
->
-> The original `FalsifiablePrediction` schema (§2A) referenced hardcoded regime names:
-> ```python
-> regime: Literal["low_freq_kHz", "mid_freq_10kHz", "high_freq_MHz", "global"]
-> ```
-> These no longer exist (Phase A reverted). The replacement should reference **`file_vector` indices or free-text metric descriptions** instead:
->
-> ```python
-> class FalsifiablePrediction(BaseModel):
->     metric: str = Field(
->         description="What to measure. Free-text, guided by expert advice. "
->                     "Examples: 'mean(file_vector[0:5])', 'denoising_score', "
->                     "'file_vector[17]'. The reflector evaluates it by parsing "
->                     "the metric string or matching against known patterns."
->     )
->     current_value: float
->     predicted_value: float
->     threshold_for_refutation: float
->     rationale: str
-> ```
->
-> The LLM writes the metric description itself, guided by expert advice that explains which files cover which frequency bands (e.g. `tuner_advice/gated_fno_freq_band_aware_v1.json`). The reflector evaluates it. No hardcoded regime names in the schema.
->
-> If the Data Analysis Agent later provides named regimes via `ExpertContextItem`, the `metric` field can reference those names — the schema stays the same, only the expert context changes. This is the right design for extensibility without schema migration.
+**Goal**: replace the proposal agent's existing two-call pattern with the three-stage configurable pipeline from §2A (comparison → reasoning → proposing), add the `ExpertContextItem` polymorphic input slot from §2D, and wire the `ModelSelectionStrategy` pre-filter. After Phase B, every proposal is backed by a structured `DiscoveryMemo` that systematically compares past models, forms a causal hypothesis, and makes a falsifiable prediction.
 
-**Goal**: every proposal commits to a structured causal hypothesis with a falsifiable prediction; the proposal agent's input slot becomes polymorphic so future upstream agents can plug in without schema invention.
+**Depends on**: nothing (Phase A was reverted). The `FalsifiablePrediction` references free-text metrics derived from `file_vector` and expert advice, not from `regime_scores`.
 
-**Depends on**: nothing (Phase A was reverted). The `FalsifiablePrediction` now references free-text metrics derived from `file_vector` and expert advice, not from `regime_scores`.
-
-**PR size**: medium.
+**PR size**: large (the biggest phase — introduces multiple new schemas, 3 new prompts, the pipeline runner, the model selection pre-filter, and DI on the proposal agent).
 
 **Files**:
-- `agent/schemas/proposal.py` — add `DiscoveryMemo`, `FalsifiablePrediction`, `InheritedComponent`, `ExpertContextItem`. Add `expert_context: List[ExpertContextItem]` to `ProposalInput`. Keep `human_advice: str` deprecated for backward compat.
+- `agent/schemas/proposal.py` — add `ModelComparison`, `DiscoveryMemo`, `FalsifiablePrediction`, `InheritedComponent`, `ExpertContextItem`, `ReasoningStage`, `ModelSelectionStrategy`, `ReasoningPipelineConfig`. Add `expert_context: List[ExpertContextItem]` and `reasoning_pipeline: ReasoningPipelineConfig` to `ProposalInput`. Keep `human_advice: str` deprecated for backward compat.
 - `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py` — update the protocol to wrap legacy `human_advice` strings into a single `ExpertContextItem` with `source="human", kind="human", cite_id="human_advice"`.
-- `nodes/ml_model_proposal_agent.py` — split the LLM call into two `bridge.generate(...)` sub-calls. First call returns a `DiscoveryMemo`; second call receives the validated memo and returns the existing `ProposalOutput`.
-- `agent/prompts.py` — add `DISCOVERY_MEMO_SYSTEM_PROMPT` (with the peer-review framing) and update `PROPOSAL_SYSTEM_PROMPT` to require references to the memo.
-- `tests/unit/agent/proposal_agent/test_discovery_memo_schema.py` (new) — schema validation tests.
-- `tests/unit/agent/proposal_agent/test_proposal_agent.py` — extend with mocked-LLM tests for the two-stage flow.
-- `tests/integration/nodes/test_ml_model_proposal_agent.py` — extend Tier-1 test with a real LLM call producing a valid memo + proposal.
+- `nodes/ml_model_proposal_agent.py` — replace the existing two-call pattern with `produce_discovery_memo(context, pipeline)` (the configurable pipeline runner from §2A) + the proposing stage. Add constructor DI (`bridge_factory`) for pseudo-mode testing. Implement the `ModelSelectionStrategy` pre-filter as a deterministic Python function.
+- `workflows/llm_config.py` (or `workflows/model_exploration.py`) — attach `ReasoningPipelineConfig` at the workflow level so the chain uses the same pipeline across all iterations.
+- `agent/prompts.py` — add `COMPARATIVE_ANALYSIS_SYSTEM_PROMPT`, `CAUSAL_REASONING_SYSTEM_PROMPT`, update `PROPOSAL_SYSTEM_PROMPT` to require references to the memo and comparisons.
+- `tests/unit/agent/proposal_agent/test_discovery_memo_schema.py` (new) — schema validation tests for all new schemas.
+- `tests/unit/agent/proposal_agent/test_reasoning_pipeline.py` (new) — unit tests for the pipeline runner and model selection pre-filter.
+- `tests/pseudo_data/api_call_outputs/ml_model_proposal_agent/` (new) — predefined responses for comparison, reasoning, and proposing stages.
+- `tests/integration/nodes/test_ml_model_proposal_agent.py` — add a `@dual_mode` test exercising the 3-stage pipeline in pseudo mode.
 
 **Sub-tasks**:
-- ☐ B.1 Define `FalsifiablePrediction` schema. Validator: `predicted_value` must differ from `current_value` by a meaningful margin; `threshold_for_refutation` must be on the correct side of `current_value`.
+- ☐ B.1 Define `FalsifiablePrediction` schema. Free-text `metric` field. Validator: `predicted_value` must differ from `current_value`; `threshold_for_refutation` must be on the correct side.
 - ☐ B.2 Define `InheritedComponent` schema with `citation_source: Optional[str] = None`.
-- ☐ B.3 Define `ExpertContextItem` schema. Validator: `cite_id` must be unique within a single `expert_context` list (no duplicate IDs).
-- ☐ B.4 Define `DiscoveryMemo` schema with all fields from §2A. Validator: `predicted_failure_modes` must have ≥1 entry; `causal_hypothesis` cannot be empty after stripping whitespace.
-- ☐ B.5 Add `expert_context: List[ExpertContextItem]` to `ProposalInput`, default empty list. Mark `human_advice: str` as deprecated in the field description.
-- ☐ B.6 Update `ml_result_interp_to_ml_model_propose` protocol to wrap legacy `human_advice` strings. Existing test cases continue to pass without changes.
-- ☐ B.7 Implement reasoning sub-call in `ml_model_proposal_agent`. Inputs: SOTA records, expert_context, prior interpretation. Output: validated `DiscoveryMemo`.
-- ☐ B.8 Implement architecture sub-call. Inputs: validated `DiscoveryMemo`, the same context. Output: existing `ProposalOutput` schema, with the memo serialized into it for downstream consumers.
-- ☐ B.9 Write `DISCOVERY_MEMO_SYSTEM_PROMPT` with the three peer-review teeth (causal anchor, devil's advocate, falsifiable prediction).
-- ☐ B.10 Update the architecture sub-call's prompt to render the memo as labeled context and require explicit memo references in the architecture's reasoning.
-- ☐ B.11 Add the labeled-block rendering of `expert_context` items (per §2D worked example) to both sub-call prompts.
+- ☐ B.3 Define `ExpertContextItem` schema. Validator: `cite_id` must be unique within a single `expert_context` list.
+- ☐ B.4 Define `ModelComparison` schema — per-model structured analysis (model_type, source, best_score, key_mechanism, strengths, weaknesses, lesson_for_next_proposal). Strengths/weaknesses reference vocabulary entries (features and concepts) by name.
+- ☐ B.5 Define `DiscoveryMemo` schema — comparative_analysis (List[ModelComparison]) + sota fields + proposed_change + causal_hypothesis + falsifiable_prediction + predicted_failure_modes + inherited_components + citation_sources. Validators: failure_modes ≥1 entry; causal_hypothesis non-empty.
+- ☐ B.6 Define `ReasoningStage`, `ModelSelectionStrategy`, `ReasoningPipelineConfig` schemas. Default pipeline = 3 stages (comparison, causal_reasoning, proposing). All schemas follow the composability principle: the pipeline runner and vocab engine are generic; specific stages and vocab kinds are pluggable content.
+- ☐ B.6a Define `VocabEntry` schema (unified features + concepts) with `kind`, `related_to`, `tier`, `pattern`. Create the initial seed file `agent/schemas/vocab_seed.json` with ~10 features + ~5 concepts drawn from the built-in models. Submit to human for review before the rest of Phase B lands (same process as the original PRIMITIVE_VOCAB seed — Phase C.1 in the old plan).
+- ☐ B.7 Add `expert_context: List[ExpertContextItem]` to `ProposalInput`. Mark the existing `human_advice: Optional[ExpertAdviceInput]` as deprecated (note: it's `ExpertAdviceInput`, not `str` — the wrapping into `ExpertContextItem` must handle both plain strings and structured `ExpertAdvice` objects).
+- ☐ B.8 Create `ProposalLLMConfig` (mirrors `TunerLLMConfig` from PR #22) with per-stage `NodeLLMConfig` slots: `comparison`, `reasoning`, `proposing`, plus a `pipeline: ReasoningPipelineConfig` field. Change `WorkflowLLMConfig.propose` from `Optional[NodeLLMConfig]` to `Optional[ProposalLLMConfig]`. Update `WorkflowLLMConfig.get()` to flatten the nested config for backward compat (same pattern as the tuner's planner/reflector flattening). Update `WorkflowLLMConfig.uniform()` to build a `ProposalLLMConfig` with all stages on the same model.
+- ☐ B.9 Update `ml_result_interp_to_ml_model_propose.local_full_context` protocol to accept and carry `expert_context` (per Decision 2 in §2A). The protocol wraps any legacy `human_advice` into an `ExpertContextItem` with `source="human", kind="human"`. The workflow passes `human_advice` to the protocol, NOT directly to the agent — keeping all inter-node data flow through protocols per CLAUDE.md. Existing tests continue to pass (new params have defaults).
+- ☐ B.10 Implement the `ModelSelectionStrategy` pre-filter as a deterministic Python function in `nodes/ml_model_proposal_agent.py`. Input: all records + strategy config. Output: filtered list of candidate models.
+- ☐ B.11 Implement `produce_discovery_memo(context, pipeline) -> DiscoveryMemo` — the configurable pipeline runner from §2A. Each enabled stage calls `bridge.generate()` with the accumulated context.
+- ☐ B.12 Implement the proposing stage — receives the DiscoveryMemo, returns `ProposalOutput` tethered to the memo.
+- ☐ B.13 Add constructor DI (`bridge_factory`) to `MLModelProposalAgent`. Current constructor takes `(provider, model_id)` and builds `LLMBridge` internally; the workflow calls `MLModelProposalAgent(**llm_config.get("propose"))`. The DI refactor adds an optional `bridge_factory` param while preserving the existing `provider`/`model_id` interface (same pattern as PR #24's tuner DI, but the proposal agent's constructor signature differs from the tuner's).
+- ☐ B.14 Write `COMPARATIVE_ANALYSIS_SYSTEM_PROMPT` — instructs the LLM to produce one `ModelComparison` per candidate model, referencing file_vector evidence and vocabulary entries. **Must include a vocabulary-contributor sub-task**: "Are there patterns in these models that suggest a new feature or concept not in the current vocabulary? If so, propose it as a candidate with a name, kind, and description." Write both the exploration-mode variant ("you have limited evidence, be honest about uncertainty, focus on identifying testable hypotheses") and the exploitation-mode variant ("leverage confirmed patterns, reference prior rounds").
+- ☐ B.15 Write `CAUSAL_REASONING_SYSTEM_PROMPT` — instructs the LLM to form a causal hypothesis building on the comparisons, with the four structural teeth (comparison-backed, falsifiable, devil's advocate, architectural tethering). Write both the exploration-mode variant ("propose a DIAGNOSTIC experiment that tests one specific hypothesis, frame predictions as conditional") and the exploitation-mode variant ("build on confirmed patterns, combine proven features/concepts, reference evidence from prior rounds").
+- ☐ B.16 Update `PROPOSAL_SYSTEM_PROMPT` to require explicit references to both the comparisons and the causal reasoning. In exploration mode, the proposing stage should favor simple, testable architectures over ambitious ones. In exploitation mode, it should favor incremental improvements over the confirmed best.
+- ☐ B.16a Implement `_resolve_exploration_mode(records, pipeline)` — the auto-detection logic that checks evidence depth (number of agent-proposed records, distinct model types, vocabulary growth rate) and selects "explore" or "exploit". The pipeline runner calls this before selecting prompt variants.
+- ☐ B.17 Add the labeled-block rendering of `expert_context` items (per §2D worked example) to all three stage prompts.
+- ☐ B.18 Schema unit tests for all new schemas (ModelComparison, DiscoveryMemo, FalsifiablePrediction, ExpertContextItem, ReasoningPipelineConfig, ModelSelectionStrategy).
+- ☐ B.19 Unit tests for the pipeline runner: (a) 3-stage default runs all stages, (b) disabling a stage skips it, (c) accumulated context passes between stages correctly, (d) model selection pre-filter with different strategies.
+- ☐ B.20 Predefined pseudo data for the proposal agent: `tests/pseudo_data/api_call_outputs/ml_model_proposal_agent/{comparison,causal_reasoning,proposing}.json` — one file per stage.
+- ☐ B.21 `@dual_mode` integration test for the proposal agent: pseudo mode exercises the full 3-stage pipeline, asserts on comparison count + memo fields + proposal tethering.
 - ☐ B.12 Schema unit tests for all new schemas.
 - ☐ B.13 Mocked-LLM unit tests for the two-stage flow, including (a) memo validation failure → retry, (b) architecture deviation note presence, (c) backward-compat with empty `expert_context`.
 - ☐ B.14 Tier-1 integration test: real LLM produces a valid memo + valid proposal; the memo's `proposed_change` actually appears in the architecture's `model_config` description.
