@@ -265,6 +265,24 @@ class HyperparamTuningAgent:
                 # Validate LLM output into ExperimentPlan (with fallback)
                 plan = ExperimentPlan.with_defaults(decision)
 
+                # Apply hard overrides from operator config (before other overrides).
+                # Unknown keys are warned and skipped; invalid values are warned
+                # and skipped — the run continues with the LLM's original value.
+                if agent_input.plan_overrides:
+                    valid_fields = set(ExperimentPlan.model_fields.keys())
+                    unknown = set(agent_input.plan_overrides) - valid_fields
+                    if unknown:
+                        print(f"  [WARN] plan_overrides: ignoring unknown keys: {unknown}")
+                    safe_overrides = {k: v for k, v in agent_input.plan_overrides.items() if k in valid_fields}
+                    if safe_overrides:
+                        try:
+                            merged = plan.model_dump(by_alias=True) | safe_overrides
+                            plan = ExperimentPlan.model_validate(merged)
+                            print(f"  Plan overrides applied: {list(safe_overrides.keys())}")
+                        except Exception as e:
+                            print(f"  [WARN] plan_overrides validation failed ({e}); "
+                                  f"using LLM plan as-is")
+
                 # Override chain: expert constraint → final-round constraint → hard caps
                 is_last_needed_round = (completed_rounds == max_rounds - 1)
                 if not trial_allowed:

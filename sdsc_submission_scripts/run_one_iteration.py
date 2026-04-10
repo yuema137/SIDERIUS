@@ -229,6 +229,12 @@ def main():
         "--human_advice_tune", type=str, default=None,
         help="Human guidance for the tuning agent."
     )
+    parser.add_argument(
+        "--plan_overrides", type=str, default=None,
+        help="JSON string of hard overrides for the LLM's ExperimentPlan. "
+             "E.g. '{\"trial_portion\": 0.2, \"train_portion\": 1.0}'. "
+             "Keys must be valid ExperimentPlan fields."
+    )
     args = parser.parse_args()
 
     # Load human advice from JSON file, with individual CLI flags as overrides.
@@ -239,6 +245,11 @@ def main():
             attr = f"human_advice_{key}"
             if getattr(args, attr) is None:
                 setattr(args, attr, advice.get(key) or None)
+
+    # Parse plan overrides from JSON string
+    plan_overrides = None
+    if args.plan_overrides:
+        plan_overrides = json.loads(args.plan_overrides)
 
     # Iteration directory: {workspace}/iter_{N:03d}
     run_name = f"iter_{args.iteration:03d}"
@@ -308,6 +319,7 @@ def main():
             human_advice_implement=args.human_advice_implement,
             human_advice_validate=args.human_advice_validate,
             human_advice_tune=args.human_advice_tune,
+            plan_overrides=plan_overrides,
         )
     except Exception as e:
         print(f"FAIL: Workflow raised exception: {type(e).__name__}: {e}")

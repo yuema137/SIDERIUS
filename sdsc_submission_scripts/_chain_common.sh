@@ -37,6 +37,7 @@ TRIAL_PORTION=0.02
 TRAIN_PORTION=1.0
 EVAL_PORTION=0.02
 HUMAN_ADVICE_FILE=""
+PLAN_OVERRIDES=""
 
 # --- Slurm-only defaults (ignored by lilab caller) ---
 PARTITION="gpu-shared"
@@ -66,6 +67,7 @@ parse_chain_args() {
         --train_portion)          TRAIN_PORTION="$2"; shift 2 ;;
         --eval_portion)           EVAL_PORTION="$2"; shift 2 ;;
         --human_advice_file)      HUMAN_ADVICE_FILE="$2"; shift 2 ;;
+        --plan_overrides)         PLAN_OVERRIDES="$2"; shift 2 ;;
         # Slurm-only flags — silently accepted on lilab too (ignored)
         --partition)              PARTITION="$2"; shift 2 ;;
         --time)                   TIME="$2"; shift 2 ;;
@@ -134,6 +136,9 @@ build_app_args() {
     fi
     if [ -n "$HUMAN_ADVICE_FILE" ]; then
         APP_ARGS+=(--human_advice_file "$HUMAN_ADVICE_FILE")
+    fi
+    if [ -n "$PLAN_OVERRIDES" ]; then
+        APP_ARGS+=(--plan_overrides "$PLAN_OVERRIDES")
     fi
 }
 

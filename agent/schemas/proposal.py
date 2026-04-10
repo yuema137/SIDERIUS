@@ -341,6 +341,14 @@ class ProposalInput(BaseModel):
                     "Set at the workflow level; controls which stages run, model selection "
                     "strategy, and exploration/exploitation mode. See §2A.",
     )
+    vocab_seed: List[VocabEntry] = Field(
+        default_factory=list,
+        description="The runtime vocabulary available to the reasoning pipeline. "
+                    "In production, populated by the interpretation agent via the "
+                    "protocol (canonical seed + promoted candidates + active candidates). "
+                    "For standalone use, load from agent/schemas/vocab_seed.json. "
+                    "Empty list = vocabulary features disabled (backward compat).",
+    )
     previous_failures: List[str] = Field(
         default_factory=list,
         description="Validation error messages from previous failed attempts in this "
