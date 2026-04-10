@@ -22,7 +22,7 @@ SIDERIUS is currently stuck at a **scientific attribution failure**, not an engi
 > The vocabulary is composable: adding a new type of constraint bridge (e.g. "failure_pattern", "physical_constraint") means adding entries with a new `kind` value — no code changes to the pipeline runner or the aggregation engine. The two-tier structure (canonical seed + agent-discovered candidates + structural promotion) keeps the vocabulary both stable enough for tracking and open enough for discovery.
 >
 > **This is the single most important design decision in V2.** Every other feature — the three-stage pipeline, the configurable stages, the expert context items, the falsifiable predictions — builds on the vocabulary as its foundation. If the vocabulary works, the LLM's reasoning compounds across iterations. If it doesn't, the system stays stuck in the random walk.
-
+to 
 The original V1 proposal (preserved at the bottom) names the right symptoms but bundles them with several premature abstractions and one architectural-invariant violation. V2 keeps the scientific ambition and discards the unnecessary scaffolding.
 
 ## 1. Design philosophy: minimalist architecture, maximalist reasoning
@@ -930,10 +930,10 @@ This section breaks each phase from §5 into concrete sub-tasks, the files they 
 - ☑ B.7 `expert_context` + `reasoning_pipeline` on `ProposalInput`. **Done** — same commit.
 - ☑ B.8 `ProposalLLMConfig` + `WorkflowLLMConfig.propose` update. **Done** — `workflows/llm_config.py`, commit `c5059ef`.
 
-#### Group 2 — Schema tests + vocab seed (NEXT)
+#### Group 2 — Schema tests + vocab seed (DONE)
 
-- ☐ B.18 Schema unit tests for all Group 1 schemas (`FalsifiablePrediction`, `InheritedComponent`, `ExpertContextItem`, `ModelComparison`, `DiscoveryMemo`, `ReasoningPipelineConfig`, `VocabEntry`). Focus on validators and cross-field checks.
-- ☐ B.6a-seed Create `agent/schemas/vocab_seed.json` — ~10 features + ~5 concepts drawn from the built-in models (wavenet, punet, fcnet, transformer, rnn, gated_fno). Submit to human for review.
+- ☑ B.18 Schema unit tests — 40 tests covering validators and cross-field checks for all Group 1 schemas. **Done** — `tests/unit/agent/ml_model_proposal_agent/test_phase_b_schemas.py`, commit `0c485bd`.
+- ☑ B.6a-seed `agent/schemas/vocab_seed.json` — 21 canonical entries: 11 features + 10 concepts drawn from all 6 built-in models. Bidirectional `related_to` graph, all references resolve. **Done** — commit `906eb7c`. Also added `vocab_seed: List[VocabEntry]` to `ProposalInput` — vocabulary flows as data through the protocol (not file reads), empty list = backward compat.
 
 #### Group 3 — Prompt templates (as separate .md files)
 
