@@ -121,6 +121,7 @@ class LLMBridge:
         api_key: Optional[str] = None,
         reflect_provider: Optional[str] = None,
         reflect_model_id: Optional[str] = None,
+        max_retries: Optional[int] = None,
     ):
         """
         Unified LLM bridge — every provider is accessed through ``openai.OpenAI``.
@@ -166,9 +167,19 @@ class LLMBridge:
                           gemini-2.5-flash for reflector).
                         - Both set: cross-provider routing (e.g. gemini for
                           planner, openai for reflector).
+            max_retries:
+                      Maximum number of retry attempts for transient API
+                      errors (429, 5xx, connection, timeout). ``None``
+                      (default) means retry indefinitely — the process
+                      owner (Slurm wall time, Ctrl-C) is the natural
+                      timeout. Set to a positive integer for interactive
+                      use where infinite retry would be annoying (e.g. 6
+                      for the legacy ~77s window, 20 for ~15 minutes).
+                      Backoff doubles from 2.5s up to a 60s cap.
         """
         load_dotenv()
         self.provider = provider.lower()
+        self.max_retries = max_retries
 
         known = _KNOWN_PROVIDERS.get(self.provider)
 
@@ -321,18 +332,33 @@ class LLMBridge:
     # Retry policy for ALL OpenAI API calls. SDK-level retry is disabled
     # (max_retries=0 in the client constructors), so this helper is the
     # single source of truth for how we handle transient API failures.
-    # Schedule: 5 retries with 2.5s, 5s, 10s, 20s, 40s backoff (~77s total).
+    #
+    # Backoff: doubles from 2.5s up to a 60s cap, then stays at 60s.
+    # Schedule: 2.5, 5, 10, 20, 40, 60, 60, 60, ...
+    #
+    # When max_retries is None (default): retry indefinitely — the process
+    # owner (Slurm wall time, Ctrl-C) is the natural timeout. This is the
+    # right default for batch jobs where burning a round on a transient 503
+    # is far more expensive than waiting a few extra minutes.
+    #
+    # When max_retries is an integer: stop after that many total attempts
+    # (e.g. max_retries=6 gives 1 initial + 5 retries, similar to the old
+    # fixed schedule). Use this for interactive/lilab sessions.
+    #
     # Catches 429 (rate limit), 5xx (server errors incl. Google 503 "high
     # demand"), and connection / timeout errors. Other 4xx errors (auth,
     # bad request, model not found) are raised immediately — they will
     # not heal on retry.
-    _RETRY_BACKOFF = [2.5, 5.0, 10.0, 20.0, 40.0]
+    _RETRY_INITIAL_WAIT = 2.5
+    _RETRY_MAX_WAIT = 60.0
 
     def _call_with_retry(self, fn, label: str = "api_call"):
         """Call an OpenAI API function with the bridge's retry policy."""
         from openai import APIStatusError, APIConnectionError, APITimeoutError
         last_exc = None
-        for attempt in range(len(self._RETRY_BACKOFF) + 1):
+        attempt = 0
+        wait = self._RETRY_INITIAL_WAIT
+        while True:
             try:
                 return fn()
             except (APIConnectionError, APITimeoutError) as e:
@@ -341,15 +367,17 @@ class LLMBridge:
                 if e.status_code != 429 and not (500 <= e.status_code < 600):
                     raise
                 last_exc = e
-            if attempt < len(self._RETRY_BACKOFF):
-                wait = self._RETRY_BACKOFF[attempt]
-                print(f"[LLMBridge.{label}] Attempt {attempt + 1} failed "
-                      f"({type(last_exc).__name__}: {last_exc}); "
-                      f"retrying in {wait}s...")
-                time.sleep(wait)
-        print(f"[LLMBridge.{label}] All {len(self._RETRY_BACKOFF) + 1} "
-              f"attempts failed; raising.")
-        raise last_exc
+            attempt += 1
+            # Check if we've exhausted our retry budget
+            if self.max_retries is not None and attempt >= self.max_retries:
+                print(f"[LLMBridge.{label}] All {attempt} "
+                      f"attempts failed; raising.")
+                raise last_exc
+            print(f"[LLMBridge.{label}] Attempt {attempt} failed "
+                  f"({type(last_exc).__name__}: {last_exc}); "
+                  f"retrying in {wait}s...")
+            time.sleep(wait)
+            wait = min(wait * 2, self._RETRY_MAX_WAIT)
 
     def _chat_json(self, client: OpenAI, model_name: str,
                    system_prompt: str, user_prompt: str) -> Dict:

@@ -514,6 +514,7 @@ def run_workflow(
             train_base_seed=train_base_seed,
             cleanup_denoised=cleanup_denoised,
             max_epochs=max_epochs,
+            max_retries=tune_llm.get("max_retries"),
         )
         if human_advice_tune is not None:
             tune_input.human_advice = human_advice_tune

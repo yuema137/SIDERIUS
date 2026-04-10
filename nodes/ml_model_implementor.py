@@ -448,8 +448,9 @@ def _assemble_test(model_name: str) -> str:
 
 class MLModelImplementor:
 
-    def __init__(self, provider: str = "gemini", model_id: str = "gemini-3.1-pro-preview"):
-        self.bridge = LLMBridge(provider=provider, model_id=model_id)
+    def __init__(self, provider: str = "gemini", model_id: str = "gemini-3.1-pro-preview",
+                 max_retries: int | None = None):
+        self.bridge = LLMBridge(provider=provider, model_id=model_id, max_retries=max_retries)
 
     # ------------------------------------------------------------------
     # Validation helpers (used in the generate-validate-repair loop)

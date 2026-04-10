@@ -647,6 +647,15 @@ class HyperparamTuningInput(BaseModel):
             "the main provider's quota for the reasoning-heavy planner."
         ),
     )
+    max_retries: Optional[int] = Field(
+        default=None,
+        description=(
+            "Maximum retry attempts for transient API errors (429, 5xx). "
+            "None (default) = retry indefinitely — the process owner "
+            "(Slurm wall time, Ctrl-C) is the natural timeout. Set to a "
+            "positive integer for interactive use."
+        ),
+    )
 
     # --- Infra ---
     storage: StorageConfig = Field(
