@@ -1192,8 +1192,8 @@ Prompt templates live in `agent/prompt_templates/proposal/` as `.md` files (not 
 Before the first real chain run with the 3-stage pipeline, the protocol
 and workflow must carry the new fields to the proposal agent.
 
-- ☐ B.9 Update `ml_result_interp_to_ml_model_propose.local_full_context` protocol to carry `expert_context` + `vocab_seed` + `reasoning_pipeline`. Wrap legacy `human_advice` into `ExpertContextItem`. The workflow passes these to the protocol, NOT directly to the agent.
-- ☐ Wire `ReasoningPipelineConfig` at the workflow level (`WorkflowLLMConfig.propose.pipeline` or equivalent) so the chain uses the 3-stage pipeline across all iterations.
+- ☑ B.9 Protocol: `local_full_context` now carries `expert_context`, `vocab_seed`, `reasoning_pipeline`, `human_advice`. Legacy `human_advice` wrapped into `ExpertContextItem(source="human")`. All params optional — 11 existing protocol tests pass unchanged. **Done**.
+- ☑ Workflow: `_load_vocab_seed()` loads seed at start; `_get_reasoning_pipeline()` extracts pipeline from `ProposalLLMConfig`. Both passed through protocol to the agent. **Done**.
 
 ---
 
