@@ -282,6 +282,48 @@ class ModelSelectionStrategy(BaseModel):
     )
 
 
+class ResearchPolicy(BaseModel):
+    """Tunable parameters for the reasoning pipeline's validators and triggers.
+
+    The 'knobs' that control how aggressively the centrifugal forces are applied.
+    Different research strategies need different settings. All defaults are
+    conservative. Override via workflow config or ExpertContextItem(kind='strategy').
+
+    See §2A 'Policy-Mechanism Decoupling' in docs/adaptive_new_model_proposer.md.
+    """
+    # --- Prediction quality ---
+    minimum_boldness: float = Field(
+        default=0.05, ge=0.0, le=1.0,
+        description="Minimum abs(predicted - current) / abs(current). "
+                    "Predictions below this are rejected as too conservative.",
+    )
+
+    # --- Citation discipline ---
+    max_citations: int = Field(
+        default=5, ge=1,
+        description="Maximum ExpertContextItem citations per DiscoveryMemo.",
+    )
+
+    # --- Vocabulary health ---
+    vocab_stagnation_threshold: float = Field(
+        default=0.1, ge=0.0, le=1.0,
+        description="If candidate/total vocab ratio drops below this in auto "
+                    "mode, the exploration resolver triggers explore mode.",
+    )
+
+    # --- Promotion strictness ---
+    min_runs_for_promotion: int = Field(
+        default=3, ge=2,
+        description="Minimum distinct runs before a candidate vocab entry "
+                    "or a ProposedVocabLink can be promoted.",
+    )
+    require_positive_delta: bool = Field(
+        default=True,
+        description="Whether promotion requires component_delta > 0 "
+                    "(positive contribution when present vs absent).",
+    )
+
+
 class ReasoningPipelineConfig(BaseModel):
     """Configurable reasoning pipeline. Lives at the workflow level."""
     stages: List[ReasoningStage] = Field(
@@ -298,6 +340,12 @@ class ReasoningPipelineConfig(BaseModel):
         description="'auto': system decides based on evidence depth. "
                     "'explore': diagnostic experiments, honest uncertainty. "
                     "'exploit': build on confirmed patterns.",
+    )
+    policy: ResearchPolicy = Field(
+        default_factory=ResearchPolicy,
+        description="Tunable thresholds for validators and exploration triggers. "
+                    "The 'software' that configures the 'hardware' of the pipeline. "
+                    "Override per-workflow or per-round via ExpertContextItem(kind='strategy').",
     )
 
 

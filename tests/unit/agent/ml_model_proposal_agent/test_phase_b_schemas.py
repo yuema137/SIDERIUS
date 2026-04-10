@@ -24,6 +24,7 @@ from agent.schemas.proposal import (
     ReasoningStage,
     ModelSelectionStrategy,
     ReasoningPipelineConfig,
+    ResearchPolicy,
     VocabEntry,
 )
 
@@ -418,6 +419,59 @@ class TestReasoningPipelineConfig:
         )
         assert config.model_selection.method == "human_specified"
         assert config.model_selection.params["models"] == ["wavenet", "gated_fno"]
+
+
+# ---------------------------------------------------------------------------
+# VocabEntry
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# ResearchPolicy
+# ---------------------------------------------------------------------------
+
+class TestResearchPolicy:
+
+    def test_defaults(self):
+        policy = ResearchPolicy()
+        assert policy.minimum_boldness == 0.05
+        assert policy.max_citations == 5
+        assert policy.vocab_stagnation_threshold == 0.1
+        assert policy.min_runs_for_promotion == 3
+        assert policy.require_positive_delta is True
+
+    def test_high_risk_policy(self):
+        policy = ResearchPolicy(
+            minimum_boldness=0.15,
+            vocab_stagnation_threshold=0.2,
+            min_runs_for_promotion=2,
+        )
+        assert policy.minimum_boldness == 0.15
+        assert policy.min_runs_for_promotion == 2
+
+    def test_safety_first_policy(self):
+        policy = ResearchPolicy(
+            minimum_boldness=0.02,
+            min_runs_for_promotion=5,
+        )
+        assert policy.minimum_boldness == 0.02
+
+    def test_boldness_range(self):
+        with pytest.raises(ValidationError):
+            ResearchPolicy(minimum_boldness=1.5)
+
+    def test_min_runs_too_low(self):
+        with pytest.raises(ValidationError):
+            ResearchPolicy(min_runs_for_promotion=1)
+
+    def test_pipeline_config_carries_policy(self):
+        config = ReasoningPipelineConfig(
+            policy=ResearchPolicy(minimum_boldness=0.2),
+        )
+        assert config.policy.minimum_boldness == 0.2
+
+    def test_pipeline_config_default_policy(self):
+        config = ReasoningPipelineConfig()
+        assert config.policy.minimum_boldness == 0.05
 
 
 # ---------------------------------------------------------------------------

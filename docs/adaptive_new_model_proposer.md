@@ -113,6 +113,119 @@ class ReasoningPipelineConfig(BaseModel):
     )
 ```
 
+#### Policy-Mechanism Decoupling
+
+> **The architecture is the hardware; the policy layer is the software that defines the experiment's soul.**
+>
+> Every validator threshold, exploration trigger, and reasoning constraint in the pipeline is a **mechanism** — the structural capability to enforce a rule. The **policy** determines how aggressively that mechanism is applied. Different research strategies need different settings: a "high-risk discovery" run wants low `minimum_boldness` and aggressive vocabulary growth; a "safety-first validation" run wants high boldness thresholds and conservative promotion rules.
+>
+> The policy is NOT a separate config system — it lives inside `ReasoningPipelineConfig` as a `ResearchPolicy` object, tunable at the workflow level. Individual thresholds can also be overridden per-round via `ExpertContextItem(kind="strategy")`.
+
+```python
+class ResearchPolicy(BaseModel):
+    """Tunable parameters for the reasoning pipeline's validators and triggers.
+
+    These are the 'knobs' that control how aggressively the centrifugal forces
+    (§2A) are applied. Different research strategies need different settings.
+
+    All defaults are conservative — they prevent the most common failure modes
+    without constraining exploration. Override via workflow config or
+    ExpertContextItem(kind='strategy').
+    """
+    # --- Prediction quality ---
+    minimum_boldness: float = Field(
+        default=0.05, ge=0.0, le=1.0,
+        description="Minimum abs(predicted - current) / abs(current). "
+                    "Predictions below this are rejected as too conservative.",
+    )
+
+    # --- Citation discipline ---
+    max_citations: int = Field(
+        default=5, ge=1,
+        description="Maximum ExpertContextItem citations per DiscoveryMemo.",
+    )
+
+    # --- Vocabulary health ---
+    vocab_stagnation_threshold: float = Field(
+        default=0.1, ge=0.0, le=1.0,
+        description="If candidate/total vocab ratio drops below this in auto "
+                    "mode, the exploration resolver triggers explore mode.",
+    )
+
+    # --- Promotion strictness ---
+    min_runs_for_promotion: int = Field(
+        default=3, ge=2,
+        description="Minimum distinct runs before a candidate vocab entry "
+                    "or a ProposedVocabLink can be promoted.",
+    )
+    require_positive_delta: bool = Field(
+        default=True,
+        description="Whether promotion requires component_delta > 0 "
+                    "(positive contribution when present vs absent).",
+    )
+```
+
+The `ResearchPolicy` is added to `ReasoningPipelineConfig`:
+```python
+class ReasoningPipelineConfig(BaseModel):
+    stages: List[ReasoningStage] = ...
+    model_selection: ModelSelectionStrategy = ...
+    exploration_mode: Literal["auto", "explore", "exploit"] = "auto"
+    policy: ResearchPolicy = Field(default_factory=ResearchPolicy)
+```
+
+**Override examples** (via workflow config or `ExpertContextItem`):
+- **High-risk discovery run**: `policy.minimum_boldness = 0.15` (demand bold predictions), `policy.vocab_stagnation_threshold = 0.2` (aggressive vocabulary growth)
+- **Safety-first validation**: `policy.minimum_boldness = 0.02` (accept conservative predictions), `policy.min_runs_for_promotion = 5` (strict promotion)
+- **Per-round override**: inject `ExpertContextItem(kind="strategy", content="For this round, set minimum_boldness=0.2 — we need a definitive test.")` — the pipeline runner reads strategy items and applies them as temporary policy overrides
+
+#### Strategy Performance Report (feedback loop)
+
+After each iteration, the interpretation agent computes a **Strategy Performance Report** — a structured summary of how the research strategy is performing. This report is formatted as an `ExpertContextItem(kind="strategy_report")` and injected into the next round's `expert_context`, closing the feedback loop.
+
+```python
+# Computed by the interpretation agent, injected via protocol
+ExpertContextItem(
+    source="interpretation_agent",
+    kind="strategy_report",
+    cite_id="strategy_report_iter_5",
+    content="""
+    Rounds 1-5 summary:
+    - Prediction hit rate: 40% (2/5 confirmed)
+    - Average boldness: 0.12 (moderate)
+    - Average information gain: 0.048 (low — bold predictions are being refuted)
+    - Vocabulary growth: 3 candidates proposed, 0 promoted
+    - Citation accuracy: 'human_advice_001' cited 4 times, 3 led to confirmed predictions.
+      'physics_constraint_002' cited 2 times, both led to refuted predictions.
+    Recommendation: reduce reliance on physics constraints, increase ablation experiments.
+    """
+)
+```
+
+The comparison and reasoning stages see this report and can adjust their approach. The LLM learns from the feedback: "my physics-driven citations are being refuted — I should adjust my reliance on theoretical constraints and demand more empirical evidence."
+
+*Phase*: E (reflector computes outcomes) + C (interpretation agent aggregates into report). The `ExpertContextItem(kind="strategy_report")` convention is designed now but implemented in Phase E.
+
+#### ExpertContextItem rendering hierarchy
+
+The prompt template renders `expert_context` items grouped by `kind`, with clear labels that signal their epistemic status:
+
+```
+[EMPIRICAL FINDING] (from data_analysis_agent, confidence=0.9)
+  Low-frequency files 0-4 show near-zero SNR across all models...
+
+[THEORETICAL CONSTRAINT] (from physics_expert, confidence=0.7)
+  The Nyquist limit at 5 MHz means...
+
+[STRATEGY REPORT] (from interpretation_agent)
+  Rounds 1-5 summary: hit rate 40%, boldness 0.12...
+
+[HUMAN DIRECTIVE] (high priority)
+  Focus on WaveNet variants only...
+```
+
+The grouping and labeling IS the priority system. No explicit `priority_weight` field — the LLM reasons about which sources to trust based on the `kind` labels, `confidence` scores, and the strategy report's track record analysis. The prompt instructs: "Empirical findings are weighted by their confidence. Theoretical constraints are treated as hard limits unless contradicted by empirical evidence. Human directives take precedence. Strategy reports inform your approach but do not override human directives."
+
 **Customization examples**:
 - **Skip comparison, just reason**: set `stages[0].enabled = False`
 - **Add a physics check**: append `ReasoningStage(name="physics_check", system_prompt_key="PHYSICS_REVIEW")`
