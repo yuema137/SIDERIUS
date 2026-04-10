@@ -1,6 +1,6 @@
 # Design Proposal V2: Adaptive Scientific Discovery Framework for SIDERIUS
 
-**Status**: design — not yet implemented. Supersedes the V1 proposal at the bottom of this file.
+**Status**: Phase B Groups 1+2 implemented (schemas, tests, vocab seed). Group 3 (prompt templates) next. Supersedes the V1 proposal at the bottom of this file.
 
 ## 0. The actual problem and the key design idea
 
@@ -17,7 +17,7 @@ SIDERIUS is currently stuck at a **scientific attribution failure**, not an engi
 
 > **Natural language is diverse and messy. An LLM reasoning in free text will invent 50 different ways to say "dilated convolution" and lose the ability to track what it has tried. The V2 design solves this by introducing a structured vocabulary — currently features (concrete building blocks) and capabilities (measurable architectural properties) — as a constraint bridge that harnesses the LLM's reasoning process.**
 >
-> The vocabulary is NOT a database or a knowledge graph. It is a **shared language** that all pipeline stages use to refer to the same things consistently. When the comparison stage says "Model A uses **dilated_causal_conv** (feature) which enables **receptive_field** (concept)", the reasoning stage knows exactly what that means and can build on it: "I propose inheriting **dilated_causal_conv** because the **receptive_field** it provides is what the SOTA lacks." Without the vocabulary, the same insight would be expressed in different words at each stage, and the connection would be lost.
+> The vocabulary is NOT a database or a knowledge graph. It is a **shared language** that all pipeline stages use to refer to the same things consistently. The seed provides the terms (features like `dilated_causal_conv`, capabilities like `receptive_field`), but the **connections between them are discovered through experimentation** — the agent hypothesizes "dilated_causal_conv enables receptive_field", tests it, and confirms or refutes it. Without the vocabulary, the same insight would be expressed in different words at each stage, and the connection would be lost.
 >
 > The vocabulary is composable: adding a new type of constraint bridge (e.g. "failure_pattern", "physical_constraint") means adding entries with a new `kind` value — no code changes to the pipeline runner or the aggregation engine. The two-tier structure (canonical seed + agent-discovered candidates + structural promotion) keeps the vocabulary both stable enough for tracking and open enough for discovery.
 >
@@ -228,19 +228,19 @@ The pre-filter is the **budget control** (how many). The expert advice is the **
 
 The vocabulary doesn't just flow INTO the pipeline — the pipeline **grows** it. Specifically, the comparison stage has a dual role:
 
-1. **Consumer**: it uses the current vocabulary (canonical + candidates) to structure its analysis — "Model A uses **dilated_causal_conv** (feature), which enables **receptive_field** (concept)."
-2. **Contributor**: it identifies patterns in the experiment records that suggest a NEW feature or concept not yet in the vocabulary. When it does, it proposes the new entry as a candidate: "Models B and C both use a pattern I'd call **frequency_band_gating** — a gated activation that operates on log-spaced frequency bins. This isn't in the current vocabulary but appeared in 2 of the top 3 models."
+1. **Consumer**: it uses the current vocabulary (canonical + candidates) to structure its analysis — "Model A uses **dilated_causal_conv** (feature). I hypothesize this enables **receptive_field** (capability) based on its strong high-frequency scores."
+2. **Contributor**: it identifies patterns in the experiment records that suggest a NEW feature or capability not yet in the vocabulary, AND proposes candidate links between features and capabilities as testable hypotheses (via `ProposedVocabLink`).
 
 The candidate enters the vocabulary pool through the comparison's output (stored in the DiscoveryMemo, persisted in the experiment record, aggregated by the interpretation agent). Future rounds can reference it by name. If it appears in ≥3 runs and meets the promotion criteria, it becomes canonical.
 
 This means:
-- **Round 1**: vocabulary = canonical seed only. Comparison can reference seed features/concepts and may propose candidates based on the seed models' descriptions.
-- **Round N**: vocabulary = canonical seed + all candidates proposed across rounds 1 to N-1. Comparison has a richer language to work with AND continues to propose new candidates from the latest results.
-- **The vocabulary compounds over iterations**, just like the experiment records do. Each round adds both data (records) and language (vocabulary candidates) for the next round to build on.
+- **Round 1**: vocabulary = canonical seed only (features + capabilities, no links). Comparison can reference seed entries and propose initial link hypotheses (`ProposedVocabLink`) based on the seed models' descriptions.
+- **Round N**: vocabulary = canonical seed + confirmed links from rounds 1 to N-1 + all candidates. Comparison has a richer language AND confirmed feature→capability links to build on.
+- **The vocabulary compounds over iterations** in two dimensions: new entries (candidates) and new links (confirmed feature→capability connections). Each round adds both language and empirical relationships for the next round to build on.
 
 #### Exploration vs exploitation — the cold-start problem
 
-**The problem**: in round 1, the system has seed model baselines but zero agent-proposed models, zero confirmed/refuted hypotheses, zero empirical evidence about what features/concepts actually matter for TIDMAD performance. Forcing the full reasoning pipeline would produce **confidently wrong** causal claims — the LLM would state hypotheses as if evidence-based when they're actually just prior beliefs. This is worse than no reasoning, because it creates false rigor.
+**The problem**: in round 1, the system has seed model baselines but zero agent-proposed models, zero confirmed/refuted hypotheses, zero empirical evidence about what features/capabilities actually matter for TIDMAD performance. Forcing the full reasoning pipeline would produce **confidently wrong** causal claims — the LLM would state hypotheses as if evidence-based when they're actually just prior beliefs. This is worse than no reasoning, because it creates false rigor.
 
 **The solution**: the pipeline's `exploration_mode` controls the reasoning tone and prompt templates. The system explicitly distinguishes between two phases:
 
@@ -263,9 +263,9 @@ def _resolve_exploration_mode(records, pipeline) -> str:
 
 **The prompts change based on the mode**:
 
-- **Exploration system prompt addition**: "You are in EXPLORATION mode. You have limited experimental evidence from this project. Your goal is NOT to beat the SOTA — it's to TEST a specific hypothesis. Propose a DIAGNOSTIC experiment that will confirm or refute one specific claim about a feature or concept. Frame your prediction as 'IF [concept] matters, THEN [metric] should change by [amount].' Be honest about what you don't know."
+- **Exploration system prompt addition**: "You are in EXPLORATION mode. You have limited experimental evidence from this project. Your goal is NOT to beat the SOTA — it's to TEST a specific hypothesis. Propose a DIAGNOSTIC experiment that will confirm or refute one specific claim about a feature→capability link. Frame your prediction as 'IF [feature] enables [capability], THEN [metric] should change by [amount].' Be honest about what you don't know."
 
-- **Exploitation system prompt addition**: "You are in EXPLOITATION mode. You have N confirmed patterns from previous rounds (hit rate: X%). Build on what works. Combine confirmed features/concepts. Your prediction should be based on empirical evidence from this project, not generic ML knowledge. Reference specific prior rounds that confirmed the patterns you're building on."
+- **Exploitation system prompt addition**: "You are in EXPLOITATION mode. You have N confirmed patterns from previous rounds (hit rate: X%). Build on what works. Combine confirmed feature→capability links. Your prediction should be based on empirical evidence from this project, not generic ML knowledge. Reference specific prior rounds that confirmed the patterns you're building on."
 
 The human can override: `exploration_mode: "explore"` forces exploration even at round 20 (useful for testing a new direction); `exploration_mode: "exploit"` forces exploitation even at round 1 (useful when the human has strong prior knowledge via ExpertContextItem).
 
@@ -417,9 +417,9 @@ None of these requires a new node, a new agent, or a sidecar file. They are all 
 
 ---
 
-### 2B. Vocabulary system — features, concepts, and lineage
+### 2B. Vocabulary system — features, capabilities, and lineage
 
-**Goal**: track the building blocks of model design at two levels of abstraction — **features** (concrete architectural primitives you can point to in code) and **concepts** (higher-level scientific ideas that explain why features matter) — and connect them so the reasoning pipeline can say structured things like "Model A uses **dilated_causal_conv** (feature) which gives it a wide **receptive_field** (concept), enabling strong low-frequency recovery."
+**Goal**: track the building blocks of model design at two levels of abstraction — **features** (concrete architectural primitives you can point to in code) and **capabilities** (measurable architectural properties that features provide) — and let the agent **discover the connections between them through experimentation**. The seed provides the vocabulary (names + definitions); the agent hypothesizes, tests, and confirms which features produce which capabilities.
 
 **Where the source of truth lives**: in the per-record `DiscoveryMemo.inherited_components`, NOT in `MODEL_REGISTRY`. Reasoning:
 
@@ -432,12 +432,12 @@ None of these requires a new node, a new agent, or a sidecar file. They are all 
 ```python
 class InheritedComponent(BaseModel):
     """One building block carried over from a past winning run. Can be a
-    concrete feature ('dilated_causal_conv') or a higher-level concept
+    concrete feature ('dilated_causal_conv') or a capability
     ('receptive_field') — both are tracked in the unified vocabulary."""
 
     component: str = Field(
         description="Short canonical name from the vocabulary. "
-                    "E.g. 'dilated_causal_conv' (feature) or 'receptive_field' (concept). "
+                    "E.g. 'dilated_causal_conv' (feature) or 'receptive_field' (capability). "
                     "Drawn from the unified vocabulary (see VocabEntry below) "
                     "to make aggregation possible."
     )
@@ -483,10 +483,10 @@ The interpretation agent computes this union from records, marks promotions in i
 
 ```python
 class VocabEntry(BaseModel):
-    """A single vocabulary entry — either a concrete feature or a higher-level
-    concept. Both live in the same two-tier vocabulary (canonical + candidate)
+    """A single vocabulary entry — either a concrete feature or a capability.
+    Both live in the same two-tier vocabulary (canonical + candidate)
     and use the same promotion mechanism. The `kind` field distinguishes them;
-    the `related_to` field connects them.
+    the `related_to` field is populated through experimentation (starts empty).
 
     Adding a new kind (e.g. 'failure_pattern', 'physical_constraint') requires
     NO code changes — just add entries with the new kind value to the seed file
@@ -498,25 +498,24 @@ class VocabEntry(BaseModel):
     kind: str = Field(
         description="What type of knowledge this entry represents. "
                     "Current kinds: 'feature' (concrete architectural building block, "
-                    "e.g. 'dilated_causal_conv') and 'capability' (measurable architectural property "
-                    "idea, e.g. 'receptive_field'). New kinds can be added without "
+                    "e.g. 'dilated_causal_conv') and 'capability' (measurable architectural "
+                    "property, e.g. 'receptive_field'). New kinds can be added without "
                     "code changes — just add entries with the new kind value."
     )
     description: str = Field(max_length=200, description="One-sentence definition.")
     related_to: List[str] = Field(
         default_factory=list,
         description="Names of other VocabEntry items this entry is connected to. "
-                    "Feature→concept: 'dilated_causal_conv' related_to ['receptive_field']. "
-                    "Concept→feature: 'receptive_field' related_to ['dilated_causal_conv', 'depth']. "
-                    "This graph enables the comparison stage to say structured things like "
-                    "'Model A uses [feature] which enables [concept], resulting in [performance]'."
+                    "**Starts empty in the seed.** Populated through experimentation: "
+                    "the agent proposes ProposedVocabLink hypotheses, tests them, and "
+                    "confirmed links get promoted here by the interpretation agent."
     )
     tier: Literal["canonical", "candidate"] = "candidate"
     pattern: Optional[str] = Field(
         default=None,
         description="AST/regex hint for features — the validator uses it to verify "
                     "that a claimed inheritance actually appears in the code. "
-                    "Not applicable to concepts (set to None)."
+                    "Not applicable to capabilities (set to None)."
     )
     proposed_by_run: Optional[str] = None  # candidates only
     seen_in_runs: List[str] = []           # all runs that have used this entry
@@ -875,7 +874,7 @@ These existing pieces are doing their job and need no change:
 |---|---|---|---|
 | **A** | ~~`regime_scores`~~ **REVERTED** — see §Phase A below. No code changes remain from Phase A. The 20-element `file_vector` on `ExperimentRecord` stays as the raw source of truth. Any frequency-band interpretation belongs in expert advice, not in the schema. | — | — |
 | **B** | Replace the proposal agent's existing two-call pattern with the **three-stage configurable pipeline** from §2A: (1) comparison — systematic review of selected past models, (2) causal reasoning — forward-looking hypothesis building on comparisons, (3) proposing — concrete architecture tethered to the memo. Add `ReasoningPipelineConfig` at the workflow level. Add `ModelSelectionStrategy` for smart pre-filtering of candidate models. Add `ExpertContextItem` (§2D) for polymorphic upstream input. Add DI (`bridge_factory`) to the proposal agent. | large | Every proposal is backed by a structured `DiscoveryMemo` that compares past models, forms a causal hypothesis, and makes a falsifiable prediction. The pipeline is configurable — adding/removing/reordering stages is a config change, not a code change. The polymorphic input slot for future upstream agents is in place. |
-| **C** | Add `VocabEntry`-based lineage validator (`check_inherited_components` for features, concept-reference check for concepts). Add `component_leaderboard` to `InterpretationOutput`. Implement the promotion engine. Note: the `VocabEntry` schema and seed file now land in Phase B (B.6a); Phase C adds the validator + interpretation aggregation on top. | medium | Lineage tracking is end-to-end. Empirical inheritance becomes the dominant signal in the next round's prompt. |
+| **C** | Add `VocabEntry`-based lineage validator (`check_inherited_components` for features). Add `component_leaderboard` to `InterpretationOutput`. Implement the promotion engine for both vocab entries and feature→capability links (`ProposedVocabLink` confirmed → `VocabEntry.related_to` populated). Note: the `VocabEntry` schema and seed file land in Phase B (B.6a); Phase C adds the validator + interpretation aggregation + link promotion on top. | medium | Lineage tracking is end-to-end. Feature→capability links are empirically validated. |
 | **D** | Add `ResearchDirective` schema and the three guardrail layers in §2C. | medium | Guided mode actually constrains the search. |
 | **E** | Add the `falsifiable_prediction` retrospective check inside the reflector: confirmed / refuted / partial label, written into the record. Aggregate the hit rate in `InterpretationOutput`. | small | The proposal agent's scientific accuracy becomes a measurable, monitorable quantity. |
 
@@ -884,7 +883,7 @@ Each phase has its own tests. Each is independently revertable. Each is small en
 ## 6. Open questions
 
 1. **Falsifiable prediction granularity**. ~~Predicting one regime score is the minimum.~~ (Phase A regime_scores reverted — see §Phase A above.) The `metric` field is now free-text, so the LLM can predict on any measurable quantity: `denoising_score`, `mean(file_vector[0:5])`, a specific `file_vector[i]`, etc. Open question: should we constrain the metric to a known set of patterns (easier to evaluate programmatically) or leave it fully free-text (more flexible but harder for the reflector to parse)? **Recommendation**: start free-text with a few documented examples in the prompt; add pattern constraints only if the reflector can't reliably evaluate free-form metrics.
-2. **Vocabulary seeding** (now `VocabEntry`, unified features + concepts). The seed file needs ~10 features + ~5 concepts drawn from the built-in models. Moved to Phase B sub-task B.6a (was Phase C.1). Claude drafts, human reviews before the rest of Phase B lands.
+2. **Vocabulary seeding** (now `VocabEntry`, unified features + capabilities). **Done** — 21 entries (11 features + 10 capabilities) in `agent/schemas/vocab_seed.json`. All `related_to` fields start empty — connections are discovered through the `ProposedVocabLink` hypothesis-test-verify loop.
 
 2a. **Promotion thresholds**. The default rule is "≥3 distinct runs AND at least one above SOTA AND semantic dedup AND pattern present". The numbers are guesses. After the first chain run with the vocabulary mechanism live, we should look at the candidate distribution and tune. Open question: should the SOTA threshold be "above the current iteration's best" (strict, raises the bar over time) or "above the seed-run baseline" (loose, freezes the bar)?
 
@@ -973,7 +972,7 @@ This section breaks each phase from §5 into concrete sub-tasks, the files they 
 #### Group 2 — Schema tests + vocab seed (DONE)
 
 - ☑ B.18 Schema unit tests — 40 tests covering validators and cross-field checks for all Group 1 schemas. **Done** — `tests/unit/agent/ml_model_proposal_agent/test_phase_b_schemas.py`, commit `0c485bd`.
-- ☑ B.6a-seed `agent/schemas/vocab_seed.json` — 21 canonical entries: 11 features + 10 concepts drawn from all 6 built-in models. Bidirectional `related_to` graph, all references resolve. **Done** — commit `906eb7c`. Also added `vocab_seed: List[VocabEntry]` to `ProposalInput` — vocabulary flows as data through the protocol (not file reads), empty list = backward compat.
+- ☑ B.6a-seed `agent/schemas/vocab_seed.json` — 21 canonical entries: 11 features + 10 capabilities drawn from all 6 built-in models. All `related_to` fields are **empty** — feature→capability connections are discovered through experimentation via `ProposedVocabLink`. Added `vocab_seed: List[VocabEntry]` to `ProposalInput` (vocabulary flows as protocol data, not file reads). Added `ProposedVocabLink` schema and `proposed_vocab_links` field to `DiscoveryMemo`.
 
 #### Group 3 — Prompt templates (as separate .md files)
 
