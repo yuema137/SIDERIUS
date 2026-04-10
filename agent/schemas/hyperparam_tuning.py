@@ -569,6 +569,16 @@ class HyperparamTuningInput(BaseModel):
             "or resource-constrained environments."
         ),
     )
+    plan_overrides: Dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Hard overrides applied to every ExperimentPlan after the LLM "
+            "produces it. Keys must be valid ExperimentPlan field names "
+            "(e.g. trial_portion, train_portion). The merged result is "
+            "re-validated through Pydantic, so invalid values are caught. "
+            "Empty dict (default) = LLM has full control."
+        ),
+    )
 
     @model_validator(mode="after")
     def _validate_trial_fields(self):

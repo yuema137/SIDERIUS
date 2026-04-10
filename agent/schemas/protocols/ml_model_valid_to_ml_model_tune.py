@@ -19,7 +19,7 @@ Fan-in protocol: consumes ValidatorOutput (adjacent node) and ProposalOutput
 the proposal provides expert_advice and baseline_config for the tuning agent.
 """
 
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from agent.schemas.validator import ValidatorOutput
 from agent.schemas.proposal import ProposalOutput
@@ -51,6 +51,7 @@ def local_validated_model(
     cleanup_denoised: bool = False,
     max_epochs: Optional[int] = None,
     max_retries: Optional[int] = None,
+    plan_overrides: Optional[Dict[str, Any]] = None,
 ) -> HyperparamTuningInput:
     """
     Map ValidatorOutput + ProposalOutput -> HyperparamTuningInput in-memory.
@@ -99,6 +100,7 @@ def local_validated_model(
         cleanup_denoised=cleanup_denoised,
         max_epochs=max_epochs,
         max_retries=max_retries,
+        plan_overrides=plan_overrides or {},
     )
 
 

@@ -274,6 +274,7 @@ def run_workflow(
     train_base_seed: int | None = None,
     cleanup_denoised: bool = False,
     max_epochs: int | None = None,
+    plan_overrides: dict | None = None,
 ) -> list[HyperparamTuningOutput]:
     """
     Execute the model exploration workflow for one or more iterations.
@@ -515,6 +516,7 @@ def run_workflow(
             cleanup_denoised=cleanup_denoised,
             max_epochs=max_epochs,
             max_retries=tune_llm.get("max_retries"),
+            plan_overrides=plan_overrides,
         )
         if human_advice_tune is not None:
             tune_input.human_advice = human_advice_tune

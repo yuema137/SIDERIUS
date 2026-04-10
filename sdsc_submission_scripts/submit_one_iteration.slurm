@@ -73,6 +73,7 @@ MAX_EPOCHS=""
 REFLECT_PROVIDER=""
 REFLECT_MODEL_ID=""
 HUMAN_ADVICE_FILE=""
+PLAN_OVERRIDES=""
 
 # --- Argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -96,6 +97,7 @@ while [[ $# -gt 0 ]]; do
     --reflect_provider)       REFLECT_PROVIDER="$2"; shift 2 ;;
     --reflect_model_id)       REFLECT_MODEL_ID="$2"; shift 2 ;;
     --human_advice_file)      HUMAN_ADVICE_FILE="$2"; shift 2 ;;
+    --plan_overrides)         PLAN_OVERRIDES="$2"; shift 2 ;;
     *)                        shift ;;  # ignore unknown flags
   esac
 done
@@ -152,6 +154,9 @@ if [ -n "$REFLECT_MODEL_ID" ]; then
 fi
 if [ -n "$HUMAN_ADVICE_FILE" ]; then
     RUNNER_ARGS+=(--human_advice_file "${HUMAN_ADVICE_FILE}")
+fi
+if [ -n "$PLAN_OVERRIDES" ]; then
+    RUNNER_ARGS+=(--plan_overrides "${PLAN_OVERRIDES}")
 fi
 
 # --- Execute the runner ---
