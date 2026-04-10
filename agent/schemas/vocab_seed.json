@@ -3,10 +3,7 @@
     "name": "dilated_causal_conv",
     "kind": "feature",
     "description": "Causal convolution with exponentially increasing dilation factors (2^i), giving O(log T) receptive field growth per layer.",
-    "related_to": [
-      "receptive_field",
-      "frequency_resolution"
-    ],
+    "related_to": [],
     "tier": "canonical",
     "pattern": "dilation"
   },
@@ -14,9 +11,7 @@
     "name": "gated_activation",
     "kind": "feature",
     "description": "Sigmoid-gated element-wise multiplication of two conv branches (tanh * sigmoid), enabling selective signal modulation.",
-    "related_to": [
-      "selective_frequency_processing"
-    ],
+    "related_to": [],
     "tier": "canonical",
     "pattern": "sigmoid.*tanh|tanh.*sigmoid"
   },
@@ -24,10 +19,7 @@
     "name": "skip_connection",
     "kind": "feature",
     "description": "Additive residual path bypassing one or more layers, preserving gradient flow and enabling multi-scale feature aggregation.",
-    "related_to": [
-      "gradient_flow",
-      "multi_scale_aggregation"
-    ],
+    "related_to": [],
     "tier": "canonical",
     "pattern": "skip|residual|\\+.*out"
   },
@@ -35,9 +27,7 @@
     "name": "positional_encoding",
     "kind": "feature",
     "description": "Sinusoidal or learned position embeddings injected into the representation to encode temporal order.",
-    "related_to": [
-      "temporal_alignment"
-    ],
+    "related_to": [],
     "tier": "canonical",
     "pattern": "positional|pos_enc|sin.*cos"
   },
@@ -45,10 +35,7 @@
     "name": "multi_head_attention",
     "kind": "feature",
     "description": "Parallel self-attention heads computing global pairwise token interactions. O(T^2) memory.",
-    "related_to": [
-      "receptive_field",
-      "long_range_dependency"
-    ],
+    "related_to": [],
     "tier": "canonical",
     "pattern": "MultiheadAttention|self_attention|attention"
   },
@@ -56,10 +43,7 @@
     "name": "encoder_decoder",
     "kind": "feature",
     "description": "Symmetric architecture that compresses input to a bottleneck representation then reconstructs, with skip connections between matched levels.",
-    "related_to": [
-      "multi_scale_aggregation",
-      "gradient_flow"
-    ],
+    "related_to": [],
     "tier": "canonical",
     "pattern": "encoder|decoder|upsample|downsample"
   },
@@ -67,10 +51,7 @@
     "name": "lstm_cell",
     "kind": "feature",
     "description": "Long Short-Term Memory recurrent cell with forget/input/output gates for sequential state compression.",
-    "related_to": [
-      "long_range_dependency",
-      "sequential_processing"
-    ],
+    "related_to": [],
     "tier": "canonical",
     "pattern": "LSTM|lstm"
   },
@@ -78,10 +59,7 @@
     "name": "spectral_conv",
     "kind": "feature",
     "description": "Learnable complex-valued weights applied in Fourier domain (RFFT), processing all frequency bins directly.",
-    "related_to": [
-      "frequency_resolution",
-      "selective_frequency_processing"
-    ],
+    "related_to": [],
     "tier": "canonical",
     "pattern": "rfft|fft|spectral|fourier"
   },
@@ -89,10 +67,7 @@
     "name": "static_v_gate",
     "kind": "feature",
     "description": "User-controlled per-frequency gate vector (v_k in [0,1]) that blends spectral and bypass paths, encoding domain knowledge about signal bands.",
-    "related_to": [
-      "selective_frequency_processing",
-      "domain_knowledge_injection"
-    ],
+    "related_to": [],
     "tier": "canonical",
     "pattern": "static_v|v_gate|gate_vector"
   },
@@ -100,9 +75,7 @@
     "name": "bottleneck_compression",
     "kind": "feature",
     "description": "Narrow hidden layer that forces the network to learn a compressed representation of the full input segment.",
-    "related_to": [
-      "parameter_efficiency"
-    ],
+    "related_to": [],
     "tier": "canonical",
     "pattern": "latent|bottleneck"
   },
@@ -118,103 +91,70 @@
     "name": "receptive_field",
     "kind": "capability",
     "description": "How far back in time the model can see per layer stack \u2014 wider receptive field enables better low-frequency signal capture.",
-    "related_to": [
-      "dilated_causal_conv",
-      "encoder_decoder",
-      "multi_head_attention"
-    ],
+    "related_to": [],
     "tier": "canonical"
   },
   {
     "name": "frequency_resolution",
     "kind": "capability",
     "description": "The model's ability to distinguish and process different frequency bands in the signal independently.",
-    "related_to": [
-      "spectral_conv",
-      "dilated_causal_conv",
-      "static_v_gate"
-    ],
+    "related_to": [],
     "tier": "canonical"
   },
   {
     "name": "selective_frequency_processing",
     "kind": "capability",
     "description": "Ability to attenuate or amplify specific frequency bands independently, rather than treating the spectrum uniformly.",
-    "related_to": [
-      "gated_activation",
-      "spectral_conv",
-      "static_v_gate"
-    ],
+    "related_to": [],
     "tier": "canonical"
   },
   {
     "name": "gradient_flow",
     "kind": "capability",
     "description": "Ease of gradient propagation during backpropagation \u2014 skip connections and residual paths prevent vanishing gradients in deep architectures.",
-    "related_to": [
-      "skip_connection",
-      "encoder_decoder"
-    ],
+    "related_to": [],
     "tier": "canonical"
   },
   {
     "name": "parameter_efficiency",
     "kind": "capability",
     "description": "Achieving comparable denoising performance with fewer trainable parameters \u2014 important for VRAM budget and generalization.",
-    "related_to": [
-      "bottleneck_compression",
-      "skip_connection"
-    ],
+    "related_to": [],
     "tier": "canonical"
   },
   {
     "name": "long_range_dependency",
     "kind": "capability",
     "description": "Model's capacity to capture correlations across distant timesteps \u2014 critical for low-frequency signal recovery.",
-    "related_to": [
-      "multi_head_attention",
-      "lstm_cell",
-      "dilated_causal_conv"
-    ],
+    "related_to": [],
     "tier": "canonical"
   },
   {
     "name": "multi_scale_aggregation",
     "kind": "capability",
     "description": "Combining features from multiple temporal resolutions \u2014 coarse features capture trends, fine features capture transients.",
-    "related_to": [
-      "encoder_decoder",
-      "skip_connection",
-      "dilated_causal_conv"
-    ],
+    "related_to": [],
     "tier": "canonical"
   },
   {
     "name": "domain_knowledge_injection",
     "kind": "capability",
     "description": "Encoding known physics or signal properties directly into the architecture, rather than learning them from data alone.",
-    "related_to": [
-      "static_v_gate"
-    ],
+    "related_to": [],
     "tier": "canonical"
   },
   {
     "name": "temporal_alignment",
     "kind": "capability",
     "description": "Maintaining phase-coherent correspondence between input and output timesteps across all processing stages.",
-    "related_to": [
-      "positional_encoding",
-      "encoder_decoder"
-    ],
+    "related_to": [],
     "tier": "canonical"
   },
   {
     "name": "sequential_processing",
     "kind": "capability",
     "description": "Processing the signal strictly left-to-right with hidden state accumulation \u2014 enables streaming but limits parallelism.",
-    "related_to": [
-      "lstm_cell"
-    ],
+    "related_to": [],
     "tier": "canonical"
   }
 ]

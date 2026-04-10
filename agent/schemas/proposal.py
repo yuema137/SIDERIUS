@@ -153,6 +153,34 @@ class ModelComparison(BaseModel):
     )
 
 
+# B.5a — Proposed vocabulary link (feature → capability hypothesis)
+class ProposedVocabLink(BaseModel):
+    """A hypothesized connection between a feature and a capability.
+
+    Proposed by the comparison stage based on model descriptions and
+    experiment results. Tested via FalsifiablePrediction in the next
+    experiment. Confirmed or refuted by the reflector.
+
+    Only confirmed links (≥2 runs) get promoted to VocabEntry.related_to
+    by the interpretation agent (Phase C).
+    """
+    feature: str = Field(
+        description="The feature entry name, e.g. 'dilated_causal_conv'."
+    )
+    capability: str = Field(
+        description="The capability entry name, e.g. 'receptive_field'."
+    )
+    evidence: str = Field(
+        max_length=300,
+        description="Why the agent thinks this link exists — must reference "
+                    "specific model results or architectural analysis."
+    )
+    status: Literal["proposed", "confirmed", "refuted"] = Field(
+        default="proposed",
+        description="Lifecycle: proposed → confirmed/refuted after experiment.",
+    )
+
+
 # B.5 — Discovery memo (output of Stages 1+2, input to Stage 3)
 class DiscoveryMemo(BaseModel):
     """The structured output of the reasoning pipeline (comparison + reasoning
@@ -205,10 +233,19 @@ class DiscoveryMemo(BaseModel):
     # --- Vocabulary candidates discovered during comparison ---
     proposed_vocab_candidates: List[Dict[str, str]] = Field(
         default_factory=list,
-        description="New features or concepts the comparison stage discovered "
+        description="New features or capabilities the comparison stage discovered "
                     "that aren't in the current vocabulary. Each entry has "
-                    "'name', 'kind' (feature/concept), 'description'. "
+                    "'name', 'kind' (feature/capability), 'description'. "
                     "These enter the candidate pool for future promotion."
+    )
+
+    # --- Feature → capability link hypotheses ---
+    proposed_vocab_links: List[ProposedVocabLink] = Field(
+        default_factory=list,
+        description="Hypothesized connections between features and capabilities. "
+                    "Proposed by the comparison stage, tested via the "
+                    "FalsifiablePrediction, confirmed/refuted by the reflector. "
+                    "Only confirmed links get promoted to VocabEntry.related_to."
     )
 
     # --- Citations ---

@@ -523,27 +523,67 @@ class VocabEntry(BaseModel):
     aliases: List[str] = []                # observed spelling variants the aggregator collapsed
 ```
 
-**Seed file example** (`agent/schemas/vocab_seed.json`):
+**Seed file** (`agent/schemas/vocab_seed.json`):
+
+The seed contains features and capabilities with **empty `related_to`**. The connections between features and capabilities are NOT pre-assumed — they are **hypotheses that the agent proposes, tests, and verifies** through the experiment loop. This is a core design principle: the seed provides the vocabulary (what things are called), but the agent discovers the relationships (what causes what).
+
 ```json
 [
-  {"name": "dilated_causal_conv", "kind": "feature", "description": "Causal convolution with exponentially increasing dilation factors", "related_to": ["receptive_field", "frequency_resolution"], "pattern": "dilation\\s*="},
-  {"name": "gated_activation", "kind": "feature", "description": "Sigmoid-gated element-wise multiplication of two conv branches", "related_to": ["selective_frequency_processing"], "pattern": "sigmoid.*\\*"},
-  {"name": "skip_connection", "kind": "feature", "description": "Additive residual path bypassing one or more layers", "related_to": ["gradient_flow", "identity_preservation"], "pattern": "\\+.*residual|skip"},
-  {"name": "fno_spectral_layer", "kind": "feature", "description": "Fourier Neural Operator layer processing the full FFT spectrum", "related_to": ["frequency_resolution", "receptive_field"]},
-  {"name": "receptive_field", "kind": "capability", "description": "How far back in time the model can see per layer — wider = better low-frequency capture", "related_to": ["dilated_causal_conv", "depth", "kernel_size"]},
-  {"name": "frequency_resolution", "kind": "capability", "description": "The model's ability to distinguish different frequency bands in the signal", "related_to": ["fno_spectral_layer", "segmentation_size", "dilated_causal_conv"]},
-  {"name": "selective_frequency_processing", "kind": "capability", "description": "Ability to attenuate or amplify specific frequency bands independently", "related_to": ["gated_activation", "static_v"]},
-  {"name": "parameter_efficiency", "kind": "capability", "description": "Achieving comparable performance with fewer trainable parameters", "related_to": ["depth", "width", "skip_connection"]}
+  {"name": "dilated_causal_conv", "kind": "feature", "description": "Causal convolution with exponentially increasing dilation factors", "related_to": [], "pattern": "dilation\\s*="},
+  {"name": "gated_activation", "kind": "feature", "description": "Sigmoid-gated element-wise multiplication of two conv branches", "related_to": [], "pattern": "sigmoid.*\\*"},
+  {"name": "spectral_conv", "kind": "feature", "description": "Learnable complex-valued weights applied in Fourier domain (RFFT)", "related_to": [], "pattern": "rfft|fft|spectral"},
+  {"name": "receptive_field", "kind": "capability", "description": "How far back in time the model can see per layer", "related_to": []},
+  {"name": "frequency_resolution", "kind": "capability", "description": "The model's ability to distinguish different frequency bands", "related_to": []},
+  {"name": "selective_frequency_processing", "kind": "capability", "description": "Ability to attenuate or amplify specific frequency bands independently", "related_to": []}
 ]
 ```
 
-The `InheritedComponent.component` field references entries from this unified vocabulary. The proposal agent's prompt includes the full `runtime_vocab` (both tiers, both kinds, clearly labeled) and is instructed: "Use canonical entries verbatim. When claiming an inherited component, specify whether it's a feature or a capability. Use `related_to` links to explain the connection between features and capabilities."
+#### Feature → capability link discovery (the hypothesis-test-verify loop)
+
+The `related_to` graph is **not pre-loaded** — it is built through experimentation:
+
+1. **Stage 1 (Comparison)**: the agent reads model descriptions + experiment results and **proposes candidate links** as hypotheses. E.g., "wavenet uses `dilated_causal_conv` and scores well on high-frequency files — I hypothesize that `dilated_causal_conv` → `receptive_field`." These go into `DiscoveryMemo.proposed_vocab_links`.
+
+2. **Stage 2 (Reasoning)**: the agent designs a proposal that **specifically tests** a proposed link. E.g., "if `dilated_causal_conv` truly enables `receptive_field`, then increasing dilation depth should improve low-freq scores." The test is captured in the `FalsifiablePrediction`.
+
+3. **After the experiment**: the reflector evaluates the prediction. If confirmed, the link's status changes to `confirmed`. If refuted, `refuted`.
+
+4. **Aggregation (Phase C)**: the interpretation agent collects all proposed links across rounds. Links that reach `confirmed` status in ≥2 runs get their `related_to` fields populated on the corresponding `VocabEntry` entries in the next round's `runtime_vocab`.
+
+```python
+class ProposedVocabLink(BaseModel):
+    """A hypothesized connection between a feature and a capability.
+
+    Proposed by the comparison stage, tested via FalsifiablePrediction,
+    confirmed or refuted by the reflector. Only confirmed links get
+    promoted to VocabEntry.related_to (via the interpretation agent).
+    """
+    feature: str = Field(
+        description="The feature entry name, e.g. 'dilated_causal_conv'."
+    )
+    capability: str = Field(
+        description="The capability entry name, e.g. 'receptive_field'."
+    )
+    evidence: str = Field(
+        max_length=300,
+        description="Why the agent thinks this link exists — must reference "
+                    "specific model results or architectural analysis."
+    )
+    status: Literal["proposed", "confirmed", "refuted"] = Field(
+        default="proposed",
+        description="Lifecycle: proposed → confirmed/refuted after experiment."
+    )
+```
+
+This schema is added to `DiscoveryMemo.proposed_vocab_links: List[ProposedVocabLink]` and to `ExperimentRecord` (for cross-round aggregation).
+
+The `InheritedComponent.component` field references entries from this vocabulary. The proposal agent's prompt includes the full `runtime_vocab` (both tiers, both kinds, clearly labeled) and instructs: "Use canonical entries verbatim. When proposing a link between a feature and a capability, cite specific experimental evidence — do not guess from generic ML knowledge."
 
 The comparison stage uses the vocabulary to structure its analysis:
-> "Model A uses **dilated_causal_conv** (feature, canonical) which enables wide **receptive_field** (concept, canonical). Its file_vector shows strong scores on files 11-19 (high frequency) but weak on files 0-4 (low frequency), suggesting the receptive_field is not wide enough for the lowest bands."
+> "Model A uses **dilated_causal_conv** (feature, canonical). Its file_vector shows strong scores on files 11-19 but weak on files 0-4. I propose the link `dilated_causal_conv → receptive_field` based on this evidence, but this needs experimental verification."
 
-The reasoning stage uses it to justify proposals:
-> "I propose inheriting **dilated_causal_conv** from Model A and adding **fno_spectral_layer** from Model C. Both features enable **frequency_resolution** (concept), but FNO's spectral processing addresses the low-frequency gap that dilated convolutions alone cannot cover."
+The reasoning stage uses confirmed links to justify proposals:
+> "`dilated_causal_conv → receptive_field` was confirmed in rounds 2 and 4. I'm now combining it with `spectral_conv` to test whether `spectral_conv → frequency_resolution` holds."
 
 #### Promotion rule (autonomous, conservative)
 

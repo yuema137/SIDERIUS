@@ -7,6 +7,7 @@ Tests validators and cross-field checks for:
   - ExpertContextItem
   - ModelComparison
   - DiscoveryMemo
+  - ProposedVocabLink
   - ReasoningStage, ModelSelectionStrategy, ReasoningPipelineConfig
   - VocabEntry
 """
@@ -19,6 +20,7 @@ from agent.schemas.proposal import (
     ExpertContextItem,
     ModelComparison,
     DiscoveryMemo,
+    ProposedVocabLink,
     ReasoningStage,
     ModelSelectionStrategy,
     ReasoningPipelineConfig,
@@ -270,6 +272,19 @@ class TestDiscoveryMemo:
         memo = DiscoveryMemo.model_validate(valid_memo)
         assert len(memo.proposed_vocab_candidates) == 1
 
+    def test_with_proposed_vocab_links(self, valid_memo):
+        valid_memo["proposed_vocab_links"] = [
+            {"feature": "dilated_causal_conv", "capability": "receptive_field",
+             "evidence": "Wavenet uses dilated convs and scores well on high-freq files."},
+        ]
+        memo = DiscoveryMemo.model_validate(valid_memo)
+        assert len(memo.proposed_vocab_links) == 1
+        assert memo.proposed_vocab_links[0].status == "proposed"
+
+    def test_proposed_vocab_links_default_empty(self, valid_memo):
+        memo = DiscoveryMemo.model_validate(valid_memo)
+        assert memo.proposed_vocab_links == []
+
     def test_sota_mechanism_max_length(self, valid_memo):
         valid_memo["sota_mechanism"] = "x" * 601
         with pytest.raises(ValidationError):
@@ -279,6 +294,67 @@ class TestDiscoveryMemo:
         valid_memo["proposed_change"] = "x" * 401
         with pytest.raises(ValidationError):
             DiscoveryMemo.model_validate(valid_memo)
+
+
+# ---------------------------------------------------------------------------
+# ReasoningStage / ModelSelectionStrategy / ReasoningPipelineConfig
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# ProposedVocabLink
+# ---------------------------------------------------------------------------
+
+class TestProposedVocabLink:
+
+    def test_valid(self):
+        link = ProposedVocabLink.model_validate({
+            "feature": "dilated_causal_conv",
+            "capability": "receptive_field",
+            "evidence": "Wavenet scores well on high-freq files and uses dilated convs.",
+        })
+        assert link.status == "proposed"  # default
+
+    def test_confirmed_status(self):
+        link = ProposedVocabLink.model_validate({
+            "feature": "spectral_conv",
+            "capability": "frequency_resolution",
+            "evidence": "Confirmed in rounds 2 and 4.",
+            "status": "confirmed",
+        })
+        assert link.status == "confirmed"
+
+    def test_refuted_status(self):
+        link = ProposedVocabLink.model_validate({
+            "feature": "bottleneck_compression",
+            "capability": "parameter_efficiency",
+            "evidence": "Smaller bottleneck did not improve score.",
+            "status": "refuted",
+        })
+        assert link.status == "refuted"
+
+    def test_invalid_status_raises(self):
+        with pytest.raises(ValidationError):
+            ProposedVocabLink.model_validate({
+                "feature": "test",
+                "capability": "test",
+                "evidence": "test",
+                "status": "maybe",
+            })
+
+    def test_evidence_max_length(self):
+        with pytest.raises(ValidationError):
+            ProposedVocabLink.model_validate({
+                "feature": "test",
+                "capability": "test",
+                "evidence": "x" * 301,
+            })
+
+    def test_missing_feature_raises(self):
+        with pytest.raises(ValidationError):
+            ProposedVocabLink.model_validate({
+                "capability": "receptive_field",
+                "evidence": "test",
+            })
 
 
 # ---------------------------------------------------------------------------
