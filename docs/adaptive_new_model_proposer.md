@@ -916,39 +916,56 @@ This section breaks each phase from §5 into concrete sub-tasks, the files they 
 - `tests/pseudo_data/api_call_outputs/ml_model_proposal_agent/` (new) — predefined responses for comparison, reasoning, and proposing stages.
 - `tests/integration/nodes/test_ml_model_proposal_agent.py` — add a `@dual_mode` test exercising the 3-stage pipeline in pseudo mode.
 
-**Sub-tasks**:
-- ☑ B.1 Define `FalsifiablePrediction` schema. Free-text `metric` field. Validator: `predicted_value` must differ from `current_value`; `threshold_for_refutation` must be on the correct side. **Done** — `agent/schemas/proposal.py`, commit `abbba2c`.
-- ☑ B.2 Define `InheritedComponent` schema with `citation_source: Optional[str] = None`. **Done** — same commit.
-- ☑ B.3 Define `ExpertContextItem` schema. Validator: `cite_id` must be unique within a single `expert_context` list. **Done** — same commit. Note: cite_id uniqueness is enforced by the pipeline runner at runtime, not by the schema itself.
-- ☑ B.4 Define `ModelComparison` schema — per-model structured analysis (model_type, source, best_score, key_mechanism, strengths, weaknesses, lesson_for_next_proposal). **Done** — same commit.
-- ☑ B.5 Define `DiscoveryMemo` schema — comparative_analysis (List[ModelComparison]) + sota fields + proposed_change + causal_hypothesis + falsifiable_prediction + predicted_failure_modes + inherited_components + citation_sources. Validators: failure_modes ≥1 entry; causal_hypothesis non-empty. **Done** — same commit. Also added `proposed_vocab_candidates` for vocabulary growth.
-- ☑ B.6 Define `ReasoningStage`, `ModelSelectionStrategy`, `ReasoningPipelineConfig` schemas. **Done** — same commit. Default pipeline = 2 reasoning stages (comparison, causal_reasoning); proposing is the fixed output stage.
-- ☑ B.6a Define `VocabEntry` schema (unified features + concepts) with `kind`, `related_to`, `tier`, `pattern`. **Schema done** — same commit. **Seed file `vocab_seed.json` not yet created** — deferred until pipeline runner is implemented.
-- ☑ B.7 Add `expert_context: List[ExpertContextItem]` to `ProposalInput`. Mark the existing `human_advice: Optional[ExpertAdviceInput]` as deprecated. **Done** — same commit. Also added `reasoning_pipeline: ReasoningPipelineConfig` to `ProposalInput`.
-- ☑ B.8 Create `ProposalLLMConfig` with per-stage `NodeLLMConfig` slots. Change `WorkflowLLMConfig.propose` to `Optional[ProposalLLMConfig]`. Update `get()` to flatten. **Done** — `workflows/llm_config.py`, commit `c5059ef`. Note: `uniform()` not yet updated (deferred — rarely used).
-- ☐ B.18 Schema unit tests for all new schemas. **Not yet written** — next task.
-- ☐ B.9 Update `ml_result_interp_to_ml_model_propose.local_full_context` protocol to accept and carry `expert_context` (per Decision 2 in §2A). The protocol wraps any legacy `human_advice` into an `ExpertContextItem` with `source="human", kind="human"`. The workflow passes `human_advice` to the protocol, NOT directly to the agent — keeping all inter-node data flow through protocols per CLAUDE.md. Existing tests continue to pass (new params have defaults).
-- ☐ B.10 Implement the `ModelSelectionStrategy` pre-filter as a deterministic Python function in `nodes/ml_model_proposal_agent.py`. Input: all records + strategy config. Output: filtered list of candidate models.
-- ☐ B.11 Implement `produce_discovery_memo(context, pipeline) -> DiscoveryMemo` — the configurable pipeline runner from §2A. Each enabled stage calls `bridge.generate()` with the accumulated context.
-- ☐ B.12 Implement the proposing stage — receives the DiscoveryMemo, returns `ProposalOutput` tethered to the memo.
-- ☐ B.13 Add constructor DI (`bridge_factory`) to `MLModelProposalAgent`. Current constructor takes `(provider, model_id)` and builds `LLMBridge` internally; the workflow calls `MLModelProposalAgent(**llm_config.get("propose"))`. The DI refactor adds an optional `bridge_factory` param while preserving the existing `provider`/`model_id` interface (same pattern as PR #24's tuner DI, but the proposal agent's constructor signature differs from the tuner's).
-- ☐ B.14 Write `COMPARATIVE_ANALYSIS_SYSTEM_PROMPT` — instructs the LLM to produce one `ModelComparison` per candidate model, referencing file_vector evidence and vocabulary entries. **Must include a vocabulary-contributor sub-task**: "Are there patterns in these models that suggest a new feature or concept not in the current vocabulary? If so, propose it as a candidate with a name, kind, and description." Write both the exploration-mode variant ("you have limited evidence, be honest about uncertainty, focus on identifying testable hypotheses") and the exploitation-mode variant ("leverage confirmed patterns, reference prior rounds").
-- ☐ B.15 Write `CAUSAL_REASONING_SYSTEM_PROMPT` — instructs the LLM to form a causal hypothesis building on the comparisons, with the four structural teeth (comparison-backed, falsifiable, devil's advocate, architectural tethering). Write both the exploration-mode variant ("propose a DIAGNOSTIC experiment that tests one specific hypothesis, frame predictions as conditional") and the exploitation-mode variant ("build on confirmed patterns, combine proven features/concepts, reference evidence from prior rounds").
-- ☐ B.16 Update `PROPOSAL_SYSTEM_PROMPT` to require explicit references to both the comparisons and the causal reasoning. In exploration mode, the proposing stage should favor simple, testable architectures over ambitious ones. In exploitation mode, it should favor incremental improvements over the confirmed best.
-- ☐ B.16a Implement `_resolve_exploration_mode(records, pipeline)` — the auto-detection logic that checks evidence depth (number of agent-proposed records, distinct model types, vocabulary growth rate) and selects "explore" or "exploit". The pipeline runner calls this before selecting prompt variants.
-- ☐ B.17 Add the labeled-block rendering of `expert_context` items (per §2D worked example) to all three stage prompts.
-- ☐ B.18 Schema unit tests for all new schemas (ModelComparison, DiscoveryMemo, FalsifiablePrediction, ExpertContextItem, ReasoningPipelineConfig, ModelSelectionStrategy).
-- ☐ B.19 Unit tests for the pipeline runner: (a) 3-stage default runs all stages, (b) disabling a stage skips it, (c) accumulated context passes between stages correctly, (d) model selection pre-filter with different strategies.
-- ☐ B.20 Predefined pseudo data for the proposal agent: `tests/pseudo_data/api_call_outputs/ml_model_proposal_agent/{comparison,causal_reasoning,proposing}.json` — one file per stage.
-- ☐ B.21 `@dual_mode` integration test for the proposal agent: pseudo mode exercises the full 3-stage pipeline, asserts on comparison count + memo fields + proposal tethering.
-- ☐ B.12 Schema unit tests for all new schemas.
-- ☐ B.13 Mocked-LLM unit tests for the two-stage flow, including (a) memo validation failure → retry, (b) architecture deviation note presence, (c) backward-compat with empty `expert_context`.
-- ☐ B.14 Tier-1 integration test: real LLM produces a valid memo + valid proposal; the memo's `proposed_change` actually appears in the architecture's `model_config` description.
+**Sub-tasks** (reordered to reflect actual implementation sequence):
 
-**Verify**:
-- All unit tests pass: `uv run pytest tests/unit/agent/proposal_agent/ -q`.
-- Tier-1 integration: `uv run pytest tests/integration/nodes/test_ml_model_proposal_agent.py -m real_run -v`.
-- Manual: inspect a generated `DiscoveryMemo` JSON and confirm it cites specific `file_vector` indices or expert-defined metrics in `causal_hypothesis`.
+#### Group 1 — Schemas + workflow config (DONE)
+
+- ☑ B.1 `FalsifiablePrediction` schema. **Done** — `agent/schemas/proposal.py`, commit `abbba2c`.
+- ☑ B.2 `InheritedComponent` schema. **Done** — same commit.
+- ☑ B.3 `ExpertContextItem` schema. **Done** — same commit.
+- ☑ B.4 `ModelComparison` schema. **Done** — same commit.
+- ☑ B.5 `DiscoveryMemo` schema with validators. **Done** — same commit. Also added `proposed_vocab_candidates`.
+- ☑ B.6 `ReasoningStage`, `ModelSelectionStrategy`, `ReasoningPipelineConfig`. **Done** — same commit.
+- ☑ B.6a `VocabEntry` schema. **Schema done** — same commit. Seed file is Group 2.
+- ☑ B.7 `expert_context` + `reasoning_pipeline` on `ProposalInput`. **Done** — same commit.
+- ☑ B.8 `ProposalLLMConfig` + `WorkflowLLMConfig.propose` update. **Done** — `workflows/llm_config.py`, commit `c5059ef`.
+
+#### Group 2 — Schema tests + vocab seed (NEXT)
+
+- ☐ B.18 Schema unit tests for all Group 1 schemas (`FalsifiablePrediction`, `InheritedComponent`, `ExpertContextItem`, `ModelComparison`, `DiscoveryMemo`, `ReasoningPipelineConfig`, `VocabEntry`). Focus on validators and cross-field checks.
+- ☐ B.6a-seed Create `agent/schemas/vocab_seed.json` — ~10 features + ~5 concepts drawn from the built-in models (wavenet, punet, fcnet, transformer, rnn, gated_fno). Submit to human for review.
+
+#### Group 3 — Prompt templates (as separate .md files)
+
+Prompt templates live in `agent/prompts/proposal/` as `.md` files, NOT in `prompts.py`. The pipeline runner loads them at runtime. This keeps complex multi-paragraph prompts readable and version-controlled separately.
+
+- ☐ B.14 `agent/prompts/proposal/comparison_stage.md` — COMPARATIVE_ANALYSIS prompt. Instructs the LLM to produce `List[ModelComparison]`. Includes vocabulary-contributor sub-task. Two variants: exploration mode (honest uncertainty, diagnostic) and exploitation mode (leverage confirmed patterns).
+- ☐ B.15 `agent/prompts/proposal/causal_reasoning_stage.md` — CAUSAL_REASONING prompt. Four structural teeth: comparison-backed, falsifiable, devil's advocate, architectural tethering. Two mode variants.
+- ☐ B.16 `agent/prompts/proposal/proposing_stage.md` — ARCHITECTURE_DESIGN prompt. Requires references to memo's `proposed_change` and `inherited_components`. Two mode variants.
+- ☐ B.16a `_resolve_exploration_mode(records, pipeline)` — auto-detection logic (explore vs exploit based on evidence depth).
+- ☐ B.17 Labeled-block rendering of `expert_context` items in all three stage prompts.
+
+#### Group 4 — Pipeline runner + model selection + DI
+
+- ☐ B.10 `ModelSelectionStrategy` pre-filter — deterministic Python function. Input: all records + strategy config. Output: filtered candidate models.
+- ☐ B.11 `produce_discovery_memo(context, pipeline) -> DiscoveryMemo` — configurable pipeline runner. Each enabled stage calls `bridge.generate()` with accumulated context.
+- ☐ B.12 Proposing stage — receives DiscoveryMemo, returns `ProposalOutput` tethered to the memo.
+- ☐ B.13 Constructor DI (`bridge_factory`) on `MLModelProposalAgent`, following PR #24's pattern.
+- ☐ B.9 Update `local_full_context` protocol to carry `expert_context`. Wrap legacy `human_advice` into `ExpertContextItem`.
+- ☐ B.19 Unit tests for pipeline runner + model selection pre-filter (mocked LLM).
+
+#### Group 5 — Integration testing (deferred)
+
+These are important for long-term robustness but not blocking for the initial pipeline implementation. Mock tests + running real loops directly is sufficient during active development.
+
+- ☐ B.20 Predefined pseudo data for proposal agent stages.
+- ☐ B.21 `@dual_mode` integration test for the 3-stage pipeline.
+- ☐ B.22 Mocked-LLM unit tests: memo validation failure → retry, deviation notes, backward-compat with empty `expert_context`.
+- ☐ B.23 Tier-1 integration test: real LLM produces valid memo + proposal with tethered `proposed_change`.
+
+**Verify** (after Group 4):
+- All unit tests pass: `uv run pytest tests/unit/agent/ml_model_proposal_agent/ -q`.
+- Manual: run the agent on real interpretation output, inspect the `DiscoveryMemo` JSON, confirm it references specific `file_vector` evidence and vocabulary entries in `causal_hypothesis`.
 
 ---
 
