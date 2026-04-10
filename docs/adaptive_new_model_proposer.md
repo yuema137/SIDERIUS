@@ -1160,19 +1160,21 @@ Prompt templates live in `agent/prompt_templates/proposal/` as `.md` files (not 
 - ☐ B.16a `_resolve_exploration_mode(records, pipeline)` (deferred to Group 4 — pipeline runner) — auto-detection logic. Checks evidence depth (agent-proposed records, distinct model types) AND **vocabulary diversity** (candidate/canonical ratio — stagnation triggers explore mode). *(Concern #1: Innovation Stagnation)*
 - ☑ B.17 `render_expert_context()` + `load_stage_prompt()` in `agent/prompt_templates/proposal/__init__.py`. Groups by kind, labeled rendering, template variable substitution, mode block injection. **Done**.
 
-#### Group 4 — Pipeline runner + model selection + DI
+#### Group 4 — Pipeline runner + model selection + DI (DONE)
 
-- ☐ B.10 `ModelSelectionStrategy` pre-filter — deterministic Python function. Input: all records + strategy config. Output: filtered candidate models.
-- ☐ B.11 `produce_discovery_memo(context, pipeline) -> DiscoveryMemo` — configurable pipeline runner. Each enabled stage calls `bridge.generate()` with accumulated context.
-- ☐ B.12 Proposing stage — receives DiscoveryMemo, returns `ProposalOutput` tethered to the memo.
-- ☐ B.13 Constructor DI (`bridge_factory`) on `MLModelProposalAgent`, following PR #24's pattern.
-- ☐ B.9 Update `local_full_context` protocol to carry `expert_context`. Wrap legacy `human_advice` into `ExpertContextItem`.
-- ☐ B.19 Unit tests for pipeline runner + model selection pre-filter (mocked LLM).
+- ☑ B.10 `select_candidate_models()` — pre-filter with top_n, all, human_specified, feature_match. **Done** — `nodes/proposal_helpers.py`.
+- ☑ B.16a `resolve_exploration_mode()` — auto-detects explore/exploit. **Done** — same file.
+- ☑ B.13 Constructor DI (`bridge_factory`) on `MLModelProposalAgent`. **Done** — follows PR #24 pattern.
+- ☑ B.11 `_run_pipeline()` — 3-stage pipeline runner with accumulated context, prompt loading, vocab rendering. **Done** — `nodes/ml_model_proposal_agent.py`.
+- ☑ B.12 Proposing stage — consumes accumulated context, produces ProposalOutput. **Done** — integrated into `_run_pipeline()`.
+- ☑ B.19 18 unit tests (model selection, exploration resolver, DI, pipeline with mocked LLM). **Done** — 800 total passed.
+**Backward compat**: default `ReasoningPipelineConfig.stages` is empty (legacy 2-call mode). Pipeline mode activates only when stages are explicitly configured at the workflow level.
 
-#### Group 5 — Integration testing (deferred)
+#### Group 5 — Workflow wiring + integration testing (deferred)
 
-These are important for long-term robustness but not blocking for the initial pipeline implementation. Mock tests + running real loops directly is sufficient during active development.
+These complete the end-to-end integration. Not blocking for pipeline development — the pipeline runner works standalone with mocked LLM. Do these when wiring the pipeline into the full exploration workflow chain.
 
+- ☐ B.9 Update `local_full_context` protocol to carry `expert_context` + `vocab_seed` + `reasoning_pipeline`. Wrap legacy `human_advice` into `ExpertContextItem`. The workflow passes these to the protocol, NOT directly to the agent.
 - ☐ B.20 Predefined pseudo data for proposal agent stages.
 - ☐ B.21 `@dual_mode` integration test for the 3-stage pipeline.
 - ☐ B.22 Mocked-LLM unit tests: memo validation failure → retry, deviation notes, backward-compat with empty `expert_context`.

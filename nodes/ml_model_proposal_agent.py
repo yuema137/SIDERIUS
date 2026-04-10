@@ -305,23 +305,188 @@ def _build_commit_prompt(reasoning: str, existing_model_types: list) -> str:
 # ---------------------------------------------------------------------------
 
 class MLModelProposalAgent:
+    """
+    Proposal agent — Node 3 in the SIDERIUS graph.
+
+    Supports two modes:
+      - **Legacy mode**: 2-call pattern (reasoning + commit). Used when
+        ``reasoning_pipeline`` has no stages or ``use_pipeline=False``.
+      - **Pipeline mode**: 3-stage configurable pipeline (comparison →
+        causal reasoning → proposing). Used when ``reasoning_pipeline``
+        has stages configured. See docs/adaptive_new_model_proposer.md §2A.
+
+    Constructor DI (``bridge_factory``) follows PR #24's pattern: optional
+    factory param, defaults to the real ``LLMBridge`` class. Tests can
+    inject a ``RecordingLLMBridge``. The existing ``(provider, model_id)``
+    interface is preserved for backward compat.
+    """
 
     def __init__(self, provider: str = "gemini", model_id: str = "gemini-3.1-flash-lite-preview",
-                 max_retries: int | None = None):
-        self.bridge = LLMBridge(provider=provider, model_id=model_id, max_retries=max_retries)
+                 max_retries: int | None = None, bridge_factory=None):
+        self._bridge_factory = bridge_factory or LLMBridge
+        self.bridge = self._bridge_factory(
+            provider=provider, model_id=model_id, max_retries=max_retries,
+        )
 
     def run(self, inp: ProposalInput) -> ProposalOutput:
-        print(f"💡 Proposing new architecture based on interpretation of "
+        print(f"Proposing new architecture based on interpretation of "
               f"{inp.interpretation.get('model_types', [])} ...")
 
-        # --- Call 1: free reasoning (plain text, no JSON constraints) ---
+        # Decide: pipeline mode or legacy mode
+        has_pipeline = (
+            inp.reasoning_pipeline
+            and inp.reasoning_pipeline.stages
+            and any(s.enabled for s in inp.reasoning_pipeline.stages)
+        )
+
+        if has_pipeline:
+            output = self._run_pipeline(inp)
+        else:
+            output = self._run_legacy(inp)
+
+        # --- Persist ---
+        if inp.storage.backend == "local" and inp.storage.local:
+            workspace = inp.storage.local.workspace
+            run_name  = inp.storage.local.run_name
+            os.makedirs(workspace, exist_ok=True)
+            out_path = os.path.join(workspace, f"proposal_{run_name}.json")
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write(output.model_dump_json(indent=4))
+            print(f"Proposal saved -> {out_path}")
+
+        return output
+
+    # ------------------------------------------------------------------
+    # Legacy mode (existing 2-call pattern, backward compat)
+    # ------------------------------------------------------------------
+
+    def _run_legacy(self, inp: ProposalInput) -> ProposalOutput:
+        """Original 2-call pattern: reasoning (text) + commit (JSON)."""
         reasoning_prompt = _build_reasoning_prompt(inp)
         reasoning = self.bridge.generate_text(PROPOSAL_REASONING_PROMPT, reasoning_prompt)
-        print(f"   Reasoning complete ({len(reasoning)} chars).")
+        print(f"   Legacy reasoning complete ({len(reasoning)} chars).")
 
-        # --- Call 2: structured commit (strict JSON) ---
         commit_prompt = _build_commit_prompt(reasoning, inp.existing_model_types)
         raw = self.bridge.generate(PROPOSAL_COMMIT_PROMPT, commit_prompt)
+
+        proposed_name = raw.get("model_name", "")
+        if proposed_name in inp.existing_model_types:
+            raise ValueError(
+                f"LLM proposed model_name '{proposed_name}' which already exists in "
+                f"existing_model_types: {inp.existing_model_types}. "
+                f"Re-run or adjust the constraints."
+            )
+
+        output = ProposalOutput.model_validate({
+            "model_name":              proposed_name,
+            "model_description":       raw.get("model_description", ""),
+            "mathematical_definition": raw.get("mathematical_definition", ""),
+            "motivation":              raw.get("motivation", ""),
+            "expert_advice":           raw.get("expert_advice", {}),
+            "baseline_config":         raw.get("baseline_config", {}),
+        })
+        print(f"Proposed model (legacy): '{output.model_name}'")
+        return output
+
+    # ------------------------------------------------------------------
+    # Pipeline mode (B.11 + B.12 — 3-stage reasoning pipeline)
+    # ------------------------------------------------------------------
+
+    def _run_pipeline(self, inp: ProposalInput) -> ProposalOutput:
+        """Three-stage pipeline: comparison → reasoning → proposing."""
+        from nodes.proposal_helpers import select_candidate_models, resolve_exploration_mode
+        from agent.prompt_templates.proposal import load_stage_prompt, render_expert_context
+
+        pipeline = inp.reasoning_pipeline
+        policy = pipeline.policy
+
+        # B.16a — resolve exploration mode
+        mode = resolve_exploration_mode(inp.interpretation, pipeline)
+        print(f"   Pipeline mode: {mode} | stages: {[s.name for s in pipeline.stages if s.enabled]}")
+
+        # B.10 — pre-filter models
+        candidates = select_candidate_models(inp.interpretation, pipeline.model_selection)
+        print(f"   Candidates: {[c['model_type'] for c in candidates]} ({len(candidates)} models)")
+
+        # Prepare shared context for all stages
+        expert_context_block = render_expert_context(inp.expert_context)
+        vocab_block = self._render_vocabulary(inp.vocab_seed)
+
+        # --- Run enabled reasoning stages (accumulate context) ---
+        accumulated = {
+            "candidates": candidates,
+            "interpretation_summary": {
+                k: inp.interpretation.get(k)
+                for k in ("model_types", "total_experiments", "best_denoising_score",
+                          "worst_denoising_score", "key_findings", "bottlenecks",
+                          "take_home_message", "per_model_best", "per_model_worst",
+                          "per_model_file_vectors")
+                if inp.interpretation.get(k) is not None
+            },
+            "existing_model_types": inp.existing_model_types,
+            "previous_failures": inp.previous_failures,
+        }
+
+        template_vars = {
+            "minimum_boldness": str(policy.minimum_boldness),
+            "n_agent_proposed": str(len([
+                c for c in candidates if c.get("source") != "seed"
+            ])),
+            "n_confirmed_links": "0",  # TODO: count from vocab_seed related_to
+            "existing_model_types": ", ".join(inp.existing_model_types),
+        }
+
+        for stage in pipeline.stages:
+            if not stage.enabled:
+                continue
+
+            # Map system_prompt_key to filename:
+            # COMPARATIVE_ANALYSIS → comparison_stage
+            # CAUSAL_REASONING → causal_reasoning_stage
+            stage_file_map = {
+                "COMPARATIVE_ANALYSIS": "comparison_stage",
+                "CAUSAL_REASONING": "causal_reasoning_stage",
+            }
+            stage_filename = stage_file_map.get(
+                stage.system_prompt_key,
+                stage.system_prompt_key.lower() + "_stage",
+            )
+            system_prompt = load_stage_prompt(
+                stage_filename,
+                exploration_mode=mode,
+                template_vars=template_vars,
+            )
+
+            # Build user prompt: accumulated context + expert context + vocab
+            user_prompt = json.dumps(accumulated, indent=2, default=str)
+            if expert_context_block:
+                user_prompt += f"\n\n{expert_context_block}"
+            if vocab_block:
+                user_prompt += f"\n\n{vocab_block}"
+
+            print(f"   Stage '{stage.name}': calling LLM...")
+            if stage.output_mode == "text":
+                result = self.bridge.generate_text(system_prompt, user_prompt)
+                accumulated[stage.name] = result
+            else:
+                result = self.bridge.generate(system_prompt, user_prompt)
+                accumulated[stage.name] = result
+
+            print(f"   Stage '{stage.name}': done.")
+
+        # --- B.12: Proposing stage (always runs last) ---
+        proposing_prompt = load_stage_prompt(
+            "proposing_stage",
+            exploration_mode=mode,
+            template_vars=template_vars,
+        )
+
+        proposing_user = json.dumps(accumulated, indent=2, default=str)
+        if expert_context_block:
+            proposing_user += f"\n\n{expert_context_block}"
+
+        print(f"   Stage 'proposing': calling LLM...")
+        raw = self.bridge.generate(proposing_prompt, proposing_user)
 
         # --- Guard: LLM must not reuse an existing model name ---
         proposed_name = raw.get("model_name", "")
@@ -340,20 +505,44 @@ class MLModelProposalAgent:
             "motivation":              raw.get("motivation", ""),
             "expert_advice":           raw.get("expert_advice", {}),
             "baseline_config":         raw.get("baseline_config", {}),
+            "memo_consistency_notes":  raw.get("memo_consistency_notes", []),
         })
-        print(f"✅ Proposed model: '{output.model_name}'")
-
-        # --- Persist ---
-        if inp.storage.backend == "local" and inp.storage.local:
-            workspace = inp.storage.local.workspace
-            run_name  = inp.storage.local.run_name
-            os.makedirs(workspace, exist_ok=True)
-            out_path = os.path.join(workspace, f"proposal_{run_name}.json")
-            with open(out_path, "w", encoding="utf-8") as f:
-                f.write(output.model_dump_json(indent=4))
-            print(f"✅ Proposal saved → {out_path}")
-
+        print(f"Proposed model (pipeline): '{output.model_name}'")
         return output
+
+    @staticmethod
+    def _render_vocabulary(vocab_seed: list) -> str:
+        """Render the vocabulary seed into a prompt block."""
+        if not vocab_seed:
+            return ""
+
+        lines = ["## Vocabulary (use these terms consistently)\n"]
+        features = [v for v in vocab_seed if hasattr(v, "kind") and v.kind == "feature"]
+        capabilities = [v for v in vocab_seed if hasattr(v, "kind") and v.kind == "capability"]
+
+        # Handle both VocabEntry objects and dicts
+        def _get(entry, key, default=""):
+            if hasattr(entry, key):
+                return getattr(entry, key)
+            if isinstance(entry, dict):
+                return entry.get(key, default)
+            return default
+
+        if features:
+            lines.append("### Features (concrete building blocks)")
+            for v in features:
+                pattern = _get(v, "pattern")
+                pat_str = f" [pattern: {pattern}]" if pattern else ""
+                lines.append(f"- **{_get(v, 'name')}**: {_get(v, 'description')}{pat_str}")
+            lines.append("")
+
+        if capabilities:
+            lines.append("### Capabilities (measurable architectural properties)")
+            for v in capabilities:
+                lines.append(f"- **{_get(v, 'name')}**: {_get(v, 'description')}")
+            lines.append("")
+
+        return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
