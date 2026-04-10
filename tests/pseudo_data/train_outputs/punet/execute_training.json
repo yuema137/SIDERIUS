@@ -1,0 +1,15 @@
+{
+  "status": "success",
+  "message": "Training finished.",
+  "results": {
+    "final_loss": 0.4231,
+    "loss_history": [
+      1.234,
+      0.892,
+      0.671,
+      0.523,
+      0.4231
+    ],
+    "model_params": 12345678
+  }
+}

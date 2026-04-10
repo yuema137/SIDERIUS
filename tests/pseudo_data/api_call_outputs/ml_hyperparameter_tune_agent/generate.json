@@ -1,0 +1,39 @@
+{
+  "model_type": "punet",
+  "hypothesis": "Default punet baseline with focal loss should give a stable starting score on file 6.",
+  "reasoning": "First round, no prior records to build on. Use the documented punet defaults (multi=40, depth=4, kernel_size=9, pe_factor=1.0) with focal loss (alpha=0.5, gamma=2.0) and lr=1e-4. This is the same starting point used by the legacy TIDMAD paper.",
+  "model_config": {
+    "model_type": "punet",
+    "segmentation_size": 40000,
+    "batch_size": 1,
+    "multi": 40,
+    "depth": 4,
+    "bilinear": true,
+    "pe_factor": 1.0,
+    "kernel_size": 9,
+    "embedding_dim": 32
+  },
+  "train_config": {
+    "lr": 0.0001,
+    "epochs": 5,
+    "batch_size": 1,
+    "optimizer_type": "adamw",
+    "weight_decay": 0.00001,
+    "device": "cuda"
+  },
+  "loss_config": {
+    "loss_type": "focal",
+    "alpha": 0.5,
+    "gamma": 2.0,
+    "reduction": "mean",
+    "use_class_weights": false
+  },
+  "is_trial": true,
+  "trial_strategy": "snapshot",
+  "trial_portion": 0.05,
+  "target_files": [],
+  "train_portion": 0.1,
+  "eval_strategy": "snapshot",
+  "eval_portion": 0.05,
+  "train_validation_align": true
+}
