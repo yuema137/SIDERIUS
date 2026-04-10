@@ -1170,15 +1170,13 @@ Prompt templates live in `agent/prompt_templates/proposal/` as `.md` files (not 
 - ☑ B.19 18 unit tests (model selection, exploration resolver, DI, pipeline with mocked LLM). **Done** — 800 total passed.
 **Backward compat**: default `ReasoningPipelineConfig.stages` is empty (legacy 2-call mode). Pipeline mode activates only when stages are explicitly configured at the workflow level.
 
-#### Group 5 — Workflow wiring + integration testing (deferred)
+#### Group 5 — Integration testing (DONE, B.9 deferred)
 
-These complete the end-to-end integration. Not blocking for pipeline development — the pipeline runner works standalone with mocked LLM. Do these when wiring the pipeline into the full exploration workflow chain.
-
-- ☐ B.9 Update `local_full_context` protocol to carry `expert_context` + `vocab_seed` + `reasoning_pipeline`. Wrap legacy `human_advice` into `ExpertContextItem`. The workflow passes these to the protocol, NOT directly to the agent.
-- ☐ B.20 Predefined pseudo data for proposal agent stages.
-- ☐ B.21 `@dual_mode` integration test for the 3-stage pipeline.
-- ☐ B.22 Mocked-LLM unit tests: memo validation failure → retry, deviation notes, backward-compat with empty `expert_context`.
-- ☐ B.23 Tier-1 integration test: real LLM produces valid memo + proposal with tethered `proposed_change`.
+- ☑ B.20 Predefined pseudo data: `tests/pseudo_data/api_call_outputs/ml_model_proposal_agent/generate.json` — 3 canned responses (comparison, causal_reasoning, proposing) as a FIFO list. **Done**.
+- ☑ B.21 `@dual_mode` integration test: `test_proposal_pipeline_dual_mode` in `tests/integration/nodes/test_ml_model_proposal_agent.py`. Pseudo mode asserts on 3 generate() calls, prompt content, output structure, file persistence. **Done**.
+- ☐ B.9 Protocol update to carry `expert_context` + `vocab_seed` + `reasoning_pipeline`. Deferred — wiring task for workflow chain integration.
+- ☐ B.22 Mocked-LLM unit tests: memo validation failure → retry, deviation notes. Deferred — incremental additions to existing mocked tests.
+- ☐ B.23 Tier-1 integration test: real LLM produces valid memo + proposal. Deferred — run manually when testing the pipeline on real data.
 
 **Verify** (after Group 4):
 - All unit tests pass: `uv run pytest tests/unit/agent/ml_model_proposal_agent/ -q`.
