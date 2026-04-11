@@ -519,6 +519,25 @@ class ProposalOutput(BaseModel):
                     "Copied from the DiscoveryMemo. The validator checks that each "
                     "claimed component actually appears in the generated code.",
     )
+    falsifiable_prediction: Optional[FalsifiablePrediction] = Field(
+        default=None,
+        description="The numerical prediction from the DiscoveryMemo. "
+                    "Evaluated by the interpretation agent after tuning to "
+                    "determine if the hypothesis was confirmed or refuted. "
+                    "None in legacy mode (no pipeline).",
+    )
+    proposed_vocab_links: List[ProposedVocabLink] = Field(
+        default_factory=list,
+        description="Feature→capability link hypotheses from the DiscoveryMemo. "
+                    "Evaluated across iterations — confirmed links get promoted "
+                    "to VocabEntry.related_to by the interpretation agent.",
+    )
+    proposed_discoveries: List[VocabEntry] = Field(
+        default_factory=list,
+        description="New kind='discovery' vocabulary entries the proposer suggests "
+                    "based on the reasoning pipeline's analysis. These are empirical "
+                    "findings expressed as sentences, not short names.",
+    )
     memo_consistency_notes: List[str] = Field(
         default_factory=list,
         description="Inconsistencies the proposing stage noticed between the "

@@ -1240,28 +1240,93 @@ Key fixes discovered during chain testing:
 **Pipeline hardening:**
 - ☐ B.22 Memo validation failure → retry in the proposal agent. Deviation notes handling when Stage 3 flags inconsistencies.
 
-**Interpretation agent — accumulate vocabulary from records:**
-- ☐ C.4 Runtime vocab aggregator: walk all records, collect `inherited_components` and `proposed_vocab_links`, merge with canonical seed, deduplicate by name. This runs every round — early rounds have few candidates; later rounds have many.
-- ☐ C.7 Add `runtime_vocab: List[VocabEntry]` and `proposed_links_summary` to `InterpretationOutput`.
-- ☐ C.7a Update protocol to pass `runtime_vocab` from interpretation → proposal (replaces static `_load_vocab_seed()` in the workflow).
+---
 
-**Promotion — graduate candidates to canonical:**
-- ☐ C.5 Structural promotion rule: candidate appears in `≥ policy.min_runs_for_promotion` distinct runs ∧ ≥1 above SOTA ∧ `delta > 0` (if `policy.require_positive_delta`) ∧ pattern present. Produces `vocab_changes` event, does NOT mutate the seed file.
-- ☐ C.5a `ProposedVocabLink` promotion: links confirmed in ≥2 runs → populate `VocabEntry.related_to` on the corresponding entries in `runtime_vocab`.
-- ☐ C.6 Semantic dedup: LLM call comparing candidate description against existing canonicals. Returns "novel" / "synonym of X" / "ambiguous". Synonyms merged via `aliases` list.
+### The vocabulary as memory — core design for C.4+
+
+> **The vocabulary system is the agent's long-term memory.** It has three kinds of entries, each playing a different role:
+>
+> - **Features** (`kind="feature"`): concrete architectural building blocks the agent can point to in code. Short names. E.g. `dilated_causal_conv`, `multi_head_attention`.
+> - **Capabilities** (`kind="capability"`): measurable architectural properties that features may provide. Short names. E.g. `receptive_field`, `frequency_resolution`.
+> - **Discoveries** (`kind="discovery"`): empirical findings from experiments — sentences/phrases that capture what the agent has learned. These are the "valuable discoveries" that accumulate over iterations. E.g. `"WaveNet scores 5.57 overall with dominant high-freq performance (files 17-19 > 50k). No other model exceeds 4.3."`, `"Adding multi_head_attention to wavenet (attn_wavenet) did NOT improve low-freq scores (files 0-5 remained near zero). Attention alone does not solve the low-frequency gap."`
+>
+> Features and capabilities are short identifiers used as **constraint bridges** — they force the LLM to use consistent terminology. Discoveries are longer phrases that capture **what the agent has learned** from experiments. Together they form the agent's accumulated memory that grows over iterations.
+>
+> The interpretation agent produces a **structured lab report** that MUST reference vocabulary terms. It cannot say random things — it must map every finding to specific features, capabilities, and discoveries. This constrains the LLM's reasoning to be grounded in the maintained vocabulary.
+>
+> The proposal agent **maintains the vocabulary** — it proposes new candidates (features, capabilities, discoveries), proposes feature→capability links, and reviews what was confirmed or refuted. The interpretation agent **reads the vocabulary** and uses it to structure its analysis.
+
+### Data flow for the vocabulary feedback loop
+
+```
+Iteration N:
+  Interpret(records from iterations 1..N-1)
+    - Reads: runtime_vocab (seed + all candidates + discoveries from previous rounds)
+    - Reads: FalsifiablePrediction from previous proposal
+    - Evaluates: was the prediction confirmed or refuted?
+    - Produces: structured lab report using vocabulary terms
+    - Produces: new discovery entries from this evaluation
+    - Produces: updated runtime_vocab (seed + candidates + discoveries)
+    ↓
+  Propose(interpretation + runtime_vocab + discoveries)
+    - Reads: lab report + vocabulary + discoveries
+    - Maintains: proposes new candidates, new links, new discoveries
+    - Uses confirmed discoveries to justify next proposal
+    - Produces: ProposalOutput with inherited_components +
+                falsifiable_prediction + proposed_vocab_links
+    ↓
+  Implement → Validate → Tune
+    - Produces: experiment records with scores, file_vectors
+    ↓
+  (records stored for iteration N+1)
+```
+
+### Schema changes needed — ALL DONE (C.13-C.15)
+
+**`ProposalOutput`** (C.13) — scientific content survives past proposal stage:
+- ☑ `falsifiable_prediction: Optional[FalsifiablePrediction]` — numerical prediction to evaluate
+- ☑ `proposed_vocab_links: List[ProposedVocabLink]` — feature→capability hypotheses
+- ☑ `proposed_discoveries: List[VocabEntry]` — new `kind="discovery"` entries
+
+**`InterpretationInput`** (C.14) — receives compressed memory + new data:
+- ☑ `runtime_vocab: List[VocabEntry]` — compressed memory of iterations 0..N-2
+- ☑ `previous_proposal: Optional[Dict]` — previous iter's ProposalOutput for evaluation
+
+**`InterpretationOutput`** (C.15) — produces updated memory:
+- ☑ `runtime_vocab: List[VocabEntry]` — updated vocabulary for next iteration
+- ☑ `prediction_evaluation: Optional[Dict]` — confirmed/refuted/partial + boldness
+- ☑ `new_discoveries: List[VocabEntry]` — empirical findings from this round
+
+### Sub-tasks (NEXT)
+
+**Vocabulary feedback loop (critical path):**
+- ☑ C.13 `ProposalOutput`: added `falsifiable_prediction: Optional[FalsifiablePrediction]`, `proposed_vocab_links: List[ProposedVocabLink]`, `proposed_discoveries: List[VocabEntry]`. Pipeline runner copies these from the DiscoveryMemo's comparison + reasoning stage outputs. **Done**.
+- ☑ C.14 `InterpretationInput`: added `runtime_vocab: List[VocabEntry]` (compressed memory of iterations 0..N-2, empty on first iter) and `previous_proposal: Optional[Dict]` (serialized ProposalOutput from iter N-1, None on first iter). **Done**.
+- ☑ C.15 `InterpretationOutput`: added `runtime_vocab: List[VocabEntry]` (updated vocabulary for next iter), `prediction_evaluation: Optional[Dict]` (confirmed/refuted/partial + boldness + info_gain), `new_discoveries: List[VocabEntry]` (empirical findings from this round). All default empty — backward compat. **Done**.
+- ☐ C.4 Implement vocab aggregator in interpretation agent: merge seed + candidates + discoveries from all previous records. Evaluate FalsifiablePrediction. Generate discovery entries.
+- ☐ C.7a Update interpret→propose protocol to pass `runtime_vocab` (replaces static `_load_vocab_seed()` in the workflow).
+- ☐ C.16 Update interpretation agent's LLM prompt to require vocabulary-constrained lab report — every finding must reference features, capabilities, or discoveries from the maintained list.
+- ☐ C.17 Update workflow to pass `previous_proposal` and `runtime_vocab` through the chain.
+- ☐ C.18 Unit tests for vocab aggregation and prediction evaluation.
+
+**Promotion (after vocabulary loop is working):**
+- ☐ C.5 Structural promotion rule for candidates.
+- ☐ C.5a `ProposedVocabLink` promotion: confirmed links → `VocabEntry.related_to`.
+- ☐ C.6 Semantic dedup LLM call.
 - ☐ C.11 Promotion rule unit tests.
-- ☐ C.12 Integration test: synthetic chain of records with repeated candidate → promotion event emitted.
 
-**Centrifugal metrics — prevent conservative collapse:**
-- ☐ Component delta scoring: `avg_score_with - avg_score_without` per vocabulary entry. *(Concern #4)*
-- ☐ Vocabulary diversity metric: `n_candidates / n_total` fed to exploration mode resolver. *(Concern #1)*
-- ☐ Information gain metric: `boldness × (1 if confirmed else 0)` tracked alongside hit rate. *(Concern #2)*
-- ☐ Strategy Performance Report: computed by interpretation agent, injected as `ExpertContextItem(kind="strategy_report")`. *(Feedback loop)*
+**Centrifugal metrics (after promotion is working):**
+- ☐ Component delta scoring. *(Concern #4)*
+- ☐ Vocabulary diversity metric. *(Concern #1)*
+- ☐ Information gain metric. *(Concern #2)*
+- ☐ Strategy Performance Report. *(Feedback loop)*
+
+**Pipeline hardening (can be done in parallel):**
+- ☐ B.22 Memo validation failure → retry.
 
 **Verify**:
-- `uv run pytest tests/unit/agent/ml_code_validator_agent/ -q` — all pass including inheritance tests.
-- Manual: run a chain round, inspect interpretation output for `runtime_vocab`, confirm accumulated candidates and links appear.
-- Manual: run a chain with a proposal claiming `dilated_causal_conv`, verify the validator checks for dilation in the code.
+- Run 2+ chain iterations. Inspect interpretation output: does `runtime_vocab` grow between iterations? Do discoveries accumulate? Is the prediction evaluation correct?
+- Check that the proposal agent references discoveries from previous rounds in its reasoning.
 
 ---
 
@@ -1343,6 +1408,99 @@ uv run pytest -m real_run -v -s \
     tests/integration/workflows/test_full_exploration_loop.py::TestFullExplorationLoop::test_chained_iterations
 ```
 This exercises the full proposal → implement → validate → tune loop with the new reasoning machinery and citation tracking end-to-end.
+
+---
+
+---
+
+## 5. Critical concern: prompt scalability and LLM attention drift
+
+### The problem
+
+As the exploration loop runs for N iterations, naive implementations will accumulate unbounded context:
+- Raw experiment records: N iterations × 5 rounds × ~3KB each → **150KB+ after 10 iterations**
+- Model descriptions and source code: grows with each new agent-generated model
+- Vocabulary: grows with candidates and discoveries
+
+When the prompt exceeds ~30-50K tokens, two things happen:
+1. **Cost**: each LLM call becomes expensive (billed per input token)
+2. **Attention drift**: the LLM's ability to attend to specific details degrades with prompt length. Critical information (the SOTA score, the vocabulary constraints, the prediction to evaluate) gets lost in a sea of historical records. This is the "lost in the middle" problem — LLMs attend strongly to the beginning and end of the prompt but poorly to the middle.
+
+### The solution: vocabulary IS compressed memory
+
+The vocabulary system IS the compression mechanism. The interpretation agent does NOT re-read all raw records every iteration.
+
+**Core assumption: iterations 0 through N-2 are fully summarized in the vocabulary.**
+
+The vocabulary (features + capabilities + discoveries) is the compressed representation of everything the agent has learned from all previous experiments. If the vocabulary is good, you don't need the raw records — the vocabulary tells you what works, what doesn't, and why.
+
+This means:
+- Iteration N's interpretation agent receives: **vocabulary (memory of 0..N-2) + new records (iteration N-1 only) + previous proposal (to evaluate)**
+- It does NOT receive raw records from iterations 0..N-2
+- Everything worth knowing from those iterations is already in the vocabulary — especially `kind="discovery"` entries which capture empirical findings as sentences
+
+**What the interpretation agent receives each round:**
+
+| Input | Size | Grows? | Purpose |
+|-------|------|--------|---------|
+| Runtime vocabulary (features + capabilities + discoveries) | ~10KB | Slowly (bounded) | Compressed memory of iterations 0..N-2 |
+| New records (from iter N-1 tuning only) | ~5-15KB | No — fixed per iteration | What happened in the latest experiment |
+| Previous proposal (`ProposalOutput` with prediction + links) | ~3KB | No — one per iteration | What was predicted, to evaluate against results |
+
+**Total prompt: ~20-30KB per iteration**, regardless of how many iterations have run.
+
+Each round, the interpretation agent:
+1. Reads the vocabulary (compressed memory of all previous iterations)
+2. Reads the latest experiment data (iteration N-1 only)
+3. Evaluates the previous prediction (confirmed/refuted?)
+4. Produces new discovery entries (what we just learned)
+5. Updates the runtime vocabulary (existing + new discoveries)
+
+### Critical dependency: vocabulary quality determines memory fidelity
+
+> **This design only works if the vocabulary faithfully represents what we've learned.** If important findings are lost during compression (not captured as discoveries, or captured imprecisely), the agent loses information across iterations and may repeat failed experiments.
+>
+> This creates a **co-evolution requirement** between two capabilities:
+>
+> **Vocabulary extraction** (interpretation agent): how well do we capture findings from each experiment as vocabulary entries? If the interpretation agent misses a critical finding (e.g., "attention doesn't help low-freq"), that knowledge is lost forever — it won't be in the vocabulary for the next round.
+>
+> **Vocabulary usage** (proposal agent): how well does the proposal agent use the vocabulary to constrain its reasoning? If it ignores discoveries, then even perfect extraction is wasted.
+>
+> **Both must improve together** — improving extraction without improving usage is wasted work, and vice versa. In practice:
+>
+> 1. **Start simple**: first implementation captures basic discoveries (prediction confirmed/refuted, which features were used, what scores resulted). Good enough for the first 5-10 iterations.
+> 2. **Improve extraction when we see memory loss**: if the agent repeats a failed experiment, the discovery for that failure was either missing or poorly worded. Fix the interpretation prompt.
+> 3. **Improve usage when we see drift**: if the proposal agent ignores discoveries in its reasoning, strengthen the vocabulary constraint in the comparison/reasoning stage prompts.
+> 4. **Alternate improvements**: each chain batch reveals whether the bottleneck is extraction (agent doesn't capture the right findings) or usage (agent captures findings but ignores them). Fix the weaker link first, then switch to the other.
+>
+> **This is NOT a one-time implementation** — it's an ongoing quality improvement loop that runs in parallel with the experiment loop itself. The vocabulary system gets better as we tune its prompts, just like the ML models get better as we tune their hyperparameters.
+
+### How vocabulary bounds the growth
+
+- **Features and capabilities**: bounded by the promotion rules. Most candidates never get promoted. The canonical seed stays at ~20 entries. Candidates churn — new ones appear, unused ones fade. Total stays ~30-50 entries.
+- **Discoveries**: the most growth-prone kind. Each iteration may add 1-3 discoveries. After 20 iterations: ~40-60 discoveries. At ~100 chars each: ~5-6KB. Manageable.
+- **If discoveries grow too large**: the interpretation agent can **summarize** older discoveries into higher-level findings. E.g., 5 individual "attention didn't help X" discoveries → 1 summary discovery "Attention mechanisms have not improved low-frequency performance across 5 experiments." This is a future concern, not immediate.
+
+### Proposal agent prompt budget
+
+The proposal agent receives even more context (comparison stage gets source code). Budget:
+
+| Input | Size | Notes |
+|-------|------|-------|
+| Candidate models (top N, with source code) | ~15-20KB | Bounded by ModelSelectionStrategy.top_n |
+| Runtime vocabulary | ~10KB | Same as interpretation |
+| Expert context (advice + strategy report) | ~5KB | Fixed |
+| Accumulated pipeline stages (comparison + reasoning) | ~5-10KB | Fixed per pipeline run |
+
+**Total: ~35-45KB per proposal.** The source code is the biggest cost, controlled by the `top_n` pre-filter. If we increase to 10+ models, we should either truncate source code or only include code for the SOTA + the model being modified.
+
+### Design rules to prevent prompt explosion
+
+1. **The lab report replaces raw records.** The interpretation agent never receives "all records since the beginning." It receives the previous lab report + new data.
+2. **The vocabulary is the memory.** Everything worth remembering is in the vocabulary (features, capabilities, discoveries). If it's not in the vocabulary, it's not remembered.
+3. **Source code is pre-filtered.** Only top N models get their source code included. The `ModelSelectionStrategy` controls this budget.
+4. **Discoveries can be summarized.** If the discovery list grows beyond ~50 entries, the interpretation agent consolidates older ones into summaries.
+5. **Each agent has a token budget.** The pipeline runner should estimate prompt size before calling the LLM and warn if it exceeds a threshold (e.g., 40K tokens).
 
 ---
 

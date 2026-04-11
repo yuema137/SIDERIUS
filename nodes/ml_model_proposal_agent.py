@@ -504,11 +504,23 @@ class MLModelProposalAgent:
                 f"Re-run or adjust the constraints."
             )
 
-        # --- Extract inherited_components from reasoning stages ---
-        inherited = []
+        # --- Extract scientific content from reasoning stages ---
         reasoning_output = accumulated.get("causal_reasoning", {})
-        if isinstance(reasoning_output, dict):
-            inherited = reasoning_output.get("inherited_components", [])
+        comparison_output = accumulated.get("comparison", {})
+        if not isinstance(reasoning_output, dict):
+            reasoning_output = {}
+        if not isinstance(comparison_output, dict):
+            comparison_output = {}
+
+        inherited = reasoning_output.get("inherited_components", [])
+        prediction = reasoning_output.get("falsifiable_prediction")
+        vocab_links = comparison_output.get("proposed_vocab_links", [])
+        # Discoveries from both stages
+        discoveries = []
+        for stage_output in [comparison_output, reasoning_output]:
+            for candidate in stage_output.get("proposed_vocab_candidates", []):
+                if isinstance(candidate, dict) and candidate.get("kind") == "discovery":
+                    discoveries.append(candidate)
 
         # --- Build and validate output ---
         output = ProposalOutput.model_validate({
@@ -519,6 +531,9 @@ class MLModelProposalAgent:
             "expert_advice":           raw.get("expert_advice", {}),
             "baseline_config":         raw.get("baseline_config", {}),
             "inherited_components":    inherited,
+            "falsifiable_prediction":  prediction,
+            "proposed_vocab_links":    vocab_links,
+            "proposed_discoveries":    discoveries,
             "memo_consistency_notes":  raw.get("memo_consistency_notes", []),
         })
         print(f"Proposed model (pipeline): '{output.model_name}'")
