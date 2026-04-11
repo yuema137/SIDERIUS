@@ -1411,6 +1411,72 @@ This exercises the full proposal → implement → validate → tune loop with t
 
 ---
 
+---
+
+## 5. Critical concern: prompt scalability and LLM attention drift
+
+### The problem
+
+As the exploration loop runs for N iterations, naive implementations will accumulate unbounded context:
+- Raw experiment records: N iterations × 5 rounds × ~3KB each → **150KB+ after 10 iterations**
+- Model descriptions and source code: grows with each new agent-generated model
+- Vocabulary: grows with candidates and discoveries
+
+When the prompt exceeds ~30-50K tokens, two things happen:
+1. **Cost**: each LLM call becomes expensive (billed per input token)
+2. **Attention drift**: the LLM's ability to attend to specific details degrades with prompt length. Critical information (the SOTA score, the vocabulary constraints, the prediction to evaluate) gets lost in a sea of historical records. This is the "lost in the middle" problem — LLMs attend strongly to the beginning and end of the prompt but poorly to the middle.
+
+### The solution: compressed memory, not raw history
+
+The vocabulary system IS the compression mechanism. The interpretation agent does NOT re-read all raw records every iteration. Instead:
+
+**What the interpretation agent receives each round:**
+
+| Input | Size | Grows? | Purpose |
+|-------|------|--------|---------|
+| Previous lab report (`InterpretationOutput` from iter N-1) | ~5KB | No — replaced each round | Compressed memory of all previous iterations |
+| New records (from iter N-1 tuning only) | ~5-15KB | No — fixed per iteration | What happened in the latest experiment |
+| Runtime vocabulary (features + capabilities + discoveries) | ~10KB | Slowly (bounded by promotion rules) | The agent's accumulated knowledge base |
+| Previous proposal (`ProposalOutput` with prediction + links) | ~3KB | No — one per iteration | What was predicted, to evaluate against results |
+
+**Total prompt: ~25-35KB per iteration**, regardless of how many iterations have run.
+
+The previous lab report is the compressed memory — it carries forward the essential findings from ALL previous iterations in ~5KB. Each round, the interpretation agent:
+1. Reads yesterday's lab report (what we knew before)
+2. Reads today's data (what happened in the latest experiment)
+3. Produces today's lab report (updated knowledge, same size as yesterday's)
+
+This is how a human scientist works — you read your last notebook entry and today's data, not the entire experimental history.
+
+### How vocabulary bounds the growth
+
+- **Features and capabilities**: bounded by the promotion rules. Most candidates never get promoted. The canonical seed stays at ~20 entries. Candidates churn — new ones appear, unused ones fade. Total stays ~30-50 entries.
+- **Discoveries**: the most growth-prone kind. Each iteration may add 1-3 discoveries. After 20 iterations: ~40-60 discoveries. At ~100 chars each: ~5-6KB. Manageable.
+- **If discoveries grow too large**: the interpretation agent can **summarize** older discoveries into higher-level findings. E.g., 5 individual "attention didn't help X" discoveries → 1 summary discovery "Attention mechanisms have not improved low-frequency performance across 5 experiments." This is a future concern, not immediate.
+
+### Proposal agent prompt budget
+
+The proposal agent receives even more context (comparison stage gets source code). Budget:
+
+| Input | Size | Notes |
+|-------|------|-------|
+| Candidate models (top N, with source code) | ~15-20KB | Bounded by ModelSelectionStrategy.top_n |
+| Runtime vocabulary | ~10KB | Same as interpretation |
+| Expert context (advice + strategy report) | ~5KB | Fixed |
+| Accumulated pipeline stages (comparison + reasoning) | ~5-10KB | Fixed per pipeline run |
+
+**Total: ~35-45KB per proposal.** The source code is the biggest cost, controlled by the `top_n` pre-filter. If we increase to 10+ models, we should either truncate source code or only include code for the SOTA + the model being modified.
+
+### Design rules to prevent prompt explosion
+
+1. **The lab report replaces raw records.** The interpretation agent never receives "all records since the beginning." It receives the previous lab report + new data.
+2. **The vocabulary is the memory.** Everything worth remembering is in the vocabulary (features, capabilities, discoveries). If it's not in the vocabulary, it's not remembered.
+3. **Source code is pre-filtered.** Only top N models get their source code included. The `ModelSelectionStrategy` controls this budget.
+4. **Discoveries can be summarized.** If the discovery list grows beyond ~50 entries, the interpretation agent consolidates older ones into summaries.
+5. **Each agent has a token budget.** The pipeline runner should estimate prompt size before calling the LLM and warn if it exceeds a threshold (e.g., 40K tokens).
+
+---
+
 # Appendix: Original V1 proposal
 
 The V1 proposal (preserved for context — superseded by V2 above) is below. V2 keeps V1's scientific ambition, drops the premature abstractions, and replaces the sidecar journal with a schema-and-protocols approach.
