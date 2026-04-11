@@ -86,6 +86,7 @@ from nodes.ml_model_proposal_agent import MLModelProposalAgent
 from nodes.ml_model_implementor import MLModelImplementor
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
+from agent.schemas.proposal import VocabEntry
 from workflows.llm_config import WorkflowLLMConfig, ProposalLLMConfig, NodeLLMConfig
 
 
@@ -423,6 +424,10 @@ def run_workflow(
     iteration_results: list[HyperparamTuningOutput] = []
     best_score_overall: float | None = None
 
+    # Phase C: track previous proposal and runtime vocab across iterations
+    previous_proposal_data: dict | None = None  # serialized ProposalOutput from iter N-1
+    current_runtime_vocab = list(vocab_seed)     # starts with seed, grows with discoveries
+
     # --- Iteration loop ---
     for iteration in range(1, max_iterations + 1):
         iter_dir = os.path.join(run_dir, f"iteration_{iteration:03d}")
@@ -438,6 +443,8 @@ def run_workflow(
         interp_input = InterpretationInput(
             summaries=summary_groups,
             human_advice=human_advice_interpret,
+            runtime_vocab=current_runtime_vocab,
+            previous_proposal=previous_proposal_data,
             storage=interp_storage,
         )
 
@@ -606,6 +613,18 @@ def run_workflow(
         for s in new_summaries:
             s.model_description = proposal.model_description
         summary_groups.extend(new_summaries)
+
+        # --- Phase C: update vocabulary feedback for next iteration ---
+        # Save proposal data so next iteration's interpretation can evaluate it
+        previous_proposal_data = proposal.model_dump()
+        # Update runtime vocab from interpretation output (if it produced one)
+        if hasattr(interpretation, "runtime_vocab") and interpretation.runtime_vocab:
+            current_runtime_vocab = [
+                v if hasattr(v, "name") else VocabEntry.model_validate(v)
+                for v in interpretation.runtime_vocab
+            ]
+            print(f"  [{iteration}] Vocab updated: {len(current_runtime_vocab)} entries "
+                  f"({sum(1 for v in current_runtime_vocab if v.kind == 'discovery')} discoveries)")
 
         # --- Check score target ---
         if tune_output.best_denoising_score is not None:
