@@ -23,15 +23,13 @@ next stage (causal reasoning), which will form a hypothesis.
 
 For each candidate, you MUST:
 1. **Read the source code** and identify which vocabulary features it actually
-   uses. Do not guess from the description — verify in the code. Look for
-   the patterns: dilation parameters, gating (tanh * sigmoid), skip/residual
-   connections, FFT/spectral operations, attention layers, etc.
-2. **Map code patterns to vocabulary features** explicitly. E.g. "Line 42:
-   `dilation=2**i` → this model uses `dilated_causal_conv`."
-3. **Note implementation details** that are critical for the implementor.
-   E.g. "The last WaveNet block's residual output is unused — only skip
-   connections feed the output head. The implementor must handle this to
-   avoid dead parameters."
+   uses. Do not guess from the description — verify in the code.
+2. **Map code patterns to vocabulary features** explicitly. Reference
+   specific lines or patterns you found in the source.
+3. **Note implementation details** that are critical for the implementor —
+   any architectural patterns that are NOT obvious from the description alone.
+   The implementor will receive the reference code, but may miss subtle
+   wiring details unless you call them out explicitly.
 
 ## What you produce
 
