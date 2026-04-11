@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from agent.schemas.hyperparam_tuning import ExpertAdviceInput
+from agent.schemas.proposal import VocabEntry, ProposedVocabLink, FalsifiablePrediction
 
 
 class ModelRunSummary(BaseModel):
@@ -157,6 +158,20 @@ class InterpretationInput(BaseModel):
         description="Optional human-provided guidance (highest priority — overrides expert_advice). "
                     "When present, injected into the LLM prompt as high-priority context.",
     )
+    # --- Vocabulary feedback (Phase C) ---
+    runtime_vocab: List[VocabEntry] = Field(
+        default_factory=list,
+        description="Current vocabulary (seed + candidates + discoveries) from "
+                    "previous iterations. Empty on first iteration (uses seed). "
+                    "This IS the compressed memory of iterations 0..N-2.",
+    )
+    previous_proposal: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Serialized ProposalOutput from the previous iteration. "
+                    "Contains falsifiable_prediction, proposed_vocab_links, "
+                    "inherited_components. None on the first iteration.",
+    )
+
     storage: StorageConfig = Field(
         default_factory=lambda: StorageConfig(
             backend="local",
@@ -272,4 +287,26 @@ class InterpretationOutput(BaseModel):
     per_model_training_segments: Optional[Dict[str, int]] = Field(
         default=None,
         description="model_type → training PSD segments used in best experiment.",
+    )
+
+    # --- Vocabulary feedback (Phase C) ---
+    runtime_vocab: List[VocabEntry] = Field(
+        default_factory=list,
+        description="Updated vocabulary: seed + candidates + discoveries from all "
+                    "iterations including this one. This is the compressed memory "
+                    "that the next iteration's proposal agent receives. "
+                    "Empty in legacy mode (no vocabulary).",
+    )
+    prediction_evaluation: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Evaluation of the previous proposal's FalsifiablePrediction. "
+                    "Contains: metric, predicted_value, actual_value, "
+                    "outcome ('confirmed'/'refuted'/'partial'), boldness, "
+                    "information_gain. None if no previous prediction exists.",
+    )
+    new_discoveries: List[VocabEntry] = Field(
+        default_factory=list,
+        description="New kind='discovery' entries generated from this round's "
+                    "evaluation. These are empirical findings expressed as "
+                    "sentences, added to runtime_vocab for the next iteration.",
     )

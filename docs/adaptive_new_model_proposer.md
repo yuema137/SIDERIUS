@@ -1300,9 +1300,9 @@ Iteration N:
 ### Sub-tasks (NEXT)
 
 **Vocabulary feedback loop (critical path):**
-- ☐ C.13 Add `falsifiable_prediction`, `proposed_vocab_links`, `proposed_discoveries` to `ProposalOutput`. Pipeline runner copies these from the DiscoveryMemo.
-- ☐ C.14 Add `previous_proposal`, `runtime_vocab` to `InterpretationInput`.
-- ☐ C.15 Add `runtime_vocab`, `prediction_evaluation`, `new_discoveries` to `InterpretationOutput`.
+- ☑ C.13 `ProposalOutput`: added `falsifiable_prediction: Optional[FalsifiablePrediction]`, `proposed_vocab_links: List[ProposedVocabLink]`, `proposed_discoveries: List[VocabEntry]`. Pipeline runner copies these from the DiscoveryMemo's comparison + reasoning stage outputs. **Done**.
+- ☑ C.14 `InterpretationInput`: added `runtime_vocab: List[VocabEntry]` (compressed memory of iterations 0..N-2, empty on first iter) and `previous_proposal: Optional[Dict]` (serialized ProposalOutput from iter N-1, None on first iter). **Done**.
+- ☑ C.15 `InterpretationOutput`: added `runtime_vocab: List[VocabEntry]` (updated vocabulary for next iter), `prediction_evaluation: Optional[Dict]` (confirmed/refuted/partial + boldness + info_gain), `new_discoveries: List[VocabEntry]` (empirical findings from this round). All default empty — backward compat. **Done**.
 - ☐ C.4 Implement vocab aggregator in interpretation agent: merge seed + candidates + discoveries from all previous records. Evaluate FalsifiablePrediction. Generate discovery entries.
 - ☐ C.7a Update interpret→propose protocol to pass `runtime_vocab` (replaces static `_load_vocab_seed()` in the workflow).
 - ☐ C.16 Update interpretation agent's LLM prompt to require vocabulary-constrained lab report — every finding must reference features, capabilities, or discoveries from the maintained list.
