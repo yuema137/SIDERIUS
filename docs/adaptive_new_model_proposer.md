@@ -1281,21 +1281,21 @@ Iteration N:
   (records stored for iteration N+1)
 ```
 
-### Schema changes needed
+### Schema changes needed — ALL DONE (C.13-C.15)
 
-**`ProposalOutput`** — add fields so scientific content survives:
-- ☐ `falsifiable_prediction: Optional[FalsifiablePrediction]` — the numerical prediction to evaluate after tuning
-- ☐ `proposed_vocab_links: List[ProposedVocabLink]` — hypothesized feature→capability connections
-- ☐ `proposed_discoveries: List[VocabEntry]` — new `kind="discovery"` entries the proposer suggests (from the DiscoveryMemo)
+**`ProposalOutput`** (C.13) — scientific content survives past proposal stage:
+- ☑ `falsifiable_prediction: Optional[FalsifiablePrediction]` — numerical prediction to evaluate
+- ☑ `proposed_vocab_links: List[ProposedVocabLink]` — feature→capability hypotheses
+- ☑ `proposed_discoveries: List[VocabEntry]` — new `kind="discovery"` entries
 
-**`InterpretationOutput`** — add fields for the lab report:
-- ☐ `runtime_vocab: List[VocabEntry]` — full vocabulary (seed + candidates + discoveries) for the next proposal
-- ☐ `prediction_evaluation: Optional[dict]` — evaluation of previous proposal's FalsifiablePrediction (metric, predicted, actual, outcome: confirmed/refuted/partial)
-- ☐ `new_discoveries: List[VocabEntry]` — discovery entries generated from this round's evaluation
+**`InterpretationInput`** (C.14) — receives compressed memory + new data:
+- ☑ `runtime_vocab: List[VocabEntry]` — compressed memory of iterations 0..N-2
+- ☑ `previous_proposal: Optional[Dict]` — previous iter's ProposalOutput for evaluation
 
-**`InterpretationInput`** — needs to receive previous proposal data:
-- ☐ `previous_proposal: Optional[dict]` — serialized ProposalOutput from the previous iteration (contains falsifiable_prediction, proposed_vocab_links, inherited_components)
-- ☐ `runtime_vocab: List[VocabEntry]` — current vocabulary from the previous round (or seed for round 1)
+**`InterpretationOutput`** (C.15) — produces updated memory:
+- ☑ `runtime_vocab: List[VocabEntry]` — updated vocabulary for next iteration
+- ☑ `prediction_evaluation: Optional[Dict]` — confirmed/refuted/partial + boldness
+- ☑ `new_discoveries: List[VocabEntry]` — empirical findings from this round
 
 ### Sub-tasks (NEXT)
 
