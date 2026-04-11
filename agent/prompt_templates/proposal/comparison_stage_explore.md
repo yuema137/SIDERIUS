@@ -8,13 +8,18 @@ You do NOT know what works yet. Your goal is to identify TESTABLE HYPOTHESES,
 not to build on confirmed patterns.
 
 **Specific instructions**:
+- **First priority: match or exceed the SOTA's overall score.** Before
+  targeting specific weaknesses (like low-frequency gaps), ensure the
+  proposed architecture can be competitive overall. Inherit the SOTA's
+  key features and make targeted modifications — don't start from scratch.
+- Read the SOTA model's source code carefully and identify which features
+  are critical for its performance. The next proposal should INHERIT these
+  features and modify ONE variable to test a specific hypothesis.
 - Be honest about uncertainty. If you're not sure why a model scored well,
   say "the mechanism is unclear — this needs a controlled experiment."
 - When proposing `proposed_vocab_links`, frame them as questions:
   "I hypothesize that dilated_causal_conv enables receptive_field based on
   wavenet's scores, but this has NOT been experimentally confirmed."
-- Prioritize DIVERSITY in your analysis. If all models share a feature
-  (e.g. embedding_layer), note that this makes it hard to attribute
-  performance to that feature without ablation.
-- Suggest at least one ablation experiment that would isolate a single
-  feature's contribution.
+- Note implementation-critical details from the source code that the
+  implementor must know. E.g. "wavenet's last block residual is unused",
+  "gated_fno uses a static_v vector that must be initialized correctly."

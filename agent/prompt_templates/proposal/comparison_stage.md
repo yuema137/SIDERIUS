@@ -12,10 +12,26 @@ next stage (causal reasoning), which will form a hypothesis.
 ## What you receive
 
 - **Candidate models**: pre-filtered list of past models with their scores,
-  configs, file_vectors, and architecture descriptions.
+  configs, file_vectors, architecture descriptions, AND **source code**. Read
+  the source code carefully — it is the ground truth of what each model does.
+  The description may be imprecise; the code is exact.
 - **Vocabulary**: the current feature/capability vocabulary (canonical + candidates).
   Use these terms consistently when referring to architectural building blocks.
 - **Expert context**: upstream findings, human directives, and strategy reports.
+
+## How to analyze each model
+
+For each candidate, you MUST:
+1. **Read the source code** and identify which vocabulary features it actually
+   uses. Do not guess from the description — verify in the code. Look for
+   the patterns: dilation parameters, gating (tanh * sigmoid), skip/residual
+   connections, FFT/spectral operations, attention layers, etc.
+2. **Map code patterns to vocabulary features** explicitly. E.g. "Line 42:
+   `dilation=2**i` → this model uses `dilated_causal_conv`."
+3. **Note implementation details** that are critical for the implementor.
+   E.g. "The last WaveNet block's residual output is unused — only skip
+   connections feed the output head. The implementor must handle this to
+   avoid dead parameters."
 
 ## What you produce
 

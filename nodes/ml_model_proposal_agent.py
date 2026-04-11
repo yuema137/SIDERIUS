@@ -397,7 +397,7 @@ class MLModelProposalAgent:
 
     def _run_pipeline(self, inp: ProposalInput) -> ProposalOutput:
         """Three-stage pipeline: comparison → reasoning → proposing."""
-        from nodes.proposal_helpers import select_candidate_models, resolve_exploration_mode
+        from nodes.proposal_helpers import select_candidate_models, resolve_exploration_mode, enrich_candidates_with_source
         from agent.prompt_templates.proposal import load_stage_prompt, render_expert_context
 
         pipeline = inp.reasoning_pipeline
@@ -409,7 +409,11 @@ class MLModelProposalAgent:
 
         # B.10 — pre-filter models
         candidates = select_candidate_models(inp.interpretation, pipeline.model_selection)
-        print(f"   Candidates: {[c['model_type'] for c in candidates]} ({len(candidates)} models)")
+        # Enrich with source code + descriptions for the comparison stage
+        candidates = enrich_candidates_with_source(candidates)
+        source_counts = sum(1 for c in candidates if c.get("source_code"))
+        print(f"   Candidates: {[c['model_type'] for c in candidates]} "
+              f"({len(candidates)} models, {source_counts} with source code)")
 
         # Prepare shared context for all stages
         expert_context_block = render_expert_context(inp.expert_context)
