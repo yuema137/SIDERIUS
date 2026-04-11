@@ -1,6 +1,6 @@
 # Design Proposal V2: Adaptive Scientific Discovery Framework for SIDERIUS
 
-**Status**: Phase B Groups 1+2 implemented (schemas, tests, vocab seed). Group 3 (prompt templates) next. Supersedes the V1 proposal at the bottom of this file.
+**Status**: Phase B complete. Phase C in progress — validator inheritance check done, chain test validated end-to-end. Supersedes the V1 proposal at the bottom of this file.
 
 ## 0. The actual problem and the key design idea
 
@@ -1216,6 +1216,26 @@ Already done (in Phase B):
 - ☑ C.2 `_check_inherited_components()` — regex-matches each claimed component's pattern from the vocab seed against plugin source. Unknown entries soft-skipped. Case-insensitive. **Done** — `nodes/ml_code_validator_agent.py`.
 - ☑ C.3 Wired as check #8 in the validator's `run()`. Only active when `inherited_components` is non-empty. Also added `inherited_components` to `ProposalOutput` (copied from DiscoveryMemo) and `ValidatorInput`. **Done**.
 - ☑ C.10 9 unit tests: valid pass, missing fail, unknown skip, capability skip, empty list, mixed, no vocab, case insensitive, simple source fails. **Done** — `tests/unit/agent/ml_code_validator_agent/test_inheritance_check.py`.
+
+**Chain test validated (end-to-end):**
+
+The full pipeline was validated in a real chain test (`lilab_chain_v2`):
+- 3-stage proposal pipeline produces `attn_wavenet` — inherits all 4 wavenet features, adds attention
+- Implementor receives reference code from ancestor models as template
+- Validator passes all 9 checks including inheritance verification
+- Tuner runs successfully with trial mode
+
+Key fixes discovered during chain testing:
+- ☑ Validator gradient check: dead parameters → warning, not failure (common in residual architectures)
+- ☑ Validator regex: `re.DOTALL` for cross-line pattern matching
+- ☑ Validator LLM reviewer: standard engineering enhancements are acceptable deviations
+- ☑ Proposal agent constructor: accepts `**kwargs` for ProposalLLMConfig per-stage kwargs
+- ☑ Source code enrichment: comparison stage receives actual model source code, not just descriptions
+- ☑ Reference code: implementor receives ancestor model code as template via `reference_code` field on `ImplementorInput`
+- ☑ Generic prompts: model-specific knowledge removed from system prompts, moved to advice files
+- ☑ Advice file: `tuner_advice/chain_v2_proposer_advice.json` — external model-specific knowledge for proposer + implementor
+
+**Design principle confirmed**: system prompts are generic (the hardware); advice files inject model-specific knowledge (the software). Different model families get different advice files — no prompt changes needed.
 
 **Pipeline hardening:**
 - ☐ B.22 Memo validation failure → retry in the proposal agent. Deviation notes handling when Stage 3 flags inconsistencies.
