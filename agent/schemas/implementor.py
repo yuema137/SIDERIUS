@@ -56,6 +56,13 @@ class ImplementorInput(BaseModel):
                     "code, and produces a targeted fix. Total attempts = 1 + max_retries. "
                     "Set to 0 to disable self-correction.",
     )
+    reference_code: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Source code of referenced ancestor models. Keyed by model_type. "
+                    "Loaded automatically from inherited_components — the implementor "
+                    "uses this as a template to copy-and-modify rather than writing "
+                    "from scratch. Empty dict = no reference code available.",
+    )
     expert_advice: ExpertAdviceInput = Field(
         default="",
         description="Structured guidance from upstream agents or orchestrators. "

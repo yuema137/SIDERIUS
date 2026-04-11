@@ -358,6 +358,29 @@ def _build_reasoning_prompt(inp: ImplementorInput) -> str:
             inp.human_advice,
         ]
 
+    # --- Reference code from ancestor models ---
+    if inp.reference_code:
+        lines += [
+            "",
+            "## Reference Code (from ancestor models — USE AS TEMPLATE)",
+            "",
+            "The following source code is from models your design inherits from.",
+            "Use this as a reference implementation — copy and modify rather than",
+            "writing from scratch. Preserve the reference code's architectural",
+            "patterns faithfully, even if some appear redundant. The reference",
+            "code is a WORKING implementation; your job is to extend it, not",
+            "to rewrite it from scratch.",
+            "",
+        ]
+        for model_type, source in inp.reference_code.items():
+            lines += [
+                f"### {model_type} (reference implementation)",
+                "```python",
+                source,
+                "```",
+                "",
+            ]
+
     return "\n".join(lines)
 
 
