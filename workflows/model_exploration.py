@@ -497,6 +497,24 @@ def run_workflow(
                 if human_advice_implement is not None:
                     impl_input.human_advice = human_advice_implement
 
+                # Load reference code from inherited_components
+                if hasattr(proposal, 'inherited_components') and proposal.inherited_components:
+                    from nodes.proposal_helpers import load_model_source
+                    ref_models = set()
+                    for ic in proposal.inherited_components:
+                        mt = ic.from_model_type if hasattr(ic, 'from_model_type') else ic.get('from_model_type')
+                        if mt:
+                            ref_models.add(mt)
+                    ref_code = {}
+                    for mt in ref_models:
+                        src = load_model_source(mt)
+                        if src:
+                            ref_code[mt] = src
+                    if ref_code:
+                        impl_input.reference_code = ref_code
+                        print(f"    Reference code: {list(ref_code.keys())} "
+                              f"({sum(len(v.split(chr(10))) for v in ref_code.values())} lines)")
+
                 impl_output = MLModelImplementor(
                     **llm_config.get("implement"),
                 ).run(impl_input)
@@ -512,6 +530,9 @@ def run_workflow(
                 )
                 if human_advice_validate is not None:
                     valid_input.human_advice = human_advice_validate
+                # Pass inherited_components from the proposal for check #8
+                if hasattr(proposal, 'inherited_components') and proposal.inherited_components:
+                    valid_input.inherited_components = proposal.inherited_components
 
                 validation = MLCodeValidatorAgent(
                     **valid_llm,

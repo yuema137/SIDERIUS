@@ -37,7 +37,7 @@
     "description": "Parallel self-attention heads computing global pairwise token interactions. O(T^2) memory.",
     "related_to": [],
     "tier": "canonical",
-    "pattern": "MultiheadAttention|self_attention|attention"
+    "pattern": "MultiheadAttention|self_attention|attention|TransformerEncoder|transformer"
   },
   {
     "name": "encoder_decoder",

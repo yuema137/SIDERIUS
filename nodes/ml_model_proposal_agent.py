@@ -322,7 +322,10 @@ class MLModelProposalAgent:
     """
 
     def __init__(self, provider: str = "gemini", model_id: str = "gemini-3.1-flash-lite-preview",
-                 max_retries: int | None = None, bridge_factory=None):
+                 max_retries: int | None = None, bridge_factory=None, **kwargs):
+        # **kwargs absorbs per-stage kwargs from ProposalLLMConfig flattening
+        # (comparison_provider, reasoning_model_id, etc.) — these are for
+        # future per-stage bridge routing, currently unused.
         self._bridge_factory = bridge_factory or LLMBridge
         self.bridge = self._bridge_factory(
             provider=provider, model_id=model_id, max_retries=max_retries,
@@ -394,7 +397,7 @@ class MLModelProposalAgent:
 
     def _run_pipeline(self, inp: ProposalInput) -> ProposalOutput:
         """Three-stage pipeline: comparison → reasoning → proposing."""
-        from nodes.proposal_helpers import select_candidate_models, resolve_exploration_mode
+        from nodes.proposal_helpers import select_candidate_models, resolve_exploration_mode, enrich_candidates_with_source
         from agent.prompt_templates.proposal import load_stage_prompt, render_expert_context
 
         pipeline = inp.reasoning_pipeline
@@ -406,7 +409,11 @@ class MLModelProposalAgent:
 
         # B.10 — pre-filter models
         candidates = select_candidate_models(inp.interpretation, pipeline.model_selection)
-        print(f"   Candidates: {[c['model_type'] for c in candidates]} ({len(candidates)} models)")
+        # Enrich with source code + descriptions for the comparison stage
+        candidates = enrich_candidates_with_source(candidates)
+        source_counts = sum(1 for c in candidates if c.get("source_code"))
+        print(f"   Candidates: {[c['model_type'] for c in candidates]} "
+              f"({len(candidates)} models, {source_counts} with source code)")
 
         # Prepare shared context for all stages
         expert_context_block = render_expert_context(inp.expert_context)

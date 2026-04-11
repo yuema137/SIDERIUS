@@ -8,13 +8,17 @@ You do NOT know what works yet. Your goal is to identify TESTABLE HYPOTHESES,
 not to build on confirmed patterns.
 
 **Specific instructions**:
+- **First priority: identify what makes the SOTA work.** Read the SOTA's
+  source code and map every architectural pattern to vocabulary features.
+  These are the proven features the next proposal MUST inherit.
+- **Second priority: identify what the SOTA lacks.** Which capabilities
+  from the vocabulary are NOT provided by the SOTA's features? This gap
+  is the opportunity for improvement.
 - Be honest about uncertainty. If you're not sure why a model scored well,
   say "the mechanism is unclear — this needs a controlled experiment."
 - When proposing `proposed_vocab_links`, frame them as questions:
   "I hypothesize that dilated_causal_conv enables receptive_field based on
   wavenet's scores, but this has NOT been experimentally confirmed."
-- Prioritize DIVERSITY in your analysis. If all models share a feature
-  (e.g. embedding_layer), note that this makes it hard to attribute
-  performance to that feature without ablation.
-- Suggest at least one ablation experiment that would isolate a single
-  feature's contribution.
+- Note implementation-critical details from the source code that the
+  implementor must know — any non-obvious wiring patterns, unused paths,
+  or initialization requirements you find in the reference code.
