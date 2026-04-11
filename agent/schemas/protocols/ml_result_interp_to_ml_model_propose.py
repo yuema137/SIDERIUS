@@ -87,8 +87,18 @@ def local_full_context(
         "expert_context":       [c.model_dump() for c in merged_context],
         "storage":              storage.model_dump(),
     }
-    if vocab_seed:
+
+    # Prefer runtime_vocab from interpretation output (accumulated memory)
+    # over the static seed. Falls back to static seed if interpretation
+    # didn't produce runtime_vocab (first iteration or legacy mode).
+    if hasattr(output, "runtime_vocab") and output.runtime_vocab:
+        result["vocab_seed"] = [
+            v.model_dump() if hasattr(v, "model_dump") else v
+            for v in output.runtime_vocab
+        ]
+    elif vocab_seed:
         result["vocab_seed"] = [v.model_dump() for v in vocab_seed]
+
     if reasoning_pipeline:
         result["reasoning_pipeline"] = reasoning_pipeline.model_dump()
 

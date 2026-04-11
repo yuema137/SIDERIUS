@@ -1303,11 +1303,11 @@ Iteration N:
 - ☑ C.13 `ProposalOutput`: added `falsifiable_prediction: Optional[FalsifiablePrediction]`, `proposed_vocab_links: List[ProposedVocabLink]`, `proposed_discoveries: List[VocabEntry]`. Pipeline runner copies these from the DiscoveryMemo's comparison + reasoning stage outputs. **Done**.
 - ☑ C.14 `InterpretationInput`: added `runtime_vocab: List[VocabEntry]` (compressed memory of iterations 0..N-2, empty on first iter) and `previous_proposal: Optional[Dict]` (serialized ProposalOutput from iter N-1, None on first iter). **Done**.
 - ☑ C.15 `InterpretationOutput`: added `runtime_vocab: List[VocabEntry]` (updated vocabulary for next iter), `prediction_evaluation: Optional[Dict]` (confirmed/refuted/partial + boldness + info_gain), `new_discoveries: List[VocabEntry]` (empirical findings from this round). All default empty — backward compat. **Done**.
-- ☐ C.4 Implement vocab aggregator in interpretation agent: merge seed + candidates + discoveries from all previous records. Evaluate FalsifiablePrediction. Generate discovery entries.
-- ☐ C.7a Update interpret→propose protocol to pass `runtime_vocab` (replaces static `_load_vocab_seed()` in the workflow).
-- ☐ C.16 Update interpretation agent's LLM prompt to require vocabulary-constrained lab report — every finding must reference features, capabilities, or discoveries from the maintained list.
-- ☐ C.17 Update workflow to pass `previous_proposal` and `runtime_vocab` through the chain.
-- ☐ C.18 Unit tests for vocab aggregation and prediction evaluation.
+- ☑ C.4 Vocab aggregator + prediction evaluation in `nodes/interpretation_helpers.py`: `evaluate_prediction()` (confirmed/refuted/partial with boldness + information_gain), `generate_discoveries()` (creates `kind="discovery"` VocabEntry entries from evaluation results), `build_runtime_vocab()` (merges seed + discoveries + candidates, deduplicates by name). Wired into `result_interpretation_agent.run()`. **Done**.
+- ☑ C.7a Protocol prefers `interpretation.runtime_vocab` (accumulated memory) over static seed. Falls back to static seed on first iteration or legacy mode. **Done**.
+- ☐ C.16 Update interpretation agent's LLM prompt to require vocabulary-constrained lab report — every finding must reference features, capabilities, or discoveries from the maintained list. (Deferred — the current prompts work, vocabulary constraint is a prompt quality improvement.)
+- ☑ C.17 Workflow tracks `previous_proposal_data` and `current_runtime_vocab` across iterations. Passes both to `InterpretationInput`. Updates `current_runtime_vocab` from interpretation output after each iteration. **Done**.
+- ☑ C.18 17 unit tests: prediction evaluation (8: confirmed/refuted/partial, file_vector metric, boldness, info_gain), discovery generation (4: confirmed/refuted/no_prediction, score vs SOTA), vocab building (5: seed only, add discoveries, dedup, candidates, multi-iteration growth). **Done**.
 
 **Promotion (after vocabulary loop is working):**
 - ☐ C.5 Structural promotion rule for candidates.

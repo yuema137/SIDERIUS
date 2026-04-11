@@ -476,6 +476,60 @@ class ResultInterpretationAgent:
             llm_bottlenecks = synthesis_response.get("bottlenecks", [])
             llm_take_home = synthesis_response.get("take_home_message", "")
 
+        # --- Phase C: Vocabulary feedback loop ---
+        from nodes.interpretation_helpers import (
+            evaluate_prediction, generate_discoveries, build_runtime_vocab,
+        )
+
+        prediction_evaluation = None
+        new_discoveries = []
+
+        if inp.previous_proposal:
+            prev_prediction = inp.previous_proposal.get("falsifiable_prediction")
+            prev_model_type = inp.previous_proposal.get("model_name", "unknown")
+            prev_inherited = inp.previous_proposal.get("inherited_components", [])
+            prev_vocab_links = inp.previous_proposal.get("proposed_vocab_links", [])
+
+            # Evaluate the prediction against actual results
+            if prev_prediction:
+                # Find the best score for the proposed model
+                prev_best = per_model_best.get(prev_model_type)
+                prev_fv = (per_model_file_vectors or {}).get(prev_model_type)
+
+                actual_results = {
+                    "best_denoising_score": prev_best,
+                    "best_file_vector": prev_fv,
+                }
+                prediction_evaluation = evaluate_prediction(prev_prediction, actual_results)
+                print(f"  Prediction evaluation: {prediction_evaluation.get('outcome', '?')} "
+                      f"(predicted={prediction_evaluation.get('predicted_value')}, "
+                      f"actual={prediction_evaluation.get('actual_value')})")
+
+            # Generate discoveries from the evaluation
+            new_discoveries = generate_discoveries(
+                prediction_eval=prediction_evaluation,
+                model_type=prev_model_type,
+                best_score=per_model_best.get(prev_model_type),
+                inherited_components=prev_inherited,
+                proposed_vocab_links=prev_vocab_links,
+            )
+            if new_discoveries:
+                print(f"  New discoveries: {len(new_discoveries)}")
+                for d in new_discoveries:
+                    print(f"    - {d.description[:100]}...")
+
+        # Build updated runtime vocabulary
+        proposed_candidates = []
+        if inp.previous_proposal:
+            proposed_candidates = inp.previous_proposal.get("proposed_discoveries", [])
+        runtime_vocab = build_runtime_vocab(
+            incoming_vocab=list(inp.runtime_vocab),
+            new_discoveries=new_discoveries,
+            proposed_candidates=proposed_candidates,
+        )
+        print(f"  Runtime vocab: {len(runtime_vocab)} entries "
+              f"({sum(1 for v in runtime_vocab if (v.kind if hasattr(v, 'kind') else v.get('kind')) == 'discovery')} discoveries)")
+
         # --- Build and validate output ---
         output = InterpretationOutput.model_validate({
             "model_types":           effective_types,
@@ -495,6 +549,10 @@ class ResultInterpretationAgent:
             "per_model_params":            per_model_params or None,
             "per_model_training_segments": per_model_training_segments or None,
             "take_home_message":     llm_take_home,
+            # Phase C: vocabulary feedback
+            "runtime_vocab":         [v.model_dump() if hasattr(v, "model_dump") else v for v in runtime_vocab],
+            "prediction_evaluation": prediction_evaluation,
+            "new_discoveries":       [d.model_dump() for d in new_discoveries],
         })
 
         # --- Persist ---
