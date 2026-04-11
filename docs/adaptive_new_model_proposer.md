@@ -1240,28 +1240,93 @@ Key fixes discovered during chain testing:
 **Pipeline hardening:**
 - ☐ B.22 Memo validation failure → retry in the proposal agent. Deviation notes handling when Stage 3 flags inconsistencies.
 
-**Interpretation agent — accumulate vocabulary from records:**
-- ☐ C.4 Runtime vocab aggregator: walk all records, collect `inherited_components` and `proposed_vocab_links`, merge with canonical seed, deduplicate by name. This runs every round — early rounds have few candidates; later rounds have many.
-- ☐ C.7 Add `runtime_vocab: List[VocabEntry]` and `proposed_links_summary` to `InterpretationOutput`.
-- ☐ C.7a Update protocol to pass `runtime_vocab` from interpretation → proposal (replaces static `_load_vocab_seed()` in the workflow).
+---
 
-**Promotion — graduate candidates to canonical:**
-- ☐ C.5 Structural promotion rule: candidate appears in `≥ policy.min_runs_for_promotion` distinct runs ∧ ≥1 above SOTA ∧ `delta > 0` (if `policy.require_positive_delta`) ∧ pattern present. Produces `vocab_changes` event, does NOT mutate the seed file.
-- ☐ C.5a `ProposedVocabLink` promotion: links confirmed in ≥2 runs → populate `VocabEntry.related_to` on the corresponding entries in `runtime_vocab`.
-- ☐ C.6 Semantic dedup: LLM call comparing candidate description against existing canonicals. Returns "novel" / "synonym of X" / "ambiguous". Synonyms merged via `aliases` list.
+### The vocabulary as memory — core design for C.4+
+
+> **The vocabulary system is the agent's long-term memory.** It has three kinds of entries, each playing a different role:
+>
+> - **Features** (`kind="feature"`): concrete architectural building blocks the agent can point to in code. Short names. E.g. `dilated_causal_conv`, `multi_head_attention`.
+> - **Capabilities** (`kind="capability"`): measurable architectural properties that features may provide. Short names. E.g. `receptive_field`, `frequency_resolution`.
+> - **Discoveries** (`kind="discovery"`): empirical findings from experiments — sentences/phrases that capture what the agent has learned. These are the "valuable discoveries" that accumulate over iterations. E.g. `"WaveNet scores 5.57 overall with dominant high-freq performance (files 17-19 > 50k). No other model exceeds 4.3."`, `"Adding multi_head_attention to wavenet (attn_wavenet) did NOT improve low-freq scores (files 0-5 remained near zero). Attention alone does not solve the low-frequency gap."`
+>
+> Features and capabilities are short identifiers used as **constraint bridges** — they force the LLM to use consistent terminology. Discoveries are longer phrases that capture **what the agent has learned** from experiments. Together they form the agent's accumulated memory that grows over iterations.
+>
+> The interpretation agent produces a **structured lab report** that MUST reference vocabulary terms. It cannot say random things — it must map every finding to specific features, capabilities, and discoveries. This constrains the LLM's reasoning to be grounded in the maintained vocabulary.
+>
+> The proposal agent **maintains the vocabulary** — it proposes new candidates (features, capabilities, discoveries), proposes feature→capability links, and reviews what was confirmed or refuted. The interpretation agent **reads the vocabulary** and uses it to structure its analysis.
+
+### Data flow for the vocabulary feedback loop
+
+```
+Iteration N:
+  Interpret(records from iterations 1..N-1)
+    - Reads: runtime_vocab (seed + all candidates + discoveries from previous rounds)
+    - Reads: FalsifiablePrediction from previous proposal
+    - Evaluates: was the prediction confirmed or refuted?
+    - Produces: structured lab report using vocabulary terms
+    - Produces: new discovery entries from this evaluation
+    - Produces: updated runtime_vocab (seed + candidates + discoveries)
+    ↓
+  Propose(interpretation + runtime_vocab + discoveries)
+    - Reads: lab report + vocabulary + discoveries
+    - Maintains: proposes new candidates, new links, new discoveries
+    - Uses confirmed discoveries to justify next proposal
+    - Produces: ProposalOutput with inherited_components +
+                falsifiable_prediction + proposed_vocab_links
+    ↓
+  Implement → Validate → Tune
+    - Produces: experiment records with scores, file_vectors
+    ↓
+  (records stored for iteration N+1)
+```
+
+### Schema changes needed
+
+**`ProposalOutput`** — add fields so scientific content survives:
+- ☐ `falsifiable_prediction: Optional[FalsifiablePrediction]` — the numerical prediction to evaluate after tuning
+- ☐ `proposed_vocab_links: List[ProposedVocabLink]` — hypothesized feature→capability connections
+- ☐ `proposed_discoveries: List[VocabEntry]` — new `kind="discovery"` entries the proposer suggests (from the DiscoveryMemo)
+
+**`InterpretationOutput`** — add fields for the lab report:
+- ☐ `runtime_vocab: List[VocabEntry]` — full vocabulary (seed + candidates + discoveries) for the next proposal
+- ☐ `prediction_evaluation: Optional[dict]` — evaluation of previous proposal's FalsifiablePrediction (metric, predicted, actual, outcome: confirmed/refuted/partial)
+- ☐ `new_discoveries: List[VocabEntry]` — discovery entries generated from this round's evaluation
+
+**`InterpretationInput`** — needs to receive previous proposal data:
+- ☐ `previous_proposal: Optional[dict]` — serialized ProposalOutput from the previous iteration (contains falsifiable_prediction, proposed_vocab_links, inherited_components)
+- ☐ `runtime_vocab: List[VocabEntry]` — current vocabulary from the previous round (or seed for round 1)
+
+### Sub-tasks (NEXT)
+
+**Vocabulary feedback loop (critical path):**
+- ☐ C.13 Add `falsifiable_prediction`, `proposed_vocab_links`, `proposed_discoveries` to `ProposalOutput`. Pipeline runner copies these from the DiscoveryMemo.
+- ☐ C.14 Add `previous_proposal`, `runtime_vocab` to `InterpretationInput`.
+- ☐ C.15 Add `runtime_vocab`, `prediction_evaluation`, `new_discoveries` to `InterpretationOutput`.
+- ☐ C.4 Implement vocab aggregator in interpretation agent: merge seed + candidates + discoveries from all previous records. Evaluate FalsifiablePrediction. Generate discovery entries.
+- ☐ C.7a Update interpret→propose protocol to pass `runtime_vocab` (replaces static `_load_vocab_seed()` in the workflow).
+- ☐ C.16 Update interpretation agent's LLM prompt to require vocabulary-constrained lab report — every finding must reference features, capabilities, or discoveries from the maintained list.
+- ☐ C.17 Update workflow to pass `previous_proposal` and `runtime_vocab` through the chain.
+- ☐ C.18 Unit tests for vocab aggregation and prediction evaluation.
+
+**Promotion (after vocabulary loop is working):**
+- ☐ C.5 Structural promotion rule for candidates.
+- ☐ C.5a `ProposedVocabLink` promotion: confirmed links → `VocabEntry.related_to`.
+- ☐ C.6 Semantic dedup LLM call.
 - ☐ C.11 Promotion rule unit tests.
-- ☐ C.12 Integration test: synthetic chain of records with repeated candidate → promotion event emitted.
 
-**Centrifugal metrics — prevent conservative collapse:**
-- ☐ Component delta scoring: `avg_score_with - avg_score_without` per vocabulary entry. *(Concern #4)*
-- ☐ Vocabulary diversity metric: `n_candidates / n_total` fed to exploration mode resolver. *(Concern #1)*
-- ☐ Information gain metric: `boldness × (1 if confirmed else 0)` tracked alongside hit rate. *(Concern #2)*
-- ☐ Strategy Performance Report: computed by interpretation agent, injected as `ExpertContextItem(kind="strategy_report")`. *(Feedback loop)*
+**Centrifugal metrics (after promotion is working):**
+- ☐ Component delta scoring. *(Concern #4)*
+- ☐ Vocabulary diversity metric. *(Concern #1)*
+- ☐ Information gain metric. *(Concern #2)*
+- ☐ Strategy Performance Report. *(Feedback loop)*
+
+**Pipeline hardening (can be done in parallel):**
+- ☐ B.22 Memo validation failure → retry.
 
 **Verify**:
-- `uv run pytest tests/unit/agent/ml_code_validator_agent/ -q` — all pass including inheritance tests.
-- Manual: run a chain round, inspect interpretation output for `runtime_vocab`, confirm accumulated candidates and links appear.
-- Manual: run a chain with a proposal claiming `dilated_causal_conv`, verify the validator checks for dilation in the code.
+- Run 2+ chain iterations. Inspect interpretation output: does `runtime_vocab` grow between iterations? Do discoveries accumulate? Is the prediction evaluation correct?
+- Check that the proposal agent references discoveries from previous rounds in its reasoning.
 
 ---
 
