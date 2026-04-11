@@ -1426,27 +1426,54 @@ When the prompt exceeds ~30-50K tokens, two things happen:
 1. **Cost**: each LLM call becomes expensive (billed per input token)
 2. **Attention drift**: the LLM's ability to attend to specific details degrades with prompt length. Critical information (the SOTA score, the vocabulary constraints, the prediction to evaluate) gets lost in a sea of historical records. This is the "lost in the middle" problem — LLMs attend strongly to the beginning and end of the prompt but poorly to the middle.
 
-### The solution: compressed memory, not raw history
+### The solution: vocabulary IS compressed memory
 
-The vocabulary system IS the compression mechanism. The interpretation agent does NOT re-read all raw records every iteration. Instead:
+The vocabulary system IS the compression mechanism. The interpretation agent does NOT re-read all raw records every iteration.
+
+**Core assumption: iterations 0 through N-2 are fully summarized in the vocabulary.**
+
+The vocabulary (features + capabilities + discoveries) is the compressed representation of everything the agent has learned from all previous experiments. If the vocabulary is good, you don't need the raw records — the vocabulary tells you what works, what doesn't, and why.
+
+This means:
+- Iteration N's interpretation agent receives: **vocabulary (memory of 0..N-2) + new records (iteration N-1 only) + previous proposal (to evaluate)**
+- It does NOT receive raw records from iterations 0..N-2
+- Everything worth knowing from those iterations is already in the vocabulary — especially `kind="discovery"` entries which capture empirical findings as sentences
 
 **What the interpretation agent receives each round:**
 
 | Input | Size | Grows? | Purpose |
 |-------|------|--------|---------|
-| Previous lab report (`InterpretationOutput` from iter N-1) | ~5KB | No — replaced each round | Compressed memory of all previous iterations |
+| Runtime vocabulary (features + capabilities + discoveries) | ~10KB | Slowly (bounded) | Compressed memory of iterations 0..N-2 |
 | New records (from iter N-1 tuning only) | ~5-15KB | No — fixed per iteration | What happened in the latest experiment |
-| Runtime vocabulary (features + capabilities + discoveries) | ~10KB | Slowly (bounded by promotion rules) | The agent's accumulated knowledge base |
 | Previous proposal (`ProposalOutput` with prediction + links) | ~3KB | No — one per iteration | What was predicted, to evaluate against results |
 
-**Total prompt: ~25-35KB per iteration**, regardless of how many iterations have run.
+**Total prompt: ~20-30KB per iteration**, regardless of how many iterations have run.
 
-The previous lab report is the compressed memory — it carries forward the essential findings from ALL previous iterations in ~5KB. Each round, the interpretation agent:
-1. Reads yesterday's lab report (what we knew before)
-2. Reads today's data (what happened in the latest experiment)
-3. Produces today's lab report (updated knowledge, same size as yesterday's)
+Each round, the interpretation agent:
+1. Reads the vocabulary (compressed memory of all previous iterations)
+2. Reads the latest experiment data (iteration N-1 only)
+3. Evaluates the previous prediction (confirmed/refuted?)
+4. Produces new discovery entries (what we just learned)
+5. Updates the runtime vocabulary (existing + new discoveries)
 
-This is how a human scientist works — you read your last notebook entry and today's data, not the entire experimental history.
+### Critical dependency: vocabulary quality determines memory fidelity
+
+> **This design only works if the vocabulary faithfully represents what we've learned.** If important findings are lost during compression (not captured as discoveries, or captured imprecisely), the agent loses information across iterations and may repeat failed experiments.
+>
+> This creates a **co-evolution requirement** between two capabilities:
+>
+> **Vocabulary extraction** (interpretation agent): how well do we capture findings from each experiment as vocabulary entries? If the interpretation agent misses a critical finding (e.g., "attention doesn't help low-freq"), that knowledge is lost forever — it won't be in the vocabulary for the next round.
+>
+> **Vocabulary usage** (proposal agent): how well does the proposal agent use the vocabulary to constrain its reasoning? If it ignores discoveries, then even perfect extraction is wasted.
+>
+> **Both must improve together** — improving extraction without improving usage is wasted work, and vice versa. In practice:
+>
+> 1. **Start simple**: first implementation captures basic discoveries (prediction confirmed/refuted, which features were used, what scores resulted). Good enough for the first 5-10 iterations.
+> 2. **Improve extraction when we see memory loss**: if the agent repeats a failed experiment, the discovery for that failure was either missing or poorly worded. Fix the interpretation prompt.
+> 3. **Improve usage when we see drift**: if the proposal agent ignores discoveries in its reasoning, strengthen the vocabulary constraint in the comparison/reasoning stage prompts.
+> 4. **Alternate improvements**: each chain batch reveals whether the bottleneck is extraction (agent doesn't capture the right findings) or usage (agent captures findings but ignores them). Fix the weaker link first, then switch to the other.
+>
+> **This is NOT a one-time implementation** — it's an ongoing quality improvement loop that runs in parallel with the experiment loop itself. The vocabulary system gets better as we tune its prompts, just like the ML models get better as we tune their hyperparameters.
 
 ### How vocabulary bounds the growth
 
