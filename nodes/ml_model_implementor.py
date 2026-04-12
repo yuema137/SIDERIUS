@@ -378,14 +378,10 @@ def _build_reasoning_prompt(inp: ImplementorInput) -> str:
     if inp.reference_code:
         lines += [
             "",
-            "## Reference Code (from ancestor models — USE AS TEMPLATE)",
+            "## Reference Code (from ancestor models — for context)",
             "",
-            "The following source code is from models your design inherits from.",
-            "Use this as a reference implementation — copy and modify rather than",
-            "writing from scratch. Preserve the reference code's architectural",
-            "patterns faithfully, even if some appear redundant. The reference",
-            "code is a WORKING implementation; your job is to extend it, not",
-            "to rewrite it from scratch.",
+            "The following source code is from models that have been tested on",
+            "this task. Use it according to the implement advice above.",
             "",
         ]
         for model_type, source in inp.reference_code.items():
@@ -402,12 +398,16 @@ def _build_reasoning_prompt(inp: ImplementorInput) -> str:
 
 def _build_code_prompt(reasoning: str, inp: ImplementorInput) -> str:
     model_cfg = inp.baseline_config.get("model_config", {})
+    advice_block = ""
+    if inp.human_advice:
+        advice_block = f"\n## Implement Advice (high priority)\n{inp.human_advice}\n"
     return (
         f"## Your Reasoning\n\n{reasoning}\n\n"
         f"---\n\n"
         f"## Model name: `{inp.model_name}`\n"
         f"## Class name: `{_class_name(inp.model_name)}`\n"
-        f"## Baseline model_config (use these as Field defaults): {json.dumps(model_cfg)}\n\n"
+        f"## Baseline model_config (use these as Field defaults): {json.dumps(model_cfg)}\n"
+        f"{advice_block}\n"
         "Now output the JSON code sections."
     )
 

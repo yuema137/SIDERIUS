@@ -462,6 +462,13 @@ class ProposalInput(BaseModel):
                     "validation failure so the proposal agent avoids the same mistakes. "
                     "Each entry is the error_message from a ValidatorOutput.",
     )
+    mindset: Optional[str] = Field(
+        default=None,
+        description="Mindset block injected at {# EXPLORATION_MODE_BLOCK #} in the "
+                    "causal reasoning stage prompt. Overrides the default _explore.md / "
+                    "_exploit.md fallback when provided. Sourced from advice['mindset']. "
+                    "When absent, the mode file is used (backward compatible with v1/v2).",
+    )
     storage: StorageConfig = Field(
         default_factory=lambda: StorageConfig(
             backend="local",

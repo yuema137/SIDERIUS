@@ -6,10 +6,9 @@ HYPOTHESIS about what to try next.
 
 ## Your task
 
-Based on the comparisons, propose ONE specific change to the SOTA model and
-articulate WHY it should improve performance. Your output is the core of the
-DiscoveryMemo — it must be falsifiable, comparative, and architecturally
-concrete.
+Based on the comparisons, propose what to try next and articulate WHY it
+should improve performance. Your output is the core of the DiscoveryMemo —
+it must be falsifiable, comparative, and architecturally concrete.
 
 ## What you receive
 
@@ -24,8 +23,8 @@ A JSON object with these fields:
 
 ```json
 {
-  "proposed_change": "What the new model changes RELATIVE TO the SOTA. Must be expressible as 'replace X with Y' or 'add Z to the SOTA's architecture'. Forbidden: 'completely new architecture'.",
-  "causal_hypothesis": "WHY the proposed change should improve the score. Must reference: (a) the SOTA mechanism it preserves, (b) the SOTA bottleneck it relaxes, (c) the new mechanism that addresses the bottleneck. Max 600 chars.",
+  "proposed_change": "What the new model tries. Can be a targeted delta on the SOTA ('add Z', 'replace X with Y') or a novel architecture ('design from scratch using mechanism M'). Be specific and architecturally concrete.",
+  "causal_hypothesis": "WHY this should improve the score. Must reference: (a) the bottleneck being addressed, (b) the mechanism that addresses it, (c) why existing models fail to address it. Max 600 chars.",
   "falsifiable_prediction": {
     "metric": "What to measure, e.g. 'mean(file_vector[0:5])' or 'denoising_score'",
     "current_value": 1.5,
@@ -63,10 +62,9 @@ A JSON object with these fields:
    not work" is not a failure mode. "The FNO layer doubles memory usage and
    may exceed the 10 GB VRAM budget" is.
 
-4. **Architecturally tethered**: the `proposed_change` must be expressible
-   as a delta against the SOTA. The proposing stage (Stage 3) will be
-   structurally constrained to implement THIS change. If Stage 3 diverges,
-   it must document the deviation.
+4. **Architecturally tethered**: the `proposed_change` must be concrete
+   enough for the proposing stage (Stage 3) to implement it unambiguously.
+   If Stage 3 diverges from your description, it must document the deviation.
 
 ## Additional rules
 

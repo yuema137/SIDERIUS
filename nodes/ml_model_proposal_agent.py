@@ -462,6 +462,7 @@ class MLModelProposalAgent:
                 stage_filename,
                 exploration_mode=mode,
                 template_vars=template_vars,
+                mindset=inp.mindset,
             )
 
             # Build user prompt: accumulated context + expert context + vocab
