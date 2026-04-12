@@ -151,7 +151,8 @@ PLUGIN_TEMPLATE = """\
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+from typing import Self
 {extra_imports}
 
 PLUGIN_MODEL_TYPE = "{model_name}"
@@ -162,6 +163,7 @@ class {ModelClass}Config(BaseModel):
     segmentation_size: int = Field(default={segmentation_size}, ge=1)
     batch_size: int = Field(default={batch_size}, ge=1)
 {config_fields_code}
+{config_validators_code}
 
 PLUGIN_CONFIG_CLASS = {ModelClass}Config
 
@@ -248,6 +250,14 @@ In your reasoning, cover all of the following:
 3. Trace the full forward pass, showing the tensor shape at each stage.
 4. What Pydantic config fields are needed? For each: name, type, default, valid range.
    Keep them minimal — only fields that the hyperparameter tuner will actually search.
+   For every channel dimension, answer these questions:
+   a. Is it passed to `.chunk(2, dim=1)` (gated activation)? If yes, it MUST be even.
+      Use `Field(..., multiple_of=2)` to enforce this.
+   b. Is it used as `d_model` in a TransformerEncoderLayer or MultiheadAttention?
+      If yes, it MUST be divisible by `nhead`. Choose defaults that satisfy this
+      (e.g. skip_channels=32, nhead=4). State the divisibility explicitly.
+   c. Is it used in a sinusoidal positional encoding that computes sin/cos pairs?
+      If yes, it MUST be even. Use `Field(..., multiple_of=2)`.
 5. Are there any shape alignment issues (e.g. after pooling/upsampling)?
    How will you handle them?
 6. What additional imports beyond torch, nn, F, BaseModel, Field are needed?
@@ -263,8 +273,9 @@ Now commit to the actual code sections.
 Output a JSON object with exactly these fields:
 
 {
-  "extra_imports": "any additional import lines beyond torch/nn/F/BaseModel/Field, one per line, or empty string",
+  "extra_imports": "any additional import lines beyond torch/nn/F/BaseModel/Field/model_validator, one per line, or empty string",
   "config_fields_code": "additional Pydantic field definitions — each line indented with 4 spaces, e.g.:\\n    channels: int = Field(default=64, ge=8, le=256)\\n    depth: int = Field(default=4, ge=1, le=8)",
+  "config_validators_code": "a @model_validator(mode='after') method enforcing divisibility constraints, indented with 4 spaces — or empty string if no constraints needed. Example:\\n    @model_validator(mode='after')\\n    def check_constraints(self) -> Self:\\n        if self.gate_channels % 2 != 0:\\n            raise ValueError(f'gate_channels must be even, got {self.gate_channels}')\\n        if self.skip_channels % self.nhead != 0:\\n            raise ValueError(f'skip_channels ({self.skip_channels}) must be divisible by nhead ({self.nhead})')\\n        return self",
   "config_fields": {"field_name": default_value, ...},
   "init_body": "the __init__ body after super().__init__(). Each line indented with 8 spaces.",
   "forward_body": "the forward body. Each line indented with 8 spaces. Must return [B, 256, T] float32."
@@ -294,8 +305,13 @@ Hard constraints — violating any of these makes the code invalid:
 - Do NOT include segmentation_size or batch_size in config_fields_code — those are already in the template.
 - Do NOT wrap the code in a class or function — write only the method body lines.
 - Do NOT include markdown fences or commentary in the code values.
-- Use only Pydantic V2 Field kwargs: ge, le, gt, lt, min_length, max_length. Do NOT use
-  min_items or max_items (those are Pydantic V1 and are deprecated).
+- Use only Pydantic V2 Field kwargs: ge, le, gt, lt, multiple_of, min_length, max_length.
+  Do NOT use min_items or max_items (those are Pydantic V1 and are deprecated).
+- Any channel dimension passed to `.chunk(2, dim=1)` (e.g. gate_channels for gated
+  activation) MUST be even. Declare it with `Field(..., multiple_of=2)`.
+- Any channel dimension used as `d_model` in TransformerEncoderLayer MUST satisfy
+  `d_model % nhead == 0`. Verify your default values satisfy this before committing
+  (e.g. skip_channels=32 with nhead=4 is valid; skip_channels=32 with nhead=6 is NOT).
 
 Output only the JSON object — no preamble, no markdown fences, no commentary."""
 
@@ -396,17 +412,43 @@ def _build_code_prompt(reasoning: str, inp: ImplementorInput) -> str:
     )
 
 
-def _build_repair_prompt(code: dict, error: str, inp: ImplementorInput) -> str:
+def _build_repair_prompt(
+    code: dict,
+    error: str,
+    inp: ImplementorInput,
+    error_history: list[tuple[int, str]] | None = None,
+) -> str:
+    """
+    Build repair prompt with full error history so the LLM doesn't fix one
+    mistake only to reintroduce a previous one.
+
+    Args:
+        code: The last generated code dict.
+        error: The current (latest) error.
+        inp: Implementor input.
+        error_history: List of (attempt_number, error_message) for all prior
+            failed attempts, in chronological order. Excludes the current error.
+    """
     model_cfg = inp.baseline_config.get("model_config", {})
+
+    history_section = ""
+    if error_history:
+        history_lines = ["## Error History (do NOT reintroduce these mistakes)\n"]
+        for attempt_num, past_error in error_history:
+            history_lines.append(f"Attempt {attempt_num}: {past_error}")
+        history_section = "\n".join(history_lines) + "\n\n"
+
     return (
         f"## Previous code (failed)\n\n"
         f"```json\n{json.dumps(code, indent=2)}\n```\n\n"
-        f"## Error\n\n{error}\n\n"
+        f"## Current Error (fix this)\n\n{error}\n\n"
+        f"{history_section}"
         f"---\n\n"
         f"## Model name: `{inp.model_name}`\n"
         f"## Class name: `{_class_name(inp.model_name)}`\n"
         f"## Baseline model_config: {json.dumps(model_cfg)}\n\n"
-        "Fix the error and output the corrected JSON code sections."
+        "Fix the current error without reintroducing any error from the history. "
+        "Output the corrected JSON code sections."
     )
 
 
@@ -421,10 +463,11 @@ def _assemble_plugin(inp: ImplementorInput, code: dict) -> str:
     batch_size = model_cfg.get("batch_size", train_cfg.get("batch_size", 1))
     model_cls  = _class_name(inp.model_name)
 
-    extra_imports     = code.get("extra_imports", "").strip()
+    extra_imports      = code.get("extra_imports", "").strip()
     config_fields_code = code.get("config_fields_code", "").rstrip()
-    init_body         = code.get("init_body", "        pass").rstrip()
-    forward_body      = code.get("forward_body", "        pass").rstrip()
+    config_validators_code = code.get("config_validators_code", "").rstrip()
+    init_body          = code.get("init_body", "        pass").rstrip()
+    forward_body       = code.get("forward_body", "        pass").rstrip()
 
     # Ensure correct indentation: init_body and forward_body must be indented 8 spaces
     init_body    = textwrap.indent(textwrap.dedent(init_body), "        ")
@@ -449,6 +492,12 @@ def _assemble_plugin(inp: ImplementorInput, code: dict) -> str:
     if extra_imports:
         extra_imports = "\n" + extra_imports
 
+    # Indent validators with 4 spaces (class body level); dedent first to normalise
+    if config_validators_code.strip():
+        config_validators_code = textwrap.indent(
+            textwrap.dedent(config_validators_code), "    "
+        )
+
     return PLUGIN_TEMPLATE.format(
         model_name=inp.model_name,
         ModelClass=model_cls,
@@ -456,6 +505,7 @@ def _assemble_plugin(inp: ImplementorInput, code: dict) -> str:
         batch_size=batch_size,
         extra_imports=extra_imports,
         config_fields_code=config_fields_code,
+        config_validators_code=config_validators_code,
         init_body=init_body,
         forward_body=forward_body,
     )
@@ -561,10 +611,12 @@ class MLModelImplementor:
         max_retries = inp.max_retries
         error = self._validate_code(code, inp)
         attempt = 0
+        error_history: list[tuple[int, str]] = []
         while error is not None and attempt < max_retries:
             attempt += 1
             print(f"   ⚠ Attempt {attempt + 1}/{max_retries + 1}: {error}")
-            repair_prompt = _build_repair_prompt(code, error, inp)
+            repair_prompt = _build_repair_prompt(code, error, inp, error_history)
+            error_history.append((attempt, error))
             code = self.bridge.generate(IMPLEMENTOR_REPAIR_PROMPT, repair_prompt)
             code = self._patch_common_mistakes(code)
             error = self._validate_code(code, inp)
