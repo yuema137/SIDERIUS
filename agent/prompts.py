@@ -458,6 +458,29 @@ def get_planner_user_prompt(
             f"You MUST propose a smaller config this round.\n"
         )
 
+    # Build a timing summary for the last successful experiment so the planner
+    # can judge speed against whatever budget is set in the expert advice.
+    slow_warning = ""
+    slow_records = [
+        r for r in memory_history
+        if r.get("status") == "success" and r.get("timing") is not None
+    ]
+    if slow_records:
+        last = slow_records[-1]
+        t = last.get("timing", {})
+        train_s = t.get("train_time_s") or 0
+        infer_s = t.get("inference_time_s") or 0
+        total_s = train_s + infer_s
+        seg = last.get("params", {}).get("model_config", {}).get("segmentation_size")
+        slow_warning = (
+            f"\n### ⏱  LAST EXPERIMENT TIMING:\n"
+            f"train={train_s/60:.1f} min, inference={infer_s/60:.1f} min, "
+            f"total={total_s/60:.1f} min"
+            + (f" (segmentation_size={seg})" if seg else "") + ".\n"
+            f"Compare this against the time budget in the Expert Advice and "
+            f"adjust segmentation_size or model complexity accordingly.\n"
+        )
+
     # Round context with phase information (when provided)
     round_context = ""
     if current_round is not None and max_rounds is not None:
@@ -504,11 +527,13 @@ def get_planner_user_prompt(
 
 ### Current Research Memory:
 {history_context}
-{oom_warning}{round_context}
+{oom_warning}{slow_warning}{round_context}
 ### INSTRUCTIONS:
 1. **Review Memory**: Look for patterns and previous failures/successes.
    - Records with status='skipped_oom_risk' were NEVER trained — they exceeded GPU memory.
    - Always follow the `memory.memory_update` field of any skipped record before proposing the next config.
+   - Check the `timing` field of past experiments and compare against the time budget
+     in Expert Advice. Reduce segmentation_size or model complexity if needed.
 2. **Follow Expert Advice**: Prioritize the direction suggested by the human expert.
 3. **Formulate Hypothesis**: Predict the outcome of this new trial.{model_constraint}
 4. **Choose Trial or Formal Mode**: Decide whether to run a fast trial or a full formal evaluation.

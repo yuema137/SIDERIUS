@@ -100,6 +100,14 @@ class ModelRunSummary(BaseModel):
         description="Number of trainable parameters in the best-scoring model.",
     )
 
+    # --- Compute cost ---
+    best_timing: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Timing dict from the best experiment: "
+                    "train_time_s, inference_time_s, scoring_time_s. "
+                    "Used to generate timing discoveries and warn the planner.",
+    )
+
     # --- Data volume context ---
     training_psd_segments: Optional[int] = Field(
         default=None,

@@ -506,12 +506,15 @@ class ResultInterpretationAgent:
                       f"actual={prediction_evaluation.get('actual_value')})")
 
             # Generate discoveries from the evaluation
+            prev_summary = per_model_summary_input.get(prev_model_type)
+            prev_timing = prev_summary.best_timing if prev_summary else None
             new_discoveries = generate_discoveries(
                 prediction_eval=prediction_evaluation,
                 model_type=prev_model_type,
                 best_score=per_model_best.get(prev_model_type),
                 inherited_components=prev_inherited,
                 proposed_vocab_links=prev_vocab_links,
+                timing=prev_timing,
             )
             if new_discoveries:
                 print(f"  New discoveries: {len(new_discoveries)}")
@@ -697,6 +700,8 @@ def tuning_output_to_model_run_summary(
         formal_file_vector=formal_rec.get("file_vector") if formal_rec else None,
         # Efficiency
         best_model_params=best_rec.get("model_params") if best_rec else None,
+        # Compute cost
+        best_timing=best_rec.get("timing") if best_rec else None,
         # Data volume
         training_psd_segments=best_rec.get("training_psd_segments") if best_rec else None,
         eval_psd_segments=best_rec.get("eval_psd_segments") if best_rec else None,
