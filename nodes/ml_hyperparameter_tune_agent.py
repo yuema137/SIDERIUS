@@ -53,10 +53,12 @@ def _validate_data_config(
 
     # 1. PSD segment must divide evenly into ML segments
     if psd % segmentation_size != 0:
+        valid = sorted([d for d in range(100, psd + 1) if psd % d == 0 and d <= 100_000])
         raise ValueError(
             f"psd_segment_length ({psd}) must be divisible by "
             f"segmentation_size ({segmentation_size}). "
-            f"Remainder: {psd % segmentation_size}."
+            f"Remainder: {psd % segmentation_size}. "
+            f"Valid segmentation_size values: {valid}."
         )
 
     # 2. trial_portion must produce at least 1 PSD segment per file

@@ -148,6 +148,24 @@ class TestGenerateDiscoveries:
         )
         assert any("REFUTED" in d.description for d in discoveries)
 
+    def test_partial_with_none_actual(self):
+        """Regression: actual_value=None should not crash format string."""
+        eval_result = {
+            "outcome": "partial",
+            "metric": "denoising_score",
+            "predicted_value": 6.8,
+            "actual_value": None,
+        }
+        discoveries = generate_discoveries(
+            prediction_eval=eval_result,
+            model_type="transformer_wavenet",
+            best_score=None,
+            inherited_components=[],
+            proposed_vocab_links=[],
+        )
+        assert any("PARTIAL" in d.description for d in discoveries)
+        assert any("N/A" in d.description for d in discoveries)
+
     def test_no_prediction(self):
         discoveries = generate_discoveries(
             prediction_eval=None,

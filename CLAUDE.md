@@ -1,7 +1,10 @@
 # SIDERIUS Project Rules
 
 ## Context
-- SIDERIUS is a project that utilizes LLM agent to explore advanced denoising algorithms (stage 0), propose new hypothesis and conduct experiment to investigate (stage 1). 
+- SIDERIUS is a project that utilizes LLM agent to explore advanced denoising algorithms (stage 0), propose new hypothesis and conduct experiment to investigate (stage 1).
+
+## Environment
+- **Always use the project virtualenv**: every Python command must use `/home/yuema137/SIDERIUS/.venv/bin/python` (or activate `.venv/bin/activate` first). Never use the system `python` or `python3` — they are Python 3.8 and will fail on f-strings and other modern syntax.
 
 ## Coding Standards:
 - **Logic First**: Before every modification, we need to review the current structure of the whole project, think about if the structure is appropriate, rather than just adding the desired feasure. We need to keep the code clean and elegant.

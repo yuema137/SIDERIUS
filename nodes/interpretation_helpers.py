@@ -146,15 +146,18 @@ def generate_discoveries(
         predicted = prediction_eval.get("predicted_value")
         actual = prediction_eval.get("actual_value")
 
+        actual_str = f"{actual:.4f}" if actual is not None else "N/A"
+        predicted_str = f"{predicted:.4f}" if predicted is not None else "N/A"
+
         if outcome == "confirmed":
-            desc = (f"CONFIRMED: {model_type} achieved {metric}={actual:.4f} "
-                    f"(predicted {predicted:.4f}). The hypothesis was supported.")
+            desc = (f"CONFIRMED: {model_type} achieved {metric}={actual_str} "
+                    f"(predicted {predicted_str}). The hypothesis was supported.")
         elif outcome == "refuted":
-            desc = (f"REFUTED: {model_type} achieved {metric}={actual:.4f} "
-                    f"(predicted {predicted:.4f}). The hypothesis was NOT supported.")
+            desc = (f"REFUTED: {model_type} achieved {metric}={actual_str} "
+                    f"(predicted {predicted_str}). The hypothesis was NOT supported.")
         else:
-            desc = (f"PARTIAL: {model_type} achieved {metric}={actual:.4f} "
-                    f"(predicted {predicted:.4f}). Results are inconclusive.")
+            desc = (f"PARTIAL: {model_type} achieved {metric}={actual_str} "
+                    f"(predicted {predicted_str}). Results are inconclusive.")
 
         # Related features from inherited components
         related = [ic.get("component", "") for ic in inherited_components if ic.get("component")]
