@@ -128,14 +128,24 @@ def generate_discoveries(
     best_score: Optional[float],
     inherited_components: List[Dict[str, Any]],
     proposed_vocab_links: List[Dict[str, Any]],
+    timing: Optional[Dict[str, Any]] = None,
+    slow_threshold_s: float = 1800.0,
 ) -> List[VocabEntry]:
     """
     Generate kind='discovery' VocabEntry entries from this iteration's results.
 
-    Produces 1-3 discovery sentences based on:
+    Produces up to 4 discovery sentences based on:
     - Whether the prediction was confirmed/refuted
-    - What score the model achieved
+    - What score the model achieved vs SOTA
+    - Whether the model was unusually slow (timing discovery)
     - Which features were inherited and whether they helped
+
+    Args:
+        timing: Dict with train_time_s, inference_time_s, scoring_time_s from
+                the best experiment's timing record. When provided and total
+                time exceeds slow_threshold_s, a timing discovery is generated.
+        slow_threshold_s: Total experiment time (train+inference) above which
+                          a timing discovery is emitted. Default 1800s (30 min).
     """
     discoveries = []
 
@@ -188,6 +198,25 @@ def generate_discoveries(
 
             discoveries.append(VocabEntry(
                 name=f"score_{model_type}_vs_sota",
+                kind="discovery",
+                description=desc,
+                tier="candidate",
+                proposed_by_run=model_type,
+            ))
+
+    # Discovery 3: timing (architectural resource cost)
+    if timing is not None:
+        train_s = timing.get("train_time_s") or 0
+        infer_s = timing.get("inference_time_s") or 0
+        total_s = train_s + infer_s
+        if total_s >= slow_threshold_s:
+            desc = (
+                f"{model_type}: {total_s/60:.1f} min/experiment "
+                f"(train={train_s/60:.1f}, infer={infer_s/60:.1f} min). "
+                f"High compute cost — reduce segmentation_size or complexity."
+            )
+            discoveries.append(VocabEntry(
+                name=f"timing_{model_type}_slow",
                 kind="discovery",
                 description=desc,
                 tier="candidate",
