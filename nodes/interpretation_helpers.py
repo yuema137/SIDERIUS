@@ -22,6 +22,8 @@ def evaluate_prediction(
     Args:
         prediction: Serialized FalsifiablePrediction dict with
                     metric, current_value, predicted_value, threshold_for_refutation.
+                    Common LLM aliases for 'denoising_score' are accepted:
+                    'best_score', 'score', 'overall denoising score', etc.
         actual_results: Dict with at least 'best_denoising_score' and
                         optionally 'best_file_vector'.
 
@@ -80,16 +82,25 @@ def evaluate_prediction(
     }
 
 
+_DENOISING_SCORE_ALIASES = {
+    "denoising_score",
+    "best_score",
+    "overall denoising score",
+    "score",
+    "best_denoising_score",
+}
+
+
 def _compute_metric(metric: str, results: Dict[str, Any]) -> Optional[float]:
     """
     Compute a metric value from tuning results.
 
     Supports:
-      - 'denoising_score' → results['best_denoising_score']
+      - 'denoising_score' (and common LLM aliases) → results['best_denoising_score']
       - 'mean(file_vector[N:M])' → mean of file_vector slice
       - 'file_vector[N]' → single file score
     """
-    if metric == "denoising_score":
+    if metric in _DENOISING_SCORE_ALIASES:
         return results.get("best_denoising_score")
 
     fv = results.get("best_file_vector")
