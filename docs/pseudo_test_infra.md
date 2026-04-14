@@ -1067,6 +1067,140 @@ G.5 (docs + CI)                      ← last
 - [x] G.5: docs and CI updated
 - [x] All 8 dual-mode tests pass (965 passed, 0 failures, 2026-04-14)
 
+---
+
+### Phase 4 — Vocabulary Accumulation Across Iterations (planned)
+
+**Goal**: verify that the system actually learns across iterations — discoveries generated in iteration N survive into iteration N+1's vocab, and the vocab list is strictly monotonically growing.
+
+**Motivation**: Phases 1–3 test individual nodes and edges in isolation. None of them exercise the full multi-iteration accumulation loop:
+
+```
+iter 1: interpret (previous_proposal=P1) → discovery D1 → runtime_vocab [D1]
+                                                 ↓ protocol
+        propose → P2 (with D1 in vocab_seed)
+iter 2: interpret (previous_proposal=P2, runtime_vocab=[D1]) → discovery D2
+            → runtime_vocab [D1, D2]  ← must contain BOTH
+```
+
+Without this test, regressions in `build_runtime_vocab` (dropping entries, not deduplicating correctly) or in the workflow's `current_runtime_vocab` accumulation loop would go undetected.
+
+---
+
+#### Step H.1 — Two-iteration vocab accumulation dual-mode test
+
+**File**: `tests/integration/workflows/test_vocab_accumulation.py`
+
+**What it exercises**:
+1. **Iteration 1**: `ResultInterpretationAgent` receives a `previous_proposal` with a `falsifiable_prediction` → evaluates it → generates at least one discovery → `runtime_vocab` has ≥ 1 entry
+2. **Protocol mapping**: `local_full_context(iter1_output, storage)` → `ProposalInput.vocab_seed` contains iter 1's discoveries
+3. **Iteration 2**: `ResultInterpretationAgent` receives `runtime_vocab` from iter 1 + a new `previous_proposal` → generates a new discovery → `runtime_vocab` has more entries than iter 1
+4. **Monotonic growth**: every entry in iter 1's `runtime_vocab` is present in iter 2's `runtime_vocab` (nothing dropped)
+
+**LLM axis only** — no sandbox needed. Both iterations use `ResultInterpretationAgent`, which is LLM-only.
+
+**Pseudo data strategy**: use two separate `RecordingLLMBridge` instances — one per iteration — each loaded from its own canned data subdirectory. This avoids the shared-queue ordering problem (Known Concern C.1) and makes each iteration's responses self-contained.
+
+```
+tests/pseudo_data/api_call_outputs/
+  result_interpretation_agent/          ← existing (used by F.3, F.9)
+  result_interpretation_agent_iter2/    ← new, canned responses for iteration 2
+```
+
+**Canned data needed**:
+- `result_interpretation_agent_iter2/`: responses for an interpretation run with 3 models (wavenet, punet, spectral_net) where `spectral_net` is the proposed model being evaluated (confirmed outcome)
+
+**Test sketch**:
+
+```python
+@pytest.mark.dual_mode
+def test_vocab_grows_across_two_iterations(tmp_path, request):
+    from tests.conftest import _is_real_llm, make_bridge_factory
+    from tests.helpers.recording_llm_bridge import RecordingLLMBridge
+
+    # --- Iteration 1 ---
+    # Scenario: attn_wavenet was proposed, its prediction was REFUTED
+    iter1_inp = InterpretationInput(
+        summaries=[SEED_WAVENET, SEED_PUNET, ATTN_WAVENET_BAD_SUMMARY],
+        previous_proposal=PREVIOUS_PROPOSAL_REFUTED,
+        runtime_vocab=[],
+        storage={...},
+    )
+    if _is_real_llm(request):
+        iter1_bridge = None
+        bridge_factory_1 = LLMBridge
+    else:
+        iter1_bridge = RecordingLLMBridge.for_agent("result_interpretation_agent")
+        bridge_factory_1 = lambda **kw: iter1_bridge
+
+    iter1_output = ResultInterpretationAgent(bridge_factory=bridge_factory_1).run(iter1_inp)
+
+    # Assert iteration 1 produced discoveries
+    assert len(iter1_output.new_discoveries) >= 1
+    assert len(iter1_output.runtime_vocab) >= 1
+    discovery_kinds = [v.kind for v in iter1_output.runtime_vocab]
+    assert "discovery" in discovery_kinds
+
+    # --- Protocol: iter 1 vocab flows to proposal ---
+    proposal_inp = local_full_context(iter1_output, storage)
+    assert proposal_inp.vocab_seed, "vocab_seed empty — iter 1 discoveries not passed to proposer"
+    assert any(
+        (v.get("kind") if isinstance(v, dict) else v.kind) == "discovery"
+        for v in proposal_inp.vocab_seed
+    ), "No discovery entry in vocab_seed"
+
+    # --- Iteration 2 ---
+    # Scenario: spectral_net (newly proposed from iter 1) was run, prediction CONFIRMED
+    iter2_inp = InterpretationInput(
+        summaries=[SEED_WAVENET, SEED_PUNET, SPECTRAL_NET_GOOD_SUMMARY],
+        previous_proposal=PREVIOUS_PROPOSAL_CONFIRMED,
+        runtime_vocab=iter1_output.runtime_vocab,   # ← carry forward
+        storage={...},
+    )
+    if _is_real_llm(request):
+        iter2_bridge = None
+        bridge_factory_2 = LLMBridge
+    else:
+        iter2_bridge = RecordingLLMBridge.for_agent("result_interpretation_agent_iter2")
+        bridge_factory_2 = lambda **kw: iter2_bridge
+
+    iter2_output = ResultInterpretationAgent(bridge_factory=bridge_factory_2).run(iter2_inp)
+
+    # Assert vocab grew
+    assert len(iter2_output.runtime_vocab) > len(iter1_output.runtime_vocab), (
+        f"Vocab did not grow: iter1={len(iter1_output.runtime_vocab)}, "
+        f"iter2={len(iter2_output.runtime_vocab)}"
+    )
+
+    # Assert iter 1 entries still present (monotonic accumulation)
+    iter1_names = {v.name for v in iter1_output.runtime_vocab}
+    iter2_names = {v.name for v in iter2_output.runtime_vocab}
+    dropped = iter1_names - iter2_names
+    assert not dropped, f"Entries dropped from vocab in iter 2: {dropped}"
+
+    # Assert a new discovery was added in iter 2
+    new_in_iter2 = iter2_names - iter1_names
+    assert new_in_iter2, "No new entries added in iter 2 — vocab did not accumulate"
+```
+
+#### Dependency and sequencing
+
+```
+H.1 depends on:
+  - existing result_interpretation_agent pseudo data (F.3)
+  - new iter2 pseudo data directory (new)
+  - local_full_context protocol (already tested in F.5)
+No production code changes needed — this is test-only.
+```
+
+#### Definition of done
+
+- [ ] H.1: `test_vocab_grows_across_two_iterations` passes in pseudo mode (default, no flags)
+- [ ] Pseudo data for `result_interpretation_agent_iter2` created and schema-validated
+- [ ] Vocab monotonic growth assertion passes: `len(iter2) > len(iter1)` and `iter1_names ⊆ iter2_names`
+- [ ] Protocol assertion passes: iter 1 discoveries appear in `proposal_inp.vocab_seed`
+- [ ] Real-LLM smoke test passes with `--real-llm`
+
 ### Definition of done
 
 The vocabulary feedback loop is considered pseudo-tested when F.1–F.6 are complete:
