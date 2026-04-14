@@ -1309,8 +1309,19 @@ Iteration N:
 - ☑ C.17 Workflow tracks `previous_proposal_data` and `current_runtime_vocab` across iterations. Passes both to `InterpretationInput`. Updates `current_runtime_vocab` from interpretation output after each iteration. **Done**.
 - ☑ C.18 17 unit tests: prediction evaluation (8: confirmed/refuted/partial, file_vector metric, boldness, info_gain), discovery generation (4: confirmed/refuted/no_prediction, score vs SOTA), vocab building (5: seed only, add discoveries, dedup, candidates, multi-iteration growth). **Done**.
 
-**O(1) call count — HIGH PRIORITY (must do before long chains):**
-- ☐ **C.19a** Add `cached_model_summaries: Dict[str, Dict]` to `InterpretationInput` and `model_summaries: Dict[str, Dict]` to `InterpretationOutput`. Agent skips Phase 1 LLM call for any model already in the cache; only new models get a fresh call. Workflow carries `model_summaries` forward as `cached_model_summaries` in the next iteration — same pattern as `current_runtime_vocab` (C.17). See §5 "⚠️ Critical implementation gap" for full design.
+**O(1) call count + two-layer persistence — HIGH PRIORITY (must do before long chains):**
+- ☐ **C.19a** Two-layer persistence redesign + O(1) call count. See §5 "⚠️ Critical implementation gap" for rationale and flowchart.
+
+  **Design principle**: separate raw archive (debug only, never re-read) from long-term memory (fed to every iteration). Long-term memory = three Python variables: `model_knowledge_cache`, `runtime_vocab`, `previous_proposal`.
+
+  Sub-tasks:
+  - ☐ **C.19a-1 Schema — `InterpretationOutput`**: rename `per_model_summaries` → `model_knowledge_cache`. Each entry = Phase 1 LLM text + `_stats: {best_denoising_score, worst_denoising_score, best_file_vector, best_model_params, completed_rounds}`. The `_stats` block makes each cache entry self-sufficient — Phase 2 can reconstruct all numerical context without the original `ModelRunSummary`.
+  - ☐ **C.19a-2 Schema — `InterpretationInput`**: add `model_knowledge_cache: Dict[str, Dict] = {}` (carry-forward from previous iteration). Change the semantic meaning of `summaries` from "all historical summaries" to "new models this iteration only".
+  - ☐ **C.19a-3 Agent — Phase 1**: cache hit (model in `model_knowledge_cache`) → copy directly, zero LLM calls. Cache miss (new model) → run LLM call, build cache entry from Phase 1 response + `_stats` from the new `ModelRunSummary`. Deterministic stats for Phase 2 are reconstructed from `summaries` (new models) + `cache[mt]["_stats"]` (cached models).
+  - ☐ **C.19a-4 Agent — Phase 2**: add `runtime_vocab` to the synthesis prompt as "established discoveries — confirm, contradict, or build on these." Keeps Phase 2 and the proposer on the same knowledge base.
+  - ☐ **C.19a-5 Workflow**: replace growing `summary_groups` (passed to agent) with `model_knowledge_cache: dict = {}`. Iteration 1: `summaries` = all seed summaries (cache is empty). Iteration 2+: `summaries` = only the latest tuned model's `ModelRunSummary`. After each iteration: `model_knowledge_cache = interpretation.model_knowledge_cache`.
+
+  **Result**: Phase 1 is called exactly once per model ever. Iterations 2+ make exactly 2 LLM calls in the interpretation agent (1 Phase 1 for the new model + 1 Phase 2 synthesis), regardless of how many models exist.
 
 **Promotion (after vocabulary loop is working):**
 - ☐ C.5 Structural promotion rule for candidates.
@@ -1478,52 +1489,106 @@ Each round, the interpretation agent:
 >
 > **This is NOT a one-time implementation** — it's an ongoing quality improvement loop that runs in parallel with the experiment loop itself. The vocabulary system gets better as we tune its prompts, just like the ML models get better as we tune their hyperparameters.
 
-### ⚠️ Critical implementation gap: O(N) LLM call count in Phase 1
+### ⚠️ Critical implementation gap: O(N) LLM call count + missing two-layer persistence
 
-**The problem — currently unresolved, high priority.**
+**Status: unresolved, HIGH priority. Tracked as C.19a.**
 
-The design above correctly bounds the prompt *content* to O(1) per iteration. But the current `result_interpretation_agent` implementation has an O(N) **call count** problem in Phase 1:
+#### The two problems
+
+**Problem 1 — O(N) call count in Phase 1.**
+
+Phase 1 (per-model summarization) makes one LLM call per model in `effective_types`. Since `summary_groups` accumulates all historical models, this grows every iteration:
 
 ```
-Phase 1 — per-model summarization: one LLM call per model in effective_types
-  Iter 1: effective_types = [wavenet, punet, attn_wavenet]          → 3 Phase 1 calls + 1 synthesis = 4
-  Iter 2: effective_types = [wavenet, punet, attn_wavenet, spec_net] → 4 Phase 1 calls + 1 synthesis = 5
-  Iter N: effective_types = [wavenet, punet, + N proposed models]   → N+2 calls
+Iter 1: [wavenet, punet, fcnet]                    → 3 Phase 1 calls + 1 synthesis = 4
+Iter 2: [wavenet, punet, fcnet, attn_wavenet]      → 4 Phase 1 calls + 1 synthesis = 5
+Iter N: [wavenet, punet, fcnet, + N−1 proposed]   → N+2 calls
 ```
 
-wavenet and punet do not change between iterations — re-summarising them from scratch each time is pure waste. The call count is O(N) in the number of models seen so far, which grows with every iteration.
+wavenet and punet have not changed — re-summarizing them from scratch each time is pure waste.
 
-**The design principle (§5 above) already implies the fix**: "new records (iter N-1 only)" as the only input. Per-model summaries from previous iterations should be cached, not recomputed.
+**Problem 2 — no explicit two-layer persistence.**
 
-**The fix: cached per-model summaries.**
+The workflow carries three ad-hoc Python variables (`current_runtime_vocab`, `previous_proposal_data`, `summary_groups`) without a clear contract for what each iteration receives. `summary_groups` conflates two different concerns: the raw input for LLM consumption and the debug archive. There is no typed boundary between "things fed to the LLM" and "things stored for debugging."
 
-Add two fields:
-- `InterpretationInput.cached_model_summaries: Dict[str, Dict]` — Phase 1 results from the previous `InterpretationOutput`, keyed by `model_type`
-- `InterpretationOutput.model_summaries: Dict[str, Dict]` — the full set (cached + new) for the workflow to pass forward as `cached_model_summaries` in the next iteration
+#### The fix: two-layer persistence + model_knowledge_cache
 
-Agent logic becomes:
+**Layer 1 — Raw archive (debug only, never re-read by the agent).**
+Every node writes its full output to disk per iteration. These files exist for human inspection and crash recovery only:
+```
+iteration_N/interpretation_{run_name}.json   ← full InterpretationOutput
+iteration_N/attempt_M/proposal_{run_name}.json
+iteration_N/{model_name}/run_output_{run_name}.json   ← raw tuning records
+```
+
+**Layer 2 — Long-term memory (fed to every iteration, O(1) size).**
+Three Python variables carried forward in the workflow:
+
+| Variable | Content | Update rule |
+|----------|---------|-------------|
+| `model_knowledge_cache` | Per-model Phase 1 LLM text + `_stats` (scores, file_vector, params) | Once per model, ever |
+| `runtime_vocab` | Growing list of typed discoveries | Every iteration (append only) |
+| `previous_proposal` | Latest `ProposalOutput` dict | Every iteration (replace) |
+
+**What flows into each LLM call per iteration (N > 1):**
+
+| LLM call | Receives |
+|----------|---------|
+| Phase 1 (new model only, 1 call) | New model's `ModelRunSummary` + description |
+| Phase 2 — synthesis (1 call) | All models' Phase 1 text (cache + new) + all `_stats` + **`runtime_vocab`** |
+| Proposer reasoning + commit (2–3 calls) | Full `InterpretationOutput` + `runtime_vocab` |
+
+`runtime_vocab` goes to **both Phase 2 and the proposer** so they are on the same knowledge base. `previous_proposal` is evaluated deterministically (not by LLM) → generates a discovery → enters `runtime_vocab`.
+
+**Information flow per iteration:**
+
+```
+LONG-TERM MEMORY (in)                   NEW DATA (in)
+model_knowledge_cache (all past models) new_summaries (this iter's model only)
+runtime_vocab (all discoveries so far)  previous_proposal (last iter's proposal)
+        │                                       │
+        └──────────────┬────────────────────────┘
+                       ▼
+              ResultInterpretationAgent
+              Phase 1: LLM × 1 (new model) + cache hits × N (old models)
+              Phase 2: LLM × 1 (synthesis, sees vocab + all model summaries)
+              Phase C: deterministic (evaluate prediction → discovery)
+                       │
+        ┌──────────────┴──────────────────────────┐
+        ▼                                         ▼
+LONG-TERM MEMORY (out)                   ARCHIVE (disk)
+model_knowledge_cache (updated)          interpretation_{run_name}.json
+runtime_vocab (updated)                  (contains full long-term memory
+previous_proposal ← ProposalOutput       as a recoverable snapshot)
+```
+
+**Self-sufficient cache entries.**
+Each `model_knowledge_cache[mt]` entry must contain both the LLM-generated analysis AND the numerical facts Phase 2 needs, so old raw summaries are never re-read:
 ```python
-for mt in effective_types:
-    if mt in inp.cached_model_summaries:
-        per_model_summaries[mt] = inp.cached_model_summaries[mt]  # reuse, zero LLM calls
-    else:
-        per_model_summaries[mt] = self.bridge.generate(...)  # only for new models
+{
+    "key_findings":          [...],   # Phase 1 LLM output
+    "bottlenecks":           [...],
+    "score_trend":           "...",
+    "frequency_analysis":    "...",
+    # ... other Phase 1 fields ...
+    "_stats": {                        # deterministic facts, stored at aggregation time
+        "best_denoising_score":  5.576,
+        "worst_denoising_score": 5.21,
+        "best_file_vector":      [...],
+        "best_model_params":     4123456,
+        "completed_rounds":      2,
+    }
+}
 ```
 
-**Result: O(1) calls per iteration** (independent of history depth):
+**Result: O(1) LLM calls per iteration**, independent of history depth:
 ```
-Iter 1: 1 call (attn_wavenet) + 0 cached (first run, no cache) + 1 synthesis = N_new + 1
-Iter 2: 1 call (spectral_net) + 2 cached (wavenet, punet from iter 1) + 1 synthesis = 2 calls
-Iter N: 1 call (new proposed model) + cached rest                      + 1 synthesis = 2 calls always
+Iter 1: N_seeds Phase 1 calls + 1 synthesis   (builds the cache)
+Iter 2: 1 Phase 1 call        + 1 synthesis   (one new model)
+Iter N: 1 Phase 1 call        + 1 synthesis   (always 2 interpretation calls)
 ```
 
-**Underlying assumption** (same as for vocab): everything worth knowing about wavenet and punet from all previous iterations is already captured in the cached per-model summary plus the runtime vocab. The cached summary is a stable, frozen view of that model's performance — it doesn't need to be re-derived from scratch each time.
-
-**Implementation note**: this is a schema + agent change only. The workflow already carries `current_runtime_vocab` forward (Phase C, C.17 ☑); adding `cached_model_summaries` follows the exact same pattern.
-
-**Priority: HIGH — must be implemented before running long (>5 iteration) chains**, otherwise cost and latency grow linearly with exploration depth.
-
-Track as: **C.19a** (new task under Phase C, before C.5/C.6 promotion which is lower priority).
+**Underlying assumption** (same as for vocab): everything worth knowing about wavenet, punet, etc. from all previous iterations is captured in the cached per-model summary plus the runtime vocab. A cached entry is a frozen, stable view — it does not need to be re-derived unless the model is re-tuned (which never happens in the current workflow: each model is tuned exactly once).
 
 ### How vocabulary bounds the growth
 
@@ -1547,7 +1612,7 @@ The proposal agent receives even more context (comparison stage gets source code
 ### Design rules to prevent prompt explosion
 
 1. **Every step makes O(1) LLM calls, independent of iteration count.** The interpretation agent caches per-model Phase 1 summaries (C.19a) and only calls the LLM for new models. The vocabulary/discovery pipeline already runs O(1) calls. The proposal agent's pipeline is fixed at 3 calls. No stage should grow call count with history depth.
-2. **The vocabulary is the memory.** Everything worth remembering is in the vocabulary (features, capabilities, discoveries). If it's not in the vocabulary, it's not remembered.
+2. **The vocabulary is the memory.** Everything worth remembering is in the vocabulary (features, capabilities, discoveries). If it's not in the vocabulary, it's not remembered. `runtime_vocab` is fed to both Phase 2 (synthesis) and the proposer so both are on the same knowledge base — Phase 2 confirms/contradicts established discoveries; the proposer uses them to constrain its reasoning.
 3. **Source code is pre-filtered.** Only top N models get their source code included. The `ModelSelectionStrategy` controls this budget.
 4. **Discoveries can be summarized.** If the discovery list grows beyond ~50 entries, the interpretation agent consolidates older ones into summaries.
 5. **Each agent has a token budget.** The pipeline runner should estimate prompt size before calling the LLM and warn if it exceeds a threshold (e.g., 40K tokens).
