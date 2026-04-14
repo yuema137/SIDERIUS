@@ -15,7 +15,7 @@ import json
 import pytest
 from unittest.mock import MagicMock, patch, call
 
-from agent.schemas.proposal import ProposalInput, ProposalOutput
+from agent.schemas.proposal import ProposalInput, ProposalOutput, VocabEntry
 from agent.schemas.hyperparam_tuning import ExpertAdvice
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from nodes.ml_model_proposal_agent import MLModelProposalAgent, _build_reasoning_prompt
@@ -390,3 +390,77 @@ class TestBuildReasoningPromptEnriched:
         expert_pos = prompt.index("Expert Guidance")
         human_pos = prompt.index("Human Expert Advice")
         assert expert_pos < human_pos
+
+
+# ---------------------------------------------------------------------------
+# F.4 — _render_vocabulary (feedback loop)
+# ---------------------------------------------------------------------------
+
+class TestRenderVocabulary:
+    """Verify that _render_vocabulary renders all four vocab kinds correctly.
+
+    Bug 2 (fixed): discoveries were silently dropped — this class would have
+    caught it immediately via test_discovery_entries_rendered.
+    """
+
+    def test_empty_returns_empty_string(self):
+        assert MLModelProposalAgent._render_vocabulary([]) == ""
+
+    def test_feature_entries_rendered(self):
+        vocab = [VocabEntry(name="dilated_causal_conv", kind="feature",
+                            description="Causal dilated convolution.", tier="canonical")]
+        rendered = MLModelProposalAgent._render_vocabulary(vocab)
+        assert "Features" in rendered
+        assert "dilated_causal_conv" in rendered
+
+    def test_capability_entries_rendered(self):
+        vocab = [VocabEntry(name="large_receptive_field", kind="capability",
+                            description="Receptive field > 10k samples.", tier="canonical")]
+        rendered = MLModelProposalAgent._render_vocabulary(vocab)
+        assert "Capabilities" in rendered
+        assert "large_receptive_field" in rendered
+
+    def test_discovery_entries_rendered(self):
+        vocab = [VocabEntry(
+            name="prediction_attn_wavenet_refuted",
+            kind="discovery",
+            description="REFUTED: attn_wavenet achieved denoising_score=-1.509 (predicted 6.5).",
+            tier="candidate",
+        )]
+        rendered = MLModelProposalAgent._render_vocabulary(vocab)
+        assert "Discoveries" in rendered
+        assert "REFUTED" in rendered
+        assert "prediction_attn_wavenet_refuted" in rendered
+
+    def test_candidate_entries_rendered(self):
+        vocab = [VocabEntry(name="ssm_layer", kind="candidate",
+                            description="State-space model layer.", tier="candidate")]
+        rendered = MLModelProposalAgent._render_vocabulary(vocab)
+        assert "Candidates" in rendered
+        assert "ssm_layer" in rendered
+
+    def test_all_four_kinds_rendered(self):
+        vocab = [
+            VocabEntry(name="f1", kind="feature",     description="feat.",    tier="canonical"),
+            VocabEntry(name="c1", kind="capability",  description="cap.",     tier="canonical"),
+            VocabEntry(name="d1", kind="discovery",   description="CONFIRMED: something worked.", tier="candidate"),
+            VocabEntry(name="n1", kind="candidate",   description="proposed.", tier="candidate"),
+        ]
+        rendered = MLModelProposalAgent._render_vocabulary(vocab)
+        assert "Features" in rendered
+        assert "Capabilities" in rendered
+        assert "Discoveries" in rendered
+        assert "Candidates" in rendered
+
+    def test_no_discoveries_no_discoveries_section(self):
+        vocab = [VocabEntry(name="f1", kind="feature", description="feat.", tier="canonical")]
+        rendered = MLModelProposalAgent._render_vocabulary(vocab)
+        assert "Discoveries" not in rendered
+
+    def test_dict_entries_also_work(self):
+        """_render_vocabulary must handle plain dicts as well as VocabEntry objects."""
+        vocab = [{"name": "d1", "kind": "discovery",
+                  "description": "REFUTED: something failed.", "tier": "candidate"}]
+        rendered = MLModelProposalAgent._render_vocabulary(vocab)
+        assert "Discoveries" in rendered
+        assert "REFUTED" in rendered
