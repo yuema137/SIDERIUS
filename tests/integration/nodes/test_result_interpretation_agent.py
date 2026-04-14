@@ -275,11 +275,7 @@ def test_interpretation_feedback_loop(
     Real mode (--real-api-call): runs against the real Gemini API. Skips
     if GEMINI_API_KEY is not set.
     """
-    is_real = request.config.getoption("--real-api-call")
-
-    if is_real:
-        if not os.getenv("GEMINI_API_KEY"):
-            pytest.skip("GEMINI_API_KEY not set")
+    from tests.conftest import make_bridge_factory
 
     # Proposed model summary with the actual score for this scenario
     proposed_summary = ModelRunSummary(
@@ -307,13 +303,8 @@ def test_interpretation_feedback_loop(
         },
     )
 
-    if is_real:
-        agent = ResultInterpretationAgent(provider="gemini",
-                                          model_id="gemini-3.1-flash-lite-preview")
-    else:
-        from tests.helpers.recording_llm_bridge import RecordingLLMBridge
-        bridge = RecordingLLMBridge.for_agent("result_interpretation_agent")
-        agent = ResultInterpretationAgent(bridge_factory=lambda **kw: bridge)
+    bridge_factory = make_bridge_factory(request, "result_interpretation_agent")
+    agent = ResultInterpretationAgent(bridge_factory=bridge_factory)
 
     output = agent.run(inp)
 
