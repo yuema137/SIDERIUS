@@ -922,6 +922,151 @@ Steps are sequenced by dependency:
 
 **F.1–F.9 all complete.**
 
+---
+
+### Phase 3 — Clean Dual-Axis Surrogation (complete)
+
+**Goal**: make LLM surrogation and training/scoring surrogation two truly independent, composable axes. Today both are flipped by a single `--real-api-call` flag and the `tuner_factories` fixture couples them as a pair. Phase 3 separates them cleanly.
+
+**Motivation**: see §8 concerns C.1–C.6 and the analysis below. The infrastructure already supports independent injection structurally (two separate constructor params: `bridge_factory` and `sandbox_factory`), but the test tooling re-couples them.
+
+#### The target design
+
+**Two flags, two axes:**
+
+| `--real-llm` | `--real-training` | Mode |
+|---|---|---|
+| ✗ | ✗ | fully pseudo (default — current behaviour) |
+| ✓ | ✗ | real LLM + pseudo training (new: test prompts without GPU) |
+| ✗ | ✓ | pseudo LLM + real training (new: test execution without API key) |
+| ✓ | ✓ | fully real (equivalent to current `--real-api-call`) |
+
+The "real LLM + pseudo training" combination is the most valuable new mode: it lets you validate prompt logic and schema parsing against the real API without requiring a GPU or TIDMAD data on disk.
+
+#### Step G.1 — Replace `--real-api-call` with two flags
+
+**File**: `tests/conftest.py`
+
+Replace:
+```python
+parser.addoption("--real-api-call", action="store_true", default=False)
+```
+With:
+```python
+parser.addoption("--real-llm",      action="store_true", default=False,
+                 help="Use real LLMBridge instead of RecordingLLMBridge (needs GEMINI_API_KEY)")
+parser.addoption("--real-training", action="store_true", default=False,
+                 help="Use real TidmadSandbox instead of RecordingSandbox (needs GPU + data)")
+```
+
+Keep `--real-api-call` as a deprecated alias (sets both flags) during the migration period so existing CI scripts don't break immediately.
+
+#### Step G.2 — Replace `tuner_factories` fixture with two independent helpers
+
+**File**: `tests/conftest.py`
+
+Delete the `tuner_factories` fixture. Add two standalone helper functions that tests call directly:
+
+```python
+def make_bridge_factory(request, agent_name: str):
+    """Return a bridge factory for the given agent.
+
+    Pseudo by default; pass --real-llm for real API calls.
+    Skips the test if --real-llm is set but GEMINI_API_KEY is absent.
+    """
+    if request.config.getoption("--real-llm"):
+        if not os.getenv("GEMINI_API_KEY"):
+            pytest.skip("--real-llm requires GEMINI_API_KEY")
+        return LLMBridge
+    bridge = RecordingLLMBridge.for_agent(agent_name)
+    return lambda **kw: bridge
+
+def make_sandbox_factory(request, model_type: str, base_dir: str, run_name: str):
+    """Return a sandbox factory for the given model.
+
+    Pseudo by default; pass --real-training for real GPU execution.
+    Skips the test if --real-training is set but TIDMAD data is absent.
+    """
+    if request.config.getoption("--real-training"):
+        if not _has_real_data():
+            pytest.skip("--real-training requires TIDMAD data on disk")
+        return TidmadSandbox
+    sandbox = RecordingSandbox.for_model(model_type, base_dir=base_dir, run_name=run_name)
+    return lambda **kw: sandbox
+```
+
+Usage in tests:
+```python
+def test_punet_one_round(tmp_path, request):
+    bridge_factory  = make_bridge_factory(request, "ml_hyperparameter_tune_agent")
+    sandbox_factory = make_sandbox_factory(request, "punet", str(tmp_path), "run")
+    agent = HyperparamTuningAgent(bridge_factory=bridge_factory,
+                                   sandbox_factory=sandbox_factory)
+```
+
+#### Step G.3 — Move `score_vector` into the sandbox interface
+
+**Files**: `core/sandbox_executor.py`, `tests/helpers/recording_sandbox.py`, `nodes/ml_hyperparameter_tune_agent.py`
+
+`score_vector` is logically an evaluation operation (same category as `execute_scoring`). It is currently a module-level function called directly by the tuner in trial mode, which requires a separate `monkeypatch` injection — a third, non-uniform injection point.
+
+Fix: move it into both sandbox classes as a method.
+
+```python
+# TidmadSandbox
+def score_vector(self, file_vector, anchors, s_max, **kwargs):
+    return _real_score_vector(file_vector, anchors, s_max, **kwargs)
+
+# RecordingSandbox
+def score_vector(self, file_vector, anchors, s_max, **kwargs):
+    self.calls.append(("score_vector", file_vector))
+    return self._pop("score_vector")
+```
+
+The agent's trial-mode call site changes from:
+```python
+fv, scalar = score_vector(file_vector=..., anchors=..., s_max=...)   # module-level
+```
+to:
+```python
+fv, scalar = self._sandbox.score_vector(file_vector=..., anchors=..., s_max=...)
+```
+
+The `monkeypatch.setattr(tuner_module, "score_vector", ...)` workaround in `test_wavenet_one_round_dual_mode` and `test_punet_one_round_dual_mode[trial]` is removed.
+
+Add `score_vector.json` to each model's pseudo-data directory, loaded by `RecordingSandbox.for_model`.
+
+#### Step G.4 — Migrate all dual-mode tests to the new helpers
+
+**Files**: all `@pytest.mark.dual_mode` tests in `tests/integration/`
+
+Replace every `request.config.getoption("--real-api-call")` pattern with calls to `make_bridge_factory` / `make_sandbox_factory`. The `if is_real: ... else: ...` blocks collapse — the factories handle the switch internally.
+
+#### Step G.5 — Update documentation and CI
+
+- Update `docs/pseudo_test_infra.md` §4C mode matrix to show the four combinations
+- Update `README.md` test-running instructions
+- Update any CI scripts that pass `--real-api-call` to pass `--real-llm --real-training` instead
+
+#### Implementation order
+
+```
+G.1 (two flags in conftest)          ← prerequisite for all
+  └── G.2 (replace tuner_factories)  ← mechanical, test-only
+G.3 (score_vector into sandbox)      ← touches production code + tests
+  └── G.4 (migrate dual-mode tests)  ← after G.1 + G.3
+G.5 (docs + CI)                      ← last
+```
+
+#### Definition of done
+
+- [x] G.1: `--real-llm` and `--real-training` flags registered; `--real-api-call` still works as alias
+- [x] G.2: `tuner_factories` fixture removed; `make_bridge_factory` / `make_sandbox_factory` helpers in place
+- [x] G.3: `score_vector` is a method on both `TidmadSandbox` and `RecordingSandbox`; `monkeypatch` workarounds removed
+- [x] G.4: all dual-mode tests use the new helpers; no test reads `--real-api-call` directly
+- [x] G.5: docs and CI updated
+- [x] All 8 dual-mode tests pass (965 passed, 0 failures, 2026-04-14)
+
 ### Definition of done
 
 The vocabulary feedback loop is considered pseudo-tested when F.1–F.6 are complete:
