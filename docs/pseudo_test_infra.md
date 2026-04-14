@@ -1,6 +1,6 @@
 # Pseudo-Full-Loop Test Infrastructure — Design
 
-**Status**: design — implementation underway on `feat/pseudo-full-loop-infra` branch.
+**Status**: Phase 1 complete (S.1–S.11, merged). Phase 2 complete — F.1–F.9 all passing. See §7 for the full plan and checklist.
 
 ## 0. The problem
 
@@ -471,20 +471,18 @@ The phases below are independent enough that any subset is committable.
 - After S.8: `uv run pytest tests/integration/nodes/test_tune_ml_hyperparam_agent.py::TestRealRunGemini::test_punet_gemini -q --real-api-call` (real mode) still passes — verifying the refactor didn't break the existing real-mode behavior.
 - After S.9: `uv run pytest tests/unit/ tests/helpers/ -q` is fully green.
 
-### Out of scope for this PR (deferred to follow-ups)
+### Deferred items — status update (Phase 1 complete)
 
-Each item below is a **PR-size scoping decision**, not a technical limitation. The infrastructure built in this PR works for any node in the graph; the deferrals just keep this PR's blast radius small enough to review confidently. The table below makes the trade-off explicit so a future contributor (or the same contributor on a different day) can decide whether to pull any item back into scope.
+Phase 1 (S.1–S.11) shipped. Below is the updated status of every item that was originally deferred. Item #4 (Phase A regime_scores) is superseded — Phase A was reverted. The new priority is the vocabulary feedback loop (§7).
 
-| Item | Approx. LOC | Risk | Recommendation | Why deferred |
-|---|---|---|---|---|
-| **(1) DI on the other 4 nodes** (`ml_model_proposal_agent`, `ml_model_implementor`, `ml_code_validator_agent`, `result_interpretation_agent`) | medium (~800, ~200/node) | low | defer | Each node has its own subtleties about *how* it uses the bridge and sandbox. `ml_model_implementor`, for example, runs subprocesses for `pytest` execution and plugin loading — we don't yet know whether `RecordingSandbox` covers those calls or whether they need their own injection points. Validating the pattern on one node first surfaces unknowns before they multiply across five. Each subsequent node is its own small follow-up PR. |
-| **(2) Refactor the other ~10 integration test methods in `test_tune_ml_hyperparam_agent.py` to dual-mode** | medium (~300) | low | defer to immediate follow-up | Mostly mechanical (copy-paste of the dual-mode pattern across loss/model parametrizations), but adds bulk that obscures the infra changes. Best as a separate "migrate test_tune_ml_hyperparam_agent.py to dual-mode" PR landing right after this one. The unmigrated tests still run in real mode exactly as today — they're not broken, just single-mode. |
-| **(3) Tier 2 (protocols) and Tier 3 (workflows) dual-mode** | high (unknown unknowns) | **high** | **strongly defer** | Tier 2 needs the fixture to thread factories into TWO nodes per test (e.g. `result_interpretation_agent` and `ml_model_proposal_agent` for the `interp_to_propose` protocol). Tier 3 runs an entire workflow that internally constructs many bridges and sandboxes — the fixture has to inject factories deep into workflow code. These are **new design problems**, not extensions of the Tier 1 pattern. We should validate Tier 1 works before extending to harder cases. |
-| **(4) Phase A's `pseudo_full_loop` test** (sub-task A.8 from `docs/adaptive_new_model_proposer.md`) | small (~100) | low | **defensible to pull in** | The most concrete validation of the new infra on the thing we actually built it for. The downside is conceptual — bundling "build the infra" with "use the infra to test Phase A" mixes ownership boundaries. The upside is that #4 is the first thing we'd write right after this PR merges anyway, and it's TINY. This is the most defensible item to pull into scope if we want a single end-to-end story. |
+| Item | Original scope | Current status |
+|---|---|---|
+| **(1) DI on the other 4 nodes** | All four nodes | ✅ `ml_model_proposal_agent` (Phase 1). ✅ `result_interpretation_agent` (F.1). ✅ `ml_model_implementor`, `ml_code_validator_agent` (F.7). |
+| **(2) Migrate tuner test to dual-mode** | ~10 test methods in `test_tune_ml_hyperparam_agent.py` | ✅ `test_wavenet_one_round_dual_mode` added (F.8). Core path covered; remaining methods are @real_run. |
+| **(3) Tier 2 dual-mode (protocols)** | `interp_to_propose`, `tune_to_interpret` | ✅ `interp_to_propose` (F.5). ✅ `tune_to_interpret` (F.9). |
+| **(4) Phase A pseudo_full_loop test** | `regime_scores` wiring | ✅ Superseded: Phase A reverted. Replaced by §7. |
 
-**Plan (locked)**: defer all four. Land this PR with the infra + one proof-of-concept dual-mode test, then immediately follow with PRs #1, #2, #4 (in some order). Item #3 waits until Tier 1 dual-mode is battle-tested.
-
-This keeps each PR clear, concise, and independently reviewable. The follow-ups are sequenced for compounding leverage: first #1 (DI on the other 4 nodes) so the infra has multiple consumers, then #2 (migrate the rest of the same test file) so we have a dense pseudo-mode harness for the tuner, then #4 (Phase A's pseudo_full_loop test) which validates the regime_scores wiring on top of the now-mature infra.
+**Phase 2 complete — F.1–F.9 all passing.**
 
 ## 6. Why this design is minimalist
 
@@ -498,6 +496,449 @@ In keeping with the V2 design philosophy ("minimalist architecture, maximalist r
 - **No breaking changes**. Every existing test, every existing CLI command, every existing call site continues to work without modification. Migration is opt-in, file by file.
 
 The PR's blast radius is exactly: one new helpers directory, one new fixture, one node gains two optional constructor params, one existing test gains a pseudo path. Everything else is documentation.
+
+---
+
+## 7. Phase 2 — Vocabulary Feedback Loop Tests
+
+### Progress at a glance
+
+| Step | What | Status | Validation gate |
+|------|------|--------|-----------------|
+| **F.1** | `bridge_factory` DI on `ResultInterpretationAgent` | ✅ Complete | `pytest tests/unit/ -q` — 871 passed |
+| **F.2** | Pseudo data for `result_interpretation_agent` | ✅ Complete | schema smoke check passes |
+| **F.3** | Dual-mode test `test_interpretation_feedback_loop` [refuted, confirmed] | ✅ Complete | 2/2 passed in pseudo mode |
+| **F.4** | Unit tests `TestRenderVocabulary` (8 cases) | ✅ Complete | 8/8 passed |
+| **F.5** | Tier 2 dual-mode `test_interp_to_propose_feedback_loop` | ✅ Complete | 1/1 passed, "REFUTED" in prompt confirmed |
+| **F.6** | Fix stale `SummaryGroup` in both integration test files | ✅ Complete | files use `ModelRunSummary`, unit tests still green |
+| **F.7** | DI on `ml_model_implementor` + `ml_code_validator_agent` | ✅ Complete | both nodes accept `bridge_factory` |
+| **F.8** | Migrate remaining tuner tests to dual-mode | ✅ Complete | `test_wavenet_one_round_dual_mode` added, all passing |
+| **F.9** | Tier 2 dual-mode `tune_to_interpret` test | ✅ Complete | `test_tune_to_interp_protocol_and_node` passing |
+
+### Background and motivation
+
+The vocabulary feedback loop is the core learning mechanism of the adaptive exploration workflow:
+
+1. The proposer makes a `falsifiable_prediction` (e.g. "adding spectral conv will push score from 5.576 to 6.5")
+2. The tuner runs and produces an actual score
+3. The interpretation agent evaluates the prediction → generates a `discovery` (CONFIRMED / REFUTED / PARTIAL)
+4. The discovery is added to `runtime_vocab`
+5. The next iteration's proposer receives the vocab → sees the discovery → adjusts its hypothesis
+
+Two bugs silently broke this loop for all v1/v2 runs:
+- **Bug 1** (fixed): `_compute_metric()` did not recognise common LLM metric aliases (`best_score`, `overall denoising score`), so `actual_value` was always `None` → all discoveries PARTIAL.
+- **Bug 2** (fixed): `_render_vocabulary()` silently dropped `discovery` and `candidate` kind entries, so even when discoveries were generated correctly, the proposer never saw them.
+
+Both bugs are fixed in the codebase. What we do NOT yet have is a pseudo test that would have caught either bug immediately without burning API quota. This section defines that test.
+
+### Current gaps
+
+| Gap | Location | Impact |
+|---|---|---|
+| No `bridge_factory` DI on `ResultInterpretationAgent` | `nodes/result_interpretation_agent.py:328` | Cannot inject `RecordingLLMBridge` — blocks all pseudo tests for this node |
+| No pseudo data for interpretation agent | `tests/pseudo_data/api_call_outputs/` | Needed by `RecordingLLMBridge.for_agent("result_interpretation_agent")` |
+| No dual-mode test for feedback loop | `tests/integration/nodes/test_result_interpretation_agent.py` | Cannot verify prediction eval + discovery generation without real API |
+| No unit test for `_render_vocabulary` with discoveries | `tests/unit/agent/ml_model_proposal_agent/` | Bug 2 would not have been caught by any test |
+| No Tier 2 dual-mode test (interp → propose) | `tests/integration/protocols/test_interp_to_propose.py` | Cannot verify discoveries reach proposer prompt end-to-end |
+| Stale schemas in existing integration tests | Both `test_result_interpretation_agent.py` and `test_interp_to_propose.py` | Use old `SummaryGroup` (replaced by `ModelRunSummary`) — tests would fail in real mode |
+
+### Step-by-step plan
+
+#### F.1 — Add `bridge_factory` DI to `ResultInterpretationAgent`
+
+**File**: `nodes/result_interpretation_agent.py`
+
+Change `__init__` from:
+```python
+def __init__(self, provider: str = "gemini", model_id: str = "...",
+             max_retries: int | None = None):
+    self.bridge = LLMBridge(provider=provider, model_id=model_id, max_retries=max_retries)
+```
+to:
+```python
+def __init__(self, provider: str = "gemini", model_id: str = "...",
+             max_retries: int | None = None, bridge_factory=None, **kwargs):
+    self._bridge_factory = bridge_factory or LLMBridge
+    self.bridge = self._bridge_factory(provider=provider, model_id=model_id, max_retries=max_retries)
+```
+
+**Why `bridge_factory` and not a direct `bridge` instance**: the node constructs its bridge once in `__init__` and reuses it across both Phase 1 and Phase 2 LLM calls. A factory matches the existing pattern from `ml_model_proposal_agent` and `HyperparamTuningAgent`. Tests inject `lambda **kw: RecordingLLMBridge(responses={...})`.
+
+**Validation gate**: `pytest tests/unit/ -q` still fully green. No behavior change in production (factory defaults to `LLMBridge`).
+
+---
+
+#### F.2 — Add pseudo data for `result_interpretation_agent`
+
+**Files to create**:
+
+```
+tests/pseudo_data/api_call_outputs/result_interpretation_agent/
+├── per_model_summary.json    # phase 1 response (one per model type in effective_types)
+└── synthesis.json            # phase 2 cross-model response
+```
+
+The `RecordingLLMBridge` will be pre-loaded with BOTH entries and will pop them in FIFO order: first call returns `per_model_summary`, second call returns `synthesis`. For multi-model tests (two seeds + one proposed model = three phase-1 calls), the queue must hold three `per_model_summary` entries.
+
+**`per_model_summary.json`** — must validate against the `PER_MODEL_SYSTEM_PROMPT` output schema (8 fields):
+
+```json
+{
+  "key_findings": [
+    "Best score of -1.509 is significantly below the wavenet baseline of 5.576, indicating the attention mechanism destabilised training.",
+    "Loss collapsed in round 1 (loss=12.3) and only partially recovered in round 3 (loss=2.1)."
+  ],
+  "bottlenecks": [
+    "Multi-head attention introduces O(T^2) memory and disrupts the causal inductive bias of dilated convolutions.",
+    "Data volume is insufficient at trial_portion=0.1 to learn stable attention weights."
+  ],
+  "best_config_analysis": "The best config (lr=1e-4, focal, attn_heads=4) still scored -1.509 — attention heads likely need more data to converge.",
+  "score_trend": "Scores improved from -2.38 (round 1) to -1.51 (round 3) but remained far below baseline. No convergence to positive territory.",
+  "frequency_analysis": "All 20 files scored below 1.0. Low-frequency files (0-4) scored near zero. High-frequency files (15-19) scored around 0.3.",
+  "data_sensitivity": "Score improved 0.87 points when trial_portion increased from 0.05 to 0.1, suggesting strong data sensitivity. Model not data-saturated.",
+  "efficiency_assessment": "Model has 8.2M parameters vs punet baseline 12.3M. Smaller but worse — not a good efficiency trade-off at this performance level.",
+  "strategy_assessment": "Agent correctly increased trial_portion after poor round 1, and explored two loss functions. Did not try reducing attention heads."
+}
+```
+
+**`synthesis.json`** — must validate against the `SYNTHESIS_SYSTEM_PROMPT` output schema (5 fields):
+
+```json
+{
+  "key_findings": [
+    "The wavenet seed (5.576) substantially outperforms all proposed models so far. The best proposed model (attn_wavenet, -1.509) is 7 points below the seed.",
+    "Every proposed model that added a global-context mechanism (attention, BiLSTM) scored negatively, while models that stayed close to dilated convolutions scored near the seed."
+  ],
+  "bottlenecks": [
+    "Universal low-frequency blindness: no model yet addresses low-frequency files (0-4) — all score near zero on those files.",
+    "Global-context mechanisms (attention, recurrence) consistently destabilise the causal dilated-conv backbone when added naively."
+  ],
+  "frequency_comparison": "Files 0-4 (low frequency) score near zero across all models. Files 10-19 score 0.3-0.7 for wavenet variants, near zero for attention models. No model achieves score > 1.0 on any file.",
+  "efficiency_comparison": "Wavenet (5.576, 4.1M params) is Pareto-dominant: highest score at lowest parameter count. All proposed models are larger and worse.",
+  "take_home_message": "Naively adding attention or recurrence to wavenet destroys performance — a fundamentally different approach to low-frequency context (e.g. multi-rate or frequency-domain) is required."
+}
+```
+
+**Schema invariant**: before committing, manually validate both files parse and their shapes match what the real `LLMBridge.generate()` returns for each system prompt. Run:
+```bash
+.venv/bin/python -c "
+import json
+per = json.load(open('tests/pseudo_data/api_call_outputs/result_interpretation_agent/per_model_summary.json'))
+assert all(k in per for k in ['key_findings','bottlenecks','best_config_analysis','score_trend',
+                               'frequency_analysis','data_sensitivity','efficiency_assessment','strategy_assessment'])
+syn = json.load(open('tests/pseudo_data/api_call_outputs/result_interpretation_agent/synthesis.json'))
+assert all(k in syn for k in ['key_findings','bottlenecks','frequency_comparison','efficiency_comparison','take_home_message'])
+print('pseudo data valid')
+"
+```
+
+**Validation gate**: smoke check passes; `RecordingLLMBridge.for_agent("result_interpretation_agent")` loads both files without error.
+
+---
+
+#### F.3 — Dual-mode test for the feedback loop in `test_result_interpretation_agent.py`
+
+**File**: `tests/integration/nodes/test_result_interpretation_agent.py`
+
+Add a new `@pytest.mark.dual_mode` test function `test_interpretation_feedback_loop`. The existing `real_run`-marked tests are left untouched (but should be migrated to `ModelRunSummary` — see F.6).
+
+**Test design — two parametrised scenarios**:
+
+| Scenario | prev prediction | actual score of proposed model | expected outcome |
+|---|---|---|---|
+| `refuted` | metric=`denoising_score`, predicted=6.5, current=5.576, threshold=5.8 | -1.509 | `"refuted"` — actual << threshold |
+| `confirmed` | metric=`denoising_score`, predicted=5.65, current=5.576, threshold=5.58 | 5.68 | `"confirmed"` — actual >= predicted |
+
+**Input construction** (pseudo mode):
+```python
+from agent.schemas.interpretation import InterpretationInput, ModelRunSummary
+from agent.schemas.storage import StorageConfig, LocalStorageConfig
+
+# The proposed model's tuning summary — with known actual score
+proposed_summary = ModelRunSummary(
+    model_type="attn_wavenet",
+    run_name="adaptive_v1",
+    status="completed",
+    completed_rounds=3,
+    best_denoising_score=actual_score,   # -1.509 or 5.68 depending on scenario
+    worst_denoising_score=actual_score - 1.0,
+    best_config={"model_config": {"attn_heads": 4}},
+    round_scores=[actual_score - 1.0, actual_score - 0.5, actual_score],
+    round_conclusions=["poor", "improving", "best"],
+    best_file_vector=[actual_score * 0.8] * 20,
+    model_description="Wavenet with multi-head attention.",
+)
+
+# Seed models (wavenet + punet)
+seed_wavenet = ModelRunSummary(model_type="wavenet", ..., best_denoising_score=5.576, ...)
+seed_punet   = ModelRunSummary(model_type="punet", ..., best_denoising_score=1.29, ...)
+
+previous_proposal = {
+    "model_name": "attn_wavenet",
+    "falsifiable_prediction": {
+        "metric": "denoising_score",
+        "current_value": 5.576,
+        "predicted_value": predicted_value,   # 6.5 or 5.65
+        "threshold_for_refutation": threshold, # 5.8 or 5.58
+        "rationale": "...",
+    },
+    "inherited_components": [
+        {"component": "dilated_causal_conv", "from_model_type": "wavenet", "contribution_evidence": "..."}
+    ],
+    "proposed_vocab_links": [],
+    "proposed_discoveries": [],
+}
+
+agent_input = InterpretationInput(
+    summaries=[seed_wavenet, seed_punet, proposed_summary],
+    previous_proposal=previous_proposal,
+    runtime_vocab=[],   # empty incoming vocab — discoveries start from zero
+    storage=StorageConfig(backend="local", local=LocalStorageConfig(workspace=str(tmp_path), run_name="test")),
+)
+```
+
+**Bridge setup** (pseudo mode): the bridge queue must have one `per_model_summary` response per model in `effective_types` (3 models = 3 per-model calls), then one `synthesis` response:
+```python
+bridge = RecordingLLMBridge(responses={
+    "generate": [
+        per_model_summary_canned,   # for wavenet
+        per_model_summary_canned,   # for punet
+        per_model_summary_canned,   # for attn_wavenet
+        synthesis_canned,           # cross-model synthesis
+    ]
+})
+agent = ResultInterpretationAgent(bridge_factory=lambda **kw: bridge)
+output = agent.run(agent_input)
+```
+
+**Assertions** (both pseudo and real mode):
+```python
+# Core: prediction was evaluated (not null)
+assert output.prediction_evaluation is not None
+assert output.prediction_evaluation["actual_value"] is not None, \
+    "actual_value is None — metric alias not resolved"
+assert output.prediction_evaluation["outcome"] == expected_outcome
+
+# Discovery was generated
+assert len(output.new_discoveries) >= 1
+assert expected_outcome.upper() in output.new_discoveries[0]["description"]
+
+# Vocab grew with discovery
+discovery_entries = [
+    v for v in output.runtime_vocab
+    if (v.get("kind") if isinstance(v, dict) else v.kind) == "discovery"
+]
+assert len(discovery_entries) >= 1, "No discovery in runtime_vocab — feedback loop broken"
+
+# Storage: file written
+interp_file = tmp_path / "interpretation_test.json"
+assert interp_file.exists()
+```
+
+**Validation gate**: `pytest tests/integration/nodes/test_result_interpretation_agent.py::test_interpretation_feedback_loop -v` passes in pseudo mode (no `--real-api-call`) in < 1 second.
+
+---
+
+#### F.4 — Unit tests for `_render_vocabulary` with discoveries
+
+**File**: `tests/unit/agent/ml_model_proposal_agent/test_proposal_agent.py`
+
+Add a new test class `TestRenderVocabulary` with the following cases:
+
+```python
+class TestRenderVocabulary:
+
+    def test_empty_returns_empty_string(self):
+        assert MLModelProposalAgent._render_vocabulary([]) == ""
+
+    def test_feature_entries_rendered(self):
+        vocab = [VocabEntry(name="dilated_causal_conv", kind="feature", description="...", tier="canonical")]
+        rendered = MLModelProposalAgent._render_vocabulary(vocab)
+        assert "Features" in rendered
+        assert "dilated_causal_conv" in rendered
+
+    def test_discovery_entries_rendered(self):
+        vocab = [VocabEntry(
+            name="prediction_attn_wavenet_refuted",
+            kind="discovery",
+            description="REFUTED: attn_wavenet achieved denoising_score=-1.509 (predicted 6.5).",
+            tier="candidate",
+        )]
+        rendered = MLModelProposalAgent._render_vocabulary(vocab)
+        assert "Discoveries" in rendered
+        assert "REFUTED" in rendered
+        assert "prediction_attn_wavenet_refuted" in rendered
+
+    def test_candidate_entries_rendered(self):
+        vocab = [VocabEntry(name="ssm_layer", kind="candidate", description="State-space model layer.", tier="candidate")]
+        rendered = MLModelProposalAgent._render_vocabulary(vocab)
+        assert "Candidates" in rendered
+        assert "ssm_layer" in rendered
+
+    def test_all_four_kinds_rendered(self):
+        vocab = [
+            VocabEntry(name="f1", kind="feature",     description="...", tier="canonical"),
+            VocabEntry(name="c1", kind="capability",  description="...", tier="canonical"),
+            VocabEntry(name="d1", kind="discovery",   description="CONFIRMED: ...", tier="candidate"),
+            VocabEntry(name="n1", kind="candidate",   description="...", tier="candidate"),
+        ]
+        rendered = MLModelProposalAgent._render_vocabulary(vocab)
+        assert "Features" in rendered
+        assert "Capabilities" in rendered
+        assert "Discoveries" in rendered
+        assert "Candidates" in rendered
+
+    def test_no_discoveries_no_discoveries_section(self):
+        vocab = [VocabEntry(name="f1", kind="feature", description="...", tier="canonical")]
+        rendered = MLModelProposalAgent._render_vocabulary(vocab)
+        assert "Discoveries" not in rendered
+
+    def test_dict_entries_also_work(self):
+        # _render_vocabulary must handle both VocabEntry objects and plain dicts
+        vocab = [{"name": "d1", "kind": "discovery", "description": "REFUTED: ...", "tier": "candidate"}]
+        rendered = MLModelProposalAgent._render_vocabulary(vocab)
+        assert "Discoveries" in rendered
+        assert "REFUTED" in rendered
+```
+
+**Why this test class matters**: bug 2 (`_render_vocabulary` dropping discoveries) would have been caught immediately by `test_discovery_entries_rendered`. The test is a unit test — no LLM, no fixtures, runs in milliseconds.
+
+**Validation gate**: `pytest tests/unit/agent/ml_model_proposal_agent/ -q` passes.
+
+---
+
+#### F.5 — Tier 2 dual-mode test: interpretation → proposal (feedback chain)
+
+**File**: `tests/integration/protocols/test_interp_to_propose.py`
+
+Add a new `@pytest.mark.dual_mode` test `test_interp_to_propose_feedback_loop` that chains:
+1. `ResultInterpretationAgent.run(input)` → `InterpretationOutput` containing discoveries
+2. `local_full_context(output, storage)` → `ProposalInput` with vocab including discoveries
+3. `MLModelProposalAgent.run(propose_input)` → assert discoveries appear in the LLM user prompt
+
+**Why this test is uniquely valuable**: it is the only test that validates the complete chain — that a discovery generated in step 2 actually reaches the proposer's LLM call as text in the user prompt. The unit tests in F.4 verify rendering in isolation. F.3 verifies discovery generation in isolation. F.5 ties both together through the protocol.
+
+**Bridge setup**:
+- **Interpretation bridge**: 3 `per_model_summary` responses + 1 `synthesis` response (same as F.3)
+- **Proposal bridge**: pre-loaded with the ~5 canned proposal pipeline responses (already exists in `tests/pseudo_data/api_call_outputs/ml_model_proposal_agent/generate.json`)
+
+```python
+interp_bridge  = RecordingLLMBridge(responses={"generate": [*three_per_model, synthesis]})
+propose_bridge = RecordingLLMBridge.for_agent("ml_model_proposal_agent")
+
+interp_agent  = ResultInterpretationAgent(bridge_factory=lambda **kw: interp_bridge)
+propose_agent = MLModelProposalAgent(bridge_factory=lambda **kw: propose_bridge)
+
+interp_output  = interp_agent.run(interp_input)   # same input as F.3 "refuted" scenario
+propose_input  = local_full_context(interp_output, storage)
+propose_output = propose_agent.run(propose_input)
+```
+
+**Key assertion — discoveries reach the proposer prompt**:
+```python
+# The proposer's user prompt is one of the generate() calls.
+# Find the call that contains "Discoveries" (the rendered vocab block).
+user_prompts = [call[2] for call in propose_bridge.calls if call[0] == "generate"]
+discovery_prompt = next((p for p in user_prompts if "Discoveries" in p), None)
+assert discovery_prompt is not None, \
+    "No LLM call contained 'Discoveries' — discovery not rendered in proposer prompt"
+assert "REFUTED" in discovery_prompt, \
+    "REFUTED discovery text not present in proposer prompt"
+```
+
+**Validation gate**: `pytest tests/integration/protocols/test_interp_to_propose.py::test_interp_to_propose_feedback_loop -v` passes in pseudo mode in < 2 seconds.
+
+---
+
+#### F.6 — Update stale schemas in existing integration tests
+
+Both `tests/integration/nodes/test_result_interpretation_agent.py` and `tests/integration/protocols/test_interp_to_propose.py` use the old `SummaryGroup` schema (replaced by `ModelRunSummary` in a prior refactor). They cannot be run in real mode without this fix.
+
+**Changes needed**:
+- Replace `from agent.schemas.interpretation import ..., SummaryGroup` with `ModelRunSummary`
+- Replace `SummaryGroup(model_type=..., run_name=..., records=[...])` with `ModelRunSummary` construction via `tuning_output_to_model_run_summary()` or direct field population
+- Mark existing tests as `@pytest.mark.dual_mode` where possible (they're currently `real_run` only)
+
+**Scope**: do this in the same PR as F.3 and F.5 to avoid leaving broken tests. The stale tests should be fixed before any new dual-mode tests are added alongside them.
+
+---
+
+#### F.7 — DI on `ml_model_implementor` and `ml_code_validator_agent` (lower priority)
+
+Same DI pattern as F.1. Enables future Tier 2 tests for the `impl → validate` and `validate → tune` edges. Not required for the feedback loop test — defer until F.1–F.5 are complete and validated.
+
+---
+
+#### F.8 — Migrate remaining tuner tests to dual-mode (deferred follow-up)
+
+**File**: `tests/integration/nodes/test_tune_ml_hyperparam_agent.py`
+
+Phase 1 (S.8) added two dual-mode methods to the tuner integration test. The remaining ~10 methods are still `@pytest.mark.real_run` only and never run in CI. This step migrates them.
+
+**Scope**: for each `real_run` test method, add a pseudo path using the existing `RecordingLLMBridge` and `RecordingSandbox` fakes. The pseudo data already exists in `tests/pseudo_data/`. No new infrastructure is needed — this is purely mechanical.
+
+**Why deferred**: F.1–F.6 are higher priority (feedback loop correctness). Tuner test migration is low-risk and does not unlock anything new — it only improves CI coverage breadth. Do this after F.1–F.6 are merged and green.
+
+**Validation gate**: `pytest tests/integration/nodes/test_tune_ml_hyperparam_agent.py -v` (no `--real-api-call`) runs all methods in pseudo mode and passes in < 5 seconds.
+
+---
+
+#### F.9 — Tier 2 dual-mode test: tuning → interpretation (`tune_to_interpret` edge) (deferred follow-up)
+
+**File**: `tests/integration/protocols/test_tune_to_interp.py`
+
+The deferred items table originally listed both `interp_to_propose` and `tune_to_interpret` as targets for Tier 2 dual-mode coverage. F.5 handles `interp_to_propose`. This step handles `tune_to_interpret`.
+
+**Scope**: a `@pytest.mark.dual_mode` test that:
+1. Constructs a `HyperparamTuningOutput` with known scores and a `best_file_vector`
+2. Passes it through the `tune_to_interp` protocol function → `InterpretationInput`
+3. Runs `ResultInterpretationAgent.run(input)` with a `RecordingLLMBridge`
+4. Asserts the output contains a valid `InterpretationOutput` with non-null `overall_best_score`
+
+**Blocked on**: F.1 (DI on `ResultInterpretationAgent`). Cannot inject a recording bridge until F.1 is done.
+
+**Why deferred**: F.5 already covers the higher-value direction (discoveries flowing *forward* to the proposer). `tune_to_interpret` exercises the protocol mapping but does not add new feedback-loop coverage. Do this after F.7 (full DI coverage) in a separate PR.
+
+**Validation gate**: `pytest tests/integration/protocols/test_tune_to_interp.py -v` passes in pseudo mode in < 2 seconds.
+
+---
+
+### Implementation order and PR strategy
+
+Steps are sequenced by dependency:
+
+```
+✅ F.4 (unit tests for _render_vocabulary)  ← independent, done first
+✅ F.1 (DI on interp)
+  └── ✅ F.2 (pseudo data)
+       ├── ✅ F.3 (feedback loop test — Tier 1)
+       │    └── ✅ F.5 (Tier 2 interp→propose chain test)
+       └── ✅ F.9 (tune→interp Tier 2 test)
+✅ F.6 (fix stale schemas) ← done with F.3
+✅ F.7 (DI on implementor/validator)
+  └── ✅ F.9 (tune_to_interpret Tier 2 test)
+✅ F.8 (migrate tuner tests to dual-mode)
+```
+
+**F.1–F.9 all complete.**
+
+### Definition of done
+
+The vocabulary feedback loop is considered pseudo-tested when F.1–F.6 are complete:
+- [x] F.1: `ResultInterpretationAgent` accepts `bridge_factory`; unit tests still green
+- [x] F.2: pseudo data exists and passes schema smoke check
+- [x] F.3: `test_interpretation_feedback_loop[refuted]` and `[confirmed]` pass in pseudo mode
+- [x] F.4: `TestRenderVocabulary` unit tests pass (8 cases)
+- [x] F.5: `test_interp_to_propose_feedback_loop` passes in pseudo mode with "REFUTED" in prompt assertion
+- [x] F.6: stale `SummaryGroup` references removed from both integration test files
+- [x] All existing unit tests still green (`pytest tests/unit/ -q` → 871 passed)
+
+**✅ Core feedback loop is pseudo-tested. All F.1–F.6 gates are green.**
+
+Phase 2 follow-ups (all complete):
+- [x] F.7: DI on `ml_model_implementor` and `ml_code_validator_agent`
+- [x] F.8: remaining tuner integration tests migrated to dual-mode
+- [x] F.9: `tune_to_interpret` Tier 2 dual-mode test
 
 ## Change log (decisions made during implementation)
 
@@ -540,3 +981,67 @@ The 20-element `file_vector` already contains all the per-file scoring informati
 - ☑ **Refactored test marker**. **Replaced, not removed**: `@pytest.mark.real_run` on `test_punet_gemini[loss_cfg0]` becomes `@pytest.mark.dual_mode`. The new marker is registered in `tests/conftest.py` via `pytest_configure`. This makes the dual nature explicit and discoverable, distinguishes the test from unmarked unit tests, and keeps the matrix in §4C unambiguous. The other 10 tests in the same file keep `real_run` until they're migrated (each migration replaces `real_run` with `dual_mode` and adds the canned-data wiring).
 - ☑ **Unit tests for the recording fakes themselves (S.4)**. **Yes**, write them. ~50 LOC of smoke tests covering register-and-pop, queue exhaustion, calls list ordering, classmethod loading, real directory creation under tmp_path, save_record disk persistence. The fakes are load-bearing infrastructure for every future pseudo test.
 - ☑ **Tuner's sub-skill call sites**. **Grep performed; no audit needed.** All five sub-skill wrappers under `agent/skills/` (`training_skill`, `inference_skill`, `denoising_score_skill`, `evaluate_resource_skill`, `check_config_format_skill`) take `sandbox` as their first positional argument from the agent and forward method calls onto it. None construct their own `TidmadSandbox`. None construct their own `LLMBridge` (the singleton invariant test enforces this). The agent at `nodes/ml_hyperparameter_tune_agent.py` is the single point of construction for both. **DI at the agent constructor is therefore sufficient** — every sub-skill transparently uses whatever sandbox the agent passes in. No follow-up needed for sub-skill audits.
+
+---
+
+## 8. Known concerns and future work
+
+These are structural limitations identified after Phase 2 completed. None block current usage, but each will cause friction as the pipeline grows.
+
+### C.1 — `plan()` silently aliases the `generate` queue
+
+`RecordingLLMBridge.plan()` records a `("plan", ...)` call but pops from the `"generate"` queue, because `LLMBridge.plan()` internally calls `self.generate()`. The consequence: when an agent makes both `plan()` and `generate()` calls (e.g. pipeline mode with 2 reasoning `generate()` stages + 1 `plan()`), all three draw from the same `generate` queue. The ordering in `generate.json` becomes load-bearing and invisible — insert one extra `generate()` inside the agent and every subsequent item in the queue shifts. This is currently documented only in the source; it is not mentioned in `pseudo_test_infra.md`.
+
+**When this will hurt**: any agent that mixes `plan()` and `generate()` in the same run (already the case for `ml_model_proposal_agent` in pipeline mode).
+
+**Possible fix**: give `plan()` its own `"plan"` queue slot; populate it from `plan.json`. Tests that inspect call order via `bridge.calls` already distinguish `plan` from `generate` entries — the queue should match.
+
+### C.2 — Multi-round testing has no ergonomic `for_agent` / `for_model` support
+
+`for_agent` loads each JSON file as one response (or a flat array). For a 2-round tuner pseudo test you need 2 plan responses and 2 reflect responses. The options today are:
+
+1. Put `[round1, round2]` in `generate.json` — works, but the file is order-sensitive and rounds are unlabeled.
+2. Construct the bridge inline (as done in `test_wavenet_one_round_dual_mode`) — no data reuse, boilerplate per test.
+
+Neither scales past 2–3 rounds. The wavenet F.8 test already bypasses `for_agent` for this reason.
+
+**When this will hurt**: any pseudo test that exercises >1 tuning round, or any workflow-level pseudo test that chains multiple agents.
+
+**Possible fix**: support per-round subdirectories, e.g. `pseudo_data/api_call_outputs/ml_hyperparameter_tune_agent/round_1/generate.json`, `round_2/generate.json`. `for_agent(agent, rounds=2)` concatenates the queues in order. Single-round tests continue to use the flat layout.
+
+### C.3 — No schema validation at pseudo-data load time
+
+`load_pseudo_data` does a raw `json.load` with no Pydantic validation. When a schema changes (e.g., `ExperimentPlan` gains a required field), the stale JSON file is loaded silently. The `ValidationError` surfaces during test *execution*, deep inside the agent, pointing at the agent's internals rather than the JSON file. There is no CI check that validates pseudo-data files against the current schemas.
+
+**When this will hurt**: every schema evolution. Already happened once during Phase 2 (`ExperimentMemory.expert_advice_followed` and `.hypothesis` were required but missing from the F.9 test data, caught only at runtime).
+
+**Possible fix**: add a `tests/unit/pseudo_data/test_pseudo_data_schema.py` that imports every pseudo-data file, feeds it through the relevant Pydantic model, and asserts it validates. Runs in `<1s` and catches stale files immediately.
+
+### C.4 — `plan()` call record drops key arguments
+
+`RecordingLLMBridge.plan()` only records `(method, memory_history, expert_advice, force_model)` in `calls`. The remaining arguments — `config_manual`, `model_description`, `exploration_checklist`, `current_round`, `max_rounds`, `trial_allowed` — are silently dropped. Tests cannot assert on what round number or model description the agent passed to the planner, which are exactly the arguments that encode round-state.
+
+**Possible fix**: record all arguments: `self.calls.append(("plan", memory_history, expert_advice, force_model, config_manual, model_description, exploration_checklist, current_round, max_rounds, trial_allowed))`.
+
+### C.5 — `score_vector` is a separate injection point with no standard pattern
+
+In trial mode the tuner calls `score_vector()` directly (not through the sandbox). The F.8 test handles this with `monkeypatch.setattr(tuner_module, "score_vector", ...)` — a different injection mechanism from the DI factory pattern used everywhere else. This creates two mental models for "how do I fake execution in a pseudo test."
+
+**Possible fix**: wrap `score_vector` behind a callable attribute on the tuner agent (e.g., `self._score_fn = score_vector`) that can be injected via constructor or monkeypatched at a stable, documented path.
+
+### C.6 — `tuner_factories` conftest fixture is hardwired to punet
+
+The `tuner_factories` fixture in `conftest.py` hardcodes `for_agent("ml_hyperparameter_tune_agent")` and defaults `model_type="punet"`. Tests that need wavenet or any other model bypass the fixture entirely. The fixture is effectively only useful for punet-specific tests, which undermines its purpose as a shared helper.
+
+**Possible fix**: parametrise the fixture or replace it with a helper function `make_tuner_factories(agent_name, model_type, base_dir)` that tests call directly, giving them explicit control without a hidden default.
+
+### Priority
+
+| Concern | Severity | Suggested action |
+|---------|----------|-----------------|
+| C.3 — No schema validation at load time | Medium | Add `test_pseudo_data_schema.py` unit test |
+| C.1 — `plan()` aliases `generate` queue | Medium | Separate `plan` queue + `plan.json` file |
+| C.2 — No multi-round `for_agent` support | Medium | Per-round subdirectory convention |
+| C.4 — `plan()` drops call record args | Low | Record all args |
+| C.5 — `score_vector` ad-hoc injection | Low | Inject via constructor attribute |
+| C.6 — `tuner_factories` fixture hardwired | Low | Replace with explicit helper function |
