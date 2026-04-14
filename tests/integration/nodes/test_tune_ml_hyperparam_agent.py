@@ -576,30 +576,26 @@ class TestTrialModeGemini:
 
 @pytest.mark.dual_mode
 @pytest.mark.parametrize("is_trial", [False, True], ids=["formal", "trial"])
-def test_punet_one_round_dual_mode(tmp_path, request, monkeypatch, is_trial):
+def test_punet_one_round_dual_mode(tmp_path, request, is_trial):
     """
     Dual-mode proof-of-concept: runs the tuner agent for 1 round of punet
     in EITHER pseudo mode (default, recording fakes) or real mode
-    (real LLM + real subprocess, requires ``--real-api-call``).
+    (real LLM + real subprocess, requires ``--real-llm`` / ``--real-training``).
 
     Parametrized over ``is_trial``:
       - ``False`` (formal): scoring goes through ``sandbox.execute_scoring``.
-      - ``True`` (trial): scoring goes through ``score_vector()`` called
-        directly in agent code; monkeypatched in pseudo mode to return the
-        predefined file_vector + scalar.
+      - ``True`` (trial): scoring goes through ``sandbox.score_vector``,
+        backed by ``score_vector.json`` in pseudo mode.
 
     Same assertions for both modes. Pseudo mode adds extra assertions on
     prompt content and record structure.
 
-    See ``docs/pseudo_test_infra.md`` for the full dual-mode design.
+    See ``docs/pseudo_test_infra.md`` for the full dual-axis design.
     """
-    is_real_mode = request.config.getoption("--real-api-call")
+    from tests.conftest import make_bridge_factory, make_sandbox_factory, _is_real_training
 
-    if is_real_mode:
-        _skip_if_no_key("gemini")
-        _skip_if_no_data()
-        if is_trial:
-            _skip_if_no_anchor_map()
+    if _is_real_training(request) and is_trial:
+        _skip_if_no_anchor_map()
 
     run_name = f"dual_punet_{'trial' if is_trial else 'formal'}_{int(time.time())}"
     workspace = str(tmp_path / "workspace")
@@ -627,36 +623,32 @@ def test_punet_one_round_dual_mode(tmp_path, request, monkeypatch, is_trial):
         is_trial=is_trial,
     )
 
-    # --- Mode-dependent construction ---
-    bridge = None
-    sandbox = None
+    from tests.conftest import _is_real_llm, _is_real_training
+    from tests.helpers.recording_llm_bridge import RecordingLLMBridge
+    from tests.helpers.recording_sandbox import RecordingSandbox
+    from agent.llm_bridge import LLMBridge
+    from core.sandbox_executor import TidmadSandbox
 
-    if is_real_mode:
-        agent = HyperparamTuningAgent()
+    # Each axis is switched independently.
+    bridge = sandbox = None
+    if _is_real_llm(request):
+        _skip_if_no_key("gemini")
+        bridge_factory = LLMBridge
     else:
-        from tests.helpers.recording_llm_bridge import RecordingLLMBridge
-        from tests.helpers.recording_sandbox import RecordingSandbox
-
         bridge = RecordingLLMBridge.for_agent("ml_hyperparameter_tune_agent")
-        sandbox = RecordingSandbox.for_model(
-            "punet", base_dir=workspace, run_name=run_name,
-        )
-        agent = HyperparamTuningAgent(
-            bridge_factory=lambda **kw: bridge,
-            sandbox_factory=lambda **kw: sandbox,
-        )
+        bridge_factory = lambda **kw: bridge
 
+    if _is_real_training(request):
+        _skip_if_no_data()
         if is_trial:
-            # Trial mode: the agent calls score_vector() directly (not
-            # through the sandbox). Monkeypatch it to return the predefined
-            # file_vector and scalar from the predefined scoring data.
-            canned_fv = [0.5]*5 + [0.7]*6 + [0.9]*9
-            canned_scalar = 0.69
-            import nodes.ml_hyperparameter_tune_agent as tuner_module
-            monkeypatch.setattr(
-                tuner_module, "score_vector",
-                lambda **kw: (canned_fv, canned_scalar),
-            )
+            _skip_if_no_anchor_map()
+        sandbox_factory = TidmadSandbox
+    else:
+        sandbox = RecordingSandbox.for_model("punet", base_dir=workspace, run_name=run_name)
+        sandbox_factory = lambda **kw: sandbox
+
+    agent = HyperparamTuningAgent(bridge_factory=bridge_factory,
+                                   sandbox_factory=sandbox_factory)
 
     output = agent.run(agent_input)
 
@@ -668,17 +660,28 @@ def test_punet_one_round_dual_mode(tmp_path, request, monkeypatch, is_trial):
     assert output.model_type == "punet"
     assert len(output.all_records) >= 1
 
-    # --- Pseudo-mode-only assertions (orchestration wiring) ---
-    if not is_real_mode:
-        assert bridge is not None and sandbox is not None
-
+    # --- Pseudo-LLM assertions (orchestration wiring) ---
+    if bridge is not None:
         # 1. First LLM call is the planner (plan method)
         planner_call = bridge.calls[0]
         assert planner_call[0] == "plan", (
             f"First LLM call should be 'plan' (planner), got {planner_call[0]!r}"
         )
 
-        # 2. The saved record has the expected fields from predefined results
+        # 2. The reflector was called and received scoring results
+        reflect_calls = [c for c in bridge.calls if c[0] == "reflect"]
+        assert len(reflect_calls) >= 1, "Reflector should have been called"
+        reflect_results = reflect_calls[0][3]
+        assert "denoising_score" in reflect_results
+        assert "file_vector" in reflect_results
+
+        # 3. Call sequence sanity: plan → … → reflect
+        bridge_methods = [c[0] for c in bridge.calls]
+        assert bridge_methods[0] == "plan"
+        assert "reflect" in bridge_methods
+
+    # --- Pseudo-sandbox assertions (record structure) ---
+    if sandbox is not None:
         assert len(sandbox.saved_records) >= 1, (
             "At least one record should have been saved via sandbox.save_record()"
         )
@@ -690,18 +693,6 @@ def test_punet_one_round_dual_mode(tmp_path, request, monkeypatch, is_trial):
         assert len(record["file_vector"]) == 20
         assert record["final_loss"] is not None
         assert record["model_params"] is not None
-
-        # 3. The reflector was called and received scoring results
-        reflect_calls = [c for c in bridge.calls if c[0] == "reflect"]
-        assert len(reflect_calls) >= 1, "Reflector should have been called"
-        reflect_results = reflect_calls[0][3]
-        assert "denoising_score" in reflect_results
-        assert "file_vector" in reflect_results
-
-        # 4. Call sequence sanity: plan → train → score path → reflect → save
-        bridge_methods = [c[0] for c in bridge.calls]
-        assert bridge_methods[0] == "plan"
-        assert "reflect" in bridge_methods
         sandbox_methods = [c[0] for c in sandbox.calls]
         assert "execute_training" in sandbox_methods
         assert "save_record" in sandbox_methods
@@ -772,11 +763,11 @@ def test_wavenet_one_round_dual_mode(tmp_path, request, monkeypatch):
     Validates that the tuner orchestration works correctly for wavenet:
     canned plan, training, scoring, reflection, and record persistence.
     """
-    is_real_mode = request.config.getoption("--real-api-call")
-
-    if is_real_mode:
-        _skip_if_no_key("gemini")
-        _skip_if_no_data()
+    from tests.conftest import _is_real_llm, _is_real_training
+    from tests.helpers.recording_llm_bridge import RecordingLLMBridge
+    from tests.helpers.recording_sandbox import RecordingSandbox
+    from agent.llm_bridge import LLMBridge
+    from core.sandbox_executor import TidmadSandbox
 
     run_name = f"dual_wavenet_formal_{int(time.time())}"
     workspace = str(tmp_path / "workspace")
@@ -804,28 +795,28 @@ def test_wavenet_one_round_dual_mode(tmp_path, request, monkeypatch):
         is_trial=False,
     )
 
-    bridge = None
-    sandbox = None
-
-    if is_real_mode:
-        agent = HyperparamTuningAgent()
+    # Each axis switched independently.
+    bridge = sandbox = None
+    if _is_real_llm(request):
+        _skip_if_no_key("gemini")
+        bridge_factory = LLMBridge
     else:
-        from tests.helpers.recording_llm_bridge import RecordingLLMBridge
-        from tests.helpers.recording_sandbox import RecordingSandbox
-
-        # Wavenet plan is model-specific — construct inline rather than via for_agent
+        # Wavenet plan is model-specific — inline construction, not for_agent.
         bridge = RecordingLLMBridge(responses={
             "generate": _WAVENET_CANNED_PLAN,
             "reflect":  _WAVENET_CANNED_REFLECT,
         })
-        sandbox = RecordingSandbox.for_model(
-            "wavenet", base_dir=workspace, run_name=run_name,
-        )
-        agent = HyperparamTuningAgent(
-            bridge_factory=lambda **kw: bridge,
-            sandbox_factory=lambda **kw: sandbox,
-        )
+        bridge_factory = lambda **kw: bridge
 
+    if _is_real_training(request):
+        _skip_if_no_data()
+        sandbox_factory = TidmadSandbox
+    else:
+        sandbox = RecordingSandbox.for_model("wavenet", base_dir=workspace, run_name=run_name)
+        sandbox_factory = lambda **kw: sandbox
+
+    agent = HyperparamTuningAgent(bridge_factory=bridge_factory,
+                                   sandbox_factory=sandbox_factory)
     output = agent.run(agent_input)
 
     # --- Assertions that hold in BOTH modes ---
@@ -836,15 +827,17 @@ def test_wavenet_one_round_dual_mode(tmp_path, request, monkeypatch):
     assert output.model_type == "wavenet"
     assert len(output.all_records) >= 1
 
-    # --- Pseudo-mode-only assertions ---
-    if not is_real_mode:
-        assert bridge is not None and sandbox is not None
-
+    # --- Pseudo-LLM assertions ---
+    if bridge is not None:
         planner_call = bridge.calls[0]
         assert planner_call[0] == "plan", (
             f"First LLM call should be 'plan', got {planner_call[0]!r}"
         )
+        bridge_methods = [c[0] for c in bridge.calls]
+        assert "reflect" in bridge_methods
 
+    # --- Pseudo-sandbox assertions ---
+    if sandbox is not None:
         assert len(sandbox.saved_records) >= 1
         record = sandbox.saved_records[0]
         assert record["status"] == "success"
@@ -852,17 +845,11 @@ def test_wavenet_one_round_dual_mode(tmp_path, request, monkeypatch):
         assert record["denoising_score"] == pytest.approx(5.576, abs=0.01)
         assert record["file_vector"] is not None
         assert len(record["file_vector"]) == 20
-        # Verify the characteristic wavenet pattern: strong high-freq, weak low-freq
         assert record["file_vector"][0] < 1.0,  "Low-freq (file 0) should be weak"
         assert record["file_vector"][19] > 7.0, "High-freq (file 19) should be strong"
-
-        bridge_methods = [c[0] for c in bridge.calls]
-        assert bridge_methods[0] == "plan"
-        assert "reflect" in bridge_methods
         sandbox_methods = [c[0] for c in sandbox.calls]
         assert "execute_training" in sandbox_methods
         assert "save_record" in sandbox_methods
-
         print(f"\n  [wavenet pseudo] score={record['denoising_score']:.4f} "
               f"file_vec[0]={record['file_vector'][0]:.2f} "
               f"file_vec[19]={record['file_vector'][19]:.2f}")

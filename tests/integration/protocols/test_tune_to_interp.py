@@ -15,7 +15,6 @@ Run with:
 
 DO NOT remove the dual_mode marker — this test runs in CI in pseudo mode.
 """
-import os
 import pytest
 from dotenv import load_dotenv
 
@@ -127,11 +126,7 @@ def test_tune_to_interp_protocol_and_node(tmp_path, request):
     Pseudo mode (default): RecordingLLMBridge with canned responses.
     Real mode (--real-api-call): real Gemini API. Skips if key not set.
     """
-    is_real = request.config.getoption("--real-api-call")
-
-    if is_real:
-        if not os.getenv("GEMINI_API_KEY"):
-            pytest.skip("GEMINI_API_KEY not set")
+    from tests.conftest import make_bridge_factory
 
     storage = StorageConfig(
         backend="local",
@@ -156,13 +151,8 @@ def test_tune_to_interp_protocol_and_node(tmp_path, request):
     assert len(summary.round_conclusions) == 2
 
     # --- Step 2: run interpretation agent ---
-    if is_real:
-        agent = ResultInterpretationAgent(provider="gemini",
-                                          model_id="gemini-3.1-flash-lite-preview")
-    else:
-        from tests.helpers.recording_llm_bridge import RecordingLLMBridge
-        bridge = RecordingLLMBridge.for_agent("result_interpretation_agent")
-        agent = ResultInterpretationAgent(bridge_factory=lambda **kw: bridge)
+    bridge_factory = make_bridge_factory(request, "result_interpretation_agent")
+    agent = ResultInterpretationAgent(bridge_factory=bridge_factory)
 
     output = agent.run(interp_input)
 

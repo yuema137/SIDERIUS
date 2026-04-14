@@ -370,6 +370,36 @@ class TidmadSandbox:
             print(f"--- Inference Error ---\n{error_msg}")
             return {"status": "error", "message": error_msg}
 
+    def score_vector(self, sample_set, anchor_map: dict, s_max: float,
+                     denoised_filename_fn: callable, **kwargs) -> tuple:
+        """Anchor-normalised multi-file scoring. Delegates to execute_tools.scoring_utils.score_vector.
+
+        Wraps the module-level function so that the agent's scoring path goes
+        through the sandbox — making it injectable in tests just like
+        execute_training / execute_inference / execute_scoring.
+
+        Args:
+            sample_set:           SampleSet dict (file_index → segment list).
+            anchor_map:           The ``"anchors"`` dict from segment_anchors.json.
+            s_max:                Global max CH2 SNR from the anchor map.
+            denoised_filename_fn: Callable (file_index) → denoised filename.
+            **kwargs:             Forwarded to scoring_utils.score_vector
+                                  (parallel, num_workers, raw_data_dir, …).
+
+        Returns:
+            (file_vector, final_scalar_score)
+        """
+        from execute_tools.scoring_utils import score_vector as _score_vector
+        return _score_vector(
+            data_dir=self.base_dir,
+            sample_set=sample_set,
+            anchor_map=anchor_map,
+            s_max=s_max,
+            denoised_filename_fn=denoised_filename_fn,
+            raw_data_dir=self.dirs["data"],
+            **kwargs,
+        )
+
     def execute_scoring(self, exp_id: str, run_name: str, model_type: str, m_cfg: Dict, t_cfg: Dict, l_cfg: Dict):
         """Calculates score and returns results to Skill layer."""
         result_dir = os.path.join(self.dirs["records"], run_name)
