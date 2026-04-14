@@ -53,14 +53,32 @@ def pytest_addoption(parser):
         help="Run training tests against the real TIDMAD HDF5 file instead of synthetic data.",
     )
     parser.addoption(
+        "--real-llm",
+        action="store_true",
+        default=False,
+        help=(
+            "Use real LLMBridge (real API calls) in dual-mode tests. "
+            "Requires GEMINI_API_KEY. Can be combined independently with "
+            "--real-training. See docs/pseudo_test_infra.md §4C."
+        ),
+    )
+    parser.addoption(
+        "--real-training",
+        action="store_true",
+        default=False,
+        help=(
+            "Use real TidmadSandbox (real subprocess execution) in dual-mode "
+            "tests. Requires GPU and TIDMAD data on disk. Can be combined "
+            "independently with --real-llm. See docs/pseudo_test_infra.md §4C."
+        ),
+    )
+    parser.addoption(
         "--real-api-call",
         action="store_true",
         default=False,
         help=(
-            "Run dual-mode integration tests against the real LLM API and real "
-            "subprocess execution (training/inference/scoring). Requires API keys "
-            "and GPU. Default: pseudo mode (recording fakes from tests/helpers/). "
-            "See docs/pseudo_test_infra.md for the dual-mode design."
+            "Deprecated alias: sets both --real-llm and --real-training. "
+            "Use --real-llm / --real-training independently instead."
         ),
     )
 
@@ -69,16 +87,16 @@ def pytest_configure(config):
     """Register custom pytest markers used by the pseudo-full-loop test infra.
 
     The ``dual_mode`` marker labels integration tests that support BOTH the
-    pseudo-mode (recording fakes, default) and real-mode (real LLM + real
-    subprocess, opt-in via ``--real-api-call``) execution paths. See
-    ``docs/pseudo_test_infra.md`` §4C for the orthogonal-axes design.
+    pseudo-mode (recording fakes, default) and real-mode (real LLM and/or real
+    subprocess, opt-in via --real-llm / --real-training) execution paths. See
+    ``docs/pseudo_test_infra.md`` §4C for the dual-axis design.
     """
     config.addinivalue_line(
         "markers",
-        "dual_mode: integration test that supports both pseudo mode (default, "
-        "uses RecordingLLMBridge + RecordingSandbox) and real mode (uses real "
-        "LLMBridge + TidmadSandbox; requires --real-api-call). Distinct from "
-        "the existing 'real_run' marker which is for real-only tests.",
+        "dual_mode: integration test that supports pseudo mode (default, uses "
+        "RecordingLLMBridge + RecordingSandbox) and real mode (uses real "
+        "LLMBridge via --real-llm and/or real TidmadSandbox via --real-training, "
+        "independently). Distinct from 'real_run' which is real-only.",
     )
 
 
@@ -143,72 +161,84 @@ def h5_source(request, synthetic_h5):
 
 
 # ---------------------------------------------------------------------------
-# Pseudo-full-loop test fixtures (dual-mode integration tests)
+# Pseudo-full-loop test helpers (dual-mode integration tests)
+# ---------------------------------------------------------------------------
+# These are plain functions, not fixtures, so tests can call them with explicit
+# arguments (agent_name, model_type, etc.) rather than relying on a fixture
+# that has hidden defaults. Each axis — LLM and training — is controlled by
+# its own flag and can be switched independently.
+#
+# Flag matrix (see docs/pseudo_test_infra.md §4C):
+#   --real-llm       use real LLMBridge  (needs GEMINI_API_KEY)
+#   --real-training  use real TidmadSandbox (needs GPU + data)
+#   --real-api-call  deprecated alias: sets both of the above
 # ---------------------------------------------------------------------------
 
-@pytest.fixture
-def tuner_factories(request, tmp_path):
-    """Factory pair for dual-mode tuner integration tests.
+def _is_real_llm(request) -> bool:
+    """True when the test should use a real LLM API call."""
+    return (request.config.getoption("--real-llm") or
+            request.config.getoption("--real-api-call"))
 
-    Returns ``{"bridge_factory": ..., "sandbox_factory": ...}`` — the two
-    callables a dual-mode test passes into ``HyperparamTuningAgent`` (or any
-    other consumer of LLMBridge + TidmadSandbox).
 
-    Mode selection:
-      * **Pseudo mode (default)**: returns
-        ``{"bridge_factory": <RecordingLLMBridge factory>, "sandbox_factory":
-        <RecordingSandbox factory>}``. The bridge factory builds a recording
-        bridge pre-loaded from ``tests/pseudo_data/api_call_outputs/
-        ml_hyperparameter_tune_agent/``; the sandbox factory builds a
-        recording sandbox under the test's ``tmp_path``, pre-loaded from
-        ``tests/pseudo_data/train_outputs/{model_type}/``. The factories
-        accept any ``**kwargs`` the agent passes (provider, model_id,
-        base_dir, run_name, etc.) and silently ignore the ones the recording
-        fakes don't need.
-      * **Real mode (``--real-api-call``)**: returns the real ``LLMBridge``
-        and ``TidmadSandbox`` classes themselves. The agent's existing
-        constructor signature is preserved bit-for-bit; the test runs
-        end-to-end against the real API and real subprocesses, exactly as
-        it does today.
+def _is_real_training(request) -> bool:
+    """True when the test should use real subprocess execution."""
+    return (request.config.getoption("--real-training") or
+            request.config.getoption("--real-api-call"))
 
-    Pseudo-mode usage assumes the consumer is the tuner agent and the model
-    type is ``"punet"`` (the only model with v1 canned data in this PR). When
-    other models gain canned data in follow-up PRs, callers can pass an
-    explicit ``model_type`` keyword to the sandbox factory and the recording
-    sandbox will load the matching ``train_outputs/{model_type}/`` directory.
+
+def make_bridge_factory(request, agent_name: str):
+    """Return a bridge factory for the given agent.
+
+    Pseudo by default; pass ``--real-llm`` (or the deprecated
+    ``--real-api-call``) for real API calls. Skips the test if the flag is
+    set but ``GEMINI_API_KEY`` is absent.
+
+    Args:
+        request:    pytest ``request`` fixture (for option access).
+        agent_name: agent's CLAUDE.md taxonomy name, e.g.
+                    ``"ml_hyperparameter_tune_agent"``. Used to locate the
+                    canned pseudo-data under
+                    ``tests/pseudo_data/api_call_outputs/{agent_name}/``.
+
+    Returns:
+        A callable that matches the ``bridge_factory`` DI parameter used by
+        every node constructor.
     """
-    if request.config.getoption("--real-api-call"):
-        # Real mode: return the real classes. Agent constructs them directly
-        # via self._bridge_factory(...) / self._sandbox_factory(...) — no
-        # behavioral change from today.
+    if _is_real_llm(request):
+        if not os.getenv("GEMINI_API_KEY"):
+            pytest.skip("--real-llm requires GEMINI_API_KEY")
         from agent.llm_bridge import LLMBridge
-        from core.sandbox_executor import TidmadSandbox
-        return {"bridge_factory": LLMBridge, "sandbox_factory": TidmadSandbox}
-
-    # Pseudo mode: return factory closures that build pre-loaded recording fakes.
+        return LLMBridge
     from tests.helpers.recording_llm_bridge import RecordingLLMBridge
+    bridge = RecordingLLMBridge.for_agent(agent_name)
+    return lambda **kw: bridge
+
+
+def make_sandbox_factory(request, model_type: str, base_dir: str, run_name: str):
+    """Return a sandbox factory for the given model.
+
+    Pseudo by default; pass ``--real-training`` (or the deprecated
+    ``--real-api-call``) for real subprocess execution. Skips the test if
+    the flag is set but TIDMAD data is absent.
+
+    Args:
+        request:    pytest ``request`` fixture (for option access).
+        model_type: built-in model key, e.g. ``"punet"``, ``"wavenet"``.
+                    Used to locate canned pseudo-data under
+                    ``tests/pseudo_data/train_outputs/{model_type}/``.
+        base_dir:   root directory for on-disk artifacts (pass ``tmp_path``).
+        run_name:   run identifier scoping per-run subdirectories.
+
+    Returns:
+        A callable that matches the ``sandbox_factory`` DI parameter used by
+        ``HyperparamTuningAgent``.
+    """
+    if _is_real_training(request):
+        real_path = os.path.join(REAL_DATA_DIR, REAL_DATA_FILE)
+        if not os.path.exists(real_path):
+            pytest.skip(f"--real-training requires TIDMAD data at {real_path}")
+        from core.sandbox_executor import TidmadSandbox
+        return TidmadSandbox
     from tests.helpers.recording_sandbox import RecordingSandbox
-
-    def _bridge_factory(**kwargs):
-        # Pre-load the bridge with the canned outputs for the tuner agent.
-        # The agent's call (e.g. with provider/model_id/reflect_*) is ignored
-        # by the recording bridge's **kwargs, so this is a clean drop-in.
-        return RecordingLLMBridge.for_agent("ml_hyperparameter_tune_agent")
-
-    def _sandbox_factory(**kwargs):
-        # Pre-load the sandbox with the canned outputs for the model type.
-        # Default to punet (the only v1 canned model). The agent passes
-        # base_dir/run_name/file_index/etc.; we honor base_dir if given,
-        # otherwise route to the test's tmp_path. file_index and other
-        # real-sandbox params are silently swallowed by **kwargs.
-        model_type = kwargs.pop("model_type", "punet")
-        base_dir = kwargs.pop("base_dir", str(tmp_path))
-        run_name = kwargs.pop("run_name", "test")
-        return RecordingSandbox.for_model(
-            model_type=model_type,
-            base_dir=base_dir,
-            run_name=run_name,
-            **kwargs,
-        )
-
-    return {"bridge_factory": _bridge_factory, "sandbox_factory": _sandbox_factory}
+    sandbox = RecordingSandbox.for_model(model_type, base_dir=base_dir, run_name=run_name)
+    return lambda **kw: sandbox
