@@ -1069,7 +1069,7 @@ G.5 (docs + CI)                      ← last
 
 ---
 
-### Phase 4 — Vocabulary Accumulation Across Iterations (planned)
+### Phase 4 — Vocabulary Accumulation Across Iterations (complete)
 
 **Goal**: verify that the system actually learns across iterations — discoveries generated in iteration N survive into iteration N+1's vocab, and the vocab list is strictly monotonically growing.
 
@@ -1195,11 +1195,11 @@ No production code changes needed — this is test-only.
 
 #### Definition of done
 
-- [ ] H.1: `test_vocab_grows_across_two_iterations` passes in pseudo mode (default, no flags)
-- [ ] Pseudo data for `result_interpretation_agent_iter2` created and schema-validated
-- [ ] Vocab monotonic growth assertion passes: `len(iter2) > len(iter1)` and `iter1_names ⊆ iter2_names`
-- [ ] Protocol assertion passes: iter 1 discoveries appear in `proposal_inp.vocab_seed`
-- [ ] Real-LLM smoke test passes with `--real-llm`
+- [x] H.1: `test_vocab_grows_across_two_iterations` passes in pseudo mode (default, no flags)
+- [x] Pseudo data for `result_interpretation_agent_iter2` created (4 canned responses for punet/spectral_net/wavenet + synthesis)
+- [x] Vocab monotonic growth assertion passes: iter1=2 entries → iter2=4 entries; `iter1_names ⊆ iter2_names`
+- [x] Protocol assertion passes: iter 1 discoveries appear in `proposal_inp.vocab_seed`
+- [ ] Real-LLM smoke test passes with `--real-llm` (pending)
 
 ### Definition of done
 
