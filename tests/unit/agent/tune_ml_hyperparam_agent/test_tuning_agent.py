@@ -368,7 +368,6 @@ class TestDynamicTrialFormal:
              patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox, \
              patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill), \
              patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map") as mock_anchor, \
-             patch("nodes.ml_hyperparameter_tune_agent.score_vector", return_value=FAKE_SCORE_VECTOR_RESULT), \
              patch("os.path.exists", return_value=True), \
              tempfile.TemporaryDirectory() as configs_dir:
 
@@ -383,6 +382,7 @@ class TestDynamicTrialFormal:
             mock_sandbox.get_summary.side_effect = lambda: list(saved_records)
             mock_sandbox.save_record.side_effect = lambda r: saved_records.append(r)
             mock_sandbox.dirs = {"configs": configs_dir, "data": configs_dir}
+            mock_sandbox.score_vector.return_value = FAKE_SCORE_VECTOR_RESULT
 
             agent = HyperparamTuningAgent()
             yield agent, mock_brain, mock_sandbox, saved_records
