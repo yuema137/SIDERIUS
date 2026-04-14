@@ -1177,7 +1177,7 @@ Prompt templates live in `agent/prompt_templates/proposal/` as `.md` files (not 
 
 **Verify** (after Group 4):
 - ☑ All unit tests pass: 800 passed.
-- ☑ Manual: ran on real interpretation data (lilab_chain_v1 iter_002, 3 models, 42 experiments) with `gemini-3.1-pro-preview`. Pipeline proposed `causal_conv_stack` — an ablation experiment testing `dilated_causal_conv → receptive_field` link. Vocabulary terms used consistently. Exploration mode correctly active.
+- ☑ Manual: ran on real interpretation data (lilab_chain_v1 iter_002, 3 models, 42 experiments) with `gemini-3.1-pro-preview` (now replaced by `gemini-2.5-flash` — quota exhausted). Pipeline proposed `causal_conv_stack` — an ablation experiment testing `dilated_causal_conv → receptive_field` link. Vocabulary terms used consistently. Exploration mode correctly active.
 
 #### Deferred items (moved to their actual phases)
 
@@ -1309,6 +1309,9 @@ Iteration N:
 - ☑ C.17 Workflow tracks `previous_proposal_data` and `current_runtime_vocab` across iterations. Passes both to `InterpretationInput`. Updates `current_runtime_vocab` from interpretation output after each iteration. **Done**.
 - ☑ C.18 17 unit tests: prediction evaluation (8: confirmed/refuted/partial, file_vector metric, boldness, info_gain), discovery generation (4: confirmed/refuted/no_prediction, score vs SOTA), vocab building (5: seed only, add discoveries, dedup, candidates, multi-iteration growth). **Done**.
 
+**O(1) call count — HIGH PRIORITY (must do before long chains):**
+- ☐ **C.19a** Add `cached_model_summaries: Dict[str, Dict]` to `InterpretationInput` and `model_summaries: Dict[str, Dict]` to `InterpretationOutput`. Agent skips Phase 1 LLM call for any model already in the cache; only new models get a fresh call. Workflow carries `model_summaries` forward as `cached_model_summaries` in the next iteration — same pattern as `current_runtime_vocab` (C.17). See §5 "⚠️ Critical implementation gap" for full design.
+
 **Promotion (after vocabulary loop is working):**
 - ☐ C.5 Structural promotion rule for candidates.
 - ☐ C.5a `ProposedVocabLink` promotion: confirmed links → `VocabEntry.related_to`.
@@ -1325,8 +1328,8 @@ Iteration N:
 - ☐ B.22 Memo validation failure → retry.
 
 **Verify**:
-- Run 2+ chain iterations. Inspect interpretation output: does `runtime_vocab` grow between iterations? Do discoveries accumulate? Is the prediction evaluation correct?
-- Check that the proposal agent references discoveries from previous rounds in its reasoning.
+- ✅ **Automated (pseudo mode)**: `test_vocab_grows_across_two_iterations` in `tests/integration/workflows/test_vocab_accumulation.py` (@dual_mode, Phase 4 of `docs/pseudo_test_infra.md`). Verifies: `runtime_vocab` grows monotonically across two iterations (iter1=2 entries → iter2=4), no entries dropped, REFUTED/CONFIRMED discoveries generated correctly, protocol maps discoveries into `vocab_seed`. Passes in pseudo mode (0.2s) and real-LLM mode (73s).
+- ☐ **Manual (real chain)**: Run 2+ real chain iterations. Check that the proposal agent's reasoning prompt references discovery entries from the previous round — i.e., that the LLM actually uses the accumulated vocabulary to constrain its proposals (not currently testable deterministically).
 
 ---
 
@@ -1475,6 +1478,53 @@ Each round, the interpretation agent:
 >
 > **This is NOT a one-time implementation** — it's an ongoing quality improvement loop that runs in parallel with the experiment loop itself. The vocabulary system gets better as we tune its prompts, just like the ML models get better as we tune their hyperparameters.
 
+### ⚠️ Critical implementation gap: O(N) LLM call count in Phase 1
+
+**The problem — currently unresolved, high priority.**
+
+The design above correctly bounds the prompt *content* to O(1) per iteration. But the current `result_interpretation_agent` implementation has an O(N) **call count** problem in Phase 1:
+
+```
+Phase 1 — per-model summarization: one LLM call per model in effective_types
+  Iter 1: effective_types = [wavenet, punet, attn_wavenet]          → 3 Phase 1 calls + 1 synthesis = 4
+  Iter 2: effective_types = [wavenet, punet, attn_wavenet, spec_net] → 4 Phase 1 calls + 1 synthesis = 5
+  Iter N: effective_types = [wavenet, punet, + N proposed models]   → N+2 calls
+```
+
+wavenet and punet do not change between iterations — re-summarising them from scratch each time is pure waste. The call count is O(N) in the number of models seen so far, which grows with every iteration.
+
+**The design principle (§5 above) already implies the fix**: "new records (iter N-1 only)" as the only input. Per-model summaries from previous iterations should be cached, not recomputed.
+
+**The fix: cached per-model summaries.**
+
+Add two fields:
+- `InterpretationInput.cached_model_summaries: Dict[str, Dict]` — Phase 1 results from the previous `InterpretationOutput`, keyed by `model_type`
+- `InterpretationOutput.model_summaries: Dict[str, Dict]` — the full set (cached + new) for the workflow to pass forward as `cached_model_summaries` in the next iteration
+
+Agent logic becomes:
+```python
+for mt in effective_types:
+    if mt in inp.cached_model_summaries:
+        per_model_summaries[mt] = inp.cached_model_summaries[mt]  # reuse, zero LLM calls
+    else:
+        per_model_summaries[mt] = self.bridge.generate(...)  # only for new models
+```
+
+**Result: O(1) calls per iteration** (independent of history depth):
+```
+Iter 1: 1 call (attn_wavenet) + 0 cached (first run, no cache) + 1 synthesis = N_new + 1
+Iter 2: 1 call (spectral_net) + 2 cached (wavenet, punet from iter 1) + 1 synthesis = 2 calls
+Iter N: 1 call (new proposed model) + cached rest                      + 1 synthesis = 2 calls always
+```
+
+**Underlying assumption** (same as for vocab): everything worth knowing about wavenet and punet from all previous iterations is already captured in the cached per-model summary plus the runtime vocab. The cached summary is a stable, frozen view of that model's performance — it doesn't need to be re-derived from scratch each time.
+
+**Implementation note**: this is a schema + agent change only. The workflow already carries `current_runtime_vocab` forward (Phase C, C.17 ☑); adding `cached_model_summaries` follows the exact same pattern.
+
+**Priority: HIGH — must be implemented before running long (>5 iteration) chains**, otherwise cost and latency grow linearly with exploration depth.
+
+Track as: **C.19a** (new task under Phase C, before C.5/C.6 promotion which is lower priority).
+
 ### How vocabulary bounds the growth
 
 - **Features and capabilities**: bounded by the promotion rules. Most candidates never get promoted. The canonical seed stays at ~20 entries. Candidates churn — new ones appear, unused ones fade. Total stays ~30-50 entries.
@@ -1496,7 +1546,7 @@ The proposal agent receives even more context (comparison stage gets source code
 
 ### Design rules to prevent prompt explosion
 
-1. **The lab report replaces raw records.** The interpretation agent never receives "all records since the beginning." It receives the previous lab report + new data.
+1. **Every step makes O(1) LLM calls, independent of iteration count.** The interpretation agent caches per-model Phase 1 summaries (C.19a) and only calls the LLM for new models. The vocabulary/discovery pipeline already runs O(1) calls. The proposal agent's pipeline is fixed at 3 calls. No stage should grow call count with history depth.
 2. **The vocabulary is the memory.** Everything worth remembering is in the vocabulary (features, capabilities, discoveries). If it's not in the vocabulary, it's not remembered.
 3. **Source code is pre-filtered.** Only top N models get their source code included. The `ModelSelectionStrategy` controls this budget.
 4. **Discoveries can be summarized.** If the discovery list grows beyond ~50 entries, the interpretation agent consolidates older ones into summaries.
