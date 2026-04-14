@@ -1199,7 +1199,7 @@ No production code changes needed — this is test-only.
 - [x] Pseudo data for `result_interpretation_agent_iter2` created (4 canned responses for punet/spectral_net/wavenet + synthesis)
 - [x] Vocab monotonic growth assertion passes: iter1=2 entries → iter2=4 entries; `iter1_names ⊆ iter2_names`
 - [x] Protocol assertion passes: iter 1 discoveries appear in `proposal_inp.vocab_seed`
-- [ ] Real-LLM smoke test passes with `--real-llm` (pending)
+- [x] Real-LLM smoke test passes with `--real-llm` (1 passed in 73s, 2026-04-14)
 
 ### Definition of done
 
