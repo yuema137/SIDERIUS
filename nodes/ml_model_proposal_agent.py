@@ -542,13 +542,14 @@ class MLModelProposalAgent:
 
     @staticmethod
     def _render_vocabulary(vocab_seed: list) -> str:
-        """Render the vocabulary seed into a prompt block."""
+        """Render the full vocabulary seed into a prompt block.
+
+        Renders all four kinds: feature, capability, discovery, candidate.
+        Discoveries carry empirical CONFIRMED/REFUTED/PARTIAL outcomes and are
+        critical for the feedback loop — the proposer must see them.
+        """
         if not vocab_seed:
             return ""
-
-        lines = ["## Vocabulary (use these terms consistently)\n"]
-        features = [v for v in vocab_seed if hasattr(v, "kind") and v.kind == "feature"]
-        capabilities = [v for v in vocab_seed if hasattr(v, "kind") and v.kind == "capability"]
 
         # Handle both VocabEntry objects and dicts
         def _get(entry, key, default=""):
@@ -557,6 +558,13 @@ class MLModelProposalAgent:
             if isinstance(entry, dict):
                 return entry.get(key, default)
             return default
+
+        features     = [v for v in vocab_seed if _get(v, "kind") == "feature"]
+        capabilities = [v for v in vocab_seed if _get(v, "kind") == "capability"]
+        discoveries  = [v for v in vocab_seed if _get(v, "kind") == "discovery"]
+        candidates   = [v for v in vocab_seed if _get(v, "kind") == "candidate"]
+
+        lines = ["## Vocabulary\n"]
 
         if features:
             lines.append("### Features (concrete building blocks)")
@@ -569,6 +577,20 @@ class MLModelProposalAgent:
         if capabilities:
             lines.append("### Capabilities (measurable architectural properties)")
             for v in capabilities:
+                lines.append(f"- **{_get(v, 'name')}**: {_get(v, 'description')}")
+            lines.append("")
+
+        if discoveries:
+            lines.append("### Discoveries (empirical outcomes — CONFIRMED/REFUTED/PARTIAL)")
+            lines.append("These are the results of past falsifiable predictions. "
+                         "Use them to avoid repeating failures and to build on confirmed findings.")
+            for v in discoveries:
+                lines.append(f"- **{_get(v, 'name')}**: {_get(v, 'description')}")
+            lines.append("")
+
+        if candidates:
+            lines.append("### Candidates (proposed but not yet confirmed)")
+            for v in candidates:
                 lines.append(f"- **{_get(v, 'name')}**: {_get(v, 'description')}")
             lines.append("")
 
