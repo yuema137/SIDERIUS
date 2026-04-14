@@ -31,7 +31,7 @@ from agent.schemas.hyperparam_tuning import (
     serialize_expert_advice,
 )
 from execute_tools.sample_set_builder import build_sample_set
-from execute_tools.scoring_utils import score_vector, SampleSet
+from execute_tools.scoring_utils import SampleSet
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 from execute_tools.build_anchor_map import load_anchor_map
 
@@ -529,13 +529,11 @@ class HyperparamTuningAgent:
                     # Trial: sparse SampleSet. Formal: full SampleSet (all 20 × 200).
                     def _denoised_fn(fi):
                         return f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_{fi:04d}.h5"
-                    file_vector, final_scalar = score_vector(
-                        data_dir=sandbox.base_dir,
+                    file_vector, final_scalar = sandbox.score_vector(
                         sample_set=eval_sample_set,
                         anchor_map=anchor_map_data["anchors"],
                         s_max=anchor_map_data["s_max"],
                         denoised_filename_fn=_denoised_fn,
-                        raw_data_dir=sandbox.dirs["data"],
                     )
                     score_res = {
                         "status": "success",
