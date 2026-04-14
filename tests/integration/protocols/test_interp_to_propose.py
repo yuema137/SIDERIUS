@@ -197,9 +197,10 @@ def test_interp_to_propose_feedback_loop(tmp_path, request):
     Pseudo mode (default): both agents use RecordingLLMBridge. No API calls.
     Real mode (--real-api-call): uses real Gemini API. Skips if key not set.
     """
-    is_real = request.config.getoption("--real-api-call")
+    from tests.conftest import _is_real_llm
+    from tests.helpers.recording_llm_bridge import RecordingLLMBridge
 
-    if is_real:
+    if _is_real_llm(request):
         if not os.getenv("GEMINI_API_KEY"):
             pytest.skip("GEMINI_API_KEY not set")
 
@@ -234,17 +235,18 @@ def test_interp_to_propose_feedback_loop(tmp_path, request):
         },
     )
 
-    if is_real:
-        interp_agent  = ResultInterpretationAgent(provider="gemini",
-                                                   model_id="gemini-3.1-flash-lite-preview")
-        propose_agent = MLModelProposalAgent(provider="gemini",
-                                             model_id="gemini-3.1-flash-lite-preview")
+    if _is_real_llm(request):
+        interp_bridge  = None
+        propose_bridge = None
+        interp_agent   = ResultInterpretationAgent(provider="gemini",
+                                                    model_id="gemini-3.1-flash-lite-preview")
+        propose_agent  = MLModelProposalAgent(provider="gemini",
+                                              model_id="gemini-3.1-flash-lite-preview")
     else:
-        from tests.helpers.recording_llm_bridge import RecordingLLMBridge
         interp_bridge  = RecordingLLMBridge.for_agent("result_interpretation_agent")
         propose_bridge = RecordingLLMBridge.for_agent("ml_model_proposal_agent")
-        interp_agent  = ResultInterpretationAgent(bridge_factory=lambda **kw: interp_bridge)
-        propose_agent = MLModelProposalAgent(bridge_factory=lambda **kw: propose_bridge)
+        interp_agent   = ResultInterpretationAgent(bridge_factory=lambda **kw: interp_bridge)
+        propose_agent  = MLModelProposalAgent(bridge_factory=lambda **kw: propose_bridge)
 
     # Step 1: run interpretation — produces REFUTED discovery in runtime_vocab
     interp_output = interp_agent.run(interp_inp)
@@ -270,7 +272,7 @@ def test_interp_to_propose_feedback_loop(tmp_path, request):
     assert isinstance(propose_output, ProposalOutput)
 
     # Step 4 (pseudo mode only): assert "REFUTED" appears in a generate() user prompt
-    if not is_real:
+    if propose_bridge is not None:
         generate_calls = [(call[1], call[2]) for call in propose_bridge.calls
                           if call[0] == "generate"]
         user_prompts = [user for _, user in generate_calls]
