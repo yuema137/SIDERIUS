@@ -705,3 +705,164 @@ def test_punet_one_round_dual_mode(tmp_path, request, monkeypatch, is_trial):
         sandbox_methods = [c[0] for c in sandbox.calls]
         assert "execute_training" in sandbox_methods
         assert "save_record" in sandbox_methods
+
+
+# ---------------------------------------------------------------------------
+# F.8 — Wavenet dual-mode test
+# ---------------------------------------------------------------------------
+
+# Canned wavenet LLM plan — must validate against ExperimentPlan + WavenetConfig.
+# device="cpu" so the resource check does not require a GPU in pseudo mode.
+_WAVENET_CANNED_PLAN = {
+    "model_type": "wavenet",
+    "hypothesis": "Default wavenet baseline with focal loss should leverage dilated causal conv for high-frequency denoising.",
+    "reasoning": "First round, no prior records. Use wavenet defaults: residual_channels=16, num_blocks=3, focal loss. Established SOTA pattern for 1D signal denoising.",
+    "model_config": {
+        "model_type": "wavenet",
+        "segmentation_size": 10000,
+        "input_channels": 8,
+        "residual_channels": 16,
+        "gate_channels": 16,
+        "skip_channels": 16,
+        "num_blocks": 3,
+        "kernel_size": 4,
+        "embedding_dim": 8,
+    },
+    "train_config": {
+        "lr": 0.0001,
+        "epochs": 5,
+        "batch_size": 1,
+        "optimizer_type": "adamw",
+        "weight_decay": 0.00001,
+        "device": "cpu",
+    },
+    "loss_config": {
+        "loss_type": "focal",
+        "alpha": 0.5,
+        "gamma": 2.0,
+        "reduction": "mean",
+        "use_class_weights": False,
+    },
+    "is_trial": False,
+    "trial_strategy": "snapshot",
+    "trial_portion": 0.05,
+    "target_files": [],
+    "train_portion": 0.1,
+    "eval_strategy": "snapshot",
+    "eval_portion": 0.05,
+    "train_validation_align": True,
+}
+
+_WAVENET_CANNED_REFLECT = {
+    "conclusion": "Strong. wavenet achieved denoising_score=5.576, substantially above the punet baseline (~1.57). High-frequency files (10-19) score 7-9; low-frequency files (0-4) score near 0.1 — low-frequency blindness is the dominant bottleneck.",
+    "key_factor": "Dilated causal convolution with gated activation provides exponential receptive field growth, enabling strong high-frequency recovery. The low-freq gap suggests the receptive field cannot capture the lowest frequency bands.",
+    "discovery": "Wavenet's dilated causal conv excels at high-freq (files 10-19: 7-9) but is near-blind at low-freq (files 0-4: 0.1). This is a structural gap, not a hyperparameter issue.",
+    "memory_update": "Next round, investigate spectral or multi-rate processing to address low-frequency blindness. Keep dilated_causal_conv as the backbone — it is clearly the driver of the strong high-freq performance.",
+}
+
+
+@pytest.mark.dual_mode
+def test_wavenet_one_round_dual_mode(tmp_path, request, monkeypatch):
+    """F.8 — Dual-mode test for wavenet (formal mode only).
+
+    Pseudo mode (default): uses a wavenet-specific canned plan and wavenet
+    train/score outputs from tests/pseudo_data/train_outputs/wavenet/.
+    Real mode (--real-api-call): runs against the real Gemini API + GPU.
+
+    Validates that the tuner orchestration works correctly for wavenet:
+    canned plan, training, scoring, reflection, and record persistence.
+    """
+    is_real_mode = request.config.getoption("--real-api-call")
+
+    if is_real_mode:
+        _skip_if_no_key("gemini")
+        _skip_if_no_data()
+
+    run_name = f"dual_wavenet_formal_{int(time.time())}"
+    workspace = str(tmp_path / "workspace")
+    os.makedirs(workspace, exist_ok=True)
+
+    agent_input = HyperparamTuningInput(
+        model_type="wavenet",
+        file_index=6,
+        max_rounds=1,
+        expert_advice=(
+            "CRITICAL: You MUST use exactly this configuration. "
+            "model_type: wavenet. "
+            f"model_config: {MODEL_CONFIGS['wavenet']}. "
+            f"train_config: {TRAIN_CONFIG}. "
+            "loss_config: {'loss_type': 'focal', 'alpha': 0.5, 'gamma': 2.0}. "
+            "Do NOT deviate from these values."
+        ),
+        llm_provider="gemini",
+        llm_model_id="gemini-3.1-flash-lite-preview",
+        storage=StorageConfig(
+            backend="local",
+            local=LocalStorageConfig(workspace=workspace, run_name=run_name),
+        ),
+        progress_bar=False,
+        is_trial=False,
+    )
+
+    bridge = None
+    sandbox = None
+
+    if is_real_mode:
+        agent = HyperparamTuningAgent()
+    else:
+        from tests.helpers.recording_llm_bridge import RecordingLLMBridge
+        from tests.helpers.recording_sandbox import RecordingSandbox
+
+        # Wavenet plan is model-specific — construct inline rather than via for_agent
+        bridge = RecordingLLMBridge(responses={
+            "generate": _WAVENET_CANNED_PLAN,
+            "reflect":  _WAVENET_CANNED_REFLECT,
+        })
+        sandbox = RecordingSandbox.for_model(
+            "wavenet", base_dir=workspace, run_name=run_name,
+        )
+        agent = HyperparamTuningAgent(
+            bridge_factory=lambda **kw: bridge,
+            sandbox_factory=lambda **kw: sandbox,
+        )
+
+    output = agent.run(agent_input)
+
+    # --- Assertions that hold in BOTH modes ---
+    assert isinstance(output, HyperparamTuningOutput)
+    HyperparamTuningOutput.model_validate(output.model_dump())
+    assert output.status in ("completed", "partial")
+    assert output.run_name == run_name
+    assert output.model_type == "wavenet"
+    assert len(output.all_records) >= 1
+
+    # --- Pseudo-mode-only assertions ---
+    if not is_real_mode:
+        assert bridge is not None and sandbox is not None
+
+        planner_call = bridge.calls[0]
+        assert planner_call[0] == "plan", (
+            f"First LLM call should be 'plan', got {planner_call[0]!r}"
+        )
+
+        assert len(sandbox.saved_records) >= 1
+        record = sandbox.saved_records[0]
+        assert record["status"] == "success"
+        assert record["model_type"] == "wavenet"
+        assert record["denoising_score"] == pytest.approx(5.576, abs=0.01)
+        assert record["file_vector"] is not None
+        assert len(record["file_vector"]) == 20
+        # Verify the characteristic wavenet pattern: strong high-freq, weak low-freq
+        assert record["file_vector"][0] < 1.0,  "Low-freq (file 0) should be weak"
+        assert record["file_vector"][19] > 7.0, "High-freq (file 19) should be strong"
+
+        bridge_methods = [c[0] for c in bridge.calls]
+        assert bridge_methods[0] == "plan"
+        assert "reflect" in bridge_methods
+        sandbox_methods = [c[0] for c in sandbox.calls]
+        assert "execute_training" in sandbox_methods
+        assert "save_record" in sandbox_methods
+
+        print(f"\n  [wavenet pseudo] score={record['denoising_score']:.4f} "
+              f"file_vec[0]={record['file_vector'][0]:.2f} "
+              f"file_vec[19]={record['file_vector'][19]:.2f}")
