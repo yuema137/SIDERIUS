@@ -29,6 +29,7 @@ def load_stage_prompt(
     stage_name: str,
     exploration_mode: str = "explore",
     template_vars: Optional[dict] = None,
+    mindset: Optional[str] = None,
 ) -> str:
     """
     Load and assemble a stage's full system prompt.
@@ -36,25 +37,33 @@ def load_stage_prompt(
     Loads the base template (e.g. ``comparison_stage.md``), injects the
     exploration/exploitation mode block, and substitutes template variables.
 
+    The mindset block is injected at the ``{# EXPLORATION_MODE_BLOCK #}``
+    placeholder. Priority:
+      1. ``mindset`` argument (from advice file) — overrides the default
+      2. ``{stage_name}_{exploration_mode}.md`` file — default fallback
+
     Args:
         stage_name: One of ``"comparison_stage"``, ``"causal_reasoning_stage"``,
                     ``"proposing_stage"``.
         exploration_mode: ``"explore"`` or ``"exploit"``.
         template_vars: Dict of ``{placeholder: value}`` for substitution.
                        E.g. ``{"minimum_boldness": "0.05", "n_agent_proposed": "3"}``.
+        mindset: Optional mindset text from the advice file. When provided,
+                 overrides the default ``_explore.md`` / ``_exploit.md`` block.
+                 When absent, the mode file is used (backward compatible).
 
     Returns:
         The assembled prompt string ready for the LLM.
     """
     base = load_prompt(f"{stage_name}.md")
 
-    # Load mode-specific block
-    mode_file = f"{stage_name}_{exploration_mode}.md"
-    mode_path = os.path.join(_PROMPT_DIR, mode_file)
-    if os.path.exists(mode_path):
-        mode_block = load_prompt(mode_file)
+    # Resolve mindset block: advice-provided mindset takes priority over mode file
+    if mindset is not None:
+        mode_block = mindset
     else:
-        mode_block = ""
+        mode_file = f"{stage_name}_{exploration_mode}.md"
+        mode_path = os.path.join(_PROMPT_DIR, mode_file)
+        mode_block = load_prompt(mode_file) if os.path.exists(mode_path) else ""
 
     # Inject mode block into placeholder
     prompt = base.replace("{# EXPLORATION_MODE_BLOCK #}", mode_block)

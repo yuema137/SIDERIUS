@@ -300,6 +300,7 @@ def run_workflow(
     human_advice_implement: str | None = None,
     human_advice_validate: str | None = None,
     human_advice_tune: str | None = None,
+    human_advice_mindset: str | None = None,
     # --- Trial mode (optional — defaults preserve single-file behavior) ---
     is_trial: bool = False,
     trial_strategy: str = "snapshot",
@@ -482,6 +483,8 @@ def run_workflow(
                 propose_input.existing_model_types = list(all_model_types)
                 if previous_failures:
                     propose_input.previous_failures = previous_failures
+                if human_advice_mindset is not None:
+                    propose_input.mindset = human_advice_mindset
 
                 proposal = MLModelProposalAgent(
                     **llm_config.get("propose"),

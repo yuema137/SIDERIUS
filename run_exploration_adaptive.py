@@ -154,6 +154,7 @@ def main():
         human_advice_propose=advice.get("propose"),
         human_advice_implement=advice.get("implement"),
         human_advice_tune=advice.get("tune"),
+        human_advice_mindset=advice.get("mindset"),
         # Cleanup denoised files to save disk
         cleanup_denoised=True,
     )
