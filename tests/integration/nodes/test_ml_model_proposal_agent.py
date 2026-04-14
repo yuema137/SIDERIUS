@@ -197,11 +197,6 @@ def test_proposal_pipeline_dual_mode(tmp_path, request):
     Real mode (--real-api-call): real LLMBridge makes real API calls.
     Same assertions on output structure.
     """
-    is_real_mode = request.config.getoption("--real-api-call")
-
-    if is_real_mode:
-        _skip_if_no_key("gemini")
-
     from agent.schemas.proposal import ReasoningPipelineConfig, ReasoningStage
 
     # Pipeline input with 2 reasoning stages
@@ -225,15 +220,19 @@ def test_proposal_pipeline_dual_mode(tmp_path, request):
         ),
     )
 
-    if is_real_mode:
-        agent = MLModelProposalAgent(provider="gemini", model_id="gemini-3.1-pro-preview")
+    from tests.conftest import _is_real_llm
+    from agent.llm_bridge import LLMBridge
+    from tests.helpers.recording_llm_bridge import RecordingLLMBridge
+
+    if _is_real_llm(request):
+        bridge = None
+        bridge_factory = LLMBridge
     else:
-        from tests.helpers.recording_llm_bridge import RecordingLLMBridge
         bridge = RecordingLLMBridge.for_agent("ml_model_proposal_agent")
-        agent = MLModelProposalAgent(
-            provider="gemini", model_id="test",
-            bridge_factory=lambda **kw: bridge,
-        )
+        bridge_factory = lambda **kw: bridge
+
+    agent = MLModelProposalAgent(provider="gemini", model_id="gemini-3.1-pro-preview",
+                                  bridge_factory=bridge_factory)
 
     output = agent.run(inp)
 
@@ -252,8 +251,8 @@ def test_proposal_pipeline_dual_mode(tmp_path, request):
     out_path = tmp_path / "proposal_pipeline_test.json"
     assert out_path.exists()
 
-    # --- Pseudo-mode-only assertions (orchestration wiring) ---
-    if not is_real_mode:
+    # --- Pseudo-LLM assertions (orchestration wiring) ---
+    if bridge is not None:
         # 3 generate() calls: comparison, causal_reasoning, proposing
         gen_calls = [c for c in bridge.calls if c[0] == "generate"]
         assert len(gen_calls) == 3, (
