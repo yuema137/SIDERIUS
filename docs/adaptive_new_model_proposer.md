@@ -1399,8 +1399,8 @@ Iteration N:
 - ☐ **C.5** Structural promotion rule for candidates. See §2B "⚠️ Implementation gaps" for the 5-gap audit.
 
   Sub-tasks:
-  - ☐ **C.5-1 Schema — `ProposalOutput`**: add `proposed_vocab_candidates: List[Dict[str, str]] = []` field for feature/capability entries from the comparison stage. Keep `proposed_discoveries` for `kind="discovery"` only. Update field docstrings.
-  - ☐ **C.5-2 Proposal agent**: collect `kind in {"feature", "capability"}` entries from `proposed_vocab_candidates` of each reasoning stage output into `proposed_vocab_candidates` (not into `proposed_discoveries`).
+  - ☑ **C.5-1 Schema — `ProposalOutput`**: add `proposed_vocab_candidates: List[Dict[str, str]] = []` field for feature/capability entries from the comparison stage. Keep `proposed_discoveries` for `kind="discovery"` only. Update field docstrings. **Done** — `agent/schemas/proposal.py`, commit `9e93d0e`.
+  - ☑ **C.5-2 Proposal agent**: collect `kind in {"feature", "capability"}` entries from `proposed_vocab_candidates` of each reasoning stage output into `proposed_vocab_candidates` (not into `proposed_discoveries`). **Done** — `nodes/ml_model_proposal_agent.py`, commit `e1a779a`.
   - ☐ **C.5-3 Helpers — `build_runtime_vocab`**: fix `seen_in_runs` tracking. After locating an entry (new or existing), append `candidate.get("proposed_by_run")` to `seen_in_runs` if not already present.
   - ☐ **C.5-4 Helpers — `promote_candidates`**: add `promote_candidates(vocab, min_runs=3) -> tuple[List[VocabEntry], List[str]]` to `interpretation_helpers.py`. Promotes `tier="candidate"` entries where `kind in {"feature", "capability"}` and `len(seen_in_runs) >= min_runs`. MVP criterion: count-only (no `require_positive_delta` — deferred).
   - ☐ **C.5-5 Schema — `InterpretationOutput`**: add `vocab_changes: List[str] = []`. Wire up: in `result_interpretation_agent.py`, read `proposed_vocab_candidates` from `previous_proposal`, call `promote_candidates` after `build_runtime_vocab`, populate `vocab_changes`.
