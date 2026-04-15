@@ -412,8 +412,39 @@ class MLModelProposalAgent:
         # Enrich with source code + descriptions for the comparison stage
         candidates = enrich_candidates_with_source(candidates)
         source_counts = sum(1 for c in candidates if c.get("source_code"))
+
+        # Build lightweight summaries for models excluded by the pre-filter.
+        # These models were tested but did not make the top-N cut. Their source
+        # code is intentionally omitted (that is the point of filtering), but
+        # the LLM still needs to know: what was tried, why it fell short, and
+        # what we learned — so it can avoid repeating past failures and build
+        # on partial successes.
+        _CACHE_TEXT_FIELDS = (
+            "key_findings", "bottlenecks", "score_trend", "strategy_assessment",
+        )
+        candidate_names = {c["model_type"] for c in candidates}
+        cache = inp.interpretation.get("model_knowledge_cache") or {}
+        descriptions = inp.interpretation.get("model_descriptions") or {}
+        per_best = inp.interpretation.get("per_model_best") or {}
+
+        non_candidates_overview = []
+        for mt in inp.interpretation.get("model_types", []):
+            if mt in candidate_names:
+                continue
+            entry = cache.get(mt) or {}
+            overview: dict = {
+                "model_type": mt,
+                "best_score": per_best.get(mt),
+                "description": descriptions.get(mt),
+            }
+            for field in _CACHE_TEXT_FIELDS:
+                if entry.get(field):
+                    overview[field] = entry[field]
+            non_candidates_overview.append(overview)
+
         print(f"   Candidates: {[c['model_type'] for c in candidates]} "
-              f"({len(candidates)} models, {source_counts} with source code)")
+              f"({len(candidates)} models, {source_counts} with source code); "
+              f"non-candidates: {[o['model_type'] for o in non_candidates_overview]}")
 
         # Prepare shared context for all stages
         expert_context_block = render_expert_context(inp.expert_context)
@@ -422,6 +453,7 @@ class MLModelProposalAgent:
         # --- Run enabled reasoning stages (accumulate context) ---
         accumulated = {
             "candidates": candidates,
+            "non_candidates_overview": non_candidates_overview,
             "interpretation_summary": {
                 k: inp.interpretation.get(k)
                 for k in ("model_types", "total_experiments", "best_denoising_score",

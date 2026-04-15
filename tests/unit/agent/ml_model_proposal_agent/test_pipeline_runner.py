@@ -43,6 +43,36 @@ FAKE_INTERPRETATION = {
         "fcnet": "Fully connected autoencoder",
         "gated_fno": "Fourier neural operator with gating",
     },
+    "model_knowledge_cache": {
+        "punet": {
+            "key_findings": ["Skip connections help low-freq"],
+            "bottlenecks": ["No temporal context"],
+            "score_trend": "Flat after round 3",
+            "strategy_assessment": "U-Net family exhausted",
+            "_stats": {"best_denoising_score": 1.8},
+        },
+        "wavenet": {
+            "key_findings": ["Wide receptive field via dilation"],
+            "bottlenecks": ["Misses very low frequencies"],
+            "score_trend": "Steady improvement to round 8",
+            "strategy_assessment": "Still room for spectral augmentation",
+            "_stats": {"best_denoising_score": 5.5},
+        },
+        "fcnet": {
+            "key_findings": ["Global mixing collapses temporal structure"],
+            "bottlenecks": ["No local feature extraction"],
+            "score_trend": "Peaked at round 1, flat thereafter",
+            "strategy_assessment": "FC architecture unsuitable for this task",
+            "_stats": {"best_denoising_score": 0.9},
+        },
+        "gated_fno": {
+            "key_findings": ["Fourier modes capture periodic patterns well"],
+            "bottlenecks": ["Gating adds instability at higher modes"],
+            "score_trend": "Improving but noisy",
+            "strategy_assessment": "Reduce active modes, add residual path",
+            "_stats": {"best_denoising_score": 4.2},
+        },
+    },
 }
 
 
@@ -321,3 +351,90 @@ class TestPipelineRunner:
         with open(out_path) as f:
             data = json.load(f)
         assert data["model_name"] == "spectral_wavenet"
+
+    def test_non_candidates_included_in_prompt(self, tmp_path):
+        """
+        When top_n < total models, excluded models must appear in
+        accumulated['non_candidates_overview'] with their description and
+        cache analysis text, so the Stage 1 LLM can learn from their failures.
+
+        Setup: 4 models, top_n=2 → wavenet (5.5) and gated_fno (4.2) are
+        selected; punet (1.8) and fcnet (0.9) are excluded.
+        Expected: both excluded models are in non_candidates_overview with
+        key_findings, bottlenecks, score_trend, strategy_assessment, and
+        description populated from FAKE_INTERPRETATION.
+        """
+        agent, mock = self._make_agent_with_mock()
+        inp = self._make_pipeline_input(tmp_path)
+        inp.reasoning_pipeline.model_selection = ModelSelectionStrategy(
+            method="top_n", params={"n": 2},
+        )
+
+        # Capture the user prompt sent to the Stage 1 LLM call.
+        captured_prompts = []
+        original_generate = mock.generate.side_effect
+
+        def capture_and_delegate(*args, **kwargs):
+            captured_prompts.append(args[1] if len(args) > 1 else kwargs.get("user_prompt", ""))
+            result = next(iter(original_generate.__self__._mock_side_effect_iterator
+                               if hasattr(original_generate, '__self__') else []))
+            return result
+
+        # Simpler: intercept at the accumulated dict level by inspecting the
+        # JSON passed as the user prompt to generate().
+        call_args_list = []
+        responses = [FAKE_COMPARISON_OUTPUT, FAKE_REASONING_OUTPUT, FAKE_PROPOSING_OUTPUT]
+        response_iter = iter(responses)
+
+        def capturing_generate(system_prompt, user_prompt, **kw):
+            call_args_list.append(user_prompt)
+            return next(response_iter)
+
+        mock.generate.side_effect = capturing_generate
+
+        agent.run(inp)
+
+        # Stage 1 user prompt is call_args_list[0]
+        stage1_prompt = call_args_list[0]
+        stage1_data = json.loads(stage1_prompt.split("\n\n")[0])  # strip appended blocks
+
+        non_candidates = stage1_data.get("non_candidates_overview", [])
+        non_candidate_types = {e["model_type"] for e in non_candidates}
+
+        # The two excluded models are present
+        assert "punet" in non_candidate_types, "punet should be in non_candidates_overview"
+        assert "fcnet" in non_candidate_types, "fcnet should be in non_candidates_overview"
+
+        # The two selected models are NOT in non_candidates_overview
+        assert "wavenet" not in non_candidate_types
+        assert "gated_fno" not in non_candidate_types
+
+        # Each excluded model carries its analysis text and description
+        for entry in non_candidates:
+            assert entry.get("description"), f"{entry['model_type']} missing description"
+            assert entry.get("key_findings"), f"{entry['model_type']} missing key_findings"
+            assert entry.get("bottlenecks"), f"{entry['model_type']} missing bottlenecks"
+            assert entry.get("score_trend"), f"{entry['model_type']} missing score_trend"
+
+    def test_non_candidates_empty_when_all_selected(self, tmp_path):
+        """When all models fit within top_n, non_candidates_overview is empty."""
+        agent, mock = self._make_agent_with_mock()
+        inp = self._make_pipeline_input(tmp_path)
+        # top_n=10 with only 4 models → all selected
+        inp.reasoning_pipeline.model_selection = ModelSelectionStrategy(
+            method="top_n", params={"n": 10},
+        )
+
+        call_args_list = []
+        responses = iter([FAKE_COMPARISON_OUTPUT, FAKE_REASONING_OUTPUT, FAKE_PROPOSING_OUTPUT])
+
+        def capturing_generate(system_prompt, user_prompt, **kw):
+            call_args_list.append(user_prompt)
+            return next(responses)
+
+        mock.generate.side_effect = capturing_generate
+
+        agent.run(inp)
+
+        stage1_data = json.loads(call_args_list[0].split("\n\n")[0])
+        assert stage1_data.get("non_candidates_overview") == []
