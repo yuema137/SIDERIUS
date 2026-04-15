@@ -147,8 +147,17 @@ class InterpretationInput(BaseModel):
 
     summaries: List[ModelRunSummary] = Field(
         default_factory=list,
-        description="One condensed summary per model tuning run. "
-                    "Can be empty if model_types is provided.",
+        description="Condensed summaries for NEW models only — models being interpreted "
+                    "for the first time this iteration. Models already in model_knowledge_cache "
+                    "do not need a summary here; Phase 1 will use the cache instead. "
+                    "On the first iteration, pass all seed model summaries (cache is empty).",
+    )
+    model_knowledge_cache: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Carry-forward cache from the previous InterpretationOutput.model_knowledge_cache. "
+                    "Each entry is self-sufficient: Phase 1 LLM text + '_stats' with numerical facts. "
+                    "Agent skips Phase 1 LLM calls for models present here. "
+                    "Empty on the first iteration.",
     )
     model_types: Optional[List[str]] = Field(
         default=None,
@@ -196,11 +205,11 @@ class InterpretationInput(BaseModel):
                 "Use None to derive model types from summaries."
             )
         derived = {s.model_type for s in self.summaries}
-        effective = derived | set(self.model_types or [])
+        effective = derived | set(self.model_types or []) | set(self.model_knowledge_cache.keys())
         if not effective:
             raise ValueError(
                 "At least one model type must be provided — "
-                "either via summaries or model_types."
+                "via summaries, model_types, or model_knowledge_cache."
             )
         return self
 
@@ -254,12 +263,17 @@ class InterpretationOutput(BaseModel):
         description="The params dict that produced the overall best denoising score.",
     )
 
-    # --- Per-model summaries (from Phase 1) ---
-    per_model_summaries: Dict[str, Dict[str, Any]] = Field(
+    # --- Per-model knowledge cache (from Phase 1) ---
+    model_knowledge_cache: Dict[str, Dict[str, Any]] = Field(
         default_factory=dict,
-        description="model_type → structured summary from Phase 1 (per-model LLM call). "
-                    "Each summary contains key_findings, bottlenecks, best_config_analysis, "
-                    "and score_trend. Carried forward for debugging and downstream consumption.",
+        description="model_type → self-sufficient cache entry produced by Phase 1. "
+                    "Each entry contains: Phase 1 LLM text (key_findings, bottlenecks, "
+                    "best_config_analysis, score_trend, frequency_analysis, data_sensitivity, "
+                    "efficiency_assessment, strategy_assessment) plus a '_stats' sub-dict "
+                    "(best_denoising_score, worst_denoising_score, best_file_vector, "
+                    "best_model_params, completed_rounds). Carry this forward as "
+                    "InterpretationInput.model_knowledge_cache in the next iteration — "
+                    "the agent skips Phase 1 LLM calls for models already in the cache.",
     )
 
     # --- LLM-generated analysis (from Phase 2) ---

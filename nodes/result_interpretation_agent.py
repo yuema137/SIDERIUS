@@ -198,6 +198,8 @@ You will receive:
 - Per-model file vectors (per-file performance across 20 frequency bands)
 - Per-model parameter counts and training data volumes
 - Overall best score and the config that produced it
+- Established discoveries from previous iterations (if any) — empirical findings
+  already confirmed by past experiments. Build on these, confirm or contradict them.
 
 Produce a JSON object with exactly these fields:
 
@@ -238,6 +240,7 @@ def _build_synthesis_prompt(
     per_model_training_segments: Optional[Dict[str, int]] = None,
     expert_advice_str: str = "",
     human_advice: Optional[str] = None,
+    runtime_vocab: Optional[List] = None,
 ) -> str:
     """Build the user prompt for cross-model synthesis."""
     lines = [
@@ -300,6 +303,25 @@ def _build_synthesis_prompt(
 
         lines.append("")
 
+    # Established discoveries from previous iterations
+    if runtime_vocab:
+        discoveries = [
+            v for v in runtime_vocab
+            if (v.get("kind") if isinstance(v, dict) else getattr(v, "kind", None)) == "discovery"
+        ]
+        if discoveries:
+            lines += [
+                "---",
+                "## Established Discoveries (from previous iterations)",
+                "These are empirically confirmed findings from past experiments.",
+                "Confirm, contradict, or build on them — do not simply repeat them verbatim.",
+            ]
+            for v in discoveries:
+                name = v.get("name") if isinstance(v, dict) else getattr(v, "name", "")
+                desc = v.get("description") if isinstance(v, dict) else getattr(v, "description", "")
+                lines.append(f"  [{name}]: {desc}")
+            lines.append("")
+
     if expert_advice_str:
         lines += [
             "---",
@@ -332,8 +354,11 @@ class ResultInterpretationAgent:
 
     def run(self, inp: InterpretationInput) -> InterpretationOutput:
         # --- Effective model types ---
+        # Union of: new summaries + explicitly listed types + cache (models from prior iterations)
         effective_types = sorted(
-            {s.model_type for s in inp.summaries} | set(inp.model_types or [])
+            {s.model_type for s in inp.summaries}
+            | set(inp.model_types or [])
+            | set(inp.model_knowledge_cache.keys())
         )
 
         # --- Load descriptions ---
@@ -353,7 +378,9 @@ class ResultInterpretationAgent:
             else:
                 model_descriptions[mt] = get_model_description(mt)
 
-        # --- Deterministic pre-computation from summaries ---
+        # --- Deterministic pre-computation ---
+        # New models: read from inp.summaries.
+        # Cached models: read from inp.model_knowledge_cache[mt]["_stats"].
         per_model_best:   Dict[str, Optional[float]] = {}
         per_model_worst:  Dict[str, Optional[float]] = {}
         per_model_best_config: Dict[str, Optional[Dict]] = {}
@@ -362,7 +389,7 @@ class ResultInterpretationAgent:
         overall_best_config: Optional[Dict[str, Any]] = None
         total_experiments = 0
 
-        # Map model_type → ModelRunSummary
+        # Map model_type → ModelRunSummary (new models only)
         per_model_summary_input: Dict[str, ModelRunSummary] = {}
 
         for s in inp.summaries:
@@ -384,7 +411,28 @@ class ResultInterpretationAgent:
                 if overall_worst_score is None or s.worst_denoising_score < overall_worst_score:
                     overall_worst_score = s.worst_denoising_score
 
-        # Fill None for model types with no summaries
+        # Reconstruct stats for cached models from their _stats block
+        for mt, entry in inp.model_knowledge_cache.items():
+            if mt in per_model_summary_input:
+                continue  # new summary takes precedence
+            stats = entry.get("_stats", {})
+            best  = stats.get("best_denoising_score")
+            worst = stats.get("worst_denoising_score")
+            total_experiments += stats.get("completed_rounds", 0)
+
+            per_model_best[mt]   = best
+            per_model_worst[mt]  = worst
+            per_model_best_config[mt] = stats.get("best_config")
+
+            if best is not None:
+                if overall_best_score is None or best > overall_best_score:
+                    overall_best_score = best
+                    overall_best_config = stats.get("best_config")
+            if worst is not None:
+                if overall_worst_score is None or worst < overall_worst_score:
+                    overall_worst_score = worst
+
+        # Fill None for any model type still missing
         for mt in effective_types:
             per_model_best.setdefault(mt, None)
             per_model_worst.setdefault(mt, None)
@@ -397,58 +445,100 @@ class ResultInterpretationAgent:
               f"{len(effective_types)} model(s): {effective_types} "
               f"(overall best: {overall_best_score})")
 
-        # --- Phase 1: Per-model summarization ---
-        per_model_summaries: Dict[str, Dict] = {}
+        # --- Phase 1: Per-model summarization (cache-first) ---
+        # Cache hit  → reuse entry from inp.model_knowledge_cache, zero LLM calls.
+        # Cache miss → call LLM, build self-sufficient entry (LLM text + _stats).
+        model_knowledge_cache: Dict[str, Dict] = {}
         for mt in effective_types:
+            if mt in inp.model_knowledge_cache:
+                # Cache hit: model was summarized in a previous iteration
+                model_knowledge_cache[mt] = inp.model_knowledge_cache[mt]
+                print(f"  Phase 1: {mt} — cache hit, skipping LLM call.")
+                continue
+
             if mt not in per_model_summary_input:
-                per_model_summaries[mt] = {
+                # No tuning data and no cache: placeholder (shouldn't happen in normal flow)
+                model_knowledge_cache[mt] = {
                     "key_findings": ["No tuning run available for this model."],
                     "bottlenecks": [],
                     "best_config_analysis": "N/A",
                     "score_trend": "N/A",
+                    "_stats": {},
                 }
                 continue
 
             summary = per_model_summary_input[mt]
-            print(f"  Phase 1: Summarizing {mt} ({summary.completed_rounds} rounds)...")
+            print(f"  Phase 1: Summarizing {mt} ({summary.completed_rounds} rounds) — LLM call...")
             per_model_prompt = _build_per_model_prompt(
                 summary=summary,
                 description=model_descriptions[mt],
                 expert_advice_str=expert_advice_str,
                 human_advice=inp.human_advice,
             )
-            per_model_response = self.bridge.generate(PER_MODEL_SYSTEM_PROMPT, per_model_prompt)
-            per_model_summaries[mt] = per_model_response
-            print(f"    {mt}: {len(per_model_response.get('key_findings', []))} findings, "
-                  f"{len(per_model_response.get('bottlenecks', []))} bottlenecks")
+            llm_response = self.bridge.generate(PER_MODEL_SYSTEM_PROMPT, per_model_prompt)
+            # Build self-sufficient cache entry: LLM text + numerical _stats
+            model_knowledge_cache[mt] = {
+                **llm_response,
+                "_stats": {
+                    "best_denoising_score":  summary.best_denoising_score,
+                    "worst_denoising_score": summary.worst_denoising_score,
+                    "best_file_vector":      summary.best_file_vector,
+                    "best_model_params":     summary.best_model_params,
+                    "completed_rounds":      summary.completed_rounds,
+                    "best_config":           summary.best_config,
+                },
+            }
+            print(f"    {mt}: {len(llm_response.get('key_findings', []))} findings, "
+                  f"{len(llm_response.get('bottlenecks', []))} bottlenecks")
 
-        # --- Pre-compute enriched fields from summaries ---
+        # --- Pre-compute enriched fields ---
+        # New models: read from inp.summaries.
+        # Cached models: read from model_knowledge_cache[mt]["_stats"].
         per_model_file_vectors: Dict[str, List[Optional[float]]] = {}
         weak_frequency_files: Dict[str, List[int]] = {}
         per_model_params: Dict[str, int] = {}
         per_model_training_segments: Dict[str, int] = {}
 
         import math
-        for s in inp.summaries:
-            mt = s.model_type
-            if s.best_file_vector is not None:
-                per_model_file_vectors[mt] = s.best_file_vector
-                # Weak files: scored entries below 1.0 (raw data baseline)
+
+        def _register_file_vector(mt: str, fv):
+            if fv is not None:
+                per_model_file_vectors[mt] = fv
                 weak = [
-                    i for i, v in enumerate(s.best_file_vector)
+                    i for i, v in enumerate(fv)
                     if v is not None and not (isinstance(v, float) and math.isnan(v)) and v < 1.0
                 ]
                 if weak:
                     weak_frequency_files[mt] = weak
+
+        for s in inp.summaries:
+            mt = s.model_type
+            _register_file_vector(mt, s.best_file_vector)
             if s.best_model_params is not None:
                 per_model_params[mt] = s.best_model_params
             if s.training_psd_segments is not None:
                 per_model_training_segments[mt] = s.training_psd_segments
 
+        # Fill from cache _stats for cached models not in new summaries
+        for mt, entry in inp.model_knowledge_cache.items():
+            if mt in per_model_summary_input:
+                continue
+            stats = entry.get("_stats", {})
+            _register_file_vector(mt, stats.get("best_file_vector"))
+            if stats.get("best_model_params") is not None:
+                per_model_params[mt] = stats["best_model_params"]
+
         # --- Phase 2: Cross-model synthesis ---
+        # Strip _stats from model_knowledge_cache entries before passing to synthesis
+        # (synthesis prompt receives the LLM text fields only, stats are shown separately)
+        per_model_summaries_for_prompt = {
+            mt: {k: v for k, v in entry.items() if k != "_stats"}
+            for mt, entry in model_knowledge_cache.items()
+        }
+
         if len(effective_types) == 1:
             single_mt = effective_types[0]
-            summary = per_model_summaries[single_mt]
+            summary = model_knowledge_cache[single_mt]
             llm_findings = summary.get("key_findings", [])
             llm_bottlenecks = summary.get("bottlenecks", [])
             llm_take_home = (
@@ -460,7 +550,7 @@ class ResultInterpretationAgent:
         else:
             print(f"  Phase 2: Synthesizing across {len(effective_types)} models...")
             synthesis_prompt = _build_synthesis_prompt(
-                per_model_summaries=per_model_summaries,
+                per_model_summaries=per_model_summaries_for_prompt,
                 per_model_best=per_model_best,
                 per_model_worst=per_model_worst,
                 overall_best_score=overall_best_score,
@@ -471,6 +561,7 @@ class ResultInterpretationAgent:
                 per_model_training_segments=per_model_training_segments or None,
                 expert_advice_str=expert_advice_str,
                 human_advice=inp.human_advice,
+                runtime_vocab=list(inp.runtime_vocab) if inp.runtime_vocab else None,
             )
             synthesis_response = self.bridge.generate(SYNTHESIS_SYSTEM_PROMPT, synthesis_prompt)
             llm_findings = synthesis_response.get("key_findings", [])
@@ -544,7 +635,7 @@ class ResultInterpretationAgent:
             "best_denoising_score":  overall_best_score,
             "worst_denoising_score": overall_worst_score,
             "best_config":           overall_best_config,
-            "per_model_summaries":   per_model_summaries,
+            "model_knowledge_cache":  model_knowledge_cache,
             "key_findings":          llm_findings,
             "bottlenecks":           llm_bottlenecks,
             # Enriched fields

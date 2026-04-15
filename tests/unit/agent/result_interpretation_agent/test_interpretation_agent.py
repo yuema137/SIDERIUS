@@ -143,8 +143,8 @@ class TestSingleModel:
     def test_per_model_summaries_populated(self, agent, tmp_path):
         inp = make_input(PUNET_SUMMARY, workspace=str(tmp_path))
         output = agent.run(inp)
-        assert "punet" in output.per_model_summaries
-        assert output.per_model_summaries["punet"]["key_findings"] == FAKE_PER_MODEL_RESPONSE["key_findings"]
+        assert "punet" in output.model_knowledge_cache
+        assert output.model_knowledge_cache["punet"]["key_findings"] == FAKE_PER_MODEL_RESPONSE["key_findings"]
 
     def test_output_written_to_file(self, agent, tmp_path):
         inp = make_input(PUNET_SUMMARY, workspace=str(tmp_path), run_name="myrun")
@@ -224,8 +224,8 @@ class TestMultiModel:
             storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
         )
         output = agent.run(inp)
-        assert "punet" in output.per_model_summaries
-        assert "fcnet" in output.per_model_summaries
+        assert "punet" in output.model_knowledge_cache
+        assert "fcnet" in output.model_knowledge_cache
 
     def test_descriptions_loaded_for_all(self, agent, tmp_path):
         inp = InterpretationInput(
@@ -235,6 +235,90 @@ class TestMultiModel:
         output = agent.run(inp)
         assert "punet" in output.model_descriptions
         assert "fcnet" in output.model_descriptions
+
+
+# ---------------------------------------------------------------------------
+# model_knowledge_cache: cache hit / cache miss / _stats
+# ---------------------------------------------------------------------------
+
+# A pre-built cache entry for punet — as if produced by a previous iteration
+_PUNET_CACHED_ENTRY = {
+    **FAKE_PER_MODEL_RESPONSE,
+    "_stats": {
+        "best_denoising_score":  1.8,
+        "worst_denoising_score": 1.2,
+        "best_file_vector":      None,
+        "best_model_params":     None,
+        "completed_rounds":      3,
+        "best_config":           PUNET_SUMMARY.best_config,
+    },
+}
+
+
+class TestModelKnowledgeCache:
+
+    def test_cache_miss_calls_llm_and_populates_cache(self, agent, tmp_path):
+        """New model (not in cache) → Phase 1 LLM called, cache entry built."""
+        inp = make_input(PUNET_SUMMARY, workspace=str(tmp_path))
+        call_count_before = agent.bridge.generate.call_count
+        output = agent.run(inp)
+        # Phase 1 LLM was called (cache miss)
+        assert agent.bridge.generate.call_count > call_count_before
+        assert "punet" in output.model_knowledge_cache
+        assert output.model_knowledge_cache["punet"]["key_findings"] == FAKE_PER_MODEL_RESPONSE["key_findings"]
+
+    def test_cache_miss_stores_stats(self, agent, tmp_path):
+        """Cache entry built from cache miss includes _stats from ModelRunSummary."""
+        inp = make_input(PUNET_SUMMARY, workspace=str(tmp_path))
+        output = agent.run(inp)
+        stats = output.model_knowledge_cache["punet"]["_stats"]
+        assert stats["best_denoising_score"] == 1.8
+        assert stats["worst_denoising_score"] == 1.2
+        assert stats["completed_rounds"] == 3
+
+    def test_cache_hit_skips_llm_call(self, agent, tmp_path):
+        """Model already in cache → Phase 1 LLM not called, cached entry reused."""
+        inp = InterpretationInput(
+            summaries=[],                                        # no new summaries
+            model_knowledge_cache={"punet": _PUNET_CACHED_ENTRY},
+            storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
+        )
+        call_count_before = agent.bridge.generate.call_count
+        output = agent.run(inp)
+        # No Phase 1 LLM call (single-model path also skips Phase 2 synthesis)
+        assert agent.bridge.generate.call_count == call_count_before
+        # Cached entry content passed through unchanged
+        assert output.model_knowledge_cache["punet"] == _PUNET_CACHED_ENTRY
+
+    def test_cache_hit_scores_from_stats(self, agent, tmp_path):
+        """Scores for cached model are reconstructed from cache _stats, not raw summary."""
+        inp = InterpretationInput(
+            summaries=[],
+            model_knowledge_cache={"punet": _PUNET_CACHED_ENTRY},
+            storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
+        )
+        output = agent.run(inp)
+        assert output.per_model_best["punet"] == 1.8
+        assert output.per_model_worst["punet"] == 1.2
+        assert output.total_experiments == 3
+
+    def test_mixed_one_cached_one_new_llm_called_once(self, agent, tmp_path):
+        """punet cached, fcnet new → exactly one Phase 1 LLM call (for fcnet only)."""
+        inp = InterpretationInput(
+            summaries=[FCNET_SUMMARY],                           # only fcnet is new
+            model_knowledge_cache={"punet": _PUNET_CACHED_ENTRY},
+            storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
+        )
+        call_count_before = agent.bridge.generate.call_count
+        output = agent.run(inp)
+        calls_made = agent.bridge.generate.call_count - call_count_before
+        # 1 Phase 1 call (fcnet) + 1 Phase 2 synthesis call = 2 total
+        assert calls_made == 2
+        assert "punet" in output.model_knowledge_cache
+        assert "fcnet" in output.model_knowledge_cache
+        # punet scores from cache, fcnet scores from new summary
+        assert output.per_model_best["punet"] == 1.8
+        assert output.per_model_best["fcnet"] == 0.9
 
 
 # ---------------------------------------------------------------------------

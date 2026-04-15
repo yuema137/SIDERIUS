@@ -125,7 +125,7 @@ class TestTuneToInterpret:
         assert len(output.take_home_message) > 10
 
         # Per-model summary from phase 1 should be present
-        assert "punet" in output.per_model_summaries
+        assert "punet" in output.model_knowledge_cache
 
         out_file = tmp_path / "interp" / "interpretation_interp_test.json"
         assert out_file.exists()
