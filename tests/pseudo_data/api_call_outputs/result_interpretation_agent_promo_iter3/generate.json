@@ -1,0 +1,39 @@
+[
+  {
+    "_comment": "Iter 3, Phase 1 — wavelet_net (cache miss, new model, score=6.3).",
+    "key_findings": [
+      "Score 6.3 beats spectral_net SOTA (6.1) by +0.2 — wavelet multi-resolution adds further coverage.",
+      "Files 0-2 now score 2.0-3.0 — very low frequencies partially recovered for the first time."
+    ],
+    "bottlenecks": [
+      "Wavelet decomposition depth is a sensitive hyperparameter — too deep loses temporal resolution.",
+      "Training time 3× wavenet — multi-resolution decomposition is expensive."
+    ],
+    "best_config_analysis": "wavelet_levels=3, spectral_channels=16 optimal. Deeper levels overfit on low-freq files.",
+    "score_trend": "6.05 → 6.18 → 6.30. Consistent improvement, model still improving.",
+    "frequency_analysis": "Files 0-2 score 2-3. Files 3-9 score 5-7. Files 10-19 score 8-9.",
+    "data_sensitivity": "High — would benefit from more rounds. Trial mode limiting performance.",
+    "efficiency_assessment": "3× compute vs wavenet, +0.72 over wavenet score. Reasonable for the gain.",
+    "strategy_assessment": "Combining spectral_gating with multi-resolution is the productive direction."
+  },
+  {
+    "_comment": "Iter 3, Phase 2 synthesis — 5 models (4 cached + wavelet_net new).",
+    "key_findings": [
+      "wavelet_net (6.3) is new SOTA. Three iterations of spectral-domain exploration confirm a clear trend.",
+      "spectral_gating appears in all three top-performing models — a genuinely reusable mechanism."
+    ],
+    "bottlenecks": [
+      "Files 0-2 still the hardest — even wavelet_net only partially addresses very low frequencies.",
+      "Compute cost scaling with each generation: wavenet(1×) → spectral_net(2×) → wavelet_net(3×)."
+    ],
+    "frequency_comparison": "Progressive improvement on low-freq files across 3 generations. The trend is clear.",
+    "efficiency_comparison": "wavenet still most efficient. wavelet_net best absolute score at highest compute.",
+    "take_home_message": "spectral_gating is now confirmed across 3 independent models — it should be promoted to canonical vocabulary. Next step: reduce compute overhead while preserving spectral coverage."
+  },
+  {
+    "_comment": "Iter 3, dedup call — spectral_gating promoted, checking against existing canonical features.",
+    "is_duplicate": false,
+    "duplicate_of": null,
+    "rationale": "spectral_gating (learnable spectral gates on frequency-domain representations) is distinct from all existing canonical features such as dilated_causal_conv, multi_head_attention, and focal_loss. It describes a frequency-domain gating mechanism not captured by any current entry."
+  }
+]

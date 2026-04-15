@@ -422,7 +422,7 @@ class ResultInterpretationAgent:
         # For built-in models, load from description.md on disk.
         model_descriptions: Dict[str, str] = {}
         for mt in effective_types:
-            # Check if any summary carries the description inline
+            # Priority 1: inline description from current iteration's summaries
             inline_desc = None
             for s in inp.summaries:
                 if s.model_type == mt and s.model_description:
@@ -430,8 +430,17 @@ class ResultInterpretationAgent:
                     break
             if inline_desc:
                 model_descriptions[mt] = inline_desc
-            else:
-                model_descriptions[mt] = get_model_description(mt)
+                continue
+
+            # Priority 2: description cached from a previous iteration's _stats
+            cached_stats = inp.model_knowledge_cache.get(mt, {}).get("_stats", {})
+            cached_desc = cached_stats.get("model_description")
+            if cached_desc:
+                model_descriptions[mt] = cached_desc
+                continue
+
+            # Priority 3: load from description.md on disk (built-in or plugin models)
+            model_descriptions[mt] = get_model_description(mt)
 
         # --- Deterministic pre-computation ---
         # New models: read from inp.summaries.
@@ -548,6 +557,7 @@ class ResultInterpretationAgent:
                     "completed_rounds":      summary.completed_rounds,
                     "best_config":           summary.best_config,
                     "formal_score":          summary.formal_score,
+                    "model_description":     model_descriptions.get(mt),
                 },
             }
             print(f"    {mt}: {len(llm_response.get('key_findings', []))} findings, "
