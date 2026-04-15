@@ -198,6 +198,8 @@ You will receive:
 - Per-model file vectors (per-file performance across 20 frequency bands)
 - Per-model parameter counts and training data volumes
 - Overall best score and the config that produced it
+- Established discoveries from previous iterations (if any) — empirical findings
+  already confirmed by past experiments. Build on these, confirm or contradict them.
 
 Produce a JSON object with exactly these fields:
 
@@ -238,6 +240,8 @@ def _build_synthesis_prompt(
     per_model_training_segments: Optional[Dict[str, int]] = None,
     expert_advice_str: str = "",
     human_advice: Optional[str] = None,
+    runtime_vocab: Optional[List] = None,
+    per_model_formal: Optional[Dict[str, Optional[float]]] = None,
 ) -> str:
     """Build the user prompt for cross-model synthesis."""
     lines = [
@@ -255,6 +259,10 @@ def _build_synthesis_prompt(
             f"Best score : {per_model_best.get(model_type)}",
             f"Worst score: {per_model_worst.get(model_type)}",
         ]
+        if per_model_formal:
+            formal = per_model_formal.get(model_type)
+            if formal is not None and formal != per_model_best.get(model_type):
+                lines.append(f"Formal score: {formal}  (best_score above may be from a trial round)")
         if per_model_params and model_type in per_model_params:
             lines.append(f"Parameters : {per_model_params[model_type]:,}")
         if per_model_training_segments and model_type in per_model_training_segments:
@@ -300,6 +308,25 @@ def _build_synthesis_prompt(
 
         lines.append("")
 
+    # Established discoveries from previous iterations
+    if runtime_vocab:
+        discoveries = [
+            v for v in runtime_vocab
+            if (v.get("kind") if isinstance(v, dict) else getattr(v, "kind", None)) == "discovery"
+        ]
+        if discoveries:
+            lines += [
+                "---",
+                "## Established Discoveries (from previous iterations)",
+                "These are empirically confirmed findings from past experiments.",
+                "Confirm, contradict, or build on them — do not simply repeat them verbatim.",
+            ]
+            for v in discoveries:
+                name = v.get("name") if isinstance(v, dict) else getattr(v, "name", "")
+                desc = v.get("description") if isinstance(v, dict) else getattr(v, "description", "")
+                lines.append(f"  [{name}]: {desc}")
+            lines.append("")
+
     if expert_advice_str:
         lines += [
             "---",
@@ -320,6 +347,56 @@ def _build_synthesis_prompt(
 
 
 # ---------------------------------------------------------------------------
+# Phase C — Semantic deduplication (C.6)
+# ---------------------------------------------------------------------------
+
+DEDUP_SYSTEM_PROMPT = """\
+You are a scientific vocabulary curator for an ML research system.
+
+Your task: determine whether a newly promoted vocabulary term is a near-duplicate
+or synonym of an existing canonical term of the same kind.
+
+Two terms ARE duplicates if they describe the same architectural concept using
+different wording — e.g. "gated_recurrence" and "gated_rnn" both describe
+hidden-state gating in recurrent networks.
+
+Two terms are NOT duplicates if they describe related but technically distinct
+concepts — e.g. "dilated_convolution" and "causal_convolution" are related but
+have different technical properties and should remain separate entries.
+
+Judge only on technical meaning, not superficial name similarity.
+
+Respond with a JSON object and nothing else:
+{
+  "is_duplicate": true or false,
+  "duplicate_of": "name_of_existing_term or null",
+  "rationale": "one sentence"
+}
+"""
+
+
+def _build_dedup_prompt(entry: "VocabEntry", existing_canonicals: List) -> str:
+    """Build the user prompt for one dedup judgment."""
+    lines = [
+        "## Candidate term (newly promoted)",
+        f"Name       : {entry.name}",
+        f"Kind       : {entry.kind}",
+        f"Description: {entry.description}",
+        "",
+        f"## Existing canonical terms (kind: {entry.kind})",
+    ]
+    for canon in existing_canonicals:
+        name = canon.name if hasattr(canon, "name") else canon.get("name", "")
+        desc = canon.description if hasattr(canon, "description") else canon.get("description", "")
+        lines.append(f"  - {name}: {desc}")
+    lines += [
+        "",
+        f'Is "{entry.name}" a near-duplicate or synonym of any of the existing terms above?',
+    ]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Node
 # ---------------------------------------------------------------------------
 
@@ -332,8 +409,11 @@ class ResultInterpretationAgent:
 
     def run(self, inp: InterpretationInput) -> InterpretationOutput:
         # --- Effective model types ---
+        # Union of: new summaries + explicitly listed types + cache (models from prior iterations)
         effective_types = sorted(
-            {s.model_type for s in inp.summaries} | set(inp.model_types or [])
+            {s.model_type for s in inp.summaries}
+            | set(inp.model_types or [])
+            | set(inp.model_knowledge_cache.keys())
         )
 
         # --- Load descriptions ---
@@ -353,16 +433,19 @@ class ResultInterpretationAgent:
             else:
                 model_descriptions[mt] = get_model_description(mt)
 
-        # --- Deterministic pre-computation from summaries ---
+        # --- Deterministic pre-computation ---
+        # New models: read from inp.summaries.
+        # Cached models: read from inp.model_knowledge_cache[mt]["_stats"].
         per_model_best:   Dict[str, Optional[float]] = {}
         per_model_worst:  Dict[str, Optional[float]] = {}
+        per_model_formal: Dict[str, Optional[float]] = {}
         per_model_best_config: Dict[str, Optional[Dict]] = {}
         overall_best_score:  Optional[float] = None
         overall_worst_score: Optional[float] = None
         overall_best_config: Optional[Dict[str, Any]] = None
         total_experiments = 0
 
-        # Map model_type → ModelRunSummary
+        # Map model_type → ModelRunSummary (new models only)
         per_model_summary_input: Dict[str, ModelRunSummary] = {}
 
         for s in inp.summaries:
@@ -384,7 +467,33 @@ class ResultInterpretationAgent:
                 if overall_worst_score is None or s.worst_denoising_score < overall_worst_score:
                     overall_worst_score = s.worst_denoising_score
 
-        # Fill None for model types with no summaries
+            if s.formal_score is not None:
+                per_model_formal[mt] = s.formal_score
+
+        # Reconstruct stats for cached models from their _stats block
+        for mt, entry in inp.model_knowledge_cache.items():
+            if mt in per_model_summary_input:
+                continue  # new summary takes precedence
+            stats = entry.get("_stats", {})
+            best  = stats.get("best_denoising_score")
+            worst = stats.get("worst_denoising_score")
+            total_experiments += stats.get("completed_rounds", 0)
+
+            per_model_best[mt]   = best
+            per_model_worst[mt]  = worst
+            per_model_best_config[mt] = stats.get("best_config")
+            if stats.get("formal_score") is not None:
+                per_model_formal[mt] = stats["formal_score"]
+
+            if best is not None:
+                if overall_best_score is None or best > overall_best_score:
+                    overall_best_score = best
+                    overall_best_config = stats.get("best_config")
+            if worst is not None:
+                if overall_worst_score is None or worst < overall_worst_score:
+                    overall_worst_score = worst
+
+        # Fill None for any model type still missing
         for mt in effective_types:
             per_model_best.setdefault(mt, None)
             per_model_worst.setdefault(mt, None)
@@ -397,58 +506,101 @@ class ResultInterpretationAgent:
               f"{len(effective_types)} model(s): {effective_types} "
               f"(overall best: {overall_best_score})")
 
-        # --- Phase 1: Per-model summarization ---
-        per_model_summaries: Dict[str, Dict] = {}
+        # --- Phase 1: Per-model summarization (cache-first) ---
+        # Cache hit  → reuse entry from inp.model_knowledge_cache, zero LLM calls.
+        # Cache miss → call LLM, build self-sufficient entry (LLM text + _stats).
+        model_knowledge_cache: Dict[str, Dict] = {}
         for mt in effective_types:
+            if mt in inp.model_knowledge_cache:
+                # Cache hit: model was summarized in a previous iteration
+                model_knowledge_cache[mt] = inp.model_knowledge_cache[mt]
+                print(f"  Phase 1: {mt} — cache hit, skipping LLM call.")
+                continue
+
             if mt not in per_model_summary_input:
-                per_model_summaries[mt] = {
+                # No tuning data and no cache: placeholder (shouldn't happen in normal flow)
+                model_knowledge_cache[mt] = {
                     "key_findings": ["No tuning run available for this model."],
                     "bottlenecks": [],
                     "best_config_analysis": "N/A",
                     "score_trend": "N/A",
+                    "_stats": {},
                 }
                 continue
 
             summary = per_model_summary_input[mt]
-            print(f"  Phase 1: Summarizing {mt} ({summary.completed_rounds} rounds)...")
+            print(f"  Phase 1: Summarizing {mt} ({summary.completed_rounds} rounds) — LLM call...")
             per_model_prompt = _build_per_model_prompt(
                 summary=summary,
                 description=model_descriptions[mt],
                 expert_advice_str=expert_advice_str,
                 human_advice=inp.human_advice,
             )
-            per_model_response = self.bridge.generate(PER_MODEL_SYSTEM_PROMPT, per_model_prompt)
-            per_model_summaries[mt] = per_model_response
-            print(f"    {mt}: {len(per_model_response.get('key_findings', []))} findings, "
-                  f"{len(per_model_response.get('bottlenecks', []))} bottlenecks")
+            llm_response = self.bridge.generate(PER_MODEL_SYSTEM_PROMPT, per_model_prompt)
+            # Build self-sufficient cache entry: LLM text + numerical _stats
+            model_knowledge_cache[mt] = {
+                **llm_response,
+                "_stats": {
+                    "best_denoising_score":  summary.best_denoising_score,
+                    "worst_denoising_score": summary.worst_denoising_score,
+                    "best_file_vector":      summary.best_file_vector,
+                    "best_model_params":     summary.best_model_params,
+                    "completed_rounds":      summary.completed_rounds,
+                    "best_config":           summary.best_config,
+                    "formal_score":          summary.formal_score,
+                },
+            }
+            print(f"    {mt}: {len(llm_response.get('key_findings', []))} findings, "
+                  f"{len(llm_response.get('bottlenecks', []))} bottlenecks")
 
-        # --- Pre-compute enriched fields from summaries ---
+        # --- Pre-compute enriched fields ---
+        # New models: read from inp.summaries.
+        # Cached models: read from model_knowledge_cache[mt]["_stats"].
         per_model_file_vectors: Dict[str, List[Optional[float]]] = {}
         weak_frequency_files: Dict[str, List[int]] = {}
         per_model_params: Dict[str, int] = {}
         per_model_training_segments: Dict[str, int] = {}
 
         import math
-        for s in inp.summaries:
-            mt = s.model_type
-            if s.best_file_vector is not None:
-                per_model_file_vectors[mt] = s.best_file_vector
-                # Weak files: scored entries below 1.0 (raw data baseline)
+
+        def _register_file_vector(mt: str, fv):
+            if fv is not None:
+                per_model_file_vectors[mt] = fv
                 weak = [
-                    i for i, v in enumerate(s.best_file_vector)
+                    i for i, v in enumerate(fv)
                     if v is not None and not (isinstance(v, float) and math.isnan(v)) and v < 1.0
                 ]
                 if weak:
                     weak_frequency_files[mt] = weak
+
+        for s in inp.summaries:
+            mt = s.model_type
+            _register_file_vector(mt, s.best_file_vector)
             if s.best_model_params is not None:
                 per_model_params[mt] = s.best_model_params
             if s.training_psd_segments is not None:
                 per_model_training_segments[mt] = s.training_psd_segments
 
+        # Fill from cache _stats for cached models not in new summaries
+        for mt, entry in inp.model_knowledge_cache.items():
+            if mt in per_model_summary_input:
+                continue
+            stats = entry.get("_stats", {})
+            _register_file_vector(mt, stats.get("best_file_vector"))
+            if stats.get("best_model_params") is not None:
+                per_model_params[mt] = stats["best_model_params"]
+
         # --- Phase 2: Cross-model synthesis ---
+        # Strip _stats from model_knowledge_cache entries before passing to synthesis
+        # (synthesis prompt receives the LLM text fields only, stats are shown separately)
+        per_model_summaries_for_prompt = {
+            mt: {k: v for k, v in entry.items() if k != "_stats"}
+            for mt, entry in model_knowledge_cache.items()
+        }
+
         if len(effective_types) == 1:
             single_mt = effective_types[0]
-            summary = per_model_summaries[single_mt]
+            summary = model_knowledge_cache[single_mt]
             llm_findings = summary.get("key_findings", [])
             llm_bottlenecks = summary.get("bottlenecks", [])
             llm_take_home = (
@@ -460,7 +612,7 @@ class ResultInterpretationAgent:
         else:
             print(f"  Phase 2: Synthesizing across {len(effective_types)} models...")
             synthesis_prompt = _build_synthesis_prompt(
-                per_model_summaries=per_model_summaries,
+                per_model_summaries=per_model_summaries_for_prompt,
                 per_model_best=per_model_best,
                 per_model_worst=per_model_worst,
                 overall_best_score=overall_best_score,
@@ -471,6 +623,8 @@ class ResultInterpretationAgent:
                 per_model_training_segments=per_model_training_segments or None,
                 expert_advice_str=expert_advice_str,
                 human_advice=inp.human_advice,
+                runtime_vocab=list(inp.runtime_vocab) if inp.runtime_vocab else None,
+                per_model_formal=per_model_formal or None,
             )
             synthesis_response = self.bridge.generate(SYNTHESIS_SYSTEM_PROMPT, synthesis_prompt)
             llm_findings = synthesis_response.get("key_findings", [])
@@ -480,6 +634,7 @@ class ResultInterpretationAgent:
         # --- Phase C: Vocabulary feedback loop ---
         from nodes.interpretation_helpers import (
             evaluate_prediction, generate_discoveries, build_runtime_vocab,
+            promote_candidates,
         )
 
         prediction_evaluation = None
@@ -516,6 +671,7 @@ class ResultInterpretationAgent:
                 inherited_components=prev_inherited,
                 proposed_vocab_links=prev_vocab_links,
                 timing=prev_timing,
+                overall_best_score=overall_best_score,
             )
             if new_discoveries:
                 print(f"  New discoveries: {len(new_discoveries)}")
@@ -523,16 +679,44 @@ class ResultInterpretationAgent:
                     print(f"    - {d.description[:100]}...")
 
         # Build updated runtime vocabulary
+        # Feature/capability candidates come from proposed_vocab_candidates (C.5-2).
+        # Discovery entries are generated separately above and passed as new_discoveries.
+        # Inject proposed_by_run from the proposal's model_name so build_runtime_vocab
+        # can populate seen_in_runs — the LLM never produces this key itself.
         proposed_candidates = []
         if inp.previous_proposal:
-            proposed_candidates = inp.previous_proposal.get("proposed_discoveries", [])
+            model_name = inp.previous_proposal.get("model_name", "")
+            raw_candidates = inp.previous_proposal.get("proposed_vocab_candidates", [])
+            proposed_candidates = [
+                {**c, "proposed_by_run": model_name} if not c.get("proposed_by_run") else c
+                for c in raw_candidates
+            ]
         runtime_vocab = build_runtime_vocab(
             incoming_vocab=list(inp.runtime_vocab),
             new_discoveries=new_discoveries,
             proposed_candidates=proposed_candidates,
         )
+
+        # Structural promotion: candidates seen in >= 3 runs → canonical
+        runtime_vocab, promoted_names = promote_candidates(runtime_vocab)
+        # Log promotions before dedup (promoted entries may be removed by dedup)
+        vocab_changes = [
+            f"Promoted '{name}' to canonical (seen in "
+            f"{next(len(e.seen_in_runs) for e in runtime_vocab if e.name == name)} runs)."
+            for name in promoted_names
+        ]
+        if promoted_names:
+            print(f"  Vocab promotions ({len(promoted_names)}): {promoted_names}")
+
+        # Semantic dedup: check newly promoted entries against existing canonicals
+        if promoted_names:
+            print(f"  Dedup: checking {len(promoted_names)} newly promoted entries...")
+            runtime_vocab, merge_changes = self._dedup_promoted(promoted_names, runtime_vocab)
+            vocab_changes.extend(merge_changes)
+
         print(f"  Runtime vocab: {len(runtime_vocab)} entries "
-              f"({sum(1 for v in runtime_vocab if (v.kind if hasattr(v, 'kind') else v.get('kind')) == 'discovery')} discoveries)")
+              f"({sum(1 for v in runtime_vocab if (v.kind if hasattr(v, 'kind') else v.get('kind')) == 'discovery')} discoveries, "
+              f"{sum(1 for v in runtime_vocab if (v.tier if hasattr(v, 'tier') else v.get('tier')) == 'canonical')} canonical)")
 
         # --- Build and validate output ---
         output = InterpretationOutput.model_validate({
@@ -544,7 +728,7 @@ class ResultInterpretationAgent:
             "best_denoising_score":  overall_best_score,
             "worst_denoising_score": overall_worst_score,
             "best_config":           overall_best_config,
-            "per_model_summaries":   per_model_summaries,
+            "model_knowledge_cache":  model_knowledge_cache,
             "key_findings":          llm_findings,
             "bottlenecks":           llm_bottlenecks,
             # Enriched fields
@@ -557,6 +741,7 @@ class ResultInterpretationAgent:
             "runtime_vocab":         [v.model_dump() if hasattr(v, "model_dump") else v for v in runtime_vocab],
             "prediction_evaluation": prediction_evaluation,
             "new_discoveries":       [d.model_dump() for d in new_discoveries],
+            "vocab_changes":         vocab_changes,
         })
 
         # --- Persist ---
@@ -570,6 +755,83 @@ class ResultInterpretationAgent:
             print(f"Interpretation saved -> {out_path}")
 
         return output
+
+    def _dedup_promoted(
+        self,
+        promoted_names: List[str],
+        vocab: List["VocabEntry"],
+    ) -> tuple[List["VocabEntry"], List[str]]:
+        """
+        Semantic deduplication of newly promoted canonical entries (C.6).
+
+        For each promoted entry, asks the LLM whether it is a near-duplicate of
+        an existing canonical of the same kind. If yes: the promoted entry is
+        removed from the vocab and its name is added to the existing entry's
+        aliases. If no: it stays canonical.
+
+        Each promoted entry that has at least one existing canonical of the same
+        kind triggers one LLM call. Promotion is rare so total cost is low.
+
+        Args:
+            promoted_names: Names of entries just promoted by promote_candidates.
+            vocab:          Current runtime vocabulary (includes promoted entries).
+
+        Returns:
+            (updated_vocab, merge_changes) — updated vocab and human-readable
+            log strings for each merge (e.g. "Merged 'x' into 'y' as alias.").
+        """
+        from agent.schemas.proposal import VocabEntry as _VocabEntry
+
+        if not promoted_names:
+            return vocab, []
+
+        vocab_by_name: Dict[str, Any] = {
+            (e.name if hasattr(e, "name") else e["name"]): e for e in vocab
+        }
+        merge_changes: List[str] = []
+
+        for name in promoted_names:
+            if name not in vocab_by_name:
+                continue  # already removed by a prior merge this loop
+
+            entry = vocab_by_name[name]
+            kind  = entry.kind if hasattr(entry, "kind") else entry.get("kind", "")
+
+            # Only compare against existing canonicals of the same kind
+            existing = [
+                e for n, e in vocab_by_name.items()
+                if n != name
+                and (e.tier if hasattr(e, "tier") else e.get("tier")) == "canonical"
+                and (e.kind if hasattr(e, "kind") else e.get("kind")) == kind
+            ]
+            if not existing:
+                print(f"  Dedup: '{name}' — no existing canonicals of kind='{kind}', keeping.")
+                continue
+
+            prompt   = _build_dedup_prompt(entry, existing)
+            response = self.bridge.generate(DEDUP_SYSTEM_PROMPT, prompt)
+
+            is_dup = response.get("is_duplicate", False)
+            dup_of = response.get("duplicate_of")
+            rationale = response.get("rationale", "")
+
+            if is_dup and dup_of and dup_of in vocab_by_name:
+                existing_entry = vocab_by_name[dup_of]
+                current_aliases = (
+                    existing_entry.aliases if hasattr(existing_entry, "aliases")
+                    else existing_entry.get("aliases", [])
+                )
+                vocab_by_name[dup_of] = existing_entry.model_copy(
+                    update={"aliases": current_aliases + [name]}
+                )
+                del vocab_by_name[name]
+                msg = f"Merged '{name}' into '{dup_of}' as alias. Rationale: {rationale}"
+                merge_changes.append(msg)
+                print(f"  Dedup: {msg}")
+            else:
+                print(f"  Dedup: '{name}' — genuine new canonical.")
+
+        return list(vocab_by_name.values()), merge_changes
 
 
 # ---------------------------------------------------------------------------

@@ -105,6 +105,11 @@ def _make_interpretation_output():
         key_findings=["Finding 1"],
         bottlenecks=["Bottleneck 1"],
         take_home_message="Need a new architecture.",
+        model_knowledge_cache={"punet": {
+            "key_findings": ["Finding 1"],
+            "bottlenecks": ["Bottleneck 1"],
+            "_stats": {"best_denoising_score": 1.5, "completed_rounds": 3},
+        }},
     )
 
 
@@ -505,7 +510,9 @@ class TestRunWorkflowMultiIteration:
         )
         assert len(results) == 3
 
-    def test_accumulates_summary_groups(self, workflow_env):
+    def test_knowledge_cache_grows_across_iterations(self, workflow_env):
+        """Iteration 1 passes all seeds as summaries (cache empty).
+        Iteration 2 passes only the new model as summaries; seeds are in the cache."""
         names = iter(["model_a", "model_b"])
         workflow_env["propose"].return_value.run.side_effect = lambda inp: _make_proposal_output(next(names))
         workflow_env["tune"].return_value.run.side_effect = lambda inp: _make_tune_output(
@@ -519,11 +526,17 @@ class TestRunWorkflowMultiIteration:
             run_name="test_run",
             max_iterations=2,
         )
-        # On iteration 2, the interpretation should see more summaries
         interp_calls = workflow_env["interp"].return_value.run.call_args_list
-        iter1_summaries = len(interp_calls[0][0][0].summaries)
-        iter2_summaries = len(interp_calls[1][0][0].summaries)
-        assert iter2_summaries > iter1_summaries
+        iter1_inp = interp_calls[0][0][0]
+        iter2_inp = interp_calls[1][0][0]
+
+        # Iter 1: seeds in summaries, cache empty
+        assert len(iter1_inp.summaries) == 1          # seed punet
+        assert iter1_inp.model_knowledge_cache == {}  # no prior cache
+
+        # Iter 2: only new model in summaries, seeds in cache
+        assert len(iter2_inp.summaries) == 1                    # new model only
+        assert "punet" in iter2_inp.model_knowledge_cache       # seed carried forward
 
     def test_stops_on_target_score(self, workflow_env):
         names = iter(["model_a", "model_b", "model_c"])

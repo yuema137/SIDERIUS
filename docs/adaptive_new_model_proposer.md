@@ -337,6 +337,13 @@ The model selection has two layers:
 
 The pre-filter is the **budget control** (how many). The expert advice is the **focus control** (what to emphasize). Both are configurable, neither is hardcoded.
 
+**Non-selected models are not invisible.** Models outside the top-N still appear in the Stage 1 prompt as a `non_candidates_overview` list. Each entry contains `best_score`, `description`, `key_findings`, `bottlenecks`, `score_trend`, and `strategy_assessment` from `model_knowledge_cache` — but **no source code**. This tells the comparison LLM what was tried and why it fell short, without paying the token cost of reading the code. The two-tier split is intentional:
+
+| Tier | Who | What the LLM receives | Purpose |
+|---|---|---|---|
+| **Candidates** (top-N) | High-scoring models | Full source code + all metadata | Deep analysis; borrow architectural ideas |
+| **Non-candidates** (the rest) | Lower-scoring models | Text summary only (analysis + description) | Know what was tried; avoid re-proposing dead ends |
+
 #### Dynamic vocabulary growth — the comparison stage as a contributor
 
 The vocabulary doesn't just flow INTO the pipeline — the pipeline **grows** it. Specifically, the comparison stage has a dual role:
@@ -783,6 +790,77 @@ The §2B validator check for `InheritedComponent` already short-circuits unknown
 | Agent proposes a "log-spaced FNO gates" variant, name not in any tier yet | Recorded as a candidate, with the LLM-supplied description and an optional regex hint. seen_in_runs gets one entry. |
 | Three rounds later, "log_spaced_fno_gates" has appeared in 4 distinct runs and 2 scored above SOTA | The interpretation agent promotes it to canonical, adds it to the next round's `runtime_vocab` with `tier=canonical`, and writes a `vocab_changes` event. The seed file in the repo is unchanged; promotion is reconstructible from records on any future run. |
 
+#### ⚠️ Implementation gaps found during C.5 audit (2026-04-15)
+
+A code audit before implementing C.5 found five gaps between the design above and the actual code.
+All five are fixed as part of C.5 — see the checklist sub-tasks below.
+
+**Gap 1 — Feature/capability candidates silently dropped by the proposal agent.**
+
+The comparison-stage LLM outputs `proposed_vocab_candidates` with entries of `kind="feature"` or
+`kind="capability"`. In `ml_model_proposal_agent.py`, the loop that builds `ProposalOutput.proposed_discoveries`
+filters to `kind=="discovery"` only:
+
+```python
+for candidate in stage_output.get("proposed_vocab_candidates", []):
+    if isinstance(candidate, dict) and candidate.get("kind") == "discovery":
+        discoveries.append(candidate)  # feature/capability silently dropped
+```
+
+Feature and capability candidates never reach `build_runtime_vocab` — so there is nothing to
+promote. `proposed_discoveries` is intentionally reserved for long-form empirical sentences
+(`kind="discovery"`). Fix: add a separate `proposed_vocab_candidates: List[Dict[str, str]]` field
+to `ProposalOutput` for feature/capability candidates; wire it through the interpretation agent.
+
+**Gap 2 — `seen_in_runs` never populated in `build_runtime_vocab`.**
+
+When a new candidate is added, `VocabEntry.model_validate(candidate)` initialises
+`seen_in_runs=[]`. When an existing candidate is encountered again in a later iteration,
+the entry is kept unchanged — `seen_in_runs` is never extended:
+
+```python
+if name not in vocab_by_name:
+    vocab_by_name[name] = VocabEntry.model_validate(candidate)  # seen_in_runs stays []
+else:
+    pass  # existing entry: seen_in_runs NOT updated → count stuck at 0
+```
+
+Fix: after locating the entry (new or existing), append `candidate.get("proposed_by_run")` to
+`seen_in_runs` if not already present. The string stored in `seen_in_runs` is the
+`proposed_by_run` value — the model name that proposed this candidate (e.g. `"wavenet_v2"`).
+
+**Gap 3 — `vocab_changes` field missing from `InterpretationOutput`.**
+
+The design doc says "the interpretation agent's output schema has a structured `vocab_changes`
+field listing every promotion / merge / alias decision made in that round." This field does not
+exist in the current schema. Fix: add `vocab_changes: List[str]` with a human-readable log
+entry per promotion (e.g. `"Promoted 'log_spaced_fno_gates' to canonical (seen in 3 runs)."`).
+
+**Gap 4 — `promote_candidates` function does not exist.**
+
+No function in the codebase applies the structural promotion criterion. Fix: add
+`promote_candidates(vocab: List[VocabEntry], min_runs: int = 3) -> tuple[List[VocabEntry], List[str]]`
+to `nodes/interpretation_helpers.py`. Call it after `build_runtime_vocab` in the
+interpretation agent.
+
+MVP criterion: `tier="candidate"`, `kind in {"feature", "capability"}`, and
+`len(seen_in_runs) >= min_runs` → set `tier="canonical"`.
+
+The `require_positive_delta` criterion from `ResearchPolicy` is **deferred**: implementing it
+requires tracking per-run SOTA scores alongside `seen_in_runs` (not just run names), which
+requires storing additional context that is not currently available in `build_runtime_vocab`.
+The design doc itself notes "we will tune the thresholds after the first batch of real chain
+runs." Count-only promotion is the correct MVP.
+
+**Gap 5 — `ProposedVocabLink` promotion blocked on Phase E.**
+
+`ProposedVocabLink.status` is always `"proposed"` — the reflector inside
+`ml_hyperparameter_tune_agent.py` never marks links as `"confirmed"` or `"refuted"`. The
+interpretation agent receives links via `previous_proposal.proposed_vocab_links` but has no
+confirmed entries to act on. Link promotion (`confirmed links → VocabEntry.related_to`) cannot
+produce useful output until Phase E (reflector evaluates link status after each experiment).
+This task has been **moved to Phase E as E.7** — it depends on E.3 and is not part of C.5.
+
 **Validator integration** (cheap, high-leverage):
 
 The `ml_code_validator_agent` already loads the proposed plugin file. Add one new check:
@@ -1177,7 +1255,7 @@ Prompt templates live in `agent/prompt_templates/proposal/` as `.md` files (not 
 
 **Verify** (after Group 4):
 - ☑ All unit tests pass: 800 passed.
-- ☑ Manual: ran on real interpretation data (lilab_chain_v1 iter_002, 3 models, 42 experiments) with `gemini-3.1-pro-preview`. Pipeline proposed `causal_conv_stack` — an ablation experiment testing `dilated_causal_conv → receptive_field` link. Vocabulary terms used consistently. Exploration mode correctly active.
+- ☑ Manual: ran on real interpretation data (lilab_chain_v1 iter_002, 3 models, 42 experiments) with `gemini-3.1-pro-preview` (now replaced by `gemini-2.5-flash` — quota exhausted). Pipeline proposed `causal_conv_stack` — an ablation experiment testing `dilated_causal_conv → receptive_field` link. Vocabulary terms used consistently. Exploration mode correctly active.
 
 #### Deferred items (moved to their actual phases)
 
@@ -1259,26 +1337,73 @@ Key fixes discovered during chain testing:
 ### Data flow for the vocabulary feedback loop
 
 ```
+Long-term memory carried into iteration N (four Python variables in run_workflow):
+  model_knowledge_cache : dict[model → {Phase 1 LLM text + _stats}]  (all models ever seen)
+  runtime_vocab         : List[VocabEntry]  (seed + accumulated candidates + discoveries)
+  previous_proposal     : Optional[dict]   (serialized ProposalOutput from iter N-1)
+  latest_new_summary    : Optional[ModelRunSummary]  (just-tuned model this iter only)
+
+─────────────────────────────────────────────────────────────────────
 Iteration N:
-  Interpret(records from iterations 1..N-1)
-    - Reads: runtime_vocab (seed + all candidates + discoveries from previous rounds)
-    - Reads: FalsifiablePrediction from previous proposal
-    - Evaluates: was the prediction confirmed or refuted?
-    - Produces: structured lab report using vocabulary terms
-    - Produces: new discovery entries from this evaluation
-    - Produces: updated runtime_vocab (seed + candidates + discoveries)
+─────────────────────────────────────────────────────────────────────
+
+  Interpret(latest_new_summary, model_knowledge_cache, runtime_vocab, previous_proposal)
+
+    Phase 1 — per-model summarization (cache-first, O(1) LLM calls/iter):
+      Cache hit  → copy entry unchanged, 0 LLM calls
+      Cache miss → 1 LLM call → build {LLM text + _stats}
+        _stats contains: best_denoising_score, formal_score, worst_denoising_score,
+                         best_file_vector, best_model_params, completed_rounds, best_config
+
+    Phase 2 — cross-model synthesis (1 LLM call, skipped if only 1 model):
+      Input: all models' Phase 1 text + per_model_best + per_model_formal
+             + runtime_vocab injected as "established discoveries"
+      Renders "Formal score: X (best above may be from a trial round)" when
+      formal_score ≠ best_denoising_score for a cached model
+
+    Phase C — vocabulary feedback (0 LLM calls, fully deterministic):
+      evaluate_prediction()    → confirmed/refuted/partial using previous_proposal prediction
+      generate_discoveries()   → uses max(stale_sota, overall_best_score) as baseline
+      inject proposed_by_run   → sets proposed_by_run = previous_proposal["model_name"]
+                                  on all vocab candidates (LLM never sets this itself)
+      build_runtime_vocab()    → merges incoming + discoveries + candidates,
+                                  extends seen_in_runs per candidate (no duplicates)
+      promote_candidates()     → tier="candidate" + kind∈{feature,capability}
+                                  + len(seen_in_runs) >= 3 → tier="canonical"
+      _dedup_promoted()        → 1 LLM call per newly promoted entry (rare);
+                                  synonym merged into existing canonical via aliases
+
+    Produces: updated model_knowledge_cache, runtime_vocab, prediction_evaluation,
+              new_discoveries, vocab_changes
     ↓
-  Propose(interpretation + runtime_vocab + discoveries)
-    - Reads: lab report + vocabulary + discoveries
-    - Maintains: proposes new candidates, new links, new discoveries
-    - Uses confirmed discoveries to justify next proposal
-    - Produces: ProposalOutput with inherited_components +
-                falsifiable_prediction + proposed_vocab_links
+
+  Propose(InterpretationOutput, accumulated runtime_vocab)
+
+    Pre-filter — two-tier context:
+      Tier 1 (top-N by score): full source code + all metadata
+                               → comparison LLM can borrow architectural ideas
+      Tier 2 (remaining):      text-only (key_findings, bottlenecks, score_trend,
+                               strategy_assessment, description — no source code)
+                               → prevents re-proposing known-dead directions
+
+    3-stage pipeline:
+      Stage 1 Comparison   (1 LLM call): both tiers in context → ModelComparison list
+                                         proposes new vocab candidates
+      Stage 2 Reasoning    (1 LLM call): causal hypothesis + FalsifiablePrediction
+      Stage 3 Proposing    (1 LLM call): ProposalOutput with model_name, baseline_config,
+                                         proposed_vocab_candidates, falsifiable_prediction
     ↓
+
   Implement → Validate → Tune
-    - Produces: experiment records with scores, file_vectors
+    Produces: HyperparamTuningOutput (best_denoising_score, formal_score, file_vector, ...)
     ↓
-  (records stored for iteration N+1)
+
+  Update long-term memory:
+    model_knowledge_cache = interpretation.model_knowledge_cache
+    runtime_vocab         = interpretation.runtime_vocab
+    previous_proposal     = proposal.model_dump()
+    latest_new_summary    = tuning_output_to_model_run_summary(tune_output)
+                            with .model_description = proposal.model_description
 ```
 
 ### Schema changes needed — ALL DONE (C.13-C.15)
@@ -1309,11 +1434,49 @@ Iteration N:
 - ☑ C.17 Workflow tracks `previous_proposal_data` and `current_runtime_vocab` across iterations. Passes both to `InterpretationInput`. Updates `current_runtime_vocab` from interpretation output after each iteration. **Done**.
 - ☑ C.18 17 unit tests: prediction evaluation (8: confirmed/refuted/partial, file_vector metric, boldness, info_gain), discovery generation (4: confirmed/refuted/no_prediction, score vs SOTA), vocab building (5: seed only, add discoveries, dedup, candidates, multi-iteration growth). **Done**.
 
+**O(1) call count + two-layer persistence — HIGH PRIORITY (must do before long chains):**
+- ☑ **C.19a** Two-layer persistence redesign + O(1) call count. See §5 "⚠️ Critical implementation gap" for rationale and flowchart.
+
+  **Design principle**: separate raw archive (debug only, never re-read) from long-term memory (fed to every iteration). Long-term memory = three Python variables: `model_knowledge_cache`, `runtime_vocab`, `previous_proposal`.
+
+  Sub-tasks:
+  - ☑ **C.19a-1 Schema — `InterpretationOutput`**: rename `per_model_summaries` → `model_knowledge_cache`. Each entry = Phase 1 LLM text + `_stats: {best_denoising_score, worst_denoising_score, best_file_vector, best_model_params, completed_rounds}`. The `_stats` block makes each cache entry self-sufficient — Phase 2 can reconstruct all numerical context without the original `ModelRunSummary`.
+  - ☑ **C.19a-2 Schema — `InterpretationInput`**: add `model_knowledge_cache: Dict[str, Dict] = {}` (carry-forward from previous iteration). Change the semantic meaning of `summaries` from "all historical summaries" to "new models this iteration only".
+  - ☑ **C.19a-3 Agent — Phase 1**: cache hit (model in `model_knowledge_cache`) → copy directly, zero LLM calls. Cache miss (new model) → run LLM call, build cache entry from Phase 1 response + `_stats` from the new `ModelRunSummary`. Deterministic stats for Phase 2 are reconstructed from `summaries` (new models) + `cache[mt]["_stats"]` (cached models).
+  - ☑ **C.19a-4 Agent — Phase 2**: add `runtime_vocab` to the synthesis prompt as "established discoveries — confirm, contradict, or build on these." Keeps Phase 2 and the proposer on the same knowledge base.
+  - ☑ **C.19a-5 Workflow**: replace growing `summary_groups` (passed to agent) with `model_knowledge_cache: dict = {}`. Iteration 1: `summaries` = all seed summaries (cache is empty). Iteration 2+: `summaries` = only the latest tuned model's `ModelRunSummary`. After each iteration: `model_knowledge_cache = interpretation.model_knowledge_cache`.
+
+  **Result**: Phase 1 is called exactly once per model ever. Iterations 2+ make exactly 2 LLM calls in the interpretation agent (1 Phase 1 for the new model + 1 Phase 2 synthesis), regardless of how many models exist.
+
 **Promotion (after vocabulary loop is working):**
-- ☐ C.5 Structural promotion rule for candidates.
-- ☐ C.5a `ProposedVocabLink` promotion: confirmed links → `VocabEntry.related_to`.
-- ☐ C.6 Semantic dedup LLM call.
-- ☐ C.11 Promotion rule unit tests.
+- ☑ **C.5** Structural promotion rule for candidates. See §2B "⚠️ Implementation gaps" for the 5-gap audit. **Done (2026-04-15)** — all 5 sub-tasks complete, 876 unit tests passing.
+
+  Sub-tasks:
+  - ☑ **C.5-1 Schema — `ProposalOutput`**: add `proposed_vocab_candidates: List[Dict[str, str]] = []` field for feature/capability entries from the comparison stage. Keep `proposed_discoveries` for `kind="discovery"` only. Update field docstrings. **Done** — `agent/schemas/proposal.py`, commit `9e93d0e`.
+  - ☑ **C.5-2 Proposal agent**: collect `kind in {"feature", "capability"}` entries from `proposed_vocab_candidates` of each reasoning stage output into `proposed_vocab_candidates` (not into `proposed_discoveries`). **Done** — `nodes/ml_model_proposal_agent.py`, commit `e1a779a`.
+  - ☑ **C.5-3 Helpers — `build_runtime_vocab`**: fix `seen_in_runs` tracking. After locating an entry (new or existing), append `candidate.get("proposed_by_run")` to `seen_in_runs` if not already present. **Done** — `nodes/interpretation_helpers.py`, commit `08fb23d`.
+  - ☑ **C.5-4 Helpers — `promote_candidates`**: add `promote_candidates(vocab, min_runs=3) -> tuple[List[VocabEntry], List[str]]` to `interpretation_helpers.py`. Promotes `tier="candidate"` entries where `kind in {"feature", "capability"}` and `len(seen_in_runs) >= min_runs`. MVP criterion: count-only (no `require_positive_delta` — deferred). **Done** — same file, commit `a0a78de`.
+  - ☑ **C.5-5 Schema — `InterpretationOutput`**: add `vocab_changes: List[str] = []`. Wire up: in `result_interpretation_agent.py`, read `proposed_vocab_candidates` from `previous_proposal`, call `promote_candidates` after `build_runtime_vocab`, populate `vocab_changes`. **Done** — `agent/schemas/interpretation.py` + `nodes/result_interpretation_agent.py`, commit `35c0f57`.
+
+- ☑ C.6 Semantic dedup LLM call. **Done** — `_dedup_promoted()` on `ResultInterpretationAgent`. One LLM call per promoted entry; duplicates removed and aliased into existing canonical; merge logged in `vocab_changes`. 6 unit tests. 896 total passing. Commit `b56c3af`.
+- ☑ C.11 Promotion rule unit tests. **Done** — 14 tests (9 for `promote_candidates`, 5 for `seen_in_runs` tracking), 890 total unit tests passing. `tests/unit/agent/result_interpretation_agent/test_vocab_feedback.py`, commit `c6f2a03`.
+
+**Post-implementation bugs found during review (2026-04-15):**
+
+- ☑ **Bug 1 (critical) — `proposed_by_run` never injected into vocab candidates.**
+  C.5-3 fixed `build_runtime_vocab` to extend `seen_in_runs` when the same candidate reappears, but `build_runtime_vocab` was never receiving `proposed_by_run` in the first place. The proposal LLM outputs `{name, kind, description}` dicts with no `proposed_by_run` field. The interpretation agent was extracting raw candidates from `previous_proposal["proposed_vocab_candidates"]` without setting the field. Result: `seen_in_runs` was always `[]` in production — no candidate could ever accumulate the 3 runs required for promotion, making the entire promotion pipeline silently broken.
+  Fix: before calling `build_runtime_vocab`, inject `proposed_by_run = previous_proposal["model_name"]` onto any candidate that doesn't already have it. An existing value is never overwritten.
+  3 new unit tests (`TestProposedByRunInjection`). **Done — `nodes/result_interpretation_agent.py`**.
+
+- ☑ **Bug 2 (minor) — stale SOTA baseline in `generate_discoveries()`.**
+  `generate_discoveries()` used `prediction_eval["current_value"]` (the SOTA score at proposal time) as the baseline for the "beating SOTA" discovery sentence. If a different model was tuned between the proposal and the current evaluation, the real SOTA could already be higher — producing false "beating SOTA" claims.
+  Fix: `generate_discoveries()` now accepts `overall_best_score` (computed fresh each iteration from all known models) and uses `max(prediction_current_value, overall_best_score)` as the baseline.
+  3 new unit tests (`TestGenerateDiscoveries`). **Done — `nodes/interpretation_helpers.py`**.
+
+- ☑ **Bug 3 (potential) — `formal_score` absent from `model_knowledge_cache._stats`.**
+  When a model runs in trial mode, `best_denoising_score` may come from a cheap subset round and be higher than `formal_score` (the official full-dataset result). `_stats` only stored `best_denoising_score`. After a model is cached, Phase 2 synthesis could only see the potentially inflated trial score, misrepresenting that model's actual standing.
+  Fix: `formal_score` is now stored in `_stats` at cache-miss time. It is reconstructed into `per_model_formal` alongside `per_model_best`, and the synthesis prompt renders a "Formal score: X (best_score above may be from a trial round)" warning line when the two values differ.
+  5 new unit tests (`TestFormalScore`). **Done — `nodes/result_interpretation_agent.py` + `nodes/interpretation_helpers.py`**.
 
 **Centrifugal metrics (after promotion is working):**
 - ☐ Component delta scoring. *(Concern #4)*
@@ -1325,8 +1488,8 @@ Iteration N:
 - ☐ B.22 Memo validation failure → retry.
 
 **Verify**:
-- Run 2+ chain iterations. Inspect interpretation output: does `runtime_vocab` grow between iterations? Do discoveries accumulate? Is the prediction evaluation correct?
-- Check that the proposal agent references discoveries from previous rounds in its reasoning.
+- ✅ **Automated (pseudo mode)**: `test_vocab_grows_across_two_iterations` in `tests/integration/workflows/test_vocab_accumulation.py` (@dual_mode, Phase 4 of `docs/pseudo_test_infra.md`). Verifies: `runtime_vocab` grows monotonically across two iterations (iter1=2 entries → iter2=4), no entries dropped, REFUTED/CONFIRMED discoveries generated correctly, protocol maps discoveries into `vocab_seed`. Passes in pseudo mode (0.2s) and real-LLM mode (73s).
+- ☐ **Manual (real chain)**: Run 2+ real chain iterations. Check that the proposal agent's reasoning prompt references discovery entries from the previous round — i.e., that the LLM actually uses the accumulated vocabulary to constrain its proposals (not currently testable deterministically).
 
 ---
 
@@ -1385,6 +1548,7 @@ Iteration N:
 - ☐ E.4 Aggregate hit-rate stats in the interpretation agent.
 - ☐ E.5 Unit tests for `evaluate_prediction` covering all branches.
 - ☐ E.6 Manual smoke test: run a 3-round trial, confirm rounds 2 and 3 have `prediction_outcome` populated.
+- ☐ E.7 `ProposedVocabLink` promotion: after E.3 marks links `"confirmed"` or `"refuted"`, the interpretation agent collects confirmed links across iterations and populates `VocabEntry.related_to` for the feature/capability pair when a link reaches `confirmed` status in ≥ `min_runs_for_promotion` distinct runs. Moved from Phase C (was C.5a) — depends on E.3.
 
 **Verify**:
 - `uv run pytest tests/unit/agent/tune_ml_hyperparam_agent/test_prediction_retrospective.py -q`.
@@ -1475,6 +1639,107 @@ Each round, the interpretation agent:
 >
 > **This is NOT a one-time implementation** — it's an ongoing quality improvement loop that runs in parallel with the experiment loop itself. The vocabulary system gets better as we tune its prompts, just like the ML models get better as we tune their hyperparameters.
 
+### ⚠️ Critical implementation gap: O(N) LLM call count + missing two-layer persistence
+
+**Status: ☑ DONE (2026-04-15). All 5 sub-tasks complete. 110 unit tests passing.**
+
+#### The two problems
+
+**Problem 1 — O(N) call count in Phase 1.**
+
+Phase 1 (per-model summarization) makes one LLM call per model in `effective_types`. Since `summary_groups` accumulates all historical models, this grows every iteration:
+
+```
+Iter 1: [wavenet, punet, fcnet]                    → 3 Phase 1 calls + 1 synthesis = 4
+Iter 2: [wavenet, punet, fcnet, attn_wavenet]      → 4 Phase 1 calls + 1 synthesis = 5
+Iter N: [wavenet, punet, fcnet, + N−1 proposed]   → N+2 calls
+```
+
+wavenet and punet have not changed — re-summarizing them from scratch each time is pure waste.
+
+**Problem 2 — no explicit two-layer persistence.**
+
+The workflow carries three ad-hoc Python variables (`current_runtime_vocab`, `previous_proposal_data`, `summary_groups`) without a clear contract for what each iteration receives. `summary_groups` conflates two different concerns: the raw input for LLM consumption and the debug archive. There is no typed boundary between "things fed to the LLM" and "things stored for debugging."
+
+#### The fix: two-layer persistence + model_knowledge_cache
+
+**Layer 1 — Raw archive (debug only, never re-read by the agent).**
+Every node writes its full output to disk per iteration. These files exist for human inspection and crash recovery only:
+```
+iteration_N/interpretation_{run_name}.json   ← full InterpretationOutput
+iteration_N/attempt_M/proposal_{run_name}.json
+iteration_N/{model_name}/run_output_{run_name}.json   ← raw tuning records
+```
+
+**Layer 2 — Long-term memory (fed to every iteration, O(1) size).**
+Three Python variables carried forward in the workflow:
+
+| Variable | Content | Update rule |
+|----------|---------|-------------|
+| `model_knowledge_cache` | Per-model Phase 1 LLM text + `_stats` (scores, file_vector, params) | Once per model, ever |
+| `runtime_vocab` | Growing list of typed discoveries | Every iteration (append only) |
+| `previous_proposal` | Latest `ProposalOutput` dict | Every iteration (replace) |
+
+**What flows into each LLM call per iteration (N > 1):**
+
+| LLM call | Receives |
+|----------|---------|
+| Phase 1 (new model only, 1 call) | New model's `ModelRunSummary` + description |
+| Phase 2 — synthesis (1 call) | All models' Phase 1 text (cache + new) + all `_stats` + **`runtime_vocab`** |
+| Proposer reasoning + commit (2–3 calls) | Full `InterpretationOutput` + `runtime_vocab` |
+
+`runtime_vocab` goes to **both Phase 2 and the proposer** so they are on the same knowledge base. `previous_proposal` is evaluated deterministically (not by LLM) → generates a discovery → enters `runtime_vocab`.
+
+**Information flow per iteration:**
+
+```
+LONG-TERM MEMORY (in)                   NEW DATA (in)
+model_knowledge_cache (all past models) new_summaries (this iter's model only)
+runtime_vocab (all discoveries so far)  previous_proposal (last iter's proposal)
+        │                                       │
+        └──────────────┬────────────────────────┘
+                       ▼
+              ResultInterpretationAgent
+              Phase 1: LLM × 1 (new model) + cache hits × N (old models)
+              Phase 2: LLM × 1 (synthesis, sees vocab + all model summaries)
+              Phase C: deterministic (evaluate prediction → discovery)
+                       │
+        ┌──────────────┴──────────────────────────┐
+        ▼                                         ▼
+LONG-TERM MEMORY (out)                   ARCHIVE (disk)
+model_knowledge_cache (updated)          interpretation_{run_name}.json
+runtime_vocab (updated)                  (contains full long-term memory
+previous_proposal ← ProposalOutput       as a recoverable snapshot)
+```
+
+**Self-sufficient cache entries.**
+Each `model_knowledge_cache[mt]` entry must contain both the LLM-generated analysis AND the numerical facts Phase 2 needs, so old raw summaries are never re-read:
+```python
+{
+    "key_findings":          [...],   # Phase 1 LLM output
+    "bottlenecks":           [...],
+    "score_trend":           "...",
+    "frequency_analysis":    "...",
+    # ... other Phase 1 fields ...
+    "_stats": {                        # deterministic facts, stored at aggregation time
+        "best_denoising_score":  5.576,
+        "worst_denoising_score": 5.21,
+        "best_file_vector":      [...],
+        "best_model_params":     4123456,
+        "completed_rounds":      2,
+    }
+}
+```
+
+**Result: O(1) LLM calls per iteration**, independent of history depth:
+```
+Iter 1: N_seeds Phase 1 calls + 1 synthesis   (builds the cache)
+Iter 2: 1 Phase 1 call        + 1 synthesis   (one new model)
+Iter N: 1 Phase 1 call        + 1 synthesis   (always 2 interpretation calls)
+```
+
+**Underlying assumption** (same as for vocab): everything worth knowing about wavenet, punet, etc. from all previous iterations is captured in the cached per-model summary plus the runtime vocab. A cached entry is a frozen, stable view — it does not need to be re-derived unless the model is re-tuned (which never happens in the current workflow: each model is tuned exactly once).
+
 ### How vocabulary bounds the growth
 
 - **Features and capabilities**: bounded by the promotion rules. Most candidates never get promoted. The canonical seed stays at ~20 entries. Candidates churn — new ones appear, unused ones fade. Total stays ~30-50 entries.
@@ -1496,8 +1761,8 @@ The proposal agent receives even more context (comparison stage gets source code
 
 ### Design rules to prevent prompt explosion
 
-1. **The lab report replaces raw records.** The interpretation agent never receives "all records since the beginning." It receives the previous lab report + new data.
-2. **The vocabulary is the memory.** Everything worth remembering is in the vocabulary (features, capabilities, discoveries). If it's not in the vocabulary, it's not remembered.
+1. **Every step makes O(1) LLM calls, independent of iteration count.** The interpretation agent caches per-model Phase 1 summaries (C.19a) and only calls the LLM for new models. The vocabulary/discovery pipeline already runs O(1) calls. The proposal agent's pipeline is fixed at 3 calls. No stage should grow call count with history depth.
+2. **The vocabulary is the memory.** Everything worth remembering is in the vocabulary (features, capabilities, discoveries). If it's not in the vocabulary, it's not remembered. `runtime_vocab` is fed to both Phase 2 (synthesis) and the proposer so both are on the same knowledge base — Phase 2 confirms/contradicts established discoveries; the proposer uses them to constrain its reasoning.
 3. **Source code is pre-filtered.** Only top N models get their source code included. The `ModelSelectionStrategy` controls this budget.
 4. **Discoveries can be summarized.** If the discovery list grows beyond ~50 entries, the interpretation agent consolidates older ones into summaries.
 5. **Each agent has a token budget.** The pipeline runner should estimate prompt size before calling the LLM and warn if it exceeds a threshold (e.g., 40K tokens).

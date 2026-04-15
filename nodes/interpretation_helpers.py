@@ -141,6 +141,7 @@ def generate_discoveries(
     proposed_vocab_links: List[Dict[str, Any]],
     timing: Optional[Dict[str, Any]] = None,
     slow_threshold_s: float = 1800.0,
+    overall_best_score: Optional[float] = None,
 ) -> List[VocabEntry]:
     """
     Generate kind='discovery' VocabEntry entries from this iteration's results.
@@ -157,6 +158,12 @@ def generate_discoveries(
                 time exceeds slow_threshold_s, a timing discovery is generated.
         slow_threshold_s: Total experiment time (train+inference) above which
                           a timing discovery is emitted. Default 1800s (30 min).
+        overall_best_score: The best score across ALL models seen this iteration
+                            (new + cached). Used as the SOTA baseline for the
+                            score comparison discovery. Falls back to
+                            prediction_eval["current_value"] (the SOTA at
+                            proposal time) when not provided, but that value
+                            may be stale if a newer model has since surpassed it.
     """
     discoveries = []
 
@@ -194,8 +201,14 @@ def generate_discoveries(
 
     # Discovery 2: score comparison to SOTA
     if best_score is not None:
-        # Check results for the SOTA comparison
-        sota_score = prediction_eval.get("current_value") if prediction_eval else None
+        # Use the strictest available SOTA: overall_best_score (current-iteration max across
+        # all models) takes precedence over prediction_eval["current_value"] (the SOTA at
+        # proposal time, which may be stale if a newer model has since surpassed it).
+        sota_from_prediction = prediction_eval.get("current_value") if prediction_eval else None
+        if overall_best_score is not None and sota_from_prediction is not None:
+            sota_score = max(sota_from_prediction, overall_best_score)
+        else:
+            sota_score = sota_from_prediction if sota_from_prediction is not None else overall_best_score
         if sota_score is not None:
             if best_score > sota_score:
                 desc = (f"{model_type} scored {best_score:.4f}, beating the previous "
@@ -237,6 +250,47 @@ def generate_discoveries(
     return discoveries
 
 
+def promote_candidates(
+    vocab: List[VocabEntry],
+    min_runs: int = 3,
+) -> tuple[List[VocabEntry], List[str]]:
+    """
+    Promote candidate VocabEntry items to canonical tier.
+
+    A candidate is promoted when:
+      - tier == "candidate"
+      - kind in {"feature", "capability"}  (discoveries are never promoted)
+      - len(seen_in_runs) >= min_runs
+
+    The require_positive_delta criterion (promotion only when candidate
+    contributed to SOTA-beating runs) is deferred — it requires per-run
+    score context not currently available here. See C.5 design doc.
+
+    Args:
+        vocab:    Current runtime vocabulary.
+        min_runs: Minimum distinct runs before promotion. Default 3.
+
+    Returns:
+        (updated_vocab, promoted_names) — updated list with tier changes
+        applied, and the names of entries promoted this call.
+    """
+    updated: List[VocabEntry] = []
+    promoted_names: List[str] = []
+
+    for entry in vocab:
+        if (
+            entry.tier == "candidate"
+            and entry.kind in {"feature", "capability"}
+            and len(entry.seen_in_runs) >= min_runs
+        ):
+            updated.append(entry.model_copy(update={"tier": "canonical"}))
+            promoted_names.append(entry.name)
+        else:
+            updated.append(entry)
+
+    return updated, promoted_names
+
+
 def build_runtime_vocab(
     incoming_vocab: List[VocabEntry],
     new_discoveries: List[VocabEntry],
@@ -269,14 +323,28 @@ def build_runtime_vocab(
     for discovery in new_discoveries:
         vocab_by_name[discovery.name] = discovery
 
-    # Add proposed candidates (features/capabilities from the proposal)
+    # Add proposed candidates (features/capabilities from the proposal).
+    # Track seen_in_runs: append proposed_by_run whenever a candidate is encountered,
+    # whether it is new or already present from a prior iteration.
     for candidate in proposed_candidates:
-        if isinstance(candidate, dict) and "name" in candidate:
-            name = candidate["name"]
-            if name not in vocab_by_name:
-                try:
-                    vocab_by_name[name] = VocabEntry.model_validate(candidate)
-                except Exception:
-                    pass  # skip malformed candidates
+        if not isinstance(candidate, dict) or "name" not in candidate:
+            continue
+        name = candidate["name"]
+        run = candidate.get("proposed_by_run") or ""
+        if name not in vocab_by_name:
+            try:
+                entry = VocabEntry.model_validate(candidate)
+                if run and run not in entry.seen_in_runs:
+                    entry = entry.model_copy(update={"seen_in_runs": [run]})
+                vocab_by_name[name] = entry
+            except Exception:
+                pass  # skip malformed candidates
+        else:
+            # Already present: extend seen_in_runs without duplicates
+            existing = vocab_by_name[name]
+            if run and run not in existing.seen_in_runs:
+                vocab_by_name[name] = existing.model_copy(
+                    update={"seen_in_runs": existing.seen_in_runs + [run]}
+                )
 
     return list(vocab_by_name.values())

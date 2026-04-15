@@ -403,7 +403,7 @@ def run_workflow(
             "Must provide either source_paths OR "
             "(data_dir + model_types + source_run_name)."
         )
-    summary_groups = tuning_outputs_to_summaries(tuning_outputs)
+    seed_summaries = tuning_outputs_to_summaries(tuning_outputs)
     print(f"  Loaded {len(tuning_outputs)} tuning outputs "
           f"across {len(set(o.model_type for o in tuning_outputs))} model types.\n")
 
@@ -425,9 +425,11 @@ def run_workflow(
     iteration_results: list[HyperparamTuningOutput] = []
     best_score_overall: float | None = None
 
-    # Phase C: track previous proposal and runtime vocab across iterations
+    # Long-term memory: three variables carried forward across iterations
     previous_proposal_data: dict | None = None  # serialized ProposalOutput from iter N-1
     current_runtime_vocab = list(vocab_seed)     # starts with seed, grows with discoveries
+    model_knowledge_cache: dict = {}             # per-model Phase 1 cache (grows once per model)
+    latest_new_summary = None                    # ModelRunSummary from the most recent tune
 
     # --- Iteration loop ---
     for iteration in range(1, max_iterations + 1):
@@ -439,10 +441,18 @@ def run_workflow(
         print(f"  Directory: {iter_dir}")
         print(f"{'='*60}\n")
 
-        # --- Interpret (once per iteration, with accumulated results) ---
+        # --- Interpret (once per iteration) ---
+        # Iteration 1: all seeds are new (cache is empty).
+        # Iteration 2+: only the model tuned in the previous iteration is new.
+        if iteration == 1:
+            new_summaries = seed_summaries
+        else:
+            new_summaries = [latest_new_summary] if latest_new_summary is not None else []
+
         interp_storage = _make_storage(iter_dir, run_name)
         interp_input = InterpretationInput(
-            summaries=summary_groups,
+            summaries=new_summaries,
+            model_knowledge_cache=model_knowledge_cache,
             human_advice=human_advice_interpret,
             runtime_vocab=current_runtime_vocab,
             previous_proposal=previous_proposal_data,
@@ -608,19 +618,24 @@ def run_workflow(
         tune_output = HyperparamTuningAgent().run(tune_input)
         iteration_results.append(tune_output)
 
-        # --- Accumulate results for next iteration ---
+        # --- Update long-term memory for next iteration ---
         all_model_types.append(proposal.model_name)
-        new_summaries = tuning_outputs_to_summaries([tune_output])
-        # Attach model description so iteration 2+ interpretation agent
-        # can find it without filesystem access to the attempt directory
-        for s in new_summaries:
-            s.model_description = proposal.model_description
-        summary_groups.extend(new_summaries)
 
-        # --- Phase C: update vocabulary feedback for next iteration ---
-        # Save proposal data so next iteration's interpretation can evaluate it
+        # Build ModelRunSummary for the newly tuned model (fed to iter N+1 as new_summaries)
+        new_model_summaries = tuning_outputs_to_summaries([tune_output])
+        for s in new_model_summaries:
+            # Attach description so iter N+1 interpretation agent can find it
+            # without filesystem access to the attempt directory
+            s.model_description = proposal.model_description
+        latest_new_summary = new_model_summaries[0]
+
+        # Update knowledge cache from interpretation output
+        if hasattr(interpretation, "model_knowledge_cache") and interpretation.model_knowledge_cache:
+            model_knowledge_cache = dict(interpretation.model_knowledge_cache)
+            print(f"  [{iteration}] Knowledge cache: {len(model_knowledge_cache)} models cached.")
+
+        # Update runtime vocab from interpretation output
         previous_proposal_data = proposal.model_dump()
-        # Update runtime vocab from interpretation output (if it produced one)
         if hasattr(interpretation, "runtime_vocab") and interpretation.runtime_vocab:
             current_runtime_vocab = [
                 v if hasattr(v, "name") else VocabEntry.model_validate(v)
