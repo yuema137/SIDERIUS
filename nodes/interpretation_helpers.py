@@ -237,6 +237,47 @@ def generate_discoveries(
     return discoveries
 
 
+def promote_candidates(
+    vocab: List[VocabEntry],
+    min_runs: int = 3,
+) -> tuple[List[VocabEntry], List[str]]:
+    """
+    Promote candidate VocabEntry items to canonical tier.
+
+    A candidate is promoted when:
+      - tier == "candidate"
+      - kind in {"feature", "capability"}  (discoveries are never promoted)
+      - len(seen_in_runs) >= min_runs
+
+    The require_positive_delta criterion (promotion only when candidate
+    contributed to SOTA-beating runs) is deferred — it requires per-run
+    score context not currently available here. See C.5 design doc.
+
+    Args:
+        vocab:    Current runtime vocabulary.
+        min_runs: Minimum distinct runs before promotion. Default 3.
+
+    Returns:
+        (updated_vocab, promoted_names) — updated list with tier changes
+        applied, and the names of entries promoted this call.
+    """
+    updated: List[VocabEntry] = []
+    promoted_names: List[str] = []
+
+    for entry in vocab:
+        if (
+            entry.tier == "candidate"
+            and entry.kind in {"feature", "capability"}
+            and len(entry.seen_in_runs) >= min_runs
+        ):
+            updated.append(entry.model_copy(update={"tier": "canonical"}))
+            promoted_names.append(entry.name)
+        else:
+            updated.append(entry)
+
+    return updated, promoted_names
+
+
 def build_runtime_vocab(
     incoming_vocab: List[VocabEntry],
     new_discoveries: List[VocabEntry],
