@@ -516,11 +516,17 @@ class MLModelProposalAgent:
         inherited = reasoning_output.get("inherited_components", [])
         prediction = reasoning_output.get("falsifiable_prediction")
         vocab_links = comparison_output.get("proposed_vocab_links", [])
-        # Discoveries from both stages
+        # Separate candidates by kind: feature/capability → vocab pipeline; discovery → discoveries
+        vocab_candidates = []
         discoveries = []
         for stage_output in [comparison_output, reasoning_output]:
             for candidate in stage_output.get("proposed_vocab_candidates", []):
-                if isinstance(candidate, dict) and candidate.get("kind") == "discovery":
+                if not isinstance(candidate, dict):
+                    continue
+                kind = candidate.get("kind", "")
+                if kind in {"feature", "capability"}:
+                    vocab_candidates.append(candidate)
+                elif kind == "discovery":
                     discoveries.append(candidate)
 
         # --- Build and validate output ---
@@ -534,6 +540,7 @@ class MLModelProposalAgent:
             "inherited_components":    inherited,
             "falsifiable_prediction":  prediction,
             "proposed_vocab_links":    vocab_links,
+            "proposed_vocab_candidates": vocab_candidates,
             "proposed_discoveries":    discoveries,
             "memo_consistency_notes":  raw.get("memo_consistency_notes", []),
         })
