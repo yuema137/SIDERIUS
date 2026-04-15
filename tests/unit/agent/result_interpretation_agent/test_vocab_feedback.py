@@ -1,13 +1,15 @@
 """
 Unit tests for Phase C vocabulary feedback loop helpers.
 
-Tests evaluate_prediction, generate_discoveries, build_runtime_vocab.
+Tests evaluate_prediction, generate_discoveries, build_runtime_vocab,
+promote_candidates (C.11), and seen_in_runs tracking (C.5-3).
 """
 import pytest
 from nodes.interpretation_helpers import (
     evaluate_prediction,
     generate_discoveries,
     build_runtime_vocab,
+    promote_candidates,
 )
 from agent.schemas.proposal import VocabEntry
 
@@ -259,3 +261,150 @@ class TestBuildRuntimeVocab:
         assert len(vocab) == 4
         kinds = {v.kind for v in vocab}
         assert kinds == {"feature", "discovery"}
+
+
+# ---------------------------------------------------------------------------
+# promote_candidates (C.11)
+# ---------------------------------------------------------------------------
+
+def _make_candidate(name, kind="feature", seen_in_runs=None, tier="candidate"):
+    return VocabEntry(
+        name=name, kind=kind, description="test",
+        tier=tier,
+        seen_in_runs=seen_in_runs or [],
+    )
+
+
+class TestPromoteCandidates:
+
+    def test_feature_with_enough_runs_promoted(self):
+        entry = _make_candidate("log_fno", kind="feature", seen_in_runs=["r1", "r2", "r3"])
+        vocab, promoted = promote_candidates([entry])
+        assert promoted == ["log_fno"]
+        assert vocab[0].tier == "canonical"
+
+    def test_capability_with_enough_runs_promoted(self):
+        entry = _make_candidate("freq_selectivity", kind="capability", seen_in_runs=["r1", "r2", "r3"])
+        vocab, promoted = promote_candidates([entry])
+        assert promoted == ["freq_selectivity"]
+        assert vocab[0].tier == "canonical"
+
+    def test_insufficient_runs_stays_candidate(self):
+        entry = _make_candidate("log_fno", seen_in_runs=["r1", "r2"])
+        vocab, promoted = promote_candidates([entry])
+        assert promoted == []
+        assert vocab[0].tier == "candidate"
+
+    def test_discovery_never_promoted_regardless_of_runs(self):
+        entry = _make_candidate("disc_finding", kind="discovery", seen_in_runs=["r1", "r2", "r3", "r4", "r5"])
+        vocab, promoted = promote_candidates([entry])
+        assert promoted == []
+        assert vocab[0].tier == "candidate"
+
+    def test_already_canonical_untouched(self):
+        entry = _make_candidate("dilated_causal_conv", tier="canonical", seen_in_runs=[])
+        vocab, promoted = promote_candidates([entry])
+        assert promoted == []
+        assert vocab[0].tier == "canonical"
+
+    def test_returns_correct_promoted_names(self):
+        entries = [
+            _make_candidate("a", seen_in_runs=["r1", "r2", "r3"]),
+            _make_candidate("b", seen_in_runs=["r1", "r2"]),
+            _make_candidate("c", seen_in_runs=["r1", "r2", "r3", "r4"]),
+        ]
+        _, promoted = promote_candidates(entries)
+        assert set(promoted) == {"a", "c"}
+
+    def test_custom_min_runs(self):
+        entry = _make_candidate("log_fno", seen_in_runs=["r1", "r2"])
+        vocab, promoted = promote_candidates([entry], min_runs=2)
+        assert promoted == ["log_fno"]
+        assert vocab[0].tier == "canonical"
+
+    def test_empty_vocab(self):
+        vocab, promoted = promote_candidates([])
+        assert vocab == []
+        assert promoted == []
+
+    def test_mixed_vocab_only_eligible_promoted(self):
+        entries = [
+            _make_candidate("feat_a", kind="feature", seen_in_runs=["r1", "r2", "r3"]),
+            _make_candidate("feat_b", kind="feature", seen_in_runs=["r1"]),
+            _make_candidate("disc_x", kind="discovery", seen_in_runs=["r1", "r2", "r3"]),
+            _make_candidate("canon_y", tier="canonical"),
+        ]
+        vocab, promoted = promote_candidates(entries)
+        assert promoted == ["feat_a"]
+        by_name = {e.name: e for e in vocab}
+        assert by_name["feat_a"].tier == "canonical"
+        assert by_name["feat_b"].tier == "candidate"
+        assert by_name["disc_x"].tier == "candidate"
+        assert by_name["canon_y"].tier == "canonical"
+
+
+# ---------------------------------------------------------------------------
+# seen_in_runs tracking in build_runtime_vocab (C.5-3)
+# ---------------------------------------------------------------------------
+
+class TestSeenInRunsTracking:
+
+    def test_new_candidate_gets_proposed_by_run(self):
+        candidate = {"name": "gated_fno", "kind": "feature", "description": "test", "proposed_by_run": "wavenet_v2"}
+        result = build_runtime_vocab([], [], [candidate])
+        entry = next(e for e in result if e.name == "gated_fno")
+        assert entry.seen_in_runs == ["wavenet_v2"]
+
+    def test_existing_candidate_seen_in_runs_extended(self):
+        """Second iteration adds a new run to an existing candidate."""
+        # Iteration 1: candidate first appears
+        vocab = build_runtime_vocab(
+            [],
+            [],
+            [{"name": "gated_fno", "kind": "feature", "description": "test", "proposed_by_run": "model_a"}],
+        )
+        assert next(e for e in vocab if e.name == "gated_fno").seen_in_runs == ["model_a"]
+
+        # Iteration 2: same candidate proposed by a different model
+        vocab = build_runtime_vocab(
+            vocab,
+            [],
+            [{"name": "gated_fno", "kind": "feature", "description": "test", "proposed_by_run": "model_b"}],
+        )
+        entry = next(e for e in vocab if e.name == "gated_fno")
+        assert set(entry.seen_in_runs) == {"model_a", "model_b"}
+
+    def test_same_run_not_duplicated_in_seen_in_runs(self):
+        """If the same run proposes the same candidate twice, seen_in_runs stays deduplicated."""
+        candidate = {"name": "gated_fno", "kind": "feature", "description": "test", "proposed_by_run": "model_a"}
+        vocab = build_runtime_vocab([], [], [candidate])
+        # Same run again
+        vocab = build_runtime_vocab(vocab, [], [candidate])
+        entry = next(e for e in vocab if e.name == "gated_fno")
+        assert entry.seen_in_runs.count("model_a") == 1
+
+    def test_missing_proposed_by_run_no_crash(self):
+        """Candidates without proposed_by_run are added but seen_in_runs stays empty."""
+        candidate = {"name": "mystery_feature", "kind": "feature", "description": "no run info"}
+        result = build_runtime_vocab([], [], [candidate])
+        entry = next(e for e in result if e.name == "mystery_feature")
+        assert entry.seen_in_runs == []
+
+    def test_seen_in_runs_enables_promotion_after_three_iterations(self):
+        """End-to-end: three iterations of the same candidate → promote_candidates fires."""
+        candidate_base = {"name": "log_fno", "kind": "feature", "description": "test"}
+
+        vocab = []
+        for run in ["model_a", "model_b", "model_c"]:
+            vocab = build_runtime_vocab(
+                vocab, [],
+                [{**candidate_base, "proposed_by_run": run}],
+            )
+
+        entry = next(e for e in vocab if e.name == "log_fno")
+        assert set(entry.seen_in_runs) == {"model_a", "model_b", "model_c"}
+
+        # Now promote_candidates should fire
+        vocab, promoted = promote_candidates(vocab)
+        assert "log_fno" in promoted
+        assert next(e for e in vocab if e.name == "log_fno").tier == "canonical"
