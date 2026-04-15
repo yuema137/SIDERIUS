@@ -241,6 +241,7 @@ def _build_synthesis_prompt(
     expert_advice_str: str = "",
     human_advice: Optional[str] = None,
     runtime_vocab: Optional[List] = None,
+    per_model_formal: Optional[Dict[str, Optional[float]]] = None,
 ) -> str:
     """Build the user prompt for cross-model synthesis."""
     lines = [
@@ -258,6 +259,10 @@ def _build_synthesis_prompt(
             f"Best score : {per_model_best.get(model_type)}",
             f"Worst score: {per_model_worst.get(model_type)}",
         ]
+        if per_model_formal:
+            formal = per_model_formal.get(model_type)
+            if formal is not None and formal != per_model_best.get(model_type):
+                lines.append(f"Formal score: {formal}  (best_score above may be from a trial round)")
         if per_model_params and model_type in per_model_params:
             lines.append(f"Parameters : {per_model_params[model_type]:,}")
         if per_model_training_segments and model_type in per_model_training_segments:
@@ -433,6 +438,7 @@ class ResultInterpretationAgent:
         # Cached models: read from inp.model_knowledge_cache[mt]["_stats"].
         per_model_best:   Dict[str, Optional[float]] = {}
         per_model_worst:  Dict[str, Optional[float]] = {}
+        per_model_formal: Dict[str, Optional[float]] = {}
         per_model_best_config: Dict[str, Optional[Dict]] = {}
         overall_best_score:  Optional[float] = None
         overall_worst_score: Optional[float] = None
@@ -461,6 +467,9 @@ class ResultInterpretationAgent:
                 if overall_worst_score is None or s.worst_denoising_score < overall_worst_score:
                     overall_worst_score = s.worst_denoising_score
 
+            if s.formal_score is not None:
+                per_model_formal[mt] = s.formal_score
+
         # Reconstruct stats for cached models from their _stats block
         for mt, entry in inp.model_knowledge_cache.items():
             if mt in per_model_summary_input:
@@ -473,6 +482,8 @@ class ResultInterpretationAgent:
             per_model_best[mt]   = best
             per_model_worst[mt]  = worst
             per_model_best_config[mt] = stats.get("best_config")
+            if stats.get("formal_score") is not None:
+                per_model_formal[mt] = stats["formal_score"]
 
             if best is not None:
                 if overall_best_score is None or best > overall_best_score:
@@ -536,6 +547,7 @@ class ResultInterpretationAgent:
                     "best_model_params":     summary.best_model_params,
                     "completed_rounds":      summary.completed_rounds,
                     "best_config":           summary.best_config,
+                    "formal_score":          summary.formal_score,
                 },
             }
             print(f"    {mt}: {len(llm_response.get('key_findings', []))} findings, "
@@ -612,6 +624,7 @@ class ResultInterpretationAgent:
                 expert_advice_str=expert_advice_str,
                 human_advice=inp.human_advice,
                 runtime_vocab=list(inp.runtime_vocab) if inp.runtime_vocab else None,
+                per_model_formal=per_model_formal or None,
             )
             synthesis_response = self.bridge.generate(SYNTHESIS_SYSTEM_PROMPT, synthesis_prompt)
             llm_findings = synthesis_response.get("key_findings", [])
@@ -658,6 +671,7 @@ class ResultInterpretationAgent:
                 inherited_components=prev_inherited,
                 proposed_vocab_links=prev_vocab_links,
                 timing=prev_timing,
+                overall_best_score=overall_best_score,
             )
             if new_discoveries:
                 print(f"  New discoveries: {len(new_discoveries)}")
@@ -667,9 +681,16 @@ class ResultInterpretationAgent:
         # Build updated runtime vocabulary
         # Feature/capability candidates come from proposed_vocab_candidates (C.5-2).
         # Discovery entries are generated separately above and passed as new_discoveries.
+        # Inject proposed_by_run from the proposal's model_name so build_runtime_vocab
+        # can populate seen_in_runs — the LLM never produces this key itself.
         proposed_candidates = []
         if inp.previous_proposal:
-            proposed_candidates = inp.previous_proposal.get("proposed_vocab_candidates", [])
+            model_name = inp.previous_proposal.get("model_name", "")
+            raw_candidates = inp.previous_proposal.get("proposed_vocab_candidates", [])
+            proposed_candidates = [
+                {**c, "proposed_by_run": model_name} if not c.get("proposed_by_run") else c
+                for c in raw_candidates
+            ]
         runtime_vocab = build_runtime_vocab(
             incoming_vocab=list(inp.runtime_vocab),
             new_discoveries=new_discoveries,
