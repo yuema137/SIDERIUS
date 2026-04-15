@@ -845,15 +845,14 @@ requires storing additional context that is not currently available in `build_ru
 The design doc itself notes "we will tune the thresholds after the first batch of real chain
 runs." Count-only promotion is the correct MVP.
 
-**Gap 5 — C.5a is blocked on Phase E.**
+**Gap 5 — `ProposedVocabLink` promotion blocked on Phase E.**
 
 `ProposedVocabLink.status` is always `"proposed"` — the reflector inside
 `ml_hyperparameter_tune_agent.py` never marks links as `"confirmed"` or `"refuted"`. The
 interpretation agent receives links via `previous_proposal.proposed_vocab_links` but has no
-confirmed entries to act on. C.5a (`confirmed links → VocabEntry.related_to`) cannot produce
-useful output until Phase E (reflector evaluates link status after each experiment). C.5a is
-documented here for completeness but **not implemented in C.5** — it is a follow-on task once
-Phase E marks links correctly.
+confirmed entries to act on. Link promotion (`confirmed links → VocabEntry.related_to`) cannot
+produce useful output until Phase E (reflector evaluates link status after each experiment).
+This task has been **moved to Phase E as E.7** — it depends on E.3 and is not part of C.5.
 
 **Validator integration** (cheap, high-leverage):
 
@@ -1405,7 +1404,6 @@ Iteration N:
   - ☑ **C.5-4 Helpers — `promote_candidates`**: add `promote_candidates(vocab, min_runs=3) -> tuple[List[VocabEntry], List[str]]` to `interpretation_helpers.py`. Promotes `tier="candidate"` entries where `kind in {"feature", "capability"}` and `len(seen_in_runs) >= min_runs`. MVP criterion: count-only (no `require_positive_delta` — deferred). **Done** — same file, commit `a0a78de`.
   - ☑ **C.5-5 Schema — `InterpretationOutput`**: add `vocab_changes: List[str] = []`. Wire up: in `result_interpretation_agent.py`, read `proposed_vocab_candidates` from `previous_proposal`, call `promote_candidates` after `build_runtime_vocab`, populate `vocab_changes`. **Done** — `agent/schemas/interpretation.py` + `nodes/result_interpretation_agent.py`, commit `35c0f57`.
 
-- ☐ **C.5a** `ProposedVocabLink` promotion: confirmed links → `VocabEntry.related_to`. **BLOCKED on Phase E** — the reflector never marks `ProposedVocabLink.status` as `"confirmed"` or `"refuted"`, so there are no confirmed links to promote. Implement after Phase E adds reflector link evaluation.
 - ☐ C.6 Semantic dedup LLM call.
 - ☐ C.11 Promotion rule unit tests.
 
@@ -1479,6 +1477,7 @@ Iteration N:
 - ☐ E.4 Aggregate hit-rate stats in the interpretation agent.
 - ☐ E.5 Unit tests for `evaluate_prediction` covering all branches.
 - ☐ E.6 Manual smoke test: run a 3-round trial, confirm rounds 2 and 3 have `prediction_outcome` populated.
+- ☐ E.7 `ProposedVocabLink` promotion: after E.3 marks links `"confirmed"` or `"refuted"`, the interpretation agent collects confirmed links across iterations and populates `VocabEntry.related_to` for the feature/capability pair when a link reaches `confirmed` status in ≥ `min_runs_for_promotion` distinct runs. Moved from Phase C (was C.5a) — depends on E.3.
 
 **Verify**:
 - `uv run pytest tests/unit/agent/tune_ml_hyperparam_agent/test_prediction_retrospective.py -q`.
