@@ -783,6 +783,78 @@ The §2B validator check for `InheritedComponent` already short-circuits unknown
 | Agent proposes a "log-spaced FNO gates" variant, name not in any tier yet | Recorded as a candidate, with the LLM-supplied description and an optional regex hint. seen_in_runs gets one entry. |
 | Three rounds later, "log_spaced_fno_gates" has appeared in 4 distinct runs and 2 scored above SOTA | The interpretation agent promotes it to canonical, adds it to the next round's `runtime_vocab` with `tier=canonical`, and writes a `vocab_changes` event. The seed file in the repo is unchanged; promotion is reconstructible from records on any future run. |
 
+#### ⚠️ Implementation gaps found during C.5 audit (2026-04-15)
+
+A code audit before implementing C.5 found five gaps between the design above and the actual code.
+All five are fixed as part of C.5 — see the checklist sub-tasks below.
+
+**Gap 1 — Feature/capability candidates silently dropped by the proposal agent.**
+
+The comparison-stage LLM outputs `proposed_vocab_candidates` with entries of `kind="feature"` or
+`kind="capability"`. In `ml_model_proposal_agent.py`, the loop that builds `ProposalOutput.proposed_discoveries`
+filters to `kind=="discovery"` only:
+
+```python
+for candidate in stage_output.get("proposed_vocab_candidates", []):
+    if isinstance(candidate, dict) and candidate.get("kind") == "discovery":
+        discoveries.append(candidate)  # feature/capability silently dropped
+```
+
+Feature and capability candidates never reach `build_runtime_vocab` — so there is nothing to
+promote. `proposed_discoveries` is intentionally reserved for long-form empirical sentences
+(`kind="discovery"`). Fix: add a separate `proposed_vocab_candidates: List[Dict[str, str]]` field
+to `ProposalOutput` for feature/capability candidates; wire it through the interpretation agent.
+
+**Gap 2 — `seen_in_runs` never populated in `build_runtime_vocab`.**
+
+When a new candidate is added, `VocabEntry.model_validate(candidate)` initialises
+`seen_in_runs=[]`. When an existing candidate is encountered again in a later iteration,
+the entry is kept unchanged — `seen_in_runs` is never extended:
+
+```python
+if name not in vocab_by_name:
+    vocab_by_name[name] = VocabEntry.model_validate(candidate)  # seen_in_runs stays []
+else:
+    pass  # existing entry: seen_in_runs NOT updated → count stuck at 0
+```
+
+Fix: after locating the entry (new or existing), append `candidate.get("proposed_by_run")` to
+`seen_in_runs` if not already present. The string stored in `seen_in_runs` is the
+`proposed_by_run` value — the model name that proposed this candidate (e.g. `"wavenet_v2"`).
+
+**Gap 3 — `vocab_changes` field missing from `InterpretationOutput`.**
+
+The design doc says "the interpretation agent's output schema has a structured `vocab_changes`
+field listing every promotion / merge / alias decision made in that round." This field does not
+exist in the current schema. Fix: add `vocab_changes: List[str]` with a human-readable log
+entry per promotion (e.g. `"Promoted 'log_spaced_fno_gates' to canonical (seen in 3 runs)."`).
+
+**Gap 4 — `promote_candidates` function does not exist.**
+
+No function in the codebase applies the structural promotion criterion. Fix: add
+`promote_candidates(vocab: List[VocabEntry], min_runs: int = 3) -> tuple[List[VocabEntry], List[str]]`
+to `nodes/interpretation_helpers.py`. Call it after `build_runtime_vocab` in the
+interpretation agent.
+
+MVP criterion: `tier="candidate"`, `kind in {"feature", "capability"}`, and
+`len(seen_in_runs) >= min_runs` → set `tier="canonical"`.
+
+The `require_positive_delta` criterion from `ResearchPolicy` is **deferred**: implementing it
+requires tracking per-run SOTA scores alongside `seen_in_runs` (not just run names), which
+requires storing additional context that is not currently available in `build_runtime_vocab`.
+The design doc itself notes "we will tune the thresholds after the first batch of real chain
+runs." Count-only promotion is the correct MVP.
+
+**Gap 5 — C.5a is blocked on Phase E.**
+
+`ProposedVocabLink.status` is always `"proposed"` — the reflector inside
+`ml_hyperparameter_tune_agent.py` never marks links as `"confirmed"` or `"refuted"`. The
+interpretation agent receives links via `previous_proposal.proposed_vocab_links` but has no
+confirmed entries to act on. C.5a (`confirmed links → VocabEntry.related_to`) cannot produce
+useful output until Phase E (reflector evaluates link status after each experiment). C.5a is
+documented here for completeness but **not implemented in C.5** — it is a follow-on task once
+Phase E marks links correctly.
+
 **Validator integration** (cheap, high-leverage):
 
 The `ml_code_validator_agent` already loads the proposed plugin file. Add one new check:
@@ -1324,8 +1396,16 @@ Iteration N:
   **Result**: Phase 1 is called exactly once per model ever. Iterations 2+ make exactly 2 LLM calls in the interpretation agent (1 Phase 1 for the new model + 1 Phase 2 synthesis), regardless of how many models exist.
 
 **Promotion (after vocabulary loop is working):**
-- ☐ C.5 Structural promotion rule for candidates.
-- ☐ C.5a `ProposedVocabLink` promotion: confirmed links → `VocabEntry.related_to`.
+- ☐ **C.5** Structural promotion rule for candidates. See §2B "⚠️ Implementation gaps" for the 5-gap audit.
+
+  Sub-tasks:
+  - ☐ **C.5-1 Schema — `ProposalOutput`**: add `proposed_vocab_candidates: List[Dict[str, str]] = []` field for feature/capability entries from the comparison stage. Keep `proposed_discoveries` for `kind="discovery"` only. Update field docstrings.
+  - ☐ **C.5-2 Proposal agent**: collect `kind in {"feature", "capability"}` entries from `proposed_vocab_candidates` of each reasoning stage output into `proposed_vocab_candidates` (not into `proposed_discoveries`).
+  - ☐ **C.5-3 Helpers — `build_runtime_vocab`**: fix `seen_in_runs` tracking. After locating an entry (new or existing), append `candidate.get("proposed_by_run")` to `seen_in_runs` if not already present.
+  - ☐ **C.5-4 Helpers — `promote_candidates`**: add `promote_candidates(vocab, min_runs=3) -> tuple[List[VocabEntry], List[str]]` to `interpretation_helpers.py`. Promotes `tier="candidate"` entries where `kind in {"feature", "capability"}` and `len(seen_in_runs) >= min_runs`. MVP criterion: count-only (no `require_positive_delta` — deferred).
+  - ☐ **C.5-5 Schema — `InterpretationOutput`**: add `vocab_changes: List[str] = []`. Wire up: in `result_interpretation_agent.py`, read `proposed_vocab_candidates` from `previous_proposal`, call `promote_candidates` after `build_runtime_vocab`, populate `vocab_changes`.
+
+- ☐ **C.5a** `ProposedVocabLink` promotion: confirmed links → `VocabEntry.related_to`. **BLOCKED on Phase E** — the reflector never marks `ProposedVocabLink.status` as `"confirmed"` or `"refuted"`, so there are no confirmed links to promote. Implement after Phase E adds reflector link evaluation.
 - ☐ C.6 Semantic dedup LLM call.
 - ☐ C.11 Promotion rule unit tests.
 
