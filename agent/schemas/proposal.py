@@ -539,11 +539,22 @@ class ProposalOutput(BaseModel):
                     "Evaluated across iterations — confirmed links get promoted "
                     "to VocabEntry.related_to by the interpretation agent.",
     )
+    proposed_vocab_candidates: List[Dict[str, str]] = Field(
+        default_factory=list,
+        description="New feature/capability candidates proposed by the comparison or "
+                    "reasoning stage. Each entry is a dict with 'name', 'kind' "
+                    "('feature' or 'capability'), and 'description'. These enter the "
+                    "candidate pool in build_runtime_vocab and are promoted to canonical "
+                    "after appearing in >= min_runs_for_promotion distinct runs. "
+                    "Separate from proposed_discoveries (which carries kind='discovery' only).",
+    )
     proposed_discoveries: List[VocabEntry] = Field(
         default_factory=list,
         description="New kind='discovery' vocabulary entries the proposer suggests "
                     "based on the reasoning pipeline's analysis. These are empirical "
-                    "findings expressed as sentences, not short names.",
+                    "findings expressed as long-form sentences (e.g. 'CONFIRMED: wavenet "
+                    "achieved score=5.57'). Short named architectural terms (features, "
+                    "capabilities) go into proposed_vocab_candidates instead.",
     )
     memo_consistency_notes: List[str] = Field(
         default_factory=list,
