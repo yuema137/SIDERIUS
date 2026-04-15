@@ -1,0 +1,67 @@
+[
+  {
+    "_comment": "Iter 1, Phase 1 — attn_wavenet (cache miss, bad score -1.509).",
+    "key_findings": [
+      "Best score of -1.509 is far below the wavenet seed baseline of 5.576.",
+      "Training collapsed in round 1 and only partially recovered by round 3."
+    ],
+    "bottlenecks": [
+      "Attention mechanism conflicts with dilated causal convolution backbone.",
+      "Insufficient data (trial_portion=0.1) to stabilise the new parameters."
+    ],
+    "best_config_analysis": "No hyperparameter setting overcame the architectural conflict.",
+    "score_trend": "Improved -2.51 → -1.51 but remained firmly negative.",
+    "frequency_analysis": "All 20 files scored below 0. Architecture uniformly fails.",
+    "data_sensitivity": "Score improved 0.87 when trial_portion doubled — data-starved.",
+    "efficiency_assessment": "More parameters than wavenet, 7 points worse. Poor trade-off.",
+    "strategy_assessment": "Did not try removing the problematic attention mechanism."
+  },
+  {
+    "_comment": "Iter 1, Phase 1 — punet (cache miss, seed model).",
+    "key_findings": [
+      "Stable at 1.29 — establishes a low-performance baseline.",
+      "Skip connections help mid-frequency files (5-9) but not low-frequency."
+    ],
+    "bottlenecks": [
+      "No temporal context — purely spatial U-Net architecture.",
+      "Fixed downsampling loses temporal resolution irreversibly."
+    ],
+    "best_config_analysis": "depth=3 is the best config; deeper nets score worse due to gradient issues.",
+    "score_trend": "Flat after round 1. No meaningful improvement over 2 rounds.",
+    "frequency_analysis": "Files 5-9 score 1.5-2.0. Files 0-4 near zero. Files 10-19 near zero.",
+    "data_sensitivity": "Low — score unchanged when trial_portion increased.",
+    "efficiency_assessment": "Lightweight model (0.8M params) but poor score. Not worth scaling.",
+    "strategy_assessment": "Architecture family exhausted. U-Net approach not suited for this task."
+  },
+  {
+    "_comment": "Iter 1, Phase 1 — wavenet (cache miss, seed model, SOTA).",
+    "key_findings": [
+      "SOTA at 5.576 — wide receptive field from dilated causal convolutions is key.",
+      "High-frequency files 15-19 score 7-9. Low-frequency files 0-4 score near zero."
+    ],
+    "bottlenecks": [
+      "Structural low-frequency blind spot: causal convolutions miss very long-range patterns.",
+      "Score plateau at round 3 — current architecture has converged."
+    ],
+    "best_config_analysis": "num_layers=6 with focal loss is optimal. More layers add instability.",
+    "score_trend": "Steady: 5.52 → 5.55 → 5.576. Converged.",
+    "frequency_analysis": "Files 15-19 score 7-9. Files 5-14 score 3-6. Files 0-4 score near 0.",
+    "data_sensitivity": "Moderate — trial_portion=0.15 improves score marginally.",
+    "efficiency_assessment": "Best score-per-parameter across all seed models. Pareto-dominant.",
+    "strategy_assessment": "Spectral augmentation or multi-rate processing could address low-freq gap."
+  },
+  {
+    "_comment": "Iter 1, Phase 2 synthesis — cross-model comparison.",
+    "key_findings": [
+      "Wavenet (5.576) is the clear SOTA. attn_wavenet collapsed — attention destabilised the backbone.",
+      "Universal low-frequency blind spot: files 0-4 near zero for all models."
+    ],
+    "bottlenecks": [
+      "Low-frequency blindness is structural, not a per-model tuning issue.",
+      "Adding non-convolutional mechanisms naively breaks the dilated causal backbone."
+    ],
+    "frequency_comparison": "Files 0-4 near zero across all models. Files 15-19 good only for wavenet.",
+    "efficiency_comparison": "Wavenet Pareto-dominant. attn_wavenet and punet worse on both axes.",
+    "take_home_message": "Spectral-domain processing is the most promising direction to address the low-frequency gap without destabilising the wavenet backbone."
+  }
+]
