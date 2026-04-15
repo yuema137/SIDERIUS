@@ -1310,16 +1310,16 @@ Iteration N:
 - ☑ C.18 17 unit tests: prediction evaluation (8: confirmed/refuted/partial, file_vector metric, boldness, info_gain), discovery generation (4: confirmed/refuted/no_prediction, score vs SOTA), vocab building (5: seed only, add discoveries, dedup, candidates, multi-iteration growth). **Done**.
 
 **O(1) call count + two-layer persistence — HIGH PRIORITY (must do before long chains):**
-- ☐ **C.19a** Two-layer persistence redesign + O(1) call count. See §5 "⚠️ Critical implementation gap" for rationale and flowchart.
+- ☑ **C.19a** Two-layer persistence redesign + O(1) call count. See §5 "⚠️ Critical implementation gap" for rationale and flowchart.
 
   **Design principle**: separate raw archive (debug only, never re-read) from long-term memory (fed to every iteration). Long-term memory = three Python variables: `model_knowledge_cache`, `runtime_vocab`, `previous_proposal`.
 
   Sub-tasks:
-  - ☐ **C.19a-1 Schema — `InterpretationOutput`**: rename `per_model_summaries` → `model_knowledge_cache`. Each entry = Phase 1 LLM text + `_stats: {best_denoising_score, worst_denoising_score, best_file_vector, best_model_params, completed_rounds}`. The `_stats` block makes each cache entry self-sufficient — Phase 2 can reconstruct all numerical context without the original `ModelRunSummary`.
-  - ☐ **C.19a-2 Schema — `InterpretationInput`**: add `model_knowledge_cache: Dict[str, Dict] = {}` (carry-forward from previous iteration). Change the semantic meaning of `summaries` from "all historical summaries" to "new models this iteration only".
-  - ☐ **C.19a-3 Agent — Phase 1**: cache hit (model in `model_knowledge_cache`) → copy directly, zero LLM calls. Cache miss (new model) → run LLM call, build cache entry from Phase 1 response + `_stats` from the new `ModelRunSummary`. Deterministic stats for Phase 2 are reconstructed from `summaries` (new models) + `cache[mt]["_stats"]` (cached models).
-  - ☐ **C.19a-4 Agent — Phase 2**: add `runtime_vocab` to the synthesis prompt as "established discoveries — confirm, contradict, or build on these." Keeps Phase 2 and the proposer on the same knowledge base.
-  - ☐ **C.19a-5 Workflow**: replace growing `summary_groups` (passed to agent) with `model_knowledge_cache: dict = {}`. Iteration 1: `summaries` = all seed summaries (cache is empty). Iteration 2+: `summaries` = only the latest tuned model's `ModelRunSummary`. After each iteration: `model_knowledge_cache = interpretation.model_knowledge_cache`.
+  - ☑ **C.19a-1 Schema — `InterpretationOutput`**: rename `per_model_summaries` → `model_knowledge_cache`. Each entry = Phase 1 LLM text + `_stats: {best_denoising_score, worst_denoising_score, best_file_vector, best_model_params, completed_rounds}`. The `_stats` block makes each cache entry self-sufficient — Phase 2 can reconstruct all numerical context without the original `ModelRunSummary`.
+  - ☑ **C.19a-2 Schema — `InterpretationInput`**: add `model_knowledge_cache: Dict[str, Dict] = {}` (carry-forward from previous iteration). Change the semantic meaning of `summaries` from "all historical summaries" to "new models this iteration only".
+  - ☑ **C.19a-3 Agent — Phase 1**: cache hit (model in `model_knowledge_cache`) → copy directly, zero LLM calls. Cache miss (new model) → run LLM call, build cache entry from Phase 1 response + `_stats` from the new `ModelRunSummary`. Deterministic stats for Phase 2 are reconstructed from `summaries` (new models) + `cache[mt]["_stats"]` (cached models).
+  - ☑ **C.19a-4 Agent — Phase 2**: add `runtime_vocab` to the synthesis prompt as "established discoveries — confirm, contradict, or build on these." Keeps Phase 2 and the proposer on the same knowledge base.
+  - ☑ **C.19a-5 Workflow**: replace growing `summary_groups` (passed to agent) with `model_knowledge_cache: dict = {}`. Iteration 1: `summaries` = all seed summaries (cache is empty). Iteration 2+: `summaries` = only the latest tuned model's `ModelRunSummary`. After each iteration: `model_knowledge_cache = interpretation.model_knowledge_cache`.
 
   **Result**: Phase 1 is called exactly once per model ever. Iterations 2+ make exactly 2 LLM calls in the interpretation agent (1 Phase 1 for the new model + 1 Phase 2 synthesis), regardless of how many models exist.
 
@@ -1491,7 +1491,7 @@ Each round, the interpretation agent:
 
 ### ⚠️ Critical implementation gap: O(N) LLM call count + missing two-layer persistence
 
-**Status: unresolved, HIGH priority. Tracked as C.19a.**
+**Status: ☑ DONE (2026-04-15). All 5 sub-tasks complete. 110 unit tests passing.**
 
 #### The two problems
 
