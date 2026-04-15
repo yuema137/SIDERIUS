@@ -631,3 +631,98 @@ class TestExpertAdviceInPrompts:
         expert_pos = prompt.index("Expert Guidance")
         human_pos = prompt.index("Human Guidance")
         assert expert_pos < human_pos
+
+
+# ---------------------------------------------------------------------------
+# Semantic dedup (C.6)
+# ---------------------------------------------------------------------------
+
+from agent.schemas.proposal import VocabEntry as _VocabEntry
+
+
+def _canon(name, kind="feature", description="test", aliases=None):
+    return _VocabEntry(name=name, kind=kind, description=description, tier="canonical", aliases=aliases or [])
+
+
+def _promoted(name, kind="feature", description="test"):
+    return _VocabEntry(name=name, kind=kind, description=description, tier="canonical", seen_in_runs=["r1", "r2", "r3"])
+
+
+class TestDedupPromoted:
+
+    def test_no_promotions_skips_llm(self, agent):
+        """Empty promoted_names → bridge.generate not called, vocab unchanged."""
+        vocab = [_canon("dilated_causal_conv")]
+        call_count_before = agent.bridge.generate.call_count
+        updated_vocab, changes = agent._dedup_promoted([], vocab)
+        assert agent.bridge.generate.call_count == call_count_before
+        assert changes == []
+        assert len(updated_vocab) == 1
+
+    def test_no_existing_canonicals_of_same_kind_skips_llm(self, agent):
+        """Promoted entry is the only canonical of its kind → skip LLM call."""
+        promoted = _promoted("log_fno", kind="feature")
+        call_count_before = agent.bridge.generate.call_count
+        updated_vocab, changes = agent._dedup_promoted(["log_fno"], [promoted])
+        assert agent.bridge.generate.call_count == call_count_before
+        assert changes == []
+        assert any(e.name == "log_fno" for e in updated_vocab)
+
+    def test_genuine_new_entry_stays_canonical(self, agent):
+        """LLM says not a duplicate → promoted entry stays in vocab."""
+        agent.bridge.generate.side_effect = None
+        agent.bridge.generate.return_value = {
+            "is_duplicate": False, "duplicate_of": None, "rationale": "Distinct concept."
+        }
+        vocab = [_canon("dilated_causal_conv"), _promoted("log_fno")]
+        updated_vocab, changes = agent._dedup_promoted(["log_fno"], vocab)
+        assert any(e.name == "log_fno" for e in updated_vocab)
+        assert changes == []
+
+    def test_duplicate_removed_and_aliased(self, agent):
+        """LLM says duplicate → promoted entry removed, name added to existing aliases."""
+        agent.bridge.generate.side_effect = None
+        agent.bridge.generate.return_value = {
+            "is_duplicate": True,
+            "duplicate_of": "dilated_causal_conv",
+            "rationale": "Same mechanism, different name.",
+        }
+        vocab = [_canon("dilated_causal_conv"), _promoted("dilated_conv_alt")]
+        updated_vocab, changes = agent._dedup_promoted(["dilated_conv_alt"], vocab)
+        names = {e.name for e in updated_vocab}
+        assert "dilated_conv_alt" not in names
+        canon = next(e for e in updated_vocab if e.name == "dilated_causal_conv")
+        assert "dilated_conv_alt" in canon.aliases
+        assert len(changes) == 1
+        assert "dilated_conv_alt" in changes[0]
+
+    def test_invalid_duplicate_of_name_treated_as_genuine(self, agent):
+        """LLM returns nonexistent duplicate_of → no merge, entry stays canonical."""
+        agent.bridge.generate.side_effect = None
+        agent.bridge.generate.return_value = {
+            "is_duplicate": True,
+            "duplicate_of": "nonexistent_entry",
+            "rationale": "Seems similar.",
+        }
+        vocab = [_canon("dilated_causal_conv"), _promoted("log_fno")]
+        updated_vocab, changes = agent._dedup_promoted(["log_fno"], vocab)
+        assert any(e.name == "log_fno" for e in updated_vocab)
+        assert changes == []
+
+    def test_only_same_kind_used_for_comparison(self, agent):
+        """Capabilities are not compared against features and vice versa."""
+        agent.bridge.generate.side_effect = None
+        agent.bridge.generate.return_value = {
+            "is_duplicate": False, "duplicate_of": None, "rationale": "Distinct."
+        }
+        # promoted is a capability; existing canonical is a feature — different kind
+        existing_feature = _canon("dilated_causal_conv", kind="feature")
+        promoted_cap = _promoted("freq_selectivity", kind="capability")
+        # Add one existing canonical of the same kind so LLM IS called
+        existing_cap = _canon("receptive_field", kind="capability")
+        vocab = [existing_feature, existing_cap, promoted_cap]
+        agent._dedup_promoted(["freq_selectivity"], vocab)
+        # LLM was called once (existing_cap is same kind)
+        call_args = agent.bridge.generate.call_args[0]
+        assert "dilated_causal_conv" not in call_args[1]  # feature not in prompt
+        assert "receptive_field" in call_args[1]           # capability is in prompt

@@ -342,6 +342,56 @@ def _build_synthesis_prompt(
 
 
 # ---------------------------------------------------------------------------
+# Phase C — Semantic deduplication (C.6)
+# ---------------------------------------------------------------------------
+
+DEDUP_SYSTEM_PROMPT = """\
+You are a scientific vocabulary curator for an ML research system.
+
+Your task: determine whether a newly promoted vocabulary term is a near-duplicate
+or synonym of an existing canonical term of the same kind.
+
+Two terms ARE duplicates if they describe the same architectural concept using
+different wording — e.g. "gated_recurrence" and "gated_rnn" both describe
+hidden-state gating in recurrent networks.
+
+Two terms are NOT duplicates if they describe related but technically distinct
+concepts — e.g. "dilated_convolution" and "causal_convolution" are related but
+have different technical properties and should remain separate entries.
+
+Judge only on technical meaning, not superficial name similarity.
+
+Respond with a JSON object and nothing else:
+{
+  "is_duplicate": true or false,
+  "duplicate_of": "name_of_existing_term or null",
+  "rationale": "one sentence"
+}
+"""
+
+
+def _build_dedup_prompt(entry: "VocabEntry", existing_canonicals: List) -> str:
+    """Build the user prompt for one dedup judgment."""
+    lines = [
+        "## Candidate term (newly promoted)",
+        f"Name       : {entry.name}",
+        f"Kind       : {entry.kind}",
+        f"Description: {entry.description}",
+        "",
+        f"## Existing canonical terms (kind: {entry.kind})",
+    ]
+    for canon in existing_canonicals:
+        name = canon.name if hasattr(canon, "name") else canon.get("name", "")
+        desc = canon.description if hasattr(canon, "description") else canon.get("description", "")
+        lines.append(f"  - {name}: {desc}")
+    lines += [
+        "",
+        f'Is "{entry.name}" a near-duplicate or synonym of any of the existing terms above?',
+    ]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Node
 # ---------------------------------------------------------------------------
 
@@ -628,13 +678,20 @@ class ResultInterpretationAgent:
 
         # Structural promotion: candidates seen in >= 3 runs → canonical
         runtime_vocab, promoted_names = promote_candidates(runtime_vocab)
+        # Log promotions before dedup (promoted entries may be removed by dedup)
         vocab_changes = [
             f"Promoted '{name}' to canonical (seen in "
             f"{next(len(e.seen_in_runs) for e in runtime_vocab if e.name == name)} runs)."
             for name in promoted_names
         ]
-        if vocab_changes:
-            print(f"  Vocab promotions: {vocab_changes}")
+        if promoted_names:
+            print(f"  Vocab promotions ({len(promoted_names)}): {promoted_names}")
+
+        # Semantic dedup: check newly promoted entries against existing canonicals
+        if promoted_names:
+            print(f"  Dedup: checking {len(promoted_names)} newly promoted entries...")
+            runtime_vocab, merge_changes = self._dedup_promoted(promoted_names, runtime_vocab)
+            vocab_changes.extend(merge_changes)
 
         print(f"  Runtime vocab: {len(runtime_vocab)} entries "
               f"({sum(1 for v in runtime_vocab if (v.kind if hasattr(v, 'kind') else v.get('kind')) == 'discovery')} discoveries, "
@@ -677,6 +734,83 @@ class ResultInterpretationAgent:
             print(f"Interpretation saved -> {out_path}")
 
         return output
+
+    def _dedup_promoted(
+        self,
+        promoted_names: List[str],
+        vocab: List["VocabEntry"],
+    ) -> tuple[List["VocabEntry"], List[str]]:
+        """
+        Semantic deduplication of newly promoted canonical entries (C.6).
+
+        For each promoted entry, asks the LLM whether it is a near-duplicate of
+        an existing canonical of the same kind. If yes: the promoted entry is
+        removed from the vocab and its name is added to the existing entry's
+        aliases. If no: it stays canonical.
+
+        Each promoted entry that has at least one existing canonical of the same
+        kind triggers one LLM call. Promotion is rare so total cost is low.
+
+        Args:
+            promoted_names: Names of entries just promoted by promote_candidates.
+            vocab:          Current runtime vocabulary (includes promoted entries).
+
+        Returns:
+            (updated_vocab, merge_changes) — updated vocab and human-readable
+            log strings for each merge (e.g. "Merged 'x' into 'y' as alias.").
+        """
+        from agent.schemas.proposal import VocabEntry as _VocabEntry
+
+        if not promoted_names:
+            return vocab, []
+
+        vocab_by_name: Dict[str, Any] = {
+            (e.name if hasattr(e, "name") else e["name"]): e for e in vocab
+        }
+        merge_changes: List[str] = []
+
+        for name in promoted_names:
+            if name not in vocab_by_name:
+                continue  # already removed by a prior merge this loop
+
+            entry = vocab_by_name[name]
+            kind  = entry.kind if hasattr(entry, "kind") else entry.get("kind", "")
+
+            # Only compare against existing canonicals of the same kind
+            existing = [
+                e for n, e in vocab_by_name.items()
+                if n != name
+                and (e.tier if hasattr(e, "tier") else e.get("tier")) == "canonical"
+                and (e.kind if hasattr(e, "kind") else e.get("kind")) == kind
+            ]
+            if not existing:
+                print(f"  Dedup: '{name}' — no existing canonicals of kind='{kind}', keeping.")
+                continue
+
+            prompt   = _build_dedup_prompt(entry, existing)
+            response = self.bridge.generate(DEDUP_SYSTEM_PROMPT, prompt)
+
+            is_dup = response.get("is_duplicate", False)
+            dup_of = response.get("duplicate_of")
+            rationale = response.get("rationale", "")
+
+            if is_dup and dup_of and dup_of in vocab_by_name:
+                existing_entry = vocab_by_name[dup_of]
+                current_aliases = (
+                    existing_entry.aliases if hasattr(existing_entry, "aliases")
+                    else existing_entry.get("aliases", [])
+                )
+                vocab_by_name[dup_of] = existing_entry.model_copy(
+                    update={"aliases": current_aliases + [name]}
+                )
+                del vocab_by_name[name]
+                msg = f"Merged '{name}' into '{dup_of}' as alias. Rationale: {rationale}"
+                merge_changes.append(msg)
+                print(f"  Dedup: {msg}")
+            else:
+                print(f"  Dedup: '{name}' — genuine new canonical.")
+
+        return list(vocab_by_name.values()), merge_changes
 
 
 # ---------------------------------------------------------------------------
