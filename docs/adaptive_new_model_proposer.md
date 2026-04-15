@@ -1396,14 +1396,14 @@ Iteration N:
   **Result**: Phase 1 is called exactly once per model ever. Iterations 2+ make exactly 2 LLM calls in the interpretation agent (1 Phase 1 for the new model + 1 Phase 2 synthesis), regardless of how many models exist.
 
 **Promotion (after vocabulary loop is working):**
-- ☐ **C.5** Structural promotion rule for candidates. See §2B "⚠️ Implementation gaps" for the 5-gap audit.
+- ☑ **C.5** Structural promotion rule for candidates. See §2B "⚠️ Implementation gaps" for the 5-gap audit. **Done (2026-04-15)** — all 5 sub-tasks complete, 876 unit tests passing.
 
   Sub-tasks:
   - ☑ **C.5-1 Schema — `ProposalOutput`**: add `proposed_vocab_candidates: List[Dict[str, str]] = []` field for feature/capability entries from the comparison stage. Keep `proposed_discoveries` for `kind="discovery"` only. Update field docstrings. **Done** — `agent/schemas/proposal.py`, commit `9e93d0e`.
   - ☑ **C.5-2 Proposal agent**: collect `kind in {"feature", "capability"}` entries from `proposed_vocab_candidates` of each reasoning stage output into `proposed_vocab_candidates` (not into `proposed_discoveries`). **Done** — `nodes/ml_model_proposal_agent.py`, commit `e1a779a`.
-  - ☐ **C.5-3 Helpers — `build_runtime_vocab`**: fix `seen_in_runs` tracking. After locating an entry (new or existing), append `candidate.get("proposed_by_run")` to `seen_in_runs` if not already present.
-  - ☐ **C.5-4 Helpers — `promote_candidates`**: add `promote_candidates(vocab, min_runs=3) -> tuple[List[VocabEntry], List[str]]` to `interpretation_helpers.py`. Promotes `tier="candidate"` entries where `kind in {"feature", "capability"}` and `len(seen_in_runs) >= min_runs`. MVP criterion: count-only (no `require_positive_delta` — deferred).
-  - ☐ **C.5-5 Schema — `InterpretationOutput`**: add `vocab_changes: List[str] = []`. Wire up: in `result_interpretation_agent.py`, read `proposed_vocab_candidates` from `previous_proposal`, call `promote_candidates` after `build_runtime_vocab`, populate `vocab_changes`.
+  - ☑ **C.5-3 Helpers — `build_runtime_vocab`**: fix `seen_in_runs` tracking. After locating an entry (new or existing), append `candidate.get("proposed_by_run")` to `seen_in_runs` if not already present. **Done** — `nodes/interpretation_helpers.py`, commit `08fb23d`.
+  - ☑ **C.5-4 Helpers — `promote_candidates`**: add `promote_candidates(vocab, min_runs=3) -> tuple[List[VocabEntry], List[str]]` to `interpretation_helpers.py`. Promotes `tier="candidate"` entries where `kind in {"feature", "capability"}` and `len(seen_in_runs) >= min_runs`. MVP criterion: count-only (no `require_positive_delta` — deferred). **Done** — same file, commit `a0a78de`.
+  - ☑ **C.5-5 Schema — `InterpretationOutput`**: add `vocab_changes: List[str] = []`. Wire up: in `result_interpretation_agent.py`, read `proposed_vocab_candidates` from `previous_proposal`, call `promote_candidates` after `build_runtime_vocab`, populate `vocab_changes`. **Done** — `agent/schemas/interpretation.py` + `nodes/result_interpretation_agent.py`, commit `35c0f57`.
 
 - ☐ **C.5a** `ProposedVocabLink` promotion: confirmed links → `VocabEntry.related_to`. **BLOCKED on Phase E** — the reflector never marks `ProposedVocabLink.status` as `"confirmed"` or `"refuted"`, so there are no confirmed links to promote. Implement after Phase E adds reflector link evaluation.
 - ☐ C.6 Semantic dedup LLM call.
