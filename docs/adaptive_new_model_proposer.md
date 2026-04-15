@@ -50,64 +50,10 @@ The two columns translate into a single design constraint: **every new field we 
 
 The reasoning pipeline is **configured at the workflow level** (not per-run), so a chain uses the same pipeline across all its iterations. The default is the 3-stage pipeline; customization is adding/removing/reordering entries in a list.
 
-```python
-class ReasoningStage(BaseModel):
-    """One stage in the reasoning pipeline. Each stage is one LLM call
-    that receives all prior stages' outputs as context."""
-    name: str                    # e.g. "comparison", "causal_reasoning"
-    system_prompt_key: str       # which prompt template to use
-    output_mode: Literal["json", "text"] = "json"  # json → bridge.generate(), text → bridge.generate_text()
-    enabled: bool = True         # disable per-workflow without removing
-
-class ModelSelectionStrategy(BaseModel):
-    """Pre-filter for which past models the comparison stage analyzes.
-    Controls token cost (how many models) while expert_context controls
-    focus (what to emphasize about those models)."""
-    method: str = Field(
-        default="top_n",
-        description="Pre-filter strategy. Options: "
-                    "'top_n' (N highest-scoring), "
-                    "'all' (everything — expensive), "
-                    "'feature_match' (models with a specific component), "
-                    "'human_specified' (exact list from human advice)."
-    )
-    params: Dict[str, Any] = Field(
-        default_factory=lambda: {"n": 10},
-        description="Strategy-specific parameters. "
-                    "top_n: {'n': 10}. "
-                    "feature_match: {'feature': 'dilated_causal_conv'}. "
-                    "human_specified: {'models': ['wavenet', 'gated_fno']}."
-    )
-
-class ReasoningPipelineConfig(BaseModel):
-    """Configurable reasoning pipeline for the proposal agent.
-    Lives at the workflow level (WorkflowLLMConfig or equivalent),
-    not per-run, so a chain uses the same pipeline across all iterations."""
-    stages: List[ReasoningStage] = Field(
-        default_factory=lambda: [
-            ReasoningStage(name="comparison", system_prompt_key="COMPARATIVE_ANALYSIS"),
-            ReasoningStage(name="causal_reasoning", system_prompt_key="CAUSAL_REASONING"),
-        ],
-        description="Ordered list of reasoning stages. Each stage is one LLM call. "
-                    "The 'proposing' stage (architecture design) always runs last and "
-                    "is not listed here — it's the fixed output stage. These stages "
-                    "produce the DiscoveryMemo; the proposing stage consumes it."
-    )
-    model_selection: ModelSelectionStrategy = Field(
-        default_factory=ModelSelectionStrategy,
-        description="How to pre-filter past models before the comparison stage."
-    )
-    exploration_mode: Literal["auto", "explore", "exploit"] = Field(
-        default="auto",
-        description="Controls the reasoning tone and prompt templates. "
-                    "'auto': system decides based on evidence depth (number of records, "
-                    "distinct model types tested, falsifiable-prediction hit rate). "
-                    "'explore': forced exploration — first few rounds or human override. "
-                    "Prompts emphasize diagnostic experimentation and honest uncertainty. "
-                    "'exploit': forced exploitation — later rounds or human override. "
-                    "Prompts emphasize building on confirmed patterns and beating SOTA."
-    )
-```
+Key schemas (`agent/schemas/proposal.py`):
+- **`ReasoningStage`** — one LLM call: `name`, `system_prompt_key`, `output_mode` (json/text), `enabled`. Stages can be disabled or added without touching the runner.
+- **`ModelSelectionStrategy`** — pre-filter method (`top_n`, `all`, `feature_match`, `human_specified`) + method-specific params. Controls which past models the comparison stage sees.
+- **`ReasoningPipelineConfig`** — workflow-level config: `stages` list, `model_selection`, `exploration_mode` (`auto`/`explore`/`exploit`), `policy: ResearchPolicy`.
 
 #### Policy-Mechanism Decoupling
 
@@ -117,60 +63,7 @@ class ReasoningPipelineConfig(BaseModel):
 >
 > The policy is NOT a separate config system — it lives inside `ReasoningPipelineConfig` as a `ResearchPolicy` object, tunable at the workflow level. Individual thresholds can also be overridden per-round via `ExpertContextItem(kind="strategy")`.
 
-```python
-class ResearchPolicy(BaseModel):
-    """Tunable parameters for the reasoning pipeline's validators and triggers.
-
-    These are the 'knobs' that control how aggressively the centrifugal forces
-    (§2A) are applied. Different research strategies need different settings.
-
-    All defaults are conservative — they prevent the most common failure modes
-    without constraining exploration. Override via workflow config or
-    ExpertContextItem(kind='strategy').
-    """
-    # --- Prediction quality ---
-    minimum_boldness: float = Field(
-        default=0.05, ge=0.0, le=1.0,
-        description="Minimum abs(predicted - current) / abs(current). "
-                    "Predictions below this are rejected as too conservative.",
-    )
-
-    # --- Citation discipline ---
-    max_citations: int = Field(
-        default=5, ge=1,
-        description="Maximum ExpertContextItem citations per DiscoveryMemo.",
-    )
-
-    # --- Vocabulary health ---
-    vocab_stagnation_threshold: float = Field(
-        default=0.1, ge=0.0, le=1.0,
-        description="If candidate/total vocab ratio drops below this in auto "
-                    "mode, the exploration resolver triggers explore mode.",
-    )
-
-    # --- Promotion strictness ---
-    min_runs_for_promotion: int = Field(
-        default=3, ge=2,
-        description="Minimum distinct runs before a candidate vocab entry "
-                    "or a ProposedVocabLink can be promoted.",
-    )
-    require_positive_delta: bool = Field(
-        default=True,
-        description="Whether promotion requires component_delta > 0 "
-                    "(positive contribution when present vs absent). "
-                    "DEFERRED — not yet enforced by promote_candidates(); "
-                    "will be activated in Phase E once per-run SOTA tracking is in place.",
-    )
-```
-
-The `ResearchPolicy` is added to `ReasoningPipelineConfig`:
-```python
-class ReasoningPipelineConfig(BaseModel):
-    stages: List[ReasoningStage] = ...
-    model_selection: ModelSelectionStrategy = ...
-    exploration_mode: Literal["auto", "explore", "exploit"] = "auto"
-    policy: ResearchPolicy = Field(default_factory=ResearchPolicy)
-```
+**`ResearchPolicy`** — the tunable knobs inside `ReasoningPipelineConfig.policy`. Defaults are conservative; override per-workflow or per-round via `ExpertContextItem(kind="strategy")`. Key fields: `minimum_boldness` (0.05), `max_citations` (5), `vocab_stagnation_threshold` (0.1), `min_runs_for_promotion` (3), `require_positive_delta` (deferred to Phase E).
 
 **Override examples** (via workflow config or `ExpertContextItem`):
 - **High-risk discovery run**: `policy.minimum_boldness = 0.15` (demand bold predictions), `policy.vocab_stagnation_threshold = 0.2` (aggressive vocabulary growth)
@@ -179,30 +72,9 @@ class ReasoningPipelineConfig(BaseModel):
 
 #### Strategy Performance Report (feedback loop)
 
-After each iteration, the interpretation agent computes a **Strategy Performance Report** — a structured summary of how the research strategy is performing. This report is formatted as an `ExpertContextItem(kind="strategy_report")` and injected into the next round's `expert_context`, closing the feedback loop.
+After each iteration, the interpretation agent computes a **Strategy Performance Report** — prediction hit rate, average boldness, information gain, vocabulary growth, citation accuracy — formatted as an `ExpertContextItem(kind="strategy_report")` and injected into the next round's `expert_context`. The LLM sees its own track record and can adjust: "my physics-driven citations are being refuted — I should demand more empirical evidence."
 
-```python
-# Computed by the interpretation agent, injected via protocol
-ExpertContextItem(
-    source="interpretation_agent",
-    kind="strategy_report",
-    cite_id="strategy_report_iter_5",
-    content="""
-    Rounds 1-5 summary:
-    - Prediction hit rate: 40% (2/5 confirmed)
-    - Average boldness: 0.12 (moderate)
-    - Average information gain: 0.048 (low — bold predictions are being refuted)
-    - Vocabulary growth: 3 candidates proposed, 0 promoted
-    - Citation accuracy: 'human_advice_001' cited 4 times, 3 led to confirmed predictions.
-      'physics_constraint_002' cited 2 times, both led to refuted predictions.
-    Recommendation: reduce reliance on physics constraints, increase ablation experiments.
-    """
-)
-```
-
-The comparison and reasoning stages see this report and can adjust their approach. The LLM learns from the feedback: "my physics-driven citations are being refuted — I should adjust my reliance on theoretical constraints and demand more empirical evidence."
-
-*Phase*: E (reflector computes outcomes) + C (interpretation agent aggregates into report). The `ExpertContextItem(kind="strategy_report")` convention is designed now but implemented in Phase E.
+*Phase*: E (reflector computes outcomes) + C (interpretation agent aggregates into report). Not yet implemented.
 
 #### ExpertContextItem rendering hierarchy
 
@@ -325,17 +197,7 @@ This means:
 | **Exploration** | Few records (<5 agent-proposed models), no confirmed patterns | Test hypotheses, gather evidence | Comparison is honest about uncertainty ("we have only seed baselines, no experimental evidence yet"). Reasoning proposes **diagnostic experiments** — "I want to test WHETHER receptive_field matters, so I'll compare a wide vs narrow model." Predictions are framed as conditional: "IF receptive_field matters, THEN file_vector[0:5] should improve by >0.1." |
 | **Exploitation** | Many records (≥5 agent-proposed), confirmed patterns exist | Build on what works, beat SOTA | Comparison leverages the full vocabulary + evidence base. Reasoning builds on confirmed patterns: "receptive_field was confirmed to matter in rounds 2, 4, and 6 (hit rate 75%). I'm now combining it with frequency_band_gating which was confirmed in round 5." Predictions reference prior evidence. |
 
-**In `auto` mode**, the pipeline runner checks before each iteration:
-```python
-def _resolve_exploration_mode(records, pipeline) -> str:
-    if pipeline.exploration_mode != "auto":
-        return pipeline.exploration_mode
-    agent_proposed = [r for r in records if r.get("source") != "seed"]
-    if len(agent_proposed) < 5:
-        return "explore"
-    # Could also check hit_rate, vocabulary growth rate, etc.
-    return "exploit"
-```
+**In `auto` mode**, `resolve_exploration_mode()` (`nodes/proposal_helpers.py`) checks: (1) vocab stagnation — if `vocab_diversity_ratio < policy.vocab_stagnation_threshold`, force explore; (2) evidence depth — fewer than 5 agent-proposed models → explore; otherwise → exploit.
 
 **The prompts change based on the mode**:
 
@@ -347,112 +209,17 @@ The human can override: `exploration_mode: "explore"` forces exploration even at
 
 #### Stage 1: Comparison — "What do we know?"
 
-Backward-looking systematic review of the pre-filtered candidate models. One `ModelComparison` per model.
-
-```python
-class ModelComparison(BaseModel):
-    """Structured analysis of one previously tested model."""
-    model_type: str
-    source: str = Field(
-        description="'seed' (from the initial seed records) or "
-                    "'proposed_iter_N' (proposed by the agent in iteration N)."
-    )
-    best_score: float
-    key_mechanism: str = Field(
-        max_length=300,
-        description="One sentence: what makes this model tick (or not). "
-                    "Must reference a specific architectural feature, not vague language."
-    )
-    strengths: List[str] = Field(
-        description="What this model does well, tied to file_vector or score evidence."
-    )
-    weaknesses: List[str] = Field(
-        description="Where this model fails, tied to file_vector or score evidence."
-    )
-    lesson_for_next_proposal: str = Field(
-        max_length=300,
-        description="What to inherit or avoid from this model in the next proposal."
-    )
-```
-
-The comparison stage's output is a `List[ModelComparison]` that feeds into Stage 2 as context.
+Backward-looking systematic review of the pre-filtered candidate models. Produces one **`ModelComparison`** per model: `key_mechanism` (one sentence, must reference a specific feature), `strengths`/`weaknesses` (tied to `file_vector` evidence), `lesson_for_next_proposal`. The full list feeds into Stage 2 as context.
 
 #### Stage 2: Reasoning — "What should we try?"
 
-Forward-looking causal hypothesis, building on the comparisons from Stage 1. This is where the DiscoveryMemo's core scientific fields are produced.
-
-```python
-class DiscoveryMemo(BaseModel):
-    """The structured output of the reasoning pipeline (stages 1+2).
-    The 'Final Verdict' — forces the LLM to articulate WHY before WHAT.
-    Stage 3 (proposing) is structurally tethered to this memo."""
-
-    # --- Comparative analysis (Stage 1 output) ---
-    comparative_analysis: List[ModelComparison] = Field(
-        description="Systematic comparison of selected past models. "
-                    "Produced by the comparison stage, consumed by the reasoning stage."
-    )
-    sota_model_type: str = Field(
-        description="The current best-scoring model, identified from the comparisons."
-    )
-    sota_score: float
-    sota_mechanism: str = Field(
-        max_length=600,
-        description="WHY does the SOTA work? Must reference physical/architectural "
-                    "mechanism, not vague language."
-    )
-
-    # --- Causal reasoning (Stage 2 output) ---
-    proposed_change: str = Field(
-        max_length=400,
-        description="What the new proposal changes RELATIVE TO the SOTA. "
-                    "Must be expressible as 'replace X with Y' or 'add Z'. "
-                    "Forbidden: 'completely new architecture'."
-    )
-    causal_hypothesis: str = Field(
-        max_length=600,
-        description="WHY the proposed change should improve the score. "
-                    "Must reference (a) the SOTA mechanism it preserves, "
-                    "(b) the SOTA bottleneck it relaxes, (c) the new mechanism. "
-                    "Vague language forbidden."
-    )
-
-    # --- Falsifiable prediction ---
-    falsifiable_prediction: FalsifiablePrediction = Field(
-        description="Concrete numerical prediction. The reflector checks it."
-    )
-
-    # --- Devil's advocate ---
-    predicted_failure_modes: List[str] = Field(
-        min_length=1, max_length=3,
-        description="At least one way the proposal could fail."
-    )
-
-    # --- Lineage (see §2B) ---
-    inherited_components: List[InheritedComponent] = Field(
-        default_factory=list,
-        description="Architectural primitives reused from past winning runs."
-    )
-
-    # --- Citation attribution (see §2D) ---
-    citation_sources: List[str] = Field(
-        default_factory=list,
-        description="cite_id values of ExpertContextItems that materially "
-                    "shaped this memo. Empty = driven purely by records."
-    )
-
-
-class FalsifiablePrediction(BaseModel):
-    metric: str = Field(
-        description="What to measure. Free-text, guided by expert advice. "
-                    "Examples: 'mean(file_vector[0:5])', 'denoising_score', "
-                    "'file_vector[17]'."
-    )
-    current_value: float
-    predicted_value: float
-    threshold_for_refutation: float
-    rationale: str
-```
+Forward-looking causal hypothesis, building on Stage 1's comparisons. Produces the **`DiscoveryMemo`** — the "Final Verdict" that Stage 3 is structurally tethered to. Key fields:
+- `sota_mechanism` — WHY the current best model works (physical/architectural, not vague)
+- `proposed_change` — what changes relative to SOTA, expressible as "replace X with Y" or "add Z"
+- `causal_hypothesis` — why it should help: (a) SOTA mechanism preserved, (b) bottleneck relaxed, (c) new mechanism introduced
+- `falsifiable_prediction` — `FalsifiablePrediction(metric, current_value, predicted_value, threshold_for_refutation)`. Metric is free-text: `denoising_score`, `mean(file_vector[0:5])`, `file_vector[17]`, etc.
+- `predicted_failure_modes` — at least one way the proposal could fail (schema-enforced)
+- `inherited_components`, `citation_sources` — lineage and attribution (§2B, §2D)
 
 #### Stage 3: Proposing — "How exactly do we build it?"
 
@@ -557,41 +324,7 @@ The four structural teeth above are **centripetal** — they pull the agent towa
 - Records are already append-only, schema-validated, and the natural unit of "what we tried and what happened".
 - The registry as a permanent metadata store would be an inter-node communication channel by another name (you'd be reading state out of `MODEL_REGISTRY` during proposal generation, which the records-via-protocol path already provides cleanly).
 
-**Schema**:
-
-```python
-class InheritedComponent(BaseModel):
-    """One building block carried over from a past winning run. Can be a
-    concrete feature ('dilated_causal_conv') or a capability
-    ('receptive_field') — both are tracked in the unified vocabulary."""
-
-    component: str = Field(
-        description="Short canonical name from the vocabulary. "
-                    "E.g. 'dilated_causal_conv' (feature) or 'receptive_field' (capability). "
-                    "Drawn from the unified vocabulary (see VocabEntry below) "
-                    "to make aggregation possible."
-    )
-    from_model_type: str = Field(
-        description="The ancestor model_type, e.g. 'wavenet'."
-    )
-    from_run: Optional[str] = Field(
-        default=None,
-        description="The specific run (run_name) where this component first proved out, "
-                    "if known. Optional — built-in models like 'wavenet' have no run."
-    )
-    contribution_evidence: str = Field(
-        max_length=300,
-        description="One sentence linking the component to its measured benefit. "
-                    "E.g. 'gave wavenet a +0.15 lift on low_freq_kHz in run hpt_full_v1.'"
-    )
-    citation_source: Optional[str] = Field(
-        default=None,
-        description="cite_id of the ExpertContextItem (see §2D) that motivated "
-                    "inheriting this component. None means the inheritance was "
-                    "driven purely by past experiment records, not by an upstream "
-                    "agent's finding."
-    )
-```
+**`InheritedComponent`** (`agent/schemas/proposal.py`) — one building block carried over from a past winning run. Fields: `component` (canonical name from vocab, e.g. `dilated_causal_conv`), `from_model_type`, `from_run` (optional), `contribution_evidence` (one sentence, evidence-linked), `citation_source` (cite_id of the `ExpertContextItem` that motivated the inheritance, if any).
 
 **Open vocabulary with structured promotion** (unified `VocabEntry` — replaces the earlier `PRIMITIVE_VOCAB` concept with a broader system that tracks both features and capabilities):
 
@@ -609,48 +342,14 @@ runtime_vocab = canonical_seed                       # tracked, immutable to age
 
 The interpretation agent computes this union from records, marks promotions in its output schema, and the protocol passes it to the proposal agent. No shared state.
 
-#### Schema additions
-
-```python
-class VocabEntry(BaseModel):
-    """A single vocabulary entry — either a concrete feature or a capability.
-    Both live in the same two-tier vocabulary (canonical + candidate)
-    and use the same promotion mechanism. The `kind` field distinguishes them;
-    the `related_to` field is populated through experimentation (starts empty).
-
-    Adding a new kind (e.g. 'failure_pattern', 'physical_constraint') requires
-    NO code changes — just add entries with the new kind value to the seed file
-    or let the agent propose them as candidates. The aggregation engine, the
-    promotion rules, and the pipeline stages all treat VocabEntry generically.
-    This is the composability principle in action.
-    """
-    name: str = Field(description="Canonical snake_case name.")
-    kind: str = Field(
-        description="What type of knowledge this entry represents. "
-                    "Current kinds: 'feature' (concrete architectural building block, "
-                    "e.g. 'dilated_causal_conv') and 'capability' (measurable architectural "
-                    "property, e.g. 'receptive_field'). New kinds can be added without "
-                    "code changes — just add entries with the new kind value."
-    )
-    description: str = Field(max_length=200, description="One-sentence definition.")
-    related_to: List[str] = Field(
-        default_factory=list,
-        description="Names of other VocabEntry items this entry is connected to. "
-                    "**Starts empty in the seed.** Populated through experimentation: "
-                    "the agent proposes ProposedVocabLink hypotheses, tests them, and "
-                    "confirmed links get promoted here by the interpretation agent."
-    )
-    tier: Literal["canonical", "candidate"] = "candidate"
-    pattern: Optional[str] = Field(
-        default=None,
-        description="AST/regex hint for features — the validator uses it to verify "
-                    "that a claimed inheritance actually appears in the code. "
-                    "Not applicable to capabilities (set to None)."
-    )
-    proposed_by_run: Optional[str] = None  # candidates only
-    seen_in_runs: List[str] = []           # all runs that have used this entry
-    aliases: List[str] = []                # observed spelling variants the aggregator collapsed
-```
+**`VocabEntry`** (`agent/schemas/proposal.py`) — one vocabulary entry. Adding a new `kind` (e.g. `failure_pattern`) requires no code changes — the engine treats all entries generically. Key fields:
+- `name` — canonical snake_case identifier
+- `kind` — `"feature"`, `"capability"`, or `"discovery"` (new kinds are free to add)
+- `tier` — `"canonical"` (seed + promoted) or `"candidate"` (agent-proposed, not yet promoted)
+- `related_to` — starts empty in the seed; populated through confirmed `ProposedVocabLink` hypotheses
+- `pattern` — regex hint for features; used by the validator to verify claimed inheritance in code
+- `seen_in_runs` — list of runs that have used this entry (drives promotion counting)
+- `aliases` — spelling variants merged by `_dedup_promoted()` at promotion time
 
 **Seed file** (`agent/schemas/vocab_seed.json`):
 
@@ -679,32 +378,7 @@ The `related_to` graph is **not pre-loaded** — it is built through experimenta
 
 4. **Aggregation (Phase E — E.7)**: the interpretation agent collects all proposed links across rounds. Links that reach `confirmed` status in ≥2 runs get their `related_to` fields populated on the corresponding `VocabEntry` entries in the next round's `runtime_vocab`. This step depends on Phase E's reflector (E.3) evaluating link status after each experiment — until then, links stay `status="proposed"`.
 
-```python
-class ProposedVocabLink(BaseModel):
-    """A hypothesized connection between a feature and a capability.
-
-    Proposed by the comparison stage, tested via FalsifiablePrediction,
-    confirmed or refuted by the reflector. Only confirmed links get
-    promoted to VocabEntry.related_to (via the interpretation agent).
-    """
-    feature: str = Field(
-        description="The feature entry name, e.g. 'dilated_causal_conv'."
-    )
-    capability: str = Field(
-        description="The capability entry name, e.g. 'receptive_field'."
-    )
-    evidence: str = Field(
-        max_length=300,
-        description="Why the agent thinks this link exists — must reference "
-                    "specific model results or architectural analysis."
-    )
-    status: Literal["proposed", "confirmed", "refuted"] = Field(
-        default="proposed",
-        description="Lifecycle: proposed → confirmed/refuted after experiment."
-    )
-```
-
-This schema is added to `DiscoveryMemo.proposed_vocab_links: List[ProposedVocabLink]` and to `ExperimentRecord` (for cross-round aggregation).
+**`ProposedVocabLink`** — a hypothesized `feature → capability` connection proposed by Stage 1, tested via `FalsifiablePrediction`, confirmed/refuted by the reflector (Phase E). Fields: `feature`, `capability`, `evidence` (experiment-grounded), `status` (`proposed`/`confirmed`/`refuted`). Lives in `DiscoveryMemo.proposed_vocab_links`. Confirmed links (≥2 runs) get promoted to `VocabEntry.related_to` by the interpretation agent (Phase E — E.7).
 
 The `InheritedComponent.component` field references entries from this vocabulary. The proposal agent's prompt includes the full `runtime_vocab` (both tiers, both kinds, clearly labeled) and instructs: "Use canonical entries verbatim. When proposing a link between a feature and a capability, cite specific experimental evidence — do not guess from generic ML knowledge."
 
@@ -748,23 +422,12 @@ The §2B validator check for `InheritedComponent` already short-circuits unknown
 | Agent proposes a "log-spaced FNO gates" variant, name not in any tier yet | Recorded as a candidate, with the LLM-supplied description and an optional regex hint. seen_in_runs gets one entry. |
 | Three rounds later, "log_spaced_fno_gates" has appeared in 4 distinct runs and 2 scored above SOTA | The interpretation agent promotes it to canonical, adds it to the next round's `runtime_vocab` with `tier=canonical`, and writes a `vocab_changes` event. The seed file in the repo is unchanged; promotion is reconstructible from records on any future run. |
 
-#### C.5 audit findings — all fixed
+#### Key implementation decisions
 
-Five gaps between the design and the implementation were identified and closed.
-
-Key design points that emerged:
-
-- **`proposed_vocab_candidates` vs `proposed_discoveries`** — feature/capability candidates from the comparison stage go into a separate `proposed_vocab_candidates` field on `ProposalOutput`; `proposed_discoveries` is reserved for `kind="discovery"` (empirical sentences). The two flow through different code paths in the interpretation agent.
-
-- **`seen_in_runs` population** — each time a candidate reappears, the proposing model's name (`proposed_by_run`) is appended to `seen_in_runs`. The field is injected by the interpretation agent before calling `build_runtime_vocab` — the proposal LLM never sets it.
-
-- **Promotion criterion (MVP)** — `promote_candidates()` uses count-only: `tier="candidate"`, `kind in {"feature","capability"}`, `len(seen_in_runs) >= 3` → `tier="canonical"`. The `require_positive_delta` criterion (requiring a measurable score lift) is **deferred** — it needs per-run SOTA scores stored alongside run names, which `build_runtime_vocab` doesn't currently track.
-
-- **`ProposedVocabLink` promotion** — moved to Phase E (E.7). Links stay `status="proposed"` until Phase E's reflector evaluates them post-experiment. Depends on E.3.
-
-- **Validator inheritance check** — each claimed `inherited_component` is regex-matched against the plugin source. An unsubstantiated claim is a validation failure and triggers an implementor retry. This closes the loop: claiming a component requires actually using it.
-
-- **`component_leaderboard`** *(future)* — cross-round aggregation tracking how many times each primitive appeared, its average score, and its best run. Becomes the dominant signal in the next-round proposal prompt. Fully derived from existing records — no separate file needed.
+- **Candidate vs discovery separation** — `ProposalOutput.proposed_vocab_candidates` carries new feature/capability candidates; `proposed_discoveries` carries `kind="discovery"` empirical sentences. The two flow through different paths in the interpretation agent.
+- **`seen_in_runs` injection** — the interpretation agent injects `proposed_by_run = previous_proposal["model_name"]` onto candidates before calling `build_runtime_vocab`. The proposal LLM never sets this field itself.
+- **Validator inheritance check** — each claimed `inherited_component.component` is regex-matched against the plugin source. An unsubstantiated claim is a validation failure → implementor retry.
+- **`component_leaderboard`** *(future)* — cross-round aggregation (appearance count, avg score, best run). Fully derivable from existing records, no separate file needed.
 
 ---
 
@@ -865,48 +528,9 @@ Crucially, these agents differ in *what* they say but not in *how* they say it �
 
 #### The polymorphic field: `ExpertContextItem`
 
-Replace today's free-form `human_advice: str` field on `ProposalInput` (and on the other consuming nodes once they catch up) with a typed list:
+**`ExpertContextItem`** (`agent/schemas/proposal.py`) — the single typed interface all upstream sources go through. Fields: `source` (free-text producer id), `kind` (`empirical`/`theoretical`/`literature`/`human`/`narrative`), `content` (max 4 KB), `cite_id` (stable id for `DiscoveryMemo.citation_sources`), `produced_at`, `confidence`. Lives in `ProposalInput.expert_context: List[ExpertContextItem]`.
 
-```python
-class ExpertContextItem(BaseModel):
-    """One piece of upstream context. The proposal agent treats human-written
-    advice and machine-generated analysis through the same interface — only
-    the `source` and `kind` fields distinguish them. New upstream agents are
-    added by emitting more of these items, NOT by adding new schema fields."""
-    source: str = Field(
-        description="Identifier of the producer. E.g. 'human', "
-                    "'data_analysis_agent', 'physics_expert_agent', "
-                    "'literature_review_agent'. Conventionally the agent's "
-                    "CLAUDE.md taxonomy name, but free-text so future agents "
-                    "don't require a schema change to register."
-    )
-    kind: Literal["empirical", "theoretical", "literature", "human", "narrative"]
-    content: str = Field(
-        max_length=4000,
-        description="The actual advice / finding / constraint. Markdown allowed."
-    )
-    cite_id: str = Field(
-        description="Short stable ID the proposal agent can reference in its "
-                    "DiscoveryMemo.citation_sources. E.g. "
-                    "'data_2026_04_09_psd_50hz_peak'. Used for lineage attribution."
-    )
-    produced_at: Optional[str] = None  # ISO timestamp
-    confidence: Optional[float] = Field(
-        default=None, ge=0.0, le=1.0,
-        description="Optional self-reported confidence from the producing agent. "
-                    "Lets the proposal agent down-weight low-confidence claims."
-    )
-
-
-class ProposalInput(BaseModel):
-    # ... existing fields ...
-    expert_context: List[ExpertContextItem] = Field(default_factory=list)
-    # human_advice: str  ← deprecated; the protocol layer wraps any legacy
-    #                       string into an ExpertContextItem with
-    #                       source='human', kind='human', cite_id='human_advice'.
-```
-
-The migration is non-breaking: legacy code that passes `human_advice: "..."` is wrapped at the protocol boundary. Any future agent (data analysis, physics, literature, narrative) emits `ExpertContextItem`s through its own protocol function — no schema invention required, no proposal-agent code changes needed to support the new source.
+The migration is non-breaking: legacy `human_advice` strings are wrapped at the protocol boundary into `ExpertContextItem(source="human", kind="human")`. Adding a new upstream agent = emitting more items through its own protocol function — no schema changes needed.
 
 This is the V2 minimalist principle in action: **one small new field unlocks N future upstream agents**. We are not creating an `InquiryContext` container or a `UnifiedContextAssembler` orchestrator. We are extending a list.
 
@@ -1001,13 +625,9 @@ Each phase has its own tests. Each is independently revertable. Each is small en
 ## 6. Open questions
 
 1. **Falsifiable prediction granularity**. ~~Predicting one regime score is the minimum.~~ (Phase A regime_scores reverted — see §Phase A above.) The `metric` field is now free-text, so the LLM can predict on any measurable quantity: `denoising_score`, `mean(file_vector[0:5])`, a specific `file_vector[i]`, etc. Open question: should we constrain the metric to a known set of patterns (easier to evaluate programmatically) or leave it fully free-text (more flexible but harder for the reflector to parse)? **Recommendation**: start free-text with a few documented examples in the prompt; add pattern constraints only if the reflector can't reliably evaluate free-form metrics.
-2. **Vocabulary seeding** (now `VocabEntry`, unified features + capabilities). **Done** — 21 entries (11 features + 10 capabilities) in `agent/schemas/vocab_seed.json`. All `related_to` fields start empty — connections are discovered through the `ProposedVocabLink` hypothesis-test-verify loop.
+2. **Vocabulary seeding** — Done. 21 entries (11 features + 10 capabilities) in `agent/schemas/vocab_seed.json`. All `related_to` fields start empty.
 
-2a. **Promotion thresholds**. The default rule is "≥3 distinct runs AND at least one above SOTA AND semantic dedup AND pattern present". The numbers are guesses. After the first chain run with the vocabulary mechanism live, we should look at the candidate distribution and tune. Open question: should the SOTA threshold be "above the current iteration's best" (strict, raises the bar over time) or "above the seed-run baseline" (loose, freezes the bar)?
-
-2b. **Semantic dedup judge**. The promotion rule's step 3 asks an LLM to decide whether a candidate is "really new" or a synonym for an existing canonical entry. This is fragile — the same LLM might judge differently on different invocations. **Mitigation**: deduplication runs only at promotion time (rare), uses the reflector model for stability (cheap, quota-friendly), and the merge decision is recorded in `vocab_changes` so a human can override after the fact.
-
-2c. **Promotion-mode flag**. The doc proposes autonomous promotion as the default. A `vocab_promotion_mode: Literal["auto", "review"]` flag on the interpretation agent input would let us flip to human-gated mode if autonomous misbehaves. Defer adding the flag until we see autonomous behavior in practice.
+2a. **Promotion tuning** — the MVP threshold (≥3 runs, semantic dedup) is conservative but unvalidated. After the first chain run with promotion live, tune: SOTA threshold strictness, dedup LLM stability, and whether to add a `vocab_promotion_mode: "review"` flag if autonomous promotion misbehaves.
 3. **Component pattern matching**. `COMPONENT_PATTERNS` (regex per primitive) is the weakest part of §2B's validator integration — regex against PyTorch source is fragile. Alternative: use AST inspection (`ast.parse` on the plugin file) and look for specific class/function calls. More work, more reliable.
 4. **Guided-mode escape hatches**. Should there be a way for the LLM to formally request a relaxation of the directive (e.g. "I think the constraint is impossible to satisfy because of Y; please review")? Otherwise stuck states could waste rounds. But adding an escape hatch risks defeating the point of guided mode.
 5. **Hit rate as feedback to the planner**. Once Phase E is in place, the planner could be told its own historical accuracy ("your causal predictions have been confirmed 38% of the time"). Self-knowledge of fallibility might improve future memos. Risk: the LLM becomes overconfident or defensive.
@@ -1018,7 +638,6 @@ Each phase has its own tests. Each is independently revertable. Each is small en
    - How does it produce `cite_id` values that are stable across re-runs of the same analysis? Hash of the finding content? Timestamped slug?
    - How do we evaluate whether its findings are actually useful — citation hit rate (per §2D) is the right metric, but Phase B doesn't yet collect it.
 
-7. ~~**Regime vocabulary consolidation**~~. **Withdrawn** — Phase A reverted. Regime definitions now live in expert advice (`ExpertContextItem`), not in the schema. There is no regime vocabulary to consolidate. If the Data Analysis Agent eventually proposes named regimes, they flow through the same `ExpertContextItem` interface as all other expert context — no separate vocabulary mechanism needed.
 
 ---
 
@@ -1219,27 +838,18 @@ Iteration N:
 
 **Promotion — done.** Feature/capability candidates flow separately from `kind="discovery"` entries. `promote_candidates()` fires when `len(seen_in_runs) >= 3` (count-only MVP; `require_positive_delta` deferred). `_dedup_promoted()` makes 1 LLM call per newly promoted entry to check for synonyms with existing canonicals.
 
-**Post-implementation bugs found during review (2026-04-15):**
+**Post-implementation bugs fixed (2026-04-15):**
 
-- ☑ **Bug 1 (critical) — `proposed_by_run` never injected into vocab candidates.**
-  C.5-3 fixed `build_runtime_vocab` to extend `seen_in_runs` when the same candidate reappears, but `build_runtime_vocab` was never receiving `proposed_by_run` in the first place. The proposal LLM outputs `{name, kind, description}` dicts with no `proposed_by_run` field. The interpretation agent was extracting raw candidates from `previous_proposal["proposed_vocab_candidates"]` without setting the field. Result: `seen_in_runs` was always `[]` in production — no candidate could ever accumulate the 3 runs required for promotion, making the entire promotion pipeline silently broken.
-  Fix: before calling `build_runtime_vocab`, inject `proposed_by_run = previous_proposal["model_name"]` onto any candidate that doesn't already have it. An existing value is never overwritten.
-  3 new unit tests (`TestProposedByRunInjection`). **Done — `nodes/result_interpretation_agent.py`**.
+- ☑ **Bug 1 — `proposed_by_run` never injected.** The proposal LLM outputs candidates without `proposed_by_run`, so `seen_in_runs` was always `[]` — silently breaking the entire promotion pipeline. Fix: interpretation agent injects `proposed_by_run = previous_proposal["model_name"]` before calling `build_runtime_vocab`. 3 unit tests.
 
-- ☑ **Bug 2 (minor) — stale SOTA baseline in `generate_discoveries()`.**
-  `generate_discoveries()` used `prediction_eval["current_value"]` (the SOTA score at proposal time) as the baseline for the "beating SOTA" discovery sentence. If a different model was tuned between the proposal and the current evaluation, the real SOTA could already be higher — producing false "beating SOTA" claims.
-  Fix: `generate_discoveries()` now accepts `overall_best_score` (computed fresh each iteration from all known models) and uses `max(prediction_current_value, overall_best_score)` as the baseline.
-  3 new unit tests (`TestGenerateDiscoveries`). **Done — `nodes/interpretation_helpers.py`**.
+- ☑ **Bug 2 — stale SOTA in `generate_discoveries()`.** Discovery sentences used `prediction_eval["current_value"]` as the SOTA baseline, which could be outdated. Fix: `generate_discoveries()` accepts `overall_best_score` and uses `max(stale_sota, overall_best_score)`. 3 unit tests.
 
-- ☑ **Bug 3 (potential) — `formal_score` absent from `model_knowledge_cache._stats`.**
-  When a model runs in trial mode, `best_denoising_score` may come from a cheap subset round and be higher than `formal_score` (the official full-dataset result). `_stats` only stored `best_denoising_score`. After a model is cached, Phase 2 synthesis could only see the potentially inflated trial score, misrepresenting that model's actual standing.
-  Fix: `formal_score` is now stored in `_stats` at cache-miss time. It is reconstructed into `per_model_formal` alongside `per_model_best`, and the synthesis prompt renders a "Formal score: X (best_score above may be from a trial round)" warning line when the two values differ.
-  5 new unit tests (`TestFormalScore`). **Done — `nodes/result_interpretation_agent.py` + `nodes/interpretation_helpers.py`**.
+- ☑ **Bug 3 — `formal_score` missing from `_stats`.** Trial-mode `best_denoising_score` can exceed `formal_score`; after caching, Phase 2 synthesis could only see the inflated trial score. Fix: `formal_score` stored in `_stats` at cache-miss time; synthesis prompt shows "Formal score: X" warning when they differ. 5 unit tests.
 
 **Centrifugal metrics (after promotion is working):**
+- ✅ Vocabulary diversity metric — `vocab_diversity_ratio` computed post-Phase-C, carried into `resolve_exploration_mode()`. *(Concern #1)*
+- ✅ Cumulative information gain — `cumulative_information_gain` accumulated per iteration, surfaced to Phase 2 synthesis prompt. *(Concern #2)*
 - ☐ Component delta scoring. *(Concern #4)*
-- ☐ Vocabulary diversity metric. *(Concern #1)*
-- ☐ Information gain metric. *(Concern #2)*
 - ☐ Strategy Performance Report. *(Feedback loop)*
 
 **Pipeline hardening (can be done in parallel):**
@@ -1451,59 +1061,15 @@ The proposal agent receives even more context (comparison stage gets source code
 
 ---
 
-# Appendix: Original V1 proposal
+## 8. Centrifugal concerns — implementation status
 
-The V1 proposal (preserved for context — superseded by V2 above) is below. V2 keeps V1's scientific ambition, drops the premature abstractions, and replaces the sidecar journal with a schema-and-protocols approach.
+These five concerns apply across all phases of the system lifecycle.
+See §2A "Centrifugal forces" for the full design rationale of each.
 
-> ## 1. Vision: Dual-Mode Research Strategy
-> The architecture must support two distinct operational modes without changing the core logic:
-> * **Autonomous Discovery**: The agent explores the architectural space freely, generating novel hypotheses from data patterns.
-> * **Guided Deep-Dive (Mentor-Guided)**: The agent follows high-level human intuition (e.g., "Deep-dive into WaveNet's gating mechanism") to perform systematic, narrow-field optimization and ablation.
->
-> ## 2. Structural Evolution: The "Research Strategy" Layer
->
-> ### A. Modular "Inquiry Context" (Pre-requisite for Literature Agent)
-> Currently, the `proposal_agent` only sees its own history. We need to modularize the **Knowledge Input** so that in the future, a **Literature Agent** or a **Human Expert** can plug in "External Priors."
-> * **Action**: Implement an `InquiryContext` schema that aggregates:
->     1.  **Internal History** (Past experiments in SIDERIUS).
->     2.  **External Priors** (Human Advice or future Literature Agent summaries).
->     3.  **Benchmark SOTA** (Permanent reference to models like WaveNet).
->
-> ### B. Meta-Instruction via "Research Directive"
-> To solve the "stuck at WaveNet" problem, the system needs a `ResearchDirective` field in the `System Prompt`.
-> * **If Autonomous**: The directive is: "Explore diversity and identify new physical symmetries."
-> * **If Guided (e.g., "Dead-lock on WaveNet")**: The directive is: "Treat WaveNet as the baseline. Perform systematic modification on its [Dilation/Gating/Residual] components. Do not deviate from the backbone until the mechanism is fully understood."
->
-> ## 3. Implementation Plan for Claude Code
->
-> ### Task 1: Decouple Reasoning from Implementation
-> * **Current State**: `proposal_agent` often jumps to code/config too fast.
-> * **New Design**: Split the Proposal Node into **`Scientific_Reasoning_Subnode`** and **`Architectural_Design_Subnode`**.
->     * The Reasoning subnode must output a **"Discovery Memo"** that compares the best model (WaveNet) vs. the proposed idea *before* any code is written.
->
-> ### Task 2: Multi-Dimensional Physics Feedback
-> * **Action**: Enhance the `ScoringOutput` to include a **`Performance_Profile`**.
->     * Instead of just `score: 0.85`, it should output:
->         ```json
->         {
->           "global_score": 0.85,
->           "regime_scores": {"high_freq": 0.92, "low_freq": 0.71, "high_snr": 0.95, "low_snr": 0.62},
->           "failure_modes": ["Phase distortion in low-frequency ripples"]
->         }
->         ```
->     * This provides the "gradient" for the agent to know *what* to fix in WaveNet.
->
-> ### Task 3: The "Comparative Memory" Summarizer
-> * **Action**: Instead of dumping raw JSON history, create a `MemorySummarizer` skill.
->     * It should produce a "Leaderboard Analysis" that explicitly tells the Agent: *"You've tried WaveNet with Attention 3 times; each time it failed with OOM. Your best gain came from increasing the dilation factor in Iteration 4."*
->
-> ## 4. Future-Proofing for Literature Agent
-> * **Design Invariant**: All input to the `proposal_agent` must pass through a **`UnifiedContextAssembler`**.
-> * When the Literature Agent is ready, its output (e.g., "Recent papers suggest FNO is better for SQUID data") will simply be another stream into the `UnifiedContextAssembler`, treated with the same priority as `Human Advice`.
->
-> ---
->
-> ### Discussion Points for Claude Code:
-> 1.  **Schema Refactoring**: How to modify `ProposalInput` to accept `InquiryContext` without breaking existing workflows?
-> 2.  **System Prompt Caching**: How to structure the SOTA model descriptions (WaveNet) into the System Prompt to leverage long-context caching?
-> 3.  **Stateful Memory**: Should we introduce a `Research_Journal.md` file that the agents update each round to maintain a high-level narrative of the "Search for Truth"?
+| Concern | Risk | Mitigation | Status |
+|---------|------|------------|--------|
+| **#1 — Innovation Stagnation** | Vocabulary safe harbor: LLM reuses only canonical terms, never proposes new features. | `vocab_diversity_ratio` = n_candidates / n_feature_capability_total. Below `policy.vocab_stagnation_threshold` (default 0.1) → `resolve_exploration_mode()` forces `"explore"`. Ratio surfaced to Phase 2 synthesis prompt with `[LOW]` annotation. | ✅ Done — `interpretation_helpers.compute_vocab_diversity_ratio`, `InterpretationOutput.vocab_diversity_ratio`, `proposal_helpers.resolve_exploration_mode`. |
+| **#2 — Predictive Risk Aversion** | `FalsifiablePrediction` grading incentivizes trivially safe predictions to maximize hit rate. | `boldness` property on `FalsifiablePrediction` (`abs(predicted−current)/current`). `information_gain = boldness × (1 if confirmed else 0)` per iteration. `cumulative_information_gain` accumulated across iterations and shown to Phase 2 synthesis LLM. `minimum_boldness` threshold (schema validator, default 0.05). | ✅ Done — `evaluate_prediction()` computes info gain per round; `InterpretationInput.cumulative_information_gain` carries it forward; `InterpretationOutput.cumulative_information_gain` stores the running total. |
+| **#3 — Error Propagation** | Stage 3 implements Stage 1 hallucinations. | `ProposalOutput.memo_consistency_notes` — Stage 3 flags inconsistencies between DiscoveryMemo and implementability. Validator surfaces as warnings (not veto). Experiment is the primary error-corrector. | ✅ Done (Phase B) — schema field exists, validator surfaces it. |
+| **#4 — Promotion Spuriousness** | Vocab entry promoted because it co-occurred with high scores, not caused them. | Component delta: `avg_score_with − avg_score_without`. Requires ablation runs where the component is absent. `require_positive_delta` flag in `ResearchPolicy` (default True, deferred until ablation data exists). | ☐ Deferred — `require_positive_delta` field exists in schema but is not yet enforced in `promote_candidates()`. Needs ablation run data. |
+| **#5 — Citation Pollution** | LLM cites every `ExpertContextItem` to appear rigorous. | `DiscoveryMemo.citation_sources` capped at `max_length=5`. Validator: each cited `cite_id` must appear verbatim in `causal_hypothesis` or `proposed_change`. | ✅ Done (Phase B) — schema cap + validator check implemented. |

@@ -2,7 +2,8 @@
 Unit tests for Phase C vocabulary feedback loop helpers.
 
 Tests evaluate_prediction, generate_discoveries, build_runtime_vocab,
-promote_candidates (C.11), and seen_in_runs tracking (C.5-3).
+promote_candidates (C.11), seen_in_runs tracking (C.5-3), and
+compute_vocab_diversity_ratio (centrifugal health metric).
 """
 import pytest
 from nodes.interpretation_helpers import (
@@ -10,6 +11,7 @@ from nodes.interpretation_helpers import (
     generate_discoveries,
     build_runtime_vocab,
     promote_candidates,
+    compute_vocab_diversity_ratio,
 )
 from agent.schemas.proposal import VocabEntry
 
@@ -474,3 +476,64 @@ class TestSeenInRunsTracking:
         vocab, promoted = promote_candidates(vocab)
         assert "log_fno" in promoted
         assert next(e for e in vocab if e.name == "log_fno").tier == "canonical"
+
+
+# ---------------------------------------------------------------------------
+# compute_vocab_diversity_ratio (centrifugal health metric)
+# ---------------------------------------------------------------------------
+
+class TestComputeVocabDiversityRatio:
+
+    def test_empty_vocab_returns_zero(self):
+        assert compute_vocab_diversity_ratio([]) == 0.0
+
+    def test_all_canonical_returns_zero(self):
+        """No candidates → no diversity → ratio = 0."""
+        vocab = [
+            VocabEntry(name="a", kind="feature", description="x", tier="canonical"),
+            VocabEntry(name="b", kind="capability", description="y", tier="canonical"),
+        ]
+        assert compute_vocab_diversity_ratio(vocab) == 0.0
+
+    def test_all_candidates_returns_one(self):
+        vocab = [
+            VocabEntry(name="a", kind="feature", description="x", tier="candidate"),
+            VocabEntry(name="b", kind="capability", description="y", tier="candidate"),
+        ]
+        assert compute_vocab_diversity_ratio(vocab) == 1.0
+
+    def test_half_candidates(self):
+        vocab = [
+            VocabEntry(name="a", kind="feature", description="x", tier="canonical"),
+            VocabEntry(name="b", kind="feature", description="y", tier="candidate"),
+        ]
+        assert abs(compute_vocab_diversity_ratio(vocab) - 0.5) < 1e-9
+
+    def test_discoveries_excluded_from_ratio(self):
+        """Discoveries are never counted — only feature/capability entries matter."""
+        vocab = [
+            VocabEntry(name="a", kind="feature", description="x", tier="canonical"),
+            VocabEntry(name="d1", kind="discovery", description="found X", tier="candidate"),
+            VocabEntry(name="d2", kind="discovery", description="found Y", tier="candidate"),
+        ]
+        # 1 feature/capability total, 0 candidates → 0.0
+        assert compute_vocab_diversity_ratio(vocab) == 0.0
+
+    def test_mixed_vocab(self):
+        """2 canonical features, 1 candidate feature, 3 discoveries → ratio = 1/3."""
+        vocab = [
+            VocabEntry(name="f1", kind="feature", description="x", tier="canonical"),
+            VocabEntry(name="f2", kind="feature", description="y", tier="canonical"),
+            VocabEntry(name="f3", kind="feature", description="z", tier="candidate"),
+            VocabEntry(name="disc1", kind="discovery", description="a", tier="candidate"),
+            VocabEntry(name="disc2", kind="discovery", description="b", tier="candidate"),
+            VocabEntry(name="disc3", kind="discovery", description="c", tier="candidate"),
+        ]
+        ratio = compute_vocab_diversity_ratio(vocab)
+        assert abs(ratio - 1 / 3) < 1e-9
+
+    def test_only_discoveries_returns_zero(self):
+        vocab = [
+            VocabEntry(name="d1", kind="discovery", description="x"),
+        ]
+        assert compute_vocab_diversity_ratio(vocab) == 0.0
