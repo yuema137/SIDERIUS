@@ -141,6 +141,7 @@ def generate_discoveries(
     proposed_vocab_links: List[Dict[str, Any]],
     timing: Optional[Dict[str, Any]] = None,
     slow_threshold_s: float = 1800.0,
+    overall_best_score: Optional[float] = None,
 ) -> List[VocabEntry]:
     """
     Generate kind='discovery' VocabEntry entries from this iteration's results.
@@ -157,6 +158,12 @@ def generate_discoveries(
                 time exceeds slow_threshold_s, a timing discovery is generated.
         slow_threshold_s: Total experiment time (train+inference) above which
                           a timing discovery is emitted. Default 1800s (30 min).
+        overall_best_score: The best score across ALL models seen this iteration
+                            (new + cached). Used as the SOTA baseline for the
+                            score comparison discovery. Falls back to
+                            prediction_eval["current_value"] (the SOTA at
+                            proposal time) when not provided, but that value
+                            may be stale if a newer model has since surpassed it.
     """
     discoveries = []
 
@@ -194,8 +201,14 @@ def generate_discoveries(
 
     # Discovery 2: score comparison to SOTA
     if best_score is not None:
-        # Check results for the SOTA comparison
-        sota_score = prediction_eval.get("current_value") if prediction_eval else None
+        # Use the strictest available SOTA: overall_best_score (current-iteration max across
+        # all models) takes precedence over prediction_eval["current_value"] (the SOTA at
+        # proposal time, which may be stale if a newer model has since surpassed it).
+        sota_from_prediction = prediction_eval.get("current_value") if prediction_eval else None
+        if overall_best_score is not None and sota_from_prediction is not None:
+            sota_score = max(sota_from_prediction, overall_best_score)
+        else:
+            sota_score = sota_from_prediction if sota_from_prediction is not None else overall_best_score
         if sota_score is not None:
             if best_score > sota_score:
                 desc = (f"{model_type} scored {best_score:.4f}, beating the previous "

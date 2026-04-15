@@ -198,6 +198,72 @@ class TestGenerateDiscoveries:
         assert len(score_discoveries) >= 1
         assert any("beating" in d.description for d in score_discoveries)
 
+    def test_overall_best_score_overrides_stale_sota(self):
+        """
+        When overall_best_score > prediction_eval current_value, the discovery
+        should use the higher value as the SOTA baseline. Without this fix the
+        agent would report "beat SOTA" against an already-superseded reference.
+        """
+        eval_result = {
+            "outcome": "confirmed",
+            "metric": "denoising_score",
+            "predicted_value": 6.0,
+            "actual_value": 6.5,
+            "current_value": 5.5,  # stale — a newer model already scored 6.2
+        }
+        discoveries = generate_discoveries(
+            prediction_eval=eval_result,
+            model_type="new_model",
+            best_score=6.5,
+            inherited_components=[],
+            proposed_vocab_links=[],
+            overall_best_score=6.2,  # real current SOTA this iteration
+        )
+        score_disc = next((d for d in discoveries if "score" in d.name), None)
+        assert score_disc is not None
+        # 6.5 beats 6.2 → "beating" expected
+        assert "beating" in score_disc.description
+        # The baseline used must be 6.2, not 5.5
+        assert "6.2" in score_disc.description
+
+    def test_overall_best_score_negates_false_beat(self):
+        """
+        When the new model's score exceeds the stale prediction SOTA but NOT
+        the real current SOTA, the discovery must NOT say "beating".
+        """
+        eval_result = {
+            "outcome": "partial",
+            "metric": "denoising_score",
+            "predicted_value": 6.0,
+            "actual_value": 5.8,
+            "current_value": 5.5,  # stale SOTA — model appears to beat it
+        }
+        discoveries = generate_discoveries(
+            prediction_eval=eval_result,
+            model_type="new_model",
+            best_score=5.8,
+            inherited_components=[],
+            proposed_vocab_links=[],
+            overall_best_score=6.0,  # real SOTA is higher — model did NOT beat it
+        )
+        score_disc = next((d for d in discoveries if "score" in d.name), None)
+        assert score_disc is not None
+        assert "beating" not in score_disc.description
+
+    def test_overall_best_score_only_no_prediction(self):
+        """When there is no prediction_eval, overall_best_score alone is used as SOTA."""
+        discoveries = generate_discoveries(
+            prediction_eval=None,
+            model_type="new_model",
+            best_score=5.8,
+            inherited_components=[],
+            proposed_vocab_links=[],
+            overall_best_score=5.5,
+        )
+        score_disc = next((d for d in discoveries if "score" in d.name), None)
+        assert score_disc is not None
+        assert "beating" in score_disc.description
+
 
 # ---------------------------------------------------------------------------
 # build_runtime_vocab
