@@ -571,6 +571,7 @@ class ResultInterpretationAgent:
         # --- Phase C: Vocabulary feedback loop ---
         from nodes.interpretation_helpers import (
             evaluate_prediction, generate_discoveries, build_runtime_vocab,
+            promote_candidates,
         )
 
         prediction_evaluation = None
@@ -614,16 +615,30 @@ class ResultInterpretationAgent:
                     print(f"    - {d.description[:100]}...")
 
         # Build updated runtime vocabulary
+        # Feature/capability candidates come from proposed_vocab_candidates (C.5-2).
+        # Discovery entries are generated separately above and passed as new_discoveries.
         proposed_candidates = []
         if inp.previous_proposal:
-            proposed_candidates = inp.previous_proposal.get("proposed_discoveries", [])
+            proposed_candidates = inp.previous_proposal.get("proposed_vocab_candidates", [])
         runtime_vocab = build_runtime_vocab(
             incoming_vocab=list(inp.runtime_vocab),
             new_discoveries=new_discoveries,
             proposed_candidates=proposed_candidates,
         )
+
+        # Structural promotion: candidates seen in >= 3 runs → canonical
+        runtime_vocab, promoted_names = promote_candidates(runtime_vocab)
+        vocab_changes = [
+            f"Promoted '{name}' to canonical (seen in "
+            f"{next(len(e.seen_in_runs) for e in runtime_vocab if e.name == name)} runs)."
+            for name in promoted_names
+        ]
+        if vocab_changes:
+            print(f"  Vocab promotions: {vocab_changes}")
+
         print(f"  Runtime vocab: {len(runtime_vocab)} entries "
-              f"({sum(1 for v in runtime_vocab if (v.kind if hasattr(v, 'kind') else v.get('kind')) == 'discovery')} discoveries)")
+              f"({sum(1 for v in runtime_vocab if (v.kind if hasattr(v, 'kind') else v.get('kind')) == 'discovery')} discoveries, "
+              f"{sum(1 for v in runtime_vocab if (v.tier if hasattr(v, 'tier') else v.get('tier')) == 'canonical')} canonical)")
 
         # --- Build and validate output ---
         output = InterpretationOutput.model_validate({
@@ -648,6 +663,7 @@ class ResultInterpretationAgent:
             "runtime_vocab":         [v.model_dump() if hasattr(v, "model_dump") else v for v in runtime_vocab],
             "prediction_evaluation": prediction_evaluation,
             "new_discoveries":       [d.model_dump() for d in new_discoveries],
+            "vocab_changes":         vocab_changes,
         })
 
         # --- Persist ---

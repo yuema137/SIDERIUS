@@ -332,3 +332,10 @@ class InterpretationOutput(BaseModel):
                     "evaluation. These are empirical findings expressed as "
                     "sentences, added to runtime_vocab for the next iteration.",
     )
+    vocab_changes: List[str] = Field(
+        default_factory=list,
+        description="Human-readable log of vocabulary promotion events made "
+                    "this iteration. One entry per promoted candidate, e.g. "
+                    "'Promoted log_fno to canonical (seen in 3 runs).' "
+                    "Empty when no candidates met the promotion threshold.",
+    )
