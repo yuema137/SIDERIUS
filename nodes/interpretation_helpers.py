@@ -269,14 +269,28 @@ def build_runtime_vocab(
     for discovery in new_discoveries:
         vocab_by_name[discovery.name] = discovery
 
-    # Add proposed candidates (features/capabilities from the proposal)
+    # Add proposed candidates (features/capabilities from the proposal).
+    # Track seen_in_runs: append proposed_by_run whenever a candidate is encountered,
+    # whether it is new or already present from a prior iteration.
     for candidate in proposed_candidates:
-        if isinstance(candidate, dict) and "name" in candidate:
-            name = candidate["name"]
-            if name not in vocab_by_name:
-                try:
-                    vocab_by_name[name] = VocabEntry.model_validate(candidate)
-                except Exception:
-                    pass  # skip malformed candidates
+        if not isinstance(candidate, dict) or "name" not in candidate:
+            continue
+        name = candidate["name"]
+        run = candidate.get("proposed_by_run") or ""
+        if name not in vocab_by_name:
+            try:
+                entry = VocabEntry.model_validate(candidate)
+                if run and run not in entry.seen_in_runs:
+                    entry = entry.model_copy(update={"seen_in_runs": [run]})
+                vocab_by_name[name] = entry
+            except Exception:
+                pass  # skip malformed candidates
+        else:
+            # Already present: extend seen_in_runs without duplicates
+            existing = vocab_by_name[name]
+            if run and run not in existing.seen_in_runs:
+                vocab_by_name[name] = existing.model_copy(
+                    update={"seen_in_runs": existing.seen_in_runs + [run]}
+                )
 
     return list(vocab_by_name.values())
