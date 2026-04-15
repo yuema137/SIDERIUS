@@ -1405,7 +1405,7 @@ Iteration N:
   - ☑ **C.5-5 Schema — `InterpretationOutput`**: add `vocab_changes: List[str] = []`. Wire up: in `result_interpretation_agent.py`, read `proposed_vocab_candidates` from `previous_proposal`, call `promote_candidates` after `build_runtime_vocab`, populate `vocab_changes`. **Done** — `agent/schemas/interpretation.py` + `nodes/result_interpretation_agent.py`, commit `35c0f57`.
 
 - ☐ C.6 Semantic dedup LLM call.
-- ☐ C.11 Promotion rule unit tests.
+- ☑ C.11 Promotion rule unit tests. **Done** — 14 tests (9 for `promote_candidates`, 5 for `seen_in_runs` tracking), 890 total unit tests passing. `tests/unit/agent/result_interpretation_agent/test_vocab_feedback.py`, commit `c6f2a03`.
 
 **Centrifugal metrics (after promotion is working):**
 - ☐ Component delta scoring. *(Concern #4)*
