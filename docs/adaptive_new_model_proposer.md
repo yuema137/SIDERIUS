@@ -1404,7 +1404,7 @@ Iteration N:
   - ☑ **C.5-4 Helpers — `promote_candidates`**: add `promote_candidates(vocab, min_runs=3) -> tuple[List[VocabEntry], List[str]]` to `interpretation_helpers.py`. Promotes `tier="candidate"` entries where `kind in {"feature", "capability"}` and `len(seen_in_runs) >= min_runs`. MVP criterion: count-only (no `require_positive_delta` — deferred). **Done** — same file, commit `a0a78de`.
   - ☑ **C.5-5 Schema — `InterpretationOutput`**: add `vocab_changes: List[str] = []`. Wire up: in `result_interpretation_agent.py`, read `proposed_vocab_candidates` from `previous_proposal`, call `promote_candidates` after `build_runtime_vocab`, populate `vocab_changes`. **Done** — `agent/schemas/interpretation.py` + `nodes/result_interpretation_agent.py`, commit `35c0f57`.
 
-- ☐ C.6 Semantic dedup LLM call.
+- ☑ C.6 Semantic dedup LLM call. **Done** — `_dedup_promoted()` on `ResultInterpretationAgent`. One LLM call per promoted entry; duplicates removed and aliased into existing canonical; merge logged in `vocab_changes`. 6 unit tests. 896 total passing. Commit `b56c3af`.
 - ☑ C.11 Promotion rule unit tests. **Done** — 14 tests (9 for `promote_candidates`, 5 for `seen_in_runs` tracking), 890 total unit tests passing. `tests/unit/agent/result_interpretation_agent/test_vocab_feedback.py`, commit `c6f2a03`.
 
 **Centrifugal metrics (after promotion is working):**
