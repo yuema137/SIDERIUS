@@ -203,13 +203,19 @@ def resolve_exploration_mode(
     """
     Decide whether to use explore or exploit mode.
 
-    In 'auto' mode, checks evidence depth:
-    - Few agent-proposed models (<5) → explore
-    - Otherwise → exploit
+    In 'auto' mode, checks two signals in priority order:
+
+    1. Vocabulary stagnation (centrifugal): if the fraction of candidate
+       feature/capability entries in the runtime vocab has dropped below
+       policy.vocab_stagnation_threshold, force explore mode to prevent
+       the system from only reusing canonical terms.
+
+    2. Evidence depth: fewer than 5 agent-proposed models → explore to
+       build up experimental evidence before switching to exploitation.
 
     Args:
         interpretation: Serialized InterpretationOutput.
-        pipeline: The reasoning pipeline config (carries exploration_mode).
+        pipeline: The reasoning pipeline config (carries exploration_mode and policy).
 
     Returns:
         "explore" or "exploit".
@@ -217,6 +223,15 @@ def resolve_exploration_mode(
     if pipeline.exploration_mode != "auto":
         return pipeline.exploration_mode
 
+    # Signal 1: vocabulary stagnation
+    vocab_diversity_ratio = interpretation.get("vocab_diversity_ratio")
+    if (
+        vocab_diversity_ratio is not None
+        and vocab_diversity_ratio < pipeline.policy.vocab_stagnation_threshold
+    ):
+        return "explore"
+
+    # Signal 2: evidence depth
     model_types = interpretation.get("model_types", [])
     agent_proposed = [mt for mt in model_types if mt not in _BUILTIN_MODELS]
 

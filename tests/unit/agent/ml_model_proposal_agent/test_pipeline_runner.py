@@ -6,6 +6,7 @@ Tests:
   - B.16a: Exploration mode resolver
   - B.13: Constructor DI (bridge_factory)
   - B.11: Pipeline runner (3-stage pipeline with mocked LLM)
+  - B.22: Proposing stage retry on validation failure
 """
 import json
 import pytest
@@ -438,3 +439,128 @@ class TestPipelineRunner:
 
         stage1_data = json.loads(call_args_list[0].split("\n\n")[0])
         assert stage1_data.get("non_candidates_overview") == []
+
+
+# ---------------------------------------------------------------------------
+# B.22 — Proposing stage retry on validation failure
+# ---------------------------------------------------------------------------
+
+class TestProposingRetry:
+    """
+    B.22: when the proposing stage produces invalid output, the pipeline
+    retries up to _MAX_PROPOSING_RETRIES times before raising.
+
+    Stages 1+2 (comparison, causal_reasoning) always succeed and are NOT
+    re-run on retry — only Stage 3 (proposing) is retried.
+    """
+
+    def _make_pipeline_input(self, tmp_path):
+        return ProposalInput(
+            interpretation=FAKE_INTERPRETATION,
+            existing_model_types=["punet", "wavenet", "fcnet", "gated_fno"],
+            reasoning_pipeline=ReasoningPipelineConfig(
+                stages=[
+                    ReasoningStage(name="comparison", system_prompt_key="COMPARATIVE_ANALYSIS"),
+                    ReasoningStage(name="causal_reasoning", system_prompt_key="CAUSAL_REASONING"),
+                ],
+            ),
+            storage=StorageConfig(
+                backend="local",
+                local=LocalStorageConfig(workspace=str(tmp_path), run_name="test"),
+            ),
+        )
+
+    def _agent(self, mock_bridge):
+        return MLModelProposalAgent(
+            provider="gemini", model_id="test",
+            bridge_factory=lambda **kw: mock_bridge,
+        )
+
+    def test_retry_on_duplicate_model_name(self, tmp_path):
+        """First proposing attempt returns an existing model name → retries → succeeds."""
+        mock_bridge = MagicMock()
+        duplicate_output = dict(FAKE_PROPOSING_OUTPUT, model_name="wavenet")
+        mock_bridge.generate.side_effect = [
+            FAKE_COMPARISON_OUTPUT,
+            FAKE_REASONING_OUTPUT,
+            duplicate_output,       # attempt 1: duplicate name (ValueError)
+            FAKE_PROPOSING_OUTPUT,  # attempt 2: success
+        ]
+        output = self._agent(mock_bridge).run(self._make_pipeline_input(tmp_path))
+
+        assert output.model_name == "spectral_wavenet"
+        # 2 pipeline stages + 2 proposing attempts
+        assert mock_bridge.generate.call_count == 4
+
+    def test_retry_on_validation_error(self, tmp_path):
+        """First proposing attempt returns output that fails ProposalOutput validation → retries."""
+        mock_bridge = MagicMock()
+        # model_name min_length=1 → ValidationError
+        invalid_output = {"model_name": ""}
+        mock_bridge.generate.side_effect = [
+            FAKE_COMPARISON_OUTPUT,
+            FAKE_REASONING_OUTPUT,
+            invalid_output,         # attempt 1: ValidationError
+            FAKE_PROPOSING_OUTPUT,  # attempt 2: success
+        ]
+        output = self._agent(mock_bridge).run(self._make_pipeline_input(tmp_path))
+
+        assert output.model_name == "spectral_wavenet"
+        assert mock_bridge.generate.call_count == 4
+
+    def test_error_injected_into_prompt_on_retry(self, tmp_path):
+        """
+        The failure message is injected into accumulated['proposing_stage_errors']
+        so the LLM sees its own mistake in the retry prompt.
+        """
+        mock_bridge = MagicMock()
+        duplicate_output = dict(FAKE_PROPOSING_OUTPUT, model_name="wavenet")
+        mock_bridge.generate.side_effect = [
+            FAKE_COMPARISON_OUTPUT,
+            FAKE_REASONING_OUTPUT,
+            duplicate_output,       # attempt 1: fails
+            FAKE_PROPOSING_OUTPUT,  # attempt 2: success
+        ]
+        self._agent(mock_bridge).run(self._make_pipeline_input(tmp_path))
+
+        # The 4th call (index 3) is the retry proposing attempt.
+        retry_user_prompt = mock_bridge.generate.call_args_list[3][0][1]
+        retry_data = json.loads(retry_user_prompt.split("\n\n")[0])
+
+        assert "proposing_stage_errors" in retry_data
+        errors = retry_data["proposing_stage_errors"]
+        assert len(errors) == 1
+        assert "wavenet" in errors[0]  # error message mentions the offending name
+
+    def test_stages_1_and_2_not_rerun_on_retry(self, tmp_path):
+        """Retry only re-calls Stage 3 — Stages 1 and 2 are called exactly once each."""
+        mock_bridge = MagicMock()
+        duplicate_output = dict(FAKE_PROPOSING_OUTPUT, model_name="wavenet")
+        mock_bridge.generate.side_effect = [
+            FAKE_COMPARISON_OUTPUT,
+            FAKE_REASONING_OUTPUT,
+            duplicate_output,
+            FAKE_PROPOSING_OUTPUT,
+        ]
+        self._agent(mock_bridge).run(self._make_pipeline_input(tmp_path))
+
+        # Total 4 calls: comparison(1) + causal_reasoning(1) + proposing(2)
+        assert mock_bridge.generate.call_count == 4
+
+    def test_exhausted_retries_raises(self, tmp_path):
+        """All proposing attempts fail → RuntimeError raised after _MAX_PROPOSING_RETRIES+1 attempts."""
+        from nodes.ml_model_proposal_agent import _MAX_PROPOSING_RETRIES
+
+        mock_bridge = MagicMock()
+        duplicate_output = dict(FAKE_PROPOSING_OUTPUT, model_name="wavenet")
+        mock_bridge.generate.side_effect = (
+            [FAKE_COMPARISON_OUTPUT, FAKE_REASONING_OUTPUT]
+            + [duplicate_output] * (_MAX_PROPOSING_RETRIES + 1)
+        )
+        agent = self._agent(mock_bridge)
+
+        with pytest.raises(RuntimeError, match="failed after"):
+            agent.run(self._make_pipeline_input(tmp_path))
+
+        # 2 pipeline stage calls + all proposing attempts
+        assert mock_bridge.generate.call_count == 2 + (_MAX_PROPOSING_RETRIES + 1)

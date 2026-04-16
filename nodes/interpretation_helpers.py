@@ -291,6 +291,40 @@ def promote_candidates(
     return updated, promoted_names
 
 
+def compute_vocab_diversity_ratio(vocab: List[VocabEntry]) -> float:
+    """
+    Compute the vocabulary diversity ratio: candidate features/capabilities
+    as a fraction of total vocab entries.
+
+    Measures how actively the system is exploring new architectural concepts.
+    A low ratio (few candidates) signals vocabulary stagnation — the system
+    is only recycling canonical terms. The exploration resolver uses this to
+    force explore mode when the ratio falls below a threshold.
+
+    Discovery entries are excluded from both numerator and denominator because
+    they are empirical findings, not architectural building blocks, and their
+    count doesn't reflect vocabulary health.
+
+    Args:
+        vocab: Current runtime vocabulary (seed + candidates + discoveries).
+
+    Returns:
+        float in [0, 1]: n_feature_capability_candidates / n_feature_capability_total.
+        Returns 0.0 for an empty vocabulary or one with no features/capabilities.
+    """
+    fc_entries = [
+        v for v in vocab
+        if (v.kind if hasattr(v, "kind") else v.get("kind", "")) in {"feature", "capability"}
+    ]
+    if not fc_entries:
+        return 0.0
+    candidates = [
+        v for v in fc_entries
+        if (v.tier if hasattr(v, "tier") else v.get("tier", "")) == "candidate"
+    ]
+    return len(candidates) / len(fc_entries)
+
+
 def build_runtime_vocab(
     incoming_vocab: List[VocabEntry],
     new_discoveries: List[VocabEntry],

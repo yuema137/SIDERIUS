@@ -23,10 +23,16 @@ import os
 import json
 import argparse
 
+from pydantic import ValidationError
+
 from agent.llm_bridge import LLMBridge
 from agent.schemas.proposal import ProposalInput, ProposalOutput
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
+
+# Maximum number of retries when the proposing stage produces invalid output.
+# Total attempts = _MAX_PROPOSING_RETRIES + 1.
+_MAX_PROPOSING_RETRIES = 2
 
 
 # ---------------------------------------------------------------------------
@@ -514,30 +520,14 @@ class MLModelProposalAgent:
 
             print(f"   Stage '{stage.name}': done.")
 
-        # --- B.12: Proposing stage (always runs last) ---
+        # --- B.12 + B.22: Proposing stage (always runs last, retries on validation failure) ---
         proposing_prompt = load_stage_prompt(
             "proposing_stage",
             exploration_mode=mode,
             template_vars=template_vars,
         )
 
-        proposing_user = json.dumps(accumulated, indent=2, default=str)
-        if expert_context_block:
-            proposing_user += f"\n\n{expert_context_block}"
-
-        print(f"   Stage 'proposing': calling LLM...")
-        raw = self.bridge.generate(proposing_prompt, proposing_user)
-
-        # --- Guard: LLM must not reuse an existing model name ---
-        proposed_name = raw.get("model_name", "")
-        if proposed_name in inp.existing_model_types:
-            raise ValueError(
-                f"LLM proposed model_name '{proposed_name}' which already exists in "
-                f"existing_model_types: {inp.existing_model_types}. "
-                f"Re-run or adjust the constraints."
-            )
-
-        # --- Extract scientific content from reasoning stages ---
+        # Extract scientific content from reasoning stages once — these don't change on retry.
         reasoning_output = accumulated.get("causal_reasoning", {})
         comparison_output = accumulated.get("comparison", {})
         if not isinstance(reasoning_output, dict):
@@ -561,23 +551,66 @@ class MLModelProposalAgent:
                 elif kind == "discovery":
                     discoveries.append(candidate)
 
-        # --- Build and validate output ---
-        output = ProposalOutput.model_validate({
-            "model_name":              proposed_name,
-            "model_description":       raw.get("model_description", ""),
-            "mathematical_definition": raw.get("mathematical_definition", ""),
-            "motivation":              raw.get("motivation", ""),
-            "expert_advice":           raw.get("expert_advice", {}),
-            "baseline_config":         raw.get("baseline_config", {}),
-            "inherited_components":    inherited,
-            "falsifiable_prediction":  prediction,
-            "proposed_vocab_links":    vocab_links,
-            "proposed_vocab_candidates": vocab_candidates,
-            "proposed_discoveries":    discoveries,
-            "memo_consistency_notes":  raw.get("memo_consistency_notes", []),
-        })
-        print(f"Proposed model (pipeline): '{output.model_name}'")
-        return output
+        last_exc: Exception | None = None
+        for attempt in range(_MAX_PROPOSING_RETRIES + 1):
+            proposing_user = json.dumps(accumulated, indent=2, default=str)
+            if expert_context_block:
+                proposing_user += f"\n\n{expert_context_block}"
+
+            print(f"   Stage 'proposing': calling LLM (attempt {attempt + 1})...")
+            raw = self.bridge.generate(proposing_prompt, proposing_user)
+
+            try:
+                proposed_name = raw.get("model_name", "")
+                if proposed_name in inp.existing_model_types:
+                    raise ValueError(
+                        f"model_name '{proposed_name}' already exists in "
+                        f"existing_model_types: {inp.existing_model_types}. "
+                        f"Choose a different name."
+                    )
+
+                output = ProposalOutput.model_validate({
+                    "model_name":              proposed_name,
+                    "model_description":       raw.get("model_description", ""),
+                    "mathematical_definition": raw.get("mathematical_definition", ""),
+                    "motivation":              raw.get("motivation", ""),
+                    "expert_advice":           raw.get("expert_advice", {}),
+                    "baseline_config":         raw.get("baseline_config", {}),
+                    "inherited_components":    inherited,
+                    "falsifiable_prediction":  prediction,
+                    "proposed_vocab_links":    vocab_links,
+                    "proposed_vocab_candidates": vocab_candidates,
+                    "proposed_discoveries":    discoveries,
+                    "memo_consistency_notes":  raw.get("memo_consistency_notes", []),
+                })
+                print(f"Proposed model (pipeline): '{output.model_name}'")
+                return output
+
+            except (ValidationError, ValueError) as exc:
+                last_exc = exc
+                # Summarise Pydantic errors concisely; ValueError message is already short.
+                if isinstance(exc, ValidationError):
+                    error_summary = "; ".join(
+                        f"{' → '.join(str(l) for l in e['loc'])}: {e['msg']}"
+                        for e in exc.errors()[:5]
+                    )
+                else:
+                    error_summary = str(exc)
+
+                if attempt < _MAX_PROPOSING_RETRIES:
+                    print(f"   Proposing attempt {attempt + 1} failed — injecting error and retrying.")
+                    # Inject the error into accumulated so the next attempt sees it.
+                    errors_so_far = accumulated.get("proposing_stage_errors", [])
+                    errors_so_far.append(
+                        f"Attempt {attempt + 1} error: {error_summary}. "
+                        f"Correct this in your next response."
+                    )
+                    accumulated["proposing_stage_errors"] = errors_so_far
+
+        raise RuntimeError(
+            f"Proposing stage failed after {_MAX_PROPOSING_RETRIES + 1} attempts. "
+            f"Last error: {last_exc}"
+        ) from last_exc
 
     @staticmethod
     def _render_vocabulary(vocab_seed: list) -> str:

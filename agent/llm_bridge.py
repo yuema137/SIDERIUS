@@ -371,13 +371,70 @@ class LLMBridge:
             # Check if we've exhausted our retry budget
             if self.max_retries is not None and attempt >= self.max_retries:
                 print(f"[LLMBridge.{label}] All {attempt} "
-                      f"attempts failed; raising.")
+                      f"attempts failed; raising.", flush=True)
                 raise last_exc
             print(f"[LLMBridge.{label}] Attempt {attempt} failed "
                   f"({type(last_exc).__name__}: {last_exc}); "
-                  f"retrying in {wait}s...")
+                  f"retrying in {wait}s...", flush=True)
             time.sleep(wait)
             wait = min(wait * 2, self._RETRY_MAX_WAIT)
+
+    @staticmethod
+    def _sanitize_json_text(text: str) -> str:
+        """Best-effort cleanup of LLM-generated JSON text before parsing.
+
+        Handles common LLM output quirks in a model-agnostic way:
+
+        1. Markdown fence stripping — some models wrap the JSON in ```json...```
+           despite being asked for raw JSON.
+        2. Invalid escape sequences — JSON only permits \\", \\\\, \\/, \\b, \\f,
+           \\n, \\r, \\t, \\uXXXX after a backslash. Any other \\X is illegal.
+           LLMs sometimes escape characters that don't need escaping (e.g. \\`
+           for backtick, \\' for apostrophe, \\( in math notation).
+
+           We fix this iteratively using the JSON parser's own error position:
+           each JSONDecodeError with "escape" in its message reports the exact
+           character position of the offending \\X. We drop the backslash at
+           pos-1 and keep the character at pos, then re-parse. Repeat until the
+           JSON is valid or a non-escape error is encountered.
+
+           This approach is model-agnostic — it doesn't assume which character
+           follows the backslash, and handles multiple bad escapes in one pass.
+        """
+        import json as _json
+
+        # 1. Strip markdown fences
+        if text.startswith("```json"):
+            text = text[7:]
+        elif text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+
+        # 2. Fix invalid escape sequences using parser error-position feedback.
+        # The JSON parser reports the backslash position inconsistently across
+        # versions (sometimes e.pos is the backslash, sometimes the char after it).
+        # We probe both positions bidirectionally, so this works regardless.
+        _MAX_FIXES = 100  # guard against pathological input
+        for _ in range(_MAX_FIXES):
+            try:
+                _json.loads(text)
+                break  # valid JSON — stop
+            except _json.JSONDecodeError as e:
+                if "escape" not in e.msg.lower():
+                    break  # different error class; let caller handle it
+                pos = e.pos
+                # Probe both pos-1 and pos for the offending backslash.
+                if pos > 0 and text[pos - 1] == "\\":
+                    idx = pos - 1  # backslash is before the reported position
+                elif pos < len(text) and text[pos] == "\\":
+                    idx = pos      # backslash is at the reported position
+                else:
+                    break  # no backslash found near the error site; give up
+                text = text[:idx] + text[idx + 1:]  # drop the backslash
+
+        return text
 
     def _chat_json(self, client: OpenAI, model_name: str,
                    system_prompt: str, user_prompt: str) -> Dict:
@@ -388,7 +445,7 @@ class LLMBridge:
         Used by ``generate()`` (which always uses ``self.client`` and
         ``self.model_name``) and by ``reflect()`` (which uses
         ``self.reflect_client`` and ``self.reflect_model_name`` so callers
-        can route the reflector to a cheaper/faster/higher-quota model on
+        can route the reflector to a cheaper/faster/different-quota model on
         the same OR a different provider than the main planner).
 
         The client and model are passed as explicit arguments so the helper
@@ -407,19 +464,16 @@ class LLMBridge:
             label="_chat_json",
         )
         text = response.choices[0].message.content.strip()
-
-        # Some models wrap JSON in markdown fences despite json_object mode
-        if text.startswith("```json"):
-            text = text[7:]
-        if text.endswith("```"):
-            text = text[:-3]
-        text = text.strip()
+        text = self._sanitize_json_text(text)
 
         try:
             return json.loads(text)
         except json.JSONDecodeError:
-            print(f"[LLMBridge._chat_json] Failed to parse JSON from model={model_name}: {text[:200]}")
-            return {}
+            print(f"[LLMBridge._chat_json] Failed to parse JSON from model={model_name}: {text[:200]}", flush=True)
+            raise ValueError(
+                f"Model response was not valid JSON. Return ONLY a raw JSON object. "
+                f"Your response started with: {text[:200]}"
+            )
 
     def generate(self, system_prompt: str, user_prompt: str) -> Dict:
         """

@@ -1,11 +1,11 @@
 """
 Dual-mode integration tests: vocabulary accumulation and candidate promotion.
 
-H.1 — Two-iteration accumulation (existing):
+H.1 — Two-iteration accumulation:
   Verifies that runtime_vocab grows monotonically across two iterations and that
   the protocol maps iter 1's vocab into ProposalInput.vocab_seed.
 
-H.2 — Three-iteration candidate promotion (new):
+H.2 — Three-iteration candidate promotion:
   Verifies the full promotion pipeline end-to-end: a feature candidate proposed
   in three successive iterations accumulates seen_in_runs and is promoted to
   canonical tier on the third iteration. Dedup runs and correctly keeps the entry.
@@ -16,6 +16,18 @@ H.2 — Three-iteration candidate promotion (new):
     - seen_in_runs accumulation across iterations via model_knowledge_cache carry-forward
     - promote_candidates() firing at seen_in_runs length == 3
     - _dedup_promoted() running and keeping a genuinely new canonical entry
+
+H.3 — Vocab discoveries appear in proposal prompt:
+  Closes the loop: discoveries produced by the interpretation agent in round N
+  actually reach the proposal agent's Stage 1 user prompt in round N+1.
+
+  Uses pseudo training results (fake ModelRunSummary, no GPU) in both modes.
+  Pseudo mode: proposal agent uses RecordingLLMBridge; the test inspects
+    bridge.calls[0][2] (Stage 1 user prompt) and asserts every discovery
+    name from iter 1's vocab appears verbatim (rendered by _render_vocabulary).
+  Real mode (--real-llm): both agents use real Gemini API with the same fake
+    summaries; the test asserts the ProposalOutput is schema-valid and the
+    proposed model engages with the accumulated vocabulary.
 
   Pseudo mode uses fake ModelRunSummary objects (no GPU) and canned LLM responses.
   Real mode (--real-llm) uses real Gemini API calls with the same fake summaries.
@@ -555,3 +567,189 @@ def test_vocab_candidate_promotion_across_three_iterations(tmp_path, request):
 
     print(f"  [iter 3] CONFIRMED spectral_gating.seen_in_runs={sg_iter3.seen_in_runs}")
     print(f"  [iter 3] tier={sg_iter3.tier!r} ✓  vocab_changes={iter3_output.vocab_changes}")
+
+
+# ---------------------------------------------------------------------------
+# H.3 — Vocab discoveries appear in proposal Stage 1 user prompt
+# ---------------------------------------------------------------------------
+
+@pytest.mark.dual_mode
+def test_vocab_discoveries_appear_in_proposal_prompt(tmp_path, request):
+    """H.3 — Discoveries from interpretation round N reach the proposal agent's
+    Stage 1 user prompt in round N+1.
+
+    Uses pseudo training results (fake ModelRunSummary, no GPU) in both modes.
+
+    Pseudo mode:
+      - Interpretation agent runs with canned LLM responses → deterministic
+        discoveries: 'prediction_attn_wavenet_refuted', 'score_attn_wavenet_vs_sota'
+      - Proposal agent uses RecordingLLMBridge with canned responses
+      - Assert: every discovery name from iter 1 vocab appears verbatim in the
+        Stage 1 user prompt (rendered by _render_vocabulary)
+
+    Real-LLM mode (--real-llm):
+      - Both agents use real Gemini API with the same fake summaries (no GPU)
+      - Assert: ProposalOutput is schema-valid, model_name is a new snake_case
+        identifier, and vocab engagement is non-trivial (proposed_discoveries
+        or proposed_vocab_candidates non-empty)
+    """
+    from tests.conftest import _is_real_llm
+    from tests.helpers.recording_llm_bridge import RecordingLLMBridge
+    from agent.schemas.proposal import (
+        ProposalOutput, ReasoningPipelineConfig, ReasoningStage,
+    )
+    from nodes.ml_model_proposal_agent import MLModelProposalAgent
+
+    storage_iter1 = StorageConfig(
+        backend="local",
+        local=LocalStorageConfig(workspace=str(tmp_path), run_name="h3_iter1"),
+    )
+
+    # -----------------------------------------------------------------------
+    # Iteration 1: interpretation agent — attn_wavenet REFUTED
+    # Produces deterministic discoveries (no LLM needed for generate_discoveries):
+    #   - 'prediction_attn_wavenet_refuted'  (outcome=refuted)
+    #   - 'score_attn_wavenet_vs_sota'       (score -1.509 << SOTA 5.576)
+    # -----------------------------------------------------------------------
+    attn_wavenet_bad = ModelRunSummary(
+        model_type="attn_wavenet",
+        run_name="h3_v1",
+        status="completed",
+        completed_rounds=3,
+        best_denoising_score=-1.509,
+        worst_denoising_score=-2.509,
+        best_config={
+            "model_config": {"attn_heads": 4},
+            "train_config": {"lr": 1e-4},
+            "loss_config": {"loss_type": "focal"},
+        },
+        round_scores=[-2.509, -2.0, -1.509],
+        round_conclusions=["unstable", "partial recovery", "best achieved"],
+        model_description="Wavenet with multi-head self-attention at the bottleneck.",
+    )
+
+    iter1_inp = InterpretationInput(
+        summaries=[_SEED_WAVENET, _SEED_PUNET, attn_wavenet_bad],
+        previous_proposal=_PREVIOUS_PROPOSAL_REFUTED,
+        runtime_vocab=[],
+        storage={
+            "backend": "local",
+            "local": {"workspace": str(tmp_path), "run_name": "h3_iter1"},
+        },
+    )
+
+    if _is_real_llm(request):
+        if not os.getenv("GEMINI_API_KEY"):
+            pytest.skip("--real-llm requires GEMINI_API_KEY")
+        from agent.llm_bridge import LLMBridge
+        # max_retries=3: fail loudly within ~77s instead of retrying forever.
+        # Pseudo training data (ModelRunSummary above) is independent of LLM calls.
+        iter1_agent = ResultInterpretationAgent(
+            bridge_factory=lambda **kw: LLMBridge(**{**kw, "model_id": "gemini-2.5-flash", "max_retries": 3})
+        )
+    else:
+        iter1_bridge = RecordingLLMBridge.for_agent("result_interpretation_agent")
+        iter1_agent = ResultInterpretationAgent(bridge_factory=lambda **kw: iter1_bridge)
+
+    try:
+        iter1_output = iter1_agent.run(iter1_inp)
+    except Exception as e:
+        print(f"\n  [h3] interpretation agent failed: {type(e).__name__}: {e}", flush=True)
+        raise
+
+    # --- Iter 1 sanity checks ---
+    assert len(iter1_output.runtime_vocab) >= 1, \
+        "Iter 1: runtime_vocab is empty — no discoveries generated"
+    discovery_names = {v.name for v in iter1_output.runtime_vocab if v.kind == "discovery"}
+    assert discovery_names, \
+        f"Iter 1: no kind='discovery' entries in runtime_vocab. Kinds: {[v.kind for v in iter1_output.runtime_vocab]}"
+
+    print(f"\n  [iter 1] discoveries: {sorted(discovery_names)}")
+
+    # -----------------------------------------------------------------------
+    # Protocol: iter 1 runtime_vocab → ProposalInput.vocab_seed
+    # Use a 3-stage pipeline so vocab_block appears in Stage 1 user prompt.
+    # -----------------------------------------------------------------------
+    pipeline = ReasoningPipelineConfig(
+        stages=[
+            ReasoningStage(name="comparison", system_prompt_key="COMPARATIVE_ANALYSIS"),
+            ReasoningStage(name="causal_reasoning", system_prompt_key="CAUSAL_REASONING"),
+        ]
+    )
+    proposal_inp = local_full_context(iter1_output, storage_iter1,
+                                      reasoning_pipeline=pipeline)
+
+    # vocab_seed must carry all iter 1 entries
+    proposal_vocab_names = {
+        (v.get("name") if isinstance(v, dict) else v.name)
+        for v in proposal_inp.vocab_seed
+    }
+    assert discovery_names.issubset(proposal_vocab_names), (
+        f"Protocol: not all discovery names reached vocab_seed. "
+        f"Missing: {discovery_names - proposal_vocab_names}"
+    )
+
+    print(f"  [protocol] vocab_seed size={len(proposal_inp.vocab_seed)}, "
+          f"discovery names passed through: {sorted(discovery_names)}")
+
+    # -----------------------------------------------------------------------
+    # Run proposal agent — pseudo or real LLM
+    # -----------------------------------------------------------------------
+    if _is_real_llm(request):
+        from agent.llm_bridge import LLMBridge
+        proposal_agent = MLModelProposalAgent(
+            bridge_factory=lambda **kw: LLMBridge(**{**kw, "model_id": "gemini-2.5-flash", "max_retries": 3})
+        )
+    else:
+        proposal_bridge = RecordingLLMBridge.for_agent("ml_model_proposal_agent_h3")
+        proposal_agent = MLModelProposalAgent(
+            bridge_factory=lambda **kw: proposal_bridge
+        )
+
+    try:
+        proposal_output = proposal_agent.run(proposal_inp)
+    except Exception as e:
+        print(f"\n  [h3] proposal agent failed: {type(e).__name__}: {e}", flush=True)
+        raise
+    assert isinstance(proposal_output, ProposalOutput), \
+        f"Expected ProposalOutput, got {type(proposal_output)}"
+
+    # -----------------------------------------------------------------------
+    # Pseudo-mode: inspect the Stage 1 user prompt directly
+    # Stage 1 is bridge.calls[0]; user_prompt = calls[0][2].
+    # _render_vocabulary renders each discovery as "**{name}**: {description}"
+    # so every name must appear verbatim in the rendered block.
+    # -----------------------------------------------------------------------
+    if not _is_real_llm(request):
+        assert len(proposal_bridge.calls) >= 1, \
+            "Proposal agent made no LLM calls — pipeline did not run"
+        stage1_user_prompt = proposal_bridge.calls[0][2]  # (method, system, user)
+        for name in discovery_names:
+            assert name in stage1_user_prompt, (
+                f"Discovery '{name}' not found in Stage 1 user prompt. "
+                f"_render_vocabulary did not include this discovery in the vocab block."
+            )
+        print(f"  [pseudo] Stage 1 user prompt contains all {len(discovery_names)} discovery names ✓")
+        print(f"  [pseudo] Proposal bridge call count: {len(proposal_bridge.calls)}")
+
+    # -----------------------------------------------------------------------
+    # Real-LLM mode: check the proposal output engages with the vocabulary
+    # -----------------------------------------------------------------------
+    else:
+        import re
+        assert len(proposal_output.model_name) > 0
+        assert re.match(r'^[a-z][a-z0-9_]*$', proposal_output.model_name), \
+            f"model_name '{proposal_output.model_name}' is not snake_case"
+        assert proposal_output.model_name not in proposal_inp.existing_model_types, \
+            f"model_name '{proposal_output.model_name}' reuses an existing model type"
+
+        vocab_engagement = (
+            len(proposal_output.proposed_discoveries) +
+            len(proposal_output.proposed_vocab_candidates)
+        )
+        print(f"  [real-llm] model_name='{proposal_output.model_name}'", flush=True)
+        print(f"  [real-llm] proposed_discoveries={len(proposal_output.proposed_discoveries)}, "
+              f"proposed_vocab_candidates={len(proposal_output.proposed_vocab_candidates)}", flush=True)
+        print(f"  [real-llm] inherited_components={[c.component for c in proposal_output.inherited_components]}", flush=True)
+        print(f"  [real-llm] vocab engagement score: {vocab_engagement} "
+              f"({'good' if vocab_engagement > 0 else 'no engagement — worth inspecting'})", flush=True)

@@ -189,6 +189,15 @@ class InterpretationInput(BaseModel):
                     "inherited_components. None on the first iteration.",
     )
 
+    # --- Centrifugal metrics (carried forward across iterations) ---
+    cumulative_information_gain: float = Field(
+        default=0.0,
+        description="Sum of information_gain from all previous iterations. "
+                    "Carries forward the history of how many bold predictions were confirmed. "
+                    "Populated by the previous InterpretationOutput.cumulative_information_gain "
+                    "via the workflow's carry-forward logic. Zero on the first iteration.",
+    )
+
     storage: StorageConfig = Field(
         default_factory=lambda: StorageConfig(
             backend="local",
@@ -338,4 +347,22 @@ class InterpretationOutput(BaseModel):
                     "this iteration. One entry per promoted candidate, e.g. "
                     "'Promoted log_fno to canonical (seen in 3 runs).' "
                     "Empty when no candidates met the promotion threshold.",
+    )
+
+    # --- Centrifugal health metrics ---
+    vocab_diversity_ratio: Optional[float] = Field(
+        default=None,
+        description="Fraction of feature/capability vocab entries that are still candidates "
+                    "(not yet promoted to canonical). Range [0, 1]. A low value signals "
+                    "vocabulary stagnation — the system is reusing only established terms "
+                    "rather than proposing new ones. The exploration resolver uses this to "
+                    "trigger explore mode when the ratio falls below policy.vocab_stagnation_threshold.",
+    )
+    cumulative_information_gain: float = Field(
+        default=0.0,
+        description="Running total of information_gain across all iterations. "
+                    "Increases when a bold prediction is confirmed (boldness × 1). "
+                    "Unchanged when predictions are refuted or partial. "
+                    "Surfaced to the Phase 2 synthesis prompt so the LLM can see "
+                    "how much confirmed knowledge has been built up over the run.",
     )

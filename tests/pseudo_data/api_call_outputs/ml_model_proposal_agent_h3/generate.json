@@ -1,0 +1,108 @@
+[
+    {
+        "_comment": "H.3 Stage 1: Comparison — references vocab discoveries in its analysis",
+        "comparisons": [
+            {
+                "model_type": "wavenet",
+                "source": "seed",
+                "best_score": 5.576,
+                "key_mechanism": "dilated_causal_conv provides exponential receptive field growth, explaining strong high-freq performance (files 10-19).",
+                "strengths": ["Strong on files 10-19 (scores above 8.0)"],
+                "weaknesses": ["Near-zero on files 0-4 — dilated receptive field insufficient for lowest bands"],
+                "lesson_for_next_proposal": "Inherit dilated_causal_conv. Must address low-frequency gap to beat SOTA."
+            },
+            {
+                "model_type": "punet",
+                "source": "seed",
+                "best_score": 1.8,
+                "key_mechanism": "encoder_decoder with skip_connection provides multi-scale aggregation.",
+                "strengths": ["Moderate generalization across bands"],
+                "weaknesses": ["Limited receptive field depth; pooling discards positional detail"]
+            },
+            {
+                "model_type": "attn_wavenet",
+                "source": "agent",
+                "best_score": -1.509,
+                "key_mechanism": "Multi-head self-attention appended to wavenet dilated stack.",
+                "strengths": ["Theoretically broader context window"],
+                "weaknesses": ["Catastrophic failure (score -1.509) — attention destabilises training on 1D signals of this length"],
+                "lesson_for_next_proposal": "Per discovery 'prediction_attn_wavenet_refuted': attention alone does not solve low-freq gap and introduces instability."
+            }
+        ],
+        "proposed_vocab_candidates": [],
+        "proposed_vocab_links": []
+    },
+    {
+        "_comment": "H.3 Stage 2: Causal reasoning — builds on discoveries from vocab",
+        "proposed_change": "Replace attention with spectral_conv after the dilated stack to enable direct frequency-domain processing of low-frequency bands.",
+        "causal_hypothesis": "Per discovery 'prediction_attn_wavenet_refuted', attention failed to recover low-freq performance and destabilised training. spectral_conv operates in the Fourier domain and directly addresses files 0-4 without disrupting the proven dilated_causal_conv mechanism that drives high-freq strength.",
+        "falsifiable_prediction": {
+            "metric": "denoising_score",
+            "current_value": 5.576,
+            "predicted_value": 6.2,
+            "threshold_for_refutation": 5.0,
+            "rationale": "Frequency-domain processing should recover low-freq bands that temporal convolution misses."
+        },
+        "predicted_failure_modes": [
+            "spectral_conv may double VRAM usage; reduce spectral_width if OOM.",
+            "Spectral and temporal paths may interfere — if high-freq degrades, reduce spectral path width."
+        ],
+        "inherited_components": [
+            {
+                "component": "dilated_causal_conv",
+                "from_model_type": "wavenet",
+                "contribution_evidence": "Core mechanism behind wavenet's SOTA score of 5.576."
+            },
+            {
+                "component": "gated_activation",
+                "from_model_type": "wavenet",
+                "contribution_evidence": "Enables selective signal modulation in wavenet's gating blocks."
+            }
+        ],
+        "proposed_vocab_candidates": []
+    },
+    {
+        "_comment": "H.3 Stage 3: Proposing — vocab_discovery_net (name does not conflict with seed models)",
+        "model_name": "vocab_discovery_net",
+        "model_description": "A hybrid architecture combining WaveNet's dilated causal convolutions with a spectral convolution layer. The dilated path handles high-frequency recovery; the spectral path directly processes low-frequency components identified as a structural gap in the vocab discovery 'prediction_attn_wavenet_refuted'.",
+        "mathematical_definition": "Input embedding (vocab_size -> d_model) -> N dilated causal conv blocks with gated activation and residual skip connections -> spectral_conv (RFFT, learnable complex weights, IRFFT) -> output projection (d_model -> vocab_size). The spectral layer operates on the full FFT spectrum providing global frequency access without causality loss.",
+        "motivation": "The accumulated discoveries show attn_wavenet REFUTED the attention hypothesis and scored -1.509, while wavenet SOTA remains 5.576. The spectral_conv approach directly targets files 0-4 (low-freq gap) without the instability of attention mechanisms.",
+        "expert_advice": {
+            "focus_areas": ["Low-frequency recovery (files 0-4)", "Spectral-temporal path balance"],
+            "constraints": ["VRAM < 10 GB", "Parameters < 50M"],
+            "known_failures": ["Pure attention destabilises 1D signal training (attn_wavenet score=-1.509)"],
+            "suggested_directions": [
+                "Start with depth=4 dilated blocks + 1 spectral layer",
+                "Use trial_portion=0.05 for initial screening with focus on files 0-4",
+                "If high-freq degrades, reduce spectral_width"
+            ],
+            "rationale": "Hybrid spectral-temporal approach preserves proven wavenet high-freq strength while adding direct low-freq processing."
+        },
+        "baseline_config": {
+            "model_config": {
+                "model_type": "vocab_discovery_net",
+                "segmentation_size": 10000,
+                "num_dilated_blocks": 4,
+                "dilation_channels": 16,
+                "skip_channels": 16,
+                "spectral_width": 32,
+                "embedding_dim": 8
+            },
+            "train_config": {
+                "lr": 0.0001,
+                "epochs": 5,
+                "batch_size": 128,
+                "optimizer_type": "adamw",
+                "weight_decay": 0.00001,
+                "device": "cuda"
+            },
+            "loss_config": {
+                "loss_type": "focal",
+                "alpha": 0.5,
+                "gamma": 2.0,
+                "reduction": "mean"
+            }
+        },
+        "memo_consistency_notes": []
+    }
+]

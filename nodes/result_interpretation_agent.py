@@ -242,6 +242,8 @@ def _build_synthesis_prompt(
     human_advice: Optional[str] = None,
     runtime_vocab: Optional[List] = None,
     per_model_formal: Optional[Dict[str, Optional[float]]] = None,
+    vocab_diversity_ratio: Optional[float] = None,
+    cumulative_information_gain: Optional[float] = None,
 ) -> str:
     """Build the user prompt for cross-model synthesis."""
     lines = [
@@ -342,6 +344,22 @@ def _build_synthesis_prompt(
             human_advice,
             "",
         ]
+
+    # Research health metrics (centrifugal forces)
+    if vocab_diversity_ratio is not None or cumulative_information_gain is not None:
+        lines += ["---", "## Research Health Metrics"]
+        if vocab_diversity_ratio is not None:
+            stagnation_note = " [LOW — explore new concepts]" if vocab_diversity_ratio < 0.1 else ""
+            lines.append(
+                f"Vocabulary diversity ratio: {vocab_diversity_ratio:.3f}"
+                f"  (fraction of feature/capability entries still in candidate tier){stagnation_note}"
+            )
+        if cumulative_information_gain is not None:
+            lines.append(
+                f"Cumulative information gain: {cumulative_information_gain:.4f}"
+                f"  (total boldness × confirmed across all iterations)"
+            )
+        lines.append("")
 
     return "\n".join(lines)
 
@@ -608,6 +626,13 @@ class ResultInterpretationAgent:
             for mt, entry in model_knowledge_cache.items()
         }
 
+        # Compute prior-state health metrics from the *incoming* vocab and cumulative
+        # before Phase 2 synthesis so the LLM can see the research trajectory so far.
+        # The updated metrics (post-Phase-C) are computed after vocab is rebuilt below.
+        from nodes.interpretation_helpers import compute_vocab_diversity_ratio as _cvdr
+        prior_vocab_diversity_ratio = _cvdr(list(inp.runtime_vocab))
+        prior_cumulative_info_gain = inp.cumulative_information_gain
+
         if len(effective_types) == 1:
             single_mt = effective_types[0]
             summary = model_knowledge_cache[single_mt]
@@ -635,6 +660,8 @@ class ResultInterpretationAgent:
                 human_advice=inp.human_advice,
                 runtime_vocab=list(inp.runtime_vocab) if inp.runtime_vocab else None,
                 per_model_formal=per_model_formal or None,
+                vocab_diversity_ratio=prior_vocab_diversity_ratio,
+                cumulative_information_gain=prior_cumulative_info_gain,
             )
             synthesis_response = self.bridge.generate(SYNTHESIS_SYSTEM_PROMPT, synthesis_prompt)
             llm_findings = synthesis_response.get("key_findings", [])
@@ -728,6 +755,16 @@ class ResultInterpretationAgent:
               f"({sum(1 for v in runtime_vocab if (v.kind if hasattr(v, 'kind') else v.get('kind')) == 'discovery')} discoveries, "
               f"{sum(1 for v in runtime_vocab if (v.tier if hasattr(v, 'tier') else v.get('tier')) == 'canonical')} canonical)")
 
+        # --- Centrifugal health metrics (post-Phase-C, on the updated vocab) ---
+        vocab_diversity_ratio = _cvdr(runtime_vocab)
+        this_info_gain = (
+            prediction_evaluation.get("information_gain", 0.0)
+            if prediction_evaluation else 0.0
+        )
+        cumulative_information_gain = inp.cumulative_information_gain + this_info_gain
+        print(f"  Vocab diversity ratio: {vocab_diversity_ratio:.3f} "
+              f"(cumulative info gain: {cumulative_information_gain:.4f})")
+
         # --- Build and validate output ---
         output = InterpretationOutput.model_validate({
             "model_types":           effective_types,
@@ -752,6 +789,9 @@ class ResultInterpretationAgent:
             "prediction_evaluation": prediction_evaluation,
             "new_discoveries":       [d.model_dump() for d in new_discoveries],
             "vocab_changes":         vocab_changes,
+            # Centrifugal health metrics
+            "vocab_diversity_ratio":        vocab_diversity_ratio,
+            "cumulative_information_gain":  cumulative_information_gain,
         })
 
         # --- Persist ---
