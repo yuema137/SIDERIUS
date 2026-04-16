@@ -267,21 +267,25 @@ All 14 tests pass. Committed in two steps: code (`da490d1`), then tests + doc.
 
 ---
 
-### Fix 4 — `related_to` full pipeline test (G4)
+### Fix 4 — `related_to` full pipeline test (G4) ✅ DONE
 **File**: `tests/integration/workflows/test_vocab_accumulation.py`
 
-Add **H.5** — `test_vocab_link_confirmed_populates_related_to_and_renders`:
+Added **H.5** — `test_vocab_link_confirmed_populates_related_to_and_renders`:
 
-Run 3 interpretation iterations where each CONFIRMED run proposes the same
-`ProposedVocabLink(feature="dilated_causal_conv", capability="receptive_field")`. After
-iteration 3, assert:
+Pre-seeds `vocab_link_confirmations` with 2 prior confirmed runs ("run_a", "run_b") and a
+`dilated_causal_conv` feature entry. Runs one CONFIRMED interpretation iteration (spectral_net,
+run_name="spectral_net") using `result_interpretation_agent_iter2` pseudo data. The 3rd
+confirmation triggers `update_vocab_link_confirmations()` promotion. Three assertions:
+
 1. `vocab_link_confirmations["dilated_causal_conv:receptive_field"]` has 3 distinct runs.
 2. `dilated_causal_conv` in `runtime_vocab` has `related_to=["receptive_field"]`.
-3. Pass `runtime_vocab` through the protocol and run the proposal agent in pseudo mode.
-   Assert `"→ enables: receptive_field"` appears verbatim in the Stage 1 user prompt.
+3. Protocol maps `runtime_vocab` into `ProposalInput.vocab_seed`; proposal agent (pseudo,
+   `ml_model_proposal_agent_h5` canned data) Stage 1 user prompt contains `"→ enables: receptive_field"`.
 
 This closes the chain: **confirmation accumulation → `related_to` populated → rendered in
-prompt** — the three steps are each tested separately today but never as a connected chain.
+prompt** — the three steps were each tested separately before but never as a connected chain.
+
+All 5 H-tests pass (H.1–H.5). Committed in two steps: test + pseudo data, then review doc.
 
 ---
 
