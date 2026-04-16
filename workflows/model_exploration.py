@@ -332,8 +332,9 @@ def run_workflow(
     cleanup_denoised: bool = False,
     max_epochs: int | None = None,
     plan_overrides: dict | None = None,
-    # --- Time-budget gate (evaluate_time_skill, docs/time_estimator_implement.md §2.7.2) ---
-    time_budget_minutes: float | None = None,
+    # --- Time-budget gate (evaluate_time_skill, docs/time_estimator_implement.md §2.7.2 / Phase I) ---
+    trial_time_budget_minutes: float | None = None,
+    formal_time_budget_minutes: float | None = None,
     # --- Reasoning pipeline ---
     exploration_mode: str = "auto",
     minimum_boldness: float = 0.05,
@@ -384,11 +385,14 @@ def run_workflow(
         sampling_seed: Seed for SampleSet construction.
         train_base_seed: Base seed for per-epoch training subsampling.
         cleanup_denoised: Delete denoised H5 files after scoring.
-        time_budget_minutes: Wall-time budget (minutes) for the evaluate_time_skill
-            gate. Fanned out to BOTH ProposalInput (proposer's baseline gate) and
-            HyperparamTuningInput (tuner's per-round gate) so the two gates use the
-            same number. None = both gates disabled. See
-            docs/time_estimator_implement.md §2.7.2.
+        trial_time_budget_minutes: Wall-time budget (minutes) for the
+            evaluate_time_skill gate on trial-mode rounds (plan.is_trial=True).
+            Fanned out to BOTH ProposalInput (proposer's baseline gate) and
+            HyperparamTuningInput (tuner's per-round gate). None = trial gate
+            disabled. See docs/time_estimator_implement.md §2.7.2 / Phase I.
+        formal_time_budget_minutes: Same as above, but for formal-mode rounds
+            (plan.is_trial=False). Sized independently because formal runs
+            use the full dataset and are 50–100x longer.
 
     Returns:
         List of HyperparamTuningOutput objects, one per successful iteration.
@@ -531,7 +535,8 @@ def run_workflow(
                     target_files=target_files,
                     train_portion=train_portion,
                     sampling_seed=sampling_seed,
-                    time_budget_minutes=time_budget_minutes,
+                    trial_time_budget_minutes=trial_time_budget_minutes,
+                    formal_time_budget_minutes=formal_time_budget_minutes,
                     data_dir=data_dir,
                 )
                 propose_input.existing_model_types = list(all_model_types)
@@ -668,7 +673,8 @@ def run_workflow(
             max_epochs=max_epochs,
             max_retries=tune_llm.get("max_retries"),
             plan_overrides=plan_overrides,
-            time_budget_minutes=time_budget_minutes,
+            trial_time_budget_minutes=trial_time_budget_minutes,
+            formal_time_budget_minutes=formal_time_budget_minutes,
             data_dir=data_dir,
         )
         if human_advice_tune is not None:
