@@ -179,6 +179,59 @@ class TestLocalValidatedModel:
 
 
 # ---------------------------------------------------------------------------
+# Deviation-note propagation — spec and inheritance warnings prepended
+# to expert_advice so the tuner's planner sees them.
+# ---------------------------------------------------------------------------
+
+class TestDeviationNotePropagation:
+
+    def test_spec_deviation_prepended(self, validator_output, proposal_output, storage):
+        """When the validator emits spec_deviation_notes, they must be prepended
+        to expert_advice as a plain string (serialized from the structured
+        ExpertAdvice)."""
+        validator_output.spec_deviation_notes = (
+            "NOTE: implementation approximates the mathematical spec — gating fused."
+        )
+        result = local_validated_model(validator_output, proposal_output, storage)
+        assert isinstance(result.expert_advice, str)
+        assert result.expert_advice.startswith("NOTE: implementation approximates")
+        # original proposal advice must still be present
+        assert "receptive field size" in result.expert_advice
+
+    def test_inheritance_deviation_prepended(self, validator_output, proposal_output, storage):
+        """inheritance_deviation_notes must reach the tuner's expert_advice."""
+        validator_output.inheritance_deviation_notes = (
+            "NOTE: claimed components not verified by regex: encoder_decoder."
+        )
+        result = local_validated_model(validator_output, proposal_output, storage)
+        assert isinstance(result.expert_advice, str)
+        assert "encoder_decoder" in result.expert_advice
+        assert "receptive field size" in result.expert_advice
+
+    def test_both_deviations_prepended_in_order(
+        self, validator_output, proposal_output, storage
+    ):
+        """When both deviation notes are present, spec first then inheritance,
+        then the serialized proposal advice."""
+        validator_output.spec_deviation_notes = "NOTE: spec deviation detail."
+        validator_output.inheritance_deviation_notes = "NOTE: inheritance deviation detail."
+        result = local_validated_model(validator_output, proposal_output, storage)
+        ea = result.expert_advice
+        assert isinstance(ea, str)
+        spec_pos = ea.index("spec deviation detail")
+        inherit_pos = ea.index("inheritance deviation detail")
+        advice_pos = ea.index("receptive field size")
+        assert spec_pos < inherit_pos < advice_pos
+
+    def test_no_deviation_passes_advice_through_structured(
+        self, validator_output, proposal_output, storage
+    ):
+        """No deviation notes → expert_advice stays as the structured ExpertAdvice."""
+        result = local_validated_model(validator_output, proposal_output, storage)
+        assert isinstance(result.expert_advice, ExpertAdvice)
+
+
+# ---------------------------------------------------------------------------
 # database_validated_model
 # ---------------------------------------------------------------------------
 
