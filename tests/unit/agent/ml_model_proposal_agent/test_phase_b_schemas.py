@@ -222,7 +222,7 @@ class TestExpertContextItem:
             ExpertContextItem.model_validate({
                 "source": "test",
                 "kind": "human",
-                "content": "x" * 4001,
+                "content": "x" * 10001,
                 "cite_id": "test_001",
             })
 
