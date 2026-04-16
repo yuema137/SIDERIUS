@@ -1,9 +1,11 @@
 """
-Unit tests for Phase C vocabulary feedback loop helpers.
+Unit tests for Phase C+E vocabulary feedback loop helpers.
 
 Tests evaluate_prediction, generate_discoveries, build_runtime_vocab,
-promote_candidates (C.11), seen_in_runs tracking (C.5-3), and
-compute_vocab_diversity_ratio (centrifugal health metric).
+promote_candidates (C.11), seen_in_runs tracking (C.5-3),
+compute_vocab_diversity_ratio (centrifugal health metric),
+update_vocab_link_confirmations (E.7), and scientific_accuracy
+accumulation helpers (E.4).
 """
 import pytest
 from nodes.interpretation_helpers import (
@@ -12,6 +14,7 @@ from nodes.interpretation_helpers import (
     build_runtime_vocab,
     promote_candidates,
     compute_vocab_diversity_ratio,
+    update_vocab_link_confirmations,
 )
 from agent.schemas.proposal import VocabEntry
 
@@ -21,95 +24,140 @@ from agent.schemas.proposal import VocabEntry
 # ---------------------------------------------------------------------------
 
 class TestEvaluatePrediction:
+    """
+    evaluate_prediction compares actual score against the SOTA at proposal time
+    (current_value in the prediction dict, or explicit current_sota override).
+    Outcomes are preset labels: confirmed / partial / refuted.
+    """
 
-    def test_confirmed(self):
-        pred = {
-            "metric": "denoising_score",
-            "current_value": 5.0,
-            "predicted_value": 6.0,
-            "threshold_for_refutation": 4.5,
+    def _pred(self, current_value=5.0, predicted_value=6.0, metric="denoising_score"):
+        return {
+            "metric": metric,
+            "current_value": current_value,
+            "predicted_value": predicted_value,
         }
-        result = evaluate_prediction(pred, {"best_denoising_score": 6.5})
+
+    # --- Core outcome labels ---
+
+    def test_confirmed_beats_sota(self):
+        """actual > sota → confirmed, delta_from_sota > 0."""
+        result = evaluate_prediction(self._pred(current_value=5.0), {"best_denoising_score": 5.5})
         assert result["outcome"] == "confirmed"
-        assert result["actual_value"] == 6.5
-        assert result["boldness"] > 0
+        assert result["actual_value"] == 5.5
+        assert result["delta_from_sota"] > 0
 
-    def test_refuted(self):
-        pred = {
-            "metric": "denoising_score",
-            "current_value": 5.0,
-            "predicted_value": 6.0,
-            "threshold_for_refutation": 4.5,
-        }
-        result = evaluate_prediction(pred, {"best_denoising_score": 4.0})
+    def test_partial_within_margin(self):
+        """actual slightly below sota but within 5% → partial, delta_from_sota < 0."""
+        # sota=5.0, margin=0.05 → partial if actual >= 4.75
+        result = evaluate_prediction(self._pred(current_value=5.0), {"best_denoising_score": 4.8})
+        assert result["outcome"] == "partial"
+        assert result["delta_from_sota"] < 0
+
+    def test_refuted_clearly_below_sota(self):
+        """actual clearly below sota (> 5% gap) → refuted."""
+        # sota=5.0, 5% threshold=4.75 → refuted if actual < 4.75
+        result = evaluate_prediction(self._pred(current_value=5.0), {"best_denoising_score": 4.0})
         assert result["outcome"] == "refuted"
+        assert result["delta_from_sota"] < 0
 
-    def test_partial(self):
-        pred = {
-            "metric": "denoising_score",
-            "current_value": 5.0,
-            "predicted_value": 6.0,
-            "threshold_for_refutation": 4.5,
-        }
-        result = evaluate_prediction(pred, {"best_denoising_score": 5.5})
+    def test_exactly_at_sota_is_partial(self):
+        """actual == sota (not strictly greater) → partial (not confirmed)."""
+        result = evaluate_prediction(self._pred(current_value=5.0), {"best_denoising_score": 5.0})
+        assert result["outcome"] == "partial"
+        assert result["delta_from_sota"] == 0.0
+
+    # --- current_sota parameter ---
+
+    def test_current_sota_override_takes_precedence(self):
+        """Explicit current_sota replaces prediction['current_value']."""
+        pred = self._pred(current_value=5.0)  # stale SOTA in prediction
+        # Pass fresher SOTA of 6.0 — actual=6.5 should still confirm
+        result = evaluate_prediction(pred, {"best_denoising_score": 6.5}, current_sota=6.0)
+        assert result["outcome"] == "confirmed"
+        assert result["current_sota"] == 6.0
+        assert abs(result["delta_from_sota"] - 0.5) < 1e-6
+
+    def test_missing_current_sota_falls_back_to_current_value(self):
+        """Without override, current_value from prediction is used."""
+        result = evaluate_prediction(self._pred(current_value=5.0), {"best_denoising_score": 6.0})
+        assert result["current_sota"] == 5.0
+
+    def test_partial_margin_custom(self):
+        """Custom partial_margin=0.10 widens the partial band."""
+        # sota=5.0, 10% threshold=4.5 → actual=4.6 is partial (not refuted)
+        result = evaluate_prediction(
+            self._pred(current_value=5.0),
+            {"best_denoising_score": 4.6},
+            partial_margin=0.10,
+        )
         assert result["outcome"] == "partial"
 
-    def test_file_vector_metric(self):
+    # --- File vector metric ---
+
+    def test_file_vector_metric_confirmed(self):
+        """mean(file_vector[0:5]) above SOTA → confirmed."""
         pred = {
             "metric": "mean(file_vector[0:5])",
-            "current_value": 0.5,
-            "predicted_value": 2.0,
-            "threshold_for_refutation": 0.3,
+            "current_value": 1.5,
+            "predicted_value": 2.5,
         }
         fv = [1.0, 1.5, 2.0, 2.5, 3.0] + [None] * 15
-        result = evaluate_prediction(pred, {
-            "best_denoising_score": 5.0,
-            "best_file_vector": fv,
-        })
+        result = evaluate_prediction(pred, {"best_denoising_score": 5.0, "best_file_vector": fv})
         assert result["actual_value"] == 2.0  # mean of [1, 1.5, 2, 2.5, 3]
-        assert result["outcome"] == "confirmed"
+        assert result["outcome"] == "confirmed"  # 2.0 > 1.5 SOTA
 
-    def test_missing_results(self):
-        pred = {
-            "metric": "denoising_score",
-            "current_value": 5.0,
-            "predicted_value": 6.0,
-            "threshold_for_refutation": 4.5,
-        }
-        result = evaluate_prediction(pred, {})
+    # --- Missing data fallback ---
+
+    def test_missing_actual_results(self):
+        """No metric data in actual_results → partial with notes."""
+        result = evaluate_prediction(self._pred(), {})
         assert result["outcome"] == "partial"
         assert "Could not compute" in result.get("notes", "")
+        assert result["delta_from_sota"] is None
 
-    def test_boldness_calculation(self):
-        pred = {
-            "metric": "denoising_score",
-            "current_value": 5.0,
-            "predicted_value": 6.0,
-            "threshold_for_refutation": 4.5,
-        }
-        result = evaluate_prediction(pred, {"best_denoising_score": 6.5})
-        # boldness = |6.0 - 5.0| / |5.0| = 0.2
-        assert abs(result["boldness"] - 0.2) < 0.01
+    def test_missing_current_sota_and_current_value(self):
+        """Neither override nor current_value → partial with notes."""
+        result = evaluate_prediction(
+            {"metric": "denoising_score", "predicted_value": 6.0},
+            {"best_denoising_score": 6.5},
+        )
+        assert result["outcome"] == "partial"
+        assert result["current_sota"] is None
 
-    def test_information_gain_confirmed(self):
-        pred = {
-            "metric": "denoising_score",
-            "current_value": 5.0,
-            "predicted_value": 6.0,
-            "threshold_for_refutation": 4.5,
-        }
-        result = evaluate_prediction(pred, {"best_denoising_score": 6.5})
-        assert result["information_gain"] > 0  # confirmed = boldness
+    # --- Boldness and information_gain ---
 
-    def test_information_gain_refuted(self):
-        pred = {
-            "metric": "denoising_score",
-            "current_value": 5.0,
-            "predicted_value": 6.0,
-            "threshold_for_refutation": 4.5,
-        }
-        result = evaluate_prediction(pred, {"best_denoising_score": 4.0})
-        assert result["information_gain"] == 0  # refuted = 0
+    def test_boldness_uses_sota_baseline(self):
+        """boldness = |predicted - sota| / |sota|."""
+        # predicted=6.0, sota=5.0 → boldness = 1.0/5.0 = 0.2
+        result = evaluate_prediction(self._pred(current_value=5.0, predicted_value=6.0),
+                                     {"best_denoising_score": 5.5})
+        assert abs(result["boldness"] - 0.2) < 1e-4
+
+    def test_boldness_zero_when_no_predicted_value(self):
+        """No predicted_value in prediction → boldness=0."""
+        result = evaluate_prediction(
+            {"metric": "denoising_score", "current_value": 5.0},
+            {"best_denoising_score": 6.0},
+        )
+        assert result["boldness"] == 0.0
+
+    def test_information_gain_confirmed_equals_delta(self):
+        """Confirmed outcome: information_gain = delta_from_sota."""
+        result = evaluate_prediction(self._pred(current_value=5.0), {"best_denoising_score": 5.5})
+        assert result["outcome"] == "confirmed"
+        assert abs(result["information_gain"] - result["delta_from_sota"]) < 1e-6
+
+    def test_information_gain_zero_when_refuted(self):
+        """Refuted outcome: information_gain = 0."""
+        result = evaluate_prediction(self._pred(current_value=5.0), {"best_denoising_score": 3.0})
+        assert result["outcome"] == "refuted"
+        assert result["information_gain"] == 0.0
+
+    def test_information_gain_zero_when_partial(self):
+        """Partial outcome: information_gain = 0."""
+        result = evaluate_prediction(self._pred(current_value=5.0), {"best_denoising_score": 4.8})
+        assert result["outcome"] == "partial"
+        assert result["information_gain"] == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -185,9 +233,8 @@ class TestGenerateDiscoveries:
         eval_result = {
             "outcome": "confirmed",
             "metric": "denoising_score",
-            "predicted_value": 6.0,
             "actual_value": 6.5,
-            "current_value": 5.5,
+            "current_sota": 5.5,  # evaluate_prediction now returns current_sota (not current_value)
         }
         discoveries = generate_discoveries(
             prediction_eval=eval_result,
@@ -202,16 +249,15 @@ class TestGenerateDiscoveries:
 
     def test_overall_best_score_overrides_stale_sota(self):
         """
-        When overall_best_score > prediction_eval current_value, the discovery
+        When overall_best_score > prediction_eval current_sota, the discovery
         should use the higher value as the SOTA baseline. Without this fix the
         agent would report "beat SOTA" against an already-superseded reference.
         """
         eval_result = {
             "outcome": "confirmed",
             "metric": "denoising_score",
-            "predicted_value": 6.0,
             "actual_value": 6.5,
-            "current_value": 5.5,  # stale — a newer model already scored 6.2
+            "current_sota": 5.5,  # stale — a newer model already scored 6.2
         }
         discoveries = generate_discoveries(
             prediction_eval=eval_result,
@@ -236,9 +282,8 @@ class TestGenerateDiscoveries:
         eval_result = {
             "outcome": "partial",
             "metric": "denoising_score",
-            "predicted_value": 6.0,
             "actual_value": 5.8,
-            "current_value": 5.5,  # stale SOTA — model appears to beat it
+            "current_sota": 5.5,  # stale SOTA — model appears to beat it
         }
         discoveries = generate_discoveries(
             prediction_eval=eval_result,
@@ -537,3 +582,199 @@ class TestComputeVocabDiversityRatio:
             VocabEntry(name="d1", kind="discovery", description="x"),
         ]
         assert compute_vocab_diversity_ratio(vocab) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# update_vocab_link_confirmations (Phase E.7)
+# ---------------------------------------------------------------------------
+
+def _feat(name="dilated_causal_conv", related_to=None):
+    return VocabEntry(name=name, kind="feature", description="test",
+                      related_to=related_to or [])
+
+
+def _cap(name="receptive_field"):
+    return VocabEntry(name=name, kind="capability", description="test")
+
+
+def _link(feature="dilated_causal_conv", capability="receptive_field"):
+    return {"feature": feature, "capability": capability, "evidence": "test"}
+
+
+class TestUpdateVocabLinkConfirmations:
+
+    # --- Confirmation counting ---
+
+    def test_confirmed_outcome_increments_count(self):
+        """A 'confirmed' prediction adds run_name to the link's confirmation list."""
+        confs, _, _ = update_vocab_link_confirmations(
+            prev_vocab_links=[_link()],
+            prediction_outcome="confirmed",
+            run_name="run_a",
+            existing_confirmations={},
+            runtime_vocab=[_feat(), _cap()],
+        )
+        assert confs["dilated_causal_conv:receptive_field"] == ["run_a"]
+
+    def test_partial_outcome_does_not_increment(self):
+        """'partial' outcome leaves confirmation counts unchanged."""
+        confs, _, _ = update_vocab_link_confirmations(
+            prev_vocab_links=[_link()],
+            prediction_outcome="partial",
+            run_name="run_a",
+            existing_confirmations={},
+            runtime_vocab=[_feat(), _cap()],
+        )
+        assert confs.get("dilated_causal_conv:receptive_field", []) == []
+
+    def test_refuted_outcome_does_not_increment(self):
+        """'refuted' outcome leaves confirmation counts unchanged."""
+        confs, _, _ = update_vocab_link_confirmations(
+            prev_vocab_links=[_link()],
+            prediction_outcome="refuted",
+            run_name="run_a",
+            existing_confirmations={},
+            runtime_vocab=[_feat(), _cap()],
+        )
+        assert confs.get("dilated_causal_conv:receptive_field", []) == []
+
+    def test_none_outcome_does_not_increment(self):
+        """None outcome (first iteration) leaves counts unchanged."""
+        confs, _, _ = update_vocab_link_confirmations(
+            prev_vocab_links=[_link()],
+            prediction_outcome=None,
+            run_name="run_a",
+            existing_confirmations={},
+            runtime_vocab=[_feat(), _cap()],
+        )
+        assert confs.get("dilated_causal_conv:receptive_field", []) == []
+
+    def test_same_run_not_counted_twice(self):
+        """Confirming the same run twice keeps only one entry."""
+        existing = {"dilated_causal_conv:receptive_field": ["run_a"]}
+        confs, _, _ = update_vocab_link_confirmations(
+            prev_vocab_links=[_link()],
+            prediction_outcome="confirmed",
+            run_name="run_a",
+            existing_confirmations=existing,
+            runtime_vocab=[_feat(), _cap()],
+        )
+        assert confs["dilated_causal_conv:receptive_field"].count("run_a") == 1
+
+    def test_different_runs_accumulated(self):
+        """Confirmations from different runs stack up correctly."""
+        existing = {"dilated_causal_conv:receptive_field": ["run_a", "run_b"]}
+        confs, _, _ = update_vocab_link_confirmations(
+            prev_vocab_links=[_link()],
+            prediction_outcome="confirmed",
+            run_name="run_c",
+            existing_confirmations=existing,
+            runtime_vocab=[_feat(), _cap()],
+        )
+        assert set(confs["dilated_causal_conv:receptive_field"]) == {"run_a", "run_b", "run_c"}
+
+    # --- related_to promotion ---
+
+    def test_promotes_to_related_to_at_threshold(self):
+        """When count reaches min_runs, capability added to feature.related_to."""
+        existing = {"dilated_causal_conv:receptive_field": ["run_a", "run_b"]}
+        confs, vocab, promoted = update_vocab_link_confirmations(
+            prev_vocab_links=[_link()],
+            prediction_outcome="confirmed",
+            run_name="run_c",  # 3rd confirmation → trigger
+            existing_confirmations=existing,
+            runtime_vocab=[_feat(), _cap()],
+            min_runs=3,
+        )
+        assert "dilated_causal_conv:receptive_field" in promoted
+        feat = next(v for v in vocab if v.name == "dilated_causal_conv")
+        assert "receptive_field" in feat.related_to
+
+    def test_below_threshold_no_promotion(self):
+        """Two confirmations with min_runs=3 → no promotion yet."""
+        existing = {"dilated_causal_conv:receptive_field": ["run_a"]}
+        confs, vocab, promoted = update_vocab_link_confirmations(
+            prev_vocab_links=[_link()],
+            prediction_outcome="confirmed",
+            run_name="run_b",  # only 2nd confirmation
+            existing_confirmations=existing,
+            runtime_vocab=[_feat(), _cap()],
+            min_runs=3,
+        )
+        assert promoted == []
+        feat = next(v for v in vocab if v.name == "dilated_causal_conv")
+        assert "receptive_field" not in feat.related_to
+
+    def test_already_in_related_to_not_promoted_twice(self):
+        """If capability already in related_to, it is not added again."""
+        existing = {"dilated_causal_conv:receptive_field": ["run_a", "run_b"]}
+        # Feature already has capability in related_to from a previous iteration
+        feat_with_link = _feat(related_to=["receptive_field"])
+        confs, vocab, promoted = update_vocab_link_confirmations(
+            prev_vocab_links=[_link()],
+            prediction_outcome="confirmed",
+            run_name="run_c",
+            existing_confirmations=existing,
+            runtime_vocab=[feat_with_link, _cap()],
+            min_runs=3,
+        )
+        assert promoted == []
+        feat = next(v for v in vocab if v.name == "dilated_causal_conv")
+        assert feat.related_to.count("receptive_field") == 1
+
+    def test_feature_not_in_vocab_no_crash(self):
+        """Link referencing a feature not in runtime_vocab is silently skipped."""
+        existing = {"unknown_feat:receptive_field": ["run_a", "run_b"]}
+        _, vocab, promoted = update_vocab_link_confirmations(
+            prev_vocab_links=[{"feature": "unknown_feat", "capability": "receptive_field", "evidence": "x"}],
+            prediction_outcome="confirmed",
+            run_name="run_c",
+            existing_confirmations=existing,
+            runtime_vocab=[_cap()],  # feature not present
+            min_runs=3,
+        )
+        assert promoted == []
+
+    def test_multiple_links_promoted_independently(self):
+        """Multiple links in one proposal can be promoted independently."""
+        existing = {
+            "dilated_causal_conv:receptive_field": ["run_a", "run_b"],
+            "gated_activation:frequency_resolution": ["run_a", "run_b"],
+        }
+        vocab = [
+            _feat("dilated_causal_conv"),
+            _feat("gated_activation"),
+            _cap("receptive_field"),
+            VocabEntry(name="frequency_resolution", kind="capability", description="test"),
+        ]
+        links = [
+            _link("dilated_causal_conv", "receptive_field"),
+            _link("gated_activation", "frequency_resolution"),
+        ]
+        confs, updated_vocab, promoted = update_vocab_link_confirmations(
+            prev_vocab_links=links,
+            prediction_outcome="confirmed",
+            run_name="run_c",
+            existing_confirmations=existing,
+            runtime_vocab=vocab,
+            min_runs=3,
+        )
+        assert len(promoted) == 2
+        dc = next(v for v in updated_vocab if v.name == "dilated_causal_conv")
+        ga = next(v for v in updated_vocab if v.name == "gated_activation")
+        assert "receptive_field" in dc.related_to
+        assert "frequency_resolution" in ga.related_to
+
+    def test_does_not_mutate_existing_confirmations(self):
+        """existing_confirmations dict is not mutated in place."""
+        existing = {"dilated_causal_conv:receptive_field": ["run_a"]}
+        original_list = existing["dilated_causal_conv:receptive_field"]
+        update_vocab_link_confirmations(
+            prev_vocab_links=[_link()],
+            prediction_outcome="confirmed",
+            run_name="run_b",
+            existing_confirmations=existing,
+            runtime_vocab=[_feat(), _cap()],
+        )
+        assert existing["dilated_causal_conv:receptive_field"] is original_list
+        assert "run_b" not in original_list

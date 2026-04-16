@@ -1,6 +1,6 @@
 # Design Proposal V2: Adaptive Scientific Discovery Framework for SIDERIUS
 
-**Status**: Phase C complete — vocabulary feedback loop, candidate promotion, centrifugal metrics (vocab diversity + information gain), pipeline hardening (B.22 retry) all done. 932 unit tests passing. Phase E next. Supersedes the V1 proposal at the bottom of this file.
+**Status**: Phase E complete — SOTA-based prediction evaluation (confirmed/partial/refuted), scientific accuracy hit-rate tracking, `ProposedVocabLink` promotion to `VocabEntry.related_to`, and all unit tests. 939 unit tests passing. Phase F next. Supersedes the V1 proposal at the bottom of this file.
 
 ## 0. The actual problem and the key design idea
 
@@ -645,8 +645,8 @@ These existing pieces are doing their job and need no change:
 |---|---|---|---|
 | **A** | ~~`regime_scores`~~ **REVERTED** — see §Phase A below. No code changes remain from Phase A. The 20-element `file_vector` on `ExperimentRecord` stays as the raw source of truth. Any frequency-band interpretation belongs in expert advice, not in the schema. | — | — |
 | **B** | Replace the proposal agent's existing two-call pattern with the **three-stage configurable pipeline** from §2A: (1) comparison — systematic review of selected past models, (2) causal reasoning — forward-looking hypothesis building on comparisons, (3) proposing — concrete architecture tethered to the memo. Add `ReasoningPipelineConfig` at the workflow level. Add `ModelSelectionStrategy` for smart pre-filtering of candidate models. Add `ExpertContextItem` (§2D) for polymorphic upstream input. Add DI (`bridge_factory`) to the proposal agent. | large | Every proposal is backed by a structured `DiscoveryMemo` that compares past models, forms a causal hypothesis, and makes a falsifiable prediction. The pipeline is configurable — adding/removing/reordering stages is a config change, not a code change. The polymorphic input slot for future upstream agents is in place. |
-| **C** | Add `VocabEntry`-based lineage validator (`check_inherited_components` for features). Implement the vocabulary feedback loop: prediction evaluation, discovery generation, `seen_in_runs` accumulation, candidate promotion (count-only MVP, ≥3 runs), semantic dedup (`_dedup_promoted()`). Two-tier model context (`non_candidates_overview`). O(1) LLM call count via `model_knowledge_cache`. Note: `ProposedVocabLink` promotion (`confirmed → VocabEntry.related_to`) moved to Phase E (E.7) — depends on the Phase E reflector. | medium | Vocabulary compounds across iterations. Each round's discoveries feed the next proposal. Lineage claims are validated in code. |
-| **E** | Add the `falsifiable_prediction` retrospective check inside the reflector: confirmed / refuted / partial label, written into the record. Aggregate the hit rate in `InterpretationOutput`. | small | The proposal agent's scientific accuracy becomes a measurable, monitorable quantity. Phase E before F because the `prediction_outcome` field on `ExperimentRecord` must exist before Phase F's receiving-end tests can validate the full loop. |
+| **C** | Add `VocabEntry`-based lineage validator (`check_inherited_components` for features). Implement the vocabulary feedback loop: prediction evaluation, discovery generation, `seen_in_runs` accumulation, candidate promotion (count-only MVP, ≥3 runs), semantic dedup (`_dedup_promoted()`). Two-tier model context (`non_candidates_overview`). O(1) LLM call count via `model_knowledge_cache`. `ProposedVocabLink` promotion (`confirmed → VocabEntry.related_to`) completed in Phase E. | medium | Vocabulary compounds across iterations. Each round's discoveries feed the next proposal. Lineage claims are validated in code. |
+| **E** | ✅ **Complete.** SOTA-based `evaluate_prediction()`: compares actual score against the SOTA at proposal time (`FalsifiablePrediction.current_value`), not the LLM's predicted value (which is unreliable). Outcomes: `confirmed` (beat SOTA), `partial` (within 5%), `refuted` (clearly below). `delta_from_sota` quantifies the gap. `scientific_accuracy` + `prediction_outcomes_history` carry-forward fields track hit rates across iterations. `update_vocab_link_confirmations()` helper: `confirmed` predictions accumulate per-run counts for each `feature:capability` link; links confirmed in ≥3 distinct runs are promoted to `VocabEntry.related_to`. All evaluation lives in `result_interpretation_agent` — architecturally cleaner than the original plan (which put it in the tuning agent reflector). 939 unit tests passing. | small | The proposal agent's scientific accuracy is now a measurable, monitorable quantity. `ProposedVocabLink` hypotheses graduate to established facts after sufficient empirical confirmation. |
 | **F** | Receptive-side external agent readiness. Add `AgentCard` schema and `ProposalInput.agent_cards`. Implement `render_agent_cards()` and update stage system prompts with contributor instructions. Add `VocabEntry.origin` field. Fix `render_expert_context` dedup and confidence sorting. Add `mindset` and `agent_cards` parameters to `local_full_context`. | small | The proposal agent is fully ready to accept external agents — any new upstream agent can be wired without touching the proposal node or its prompts. Phase F before D because its schema changes (`VocabEntry`, `ProposalInput`) are foundational — better to land them before D adds more fields in the same files. |
 | **D** | Add `ResearchDirective` schema and the three guardrail layers in §2C. | medium | Guided mode actually constrains the search to a specific model family when the human directs it. Deferred past E and F because: (1) it is opt-in and locked OFF by default — existing chains are unaffected; (2) it has no immediate prerequisite from E or F; (3) E and F close higher-priority gaps (scientific accuracy, external agent readiness) at lower cost. Implement when focused "deep-dive on WaveNet" experiments are planned. |
 
@@ -660,7 +660,7 @@ Each phase has its own tests. Each is independently revertable. Each is small en
 2a. **Promotion tuning** — the MVP threshold (≥3 runs, semantic dedup) is conservative but unvalidated. After the first chain run with promotion live, tune: SOTA threshold strictness, dedup LLM stability, and whether to add a `vocab_promotion_mode: "review"` flag if autonomous promotion misbehaves.
 3. **Component pattern matching**. `COMPONENT_PATTERNS` (regex per primitive) is the weakest part of §2B's validator integration — regex against PyTorch source is fragile. Alternative: use AST inspection (`ast.parse` on the plugin file) and look for specific class/function calls. More work, more reliable.
 4. **Guided-mode escape hatches**. Should there be a way for the LLM to formally request a relaxation of the directive (e.g. "I think the constraint is impossible to satisfy because of Y; please review")? Otherwise stuck states could waste rounds. But adding an escape hatch risks defeating the point of guided mode.
-5. **Hit rate as feedback to the planner**. Once Phase E is in place, the planner could be told its own historical accuracy ("your causal predictions have been confirmed 38% of the time"). Self-knowledge of fallibility might improve future memos. Risk: the LLM becomes overconfident or defensive.
+5. **Hit rate as feedback to the planner**. Phase E is in place — `scientific_accuracy` is now computed and carried forward in `InterpretationOutput`. Next step: surface it in the Phase 2 synthesis prompt alongside `cumulative_information_gain`, so the LLM can see its own track record. Risk: the LLM becomes overconfident or defensive in response to low hit rates.
 
 6. **First non-human upstream agents — Literature Review Agents**. Phase B introduces the `ExpertContextItem` polymorphic input slot and Phase F makes the receiving end fully ready. The first real external agents are `ml_literature_review` and `physics_literature_review` (see `docs/external_agents_for_proposer.md` for the full design). Open questions for those future PRs:
    - How do agents produce `cite_id` values that are stable across re-runs of the same analysis? Hash of the finding content? Timestamped slug? A stable `cite_id` is required for the citation audit trail to work across rounds.
@@ -925,32 +925,38 @@ Iteration N:
 
 ---
 
-### Phase E — Falsifiable prediction retrospective + scientific accuracy metric
+### Phase E — Falsifiable prediction retrospective + scientific accuracy metric ✅
 
 **Goal**: every prediction made in `DiscoveryMemo.falsifiable_prediction` gets checked against actual results; the agent's hit rate becomes a measurable, monitorable quantity.
 
 **Depends on**: Phase B (FalsifiablePrediction lives in DiscoveryMemo). Phase A dependency removed (reverted).
 
-**PR size**: small.
+**Architecture note**: evaluation lives in `result_interpretation_agent`, not `ml_hyperparameter_tune_agent`. This is cleaner — the interpretation agent already holds `previous_proposal` (the prediction) and all the actual scores, so no data needs to be threaded into the tuning agent. `prediction_outcome` is **not** on `ExperimentRecord`; it lives in `InterpretationOutput.prediction_evaluation`.
 
-**Files**:
-- `agent/schemas/hyperparam_tuning.py` — add `prediction_outcome: Optional[Literal["confirmed", "refuted", "partial"]]` to `ExperimentRecord`.
-- `nodes/ml_hyperparameter_tune_agent.py` — in the reflector path, look up the previous round's `DiscoveryMemo.falsifiable_prediction` (if any), compute the predicted metric from the current round's `file_vector` and `denoising_score`, label the outcome, write into the record.
-- `nodes/result_interpretation_agent.py` — aggregate the hit rate across all records into `InterpretationOutput.scientific_accuracy: Dict[str, float]` (e.g. `{"confirmed": 0.38, "partial": 0.22, "refuted": 0.40}`).
-- `tests/unit/agent/tune_ml_hyperparam_agent/test_prediction_retrospective.py` (new).
+**Files changed**:
+- `nodes/interpretation_helpers.py` — `evaluate_prediction()` rewritten (SOTA-based, not predicted-value-based); new `update_vocab_link_confirmations()` helper.
+- `nodes/result_interpretation_agent.py` — wires both E.4 and E.7 after `promote_candidates`; prints scientific accuracy and link promotion events.
+- `agent/schemas/interpretation.py` — new fields on `InterpretationInput`: `prediction_outcomes_history`, `vocab_link_confirmations`; new fields on `InterpretationOutput`: `scientific_accuracy`, `prediction_outcomes_history`, `vocab_link_confirmations`.
+- `tests/unit/agent/result_interpretation_agent/test_vocab_feedback.py` — `TestEvaluatePrediction` fully rewritten (15 tests); `TestUpdateVocabLinkConfirmations` added (12 tests). 61 tests total.
+
+**Design changes from original plan**:
+- `evaluate_prediction()` baseline changed from `predicted_value` to `current_sota` (= `FalsifiablePrediction.current_value`, the SOTA at proposal time). LLMs cannot reliably predict exact scores; the meaningful question is whether the model beat the bar it was designed to beat.
+- Outcome labels (preset, never LLM-generated): `confirmed` (actual > SOTA), `partial` (within 5% margin below SOTA), `refuted` (clearly below SOTA). The 5% margin acknowledges near-competitive results.
+- `ProposedVocabLink` confirmation uses the **prediction outcome as a proxy**: when a run is `confirmed`, all proposed links from that run gain one confirmation count. Links confirmed in ≥ `min_runs_for_promotion` (default 3) distinct runs are promoted to `VocabEntry.related_to`.
 
 **Sub-tasks**:
-- ☐ E.1 Add `prediction_outcome` to `ExperimentRecord`.
-- ☐ E.2 Implement `evaluate_prediction(prediction: FalsifiablePrediction, actual: Dict[str, float]) -> Literal[...]`. Logic: confirmed if actual ≥ predicted; refuted if actual ≤ refutation_threshold; partial otherwise.
-- ☐ E.3 Wire the evaluator into the reflector path. If no prior prediction exists (e.g. round 1, or memo missing), set outcome to `None`.
-- ☐ E.4 Aggregate hit-rate stats in the interpretation agent.
-- ☐ E.5 Unit tests for `evaluate_prediction` covering all branches.
-- ☐ E.6 Manual smoke test: run a 3-round trial, confirm rounds 2 and 3 have `prediction_outcome` populated.
-- ☐ E.7 `ProposedVocabLink` promotion: after E.3 marks links `"confirmed"` or `"refuted"`, the interpretation agent collects confirmed links across iterations and populates `VocabEntry.related_to` for the feature/capability pair when a link reaches `confirmed` status in ≥ `min_runs_for_promotion` distinct runs. Moved from Phase C (was C.5a) — depends on E.3.
+- ☑ E.1 `evaluate_prediction()` rewritten — SOTA-based comparison, `delta_from_sota` output key.
+- ☑ E.2 Call site wired: `sota_at_proposal = prev_prediction.get("current_value")`; print shows `delta_from_sota`.
+- ☑ E.3 Schema description updated; `prediction_evaluation` field documents new keys.
+- ☑ E.4 `scientific_accuracy` + `prediction_outcomes_history` carry-forward in interpretation agent.
+- ☑ E.5 Unit tests: 15 tests for `evaluate_prediction`, 12 for `update_vocab_link_confirmations`.
+- ☑ E.7 `update_vocab_link_confirmations()` — confirmation tracking, `VocabEntry.related_to` promotion, immutability guarantee.
 
 **Verify**:
-- `uv run pytest tests/unit/agent/tune_ml_hyperparam_agent/test_prediction_retrospective.py -q`.
-- Manual: inspect a 3-round summary record and confirm the field is populated for rounds 2+.
+- ✅ `uv run pytest tests/unit/agent/result_interpretation_agent/test_vocab_feedback.py -q` — 61 passed.
+- ✅ `uv run pytest tests/unit/ -q` — 939 passed, 0 failures.
+- ✅ H.4 pseudo mode: `uv run pytest tests/integration/workflows/test_vocab_accumulation.py::test_scientific_accuracy_and_vocab_links_accumulate -v -s` — REFUTED iter produces `scientific_accuracy={"confirmed": 0.0, "refuted": 1.0}`; CONFIRMED iter updates to `{"confirmed": 0.5, "refuted": 0.5}`; `vocab_link_confirmations={"dilated_causal_conv:receptive_field": ["spectral_net"]}` after 1 confirmation (not yet promoted, threshold=3).
+- ✅ H.4 real-LLM: `uv run pytest tests/integration/workflows/test_vocab_accumulation.py::test_scientific_accuracy_and_vocab_links_accumulate -v -s --real-llm` — PASSED (2m04s, Gemini 2.5 Flash). Iter 1 REFUTED: `delta_from_sota=-7.085`, `scientific_accuracy={"confirmed":0.0,"refuted":1.0}`, no link added. Iter 2 CONFIRMED: `delta_from_sota=0.524`, `scientific_accuracy={"confirmed":0.5,"refuted":0.5}`, `vocab_link_confirmations={"dilated_causal_conv:receptive_field":["spectral_net"]}`.
 
 ---
 

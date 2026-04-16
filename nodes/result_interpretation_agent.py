@@ -671,11 +671,12 @@ class ResultInterpretationAgent:
         # --- Phase C: Vocabulary feedback loop ---
         from nodes.interpretation_helpers import (
             evaluate_prediction, generate_discoveries, build_runtime_vocab,
-            promote_candidates,
+            promote_candidates, update_vocab_link_confirmations,
         )
 
         prediction_evaluation = None
         new_discoveries = []
+        prev_model_type = ""
 
         if inp.previous_proposal:
             prev_prediction = inp.previous_proposal.get("falsifiable_prediction")
@@ -693,9 +694,17 @@ class ResultInterpretationAgent:
                     "best_denoising_score": prev_best,
                     "best_file_vector": prev_fv,
                 }
-                prediction_evaluation = evaluate_prediction(prev_prediction, actual_results)
+                # current_sota = SOTA at proposal time (FalsifiablePrediction.current_value).
+                # The workflow may pass a fresher value via overall_best_score if needed,
+                # but the proposal-time baseline is the fairest comparison for evaluation.
+                sota_at_proposal = prev_prediction.get("current_value")
+                prediction_evaluation = evaluate_prediction(
+                    prev_prediction,
+                    actual_results,
+                    current_sota=sota_at_proposal,
+                )
                 print(f"  Prediction evaluation: {prediction_evaluation.get('outcome', '?')} "
-                      f"(predicted={prediction_evaluation.get('predicted_value')}, "
+                      f"(delta_from_sota={prediction_evaluation.get('delta_from_sota')}, "
                       f"actual={prediction_evaluation.get('actual_value')})")
 
             # Generate discoveries from the evaluation
@@ -755,6 +764,51 @@ class ResultInterpretationAgent:
               f"({sum(1 for v in runtime_vocab if (v.kind if hasattr(v, 'kind') else v.get('kind')) == 'discovery')} discoveries, "
               f"{sum(1 for v in runtime_vocab if (v.tier if hasattr(v, 'tier') else v.get('tier')) == 'canonical')} canonical)")
 
+        # --- Phase E.7: Update ProposedVocabLink confirmation tracking ---
+        # When prediction is confirmed, each proposed link from the previous run
+        # gains one confirmation. Links confirmed in >= min_runs distinct runs
+        # are promoted to VocabEntry.related_to (feature gains capability as established fact).
+        prev_vocab_links: List[Dict[str, Any]] = (
+            inp.previous_proposal.get("proposed_vocab_links", [])
+            if inp.previous_proposal else []
+        )
+        link_confirmations, runtime_vocab, promoted_link_pairs = update_vocab_link_confirmations(
+            prev_vocab_links=prev_vocab_links,
+            prediction_outcome=(
+                prediction_evaluation.get("outcome") if prediction_evaluation else None
+            ),
+            run_name=prev_model_type if inp.previous_proposal else "",
+            existing_confirmations=inp.vocab_link_confirmations,
+            runtime_vocab=runtime_vocab,
+            min_runs=3,
+        )
+        if promoted_link_pairs:
+            print(f"  Vocab link promotions ({len(promoted_link_pairs)}): {promoted_link_pairs}")
+            for pair in promoted_link_pairs:
+                feature, _, capability = pair.partition(":")
+                vocab_changes.append(
+                    f"Link '{feature} → {capability}' confirmed in ≥3 runs; "
+                    f"added '{capability}' to {feature}.related_to."
+                )
+
+        # --- Phase E.4: Scientific accuracy tracking ---
+        # Accumulate outcome counts and compute hit-rate fractions.
+        new_outcomes_history = dict(inp.prediction_outcomes_history)
+        if prediction_evaluation:
+            outcome_label = prediction_evaluation.get("outcome")
+            if outcome_label in ("confirmed", "partial", "refuted"):
+                new_outcomes_history[outcome_label] = (
+                    new_outcomes_history.get(outcome_label, 0) + 1
+                )
+        total_preds = sum(new_outcomes_history.values())
+        scientific_accuracy: Optional[Dict[str, float]] = (
+            {k: round(v / total_preds, 4) for k, v in new_outcomes_history.items()}
+            if total_preds > 0 else None
+        )
+        if scientific_accuracy:
+            print(f"  Scientific accuracy: {scientific_accuracy} "
+                  f"(n={total_preds})")
+
         # --- Centrifugal health metrics (post-Phase-C, on the updated vocab) ---
         vocab_diversity_ratio = _cvdr(runtime_vocab)
         this_info_gain = (
@@ -792,6 +846,10 @@ class ResultInterpretationAgent:
             # Centrifugal health metrics
             "vocab_diversity_ratio":        vocab_diversity_ratio,
             "cumulative_information_gain":  cumulative_information_gain,
+            # Phase E: scientific accuracy + vocab link promotion
+            "scientific_accuracy":           scientific_accuracy,
+            "prediction_outcomes_history":   new_outcomes_history,
+            "vocab_link_confirmations":      link_confirmations,
         })
 
         # --- Persist ---

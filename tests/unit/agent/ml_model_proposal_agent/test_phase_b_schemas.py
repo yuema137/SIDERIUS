@@ -162,12 +162,12 @@ class TestInheritedComponent:
             })
 
     def test_evidence_max_length(self):
-        """contribution_evidence has max_length=300."""
+        """contribution_evidence has max_length=1000."""
         with pytest.raises(ValidationError):
             InheritedComponent.model_validate({
                 "component": "test",
                 "from_model_type": "wavenet",
-                "contribution_evidence": "x" * 301,
+                "contribution_evidence": "x" * 1001,
             })
 
 
@@ -239,7 +239,8 @@ class TestModelComparison:
         assert mc.best_score == 5.57
 
     def test_key_mechanism_max_length(self, valid_comparison):
-        valid_comparison["key_mechanism"] = "x" * 301
+        """key_mechanism has max_length=1000."""
+        valid_comparison["key_mechanism"] = "x" * 1001
         with pytest.raises(ValidationError):
             ModelComparison.model_validate(valid_comparison)
 
@@ -324,12 +325,14 @@ class TestDiscoveryMemo:
         assert len(memo.citation_sources) == 5
 
     def test_sota_mechanism_max_length(self, valid_memo):
-        valid_memo["sota_mechanism"] = "x" * 601
+        """sota_mechanism has max_length=1000."""
+        valid_memo["sota_mechanism"] = "x" * 1001
         with pytest.raises(ValidationError):
             DiscoveryMemo.model_validate(valid_memo)
 
     def test_proposed_change_max_length(self, valid_memo):
-        valid_memo["proposed_change"] = "x" * 401
+        """proposed_change has max_length=1000."""
+        valid_memo["proposed_change"] = "x" * 1001
         with pytest.raises(ValidationError):
             DiscoveryMemo.model_validate(valid_memo)
 
@@ -370,21 +373,23 @@ class TestProposedVocabLink:
         })
         assert link.status == "refuted"
 
-    def test_invalid_status_raises(self):
-        with pytest.raises(ValidationError):
-            ProposedVocabLink.model_validate({
-                "feature": "test",
-                "capability": "test",
-                "evidence": "test",
-                "status": "maybe",
-            })
+    def test_invalid_status_coerced_to_proposed(self):
+        """Unknown LLM-invented status values are coerced to 'proposed' (not rejected)."""
+        link = ProposedVocabLink.model_validate({
+            "feature": "test",
+            "capability": "test",
+            "evidence": "test",
+            "status": "maybe",
+        })
+        assert link.status == "proposed"
 
     def test_evidence_max_length(self):
+        """evidence has max_length=1000."""
         with pytest.raises(ValidationError):
             ProposedVocabLink.model_validate({
                 "feature": "test",
                 "capability": "test",
-                "evidence": "x" * 301,
+                "evidence": "x" * 1001,
             })
 
     def test_missing_feature_raises(self):
@@ -588,11 +593,12 @@ class TestVocabEntry:
         assert len(ve.seen_in_runs) == 2
 
     def test_description_max_length(self):
+        """description has max_length=1000."""
         with pytest.raises(ValidationError):
             VocabEntry.model_validate({
                 "name": "test",
                 "kind": "feature",
-                "description": "x" * 201,
+                "description": "x" * 1001,
             })
 
     def test_invalid_tier_raises(self):
