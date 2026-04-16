@@ -319,12 +319,14 @@ Each phase ends with `.venv/bin/python -m pytest tests/unit/agent/skills/ -q` (o
 - [x] Confirm `_run_skill("evaluate_time_skill", ...)` discoverable from the tune agent.
 - **Verified** (2026-04-16): `importlib.import_module("agent.skills.evaluate_time_skill.wrapper")` succeeds; `run_skill()` returns `{status, feasible, verdict, suggestion, estimated_minutes, limit_minutes, breakdown}` with the expected keys.
 
-### Phase B — Step-count math + static fallback [ ]
+### Phase B — Step-count math + static fallback [x]
 
-- [ ] Implement the step-count formulae from §2.2 in `wrapper.py`.
-- [ ] Add a static `ms_per_step ≈ params × seg_size × 1e-9 s` fallback used when `device != "cuda"` or when a `--skip_warmup` flag is set (for unit tests on CPU).
-- [ ] Unit tests for step-count math (covers the 6 cases listed in §6.1).
-- **Verify**: `.venv/bin/python -m pytest tests/unit/agent/skills/test_evaluate_time_skill.py -q` passes (6+ tests).
+- [x] Implement the step-count formulae from §2.2 in `wrapper.py` (`_total_train_steps`).
+- [x] Add static `ms_per_step` fallback (`_static_ms_per_step`, ~6 FLOPs per param per sample / 1e10 flops/ms).
+- [x] Suggestion-lever routing (`_suggest_lever`, 3 branches from §2.4).
+- [x] Full `run_skill` entry point wired up on top of the helpers with the static formula; warmup + calibration still stubs.
+- [x] Unit tests (19 tests in `tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_time_skill.py`): step-count math over 6 parametrised cases + ceil edge-case, static-formula linearity, 3 suggestion branches, contract-shape assertion, feasible/infeasible branches via monkeypatched `_count_params`, error path.
+- **Verified** (2026-04-16): `pytest tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_time_skill.py -q` → **19 passed**. Sanity: step-count for the two real blown-budget runs reproduces the quoted 3,200,000 / 250,000 exactly.
 
 ### Phase C — Real-dataset live warmup [ ]
 
