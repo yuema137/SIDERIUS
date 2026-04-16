@@ -539,9 +539,9 @@ Functionally absorbed into Phase B. All four items below were implemented while 
 - [x] Unit tests for each suggestion branch — covered by the "3 suggestion branches" tests landed in Phase B.
 - **Verified** (2026-04-16): `pytest tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_time_skill.py -q` → **22 passed** (same suite as Phase C).
 
-### Phase E — Agent integration [~]
+### Phase E — Agent integration [x]
 
-E0 and E1 are landed; E2 (proposer baseline-gate) is the only remaining sub-phase.
+All three sub-phases (E0 schema/protocol/workflow, E1 tuner round-gate, E2 proposer baseline-gate) are landed. The skill is now wired at both call sites with consistent input shape and the `time_risk` annotation flows end-to-end (proposer → validator → tuner protocol → planner expert_advice).
 
 The skill is shared infrastructure (§2.7), so this phase has two call sites. They are independent and can land in either order, but **E1 first** is recommended because it exercises the skill end-to-end before the proposer starts depending on it. Both sub-phases share the schema additions in E0.
 
@@ -573,14 +573,15 @@ Workflow:
 - [x] One-time startup warning when `time_budget_minutes is None` (gate disabled). Mirrors the "additive, opt-in" stance in §5.
 - **Verify**: 6 new unit tests in `TestTimeBudgetGate` cover feasible passthrough, kwarg forwarding (budget + `data_dir`), infeasible → `skipped_time_risk` record, suggestion content, `status="error"` propagation, and `time_budget_minutes=None` skipping the skill entirely. `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent/test_tuning_agent.py -q` → **34 passed** (2026-04-16).
 
-#### E2. Proposer baseline-gate [ ]
+#### E2. Proposer baseline-gate [x]
 
-- [ ] In `nodes/ml_model_proposal_agent.py`, right before returning `ProposalOutput`, call `run_skill("evaluate_time_skill", ...)` with the dict shape from §2.7.3.
-- [ ] Build `sample_set` via the same `build_sample_set` helper the tuner uses (§2.7.5 Option A). If the helper isn't importable from the tuner's module without a circular dependency, relocate it to a shared util — but only if the relocation is small; otherwise fall back to Option B and revisit.
-- [ ] On `feasible=True` → leave `time_risk=None`. On `feasible=False` → set `time_risk = result["suggestion"]` (the lever text from `_suggest_lever`). On `status="error"` → leave `time_risk=None` and print a warning; don't block the proposer on a skill failure.
-- [ ] When `time_budget_minutes is None` (skill disabled), skip the call entirely. Same one-time-warning policy as the tuner gate.
-- [ ] Read-only access to the calibration file — proposer never calls `update_k`.
-- **Verify**: unit tests for the proposer's three branches (feasible, infeasible, skill error) with `run_skill` monkeypatched. Pseudo-mode integration test confirming `time_risk` round-trips through the proposer→implementor→tuner protocol chain. `.venv/bin/python -m pytest tests/unit/agent/ml_model_proposal_agent/ -q`.
+- [x] In `nodes/ml_model_proposal_agent.py`, right after the proposing pipeline returns and before persistence, call the skill via a new `_apply_time_gate(output, inp)` helper. The skill module is imported directly (`agent.skills.evaluate_time_skill.wrapper`) and invoked with `sandbox=None` since `evaluate_time_skill` doesn't read its sandbox arg.
+- [x] Build `sample_set` via `execute_tools.sample_set_builder.build_sample_set(...)` (§2.7.5 Option A). The helper already lives in a neutral location — no relocation needed.
+- [x] On `feasible=True` → leave `time_risk=None`. On `feasible=False` → set `time_risk = result["suggestion"]` (with `verdict` as fallback when the suggestion is empty). On `status="error"` → leave `time_risk=None` and print a warning; the proposer never blocks on a skill failure.
+- [x] When `time_budget_minutes is None`, skip the call entirely. Module-level `_TIME_GATE_WARNED` flag → one-time process warning, mirrors the tuner gate's startup-once policy.
+- [ ] Read-only access to the calibration file — proposer never calls `update_k`. (Deferred to Phase F; the calibration module doesn't exist yet.)
+- **Practical caveat**: a brand-new `model_name` proposed by the LLM will not be in `MODEL_REGISTRY` yet (the implementor only registers it later), so the skill's `_count_params` will raise → `status="error"` → gate degrades gracefully via the warn-and-proceed path. The wiring and `time_risk` propagation through the validator→tuner protocol are still valuable: the gate becomes useful the moment a future revision lets the proposer instantiate its proposal pre-validation, and the protocol path is exercised end-to-end now (not retrofitted later).
+- **Verify**: 11 new unit tests in `tests/unit/agent/ml_model_proposal_agent/test_baseline_time_gate.py` cover all four branches (feasible / infeasible / error / disabled), skill-kwarg shape, sample-set construction from the trial-mirror, suggestion-vs-verdict fallback, and end-to-end wiring through `MLModelProposalAgent.run()` including JSON round-trip of `time_risk`. `.venv/bin/python -m pytest tests/unit/agent/ml_model_proposal_agent/ -q` → **240 passed** (2026-04-16).
 
 ### Phase F — Learned calibration (asymmetric EMA) [ ]
 
