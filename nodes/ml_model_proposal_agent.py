@@ -26,13 +26,50 @@ import argparse
 from pydantic import ValidationError
 
 from agent.llm_bridge import LLMBridge
-from agent.schemas.proposal import ProposalInput, ProposalOutput
+from agent.schemas.proposal import ProposalInput, ProposalOutput, FalsifiablePrediction
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
 
 # Maximum number of retries when the proposing stage produces invalid output.
 # Total attempts = _MAX_PROPOSING_RETRIES + 1.
 _MAX_PROPOSING_RETRIES = 2
+
+# One retry when causal_reasoning produces a prediction below minimum_boldness.
+_MAX_REASONING_RETRIES = 1
+
+
+def _check_citation_discipline(
+    citation_sources: list,
+    causal_hypothesis: str,
+    proposed_change: str,
+) -> list:
+    """Return a warning message for each cite_id that was cited but not referenced.
+
+    Each cite_id in citation_sources must appear verbatim in causal_hypothesis
+    or proposed_change.  Violations are soft warnings — the proposal is not
+    rejected, but the issues are appended to ProposalOutput.memo_consistency_notes
+    so the validator and the human reviewer can see them.
+
+    Args:
+        citation_sources: list of cite_id strings from DiscoveryMemo.
+        causal_hypothesis: the reasoning text that should reference the cited items.
+        proposed_change: the change description that should reference the cited items.
+
+    Returns:
+        List of violation strings, one per uncited cite_id.  Empty = all citations
+        are properly referenced in the reasoning text.
+    """
+    combined = causal_hypothesis + " " + proposed_change
+    violations = []
+    for cite_id in citation_sources:
+        if cite_id not in combined:
+            violations.append(
+                f"CITATION_NOT_REFERENCED: cite_id '{cite_id}' is listed in "
+                f"citation_sources but does not appear verbatim in causal_hypothesis "
+                f"or proposed_change. Either reference it in your reasoning or remove "
+                f"it from citations."
+            )
+    return violations
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +216,37 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
         interp.get("take_home_message", ""),
         "",
     ]
+
+    # Phase E — prediction track record (scientific accuracy + information gain)
+    sci_acc   = interp.get("scientific_accuracy")
+    cum_ig    = interp.get("cumulative_information_gain")
+    pred_hist = interp.get("prediction_outcomes_history") or {}
+    if sci_acc is not None or cum_ig is not None:
+        lines.append("### Prediction Track Record")
+        total = sum(pred_hist.values()) if pred_hist else 0
+        if cum_ig is not None:
+            lines.append(f"  Cumulative information gain : {cum_ig:.3f}")
+        if sci_acc is not None:
+            confirmed_pct = sci_acc.get("confirmed", 0.0) * 100
+            partial_pct   = sci_acc.get("partial",   0.0) * 100
+            refuted_pct   = sci_acc.get("refuted",   0.0) * 100
+            lines.append(
+                f"  Scientific accuracy (N={total}) : "
+                f"confirmed={confirmed_pct:.0f}%  "
+                f"partial={partial_pct:.0f}%  "
+                f"refuted={refuted_pct:.0f}%"
+            )
+        lines.append("")
+
+    # Phase C — vocabulary health
+    vdr = interp.get("vocab_diversity_ratio")
+    if vdr is not None:
+        lines += [
+            "### Vocabulary Health",
+            f"  Diversity ratio : {vdr:.2f}  "
+            f"({'LOW — consider proposing new vocabulary entries' if vdr < 0.1 else 'OK'})",
+            "",
+        ]
 
     # Frequency analysis (from enriched interpretation)
     freq_comp = interp.get("frequency_comparison")
@@ -463,22 +531,40 @@ class MLModelProposalAgent:
             "non_candidates_overview": non_candidates_overview,
             "interpretation_summary": {
                 k: inp.interpretation.get(k)
-                for k in ("model_types", "total_experiments", "best_denoising_score",
-                          "worst_denoising_score", "key_findings", "bottlenecks",
-                          "take_home_message", "per_model_best", "per_model_worst",
-                          "per_model_file_vectors")
+                for k in (
+                    "model_types", "total_experiments", "best_denoising_score",
+                    "worst_denoising_score", "key_findings", "bottlenecks",
+                    "take_home_message", "per_model_best", "per_model_worst",
+                    "per_model_file_vectors",
+                    # Phase E — prediction track record (surfaced to all stages)
+                    "scientific_accuracy", "cumulative_information_gain",
+                    "prediction_outcomes_history",
+                    # Phase C — vocabulary health metric
+                    "vocab_diversity_ratio",
+                )
                 if inp.interpretation.get(k) is not None
             },
             "existing_model_types": inp.existing_model_types,
             "previous_failures": inp.previous_failures,
         }
 
+        # Count confirmed feature→capability links: entries with non-empty related_to.
+        def _get_related(entry) -> list:
+            if hasattr(entry, "related_to"):
+                return getattr(entry, "related_to") or []
+            if isinstance(entry, dict):
+                return entry.get("related_to") or []
+            return []
+
+        n_confirmed_links = sum(
+            1 for v in inp.vocab_seed if _get_related(v)
+        )
         template_vars = {
             "minimum_boldness": str(policy.minimum_boldness),
             "n_agent_proposed": str(len([
                 c for c in candidates if c.get("source") != "seed"
             ])),
-            "n_confirmed_links": "0",  # TODO: count from vocab_seed related_to
+            "n_confirmed_links": str(n_confirmed_links),
             "existing_model_types": ", ".join(inp.existing_model_types),
         }
 
@@ -522,6 +608,55 @@ class MLModelProposalAgent:
                 accumulated[stage.name] = result
 
             print(f"   Stage '{stage.name}': done.")
+
+        # --- Boldness check: re-run causal_reasoning if prediction is too timid ---
+        # Mirrors the B.22 proposing-stage retry but targets Stage 2 specifically.
+        # Stage 1 (comparison) is expensive; we never re-run it for a boldness violation.
+        reasoning_raw = accumulated.get("causal_reasoning")
+        if isinstance(reasoning_raw, dict):
+            pred_raw = reasoning_raw.get("falsifiable_prediction")
+            if pred_raw and isinstance(pred_raw, dict):
+                try:
+                    pred = FalsifiablePrediction.model_validate(pred_raw)
+                    if pred.boldness < policy.minimum_boldness:
+                        print(
+                            f"   Boldness check: boldness={pred.boldness:.4f} < "
+                            f"minimum_boldness={policy.minimum_boldness} — "
+                            f"retrying causal_reasoning."
+                        )
+                        accumulated.setdefault("proposing_stage_errors", []).append(
+                            f"BOLDNESS_TOO_LOW: prediction boldness={pred.boldness:.4f} "
+                            f"is below minimum_boldness={policy.minimum_boldness}. "
+                            f"Current: {pred.current_value}, "
+                            f"Predicted: {pred.predicted_value}. "
+                            f"Make a bolder prediction — increase the delta between "
+                            f"current and predicted value."
+                        )
+                        reasoning_stage = next(
+                            (s for s in pipeline.stages
+                             if s.name == "causal_reasoning" and s.enabled),
+                            None,
+                        )
+                        if reasoning_stage is not None:
+                            retry_system = load_stage_prompt(
+                                "causal_reasoning_stage",
+                                exploration_mode=mode,
+                                template_vars=template_vars,
+                                mindset=inp.mindset,
+                            )
+                            retry_user = json.dumps(accumulated, indent=2, default=str)
+                            if agent_cards_block:
+                                retry_user += f"\n\n{agent_cards_block}"
+                            if expert_context_block:
+                                retry_user += f"\n\n{expert_context_block}"
+                            if vocab_block:
+                                retry_user += f"\n\n{vocab_block}"
+                            print("   Stage 'causal_reasoning': retrying (boldness)...")
+                            accumulated["causal_reasoning"] = self.bridge.generate(
+                                retry_system, retry_user
+                            )
+                except (ValidationError, Exception):
+                    pass  # malformed prediction — let the proposing stage handle it
 
         # --- B.12 + B.22: Proposing stage (always runs last, retries on validation failure) ---
         proposing_prompt = load_stage_prompt(
@@ -588,6 +723,18 @@ class MLModelProposalAgent:
                     "proposed_discoveries":    discoveries,
                     "memo_consistency_notes":  raw.get("memo_consistency_notes", []),
                 })
+                # Citation discipline check — violations are warnings, not hard failures.
+                citation_violations = _check_citation_discipline(
+                    citation_sources=reasoning_output.get("citation_sources", []),
+                    causal_hypothesis=reasoning_output.get("causal_hypothesis", ""),
+                    proposed_change=reasoning_output.get("proposed_change", ""),
+                )
+                if citation_violations:
+                    output.memo_consistency_notes.extend(citation_violations)
+                    print(
+                        f"   Citation check: {len(citation_violations)} violation(s) "
+                        f"appended to memo_consistency_notes."
+                    )
                 print(f"Proposed model (pipeline): '{output.model_name}'")
                 return output
 
@@ -648,13 +795,17 @@ class MLModelProposalAgent:
             for v in features:
                 pattern = _get(v, "pattern")
                 pat_str = f" [pattern: {pattern}]" if pattern else ""
-                lines.append(f"- **{_get(v, 'name')}**: {_get(v, 'description')}{pat_str}")
+                related = _get(v, "related_to", [])
+                rel_str = f" → enables: {', '.join(related)}" if related else ""
+                lines.append(f"- **{_get(v, 'name')}**: {_get(v, 'description')}{pat_str}{rel_str}")
             lines.append("")
 
         if capabilities:
             lines.append("### Capabilities (measurable architectural properties)")
             for v in capabilities:
-                lines.append(f"- **{_get(v, 'name')}**: {_get(v, 'description')}")
+                related = _get(v, "related_to", [])
+                rel_str = f" ← enabled by: {', '.join(related)}" if related else ""
+                lines.append(f"- **{_get(v, 'name')}**: {_get(v, 'description')}{rel_str}")
             lines.append("")
 
         if discoveries:
