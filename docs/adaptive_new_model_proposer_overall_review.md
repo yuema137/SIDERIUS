@@ -246,22 +246,24 @@ Stage 2 is re-run (not Stage 1 — comparisons are expensive and don't need to c
 
 ---
 
-### Fix 3 — Citation discipline validator (G2)
+### Fix 3 — Citation discipline validator (G2) ✅ DONE
 **File**: `nodes/ml_model_proposal_agent.py`
 
-Add a `_check_citation_discipline(memo: DiscoveryMemo, expert_context: List[ExpertContextItem]) -> List[str]`
-helper that returns a list of violation messages. For each `cite_id` in
-`memo.citation_sources`, check whether the string appears in `memo.causal_hypothesis` or
-`memo.proposed_change`. Violations are injected as warnings into `memo_consistency_notes`
-(not hard failures — consistent with the doc's intent that this is a flag, not a veto).
+Added module-level `_check_citation_discipline(citation_sources, causal_hypothesis, proposed_change) -> list`
+that returns a violation message for each `cite_id` not appearing verbatim in either text field.
+Violations are appended to `ProposalOutput.memo_consistency_notes` (soft warning, not a hard rejection).
+Wired just before `return output` in the proposing retry block, using the raw `reasoning_output` dict.
 
 **Unit tests**: `tests/unit/agent/ml_model_proposal_agent/test_citation_discipline.py`
-- `test_citation_present_in_causal_hypothesis` — passes
-- `test_citation_present_in_proposed_change` — passes
-- `test_citation_absent_from_both_fields` — violation returned
-- `test_empty_citation_list` — no violations
-- `test_multiple_citations_one_violation` — only the absent one flagged
-- `test_empty_expert_context_no_crash` — no violations
+
+14 tests across two groups:
+
+| Group | What it covers | Tests |
+|-------|---------------|-------|
+| `TestCheckCitationDiscipline` | Pure function: empty list, cite_id in hypothesis, cite_id in proposed_change, absent cite_id, multiple cites (all present / one absent / all absent), empty fields, verbatim-match requirement | 10 |
+| `TestCitationDisciplinePipelineIntegration` | violations appended to `memo_consistency_notes`; no violations when all cited; existing notes preserved; empty `citation_sources` → no notes | 4 |
+
+All 14 tests pass. Committed in two steps: code (`da490d1`), then tests + doc.
 
 ---
 
