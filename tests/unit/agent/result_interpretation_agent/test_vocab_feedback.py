@@ -1,9 +1,11 @@
 """
-Unit tests for Phase C vocabulary feedback loop helpers.
+Unit tests for Phase C+E vocabulary feedback loop helpers.
 
 Tests evaluate_prediction, generate_discoveries, build_runtime_vocab,
-promote_candidates (C.11), seen_in_runs tracking (C.5-3), and
-compute_vocab_diversity_ratio (centrifugal health metric).
+promote_candidates (C.11), seen_in_runs tracking (C.5-3),
+compute_vocab_diversity_ratio (centrifugal health metric),
+update_vocab_link_confirmations (E.7), and scientific_accuracy
+accumulation helpers (E.4).
 """
 import pytest
 from nodes.interpretation_helpers import (
@@ -12,6 +14,7 @@ from nodes.interpretation_helpers import (
     build_runtime_vocab,
     promote_candidates,
     compute_vocab_diversity_ratio,
+    update_vocab_link_confirmations,
 )
 from agent.schemas.proposal import VocabEntry
 
@@ -579,3 +582,199 @@ class TestComputeVocabDiversityRatio:
             VocabEntry(name="d1", kind="discovery", description="x"),
         ]
         assert compute_vocab_diversity_ratio(vocab) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# update_vocab_link_confirmations (Phase E.7)
+# ---------------------------------------------------------------------------
+
+def _feat(name="dilated_causal_conv", related_to=None):
+    return VocabEntry(name=name, kind="feature", description="test",
+                      related_to=related_to or [])
+
+
+def _cap(name="receptive_field"):
+    return VocabEntry(name=name, kind="capability", description="test")
+
+
+def _link(feature="dilated_causal_conv", capability="receptive_field"):
+    return {"feature": feature, "capability": capability, "evidence": "test"}
+
+
+class TestUpdateVocabLinkConfirmations:
+
+    # --- Confirmation counting ---
+
+    def test_confirmed_outcome_increments_count(self):
+        """A 'confirmed' prediction adds run_name to the link's confirmation list."""
+        confs, _, _ = update_vocab_link_confirmations(
+            prev_vocab_links=[_link()],
+            prediction_outcome="confirmed",
+            run_name="run_a",
+            existing_confirmations={},
+            runtime_vocab=[_feat(), _cap()],
+        )
+        assert confs["dilated_causal_conv:receptive_field"] == ["run_a"]
+
+    def test_partial_outcome_does_not_increment(self):
+        """'partial' outcome leaves confirmation counts unchanged."""
+        confs, _, _ = update_vocab_link_confirmations(
+            prev_vocab_links=[_link()],
+            prediction_outcome="partial",
+            run_name="run_a",
+            existing_confirmations={},
+            runtime_vocab=[_feat(), _cap()],
+        )
+        assert confs.get("dilated_causal_conv:receptive_field", []) == []
+
+    def test_refuted_outcome_does_not_increment(self):
+        """'refuted' outcome leaves confirmation counts unchanged."""
+        confs, _, _ = update_vocab_link_confirmations(
+            prev_vocab_links=[_link()],
+            prediction_outcome="refuted",
+            run_name="run_a",
+            existing_confirmations={},
+            runtime_vocab=[_feat(), _cap()],
+        )
+        assert confs.get("dilated_causal_conv:receptive_field", []) == []
+
+    def test_none_outcome_does_not_increment(self):
+        """None outcome (first iteration) leaves counts unchanged."""
+        confs, _, _ = update_vocab_link_confirmations(
+            prev_vocab_links=[_link()],
+            prediction_outcome=None,
+            run_name="run_a",
+            existing_confirmations={},
+            runtime_vocab=[_feat(), _cap()],
+        )
+        assert confs.get("dilated_causal_conv:receptive_field", []) == []
+
+    def test_same_run_not_counted_twice(self):
+        """Confirming the same run twice keeps only one entry."""
+        existing = {"dilated_causal_conv:receptive_field": ["run_a"]}
+        confs, _, _ = update_vocab_link_confirmations(
+            prev_vocab_links=[_link()],
+            prediction_outcome="confirmed",
+            run_name="run_a",
+            existing_confirmations=existing,
+            runtime_vocab=[_feat(), _cap()],
+        )
+        assert confs["dilated_causal_conv:receptive_field"].count("run_a") == 1
+
+    def test_different_runs_accumulated(self):
+        """Confirmations from different runs stack up correctly."""
+        existing = {"dilated_causal_conv:receptive_field": ["run_a", "run_b"]}
+        confs, _, _ = update_vocab_link_confirmations(
+            prev_vocab_links=[_link()],
+            prediction_outcome="confirmed",
+            run_name="run_c",
+            existing_confirmations=existing,
+            runtime_vocab=[_feat(), _cap()],
+        )
+        assert set(confs["dilated_causal_conv:receptive_field"]) == {"run_a", "run_b", "run_c"}
+
+    # --- related_to promotion ---
+
+    def test_promotes_to_related_to_at_threshold(self):
+        """When count reaches min_runs, capability added to feature.related_to."""
+        existing = {"dilated_causal_conv:receptive_field": ["run_a", "run_b"]}
+        confs, vocab, promoted = update_vocab_link_confirmations(
+            prev_vocab_links=[_link()],
+            prediction_outcome="confirmed",
+            run_name="run_c",  # 3rd confirmation → trigger
+            existing_confirmations=existing,
+            runtime_vocab=[_feat(), _cap()],
+            min_runs=3,
+        )
+        assert "dilated_causal_conv:receptive_field" in promoted
+        feat = next(v for v in vocab if v.name == "dilated_causal_conv")
+        assert "receptive_field" in feat.related_to
+
+    def test_below_threshold_no_promotion(self):
+        """Two confirmations with min_runs=3 → no promotion yet."""
+        existing = {"dilated_causal_conv:receptive_field": ["run_a"]}
+        confs, vocab, promoted = update_vocab_link_confirmations(
+            prev_vocab_links=[_link()],
+            prediction_outcome="confirmed",
+            run_name="run_b",  # only 2nd confirmation
+            existing_confirmations=existing,
+            runtime_vocab=[_feat(), _cap()],
+            min_runs=3,
+        )
+        assert promoted == []
+        feat = next(v for v in vocab if v.name == "dilated_causal_conv")
+        assert "receptive_field" not in feat.related_to
+
+    def test_already_in_related_to_not_promoted_twice(self):
+        """If capability already in related_to, it is not added again."""
+        existing = {"dilated_causal_conv:receptive_field": ["run_a", "run_b"]}
+        # Feature already has capability in related_to from a previous iteration
+        feat_with_link = _feat(related_to=["receptive_field"])
+        confs, vocab, promoted = update_vocab_link_confirmations(
+            prev_vocab_links=[_link()],
+            prediction_outcome="confirmed",
+            run_name="run_c",
+            existing_confirmations=existing,
+            runtime_vocab=[feat_with_link, _cap()],
+            min_runs=3,
+        )
+        assert promoted == []
+        feat = next(v for v in vocab if v.name == "dilated_causal_conv")
+        assert feat.related_to.count("receptive_field") == 1
+
+    def test_feature_not_in_vocab_no_crash(self):
+        """Link referencing a feature not in runtime_vocab is silently skipped."""
+        existing = {"unknown_feat:receptive_field": ["run_a", "run_b"]}
+        _, vocab, promoted = update_vocab_link_confirmations(
+            prev_vocab_links=[{"feature": "unknown_feat", "capability": "receptive_field", "evidence": "x"}],
+            prediction_outcome="confirmed",
+            run_name="run_c",
+            existing_confirmations=existing,
+            runtime_vocab=[_cap()],  # feature not present
+            min_runs=3,
+        )
+        assert promoted == []
+
+    def test_multiple_links_promoted_independently(self):
+        """Multiple links in one proposal can be promoted independently."""
+        existing = {
+            "dilated_causal_conv:receptive_field": ["run_a", "run_b"],
+            "gated_activation:frequency_resolution": ["run_a", "run_b"],
+        }
+        vocab = [
+            _feat("dilated_causal_conv"),
+            _feat("gated_activation"),
+            _cap("receptive_field"),
+            VocabEntry(name="frequency_resolution", kind="capability", description="test"),
+        ]
+        links = [
+            _link("dilated_causal_conv", "receptive_field"),
+            _link("gated_activation", "frequency_resolution"),
+        ]
+        confs, updated_vocab, promoted = update_vocab_link_confirmations(
+            prev_vocab_links=links,
+            prediction_outcome="confirmed",
+            run_name="run_c",
+            existing_confirmations=existing,
+            runtime_vocab=vocab,
+            min_runs=3,
+        )
+        assert len(promoted) == 2
+        dc = next(v for v in updated_vocab if v.name == "dilated_causal_conv")
+        ga = next(v for v in updated_vocab if v.name == "gated_activation")
+        assert "receptive_field" in dc.related_to
+        assert "frequency_resolution" in ga.related_to
+
+    def test_does_not_mutate_existing_confirmations(self):
+        """existing_confirmations dict is not mutated in place."""
+        existing = {"dilated_causal_conv:receptive_field": ["run_a"]}
+        original_list = existing["dilated_causal_conv:receptive_field"]
+        update_vocab_link_confirmations(
+            prev_vocab_links=[_link()],
+            prediction_outcome="confirmed",
+            run_name="run_b",
+            existing_confirmations=existing,
+            runtime_vocab=[_feat(), _cap()],
+        )
+        assert existing["dilated_causal_conv:receptive_field"] is original_list
+        assert "run_b" not in original_list

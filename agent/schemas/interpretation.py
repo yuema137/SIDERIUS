@@ -198,6 +198,22 @@ class InterpretationInput(BaseModel):
                     "via the workflow's carry-forward logic. Zero on the first iteration.",
     )
 
+    # --- Scientific accuracy (carried forward across iterations) ---
+    prediction_outcomes_history: Dict[str, int] = Field(
+        default_factory=lambda: {"confirmed": 0, "partial": 0, "refuted": 0},
+        description="Running count of each prediction outcome across all past iterations. "
+                    "Carry forward from InterpretationOutput.prediction_outcomes_history. "
+                    "Zero on first iteration.",
+    )
+
+    # --- Vocab link promotion tracking (carried forward across iterations) ---
+    vocab_link_confirmations: Dict[str, List[str]] = Field(
+        default_factory=dict,
+        description="Carry-forward mapping: 'feature:capability' → list of run_names "
+                    "where that link was confirmed. Populated by "
+                    "InterpretationOutput.vocab_link_confirmations. Empty on first iteration.",
+    )
+
     storage: StorageConfig = Field(
         default_factory=lambda: StorageConfig(
             backend="local",
@@ -367,4 +383,27 @@ class InterpretationOutput(BaseModel):
                     "Unchanged when predictions are refuted or partial. "
                     "Surfaced to the Phase 2 synthesis prompt so the LLM can see "
                     "how much confirmed knowledge has been built up over the run.",
+    )
+
+    # --- Scientific accuracy (Phase E) ---
+    scientific_accuracy: Optional[Dict[str, float]] = Field(
+        default=None,
+        description="Prediction hit-rate fractions: e.g. {'confirmed': 0.38, 'partial': 0.22, "
+                    "'refuted': 0.40}. Values sum to 1.0. None until the first prediction "
+                    "has been evaluated (first iteration has no prior prediction).",
+    )
+    prediction_outcomes_history: Dict[str, int] = Field(
+        default_factory=lambda: {"confirmed": 0, "partial": 0, "refuted": 0},
+        description="Cumulative count of each prediction outcome across all iterations. "
+                    "Carry forward as InterpretationInput.prediction_outcomes_history "
+                    "in the next iteration.",
+    )
+
+    # --- Vocab link promotion (Phase E.7) ---
+    vocab_link_confirmations: Dict[str, List[str]] = Field(
+        default_factory=dict,
+        description="Updated feature→capability link confirmation counts: "
+                    "'feature:capability' → list of run_names where the link was confirmed. "
+                    "Carry forward as InterpretationInput.vocab_link_confirmations "
+                    "in the next iteration.",
     )

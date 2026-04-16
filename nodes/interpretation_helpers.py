@@ -399,3 +399,83 @@ def build_runtime_vocab(
                 )
 
     return list(vocab_by_name.values())
+
+
+def update_vocab_link_confirmations(
+    prev_vocab_links: List[Dict[str, Any]],
+    prediction_outcome: Optional[str],
+    run_name: str,
+    existing_confirmations: Dict[str, List[str]],
+    runtime_vocab: List[VocabEntry],
+    min_runs: int = 3,
+) -> tuple[Dict[str, List[str]], List[VocabEntry], List[str]]:
+    """
+    Update vocab link confirmation tracking and promote confirmed links to VocabEntry.related_to.
+
+    A ``ProposedVocabLink`` asserts that a feature enables a capability.
+    When the experiment's prediction_outcome is ``'confirmed'`` (the model beat
+    SOTA), every proposed link from that run is counted as one confirmation for
+    the feature→capability pair.  Once a pair has been confirmed in ≥ min_runs
+    distinct runs, the capability name is added to the feature's
+    ``VocabEntry.related_to`` in ``runtime_vocab`` — the relationship graduates
+    from hypothesis to established fact.
+
+    Only ``'confirmed'`` predictions count; ``'partial'`` and ``'refuted'``
+    outcomes leave link counts unchanged.
+
+    Args:
+        prev_vocab_links: ``proposed_vocab_links`` from the previous proposal.
+                          Each dict must have ``'feature'`` and ``'capability'`` keys.
+        prediction_outcome: Outcome from evaluate_prediction — 'confirmed',
+                            'partial', 'refuted', or None.
+        run_name: Identifier for this run (typically model_type).  Used to
+                  deduplicate: the same run can only confirm a link once.
+        existing_confirmations: Carry-forward mapping from 'feature:capability'
+                                to list of confirming run_names.
+        runtime_vocab: Current runtime vocabulary to update related_to in.
+        min_runs: Confirmation threshold for promotion. Default 3.
+
+    Returns:
+        (updated_confirmations, updated_vocab, newly_promoted_pairs)
+        where newly_promoted_pairs is a list of 'feature:capability' strings
+        that were promoted to VocabEntry.related_to in this call.
+    """
+    # Deep-copy confirmations so we never mutate the caller's dict
+    updated_confs: Dict[str, List[str]] = {k: list(v) for k, v in existing_confirmations.items()}
+
+    # Record confirmations from this run (only when prediction was confirmed)
+    if prediction_outcome == "confirmed" and run_name:
+        for link in prev_vocab_links:
+            feature = link.get("feature", "")
+            capability = link.get("capability", "")
+            if not feature or not capability:
+                continue
+            key = f"{feature}:{capability}"
+            if key not in updated_confs:
+                updated_confs[key] = []
+            if run_name not in updated_confs[key]:
+                updated_confs[key].append(run_name)
+
+    # Promote pairs that have enough confirmations to VocabEntry.related_to
+    # Build an index for O(1) feature lookup
+    vocab_by_name: Dict[str, VocabEntry] = {}
+    for entry in runtime_vocab:
+        name = entry.name if hasattr(entry, "name") else entry.get("name", "")
+        vocab_by_name[name] = entry
+
+    newly_promoted: List[str] = []
+    for key, run_names in updated_confs.items():
+        if len(run_names) < min_runs:
+            continue
+        feature, _, capability = key.partition(":")
+        feat_entry = vocab_by_name.get(feature)
+        if feat_entry is None:
+            continue
+        existing_related = feat_entry.related_to if hasattr(feat_entry, "related_to") else feat_entry.get("related_to", [])
+        if capability not in existing_related:
+            updated = feat_entry.model_copy(update={"related_to": list(existing_related) + [capability]})
+            vocab_by_name[feature] = updated
+            newly_promoted.append(key)
+
+    updated_vocab = list(vocab_by_name.values())
+    return updated_confs, updated_vocab, newly_promoted
