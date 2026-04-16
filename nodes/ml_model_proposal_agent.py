@@ -180,6 +180,37 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
         "",
     ]
 
+    # Phase E — prediction track record (scientific accuracy + information gain)
+    sci_acc   = interp.get("scientific_accuracy")
+    cum_ig    = interp.get("cumulative_information_gain")
+    pred_hist = interp.get("prediction_outcomes_history") or {}
+    if sci_acc is not None or cum_ig is not None:
+        lines.append("### Prediction Track Record")
+        total = sum(pred_hist.values()) if pred_hist else 0
+        if cum_ig is not None:
+            lines.append(f"  Cumulative information gain : {cum_ig:.3f}")
+        if sci_acc is not None:
+            confirmed_pct = sci_acc.get("confirmed", 0.0) * 100
+            partial_pct   = sci_acc.get("partial",   0.0) * 100
+            refuted_pct   = sci_acc.get("refuted",   0.0) * 100
+            lines.append(
+                f"  Scientific accuracy (N={total}) : "
+                f"confirmed={confirmed_pct:.0f}%  "
+                f"partial={partial_pct:.0f}%  "
+                f"refuted={refuted_pct:.0f}%"
+            )
+        lines.append("")
+
+    # Phase C — vocabulary health
+    vdr = interp.get("vocab_diversity_ratio")
+    if vdr is not None:
+        lines += [
+            "### Vocabulary Health",
+            f"  Diversity ratio : {vdr:.2f}  "
+            f"({'LOW — consider proposing new vocabulary entries' if vdr < 0.1 else 'OK'})",
+            "",
+        ]
+
     # Frequency analysis (from enriched interpretation)
     freq_comp = interp.get("frequency_comparison")
     if freq_comp:
@@ -463,22 +494,40 @@ class MLModelProposalAgent:
             "non_candidates_overview": non_candidates_overview,
             "interpretation_summary": {
                 k: inp.interpretation.get(k)
-                for k in ("model_types", "total_experiments", "best_denoising_score",
-                          "worst_denoising_score", "key_findings", "bottlenecks",
-                          "take_home_message", "per_model_best", "per_model_worst",
-                          "per_model_file_vectors")
+                for k in (
+                    "model_types", "total_experiments", "best_denoising_score",
+                    "worst_denoising_score", "key_findings", "bottlenecks",
+                    "take_home_message", "per_model_best", "per_model_worst",
+                    "per_model_file_vectors",
+                    # Phase E — prediction track record (surfaced to all stages)
+                    "scientific_accuracy", "cumulative_information_gain",
+                    "prediction_outcomes_history",
+                    # Phase C — vocabulary health metric
+                    "vocab_diversity_ratio",
+                )
                 if inp.interpretation.get(k) is not None
             },
             "existing_model_types": inp.existing_model_types,
             "previous_failures": inp.previous_failures,
         }
 
+        # Count confirmed feature→capability links: entries with non-empty related_to.
+        def _get_related(entry) -> list:
+            if hasattr(entry, "related_to"):
+                return getattr(entry, "related_to") or []
+            if isinstance(entry, dict):
+                return entry.get("related_to") or []
+            return []
+
+        n_confirmed_links = sum(
+            1 for v in inp.vocab_seed if _get_related(v)
+        )
         template_vars = {
             "minimum_boldness": str(policy.minimum_boldness),
             "n_agent_proposed": str(len([
                 c for c in candidates if c.get("source") != "seed"
             ])),
-            "n_confirmed_links": "0",  # TODO: count from vocab_seed related_to
+            "n_confirmed_links": str(n_confirmed_links),
             "existing_model_types": ", ".join(inp.existing_model_types),
         }
 
@@ -648,13 +697,17 @@ class MLModelProposalAgent:
             for v in features:
                 pattern = _get(v, "pattern")
                 pat_str = f" [pattern: {pattern}]" if pattern else ""
-                lines.append(f"- **{_get(v, 'name')}**: {_get(v, 'description')}{pat_str}")
+                related = _get(v, "related_to", [])
+                rel_str = f" → enables: {', '.join(related)}" if related else ""
+                lines.append(f"- **{_get(v, 'name')}**: {_get(v, 'description')}{pat_str}{rel_str}")
             lines.append("")
 
         if capabilities:
             lines.append("### Capabilities (measurable architectural properties)")
             for v in capabilities:
-                lines.append(f"- **{_get(v, 'name')}**: {_get(v, 'description')}")
+                related = _get(v, "related_to", [])
+                rel_str = f" ← enabled by: {', '.join(related)}" if related else ""
+                lines.append(f"- **{_get(v, 'name')}**: {_get(v, 'description')}{rel_str}")
             lines.append("")
 
         if discoveries:
