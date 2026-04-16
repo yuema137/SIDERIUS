@@ -52,8 +52,9 @@ def local_validated_model(
     max_epochs: Optional[int] = None,
     max_retries: Optional[int] = None,
     plan_overrides: Optional[Dict[str, Any]] = None,
-    # --- Time-budget gate (evaluate_time_skill) ---
-    time_budget_minutes: Optional[float] = None,
+    # --- Time-budget gate (evaluate_time_skill, Phase I two-budget split) ---
+    trial_time_budget_minutes: Optional[float] = None,
+    formal_time_budget_minutes: Optional[float] = None,
     data_dir: Optional[str] = None,
 ) -> HyperparamTuningInput:
     """
@@ -87,10 +88,13 @@ def local_validated_model(
       - reflect_model_id : optional separate model for the tuner's
         reflect() call. None means the reflector uses llm_model_id.
       - is_trial + trial_*: trial mode configuration (caller-supplied, defaults to single-file)
-      - time_budget_minutes / data_dir : workflow-supplied run-level context for
-        the tuner's per-round evaluate_time_skill gate. Both default to None;
-        when time_budget_minutes is None the gate is skipped (one-time warning).
-        See §2.7.2 fan-in.
+      - trial_time_budget_minutes / formal_time_budget_minutes / data_dir :
+        workflow-supplied run-level context for the tuner's per-round
+        evaluate_time_skill gate (Phase I two-budget split). Each budget
+        defaults to None; the per-round gate picks the one matching
+        plan.is_trial. When the chosen budget is None the gate is skipped
+        for that round (one-time warning per mode at startup).
+        See §2.7.2 fan-in / Phase I.
     """
     # Prepend planner-visible warnings to expert_advice so the tuner's planner
     # knows up front about (a) implementation deviating from the spec, (b)
@@ -140,7 +144,8 @@ def local_validated_model(
         max_epochs=max_epochs,
         max_retries=max_retries,
         plan_overrides=plan_overrides or {},
-        time_budget_minutes=time_budget_minutes,
+        trial_time_budget_minutes=trial_time_budget_minutes,
+        formal_time_budget_minutes=formal_time_budget_minutes,
         data_dir=data_dir,
     )
 
