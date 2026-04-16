@@ -404,7 +404,7 @@ class MLModelProposalAgent:
     def _run_pipeline(self, inp: ProposalInput) -> ProposalOutput:
         """Three-stage pipeline: comparison → reasoning → proposing."""
         from nodes.proposal_helpers import select_candidate_models, resolve_exploration_mode, enrich_candidates_with_source
-        from agent.prompt_templates.proposal import load_stage_prompt, render_expert_context
+        from agent.prompt_templates.proposal import load_stage_prompt, render_expert_context, render_agent_cards
 
         pipeline = inp.reasoning_pipeline
         policy = pipeline.policy
@@ -453,6 +453,7 @@ class MLModelProposalAgent:
               f"non-candidates: {[o['model_type'] for o in non_candidates_overview]}")
 
         # Prepare shared context for all stages
+        agent_cards_block = render_agent_cards(inp.agent_cards)
         expert_context_block = render_expert_context(inp.expert_context)
         vocab_block = self._render_vocabulary(inp.vocab_seed)
 
@@ -503,8 +504,10 @@ class MLModelProposalAgent:
                 mindset=inp.mindset,
             )
 
-            # Build user prompt: accumulated context + expert context + vocab
+            # Build user prompt: accumulated context + agent cards + expert context + vocab
             user_prompt = json.dumps(accumulated, indent=2, default=str)
+            if agent_cards_block:
+                user_prompt += f"\n\n{agent_cards_block}"
             if expert_context_block:
                 user_prompt += f"\n\n{expert_context_block}"
             if vocab_block:
@@ -554,6 +557,8 @@ class MLModelProposalAgent:
         last_exc: Exception | None = None
         for attempt in range(_MAX_PROPOSING_RETRIES + 1):
             proposing_user = json.dumps(accumulated, indent=2, default=str)
+            if agent_cards_block:
+                proposing_user += f"\n\n{agent_cards_block}"
             if expert_context_block:
                 proposing_user += f"\n\n{expert_context_block}"
 
