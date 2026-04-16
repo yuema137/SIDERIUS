@@ -1,6 +1,6 @@
 # Time-Budget Estimator Skill
 
-**Status**: implemented (Phases A–G complete; H deferred to first SDSC run)
+**Status**: implemented (Phases A–G complete; H1 lilab + H2 SDSC smoke runs deferred — different environments, see Phase H)
 **Author**: design discussion 2026-04-16
 **Motivation**: two trial-mode runs (`exploit_cnn_v1`, `explore_novel_v1`) stalled in Round 1 for 1h 50min and 2h 27min respectively, both blowing past the 1-hour trial budget stated in the expert advice. Neither was blocked, because the planner has no pre-flight wall-time estimate — only a VRAM check.
 
@@ -17,7 +17,8 @@
 | E2 — proposer baseline gate | 2026-04-16 | `f6e3b19` | 11 new tests (240 proposer total) |
 | F — per-GPU calibration (asymmetric EMA) | 2026-04-16 | `12813a0` | 29 new calibration tests (409 tuner+proposer total) |
 | G — `.gitignore` housekeeping | 2026-04-16 | (this commit) | n/a |
-| H — first real-GPU smoke run | deferred | — | requires GPU + `data_dir`; gated until next SDSC submit |
+| H1 — lilab smoke run (interactive GPU) | deferred | — | local end-to-end; catches code-level bugs before SDSC |
+| H2 — SDSC smoke run (Slurm batch, chained) | deferred | — | gated on H1 passing; tests batch-system specifics (env-var override, GPU stability across restarts, concurrent-writer safety) |
 
 ---
 
@@ -624,14 +625,44 @@ What remains here is just the gitignore housekeeping:
 - [x] `time_calibration_*.json` added to `.gitignore` (defensive — the file lives at `~/.siderius/` by default per §2.6.4, but the `SIDERIUS_CALIBRATION_DIR` env-var override could land it inside the repo tree).
 - **Verified**: `git check-ignore time_calibration_test.json` → matches `.gitignore:47`.
 
-### Phase H — First real-GPU smoke run [deferred]
+### Phase H — First real-GPU smoke run
 
-H requires a real GPU and a populated `data_dir`, so it can't run on the dev box. Gated until the next SDSC submission. Acceptance criteria when it does run:
+H is **two separate runs on two separate environments**. They test different things and the acceptance criteria only partially overlap. Do H1 first (faster iteration, no queue wait); only move to H2 once H1's calibration entries look sane.
 
-- [ ] Re-run a shortened config known to be over-budget with `--time_budget_minutes 10`. Confirm skill blocks it and the `skipped_time_risk` record lands.
-- [ ] Re-run a config expected to finish in ~5 min with `--time_budget_minutes 30`. Confirm: gate passes, training completes, the per-GPU calibration file gains an entry, and `k` shifts in the expected direction (down if the warmup over-predicted, up if it under-predicted).
-- [ ] Inspect the post-run calibration file at `~/.siderius/time_calibration_<gpu>.json`; confirm the `history` entry shape matches `make_entry`'s contract and `estimate_violated` is consistent with `actual_minutes` vs `estimated_minutes`.
-- [ ] Update the Status line above to `implemented + smoke-tested` once H lands; append the H row to the Progress log with the SDSC job ID.
+---
+
+#### Phase H1 — lilab (local interactive GPU) [deferred]
+
+Lilab is a single-host interactive GPU box. The skill runs in-process, the calibration file lives at `~/.siderius/time_calibration_<gpu>.json`, and the `_measure_ms_per_step` warmup path is fully exercised. This is where we catch code-level bugs — torch device placement, DataLoader worker count, HDF5 access, `_count_params` for each real model class, the atomic-write race on a hot filesystem.
+
+- [ ] Submit an over-budget config with `--time_budget_minutes 10` and a config known to need ~30 min → confirm the tuner gate blocks round 1 and a `skipped_time_risk` record lands in the workspace.
+- [ ] Submit a ~5-min config with `--time_budget_minutes 30` → confirm the gate passes, training completes, `~/.siderius/time_calibration_<lilab_gpu>.json` gains a history entry, and `k` shifts in the right direction (down if warmup over-predicted, up if it under-predicted).
+- [ ] Inspect the history entry: `ratio` finite, `estimate_violated` consistent with `actual_minutes > estimated_minutes`, UTC timestamp present.
+- [ ] Run the same config a **second time** — confirm `k` is re-read from disk (no in-process cache) and the EMA blends the two entries as expected.
+- [ ] Mark H1 `[x]` with the lilab GPU name and run_name in the Progress log.
+
+H1 acceptance = the skill runs end-to-end on a real GPU with real data. No batch-system concerns.
+
+---
+
+#### Phase H2 — SDSC Expanse (Slurm batch, job-chained) [deferred, after H1]
+
+SDSC is structurally different from lilab: jobs are Slurm-submitted with `afterany+48G` chaining, walltime is a hard kill (not a soft budget), `$HOME`/`$SCRATCH` have separate quotas, and a single logical run can span multiple physical nodes (each restart lands in a new job). The skill's behaviour changes in ways H1 can't catch:
+
+1. **Calibration file location.** `~/` on SDSC is quota-constrained — the user may prefer `$SCRATCH` via `SIDERIUS_CALIBRATION_DIR`. Confirm the env override resolves correctly inside the Slurm job's environment, not just the login shell.
+2. **GPU-name stability across restarts.** The design claim (§2.6.4) is that `torch.cuda.get_device_name(0)` is stable even when Slurm reassigns the job to a different node with the same GPU model. H1 can't test this. H2 must.
+3. **Budget sizing against walltime.** `--time_budget_minutes` must be set **strictly less than** the Slurm `--time` flag so the gate fires before Slurm does. Confirm the rejection path produces a clean `skipped_time_risk` record and the job exits gracefully rather than being killed mid-training.
+4. **Concurrent-writer safety.** Two chained jobs on the same GPU model may overlap briefly during handoff. The atomic `tmp + rename` in `save_table` should hold, but H2 is the first time it's tested under real concurrency.
+
+Acceptance criteria:
+
+- [ ] Submit an over-budget sbatch job with `--time_budget_minutes 10` below the `--time` walltime → gate fires, `skipped_time_risk` lands, job exits clean before walltime kill.
+- [ ] Submit an under-budget job → training completes, calibration entry lands in whichever directory `SIDERIUS_CALIBRATION_DIR` resolved to inside the job.
+- [ ] Submit a **chained** pair of jobs (job B `--dependency=afterany:<job_A>`) on the same GPU model → confirm B reads A's calibration file correctly and appends (doesn't overwrite) the history.
+- [ ] If Slurm lands the two jobs on different physical nodes, confirm both produce the same filename (same GPU → same slug).
+- [ ] Update Status line to `implemented + smoke-tested (lilab + SDSC)`; append H2 row to Progress log with SDSC job IDs.
+
+H2 acceptance = the skill is safe to leave on by default in the production SDSC workflow.
 
 ---
 
