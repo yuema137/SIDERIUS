@@ -54,6 +54,14 @@ def parse_args():
         help="Path to the JSON advice file (propose/implement/tune keys).",
     )
     parser.add_argument(
+        "--llm_config", type=str, default=None,
+        help=(
+            "Path to a WorkflowLLMConfig JSON file for per-node model routing "
+            "(e.g. llm_configs/openai_tiered_v1.json). "
+            "When omitted, defaults to uniform gemini-3.1-pro-preview."
+        ),
+    )
+    parser.add_argument(
         "--max_iterations", type=int, default=20,
         help="Number of propose->implement->validate->tune iterations.",
     )
@@ -85,6 +93,25 @@ def parse_args():
         "--source_paths", type=str, nargs="+", default=None,
         help="Seed run output JSON paths. Defaults to wavenet + punet trial runs.",
     )
+    parser.add_argument(
+        "--exploration_mode", type=str, default="auto",
+        choices=["auto", "explore", "exploit"],
+        help=(
+            "Reasoning pipeline mode. 'auto' resolves dynamically from n_agent_proposed "
+            "and vocab_diversity_ratio. 'explore' forces novel architecture search "
+            "(use with exploration_adaptive_v3 advice). 'exploit' forces incremental "
+            "refinement of the current SOTA."
+        ),
+    )
+    parser.add_argument(
+        "--minimum_boldness", type=float, default=0.05,
+        help=(
+            "Minimum boldness threshold for FalsifiablePrediction: "
+            "|predicted - current| / |current| must exceed this value. "
+            "Predictions below the threshold trigger a causal_reasoning retry. "
+            "Default 0.05 (5%% relative improvement required)."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -110,12 +137,14 @@ def main():
     with open(args.advice) as f:
         advice = json.load(f)
 
-    # LLM config
-    llm_config = WorkflowLLMConfig.uniform(
-        "gemini", "gemini-3.1-pro-preview",
-        reflect_provider="gemini",
-        reflect_model_id="gemini-2.5-flash",
-    )
+    # LLM config — from file if provided, else default uniform gemini
+    if args.llm_config:
+        if not os.path.exists(args.llm_config):
+            print(f"ERROR: LLM config file not found: {args.llm_config}")
+            sys.exit(1)
+        llm_config = WorkflowLLMConfig.from_json(args.llm_config)
+    else:
+        llm_config = WorkflowLLMConfig.uniform("gemini", "gemini-3.1-pro-preview")
 
     # Print summary
     print("=" * 60)
@@ -126,7 +155,10 @@ def main():
     print(f"  Rounds/iter: {args.max_rounds}  |  Max epochs: {args.max_epochs}")
     print(f"  Trial portion: {args.trial_portion}  |  Train portion: {args.train_portion}  |  Eval portion: {args.eval_portion}")
     print(f"  Advice    : {args.advice}")
+    print(f"  LLM config: {args.llm_config or 'default (gemini-3.1-pro-preview uniform)'}")
     print(f"  Seeds     : {len(source_paths)} models")
+    print(f"  Exploration mode : {args.exploration_mode}")
+    print(f"  Min boldness     : {args.minimum_boldness}")
     print("=" * 60)
 
     run_workflow(
@@ -157,6 +189,9 @@ def main():
         human_advice_mindset=advice.get("mindset"),
         # Cleanup denoised files to save disk
         cleanup_denoised=True,
+        # Reasoning pipeline
+        exploration_mode=args.exploration_mode,
+        minimum_boldness=args.minimum_boldness,
     )
 
 
