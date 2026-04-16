@@ -648,7 +648,6 @@ These existing pieces are doing their job and need no change:
 | **C** | Add `VocabEntry`-based lineage validator (`check_inherited_components` for features). Implement the vocabulary feedback loop: prediction evaluation, discovery generation, `seen_in_runs` accumulation, candidate promotion (count-only MVP, ≥3 runs), semantic dedup (`_dedup_promoted()`). Two-tier model context (`non_candidates_overview`). O(1) LLM call count via `model_knowledge_cache`. `ProposedVocabLink` promotion (`confirmed → VocabEntry.related_to`) completed in Phase E. | medium | Vocabulary compounds across iterations. Each round's discoveries feed the next proposal. Lineage claims are validated in code. |
 | **E** | ✅ **Complete.** SOTA-based `evaluate_prediction()`: compares actual score against the SOTA at proposal time (`FalsifiablePrediction.current_value`), not the LLM's predicted value (which is unreliable). Outcomes: `confirmed` (beat SOTA), `partial` (within 5%), `refuted` (clearly below). `delta_from_sota` quantifies the gap. `scientific_accuracy` + `prediction_outcomes_history` carry-forward fields track hit rates across iterations. `update_vocab_link_confirmations()` helper: `confirmed` predictions accumulate per-run counts for each `feature:capability` link; links confirmed in ≥3 distinct runs are promoted to `VocabEntry.related_to`. All evaluation lives in `result_interpretation_agent` — architecturally cleaner than the original plan (which put it in the tuning agent reflector). 939 unit tests passing. | small | The proposal agent's scientific accuracy is now a measurable, monitorable quantity. `ProposedVocabLink` hypotheses graduate to established facts after sufficient empirical confirmation. |
 | **F** | ✅ **Complete (infrastructure only).** Receptive-side readiness: `AgentCard` schema + `ProposalInput.agent_cards`; `VocabEntry.origin`; `render_agent_cards()` + Contributors section in stage prompts; `render_expert_context()` dedup + confidence sort; `local_full_context` accepts `mindset`/`agent_cards`. 977 unit tests. **No external agent is built here** — Phase F is the receiving end only. First real test will be `ml_literature_review` (see `docs/external_agents_for_proposer.md`). | small | After Phase F, wiring a new upstream agent = output schema + one protocol file. Nothing in the proposal node changes. |
-| **D** | Add `ResearchDirective` schema and the three guardrail layers in §2C. | medium | Guided mode actually constrains the search to a specific model family when the human directs it. Deferred past E and F because: (1) it is opt-in and locked OFF by default — existing chains are unaffected; (2) it has no immediate prerequisite from E or F; (3) E and F close higher-priority gaps (scientific accuracy, external agent readiness) at lower cost. Implement when focused "deep-dive on WaveNet" experiments are planned. |
 
 Each phase has its own tests. Each is independently revertable. Each is small enough to commit and PR cleanly.
 
@@ -888,40 +887,6 @@ Iteration N:
 - ✅ **Automated (pseudo mode)**: `test_vocab_grows_across_two_iterations` in `tests/integration/workflows/test_vocab_accumulation.py` (@dual_mode, Phase 4 of `docs/pseudo_test_infra.md`). Verifies: `runtime_vocab` grows monotonically across two iterations (iter1=2 entries → iter2=4), no entries dropped, REFUTED/CONFIRMED discoveries generated correctly, protocol maps discoveries into `vocab_seed`. Passes in pseudo mode (0.2s) and real-LLM mode (73s).
 - ✅ **Automated (pseudo mode)**: `test_vocab_candidate_promotion_across_three_iterations` in `tests/integration/workflows/test_vocab_accumulation.py` (@dual_mode, PR #43/#44). Verifies the full promotion pipeline across 3 iterations using fake `ModelRunSummary` objects (no GPU). Asserts: `spectral_gating` accumulates `seen_in_runs` correctly across iterations (1→2→3), `promote_candidates()` fires at count=3, `_dedup_promoted()` runs and keeps the entry, `tier` flips to `"canonical"`, and `vocab_changes` logs the event. Cache hits in iter 2/3 confirm O(1) new LLM calls per iteration.
 - ☐ **Manual (real chain)**: Run 2+ real chain iterations. Check that the proposal agent's reasoning prompt references discovery entries from the previous round — i.e., that the LLM actually uses the accumulated vocabulary to constrain its proposals (not currently testable deterministically).
-
----
-
-### Phase D — `ResearchDirective` guided mode
-
-**Goal**: when a human specifies "deep-dive on WaveNet", the agent structurally cannot drift into unrelated architectures.
-
-**Depends on**: Phase B (guided mode forcibly sets `DiscoveryMemo.sota_model_type`); Phase C (the validator gains two more checks that build on `check_inherited_components`). Sequenced after E and F — see §5 for rationale.
-
-**PR size**: medium.
-
-**Files**:
-- `agent/schemas/proposal.py` — add `ResearchDirective` schema, attach to `ProposalInput`.
-- `nodes/ml_model_proposal_agent.py` — branch on `directive.mode` in the reasoning sub-call. In guided mode, force `DiscoveryMemo.sota_model_type = directive.base_model` and block free choice.
-- `agent/prompts.py` — add the `[GUIDED MODE DIRECTIVE]` block conditionally to the proposal system prompts.
-- `nodes/ml_code_validator_agent.py` — add `check_base_model_inheritance` and `check_forbidden_components` (active only in guided mode).
-- `agent/schemas/primitive_vocab.py` — add `FORBIDDEN_PATTERNS` map (e.g. `attention` → `nn\.MultiheadAttention|self_attention`).
-- `tests/unit/agent/proposal_agent/test_guided_mode.py` (new).
-- `tests/unit/agent/code_validator_agent/test_guided_validators.py` (new).
-
-**Sub-tasks**:
-- ☐ D.1 Define `ResearchDirective` schema with `mode`, `base_model`, `target_components`, `forbidden_components`, `rationale`. Validator: `mode == "guided"` requires `base_model`.
-- ☐ D.2 Attach `research_directive: ResearchDirective` to `ProposalInput`, default = autonomous.
-- ☐ D.3 In `ml_model_proposal_agent`, when in guided mode, override the `sota_model_type` field on the memo BEFORE the LLM call (the LLM is told its anchor, not asked to pick one).
-- ☐ D.4 Add the `[GUIDED MODE DIRECTIVE]` block to the proposal system prompt template, interpolating `base_model`, `target_components`, `forbidden_components`, `rationale`.
-- ☐ D.5 Implement `check_base_model_inheritance`: at least one entry in `inherited_components` must have `from_model_type == directive.base_model`.
-- ☐ D.6 Implement `check_forbidden_components`: define `FORBIDDEN_PATTERNS = {"attention": r"nn\.MultiheadAttention|self_attention", ...}`. Match against the plugin source. Any hit → fail.
-- ☐ D.7 Wire both new checks into the validator, gated on `directive.mode == "guided"`.
-- ☐ D.8 Unit tests: autonomous mode → none of the new checks fire; guided mode with valid proposal → both checks pass; guided mode with proposal omitting base inheritance → fails check D.5; guided mode with proposal containing a forbidden component → fails check D.6.
-- ☐ D.9 Tier-1 integration test: guided run with `base_model="wavenet"` and `forbidden_components=["attention"]`, real LLM → proposal stays on wavenet variants; intentionally adversarial prompt that asks for attention → validator rejects.
-
-**Verify**:
-- `uv run pytest tests/unit/agent/proposal_agent tests/unit/agent/code_validator_agent -q`.
-- Manual: run a guided-mode tuner round and confirm the agent does not drift.
 
 ---
 
@@ -1170,3 +1135,34 @@ See §2A "Centrifugal forces" for the full design rationale of each.
 | **#3 — Error Propagation** | Stage 3 implements Stage 1 hallucinations. | `ProposalOutput.memo_consistency_notes` — Stage 3 flags inconsistencies between DiscoveryMemo and implementability. Validator surfaces as warnings (not veto). Experiment is the primary error-corrector. | ✅ Done (Phase B) — schema field exists, validator surfaces it. |
 | **#4 — Promotion Spuriousness** | Vocab entry promoted because it co-occurred with high scores, not caused them. | Component delta: `avg_score_with − avg_score_without`. Requires ablation runs where the component is absent. `require_positive_delta` flag in `ResearchPolicy` (default True, deferred until ablation data exists). | ☐ Deferred — `require_positive_delta` field exists in schema but is not yet enforced in `promote_candidates()`. Needs ablation run data. |
 | **#5 — Citation Pollution** | LLM cites every `ExpertContextItem` to appear rigorous. | `DiscoveryMemo.citation_sources` capped at `max_length=5`. Validator: each cited `cite_id` must appear verbatim in `causal_hypothesis` or `proposed_change`. | ✅ Done (Phase B) — schema cap + validator check implemented. |
+
+---
+
+## 9. Possible future development — `ResearchDirective` guided mode
+
+**Why deferred**: the `mindset: Optional[str]` field on `ProposalInput` (Phase F) already covers the prompt-layer use case. Writing `mindset = "Deep-dive on WaveNet — all proposals must be WaveNet variants"` injects that instruction into the causal reasoning stage system prompt. For current usage this is sufficient. The extra structural layers below are only warranted if LLM drift is observed in practice during focused deep-dive experiments.
+
+**What `mindset` does not cover** (the value of a future `ResearchDirective`):
+
+| Layer | Mechanism | Covered by `mindset`? |
+|---|---|---|
+| 1 — Prompt | `[GUIDED MODE DIRECTIVE]` block in system prompt | ✅ `mindset` already does this |
+| 2 — Memo anchor | Python code **forces** `DiscoveryMemo.sota_model_type = base_model` before the LLM call — the LLM cannot choose a different anchor | ✗ |
+| 3 — Validator | Hard code checks: `check_base_model_inheritance` (plugin must inherit from base) and `check_forbidden_components` (regex rejects forbidden patterns in source code) | ✗ |
+
+**Design** (from §2C, preserved here for reference):
+
+```python
+class ResearchDirective(BaseModel):
+    mode: Literal["autonomous", "guided"] = "autonomous"
+    base_model: Optional[str] = None        # e.g. "wavenet"
+    target_components: List[str] = []       # must appear in inherited_components
+    forbidden_components: List[str] = []    # e.g. ["attention"] → regex-rejected in code
+    rationale: Optional[str] = None
+```
+
+Attach as `ProposalInput.research_directive` (default = autonomous, fully backward compatible).
+
+**When to implement**: when focused deep-dive experiments are planned and the team has observed the LLM ignoring `mindset`-level guidance. Until then, `mindset` is the right tool.
+
+**Estimated effort**: medium (new schema, memo override logic in proposal agent, two new validator checks, unit + integration tests).
