@@ -122,7 +122,7 @@ class ExpertContextItem(BaseModel):
         description="What type of context this is."
     )
     content: str = Field(
-        max_length=4000,
+        max_length=10000,
         description="The actual advice / finding / constraint."
     )
     cite_id: str = Field(
