@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from agent.schemas.validator import ValidatorOutput
 from agent.schemas.proposal import ProposalOutput
-from agent.schemas.hyperparam_tuning import HyperparamTuningInput
+from agent.schemas.hyperparam_tuning import HyperparamTuningInput, serialize_expert_advice
 from agent.schemas.storage import StorageConfig
 
 
@@ -77,11 +77,19 @@ def local_validated_model(
         reflect() call. None means the reflector uses llm_model_id.
       - is_trial + trial_*: trial mode configuration (caller-supplied, defaults to single-file)
     """
+    # When the implementation deviates from the spec, prepend the warning to
+    # expert_advice so the tuner's planner knows it is not tuning the exact
+    # proposed architecture. This prevents false causal attributions downstream.
+    expert_advice = proposal.expert_advice
+    if output.spec_deviation_notes:
+        base = serialize_expert_advice(expert_advice) if expert_advice else ""
+        expert_advice = f"{output.spec_deviation_notes}\n\n{base}" if base else output.spec_deviation_notes
+
     return HyperparamTuningInput(
         model_type=output.model_type,
         file_index=file_index,
         max_rounds=max_rounds,
-        expert_advice=proposal.expert_advice,
+        expert_advice=expert_advice,
         llm_provider=llm_provider,
         llm_model_id=llm_model_id,
         reflect_provider=reflect_provider,

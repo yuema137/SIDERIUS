@@ -32,7 +32,10 @@ class LLMCodeReview(BaseModel):
         description="Correctness bugs or logical errors found in the code. Empty list if none.",
     )
     passed: bool = Field(
-        description="Overall LLM assessment: True if the implementation is sound for training.",
+        description="Trainability gate: True if the model will run and train without errors. "
+                    "spec_alignment is assessed independently and does NOT affect this field — "
+                    "a model can have spec_alignment=False and passed=True when it is a valid "
+                    "trainable implementation that deviates in implementation details only.",
     )
     notes: str = Field(
         description="Brief overall assessment of the implementation quality.",
@@ -181,6 +184,15 @@ class ValidatorOutput(BaseModel):
     llm_review_notes: Optional[str] = Field(
         default=None,
         description="LLM's brief overall assessment of the implementation.",
+    )
+    spec_deviation_notes: Optional[str] = Field(
+        default=None,
+        description="Human-readable summary of how the implementation deviates from the "
+                    "mathematical spec, when the model passes trainability checks but "
+                    "spec_alignment=False. Propagated to the tuner's expert_advice so the "
+                    "planner knows it is tuning an implementation that differs from the "
+                    "proposed hypothesis. None when spec_alignment=True or when the model "
+                    "failed validation entirely.",
     )
     error_message: Optional[str] = Field(
         default=None,
