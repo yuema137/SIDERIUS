@@ -56,13 +56,20 @@ def _apply_time_gate(output: ProposalOutput, inp: ProposalInput) -> None:
                           downstream tuner round will gate again with the real
                           implementation in place).
 
-    No-op when ``inp.time_budget_minutes is None`` (one-time process warning).
+    No-op when the budget for the active mode (``inp.is_trial`` ?
+    ``trial_time_budget_minutes`` : ``formal_time_budget_minutes``) is None.
+    Phase I splits the single budget into two so each mode has its own ceiling;
+    the proposer picks the one that matches the mode it's estimating against.
     """
     global _TIME_GATE_WARNED
-    if inp.time_budget_minutes is None:
+    chosen_budget = (inp.trial_time_budget_minutes
+                     if inp.is_trial
+                     else inp.formal_time_budget_minutes)
+    if chosen_budget is None:
         if not _TIME_GATE_WARNED:
-            print("[time-gate disabled] time_budget_minutes is None — "
-                  "proposer's baseline gate will not run.")
+            mode_label = "trial" if inp.is_trial else "formal"
+            print(f"[time-gate disabled / {mode_label}] selected mode budget is "
+                  f"None — proposer's baseline gate will not run.")
             _TIME_GATE_WARNED = True
         return
 
@@ -80,8 +87,9 @@ def _apply_time_gate(output: ProposalOutput, inp: ProposalInput) -> None:
         seed=inp.sampling_seed,
     )
 
-    print(f"\n>>> [Baseline time-gate] Checking '{output.model_name}' "
-          f"against {inp.time_budget_minutes:.0f} min budget...")
+    mode_label = "trial" if inp.is_trial else "formal"
+    print(f"\n>>> [Baseline time-gate / {mode_label}] Checking "
+          f"'{output.model_name}' against {chosen_budget:.0f} min budget...")
     skill_module = importlib.import_module(
         "agent.skills.evaluate_time_skill.wrapper"
     )
@@ -96,7 +104,7 @@ def _apply_time_gate(output: ProposalOutput, inp: ProposalInput) -> None:
         loss_config=loss_config,
         sample_set=sample_set,
         train_portion=inp.train_portion,
-        time_budget_minutes=inp.time_budget_minutes,
+        time_budget_minutes=chosen_budget,
         data_dir=inp.data_dir,
     )
 
