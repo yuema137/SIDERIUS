@@ -1,0 +1,107 @@
+[
+    {
+        "_comment": "H.5 Stage 1: Comparison — dilated_causal_conv appears in vocab with → enables: receptive_field",
+        "comparisons": [
+            {
+                "model_type": "wavenet",
+                "source": "seed",
+                "best_score": 5.576,
+                "key_mechanism": "dilated_causal_conv provides exponential receptive field growth (confirmed link: dilated_causal_conv → receptive_field), explaining strong high-freq performance.",
+                "strengths": ["Strong on files 10-19 (scores above 8.0)"],
+                "weaknesses": ["Near-zero on files 0-4 — dilated receptive field insufficient for lowest bands"],
+                "lesson_for_next_proposal": "Inherit dilated_causal_conv. Must extend coverage to very-low frequencies."
+            },
+            {
+                "model_type": "punet",
+                "source": "seed",
+                "best_score": 1.8,
+                "key_mechanism": "encoder_decoder with skip_connection provides multi-scale aggregation.",
+                "strengths": ["Moderate generalization across bands"],
+                "weaknesses": ["Limited receptive field depth"]
+            },
+            {
+                "model_type": "spectral_net",
+                "source": "agent",
+                "best_score": 6.1,
+                "key_mechanism": "FFT-based convolutions directly address the low-frequency band gap identified as a structural limitation of dilated_causal_conv.",
+                "strengths": ["Low-frequency performance significantly improved (files 0-4: 1.5-2.5 vs near-zero for wavenet)"],
+                "weaknesses": ["Very lowest files (0-2) still below 1.0"],
+                "lesson_for_next_proposal": "Spectral processing confirmed as the solution for the low-frequency gap."
+            }
+        ],
+        "proposed_vocab_candidates": [],
+        "proposed_vocab_links": []
+    },
+    {
+        "_comment": "H.5 Stage 2: Causal reasoning — references dilated_causal_conv link, no dangling citations",
+        "proposed_change": "Add a multi-resolution wavelet decomposition layer after the dilated_causal_conv stack to extend receptive_field coverage to sub-10Hz frequencies.",
+        "causal_hypothesis": "The confirmed link (dilated_causal_conv → receptive_field) explains wavenet's strength at mid-frequencies. Wavelet decomposition extends this receptive_field to sub-10Hz bands, addressing the remaining gap at files 0-2.",
+        "citation_sources": [],
+        "falsifiable_prediction": {
+            "metric": "denoising_score",
+            "current_value": 6.1,
+            "predicted_value": 6.5,
+            "threshold_for_refutation": 5.9,
+            "rationale": "Multi-resolution wavelet should recover the remaining sub-10Hz band gap that spectral_conv could not fully address. boldness=0.4/6.1≈0.066>0.05."
+        },
+        "predicted_failure_modes": [
+            "Wavelet transform may introduce phase artifacts at boundaries — use zero-padding if quality degrades at file edges.",
+            "Increased memory from multi-resolution paths — reduce wavelet levels if OOM."
+        ],
+        "inherited_components": [
+            {
+                "component": "dilated_causal_conv",
+                "from_model_type": "wavenet",
+                "contribution_evidence": "Core mechanism behind wavenet's SOTA score of 5.576; confirmed to extend receptive_field."
+            },
+            {
+                "component": "spectral_conv",
+                "from_model_type": "spectral_net",
+                "contribution_evidence": "Addresses the low-frequency gap confirmed in spectral_net's 6.1 score."
+            }
+        ],
+        "proposed_vocab_candidates": []
+    },
+    {
+        "_comment": "H.5 Stage 3: Proposing — wavelet_spectral_net",
+        "model_name": "wavelet_spectral_net",
+        "model_description": "A three-path architecture combining dilated causal convolutions (temporal), spectral convolutions (frequency-domain), and multi-resolution wavelet decomposition (sub-band). The confirmed dilated_causal_conv → receptive_field link motivates the wavelet extension to sub-10Hz coverage.",
+        "mathematical_definition": "Input → dilated_causal_conv stack (N blocks) → [spectral path: RFFT → learnable complex weights → IRFFT | wavelet path: DWT → per-level denoising → IDWT] → merge → output projection.",
+        "motivation": "Spectral_net confirmed (6.1) that frequency-domain processing addresses the low-frequency gap. Wavelet decomposition targets the remaining sub-10Hz band (files 0-2) that spectral convolution did not fully resolve.",
+        "expert_advice": {
+            "focus_areas": ["Sub-10Hz band recovery (files 0-2)", "Wavelet-spectral path balance"],
+            "constraints": ["VRAM < 10 GB", "Parameters < 50M"],
+            "known_failures": ["Pure attention destabilises 1D signal training"],
+            "suggested_directions": [
+                "Start with wavelet_levels=2, spectral_width=32",
+                "Monitor files 0-2 scores specifically — that is the target gap"
+            ],
+            "rationale": "Incremental extension of the confirmed spectral approach with wavelet sub-band decomposition."
+        },
+        "baseline_config": {
+            "model_config": {
+                "model_type": "wavelet_spectral_net",
+                "num_dilated_blocks": 4,
+                "dilation_channels": 16,
+                "spectral_width": 32,
+                "wavelet_levels": 2,
+                "embedding_dim": 8
+            },
+            "train_config": {
+                "lr": 0.0001,
+                "epochs": 5,
+                "batch_size": 128,
+                "optimizer_type": "adamw",
+                "weight_decay": 0.00001,
+                "device": "cuda"
+            },
+            "loss_config": {
+                "loss_type": "focal",
+                "alpha": 0.5,
+                "gamma": 2.0,
+                "reduction": "mean"
+            }
+        },
+        "memo_consistency_notes": []
+    }
+]

@@ -1019,3 +1019,238 @@ def test_scientific_accuracy_and_vocab_links_accumulate(tmp_path, request):
           f"{iter2_output.prediction_outcomes_history}", flush=True)
     print(f"  [h4 iter2] delta_from_sota="
           f"{iter2_output.prediction_evaluation.get('delta_from_sota')}", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# H.5 — VocabEntry.related_to populated at 3 confirmations and rendered
+# ---------------------------------------------------------------------------
+
+@pytest.mark.dual_mode
+def test_vocab_link_confirmed_populates_related_to_and_renders(tmp_path, request):
+    """H.5 — Three confirmed runs promote a vocab link into VocabEntry.related_to,
+    and the rendered form ("→ enables: receptive_field") reaches the proposal
+    agent's Stage 1 user prompt.
+
+    Chain under test:
+      confirmation accumulation → related_to populated → rendered in prompt
+
+    The test pre-seeds vocab_link_confirmations with 2 prior confirmed runs
+    ("run_a", "run_b").  One CONFIRMED interpretation iteration (spectral_net)
+    contributes the 3rd confirmation.  The interpretation agent calls
+    update_vocab_link_confirmations(), which promotes:
+      dilated_causal_conv.related_to = ["receptive_field"]
+    The protocol maps runtime_vocab into ProposalInput.vocab_seed.
+    The proposal agent's _render_vocabulary produces
+    "→ enables: receptive_field" in the vocab block, which is appended to
+    every stage user prompt.
+
+    Pseudo mode: interpretation uses result_interpretation_agent_iter2 canned
+    data (spectral_net CONFIRMED); proposal uses ml_model_proposal_agent_h5
+    canned data.  All Phase E logic (update_vocab_link_confirmations,
+    build_runtime_vocab) is deterministic Python — assertions hold in both modes.
+
+    Real-LLM mode (--real-llm): same fake summaries; real Gemini API calls.
+    The related_to promotion is still deterministic — only vocab rendering
+    and schema validity are LLM-dependent.
+    """
+    from tests.conftest import _is_real_llm
+    from tests.helpers.recording_llm_bridge import RecordingLLMBridge
+    from agent.schemas.proposal import (
+        ProposalOutput, ReasoningPipelineConfig, ReasoningStage,
+    )
+    from agent.schemas.proposal import VocabEntry
+    from nodes.ml_model_proposal_agent import MLModelProposalAgent
+
+    # -----------------------------------------------------------------------
+    # Setup: dilated_causal_conv feature entry + 2 prior confirmations
+    # -----------------------------------------------------------------------
+
+    # A canonical feature entry for dilated_causal_conv — must be in runtime_vocab
+    # for update_vocab_link_confirmations() to find it and update related_to.
+    dilated_conv_entry = VocabEntry(
+        name="dilated_causal_conv",
+        kind="feature",
+        description=(
+            "Stacked dilated causal convolutions with exponentially growing dilation "
+            "factors, providing an exponential receptive field at O(log N) depth."
+        ),
+        tier="canonical",
+        related_to=[],
+    )
+
+    # Two prior CONFIRMED runs have already proposed dilated_causal_conv → receptive_field.
+    # The 3rd confirmation (spectral_net, from this iteration) triggers promotion.
+    prior_confirmations = {
+        "dilated_causal_conv:receptive_field": ["run_a", "run_b"],
+    }
+
+    # -----------------------------------------------------------------------
+    # Interpretation iteration: spectral_net CONFIRMED (3rd confirmation)
+    # Reuses _E4_PROPOSAL_CONFIRMED (model_name="spectral_net",
+    # proposed_vocab_links=[dilated_causal_conv→receptive_field]).
+    # -----------------------------------------------------------------------
+    spectral_net_good = ModelRunSummary(
+        model_type="spectral_net",
+        run_name="h5_v1",
+        status="completed",
+        completed_rounds=3,
+        best_denoising_score=6.1,
+        worst_denoising_score=5.85,
+        best_config={
+            "model_config": {"spectral_channels": 32, "num_blocks": 4},
+            "train_config": {"lr": 1e-4, "epochs": 10},
+            "loss_config": {"loss_type": "focal"},
+        },
+        round_scores=[5.85, 5.98, 6.10],
+        round_conclusions=[
+            "Spectral convolutions address low-freq gap immediately.",
+            "Score improved with more data.",
+            "Converged at 6.1.",
+        ],
+        model_description=(
+            "SpectralNet applies 1D FFT-based convolutions to capture frequency-domain "
+            "patterns directly, bypassing the temporal limitations of dilated causal convolutions."
+        ),
+    )
+
+    iter_inp = InterpretationInput(
+        summaries=[_SEED_WAVENET, _SEED_PUNET, spectral_net_good],
+        previous_proposal=_E4_PROPOSAL_CONFIRMED,          # model_name="spectral_net"
+        runtime_vocab=[dilated_conv_entry],                 # carry-in: dilated_causal_conv
+        prediction_outcomes_history={"confirmed": 0, "partial": 0, "refuted": 0},
+        vocab_link_confirmations=prior_confirmations,       # 2 prior confirmations
+        storage={
+            "backend": "local",
+            "local": {"workspace": str(tmp_path), "run_name": "h5_iter1"},
+        },
+    )
+
+    if _is_real_llm(request):
+        if not os.getenv("GEMINI_API_KEY"):
+            pytest.skip("--real-llm requires GEMINI_API_KEY")
+        from agent.llm_bridge import LLMBridge
+        interp_agent = ResultInterpretationAgent(
+            bridge_factory=lambda **kw: LLMBridge(**{**kw, "model_id": "gemini-2.5-flash", "max_retries": 3})
+        )
+    else:
+        interp_bridge = RecordingLLMBridge.for_agent("result_interpretation_agent_iter2")
+        interp_agent = ResultInterpretationAgent(bridge_factory=lambda **kw: interp_bridge)
+
+    try:
+        iter_output = interp_agent.run(iter_inp)
+    except Exception as e:
+        print(f"\n  [h5] interpretation agent failed: {type(e).__name__}: {e}", flush=True)
+        raise
+
+    assert isinstance(iter_output, InterpretationOutput)
+    assert iter_output.prediction_evaluation is not None
+    assert iter_output.prediction_evaluation["outcome"] == "confirmed", (
+        f"Expected CONFIRMED, got {iter_output.prediction_evaluation['outcome']!r}"
+    )
+
+    # -----------------------------------------------------------------------
+    # Assertion 1: vocab_link_confirmations has exactly 3 entries for the link
+    # -----------------------------------------------------------------------
+    link_confs = iter_output.vocab_link_confirmations
+    assert "dilated_causal_conv:receptive_field" in link_confs, (
+        f"'dilated_causal_conv:receptive_field' missing from confirmations. "
+        f"Keys: {list(link_confs.keys())}"
+    )
+    conf_runs = link_confs["dilated_causal_conv:receptive_field"]
+    assert len(conf_runs) == 3, (
+        f"Expected 3 confirmation runs, got {len(conf_runs)}: {conf_runs}"
+    )
+    assert "spectral_net" in conf_runs, (
+        f"'spectral_net' not added as 3rd confirmation. Got: {conf_runs}"
+    )
+    assert "run_a" in conf_runs and "run_b" in conf_runs, (
+        f"Prior confirmations not preserved. Got: {conf_runs}"
+    )
+    print(f"\n  [h5] vocab_link_confirmations: {dict(link_confs)}")
+
+    # -----------------------------------------------------------------------
+    # Assertion 2: dilated_causal_conv.related_to contains "receptive_field"
+    # -----------------------------------------------------------------------
+    dc_entry = next(
+        (v for v in iter_output.runtime_vocab if v.name == "dilated_causal_conv"),
+        None,
+    )
+    assert dc_entry is not None, (
+        "dilated_causal_conv missing from runtime_vocab — incoming entry was dropped"
+    )
+    assert "receptive_field" in dc_entry.related_to, (
+        f"Link NOT promoted to related_to after 3 confirmations. "
+        f"dilated_causal_conv.related_to={dc_entry.related_to}"
+    )
+    print(f"  [h5] dilated_causal_conv.related_to={dc_entry.related_to} ✓")
+
+    # -----------------------------------------------------------------------
+    # Protocol: runtime_vocab → ProposalInput.vocab_seed
+    # -----------------------------------------------------------------------
+    storage_h5 = StorageConfig(
+        backend="local",
+        local=LocalStorageConfig(workspace=str(tmp_path), run_name="h5_proposal"),
+    )
+    pipeline = ReasoningPipelineConfig(
+        stages=[
+            ReasoningStage(name="comparison",      system_prompt_key="COMPARATIVE_ANALYSIS"),
+            ReasoningStage(name="causal_reasoning", system_prompt_key="CAUSAL_REASONING"),
+        ]
+    )
+    proposal_inp = local_full_context(iter_output, storage_h5,
+                                      reasoning_pipeline=pipeline)
+
+    # vocab_seed must carry dilated_causal_conv with its updated related_to
+    dc_in_seed = next(
+        (v for v in proposal_inp.vocab_seed
+         if (v.get("name") if isinstance(v, dict) else v.name) == "dilated_causal_conv"),
+        None,
+    )
+    assert dc_in_seed is not None, (
+        "dilated_causal_conv missing from ProposalInput.vocab_seed — protocol dropped it"
+    )
+    seed_related = (
+        dc_in_seed.get("related_to", []) if isinstance(dc_in_seed, dict)
+        else dc_in_seed.related_to
+    )
+    assert "receptive_field" in seed_related, (
+        f"related_to not preserved through protocol. "
+        f"vocab_seed dilated_causal_conv.related_to={seed_related}"
+    )
+    print(f"  [h5] protocol: dilated_causal_conv in vocab_seed with "
+          f"related_to={seed_related} ✓")
+
+    # -----------------------------------------------------------------------
+    # Proposal agent: assert "→ enables: receptive_field" in Stage 1 user prompt
+    # -----------------------------------------------------------------------
+    if _is_real_llm(request):
+        from agent.llm_bridge import LLMBridge
+        proposal_agent = MLModelProposalAgent(
+            bridge_factory=lambda **kw: LLMBridge(
+                **{**kw, "model_id": "gemini-2.5-flash", "max_retries": 3}
+            )
+        )
+        proposal_output = proposal_agent.run(proposal_inp)
+        assert isinstance(proposal_output, ProposalOutput), \
+            f"Expected ProposalOutput, got {type(proposal_output)}"
+        print(f"  [h5 real-llm] model_name='{proposal_output.model_name}'", flush=True)
+    else:
+        proposal_bridge = RecordingLLMBridge.for_agent("ml_model_proposal_agent_h5")
+        proposal_agent = MLModelProposalAgent(
+            bridge_factory=lambda **kw: proposal_bridge
+        )
+        proposal_output = proposal_agent.run(proposal_inp)
+        assert isinstance(proposal_output, ProposalOutput)
+
+        # Stage 1 is calls[0]; user_prompt is at index [2]
+        assert len(proposal_bridge.calls) >= 1, \
+            "Proposal agent made no LLM calls"
+        stage1_user_prompt = proposal_bridge.calls[0][2]
+
+        assert "→ enables: receptive_field" in stage1_user_prompt, (
+            "Rendered vocab link '→ enables: receptive_field' not found in "
+            "Stage 1 user prompt. _render_vocabulary did not render the confirmed link.\n"
+            f"Vocab seed entries: {[getattr(v, 'name', v.get('name')) for v in proposal_inp.vocab_seed]}"
+        )
+        print(f"  [h5 pseudo] '→ enables: receptive_field' in Stage 1 user prompt ✓")
+        print(f"  [h5 pseudo] proposal bridge call count: {len(proposal_bridge.calls)}")
