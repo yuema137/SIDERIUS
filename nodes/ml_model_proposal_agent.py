@@ -38,6 +38,40 @@ _MAX_PROPOSING_RETRIES = 2
 _MAX_REASONING_RETRIES = 1
 
 
+def _check_citation_discipline(
+    citation_sources: list,
+    causal_hypothesis: str,
+    proposed_change: str,
+) -> list:
+    """Return a warning message for each cite_id that was cited but not referenced.
+
+    Each cite_id in citation_sources must appear verbatim in causal_hypothesis
+    or proposed_change.  Violations are soft warnings — the proposal is not
+    rejected, but the issues are appended to ProposalOutput.memo_consistency_notes
+    so the validator and the human reviewer can see them.
+
+    Args:
+        citation_sources: list of cite_id strings from DiscoveryMemo.
+        causal_hypothesis: the reasoning text that should reference the cited items.
+        proposed_change: the change description that should reference the cited items.
+
+    Returns:
+        List of violation strings, one per uncited cite_id.  Empty = all citations
+        are properly referenced in the reasoning text.
+    """
+    combined = causal_hypothesis + " " + proposed_change
+    violations = []
+    for cite_id in citation_sources:
+        if cite_id not in combined:
+            violations.append(
+                f"CITATION_NOT_REFERENCED: cite_id '{cite_id}' is listed in "
+                f"citation_sources but does not appear verbatim in causal_hypothesis "
+                f"or proposed_change. Either reference it in your reasoning or remove "
+                f"it from citations."
+            )
+    return violations
+
+
 # ---------------------------------------------------------------------------
 # System prompts
 # ---------------------------------------------------------------------------
@@ -689,6 +723,18 @@ class MLModelProposalAgent:
                     "proposed_discoveries":    discoveries,
                     "memo_consistency_notes":  raw.get("memo_consistency_notes", []),
                 })
+                # Citation discipline check — violations are warnings, not hard failures.
+                citation_violations = _check_citation_discipline(
+                    citation_sources=reasoning_output.get("citation_sources", []),
+                    causal_hypothesis=reasoning_output.get("causal_hypothesis", ""),
+                    proposed_change=reasoning_output.get("proposed_change", ""),
+                )
+                if citation_violations:
+                    output.memo_consistency_notes.extend(citation_violations)
+                    print(
+                        f"   Citation check: {len(citation_violations)} violation(s) "
+                        f"appended to memo_consistency_notes."
+                    )
                 print(f"Proposed model (pipeline): '{output.model_name}'")
                 return output
 
