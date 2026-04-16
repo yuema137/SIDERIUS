@@ -352,6 +352,24 @@ class LLMBridge:
     _RETRY_INITIAL_WAIT = 2.5
     _RETRY_MAX_WAIT = 60.0
 
+    @staticmethod
+    def _parse_retry_delay(exc) -> Optional[float]:
+        """Extract retryDelay seconds from a Google API 429 error body, if present.
+
+        Google embeds a RetryInfo detail with a delay string like "28890s".
+        Returns None if the field is absent or unparseable.
+        """
+        try:
+            details = exc.body.get("error", {}).get("details", [])
+            for d in details:
+                if d.get("@type", "").endswith("RetryInfo"):
+                    delay_str = d.get("retryDelay", "")
+                    if delay_str.endswith("s"):
+                        return float(delay_str[:-1])
+        except Exception:
+            pass
+        return None
+
     def _call_with_retry(self, fn, label: str = "api_call"):
         """Call an OpenAI API function with the bridge's retry policy."""
         from openai import APIStatusError, APIConnectionError, APITimeoutError
@@ -367,6 +385,13 @@ class LLMBridge:
                 if e.status_code != 429 and not (500 <= e.status_code < 600):
                     raise
                 last_exc = e
+                # Honor the API-suggested retry delay for hard quota errors
+                # (e.g. daily RPD reset). Overrides the exponential backoff
+                # for this attempt only; next attempt resumes normal schedule.
+                if e.status_code == 429:
+                    suggested = self._parse_retry_delay(e)
+                    if suggested is not None:
+                        wait = suggested
             attempt += 1
             # Check if we've exhausted our retry budget
             if self.max_retries is not None and attempt >= self.max_retries:
