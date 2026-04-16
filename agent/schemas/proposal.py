@@ -139,6 +139,47 @@ class ExpertContextItem(BaseModel):
     )
 
 
+# B.3a — Agent name card (Phase F)
+class AgentCard(BaseModel):
+    """Static self-description of an external contributing agent.
+
+    Defined once in the agent's implementation, emitted on every run.
+    Collected into ProposalInput.agent_cards and rendered as a 'Contributors'
+    section near the top of each stage prompt — before the Expert Context block.
+
+    The key principle: findings are the evidence; the name card is the calibration.
+    The LLM reads the name cards *before* reading the ExpertContextItem list, so
+    it knows how to weight each source before it encounters any specific claim.
+    """
+    agent_name: str = Field(
+        description="Stable identifier matching ExpertContextItem.source values "
+                    "this agent produces. E.g. 'ml_literature_review'."
+    )
+    role: str = Field(
+        max_length=200,
+        description="One sentence: what this agent does in the pipeline."
+    )
+    expertise_domain: str = Field(
+        max_length=300,
+        description="What this agent knows well — the domain its findings are grounded in."
+    )
+    coverage: str = Field(
+        max_length=300,
+        description="Scope of its knowledge: time range, data sources, filtering criteria."
+    )
+    limitations: str = Field(
+        max_length=300,
+        description="What this agent cannot assess or may get wrong."
+    )
+    trust_guidance: str = Field(
+        max_length=400,
+        description="One or two sentences instructing the proposal LLM how to weight "
+                    "this agent's findings relative to experiment results and other sources. "
+                    "E.g. 'Treat as promising priors — only experiment runs confirm applicability.' "
+                    "For physics agents: 'Physical constraints are HARD LIMITS.'"
+    )
+
+
 # B.4 — Model comparison (Stage 1 output)
 class ModelComparison(BaseModel):
     """Structured analysis of one previously tested model.
@@ -409,6 +450,14 @@ class VocabEntry(BaseModel):
     proposed_by_run: Optional[str] = None
     seen_in_runs: List[str] = Field(default_factory=list)
     aliases: List[str] = Field(default_factory=list)
+    origin: Optional[str] = Field(
+        default=None,
+        description="Source agent for externally-contributed entries. "
+                    "E.g. 'ml_literature_review', 'physics_literature_review'. "
+                    "None = proposed during an experiment run (proposed_by_run carries the run name). "
+                    "When set, proposed_by_run must be None — external contributions do not "
+                    "count toward seen_in_runs and cannot be promoted via the run-count criterion.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -481,6 +530,13 @@ class ProposalInput(BaseModel):
                     "causal reasoning stage prompt. Overrides the default _explore.md / "
                     "_exploit.md fallback when provided. Sourced from advice['mindset']. "
                     "When absent, the mode file is used (backward compatible with v1/v2).",
+    )
+    agent_cards: List[AgentCard] = Field(
+        default_factory=list,
+        description="Self-descriptions of all external agents contributing context this round. "
+                    "Rendered as a 'Contributors' section before the Expert Context block. "
+                    "The proposal LLM reads these first to calibrate trust in each source. "
+                    "Empty = no external agents this round (internal-only run).",
     )
     storage: StorageConfig = Field(
         default_factory=lambda: StorageConfig(

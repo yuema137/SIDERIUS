@@ -25,6 +25,7 @@ from typing import List, Optional
 
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.proposal import (
+    AgentCard,
     ExpertContextItem,
     ProposalInput,
     ReasoningPipelineConfig,
@@ -41,6 +42,8 @@ def local_full_context(
     vocab_seed: Optional[List[VocabEntry]] = None,
     reasoning_pipeline: Optional[ReasoningPipelineConfig] = None,
     human_advice: Optional[ExpertAdviceInput] = None,
+    mindset: Optional[str] = None,
+    agent_cards: Optional[List[AgentCard]] = None,
 ) -> ProposalInput:
     """
     Local in-memory protocol — transfers the complete interpretation directly.
@@ -60,6 +63,8 @@ def local_full_context(
       - vocab_seed           : runtime vocabulary (canonical + promoted + candidates)
       - reasoning_pipeline   : 3-stage pipeline config (stages, model selection, policy)
       - human_advice         : legacy human advice — wrapped into ExpertContextItem if provided
+      - mindset              : optional free-text injected into the causal reasoning stage prompt
+      - agent_cards          : optional list of external agent self-descriptions (Contributors block)
 
     Populates in ml-model-propose (ProposalInput):
       - interpretation       : full serialised InterpretationOutput (all fields above)
@@ -67,6 +72,8 @@ def local_full_context(
       - expert_context       : merged list of ExpertContextItems
       - vocab_seed           : runtime vocabulary entries
       - reasoning_pipeline   : pipeline configuration
+      - mindset              : passed through when provided
+      - agent_cards          : passed through when provided
       - storage              : passed through from the orchestrator
     """
     # Build expert_context — start with what's passed, wrap legacy human_advice
@@ -101,6 +108,15 @@ def local_full_context(
 
     if reasoning_pipeline:
         result["reasoning_pipeline"] = reasoning_pipeline.model_dump()
+
+    if mindset is not None:
+        result["mindset"] = mindset
+
+    if agent_cards:
+        result["agent_cards"] = [
+            c.model_dump() if hasattr(c, "model_dump") else c
+            for c in agent_cards
+        ]
 
     return ProposalInput.model_validate(result)
 
