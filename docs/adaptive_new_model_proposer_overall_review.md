@@ -1,8 +1,8 @@
 # Adaptive New Model Proposer — Overall Review and Development Plan
 
-**Status**: Post-Phase-F review. All six phases (A-reverted, B, C, E, F) are implemented.
-977 unit tests pass. This document catalogs the remaining critical gaps and the ordered
-plan for fixing them and writing integration tests.
+**Status**: Phase 1 fixes complete. All four code gaps (G1–G4) are resolved and tested.
+1028 unit tests pass; 5 dual-mode integration tests (H.1–H.5) pass. Phase 2 pseudo
+integration tests (T1, T2, T5) and Phase 3 real-LLM tests (T3–T8) are next.
 
 ---
 
@@ -435,11 +435,11 @@ literature one says "attention mechanisms dominate in recent SOTA".
 ## 5. Execution order summary
 
 ```
-Phase 1 — Fix and commit (no real-LLM needed)
-  Fix 1: unit tests for uncommitted changes in ml_model_proposal_agent.py   (1-2h)
-  Fix 2: boldness enforcement + unit tests                                   (1h)
-  Fix 3: citation discipline validator + unit tests                          (1h)
-  Fix 4: H.5 related_to full pipeline test                                   (1h)
+Phase 1 — Fix and commit (no real-LLM needed)  ✅ COMPLETE
+  Fix 1: unit tests for uncommitted changes in ml_model_proposal_agent.py   ✅ DONE
+  Fix 2: boldness enforcement + unit tests                                   ✅ DONE
+  Fix 3: citation discipline validator + unit tests                          ✅ DONE
+  Fix 4: H.5 related_to full pipeline test                                   ✅ DONE
 
 Phase 2 — Pseudo integration tests (no real-LLM needed)
   T1 (pseudo path): exploration/exploitation mode switching                  (1-2h)
