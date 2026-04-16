@@ -217,7 +217,7 @@ together (awaiting user approval).
 
 ---
 
-### Fix 2 — Boldness enforcement in pipeline runner (G1)
+### Fix 2 — Boldness enforcement in pipeline runner (G1) ✅ DONE
 **File**: `nodes/ml_model_proposal_agent.py`
 
 After Stage 2 produces a `DiscoveryMemo`, add:
