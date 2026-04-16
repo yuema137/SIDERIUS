@@ -331,9 +331,11 @@ class InterpretationOutput(BaseModel):
     prediction_evaluation: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Evaluation of the previous proposal's FalsifiablePrediction. "
-                    "Contains: metric, predicted_value, actual_value, "
-                    "outcome ('confirmed'/'refuted'/'partial'), boldness, "
-                    "information_gain. None if no previous prediction exists.",
+                    "Outcome is SOTA-based (not predicted-value-based): "
+                    "confirmed = beat SOTA, partial = within 5%% of SOTA, refuted = clearly below. "
+                    "Contains: metric, actual_value, current_sota, delta_from_sota, "
+                    "outcome ('confirmed'/'partial'/'refuted'), boldness, information_gain. "
+                    "None if no previous prediction exists.",
     )
     new_discoveries: List[VocabEntry] = Field(
         default_factory=list,

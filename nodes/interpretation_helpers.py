@@ -15,67 +15,84 @@ from agent.schemas.proposal import VocabEntry, ProposedVocabLink, FalsifiablePre
 def evaluate_prediction(
     prediction: Dict[str, Any],
     actual_results: Dict[str, Any],
+    current_sota: Optional[float] = None,
+    partial_margin: float = 0.05,
 ) -> Dict[str, Any]:
     """
-    Evaluate a FalsifiablePrediction against actual tuning results.
+    Evaluate whether this model beat the current SOTA.
+
+    The baseline is the SOTA at the time of proposal, not the LLM's predicted
+    value. Predicting exact scores is unreliable; the meaningful question is
+    whether the proposed architecture surpassed the bar it was designed to beat.
 
     Args:
-        prediction: Serialized FalsifiablePrediction dict with
-                    metric, current_value, predicted_value, threshold_for_refutation.
+        prediction: Serialized FalsifiablePrediction dict with metric,
+                    current_value (SOTA at proposal time), and optionally
+                    predicted_value (used only for boldness calculation).
                     Common LLM aliases for 'denoising_score' are accepted:
                     'best_score', 'score', 'overall denoising score', etc.
         actual_results: Dict with at least 'best_denoising_score' and
                         optionally 'best_file_vector'.
+        current_sota: SOTA override. When provided, takes precedence over
+                      prediction['current_value']. Pass the dynamically
+                      tracked best score from the workflow when available.
+        partial_margin: Fraction below SOTA that still counts as 'partial'
+                        (nearly competitive). Default 0.05 (5%).
 
     Returns:
-        Dict with: metric, predicted_value, actual_value, outcome
-        ('confirmed'/'refuted'/'partial'), boldness, information_gain.
+        Dict with: metric, actual_value, current_sota, delta_from_sota,
+        outcome ('confirmed'/'partial'/'refuted'), boldness, information_gain.
+
+    Outcome labels (preset):
+        confirmed — actual > current_sota (beat SOTA)
+        partial   — current_sota * (1 - partial_margin) < actual <= current_sota
+        refuted   — actual <= current_sota * (1 - partial_margin)
     """
     metric = prediction.get("metric", "denoising_score")
     predicted = prediction.get("predicted_value")
-    current = prediction.get("current_value")
-    threshold = prediction.get("threshold_for_refutation")
+
+    # Resolve effective SOTA: explicit override takes precedence over proposal-time value
+    sota = current_sota if current_sota is not None else prediction.get("current_value")
 
     # Compute actual value from results
     actual = _compute_metric(metric, actual_results)
 
-    if actual is None or predicted is None or current is None:
+    if actual is None or sota is None:
         return {
             "metric": metric,
-            "predicted_value": predicted,
             "actual_value": actual,
+            "current_sota": sota,
+            "delta_from_sota": None,
             "outcome": "partial",
             "boldness": 0.0,
             "information_gain": 0.0,
             "notes": "Could not compute metric from results.",
         }
 
-    # Determine outcome
-    predicting_increase = predicted > current
-    if predicting_increase:
-        if actual >= predicted:
-            outcome = "confirmed"
-        elif threshold is not None and actual <= threshold:
-            outcome = "refuted"
-        else:
-            outcome = "partial"
-    else:
-        # Predicting decrease (rare but valid for ablation experiments)
-        if actual <= predicted:
-            outcome = "confirmed"
-        elif threshold is not None and actual >= threshold:
-            outcome = "refuted"
-        else:
-            outcome = "partial"
+    delta = actual - sota
 
-    boldness = abs(predicted - current) / max(abs(current), 1e-6)
-    information_gain = boldness if outcome == "confirmed" else 0.0
+    # Outcome: confirmed beats SOTA, partial is within margin, refuted is clearly below
+    if actual > sota:
+        outcome = "confirmed"
+    elif actual >= sota * (1.0 - partial_margin):
+        outcome = "partial"
+    else:
+        outcome = "refuted"
+
+    # Boldness: how ambitious was the LLM's prediction relative to SOTA?
+    boldness = (
+        abs(predicted - sota) / max(abs(sota), 1e-6)
+        if predicted is not None
+        else 0.0
+    )
+    # Information gain: positive only when the architecture actually beat SOTA
+    information_gain = delta if outcome == "confirmed" else 0.0
 
     return {
         "metric": metric,
-        "predicted_value": predicted,
         "actual_value": actual,
-        "current_value": current,
+        "current_sota": sota,
+        "delta_from_sota": round(delta, 4),
         "outcome": outcome,
         "boldness": round(boldness, 4),
         "information_gain": round(information_gain, 4),
@@ -202,9 +219,9 @@ def generate_discoveries(
     # Discovery 2: score comparison to SOTA
     if best_score is not None:
         # Use the strictest available SOTA: overall_best_score (current-iteration max across
-        # all models) takes precedence over prediction_eval["current_value"] (the SOTA at
+        # all models) takes precedence over prediction_eval["current_sota"] (the SOTA at
         # proposal time, which may be stale if a newer model has since surpassed it).
-        sota_from_prediction = prediction_eval.get("current_value") if prediction_eval else None
+        sota_from_prediction = prediction_eval.get("current_sota") if prediction_eval else None
         if overall_best_score is not None and sota_from_prediction is not None:
             sota_score = max(sota_from_prediction, overall_best_score)
         else:

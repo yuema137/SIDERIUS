@@ -693,9 +693,17 @@ class ResultInterpretationAgent:
                     "best_denoising_score": prev_best,
                     "best_file_vector": prev_fv,
                 }
-                prediction_evaluation = evaluate_prediction(prev_prediction, actual_results)
+                # current_sota = SOTA at proposal time (FalsifiablePrediction.current_value).
+                # The workflow may pass a fresher value via overall_best_score if needed,
+                # but the proposal-time baseline is the fairest comparison for evaluation.
+                sota_at_proposal = prev_prediction.get("current_value")
+                prediction_evaluation = evaluate_prediction(
+                    prev_prediction,
+                    actual_results,
+                    current_sota=sota_at_proposal,
+                )
                 print(f"  Prediction evaluation: {prediction_evaluation.get('outcome', '?')} "
-                      f"(predicted={prediction_evaluation.get('predicted_value')}, "
+                      f"(delta_from_sota={prediction_evaluation.get('delta_from_sota')}, "
                       f"actual={prediction_evaluation.get('actual_value')})")
 
             # Generate discoveries from the evaluation
