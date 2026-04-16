@@ -74,6 +74,14 @@ def parse_args():
         help="Max proposal retries per iteration if validation fails.",
     )
     parser.add_argument(
+        "--max_impl_attempts", type=int, default=3,
+        help=(
+            "Max implementation retries per proposal when the validator rejects the code. "
+            "Each retry feeds the validator's error back to the implementor so it can fix "
+            "spec-alignment issues without requiring a new proposal."
+        ),
+    )
+    parser.add_argument(
         "--trial_portion", type=float, default=0.1,
         help="Fraction of data used for trial-mode training/eval.",
     )
@@ -192,6 +200,8 @@ def main():
         # Reasoning pipeline
         exploration_mode=args.exploration_mode,
         minimum_boldness=args.minimum_boldness,
+        # Implementation retry
+        max_impl_attempts=args.max_impl_attempts,
     )
 
 

@@ -335,6 +335,8 @@ def run_workflow(
     # --- Reasoning pipeline ---
     exploration_mode: str = "auto",
     minimum_boldness: float = 0.05,
+    # --- Implementation retry ---
+    max_impl_attempts: int = 3,
 ) -> list[HyperparamTuningOutput]:
     """
     Execute the model exploration workflow for one or more iterations.
@@ -531,17 +533,9 @@ def run_workflow(
                 attempt_dir = named_dir
                 attempt_storage = _make_storage(attempt_dir, run_name)
 
-                # --- Implement ---
-                print(f"  [{iteration}.{attempt}] Implementing...")
-                impl_input = local_full_spec(proposal, attempt_storage)
-                # Route plugin files into the attempt directory (not the default
-                # agent_generated/ in the working dir)
-                impl_input.plugin_dir = os.path.join(attempt_dir, "models")
-                impl_input.test_dir = os.path.join(attempt_dir, "tests")
-                if human_advice_implement is not None:
-                    impl_input.human_advice = human_advice_implement
-
-                # Load reference code from inherited_components
+                # --- Implement → Validate (inner retry loop per proposal) ---
+                # Load reference code once (shared across impl attempts for this proposal)
+                ref_code: dict = {}
                 if hasattr(proposal, 'inherited_components') and proposal.inherited_components:
                     from nodes.proposal_helpers import load_model_source
                     ref_models = set()
@@ -549,47 +543,68 @@ def run_workflow(
                         mt = ic.from_model_type if hasattr(ic, 'from_model_type') else ic.get('from_model_type')
                         if mt:
                             ref_models.add(mt)
-                    ref_code = {}
                     for mt in ref_models:
                         src = load_model_source(mt)
                         if src:
                             ref_code[mt] = src
                     if ref_code:
-                        impl_input.reference_code = ref_code
                         print(f"    Reference code: {list(ref_code.keys())} "
                               f"({sum(len(v.split(chr(10))) for v in ref_code.values())} lines)")
 
-                impl_output = MLModelImplementor(
-                    **llm_config.get("implement"),
-                ).run(impl_input)
-                print(f"    Plugin: {impl_output.model_file_path}")
-
-                # --- Validate ---
-                print(f"  [{iteration}.{attempt}] Validating...")
                 valid_llm = llm_config.get("validate")
-                valid_input = local_all_fields(
-                    impl_output, attempt_storage,
-                    llm_provider=valid_llm.get("provider", "gemini"),
-                    llm_model_id=valid_llm.get("model_id", "gemini-3.1-flash-lite-preview"),
-                )
-                if human_advice_validate is not None:
-                    valid_input.human_advice = human_advice_validate
-                # Pass inherited_components from the proposal for check #8
-                if hasattr(proposal, 'inherited_components') and proposal.inherited_components:
-                    valid_input.inherited_components = proposal.inherited_components
+                previous_validation_failure: str | None = None
 
-                validation = MLCodeValidatorAgent(
-                    **valid_llm,
-                ).run(valid_input)
+                for impl_attempt in range(1, max_impl_attempts + 1):
+                    impl_suffix = (f" (impl {impl_attempt}/{max_impl_attempts})"
+                                   if max_impl_attempts > 1 else "")
+                    print(f"  [{iteration}.{attempt}] Implementing{impl_suffix}...")
+                    impl_input = local_full_spec(proposal, attempt_storage)
+                    impl_input.plugin_dir = os.path.join(attempt_dir, "models")
+                    impl_input.test_dir = os.path.join(attempt_dir, "tests")
+                    if human_advice_implement is not None:
+                        impl_input.human_advice = human_advice_implement
+                    if ref_code:
+                        impl_input.reference_code = ref_code
+                    if previous_validation_failure is not None:
+                        impl_input.previous_validation_failure = previous_validation_failure
 
-                if validation.passed:
-                    print(f"    All 7 checks passed.\n")
+                    impl_output = MLModelImplementor(
+                        **llm_config.get("implement"),
+                    ).run(impl_input)
+                    print(f"    Plugin: {impl_output.model_file_path}")
+
+                    # --- Validate ---
+                    print(f"  [{iteration}.{attempt}] Validating...")
+                    valid_input = local_all_fields(
+                        impl_output, attempt_storage,
+                        llm_provider=valid_llm.get("provider", "gemini"),
+                        llm_model_id=valid_llm.get("model_id", "gemini-3.1-flash-lite-preview"),
+                    )
+                    if human_advice_validate is not None:
+                        valid_input.human_advice = human_advice_validate
+                    if hasattr(proposal, 'inherited_components') and proposal.inherited_components:
+                        valid_input.inherited_components = proposal.inherited_components
+
+                    validation = MLCodeValidatorAgent(
+                        **valid_llm,
+                    ).run(valid_input)
+
+                    if validation.passed:
+                        print(f"    All 7 checks passed.\n")
+                        break
+
+                    previous_validation_failure = validation.error_message or "Unknown validation error"
+                    print(f"    Validation FAILED: {previous_validation_failure}")
+                    if impl_attempt < max_impl_attempts:
+                        print(f"    Retrying implementation with validator feedback...\n")
+
+                if validation and validation.passed:
                     break
-                else:
-                    print(f"    Validation FAILED: {validation.error_message}")
-                    previous_failures.append(validation.error_message or "Unknown validation error")
-                    if attempt < max_proposal_attempts:
-                        print(f"    Retrying with failure feedback...\n")
+
+                # All impl attempts for this proposal exhausted
+                previous_failures.append(previous_validation_failure or "Unknown error")
+                if attempt < max_proposal_attempts:
+                    print(f"    Retrying with a new proposal...\n")
 
             except Exception as e:
                 error_msg = f"Node error: {type(e).__name__}: {e}"

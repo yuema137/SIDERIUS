@@ -393,6 +393,22 @@ def _build_reasoning_prompt(inp: ImplementorInput) -> str:
                 "",
             ]
 
+    # --- Previous validation failure (retry context) ---
+    if inp.previous_validation_failure:
+        lines += [
+            "",
+            "## ⚠ Previous Implementation Failed Validation — Fix This",
+            "",
+            "Your previous implementation of this same proposal was rejected by the",
+            "validator with the following error. Address it explicitly in your reasoning",
+            "before committing to code:",
+            "",
+            inp.previous_validation_failure,
+            "",
+            "Do NOT reproduce the same mistake. Your reasoning must explain how you will",
+            "fix each issue raised above.",
+        ]
+
     return "\n".join(lines)
 
 
