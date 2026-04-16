@@ -1,6 +1,6 @@
 # Design Proposal V2: Adaptive Scientific Discovery Framework for SIDERIUS
 
-**Status**: Phase B complete. Phase C in progress — validator inheritance check done, chain test validated end-to-end. Supersedes the V1 proposal at the bottom of this file.
+**Status**: Phase C complete — vocabulary feedback loop, candidate promotion, centrifugal metrics (vocab diversity + information gain), pipeline hardening (B.22 retry) all done. 932 unit tests passing. Phase E next. Supersedes the V1 proposal at the bottom of this file.
 
 ## 0. The actual problem and the key design idea
 
@@ -882,7 +882,7 @@ Iteration N:
 - ☐ Strategy Performance Report. *(Feedback loop)*
 
 **Pipeline hardening (can be done in parallel):**
-- ☐ B.22 Memo validation failure → retry.
+- ☑ B.22 Memo validation failure → retry. Stages 1+2 not re-run; error injected into `accumulated["proposing_stage_errors"]` so the LLM sees its own mistake; up to 3 total attempts. **Done** — `nodes/ml_model_proposal_agent.py`.
 
 **Verify**:
 - ✅ **Automated (pseudo mode)**: `test_vocab_grows_across_two_iterations` in `tests/integration/workflows/test_vocab_accumulation.py` (@dual_mode, Phase 4 of `docs/pseudo_test_infra.md`). Verifies: `runtime_vocab` grows monotonically across two iterations (iter1=2 entries → iter2=4), no entries dropped, REFUTED/CONFIRMED discoveries generated correctly, protocol maps discoveries into `vocab_seed`. Passes in pseudo mode (0.2s) and real-LLM mode (73s).
