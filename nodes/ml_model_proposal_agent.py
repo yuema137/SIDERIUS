@@ -26,13 +26,16 @@ import argparse
 from pydantic import ValidationError
 
 from agent.llm_bridge import LLMBridge
-from agent.schemas.proposal import ProposalInput, ProposalOutput
+from agent.schemas.proposal import ProposalInput, ProposalOutput, FalsifiablePrediction
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
 
 # Maximum number of retries when the proposing stage produces invalid output.
 # Total attempts = _MAX_PROPOSING_RETRIES + 1.
 _MAX_PROPOSING_RETRIES = 2
+
+# One retry when causal_reasoning produces a prediction below minimum_boldness.
+_MAX_REASONING_RETRIES = 1
 
 
 # ---------------------------------------------------------------------------
@@ -571,6 +574,55 @@ class MLModelProposalAgent:
                 accumulated[stage.name] = result
 
             print(f"   Stage '{stage.name}': done.")
+
+        # --- Boldness check: re-run causal_reasoning if prediction is too timid ---
+        # Mirrors the B.22 proposing-stage retry but targets Stage 2 specifically.
+        # Stage 1 (comparison) is expensive; we never re-run it for a boldness violation.
+        reasoning_raw = accumulated.get("causal_reasoning")
+        if isinstance(reasoning_raw, dict):
+            pred_raw = reasoning_raw.get("falsifiable_prediction")
+            if pred_raw and isinstance(pred_raw, dict):
+                try:
+                    pred = FalsifiablePrediction.model_validate(pred_raw)
+                    if pred.boldness < policy.minimum_boldness:
+                        print(
+                            f"   Boldness check: boldness={pred.boldness:.4f} < "
+                            f"minimum_boldness={policy.minimum_boldness} — "
+                            f"retrying causal_reasoning."
+                        )
+                        accumulated.setdefault("proposing_stage_errors", []).append(
+                            f"BOLDNESS_TOO_LOW: prediction boldness={pred.boldness:.4f} "
+                            f"is below minimum_boldness={policy.minimum_boldness}. "
+                            f"Current: {pred.current_value}, "
+                            f"Predicted: {pred.predicted_value}. "
+                            f"Make a bolder prediction — increase the delta between "
+                            f"current and predicted value."
+                        )
+                        reasoning_stage = next(
+                            (s for s in pipeline.stages
+                             if s.name == "causal_reasoning" and s.enabled),
+                            None,
+                        )
+                        if reasoning_stage is not None:
+                            retry_system = load_stage_prompt(
+                                "causal_reasoning_stage",
+                                exploration_mode=mode,
+                                template_vars=template_vars,
+                                mindset=inp.mindset,
+                            )
+                            retry_user = json.dumps(accumulated, indent=2, default=str)
+                            if agent_cards_block:
+                                retry_user += f"\n\n{agent_cards_block}"
+                            if expert_context_block:
+                                retry_user += f"\n\n{expert_context_block}"
+                            if vocab_block:
+                                retry_user += f"\n\n{vocab_block}"
+                            print("   Stage 'causal_reasoning': retrying (boldness)...")
+                            accumulated["causal_reasoning"] = self.bridge.generate(
+                                retry_system, retry_user
+                            )
+                except (ValidationError, Exception):
+                    pass  # malformed prediction — let the proposing stage handle it
 
         # --- B.12 + B.22: Proposing stage (always runs last, retries on validation failure) ---
         proposing_prompt = load_stage_prompt(
