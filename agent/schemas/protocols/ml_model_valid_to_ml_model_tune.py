@@ -77,13 +77,19 @@ def local_validated_model(
         reflect() call. None means the reflector uses llm_model_id.
       - is_trial + trial_*: trial mode configuration (caller-supplied, defaults to single-file)
     """
-    # When the implementation deviates from the spec, prepend the warning to
-    # expert_advice so the tuner's planner knows it is not tuning the exact
-    # proposed architecture. This prevents false causal attributions downstream.
+    # When the implementation deviates from the spec or has unverified inherited
+    # components, prepend the warnings to expert_advice so the tuner's planner knows
+    # it is not tuning the exact proposed architecture. This prevents false causal
+    # attributions downstream. Spec deviation comes first (it is the stronger signal
+    # about architectural fidelity); inheritance deviation follows.
     expert_advice = proposal.expert_advice
-    if output.spec_deviation_notes:
+    deviation_notes = [
+        n for n in (output.spec_deviation_notes, output.inheritance_deviation_notes) if n
+    ]
+    if deviation_notes:
         base = serialize_expert_advice(expert_advice) if expert_advice else ""
-        expert_advice = f"{output.spec_deviation_notes}\n\n{base}" if base else output.spec_deviation_notes
+        prefix = "\n\n".join(deviation_notes)
+        expert_advice = f"{prefix}\n\n{base}" if base else prefix
 
     return HyperparamTuningInput(
         model_type=output.model_type,
