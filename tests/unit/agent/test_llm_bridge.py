@@ -178,12 +178,13 @@ class TestGenerate:
             assert messages[0] == {"role": "system", "content": SYSTEM_PROMPT}
             assert messages[1] == {"role": "user", "content": USER_PROMPT}
 
-    def test_malformed_json_returns_empty_dict(self):
+    def test_malformed_json_raises_value_error(self):
+        """_chat_json raises ValueError on unparseable JSON (does not silently return {})."""
         with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
             MockOpenAI.return_value.chat.completions.create.return_value = _chat_response("not valid json {{")
             bridge = LLMBridge(provider="gemini", model_id="test-model")
-            result = bridge.generate(SYSTEM_PROMPT, USER_PROMPT)
-        assert result == {}
+            with pytest.raises(ValueError, match="not valid JSON"):
+                bridge.generate(SYSTEM_PROMPT, USER_PROMPT)
 
     def test_markdown_fenced_json_is_parsed(self):
         fenced = "```json\n" + VALID_JSON_STR + "\n```"
