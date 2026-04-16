@@ -19,7 +19,10 @@ the full output contract so later phases only need to swap the ms/step source.
 
 from __future__ import annotations
 
+import gc
 import math
+import os
+import time
 import traceback
 
 from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
@@ -90,7 +93,7 @@ def _suggest_lever(ms_per_step: float, seg_size: int, batch_size: int) -> str:
     )
 
 
-# ── torch-dependent helper ───────────────────────────────────────────────────
+# ── torch-dependent helpers ──────────────────────────────────────────────────
 
 
 def _count_params(model_type: str, model_config: dict, loss_type: str) -> int:
@@ -108,6 +111,157 @@ def _count_params(model_type: str, model_config: dict, loss_type: str) -> int:
     else:
         model = MODEL_REGISTRY[model_type](config_obj)
     return sum(p.numel() for p in model.parameters())
+
+
+def _measure_ms_per_step(
+    model_type: str,
+    model_config: dict,
+    train_config: dict,
+    loss_config: dict,
+    data_dir: str,
+    sample_set: dict,
+    n_warmup_batches: int = 1,
+    n_timed_batches: int = 2,
+) -> float | None:
+    """Measure real ms/step by running a micro training pass on 1+ real PSDs.
+
+    Mirrors the training code path in ``execute_tools.train_engine_sandbox`` so
+    the measurement captures GPU compute, disk/HDF5 load, DataLoader overhead,
+    and the actual model+loss+optimizer combination in one shot.
+
+    Returns ``None`` on any failure (missing CUDA, missing data_dir, model
+    instantiation error, etc.) — caller falls back to the static formula.
+    """
+    if not data_dir or not os.path.isdir(data_dir):
+        print("    [warmup skipped] no data_dir; falling back to static formula.")
+        return None
+
+    try:
+        import torch
+    except ImportError:
+        return None
+    if not torch.cuda.is_available():
+        print("    [warmup skipped] CUDA not available; falling back to static formula.")
+        return None
+
+    try:
+        import random
+        from torch.utils.data import DataLoader
+
+        from execute_tools.train_engine_sandbox import TIDMADEpochDataset
+        from ml_models.models_sandbox import MODEL_REGISTRY
+        from ml_models.models_format_sandbox import (
+            LossConfig,
+            TrainConfig,
+            get_config_class,
+        )
+        from ml_models.loss_models_sandbox import get_criterion
+
+        seg_size = int(model_config["segmentation_size"])
+        batch_size = int(train_config.get("batch_size", 1))
+        loss_type = loss_config.get("loss_type", "ce")
+
+        # Pick a minimal slice of the sample_set large enough for the required batches.
+        if not sample_set:
+            return None
+        first_key = sorted(sample_set.keys(), key=int)[0]
+        first_psds = list(sample_set[first_key])
+        if not first_psds:
+            return None
+
+        ml_per_psd = PSD_SEGMENT_LENGTH // seg_size
+        required_segs = (n_warmup_batches + n_timed_batches) * batch_size
+        n_psd_needed = max(1, math.ceil(required_segs / max(ml_per_psd, 1)))
+        n_psd_needed = min(n_psd_needed, 5, len(first_psds))
+        mini_sample_set = {first_key: first_psds[:n_psd_needed]}
+
+        dataset = TIDMADEpochDataset(
+            data_dir=data_dir,
+            sample_set=mini_sample_set,
+            seg_size=seg_size,
+            train_portion=1.0,
+            rng=random.Random(0),
+        )
+        if len(dataset) < required_segs:
+            print(
+                f"    [warmup skipped] mini dataset too small "
+                f"({len(dataset)} < {required_segs} required); falling back."
+            )
+            return None
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, drop_last=True)
+
+        device = torch.device("cuda")
+
+        config_cls = get_config_class(model_type)
+        model_cfg_obj = config_cls(**model_config)
+        if model_type == "fcnet":
+            model = MODEL_REGISTRY[model_type](model_cfg_obj, loss_type=loss_type).to(device)
+        else:
+            model = MODEL_REGISTRY[model_type](model_cfg_obj).to(device)
+
+        train_cfg_obj = TrainConfig(**train_config)
+        loss_cfg_obj = LossConfig(**loss_config)
+        criterion = get_criterion(loss_cfg_obj, class_weights=None)
+
+        if train_cfg_obj.optimizer_type == "adamw":
+            optimizer = torch.optim.AdamW(
+                model.parameters(),
+                lr=train_cfg_obj.lr,
+                weight_decay=train_cfg_obj.weight_decay,
+            )
+        elif train_cfg_obj.optimizer_type == "adam":
+            optimizer = torch.optim.Adam(model.parameters(), lr=train_cfg_obj.lr)
+        else:
+            optimizer = torch.optim.SGD(model.parameters(), lr=train_cfg_obj.lr)
+
+        model.train()
+        timings_ms = []
+        it = iter(loader)
+        for step in range(n_warmup_batches + n_timed_batches):
+            try:
+                x, y = next(it)
+            except StopIteration:
+                break
+            x = x.to(device)
+            y = y.to(device)
+            if model_type == "fcnet":
+                x = x.float()
+            else:
+                x = x.int()
+            if loss_type in ("ce", "focal", "focal_cw"):
+                y = y.long()
+            else:
+                y = y.float()
+
+            torch.cuda.synchronize()
+            t0 = time.perf_counter()
+            optimizer.zero_grad()
+            out = model(x)
+            loss = criterion(out, y)
+            loss.backward()
+            optimizer.step()
+            torch.cuda.synchronize()
+            elapsed_ms = (time.perf_counter() - t0) * 1000.0
+            if step >= n_warmup_batches:
+                timings_ms.append(elapsed_ms)
+
+        del model, optimizer, criterion, dataset, loader
+        torch.cuda.empty_cache()
+        gc.collect()
+
+        if not timings_ms:
+            return None
+        return sum(timings_ms) / len(timings_ms)
+
+    except Exception as exc:  # pragma: no cover — defensive
+        print(f"    [warmup failed] {exc}\n{traceback.format_exc(limit=3)}")
+        try:
+            import torch
+
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+        return None
 
 
 # ── public entry point ───────────────────────────────────────────────────────
@@ -131,6 +285,7 @@ def run_skill(sandbox, **kwargs) -> dict:
     sample_set = kwargs.get("sample_set", {})
     train_portion = float(kwargs.get("train_portion", 1.0))
     budget_min = float(kwargs.get("time_budget_minutes", 0.0))
+    data_dir = kwargs.get("data_dir")
 
     seg_size = int(model_config.get("segmentation_size", 1000))
     batch_size = int(train_config.get("batch_size", 1))
@@ -152,9 +307,27 @@ def run_skill(sandbox, **kwargs) -> dict:
         print(f"!!! [TimeEval] {msg}")
         return {"status": "error", "message": msg}
 
-    # Phase B: static formula only. Phase C will replace with live warmup
-    # and Phase F will fold in the learned correction factor k.
-    ms_per_step = _static_ms_per_step(num_params, seg_size, batch_size)
+    # Prefer the real-dataset live warmup; fall back to the static formula
+    # when CUDA / data_dir / model build is unavailable (e.g. unit tests,
+    # CPU-only hosts). Phase F will fold in the learned correction factor k.
+    measured = None
+    if data_dir:
+        measured = _measure_ms_per_step(
+            model_type=model_type,
+            model_config=model_config,
+            train_config=train_config,
+            loss_config=loss_config,
+            data_dir=data_dir,
+            sample_set=sample_set,
+        )
+
+    if measured is not None and measured > 0:
+        ms_per_step = measured
+        ms_source = "real_dataset_warmup"
+    else:
+        ms_per_step = _static_ms_per_step(num_params, seg_size, batch_size)
+        ms_source = "static_formula_phase_b"
+
     k_correction = 1.0
     total_min = (
         total_steps * ms_per_step * k_correction * SAFETY_MULTIPLIER / 60_000.0
@@ -168,7 +341,7 @@ def run_skill(sandbox, **kwargs) -> dict:
         "safety_multiplier": SAFETY_MULTIPLIER,
         "train_minutes": round(total_min, 2),
         "num_params": num_params,
-        "source": "static_formula_phase_b",
+        "source": ms_source,
     }
 
     verdict = (
@@ -181,7 +354,7 @@ def run_skill(sandbox, **kwargs) -> dict:
 
     print(f"    Parameters   : {num_params:,}")
     print(f"    Total steps  : {total_steps:,}")
-    print(f"    ms/step      : {ms_per_step:.2f}  (static formula — phase B)")
+    print(f"    ms/step      : {ms_per_step:.2f}  ({ms_source})")
     print(f"    Est minutes  : {total_min:.1f} / budget {budget_min:.1f}")
     print(f"    Feasible     : {'YES' if feasible else 'NO'}")
     if suggestion:

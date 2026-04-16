@@ -196,3 +196,46 @@ def test_run_skill_respects_safety_multiplier(monkeypatch):
     assert result["estimated_minutes"] == pytest.approx(
         raw * ts.SAFETY_MULTIPLIER, rel=1e-3
     )
+
+
+# ---------------------------------------------------------------------------
+# Warmup vs static-formula source routing (Phase C)
+# ---------------------------------------------------------------------------
+
+def test_run_skill_uses_warmup_when_data_dir_and_measurement_available(monkeypatch):
+    # When data_dir is passed and _measure_ms_per_step returns a positive
+    # value, run_skill must use it and flag the source accordingly.
+    _patch_count_params(monkeypatch, 100_000)
+    monkeypatch.setattr(ts, "_measure_ms_per_step", lambda **kw: 3.5)
+    result = ts.run_skill(
+        FakeSandbox(),
+        **_base_kwargs(data_dir="/any/path"),
+    )
+    assert result["breakdown"]["source"] == "real_dataset_warmup"
+    assert result["breakdown"]["ms_per_step_warmup"] == pytest.approx(3.5)
+
+
+def test_run_skill_falls_back_to_static_when_warmup_returns_none(monkeypatch):
+    # Warmup returns None (no CUDA, build failure, etc.) → static formula path.
+    _patch_count_params(monkeypatch, 100_000)
+    monkeypatch.setattr(ts, "_measure_ms_per_step", lambda **kw: None)
+    result = ts.run_skill(
+        FakeSandbox(),
+        **_base_kwargs(data_dir="/any/path"),
+    )
+    assert result["breakdown"]["source"] == "static_formula_phase_b"
+
+
+def test_run_skill_skips_warmup_without_data_dir(monkeypatch):
+    # No data_dir → _measure_ms_per_step must not be invoked at all.
+    _patch_count_params(monkeypatch, 100_000)
+    calls = []
+
+    def _should_not_be_called(**kw):
+        calls.append(kw)
+        return 99.0
+
+    monkeypatch.setattr(ts, "_measure_ms_per_step", _should_not_be_called)
+    result = ts.run_skill(FakeSandbox(), **_base_kwargs())
+    assert calls == []
+    assert result["breakdown"]["source"] == "static_formula_phase_b"
