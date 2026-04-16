@@ -753,3 +753,269 @@ def test_vocab_discoveries_appear_in_proposal_prompt(tmp_path, request):
         print(f"  [real-llm] inherited_components={[c.component for c in proposal_output.inherited_components]}", flush=True)
         print(f"  [real-llm] vocab engagement score: {vocab_engagement} "
               f"({'good' if vocab_engagement > 0 else 'no engagement — worth inspecting'})", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# Phase E fixtures
+# ---------------------------------------------------------------------------
+
+# Proposals include proposed_vocab_links so we can verify E.7 tracking.
+_E4_PROPOSAL_REFUTED = {
+    "model_name": "attn_wavenet",
+    "falsifiable_prediction": {
+        "metric": "denoising_score",
+        "current_value": 5.576,   # SOTA at proposal time
+        "predicted_value": 6.5,
+        "threshold_for_refutation": 5.8,
+        "rationale": "Attention should extend receptive field and capture global context.",
+    },
+    "inherited_components": [
+        {"component": "dilated_causal_conv", "from_model_type": "wavenet",
+         "contribution_evidence": "Core mechanism of wavenet's 5.576 score."},
+    ],
+    "proposed_vocab_links": [
+        {
+            "feature": "dilated_causal_conv",
+            "capability": "receptive_field",
+            "evidence": "Increasing dilation depth in wavenet correlates with improved mid-freq scores.",
+            "status": "proposed",
+        },
+    ],
+    "proposed_vocab_candidates": [],
+    "proposed_discoveries": [],
+}
+
+_E4_PROPOSAL_CONFIRMED = {
+    "model_name": "spectral_net",
+    "falsifiable_prediction": {
+        "metric": "denoising_score",
+        "current_value": 5.576,   # same SOTA — still trying to beat wavenet
+        "predicted_value": 6.0,
+        "threshold_for_refutation": 5.7,
+        "rationale": "Spectral processing directly addresses the low-frequency blind spot.",
+    },
+    "inherited_components": [
+        {"component": "focal_loss", "from_model_type": "wavenet",
+         "contribution_evidence": "Focal loss improved wavenet by +0.35."},
+    ],
+    "proposed_vocab_links": [
+        {
+            "feature": "dilated_causal_conv",
+            "capability": "receptive_field",
+            "evidence": "Wavenet's dilated stack remains the primary mechanism for temporal coverage.",
+            "status": "proposed",
+        },
+    ],
+    "proposed_vocab_candidates": [],
+    "proposed_discoveries": [],
+}
+
+
+# ---------------------------------------------------------------------------
+# H.4 — Phase E: scientific_accuracy and vocab_link_confirmations accumulate
+# ---------------------------------------------------------------------------
+
+@pytest.mark.dual_mode
+def test_scientific_accuracy_and_vocab_links_accumulate(tmp_path, request):
+    """H.4 — Phase E integration: scientific_accuracy and vocab_link_confirmations
+    carry forward correctly across two iterations.
+
+    Iteration 1 (REFUTED):
+      - attn_wavenet proposed with vocab link: dilated_causal_conv → receptive_field
+      - actual=-1.509 << current_sota=5.576 → outcome='refuted'
+      - prediction_outcomes_history = {"confirmed": 0, "partial": 0, "refuted": 1}
+      - scientific_accuracy = {"confirmed": 0.0, "partial": 0.0, "refuted": 1.0}
+      - vocab_link_confirmations: unchanged (refuted does not add confirmation)
+
+    Iteration 2 (CONFIRMED):
+      - spectral_net proposed with same vocab link
+      - actual=6.1 > current_sota=5.576 → outcome='confirmed'
+      - carry forward: prediction_outcomes_history + vocab_link_confirmations from iter 1
+      - prediction_outcomes_history = {"confirmed": 1, "partial": 0, "refuted": 1}
+      - scientific_accuracy = {"confirmed": 0.5, "partial": 0.0, "refuted": 0.5}
+      - vocab_link_confirmations["dilated_causal_conv:receptive_field"] = ["spectral_net"]
+        (1 confirmation, not yet at min_runs=3 threshold → not yet in related_to)
+
+    Uses pseudo training results (fake ModelRunSummary, no GPU) in both modes.
+    Pseudo mode: RecordingLLMBridge (canned responses). Phase E logic is
+    deterministic Python — assertions hold regardless of LLM mode.
+    Real-LLM mode (--real-llm): real Gemini 2.5 Flash for LLM-dependent phases.
+    """
+    from tests.conftest import _is_real_llm
+    from tests.helpers.recording_llm_bridge import RecordingLLMBridge
+
+    # -----------------------------------------------------------------------
+    # Iteration 1: attn_wavenet REFUTED (actual=-1.509 << SOTA 5.576)
+    # -----------------------------------------------------------------------
+    attn_wavenet_bad = ModelRunSummary(
+        model_type="attn_wavenet",
+        run_name="h4_v1",
+        status="completed",
+        completed_rounds=3,
+        best_denoising_score=-1.509,
+        worst_denoising_score=-2.509,
+        best_config={
+            "model_config": {"attn_heads": 4},
+            "train_config": {"lr": 1e-4},
+            "loss_config": {"loss_type": "focal"},
+        },
+        round_scores=[-2.509, -2.0, -1.509],
+        round_conclusions=["unstable", "partial recovery", "best achieved"],
+        model_description="Wavenet with multi-head self-attention at the bottleneck.",
+    )
+
+    iter1_inp = InterpretationInput(
+        summaries=[_SEED_WAVENET, _SEED_PUNET, attn_wavenet_bad],
+        previous_proposal=_E4_PROPOSAL_REFUTED,
+        runtime_vocab=[],
+        prediction_outcomes_history={"confirmed": 0, "partial": 0, "refuted": 0},
+        vocab_link_confirmations={},
+        storage={
+            "backend": "local",
+            "local": {"workspace": str(tmp_path), "run_name": "h4_iter1"},
+        },
+    )
+
+    if _is_real_llm(request):
+        if not os.getenv("GEMINI_API_KEY"):
+            pytest.skip("--real-llm requires GEMINI_API_KEY")
+        from agent.llm_bridge import LLMBridge
+        iter1_agent = ResultInterpretationAgent(
+            bridge_factory=lambda **kw: LLMBridge(**{**kw, "model_id": "gemini-2.5-flash", "max_retries": 3})
+        )
+    else:
+        iter1_bridge = RecordingLLMBridge.for_agent("result_interpretation_agent")
+        iter1_agent = ResultInterpretationAgent(bridge_factory=lambda **kw: iter1_bridge)
+
+    try:
+        iter1_output = iter1_agent.run(iter1_inp)
+    except Exception as e:
+        print(f"\n  [h4] iter1 interpretation failed: {type(e).__name__}: {e}", flush=True)
+        raise
+
+    # --- Iter 1 Phase E assertions ---
+    assert iter1_output.prediction_evaluation is not None, \
+        "Iter 1: prediction_evaluation is None"
+    assert iter1_output.prediction_evaluation["outcome"] == "refuted", \
+        f"Iter 1: expected 'refuted', got {iter1_output.prediction_evaluation['outcome']!r}"
+
+    assert iter1_output.prediction_outcomes_history["refuted"] == 1, \
+        f"Iter 1: expected refuted=1, got {iter1_output.prediction_outcomes_history}"
+    assert iter1_output.prediction_outcomes_history["confirmed"] == 0
+    assert iter1_output.prediction_outcomes_history["partial"] == 0
+
+    assert iter1_output.scientific_accuracy is not None, \
+        "Iter 1: scientific_accuracy is None — should be computed after first prediction"
+    assert abs(iter1_output.scientific_accuracy["refuted"] - 1.0) < 1e-6, \
+        f"Iter 1: expected refuted=1.0, got {iter1_output.scientific_accuracy}"
+    assert abs(iter1_output.scientific_accuracy["confirmed"]) < 1e-6
+
+    # REFUTED prediction → vocab link NOT confirmed → confirmations unchanged
+    assert iter1_output.vocab_link_confirmations.get(
+        "dilated_causal_conv:receptive_field", []
+    ) == [], \
+        "Iter 1: refuted prediction should not add vocab link confirmation"
+
+    print(f"\n  [h4 iter1] outcome=refuted  "
+          f"scientific_accuracy={iter1_output.scientific_accuracy}  "
+          f"link_confs={dict(iter1_output.vocab_link_confirmations)}", flush=True)
+
+    # -----------------------------------------------------------------------
+    # Iteration 2: spectral_net CONFIRMED (actual=6.1 > SOTA 5.576)
+    # Carry forward Phase E state from iter 1.
+    # -----------------------------------------------------------------------
+    spectral_net_good = ModelRunSummary(
+        model_type="spectral_net",
+        run_name="h4_v2",
+        status="completed",
+        completed_rounds=3,
+        best_denoising_score=6.1,
+        worst_denoising_score=5.85,
+        best_config={
+            "model_config": {"spectral_channels": 32, "num_blocks": 4},
+            "train_config": {"lr": 1e-4, "epochs": 10},
+            "loss_config": {"loss_type": "focal"},
+        },
+        round_scores=[5.85, 5.98, 6.10],
+        round_conclusions=[
+            "Spectral convolutions address low-freq gap immediately.",
+            "Score improved with more data.",
+            "Converged at 6.1.",
+        ],
+        model_description=(
+            "SpectralNet applies 1D FFT-based convolutions to capture frequency-domain "
+            "patterns directly, bypassing the temporal limitations of dilated causal convolutions."
+        ),
+    )
+
+    iter2_inp = InterpretationInput(
+        summaries=[_SEED_WAVENET, _SEED_PUNET, spectral_net_good],
+        previous_proposal=_E4_PROPOSAL_CONFIRMED,
+        runtime_vocab=iter1_output.runtime_vocab,
+        # Carry forward Phase E state
+        prediction_outcomes_history=iter1_output.prediction_outcomes_history,
+        vocab_link_confirmations=iter1_output.vocab_link_confirmations,
+        storage={
+            "backend": "local",
+            "local": {"workspace": str(tmp_path), "run_name": "h4_iter2"},
+        },
+    )
+
+    if _is_real_llm(request):
+        from agent.llm_bridge import LLMBridge
+        iter2_agent = ResultInterpretationAgent(
+            bridge_factory=lambda **kw: LLMBridge(**{**kw, "model_id": "gemini-2.5-flash", "max_retries": 3})
+        )
+    else:
+        iter2_bridge = RecordingLLMBridge.for_agent("result_interpretation_agent_iter2")
+        iter2_agent = ResultInterpretationAgent(bridge_factory=lambda **kw: iter2_bridge)
+
+    try:
+        iter2_output = iter2_agent.run(iter2_inp)
+    except Exception as e:
+        print(f"\n  [h4] iter2 interpretation failed: {type(e).__name__}: {e}", flush=True)
+        raise
+
+    # --- Iter 2 Phase E assertions ---
+    assert iter2_output.prediction_evaluation is not None, \
+        "Iter 2: prediction_evaluation is None"
+    assert iter2_output.prediction_evaluation["outcome"] == "confirmed", \
+        f"Iter 2: expected 'confirmed', got {iter2_output.prediction_evaluation['outcome']!r}"
+
+    # History: 1 refuted (from iter 1) + 1 confirmed (this iter) = 2 total
+    assert iter2_output.prediction_outcomes_history["confirmed"] == 1, \
+        f"Iter 2: expected confirmed=1, got {iter2_output.prediction_outcomes_history}"
+    assert iter2_output.prediction_outcomes_history["refuted"] == 1
+    assert iter2_output.prediction_outcomes_history["partial"] == 0
+
+    # scientific_accuracy: 1 confirmed / 2 total = 0.5
+    assert iter2_output.scientific_accuracy is not None
+    assert abs(iter2_output.scientific_accuracy["confirmed"] - 0.5) < 1e-4, \
+        f"Iter 2: expected confirmed=0.5, got {iter2_output.scientific_accuracy}"
+    assert abs(iter2_output.scientific_accuracy["refuted"] - 0.5) < 1e-4
+
+    # CONFIRMED prediction → vocab link gets 1 confirmation from run "spectral_net"
+    link_confs = iter2_output.vocab_link_confirmations
+    assert "dilated_causal_conv:receptive_field" in link_confs, \
+        f"Iter 2: link 'dilated_causal_conv:receptive_field' not in confirmations. " \
+        f"Got keys: {list(link_confs.keys())}"
+    assert "spectral_net" in link_confs["dilated_causal_conv:receptive_field"], \
+        f"Iter 2: 'spectral_net' not in confirmation list. " \
+        f"Got: {link_confs['dilated_causal_conv:receptive_field']}"
+
+    # 1 confirmation only → NOT yet promoted to related_to (needs 3)
+    feat = next(
+        (v for v in iter2_output.runtime_vocab if v.name == "dilated_causal_conv"),
+        None,
+    )
+    if feat is not None:
+        assert "receptive_field" not in feat.related_to, \
+            "Iter 2: link promoted to related_to after only 1 confirmation — threshold is 3"
+
+    print(f"  [h4 iter2] outcome=confirmed  "
+          f"scientific_accuracy={iter2_output.scientific_accuracy}  "
+          f"link_confs={dict(link_confs)}", flush=True)
+    print(f"  [h4 iter2] prediction_outcomes_history="
+          f"{iter2_output.prediction_outcomes_history}", flush=True)
+    print(f"  [h4 iter2] delta_from_sota="
+          f"{iter2_output.prediction_evaluation.get('delta_from_sota')}", flush=True)
