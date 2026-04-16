@@ -118,9 +118,13 @@ class ValidatorOutput(BaseModel):
     """
 
     passed: bool = Field(
-        description="True only if all eight checks pass: plugin loads, pytest passes, "
-                    "description valid, config fields scalar, in-process instantiation succeeds, "
-                    "gradient flow confirmed, output type consistent, and LLM review passes.",
+        description="Trainability gate. True only if the model will run and train: plugin "
+                    "loads, pytest passes, description valid, config fields scalar, in-process "
+                    "instantiation succeeds, gradient flow confirmed, output type consistent, "
+                    "and LLM review passes. Does NOT include inheritance_check_passed or "
+                    "llm_review_spec_alignment — those are assessed independently and "
+                    "propagated as deviation notes so the tuner can account for them without "
+                    "blocking a trainable model on a fragile regex or a minor spec drift.",
     )
     model_type: str = Field(
         description="The model type key that was validated.",
@@ -158,12 +162,23 @@ class ValidatorOutput(BaseModel):
         default=True,
         description="Whether all claimed inherited_components were found in the plugin source. "
                     "True when inherited_components is empty (check skipped). "
-                    "False when at least one claimed component's pattern was not found.",
+                    "False when at least one claimed component's pattern was not found. "
+                    "Informational only — does NOT affect `passed`. Regex-based checks are "
+                    "brittle (e.g. 'encoder_decoder' fails on models that use F.interpolate "
+                    "without the literal word). Unverified claims are surfaced to downstream "
+                    "nodes via inheritance_deviation_notes and unverified_inherited_components.",
     )
     inheritance_check_notes: Optional[List[str]] = Field(
         default=None,
         description="Per-component results: which passed, which failed, which were skipped "
                     "(no pattern). None when inherited_components is empty.",
+    )
+    unverified_inherited_components: List[str] = Field(
+        default_factory=list,
+        description="Names of claimed inherited_components whose regex pattern did not match "
+                    "the plugin source. Structured for downstream consumers (e.g. the "
+                    "interpretation agent can avoid awarding confirmation credit for these "
+                    "components). Empty when all claims verified or inherited_components is empty.",
     )
     test_output: Optional[str] = Field(
         default=None,
@@ -193,6 +208,15 @@ class ValidatorOutput(BaseModel):
                     "planner knows it is tuning an implementation that differs from the "
                     "proposed hypothesis. None when spec_alignment=True or when the model "
                     "failed validation entirely.",
+    )
+    inheritance_deviation_notes: Optional[str] = Field(
+        default=None,
+        description="Human-readable summary listing which claimed inherited_components could "
+                    "not be verified in the plugin source, emitted when the model passes "
+                    "trainability checks but inheritance_check_passed=False. Propagated to "
+                    "the tuner's expert_advice so the planner knows some claimed primitives "
+                    "may be absent or implemented differently than the regex expected. "
+                    "None when inheritance_check_passed=True or when the model failed validation.",
     )
     error_message: Optional[str] = Field(
         default=None,
