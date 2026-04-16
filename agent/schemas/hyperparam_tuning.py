@@ -558,6 +558,30 @@ class HyperparamTuningInput(BaseModel):
         ),
     )
 
+    # --- Time-budget gate (evaluate_time_skill) ---
+    # See docs/time_estimator_implement.md §2.7. Both fields originate at the
+    # workflow/CLI level and are forwarded through the validator→tuner protocol.
+    time_budget_minutes: Optional[float] = Field(
+        default=None,
+        description=(
+            "Wall-time budget in minutes against which evaluate_time_skill gates "
+            "every round's plan ([Step 0.5/3], after the VRAM check). "
+            "None = gate disabled; the tuner prints a one-time warning at "
+            "startup and skips the time check. Set at the workflow level so "
+            "both the proposer's baseline gate and the tuner's per-round gate "
+            "see the same number."
+        ),
+    )
+    data_dir: Optional[str] = Field(
+        default=None,
+        description=(
+            "Filesystem path to the TIDMAD data directory. Forwarded to "
+            "evaluate_time_skill so its real-dataset warmup can read 1 PSD "
+            "from the actual disk path the training run will use. When None, "
+            "the skill falls back to its static-formula estimate."
+        ),
+    )
+
     # --- Hard constraints on LLM plan output (enforced after plan, not by the LLM) ---
     max_epochs: Optional[int] = Field(
         default=None,

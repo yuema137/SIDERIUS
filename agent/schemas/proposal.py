@@ -481,6 +481,36 @@ class ProposalInput(BaseModel):
         description="Model type keys already registered in MODEL_REGISTRY. "
                     "The proposal agent must not reuse any of these names.",
     )
+    # --- Run-level context (workflow-supplied; consumed by the time-budget gate) ---
+    # See docs/time_estimator_implement.md §2.7.2: these four fields originate at
+    # the workflow/CLI entry point and fan out to both this node and the tuner so
+    # the proposer can run evaluate_time_skill on its own baseline before emitting.
+    file_index: int = Field(
+        default=6,
+        ge=0,
+        description="Validation/training file index (0-39). Used by the proposer "
+                    "to build the same sample_set the tuner will see when it gates "
+                    "the baseline through evaluate_time_skill.",
+    )
+    train_portion: float = Field(
+        default=1.0,
+        ge=0.01,
+        le=1.0,
+        description="Per-epoch subsample fraction. Forwarded to evaluate_time_skill "
+                    "so the proposer's wall-time estimate matches the tuner's.",
+    )
+    time_budget_minutes: Optional[float] = Field(
+        default=None,
+        description="Wall-time budget in minutes against which evaluate_time_skill "
+                    "gates the baseline config. None = gate disabled (no estimate, "
+                    "no time_risk annotation). See §2.7.",
+    )
+    data_dir: Optional[str] = Field(
+        default=None,
+        description="Filesystem path to the TIDMAD data directory. Required by the "
+                    "real-dataset warmup inside evaluate_time_skill; when None, the "
+                    "skill falls back to its static formula. See §2.6.3.",
+    )
     constraints: List[str] = Field(
         default_factory=list,
         description="Hard limits the proposed architecture must respect "
@@ -631,4 +661,14 @@ class ProposalOutput(BaseModel):
                     "DiscoveryMemo and what's physically implementable. "
                     "Empty = no issues found. Non-empty = the validator surfaces "
                     "these as warnings. This is a flag, not a veto.",
+    )
+    time_risk: Optional[str] = Field(
+        default=None,
+        description="Non-None when evaluate_time_skill estimated the baseline_config "
+                    "would exceed the wall-time budget (gate-and-annotate, "
+                    "docs/time_estimator_implement.md §2.7.4). Carries the suggestion "
+                    "text from _suggest_lever so the validator→tuner protocol can "
+                    "prepend it to expert_advice as round-0 guidance. None = baseline "
+                    "fits the budget or the gate was disabled (time_budget_minutes "
+                    "not supplied at the workflow level).",
     )
