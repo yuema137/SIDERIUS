@@ -34,6 +34,7 @@ from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_utils import SampleSet
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 from execute_tools.build_anchor_map import load_anchor_map
+from agent.skills.evaluate_time_skill import calibration as time_calibration
 
 
 def _validate_data_config(
@@ -477,6 +478,9 @@ class HyperparamTuningAgent:
                 # and continue without consuming a round. Skipped entirely
                 # when time_budget_minutes is None (one-time warning printed
                 # at startup). See docs/time_estimator_implement.md §2.7 / E1.
+                # The result is stashed so the post-flight calibration update
+                # (Phase F) can compare warmup vs actual ms/step.
+                time_check = None
                 if time_budget_minutes is not None:
                     print(f"\n[Step 0.5/3] Time check...")
                     time_check = _run_skill(
@@ -772,6 +776,45 @@ class HyperparamTuningAgent:
 
                 ExperimentRecord.model_validate(final_record)
                 sandbox.save_record(final_record)
+
+                # Phase F post-flight: update per-GPU calibration from this
+                # successful run. Only runs when the gate used the real-dataset
+                # warmup path (the static formula has no warmup signal to
+                # calibrate against). See docs/time_estimator_implement.md §2.6.5.
+                if time_check is not None:
+                    bd = time_check.get("breakdown") or {}
+                    if bd.get("source") == "real_dataset_warmup":
+                        gpu_name = bd.get("gpu_name")
+                        warmup_ms = float(bd.get("ms_per_step_warmup") or 0.0)
+                        total_steps = int(bd.get("total_train_steps") or 0)
+                        if gpu_name and warmup_ms > 0 and total_steps > 0 and train_time > 0:
+                            try:
+                                actual_ms = train_time * 1000.0 / total_steps
+                                entry = time_calibration.make_entry(
+                                    gpu_name=gpu_name,
+                                    model_type=model_type,
+                                    seg_size=int(active_params["model_config"].get("segmentation_size", 0)),
+                                    batch_size=int(active_params["train_config"].get("batch_size", 1)),
+                                    total_steps=total_steps,
+                                    warmup_ms_per_step=warmup_ms,
+                                    actual_ms_per_step=actual_ms,
+                                    estimated_minutes=float(time_check.get("estimated_minutes") or 0.0),
+                                    actual_minutes=train_time / 60.0,
+                                )
+                                table = time_calibration.load_table(gpu_name)
+                                time_calibration.update_k(table, entry)
+                                time_calibration.save_table(gpu_name, table)
+                                drift = time_calibration.detect_drift(table)
+                                if drift:
+                                    print(f"  [time-calibration] {drift}")
+                                else:
+                                    new_k = time_calibration.lookup_k(table, model_type)
+                                    print(
+                                        f"  [time-calibration] {gpu_name} / {model_type}: "
+                                        f"ratio={entry['ratio']:.3f} → k={new_k:.3f}"
+                                    )
+                            except Exception as cal_exc:  # pragma: no cover — defensive
+                                print(f"  [time-calibration skipped] {cal_exc}")
 
                 completed_rounds += 1
                 print(f"Round {completed_rounds}/{max_rounds} Complete. "

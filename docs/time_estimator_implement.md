@@ -579,24 +579,26 @@ Workflow:
 - [x] Build `sample_set` via `execute_tools.sample_set_builder.build_sample_set(...)` (§2.7.5 Option A). The helper already lives in a neutral location — no relocation needed.
 - [x] On `feasible=True` → leave `time_risk=None`. On `feasible=False` → set `time_risk = result["suggestion"]` (with `verdict` as fallback when the suggestion is empty). On `status="error"` → leave `time_risk=None` and print a warning; the proposer never blocks on a skill failure.
 - [x] When `time_budget_minutes is None`, skip the call entirely. Module-level `_TIME_GATE_WARNED` flag → one-time process warning, mirrors the tuner gate's startup-once policy.
-- [ ] Read-only access to the calibration file — proposer never calls `update_k`. (Deferred to Phase F; the calibration module doesn't exist yet.)
+- [x] Read-only access to the calibration file — proposer never calls `update_k`. (Wired in Phase F2: `wrapper.run_skill` calls `calibration.load_table` + `lookup_k` only; the proposer-side gate inherits this behavior transitively. The tuner is the sole writer.)
 - **Practical caveat**: a brand-new `model_name` proposed by the LLM will not be in `MODEL_REGISTRY` yet (the implementor only registers it later), so the skill's `_count_params` will raise → `status="error"` → gate degrades gracefully via the warn-and-proceed path. The wiring and `time_risk` propagation through the validator→tuner protocol are still valuable: the gate becomes useful the moment a future revision lets the proposer instantiate its proposal pre-validation, and the protocol path is exercised end-to-end now (not retrofitted later).
 - **Verify**: 11 new unit tests in `tests/unit/agent/ml_model_proposal_agent/test_baseline_time_gate.py` cover all four branches (feasible / infeasible / error / disabled), skill-kwarg shape, sample-set construction from the trial-mirror, suggestion-vs-verdict fallback, and end-to-end wiring through `MLModelProposalAgent.run()` including JSON round-trip of `time_risk`. `.venv/bin/python -m pytest tests/unit/agent/ml_model_proposal_agent/ -q` → **240 passed** (2026-04-16).
 
-### Phase F — Learned calibration (asymmetric EMA) [ ]
+### Phase F — Learned calibration (asymmetric EMA) [x]
 
 This is where "learning from mistakes" lands. Splits into three sub-steps.
 
-- [ ] **F1. Calibration module.** Create `agent/skills/evaluate_time_skill/calibration.py` with:
-  - `load_table(gpu_name) -> dict`
-  - `lookup_k(table, model_type) -> float` with fallback chain `(gpu, model_type) → (gpu, *) → 1.0`
-  - `update_k(table, entry) -> dict` implementing the asymmetric EMA from §2.6.5 (`α_up=0.5`, `α_down=0.1`, clip `[0.5, 5.0]`)
-  - `save_table(gpu_name, table)` with atomic write (tmp file + rename)
-  - `detect_drift(table, last_n=3) -> Optional[str]` returns a warning message if last N entries all violated
-- [ ] **F2. Pre-flight use.** In `wrapper.py`, after measuring `warmup_ms_per_step`, look up `k` and compute `ms_per_step_estimate = warmup × k × SAFETY_MULTIPLIER`. Include both `warmup_ms_per_step` and `k_used` in the returned breakdown.
-- [ ] **F3. Post-flight update.** In `nodes/ml_hyperparameter_tune_agent.py`, after `train_time` is recorded (around `line 469`), append a new entry to the calibration file and call `update_k`. Emit the drift warning if any. Pass the pre-flight `estimated_minutes` through from the gate's return so `estimate_violated` is computable.
-- [ ] Unit tests in `test_time_calibration.py`: EMA update under over- and under-prediction, clipping, lookup fallback, drift detection on a synthetic table.
-- **Verify**: `.venv/bin/python -m pytest tests/unit/agent/skills/ -q`. Inline smoke — run the skill twice with the same config, confirm entry appears in the calibration file and `k` shifted as expected on the second call.
+- [x] **F1. Calibration module.** `agent/skills/evaluate_time_skill/calibration.py` exposes:
+  - `load_table(gpu_name) -> dict` — defensive against missing/corrupt JSON; returns an empty `{"gpu_name", "k_values", "history"}` skeleton on either failure path.
+  - `lookup_k(table, model_type) -> float` with fallback chain `(gpu, model_type) → (gpu, *) → 1.0`.
+  - `update_k(table, entry) -> dict` implementing the asymmetric EMA from §2.6.5 (`α_up=0.5`, `α_down=0.1`, clip `[0.5, 5.0]`); mutates `table` in place and appends to `history`.
+  - `save_table(gpu_name, table)` with atomic write (`tempfile.mkstemp` + `os.replace`).
+  - `detect_drift(table, last_n=3) -> Optional[str]` warns when the last N entries all violated.
+  - `make_entry(...)` packages a finished run into the canonical history dict (computes `ratio` and `estimate_violated`, emits a UTC ISO timestamp).
+  - Path resolution: `SIDERIUS_CALIBRATION_DIR` env var, falling back to `~/.siderius/`. GPU-name slugged via `gpu_slug()` so `"NVIDIA RTX 5090"` → `time_calibration_nvidia_rtx_5090.json`.
+- [x] **F2. Pre-flight use.** `wrapper.py` now calls `_detect_gpu_name()` and, when the warmup path was used, looks up `k` via `calibration.load_table` + `lookup_k`. The static-formula path stays at `k=1.0` (no warmup signal to calibrate against). The breakdown gains `k_correction` and `gpu_name`. The 22 existing skill tests still pass — `k=1.0` keeps the static path identical.
+- [x] **F3. Post-flight update.** `nodes/ml_hyperparameter_tune_agent.py` stashes the gate's `time_check` result; after the success record is built, it computes `actual_ms_per_step = train_time × 1000 / total_steps`, builds a `make_entry`, calls `update_k`, saves the table atomically, and prints either the new `k` or the drift warning. Update is gated on `source == "real_dataset_warmup"` and a non-None `gpu_name`, so CPU-only / static-formula runs are silently skipped.
+- [x] Unit tests in `tests/unit/agent/tune_ml_hyperparam_agent/test_time_calibration.py` (29 tests): EMA up/down asymmetry, K_MIN/K_MAX clipping, lookup fallback chain, drift detection (positive/negative/short-history), atomic write semantics, env-var override, slug determinism, defensive load against corrupt JSON, `make_entry` ratio + zero-warmup safety. Located alongside the tuner tests so the per-agent folder convention holds.
+- **Verify**: `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent/ tests/unit/agent/ml_model_proposal_agent/ -q` → **409 passed** (2026-04-16). Inline smoke is deferred to Phase H.
 
 ### Phase G — .gitignore housekeeping [ ]
 
