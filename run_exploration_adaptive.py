@@ -98,6 +98,41 @@ def parse_args():
         help="Hard cap on epochs per tuning round.",
     )
     parser.add_argument(
+        "--trial_strategy", type=str, default="snapshot",
+        choices=["snapshot", "anchors", "target"],
+        help=(
+            "Sampling strategy for trial mode. 'snapshot' covers all 20 files, "
+            "'anchors' picks files 0/10/19, 'target' restricts to --target_files. "
+            "Forwarded to BOTH the proposer's and tuner's evaluate_time_skill gates."
+        ),
+    )
+    parser.add_argument(
+        "--target_files", type=int, nargs="+", default=None,
+        help=(
+            "File indices to sample from (required when --trial_strategy=target). "
+            "Modern replacement for legacy single-file mode: pass e.g. --target_files 6."
+        ),
+    )
+    parser.add_argument(
+        "--sampling_seed", type=int, default=None,
+        help="Seed for build_sample_set(). None auto-generates per gate.",
+    )
+    parser.add_argument(
+        "--time_budget_minutes", type=float, default=None,
+        help=(
+            "Wall-time budget (minutes) for the evaluate_time_skill gate. "
+            "None disables BOTH the proposer's baseline gate and the tuner's "
+            "per-round gate (docs/time_estimator_implement.md §2.7)."
+        ),
+    )
+    parser.add_argument(
+        "--data_dir", type=str, default=None,
+        help=(
+            "TIDMAD data directory used by evaluate_time_skill's real-dataset "
+            "warmup. None makes the skill fall back to its static formula."
+        ),
+    )
+    parser.add_argument(
         "--source_paths", type=str, nargs="+", default=None,
         help="Seed run output JSON paths. Defaults to wavenet + punet trial runs.",
     )
@@ -154,6 +189,11 @@ def main():
     else:
         llm_config = WorkflowLLMConfig.uniform("gemini", "gemini-3.1-pro-preview")
 
+    # Validate target-mode wiring early
+    if args.trial_strategy == "target" and not args.target_files:
+        print("ERROR: --trial_strategy=target requires --target_files (one or more file indices)")
+        sys.exit(1)
+
     # Print summary
     print("=" * 60)
     print("  SIDERIUS Adaptive Exploration")
@@ -161,7 +201,12 @@ def main():
     print(f"  Workspace : {workspace}")
     print(f"  Iterations: {args.max_iterations}")
     print(f"  Rounds/iter: {args.max_rounds}  |  Max epochs: {args.max_epochs}")
+    print(f"  Trial strategy: {args.trial_strategy}"
+          + (f"  |  Target files: {args.target_files}" if args.trial_strategy == "target" else ""))
     print(f"  Trial portion: {args.trial_portion}  |  Train portion: {args.train_portion}  |  Eval portion: {args.eval_portion}")
+    print(f"  Sampling seed : {args.sampling_seed if args.sampling_seed is not None else 'auto'}")
+    print(f"  Time budget   : {f'{args.time_budget_minutes} min' if args.time_budget_minutes is not None else 'disabled (no time gate)'}")
+    print(f"  Data dir      : {args.data_dir or 'unset (skill uses static formula)'}")
     print(f"  Advice    : {args.advice}")
     print(f"  LLM config: {args.llm_config or 'default (gemini-3.1-pro-preview uniform)'}")
     print(f"  Seeds     : {len(source_paths)} models")
@@ -179,10 +224,12 @@ def main():
         llm_config=llm_config,
         # Trial mode
         is_trial=True,
-        trial_strategy="snapshot",
+        trial_strategy=args.trial_strategy,
         trial_portion=args.trial_portion,
+        target_files=args.target_files,
         train_portion=args.train_portion,
         eval_portion=args.eval_portion,
+        sampling_seed=args.sampling_seed,
         max_epochs=args.max_epochs,
         plan_overrides={
             "is_trial": True,
@@ -190,6 +237,9 @@ def main():
             "train_portion": args.train_portion,
             "eval_portion": args.eval_portion,
         },
+        # Time-budget gate (fans out to both proposer and tuner)
+        time_budget_minutes=args.time_budget_minutes,
+        data_dir=args.data_dir,
         # Advice
         human_advice_propose=advice.get("propose"),
         human_advice_implement=advice.get("implement"),
