@@ -157,6 +157,15 @@ class HyperparamTuningAgent:
               f"| file_index={file_index} | trial_allowed={trial_allowed} "
               f"| provider={agent_input.llm_provider}")
 
+        # One-time warning if the time-budget gate is disabled. Mirrors the
+        # "additive, opt-in" stance in docs/time_estimator_implement.md §5 —
+        # without a budget the per-round [Step 0.5/3] check is skipped entirely.
+        time_budget_minutes = agent_input.time_budget_minutes
+        time_data_dir = agent_input.data_dir
+        if time_budget_minutes is None:
+            print("[time-gate disabled] time_budget_minutes is None — "
+                  "evaluate_time_skill will not run.")
+
         # --- Initialize sandbox and brain (via factory for DI / pseudo-mode) ---
         sandbox = self._sandbox_factory(
             metadata_source="local",
@@ -462,6 +471,57 @@ class HyperparamTuningAgent:
                     ExperimentRecord.model_validate(oom_record)
                     sandbox.save_record(oom_record)
                     continue
+
+                # [Step 0.5/3] Wall-time gate. Mirrors the VRAM gate above:
+                # error → raise; infeasible → emit skipped_time_risk record
+                # and continue without consuming a round. Skipped entirely
+                # when time_budget_minutes is None (one-time warning printed
+                # at startup). See docs/time_estimator_implement.md §2.7 / E1.
+                if time_budget_minutes is not None:
+                    print(f"\n[Step 0.5/3] Time check...")
+                    time_check = _run_skill(
+                        "evaluate_time_skill",
+                        sandbox,
+                        **active_params,
+                        time_budget_minutes=time_budget_minutes,
+                        data_dir=time_data_dir,
+                    )
+                    if time_check.get("status") == "error":
+                        raise RuntimeError(
+                            f"Time check error: {time_check.get('message')}"
+                        )
+
+                    if not time_check.get("feasible", True):
+                        print(f"Time check FAILED — this attempt does NOT count as a round.")
+                        print(f"   Verdict   : {time_check.get('verdict', '')}")
+                        print(f"   Suggestion: {time_check.get('suggestion', '')}")
+
+                        time_record = {
+                            "exp_id":          exp_id,
+                            "status":          "skipped_time_risk",
+                            "model_type":      model_type,
+                            "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "file_index":      file_index,
+                            "params":          record_params,
+                            "denoising_score": None,
+                            "memory": {
+                                "expert_advice_followed": expert_advice_str,
+                                "hypothesis":    hypothesis,
+                                "conclusion":    (
+                                    f"Skipped: estimated wall-time "
+                                    f"({time_check.get('estimated_minutes', '?')} min) "
+                                    f"exceeds budget ({time_check.get('limit_minutes', '?')} min)."
+                                ),
+                                "discovery":     time_check.get("verdict", ""),
+                                "memory_update": time_check.get(
+                                    "suggestion",
+                                    "Reduce model size, batch_size, segmentation_size, or train_portion.",
+                                ),
+                            },
+                        }
+                        ExperimentRecord.model_validate(time_record)
+                        sandbox.save_record(time_record)
+                        continue
 
                 print(f"\n[Step 1/3] Training...")
                 t0 = time.time()

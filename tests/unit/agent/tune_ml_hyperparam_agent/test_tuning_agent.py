@@ -484,3 +484,216 @@ class TestDynamicTrialFormal:
             train_calls = [(f, p) for f, p in skill_calls if f == "training_skill"]
             assert len(train_calls) >= 1
             assert train_calls[0][1].get("train_portion") == 0.1
+
+
+# ---------------------------------------------------------------------------
+# [Step 0.5/3] Time-budget gate (Phase E1)
+#
+# evaluate_time_skill is called after the VRAM check. Mirrors the VRAM gate's
+# error/feasible/infeasible structure exactly:
+#   - status="error"   → RuntimeError, kills the round.
+#   - feasible=True    → training proceeds.
+#   - feasible=False   → emit skipped_time_risk record, continue (no round consumed).
+#   - budget=None      → skill not called at all (one-time warning at startup).
+# See docs/time_estimator_implement.md §2.7 / E1.
+# ---------------------------------------------------------------------------
+
+FAKE_TIME_CHECK_OK = {
+    "status": "success",
+    "feasible": True,
+    "estimated_minutes": 12.0,
+    "limit_minutes": 30.0,
+    "verdict": "FITS",
+    "suggestion": "",
+}
+
+FAKE_TIME_CHECK_OVER = {
+    "status": "success",
+    "feasible": False,
+    "estimated_minutes": 90.0,
+    "limit_minutes": 30.0,
+    "verdict": "OVER BUDGET — Est 90.0 min vs budget 30.0 min.",
+    "suggestion": "Reduce model depth/width.",
+}
+
+
+def _make_input_with_budget(
+    tmp_path,
+    *,
+    max_rounds=1,
+    time_budget_minutes=30.0,
+    data_dir=None,
+):
+    return HyperparamTuningInput(
+        model_type="punet",
+        file_index=6,
+        max_rounds=max_rounds,
+        expert_advice="",
+        llm_provider="gemini",
+        llm_model_id="test-model",
+        storage=StorageConfig(
+            backend="local",
+            local=LocalStorageConfig(workspace=str(tmp_path), run_name="test_run"),
+        ),
+        progress_bar=False,
+        time_budget_minutes=time_budget_minutes,
+        data_dir=data_dir,
+    )
+
+
+class TestTimeBudgetGate:
+    """Phase E1 — tuner round-gate behaviour."""
+
+    def _make_agent(self, time_check_result):
+        """Patch context with controllable time-check return value."""
+        cm_brain = patch("nodes.ml_hyperparameter_tune_agent.LLMBridge")
+        cm_sandbox = patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox")
+        cm_skill = patch("nodes.ml_hyperparameter_tune_agent._run_skill")
+        cm_tmp = tempfile.TemporaryDirectory()
+
+        MockBridge = cm_brain.__enter__()
+        MockSandbox = cm_sandbox.__enter__()
+        mock_skill = cm_skill.__enter__()
+        configs_dir = cm_tmp.__enter__()
+
+        mock_brain = MockBridge.return_value
+        mock_brain.plan.return_value = FAKE_PLAN_RESPONSE
+        mock_brain.reflect.return_value = FAKE_REFLECT_RESPONSE
+
+        saved_records = []
+        skill_calls = []
+        mock_sandbox = MockSandbox.return_value
+        mock_sandbox.get_summary.side_effect = lambda: list(saved_records)
+        mock_sandbox.save_record.side_effect = lambda r: saved_records.append(r)
+        mock_sandbox.dirs = {"configs": configs_dir}
+
+        def dispatch(skill_folder, sandbox, **params):
+            skill_calls.append((skill_folder, params))
+            if skill_folder == "check_config_format_skill":
+                return FAKE_CONFIG_MANUAL
+            if skill_folder == "evaluate_resource_skill":
+                return FAKE_RESOURCE_CHECK_OK
+            if skill_folder == "evaluate_time_skill":
+                return time_check_result
+            if skill_folder == "training_skill":
+                return FAKE_TRAIN_RESULT
+            if skill_folder == "inference_skill":
+                return FAKE_INFERENCE_RESULT
+            if skill_folder == "denoising_score_skill":
+                return FAKE_SCORE_RESULT
+            return {"status": "error", "message": f"unknown skill {skill_folder}"}
+
+        mock_skill.side_effect = dispatch
+
+        agent = HyperparamTuningAgent()
+
+        def cleanup():
+            cm_brain.__exit__(None, None, None)
+            cm_sandbox.__exit__(None, None, None)
+            cm_skill.__exit__(None, None, None)
+            cm_tmp.__exit__(None, None, None)
+
+        return agent, mock_brain, mock_sandbox, saved_records, skill_calls, cleanup
+
+    # --- happy path ---------------------------------------------------------
+
+    def test_feasible_proceeds_to_training(self, tmp_path):
+        agent, _, _, saved_records, skill_calls, cleanup = self._make_agent(
+            FAKE_TIME_CHECK_OK
+        )
+        try:
+            output = agent.run(
+                _make_input_with_budget(tmp_path, time_budget_minutes=30.0)
+            )
+        finally:
+            cleanup()
+        assert output.status == "completed"
+        assert output.completed_rounds == 1
+        # Training was called and the saved record is a success
+        called_skills = [s for s, _ in skill_calls]
+        assert "training_skill" in called_skills
+        assert saved_records[0]["status"] == "success"
+
+    def test_skill_receives_budget_and_data_dir(self, tmp_path):
+        agent, _, _, _, skill_calls, cleanup = self._make_agent(FAKE_TIME_CHECK_OK)
+        try:
+            agent.run(_make_input_with_budget(
+                tmp_path,
+                time_budget_minutes=45.0,
+                data_dir="/mnt/tidmad",
+            ))
+        finally:
+            cleanup()
+        time_calls = [p for s, p in skill_calls if s == "evaluate_time_skill"]
+        assert len(time_calls) == 1
+        assert time_calls[0]["time_budget_minutes"] == 45.0
+        assert time_calls[0]["data_dir"] == "/mnt/tidmad"
+
+    # --- infeasible path ----------------------------------------------------
+
+    def test_infeasible_emits_skipped_record(self, tmp_path):
+        agent, _, _, saved_records, skill_calls, cleanup = self._make_agent(
+            FAKE_TIME_CHECK_OVER
+        )
+        try:
+            output = agent.run(_make_input_with_budget(tmp_path, max_rounds=1))
+        finally:
+            cleanup()
+        # All 3 attempts hit the time gate → 3 skipped_time_risk records, 0 rounds completed
+        assert output.status == "partial"
+        assert output.completed_rounds == 0
+        assert all(r["status"] == "skipped_time_risk" for r in saved_records)
+        # Training was never called
+        assert not any(s == "training_skill" for s, _ in skill_calls)
+
+    def test_skipped_record_carries_suggestion(self, tmp_path):
+        agent, _, _, saved_records, _, cleanup = self._make_agent(FAKE_TIME_CHECK_OVER)
+        try:
+            agent.run(_make_input_with_budget(tmp_path, max_rounds=1))
+        finally:
+            cleanup()
+        rec = saved_records[0]
+        assert rec["memory"]["memory_update"] == "Reduce model depth/width."
+        assert "OVER BUDGET" in rec["memory"]["discovery"]
+        # Conclusion mentions both the estimate and the budget
+        assert "90.0" in rec["memory"]["conclusion"]
+        assert "30.0" in rec["memory"]["conclusion"]
+
+    # --- error path ---------------------------------------------------------
+
+    def test_error_status_does_not_skip_silently(self, tmp_path):
+        """status=error from the skill must propagate as a Loop Error (caught
+        by the outer try/except) — it must NOT be treated as feasible=True."""
+        agent, _, _, saved_records, skill_calls, cleanup = self._make_agent(
+            {"status": "error", "message": "instantiation failed"}
+        )
+        try:
+            output = agent.run(_make_input_with_budget(tmp_path, max_rounds=1))
+        finally:
+            cleanup()
+        # The RuntimeError is caught by the loop's try/except → no rounds complete,
+        # no records saved (training never reached, no skipped_time_risk emitted
+        # because status was error not infeasible).
+        assert output.completed_rounds == 0
+        assert not any(s == "training_skill" for s, _ in skill_calls)
+        assert not saved_records
+
+    # --- gate-disabled path -------------------------------------------------
+
+    def test_none_budget_skips_skill_entirely(self, tmp_path):
+        """time_budget_minutes=None → evaluate_time_skill is never called and
+        training proceeds (one-time warning printed at startup)."""
+        agent, _, _, saved_records, skill_calls, cleanup = self._make_agent(
+            FAKE_TIME_CHECK_OVER  # would block if invoked
+        )
+        try:
+            output = agent.run(
+                _make_input_with_budget(tmp_path, time_budget_minutes=None)
+            )
+        finally:
+            cleanup()
+        assert output.status == "completed"
+        assert output.completed_rounds == 1
+        called_skills = [s for s, _ in skill_calls]
+        assert "evaluate_time_skill" not in called_skills
+        assert "training_skill" in called_skills

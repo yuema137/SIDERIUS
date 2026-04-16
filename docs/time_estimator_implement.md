@@ -539,11 +539,13 @@ Functionally absorbed into Phase B. All four items below were implemented while 
 - [x] Unit tests for each suggestion branch — covered by the "3 suggestion branches" tests landed in Phase B.
 - **Verified** (2026-04-16): `pytest tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_time_skill.py -q` → **22 passed** (same suite as Phase C).
 
-### Phase E — Agent integration [ ]
+### Phase E — Agent integration [~]
+
+E0 and E1 are landed; E2 (proposer baseline-gate) is the only remaining sub-phase.
 
 The skill is shared infrastructure (§2.7), so this phase has two call sites. They are independent and can land in either order, but **E1 first** is recommended because it exercises the skill end-to-end before the proposer starts depending on it. Both sub-phases share the schema additions in E0.
 
-#### E0. Shared schema + workflow plumbing [~]
+#### E0. Shared schema + workflow plumbing [x]
 
 Schemas:
 
@@ -558,17 +560,18 @@ Protocols (only the two that actually carry the new fields — `ml_model_propose
 
 Workflow:
 
-- [ ] Workflow runner (`run_exploration_adaptive.py` + `workflows/model_exploration.py`) fans the same trial-mode + budget set out to both `ProposalInput` and `HyperparamTuningInput` via the two protocols above (§2.7.2 diagram). Single source of truth: the CLI args block.
+- [x] Workflow runner (`run_exploration_adaptive.py` + `workflows/model_exploration.py`) fans the same trial-mode + budget set out to both `ProposalInput` and `HyperparamTuningInput` via the two protocols above (§2.7.2 diagram). Single source of truth: the CLI args block. CLI surface: `--trial_strategy`, `--target_files`, `--sampling_seed`, `--time_budget_minutes`, `--data_dir` (all default `None` so the gate stays off until opted in). — committed `f7d2f04`.
 
 **Verify**: protocol unit tests assert the new fields survive each hop, and that `time_risk` lands in `HyperparamTuningInput.expert_advice` when set on the proposal. `.venv/bin/python -m pytest tests/unit/agent/protocols/ -q` → **50 passed** (2026-04-16).
 
-#### E1. Tuner round-gate [ ]
+#### E1. Tuner round-gate [x]
 
-- [ ] Add `[Step 0.5/3]` call in `nodes/ml_hyperparameter_tune_agent.py` after the existing VRAM check. Follow the exact structure of the VRAM gate (error check, feasible check, record emission).
-- [ ] Define `skipped_time_risk` status and wire it into `ExperimentRecord` if not already accepted.
-- [ ] Forward `time_budget_minutes` and `data_dir` from `HyperparamTuningInput` down to the skill's `run_skill` call.
-- [ ] If the upstream `ProposalOutput.time_risk` is non-None, surface it to the planner prompt as round-0 guidance (so the LLM doesn't immediately re-propose the rejected baseline).
-- **Verify**: unit tests for the tune agent's new branch (happy path, over-budget path, missing-budget path). Pseudo-mode integration test for the over-budget path. `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent/ -q`.
+- [x] Add `[Step 0.5/3]` call in `nodes/ml_hyperparameter_tune_agent.py` after the existing VRAM check. Follow the exact structure of the VRAM gate (error check, feasible check, record emission).
+- [x] Define `skipped_time_risk` status and wire it into `ExperimentRecord` if not already accepted.
+- [x] Forward `time_budget_minutes` and `data_dir` from `HyperparamTuningInput` down to the skill's `run_skill` call.
+- [x] If the upstream `ProposalOutput.time_risk` is non-None, surface it to the planner prompt as round-0 guidance (so the LLM doesn't immediately re-propose the rejected baseline). **Already handled by the protocol** (`ml_model_valid_to_ml_model_tune.local_validated_model`, commit `7c0e107`): `proposal.time_risk` is prepended to `expert_advice` and the tuner's existing `_serialize_expert_advice` plumbing carries it into the planner prompt — no extra wiring inside the agent was needed.
+- [x] One-time startup warning when `time_budget_minutes is None` (gate disabled). Mirrors the "additive, opt-in" stance in §5.
+- **Verify**: 6 new unit tests in `TestTimeBudgetGate` cover feasible passthrough, kwarg forwarding (budget + `data_dir`), infeasible → `skipped_time_risk` record, suggestion content, `status="error"` propagation, and `time_budget_minutes=None` skipping the skill entirely. `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent/test_tuning_agent.py -q` → **34 passed** (2026-04-16).
 
 #### E2. Proposer baseline-gate [ ]
 
@@ -594,14 +597,14 @@ This is where "learning from mistakes" lands. Splits into three sub-steps.
 - [ ] Unit tests in `test_time_calibration.py`: EMA update under over- and under-prediction, clipping, lookup fallback, drift detection on a synthetic table.
 - **Verify**: `.venv/bin/python -m pytest tests/unit/agent/skills/ -q`. Inline smoke — run the skill twice with the same config, confirm entry appears in the calibration file and `k` shifted as expected on the second call.
 
-### Phase G — CLI surface polish + .gitignore [ ]
+### Phase G — .gitignore housekeeping [ ]
 
-Most of the original "workflow plumbing" content moved into Phase E0 (schema additions, fan-out to both `ProposalInput` and `HyperparamTuningInput`). What remains here is the user-facing surface and the gitignore housekeeping:
+The CLI surface (`--time_budget_minutes`, `--trial_strategy`, `--target_files`, `--sampling_seed`, `--data_dir`) and the startup-print block both landed in E0 (commit `f7d2f04`). The default for `--time_budget_minutes` is `None`, not 60 — this keeps the gate off until the user explicitly opts in, matching the "additive, opt-in" stance in §5.
 
-- [ ] Add `--time_budget_minutes` argparse entry to `run_exploration_adaptive.py` (default `60`). The threading itself is already done in E0; this step only registers the flag and wires it into the workflow context dict E0 reads from.
-- [ ] Update `run_exploration_adaptive.py`'s startup print block to show the budget alongside the existing run-config summary.
-- [ ] Add `time_calibration_*.json` to `.gitignore` (defensive — the file lives at `~/.siderius/` by default per §2.6.4, but the env-var override could land it inside the repo tree).
-- **Verify**: `.venv/bin/python run_exploration_adaptive.py --help` shows the new flag. Dry-run invocation confirms the budget value reaches both `ProposalInput.time_budget_minutes` and `HyperparamTuningInput.time_budget_minutes` (both gates see the same number).
+What remains here is just the gitignore housekeeping:
+
+- [ ] Add `time_calibration_*.json` to `.gitignore` (defensive — the file lives at `~/.siderius/` by default per §2.6.4, but the `SIDERIUS_CALIBRATION_DIR` env-var override could land it inside the repo tree).
+- **Verify**: `git check-ignore time_calibration_test.json` reports the path is ignored.
 
 ### Phase H — Smoke test + doc update [ ]
 
