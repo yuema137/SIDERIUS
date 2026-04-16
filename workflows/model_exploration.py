@@ -109,20 +109,37 @@ def _load_vocab_seed() -> list:
         return []
 
 
-def _get_reasoning_pipeline(llm_config: WorkflowLLMConfig):
-    """Extract the ReasoningPipelineConfig from the workflow's ProposalLLMConfig.
+def _get_reasoning_pipeline(
+    llm_config: WorkflowLLMConfig,
+    exploration_mode: str = "auto",
+    minimum_boldness: float = 0.05,
+):
+    """Build a ReasoningPipelineConfig from the workflow's ProposalLLMConfig.
 
-    Returns None if propose is not a ProposalLLMConfig or has no pipeline.
+    Returns None if propose is not a ProposalLLMConfig (legacy mode).
+
+    Args:
+        llm_config: Workflow LLM config; must have a ProposalLLMConfig in the
+            propose slot for the pipeline to be active.
+        exploration_mode: One of "auto", "explore", "exploit".
+            "auto" lets the pipeline resolver choose based on n_agent_proposed
+            and vocab_diversity_ratio. "explore" and "exploit" force the mode
+            regardless of those signals.
+        minimum_boldness: Minimum required boldness for a FalsifiablePrediction
+            (|predicted - current| / |current|). Predictions below this threshold
+            trigger a causal_reasoning retry. Default 0.05.
     """
     if llm_config.propose and isinstance(llm_config.propose, ProposalLLMConfig):
-        from agent.schemas.proposal import ReasoningPipelineConfig, ReasoningStage
-        # Build the default 3-stage pipeline if not explicitly configured
-        # (ProposalLLMConfig exists but pipeline.stages may be empty)
+        from agent.schemas.proposal import (
+            ReasoningPipelineConfig, ReasoningStage, ResearchPolicy,
+        )
         pipeline = ReasoningPipelineConfig(
             stages=[
                 ReasoningStage(name="comparison", system_prompt_key="COMPARATIVE_ANALYSIS"),
                 ReasoningStage(name="causal_reasoning", system_prompt_key="CAUSAL_REASONING"),
             ],
+            exploration_mode=exploration_mode,
+            policy=ResearchPolicy(minimum_boldness=minimum_boldness),
         )
         return pipeline
     return None
@@ -315,6 +332,9 @@ def run_workflow(
     cleanup_denoised: bool = False,
     max_epochs: int | None = None,
     plan_overrides: dict | None = None,
+    # --- Reasoning pipeline ---
+    exploration_mode: str = "auto",
+    minimum_boldness: float = 0.05,
 ) -> list[HyperparamTuningOutput]:
     """
     Execute the model exploration workflow for one or more iterations.
@@ -412,7 +432,11 @@ def run_workflow(
 
     # --- Load vocabulary seed + reasoning pipeline config ---
     vocab_seed = _load_vocab_seed()
-    reasoning_pipeline = _get_reasoning_pipeline(llm_config)
+    reasoning_pipeline = _get_reasoning_pipeline(
+        llm_config,
+        exploration_mode=exploration_mode,
+        minimum_boldness=minimum_boldness,
+    )
     if vocab_seed:
         print(f"  Vocab seed: {len(vocab_seed)} entries loaded.")
     if reasoning_pipeline and reasoning_pipeline.stages:
