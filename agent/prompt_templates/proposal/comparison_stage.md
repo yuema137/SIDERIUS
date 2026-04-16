@@ -18,6 +18,14 @@ next stage (causal reasoning), which will form a hypothesis.
 - **Vocabulary**: the current feature/capability vocabulary (canonical + candidates).
   Use these terms consistently when referring to architectural building blocks.
 - **Expert context**: upstream findings, human directives, and strategy reports.
+- **Contributors** (when present): external agents contributing findings this round.
+  Read the Contributors section before the Expert Context. Each contributor's
+  `Trust guidance` field tells you how to calibrate their findings:
+  - Literature agents: treat as promising priors that lower exploration cost.
+    Only experiment runs confirm applicability to TIDMAD.
+  - Physics agents: physical constraints are HARD LIMITS. Do not propose
+    architectures that violate them without explicit physics justification.
+  - Human directives: always take precedence over agent findings.
 
 ## How to analyze each model
 

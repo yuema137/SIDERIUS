@@ -16,6 +16,14 @@ it must be falsifiable, comparative, and architecturally concrete.
   proposed vocab links, and ablation suggestions.
 - **Vocabulary**: current features/capabilities with any confirmed links.
 - **Expert context**: upstream findings, human directives, strategy reports.
+- **Contributors** (when present): external agents contributing findings this round.
+  Read the Contributors section before the Expert Context. Each contributor's
+  `Trust guidance` field tells you how to calibrate their findings:
+  - Literature agents: treat as promising priors that lower exploration cost.
+    Only experiment runs confirm applicability to TIDMAD.
+  - Physics agents: physical constraints are HARD LIMITS. Do not propose
+    architectures that violate them without explicit physics justification.
+  - Human directives: always take precedence over agent findings.
 
 ## What you produce
 

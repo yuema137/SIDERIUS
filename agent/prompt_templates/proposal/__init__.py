@@ -76,11 +76,47 @@ def load_stage_prompt(
     return prompt
 
 
+def render_agent_cards(cards: list) -> str:
+    """
+    Render agent name cards as a labeled 'Contributors' section.
+
+    Called before render_expert_context() so the LLM reads who is
+    contributing before it reads their specific findings.
+
+    Args:
+        cards: List of AgentCard dicts or Pydantic objects.
+
+    Returns:
+        Formatted string, or empty string when cards is empty (no noise
+        in single-agent runs).
+    """
+    if not cards:
+        return ""
+
+    lines = [
+        "## External Contributors\n",
+        "Read each contributor's role and trust guidance before reading their findings.\n",
+    ]
+    for card in cards:
+        if hasattr(card, "model_dump"):
+            card = card.model_dump()
+        name = card.get("agent_name", "unknown")
+        lines.append(f"### {name}")
+        for field in ("role", "expertise_domain", "coverage", "limitations", "trust_guidance"):
+            val = card.get(field, "")
+            if val:
+                lines.append(f"  {field.replace('_', ' ').title()}: {val}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 def render_expert_context(items: list) -> str:
     """
     Render a list of ExpertContextItem dicts into a labeled prompt block.
 
-    Groups items by kind, renders each with source and confidence labels.
+    Groups items by kind, deduplicates by cite_id (last occurrence wins),
+    and sorts each group by confidence descending (None last).
     The grouping and labeling IS the priority system — no explicit weights.
 
     Args:
@@ -101,6 +137,13 @@ def render_expert_context(items: list) -> str:
         else:
             normalized.append(item)
 
+    # Deduplicate by cite_id — last occurrence wins (most recent agent's version kept)
+    seen_cite_ids: dict[str, dict] = {}
+    for item in normalized:
+        cite_id = item.get("cite_id", "")
+        seen_cite_ids[cite_id] = item
+    deduplicated = list(seen_cite_ids.values())
+
     # Group by kind
     KIND_ORDER = ["empirical", "theoretical", "strategy_report", "human", "narrative", "literature"]
     KIND_LABELS = {
@@ -113,15 +156,20 @@ def render_expert_context(items: list) -> str:
     }
 
     groups: dict[str, list] = {}
-    for item in normalized:
+    for item in deduplicated:
         kind = item.get("kind", "human")
         groups.setdefault(kind, []).append(item)
+
+    # Sort each group by confidence descending; None sorts last
+    def _conf_key(item: dict) -> float:
+        c = item.get("confidence")
+        return c if c is not None else -1.0
 
     lines = ["## Expert Context\n"]
     for kind in KIND_ORDER:
         if kind not in groups:
             continue
-        for item in groups[kind]:
+        for item in sorted(groups[kind], key=_conf_key, reverse=True):
             label = KIND_LABELS.get(kind, kind.upper())
             source = item.get("source", "unknown")
             confidence = item.get("confidence")
@@ -136,7 +184,7 @@ def render_expert_context(items: list) -> str:
     for kind, items_in_group in groups.items():
         if kind in KIND_ORDER:
             continue
-        for item in items_in_group:
+        for item in sorted(items_in_group, key=_conf_key, reverse=True):
             lines.append(f"[{kind.upper()}] (from {item.get('source', 'unknown')})")
             lines.append(f"  {item.get('content', '')}")
             lines.append("")
