@@ -248,44 +248,61 @@ The skill is shared infrastructure, not tuner-internal. Two agents must call it 
 
 **Why share the calibration file**: the proposer's estimate benefits directly from the tuner's post-flight learning. A wavenet baseline that proved 30% slower than predicted last run will be adjusted automatically when the proposer estimates the next wavenet baseline. Both agents read from, and the tuner writes to, the same `~/.siderius/time_calibration_{gpu_slug}.json` (§2.6.4). The proposer is read-only against it.
 
-#### 2.7.1 Current state of the relevant schemas (verified 2026-04-16)
+#### 2.7.1 Current state of the relevant schemas (verified 2026-04-16; updated after Phase E0 schema work)
 
-Audit of `agent/schemas/proposal.py` and `agent/schemas/hyperparam_tuning.py`:
+Audit of `agent/schemas/proposal.py` and `agent/schemas/hyperparam_tuning.py`. The training-side trial-mode set on `ProposalInput` **mirrors `HyperparamTuningInput` exactly** — by design, since both nodes' evaluate_time_skill gates must construct the same `sample_set`. Legacy single-file mode (`file_index`, `is_trial=False`) is intentionally absent from `ProposalInput`: modern usage uses `is_trial=True` + `trial_strategy='target'` + `target_files=[N]` when a single file is wanted.
 
 | Field | In `ProposalInput`? | In `HyperparamTuningInput`? |
 |---|---|---|
-| `file_index` | ❌ no | ✅ yes (line 127, default `6`) |
-| `sample_set` | ❌ no (built from `file_index` downstream) | ❌ no (built in tuner via `build_sample_set()`) |
-| `time_budget_minutes` | ❌ no | ❌ no (currently only prose in expert advice) |
-| `data_dir` | ❌ no | ❌ no (currently hard-coded in execute_tools) |
-| `train_portion` | ❌ no | ✅ yes (line 286, for `build_sample_set` seed) |
+| `file_index` | ❌ no (legacy single-file mode is covered by trial-mode `target` strategy) | ✅ yes (default `6`; ignored when `is_trial=True`) |
+| `is_trial` | ✅ yes (default `False`) | ✅ yes (default `False`) |
+| `trial_strategy` | ✅ yes (default `"snapshot"`) | ✅ yes (default `"snapshot"`) |
+| `trial_portion` | ✅ yes (default `0.1`) | ✅ yes (default `0.1`) |
+| `target_files` | ✅ yes (default `[]`) | ✅ yes (default `[]`) |
+| `train_portion` | ✅ yes (default `0.1`, matches tuner) | ✅ yes (default `0.1`) |
+| `sampling_seed` | ✅ yes (default `None`) | ✅ yes (default `None`) |
+| `sample_set` | ❌ no (built inside the node from the trial-mode set) | ❌ no (built inside the node via `build_sample_set()`) |
+| `time_budget_minutes` | ✅ yes (default `None`, gate disabled) | ✅ yes (default `None`, gate disabled) |
+| `data_dir` | ✅ yes (default `None`) | ✅ yes (default `None`) |
 
-Neither agent currently receives the quantitative data-scale or budget information the skill needs. The `constraints: List[str]` field on `ProposalInput` (line 484) holds free-text prose like `'VRAM < 10 GB'` — the numeric channel does not exist yet. Both schemas must gain the four new fields before either integration is possible.
+The `constraints: List[str]` field on `ProposalInput` holds free-text prose like `'VRAM < 10 GB'`; the numeric channel now lives in the fields above. The `ProposalOutput.time_risk: Optional[str]` field (added in Phase E0) carries the gate-and-annotate suggestion text — see §2.7.4.
 
 #### 2.7.2 Fan-in origin: workflow orchestrator
 
-`file_index`, `time_budget_minutes`, and `data_dir` are **run-level parameters** — they do not originate in the interpretation agent (upstream of the proposer) or the proposer (upstream of the tuner). They originate at the workflow/CLI entry point (`run_exploration_adaptive.py`) and fan out:
+The trial-mode data-sampling set (`is_trial`, `trial_strategy`, `trial_portion`, `target_files`, `train_portion`, `sampling_seed`) and the budget set (`time_budget_minutes`, `data_dir`) are **run-level parameters** — they do not originate in the interpretation agent (upstream of the proposer) or the proposer (upstream of the tuner). They originate at the workflow/CLI entry point (`run_exploration_adaptive.py`) and fan out:
 
 ```
-CLI args ──► workflow runner ─┬─► ProposalInput(file_index, time_budget_minutes, data_dir, train_portion)
+CLI args ──► workflow runner ─┬─► ProposalInput(is_trial, trial_strategy, trial_portion, target_files,
+                              │                 train_portion, sampling_seed,
+                              │                 time_budget_minutes, data_dir)
                               │
-                              └─► HyperparamTuningInput(file_index, time_budget_minutes, data_dir, train_portion)
+                              └─► HyperparamTuningInput(is_trial, trial_strategy, trial_portion, target_files,
+                                                       train_portion, sampling_seed,
+                                                       time_budget_minutes, data_dir, ...)
 ```
 
-The protocols between nodes (`ml_result_interp_to_ml_model_propose`, `ml_model_propose_to_ml_model_impl`) pass these fields through untouched — the interpretation agent never reads or modifies them. In schema-first terms, they are **workflow context** that every node along the chain needs visibility to.
+The two protocols that carry these fields — `ml_result_interp_to_ml_model_propose.local_full_context` (into the proposer) and `ml_model_valid_to_ml_model_tune.local_validated_model` (into the tuner) — forward them untouched as caller-supplied kwargs. The interpretation agent and the validator never read or modify them; in schema-first terms, they are **workflow context** that both gates must see identically so the proposer's baseline estimate and the tuner's per-round estimate construct the same `sample_set`.
 
 #### 2.7.3 Skill-input construction at each call site
 
-Each caller assembles the same skill input dict from the fields now available on its input schema:
+Each caller assembles the same skill input dict from the fields now available on its input schema. Because `ProposalInput` mirrors the tuner's trial-mode set exactly, the two call sites differ only in where `sample_set` comes from:
 
 ```python
 # In ml_model_proposal_agent, right before returning ProposalOutput:
+sample_set = build_sample_set(
+    is_trial=input.is_trial,
+    file_index=6,                       # ignored when is_trial=True
+    trial_strategy=input.trial_strategy,
+    trial_portion=input.trial_portion,
+    target_files=input.target_files or None,
+    seed=input.sampling_seed,
+)
 result = run_skill(sandbox, **{
     "model_type":          output.model_name,          # proposed name
     "model_config":        output.baseline_config["model_config"],
     "train_config":        output.baseline_config["train_config"],
     "loss_config":         output.baseline_config["loss_config"],
-    "sample_set":          build_sample_set(input.file_index, ...),   # or a proxy: see §2.7.5
+    "sample_set":          sample_set,
     "train_portion":       input.train_portion,
     "time_budget_minutes": input.time_budget_minutes,
     "data_dir":            input.data_dir,
@@ -298,7 +315,7 @@ result = run_skill(sandbox, **{
     "model_config":        trial.model_config,
     "train_config":        trial.train_config,
     "loss_config":         trial.loss_config,
-    "sample_set":          self.sample_set,                           # already built
+    "sample_set":          self.sample_set,                           # already built in __init__
     "train_portion":       input.train_portion,
     "time_budget_minutes": input.time_budget_minutes,
     "data_dir":            input.data_dir,
@@ -306,7 +323,7 @@ result = run_skill(sandbox, **{
 # Act on result.feasible per existing VRAM-gate pattern.
 ```
 
-Identical shape, identical skill body, different field sources.
+Identical shape, identical skill body, identical trial-mode parameterisation of `sample_set` — the only difference is that the tuner caches `self.sample_set` for reuse across rounds, while the proposer builds it once for its single baseline estimate.
 
 #### 2.7.4 Design fork: gate-and-revise vs gate-and-annotate
 
@@ -335,11 +352,11 @@ time_risk: Optional[str] = Field(
 
 The proposer doesn't currently build a `sample_set` — it emits a config and hands off. For the skill call, the proposer needs either:
 
-**Option A (preferred)**: call `build_sample_set(file_index, train_portion, ...)` directly — the same helper the tuner uses — and pass the result to the skill. Costs nothing; same code path; the skill sees the identical data the tuner will see.
+**Option A (chosen)**: call `execute_tools.sample_set_builder.build_sample_set(...)` directly — the same helper the tuner uses — and pass the result to the skill. Forwarded args are exactly the trial-mode mirror set on `ProposalInput` (`is_trial`, `trial_strategy`, `trial_portion`, `target_files`, `sampling_seed`). Costs nothing; same code path; the skill sees the identical `sample_set` shape the tuner will build for the same workflow context.
 
 **Option B**: skip `sample_set` and pass only `n_train_psd_segs` as a scalar. Requires the skill to accept either shape. Simpler for the proposer; adds a branch inside the skill that exists only to serve one caller. Rejected.
 
-Going with Option A. The proposer imports `build_sample_set` (currently in the tuner — may need relocation to a shared util), constructs the same set the tuner will, and passes it in. If the relocation touches more files than expected, we fall back to Option B.
+Going with Option A. `build_sample_set` already lives in `execute_tools/sample_set_builder.py` (a neutral, non-circular location), so no relocation is needed — the proposer imports it directly. The trial-mode mirror on `ProposalInput` is what guarantees the two `sample_set` instances are equivalent: same `is_trial`, same `trial_strategy`, same `trial_portion`, same `target_files`. The `sampling_seed` may differ across the two call sites (each auto-generates its own when `None`), but the time estimate is robust to which exact PSD segments are picked, so seed identity across the two gates is not required.
 
 ### 2.8 Placement against `ml_model_validator_agent` — code validation vs config feasibility
 
@@ -399,11 +416,11 @@ Both records carry the same `suggestion` text from their respective skills, surf
 - **Tuner integration** (`[Step 0.5/3]` in `nodes/ml_hyperparameter_tune_agent.py`) — fail → `skipped_time_risk` record, no round consumed.
 - **Proposer integration** (gate-and-annotate, §2.7.4) — `nodes/ml_model_proposal_agent.py` runs the skill on its own baseline before returning, attaching a `time_risk` note to `ProposalOutput` when infeasible; no in-place revision in v1.
 - **Schema additions** to carry the run-level parameters end-to-end:
-  - `ProposalInput` gains `file_index: int`, `time_budget_minutes: Optional[float]`, `data_dir: Optional[str]`, `train_portion: float`.
-  - `ProposalOutput` gains `time_risk: Optional[str]`.
-  - `HyperparamTuningInput` gains `time_budget_minutes: Optional[float]`, `data_dir: Optional[str]` (already has `file_index` and `train_portion`).
-- **Workflow fan-out** in `run_exploration_adaptive.py` / `workflows/run_workflow.py`: a single CLI args block populates both `ProposalInput` and `HyperparamTuningInput` with the same `file_index` / `time_budget_minutes` / `data_dir` / `train_portion` (§2.7.2 fan-in diagram).
-- **Protocol pass-through**: `ml_result_interp_to_ml_model_propose` and `ml_model_propose_to_ml_model_impl` forward the new fields untouched; the tuner's input protocol must surface `time_risk` from the proposer to the planner prompt as round-0 guidance.
+  - `ProposalInput` gains the training-side trial-mode mirror (`is_trial`, `trial_strategy`, `trial_portion`, `target_files`, `train_portion`, `sampling_seed`) plus `time_budget_minutes: Optional[float]` and `data_dir: Optional[str]`. Defaults match `HyperparamTuningInput` so an omitted CLI arg behaves identically across the two gates. Legacy single-file mode (`file_index`, `is_trial=False`) is intentionally not surfaced here — modern usage uses `is_trial=True` + `trial_strategy='target'` + `target_files=[N]`.
+  - `ProposalOutput` gains `time_risk: Optional[str]` (gate-and-annotate, §2.7.4).
+  - `HyperparamTuningInput` gains `time_budget_minutes: Optional[float]` and `data_dir: Optional[str]` (the trial-mode set already exists).
+- **Workflow fan-out** in `run_exploration_adaptive.py` / `workflows/model_exploration.py`: a single CLI args block populates both `ProposalInput` and `HyperparamTuningInput` with the same trial-mode + budget set (§2.7.2 fan-in diagram).
+- **Protocol pass-through**: `ml_result_interp_to_ml_model_propose.local_full_context` accepts the new fields as caller-supplied kwargs and forwards them into `ProposalInput`. `ml_model_valid_to_ml_model_tune.local_validated_model` accepts `time_budget_minutes` / `data_dir` (the trial-mode set was already wired) and surfaces `proposal.time_risk` to the tuner's `expert_advice` as round-0 guidance, ordered after spec/inheritance deviation notes.
 - CLI flag `--time_budget_minutes` on `run_exploration_adaptive.py`.
 - Unit tests: skill in isolation with mocked torch, asymmetric-EMA math, calibration-file I/O, proposer baseline-gate (annotate path). Integration test with a tiny real model on GPU; pseudo-mode test that an over-budget baseline yields a non-None `time_risk`.
 
@@ -427,14 +444,14 @@ Both records carry the same `suggestion` text from their respective skills, surf
 | `~/.siderius/time_calibration_{gpu_slug}.json` | **new** — persistent per-GPU learned correction factors (gitignored, auto-created) |
 | `nodes/ml_hyperparameter_tune_agent.py` | add `[Step 0.5/3]` call + `skipped_time_risk` branch; add post-training hook that writes back to calibration file |
 | `nodes/ml_model_proposal_agent.py` | add baseline-gate skill call right before returning `ProposalOutput`; populate `time_risk` per §2.7.4 |
-| `agent/schemas/proposal.py` | add `file_index`, `time_budget_minutes`, `data_dir`, `train_portion` to `ProposalInput`; add `time_risk: Optional[str]` to `ProposalOutput` |
-| `agent/schemas/hyperparam_tuning.py` | add optional `time_budget_minutes: float`, `data_dir: Optional[str]` to `HyperparamTuningInput` |
-| `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py` | accept `file_index` / `time_budget_minutes` / `data_dir` / `train_portion` as caller-supplied kwargs and forward them into `ProposalInput` |
-| `agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py` | accept `time_budget_minutes` / `data_dir` as caller-supplied kwargs (alongside the existing `file_index` / `train_portion` kwargs); read `proposal.time_risk` and prepend it to `expert_advice` (parallel to the existing `spec_deviation_notes` / `inheritance_deviation_notes` pattern) |
+| `agent/schemas/proposal.py` | add the trial-mode mirror (`is_trial`, `trial_strategy`, `trial_portion`, `target_files`, `train_portion`, `sampling_seed`) + `time_budget_minutes` + `data_dir` to `ProposalInput`; add `time_risk: Optional[str]` to `ProposalOutput`. Defaults track `HyperparamTuningInput` exactly. |
+| `agent/schemas/hyperparam_tuning.py` | add optional `time_budget_minutes: float`, `data_dir: Optional[str]` to `HyperparamTuningInput` (trial-mode set already present) |
+| `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py` | accept the trial-mode mirror + `time_budget_minutes` / `data_dir` as caller-supplied kwargs (each falls through to the schema default when `None`) and forward them into `ProposalInput`. Conditional-inclusion pattern: only added to the result dict when the caller supplied them, so partial workflow plumbing doesn't silently reset a field. |
+| `agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py` | accept `time_budget_minutes` / `data_dir` as caller-supplied kwargs (the trial-mode set was already wired); read `proposal.time_risk` and prepend it to `expert_advice` after `spec_deviation_notes` / `inheritance_deviation_notes` (order: spec → inheritance → time_risk → base advice) |
 | ~~`agent/schemas/protocols/ml_model_propose_to_ml_model_impl.py`~~ | **no change** — `ImplementorInput` does not need any of these fields; the validator→tuner fan-in protocol reads `time_risk` from `ProposalOutput` directly |
-| `run_exploration_adaptive.py` | add `--time_budget_minutes` CLI arg; forward `file_index`/`data_dir`/`train_portion`/`time_budget_minutes` into the workflow context |
-| `workflows/run_workflow.py` (or equivalent entry) | fan out the four run-level fields to **both** `ProposalInput` and `HyperparamTuningInput` (§2.7.2) |
-| (optional) `agent/skills/evaluate_time_skill/sample_set_util.py` or relocation of `build_sample_set` | only if the proposer can't import the tuner's helper directly — see §2.7.5 Option A vs B |
+| `run_exploration_adaptive.py` | add `--time_budget_minutes` CLI arg; forward the trial-mode + budget set into the workflow context |
+| `workflows/model_exploration.py` (or equivalent entry) | fan out the trial-mode + budget set to **both** `ProposalInput` and `HyperparamTuningInput` (§2.7.2) |
+| (no relocation needed) `execute_tools/sample_set_builder.py` | already in a neutral location; the proposer imports `build_sample_set` directly — see §2.7.5 |
 | `~/.siderius/time_calibration_{gpu_slug}.json` | **new** — persistent per-GPU learned correction factors (gitignored, auto-created) |
 | `.gitignore` | add `time_calibration_*.json` (if stored anywhere reachable by git) |
 | `tests/unit/agent/skills/test_evaluate_time_skill.py` | **new** — step-count math, suggestion logic |
@@ -526,24 +543,24 @@ Functionally absorbed into Phase B. All four items below were implemented while 
 
 The skill is shared infrastructure (§2.7), so this phase has two call sites. They are independent and can land in either order, but **E1 first** is recommended because it exercises the skill end-to-end before the proposer starts depending on it. Both sub-phases share the schema additions in E0.
 
-#### E0. Shared schema + workflow plumbing [ ]
+#### E0. Shared schema + workflow plumbing [~]
 
 Schemas:
 
-- [ ] `HyperparamTuningInput` gains `time_budget_minutes: Optional[float] = None` and `data_dir: Optional[str] = None`. When `time_budget_minutes is None`, the gate is skipped with a one-time printed warning. (`file_index` and `train_portion` already exist.)
-- [ ] `ProposalInput` gains `file_index: int = 6`, `time_budget_minutes: Optional[float] = None`, `data_dir: Optional[str] = None`, `train_portion: float = 1.0`.
-- [ ] `ProposalOutput` gains `time_risk: Optional[str] = None` per §2.7.4.
+- [x] `HyperparamTuningInput` gains `time_budget_minutes: Optional[float] = None` and `data_dir: Optional[str] = None`. When `time_budget_minutes is None`, the gate is skipped with a one-time printed warning. (Trial-mode set + `train_portion` already existed.) — committed `f76bb8a`.
+- [x] `ProposalInput` gains the **training-side trial-mode mirror** (`is_trial: bool = False`, `trial_strategy: Literal[...] = "snapshot"`, `trial_portion: float = 0.1`, `target_files: List[int] = []`, `train_portion: float = 0.1`, `sampling_seed: Optional[int] = None`) plus `time_budget_minutes: Optional[float] = None` and `data_dir: Optional[str] = None`. Defaults track `HyperparamTuningInput` so the two gates stay aligned. Legacy `file_index` is intentionally absent — see §2.7.1. — committed `3ba870c`.
+- [x] `ProposalOutput` gains `time_risk: Optional[str] = None` per §2.7.4. — committed `3ba870c`.
 
 Protocols (only the two that actually carry the new fields — `ml_model_propose_to_ml_model_impl` is intentionally untouched, see §4 note):
 
-- [ ] `ml_result_interp_to_ml_model_propose.local_full_context` — accept `file_index`, `time_budget_minutes`, `data_dir`, `train_portion` as caller-supplied kwargs (mirroring the existing `expert_context`/`vocab_seed`/`reasoning_pipeline` pattern); forward each into `ProposalInput`. Add a `database_full_context` placeholder kwarg-update if its signature still raises `NotImplementedError`.
-- [ ] `ml_model_valid_to_ml_model_tune.local_validated_model` — add `time_budget_minutes` and `data_dir` to the caller-supplied kwargs (alongside the existing `file_index` / `train_portion` / etc.). Read `proposal.time_risk` and prepend it to `expert_advice` in the same place where `spec_deviation_notes` and `inheritance_deviation_notes` are already prepended (`ml_model_valid_to_ml_model_tune.py:86`). Order: spec-deviation → inheritance-deviation → time-risk → base advice.
+- [x] `ml_result_interp_to_ml_model_propose.local_full_context` — accept the trial-mode mirror + `time_budget_minutes` + `data_dir` as caller-supplied kwargs (mirroring the existing `expert_context`/`vocab_seed`/`reasoning_pipeline` pattern); forward each into `ProposalInput` only when the caller supplied it (so partial workflow plumbing doesn't reset a field the caller didn't touch). — committed `3ba870c`.
+- [x] `ml_model_valid_to_ml_model_tune.local_validated_model` — add `time_budget_minutes` and `data_dir` to the caller-supplied kwargs (alongside the existing trial-mode / `file_index` / `train_portion` kwargs). Read `proposal.time_risk` and prepend it to `expert_advice` in the same place where `spec_deviation_notes` and `inheritance_deviation_notes` are already prepended. Order: spec-deviation → inheritance-deviation → time-risk → base advice. — committed `7c0e107`.
 
 Workflow:
 
-- [ ] Workflow runner (`run_exploration_adaptive.py` + `workflows/model_exploration.py`) fans the same four CLI-derived fields out to both `ProposalInput` and `HyperparamTuningInput` via the two protocols above (§2.7.2 diagram). Single source of truth: the CLI args block.
+- [ ] Workflow runner (`run_exploration_adaptive.py` + `workflows/model_exploration.py`) fans the same trial-mode + budget set out to both `ProposalInput` and `HyperparamTuningInput` via the two protocols above (§2.7.2 diagram). Single source of truth: the CLI args block.
 
-**Verify**: protocol unit tests assert the new fields survive each hop, and that `time_risk` lands in `HyperparamTuningInput.expert_advice` when set on the proposal. `.venv/bin/python -m pytest tests/unit/agent/protocols/ -q`.
+**Verify**: protocol unit tests assert the new fields survive each hop, and that `time_risk` lands in `HyperparamTuningInput.expert_advice` when set on the proposal. `.venv/bin/python -m pytest tests/unit/agent/protocols/ -q` → **50 passed** (2026-04-16).
 
 #### E1. Tuner round-gate [ ]
 
