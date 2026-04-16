@@ -642,12 +642,20 @@ def test_vocab_discoveries_appear_in_proposal_prompt(tmp_path, request):
         if not os.getenv("GEMINI_API_KEY"):
             pytest.skip("--real-llm requires GEMINI_API_KEY")
         from agent.llm_bridge import LLMBridge
-        iter1_agent = ResultInterpretationAgent(bridge_factory=LLMBridge)
+        # max_retries=3: fail loudly within ~77s instead of retrying forever.
+        # Pseudo training data (ModelRunSummary above) is independent of LLM calls.
+        iter1_agent = ResultInterpretationAgent(
+            bridge_factory=lambda **kw: LLMBridge(**{**kw, "model_id": "gemini-2.5-flash", "max_retries": 3})
+        )
     else:
         iter1_bridge = RecordingLLMBridge.for_agent("result_interpretation_agent")
         iter1_agent = ResultInterpretationAgent(bridge_factory=lambda **kw: iter1_bridge)
 
-    iter1_output = iter1_agent.run(iter1_inp)
+    try:
+        iter1_output = iter1_agent.run(iter1_inp)
+    except Exception as e:
+        print(f"\n  [h3] interpretation agent failed: {type(e).__name__}: {e}", flush=True)
+        raise
 
     # --- Iter 1 sanity checks ---
     assert len(iter1_output.runtime_vocab) >= 1, \
@@ -689,14 +697,20 @@ def test_vocab_discoveries_appear_in_proposal_prompt(tmp_path, request):
     # -----------------------------------------------------------------------
     if _is_real_llm(request):
         from agent.llm_bridge import LLMBridge
-        proposal_agent = MLModelProposalAgent(bridge_factory=LLMBridge)
+        proposal_agent = MLModelProposalAgent(
+            bridge_factory=lambda **kw: LLMBridge(**{**kw, "model_id": "gemini-2.5-flash", "max_retries": 3})
+        )
     else:
         proposal_bridge = RecordingLLMBridge.for_agent("ml_model_proposal_agent_h3")
         proposal_agent = MLModelProposalAgent(
             bridge_factory=lambda **kw: proposal_bridge
         )
 
-    proposal_output = proposal_agent.run(proposal_inp)
+    try:
+        proposal_output = proposal_agent.run(proposal_inp)
+    except Exception as e:
+        print(f"\n  [h3] proposal agent failed: {type(e).__name__}: {e}", flush=True)
+        raise
     assert isinstance(proposal_output, ProposalOutput), \
         f"Expected ProposalOutput, got {type(proposal_output)}"
 
@@ -733,9 +747,9 @@ def test_vocab_discoveries_appear_in_proposal_prompt(tmp_path, request):
             len(proposal_output.proposed_discoveries) +
             len(proposal_output.proposed_vocab_candidates)
         )
-        print(f"  [real-llm] model_name='{proposal_output.model_name}'")
+        print(f"  [real-llm] model_name='{proposal_output.model_name}'", flush=True)
         print(f"  [real-llm] proposed_discoveries={len(proposal_output.proposed_discoveries)}, "
-              f"proposed_vocab_candidates={len(proposal_output.proposed_vocab_candidates)}")
-        print(f"  [real-llm] inherited_components={[c.component for c in proposal_output.inherited_components]}")
+              f"proposed_vocab_candidates={len(proposal_output.proposed_vocab_candidates)}", flush=True)
+        print(f"  [real-llm] inherited_components={[c.component for c in proposal_output.inherited_components]}", flush=True)
         print(f"  [real-llm] vocab engagement score: {vocab_engagement} "
-              f"({'good' if vocab_engagement > 0 else 'no engagement — worth inspecting'})")
+              f"({'good' if vocab_engagement > 0 else 'no engagement — worth inspecting'})", flush=True)

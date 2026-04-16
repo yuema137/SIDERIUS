@@ -10,7 +10,7 @@ for consumption by both ml_model_implementor and tune_ml_hyperparam_agent.
 from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from agent.schemas.hyperparam_tuning import ExpertAdvice, ExpertAdviceInput
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
@@ -95,8 +95,8 @@ class InheritedComponent(BaseModel):
                     "None for built-in models."
     )
     contribution_evidence: str = Field(
-        max_length=300,
-        description="One sentence linking the component to its measured benefit."
+        max_length=1000,
+        description="Why this component contributes — link it to its measured benefit."
     )
     citation_source: Optional[str] = Field(
         default=None,
@@ -152,8 +152,8 @@ class ModelComparison(BaseModel):
     )
     best_score: float
     key_mechanism: str = Field(
-        max_length=300,
-        description="One sentence: what makes this model tick (or not). "
+        max_length=1000,
+        description="What makes this model tick (or not). "
                     "Must reference a specific architectural feature or concept."
     )
     strengths: List[str] = Field(
@@ -163,7 +163,7 @@ class ModelComparison(BaseModel):
         description="Where this model fails, tied to file_vector or score evidence."
     )
     lesson_for_next_proposal: str = Field(
-        max_length=300,
+        max_length=1000,
         description="What to inherit or avoid from this model."
     )
 
@@ -186,7 +186,7 @@ class ProposedVocabLink(BaseModel):
         description="The capability entry name, e.g. 'receptive_field'."
     )
     evidence: str = Field(
-        max_length=300,
+        max_length=1000,
         description="Why the agent thinks this link exists — must reference "
                     "specific model results or architectural analysis."
     )
@@ -194,6 +194,19 @@ class ProposedVocabLink(BaseModel):
         default="proposed",
         description="Lifecycle: proposed → confirmed/refuted after experiment.",
     )
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def coerce_status(cls, v: object) -> str:
+        """Coerce any LLM-invented status value to 'proposed'.
+
+        LLMs occasionally produce values like 'uncertain' or 'refuted_for_this_integration'.
+        All new links output by the proposal agent are inherently proposed — they haven't
+        been tested yet — so falling back to 'proposed' is always semantically correct.
+        """
+        if v not in ("proposed", "confirmed", "refuted"):
+            return "proposed"
+        return v
 
 
 # B.5 — Discovery memo (output of Stages 1+2, input to Stage 3)
@@ -213,19 +226,19 @@ class DiscoveryMemo(BaseModel):
     )
     sota_score: float
     sota_mechanism: str = Field(
-        max_length=600,
+        max_length=1000,
         description="WHY does the SOTA work? Must reference physical/architectural "
                     "mechanism, not vague language."
     )
 
     # --- Causal reasoning (Stage 2 output) ---
     proposed_change: str = Field(
-        max_length=400,
+        max_length=1000,
         description="What the new proposal changes RELATIVE TO the SOTA. "
                     "Must be expressible as 'replace X with Y' or 'add Z'."
     )
     causal_hypothesis: str = Field(
-        max_length=600,
+        max_length=1000,
         description="WHY the proposed change should improve the score. "
                     "Must reference the SOTA mechanism preserved, the bottleneck "
                     "relaxed, and the new mechanism introduced."
@@ -382,7 +395,7 @@ class VocabEntry(BaseModel):
                     "architectural property the feature provides, e.g. "
                     "'receptive_field'). New kinds can be added freely."
     )
-    description: str = Field(max_length=200)
+    description: str = Field(max_length=1000)
     related_to: List[str] = Field(
         default_factory=list,
         description="Names of connected VocabEntry items. "
