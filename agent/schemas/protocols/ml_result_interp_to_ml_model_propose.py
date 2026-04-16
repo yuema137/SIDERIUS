@@ -44,6 +44,10 @@ def local_full_context(
     human_advice: Optional[ExpertAdviceInput] = None,
     mindset: Optional[str] = None,
     agent_cards: Optional[List[AgentCard]] = None,
+    file_index: Optional[int] = None,
+    train_portion: Optional[float] = None,
+    time_budget_minutes: Optional[float] = None,
+    data_dir: Optional[str] = None,
 ) -> ProposalInput:
     """
     Local in-memory protocol — transfers the complete interpretation directly.
@@ -65,6 +69,12 @@ def local_full_context(
       - human_advice         : legacy human advice — wrapped into ExpertContextItem if provided
       - mindset              : optional free-text injected into the causal reasoning stage prompt
       - agent_cards          : optional list of external agent self-descriptions (Contributors block)
+      - file_index           : run-level data split index; forwarded for the proposer's
+                                evaluate_time_skill gate (docs/time_estimator_implement.md §2.7.2).
+                                Falls through to the ProposalInput schema default when None.
+      - train_portion        : run-level per-epoch subsample fraction; same fan-out as file_index.
+      - time_budget_minutes  : wall-time gate budget; None disables the proposer's gate.
+      - data_dir             : TIDMAD data directory; required for the skill's real-dataset warmup.
 
     Populates in ml-model-propose (ProposalInput):
       - interpretation       : full serialised InterpretationOutput (all fields above)
@@ -74,6 +84,8 @@ def local_full_context(
       - reasoning_pipeline   : pipeline configuration
       - mindset              : passed through when provided
       - agent_cards          : passed through when provided
+      - file_index/train_portion/time_budget_minutes/data_dir : passed through when provided;
+        otherwise the ProposalInput schema defaults apply.
       - storage              : passed through from the orchestrator
     """
     # Build expert_context — start with what's passed, wrap legacy human_advice
@@ -117,6 +129,19 @@ def local_full_context(
             c.model_dump() if hasattr(c, "model_dump") else c
             for c in agent_cards
         ]
+
+    # Run-level fields for the proposer's evaluate_time_skill gate. Each is
+    # only included when the caller supplied it; otherwise ProposalInput's
+    # schema default takes effect (file_index=6, train_portion=1.0,
+    # time_budget_minutes=None, data_dir=None).
+    if file_index is not None:
+        result["file_index"] = file_index
+    if train_portion is not None:
+        result["train_portion"] = train_portion
+    if time_budget_minutes is not None:
+        result["time_budget_minutes"] = time_budget_minutes
+    if data_dir is not None:
+        result["data_dir"] = data_dir
 
     return ProposalInput.model_validate(result)
 
