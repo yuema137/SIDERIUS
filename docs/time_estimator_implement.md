@@ -1,8 +1,23 @@
 # Time-Budget Estimator Skill
 
-**Status**: design (awaiting approval)
+**Status**: implemented (Phases A–G complete; H deferred to first SDSC run)
 **Author**: design discussion 2026-04-16
 **Motivation**: two trial-mode runs (`exploit_cnn_v1`, `explore_novel_v1`) stalled in Round 1 for 1h 50min and 2h 27min respectively, both blowing past the 1-hour trial budget stated in the expert advice. Neither was blocked, because the planner has no pre-flight wall-time estimate — only a VRAM check.
+
+## Progress log
+
+| Phase | Date | Commit | Tests |
+|---|---|---|---|
+| A — scaffold + design doc | 2026-04-16 | `ca283cf` | n/a |
+| B — step-count math + static ms/step | 2026-04-16 | `2166c13` | 22 evaluate_time_skill unit tests |
+| C — real-dataset GPU warmup | 2026-04-16 | `380e82c` | warmup path covered via monkeypatch |
+| D — workflow + CLI (`f7d2f04`) | 2026-04-16 | `f7d2f04` | n/a (wiring) |
+| E0 — schemas + protocols (interp→prop, prop→impl, valid→tune) | 2026-04-16 | `f76bb8a`, `6d8c104`, `3ba870c`, `7c0e107` | covered by per-protocol suites |
+| E1 — tuner [Step 0.5/3] gate | 2026-04-16 | `458361d` | 6 new TestTimeBudgetGate tests (140 tuner total) |
+| E2 — proposer baseline gate | 2026-04-16 | `f6e3b19` | 11 new tests (240 proposer total) |
+| F — per-GPU calibration (asymmetric EMA) | 2026-04-16 | `12813a0` | 29 new calibration tests (409 tuner+proposer total) |
+| G — `.gitignore` housekeeping | 2026-04-16 | (this commit) | n/a |
+| H — first real-GPU smoke run | deferred | — | requires GPU + `data_dir`; gated until next SDSC submit |
 
 ---
 
@@ -600,21 +615,23 @@ This is where "learning from mistakes" lands. Splits into three sub-steps.
 - [x] Unit tests in `tests/unit/agent/tune_ml_hyperparam_agent/test_time_calibration.py` (29 tests): EMA up/down asymmetry, K_MIN/K_MAX clipping, lookup fallback chain, drift detection (positive/negative/short-history), atomic write semantics, env-var override, slug determinism, defensive load against corrupt JSON, `make_entry` ratio + zero-warmup safety. Located alongside the tuner tests so the per-agent folder convention holds.
 - **Verify**: `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent/ tests/unit/agent/ml_model_proposal_agent/ -q` → **409 passed** (2026-04-16). Inline smoke is deferred to Phase H.
 
-### Phase G — .gitignore housekeeping [ ]
+### Phase G — .gitignore housekeeping [x]
 
 The CLI surface (`--time_budget_minutes`, `--trial_strategy`, `--target_files`, `--sampling_seed`, `--data_dir`) and the startup-print block both landed in E0 (commit `f7d2f04`). The default for `--time_budget_minutes` is `None`, not 60 — this keeps the gate off until the user explicitly opts in, matching the "additive, opt-in" stance in §5.
 
 What remains here is just the gitignore housekeeping:
 
-- [ ] Add `time_calibration_*.json` to `.gitignore` (defensive — the file lives at `~/.siderius/` by default per §2.6.4, but the `SIDERIUS_CALIBRATION_DIR` env-var override could land it inside the repo tree).
-- **Verify**: `git check-ignore time_calibration_test.json` reports the path is ignored.
+- [x] `time_calibration_*.json` added to `.gitignore` (defensive — the file lives at `~/.siderius/` by default per §2.6.4, but the `SIDERIUS_CALIBRATION_DIR` env-var override could land it inside the repo tree).
+- **Verified**: `git check-ignore time_calibration_test.json` → matches `.gitignore:47`.
 
-### Phase H — Smoke test + doc update [ ]
+### Phase H — First real-GPU smoke run [deferred]
+
+H requires a real GPU and a populated `data_dir`, so it can't run on the dev box. Gated until the next SDSC submission. Acceptance criteria when it does run:
 
 - [ ] Re-run a shortened config known to be over-budget with `--time_budget_minutes 10`. Confirm skill blocks it and the `skipped_time_risk` record lands.
-- [ ] Re-run a config expected to finish in ~5 min with `--time_budget_minutes 30`. Confirm: gate passes, training completes, calibration file gains an entry, `k` is updated.
-- [ ] Update this doc's Status line to `implemented`; add a Progress log at the top with dates and test counts per phase.
-- [ ] Decide with user: one big squash commit, or per-phase commits.
+- [ ] Re-run a config expected to finish in ~5 min with `--time_budget_minutes 30`. Confirm: gate passes, training completes, the per-GPU calibration file gains an entry, and `k` shifts in the expected direction (down if the warmup over-predicted, up if it under-predicted).
+- [ ] Inspect the post-run calibration file at `~/.siderius/time_calibration_<gpu>.json`; confirm the `history` entry shape matches `make_entry`'s contract and `estimate_violated` is consistent with `actual_minutes` vs `estimated_minutes`.
+- [ ] Update the Status line above to `implemented + smoke-tested` once H lands; append the H row to the Progress log with the SDSC job ID.
 
 ---
 
