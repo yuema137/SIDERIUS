@@ -109,20 +109,37 @@ def _load_vocab_seed() -> list:
         return []
 
 
-def _get_reasoning_pipeline(llm_config: WorkflowLLMConfig):
-    """Extract the ReasoningPipelineConfig from the workflow's ProposalLLMConfig.
+def _get_reasoning_pipeline(
+    llm_config: WorkflowLLMConfig,
+    exploration_mode: str = "auto",
+    minimum_boldness: float = 0.05,
+):
+    """Build a ReasoningPipelineConfig from the workflow's ProposalLLMConfig.
 
-    Returns None if propose is not a ProposalLLMConfig or has no pipeline.
+    Returns None if propose is not a ProposalLLMConfig (legacy mode).
+
+    Args:
+        llm_config: Workflow LLM config; must have a ProposalLLMConfig in the
+            propose slot for the pipeline to be active.
+        exploration_mode: One of "auto", "explore", "exploit".
+            "auto" lets the pipeline resolver choose based on n_agent_proposed
+            and vocab_diversity_ratio. "explore" and "exploit" force the mode
+            regardless of those signals.
+        minimum_boldness: Minimum required boldness for a FalsifiablePrediction
+            (|predicted - current| / |current|). Predictions below this threshold
+            trigger a causal_reasoning retry. Default 0.05.
     """
     if llm_config.propose and isinstance(llm_config.propose, ProposalLLMConfig):
-        from agent.schemas.proposal import ReasoningPipelineConfig, ReasoningStage
-        # Build the default 3-stage pipeline if not explicitly configured
-        # (ProposalLLMConfig exists but pipeline.stages may be empty)
+        from agent.schemas.proposal import (
+            ReasoningPipelineConfig, ReasoningStage, ResearchPolicy,
+        )
         pipeline = ReasoningPipelineConfig(
             stages=[
                 ReasoningStage(name="comparison", system_prompt_key="COMPARATIVE_ANALYSIS"),
                 ReasoningStage(name="causal_reasoning", system_prompt_key="CAUSAL_REASONING"),
             ],
+            exploration_mode=exploration_mode,
+            policy=ResearchPolicy(minimum_boldness=minimum_boldness),
         )
         return pipeline
     return None
@@ -315,6 +332,13 @@ def run_workflow(
     cleanup_denoised: bool = False,
     max_epochs: int | None = None,
     plan_overrides: dict | None = None,
+    # --- Time-budget gate (evaluate_time_skill, docs/time_estimator_implement.md §2.7.2) ---
+    time_budget_minutes: float | None = None,
+    # --- Reasoning pipeline ---
+    exploration_mode: str = "auto",
+    minimum_boldness: float = 0.05,
+    # --- Implementation retry ---
+    max_impl_attempts: int = 3,
 ) -> list[HyperparamTuningOutput]:
     """
     Execute the model exploration workflow for one or more iterations.
@@ -360,6 +384,11 @@ def run_workflow(
         sampling_seed: Seed for SampleSet construction.
         train_base_seed: Base seed for per-epoch training subsampling.
         cleanup_denoised: Delete denoised H5 files after scoring.
+        time_budget_minutes: Wall-time budget (minutes) for the evaluate_time_skill
+            gate. Fanned out to BOTH ProposalInput (proposer's baseline gate) and
+            HyperparamTuningInput (tuner's per-round gate) so the two gates use the
+            same number. None = both gates disabled. See
+            docs/time_estimator_implement.md §2.7.2.
 
     Returns:
         List of HyperparamTuningOutput objects, one per successful iteration.
@@ -412,7 +441,11 @@ def run_workflow(
 
     # --- Load vocabulary seed + reasoning pipeline config ---
     vocab_seed = _load_vocab_seed()
-    reasoning_pipeline = _get_reasoning_pipeline(llm_config)
+    reasoning_pipeline = _get_reasoning_pipeline(
+        llm_config,
+        exploration_mode=exploration_mode,
+        minimum_boldness=minimum_boldness,
+    )
     if vocab_seed:
         print(f"  Vocab seed: {len(vocab_seed)} entries loaded.")
     if reasoning_pipeline and reasoning_pipeline.stages:
@@ -483,12 +516,23 @@ def run_workflow(
 
             try:
                 # --- Propose ---
+                # Forward the trial-mode mirror + budget set so the proposer's
+                # evaluate_time_skill gate constructs the same sample_set the
+                # tuner will (docs/time_estimator_implement.md §2.7.2).
                 propose_input = local_full_context(
                     interpretation,
                     attempt_storage,
                     vocab_seed=vocab_seed,
                     reasoning_pipeline=reasoning_pipeline,
                     human_advice=human_advice_propose,
+                    is_trial=is_trial,
+                    trial_strategy=trial_strategy,
+                    trial_portion=trial_portion,
+                    target_files=target_files,
+                    train_portion=train_portion,
+                    sampling_seed=sampling_seed,
+                    time_budget_minutes=time_budget_minutes,
+                    data_dir=data_dir,
                 )
                 propose_input.existing_model_types = list(all_model_types)
                 if previous_failures:
@@ -507,17 +551,9 @@ def run_workflow(
                 attempt_dir = named_dir
                 attempt_storage = _make_storage(attempt_dir, run_name)
 
-                # --- Implement ---
-                print(f"  [{iteration}.{attempt}] Implementing...")
-                impl_input = local_full_spec(proposal, attempt_storage)
-                # Route plugin files into the attempt directory (not the default
-                # agent_generated/ in the working dir)
-                impl_input.plugin_dir = os.path.join(attempt_dir, "models")
-                impl_input.test_dir = os.path.join(attempt_dir, "tests")
-                if human_advice_implement is not None:
-                    impl_input.human_advice = human_advice_implement
-
-                # Load reference code from inherited_components
+                # --- Implement → Validate (inner retry loop per proposal) ---
+                # Load reference code once (shared across impl attempts for this proposal)
+                ref_code: dict = {}
                 if hasattr(proposal, 'inherited_components') and proposal.inherited_components:
                     from nodes.proposal_helpers import load_model_source
                     ref_models = set()
@@ -525,47 +561,68 @@ def run_workflow(
                         mt = ic.from_model_type if hasattr(ic, 'from_model_type') else ic.get('from_model_type')
                         if mt:
                             ref_models.add(mt)
-                    ref_code = {}
                     for mt in ref_models:
                         src = load_model_source(mt)
                         if src:
                             ref_code[mt] = src
                     if ref_code:
-                        impl_input.reference_code = ref_code
                         print(f"    Reference code: {list(ref_code.keys())} "
                               f"({sum(len(v.split(chr(10))) for v in ref_code.values())} lines)")
 
-                impl_output = MLModelImplementor(
-                    **llm_config.get("implement"),
-                ).run(impl_input)
-                print(f"    Plugin: {impl_output.model_file_path}")
-
-                # --- Validate ---
-                print(f"  [{iteration}.{attempt}] Validating...")
                 valid_llm = llm_config.get("validate")
-                valid_input = local_all_fields(
-                    impl_output, attempt_storage,
-                    llm_provider=valid_llm.get("provider", "gemini"),
-                    llm_model_id=valid_llm.get("model_id", "gemini-3.1-flash-lite-preview"),
-                )
-                if human_advice_validate is not None:
-                    valid_input.human_advice = human_advice_validate
-                # Pass inherited_components from the proposal for check #8
-                if hasattr(proposal, 'inherited_components') and proposal.inherited_components:
-                    valid_input.inherited_components = proposal.inherited_components
+                previous_validation_failure: str | None = None
 
-                validation = MLCodeValidatorAgent(
-                    **valid_llm,
-                ).run(valid_input)
+                for impl_attempt in range(1, max_impl_attempts + 1):
+                    impl_suffix = (f" (impl {impl_attempt}/{max_impl_attempts})"
+                                   if max_impl_attempts > 1 else "")
+                    print(f"  [{iteration}.{attempt}] Implementing{impl_suffix}...")
+                    impl_input = local_full_spec(proposal, attempt_storage)
+                    impl_input.plugin_dir = os.path.join(attempt_dir, "models")
+                    impl_input.test_dir = os.path.join(attempt_dir, "tests")
+                    if human_advice_implement is not None:
+                        impl_input.human_advice = human_advice_implement
+                    if ref_code:
+                        impl_input.reference_code = ref_code
+                    if previous_validation_failure is not None:
+                        impl_input.previous_validation_failure = previous_validation_failure
 
-                if validation.passed:
-                    print(f"    All 7 checks passed.\n")
+                    impl_output = MLModelImplementor(
+                        **llm_config.get("implement"),
+                    ).run(impl_input)
+                    print(f"    Plugin: {impl_output.model_file_path}")
+
+                    # --- Validate ---
+                    print(f"  [{iteration}.{attempt}] Validating...")
+                    valid_input = local_all_fields(
+                        impl_output, attempt_storage,
+                        llm_provider=valid_llm.get("provider", "gemini"),
+                        llm_model_id=valid_llm.get("model_id", "gemini-3.1-flash-lite-preview"),
+                    )
+                    if human_advice_validate is not None:
+                        valid_input.human_advice = human_advice_validate
+                    if hasattr(proposal, 'inherited_components') and proposal.inherited_components:
+                        valid_input.inherited_components = proposal.inherited_components
+
+                    validation = MLCodeValidatorAgent(
+                        **valid_llm,
+                    ).run(valid_input)
+
+                    if validation.passed:
+                        print(f"    All 7 checks passed.\n")
+                        break
+
+                    previous_validation_failure = validation.error_message or "Unknown validation error"
+                    print(f"    Validation FAILED: {previous_validation_failure}")
+                    if impl_attempt < max_impl_attempts:
+                        print(f"    Retrying implementation with validator feedback...\n")
+
+                if validation and validation.passed:
                     break
-                else:
-                    print(f"    Validation FAILED: {validation.error_message}")
-                    previous_failures.append(validation.error_message or "Unknown validation error")
-                    if attempt < max_proposal_attempts:
-                        print(f"    Retrying with failure feedback...\n")
+
+                # All impl attempts for this proposal exhausted
+                previous_failures.append(previous_validation_failure or "Unknown error")
+                if attempt < max_proposal_attempts:
+                    print(f"    Retrying with a new proposal...\n")
 
             except Exception as e:
                 error_msg = f"Node error: {type(e).__name__}: {e}"
@@ -611,6 +668,8 @@ def run_workflow(
             max_epochs=max_epochs,
             max_retries=tune_llm.get("max_retries"),
             plan_overrides=plan_overrides,
+            time_budget_minutes=time_budget_minutes,
+            data_dir=data_dir,
         )
         if human_advice_tune is not None:
             tune_input.human_advice = human_advice_tune

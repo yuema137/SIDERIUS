@@ -784,3 +784,108 @@ class TestExpertAdviceInReviewPrompt:
         expert_pos = prompt.index("Expert Guidance")
         human_pos = prompt.index("Human Guidance")
         assert expert_pos < human_pos
+
+
+# ---------------------------------------------------------------------------
+# Inheritance decoupling — inherit_ok does NOT gate `passed`
+# ---------------------------------------------------------------------------
+
+class TestInheritanceDecoupledFromPassed:
+    """Inheritance check is informational — a regex miss must not block a
+    trainable model. Deviations flow downstream via inheritance_deviation_notes
+    and unverified_inherited_components instead of failing the node."""
+
+    def test_inheritance_miss_still_passes_when_trainable(self, tmp_path, passing_mocks):
+        """All trainability checks pass, one inherited component's regex misses → passed=True."""
+        from agent.schemas.proposal import InheritedComponent
+        # VALID_PLUGIN_SRC has no fft/rfft — claim spectral_conv so it fails to match.
+        inp = make_input(
+            tmp_path,
+            inherited_components=[
+                InheritedComponent(
+                    component="spectral_conv",
+                    from_model_type="gated_fno",
+                    contribution_evidence="Claimed but absent in source.",
+                )
+            ],
+        )
+        out = MLCodeValidatorAgent(
+            provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+        ).run(inp)
+        assert out.passed is True
+        assert out.inheritance_check_passed is False
+        assert out.inheritance_deviation_notes is not None
+        assert "spectral_conv" in out.inheritance_deviation_notes
+        assert out.unverified_inherited_components == ["spectral_conv"]
+
+    def test_error_message_does_not_mention_inheritance_when_passed(
+        self, tmp_path, passing_mocks
+    ):
+        """When only inheritance fails, error_message must remain None."""
+        from agent.schemas.proposal import InheritedComponent
+        inp = make_input(
+            tmp_path,
+            inherited_components=[
+                InheritedComponent(
+                    component="spectral_conv",
+                    from_model_type="gated_fno",
+                    contribution_evidence="Claimed but absent in source.",
+                )
+            ],
+        )
+        out = MLCodeValidatorAgent(
+            provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+        ).run(inp)
+        assert out.error_message is None
+
+    def test_inheritance_pass_leaves_deviation_notes_none(self, tmp_path, passing_mocks):
+        """When every claimed component matches, deviation_notes stays None and the
+        structured list stays empty."""
+        from agent.schemas.proposal import InheritedComponent
+        # VALID_PLUGIN_SRC contains nn.Embedding — this claim will match.
+        inp = make_input(
+            tmp_path,
+            inherited_components=[
+                InheritedComponent(
+                    component="embedding_layer",
+                    from_model_type="punet",
+                    contribution_evidence="ADC encoding.",
+                )
+            ],
+        )
+        out = MLCodeValidatorAgent(
+            provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+        ).run(inp)
+        assert out.inheritance_check_passed is True
+        assert out.inheritance_deviation_notes is None
+        assert out.unverified_inherited_components == []
+
+    def test_trainability_failure_still_fails_even_when_inheritance_ok(
+        self, tmp_path, mock_llm_bridge
+    ):
+        """If pytest fails, the model must still fail overall — inheritance cannot
+        rescue a non-trainable model."""
+        from agent.schemas.proposal import InheritedComponent
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = "FAILED test_forward"
+        mock_result.stderr = ""
+        with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
+            inp = make_input(
+                tmp_path,
+                inherited_components=[
+                    InheritedComponent(
+                        component="embedding_layer",
+                        from_model_type="punet",
+                        contribution_evidence="ADC encoding.",
+                    )
+                ],
+            )
+            out = MLCodeValidatorAgent(
+                provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+            ).run(inp)
+        assert out.passed is False
+        assert out.tests_passed is False
+        # When the model fails for a trainability reason, inheritance deviation
+        # notes are not emitted (the deviation only propagates for passing models).
+        assert out.inheritance_deviation_notes is None

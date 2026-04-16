@@ -21,7 +21,7 @@ database_full_context   DB-backed transfer: interp agent writes the interpretati
                         StorageConfig backend. Raises NotImplementedError until wired.
 """
 
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.proposal import (
@@ -44,6 +44,15 @@ def local_full_context(
     human_advice: Optional[ExpertAdviceInput] = None,
     mindset: Optional[str] = None,
     agent_cards: Optional[List[AgentCard]] = None,
+    # --- Run-level data + time-budget context (workflow-supplied) ---
+    is_trial: Optional[bool] = None,
+    trial_strategy: Optional[Literal["snapshot", "anchors", "target"]] = None,
+    trial_portion: Optional[float] = None,
+    target_files: Optional[List[int]] = None,
+    train_portion: Optional[float] = None,
+    sampling_seed: Optional[int] = None,
+    time_budget_minutes: Optional[float] = None,
+    data_dir: Optional[str] = None,
 ) -> ProposalInput:
     """
     Local in-memory protocol — transfers the complete interpretation directly.
@@ -65,6 +74,16 @@ def local_full_context(
       - human_advice         : legacy human advice — wrapped into ExpertContextItem if provided
       - mindset              : optional free-text injected into the causal reasoning stage prompt
       - agent_cards          : optional list of external agent self-descriptions (Contributors block)
+      - is_trial / trial_strategy / trial_portion / target_files / train_portion /
+        sampling_seed         : run-level data-sampling parameters that mirror
+                                HyperparamTuningInput exactly. Forwarded so the proposer's
+                                evaluate_time_skill gate constructs the same SampleSet the
+                                tuner will use (docs/time_estimator_implement.md §2.7.2/§2.7.5).
+                                Each falls through to the ProposalInput schema default when
+                                None — partial workflow plumbing must not silently reset a
+                                field the caller didn't touch.
+      - time_budget_minutes  : wall-time gate budget; None disables the proposer's gate.
+      - data_dir             : TIDMAD data directory; required for the skill's real-dataset warmup.
 
     Populates in ml-model-propose (ProposalInput):
       - interpretation       : full serialised InterpretationOutput (all fields above)
@@ -74,6 +93,9 @@ def local_full_context(
       - reasoning_pipeline   : pipeline configuration
       - mindset              : passed through when provided
       - agent_cards          : passed through when provided
+      - is_trial / trial_strategy / trial_portion / target_files / train_portion /
+        sampling_seed / time_budget_minutes / data_dir : passed through when
+        provided; otherwise the ProposalInput schema defaults apply.
       - storage              : passed through from the orchestrator
     """
     # Build expert_context — start with what's passed, wrap legacy human_advice
@@ -117,6 +139,29 @@ def local_full_context(
             c.model_dump() if hasattr(c, "model_dump") else c
             for c in agent_cards
         ]
+
+    # Run-level fields for the proposer's evaluate_time_skill gate. Each is
+    # only included when the caller supplied it; otherwise ProposalInput's
+    # schema default takes effect (mirrors HyperparamTuningInput defaults:
+    # is_trial=False, trial_strategy="snapshot", trial_portion=0.1,
+    # target_files=[], train_portion=0.1, sampling_seed=None,
+    # time_budget_minutes=None, data_dir=None).
+    if is_trial is not None:
+        result["is_trial"] = is_trial
+    if trial_strategy is not None:
+        result["trial_strategy"] = trial_strategy
+    if trial_portion is not None:
+        result["trial_portion"] = trial_portion
+    if target_files is not None:
+        result["target_files"] = target_files
+    if train_portion is not None:
+        result["train_portion"] = train_portion
+    if sampling_seed is not None:
+        result["sampling_seed"] = sampling_seed
+    if time_budget_minutes is not None:
+        result["time_budget_minutes"] = time_budget_minutes
+    if data_dir is not None:
+        result["data_dir"] = data_dir
 
     return ProposalInput.model_validate(result)
 

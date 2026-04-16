@@ -1,0 +1,52 @@
+{
+  "name": "evaluate_time_skill",
+  "description": "Estimate training wall-time for a proposed experiment config by (1) computing total step count from sample_set + seg_size + batch_size + epochs, (2) measuring ms/step via a real-dataset GPU warmup, (3) applying a learned per-GPU correction factor and a safety multiplier. Returns feasibility verdict vs time_budget_minutes. Must be called AFTER evaluate_resource_skill and BEFORE training_skill.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "model_type": {
+        "type": "string",
+        "description": "The model architecture (any model in MODEL_REGISTRY)."
+      },
+      "model_config": {
+        "type": "object",
+        "description": "Model configuration dict (same as passed to training_skill)."
+      },
+      "train_config": {
+        "type": "object",
+        "description": "Training configuration dict — batch_size, epochs, device.",
+        "properties": {
+          "batch_size": { "type": "integer" },
+          "epochs":     { "type": "integer" },
+          "device":     { "type": "string" }
+        },
+        "required": ["batch_size", "epochs"]
+      },
+      "loss_config": {
+        "type": "object",
+        "description": "Loss configuration dict — loss_type.",
+        "properties": {
+          "loss_type": { "type": "string" }
+        },
+        "required": ["loss_type"]
+      },
+      "sample_set": {
+        "type": "object",
+        "description": "Training SampleSet — {file_index (str): [PSD segment indices]}. Used to compute total step count and to build the 1-PSD mini dataset for the warmup."
+      },
+      "train_portion": {
+        "type": "number",
+        "description": "Per-epoch subsampling fraction (0.01–1.0). Scales total step count."
+      },
+      "time_budget_minutes": {
+        "type": "number",
+        "description": "Maximum allowed wall-time for training in minutes. The skill returns feasible=false if the estimate exceeds this."
+      },
+      "data_dir": {
+        "type": "string",
+        "description": "Directory with abra_training_XXXX.h5 files. Required for real-dataset warmup; omit to force static-formula fallback."
+      }
+    },
+    "required": ["model_type", "model_config", "train_config", "loss_config", "sample_set", "time_budget_minutes"]
+  }
+}

@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from agent.schemas.validator import ValidatorOutput
 from agent.schemas.proposal import ProposalOutput
-from agent.schemas.hyperparam_tuning import HyperparamTuningInput
+from agent.schemas.hyperparam_tuning import HyperparamTuningInput, serialize_expert_advice
 from agent.schemas.storage import StorageConfig
 
 
@@ -52,20 +52,31 @@ def local_validated_model(
     max_epochs: Optional[int] = None,
     max_retries: Optional[int] = None,
     plan_overrides: Optional[Dict[str, Any]] = None,
+    # --- Time-budget gate (evaluate_time_skill) ---
+    time_budget_minutes: Optional[float] = None,
+    data_dir: Optional[str] = None,
 ) -> HyperparamTuningInput:
     """
     Map ValidatorOutput + ProposalOutput -> HyperparamTuningInput in-memory.
 
     Consumes from ml-model-valid (ValidatorOutput):
       - model_type: the validated plugin key
+      - spec_deviation_notes / inheritance_deviation_notes: prepended to
+        expert_advice as planner-visible warnings.
 
     Consumes from ml-model-propose (ProposalOutput, held by workflow):
       - expert_advice  : structured guidance for the tuning agent
       - baseline_config: safe starting configuration for the new model
+      - time_risk      : non-None when the proposer's evaluate_time_skill gate
+                         flagged the baseline as over-budget. Prepended to
+                         expert_advice as a planner-visible warning so the
+                         LLM doesn't immediately re-propose the rejected
+                         baseline (docs/time_estimator_implement.md §2.7.4).
 
     Populates in ml-model-tune (HyperparamTuningInput):
       - model_type    : from ValidatorOutput
-      - expert_advice : from ProposalOutput
+      - expert_advice : from ProposalOutput, with deviation + time-risk notes
+                        prepended in the order spec → inheritance → time_risk.
       - storage       : passed through from the workflow
       - max_rounds    : tuning budget (caller-supplied, default 50)
       - file_index    : data split index (caller-supplied, default 6; ignored when is_trial=True)
@@ -76,12 +87,40 @@ def local_validated_model(
       - reflect_model_id : optional separate model for the tuner's
         reflect() call. None means the reflector uses llm_model_id.
       - is_trial + trial_*: trial mode configuration (caller-supplied, defaults to single-file)
+      - time_budget_minutes / data_dir : workflow-supplied run-level context for
+        the tuner's per-round evaluate_time_skill gate. Both default to None;
+        when time_budget_minutes is None the gate is skipped (one-time warning).
+        See §2.7.2 fan-in.
     """
+    # Prepend planner-visible warnings to expert_advice so the tuner's planner
+    # knows up front about (a) implementation deviating from the spec, (b)
+    # unverified inherited components, and (c) the proposer's time-budget gate
+    # firing on the baseline. Order is intentional: spec deviation is the
+    # strongest signal about architectural fidelity, inheritance deviation is
+    # weaker, and the time risk is the latest-stage warning before tuning starts.
+    expert_advice = proposal.expert_advice
+    time_risk_note = (
+        f"NOTE: time-budget risk on baseline — {proposal.time_risk}"
+        if proposal.time_risk
+        else None
+    )
+    deviation_notes = [
+        n for n in (
+            output.spec_deviation_notes,
+            output.inheritance_deviation_notes,
+            time_risk_note,
+        ) if n
+    ]
+    if deviation_notes:
+        base = serialize_expert_advice(expert_advice) if expert_advice else ""
+        prefix = "\n\n".join(deviation_notes)
+        expert_advice = f"{prefix}\n\n{base}" if base else prefix
+
     return HyperparamTuningInput(
         model_type=output.model_type,
         file_index=file_index,
         max_rounds=max_rounds,
-        expert_advice=proposal.expert_advice,
+        expert_advice=expert_advice,
         llm_provider=llm_provider,
         llm_model_id=llm_model_id,
         reflect_provider=reflect_provider,
@@ -101,6 +140,8 @@ def local_validated_model(
         max_epochs=max_epochs,
         max_retries=max_retries,
         plan_overrides=plan_overrides or {},
+        time_budget_minutes=time_budget_minutes,
+        data_dir=data_dir,
     )
 
 

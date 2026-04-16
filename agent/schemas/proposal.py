@@ -122,7 +122,7 @@ class ExpertContextItem(BaseModel):
         description="What type of context this is."
     )
     content: str = Field(
-        max_length=4000,
+        max_length=10000,
         description="The actual advice / finding / constraint."
     )
     cite_id: str = Field(
@@ -481,6 +481,68 @@ class ProposalInput(BaseModel):
         description="Model type keys already registered in MODEL_REGISTRY. "
                     "The proposal agent must not reuse any of these names.",
     )
+    # --- Run-level data + time-budget context (workflow-supplied) ---
+    # See docs/time_estimator_implement.md §2.7.2. These fields originate at the
+    # workflow/CLI entry point and fan out to both this node and the tuner so
+    # the proposer can call build_sample_set + evaluate_time_skill on its own
+    # baseline before emitting. The training-side trial-mode set mirrors
+    # HyperparamTuningInput exactly so both gates see identical sample_sets;
+    # legacy single_file mode (file_index, is_trial=False) is deliberately not
+    # surfaced here — modern usage is is_trial=True with trial_strategy='target'
+    # + target_files=[N] when a single file is wanted.
+    is_trial: bool = Field(
+        default=False,
+        description="Whether the run uses trial (sparse) sampling. Forwarded to "
+                    "build_sample_set inside the proposer's evaluate_time_skill gate "
+                    "so it matches what the tuner will run.",
+    )
+    trial_strategy: Literal["snapshot", "anchors", "target"] = Field(
+        default="snapshot",
+        description="Sampling strategy for training data: 'snapshot' (all 20 files), "
+                    "'anchors' (files 0/10/19), 'target' (caller-specified files). "
+                    "Mirrors HyperparamTuningInput.trial_strategy.",
+    )
+    trial_portion: float = Field(
+        default=0.1,
+        ge=0.01,
+        le=1.0,
+        description="Fraction of segments per file for the training scope. "
+                    "Mirrors HyperparamTuningInput.trial_portion.",
+    )
+    target_files: List[int] = Field(
+        default_factory=list,
+        description="File indices to sample from. Required when trial_strategy='target'. "
+                    "Mirrors HyperparamTuningInput.target_files.",
+    )
+    train_portion: float = Field(
+        default=0.1,
+        ge=0.01,
+        le=1.0,
+        description="Per-epoch subsample fraction from the training scope. "
+                    "Forwarded to evaluate_time_skill so the proposer's wall-time "
+                    "estimate matches the tuner's. Default 0.1 mirrors "
+                    "HyperparamTuningInput.train_portion.",
+    )
+    sampling_seed: Optional[int] = Field(
+        default=None,
+        description="Seed for build_sample_set(). When None the proposer auto-generates "
+                    "one for its estimate; the tuner uses its own auto-generation "
+                    "policy from HyperparamTuningInput.sampling_seed. The estimate is "
+                    "robust to which exact segments are picked, so identical seeds "
+                    "across the two gates are not required.",
+    )
+    time_budget_minutes: Optional[float] = Field(
+        default=None,
+        description="Wall-time budget in minutes against which evaluate_time_skill "
+                    "gates the baseline config. None = gate disabled (no estimate, "
+                    "no time_risk annotation). See §2.7.",
+    )
+    data_dir: Optional[str] = Field(
+        default=None,
+        description="Filesystem path to the TIDMAD data directory. Required by the "
+                    "real-dataset warmup inside evaluate_time_skill; when None, the "
+                    "skill falls back to its static formula. See §2.6.3.",
+    )
     constraints: List[str] = Field(
         default_factory=list,
         description="Hard limits the proposed architecture must respect "
@@ -631,4 +693,14 @@ class ProposalOutput(BaseModel):
                     "DiscoveryMemo and what's physically implementable. "
                     "Empty = no issues found. Non-empty = the validator surfaces "
                     "these as warnings. This is a flag, not a veto.",
+    )
+    time_risk: Optional[str] = Field(
+        default=None,
+        description="Non-None when evaluate_time_skill estimated the baseline_config "
+                    "would exceed the wall-time budget (gate-and-annotate, "
+                    "docs/time_estimator_implement.md §2.7.4). Carries the suggestion "
+                    "text from _suggest_lever so the validator→tuner protocol can "
+                    "prepend it to expert_advice as round-0 guidance. None = baseline "
+                    "fits the budget or the gate was disabled (time_budget_minutes "
+                    "not supplied at the workflow level).",
     )

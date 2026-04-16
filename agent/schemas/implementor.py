@@ -73,6 +73,14 @@ class ImplementorInput(BaseModel):
         description="Optional human-provided guidance (highest priority — overrides expert_advice). "
                     "When present, injected into the LLM prompt as high-priority context.",
     )
+    previous_validation_failure: Optional[str] = Field(
+        default=None,
+        description="Validation error message from the previous implementation attempt "
+                    "for this same proposal. When set, the implementor knows upfront "
+                    "what spec-alignment issue to fix and can target the repair in its "
+                    "reasoning phase rather than discovering the problem after the fact. "
+                    "None on the first attempt.",
+    )
     storage: StorageConfig = Field(
         default_factory=lambda: StorageConfig(
             backend="local",

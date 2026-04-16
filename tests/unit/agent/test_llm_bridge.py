@@ -11,6 +11,7 @@ Mocks the unified openai.OpenAI client to verify:
 """
 import json
 import pytest
+from typing import Optional
 from unittest.mock import MagicMock, patch, PropertyMock
 
 from agent.llm_bridge import LLMBridge, ToolCallResult, _KNOWN_PROVIDERS
@@ -573,3 +574,106 @@ class TestReflectProviderSplit:
         assert bridge.reflect_provider == "gemini"
         # And same-after-lowercase should still reuse the client
         assert bridge.client is bridge.reflect_client
+
+
+# ---------------------------------------------------------------------------
+# _parse_retry_delay — extract retryDelay from Google 429 error body
+# ---------------------------------------------------------------------------
+
+class TestParseRetryDelay:
+
+    def _make_exc(self, body: dict) -> MagicMock:
+        exc = MagicMock()
+        exc.body = body
+        return exc
+
+    def test_parses_seconds_string(self):
+        exc = self._make_exc({"error": {"details": [
+            {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "28890s"}
+        ]}})
+        assert LLMBridge._parse_retry_delay(exc) == 28890.0
+
+    def test_returns_none_when_no_retry_info(self):
+        exc = self._make_exc({"error": {"details": [
+            {"@type": "type.googleapis.com/google.rpc.Help"}
+        ]}})
+        assert LLMBridge._parse_retry_delay(exc) is None
+
+    def test_returns_none_when_details_missing(self):
+        exc = self._make_exc({"error": {}})
+        assert LLMBridge._parse_retry_delay(exc) is None
+
+    def test_returns_none_when_body_not_dict(self):
+        exc = MagicMock()
+        exc.body = "not a dict"
+        assert LLMBridge._parse_retry_delay(exc) is None
+
+    def test_returns_none_when_delay_not_seconds_format(self):
+        exc = self._make_exc({"error": {"details": [
+            {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "1h30m"}
+        ]}})
+        assert LLMBridge._parse_retry_delay(exc) is None
+
+
+# ---------------------------------------------------------------------------
+# _call_with_retry — retry delay behavior
+# ---------------------------------------------------------------------------
+
+class TestCallWithRetryDelay:
+
+    def _make_bridge(self):
+        with patch("agent.llm_bridge.OpenAI"):
+            return LLMBridge(provider="gemini", model_id="test-model")
+
+    def _make_429(self, retry_delay_s: Optional[float] = None):
+        from openai import APIStatusError
+        body = {"error": {"details": [
+            {"@type": "type.googleapis.com/google.rpc.RetryInfo",
+             "retryDelay": f"{int(retry_delay_s)}s"}
+        ]}} if retry_delay_s is not None else {"error": {}}
+
+        class Fake429(APIStatusError):
+            status_code = 429
+
+        response = MagicMock()
+        response.status_code = 429
+        exc = Fake429.__new__(Fake429)
+        exc.status_code = 429
+        exc.body = body
+        exc.response = response
+        exc.message = "quota exceeded"
+        return exc
+
+    def test_honors_retry_delay_on_429(self):
+        """When API returns retryDelay=300s, bridge sleeps 300s (not the 60s cap)."""
+        bridge = self._make_bridge()
+        exc = self._make_429(retry_delay_s=300)
+        call_count = 0
+
+        def fn():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise exc
+            return _chat_response(VALID_JSON_STR)
+
+        with patch("agent.llm_bridge.time.sleep") as mock_sleep:
+            bridge._call_with_retry(fn, label="test")
+        mock_sleep.assert_called_once_with(300.0)
+
+    def test_uses_exponential_backoff_without_retry_delay(self):
+        """When 429 has no retryDelay, normal exponential backoff applies (starts at 2.5s)."""
+        bridge = self._make_bridge()
+        exc = self._make_429(retry_delay_s=None)
+        call_count = 0
+
+        def fn():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise exc
+            return _chat_response(VALID_JSON_STR)
+
+        with patch("agent.llm_bridge.time.sleep") as mock_sleep:
+            bridge._call_with_retry(fn, label="test")
+        mock_sleep.assert_called_once_with(2.5)

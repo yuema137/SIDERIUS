@@ -54,6 +54,14 @@ def parse_args():
         help="Path to the JSON advice file (propose/implement/tune keys).",
     )
     parser.add_argument(
+        "--llm_config", type=str, default=None,
+        help=(
+            "Path to a WorkflowLLMConfig JSON file for per-node model routing "
+            "(e.g. llm_configs/openai_tiered_v1.json). "
+            "When omitted, defaults to uniform gemini-3.1-pro-preview."
+        ),
+    )
+    parser.add_argument(
         "--max_iterations", type=int, default=20,
         help="Number of propose->implement->validate->tune iterations.",
     )
@@ -64,6 +72,14 @@ def parse_args():
     parser.add_argument(
         "--max_proposal_attempts", type=int, default=3,
         help="Max proposal retries per iteration if validation fails.",
+    )
+    parser.add_argument(
+        "--max_impl_attempts", type=int, default=3,
+        help=(
+            "Max implementation retries per proposal when the validator rejects the code. "
+            "Each retry feeds the validator's error back to the implementor so it can fix "
+            "spec-alignment issues without requiring a new proposal."
+        ),
     )
     parser.add_argument(
         "--trial_portion", type=float, default=0.1,
@@ -82,8 +98,62 @@ def parse_args():
         help="Hard cap on epochs per tuning round.",
     )
     parser.add_argument(
+        "--trial_strategy", type=str, default="snapshot",
+        choices=["snapshot", "anchors", "target"],
+        help=(
+            "Sampling strategy for trial mode. 'snapshot' covers all 20 files, "
+            "'anchors' picks files 0/10/19, 'target' restricts to --target_files. "
+            "Forwarded to BOTH the proposer's and tuner's evaluate_time_skill gates."
+        ),
+    )
+    parser.add_argument(
+        "--target_files", type=int, nargs="+", default=None,
+        help=(
+            "File indices to sample from (required when --trial_strategy=target). "
+            "Modern replacement for legacy single-file mode: pass e.g. --target_files 6."
+        ),
+    )
+    parser.add_argument(
+        "--sampling_seed", type=int, default=None,
+        help="Seed for build_sample_set(). None auto-generates per gate.",
+    )
+    parser.add_argument(
+        "--time_budget_minutes", type=float, default=None,
+        help=(
+            "Wall-time budget (minutes) for the evaluate_time_skill gate. "
+            "None disables BOTH the proposer's baseline gate and the tuner's "
+            "per-round gate (docs/time_estimator_implement.md §2.7)."
+        ),
+    )
+    parser.add_argument(
+        "--data_dir", type=str, default=None,
+        help=(
+            "TIDMAD data directory used by evaluate_time_skill's real-dataset "
+            "warmup. None makes the skill fall back to its static formula."
+        ),
+    )
+    parser.add_argument(
         "--source_paths", type=str, nargs="+", default=None,
         help="Seed run output JSON paths. Defaults to wavenet + punet trial runs.",
+    )
+    parser.add_argument(
+        "--exploration_mode", type=str, default="auto",
+        choices=["auto", "explore", "exploit"],
+        help=(
+            "Reasoning pipeline mode. 'auto' resolves dynamically from n_agent_proposed "
+            "and vocab_diversity_ratio. 'explore' forces novel architecture search "
+            "(use with exploration_adaptive_v3 advice). 'exploit' forces incremental "
+            "refinement of the current SOTA."
+        ),
+    )
+    parser.add_argument(
+        "--minimum_boldness", type=float, default=0.05,
+        help=(
+            "Minimum boldness threshold for FalsifiablePrediction: "
+            "|predicted - current| / |current| must exceed this value. "
+            "Predictions below the threshold trigger a causal_reasoning retry. "
+            "Default 0.05 (5%% relative improvement required)."
+        ),
     )
     return parser.parse_args()
 
@@ -110,12 +180,19 @@ def main():
     with open(args.advice) as f:
         advice = json.load(f)
 
-    # LLM config
-    llm_config = WorkflowLLMConfig.uniform(
-        "gemini", "gemini-3.1-pro-preview",
-        reflect_provider="gemini",
-        reflect_model_id="gemini-2.5-flash",
-    )
+    # LLM config — from file if provided, else default uniform gemini
+    if args.llm_config:
+        if not os.path.exists(args.llm_config):
+            print(f"ERROR: LLM config file not found: {args.llm_config}")
+            sys.exit(1)
+        llm_config = WorkflowLLMConfig.from_json(args.llm_config)
+    else:
+        llm_config = WorkflowLLMConfig.uniform("gemini", "gemini-3.1-pro-preview")
+
+    # Validate target-mode wiring early
+    if args.trial_strategy == "target" and not args.target_files:
+        print("ERROR: --trial_strategy=target requires --target_files (one or more file indices)")
+        sys.exit(1)
 
     # Print summary
     print("=" * 60)
@@ -124,9 +201,17 @@ def main():
     print(f"  Workspace : {workspace}")
     print(f"  Iterations: {args.max_iterations}")
     print(f"  Rounds/iter: {args.max_rounds}  |  Max epochs: {args.max_epochs}")
+    print(f"  Trial strategy: {args.trial_strategy}"
+          + (f"  |  Target files: {args.target_files}" if args.trial_strategy == "target" else ""))
     print(f"  Trial portion: {args.trial_portion}  |  Train portion: {args.train_portion}  |  Eval portion: {args.eval_portion}")
+    print(f"  Sampling seed : {args.sampling_seed if args.sampling_seed is not None else 'auto'}")
+    print(f"  Time budget   : {f'{args.time_budget_minutes} min' if args.time_budget_minutes is not None else 'disabled (no time gate)'}")
+    print(f"  Data dir      : {args.data_dir or 'unset (skill uses static formula)'}")
     print(f"  Advice    : {args.advice}")
+    print(f"  LLM config: {args.llm_config or 'default (gemini-3.1-pro-preview uniform)'}")
     print(f"  Seeds     : {len(source_paths)} models")
+    print(f"  Exploration mode : {args.exploration_mode}")
+    print(f"  Min boldness     : {args.minimum_boldness}")
     print("=" * 60)
 
     run_workflow(
@@ -139,10 +224,12 @@ def main():
         llm_config=llm_config,
         # Trial mode
         is_trial=True,
-        trial_strategy="snapshot",
+        trial_strategy=args.trial_strategy,
         trial_portion=args.trial_portion,
+        target_files=args.target_files,
         train_portion=args.train_portion,
         eval_portion=args.eval_portion,
+        sampling_seed=args.sampling_seed,
         max_epochs=args.max_epochs,
         plan_overrides={
             "is_trial": True,
@@ -150,6 +237,9 @@ def main():
             "train_portion": args.train_portion,
             "eval_portion": args.eval_portion,
         },
+        # Time-budget gate (fans out to both proposer and tuner)
+        time_budget_minutes=args.time_budget_minutes,
+        data_dir=args.data_dir,
         # Advice
         human_advice_propose=advice.get("propose"),
         human_advice_implement=advice.get("implement"),
@@ -157,6 +247,11 @@ def main():
         human_advice_mindset=advice.get("mindset"),
         # Cleanup denoised files to save disk
         cleanup_denoised=True,
+        # Reasoning pipeline
+        exploration_mode=args.exploration_mode,
+        minimum_boldness=args.minimum_boldness,
+        # Implementation retry
+        max_impl_attempts=args.max_impl_attempts,
     )
 
 

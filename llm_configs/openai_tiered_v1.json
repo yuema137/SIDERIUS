@@ -1,0 +1,38 @@
+{
+  "interpret": {
+    "provider": "openai",
+    "model_id": "gpt-5.4"
+  },
+  "propose": {
+    "comparison": {
+      "provider": "openai",
+      "model_id": "gpt-5.4-mini"
+    },
+    "reasoning": {
+      "provider": "openai",
+      "model_id": "gpt-5.4"
+    },
+    "proposing": {
+      "provider": "openai",
+      "model_id": "gpt-5.4"
+    }
+  },
+  "implement": {
+    "provider": "openai",
+    "model_id": "gpt-5.4"
+  },
+  "validate": {
+    "provider": "openai",
+    "model_id": "gpt-5.4-mini"
+  },
+  "tune": {
+    "planner": {
+      "provider": "openai",
+      "model_id": "gpt-5.4"
+    },
+    "reflector": {
+      "provider": "openai",
+      "model_id": "gpt-5.4-nano"
+    }
+  }
+}

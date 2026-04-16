@@ -56,39 +56,44 @@ from agent.schemas.storage import StorageConfig, LocalStorageConfig
 VALIDATOR_REVIEW_SYSTEM_PROMPT = """\
 You are a senior ML engineer reviewing an auto-generated PyTorch model plugin.
 
-Your task is to verify that the implementation is CORRECT — meaning it will run,
-train, and produce the expected output shape without errors. You are NOT reviewing
-for production readiness, style, or optimality.
+Your task is to verify that the implementation will RUN AND TRAIN correctly.
+You are NOT reviewing for production readiness, style, optimality, or exact
+mathematical fidelity to the spec.
 
-Check for these CONCRETE BUGS (set passed=false if any are present):
-1. Implementation contradicts the mathematical spec in a way that changes the
-   model's computational semantics (e.g. spec says additive residual but code
-   uses multiplicative, spec says causal but code uses bidirectional).
-2. Correctness bugs that cause wrong results: wrong tensor shapes, missing
-   operations, incorrect dimension ordering, broken residual connections.
-3. Trainability-breaking bugs: detached tensors in the gradient path,
-   non-differentiable operations where gradients are needed, operations that
-   always produce zero gradients.
+## The two fields you set are INDEPENDENT — understand this distinction:
 
-Do NOT fail the review for:
-- Theoretical edge-case concerns (e.g. "padding breaks if kernel_size is even"
-  when the default kernel_size is odd and within valid Field constraints).
-- Suggestions for improvement, alternative designs, or missing bells and whistles.
-- Concerns about input data format — the forward contract ([B,T] int64 input with
-  nn.Embedding) is specified by the system and is always correct.
-- Hyperparameter range concerns — Field constraints are handled by the config schema.
-- STANDARD ENGINEERING ENHANCEMENTS that don't change the core architecture:
-  adding residual connections around attention layers, adding layer normalization,
-  adding dropout, using standard initialization patterns, or other well-known
-  best practices. These are ACCEPTABLE deviations from the mathematical spec.
-  The implementor has engineering latitude as long as the core computational
-  semantics (what operations happen, in what order, what feeds into what) match
-  the spec. Note the deviations in trainability_concerns, do NOT set passed=false.
-Put these observations in trainability_concerns or notes instead.
+`passed` — TRAINABILITY GATE (the only hard gate):
+  Set passed=true if the model will run and train without errors.
+  Set passed=false ONLY for bugs that will cause a crash or completely broken training:
+    - Shape mismatches that cause a runtime error
+    - Broken gradient path (detached tensors, non-differentiable ops where needed)
+    - Missing operations that prevent the model from running at all
+    - Wrong output shape that breaks the [B, 256, T] contract
+  Implementation details that differ from the spec but still produce a valid,
+  trainable model do NOT set passed=false. A model that is "structurally close
+  and should run" MUST have passed=true.
 
-When runtime errors are provided (pytest output, forward/backward errors), use them as
-primary evidence to diagnose the precise root cause and report it in implementation_issues.
-Do not speculate about unrelated issues when a concrete runtime error is present.
+`spec_alignment` — FIDELITY SIGNAL (warning only, never gates passed):
+  Set spec_alignment=true only if the implementation exactly matches the
+  mathematical definition — same operations, same data flow, same semantics.
+  Set spec_alignment=false if there are ANY deviations, even minor ones
+  (different padding strategy, simplified gating, alternative upsampling, etc.).
+  This field is informational. It does NOT affect passed. A model can and should
+  have spec_alignment=false and passed=true when it is a valid trainable
+  implementation that differs in implementation details from the spec.
+
+## Do NOT set passed=false for:
+- Causal length alignment approaches (min_len truncation, F.pad strategies) that
+  differ from the spec but still produce the correct output shape.
+- Engineering simplifications (shared projections instead of separate ones,
+  F.interpolate instead of transposed conv, etc.) that change implementation
+  details but not the fundamental computation.
+- Standard enhancements (residual connections, layer norm, dropout) not in the spec.
+- Theoretical edge-case concerns when default config values avoid the edge case.
+- Hyperparameter range choices — those are for the tuner, not the validator.
+
+When runtime errors are provided (pytest output, forward/backward errors), use them
+as primary evidence. Do not speculate about unrelated issues.
 
 Output a JSON object with exactly these fields:
 {
@@ -99,9 +104,9 @@ Output a JSON object with exactly these fields:
   "notes": "brief overall assessment"
 }
 
-- trainability_concerns and implementation_issues must be lists (empty list [] if none).
-- passed should be true if the implementation correctly implements the spec and will
-  train without errors. Minor concerns belong in trainability_concerns, not in passed.
+- trainability_concerns: list concerns about gradient flow or stability (empty [] if none).
+- implementation_issues: list only bugs that cause crashes or wrong output shape.
+- passed: true if the model will run and train. false only for crash/broken-gradient bugs.
 - Output only the JSON object — no preamble, no markdown fences."""
 
 
@@ -401,6 +406,10 @@ class MLCodeValidatorAgent:
                 inst_err=inst_err if plugin_ok and inst_err is not None else None,
             )
             llm_ok = review.passed
+            if llm_ok and not review.spec_alignment:
+                print(f"  WARNING (spec alignment): implementation deviates from proposal spec. "
+                      f"Model will train but may not exactly test the proposed hypothesis. "
+                      f"Notes: {review.notes}")
         else:
             review = LLMCodeReview(
                 spec_alignment=False,
@@ -439,17 +448,51 @@ class MLCodeValidatorAgent:
             if not inherit_ok:
                 print(f"  Inheritance check FAILED: {inherit_notes}")
 
-        passed = all([plugin_ok, tests_ok, desc_ok, cfg_ok, inst_ok, grad_ok, otype_ok, llm_ok, inherit_ok])
+        # Trainability gate — inheritance_check_passed is NOT in this list (regex checks
+        # are too brittle to block a model that otherwise runs and trains). It is surfaced
+        # as a deviation note so the tuner/interpretation agents can treat unverified
+        # component claims with appropriate skepticism.
+        passed = all([plugin_ok, tests_ok, desc_ok, cfg_ok, inst_ok, grad_ok, otype_ok, llm_ok])
 
         errors = [e for e in [plugin_err, desc_err, cfg_err, inst_err] if e is not None]
         if not tests_ok:
             errors.append("pytest tests failed — see test_output for details")
         if not llm_ok:
             errors.append(f"LLM review did not pass: {review.notes}")
-        if not inherit_ok:
-            failed_claims = [n for n in (inherit_notes or []) if "NOT FOUND" in n]
-            errors.append(f"Inheritance check failed: {'; '.join(failed_claims)}")
         error_message = "; ".join(errors) if errors else None
+
+        # Populate spec_deviation_notes when the model passes but doesn't match the spec —
+        # propagated to the tuner so its planner knows what it's actually tuning.
+        spec_deviation_notes = None
+        if passed and not review.spec_alignment:
+            issues = review.implementation_issues or []
+            concerns = review.trainability_concerns or []
+            deviation_lines = issues + concerns
+            spec_deviation_notes = (
+                f"NOTE: This implementation passes trainability checks but deviates from "
+                f"the proposed mathematical spec. The tuner is optimizing an approximation "
+                f"of the intended architecture. Deviations: "
+                + (" | ".join(deviation_lines) if deviation_lines else review.notes)
+            )
+
+        # Parallel treatment for inheritance: when a claimed inherited_component's regex
+        # pattern did not match, record it structurally (for downstream consumers like the
+        # interpretation agent) and in prose (for the tuner's LLM planner).
+        unverified_components: list[str] = []
+        inheritance_deviation_notes = None
+        if not inherit_ok and inherit_notes:
+            for note in inherit_notes:
+                if "NOT FOUND" in note:
+                    unverified_components.append(note.split(":", 1)[0].strip())
+            if passed and unverified_components:
+                inheritance_deviation_notes = (
+                    f"NOTE: The implementation passes trainability checks, but the following "
+                    f"claimed inherited_components could not be verified in the plugin source "
+                    f"by pattern match: {', '.join(unverified_components)}. The regex check is "
+                    f"brittle (e.g. a primitive implemented via F.interpolate may not match a "
+                    f"pattern that expects 'upsample'). Treat confirmation credit for these "
+                    f"components with caution."
+                )
 
         out = ValidatorOutput(
             passed=passed,
@@ -464,11 +507,14 @@ class MLCodeValidatorAgent:
             llm_review_passed=llm_ok,
             inheritance_check_passed=inherit_ok,
             inheritance_check_notes=inherit_notes,
+            unverified_inherited_components=unverified_components,
             test_output=test_output if test_output.strip() else None,
             llm_review_spec_alignment=review.spec_alignment,
             llm_review_trainability_concerns=review.trainability_concerns,
             llm_review_implementation_issues=review.implementation_issues,
             llm_review_notes=review.notes,
+            spec_deviation_notes=spec_deviation_notes,
+            inheritance_deviation_notes=inheritance_deviation_notes,
             error_message=error_message,
         )
 

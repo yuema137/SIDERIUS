@@ -121,6 +121,126 @@ class TestLocalFullContext:
 
 
 # ---------------------------------------------------------------------------
+# Time-budget + trial-mode context fields (Phase E0)
+#
+# The run-level data + time-budget fields originate at the workflow/CLI level
+# and fan out into BOTH ProposalInput (here) and HyperparamTuningInput (via
+# the validator→tuner protocol) so the proposer's baseline gate and the
+# tuner's per-round gate construct the same SampleSet and see the same
+# wall-time budget. See docs/time_estimator_implement.md §2.7.2/§2.7.5.
+#
+# The training-side trial-mode set (is_trial / trial_strategy / trial_portion
+# / target_files / train_portion / sampling_seed) mirrors the tuner exactly;
+# legacy single-file mode (file_index, is_trial=False) is intentionally not
+# surfaced — modern usage uses is_trial=True with trial_strategy='target'
+# + target_files=[N] when a single file is wanted.
+# ---------------------------------------------------------------------------
+
+class TestTimeBudgetContextFields:
+
+    # --- individual kwargs ---------------------------------------------------
+
+    def test_is_trial_passed_through(self, storage):
+        output = make_interpretation_output(["punet"])
+        result = local_full_context(output, storage, is_trial=True)
+        assert result.is_trial is True
+
+    def test_trial_strategy_passed_through(self, storage):
+        output = make_interpretation_output(["punet"])
+        result = local_full_context(output, storage, trial_strategy="target")
+        assert result.trial_strategy == "target"
+
+    def test_trial_portion_passed_through(self, storage):
+        output = make_interpretation_output(["punet"])
+        result = local_full_context(output, storage, trial_portion=0.25)
+        assert result.trial_portion == 0.25
+
+    def test_target_files_passed_through(self, storage):
+        output = make_interpretation_output(["punet"])
+        result = local_full_context(output, storage, target_files=[3, 7, 11])
+        assert result.target_files == [3, 7, 11]
+
+    def test_train_portion_passed_through(self, storage):
+        output = make_interpretation_output(["punet"])
+        result = local_full_context(output, storage, train_portion=0.5)
+        assert result.train_portion == 0.5
+
+    def test_sampling_seed_passed_through(self, storage):
+        output = make_interpretation_output(["punet"])
+        result = local_full_context(output, storage, sampling_seed=1234)
+        assert result.sampling_seed == 1234
+
+    def test_time_budget_minutes_passed_through(self, storage):
+        output = make_interpretation_output(["punet"])
+        result = local_full_context(output, storage, time_budget_minutes=45.0)
+        assert result.time_budget_minutes == 45.0
+
+    def test_data_dir_passed_through(self, storage):
+        output = make_interpretation_output(["punet"])
+        result = local_full_context(output, storage, data_dir="/data/tidmad")
+        assert result.data_dir == "/data/tidmad"
+
+    # --- combined fan-out scenarios -----------------------------------------
+
+    def test_full_trial_target_fan_out(self, storage):
+        """Realistic single-file-via-trial workflow plumbing: caller supplies
+        the full trial-mode set + budget + data_dir together. Mirrors what the
+        validator→tuner edge will receive for the tuner's per-round gate."""
+        output = make_interpretation_output(["punet"])
+        result = local_full_context(
+            output, storage,
+            is_trial=True,
+            trial_strategy="target",
+            trial_portion=0.5,
+            target_files=[6],
+            train_portion=0.5,
+            sampling_seed=42,
+            time_budget_minutes=30.0,
+            data_dir="/mnt/tidmad",
+        )
+        assert result.is_trial is True
+        assert result.trial_strategy == "target"
+        assert result.trial_portion == 0.5
+        assert result.target_files == [6]
+        assert result.train_portion == 0.5
+        assert result.sampling_seed == 42
+        assert result.time_budget_minutes == 30.0
+        assert result.data_dir == "/mnt/tidmad"
+
+    def test_defaults_when_caller_omits(self, storage):
+        """When the caller passes none of the new kwargs, ProposalInput's
+        schema defaults must take effect (mirroring HyperparamTuningInput:
+        is_trial=False, trial_strategy='snapshot', trial_portion=0.1,
+        target_files=[], train_portion=0.1, sampling_seed=None,
+        time_budget_minutes=None, data_dir=None)."""
+        output = make_interpretation_output(["punet"])
+        result = local_full_context(output, storage)
+        assert result.is_trial is False
+        assert result.trial_strategy == "snapshot"
+        assert result.trial_portion == 0.1
+        assert result.target_files == []
+        assert result.train_portion == 0.1
+        assert result.sampling_seed is None
+        assert result.time_budget_minutes is None
+        assert result.data_dir is None
+
+    def test_partial_kwargs_only_overrides_supplied_fields(self, storage):
+        """Caller supplies time_budget_minutes only — every other run-level
+        field keeps its schema default so partial workflow plumbing doesn't
+        accidentally reset a field the caller didn't touch."""
+        output = make_interpretation_output(["punet"])
+        result = local_full_context(output, storage, time_budget_minutes=60.0)
+        assert result.time_budget_minutes == 60.0
+        assert result.is_trial is False
+        assert result.trial_strategy == "snapshot"
+        assert result.trial_portion == 0.1
+        assert result.target_files == []
+        assert result.train_portion == 0.1
+        assert result.sampling_seed is None
+        assert result.data_dir is None
+
+
+# ---------------------------------------------------------------------------
 # database_full_context
 # ---------------------------------------------------------------------------
 
