@@ -158,14 +158,21 @@ class HyperparamTuningAgent:
               f"| file_index={file_index} | trial_allowed={trial_allowed} "
               f"| provider={agent_input.llm_provider}")
 
-        # One-time warning if the time-budget gate is disabled. Mirrors the
-        # "additive, opt-in" stance in docs/time_estimator_implement.md §5 —
-        # without a budget the per-round [Step 0.5/3] check is skipped entirely.
-        time_budget_minutes = agent_input.time_budget_minutes
+        # Per-mode time-budget gate (Phase I). Each mode has its own optional
+        # ceiling; the per-round pick happens inside the loop based on
+        # plan.is_trial. Mirrors the "additive, opt-in" stance in
+        # docs/time_estimator_implement.md §5 — when both budgets are None the
+        # gate never fires; when only one is set, rounds in the other mode skip
+        # the gate (one-time warning printed below per mode).
+        trial_time_budget = agent_input.trial_time_budget_minutes
+        formal_time_budget = agent_input.formal_time_budget_minutes
         time_data_dir = agent_input.data_dir
-        if time_budget_minutes is None:
-            print("[time-gate disabled] time_budget_minutes is None — "
-                  "evaluate_time_skill will not run.")
+        if trial_time_budget is None:
+            print("[time-gate disabled / trial] trial_time_budget_minutes is None "
+                  "— evaluate_time_skill will not gate trial-mode rounds.")
+        if formal_time_budget is None:
+            print("[time-gate disabled / formal] formal_time_budget_minutes is None "
+                  "— evaluate_time_skill will not gate formal-mode rounds.")
 
         # --- Initialize sandbox and brain (via factory for DI / pseudo-mode) ---
         sandbox = self._sandbox_factory(
@@ -476,18 +483,28 @@ class HyperparamTuningAgent:
                 # [Step 0.5/3] Wall-time gate. Mirrors the VRAM gate above:
                 # error → raise; infeasible → emit skipped_time_risk record
                 # and continue without consuming a round. Skipped entirely
-                # when time_budget_minutes is None (one-time warning printed
-                # at startup). See docs/time_estimator_implement.md §2.7 / E1.
+                # when the budget for the active mode is None (one-time
+                # warning per mode printed at startup).
+                # See docs/time_estimator_implement.md §2.7 / E1 / Phase I.
                 # The result is stashed so the post-flight calibration update
                 # (Phase F) can compare warmup vs actual ms/step.
+                # Phase I: per-mode budget pick. plan.is_trial decides which
+                # ceiling applies for THIS round; the unselected one is
+                # ignored. The skill itself stays mode-agnostic — it gets a
+                # single time_budget_minutes kwarg.
+                chosen_time_budget = (trial_time_budget
+                                      if plan.is_trial
+                                      else formal_time_budget)
                 time_check = None
-                if time_budget_minutes is not None:
-                    print(f"\n[Step 0.5/3] Time check...")
+                if chosen_time_budget is not None:
+                    print(f"\n[Step 0.5/3] Time check "
+                          f"(mode={'trial' if plan.is_trial else 'formal'}, "
+                          f"budget={chosen_time_budget} min)...")
                     time_check = _run_skill(
                         "evaluate_time_skill",
                         sandbox,
                         **active_params,
-                        time_budget_minutes=time_budget_minutes,
+                        time_budget_minutes=chosen_time_budget,
                         data_dir=time_data_dir,
                     )
                     if time_check.get("status") == "error":
@@ -927,6 +944,23 @@ def main():
     parser.add_argument("--cleanup_denoised", action="store_true",
                         help="Delete denoised HDF5 files after scoring each round to save disk space.")
 
+    # evaluate_time_skill gate (Phase E1, Phase I two-budget split). Each
+    # default is None, which keeps that mode's gate off — matches the
+    # workflow-level CLI in run_exploration_adaptive.py.
+    parser.add_argument("--trial_time_budget_minutes", type=float, default=None,
+                        help="Wall-time budget (minutes) for the evaluate_time_skill "
+                             "gate on rounds where plan.is_trial=True. None disables "
+                             "the trial gate.")
+    parser.add_argument("--formal_time_budget_minutes", type=float, default=None,
+                        help="Wall-time budget (minutes) for the evaluate_time_skill "
+                             "gate on rounds where plan.is_trial=False. None disables "
+                             "the formal gate. Sized independently from the trial "
+                             "budget because formal runs use the full dataset and "
+                             "are 50–100x longer.")
+    parser.add_argument("--data_dir", type=str, default=None,
+                        help="TIDMAD data directory used by evaluate_time_skill's real-dataset "
+                             "warmup. None makes the skill fall back to its static formula.")
+
     args = parser.parse_args()
 
     input_dict = {
@@ -956,6 +990,12 @@ def main():
         })
     if args.human_advice:
         input_dict["human_advice"] = args.human_advice
+    if args.trial_time_budget_minutes is not None:
+        input_dict["trial_time_budget_minutes"] = args.trial_time_budget_minutes
+    if args.formal_time_budget_minutes is not None:
+        input_dict["formal_time_budget_minutes"] = args.formal_time_budget_minutes
+    if args.data_dir is not None:
+        input_dict["data_dir"] = args.data_dir
 
     agent_input = HyperparamTuningInput.model_validate(input_dict)
 

@@ -521,9 +521,18 @@ def _make_input_with_budget(
     tmp_path,
     *,
     max_rounds=1,
-    time_budget_minutes=30.0,
+    trial_budget=None,
+    formal_budget=None,
     data_dir=None,
+    is_trial=False,
 ):
+    """Phase I: helper takes both budgets independently.
+
+    The default ``FAKE_PLAN_RESPONSE`` has no ``is_trial`` key so the LLM-side
+    plan defaults to formal mode → tests passing only ``formal_budget`` will
+    exercise the gate. To exercise the trial branch, set ``is_trial=True``
+    here AND override ``mock_brain.plan.return_value`` to include
+    ``"is_trial": True``."""
     return HyperparamTuningInput(
         model_type="punet",
         file_index=6,
@@ -536,25 +545,42 @@ def _make_input_with_budget(
             local=LocalStorageConfig(workspace=str(tmp_path), run_name="test_run"),
         ),
         progress_bar=False,
-        time_budget_minutes=time_budget_minutes,
+        trial_time_budget_minutes=trial_budget,
+        formal_time_budget_minutes=formal_budget,
         data_dir=data_dir,
+        is_trial=is_trial,
     )
 
 
 class TestTimeBudgetGate:
     """Phase E1 — tuner round-gate behaviour."""
 
-    def _make_agent(self, time_check_result):
-        """Patch context with controllable time-check return value."""
+    def _make_agent(self, time_check_result, *, enable_trial_mode=False):
+        """Patch context with controllable time-check return value.
+
+        When ``enable_trial_mode=True``, also patches the anchor-map loader
+        and ``os.path.exists`` (and adds ``data`` to ``mock_sandbox.dirs``)
+        so the agent's pre-loop trial-mode bootstrap (`segment_anchors.json`
+        existence check) doesn't crash. Required by Phase I per-mode tests
+        where ``HyperparamTuningInput.is_trial=True`` flips ``trial_allowed``."""
         cm_brain = patch("nodes.ml_hyperparameter_tune_agent.LLMBridge")
         cm_sandbox = patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox")
         cm_skill = patch("nodes.ml_hyperparameter_tune_agent._run_skill")
         cm_tmp = tempfile.TemporaryDirectory()
+        cm_anchor = (patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map")
+                     if enable_trial_mode else None)
+        cm_exists = (patch("os.path.exists", return_value=True)
+                     if enable_trial_mode else None)
 
         MockBridge = cm_brain.__enter__()
         MockSandbox = cm_sandbox.__enter__()
         mock_skill = cm_skill.__enter__()
         configs_dir = cm_tmp.__enter__()
+        if cm_anchor is not None:
+            mock_anchor = cm_anchor.__enter__()
+            mock_anchor.return_value = {"anchors": {}, "s_max": 1.0}
+        if cm_exists is not None:
+            cm_exists.__enter__()
 
         mock_brain = MockBridge.return_value
         mock_brain.plan.return_value = FAKE_PLAN_RESPONSE
@@ -565,7 +591,17 @@ class TestTimeBudgetGate:
         mock_sandbox = MockSandbox.return_value
         mock_sandbox.get_summary.side_effect = lambda: list(saved_records)
         mock_sandbox.save_record.side_effect = lambda r: saved_records.append(r)
-        mock_sandbox.dirs = {"configs": configs_dir}
+        mock_sandbox.dirs = (
+            {"configs": configs_dir, "data": configs_dir}
+            if enable_trial_mode
+            else {"configs": configs_dir}
+        )
+        if enable_trial_mode:
+            # Trial-mode rounds compute a per-file score vector (one entry
+            # per anchor file) before scalar reduction; the formal path
+            # bypasses this. Mock it to a deterministic 2-tuple so the
+            # round completes without the per-file scoring branch crashing.
+            mock_sandbox.score_vector.return_value = FAKE_SCORE_VECTOR_RESULT
 
         def dispatch(skill_folder, sandbox, **params):
             skill_calls.append((skill_folder, params))
@@ -588,6 +624,10 @@ class TestTimeBudgetGate:
         agent = HyperparamTuningAgent()
 
         def cleanup():
+            if cm_exists is not None:
+                cm_exists.__exit__(None, None, None)
+            if cm_anchor is not None:
+                cm_anchor.__exit__(None, None, None)
             cm_brain.__exit__(None, None, None)
             cm_sandbox.__exit__(None, None, None)
             cm_skill.__exit__(None, None, None)
@@ -603,7 +643,7 @@ class TestTimeBudgetGate:
         )
         try:
             output = agent.run(
-                _make_input_with_budget(tmp_path, time_budget_minutes=30.0)
+                _make_input_with_budget(tmp_path, formal_budget=30.0)
             )
         finally:
             cleanup()
@@ -615,11 +655,14 @@ class TestTimeBudgetGate:
         assert saved_records[0]["status"] == "success"
 
     def test_skill_receives_budget_and_data_dir(self, tmp_path):
+        """Default plan is formal (no is_trial in FAKE_PLAN_RESPONSE) → the
+        per-round pick lands on formal_budget; the skill's single
+        time_budget_minutes kwarg carries that value."""
         agent, _, _, _, skill_calls, cleanup = self._make_agent(FAKE_TIME_CHECK_OK)
         try:
             agent.run(_make_input_with_budget(
                 tmp_path,
-                time_budget_minutes=45.0,
+                formal_budget=45.0,
                 data_dir="/mnt/tidmad",
             ))
         finally:
@@ -636,7 +679,9 @@ class TestTimeBudgetGate:
             FAKE_TIME_CHECK_OVER
         )
         try:
-            output = agent.run(_make_input_with_budget(tmp_path, max_rounds=1))
+            output = agent.run(_make_input_with_budget(
+                tmp_path, max_rounds=1, formal_budget=30.0
+            ))
         finally:
             cleanup()
         # All 3 attempts hit the time gate → 3 skipped_time_risk records, 0 rounds completed
@@ -649,7 +694,9 @@ class TestTimeBudgetGate:
     def test_skipped_record_carries_suggestion(self, tmp_path):
         agent, _, _, saved_records, _, cleanup = self._make_agent(FAKE_TIME_CHECK_OVER)
         try:
-            agent.run(_make_input_with_budget(tmp_path, max_rounds=1))
+            agent.run(_make_input_with_budget(
+                tmp_path, max_rounds=1, formal_budget=30.0
+            ))
         finally:
             cleanup()
         rec = saved_records[0]
@@ -668,7 +715,9 @@ class TestTimeBudgetGate:
             {"status": "error", "message": "instantiation failed"}
         )
         try:
-            output = agent.run(_make_input_with_budget(tmp_path, max_rounds=1))
+            output = agent.run(_make_input_with_budget(
+                tmp_path, max_rounds=1, formal_budget=30.0
+            ))
         finally:
             cleanup()
         # The RuntimeError is caught by the loop's try/except → no rounds complete,
@@ -681,19 +730,116 @@ class TestTimeBudgetGate:
     # --- gate-disabled path -------------------------------------------------
 
     def test_none_budget_skips_skill_entirely(self, tmp_path):
-        """time_budget_minutes=None → evaluate_time_skill is never called and
-        training proceeds (one-time warning printed at startup)."""
+        """Both budgets None → evaluate_time_skill is never called and
+        training proceeds (one-time warning per mode printed at startup)."""
         agent, _, _, saved_records, skill_calls, cleanup = self._make_agent(
             FAKE_TIME_CHECK_OVER  # would block if invoked
         )
         try:
             output = agent.run(
-                _make_input_with_budget(tmp_path, time_budget_minutes=None)
+                _make_input_with_budget(tmp_path)  # both budgets default None
             )
         finally:
             cleanup()
         assert output.status == "completed"
         assert output.completed_rounds == 1
+        called_skills = [s for s, _ in skill_calls]
+        assert "evaluate_time_skill" not in called_skills
+        assert "training_skill" in called_skills
+
+    # --- Phase I: per-mode budget pick at the per-round gate ----------------
+
+    def test_trial_mode_round_picks_trial_budget(self, tmp_path):
+        """plan.is_trial=True → the per-round gate calls the skill with the
+        trial budget. The formal budget is ignored even when set.
+
+        Note: max_rounds=2 is required because the agent forces the FINAL
+        round to formal mode (`max_rounds=1` would always run formal). The
+        first round honours the LLM's is_trial=True so the per-mode pick is
+        actually exercised."""
+        agent, mock_brain, _, _, skill_calls, cleanup = self._make_agent(
+            FAKE_TIME_CHECK_OK, enable_trial_mode=True,
+        )
+        # Override the default plan to return is_trial=True for this round.
+        mock_brain.plan.return_value = {**FAKE_PLAN_RESPONSE, "is_trial": True}
+        try:
+            agent.run(_make_input_with_budget(
+                tmp_path,
+                max_rounds=2,
+                trial_budget=15.0,
+                formal_budget=240.0,
+                is_trial=True,  # mirrors LLM plan: caller permits trial mode
+            ))
+        finally:
+            cleanup()
+        time_calls = [p for s, p in skill_calls if s == "evaluate_time_skill"]
+        # First round runs as trial → trial budget. Second (final) round is
+        # forced formal → formal budget. We assert specifically on the trial
+        # round to keep the per-mode pick check unambiguous.
+        assert len(time_calls) == 2
+        assert time_calls[0]["time_budget_minutes"] == 15.0
+
+    def test_formal_mode_round_picks_formal_budget(self, tmp_path):
+        """plan.is_trial=False (default) → the per-round gate calls the skill
+        with the formal budget. The trial budget is ignored even when set."""
+        agent, _, _, _, skill_calls, cleanup = self._make_agent(FAKE_TIME_CHECK_OK)
+        try:
+            agent.run(_make_input_with_budget(
+                tmp_path,
+                trial_budget=15.0,
+                formal_budget=240.0,
+            ))
+        finally:
+            cleanup()
+        time_calls = [p for s, p in skill_calls if s == "evaluate_time_skill"]
+        assert len(time_calls) == 1
+        assert time_calls[0]["time_budget_minutes"] == 240.0
+
+    def test_trial_round_with_only_formal_budget_skips_gate(self, tmp_path):
+        """LLM picks trial mode but only formal_budget is set → trial gate
+        disabled for the trial round, skill never called for that round.
+
+        max_rounds=1 + is_trial=True forces final-round-formal, so we use
+        max_rounds=2 to actually get a trial round. The trial round must
+        skip the gate; the final formal round will hit it (formal_budget
+        is set), but FAKE_TIME_CHECK_OVER would block it — we assert that
+        only ONE evaluate_time_skill call happens (the formal one), not
+        two — confirming the trial round bypassed the gate."""
+        agent, mock_brain, _, _, skill_calls, cleanup = self._make_agent(
+            FAKE_TIME_CHECK_OK,  # final formal round passes
+            enable_trial_mode=True,
+        )
+        mock_brain.plan.return_value = {**FAKE_PLAN_RESPONSE, "is_trial": True}
+        try:
+            output = agent.run(_make_input_with_budget(
+                tmp_path,
+                max_rounds=2,
+                formal_budget=240.0,  # trial_budget left None
+                is_trial=True,
+            ))
+        finally:
+            cleanup()
+        assert output.status == "completed"
+        time_calls = [p for s, p in skill_calls if s == "evaluate_time_skill"]
+        # Only the final (formal) round invokes the skill — the trial round
+        # bypassed it because trial_budget was None.
+        assert len(time_calls) == 1
+        assert time_calls[0]["time_budget_minutes"] == 240.0
+
+    def test_formal_round_with_only_trial_budget_skips_gate(self, tmp_path):
+        """LLM defaults to formal but only trial_budget is set → formal gate
+        disabled for this round, skill never called, training proceeds."""
+        agent, _, _, _, skill_calls, cleanup = self._make_agent(
+            FAKE_TIME_CHECK_OVER  # would block if invoked
+        )
+        try:
+            output = agent.run(_make_input_with_budget(
+                tmp_path,
+                trial_budget=5.0,  # formal_budget left None
+            ))
+        finally:
+            cleanup()
+        assert output.status == "completed"
         called_skills = [s for s, _ in skill_calls]
         assert "evaluate_time_skill" not in called_skills
         assert "training_skill" in called_skills
