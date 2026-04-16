@@ -1,6 +1,6 @@
 # Design Proposal V2: Adaptive Scientific Discovery Framework for SIDERIUS
 
-**Status**: Phase E complete — SOTA-based prediction evaluation (confirmed/partial/refuted), scientific accuracy hit-rate tracking, `ProposedVocabLink` promotion to `VocabEntry.related_to`, and all unit tests. 939 unit tests passing. Phase F next. Supersedes the V1 proposal at the bottom of this file.
+**Status**: Phase F complete — receptive-side infrastructure for external agents: `AgentCard` schema, `ProposalInput.agent_cards`, `VocabEntry.origin`, `render_agent_cards()`, `render_expert_context()` dedup + confidence sort, Contributors instruction in stage prompts, protocol `mindset`/`agent_cards` params. 977 unit tests passing. No external agent is implemented yet — Phase F is infrastructure only. Next: implement `ml_literature_review` (see `docs/external_agents_for_proposer.md`). Supersedes the V1 proposal at the bottom of this file.
 
 ## 0. The actual problem and the key design idea
 
@@ -647,7 +647,7 @@ These existing pieces are doing their job and need no change:
 | **B** | Replace the proposal agent's existing two-call pattern with the **three-stage configurable pipeline** from §2A: (1) comparison — systematic review of selected past models, (2) causal reasoning — forward-looking hypothesis building on comparisons, (3) proposing — concrete architecture tethered to the memo. Add `ReasoningPipelineConfig` at the workflow level. Add `ModelSelectionStrategy` for smart pre-filtering of candidate models. Add `ExpertContextItem` (§2D) for polymorphic upstream input. Add DI (`bridge_factory`) to the proposal agent. | large | Every proposal is backed by a structured `DiscoveryMemo` that compares past models, forms a causal hypothesis, and makes a falsifiable prediction. The pipeline is configurable — adding/removing/reordering stages is a config change, not a code change. The polymorphic input slot for future upstream agents is in place. |
 | **C** | Add `VocabEntry`-based lineage validator (`check_inherited_components` for features). Implement the vocabulary feedback loop: prediction evaluation, discovery generation, `seen_in_runs` accumulation, candidate promotion (count-only MVP, ≥3 runs), semantic dedup (`_dedup_promoted()`). Two-tier model context (`non_candidates_overview`). O(1) LLM call count via `model_knowledge_cache`. `ProposedVocabLink` promotion (`confirmed → VocabEntry.related_to`) completed in Phase E. | medium | Vocabulary compounds across iterations. Each round's discoveries feed the next proposal. Lineage claims are validated in code. |
 | **E** | ✅ **Complete.** SOTA-based `evaluate_prediction()`: compares actual score against the SOTA at proposal time (`FalsifiablePrediction.current_value`), not the LLM's predicted value (which is unreliable). Outcomes: `confirmed` (beat SOTA), `partial` (within 5%), `refuted` (clearly below). `delta_from_sota` quantifies the gap. `scientific_accuracy` + `prediction_outcomes_history` carry-forward fields track hit rates across iterations. `update_vocab_link_confirmations()` helper: `confirmed` predictions accumulate per-run counts for each `feature:capability` link; links confirmed in ≥3 distinct runs are promoted to `VocabEntry.related_to`. All evaluation lives in `result_interpretation_agent` — architecturally cleaner than the original plan (which put it in the tuning agent reflector). 939 unit tests passing. | small | The proposal agent's scientific accuracy is now a measurable, monitorable quantity. `ProposedVocabLink` hypotheses graduate to established facts after sufficient empirical confirmation. |
-| **F** | Receptive-side external agent readiness. Add `AgentCard` schema and `ProposalInput.agent_cards`. Implement `render_agent_cards()` and update stage system prompts with contributor instructions. Add `VocabEntry.origin` field. Fix `render_expert_context` dedup and confidence sorting. Add `mindset` and `agent_cards` parameters to `local_full_context`. | small | The proposal agent is fully ready to accept external agents — any new upstream agent can be wired without touching the proposal node or its prompts. Phase F before D because its schema changes (`VocabEntry`, `ProposalInput`) are foundational — better to land them before D adds more fields in the same files. |
+| **F** | ✅ **Complete (infrastructure only).** Receptive-side readiness: `AgentCard` schema + `ProposalInput.agent_cards`; `VocabEntry.origin`; `render_agent_cards()` + Contributors section in stage prompts; `render_expert_context()` dedup + confidence sort; `local_full_context` accepts `mindset`/`agent_cards`. 977 unit tests. **No external agent is built here** — Phase F is the receiving end only. First real test will be `ml_literature_review` (see `docs/external_agents_for_proposer.md`). | small | After Phase F, wiring a new upstream agent = output schema + one protocol file. Nothing in the proposal node changes. |
 | **D** | Add `ResearchDirective` schema and the three guardrail layers in §2C. | medium | Guided mode actually constrains the search to a specific model family when the human directs it. Deferred past E and F because: (1) it is opt-in and locked OFF by default — existing chains are unaffected; (2) it has no immediate prerequisite from E or F; (3) E and F close higher-priority gaps (scientific accuracy, external agent readiness) at lower cost. Implement when focused "deep-dive on WaveNet" experiments are planned. |
 
 Each phase has its own tests. Each is independently revertable. Each is small enough to commit and PR cleanly.
@@ -962,37 +962,63 @@ Iteration N:
 
 ---
 
-### Phase F — Receptive-side external agent readiness
+### Phase F — Receptive-side external agent readiness ✅
 
-**Goal**: make the proposal agent fully ready to accept external upstream agents without any further changes to its node, prompts, or schemas. After Phase F, wiring a new external agent = write its output schema + one protocol file. Nothing else changes.
+**Goal**: make the proposal agent fully ready to *accept* external upstream agents without any further changes to its node, prompts, or schemas. After Phase F, wiring a new external agent = write its output schema + one protocol file. Nothing else changes.
+
+**Scope clarification — what Phase F is and is NOT**:
+
+Phase F is **infrastructure only**. It prepares the proposal agent's receiving end.
+No external agent is built here — those come in later phases.
+The new channels (`agent_cards`, `mindset`, `origin`) are fully wired but carry no data yet
+in production runs: `agent_cards=[]` (default), `mindset=None` (default), `origin=None` (default).
+All existing runs are unaffected — every new field is backward-compatible with a sensible default.
+
+| What Phase F does | What Phase F does NOT do |
+|---|---|
+| `AgentCard` schema + `ProposalInput.agent_cards` field | Build `ml_literature_review` agent |
+| `VocabEntry.origin` field | Build `physics_literature_review` agent |
+| `render_agent_cards()` renderer | Write any protocol file for a new agent |
+| `render_expert_context()` dedup + confidence sort | Trigger any external agent from a workflow |
+| Contributors instruction in stage prompts | Validate that external context reaches the LLM |
+| `local_full_context` accepts `mindset` + `agent_cards` | |
+
+The first real test of these channels will be in the phase that implements `ml_literature_review`
+(see `docs/external_agents_for_proposer.md` §2.1).
 
 **Depends on**: Phase B (ExpertContextItem, ProposalInput schemas in place).
 
 **PR size**: small.
 
-**Files**:
-- `agent/schemas/proposal.py` — add `AgentCard` schema and `agent_cards: List[AgentCard]` field to `ProposalInput`. Add `origin: Optional[str]` field to `VocabEntry`.
-- `agent/prompt_templates/proposal/__init__.py` — add `render_agent_cards()`. Update `render_expert_context()`: deduplicate by `cite_id`, sort each kind-group by `confidence` descending.
-- `agent/prompt_templates/proposal/comparison_stage.md` — add "Contributors" instruction to "What you receive" section.
+**Files changed**:
+- `agent/schemas/proposal.py` — new `AgentCard` schema; `VocabEntry.origin` field; `ProposalInput.agent_cards` field.
+- `agent/prompt_templates/proposal/__init__.py` — new `render_agent_cards()`; updated `render_expert_context()` (dedup by `cite_id`, sort by `confidence` desc).
+- `agent/prompt_templates/proposal/comparison_stage.md` — "Contributors" instruction in "What you receive".
 - `agent/prompt_templates/proposal/causal_reasoning_stage.md` — same.
-- `nodes/ml_model_proposal_agent.py` — inject `agent_cards_block` (from `render_agent_cards`) into the user prompt, before the `expert_context_block`.
-- `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py` — add `mindset: Optional[str] = None` and `agent_cards: Optional[List[AgentCard]] = None` to `local_full_context`.
-- `tests/unit/agent/ml_model_proposal_agent/test_agent_cards.py` (new).
+- `nodes/ml_model_proposal_agent.py` — inject `agent_cards_block` before `expert_context_block` in both per-stage and proposing-stage user prompts.
+- `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py` — `mindset` and `agent_cards` params added to `local_full_context`.
+- `tests/unit/agent/ml_model_proposal_agent/test_agent_cards.py` (new, 26 tests).
 
 **Sub-tasks**:
-- ☐ F.1 Add `AgentCard` schema to `agent/schemas/proposal.py`.
-- ☐ F.2 Add `ProposalInput.agent_cards: List[AgentCard] = []`.
-- ☐ F.3 Add `VocabEntry.origin: Optional[str] = None`. Update `build_runtime_vocab()` docstring to document that external entries set `origin=` and leave `proposed_by_run=None`.
-- ☐ F.4 Implement `render_agent_cards()` in `agent/prompt_templates/proposal/__init__.py`. Returns empty string when `agent_cards` is empty (no noise in single-agent runs).
-- ☐ F.5 Update `render_expert_context()`: (a) deduplicate by `cite_id` before grouping; (b) sort each group by `confidence` descending, `None` last.
-- ☐ F.6 Inject `agent_cards_block` in `_run_pipeline()` before `expert_context_block`.
-- ☐ F.7 Add contributor instruction block to `comparison_stage.md` and `causal_reasoning_stage.md`.
-- ☐ F.8 Add `mindset` and `agent_cards` parameters to `local_full_context` in the protocol file.
-- ☐ F.9 Unit tests: `render_agent_cards` with empty list → empty string; with one card → correct labels; `render_expert_context` dedup removes duplicate `cite_id`; confidence sorting puts highest first.
+- ☑ F.1 Add `AgentCard` schema to `agent/schemas/proposal.py`.
+- ☑ F.2 Add `ProposalInput.agent_cards: List[AgentCard] = []`.
+- ☑ F.3 Add `VocabEntry.origin: Optional[str] = None`.
+- ☑ F.4 Implement `render_agent_cards()` — returns empty string when `agent_cards` is empty (no noise in single-agent runs).
+- ☑ F.5 Update `render_expert_context()`: (a) deduplicate by `cite_id` before grouping; (b) sort each group by `confidence` descending, `None` last.
+- ☑ F.6 Inject `agent_cards_block` in `_run_pipeline()` before `expert_context_block`.
+- ☑ F.7 Add contributor instruction block to `comparison_stage.md` and `causal_reasoning_stage.md`.
+- ☑ F.8 Add `mindset` and `agent_cards` parameters to `local_full_context` in the protocol file.
+- ☑ F.9 Unit tests: 26 tests covering all new schema fields, both renderers, dedup, confidence sorting, and protocol pass-through.
 
 **Verify**:
-- `uv run pytest tests/unit/ -q` — full suite still green.
-- Manual: pass a `ProposalInput` with one `AgentCard` through the pipeline, confirm "Contributors" section appears in the logged prompt before the "Expert Context" section.
+- ✅ `uv run pytest tests/unit/agent/ml_model_proposal_agent/test_agent_cards.py -v` — 26 passed.
+- ✅ `uv run pytest tests/unit/ -q` — 977 passed, 0 failures.
+
+**What comes next** (not Phase F):
+- Implement `ml_literature_review` node — follows the 8-step node checklist in CLAUDE.md.
+  See `docs/external_agents_for_proposer.md` §2.1 for full spec (schema, protocol, trigger conditions).
+- Implement `physics_literature_review` node — see §2.2 in the same doc.
+- Both agents will be the first real test of the `AgentCard` + `agent_cards` channel.
 
 ---
 
