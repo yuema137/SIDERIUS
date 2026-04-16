@@ -448,16 +448,17 @@ class MLCodeValidatorAgent:
             if not inherit_ok:
                 print(f"  Inheritance check FAILED: {inherit_notes}")
 
-        passed = all([plugin_ok, tests_ok, desc_ok, cfg_ok, inst_ok, grad_ok, otype_ok, llm_ok, inherit_ok])
+        # Trainability gate — inheritance_check_passed is NOT in this list (regex checks
+        # are too brittle to block a model that otherwise runs and trains). It is surfaced
+        # as a deviation note so the tuner/interpretation agents can treat unverified
+        # component claims with appropriate skepticism.
+        passed = all([plugin_ok, tests_ok, desc_ok, cfg_ok, inst_ok, grad_ok, otype_ok, llm_ok])
 
         errors = [e for e in [plugin_err, desc_err, cfg_err, inst_err] if e is not None]
         if not tests_ok:
             errors.append("pytest tests failed — see test_output for details")
         if not llm_ok:
             errors.append(f"LLM review did not pass: {review.notes}")
-        if not inherit_ok:
-            failed_claims = [n for n in (inherit_notes or []) if "NOT FOUND" in n]
-            errors.append(f"Inheritance check failed: {'; '.join(failed_claims)}")
         error_message = "; ".join(errors) if errors else None
 
         # Populate spec_deviation_notes when the model passes but doesn't match the spec —
@@ -474,6 +475,25 @@ class MLCodeValidatorAgent:
                 + (" | ".join(deviation_lines) if deviation_lines else review.notes)
             )
 
+        # Parallel treatment for inheritance: when a claimed inherited_component's regex
+        # pattern did not match, record it structurally (for downstream consumers like the
+        # interpretation agent) and in prose (for the tuner's LLM planner).
+        unverified_components: list[str] = []
+        inheritance_deviation_notes = None
+        if not inherit_ok and inherit_notes:
+            for note in inherit_notes:
+                if "NOT FOUND" in note:
+                    unverified_components.append(note.split(":", 1)[0].strip())
+            if passed and unverified_components:
+                inheritance_deviation_notes = (
+                    f"NOTE: The implementation passes trainability checks, but the following "
+                    f"claimed inherited_components could not be verified in the plugin source "
+                    f"by pattern match: {', '.join(unverified_components)}. The regex check is "
+                    f"brittle (e.g. a primitive implemented via F.interpolate may not match a "
+                    f"pattern that expects 'upsample'). Treat confirmation credit for these "
+                    f"components with caution."
+                )
+
         out = ValidatorOutput(
             passed=passed,
             model_type=inp.model_type,
@@ -487,12 +507,14 @@ class MLCodeValidatorAgent:
             llm_review_passed=llm_ok,
             inheritance_check_passed=inherit_ok,
             inheritance_check_notes=inherit_notes,
+            unverified_inherited_components=unverified_components,
             test_output=test_output if test_output.strip() else None,
             llm_review_spec_alignment=review.spec_alignment,
             llm_review_trainability_concerns=review.trainability_concerns,
             llm_review_implementation_issues=review.implementation_issues,
             llm_review_notes=review.notes,
             spec_deviation_notes=spec_deviation_notes,
+            inheritance_deviation_notes=inheritance_deviation_notes,
             error_message=error_message,
         )
 
