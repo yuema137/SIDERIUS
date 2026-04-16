@@ -481,23 +481,55 @@ class ProposalInput(BaseModel):
         description="Model type keys already registered in MODEL_REGISTRY. "
                     "The proposal agent must not reuse any of these names.",
     )
-    # --- Run-level context (workflow-supplied; consumed by the time-budget gate) ---
-    # See docs/time_estimator_implement.md §2.7.2: these four fields originate at
-    # the workflow/CLI entry point and fan out to both this node and the tuner so
-    # the proposer can run evaluate_time_skill on its own baseline before emitting.
-    file_index: int = Field(
-        default=6,
-        ge=0,
-        description="Validation/training file index (0-39). Used by the proposer "
-                    "to build the same sample_set the tuner will see when it gates "
-                    "the baseline through evaluate_time_skill.",
+    # --- Run-level data + time-budget context (workflow-supplied) ---
+    # See docs/time_estimator_implement.md §2.7.2. These fields originate at the
+    # workflow/CLI entry point and fan out to both this node and the tuner so
+    # the proposer can call build_sample_set + evaluate_time_skill on its own
+    # baseline before emitting. The training-side trial-mode set mirrors
+    # HyperparamTuningInput exactly so both gates see identical sample_sets;
+    # legacy single_file mode (file_index, is_trial=False) is deliberately not
+    # surfaced here — modern usage is is_trial=True with trial_strategy='target'
+    # + target_files=[N] when a single file is wanted.
+    is_trial: bool = Field(
+        default=False,
+        description="Whether the run uses trial (sparse) sampling. Forwarded to "
+                    "build_sample_set inside the proposer's evaluate_time_skill gate "
+                    "so it matches what the tuner will run.",
     )
-    train_portion: float = Field(
-        default=1.0,
+    trial_strategy: Literal["snapshot", "anchors", "target"] = Field(
+        default="snapshot",
+        description="Sampling strategy for training data: 'snapshot' (all 20 files), "
+                    "'anchors' (files 0/10/19), 'target' (caller-specified files). "
+                    "Mirrors HyperparamTuningInput.trial_strategy.",
+    )
+    trial_portion: float = Field(
+        default=0.1,
         ge=0.01,
         le=1.0,
-        description="Per-epoch subsample fraction. Forwarded to evaluate_time_skill "
-                    "so the proposer's wall-time estimate matches the tuner's.",
+        description="Fraction of segments per file for the training scope. "
+                    "Mirrors HyperparamTuningInput.trial_portion.",
+    )
+    target_files: List[int] = Field(
+        default_factory=list,
+        description="File indices to sample from. Required when trial_strategy='target'. "
+                    "Mirrors HyperparamTuningInput.target_files.",
+    )
+    train_portion: float = Field(
+        default=0.1,
+        ge=0.01,
+        le=1.0,
+        description="Per-epoch subsample fraction from the training scope. "
+                    "Forwarded to evaluate_time_skill so the proposer's wall-time "
+                    "estimate matches the tuner's. Default 0.1 mirrors "
+                    "HyperparamTuningInput.train_portion.",
+    )
+    sampling_seed: Optional[int] = Field(
+        default=None,
+        description="Seed for build_sample_set(). When None the proposer auto-generates "
+                    "one for its estimate; the tuner uses its own auto-generation "
+                    "policy from HyperparamTuningInput.sampling_seed. The estimate is "
+                    "robust to which exact segments are picked, so identical seeds "
+                    "across the two gates are not required.",
     )
     time_budget_minutes: Optional[float] = Field(
         default=None,
