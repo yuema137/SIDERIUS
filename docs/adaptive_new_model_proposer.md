@@ -516,13 +516,15 @@ Failures from layers 2 and 3 trigger the existing implementor retry loop with a 
 
 #### The future agents we're designing for
 
-| Future agent | Produces | Kind of context |
-|---|---|---|
-| `data_analysis_agent` | Empirical findings about the raw signals — noise distributions, SQUID-specific artifacts, per-frequency-band SNR, observed periodicities, unexplained peaks | **empirical** |
-| `physics_expert_agent` | Theoretical constraints — symmetries, conservation laws, mass-range / energy bounds, allowed coupling structures | **theoretical** |
-| `literature_review_agent` | Architecture ideas synthesized from recent ML / physics papers | **literature** |
-| `research_narrative_agent` (optional) | Meta-summary of what's been tried; plateau detection; strategic suggestions | **narrative** |
-| Human expert | Hand-written advice (today's `human_advice`) | **human** |
+| Future agent | Module prefix | Produces | Kind of context |
+|---|---|---|---|
+| `data_analysis_agent` | `data_` | Empirical findings about the raw signals — noise distributions, SQUID-specific artifacts, per-frequency-band SNR, observed periodicities, unexplained peaks | **empirical** |
+| `ml_literature_review` | `ml_` | Architecture ideas synthesized from recent ML papers (Semantic Scholar, OpenReview) | **literature** |
+| `physics_literature_review` | `phys_` | Physical constraints on SQUID systems — symmetries, mass-range / energy bounds, causality, band limits. First agent with `phys_` prefix; establishes that module convention. | **theoretical** |
+| `research_narrative_agent` (optional) | `ml_` | Meta-summary of what's been tried; plateau detection; strategic suggestions | **narrative** |
+| Human expert | — | Hand-written advice (today's `human_advice`) | **human** |
+
+Full design for `ml_literature_review` and `physics_literature_review` — including output schemas, protocol files, trigger conditions, and implementation checklist — is in `docs/external_agents_for_proposer.md`.
 
 Crucially, these agents differ in *what* they say but not in *how* they say it — they all produce typed structured advice that the proposal agent should weigh against past experiment records when forming its `DiscoveryMemo`. V2's design principle here is **don't invent an umbrella container**. The V1 proposal called for an `InquiryContext` / `UnifiedContextAssembler` to hold all these sources — V2 explicitly rejected that as premature abstraction. Instead, V2 reuses the existing pattern: schemas + protocols. Each upstream agent has its own output schema, and a protocol function (`{source}_to_ml_model_propose`) maps that output into the proposal agent's input. The proposal agent treats all of them through one minimal polymorphic field.
 
@@ -533,6 +535,33 @@ Crucially, these agents differ in *what* they say but not in *how* they say it �
 The migration is non-breaking: legacy `human_advice` strings are wrapped at the protocol boundary into `ExpertContextItem(source="human", kind="human")`. Adding a new upstream agent = emitting more items through its own protocol function — no schema changes needed.
 
 This is the V2 minimalist principle in action: **one small new field unlocks N future upstream agents**. We are not creating an `InquiryContext` container or a `UnifiedContextAssembler` orchestrator. We are extending a list.
+
+#### Agent name cards — epistemic calibration
+
+`ExpertContextItem` conveys *what* an agent found. It does not tell the proposal LLM *who* the agent is, what domain it covers, or how much to trust it. Without this context, the LLM treats `source="ml_literature_review"` and `source="data_analysis_agent"` identically — but they have very different epistemic statuses: one is experimental ground truth on TIDMAD data, the other is a literature prior that may not transfer.
+
+The fix is an **`AgentCard`** — a static self-description each external agent emits alongside its findings. An `AgentCard` carries: `agent_name`, `role` (one sentence), `expertise_domain`, `coverage` (data sources and time range), `limitations`, and `trust_guidance` (how the proposal LLM should weight this agent's findings). The proposal agent collects these into `ProposalInput.agent_cards: List[AgentCard]` and renders them as a "Contributors" section *before* the `ExpertContextItem` list in each stage prompt — so the LLM reads *who is contributing* before it reads *what they found*.
+
+Key design principle: **findings are the evidence; the name card is the calibration**. The `AgentCard` is defined once in the external agent's implementation (it is static knowledge about what the agent is) and passed through every run via its output schema.
+
+The system prompt instruction in `comparison_stage.md` and `causal_reasoning_stage.md` will tell the LLM:
+- Literature agents: treat as promising priors. Only experiment runs confirm applicability to TIDMAD.
+- Physics agents: physical constraints are hard limits. Do not propose architectures that violate them.
+- Human directives: always take precedence.
+
+Phase F (§7) implements `AgentCard`, `ProposalInput.agent_cards`, `render_agent_cards()`, and the system prompt instructions.
+
+#### Receiving-end gaps to fix before wiring external agents
+
+Three small gaps in the current code that would cause problems as soon as the first external agent is wired:
+
+1. **`VocabEntry.proposed_by_run` overloading**: this field is currently used for both attribution (who suggested the term) and promotion counting (injected into `seen_in_runs`, promotion fires at count ≥ 3). If an external agent sets `proposed_by_run="ml_literature_review"`, that string enters `seen_in_runs` and the term gets promoted after 3 literature scans — without experimental validation. Fix: add `origin: Optional[str]` to `VocabEntry`. External agents set `origin=` and leave `proposed_by_run=None`. Promotion stays experiment-driven.
+
+2. **`render_expert_context` has no deduplication**: two agents may independently cite the same paper (`cite_id` collision). Fix: deduplicate by `cite_id` before rendering (last occurrence wins).
+
+3. **`render_expert_context` has no confidence-based ordering**: within a `kind` group, items are in insertion order. Fix: sort each group by `confidence` descending; items with `confidence=None` sort last.
+
+Phase F (§7) implements all three fixes alongside the `AgentCard` additions.
 
 #### How the Discovery Memo consumes Expert Context
 
@@ -619,6 +648,7 @@ These existing pieces are doing their job and need no change:
 | **C** | Add `VocabEntry`-based lineage validator (`check_inherited_components` for features). Implement the vocabulary feedback loop: prediction evaluation, discovery generation, `seen_in_runs` accumulation, candidate promotion (count-only MVP, ≥3 runs), semantic dedup (`_dedup_promoted()`). Two-tier model context (`non_candidates_overview`). O(1) LLM call count via `model_knowledge_cache`. Note: `ProposedVocabLink` promotion (`confirmed → VocabEntry.related_to`) moved to Phase E (E.7) — depends on the Phase E reflector. | medium | Vocabulary compounds across iterations. Each round's discoveries feed the next proposal. Lineage claims are validated in code. |
 | **D** | Add `ResearchDirective` schema and the three guardrail layers in §2C. | medium | Guided mode actually constrains the search. |
 | **E** | Add the `falsifiable_prediction` retrospective check inside the reflector: confirmed / refuted / partial label, written into the record. Aggregate the hit rate in `InterpretationOutput`. | small | The proposal agent's scientific accuracy becomes a measurable, monitorable quantity. |
+| **F** | Receptive-side external agent readiness. Add `AgentCard` schema and `ProposalInput.agent_cards`. Implement `render_agent_cards()` and update stage system prompts with contributor instructions. Add `VocabEntry.origin` field. Fix `render_expert_context` dedup and confidence sorting. Add `mindset` and `agent_cards` parameters to `local_full_context`. | small | The proposal agent is fully ready to accept external agents — any new upstream agent can be wired without touching the proposal node or its prompts. |
 
 Each phase has its own tests. Each is independently revertable. Each is small enough to commit and PR cleanly.
 
@@ -632,11 +662,10 @@ Each phase has its own tests. Each is independently revertable. Each is small en
 4. **Guided-mode escape hatches**. Should there be a way for the LLM to formally request a relaxation of the directive (e.g. "I think the constraint is impossible to satisfy because of Y; please review")? Otherwise stuck states could waste rounds. But adding an escape hatch risks defeating the point of guided mode.
 5. **Hit rate as feedback to the planner**. Once Phase E is in place, the planner could be told its own historical accuracy ("your causal predictions have been confirmed 38% of the time"). Self-knowledge of fallibility might improve future memos. Risk: the LLM becomes overconfident or defensive.
 
-6. **First non-human upstream agent — Data Analysis Agent**. Phase B introduces the `ExpertContextItem` polymorphic input slot, but it does not introduce any new producer of those items beyond the human-advice wrapper. The first real test of the §2D design will be when we wire up the Data Analysis Agent. Open questions for that future PR:
-   - Where does the Data Analysis Agent run in the workflow — once at exploration start (cheap, static), once per iteration (more expensive, can adapt to new findings), or on demand from the proposal agent?
-   - Should its findings be persisted into the records or live only in memory between runs? (Persisting them turns the records into a growing knowledge base; not persisting keeps the chain stateless.)
-   - How does it produce `cite_id` values that are stable across re-runs of the same analysis? Hash of the finding content? Timestamped slug?
-   - How do we evaluate whether its findings are actually useful — citation hit rate (per §2D) is the right metric, but Phase B doesn't yet collect it.
+6. **First non-human upstream agents — Literature Review Agents**. Phase B introduces the `ExpertContextItem` polymorphic input slot and Phase F makes the receiving end fully ready. The first real external agents are `ml_literature_review` and `physics_literature_review` (see `docs/external_agents_for_proposer.md` for the full design). Open questions for those future PRs:
+   - How do agents produce `cite_id` values that are stable across re-runs of the same analysis? Hash of the finding content? Timestamped slug? A stable `cite_id` is required for the citation audit trail to work across rounds.
+   - How do we evaluate whether a literature agent's findings are actually useful — citation hit rate (per §2D) is the right metric, but it requires Phase E's `prediction_outcome` to be populated before we can cross-reference citations with confirmed hypotheses.
+   - Should physics agent findings be persisted into the records or live only in memory per chain? Persisting them turns the records into a growing knowledge base; not persisting keeps the chain stateless.
 
 
 ---
@@ -925,6 +954,42 @@ Iteration N:
 
 ---
 
+---
+
+### Phase F — Receptive-side external agent readiness
+
+**Goal**: make the proposal agent fully ready to accept external upstream agents without any further changes to its node, prompts, or schemas. After Phase F, wiring a new external agent = write its output schema + one protocol file. Nothing else changes.
+
+**Depends on**: Phase B (ExpertContextItem, ProposalInput schemas in place).
+
+**PR size**: small.
+
+**Files**:
+- `agent/schemas/proposal.py` — add `AgentCard` schema and `agent_cards: List[AgentCard]` field to `ProposalInput`. Add `origin: Optional[str]` field to `VocabEntry`.
+- `agent/prompt_templates/proposal/__init__.py` — add `render_agent_cards()`. Update `render_expert_context()`: deduplicate by `cite_id`, sort each kind-group by `confidence` descending.
+- `agent/prompt_templates/proposal/comparison_stage.md` — add "Contributors" instruction to "What you receive" section.
+- `agent/prompt_templates/proposal/causal_reasoning_stage.md` — same.
+- `nodes/ml_model_proposal_agent.py` — inject `agent_cards_block` (from `render_agent_cards`) into the user prompt, before the `expert_context_block`.
+- `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py` — add `mindset: Optional[str] = None` and `agent_cards: Optional[List[AgentCard]] = None` to `local_full_context`.
+- `tests/unit/agent/ml_model_proposal_agent/test_agent_cards.py` (new).
+
+**Sub-tasks**:
+- ☐ F.1 Add `AgentCard` schema to `agent/schemas/proposal.py`.
+- ☐ F.2 Add `ProposalInput.agent_cards: List[AgentCard] = []`.
+- ☐ F.3 Add `VocabEntry.origin: Optional[str] = None`. Update `build_runtime_vocab()` docstring to document that external entries set `origin=` and leave `proposed_by_run=None`.
+- ☐ F.4 Implement `render_agent_cards()` in `agent/prompt_templates/proposal/__init__.py`. Returns empty string when `agent_cards` is empty (no noise in single-agent runs).
+- ☐ F.5 Update `render_expert_context()`: (a) deduplicate by `cite_id` before grouping; (b) sort each group by `confidence` descending, `None` last.
+- ☐ F.6 Inject `agent_cards_block` in `_run_pipeline()` before `expert_context_block`.
+- ☐ F.7 Add contributor instruction block to `comparison_stage.md` and `causal_reasoning_stage.md`.
+- ☐ F.8 Add `mindset` and `agent_cards` parameters to `local_full_context` in the protocol file.
+- ☐ F.9 Unit tests: `render_agent_cards` with empty list → empty string; with one card → correct labels; `render_expert_context` dedup removes duplicate `cite_id`; confidence sorting puts highest first.
+
+**Verify**:
+- `uv run pytest tests/unit/ -q` — full suite still green.
+- Manual: pass a `ProposalInput` with one `AgentCard` through the pipeline, confirm "Contributors" section appears in the logged prompt before the "Expert Context" section.
+
+---
+
 ### Cross-phase verification gates
 
 After each phase ships and is committed:
@@ -935,7 +1000,7 @@ After each phase ships and is committed:
 4. **Backward compatibility**: at least one tuner run with no new fields populated (legacy path) completes successfully.
 5. **No invariant violation**: no new sidecar markdown files, no new shared mutable state files, no inter-node communication that bypasses protocols.
 
-After **all five phases** ship, run the Tier-3 chain test as a final verification:
+After **all six phases** ship, run the Tier-3 chain test as a final verification:
 ```bash
 uv run pytest -m real_run -v -s \
     tests/integration/workflows/test_full_exploration_loop.py::TestFullExplorationLoop::test_chained_iterations
