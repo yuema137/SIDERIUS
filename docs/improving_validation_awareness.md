@@ -1,6 +1,6 @@
 # Validation-Awareness Across Proposer + Implementor
 
-**Status**: Phase A complete 2026-04-16; Phase B not started
+**Status**: Phase A complete 2026-04-16; Phase B.1 landed 2026-04-17, B.2+ in progress
 **Author**: design discussion 2026-04-16
 **Motivation**: two iter-1 runs (`exploit_cnn_v1`, `explore_novel_v1`, launched 2026-04-16 23:02) burned their entire 9-attempt budgets and produced **zero successful rounds** because the proposer wrote `baseline_config` values that violated downstream validation rules. Both runs reached `status="partial", completed_rounds=0, all_records=[]` after ~2.5 minutes each, then advanced to iter-2 and would have repeated the same failure mode for the rest of the 20-iteration budget.
 
@@ -12,7 +12,8 @@
 | A.1 — `ProposalOutput` segmentation_size validator + `DatasetConfig.valid_segmentation_sizes()` helper | 2026-04-16 | `7c935b0` | 6 helper + 9 validator tests; 253 full proposer suite + 899 full agent unit suite all green |
 | A.2 + A.3 — `_format_known_constraints_block` helper, `{known_constraints_block}` placeholder in `proposing_stage.md`, wired in `nodes/ml_model_proposal_agent.py` with `DATASET_CONFIG` | 2026-04-16 | `8c37d61` | 10 new tests; 263 full proposer suite green |
 | A.4 — confirm existing proposer retry loop catches the A.1 validator (no new wiring) + 3 integration tests | 2026-04-16 | `ff59aa8` | 3 new tests in `TestSegmentationSizeRetryIntegration`; 28 full pipeline_runner suite green |
-| A.5 — Phase A acceptance gate (stubborn-LLM scenario covered by A.4 unit tests; dual-mode test deferred to C.3) | 2026-04-16 | (this commit — doc only) | 272 tests (266 proposer + 6 dataset_config) |
+| A.5 — Phase A acceptance gate (stubborn-LLM scenario covered by A.4 unit tests; dual-mode test deferred to C.3) | 2026-04-16 | `b904fe2` | 272 tests (266 proposer + 6 dataset_config) |
+| B.1 — `ConfigAdjustment` schema + `ImplementorOutput.baseline_config_adjustments` dict; §2.4 policy enforced (forbidden list for dataset-level fields; ±20% delta on numeric; bool/str rejected) | 2026-04-17 | (this commit) | 22 new tests; 88 full implementor suite green |
 
 ---
 
@@ -195,14 +196,14 @@ Catches `segmentation_size=16384` before the implementor is even invoked.
 
 Catches `multiple_of=2` vs `refiner_kernel_size=5` before the tuner runs.
 
-#### B.1 — `ConfigAdjustment` schema + `ImplementorOutput.baseline_config_adjustments`
-- [ ] Add `ConfigAdjustment` model in `agent/schemas/implementor.py`
-- [ ] Add `baseline_config_adjustments: Dict[str, ConfigAdjustment] = Field(default_factory=dict)` to `ImplementorOutput`
-- [ ] Add validator on `ConfigAdjustment` enforcing the §2.4 policy:
-  - dataset-level fields rejected (constant list of forbidden field names: `segmentation_size`, …)
-  - continuous numeric: `|new - old| / |old| <= 0.20`
-  - discrete: any value (snap-to-nearest is the implementor's job, the validator just records)
-- [ ] Unit tests: `tests/unit/agent/ml_model_implementor/test_config_adjustment_schema.py`
+#### B.1 — `ConfigAdjustment` schema + `ImplementorOutput.baseline_config_adjustments` ✅
+- [x] Added `ConfigAdjustment` model in `agent/schemas/implementor.py` with fields `original_value`, `adjusted_value`, `reason` (min_length=1 for audit trail readability)
+- [x] Added `baseline_config_adjustments: Dict[str, ConfigAdjustment] = Field(default_factory=dict)` to `ImplementorOutput` (default empty preserves backward compat with existing implementor tests)
+- [x] Enforced §2.4 policy across two validator sites:
+  - `ConfigAdjustment.model_validator` (single-entry): ±20% delta for numeric (int/float, non-bool), zero-original requires zero-adjusted, bool rejected as categorical, non-numeric (str/list/dict) rejected
+  - `ImplementorOutput.model_validator` (cross-key): keys in `_FORBIDDEN_ADJUSTMENT_FIELDS` (currently `{"segmentation_size"}`) rejected with error text routing the retry upstream to the proposer
+- [x] **Simplification from the original spec**: the doc originally distinguished "continuous numeric" (±20% enforced) from "discrete numeric with constraint" (any value). In pydantic both are typically `int`, so type-based discrimination is unreliable. Per locked decision §5.2 ("±20% accepted as default"), we enforce ±20% universally on int+float. If legitimate `multiple_of` snaps can't satisfy this (e.g., `kernel_size=3` with `multiple_of=5` → 5, 66%), the LLM must relax the schema instead. Revisit if this fires on real runs.
+- [x] Unit tests: `tests/unit/agent/ml_model_implementor/test_config_adjustment_schema.py` (22 tests across 4 classes: numeric policy, categorical rejection, edge cases, ImplementorOutput ownership, module constants)
 
 #### B.2 — Implementor post-write check
 - [ ] After writing the plugin file in `nodes/ml_model_implementor.py`, import it via `importlib`
