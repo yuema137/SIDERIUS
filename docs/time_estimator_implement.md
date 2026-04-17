@@ -1,6 +1,6 @@
 # Time-Budget Estimator Skill
 
-**Status**: implemented (Phases A–G complete; H1a lilab direct-skill smoke verified 2026-04-16; **Phase I — trial/formal budget split — landed 2026-04-16 across 5 commits**; **Phase J — success-path time info to planner — planned, the only remaining blocker for H1b**; H2 SDSC deferred)
+**Status**: implemented (Phases A–G complete; H1a lilab direct-skill smoke verified 2026-04-16; **Phase I — trial/formal budget split — landed 2026-04-16 across 5 commits**; **Phase J — success-path time info to planner — landed 2026-04-16 across 3 commits**; H1b unblocked, ready to run; H2 SDSC deferred)
 **Author**: design discussion 2026-04-16
 **Motivation**: two trial-mode runs (`exploit_cnn_v1`, `explore_novel_v1`) stalled in Round 1 for 1h 50min and 2h 27min respectively, both blowing past the 1-hour trial budget stated in the expert advice. Neither was blocked, because the planner has no pre-flight wall-time estimate — only a VRAM check.
 
@@ -19,8 +19,8 @@
 | G — `.gitignore` housekeeping | 2026-04-16 | (this commit) | n/a |
 | H1a — lilab direct skill smoke (RTX 5090) | 2026-04-16 | (no commit — `/tmp/smoke_h1a.py`) | wavenet+punet real warmup, k=1.25 EMA round-trip from disk |
 | I — trial/formal budget split (schema + CLI rename) | 2026-04-16 | `29cd956`, `485250e`, `358dded`, `b6b680d`, `b51be8e` | 53 protocol + 17 proposer-gate + 36 tuner-gate Phase-I tests pass |
-| J — success-path time info to planner | planned | — | attach `time_estimate_minutes` / `time_budget_minutes` / `mode` to success records' memory so the planner sees headroom (not just rejections); tuner-only; the only remaining blocker for H1b |
-| H1b — lilab tuner-integration smoke | blocked on J | — | needs Phase J success-path feedback + real LLM cost (Phase I CLI flags now available) |
+| J — success-path time info to planner | 2026-04-16 | `bbbc174`, `265bfb5`, `4b8fb94` | 5 schema + 3 success-path + 1 skipped-record Phase-J tests pass (182 tuner total) |
+| H1b — lilab tuner-integration smoke | ready (Phase J landed) | — | unblocked; awaits real LLM run (Phase I CLI flags + Phase J planner-feedback channel both available) |
 | H2 — SDSC smoke run (Slurm batch, chained) | deferred | — | gated on H1b passing; tests batch-system specifics (env-var override, GPU stability across restarts, concurrent-writer safety) |
 
 ---
@@ -677,7 +677,7 @@ Drove `evaluate_time_skill.run_skill()` directly on lilab with `data_dir=/home/k
 - [x] Atomic save→reload round-trip: a second `run_skill()` call reads **k=1.25 from disk** (no in-process cache).
 - [x] `punet` real-warmup completes: 412,392 params, 3.01 ms/step, k=1.0 from its own per-model entry (never calibrated).
 
-H1a acceptance = the skill, the model-class instantiation, the GPU warmup, and the calibration round-trip all work end-to-end on real RTX 5090 + real HDF5. The remaining failure modes are tuner-integration ones, covered by H1b. Phase I (the structural-flaw fix surfaced by H1a-prep) landed 2026-04-16; H1b is now blocked only on **Phase J** (success-path time info to the planner).
+H1a acceptance = the skill, the model-class instantiation, the GPU warmup, and the calibration round-trip all work end-to-end on real RTX 5090 + real HDF5. The remaining failure modes are tuner-integration ones, covered by H1b. Phase I (the structural-flaw fix surfaced by H1a-prep) landed 2026-04-16; Phase J (success-path time info to the planner) landed 2026-04-16; H1b is now unblocked.
 
 ---
 
@@ -729,11 +729,11 @@ There is no single budget value that correctly gates both modes. They are differ
 - **Deferred to H1b**: real-mode tuner launch with `--trial_time_budget_minutes 5 --max_rounds 3` (and the negative-path `--trial_time_budget_minutes 0.01` rejection check) requires real LLM cost and is folded into the H1b smoke acceptance — not a separate Phase I gate.
 - [x] Marked I `[x]` in the Progress log with all 5 commit hashes.
 
-H1b is now blocked only on Phase J.
+H1b is now unblocked — Phase J landed 2026-04-16.
 
 ---
 
-### Phase J — Success-path time info to the planner [planned, blocks H1b]
+### Phase J — Success-path time info to the planner [x] (2026-04-16)
 
 **Background.** Phases E1 and I wire the time estimator into the round-loop and the dual-budget split, but the LLM only ever hears from the gate **on rejection**. When the gate passes, the round becomes a success record with no time-related field — the planner gets a silent green light. The LLM has to *crash into the boundary* to learn it. Two consequences:
 
@@ -777,31 +777,33 @@ The existing `skipped_time_risk` record's `memory.conclusion` already includes `
 
 #### J.4 Files touched
 
-- [ ] `nodes/ml_hyperparameter_tune_agent.py`:
-  - Final success-record assembly (around `:710` — the `final_record` dict): add the three `memory` fields, sourced from the stashed `time_check`. Guard with `if time_check is not None` so runs with the gate disabled produce records without these keys (rather than `None` values that the reflector would have to filter).
-  - `skipped_time_risk` record (around `:503`): add the same three fields for consistency.
-- [ ] `nodes/ml_model_proposal_agent.py`: **no change**. Proposer is one-shot; no next-round to feed back into.
+- [x] `agent/schemas/hyperparam_tuning.py`: extend `ExperimentMemory` with three optional fields (`time_estimate_minutes: Optional[float]`, `time_budget_minutes: Optional[float]`, `time_mode: Optional[Literal["trial", "formal"]]`). Defaults to `None` so pre-Phase-J records still validate. Committed `bbbc174`.
+- [x] `nodes/ml_hyperparameter_tune_agent.py`:
+  - Final success-record assembly (around `:782`): inject the three `memory` fields from the stashed `time_check` dict, guarded by `if time_check is not None` so runs with the gate disabled emit records without the keys. Committed `265bfb5`.
+  - `skipped_time_risk` record (around `:528`): add the same three fields unconditionally (the gate just ran by definition). Committed `4b8fb94`.
+- [x] `nodes/ml_model_proposal_agent.py`: **no change**. Proposer is one-shot; no next-round to feed back into.
 
 #### J.5 Test surface
 
-- [ ] Extend `tests/unit/agent/tune_ml_hyperparam_agent/test_tuning_agent.py`:
-  - Gate-pass round → success record's `memory` contains the three time fields with the values from the mocked `time_check` dict.
-  - Gate-pass with `is_trial=True` → `time_mode == "trial"` and `time_budget_minutes` matches `trial_time_budget_minutes`.
-  - Gate-pass with formal mode → `time_mode == "formal"`, `time_budget_minutes` matches `formal_time_budget_minutes`.
-  - Gate disabled (both budgets `None`) → the three fields are absent from the record (not `None`).
-  - Gate-fail → `skipped_time_risk` record's `memory` also carries the three fields (consistency check).
+- [x] `tests/unit/agent/tune_ml_hyperparam_agent/test_hyperparam_schemas.py`: new `TestExperimentMemoryTimeFields` class — 5 tests covering schema defaults, concrete values, `Literal` rejection, and round-trip of pre-Phase-J records (committed `bbbc174`).
+- [x] `tests/unit/agent/tune_ml_hyperparam_agent/test_tuning_agent.py`: 3 new success-path tests in `TestTimeBudgetGate`:
+  - `test_success_record_memory_carries_time_fields_formal` — gate-pass formal mode populates all three fields.
+  - `test_success_record_memory_time_mode_trial` — gate-pass trial mode → `time_mode == "trial"`.
+  - `test_success_record_omits_time_fields_when_gate_disabled` — both budgets `None` → keys absent (not `None`).
+  - (committed `265bfb5`)
+- [x] Same file: 1 new consistency test:
+  - `test_skipped_time_risk_record_carries_time_fields` — skipped record's `memory` carries the same three fields with values from the over-budget `time_check` (committed `4b8fb94`).
 
 #### J.6 Acceptance
 
-- **Verify**: `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent/ -q` → all passing, including the new gate-pass-memory tests.
+- **Verified** (2026-04-16): `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent/ -q` → **182 passed** (9 new Phase-J tests, 0 regressions).
 - **Verify (during H1b)**: in the post-run workspace records for the H1b 3-round trial, confirm rounds 2 and 3 carry the round-1 time fields in their `experiment_history` block visible to the planner (inspect the actual prompt or the planner trace).
-- Mark J `[x]` with commit hash + test count in the Progress log.
 
 ---
 
-##### H1b — tuner-integration smoke (real LLM cost) [blocked on J]
+##### H1b — tuner-integration smoke (real LLM cost) [ready, Phase J landed]
 
-Phase I landed 2026-04-16; once Phase J lands, run a real multi-round tuner job to exercise the per-round calibration update path AND the success-path feedback channel under real LLM planning.
+Phases I and J both landed 2026-04-16; H1b is now unblocked. Run a real multi-round tuner job to exercise the per-round calibration update path AND the Phase-J success-path feedback channel under real LLM planning.
 
 - [ ] **Test A — positive trial path + protected from formal blowup.** Tuner run with `--max_rounds 3 --is_trial --trial_portion 0.01 --train_portion 0.1 --force_model wavenet --trial_time_budget_minutes 5 --formal_time_budget_minutes 5 --data_dir /home/klz/Data/TIDMAD/ --provider openai --model_id gpt-5-mini` (per `feedback_prefer_openai_for_smoke.md`). Acceptance:
   - Gate passes for trial rounds, training completes
