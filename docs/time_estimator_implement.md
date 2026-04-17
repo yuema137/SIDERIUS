@@ -1,8 +1,27 @@
 # Time-Budget Estimator Skill
 
-**Status**: design (awaiting approval)
+**Status**: implemented (Phases A–G complete; H1a lilab direct-skill smoke verified 2026-04-16; **Phase I — trial/formal budget split — landed 2026-04-16 across 5 commits**; **Phase J — success-path time info to planner — planned, the only remaining blocker for H1b**; H2 SDSC deferred)
 **Author**: design discussion 2026-04-16
 **Motivation**: two trial-mode runs (`exploit_cnn_v1`, `explore_novel_v1`) stalled in Round 1 for 1h 50min and 2h 27min respectively, both blowing past the 1-hour trial budget stated in the expert advice. Neither was blocked, because the planner has no pre-flight wall-time estimate — only a VRAM check.
+
+## Progress log
+
+| Phase | Date | Commit | Tests |
+|---|---|---|---|
+| A — scaffold + design doc | 2026-04-16 | `ca283cf` | n/a |
+| B — step-count math + static ms/step | 2026-04-16 | `2166c13` | 22 evaluate_time_skill unit tests |
+| C — real-dataset GPU warmup | 2026-04-16 | `380e82c` | warmup path covered via monkeypatch |
+| D — workflow + CLI (`f7d2f04`) | 2026-04-16 | `f7d2f04` | n/a (wiring) |
+| E0 — schemas + protocols (interp→prop, prop→impl, valid→tune) | 2026-04-16 | `f76bb8a`, `6d8c104`, `3ba870c`, `7c0e107` | covered by per-protocol suites |
+| E1 — tuner [Step 0.5/3] gate | 2026-04-16 | `458361d` | 6 new TestTimeBudgetGate tests (140 tuner total) |
+| E2 — proposer baseline gate | 2026-04-16 | `f6e3b19` | 11 new tests (240 proposer total) |
+| F — per-GPU calibration (asymmetric EMA) | 2026-04-16 | `12813a0` | 29 new calibration tests (409 tuner+proposer total) |
+| G — `.gitignore` housekeeping | 2026-04-16 | (this commit) | n/a |
+| H1a — lilab direct skill smoke (RTX 5090) | 2026-04-16 | (no commit — `/tmp/smoke_h1a.py`) | wavenet+punet real warmup, k=1.25 EMA round-trip from disk |
+| I — trial/formal budget split (schema + CLI rename) | 2026-04-16 | `29cd956`, `485250e`, `358dded`, `b6b680d`, `b51be8e` | 53 protocol + 17 proposer-gate + 36 tuner-gate Phase-I tests pass |
+| J — success-path time info to planner | planned | — | attach `time_estimate_minutes` / `time_budget_minutes` / `mode` to success records' memory so the planner sees headroom (not just rejections); tuner-only; the only remaining blocker for H1b |
+| H1b — lilab tuner-integration smoke | blocked on J | — | needs Phase J success-path feedback + real LLM cost (Phase I CLI flags now available) |
+| H2 — SDSC smoke run (Slurm batch, chained) | deferred | — | gated on H1b passing; tests batch-system specifics (env-var override, GPU stability across restarts, concurrent-writer safety) |
 
 ---
 
@@ -222,7 +241,13 @@ total_minutes        = ms_per_step_estimate × total_steps / 60000
 
 If three consecutive runs on the same GPU violate their estimates (`actual_minutes > estimated_minutes`) — even after the EMA has had a chance to correct — emit a warning. This catches qualitative changes the EMA can't track smoothly: driver upgrade, partition switch (gpu-shared → gpu-debug), a neighboring job hogging the node. User intervention: clear the calibration file or investigate the environment.
 
-#### 2.6.7 Accuracy layers summary
+#### 2.6.7 Calibration timing invariant
+
+`actual_ms_per_step` is computed as `train_time × 1000 / total_train_steps`, so the EMA's accuracy depends on `train_time` being the wall-time of training **and nothing else**. Audited 2026-04-16: in `nodes/ml_hyperparameter_tune_agent.py` the timer is captured tightly around the training subprocess (3 adjacent lines: `t0 = time.time()` → `_run_skill("training_skill", ...)` → `train_time = time.time() - t0`). The skill's wrapper resolves directly to `sandbox.execute_training()` → `subprocess.run(["python", "execute_tools/train_engine_sandbox.py", ...])` — pure subprocess, no LLM call. Inference and scoring are timed in their own separate `t0 → call → t1` blocks; the LLM `brain.reflect()` call runs **after** all three timers are already captured, so its latency cannot pollute any of them. The F3 calibration update (which only consumes `train_time`) therefore sees an uncontaminated measurement.
+
+**Invariant for future edits**: the three timer blocks for train / inference / scoring must remain LLM-free between their `t0` and the matching `time.time() - t0`. Any new LLM call must be placed strictly after all three timers are captured (i.e. in the reflect / commit phase). Adding a `_run_skill` call between `t0` and the timer-end is also safe only if that skill is itself LLM-free (e.g. `evaluate_*_skill` are fine; a future LLM-backed skill would not be).
+
+#### 2.6.8 Accuracy layers summary
 
 | Layer | Captures | Phase |
 |---|---|---|
@@ -262,23 +287,30 @@ Audit of `agent/schemas/proposal.py` and `agent/schemas/hyperparam_tuning.py`. T
 | `train_portion` | ✅ yes (default `0.1`, matches tuner) | ✅ yes (default `0.1`) |
 | `sampling_seed` | ✅ yes (default `None`) | ✅ yes (default `None`) |
 | `sample_set` | ❌ no (built inside the node from the trial-mode set) | ❌ no (built inside the node via `build_sample_set()`) |
-| `time_budget_minutes` | ✅ yes (default `None`, gate disabled) | ✅ yes (default `None`, gate disabled) |
+| `trial_time_budget_minutes` (Phase I) | ✅ yes (default `None`, gate disabled for trial rounds) | ✅ yes (default `None`, gate disabled for trial rounds) |
+| `formal_time_budget_minutes` (Phase I) | ✅ yes (default `None`, gate disabled for formal rounds) | ✅ yes (default `None`, gate disabled for formal rounds) |
 | `data_dir` | ✅ yes (default `None`) | ✅ yes (default `None`) |
+
+> **Phase I rename**: prior to Phase I both schemas carried a single `time_budget_minutes: Optional[float]`. The single field was applied identically per round regardless of whether the LLM picked trial or formal — so a budget sized for trial would reject every formal round, and a budget sized for formal would let every trial round through unchecked. Phase I splits it into two so each mode has its own ceiling. The skill (`evaluate_time_skill/wrapper.py`) is unchanged: it still takes a single `time_budget_minutes` kwarg; the *caller* picks which budget to pass based on `is_trial`.
 
 The `constraints: List[str]` field on `ProposalInput` holds free-text prose like `'VRAM < 10 GB'`; the numeric channel now lives in the fields above. The `ProposalOutput.time_risk: Optional[str]` field (added in Phase E0) carries the gate-and-annotate suggestion text — see §2.7.4.
 
 #### 2.7.2 Fan-in origin: workflow orchestrator
 
-The trial-mode data-sampling set (`is_trial`, `trial_strategy`, `trial_portion`, `target_files`, `train_portion`, `sampling_seed`) and the budget set (`time_budget_minutes`, `data_dir`) are **run-level parameters** — they do not originate in the interpretation agent (upstream of the proposer) or the proposer (upstream of the tuner). They originate at the workflow/CLI entry point (`run_exploration_adaptive.py`) and fan out:
+The trial-mode data-sampling set (`is_trial`, `trial_strategy`, `trial_portion`, `target_files`, `train_portion`, `sampling_seed`) and the budget set (`trial_time_budget_minutes`, `formal_time_budget_minutes`, `data_dir`) are **run-level parameters** — they do not originate in the interpretation agent (upstream of the proposer) or the proposer (upstream of the tuner). They originate at the workflow/CLI entry point (`run_exploration_adaptive.py`) and fan out:
 
 ```
 CLI args ──► workflow runner ─┬─► ProposalInput(is_trial, trial_strategy, trial_portion, target_files,
                               │                 train_portion, sampling_seed,
-                              │                 time_budget_minutes, data_dir)
+                              │                 trial_time_budget_minutes,
+                              │                 formal_time_budget_minutes,
+                              │                 data_dir)
                               │
                               └─► HyperparamTuningInput(is_trial, trial_strategy, trial_portion, target_files,
                                                        train_portion, sampling_seed,
-                                                       time_budget_minutes, data_dir, ...)
+                                                       trial_time_budget_minutes,
+                                                       formal_time_budget_minutes,
+                                                       data_dir, ...)
 ```
 
 The two protocols that carry these fields — `ml_result_interp_to_ml_model_propose.local_full_context` (into the proposer) and `ml_model_valid_to_ml_model_tune.local_validated_model` (into the tuner) — forward them untouched as caller-supplied kwargs. The interpretation agent and the validator never read or modify them; in schema-first terms, they are **workflow context** that both gates must see identically so the proposer's baseline estimate and the tuner's per-round estimate construct the same `sample_set`.
@@ -297,6 +329,10 @@ sample_set = build_sample_set(
     target_files=input.target_files or None,
     seed=input.sampling_seed,
 )
+# Phase I: pick the budget that matches the mode the proposer is estimating against.
+chosen_budget = (input.trial_time_budget_minutes
+                 if input.is_trial
+                 else input.formal_time_budget_minutes)
 result = run_skill(sandbox, **{
     "model_type":          output.model_name,          # proposed name
     "model_config":        output.baseline_config["model_config"],
@@ -304,12 +340,17 @@ result = run_skill(sandbox, **{
     "loss_config":         output.baseline_config["loss_config"],
     "sample_set":          sample_set,
     "train_portion":       input.train_portion,
-    "time_budget_minutes": input.time_budget_minutes,
+    "time_budget_minutes": chosen_budget,              # Phase I: per-mode pick
     "data_dir":            input.data_dir,
 })
-# Act on result.feasible per §2.7.4 policy.
+# Act on result.feasible per §2.7.4 policy. When chosen_budget is None the gate is skipped
+# (one-time warning), same as before but evaluated per-mode instead of globally.
 
 # In ml_hyperparameter_tune_agent, at [Step 0.5/3] each round:
+# Phase I: the per-round plan decides trial vs formal, so the budget pick is per-round too.
+chosen_budget = (input.trial_time_budget_minutes
+                 if plan.is_trial
+                 else input.formal_time_budget_minutes)
 result = run_skill(sandbox, **{
     "model_type":          input.model_type,
     "model_config":        trial.model_config,
@@ -317,13 +358,13 @@ result = run_skill(sandbox, **{
     "loss_config":         trial.loss_config,
     "sample_set":          self.sample_set,                           # already built in __init__
     "train_portion":       input.train_portion,
-    "time_budget_minutes": input.time_budget_minutes,
+    "time_budget_minutes": chosen_budget,              # Phase I: per-mode pick
     "data_dir":            input.data_dir,
 })
 # Act on result.feasible per existing VRAM-gate pattern.
 ```
 
-Identical shape, identical skill body, identical trial-mode parameterisation of `sample_set` — the only difference is that the tuner caches `self.sample_set` for reuse across rounds, while the proposer builds it once for its single baseline estimate.
+Identical shape, identical skill body, identical trial-mode parameterisation of `sample_set` — the only difference is that the tuner caches `self.sample_set` for reuse across rounds, while the proposer builds it once for its single baseline estimate. Both call sites carry **two** budget fields and pick one per call based on the mode the gate is being evaluated against (Phase I).
 
 #### 2.7.4 Design fork: gate-and-revise vs gate-and-annotate
 
@@ -416,19 +457,19 @@ Both records carry the same `suggestion` text from their respective skills, surf
 - **Tuner integration** (`[Step 0.5/3]` in `nodes/ml_hyperparameter_tune_agent.py`) — fail → `skipped_time_risk` record, no round consumed.
 - **Proposer integration** (gate-and-annotate, §2.7.4) — `nodes/ml_model_proposal_agent.py` runs the skill on its own baseline before returning, attaching a `time_risk` note to `ProposalOutput` when infeasible; no in-place revision in v1.
 - **Schema additions** to carry the run-level parameters end-to-end:
-  - `ProposalInput` gains the training-side trial-mode mirror (`is_trial`, `trial_strategy`, `trial_portion`, `target_files`, `train_portion`, `sampling_seed`) plus `time_budget_minutes: Optional[float]` and `data_dir: Optional[str]`. Defaults match `HyperparamTuningInput` so an omitted CLI arg behaves identically across the two gates. Legacy single-file mode (`file_index`, `is_trial=False`) is intentionally not surfaced here — modern usage uses `is_trial=True` + `trial_strategy='target'` + `target_files=[N]`.
+  - `ProposalInput` gains the training-side trial-mode mirror (`is_trial`, `trial_strategy`, `trial_portion`, `target_files`, `train_portion`, `sampling_seed`) plus **`trial_time_budget_minutes: Optional[float]`**, **`formal_time_budget_minutes: Optional[float]`** (Phase I), and `data_dir: Optional[str]`. Defaults match `HyperparamTuningInput` so an omitted CLI arg behaves identically across the two gates. Legacy single-file mode (`file_index`, `is_trial=False`) is intentionally not surfaced here — modern usage uses `is_trial=True` + `trial_strategy='target'` + `target_files=[N]`.
   - `ProposalOutput` gains `time_risk: Optional[str]` (gate-and-annotate, §2.7.4).
-  - `HyperparamTuningInput` gains `time_budget_minutes: Optional[float]` and `data_dir: Optional[str]` (the trial-mode set already exists).
+  - `HyperparamTuningInput` gains **`trial_time_budget_minutes: Optional[float]`** + **`formal_time_budget_minutes: Optional[float]`** (Phase I) and `data_dir: Optional[str]` (the trial-mode set already exists).
 - **Workflow fan-out** in `run_exploration_adaptive.py` / `workflows/model_exploration.py`: a single CLI args block populates both `ProposalInput` and `HyperparamTuningInput` with the same trial-mode + budget set (§2.7.2 fan-in diagram).
-- **Protocol pass-through**: `ml_result_interp_to_ml_model_propose.local_full_context` accepts the new fields as caller-supplied kwargs and forwards them into `ProposalInput`. `ml_model_valid_to_ml_model_tune.local_validated_model` accepts `time_budget_minutes` / `data_dir` (the trial-mode set was already wired) and surfaces `proposal.time_risk` to the tuner's `expert_advice` as round-0 guidance, ordered after spec/inheritance deviation notes.
-- CLI flag `--time_budget_minutes` on `run_exploration_adaptive.py`.
-- Unit tests: skill in isolation with mocked torch, asymmetric-EMA math, calibration-file I/O, proposer baseline-gate (annotate path). Integration test with a tiny real model on GPU; pseudo-mode test that an over-budget baseline yields a non-None `time_risk`.
+- **Protocol pass-through**: `ml_result_interp_to_ml_model_propose.local_full_context` accepts the new fields as caller-supplied kwargs and forwards them into `ProposalInput`. `ml_model_valid_to_ml_model_tune.local_validated_model` accepts `trial_time_budget_minutes` / `formal_time_budget_minutes` / `data_dir` (the trial-mode set was already wired) and surfaces `proposal.time_risk` to the tuner's `expert_advice` as round-0 guidance, ordered after spec/inheritance deviation notes.
+- CLI flags `--trial_time_budget_minutes` and `--formal_time_budget_minutes` on `run_exploration_adaptive.py` and on each node CLI (`nodes/ml_hyperparameter_tune_agent.py`, `nodes/ml_model_proposal_agent.py`). The single `--time_budget_minutes` flag from Phases D–G is removed in Phase I (no compat shim, per project rules).
+- Unit tests: skill in isolation with mocked torch, asymmetric-EMA math, calibration-file I/O, proposer baseline-gate (annotate path). Integration test with a tiny real model on GPU; pseudo-mode test that an over-budget baseline yields a non-None `time_risk`. Phase I adds tests asserting per-mode budget selection at both call sites.
 
 ### 3.2 Out of scope (deferred)
 
 - Inference-time estimate (phase 2 — additive, same skill).
 - Override-disclosure prompt change (separate doc/PR).
-- Budget enforcement in formal (non-trial) mode — formal runs are expected to be long; phase 1 gates trial mode only.
+- ~~Budget enforcement in formal (non-trial) mode~~ — **moved into scope by Phase I**: a separate `formal_time_budget_minutes` is now a first-class field. Formal-mode gating remains opt-in (the field defaults to `None` → gate skipped for formal rounds), so existing formal runs see no behaviour change unless the flag is set.
 - Cross-user calibration sharing (each SDSC user builds their own file; no central store).
 
 ---
@@ -442,15 +483,15 @@ Both records carry the same `suggestion` text from their respective skills, surf
 | `agent/skills/evaluate_time_skill/calibration.py` | **new** — load / update / lookup of the per-GPU calibration file (asymmetric EMA math) |
 | `agent/skills/evaluate_time_skill/__init__.py` | **new** — empty module marker |
 | `~/.siderius/time_calibration_{gpu_slug}.json` | **new** — persistent per-GPU learned correction factors (gitignored, auto-created) |
-| `nodes/ml_hyperparameter_tune_agent.py` | add `[Step 0.5/3]` call + `skipped_time_risk` branch; add post-training hook that writes back to calibration file |
-| `nodes/ml_model_proposal_agent.py` | add baseline-gate skill call right before returning `ProposalOutput`; populate `time_risk` per §2.7.4 |
-| `agent/schemas/proposal.py` | add the trial-mode mirror (`is_trial`, `trial_strategy`, `trial_portion`, `target_files`, `train_portion`, `sampling_seed`) + `time_budget_minutes` + `data_dir` to `ProposalInput`; add `time_risk: Optional[str]` to `ProposalOutput`. Defaults track `HyperparamTuningInput` exactly. |
-| `agent/schemas/hyperparam_tuning.py` | add optional `time_budget_minutes: float`, `data_dir: Optional[str]` to `HyperparamTuningInput` (trial-mode set already present) |
-| `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py` | accept the trial-mode mirror + `time_budget_minutes` / `data_dir` as caller-supplied kwargs (each falls through to the schema default when `None`) and forward them into `ProposalInput`. Conditional-inclusion pattern: only added to the result dict when the caller supplied them, so partial workflow plumbing doesn't silently reset a field. |
-| `agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py` | accept `time_budget_minutes` / `data_dir` as caller-supplied kwargs (the trial-mode set was already wired); read `proposal.time_risk` and prepend it to `expert_advice` after `spec_deviation_notes` / `inheritance_deviation_notes` (order: spec → inheritance → time_risk → base advice) |
+| `nodes/ml_hyperparameter_tune_agent.py` | add `[Step 0.5/3]` call + `skipped_time_risk` branch; add post-training hook that writes back to calibration file. **Phase I**: per-round budget pick by `plan.is_trial`; add `--trial_time_budget_minutes` / `--formal_time_budget_minutes` to argparse; remove `--time_budget_minutes`. |
+| `nodes/ml_model_proposal_agent.py` | add baseline-gate skill call right before returning `ProposalOutput`; populate `time_risk` per §2.7.4. **Phase I**: budget pick by `inp.is_trial`; same CLI rename. |
+| `agent/schemas/proposal.py` | add the trial-mode mirror (`is_trial`, `trial_strategy`, `trial_portion`, `target_files`, `train_portion`, `sampling_seed`) + **`trial_time_budget_minutes`** + **`formal_time_budget_minutes`** (Phase I) + `data_dir` to `ProposalInput`; add `time_risk: Optional[str]` to `ProposalOutput`. Defaults track `HyperparamTuningInput` exactly. |
+| `agent/schemas/hyperparam_tuning.py` | add optional **`trial_time_budget_minutes: float`**, **`formal_time_budget_minutes: float`** (Phase I), `data_dir: Optional[str]` to `HyperparamTuningInput` (trial-mode set already present). |
+| `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py` | accept the trial-mode mirror + **`trial_time_budget_minutes` / `formal_time_budget_minutes`** (Phase I) / `data_dir` as caller-supplied kwargs (each falls through to the schema default when `None`) and forward them into `ProposalInput`. Conditional-inclusion pattern: only added to the result dict when the caller supplied them, so partial workflow plumbing doesn't silently reset a field. |
+| `agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py` | accept **`trial_time_budget_minutes` / `formal_time_budget_minutes`** (Phase I) / `data_dir` as caller-supplied kwargs (the trial-mode set was already wired); read `proposal.time_risk` and prepend it to `expert_advice` after `spec_deviation_notes` / `inheritance_deviation_notes` (order: spec → inheritance → time_risk → base advice). |
 | ~~`agent/schemas/protocols/ml_model_propose_to_ml_model_impl.py`~~ | **no change** — `ImplementorInput` does not need any of these fields; the validator→tuner fan-in protocol reads `time_risk` from `ProposalOutput` directly |
-| `run_exploration_adaptive.py` | add `--time_budget_minutes` CLI arg; forward the trial-mode + budget set into the workflow context |
-| `workflows/model_exploration.py` (or equivalent entry) | fan out the trial-mode + budget set to **both** `ProposalInput` and `HyperparamTuningInput` (§2.7.2) |
+| `run_exploration_adaptive.py` | add **`--trial_time_budget_minutes` / `--formal_time_budget_minutes`** (Phase I) CLI args; forward the trial-mode + budget set into the workflow context. |
+| `workflows/model_exploration.py` (or equivalent entry) | fan out the trial-mode + budget set to **both** `ProposalInput` and `HyperparamTuningInput` (§2.7.2). |
 | (no relocation needed) `execute_tools/sample_set_builder.py` | already in a neutral location; the proposer imports `build_sample_set` directly — see §2.7.5 |
 | `~/.siderius/time_calibration_{gpu_slug}.json` | **new** — persistent per-GPU learned correction factors (gitignored, auto-created) |
 | `.gitignore` | add `time_calibration_*.json` (if stored anywhere reachable by git) |
@@ -464,9 +505,14 @@ Both records carry the same `suggestion` text from their respective skills, surf
 
 ## 5. Backward Compatibility
 
-- The skill is purely additive. Existing flows that don't pass `time_budget_minutes` see no behavior change — the tune agent treats a missing budget as "skip the time gate" (feasible=True, warning printed once).
-- `HyperparamTuningInput.time_budget_minutes` is optional with default `None`. Existing config JSON round-trips unchanged.
+- The skill is purely additive. Existing flows that don't pass any budget field see no behavior change — both gates treat a missing budget as "skip" (feasible=True, warning printed once).
+- Both `trial_time_budget_minutes` and `formal_time_budget_minutes` (Phase I) are optional with default `None`. The gate is per-mode: setting only the trial budget gates trial rounds and skips formal rounds; setting only the formal budget does the inverse.
 - No changes to record schemas except adding `"skipped_time_risk"` as an allowed `status` value in `ExperimentRecord` (mirrors existing `"skipped_oom_risk"`).
+- **Phase I breaking rename** (no compat shim, per project rules):
+  - The single field `time_budget_minutes` on `HyperparamTuningInput` and `ProposalInput` is **removed** and replaced with two fields. Any caller (workflow runner, CLI, tests) that constructs these schemas with the old field name will fail Pydantic validation.
+  - The single CLI flag `--time_budget_minutes` is **removed** from `run_exploration_adaptive.py` and node CLIs, replaced by `--trial_time_budget_minutes` and `--formal_time_budget_minutes`.
+  - The skill (`evaluate_time_skill.run_skill`) keeps its single `time_budget_minutes` kwarg unchanged — only the upstream schema/CLI surface changes.
+  - Phase E1's existing pseudo-mode tests, integration tests, and any saved workspace JSON that mentions `time_budget_minutes` are updated as part of Phase I.
 
 ---
 
@@ -539,11 +585,13 @@ Functionally absorbed into Phase B. All four items below were implemented while 
 - [x] Unit tests for each suggestion branch — covered by the "3 suggestion branches" tests landed in Phase B.
 - **Verified** (2026-04-16): `pytest tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_time_skill.py -q` → **22 passed** (same suite as Phase C).
 
-### Phase E — Agent integration [ ]
+### Phase E — Agent integration [x]
+
+All three sub-phases (E0 schema/protocol/workflow, E1 tuner round-gate, E2 proposer baseline-gate) are landed. The skill is now wired at both call sites with consistent input shape and the `time_risk` annotation flows end-to-end (proposer → validator → tuner protocol → planner expert_advice).
 
 The skill is shared infrastructure (§2.7), so this phase has two call sites. They are independent and can land in either order, but **E1 first** is recommended because it exercises the skill end-to-end before the proposer starts depending on it. Both sub-phases share the schema additions in E0.
 
-#### E0. Shared schema + workflow plumbing [~]
+#### E0. Shared schema + workflow plumbing [x]
 
 Schemas:
 
@@ -558,57 +606,235 @@ Protocols (only the two that actually carry the new fields — `ml_model_propose
 
 Workflow:
 
-- [ ] Workflow runner (`run_exploration_adaptive.py` + `workflows/model_exploration.py`) fans the same trial-mode + budget set out to both `ProposalInput` and `HyperparamTuningInput` via the two protocols above (§2.7.2 diagram). Single source of truth: the CLI args block.
+- [x] Workflow runner (`run_exploration_adaptive.py` + `workflows/model_exploration.py`) fans the same trial-mode + budget set out to both `ProposalInput` and `HyperparamTuningInput` via the two protocols above (§2.7.2 diagram). Single source of truth: the CLI args block. CLI surface: `--trial_strategy`, `--target_files`, `--sampling_seed`, `--time_budget_minutes`, `--data_dir` (all default `None` so the gate stays off until opted in). — committed `f7d2f04`.
 
 **Verify**: protocol unit tests assert the new fields survive each hop, and that `time_risk` lands in `HyperparamTuningInput.expert_advice` when set on the proposal. `.venv/bin/python -m pytest tests/unit/agent/protocols/ -q` → **50 passed** (2026-04-16).
 
-#### E1. Tuner round-gate [ ]
+#### E1. Tuner round-gate [x]
 
-- [ ] Add `[Step 0.5/3]` call in `nodes/ml_hyperparameter_tune_agent.py` after the existing VRAM check. Follow the exact structure of the VRAM gate (error check, feasible check, record emission).
-- [ ] Define `skipped_time_risk` status and wire it into `ExperimentRecord` if not already accepted.
-- [ ] Forward `time_budget_minutes` and `data_dir` from `HyperparamTuningInput` down to the skill's `run_skill` call.
-- [ ] If the upstream `ProposalOutput.time_risk` is non-None, surface it to the planner prompt as round-0 guidance (so the LLM doesn't immediately re-propose the rejected baseline).
-- **Verify**: unit tests for the tune agent's new branch (happy path, over-budget path, missing-budget path). Pseudo-mode integration test for the over-budget path. `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent/ -q`.
+- [x] Add `[Step 0.5/3]` call in `nodes/ml_hyperparameter_tune_agent.py` after the existing VRAM check. Follow the exact structure of the VRAM gate (error check, feasible check, record emission).
+- [x] Define `skipped_time_risk` status and wire it into `ExperimentRecord` if not already accepted.
+- [x] Forward `time_budget_minutes` and `data_dir` from `HyperparamTuningInput` down to the skill's `run_skill` call.
+- [x] If the upstream `ProposalOutput.time_risk` is non-None, surface it to the planner prompt as round-0 guidance (so the LLM doesn't immediately re-propose the rejected baseline). **Already handled by the protocol** (`ml_model_valid_to_ml_model_tune.local_validated_model`, commit `7c0e107`): `proposal.time_risk` is prepended to `expert_advice` and the tuner's existing `_serialize_expert_advice` plumbing carries it into the planner prompt — no extra wiring inside the agent was needed.
+- [x] One-time startup warning when `time_budget_minutes is None` (gate disabled). Mirrors the "additive, opt-in" stance in §5.
+- **Verify**: 6 new unit tests in `TestTimeBudgetGate` cover feasible passthrough, kwarg forwarding (budget + `data_dir`), infeasible → `skipped_time_risk` record, suggestion content, `status="error"` propagation, and `time_budget_minutes=None` skipping the skill entirely. `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent/test_tuning_agent.py -q` → **34 passed** (2026-04-16).
 
-#### E2. Proposer baseline-gate [ ]
+#### E2. Proposer baseline-gate [x]
 
-- [ ] In `nodes/ml_model_proposal_agent.py`, right before returning `ProposalOutput`, call `run_skill("evaluate_time_skill", ...)` with the dict shape from §2.7.3.
-- [ ] Build `sample_set` via the same `build_sample_set` helper the tuner uses (§2.7.5 Option A). If the helper isn't importable from the tuner's module without a circular dependency, relocate it to a shared util — but only if the relocation is small; otherwise fall back to Option B and revisit.
-- [ ] On `feasible=True` → leave `time_risk=None`. On `feasible=False` → set `time_risk = result["suggestion"]` (the lever text from `_suggest_lever`). On `status="error"` → leave `time_risk=None` and print a warning; don't block the proposer on a skill failure.
-- [ ] When `time_budget_minutes is None` (skill disabled), skip the call entirely. Same one-time-warning policy as the tuner gate.
-- [ ] Read-only access to the calibration file — proposer never calls `update_k`.
-- **Verify**: unit tests for the proposer's three branches (feasible, infeasible, skill error) with `run_skill` monkeypatched. Pseudo-mode integration test confirming `time_risk` round-trips through the proposer→implementor→tuner protocol chain. `.venv/bin/python -m pytest tests/unit/agent/ml_model_proposal_agent/ -q`.
+- [x] In `nodes/ml_model_proposal_agent.py`, right after the proposing pipeline returns and before persistence, call the skill via a new `_apply_time_gate(output, inp)` helper. The skill module is imported directly (`agent.skills.evaluate_time_skill.wrapper`) and invoked with `sandbox=None` since `evaluate_time_skill` doesn't read its sandbox arg.
+- [x] Build `sample_set` via `execute_tools.sample_set_builder.build_sample_set(...)` (§2.7.5 Option A). The helper already lives in a neutral location — no relocation needed.
+- [x] On `feasible=True` → leave `time_risk=None`. On `feasible=False` → set `time_risk = result["suggestion"]` (with `verdict` as fallback when the suggestion is empty). On `status="error"` → leave `time_risk=None` and print a warning; the proposer never blocks on a skill failure.
+- [x] When `time_budget_minutes is None`, skip the call entirely. Module-level `_TIME_GATE_WARNED` flag → one-time process warning, mirrors the tuner gate's startup-once policy.
+- [x] Read-only access to the calibration file — proposer never calls `update_k`. (Wired in Phase F2: `wrapper.run_skill` calls `calibration.load_table` + `lookup_k` only; the proposer-side gate inherits this behavior transitively. The tuner is the sole writer.)
+- **Practical caveat**: a brand-new `model_name` proposed by the LLM will not be in `MODEL_REGISTRY` yet (the implementor only registers it later), so the skill's `_count_params` will raise → `status="error"` → gate degrades gracefully via the warn-and-proceed path. The wiring and `time_risk` propagation through the validator→tuner protocol are still valuable: the gate becomes useful the moment a future revision lets the proposer instantiate its proposal pre-validation, and the protocol path is exercised end-to-end now (not retrofitted later).
+- **Verify**: 11 new unit tests in `tests/unit/agent/ml_model_proposal_agent/test_baseline_time_gate.py` cover all four branches (feasible / infeasible / error / disabled), skill-kwarg shape, sample-set construction from the trial-mirror, suggestion-vs-verdict fallback, and end-to-end wiring through `MLModelProposalAgent.run()` including JSON round-trip of `time_risk`. `.venv/bin/python -m pytest tests/unit/agent/ml_model_proposal_agent/ -q` → **240 passed** (2026-04-16).
 
-### Phase F — Learned calibration (asymmetric EMA) [ ]
+### Phase F — Learned calibration (asymmetric EMA) [x]
 
 This is where "learning from mistakes" lands. Splits into three sub-steps.
 
-- [ ] **F1. Calibration module.** Create `agent/skills/evaluate_time_skill/calibration.py` with:
-  - `load_table(gpu_name) -> dict`
-  - `lookup_k(table, model_type) -> float` with fallback chain `(gpu, model_type) → (gpu, *) → 1.0`
-  - `update_k(table, entry) -> dict` implementing the asymmetric EMA from §2.6.5 (`α_up=0.5`, `α_down=0.1`, clip `[0.5, 5.0]`)
-  - `save_table(gpu_name, table)` with atomic write (tmp file + rename)
-  - `detect_drift(table, last_n=3) -> Optional[str]` returns a warning message if last N entries all violated
-- [ ] **F2. Pre-flight use.** In `wrapper.py`, after measuring `warmup_ms_per_step`, look up `k` and compute `ms_per_step_estimate = warmup × k × SAFETY_MULTIPLIER`. Include both `warmup_ms_per_step` and `k_used` in the returned breakdown.
-- [ ] **F3. Post-flight update.** In `nodes/ml_hyperparameter_tune_agent.py`, after `train_time` is recorded (around `line 469`), append a new entry to the calibration file and call `update_k`. Emit the drift warning if any. Pass the pre-flight `estimated_minutes` through from the gate's return so `estimate_violated` is computable.
-- [ ] Unit tests in `test_time_calibration.py`: EMA update under over- and under-prediction, clipping, lookup fallback, drift detection on a synthetic table.
-- **Verify**: `.venv/bin/python -m pytest tests/unit/agent/skills/ -q`. Inline smoke — run the skill twice with the same config, confirm entry appears in the calibration file and `k` shifted as expected on the second call.
+- [x] **F1. Calibration module.** `agent/skills/evaluate_time_skill/calibration.py` exposes:
+  - `load_table(gpu_name) -> dict` — defensive against missing/corrupt JSON; returns an empty `{"gpu_name", "k_values", "history"}` skeleton on either failure path.
+  - `lookup_k(table, model_type) -> float` with fallback chain `(gpu, model_type) → (gpu, *) → 1.0`.
+  - `update_k(table, entry) -> dict` implementing the asymmetric EMA from §2.6.5 (`α_up=0.5`, `α_down=0.1`, clip `[0.5, 5.0]`); mutates `table` in place and appends to `history`.
+  - `save_table(gpu_name, table)` with atomic write (`tempfile.mkstemp` + `os.replace`).
+  - `detect_drift(table, last_n=3) -> Optional[str]` warns when the last N entries all violated.
+  - `make_entry(...)` packages a finished run into the canonical history dict (computes `ratio` and `estimate_violated`, emits a UTC ISO timestamp).
+  - Path resolution: `SIDERIUS_CALIBRATION_DIR` env var, falling back to `~/.siderius/`. GPU-name slugged via `gpu_slug()` so `"NVIDIA RTX 5090"` → `time_calibration_nvidia_rtx_5090.json`.
+- [x] **F2. Pre-flight use.** `wrapper.py` now calls `_detect_gpu_name()` and, when the warmup path was used, looks up `k` via `calibration.load_table` + `lookup_k`. The static-formula path stays at `k=1.0` (no warmup signal to calibrate against). The breakdown gains `k_correction` and `gpu_name`. The 22 existing skill tests still pass — `k=1.0` keeps the static path identical.
+- [x] **F3. Post-flight update.** `nodes/ml_hyperparameter_tune_agent.py` stashes the gate's `time_check` result; after the success record is built, it computes `actual_ms_per_step = train_time × 1000 / total_steps`, builds a `make_entry`, calls `update_k`, saves the table atomically, and prints either the new `k` or the drift warning. Update is gated on `source == "real_dataset_warmup"` and a non-None `gpu_name`, so CPU-only / static-formula runs are silently skipped.
+- [x] Unit tests in `tests/unit/agent/tune_ml_hyperparam_agent/test_time_calibration.py` (29 tests): EMA up/down asymmetry, K_MIN/K_MAX clipping, lookup fallback chain, drift detection (positive/negative/short-history), atomic write semantics, env-var override, slug determinism, defensive load against corrupt JSON, `make_entry` ratio + zero-warmup safety. Located alongside the tuner tests so the per-agent folder convention holds.
+- **Verify**: `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent/ tests/unit/agent/ml_model_proposal_agent/ -q` → **409 passed** (2026-04-16). Inline smoke is deferred to Phase H.
 
-### Phase G — CLI surface polish + .gitignore [ ]
+### Phase G — .gitignore housekeeping [x]
 
-Most of the original "workflow plumbing" content moved into Phase E0 (schema additions, fan-out to both `ProposalInput` and `HyperparamTuningInput`). What remains here is the user-facing surface and the gitignore housekeeping:
+The CLI surface (`--time_budget_minutes`, `--trial_strategy`, `--target_files`, `--sampling_seed`, `--data_dir`) and the startup-print block both landed in E0 (commit `f7d2f04`). The default for `--time_budget_minutes` is `None`, not 60 — this keeps the gate off until the user explicitly opts in, matching the "additive, opt-in" stance in §5. **Note**: Phase I supersedes the single `--time_budget_minutes` flag with two per-mode flags; this paragraph is preserved for historical accuracy.
 
-- [ ] Add `--time_budget_minutes` argparse entry to `run_exploration_adaptive.py` (default `60`). The threading itself is already done in E0; this step only registers the flag and wires it into the workflow context dict E0 reads from.
-- [ ] Update `run_exploration_adaptive.py`'s startup print block to show the budget alongside the existing run-config summary.
-- [ ] Add `time_calibration_*.json` to `.gitignore` (defensive — the file lives at `~/.siderius/` by default per §2.6.4, but the env-var override could land it inside the repo tree).
-- **Verify**: `.venv/bin/python run_exploration_adaptive.py --help` shows the new flag. Dry-run invocation confirms the budget value reaches both `ProposalInput.time_budget_minutes` and `HyperparamTuningInput.time_budget_minutes` (both gates see the same number).
+What remains here is just the gitignore housekeeping:
 
-### Phase H — Smoke test + doc update [ ]
+- [x] `time_calibration_*.json` added to `.gitignore` (defensive — the file lives at `~/.siderius/` by default per §2.6.4, but the `SIDERIUS_CALIBRATION_DIR` env-var override could land it inside the repo tree).
+- **Verified**: `git check-ignore time_calibration_test.json` → matches `.gitignore:47`.
 
-- [ ] Re-run a shortened config known to be over-budget with `--time_budget_minutes 10`. Confirm skill blocks it and the `skipped_time_risk` record lands.
-- [ ] Re-run a config expected to finish in ~5 min with `--time_budget_minutes 30`. Confirm: gate passes, training completes, calibration file gains an entry, `k` is updated.
-- [ ] Update this doc's Status line to `implemented`; add a Progress log at the top with dates and test counts per phase.
-- [ ] Decide with user: one big squash commit, or per-phase commits.
+### Phase H — First real-GPU smoke run
+
+H is **two separate runs on two separate environments**. They test different things and the acceptance criteria only partially overlap. Do H1 first (faster iteration, no queue wait); only move to H2 once H1's calibration entries look sane.
+
+---
+
+#### Phase H1 — lilab (local interactive GPU)
+
+Lilab is a single-host interactive GPU box. The skill runs in-process, the calibration file lives at `~/.siderius/time_calibration_<gpu>.json`, and the `_measure_ms_per_step` warmup path is fully exercised. This is where we catch code-level bugs — torch device placement, DataLoader worker count, HDF5 access, `_count_params` for each real model class, the atomic-write race on a hot filesystem.
+
+H1 splits into two stages because they have very different costs:
+
+##### H1a — direct skill smoke (no LLM cost) [x]
+
+Drove `evaluate_time_skill.run_skill()` directly on lilab with `data_dir=/home/klz/Data/TIDMAD/`, isolated calibration dir under `/tmp` so the real `~/.siderius` was untouched (smoke script `/tmp/smoke_h1a.py`, 2026-04-16):
+
+- [x] `_detect_gpu_name()` → `'NVIDIA GeForce RTX 5090'`.
+- [x] `wavenet` real-warmup completes: 35,008 params, **3.09 ms/step**, `source=real_dataset_warmup`, breakdown shape correct (gpu_name + k_correction present).
+- [x] Synthetic post-flight: `make_entry(ratio=1.5, violated=True)` + `update_k` → **k=1.25 exactly**, matching the closed-form `α_up=0.5 × 1.5 + 0.5 × 1.0`.
+- [x] Atomic save→reload round-trip: a second `run_skill()` call reads **k=1.25 from disk** (no in-process cache).
+- [x] `punet` real-warmup completes: 412,392 params, 3.01 ms/step, k=1.0 from its own per-model entry (never calibrated).
+
+H1a acceptance = the skill, the model-class instantiation, the GPU warmup, and the calibration round-trip all work end-to-end on real RTX 5090 + real HDF5. The remaining failure modes are tuner-integration ones, covered by H1b. Phase I (the structural-flaw fix surfaced by H1a-prep) landed 2026-04-16; H1b is now blocked only on **Phase J** (success-path time info to the planner).
+
+---
+
+### Phase I — Two-budget split (trial vs formal) [x] (2026-04-16)
+
+**Background.** Phase E1 landed a single `time_budget_minutes` field that both the proposer's baseline gate and the tuner's `[Step 0.5/3]` gate compare against. The skill correctly computes `estimated_minutes` as a function of the active mode (trial vs formal) — `total_train_steps` shrinks when `trial_portion` is small — but the **budget being compared against is the same constant** regardless of mode. Two failure modes follow:
+
+1. **Budget sized for trial → every formal round rejected.** A 5-min budget that's comfortable for trial rounds will fail every formal round (which uses the full dataset and runs 50–100× longer).
+2. **Budget sized for formal → trial gate effectively disabled.** A 4-hour budget set to permit formal runs lets every trial round through unchecked, defeating the original purpose of the gate (catching the 1h 50min / 2h 27min trial blowups from §1.1).
+
+There is no single budget value that correctly gates both modes. They are different ceilings on different things.
+
+**The fix.** Replace one field with two — `trial_time_budget_minutes` and `formal_time_budget_minutes`, both `Optional[float]` defaulting to `None`. The per-round gate selects the matching one based on the mode that round will run in. The skill is **unchanged**: it still takes a single `time_budget_minutes` kwarg; the *caller* picks which budget to pass.
+
+#### I.1 Schema rename [x]
+
+- [x] `agent/schemas/hyperparam_tuning.py` — `HyperparamTuningInput`: remove `time_budget_minutes`, add `trial_time_budget_minutes: Optional[float] = None` and `formal_time_budget_minutes: Optional[float] = None`. Field docstrings describe the per-mode behaviour and the gate-skip semantics when one is `None`. — committed `29cd956`.
+- [x] `agent/schemas/proposal.py` — `ProposalInput`: same rename. Defaults track `HyperparamTuningInput` exactly so the two gates stay aligned. `ProposalOutput.time_risk` description updated to reflect the per-mode disabling. — committed `29cd956`.
+- [x] No compat shim — the old field name is removed cleanly. Any caller still passing `time_budget_minutes=` will fail Pydantic validation, surfacing the rename as a hard error rather than silent drift.
+
+#### I.2 Per-mode pick at the call sites [x]
+
+- [x] `nodes/ml_hyperparameter_tune_agent.py`: at `[Step 0.5/3]`, computes `chosen_budget = trial_time_budget_minutes if plan.is_trial else formal_time_budget_minutes` and passes it to the skill as `time_budget_minutes=chosen_budget`. Skips the gate (one-time warning) when `chosen_budget is None`. The `time_check` stash for the F3 post-flight calibration update is unchanged. — committed `358dded`.
+- [x] `nodes/ml_model_proposal_agent.py`: `_apply_time_gate` computes `chosen_budget = inp.trial_time_budget_minutes if inp.is_trial else inp.formal_time_budget_minutes`. Same skip-when-None semantics; disabled-warning text updated. — committed `485250e`.
+
+#### I.3 Protocol pass-through [x]
+
+- [x] `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py` — `local_full_context`: `time_budget_minutes` kwarg replaced with `trial_time_budget_minutes` + `formal_time_budget_minutes`. Conditional-inclusion pattern preserved. — committed `29cd956`.
+- [x] `agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py` — `local_validated_model`: same kwarg replacement. — committed `29cd956`.
+- [x] `agent/schemas/protocols/ml_model_propose_to_ml_model_impl.py`: confirmed no change — the implementor protocol does not carry budget fields.
+
+#### I.4 CLI surface [x]
+
+- [x] `run_exploration_adaptive.py` + `workflows/model_exploration.py`: `--time_budget_minutes` replaced with `--trial_time_budget_minutes` and `--formal_time_budget_minutes`; both default `None` (gate-off-until-opted-in). Startup banner prints both per-mode budgets. Workflow runner fans each one out to BOTH `ProposalInput` (via `local_full_context`) and `HyperparamTuningInput` (via `local_validated_model`). — committed `b6b680d`.
+- [x] `nodes/ml_hyperparameter_tune_agent.py` argparse: same rename, plus `--data_dir` (was deferred under H1b). — committed `358dded`.
+- [x] `nodes/ml_model_proposal_agent.py` argparse: **no change** — the proposer node CLI is a minimal debug entry point (only `--workspace`, `--run_name`, `--provider`, `--model_id`); it never accepted `--is_trial`, `--trial_strategy`, or `--time_budget_minutes`, so it constructs `ProposalInput` with all trial-mode and budget fields at their schema defaults (`is_trial=False`, both budgets `None`, `data_dir=None`). The baseline gate is therefore always disabled when invoked via this CLI. Production usage flows through `run_exploration_adaptive.py` → `workflows/model_exploration.py` → `local_full_context` protocol → `ProposalInput`, where the budget flags are wired. Adding the budget flags here in isolation would be partial wiring with no real gate exercise. H1a (the lilab smoke) confirmed this scoping by calling the skill directly via `/tmp/smoke_h1a.py` rather than the proposer node CLI.
+
+#### I.5 Test surface [x]
+
+- [x] `tests/unit/agent/tune_ml_hyperparam_agent/test_tuning_agent.py` (`TestTimeBudgetGate`): kwargs renamed; `_make_input_with_budget` helper takes `trial_budget`/`formal_budget`/`is_trial` explicitly; `_make_agent` extended with `enable_trial_mode=True` to patch `load_anchor_map` + `os.path.exists` and stub `sandbox.dirs["data"]` + `sandbox.score_vector` so trial-mode rounds reach the gate without crashing. New per-mode-pick tests use `max_rounds=2` because the final round is forced to formal regardless of the planner's choice. — committed `358dded`.
+- [x] `tests/unit/agent/ml_model_proposal_agent/test_baseline_time_gate.py`: same per-mode pick assertions at the proposer gate; `_make_input` helper signature updated. — committed `485250e`.
+- [x] `tests/unit/agent/protocols/test_ml_result_interp_to_ml_model_propose.py` and `test_ml_model_valid_to_ml_model_tune.py`: kwargs renamed; both fields independently asserted to survive the protocol mapping. — committed `29cd956`.
+- [x] `tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_time_skill.py`: confirmed unchanged — the skill kwargs (`time_budget_minutes`) are unaffected by the schema rename, only the upstream callers pick which budget to pass.
+- [x] Pseudo-mode integration tests (`tests/integration/`): no fixture references to `time_budget_minutes=` found; nothing to update.
+
+#### I.6 Acceptance [x]
+
+- [x] **Verified** (2026-04-16): targeted Phase-I test surface passes: `pytest tests/unit/agent/protocols/ tests/unit/agent/ml_model_proposal_agent/test_baseline_time_gate.py tests/unit/agent/tune_ml_hyperparam_agent/test_tuning_agent.py -q` → 53 protocol + 17 proposer-gate + 36 tuner-gate = **106 passed**. CLI `--help` confirms the two new flags are wired with per-mode help text. Both `workflows.model_exploration` and `run_exploration_adaptive` import cleanly.
+- **Deferred to H1b**: real-mode tuner launch with `--trial_time_budget_minutes 5 --max_rounds 3` (and the negative-path `--trial_time_budget_minutes 0.01` rejection check) requires real LLM cost and is folded into the H1b smoke acceptance — not a separate Phase I gate.
+- [x] Marked I `[x]` in the Progress log with all 5 commit hashes.
+
+H1b is now blocked only on Phase J.
+
+---
+
+### Phase J — Success-path time info to the planner [planned, blocks H1b]
+
+**Background.** Phases E1 and I wire the time estimator into the round-loop and the dual-budget split, but the LLM only ever hears from the gate **on rejection**. When the gate passes, the round becomes a success record with no time-related field — the planner gets a silent green light. The LLM has to *crash into the boundary* to learn it. Two consequences:
+
+1. **Reactive boundary discovery.** The planner can't make "I had 2 of my 5 min last round, room to grow" or "I used 4.8 of 5, stay near here" decisions. It must propose, get rejected, then back off.
+2. **Wasted rounds near the ceiling.** A planner that knew it was at 96% budget last round could choose to widen `seg_size` (cheap, fewer steps) instead of `hidden_channels` (expensive, slower steps). Without that signal, it picks blindly.
+
+**The fix.** When the gate passes, attach a small block to the success record's `memory` so the existing reflector-then-planner channel carries it forward. No new schema for the planner side, no prompt rewrites, no new LLM call.
+
+#### J.1 What gets surfaced
+
+Add three fields to the **success record's `memory` block** (next to the existing `expert_advice_followed`, `hypothesis`, `conclusion`, `discovery`, `memory_update`):
+
+```python
+"memory": {
+    ...existing fields...,
+    "time_estimate_minutes": float,   # what evaluate_time_skill predicted pre-flight
+    "time_budget_minutes":   float,   # the budget that was checked against (mode-dependent)
+    "time_mode":             str,     # "trial" or "formal" — which budget was active
+}
+```
+
+Computed source: the `time_check` dict that's already stashed for Phase F3's calibration update. No new computation; just lift three fields out and put them in the record.
+
+**Explicit non-goals (deferred):**
+- `k_correction` — too internal; the LLM doesn't know what to do with a multiplier. The pre-flight estimate already incorporates `k`, so the planner sees the corrected number.
+- `ms_per_step_warmup` / `total_train_steps` — same reason. The aggregated `estimate_minutes` is what matters for budget decisions.
+- `time_actual_minutes` (what training actually took) — useful, but lives on a different axis (post-flight, vs pre-flight estimate). Could be added later as `memory.time_actual_minutes` from the `train_time` already recorded; defer to keep Phase J a one-shot edit.
+- Proposer-side history exposure — proposer is one-shot, gets only one config, no iteration loop to feed back into. Defer indefinitely unless we move to gate-and-revise (§2.7.4).
+
+#### J.2 Where the LLM picks it up
+
+No new wiring needed. The reflector summarises round records into the `experiment_history` block of the next planner prompt; the planner already sees `memory.conclusion` / `memory.discovery` / `memory.memory_update` for past rounds. Adding three more keys to `memory` propagates automatically through the same pipeline.
+
+The planner prompt does NOT need a dedicated "time budget guidance" section — the reflector's existing summary will surface "Round 1: estimated 2.3 min vs 5 min budget (trial)" alongside the architecture choices, which is enough context for the planner to reason about headroom.
+
+If telemetry later shows the planner is ignoring the new fields (still proposes ceiling-blowing configs), revisit with an explicit prompt section. Cheap to retrofit; not worth pre-empting.
+
+#### J.3 Skipped-record consistency
+
+The existing `skipped_time_risk` record's `memory.conclusion` already includes `estimated_minutes` and `limit_minutes` in human-readable form ("Skipped: estimated wall-time (X min) exceeds budget (Y min)"). For consistency post-Phase J, **also** add the same three structured fields (`time_estimate_minutes`, `time_budget_minutes`, `time_mode`) to the skipped record's memory. Cost is two extra dict keys; payoff is the planner sees the same shape regardless of pass/fail.
+
+#### J.4 Files touched
+
+- [ ] `nodes/ml_hyperparameter_tune_agent.py`:
+  - Final success-record assembly (around `:710` — the `final_record` dict): add the three `memory` fields, sourced from the stashed `time_check`. Guard with `if time_check is not None` so runs with the gate disabled produce records without these keys (rather than `None` values that the reflector would have to filter).
+  - `skipped_time_risk` record (around `:503`): add the same three fields for consistency.
+- [ ] `nodes/ml_model_proposal_agent.py`: **no change**. Proposer is one-shot; no next-round to feed back into.
+
+#### J.5 Test surface
+
+- [ ] Extend `tests/unit/agent/tune_ml_hyperparam_agent/test_tuning_agent.py`:
+  - Gate-pass round → success record's `memory` contains the three time fields with the values from the mocked `time_check` dict.
+  - Gate-pass with `is_trial=True` → `time_mode == "trial"` and `time_budget_minutes` matches `trial_time_budget_minutes`.
+  - Gate-pass with formal mode → `time_mode == "formal"`, `time_budget_minutes` matches `formal_time_budget_minutes`.
+  - Gate disabled (both budgets `None`) → the three fields are absent from the record (not `None`).
+  - Gate-fail → `skipped_time_risk` record's `memory` also carries the three fields (consistency check).
+
+#### J.6 Acceptance
+
+- **Verify**: `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent/ -q` → all passing, including the new gate-pass-memory tests.
+- **Verify (during H1b)**: in the post-run workspace records for the H1b 3-round trial, confirm rounds 2 and 3 carry the round-1 time fields in their `experiment_history` block visible to the planner (inspect the actual prompt or the planner trace).
+- Mark J `[x]` with commit hash + test count in the Progress log.
+
+---
+
+##### H1b — tuner-integration smoke (real LLM cost) [blocked on J]
+
+Phase I landed 2026-04-16; once Phase J lands, run a real multi-round tuner job to exercise the per-round calibration update path AND the success-path feedback channel under real LLM planning.
+
+- [ ] **Test A — positive trial path + protected from formal blowup.** Tuner run with `--max_rounds 3 --is_trial --trial_portion 0.01 --train_portion 0.1 --force_model wavenet --trial_time_budget_minutes 5 --formal_time_budget_minutes 5 --data_dir /home/klz/Data/TIDMAD/ --provider openai --model_id gpt-5-mini` (per `feedback_prefer_openai_for_smoke.md`). Acceptance:
+  - Gate passes for trial rounds, training completes
+  - `~/.siderius/time_calibration_<lilab_gpu>.json` gains real history entries with finite `ratio` and consistent `estimate_violated`
+  - **(Phase J)** Round-2 and round-3 success records' `memory` carries the three time fields populated from the active mode's budget; the round-1 fields are visible in the round-2 planner prompt's `experiment_history`
+  - The `--formal_time_budget_minutes 5` flag silently no-ops if the LLM never picks formal; if it does, the round lands as `skipped_time_risk` (no real ~20 min formal training)
+- [ ] **Test B — negative trial path.** Same as A but `--trial_time_budget_minutes 0.01`. Acceptance:
+  - All 3 rounds land as `skipped_time_risk` records
+  - **(Phase J)** Each record's `memory` carries the three time fields with `time_mode="trial"` and `time_budget_minutes=0.01`
+  - No training runs; calibration file unchanged from Test A
+- [ ] **Test C — explicit formal-only rejection (optional).** Drop `--is_trial`, keep `--formal_time_budget_minutes 5`. Acceptance: 3 × `skipped_time_risk` with `time_mode="formal"` and the ~20 min estimate visible in the records.
+- [ ] Mark H1b `[x]` with the lilab GPU name, run_name, and the post-run `k(wavenet)` in the Progress log.
+
+---
+
+#### Phase H2 — SDSC Expanse (Slurm batch, job-chained) [deferred, after H1]
+
+SDSC is structurally different from lilab: jobs are Slurm-submitted with `afterany+48G` chaining, walltime is a hard kill (not a soft budget), `$HOME`/`$SCRATCH` have separate quotas, and a single logical run can span multiple physical nodes (each restart lands in a new job). The skill's behaviour changes in ways H1 can't catch:
+
+1. **Calibration file location.** `~/` on SDSC is quota-constrained — the user may prefer `$SCRATCH` via `SIDERIUS_CALIBRATION_DIR`. Confirm the env override resolves correctly inside the Slurm job's environment, not just the login shell.
+2. **GPU-name stability across restarts.** The design claim (§2.6.4) is that `torch.cuda.get_device_name(0)` is stable even when Slurm reassigns the job to a different node with the same GPU model. H1 can't test this. H2 must.
+3. **Budget sizing against walltime.** `--time_budget_minutes` must be set **strictly less than** the Slurm `--time` flag so the gate fires before Slurm does. Confirm the rejection path produces a clean `skipped_time_risk` record and the job exits gracefully rather than being killed mid-training.
+4. **Concurrent-writer safety.** Two chained jobs on the same GPU model may overlap briefly during handoff. The atomic `tmp + rename` in `save_table` should hold, but H2 is the first time it's tested under real concurrency.
+
+Acceptance criteria:
+
+- [ ] Submit an over-budget sbatch job with `--time_budget_minutes 10` below the `--time` walltime → gate fires, `skipped_time_risk` lands, job exits clean before walltime kill.
+- [ ] Submit an under-budget job → training completes, calibration entry lands in whichever directory `SIDERIUS_CALIBRATION_DIR` resolved to inside the job.
+- [ ] Submit a **chained** pair of jobs (job B `--dependency=afterany:<job_A>`) on the same GPU model → confirm B reads A's calibration file correctly and appends (doesn't overwrite) the history.
+- [ ] If Slurm lands the two jobs on different physical nodes, confirm both produce the same filename (same GPU → same slug).
+- [ ] Update Status line to `implemented + smoke-tested (lilab + SDSC)`; append H2 row to Progress log with SDSC job IDs.
+
+H2 acceptance = the skill is safe to leave on by default in the production SDSC workflow.
 
 ---
 
@@ -627,7 +853,7 @@ No data-layer changes, no schema changes that block older records from loading (
 ## 9. Open Questions
 
 1. **Warmup batch count**: 3 (1 warmup + 2 timed) vs 5? I'll start with 3 in Phase C and revisit if variance on SDSC shared nodes is high.
-2. **Budget default**: 60 min matches the current expert-advice prose. Formal-mode gate is deferred; if we enable it later, default is probably 4 h.
+2. **Budget defaults**: both `trial_time_budget_minutes` and `formal_time_budget_minutes` default to `None` (gate-off-until-opted-in) post-Phase I. If we want non-`None` defaults later: trial ≈ 60 min (matches the original expert-advice prose); formal ≈ 4 h (educated guess; revisit once a few formal runs have completed and the calibration history can inform it).
 3. **EMA α constants**: `α_up=0.5, α_down=0.1` are educated guesses. Once a few real entries accumulate, sanity-check these by replay — do we converge too slow/fast? Tune then.
 4. **Calibration file location**: `~/.siderius/` by default; override with `SIDERIUS_CALIBRATION_DIR` env var so SDSC users can point to `$HOME` or `$SCRATCH` depending on quota.
 5. **`skipped_time_risk` enum location**: wherever `skipped_oom_risk` lives in the record schema — confirm path in Phase E1.

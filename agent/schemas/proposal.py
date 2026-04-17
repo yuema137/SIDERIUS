@@ -531,11 +531,22 @@ class ProposalInput(BaseModel):
                     "robust to which exact segments are picked, so identical seeds "
                     "across the two gates are not required.",
     )
-    time_budget_minutes: Optional[float] = Field(
+    trial_time_budget_minutes: Optional[float] = Field(
         default=None,
         description="Wall-time budget in minutes against which evaluate_time_skill "
-                    "gates the baseline config. None = gate disabled (no estimate, "
-                    "no time_risk annotation). See §2.7.",
+                    "gates the baseline config when inp.is_trial=True. None = "
+                    "trial gate disabled (no estimate, no time_risk annotation). "
+                    "See §2.7 + Phase I — the single time_budget_minutes field "
+                    "used in Phases D-G was split into trial/formal so each mode "
+                    "has its own ceiling.",
+    )
+    formal_time_budget_minutes: Optional[float] = Field(
+        default=None,
+        description="Wall-time budget in minutes against which evaluate_time_skill "
+                    "gates the baseline config when inp.is_trial=False. None = "
+                    "formal gate disabled. Sized independently from the trial "
+                    "budget because formal runs use the full dataset and have a "
+                    "wall-time scale 50–100× longer.",
     )
     data_dir: Optional[str] = Field(
         default=None,
@@ -701,6 +712,8 @@ class ProposalOutput(BaseModel):
                     "docs/time_estimator_implement.md §2.7.4). Carries the suggestion "
                     "text from _suggest_lever so the validator→tuner protocol can "
                     "prepend it to expert_advice as round-0 guidance. None = baseline "
-                    "fits the budget or the gate was disabled (time_budget_minutes "
-                    "not supplied at the workflow level).",
+                    "fits the budget or the gate was disabled (the budget for the "
+                    "active mode — trial_time_budget_minutes or "
+                    "formal_time_budget_minutes — was not supplied at the workflow "
+                    "level).",
     )

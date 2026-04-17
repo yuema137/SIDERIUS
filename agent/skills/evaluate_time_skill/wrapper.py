@@ -27,6 +27,8 @@ import traceback
 
 from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
 
+from agent.skills.evaluate_time_skill import calibration
+
 
 # Safety margin applied on top of (ms_per_step × k). Tight because the
 # real-dataset warmup in Phase C will capture DataLoader / HDF5 / GPU path.
@@ -94,6 +96,22 @@ def _suggest_lever(ms_per_step: float, seg_size: int, batch_size: int) -> str:
 
 
 # ── torch-dependent helpers ──────────────────────────────────────────────────
+
+
+def _detect_gpu_name() -> str | None:
+    """Return the active CUDA device name, or None on CPU-only / import-fail
+    hosts. Stable across SDSC node reassignment because it queries the GPU,
+    not the hostname (§2.6.4)."""
+    try:
+        import torch
+    except ImportError:
+        return None
+    if not torch.cuda.is_available():
+        return None
+    try:
+        return torch.cuda.get_device_name(0)
+    except Exception:
+        return None
 
 
 def _count_params(model_type: str, model_config: dict, loss_type: str) -> int:
@@ -328,7 +346,17 @@ def run_skill(sandbox, **kwargs) -> dict:
         ms_per_step = _static_ms_per_step(num_params, seg_size, batch_size)
         ms_source = "static_formula_phase_b"
 
-    k_correction = 1.0
+    # Phase F: apply learned per-GPU correction k(gpu, model_type). Only applies
+    # to the real-dataset warmup path — the static formula has no warmup signal
+    # to calibrate against, so k stays at 1.0 there. gpu_name is None on hosts
+    # without CUDA (calibration is GPU-specific).
+    gpu_name = _detect_gpu_name()
+    if ms_source == "real_dataset_warmup" and gpu_name:
+        cal_table = calibration.load_table(gpu_name)
+        k_correction = calibration.lookup_k(cal_table, model_type)
+    else:
+        k_correction = 1.0
+
     total_min = (
         total_steps * ms_per_step * k_correction * SAFETY_MULTIPLIER / 60_000.0
     )
@@ -337,11 +365,12 @@ def run_skill(sandbox, **kwargs) -> dict:
     breakdown = {
         "total_train_steps": total_steps,
         "ms_per_step_warmup": round(ms_per_step, 4),
-        "k_correction": k_correction,
+        "k_correction": round(k_correction, 4),
         "safety_multiplier": SAFETY_MULTIPLIER,
         "train_minutes": round(total_min, 2),
         "num_params": num_params,
         "source": ms_source,
+        "gpu_name": gpu_name,
     }
 
     verdict = (

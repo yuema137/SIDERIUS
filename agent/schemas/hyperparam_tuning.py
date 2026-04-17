@@ -117,6 +117,7 @@ class ExperimentRecord(BaseModel):
         "success",
         "error",
         "skipped_oom_risk",
+        "skipped_time_risk",
         "error_training",
         "error_training_oom",
         "error_inference",
@@ -559,17 +560,34 @@ class HyperparamTuningInput(BaseModel):
     )
 
     # --- Time-budget gate (evaluate_time_skill) ---
-    # See docs/time_estimator_implement.md §2.7. Both fields originate at the
-    # workflow/CLI level and are forwarded through the validator→tuner protocol.
-    time_budget_minutes: Optional[float] = Field(
+    # See docs/time_estimator_implement.md §2.7 + Phase I. The single
+    # `time_budget_minutes` field used in Phases D-G was split into two so the
+    # per-round gate uses the right ceiling for the mode the round runs in.
+    # Both fields originate at the workflow/CLI level and are forwarded through
+    # the validator→tuner protocol. Each is independently optional: setting
+    # only the trial budget gates trial rounds and skips formal rounds, and
+    # vice versa. The tuner picks the right one each round via plan.is_trial.
+    trial_time_budget_minutes: Optional[float] = Field(
         default=None,
         description=(
-            "Wall-time budget in minutes against which evaluate_time_skill gates "
-            "every round's plan ([Step 0.5/3], after the VRAM check). "
-            "None = gate disabled; the tuner prints a one-time warning at "
-            "startup and skips the time check. Set at the workflow level so "
-            "both the proposer's baseline gate and the tuner's per-round gate "
-            "see the same number."
+            "Wall-time budget in minutes against which evaluate_time_skill "
+            "gates rounds where the planner picks trial mode (plan.is_trial=True). "
+            "None = trial gate disabled; the tuner prints a one-time warning at "
+            "startup and skips the time check for trial rounds. Set at the "
+            "workflow level so both the proposer's baseline gate and the "
+            "tuner's per-round gate see the same number for trial-mode "
+            "estimates."
+        ),
+    )
+    formal_time_budget_minutes: Optional[float] = Field(
+        default=None,
+        description=(
+            "Wall-time budget in minutes against which evaluate_time_skill "
+            "gates rounds where the planner picks formal mode (plan.is_trial=False). "
+            "None = formal gate disabled; the tuner prints a one-time warning "
+            "at startup and skips the time check for formal rounds. Sized "
+            "independently from the trial budget because formal runs use the "
+            "full dataset and have a wall-time scale 50–100× longer."
         ),
     )
     data_dir: Optional[str] = Field(

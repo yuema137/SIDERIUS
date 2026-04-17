@@ -170,10 +170,31 @@ class TestTimeBudgetContextFields:
         result = local_full_context(output, storage, sampling_seed=1234)
         assert result.sampling_seed == 1234
 
-    def test_time_budget_minutes_passed_through(self, storage):
+    def test_trial_time_budget_minutes_passed_through(self, storage):
         output = make_interpretation_output(["punet"])
-        result = local_full_context(output, storage, time_budget_minutes=45.0)
-        assert result.time_budget_minutes == 45.0
+        result = local_full_context(output, storage, trial_time_budget_minutes=45.0)
+        assert result.trial_time_budget_minutes == 45.0
+        # Phase I: setting the trial budget alone must NOT touch the formal one.
+        assert result.formal_time_budget_minutes is None
+
+    def test_formal_time_budget_minutes_passed_through(self, storage):
+        output = make_interpretation_output(["punet"])
+        result = local_full_context(output, storage, formal_time_budget_minutes=240.0)
+        assert result.formal_time_budget_minutes == 240.0
+        # Phase I: setting the formal budget alone must NOT touch the trial one.
+        assert result.trial_time_budget_minutes is None
+
+    def test_both_budgets_independent(self, storage):
+        """Phase I two-budget split: caller sets both — both survive the
+        protocol mapping with their own values, no cross-contamination."""
+        output = make_interpretation_output(["punet"])
+        result = local_full_context(
+            output, storage,
+            trial_time_budget_minutes=30.0,
+            formal_time_budget_minutes=240.0,
+        )
+        assert result.trial_time_budget_minutes == 30.0
+        assert result.formal_time_budget_minutes == 240.0
 
     def test_data_dir_passed_through(self, storage):
         output = make_interpretation_output(["punet"])
@@ -184,8 +205,9 @@ class TestTimeBudgetContextFields:
 
     def test_full_trial_target_fan_out(self, storage):
         """Realistic single-file-via-trial workflow plumbing: caller supplies
-        the full trial-mode set + budget + data_dir together. Mirrors what the
-        validator→tuner edge will receive for the tuner's per-round gate."""
+        the full trial-mode set + both budgets + data_dir together. Mirrors
+        what the validator→tuner edge will receive for the tuner's per-round
+        gate (Phase I two-budget split)."""
         output = make_interpretation_output(["punet"])
         result = local_full_context(
             output, storage,
@@ -195,7 +217,8 @@ class TestTimeBudgetContextFields:
             target_files=[6],
             train_portion=0.5,
             sampling_seed=42,
-            time_budget_minutes=30.0,
+            trial_time_budget_minutes=30.0,
+            formal_time_budget_minutes=240.0,
             data_dir="/mnt/tidmad",
         )
         assert result.is_trial is True
@@ -204,7 +227,8 @@ class TestTimeBudgetContextFields:
         assert result.target_files == [6]
         assert result.train_portion == 0.5
         assert result.sampling_seed == 42
-        assert result.time_budget_minutes == 30.0
+        assert result.trial_time_budget_minutes == 30.0
+        assert result.formal_time_budget_minutes == 240.0
         assert result.data_dir == "/mnt/tidmad"
 
     def test_defaults_when_caller_omits(self, storage):
@@ -212,7 +236,8 @@ class TestTimeBudgetContextFields:
         schema defaults must take effect (mirroring HyperparamTuningInput:
         is_trial=False, trial_strategy='snapshot', trial_portion=0.1,
         target_files=[], train_portion=0.1, sampling_seed=None,
-        time_budget_minutes=None, data_dir=None)."""
+        trial_time_budget_minutes=None, formal_time_budget_minutes=None,
+        data_dir=None)."""
         output = make_interpretation_output(["punet"])
         result = local_full_context(output, storage)
         assert result.is_trial is False
@@ -221,16 +246,19 @@ class TestTimeBudgetContextFields:
         assert result.target_files == []
         assert result.train_portion == 0.1
         assert result.sampling_seed is None
-        assert result.time_budget_minutes is None
+        assert result.trial_time_budget_minutes is None
+        assert result.formal_time_budget_minutes is None
         assert result.data_dir is None
 
     def test_partial_kwargs_only_overrides_supplied_fields(self, storage):
-        """Caller supplies time_budget_minutes only — every other run-level
-        field keeps its schema default so partial workflow plumbing doesn't
-        accidentally reset a field the caller didn't touch."""
+        """Caller supplies trial_time_budget_minutes only — every other
+        run-level field (including formal_time_budget_minutes) keeps its
+        schema default so partial workflow plumbing doesn't accidentally
+        reset a field the caller didn't touch."""
         output = make_interpretation_output(["punet"])
-        result = local_full_context(output, storage, time_budget_minutes=60.0)
-        assert result.time_budget_minutes == 60.0
+        result = local_full_context(output, storage, trial_time_budget_minutes=60.0)
+        assert result.trial_time_budget_minutes == 60.0
+        assert result.formal_time_budget_minutes is None
         assert result.is_trial is False
         assert result.trial_strategy == "snapshot"
         assert result.trial_portion == 0.1

@@ -118,11 +118,21 @@ def parse_args():
         help="Seed for build_sample_set(). None auto-generates per gate.",
     )
     parser.add_argument(
-        "--time_budget_minutes", type=float, default=None,
+        "--trial_time_budget_minutes", type=float, default=None,
         help=(
-            "Wall-time budget (minutes) for the evaluate_time_skill gate. "
-            "None disables BOTH the proposer's baseline gate and the tuner's "
-            "per-round gate (docs/time_estimator_implement.md §2.7)."
+            "Wall-time budget (minutes) for the evaluate_time_skill gate on "
+            "rounds where plan.is_trial=True. Forwarded to BOTH the proposer's "
+            "baseline gate and the tuner's per-round gate. None disables the "
+            "trial gate (docs/time_estimator_implement.md §2.7 / Phase I)."
+        ),
+    )
+    parser.add_argument(
+        "--formal_time_budget_minutes", type=float, default=None,
+        help=(
+            "Wall-time budget (minutes) for the evaluate_time_skill gate on "
+            "rounds where plan.is_trial=False. Sized independently from the "
+            "trial budget because formal runs use the full dataset and are "
+            "50–100x longer. None disables the formal gate."
         ),
     )
     parser.add_argument(
@@ -205,7 +215,13 @@ def main():
           + (f"  |  Target files: {args.target_files}" if args.trial_strategy == "target" else ""))
     print(f"  Trial portion: {args.trial_portion}  |  Train portion: {args.train_portion}  |  Eval portion: {args.eval_portion}")
     print(f"  Sampling seed : {args.sampling_seed if args.sampling_seed is not None else 'auto'}")
-    print(f"  Time budget   : {f'{args.time_budget_minutes} min' if args.time_budget_minutes is not None else 'disabled (no time gate)'}")
+    trial_budget_str = (f"{args.trial_time_budget_minutes} min"
+                        if args.trial_time_budget_minutes is not None
+                        else "disabled")
+    formal_budget_str = (f"{args.formal_time_budget_minutes} min"
+                         if args.formal_time_budget_minutes is not None
+                         else "disabled")
+    print(f"  Time budget   : trial={trial_budget_str}  |  formal={formal_budget_str}")
     print(f"  Data dir      : {args.data_dir or 'unset (skill uses static formula)'}")
     print(f"  Advice    : {args.advice}")
     print(f"  LLM config: {args.llm_config or 'default (gemini-3.1-pro-preview uniform)'}")
@@ -237,8 +253,9 @@ def main():
             "train_portion": args.train_portion,
             "eval_portion": args.eval_portion,
         },
-        # Time-budget gate (fans out to both proposer and tuner)
-        time_budget_minutes=args.time_budget_minutes,
+        # Time-budget gate (Phase I two-budget split — fans out to both proposer and tuner)
+        trial_time_budget_minutes=args.trial_time_budget_minutes,
+        formal_time_budget_minutes=args.formal_time_budget_minutes,
         data_dir=args.data_dir,
         # Advice
         human_advice_propose=advice.get("propose"),

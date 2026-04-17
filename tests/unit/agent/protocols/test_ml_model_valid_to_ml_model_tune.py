@@ -232,24 +232,39 @@ class TestDeviationNotePropagation:
 
 
 # ---------------------------------------------------------------------------
-# Time-budget context fan-out (Phase E0)
+# Time-budget context fan-out (Phase E0 + Phase I two-budget split)
 #
-# time_budget_minutes + data_dir fan out from the workflow/CLI into BOTH
-# ProposalInput (via interp→propose) and HyperparamTuningInput (here) so the
-# tuner's per-round evaluate_time_skill gate sees the same numbers as the
-# proposer's baseline gate. See docs/time_estimator_implement.md §2.7.2.
+# trial_time_budget_minutes / formal_time_budget_minutes / data_dir fan out
+# from the workflow/CLI into BOTH ProposalInput (via interp→propose) and
+# HyperparamTuningInput (here) so the tuner's per-round evaluate_time_skill
+# gate sees the same numbers as the proposer's baseline gate. The per-round
+# pick (trial vs formal) happens inside the tuner based on plan.is_trial.
+# See docs/time_estimator_implement.md §2.7.2 / Phase I.
 # ---------------------------------------------------------------------------
 
 class TestTimeBudgetFanOut:
 
-    def test_time_budget_minutes_passed_through(
+    def test_trial_time_budget_minutes_passed_through(
         self, validator_output, proposal_output, storage
     ):
         result = local_validated_model(
             validator_output, proposal_output, storage,
-            time_budget_minutes=45.0,
+            trial_time_budget_minutes=45.0,
         )
-        assert result.time_budget_minutes == 45.0
+        assert result.trial_time_budget_minutes == 45.0
+        # Phase I: setting the trial budget alone must NOT touch the formal one.
+        assert result.formal_time_budget_minutes is None
+
+    def test_formal_time_budget_minutes_passed_through(
+        self, validator_output, proposal_output, storage
+    ):
+        result = local_validated_model(
+            validator_output, proposal_output, storage,
+            formal_time_budget_minutes=240.0,
+        )
+        assert result.formal_time_budget_minutes == 240.0
+        # Phase I: setting the formal budget alone must NOT touch the trial one.
+        assert result.trial_time_budget_minutes is None
 
     def test_data_dir_passed_through(
         self, validator_output, proposal_output, storage
@@ -260,24 +275,30 @@ class TestTimeBudgetFanOut:
         )
         assert result.data_dir == "/mnt/tidmad"
 
-    def test_both_budget_fields_together(
+    def test_both_budgets_independent(
         self, validator_output, proposal_output, storage
     ):
+        """Phase I two-budget split: caller sets both — both survive the
+        protocol mapping with their own values, no cross-contamination."""
         result = local_validated_model(
             validator_output, proposal_output, storage,
-            time_budget_minutes=30.0,
+            trial_time_budget_minutes=30.0,
+            formal_time_budget_minutes=240.0,
             data_dir="/data/tidmad",
         )
-        assert result.time_budget_minutes == 30.0
+        assert result.trial_time_budget_minutes == 30.0
+        assert result.formal_time_budget_minutes == 240.0
         assert result.data_dir == "/data/tidmad"
 
     def test_defaults_none_when_omitted(
         self, validator_output, proposal_output, storage
     ):
-        """When the caller supplies neither kwarg the tuner's per-round gate
-        stays disabled (one-time warning) — both fields default to None."""
+        """When the caller supplies none of the budget kwargs, both modes'
+        gates stay disabled (one-time warning per mode). All three fields
+        default to None."""
         result = local_validated_model(validator_output, proposal_output, storage)
-        assert result.time_budget_minutes is None
+        assert result.trial_time_budget_minutes is None
+        assert result.formal_time_budget_minutes is None
         assert result.data_dir is None
 
 

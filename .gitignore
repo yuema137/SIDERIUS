@@ -40,3 +40,8 @@ tidmad_data_config.yaml
 dashboard_config.yaml
 siderius_workspace/
 fm-agent-repo/
+
+# Per-GPU time-calibration tables for evaluate_time_skill. Default location
+# is ~/.siderius/ so this is defensive — only matters when a developer points
+# SIDERIUS_CALIBRATION_DIR at a path inside the repo tree.
+time_calibration_*.json

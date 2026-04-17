@@ -34,6 +34,7 @@ from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_utils import SampleSet
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 from execute_tools.build_anchor_map import load_anchor_map
+from agent.skills.evaluate_time_skill import calibration as time_calibration
 
 
 def _validate_data_config(
@@ -156,6 +157,22 @@ class HyperparamTuningAgent:
         print(f"Input validated: model={model_type_setting} | rounds={max_rounds} "
               f"| file_index={file_index} | trial_allowed={trial_allowed} "
               f"| provider={agent_input.llm_provider}")
+
+        # Per-mode time-budget gate (Phase I). Each mode has its own optional
+        # ceiling; the per-round pick happens inside the loop based on
+        # plan.is_trial. Mirrors the "additive, opt-in" stance in
+        # docs/time_estimator_implement.md §5 — when both budgets are None the
+        # gate never fires; when only one is set, rounds in the other mode skip
+        # the gate (one-time warning printed below per mode).
+        trial_time_budget = agent_input.trial_time_budget_minutes
+        formal_time_budget = agent_input.formal_time_budget_minutes
+        time_data_dir = agent_input.data_dir
+        if trial_time_budget is None:
+            print("[time-gate disabled / trial] trial_time_budget_minutes is None "
+                  "— evaluate_time_skill will not gate trial-mode rounds.")
+        if formal_time_budget is None:
+            print("[time-gate disabled / formal] formal_time_budget_minutes is None "
+                  "— evaluate_time_skill will not gate formal-mode rounds.")
 
         # --- Initialize sandbox and brain (via factory for DI / pseudo-mode) ---
         sandbox = self._sandbox_factory(
@@ -463,6 +480,70 @@ class HyperparamTuningAgent:
                     sandbox.save_record(oom_record)
                     continue
 
+                # [Step 0.5/3] Wall-time gate. Mirrors the VRAM gate above:
+                # error → raise; infeasible → emit skipped_time_risk record
+                # and continue without consuming a round. Skipped entirely
+                # when the budget for the active mode is None (one-time
+                # warning per mode printed at startup).
+                # See docs/time_estimator_implement.md §2.7 / E1 / Phase I.
+                # The result is stashed so the post-flight calibration update
+                # (Phase F) can compare warmup vs actual ms/step.
+                # Phase I: per-mode budget pick. plan.is_trial decides which
+                # ceiling applies for THIS round; the unselected one is
+                # ignored. The skill itself stays mode-agnostic — it gets a
+                # single time_budget_minutes kwarg.
+                chosen_time_budget = (trial_time_budget
+                                      if plan.is_trial
+                                      else formal_time_budget)
+                time_check = None
+                if chosen_time_budget is not None:
+                    print(f"\n[Step 0.5/3] Time check "
+                          f"(mode={'trial' if plan.is_trial else 'formal'}, "
+                          f"budget={chosen_time_budget} min)...")
+                    time_check = _run_skill(
+                        "evaluate_time_skill",
+                        sandbox,
+                        **active_params,
+                        time_budget_minutes=chosen_time_budget,
+                        data_dir=time_data_dir,
+                    )
+                    if time_check.get("status") == "error":
+                        raise RuntimeError(
+                            f"Time check error: {time_check.get('message')}"
+                        )
+
+                    if not time_check.get("feasible", True):
+                        print(f"Time check FAILED — this attempt does NOT count as a round.")
+                        print(f"   Verdict   : {time_check.get('verdict', '')}")
+                        print(f"   Suggestion: {time_check.get('suggestion', '')}")
+
+                        time_record = {
+                            "exp_id":          exp_id,
+                            "status":          "skipped_time_risk",
+                            "model_type":      model_type,
+                            "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "file_index":      file_index,
+                            "params":          record_params,
+                            "denoising_score": None,
+                            "memory": {
+                                "expert_advice_followed": expert_advice_str,
+                                "hypothesis":    hypothesis,
+                                "conclusion":    (
+                                    f"Skipped: estimated wall-time "
+                                    f"({time_check.get('estimated_minutes', '?')} min) "
+                                    f"exceeds budget ({time_check.get('limit_minutes', '?')} min)."
+                                ),
+                                "discovery":     time_check.get("verdict", ""),
+                                "memory_update": time_check.get(
+                                    "suggestion",
+                                    "Reduce model size, batch_size, segmentation_size, or train_portion.",
+                                ),
+                            },
+                        }
+                        ExperimentRecord.model_validate(time_record)
+                        sandbox.save_record(time_record)
+                        continue
+
                 print(f"\n[Step 1/3] Training...")
                 t0 = time.time()
                 train_status = _run_skill("training_skill", sandbox, **active_params)
@@ -713,6 +794,45 @@ class HyperparamTuningAgent:
                 ExperimentRecord.model_validate(final_record)
                 sandbox.save_record(final_record)
 
+                # Phase F post-flight: update per-GPU calibration from this
+                # successful run. Only runs when the gate used the real-dataset
+                # warmup path (the static formula has no warmup signal to
+                # calibrate against). See docs/time_estimator_implement.md §2.6.5.
+                if time_check is not None:
+                    bd = time_check.get("breakdown") or {}
+                    if bd.get("source") == "real_dataset_warmup":
+                        gpu_name = bd.get("gpu_name")
+                        warmup_ms = float(bd.get("ms_per_step_warmup") or 0.0)
+                        total_steps = int(bd.get("total_train_steps") or 0)
+                        if gpu_name and warmup_ms > 0 and total_steps > 0 and train_time > 0:
+                            try:
+                                actual_ms = train_time * 1000.0 / total_steps
+                                entry = time_calibration.make_entry(
+                                    gpu_name=gpu_name,
+                                    model_type=model_type,
+                                    seg_size=int(active_params["model_config"].get("segmentation_size", 0)),
+                                    batch_size=int(active_params["train_config"].get("batch_size", 1)),
+                                    total_steps=total_steps,
+                                    warmup_ms_per_step=warmup_ms,
+                                    actual_ms_per_step=actual_ms,
+                                    estimated_minutes=float(time_check.get("estimated_minutes") or 0.0),
+                                    actual_minutes=train_time / 60.0,
+                                )
+                                table = time_calibration.load_table(gpu_name)
+                                time_calibration.update_k(table, entry)
+                                time_calibration.save_table(gpu_name, table)
+                                drift = time_calibration.detect_drift(table)
+                                if drift:
+                                    print(f"  [time-calibration] {drift}")
+                                else:
+                                    new_k = time_calibration.lookup_k(table, model_type)
+                                    print(
+                                        f"  [time-calibration] {gpu_name} / {model_type}: "
+                                        f"ratio={entry['ratio']:.3f} → k={new_k:.3f}"
+                                    )
+                            except Exception as cal_exc:  # pragma: no cover — defensive
+                                print(f"  [time-calibration skipped] {cal_exc}")
+
                 completed_rounds += 1
                 print(f"Round {completed_rounds}/{max_rounds} Complete. "
                       f"Score: {score_results.get('denoising_score', 'N/A')}")
@@ -824,6 +944,23 @@ def main():
     parser.add_argument("--cleanup_denoised", action="store_true",
                         help="Delete denoised HDF5 files after scoring each round to save disk space.")
 
+    # evaluate_time_skill gate (Phase E1, Phase I two-budget split). Each
+    # default is None, which keeps that mode's gate off — matches the
+    # workflow-level CLI in run_exploration_adaptive.py.
+    parser.add_argument("--trial_time_budget_minutes", type=float, default=None,
+                        help="Wall-time budget (minutes) for the evaluate_time_skill "
+                             "gate on rounds where plan.is_trial=True. None disables "
+                             "the trial gate.")
+    parser.add_argument("--formal_time_budget_minutes", type=float, default=None,
+                        help="Wall-time budget (minutes) for the evaluate_time_skill "
+                             "gate on rounds where plan.is_trial=False. None disables "
+                             "the formal gate. Sized independently from the trial "
+                             "budget because formal runs use the full dataset and "
+                             "are 50–100x longer.")
+    parser.add_argument("--data_dir", type=str, default=None,
+                        help="TIDMAD data directory used by evaluate_time_skill's real-dataset "
+                             "warmup. None makes the skill fall back to its static formula.")
+
     args = parser.parse_args()
 
     input_dict = {
@@ -853,6 +990,12 @@ def main():
         })
     if args.human_advice:
         input_dict["human_advice"] = args.human_advice
+    if args.trial_time_budget_minutes is not None:
+        input_dict["trial_time_budget_minutes"] = args.trial_time_budget_minutes
+    if args.formal_time_budget_minutes is not None:
+        input_dict["formal_time_budget_minutes"] = args.formal_time_budget_minutes
+    if args.data_dir is not None:
+        input_dict["data_dir"] = args.data_dir
 
     agent_input = HyperparamTuningInput.model_validate(input_dict)
 

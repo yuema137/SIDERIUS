@@ -51,7 +51,8 @@ def local_full_context(
     target_files: Optional[List[int]] = None,
     train_portion: Optional[float] = None,
     sampling_seed: Optional[int] = None,
-    time_budget_minutes: Optional[float] = None,
+    trial_time_budget_minutes: Optional[float] = None,
+    formal_time_budget_minutes: Optional[float] = None,
     data_dir: Optional[str] = None,
 ) -> ProposalInput:
     """
@@ -82,7 +83,10 @@ def local_full_context(
                                 Each falls through to the ProposalInput schema default when
                                 None — partial workflow plumbing must not silently reset a
                                 field the caller didn't touch.
-      - time_budget_minutes  : wall-time gate budget; None disables the proposer's gate.
+      - trial_time_budget_minutes / formal_time_budget_minutes :
+                                wall-time gate budgets, one per mode (Phase I two-budget split).
+                                The proposer's baseline gate picks the one matching inp.is_trial.
+                                Each None independently disables the gate for that mode.
       - data_dir             : TIDMAD data directory; required for the skill's real-dataset warmup.
 
     Populates in ml-model-propose (ProposalInput):
@@ -94,8 +98,9 @@ def local_full_context(
       - mindset              : passed through when provided
       - agent_cards          : passed through when provided
       - is_trial / trial_strategy / trial_portion / target_files / train_portion /
-        sampling_seed / time_budget_minutes / data_dir : passed through when
-        provided; otherwise the ProposalInput schema defaults apply.
+        sampling_seed / trial_time_budget_minutes / formal_time_budget_minutes /
+        data_dir : passed through when provided; otherwise the ProposalInput
+        schema defaults apply.
       - storage              : passed through from the orchestrator
     """
     # Build expert_context — start with what's passed, wrap legacy human_advice
@@ -145,7 +150,9 @@ def local_full_context(
     # schema default takes effect (mirrors HyperparamTuningInput defaults:
     # is_trial=False, trial_strategy="snapshot", trial_portion=0.1,
     # target_files=[], train_portion=0.1, sampling_seed=None,
-    # time_budget_minutes=None, data_dir=None).
+    # trial_time_budget_minutes=None, formal_time_budget_minutes=None,
+    # data_dir=None). Phase I splits the single budget into two so each mode
+    # has its own ceiling; both are independently optional.
     if is_trial is not None:
         result["is_trial"] = is_trial
     if trial_strategy is not None:
@@ -158,8 +165,10 @@ def local_full_context(
         result["train_portion"] = train_portion
     if sampling_seed is not None:
         result["sampling_seed"] = sampling_seed
-    if time_budget_minutes is not None:
-        result["time_budget_minutes"] = time_budget_minutes
+    if trial_time_budget_minutes is not None:
+        result["trial_time_budget_minutes"] = trial_time_budget_minutes
+    if formal_time_budget_minutes is not None:
+        result["formal_time_budget_minutes"] = formal_time_budget_minutes
     if data_dir is not None:
         result["data_dir"] = data_dir
 
