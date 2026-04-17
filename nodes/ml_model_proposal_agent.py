@@ -27,9 +27,11 @@ import importlib
 from pydantic import ValidationError
 
 from agent.llm_bridge import LLMBridge
+from agent.prompts import _format_known_constraints_block
 from agent.schemas.proposal import ProposalInput, ProposalOutput, FalsifiablePrediction
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
+from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 from execute_tools.sample_set_builder import build_sample_set
 
 # Maximum number of retries when the proposing stage produces invalid output.
@@ -663,6 +665,10 @@ class MLModelProposalAgent:
             ])),
             "n_confirmed_links": str(n_confirmed_links),
             "existing_model_types": ", ".join(inp.existing_model_types),
+            # Proposing-stage placeholder. Other stages don't reference it; the
+            # template_vars replace is a no-op when the placeholder is absent.
+            # See docs/improving_validation_awareness.md Phase A.2/A.3.
+            "known_constraints_block": _format_known_constraints_block(DATASET_CONFIG),
         }
 
         for stage in pipeline.stages:

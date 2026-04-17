@@ -44,6 +44,7 @@ A JSON object with these fields:
 }
 ```
 
+{known_constraints_block}
 ## Rules
 
 1. **Tethered to the memo.** Your `motivation` must reference the

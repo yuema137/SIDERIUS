@@ -564,3 +564,101 @@ class TestProposingRetry:
 
         # 2 pipeline stage calls + all proposing attempts
         assert mock_bridge.generate.call_count == 2 + (_MAX_PROPOSING_RETRIES + 1)
+
+
+# ---------------------------------------------------------------------------
+# Phase A.4 — segmentation_size validator integration with the retry loop
+# ---------------------------------------------------------------------------
+
+class TestSegmentationSizeRetryIntegration:
+    """
+    A.4: end-to-end check that the A.1 ProposalOutput.segmentation_size validator
+    fires inside the proposer's existing retry loop, surfaces the divisor-list
+    error to the next attempt via ``proposing_stage_errors``, and lets a
+    self-corrected response succeed.
+
+    See docs/improving_validation_awareness.md Phase A.4.
+    """
+
+    def _make_pipeline_input(self, tmp_path):
+        return ProposalInput(
+            interpretation=FAKE_INTERPRETATION,
+            existing_model_types=["punet", "wavenet", "fcnet", "gated_fno"],
+            reasoning_pipeline=ReasoningPipelineConfig(
+                stages=[
+                    ReasoningStage(name="comparison", system_prompt_key="COMPARATIVE_ANALYSIS"),
+                    ReasoningStage(name="causal_reasoning", system_prompt_key="CAUSAL_REASONING"),
+                ],
+            ),
+            storage=StorageConfig(
+                backend="local",
+                local=LocalStorageConfig(workspace=str(tmp_path), run_name="test"),
+            ),
+        )
+
+    def _agent(self, mock_bridge):
+        return MLModelProposalAgent(
+            provider="gemini", model_id="test",
+            bridge_factory=lambda **kw: mock_bridge,
+        )
+
+    @staticmethod
+    def _with_seg(size):
+        out = json.loads(json.dumps(FAKE_PROPOSING_OUTPUT))
+        out["baseline_config"]["model_config"]["segmentation_size"] = size
+        return out
+
+    def test_invalid_segmentation_size_triggers_retry_then_succeeds(self, tmp_path):
+        """16384 is the exact value the production runs failed on. 16000 is the
+        nearest valid divisor of 10_000_000 and is mentioned in the recovery hint."""
+        mock_bridge = MagicMock()
+        mock_bridge.generate.side_effect = [
+            FAKE_COMPARISON_OUTPUT,
+            FAKE_REASONING_OUTPUT,
+            self._with_seg(16384),  # attempt 1: invalid (power of 2, not a divisor)
+            self._with_seg(16000),  # attempt 2: valid divisor
+        ]
+        output = self._agent(mock_bridge).run(self._make_pipeline_input(tmp_path))
+
+        assert output.baseline_config["model_config"]["segmentation_size"] == 16000
+        # comparison(1) + causal_reasoning(1) + proposing(2)
+        assert mock_bridge.generate.call_count == 4
+
+    def test_validator_error_visible_in_retry_prompt(self, tmp_path):
+        """The retry's user prompt must include the validator's error in
+        ``proposing_stage_errors`` so the LLM can self-correct against the
+        divisor list."""
+        mock_bridge = MagicMock()
+        mock_bridge.generate.side_effect = [
+            FAKE_COMPARISON_OUTPUT,
+            FAKE_REASONING_OUTPUT,
+            self._with_seg(16384),
+            self._with_seg(16000),
+        ]
+        self._agent(mock_bridge).run(self._make_pipeline_input(tmp_path))
+
+        # Call index 3 = retry proposing attempt
+        retry_user_prompt = mock_bridge.generate.call_args_list[3][0][1]
+        retry_data = json.loads(retry_user_prompt.split("\n\n")[0])
+
+        assert "proposing_stage_errors" in retry_data
+        errors = retry_data["proposing_stage_errors"]
+        assert len(errors) == 1
+        # Error message names the offending field and the diagnostic
+        err = errors[0]
+        assert "segmentation_size" in err
+        assert "16384" in err
+
+    def test_all_invalid_segmentation_sizes_exhausts_retries(self, tmp_path):
+        """If the LLM never corrects, the retry loop exhausts cleanly and raises."""
+        from nodes.ml_model_proposal_agent import _MAX_PROPOSING_RETRIES
+
+        mock_bridge = MagicMock()
+        mock_bridge.generate.side_effect = (
+            [FAKE_COMPARISON_OUTPUT, FAKE_REASONING_OUTPUT]
+            + [self._with_seg(16384)] * (_MAX_PROPOSING_RETRIES + 1)
+        )
+        with pytest.raises(RuntimeError, match="failed after"):
+            self._agent(mock_bridge).run(self._make_pipeline_input(tmp_path))
+
+        assert mock_bridge.generate.call_count == 2 + (_MAX_PROPOSING_RETRIES + 1)

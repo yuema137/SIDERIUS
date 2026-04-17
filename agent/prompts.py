@@ -1,4 +1,5 @@
 # agent/prompts.py
+import inspect
 import json
 
 # ==========================================
@@ -375,9 +376,122 @@ def build_exploration_checklist(
     return "\n".join(lines)
 
 
+# Maximum characters to emit for the config-class source excerpt. Keeps the
+# planner prompt bounded when a plugin config class grows large. Real-world
+# plugin config bodies (validators + fields) typically run 500–1500 chars, so
+# 4000 gives ~2-3x headroom before truncation kicks in.
+_PLUGIN_SOURCE_EXCERPT_MAX_CHARS = 4000
+
+
+def _extract_config_class_source(config_cls) -> str:
+    """Return the source of a Pydantic config class, suitable for injection
+    into the tuner's planner prompt.
+
+    Why: ``PLUGIN_CONFIG_CLASS.model_json_schema()`` exposes per-field bounds
+    (``ge`` / ``le`` / ``multiple_of``) but has no representation for
+    ``@model_validator(mode='after')`` or cross-field ``@field_validator``
+    bodies. The planner is therefore blind to hand-rolled invariants — this
+    was the root cause of the ``exploit_cnn_v1`` iter-1 failure on 2026-04-17
+    (7 consecutive ``nondecreasing channels`` violations).
+
+    We use ``inspect.getsource(config_cls)`` which works uniformly for both
+    built-in config classes (``ml_models/models_format_sandbox.py``) and
+    agent-generated plugin classes (``agent_generated/models/*.py``) without
+    any file-path heuristics. The returned source includes the class body and
+    every ``@*_validator`` decorator inside it.
+
+    Phase D.1 — see ``docs/improving_validation_awareness.md``.
+
+    Args:
+        config_cls: A Pydantic ``BaseModel`` subclass (or ``None``).
+
+    Returns:
+        The class source, truncated to ``_PLUGIN_SOURCE_EXCERPT_MAX_CHARS``
+        with a ``"... (truncated)"`` marker appended when cut. Returns ``""``
+        when ``config_cls`` is falsy or when ``inspect.getsource`` fails
+        (e.g. dynamically constructed class, source file unavailable).
+    """
+    if config_cls is None:
+        return ""
+    try:
+        src = inspect.getsource(config_cls)
+    except (OSError, TypeError):
+        # OSError: source file missing / unreadable.
+        # TypeError: class is a builtin or dynamically constructed.
+        return ""
+    if len(src) > _PLUGIN_SOURCE_EXCERPT_MAX_CHARS:
+        src = src[:_PLUGIN_SOURCE_EXCERPT_MAX_CHARS].rstrip() + "\n... (truncated)"
+    return src
+
+
+def format_plugin_source_excerpt_block(config_cls) -> str:
+    """Wrap ``_extract_config_class_source`` output in the pinned
+    planner-prompt heading.
+
+    Returns ``""`` when the helper yields no source — caller should inject the
+    result unconditionally (an empty string collapses cleanly in the prompt).
+
+    Phase D.1 — paired with ``LLMBridge.plan(plugin_source_excerpt=...)``.
+    """
+    src = _extract_config_class_source(config_cls)
+    if not src:
+        return ""
+    return (
+        "## PLUGIN CONFIG SCHEMA (authoritative — read validators carefully)\n"
+        "The planner prompt's JSON schema below cannot represent "
+        "`@model_validator(mode='after')` or cross-field `@field_validator` "
+        "bodies. Treat the source below as the single source of truth for any "
+        "cross-field invariants; a proposed config that violates one will be "
+        "rejected by the resource-eval skill and burn a retry attempt.\n\n"
+        "```python\n"
+        f"{src}\n"
+        "```\n"
+    )
+
+
 # ==========================================
 # 3. USER PROMPT GENERATORS (The Context)
 # ==========================================
+
+def _format_known_constraints_block(dataset_config=None) -> str:
+    """
+    Render a SYSTEM-ENFORCED DATASET CONSTRAINTS block listing the dataset-level
+    rules that the proposer's ``baseline_config`` is machine-validated against.
+
+    Used by the proposing-stage prompt only — the comparison and causal-reasoning
+    stages don't write ``baseline_config`` and don't need this block.
+
+    Returns an empty string when ``dataset_config`` is None (backward-compat for
+    callers that don't supply one — those callers pre-date this validator).
+
+    See ``docs/improving_validation_awareness.md`` Phase A.2.
+
+    Args:
+        dataset_config: A ``DatasetConfig`` (typically ``TIDMAD``). When None,
+            the helper no-ops and returns "".
+
+    Returns:
+        Formatted block string, or "" when ``dataset_config`` is None.
+    """
+    if dataset_config is None:
+        return ""
+
+    psd = dataset_config.psd_segment_length
+    valid = dataset_config.valid_segmentation_sizes()
+    return f"""## SYSTEM-ENFORCED DATASET CONSTRAINTS
+
+Your `baseline_config` will be machine-validated against the dataset rules below.
+A violation rejects the proposal and re-prompts you with the error — burning one
+of your retry attempts. Pick valid values now.
+
+  segmentation_size — must EXACTLY divide psd_segment_length ({psd:,}).
+                      Valid values: {valid}.
+                      Powers of 2 such as 16384, 8192, 4096 are INVALID
+                      because they do not divide {psd:,}. Use a divisor from
+                      the list above (16000 is the nearest valid neighbor of 16384).
+
+"""
+
 
 def _format_fixed_params_block(plan_overrides=None, max_epochs=None):
     """

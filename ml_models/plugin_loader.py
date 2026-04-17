@@ -14,6 +14,7 @@ Plugin interface — each plugin file must define:
 """
 
 import os
+import sys
 import importlib.util
 
 AGENT_GENERATED_DIR = os.path.join(
@@ -21,18 +22,41 @@ AGENT_GENERATED_DIR = os.path.join(
     "agent_generated", "models",
 )
 
+# Prefix for per-plugin module names registered in ``sys.modules`` after load.
+# The full name is ``_MODULE_NAME_PREFIX + <filename stem>`` so each plugin gets
+# a unique, stable identity. Stability is required for ``inspect.getsource`` /
+# ``inspect.getmodule`` to resolve the source file — without registration, any
+# class loaded from a plugin appears as a built-in (Python's inspect machinery
+# walks ``sys.modules[cls.__module__]`` to find ``__file__``). The tuner's
+# Phase D.1 planner-prompt excerpt (``format_plugin_source_excerpt_block``)
+# depends on that resolution.
+_MODULE_NAME_PREFIX = "siderius_plugin_"
+
 # Populated at load time by extend_registries().
 # Maps plugin model_type → "classifier" or "regressor".
 PLUGIN_OUTPUT_TYPE_REGISTRY: dict[str, str] = {}
 
 
 def _load_plugin(path: str) -> dict | None:
-    """Load a single plugin file. Returns attribute dict or None if invalid."""
-    spec = importlib.util.spec_from_file_location("_siderius_plugin_tmp", path)
+    """Load a single plugin file. Returns attribute dict or None if invalid.
+
+    The module is registered in ``sys.modules`` under a stable, filename-
+    derived name so that downstream callers of ``inspect.getsource(cls)``
+    (Phase D.1 — planner-prompt excerpt) can resolve the source file.
+    Without this, classes defined in the plugin appear as built-ins.
+    """
+    module_name = _MODULE_NAME_PREFIX + os.path.splitext(os.path.basename(path))[0]
+    spec = importlib.util.spec_from_file_location(module_name, path)
     module = importlib.util.module_from_spec(spec)
+    # Register BEFORE exec so the plugin can reference its own module name
+    # (via ``__name__``) without surprising downstream inspect calls.
+    sys.modules[module_name] = module
     try:
         spec.loader.exec_module(module)
     except Exception as e:
+        # Roll back the sys.modules entry on load failure so a broken plugin
+        # can be fixed and retried in the same process.
+        sys.modules.pop(module_name, None)
         print(f"[PluginLoader] Failed to load {path}: {e}")
         return None
 

@@ -136,6 +136,7 @@ class ExperimentRecord(BaseModel):
         "error",
         "skipped_oom_risk",
         "skipped_time_risk",
+        "skipped_schema_violation",
         "error_training",
         "error_training_oom",
         "error_inference",

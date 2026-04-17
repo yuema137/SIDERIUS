@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from agent.schemas.hyperparam_tuning import ExpertAdvice, ExpertAdviceInput
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 
 
 # ---------------------------------------------------------------------------
@@ -717,3 +718,40 @@ class ProposalOutput(BaseModel):
                     "formal_time_budget_minutes — was not supplied at the workflow "
                     "level).",
     )
+
+    @model_validator(mode="after")
+    def _validate_baseline_segmentation_size(self):
+        """Ensure ``baseline_config`` respects the dataset's ``segmentation_size`` rule.
+
+        See ``docs/improving_validation_awareness.md`` Phase A.1 — moves the
+        ``psd_segment_length % segmentation_size == 0`` check from deep inside the
+        tuner (``_validate_data_config``) up to the proposer's output gate, so
+        an invalid baseline is rejected before the implementor and tuner are
+        invoked. The proposer node's existing retry loop feeds this error back
+        via ``previous_failures``, giving the LLM one upstream chance to fix it.
+
+        No-ops gracefully when ``baseline_config`` lacks ``model_config`` or the
+        nested ``segmentation_size`` field — some architectures don't have one,
+        and existing tests construct ``ProposalOutput`` with ``baseline_config={}``.
+        """
+        model_cfg = self.baseline_config.get("model_config") if self.baseline_config else None
+        if not isinstance(model_cfg, dict):
+            return self
+        seg = model_cfg.get("segmentation_size")
+        if seg is None:
+            return self
+        if not isinstance(seg, int) or seg <= 0:
+            raise ValueError(
+                f"baseline_config['model_config']['segmentation_size'] must be a "
+                f"positive int, got {seg!r}."
+            )
+        psd = DATASET_CONFIG.psd_segment_length
+        if psd % seg != 0:
+            valid = DATASET_CONFIG.valid_segmentation_sizes()
+            raise ValueError(
+                f"baseline_config['model_config']['segmentation_size'] ({seg}) "
+                f"must exactly divide psd_segment_length ({psd}). "
+                f"Remainder: {psd % seg}. "
+                f"Valid segmentation_size values: {valid}."
+            )
+        return self

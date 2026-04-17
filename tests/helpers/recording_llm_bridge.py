@@ -74,12 +74,17 @@ class RecordingLLMBridge:
 
     def plan(self, memory_history, expert_advice="None", force_model="auto",
              config_manual=None, model_description=None,
-             exploration_checklist="", current_round=None,
-             max_rounds=None, trial_allowed=True) -> Dict[str, Any]:
+             exploration_checklist="", plugin_source_excerpt="",
+             current_round=None, max_rounds=None, trial_allowed=True,
+             **kwargs) -> Dict[str, Any]:
         """Mirror of :meth:`LLMBridge.plan`. In the real bridge, ``plan``
         assembles a prompt and calls ``generate``. Here we record the call
         and pop from the ``"generate"`` queue (since the predefined response
-        is the ExperimentPlan dict that ``plan`` would have returned)."""
+        is the ExperimentPlan dict that ``plan`` would have returned).
+
+        ``**kwargs`` swallows any new optional planner arg (e.g.
+        ``plan_overrides``, ``max_epochs``) so adding one to the real bridge
+        doesn't require touching every fixture."""
         self.calls.append(("plan", memory_history, expert_advice, force_model))
         return self._pop("generate")
 
