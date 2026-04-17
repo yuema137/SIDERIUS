@@ -20,6 +20,7 @@ import sys
 import os
 
 import torch
+from pydantic import ValidationError
 from ml_models.models_sandbox import MODEL_REGISTRY
 from ml_models.models_format_sandbox import get_config_class
 
@@ -42,6 +43,53 @@ def _count_params(model_type: str, model_cfg: dict, loss_type: str) -> int:
         model = MODEL_REGISTRY[model_type](config_obj)
 
     return sum(p.numel() for p in model.parameters())
+
+
+def _extract_schema_violations(exc: ValidationError) -> list[dict]:
+    """Turn a pydantic ``ValidationError`` into a serializable list of
+    per-field records.
+
+    Each entry has:
+      * ``loc``  — dotted path to the offending field (e.g. ``"context_stem_channels"``
+        or ``"__root__"`` for ``@model_validator(mode='after')`` cross-field rules).
+      * ``type`` — pydantic error type slug (``value_error``, ``multiple_of``,
+        ``greater_than_equal`` …). Lets the tuner planner distinguish per-field
+        bounds from cross-field invariants.
+      * ``msg``  — human-readable error message.
+      * ``input`` — the raw input value that pydantic rejected (``None`` when
+        the error came from an ``@model_validator`` body, since the validator
+        ran on the fully-built model rather than one input field).
+
+    Phase D.4 — `docs/improving_validation_awareness.md`. See that doc for why
+    we surface the structured entries rather than the raw error string: the
+    tuner's next-attempt planner reads these back via the saved
+    ``skipped_schema_violation`` record's ``memory.memory_update`` field.
+    """
+    violations: list[dict] = []
+    for err in exc.errors():
+        loc = ".".join(str(p) for p in err.get("loc", ())) or "__root__"
+        violations.append({
+            "loc":   loc,
+            "type":  err.get("type", "unknown"),
+            "msg":   err.get("msg", ""),
+            "input": err.get("input"),
+        })
+    return violations
+
+
+def _format_schema_violation_verdict(violations: list[dict]) -> str:
+    """Short human-readable one-liner for the tuner's stdout + record.
+
+    Truncated intentionally — the full structured list goes into the record's
+    ``violations`` field. This string is only for the log line and the
+    ``memory.conclusion`` narrative."""
+    if not violations:
+        return "Schema rejected config (no details)."
+    parts = []
+    for v in violations[:3]:  # first 3 is plenty for a log line
+        parts.append(f"{v['loc']}={v.get('input')!r} ({v['type']})")
+    extra = "" if len(violations) <= 3 else f" (+{len(violations) - 3} more)"
+    return "Schema rejected config: " + "; ".join(parts) + extra
 
 
 def _estimate_bytes(
@@ -107,7 +155,32 @@ def run_skill(sandbox, **kwargs):
 
     try:
         # ── 1. Count params by instantiating the model ────────────────────
-        num_params = _count_params(model_type, model_cfg, loss_type)
+        # Phase D.4: a Pydantic ``ValidationError`` from the plugin's
+        # ``PLUGIN_CONFIG_CLASS`` signals a tuner-proposed config that violated
+        # either a per-field bound (``ge`` / ``le`` / ``multiple_of``) or a
+        # cross-field ``@model_validator(mode='after')`` invariant. The tuner's
+        # planner cannot see the latter class of rule through
+        # ``model_json_schema()`` (it drops validator bodies). Surface a
+        # structured ``schema_violation`` so the tuner can save a dedicated
+        # ``skipped_schema_violation`` record instead of crashing with a
+        # generic "Loop Error". See docs/improving_validation_awareness.md §D.4.
+        try:
+            num_params = _count_params(model_type, model_cfg, loss_type)
+        except ValidationError as ve:
+            violations = _extract_schema_violations(ve)
+            verdict = _format_schema_violation_verdict(violations)
+            print(f"    SCHEMA REJECT: {verdict}")
+            return {
+                "status":           "schema_violation",
+                "violations":       violations,
+                "offending_config": model_cfg,
+                "message":          verdict,
+                "verdict":          verdict,
+                "suggestion": (
+                    "Propose a config that satisfies the plugin's schema "
+                    "invariants. DO NOT repeat the same field/value combination."
+                ),
+            }
         print(f"    Parameters  : {num_params:,}")
 
         # ── 2. Estimate memory breakdown ──────────────────────────────────
