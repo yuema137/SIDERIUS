@@ -1,6 +1,6 @@
 # Validation-Awareness Across Proposer + Implementor
 
-**Status**: Phase A complete 2026-04-16; Phase B.1 + B.2a landed 2026-04-17, B.2b+ in progress; **Phase D observed + designed 2026-04-17** (implementor→tuner cross-field invariants)
+**Status**: Phase A complete 2026-04-16; Phase B.1 + B.2a landed 2026-04-17, B.2b+ in progress; **Phase D.4 landed 2026-04-17** (reactive constraint-aware retry); D.1/D.2/D.3/D.5 pending
 **Author**: design discussion 2026-04-16; Phase D addendum 2026-04-17
 **Motivation**: two iter-1 runs (`exploit_cnn_v1`, `explore_novel_v1`, launched 2026-04-16 23:02) burned their entire 9-attempt budgets and produced **zero successful rounds** because the proposer wrote `baseline_config` values that violated downstream validation rules. Both runs reached `status="partial", completed_rounds=0, all_records=[]` after ~2.5 minutes each, then advanced to iter-2 and would have repeated the same failure mode for the rest of the 20-iteration budget. A **second class of failure** surfaced during the Phase C.3 re-launch on 2026-04-17: `exploit_cnn_v1` iter-1 burned 9 attempts on the same pydantic `@model_validator(mode='after')` cross-field invariant (`nondecreasing channels`) — the tuner's planner cannot see this kind of rule because `PLUGIN_CONFIG_CLASS.model_json_schema()` drops `@model_validator` bodies. Phase D closes this new gap.
 
@@ -17,6 +17,7 @@
 | B.2a — baseline-self-check helper + wiring into `_validate_code`; existing retry loop picks up schema-relax path | 2026-04-17 | `4ca5ca4` | 17 new tests; 105 full implementor suite green |
 | C.3 (test infra) — Tier-3 replay test `test_baseline_validation_fix.py` for propose→implement→validate slice of the 2026-04-16 failures | 2026-04-17 | `3458ef0` | 2 new real-LLM tests; both passed (601 s) |
 | D observation — `exploit_cnn_v1` iter-1 re-launch burned 9 attempts on `@model_validator` cross-field invariant (`nondecreasing channels`); root-caused to `model_json_schema()` dropping validator bodies | 2026-04-17 | run log `logs/exploit_cnn_v1_20260417_005517.log` | design below |
+| D.4 — reactive constraint-aware retry: `skipped_schema_violation` record type, wrapper returns structured `schema_violation` on `ValidationError`, tuner saves record + continues without advancing round | 2026-04-17 | `51c0b87` (schema) + `8785f8d` (wrapper) + `5c65106` (tuner) + `5e65655` (tests + doc) | 3 new schema tests + 10 new D.4 tests (`test_constraint_aware_retry.py`); 193 full `tune_ml_hyperparam_agent` suite green |
 
 ---
 
@@ -391,7 +392,7 @@ Sibling upgrade to D.2: in addition to plain-English, implementor emits machine-
   - [ ] tuner-side gate short-circuits before resource check on violation
 - [ ] Note: only land if D.1+D.2+D.4 leave measurable failure rate. Revisit after one full real-run cycle with D.1+D.2 in place.
 
-#### D.4 — Constraint-aware retry (low effort, reactive)
+#### D.4 — Constraint-aware retry (low effort, reactive) ✅
 
 Safety net: if a `ValidationError` slips through D.1–D.3 prevention, surface the *specific violating rule* back to the planner via the next attempt's `memory_history`, not as a generic "Loop Error".
 
@@ -399,22 +400,27 @@ Safety net: if a `ValidationError` slips through D.1–D.3 prevention, surface t
 
 This keeps D.4 identical in behavior (planner sees structured, field-level signal on next attempt) but removes ~30 lines of bespoke plumbing. Reconsider the dedicated accumulator only if real runs show the planner still repeats violations after 2-3 records (i.e. memory-history rendering is too dilute to cut through). Deviation explicitly flagged so the doc keeps pace with what was built.
 
-- [ ] Add `"skipped_schema_violation"` to `ExperimentRecord.status` Literal in `agent/schemas/hyperparam_tuning.py`.
-- [ ] Extend `agent/skills/evaluate_resource_skill/wrapper.py`: wrap the `_count_params(...)` call (which is what currently triggers Pydantic instantiation via `get_config_class(model_type)(**model_cfg)`) in a dedicated `try/except ValidationError` **before** the existing broad `except Exception`. On `ValidationError`, extract each `err.errors()` entry into a `violations: list[dict]` with keys `loc` (tuple joined with `.`), `type` (e.g. `value_error`, `multiple_of`, `greater_than_equal`), `msg`, and `input` (if present). Return `{"status": "schema_violation", "violations": [...], "offending_config": model_cfg, "message": <readable summary>, "verdict": <short one-liner>, "suggestion": <"relax schema or propose a valid combo">}` instead of re-raising.
-- [ ] In `nodes/ml_hyperparameter_tune_agent.py`, add a new branch after line 455 (mirroring the `skipped_oom_risk` / `skipped_time_risk` pattern):
-  - `if resource_check.get("status") == "schema_violation":`
-  - Build and validate an `ExperimentRecord` with `status="skipped_schema_violation"`, `params=record_params`, `denoising_score=None`.
-  - Populate `memory.conclusion` with "Skipped: config violated plugin schema. Violating fields: {field_list}. Offending values: {values}."
-  - Populate `memory.memory_update` with "DO NOT repeat these field values. Constraint: {structured summary of each violation}. Either change the value or (if the rule is wrong) note that the schema may need relaxation."
-  - `sandbox.save_record(...)` then `continue` — the attempt does NOT count as a round, exactly like the OOM/time skip records.
-- [ ] Unit tests (`tests/unit/agent/tune_ml_hyperparam_agent/test_constraint_aware_retry.py`, new file):
-  - [ ] Wrapper: `ValidationError` from `@model_validator(mode='after')` body (the exact `dual_path_skip_fusion_cnn` case — nondecreasing channels) produces `status="schema_violation"` with the offending field names present in `violations`.
-  - [ ] Wrapper: per-field `multiple_of` violation extracted with `type="multiple_of"` and input value preserved.
-  - [ ] Wrapper: per-field `ge`/`le` violation extracted with correct `type`.
-  - [ ] Wrapper: when `_count_params` succeeds (valid config), the new branch is not taken — existing happy-path response is unchanged.
-  - [ ] Schema: `ExperimentRecord.model_validate({..., "status": "skipped_schema_violation", ...})` accepts the new literal.
-  - [ ] End-to-end with RecordingSandbox-style fake (or minimal mock): a wrapper returning `status="schema_violation"` causes the tuner to save a `skipped_schema_violation` record, not raise, and not advance `completed_rounds`.
-- [ ] Drawback: purely reactive — wastes the first attempt before the signal arrives. Most valuable when paired with D.1 (prevention) as belt-and-suspenders. Prompt-side rendering relies on the existing `memory_history` mechanism; if real runs show dilution, escalate to a dedicated pinned block later.
+- [x] Added `"skipped_schema_violation"` to `ExperimentRecord.status` Literal in `agent/schemas/hyperparam_tuning.py` (commit `51c0b87`).
+- [x] Extended `agent/skills/evaluate_resource_skill/wrapper.py` (commit `8785f8d`): two new helpers `_extract_schema_violations` (turns `ValidationError.errors()` into serializable dicts with `loc` / `type` / `msg` / `input`; empty `loc` normalized to `"__root__"` for `@model_validator` cross-field rules) and `_format_schema_violation_verdict` (short one-liner for logs + `memory.conclusion`). The `_count_params(...)` call in `run_skill` is now wrapped in a dedicated `try/except ValidationError` **before** the existing broad `except Exception`; on match, returns `{"status": "schema_violation", "violations": [...], "offending_config": model_cfg, "message": <verdict>, "verdict": <verdict>, "suggestion": "Propose a config that satisfies the plugin's schema invariants. DO NOT repeat the same field/value combination."}` instead of raising.
+- [x] In `nodes/ml_hyperparameter_tune_agent.py` (commit `5c65106`), added a new branch after the resource-check-error check and before the feasibility check, mirroring `skipped_oom_risk` / `skipped_time_risk`:
+  - `if resource_check.get("status") == "schema_violation":` — builds and validates an `ExperimentRecord` with `status="skipped_schema_violation"`, `params=record_params`, `denoising_score=None`.
+  - `memory.conclusion` reads *"Skipped: plugin schema rejected the proposed model_config. Violating fields: {field_list}. Offending values: {offending}."*
+  - `memory.memory_update` reads *"DO NOT repeat this exact combination — plugin schema requires: {violation_summary}. Propose a config that satisfies every @model_validator(mode='after') and per-field bound in the plugin's PLUGIN_CONFIG_CLASS."*
+  - Calls `sandbox.save_record(...)` then `continue` — the attempt does NOT count as a round, identical to the OOM/time-skip records.
+- [x] Unit tests (`tests/unit/agent/tune_ml_hyperparam_agent/test_constraint_aware_retry.py`, 10 tests across 3 classes — commit `5e65655`):
+  - [x] `TestExtractor::test_model_validator_violation_loc_is_root` — `@model_validator(mode='after')` empty `loc` normalized to `"__root__"`.
+  - [x] `TestExtractor::test_multiple_of_loc_and_type_and_input` — `multiple_of` violation captures `loc`, `type="multiple_of"`, and `input` verbatim.
+  - [x] `TestExtractor::test_greater_than_equal_loc_and_type` — `ge` violation extracted with correct `type="greater_than_equal"`.
+  - [x] `TestWrapperSchemaViolation::test_model_validator_violation_returns_schema_violation` — mock nondecreasing-channels class (mirrors `dual_path_skip_fusion_cnn` invariant) → `status="schema_violation"`, offending config + suggestion + verdict present.
+  - [x] `TestWrapperSchemaViolation::test_multiple_of_violation_returns_schema_violation` — per-field `multiple_of` surfaces through the wrapper.
+  - [x] `TestWrapperSchemaViolation::test_ge_violation_returns_schema_violation` — per-field `ge` surfaces through the wrapper.
+  - [x] `TestWrapperSchemaViolation::test_happy_path_unchanged` — valid real `rnn` plugin config → `status="success"`, `feasible=True` (confirms the new branch doesn't intercept healthy configs).
+  - [x] `TestTunerSchemaViolationBehavior::test_does_not_raise_does_not_advance_rounds` — 3/3 attempts schema_violation → `status="partial"`, `completed_rounds=0`, no exception.
+  - [x] `TestTunerSchemaViolationBehavior::test_all_records_saved_as_skipped_schema_violation` — every saved record carries the new literal.
+  - [x] `TestTunerSchemaViolationBehavior::test_record_memory_carries_violation_details` — `memory.conclusion` names the violating field + offending values; `memory.memory_update` carries "DO NOT" marker + the pydantic rule text verbatim.
+  - Schema-side coverage handled by 3 tests in `test_hyperparam_schemas.py::TestExperimentRecordSchemaViolation` (commit `51c0b87`).
+- [x] Full `tune_ml_hyperparam_agent` suite green after each step (193 tests at step 3; 10/10 new D.4 tests at step 4).
+- **Drawback (unchanged from design)**: purely reactive — wastes the first attempt before the signal arrives. Most valuable when paired with D.1 (prevention) as belt-and-suspenders. Prompt-side rendering relies on the existing `memory_history` mechanism; if real runs show dilution, escalate to a dedicated pinned block later.
 
 #### D.5 — Phase D acceptance test
 
