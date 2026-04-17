@@ -268,7 +268,9 @@ class LLMBridge:
              exploration_checklist: str = "",
              current_round: Optional[int] = None,
              max_rounds: Optional[int] = None,
-             trial_allowed: bool = True) -> Dict:
+             trial_allowed: bool = True,
+             plan_overrides: Optional[Dict] = None,
+             max_epochs: Optional[int] = None) -> Dict:
         """
         Uses the Planner logic to observe Research Memory and decide next steps.
         Incorporates physical constraints from config_manual and architecture
@@ -280,6 +282,10 @@ class LLMBridge:
             current_round:    Current round number (1-based). Forwarded to prompt.
             max_rounds:       Total rounds in this run. Forwarded to prompt.
             trial_allowed:    Whether the LLM may choose trial mode. Forwarded to prompt.
+            plan_overrides:   Operator-frozen plan fields. When set, the prompt
+                              renders a SYSTEM-FIXED PARAMETERS block so the LLM
+                              knows which knobs it does not control.
+            max_epochs:       Hard cap on epochs. Forwarded to the FIXED block.
         """
         system_prompt = PLANNER_PROMPT
 
@@ -298,6 +304,8 @@ class LLMBridge:
             current_round=current_round,
             max_rounds=max_rounds,
             trial_allowed=trial_allowed,
+            plan_overrides=plan_overrides,
+            max_epochs=max_epochs,
         )
 
         # Assemble final prompt: user prompt + checklist + description + manual

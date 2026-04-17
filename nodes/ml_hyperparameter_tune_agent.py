@@ -279,6 +279,8 @@ class HyperparamTuningAgent:
                     current_round=iteration,
                     max_rounds=max_rounds,
                     trial_allowed=trial_allowed,
+                    plan_overrides=agent_input.plan_overrides,
+                    max_epochs=agent_input.max_epochs,
                 )
 
                 # Validate LLM output into ExperimentPlan (with fallback)

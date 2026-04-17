@@ -379,6 +379,64 @@ def build_exploration_checklist(
 # 3. USER PROMPT GENERATORS (The Context)
 # ==========================================
 
+def _format_fixed_params_block(plan_overrides=None, max_epochs=None):
+    """
+    Render a SYSTEM-FIXED PARAMETERS block for the planner prompt when the
+    operator has frozen any plan fields via ``plan_overrides`` or capped
+    ``max_epochs``. Returns an empty string when nothing is set, so the prompt
+    is unchanged for runs that do not use overrides.
+
+    The block tells the LLM (a) which fields it does NOT control this run, and
+    (b) that the standard prompt's phase-progression / "increase trial_portion"
+    advice does not apply when those knobs are frozen. Without this, the LLM
+    wastes reasoning on knobs the workflow silently overrides.
+    """
+    overrides = dict(plan_overrides) if plan_overrides else {}
+    has_max_epochs = max_epochs is not None
+    if not overrides and not has_max_epochs:
+        return ""
+
+    lines = []
+    if "is_trial" in overrides:
+        lines.append(f"  is_trial         = {overrides['is_trial']}   "
+                     f"← trial mode (final round auto-flips to formal)")
+    if "trial_portion" in overrides:
+        lines.append(f"  trial_portion    = {overrides['trial_portion']}")
+    if "train_portion" in overrides:
+        lines.append(f"  train_portion    = {overrides['train_portion']}    "
+                     f"← full per-epoch pass (no per-epoch subsampling)")
+    if "eval_portion" in overrides:
+        lines.append(f"  eval_portion     = {overrides['eval_portion']}    "
+                     f"← formal mode auto-uses 1.0")
+    # Render any other override keys generically
+    rendered_keys = {"is_trial", "trial_portion", "train_portion", "eval_portion"}
+    for k, v in overrides.items():
+        if k not in rendered_keys:
+            lines.append(f"  {k:16s} = {v}")
+    if has_max_epochs:
+        lines.append(f"  epochs (cap)     ≤ {max_epochs}      ← higher values are clamped")
+
+    fixed_lines = "\n".join(lines)
+    return f"""
+### SYSTEM-FIXED PARAMETERS (operator-set; do NOT vary):
+The operator has frozen these plan fields. Any other value you pick will be silently
+overridden — reflect these values verbatim in your JSON output and do not waste reasoning
+on them.
+
+{fixed_lines}
+
+Your control surface this run:
+  - model_type + model_config (architecture, segmentation_size, channel widths, …)
+  - loss_config (loss_type)
+  - train_config (lr, batch_size; epochs is capped)
+  - trial_strategy + target_files; eval_strategy; train_validation_align
+
+NOTE: Standard guidance below mentions varying trial_portion/epochs (phase-progression,
+"increase trial_portion if scores are poor"). Those instructions do not apply this run
+since those knobs are frozen — focus your reasoning on architecture, lr, and loss_type.
+"""
+
+
 def get_planner_user_prompt(
     memory_history,
     expert_advice="None",
@@ -386,6 +444,8 @@ def get_planner_user_prompt(
     current_round=None,
     max_rounds=None,
     trial_allowed=True,
+    plan_overrides=None,
+    max_epochs=None,
 ):
     """
     Constructs the prompt for the Planner.
@@ -398,6 +458,10 @@ def get_planner_user_prompt(
         max_rounds:     Total rounds in this run. None = omit round context.
         trial_allowed:  Whether the LLM may choose trial mode. When False, the
                         LLM must set is_trial=false.
+        plan_overrides: Dict of plan fields the operator has frozen. When set,
+                        a SYSTEM-FIXED PARAMETERS block is rendered so the LLM
+                        does not waste reasoning on overridden knobs.
+        max_epochs:     Hard cap on epochs. Rendered alongside plan_overrides.
     """
     history_context = json.dumps(memory_history, indent=2) if memory_history else "No previous experiments recorded."
 
@@ -521,7 +585,10 @@ def get_planner_user_prompt(
                 "- Use trial mode for fast exploration; switch to formal when you want a definitive score.\n"
             )
 
+    fixed_params_block = _format_fixed_params_block(plan_overrides, max_epochs)
+
     return f"""
+{fixed_params_block}
 ### Human Expert Advice:
 {expert_advice}
 
