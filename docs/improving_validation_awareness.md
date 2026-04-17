@@ -1,6 +1,6 @@
 # Validation-Awareness Across Proposer + Implementor
 
-**Status**: Phase A complete 2026-04-16; Phase B.1 landed 2026-04-17, B.2+ in progress
+**Status**: Phase A complete 2026-04-16; Phase B.1 + B.2a landed 2026-04-17, B.2b+ in progress
 **Author**: design discussion 2026-04-16
 **Motivation**: two iter-1 runs (`exploit_cnn_v1`, `explore_novel_v1`, launched 2026-04-16 23:02) burned their entire 9-attempt budgets and produced **zero successful rounds** because the proposer wrote `baseline_config` values that violated downstream validation rules. Both runs reached `status="partial", completed_rounds=0, all_records=[]` after ~2.5 minutes each, then advanced to iter-2 and would have repeated the same failure mode for the rest of the 20-iteration budget.
 
@@ -13,7 +13,8 @@
 | A.2 + A.3 — `_format_known_constraints_block` helper, `{known_constraints_block}` placeholder in `proposing_stage.md`, wired in `nodes/ml_model_proposal_agent.py` with `DATASET_CONFIG` | 2026-04-16 | `8c37d61` | 10 new tests; 263 full proposer suite green |
 | A.4 — confirm existing proposer retry loop catches the A.1 validator (no new wiring) + 3 integration tests | 2026-04-16 | `ff59aa8` | 3 new tests in `TestSegmentationSizeRetryIntegration`; 28 full pipeline_runner suite green |
 | A.5 — Phase A acceptance gate (stubborn-LLM scenario covered by A.4 unit tests; dual-mode test deferred to C.3) | 2026-04-16 | `b904fe2` | 272 tests (266 proposer + 6 dataset_config) |
-| B.1 — `ConfigAdjustment` schema + `ImplementorOutput.baseline_config_adjustments` dict; §2.4 policy enforced (forbidden list for dataset-level fields; ±20% delta on numeric; bool/str rejected) | 2026-04-17 | (this commit) | 22 new tests; 88 full implementor suite green |
+| B.1 — `ConfigAdjustment` schema + `ImplementorOutput.baseline_config_adjustments` dict; §2.4 policy enforced (forbidden list for dataset-level fields; ±20% delta on numeric; bool/str rejected) | 2026-04-17 | `240fd5e` | 22 new tests; 88 full implementor suite green |
+| B.2a — baseline-self-check helper + wiring into `_validate_code`; existing retry loop picks up schema-relax path | 2026-04-17 | (this commit) | 17 new tests; 105 full implementor suite green |
 
 ---
 
@@ -206,17 +207,27 @@ Catches `multiple_of=2` vs `refiner_kernel_size=5` before the tuner runs.
 - [x] Unit tests: `tests/unit/agent/ml_model_implementor/test_config_adjustment_schema.py` (22 tests across 4 classes: numeric policy, categorical rejection, edge cases, ImplementorOutput ownership, module constants)
 
 #### B.2 — Implementor post-write check
-- [ ] After writing the plugin file in `nodes/ml_model_implementor.py`, import it via `importlib`
-- [ ] Run `module.PLUGIN_CONFIG_CLASS(**baseline_config['model_config'])`
-- [ ] Two outcomes:
-  1. Pass → no adjustment, `baseline_config_adjustments={}`, return success
-  2. Pydantic raises → consume one of `max_retries=2`, feed `previous_validation_failure` to LLM with the adjust-or-relax instruction (see B.3). The LLM is responsible for resolving — either by editing the schema or by emitting a `baseline_config_adjustments` entry with a value that passes its own schema. The post-write check re-runs after each retry.
-- [ ] On all retries exhausted with the conflict still present, the implementor returns a failure status that propagates to the iteration controller (existing failure-path; no new wiring)
-- [ ] Unit tests: `tests/unit/agent/ml_model_implementor/test_baseline_self_check.py`
-  - [ ] schema accepts baseline as-is → no retry, no adjustment, success
-  - [ ] schema rejects baseline → retry consumed, LLM-corrected schema (or adjustment) accepted on attempt 2
-  - [ ] schema still rejects after all retries → implementor returns failure
-  - [ ] adjustment violating §2.4 policy (dataset-level field, > 20% delta) → ConfigAdjustment validator rejects, retry consumed
+
+Split into two sub-steps for digestibility:
+
+##### B.2a — Baseline self-check fires via existing retry loop (schema-relax path) ✅
+
+- [x] New helper `_check_baseline_schema_compatibility(plugin_src, model_name, baseline_config)` in `nodes/ml_model_implementor.py` — imports the written plugin via `importlib.util`, then runs `PLUGIN_CONFIG_CLASS(**baseline_config['model_config'])`. On failure returns a human-readable error string; on success returns `None`. No-ops when baseline is empty. Never raises (graceful on malformed plugins — the smoke/syntax checks surface those).
+- [x] Wired as the 5th check inside `MLModelImplementor._validate_code` (after smoke test) so the **existing** repair loop picks up the error automatically via `_build_repair_prompt` — no new retry machinery needed. This is the exact pattern Phase A.4 established on the proposer side.
+- [x] Error message routes the LLM: names the offending field, includes the offending `model_config` dict verbatim, says "RELAX the offending schema constraint", reminds it not to touch `segmentation_size` (proposer-owned per §2.1).
+- [x] **Scope for this sub-step is the schema-relax path only** — the LLM resolves the conflict by regenerating its schema with a less restrictive constraint. `baseline_config_adjustments` stays empty; the explicit adjust-path lands in B.2b.
+- [x] Failure on all retries propagates via the existing `ValueError("Code generation failed after {max_retries + 1} attempts...")` path — no new failure wiring.
+- [x] Unit + integration tests: `tests/unit/agent/ml_model_implementor/test_baseline_self_check.py` (17 tests across 5 classes: no-op paths, schema-accepts, schema-rejects with error content checks, graceful handling of malformed plugins, `_validate_code` integration with check ordering).
+
+##### B.2b — LLM-driven `baseline_config_adjustments` emission (adjust path)
+
+Requires B.3's prompt work first so LLM knows the adjust option exists.
+
+- [ ] Extend the code-generation output JSON schema with optional `baseline_config_adjustments: Dict[str, {original_value, adjusted_value, reason}]`
+- [ ] Implementor applies any returned adjustments to the written plugin's config defaults before re-running the baseline check
+- [ ] Validate adjustments against `ConfigAdjustment` (from B.1); a policy violation (forbidden field, > ±20%) consumes a retry just like a pydantic failure
+- [ ] Populate `ImplementorOutput.baseline_config_adjustments` so downstream protocols (B.4) can thread it through
+- [ ] Unit tests: valid adjustment captured, forbidden adjustment triggers retry, > ±20% adjustment triggers retry, empty adjustments dict is the default success path
 
 #### B.3 — Implementor retry prompt: adjust-or-relax instruction
 - [ ] Extend the retry prompt with a section: *"Your schema rejected the proposer's baseline value `<field>=<value>` (constraint: `<constraint>`). You have two options: (a) relax the constraint so the baseline value is accepted, or (b) change the constraint so the nearest valid value is within ±20% of `<value>`. You MAY NOT change `segmentation_size` — that is the proposer's responsibility, not yours."*

@@ -143,6 +143,87 @@ def _smoke_test_plugin(plugin_src: str, model_name: str) -> str | None:
             pass
 
 
+def _check_baseline_schema_compatibility(
+    plugin_src: str,
+    model_name: str,
+    baseline_config: dict,
+) -> str | None:
+    """
+    Verify the implementor's pydantic config schema accepts the proposer's
+    ``baseline_config['model_config']`` values — not just its own defaults.
+
+    This is Phase B.2's post-write gate. The smoke test already instantiates
+    ``PLUGIN_CONFIG_CLASS()`` with defaults (which always pass by construction);
+    this helper instantiates ``PLUGIN_CONFIG_CLASS(**model_config)`` with the
+    values the proposer actually asked for. A mismatch means the implementor
+    invented a constraint (e.g. ``multiple_of=2``) that rejects the proposer's
+    baseline (e.g. ``refiner_kernel_size=5``) — the exact failure mode seen in
+    the 2026-04-16 `explore_novel_v1` run.
+
+    The returned error string is consumed by the existing `_validate_code` →
+    `_build_repair_prompt` retry loop, so no new wiring is needed.
+
+    Returns ``None`` on success (or when there is no baseline to check), or a
+    human-readable error string describing the rejection and pointing the LLM
+    toward the adjust-or-relax options. Never raises — unexpected errors are
+    returned as None so the smoke test / syntax check can surface them instead.
+
+    Args:
+        plugin_src: The assembled plugin source code.
+        model_name: The snake_case model type (used as import name).
+        baseline_config: ``inp.baseline_config`` — the full proposer baseline.
+            The ``model_config`` subdict is what gets fed to the schema.
+
+    Returns:
+        ``None`` when the schema accepts the baseline (or when there is nothing
+        to check), or an error string when the schema rejects it.
+    """
+    model_cfg = (baseline_config or {}).get("model_config") or {}
+    if not model_cfg:
+        return None  # No baseline values to check — skip gracefully
+
+    tmp_dir = tempfile.mkdtemp(prefix="siderius_basecheck_")
+    tmp_path = os.path.join(tmp_dir, f"{model_name}.py")
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(plugin_src)
+
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(model_name, tmp_path)
+        if spec is None or spec.loader is None:
+            return None  # Smoke/syntax check already covers import failure
+        mod = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(mod)
+        except Exception:
+            return None  # Import error — smoke/syntax check will surface it
+
+        if not hasattr(mod, "PLUGIN_CONFIG_CLASS"):
+            return None  # Smoke test will surface the missing attribute
+
+        try:
+            mod.PLUGIN_CONFIG_CLASS(**model_cfg)
+        except Exception as exc:
+            return (
+                f"Baseline self-check failed: the plugin's PLUGIN_CONFIG_CLASS "
+                f"rejects the proposer's baseline_config.model_config. "
+                f"Schema error: {type(exc).__name__}: {exc}\n"
+                f"Proposer's model_config was: {model_cfg}\n"
+                f"To fix: RELAX the offending schema constraint on the field "
+                f"named in the error above so the baseline value is accepted. "
+                f"Do NOT change `segmentation_size` — that field is owned by "
+                f"the proposer."
+            )
+        return None
+
+    finally:
+        try:
+            os.remove(tmp_path)
+            os.rmdir(tmp_dir)
+        except OSError:
+            pass
+
+
 # ---------------------------------------------------------------------------
 # Templates
 # ---------------------------------------------------------------------------
@@ -600,10 +681,23 @@ class MLModelImplementor:
                 f"Check for undefined helper classes or malformed expressions."
             )
 
-        # Check 3: smoke test (instantiate + forward pass)
+        # Check 3: smoke test (instantiate + forward pass with defaults)
         smoke_error = _smoke_test_plugin(plugin_src, inp.model_name)
         if smoke_error:
             return f"Smoke test failed: {smoke_error}"
+
+        # Check 4 (Phase B.2a): baseline self-check. The smoke test uses
+        # schema defaults only; here we instantiate PLUGIN_CONFIG_CLASS with
+        # the proposer's actual baseline_config.model_config to catch
+        # implementor-invented constraints (e.g. multiple_of=2) that reject
+        # the proposer's values. On failure, the existing retry loop picks
+        # up the error and feeds it to the LLM via _build_repair_prompt.
+        # See docs/improving_validation_awareness.md Phase B.2.
+        baseline_error = _check_baseline_schema_compatibility(
+            plugin_src, inp.model_name, inp.baseline_config,
+        )
+        if baseline_error:
+            return baseline_error
 
         return None  # all good
 
