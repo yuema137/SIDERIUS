@@ -648,7 +648,28 @@ try:
     import os as _os, sys as _sys
     _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
     from ml_models.plugin_loader import extend_registries as _extend_registries
-    from models_format_sandbox import PLUGIN_CONFIG_REGISTRY as _plugin_cfg_reg
+    # Use the packaged import path (``ml_models.models_format_sandbox``) so the
+    # registry we populate here is the *same* module object every downstream
+    # caller reads from via ``from ml_models.models_format_sandbox import ...``.
+    # The bare form ``from models_format_sandbox import ...`` resolves to a
+    # separate module when ``ml_models/`` is also on sys.path, producing a
+    # duplicate module whose PLUGIN_CONFIG_REGISTRY is disconnected from
+    # ``get_config_class`` — plugin config classes then silently resolve to
+    # ``None`` at tuner time. See docs/improving_validation_awareness.md §D.5.
+    from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY as _plugin_cfg_reg
     _extend_registries(MODEL_REGISTRY, _plugin_cfg_reg)
+    # Mirror onto the bare-name identity if it was loaded separately. Bare
+    # imports (``from models_format_sandbox import ...``) — used by the
+    # training subprocess (``execute_tools/train_engine_sandbox.py``),
+    # ``execute_tools/inference_single.py``, and ``ml_models/loss_models_sandbox.py``
+    # — resolve to a distinct module object when ``ml_models/`` is on sys.path.
+    # Without mirroring, ``get_config_class()`` called through the bare
+    # identity reads an empty registry and returns ``None`` for every plugin,
+    # crashing the training subprocess with ``Unknown model_type``.
+    # See docs/improving_validation_awareness.md §D.5.
+    _bare_fmt = _sys.modules.get('models_format_sandbox')
+    _pkg_fmt = _sys.modules.get('ml_models.models_format_sandbox')
+    if _bare_fmt is not None and _pkg_fmt is not None and _bare_fmt is not _pkg_fmt:
+        _bare_fmt.PLUGIN_CONFIG_REGISTRY.update(_plugin_cfg_reg)
 except Exception as _e:
     print(f"[PluginLoader] Warning: could not load plugins: {_e}")
