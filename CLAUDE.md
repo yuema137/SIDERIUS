@@ -15,6 +15,7 @@
 - **Always think what test we can add for each single module**: pytest is a powerful tool. We should always equip our code with that. 
 - **Be humble and curious**: if you are not sure about something, for example the detail of the desired feature, or the format of data, please don't guess by yourself, but ASK the user explicitely.
 - **Be strict to the user and always double check**: what I say is not always correct. If you feel that are some wrong statement made by me, or some ideas are not pratical, you need to ask for clarification and state your objection clearly.
+- **Never directly continue on the previous work right after conversation compression**: you need to stop after conversation compression, and I will remind you the context, the docs and code to read, never start blindly!
 
 ## Inter-Node Communication Principle
 
