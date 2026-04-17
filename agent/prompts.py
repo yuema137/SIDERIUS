@@ -1,4 +1,5 @@
 # agent/prompts.py
+import inspect
 import json
 
 # ==========================================
@@ -373,6 +374,79 @@ def build_exploration_checklist(
         lines.append(f"- {marker} `{key}`: {tried_str}")
 
     return "\n".join(lines)
+
+
+# Maximum characters to emit for the config-class source excerpt. Keeps the
+# planner prompt bounded when a plugin config class grows large. Real-world
+# plugin config bodies (validators + fields) typically run 500–1500 chars, so
+# 4000 gives ~2-3x headroom before truncation kicks in.
+_PLUGIN_SOURCE_EXCERPT_MAX_CHARS = 4000
+
+
+def _extract_config_class_source(config_cls) -> str:
+    """Return the source of a Pydantic config class, suitable for injection
+    into the tuner's planner prompt.
+
+    Why: ``PLUGIN_CONFIG_CLASS.model_json_schema()`` exposes per-field bounds
+    (``ge`` / ``le`` / ``multiple_of``) but has no representation for
+    ``@model_validator(mode='after')`` or cross-field ``@field_validator``
+    bodies. The planner is therefore blind to hand-rolled invariants — this
+    was the root cause of the ``exploit_cnn_v1`` iter-1 failure on 2026-04-17
+    (7 consecutive ``nondecreasing channels`` violations).
+
+    We use ``inspect.getsource(config_cls)`` which works uniformly for both
+    built-in config classes (``ml_models/models_format_sandbox.py``) and
+    agent-generated plugin classes (``agent_generated/models/*.py``) without
+    any file-path heuristics. The returned source includes the class body and
+    every ``@*_validator`` decorator inside it.
+
+    Phase D.1 — see ``docs/improving_validation_awareness.md``.
+
+    Args:
+        config_cls: A Pydantic ``BaseModel`` subclass (or ``None``).
+
+    Returns:
+        The class source, truncated to ``_PLUGIN_SOURCE_EXCERPT_MAX_CHARS``
+        with a ``"... (truncated)"`` marker appended when cut. Returns ``""``
+        when ``config_cls`` is falsy or when ``inspect.getsource`` fails
+        (e.g. dynamically constructed class, source file unavailable).
+    """
+    if config_cls is None:
+        return ""
+    try:
+        src = inspect.getsource(config_cls)
+    except (OSError, TypeError):
+        # OSError: source file missing / unreadable.
+        # TypeError: class is a builtin or dynamically constructed.
+        return ""
+    if len(src) > _PLUGIN_SOURCE_EXCERPT_MAX_CHARS:
+        src = src[:_PLUGIN_SOURCE_EXCERPT_MAX_CHARS].rstrip() + "\n... (truncated)"
+    return src
+
+
+def format_plugin_source_excerpt_block(config_cls) -> str:
+    """Wrap ``_extract_config_class_source`` output in the pinned
+    planner-prompt heading.
+
+    Returns ``""`` when the helper yields no source — caller should inject the
+    result unconditionally (an empty string collapses cleanly in the prompt).
+
+    Phase D.1 — paired with ``LLMBridge.plan(plugin_source_excerpt=...)``.
+    """
+    src = _extract_config_class_source(config_cls)
+    if not src:
+        return ""
+    return (
+        "## PLUGIN CONFIG SCHEMA (authoritative — read validators carefully)\n"
+        "The planner prompt's JSON schema below cannot represent "
+        "`@model_validator(mode='after')` or cross-field `@field_validator` "
+        "bodies. Treat the source below as the single source of truth for any "
+        "cross-field invariants; a proposed config that violates one will be "
+        "rejected by the resource-eval skill and burn a retry attempt.\n\n"
+        "```python\n"
+        f"{src}\n"
+        "```\n"
+    )
 
 
 # ==========================================
