@@ -1,8 +1,8 @@
 # Validation-Awareness Across Proposer + Implementor
 
-**Status**: Phase A complete 2026-04-16; Phase B.1 + B.2a landed 2026-04-17, B.2b+ in progress
-**Author**: design discussion 2026-04-16
-**Motivation**: two iter-1 runs (`exploit_cnn_v1`, `explore_novel_v1`, launched 2026-04-16 23:02) burned their entire 9-attempt budgets and produced **zero successful rounds** because the proposer wrote `baseline_config` values that violated downstream validation rules. Both runs reached `status="partial", completed_rounds=0, all_records=[]` after ~2.5 minutes each, then advanced to iter-2 and would have repeated the same failure mode for the rest of the 20-iteration budget.
+**Status**: Phase A complete 2026-04-16; Phase B.1 + B.2a landed 2026-04-17, B.2b+ in progress; **Phase D observed + designed 2026-04-17** (implementor→tuner cross-field invariants)
+**Author**: design discussion 2026-04-16; Phase D addendum 2026-04-17
+**Motivation**: two iter-1 runs (`exploit_cnn_v1`, `explore_novel_v1`, launched 2026-04-16 23:02) burned their entire 9-attempt budgets and produced **zero successful rounds** because the proposer wrote `baseline_config` values that violated downstream validation rules. Both runs reached `status="partial", completed_rounds=0, all_records=[]` after ~2.5 minutes each, then advanced to iter-2 and would have repeated the same failure mode for the rest of the 20-iteration budget. A **second class of failure** surfaced during the Phase C.3 re-launch on 2026-04-17: `exploit_cnn_v1` iter-1 burned 9 attempts on the same pydantic `@model_validator(mode='after')` cross-field invariant (`nondecreasing channels`) — the tuner's planner cannot see this kind of rule because `PLUGIN_CONFIG_CLASS.model_json_schema()` drops `@model_validator` bodies. Phase D closes this new gap.
 
 ## Progress log
 
@@ -15,6 +15,8 @@
 | A.5 — Phase A acceptance gate (stubborn-LLM scenario covered by A.4 unit tests; dual-mode test deferred to C.3) | 2026-04-16 | `b904fe2` | 272 tests (266 proposer + 6 dataset_config) |
 | B.1 — `ConfigAdjustment` schema + `ImplementorOutput.baseline_config_adjustments` dict; §2.4 policy enforced (forbidden list for dataset-level fields; ±20% delta on numeric; bool/str rejected) | 2026-04-17 | `240fd5e` | 22 new tests; 88 full implementor suite green |
 | B.2a — baseline-self-check helper + wiring into `_validate_code`; existing retry loop picks up schema-relax path | 2026-04-17 | `4ca5ca4` | 17 new tests; 105 full implementor suite green |
+| C.3 (test infra) — Tier-3 replay test `test_baseline_validation_fix.py` for propose→implement→validate slice of the 2026-04-16 failures | 2026-04-17 | `3458ef0` | 2 new real-LLM tests; both passed (601 s) |
+| D observation — `exploit_cnn_v1` iter-1 re-launch burned 9 attempts on `@model_validator` cross-field invariant (`nondecreasing channels`); root-caused to `model_json_schema()` dropping validator bodies | 2026-04-17 | run log `logs/exploit_cnn_v1_20260417_005517.log` | design below |
 
 ---
 
@@ -264,9 +266,176 @@ Requires B.3's prompt work first so LLM knows the adjust option exists.
 - [ ] No new advice prose needed for `multiple_of` — that's per-model and the implementor handles it locally
 
 #### C.3 — Re-launch the two killed runs
-- [ ] Re-launch `exploit_cnn_v1` and `explore_novel_v1` in screens
-- [ ] Confirm iter-1 reaches at least one completed round (the previously-failing pattern produces at minimum `completed_rounds=1`)
-- [ ] Document the launch in this doc's Progress Log
+- [x] Tier-3 replay test `tests/integration/workflows/test_baseline_validation_fix.py` landed (commit `3458ef0`) — both `exploit_cnn_v1` and `explore_novel_v1` propose→implement→validate slices pass with real OpenAI
+- [x] Re-launch `exploit_cnn_v1` in screen (2026-04-17 00:55 PDT) — 4 iterations reached; iter-1 abandoned (see Phase D below), iter-2/3 completed, iter-4 in progress at time of writing
+- [x] Re-launch `explore_novel_v1` in screen (2026-04-17 00:55 PDT, relaunched 09:35 with `segmentation_size ≥ 40000` advice restriction + trial 30 min / formal 120 min budgets after first relaunch stalled on formal inference)
+- [x] **Original failure mode confirmed closed from the proposer side**: zero Phase A gate fires and zero Phase B.2a fires across both runs (LLM produced valid baselines on first try every iter). The silent-guard contract holds.
+- [ ] **New failure mode surfaced in exploit_cnn_v1 iter-1** (see Phase D) — not covered by A or B.2a.
+- [x] Documented in this doc's Progress Log
+
+---
+
+### Phase D — Cross-field invariant awareness (implementor → tuner) (Fix D)
+
+Catches hand-rolled `@model_validator(mode='after')` cross-field invariants before the tuner's planner wastes attempts proposing configs that violate them.
+
+#### D.0 — Problem statement (observed 2026-04-17 in `exploit_cnn_v1` iter-1)
+
+**What happened.** `exploit_cnn_v1` iter-1 (model `dual_path_skip_fusion_cnn`) burned all 9 retry attempts: 2 on time-gate failures and **7 consecutively** on the same pydantic `ValidationError`:
+
+```
+Value error, context channels must be nondecreasing, got 32, 96, 128, 96
+Value error, context channels must be nondecreasing, got 24, 96, 128, 64
+Value error, context channels must be nondecreasing, got 32, 96, 128, 80
+...
+```
+
+The validator lives in the implementor-generated plugin at `agent_generated/models/dual_path_skip_fusion_cnn.py:28-36`:
+
+```python
+@model_validator(mode='after')
+def check_constraints(self):
+    if not (self.context_stem_channels
+            <= self.context_level2_channels
+            <= self.context_level3_channels
+            <= self.context_bottleneck_channels):
+        raise ValueError(f'context channels must be nondecreasing, got ...')
+    return self
+```
+
+Baseline passed the check (defaults `64 ≤ 96 ≤ 128 ≤ 160` — valid). The failing configs were all **tuner-perturbed variants** emitted by the planner round by round. `dual_path_skip_fusion_cnn` iteration was abandoned with `best_score=None` after exhausting the retry budget.
+
+**Root cause: lossy implementor→tuner schema handoff.**
+
+| Party | Sees plugin source? | How it learns the schema |
+|---|:---:|---|
+| implementor | ✓ (it wrote it) | — |
+| validator (`ml_code_validator_agent`) | ✓ | reads the plugin file |
+| **tuner planner** | **✗** | `PLUGIN_CONFIG_CLASS.model_json_schema()` — see `nodes/ml_hyperparameter_tune_agent.py:265` |
+
+Pydantic's `model_json_schema()` exposes per-field constraints (`minimum`, `maximum`, `multipleOf`) but **has no representation for `@model_validator(mode='after')` bodies**. So the planner sees the four `context_*_channels` as independent ints within their overlapping `ge`/`le` ranges — monotonicity is invisible.
+
+Verified directly by running `PLUGIN_CONFIG_CLASS.model_json_schema()` on the offending plugin and confirming the `check_constraints` body is absent from the output (only per-field `minimum`/`maximum`/`multipleOf` present).
+
+**Why retries didn't rescue it.** The planner receives a generic "Loop Error: ValidationError" retry signal — the structured reason (the error message string, naming the fields and values) is not promoted to a first-class pinned "avoid-this-combo" rule in the next attempt's context. 7 identical failures in a row confirm the planner never internalized the rule.
+
+**Why this is structural, not model-specific.** Cross-field invariants are **natural and common in ML configs**:
+- U-Net encoders: widths monotonically non-decreasing (this case)
+- Transformers: `hidden_dim % num_heads == 0`
+- Dilated stacks: `receptive_field ≤ segmentation_size`
+- Any concat/add fusion: branch widths must be compatible
+- ResNet-style blocks: bottleneck channel ratio constraints
+
+The project actively encourages this pattern via CLAUDE.md ("Pydantic validation and appropriate error message is highly recommended"). Every future plugin that writes a `@model_validator` will hit the same gap.
+
+**Ownership.** Phase A closed proposer→validator (for `segmentation_size` divisibility). Phase B closed implementor→baseline (B.2a self-check). **Phase D closes implementor→tuner for cross-field invariants** — the last silent edge in the propose/implement/validate/tune graph for this class of failure.
+
+#### D.1 — Surface plugin source excerpt to tuner planner (low effort, preventive)
+
+Cheapest preventive fix. The planner already gets the json-schema dict; we additionally feed it the raw config-class block so `@model_validator` bodies are visible.
+
+- [ ] Add extraction helper `_extract_config_class_excerpt(plugin_src: str) -> str` in `nodes/ml_hyperparameter_tune_agent.py` (or `agent/prompts.py` if shared): returns the `class *Config(BaseModel):` body plus any `@field_validator`/`@model_validator` decorators that appear before `PLUGIN_CONFIG_CLASS = ...`. Strip the `PLUGIN_MODEL_CLASS` forward code — it's not schema-relevant and would bloat the prompt.
+- [ ] Truncate to ≤4000 chars; append `"... (truncated)"` marker if cut.
+- [ ] Read plugin source once per run in `HyperparamTuningAgent.run()` (plugin path already in `agent_input`), cache as `self._plugin_source_excerpt`, pass to `brain.plan(..., plugin_source_excerpt=...)`.
+- [ ] Update `build_exploration_checklist` (or render it in the planner prompt adjacent to the checklist) to inject the excerpt under a pinned heading like `## PLUGIN CONFIG SCHEMA (authoritative — read these validators carefully)`.
+- [ ] Unit tests (`tests/unit/agent/ml_hyperparameter_tune_agent/test_plugin_source_excerpt.py`, new file):
+  - [ ] extraction returns config class + validators only; forward code stripped
+  - [ ] excerpt trimmed to ≤4000 chars with truncation marker
+  - [ ] plugin lacking any `@*_validator` still returns a clean excerpt (just the class body)
+  - [ ] plugin missing `PLUGIN_CONFIG_CLASS` returns empty string (graceful)
+  - [ ] planner prompt renders the excerpt section when supplied; omits the whole section when empty
+- [ ] Drawback: prompt bloat every planner call. Common-case excerpt is 500–1500 chars so bearable; track in production.
+
+#### D.2 — `ImplementorOutput.schema_constraints` plain-English rules (medium effort, preventive, clean)
+
+Long-term home: the implementor emits a structured summary of every cross-field rule it encodes. Two-channel redundancy with D.1 — if the LLM under-parses the source, it can lean on the plain-English list.
+
+- [ ] Add field to `agent/schemas/implementor.py`:
+  ```python
+  schema_constraints: list[str] = Field(
+      default_factory=list,
+      description="Plain-English statement of each cross-field invariant the plugin's "
+                  "config schema enforces. Populate whenever @model_validator(mode='after') "
+                  "or cross-field @field_validator is present. Empty allowed only when "
+                  "the plugin has NO cross-field rules beyond per-field ge/le/multiple_of."
+  )
+  ```
+- [ ] Extend the code-generation output JSON schema (the structured-output contract) with the same optional field.
+- [ ] Update the implementor prompt (`agent/prompts.py` or the implementor's system prompt): when the LLM emits any `@model_validator(mode='after')` or any `@field_validator` that references multiple fields, it MUST also populate `schema_constraints` with one human-readable entry per rule. Example shown in-prompt: `"context_stem_channels <= context_level2_channels <= context_level3_channels <= context_bottleneck_channels (U-Net encoder widths must be monotonically non-decreasing for skip-fusion buffer shapes to line up)"`.
+- [ ] Add a regex-based lint inside `_validate_code` (as a new 6th check, after baseline self-check): if plugin source contains `@model_validator` or `@field_validator` with an arg list of length ≥2, fail validation unless `schema_constraints` is non-empty. Error routes the LLM to populate the field (not to remove the validator).
+- [ ] Thread `schema_constraints` through the graph:
+  - `ImplementorOutput` → already on the implementor record
+  - protocol `ml_model_impl_to_ml_model_tune` (whichever name): pass into tuner input
+  - `HyperparamTuningInput`: new field `schema_constraints: list[str] = []`
+  - tuner planner prompt: pinned "## CONFIG RULES" section rendering each entry verbatim
+- [ ] Unit tests (`tests/unit/agent/ml_model_implementor/test_schema_constraints.py`):
+  - [ ] default empty preserves backward compat
+  - [ ] plugin with `@model_validator` + empty `schema_constraints` fails `_validate_code` lint
+  - [ ] plugin with `@model_validator` + populated `schema_constraints` passes
+  - [ ] plugin with only per-field `ge`/`le` (no `@*_validator`) passes with empty list
+- [ ] Protocol tests verify pass-through. Tuner-side prompt test verifies rendering.
+
+#### D.3 — Declarative constraint DSL (medium effort, cleanest, optional)
+
+Sibling upgrade to D.2: in addition to plain-English, implementor emits machine-evaluable expressions. Lets the tuner gate configs *before* Pydantic instantiation, saving the full resource-check cost.
+
+- [ ] Add `schema_constraints_declarative: list[str]` to `ImplementorOutput`. Each entry is a Python expression string using only: comparison ops (`<, <=, ==, !=, >=, >`), boolean ops (`and, or, not`), field names defined in the config, numeric literals. Example: `"context_stem_channels <= context_level2_channels"`.
+- [ ] Parser + safety whitelist helper `parse_declarative_constraint(expr: str, field_names: set[str]) -> ast.Expression`: use `ast.parse` with restricted node types. Reject `Import`, `Attribute`, `Call`, `Subscript`, anything not in the whitelist. Reject unknown identifiers (not in `field_names`). Return parsed AST for later evaluation.
+- [ ] Evaluator `evaluate_declarative_constraint(ast_expr, config_dict) -> bool`: walks the AST with the dict as the scope; no `eval`/`exec`.
+- [ ] Tuner-side gate in `HyperparamTuningAgent.run()`: after the planner emits a config, evaluate every declarative constraint. If any fails, re-prompt the planner with the specific expression and the failing field values, **without** paying a Pydantic instantiation or resource-check attempt.
+- [ ] Unit tests (`tests/unit/agent/protocols/test_declarative_constraints.py`):
+  - [ ] parser accepts whitelisted exprs (monotone, multiple_of, equality)
+  - [ ] parser rejects `import`, `__class__`, function calls, attribute access
+  - [ ] parser rejects unknown field names
+  - [ ] evaluator correctly flags monotone-violation; returns True for valid configs
+  - [ ] tuner-side gate short-circuits before resource check on violation
+- [ ] Note: only land if D.1+D.2+D.4 leave measurable failure rate. Revisit after one full real-run cycle with D.1+D.2 in place.
+
+#### D.4 — Constraint-aware retry (low effort, reactive)
+
+Safety net: if a `ValidationError` slips through D.1–D.3 prevention, surface the *specific violating rule* back to the planner via the next attempt's `memory_history`, not as a generic "Loop Error".
+
+**Design note (refined during implementation review 2026-04-17).** The original sketch proposed a dedicated `accumulator` of `{attempt_n: {config, violations}}` rendered into a custom `## DO NOT REPEAT THESE CONFIGS` prompt block. Reading the actual tuner loop shows the existing `skipped_oom_risk` / `skipped_time_risk` records already solve the same problem: they are saved via `sandbox.save_record()`, automatically appear in the next round's `memory_history = sandbox.get_summary()`, and their `memory.conclusion` + `memory.memory_update` fields are already rendered to the planner. A new `skipped_schema_violation` record type plugs straight into that machinery — no parallel accumulator, no new prompt block, no extra wiring.
+
+This keeps D.4 identical in behavior (planner sees structured, field-level signal on next attempt) but removes ~30 lines of bespoke plumbing. Reconsider the dedicated accumulator only if real runs show the planner still repeats violations after 2-3 records (i.e. memory-history rendering is too dilute to cut through). Deviation explicitly flagged so the doc keeps pace with what was built.
+
+- [ ] Add `"skipped_schema_violation"` to `ExperimentRecord.status` Literal in `agent/schemas/hyperparam_tuning.py`.
+- [ ] Extend `agent/skills/evaluate_resource_skill/wrapper.py`: wrap the `_count_params(...)` call (which is what currently triggers Pydantic instantiation via `get_config_class(model_type)(**model_cfg)`) in a dedicated `try/except ValidationError` **before** the existing broad `except Exception`. On `ValidationError`, extract each `err.errors()` entry into a `violations: list[dict]` with keys `loc` (tuple joined with `.`), `type` (e.g. `value_error`, `multiple_of`, `greater_than_equal`), `msg`, and `input` (if present). Return `{"status": "schema_violation", "violations": [...], "offending_config": model_cfg, "message": <readable summary>, "verdict": <short one-liner>, "suggestion": <"relax schema or propose a valid combo">}` instead of re-raising.
+- [ ] In `nodes/ml_hyperparameter_tune_agent.py`, add a new branch after line 455 (mirroring the `skipped_oom_risk` / `skipped_time_risk` pattern):
+  - `if resource_check.get("status") == "schema_violation":`
+  - Build and validate an `ExperimentRecord` with `status="skipped_schema_violation"`, `params=record_params`, `denoising_score=None`.
+  - Populate `memory.conclusion` with "Skipped: config violated plugin schema. Violating fields: {field_list}. Offending values: {values}."
+  - Populate `memory.memory_update` with "DO NOT repeat these field values. Constraint: {structured summary of each violation}. Either change the value or (if the rule is wrong) note that the schema may need relaxation."
+  - `sandbox.save_record(...)` then `continue` — the attempt does NOT count as a round, exactly like the OOM/time skip records.
+- [ ] Unit tests (`tests/unit/agent/tune_ml_hyperparam_agent/test_constraint_aware_retry.py`, new file):
+  - [ ] Wrapper: `ValidationError` from `@model_validator(mode='after')` body (the exact `dual_path_skip_fusion_cnn` case — nondecreasing channels) produces `status="schema_violation"` with the offending field names present in `violations`.
+  - [ ] Wrapper: per-field `multiple_of` violation extracted with `type="multiple_of"` and input value preserved.
+  - [ ] Wrapper: per-field `ge`/`le` violation extracted with correct `type`.
+  - [ ] Wrapper: when `_count_params` succeeds (valid config), the new branch is not taken — existing happy-path response is unchanged.
+  - [ ] Schema: `ExperimentRecord.model_validate({..., "status": "skipped_schema_violation", ...})` accepts the new literal.
+  - [ ] End-to-end with RecordingSandbox-style fake (or minimal mock): a wrapper returning `status="schema_violation"` causes the tuner to save a `skipped_schema_violation` record, not raise, and not advance `completed_rounds`.
+- [ ] Drawback: purely reactive — wastes the first attempt before the signal arrives. Most valuable when paired with D.1 (prevention) as belt-and-suspenders. Prompt-side rendering relies on the existing `memory_history` mechanism; if real runs show dilution, escalate to a dedicated pinned block later.
+
+#### D.5 — Phase D acceptance test
+
+- [ ] **Pseudo-mode dual-mode test** in `tests/integration/workflows/test_cross_field_invariant_recovery.py` (new file): replay the `exploit_cnn_v1` iter-1 failure mode. Fixture plugin with `@model_validator` enforcing `nondecreasing channels`; canned planner that on attempt 1 emits a non-monotone tuple. Assertions:
+  - [ ] Without Phase D (feature-flag off): ≥7 attempts before exhaustion (matches observed failure)
+  - [ ] With D.1 only: planner converges in ≤3 attempts (prompt-level awareness)
+  - [ ] With D.1 + D.4: planner converges in ≤2 attempts
+- [ ] Unit test: `dual_path_skip_fusion_cnn`'s actual on-disk plugin extracted via D.1 helper still contains the `check_constraints` body within the 4000-char cap
+- [ ] Unit test: tuner planner prompt renders `schema_constraints` list (D.2 end-to-end)
+- [ ] Real-run Tier-3 (optional, after D.1+D.2+D.4 land): re-launch a single-iteration trial against `dual_path_skip_fusion_cnn` and confirm iter-1 reaches `completed_rounds ≥ 1`.
+
+#### D.6 — Order of work + MVP
+
+Recommended execution order (lowest-risk, fastest-value first):
+
+1. **D.4 first** — reactive fix, lowest effort, immediately improves the observed failure mode.
+2. **D.1 second** — preventive, also low effort; pairs with D.4 to stop most first-attempt failures.
+3. **D.2 third** — the clean long-term home; schedule alongside B.2b's implementor prompt work since both touch the same prompt.
+4. **D.3 last (optional)** — only if D.1+D.2+D.4 leave measurable failures in real runs.
+
+**Minimum viable Phase D: D.1 + D.4 + D.5.** Everything else is polish.
 
 ---
 
