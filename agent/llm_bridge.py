@@ -266,6 +266,7 @@ class LLMBridge:
              config_manual: Optional[Dict] = None,
              model_description: Optional[str] = None,
              exploration_checklist: str = "",
+             plugin_source_excerpt: str = "",
              current_round: Optional[int] = None,
              max_rounds: Optional[int] = None,
              trial_allowed: bool = True,
@@ -279,6 +280,13 @@ class LLMBridge:
         Args:
             config_manual:    JSON schema of the model's config fields.
             model_description: Markdown description of the architecture and its physics.
+            plugin_source_excerpt: Pre-formatted block (e.g. from
+                              ``format_plugin_source_excerpt_block``) showing the
+                              raw Pydantic config class source so the LLM can
+                              see ``@model_validator`` / ``@field_validator``
+                              bodies that ``config_manual`` (JSON schema) cannot
+                              represent. Empty string disables the section.
+                              Phase D.1 — see docs/improving_validation_awareness.md.
             current_round:    Current round number (1-based). Forwarded to prompt.
             max_rounds:       Total rounds in this run. Forwarded to prompt.
             trial_allowed:    Whether the LLM may choose trial mode. Forwarded to prompt.
@@ -308,8 +316,13 @@ class LLMBridge:
             max_epochs=max_epochs,
         )
 
-        # Assemble final prompt: user prompt + checklist + description + manual
+        # Assemble final prompt: user prompt + plugin source + checklist + description + manual.
+        # ``plugin_source_excerpt`` is rendered before the exploration checklist so the
+        # raw ``@model_validator`` bodies are adjacent to the field-by-field tried-value
+        # list — the planner reasons about both at the same moment.
         final_user_prompt = user_prompt
+        if plugin_source_excerpt:
+            final_user_prompt += f"\n\n{plugin_source_excerpt}"
         if exploration_checklist:
             final_user_prompt += f"\n\n{exploration_checklist}"
         final_user_prompt += manual_context

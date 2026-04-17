@@ -150,3 +150,72 @@ class TestBlockFormatter:
         reading an empty block)."""
         DynCfg = type("DynCfg2", (BaseModel,), {"__module__": __name__})
         assert format_plugin_source_excerpt_block(DynCfg) == ""
+
+
+# ===========================================================================
+# LLMBridge.plan — end-to-end rendering check (step 2 of D.1)
+# ===========================================================================
+
+from unittest.mock import patch
+
+from agent.llm_bridge import LLMBridge
+
+
+class TestBrainPlanRendering:
+    """Verifies ``LLMBridge.plan`` threads ``plugin_source_excerpt`` into the
+    assembled user prompt. We sidestep the real LLM constructor (which
+    requires an API key) by patching ``__init__`` and stubbing
+    ``self.generate`` on the instance."""
+
+    def _make_bridge(self):
+        with patch.object(LLMBridge, "__init__", lambda self: None):
+            bridge = LLMBridge()
+        captured = {}
+
+        def fake_generate(system_prompt, user_prompt):
+            captured["system_prompt"] = system_prompt
+            captured["user_prompt"] = user_prompt
+            return {}
+
+        bridge.generate = fake_generate
+        return bridge, captured
+
+    def test_excerpt_embedded_in_user_prompt_when_supplied(self):
+        bridge, captured = self._make_bridge()
+        block = format_plugin_source_excerpt_block(_MonotoneCfg)
+        assert block, "pre-condition: block helper should emit non-empty text"
+
+        bridge.plan(
+            memory_history=[],
+            plugin_source_excerpt=block,
+        )
+        user_prompt = captured["user_prompt"]
+        # The pinned heading appears.
+        assert "## PLUGIN CONFIG SCHEMA" in user_prompt
+        # The validator body from the config class is inside the rendered prompt.
+        assert "check_monotone" in user_prompt
+        assert "nondecreasing" in user_prompt
+
+    def test_section_omitted_when_excerpt_empty(self):
+        bridge, captured = self._make_bridge()
+        bridge.plan(memory_history=[], plugin_source_excerpt="")
+        assert "## PLUGIN CONFIG SCHEMA" not in captured["user_prompt"]
+
+    def test_excerpt_rendered_before_checklist(self):
+        """Adjacency matters: the raw validator body must appear before the
+        tried-values checklist so the planner reasons about both at the same
+        moment (rule → values, not values → then rule)."""
+        bridge, captured = self._make_bridge()
+        block = format_plugin_source_excerpt_block(_MonotoneCfg)
+        checklist = "### EXPLORATION CHECKLIST\n- sentinel_checklist_marker"
+
+        bridge.plan(
+            memory_history=[],
+            plugin_source_excerpt=block,
+            exploration_checklist=checklist,
+        )
+        user_prompt = captured["user_prompt"]
+        i_schema = user_prompt.find("## PLUGIN CONFIG SCHEMA")
+        i_checklist = user_prompt.find("sentinel_checklist_marker")
+        assert i_schema != -1 and i_checklist != -1
+        assert i_schema < i_checklist
