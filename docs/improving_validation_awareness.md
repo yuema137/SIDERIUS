@@ -1,6 +1,6 @@
 # Validation-Awareness Across Proposer + Implementor
 
-**Status**: Phase A complete 2026-04-16; Phase B.1 + B.2a landed 2026-04-17, B.2b+ in progress; **Phase D.4 landed 2026-04-17** (reactive constraint-aware retry); **Phase D.1 step 1 landed 2026-04-17** (source-excerpt helpers); D.1 wiring, D.2/D.3/D.5 pending
+**Status**: Phase A complete 2026-04-16; Phase B.1 + B.2a landed 2026-04-17, B.2b+ in progress; **Phase D.4 landed 2026-04-17** (reactive constraint-aware retry); **Phase D.1 landed 2026-04-17** (helpers + `brain.plan` wiring); D.2/D.3 pending; D.5 real-run in preparation
 **Author**: design discussion 2026-04-16; Phase D addendum 2026-04-17
 **Motivation**: two iter-1 runs (`exploit_cnn_v1`, `explore_novel_v1`, launched 2026-04-16 23:02) burned their entire 9-attempt budgets and produced **zero successful rounds** because the proposer wrote `baseline_config` values that violated downstream validation rules. Both runs reached `status="partial", completed_rounds=0, all_records=[]` after ~2.5 minutes each, then advanced to iter-2 and would have repeated the same failure mode for the rest of the 20-iteration budget. A **second class of failure** surfaced during the Phase C.3 re-launch on 2026-04-17: `exploit_cnn_v1` iter-1 burned 9 attempts on the same pydantic `@model_validator(mode='after')` cross-field invariant (`nondecreasing channels`) — the tuner's planner cannot see this kind of rule because `PLUGIN_CONFIG_CLASS.model_json_schema()` drops `@model_validator` bodies. Phase D closes this new gap.
 
@@ -19,6 +19,7 @@
 | D observation — `exploit_cnn_v1` iter-1 re-launch burned 9 attempts on `@model_validator` cross-field invariant (`nondecreasing channels`); root-caused to `model_json_schema()` dropping validator bodies | 2026-04-17 | run log `logs/exploit_cnn_v1_20260417_005517.log` | design below |
 | D.4 — reactive constraint-aware retry: `skipped_schema_violation` record type, wrapper returns structured `schema_violation` on `ValidationError`, tuner saves record + continues without advancing round | 2026-04-17 | `51c0b87` (schema) + `8785f8d` (wrapper) + `5c65106` (tuner) + `5e65655` (tests + doc) | 3 new schema tests + 10 new D.4 tests (`test_constraint_aware_retry.py`); 193 full `tune_ml_hyperparam_agent` suite green |
 | D.1 step 1 — source-excerpt helpers: `_extract_config_class_source` (via `inspect.getsource`) + `format_plugin_source_excerpt_block` (pinned heading wrapper). Works uniformly for built-in and plugin config classes. Truncation at 4000 chars with marker. Not yet wired into the planner prompt. | 2026-04-17 | `9682964` | 11 new tests in `test_plugin_source_excerpt.py` (all pass) |
+| D.1 step 2 — wire `plugin_source_excerpt` through `LLMBridge.plan` (new kwarg, rendered before the exploration checklist so validator bodies sit adjacent to the tried-values list). Tuner builds the block once per round via `format_plugin_source_excerpt_block(config_cls)`. `RecordingLLMBridge` absorbs the kwarg + `**kwargs`. | 2026-04-17 | `86e8a6f` | 3 new `TestBrainPlanRendering` tests; 217 full `tune_ml_hyperparam_agent` suite green |
 
 ---
 
@@ -353,12 +354,13 @@ Cheapest preventive fix. The planner already gets the json-schema dict; we addit
   - [x] `TestExtractor::test_real_builtin_config_class` — regression guard on `PUNetConfig` (built-in has `@model_validator`s; D.1 must work for built-ins, not only plugins).
   - [x] `TestBlockFormatter::{test_none_returns_empty, test_heading_and_fence_present, test_embeds_extracted_source, test_empty_when_source_unavailable}` — block wrapper contracts.
 
-**Step 2 (pending)** — wiring:
+**Step 2 (landed 2026-04-17, commit `86e8a6f`)** — wiring:
 
-- [ ] Add `plugin_source_excerpt: str = ""` parameter to `LLMBridge.plan()` in `agent/llm_bridge.py`; append to `final_user_prompt` adjacent to the existing `exploration_checklist` injection.
-- [ ] In `nodes/ml_hyperparameter_tune_agent.py`, build the excerpt once per run via `format_plugin_source_excerpt_block(config_cls)` (the class object is already resolved at the existing `get_config_class(model_type_setting)` call site) and thread it through `brain.plan(..., plugin_source_excerpt=excerpt)`.
-- [ ] Unit test: `brain.plan` rendering — excerpt present in rendered user prompt when supplied; section omitted when empty. (Recording-bridge style, no real LLM.)
-- [ ] Tuner-integration test: mock `brain.plan` and assert `plugin_source_excerpt` kwarg is populated with the monotone-class body on a run against a config class that has `@model_validator`.
+- [x] Added `plugin_source_excerpt: str = ""` parameter to `LLMBridge.plan()` in `agent/llm_bridge.py`; appended to `final_user_prompt` **before** the existing `exploration_checklist` injection (adjacency matters: validator bodies should appear before tried-values so the LLM reasons rule → values, not values → then rule).
+- [x] In `nodes/ml_hyperparameter_tune_agent.py`, build the excerpt once per round via `format_plugin_source_excerpt_block(config_cls)` at the existing `get_config_class(model_type_setting)` call site; threaded through `brain.plan(..., plugin_source_excerpt=...)`.
+- [x] `RecordingLLMBridge.plan` absorbs the new kwarg + `**kwargs` swallow so future optional planner args don't require touching every fixture.
+- [x] Rendering tests (`TestBrainPlanRendering`, 3 tests): excerpt embedded when supplied; section omitted when empty; schema excerpt precedes the checklist sentinel in the rendered prompt.
+- Tuner-integration coverage deferred: the 193-test `tune_ml_hyperparam_agent` suite (which mocks `brain.plan` via `MockBridge`) already exercises the call path; duplicating it as a dedicated "did we pass the kwarg" test adds noise without catching bugs the rendering tests miss. Revisit only if a subtle threading bug appears in practice.
 
 **Drawback (unchanged from design)**: prompt bloat every planner call. Common-case excerpt is 500–1500 chars so bearable; track in production.
 
@@ -439,13 +441,15 @@ This keeps D.4 identical in behavior (planner sees structured, field-level signa
 
 #### D.5 — Phase D acceptance test
 
-- [ ] **Pseudo-mode dual-mode test** in `tests/integration/workflows/test_cross_field_invariant_recovery.py` (new file): replay the `exploit_cnn_v1` iter-1 failure mode. Fixture plugin with `@model_validator` enforcing `nondecreasing channels`; canned planner that on attempt 1 emits a non-monotone tuple. Assertions:
-  - [ ] Without Phase D (feature-flag off): ≥7 attempts before exhaustion (matches observed failure)
-  - [ ] With D.1 only: planner converges in ≤3 attempts (prompt-level awareness)
-  - [ ] With D.1 + D.4: planner converges in ≤2 attempts
-- [ ] Unit test: `dual_path_skip_fusion_cnn`'s actual on-disk plugin extracted via D.1 helper still contains the `check_constraints` body within the 4000-char cap
-- [ ] Unit test: tuner planner prompt renders `schema_constraints` list (D.2 end-to-end)
-- [ ] Real-run Tier-3 (optional, after D.1+D.2+D.4 land): re-launch a single-iteration trial against `dual_path_skip_fusion_cnn` and confirm iter-1 reaches `completed_rounds ≥ 1`.
+**Approach pivot (2026-04-17).** Original sketch proposed a pseudo-mode dual-mode test replaying the `exploit_cnn_v1` iter-1 failure with a canned planner. That would validate the plumbing (which the 217 existing unit tests already cover) but could not measure the LLM's actual convergence behavior — the whole point of the fix. Pivoting to a **real-run Tier-3 replay as the primary acceptance gate**: re-launch a single-iteration trial against `dual_path_skip_fusion_cnn` (the exact failing plugin from 2026-04-17) with D.1 + D.4 active, and measure `completed_rounds` + number of `skipped_schema_violation` records before the first successful round.
+
+- [ ] **Real-run Tier-3 acceptance gate** — single-iteration trial (`is_trial=True`, `max_rounds=1`, OpenAI provider — gemini is unstable per memory) against `dual_path_skip_fusion_cnn`. Pass criteria:
+  - `completed_rounds ≥ 1` (baseline to beat: original run reached 0).
+  - ≤3 `skipped_schema_violation` records before the first success (baseline to beat: 7 consecutive failures).
+  - Planner reasoning in the saved plan shows awareness of the monotone rule (prose mentions non-decreasing or validator, ideally citing the `check_constraints` method).
+- [ ] Unit test: `dual_path_skip_fusion_cnn`'s actual on-disk plugin extracted via D.1 helper still contains the `check_constraints` body within the 4000-char cap — simple regression guard that wraps the D.1 helper around the real plugin file.
+- [ ] Pseudo-mode dual-mode test (optional, de-prioritized): revisit only if the real-run gate fails and we need fast iteration on prompt wording without burning API budget.
+- [ ] Unit test for D.2 end-to-end (`schema_constraints` list) — gated on D.2 landing; not blocking this gate.
 
 #### D.6 — Order of work + MVP
 
