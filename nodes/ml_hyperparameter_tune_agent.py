@@ -454,6 +454,59 @@ class HyperparamTuningAgent:
                 if resource_check.get("status") == "error":
                     raise RuntimeError(f"Resource check error: {resource_check.get('message')}")
 
+                # Phase D.4 — constraint-aware retry. The wrapper returns
+                # ``status="schema_violation"`` when the plugin's
+                # ``PLUGIN_CONFIG_CLASS(**model_cfg)`` call raised a
+                # ``ValidationError``. This typically happens when the tuner
+                # planner proposes a config that violates a cross-field
+                # invariant (e.g. U-Net non-decreasing channels) that
+                # ``model_json_schema()`` cannot represent. Save a
+                # ``skipped_schema_violation`` record so the violating
+                # fields/values surface in next round's ``memory_history``;
+                # the attempt does NOT count as a completed round.
+                # See docs/improving_validation_awareness.md §D.4.
+                if resource_check.get("status") == "schema_violation":
+                    violations = resource_check.get("violations", [])
+                    offending = resource_check.get("offending_config", {})
+                    violating_fields = ", ".join(v.get("loc", "?") for v in violations) or "unknown"
+                    print(f"Schema violation — this attempt does NOT count as a round.")
+                    print(f"   Violating fields : {violating_fields}")
+                    for v in violations:
+                        print(f"   - {v.get('loc')} ({v.get('type')}): {v.get('msg')}")
+
+                    violation_summary = "; ".join(
+                        f"{v.get('loc')}={v.get('input')!r} → {v.get('msg')}"
+                        for v in violations
+                    ) or "unspecified schema violation"
+                    schema_record = {
+                        "exp_id":          exp_id,
+                        "status":          "skipped_schema_violation",
+                        "model_type":      model_type,
+                        "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "file_index":      file_index,
+                        "params":          record_params,
+                        "denoising_score": None,
+                        "memory": {
+                            "expert_advice_followed": expert_advice_str,
+                            "hypothesis":    hypothesis,
+                            "conclusion":    (
+                                f"Skipped: plugin schema rejected the proposed model_config. "
+                                f"Violating fields: {violating_fields}. "
+                                f"Offending values: {offending}."
+                            ),
+                            "discovery":     resource_check.get("verdict", ""),
+                            "memory_update": (
+                                f"DO NOT repeat this exact combination — plugin schema requires: "
+                                f"{violation_summary}. Propose a config that satisfies every "
+                                f"@model_validator(mode='after') and per-field bound in the "
+                                f"plugin's PLUGIN_CONFIG_CLASS."
+                            ),
+                        },
+                    }
+                    ExperimentRecord.model_validate(schema_record)
+                    sandbox.save_record(schema_record)
+                    continue
+
                 if not resource_check.get("feasible", True):
                     print(f"Resource check FAILED — this attempt does NOT count as a round.")
                     print(f"   Verdict   : {resource_check.get('verdict', '')}")
