@@ -8,6 +8,8 @@ All tests use a temporary plugin written to a tmp_path directory — no real
 agent_generated/ files are created or modified.
 """
 import os
+import sys
+import subprocess
 import textwrap
 import importlib
 import pytest
@@ -230,3 +232,102 @@ class TestPluginModelCallable:
         x   = torch.randint(0, 256, (1, 500))
         out = model(x)
         assert not torch.isnan(out).any()
+
+
+# ---------------------------------------------------------------------------
+# Bootstrap registry mirror — regression guard for the 2026-04-17 fix
+# ---------------------------------------------------------------------------
+
+_BOOTSTRAP_MIRROR_SCRIPT = textwrap.dedent("""\
+    import sys
+    import ml_models.plugin_loader as pl
+
+    # Redirect the loader at the tmp plugin dir BEFORE triggering bootstrap.
+    pl.AGENT_GENERATED_DIR = sys.argv[1]
+
+    # Importing models_sandbox triggers:
+    #   1) line 11: bare ``from models_format_sandbox import ...`` — loads
+    #      the bare module identity because ml_models/ is on sys.path.
+    #   2) the bootstrap at the bottom: loads packaged
+    #      ``ml_models.models_format_sandbox``, populates its registry, then
+    #      mirrors onto the bare identity.
+    import ml_models.models_sandbox  # noqa: F401
+
+    bare = sys.modules.get('models_format_sandbox')
+    pkg  = sys.modules.get('ml_models.models_format_sandbox')
+
+    assert bare is not None, "bare models_format_sandbox was not loaded"
+    assert pkg is not None, "packaged ml_models.models_format_sandbox was not loaded"
+    assert bare is not pkg, (
+        "bare and packaged should be distinct module objects when ml_models/ "
+        "is on sys.path — if they are the same, this test is no longer "
+        "exercising the duplicate-module scenario"
+    )
+
+    assert "test_plugin_model" in pkg.PLUGIN_CONFIG_REGISTRY, (
+        "plugin missing from packaged registry: "
+        + str(list(pkg.PLUGIN_CONFIG_REGISTRY.keys()))
+    )
+    assert "test_plugin_model" in bare.PLUGIN_CONFIG_REGISTRY, (
+        "plugin missing from bare registry (mirror regression): "
+        + str(list(bare.PLUGIN_CONFIG_REGISTRY.keys()))
+    )
+
+    # The exact code path the training subprocess takes.
+    cls = bare.get_config_class("test_plugin_model")
+    assert cls is not None, (
+        "bare get_config_class('test_plugin_model') returned None — this is "
+        "the exact failure mode fixed on 2026-04-17"
+    )
+
+    print("OK")
+""")
+
+
+class TestBootstrapRegistryMirror:
+    """Regression guard for the duplicate-module bootstrap fix (2026-04-17).
+
+    With ``ml_models/`` on sys.path (the training subprocess env), the bare
+    ``models_format_sandbox`` and packaged ``ml_models.models_format_sandbox``
+    resolve to two distinct module objects. The bootstrap in
+    ``ml_models/models_sandbox.py`` mirrors the populated packaged registry
+    onto the bare module so bare-import callers — ``execute_tools/
+    train_engine_sandbox.py``, ``execute_tools/inference_single.py``,
+    ``ml_models/loss_models_sandbox.py`` — see the same plugins.
+
+    Without the mirror, ``get_config_class()`` called through the bare
+    identity reads an empty ``PLUGIN_CONFIG_REGISTRY`` and returns ``None``
+    for every plugin, crashing the training subprocess with
+    ``ValueError: Unknown model_type in config: <plugin>``.
+
+    This must run in a subprocess because pytest's own environment only
+    places the project root on sys.path, so the duplicate-module scenario
+    cannot be reproduced in-process.
+    """
+
+    def test_both_module_identities_carry_plugin_after_bootstrap(self, tmp_path):
+        models_dir = tmp_path / "models"
+        models_dir.mkdir()
+        (models_dir / "test_plugin_model.py").write_text(VALID_PLUGIN_SRC)
+
+        import ml_models.plugin_loader as pl
+        ml_models_dir = os.path.dirname(os.path.abspath(pl.__file__))
+        project_root  = os.path.dirname(ml_models_dir)
+
+        # Mirror the training subprocess PYTHONPATH: project root + ml_models/.
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.pathsep.join([project_root, ml_models_dir])
+
+        result = subprocess.run(
+            [sys.executable, "-c", _BOOTSTRAP_MIRROR_SCRIPT, str(models_dir)],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, (
+            f"subprocess failed (returncode={result.returncode})\n"
+            f"stdout:\n{result.stdout}\n"
+            f"stderr:\n{result.stderr}"
+        )
+        assert "OK" in result.stdout, f"missing OK marker; stdout={result.stdout!r}"
