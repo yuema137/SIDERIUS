@@ -110,6 +110,24 @@ class ExperimentMemory(BaseModel):
     discovery: Optional[str] = None
     memory_update: Optional[str] = None
 
+    # Phase J — pre-flight time-budget context surfaced to the planner via the
+    # next round's experiment_history. Populated only when the time gate ran
+    # (i.e. the active mode's budget was set); absent on records produced with
+    # the gate disabled, so the reflector doesn't have to filter None values.
+    # See docs/time_estimator_implement.md §J.1.
+    time_estimate_minutes: Optional[float] = Field(
+        default=None,
+        description="Pre-flight wall-time prediction from evaluate_time_skill (minutes).",
+    )
+    time_budget_minutes: Optional[float] = Field(
+        default=None,
+        description="Active mode's time ceiling that the estimate was checked against (minutes).",
+    )
+    time_mode: Optional[Literal["trial", "formal"]] = Field(
+        default=None,
+        description="Which budget was active for this round — 'trial' or 'formal'.",
+    )
+
 
 class ExperimentRecord(BaseModel):
     exp_id: str

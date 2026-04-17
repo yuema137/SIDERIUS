@@ -279,6 +279,8 @@ class HyperparamTuningAgent:
                     current_round=iteration,
                     max_rounds=max_rounds,
                     trial_allowed=trial_allowed,
+                    plan_overrides=agent_input.plan_overrides,
+                    max_epochs=agent_input.max_epochs,
                 )
 
                 # Validate LLM output into ExperimentPlan (with fallback)
@@ -538,6 +540,13 @@ class HyperparamTuningAgent:
                                     "suggestion",
                                     "Reduce model size, batch_size, segmentation_size, or train_portion.",
                                 ),
+                                # Phase J — same three fields the success
+                                # record carries, so the planner sees the
+                                # same shape regardless of pass/fail.
+                                # See docs/time_estimator_implement.md §J.3.
+                                "time_estimate_minutes": time_check.get("estimated_minutes"),
+                                "time_budget_minutes":   time_check.get("limit_minutes"),
+                                "time_mode":             "trial" if plan.is_trial else "formal",
                             },
                         }
                         ExperimentRecord.model_validate(time_record)
@@ -780,6 +789,22 @@ class HyperparamTuningAgent:
                         "memory_update": reflection.get("memory_update"),
                     },
                 }
+                # Phase J — surface pre-flight time-estimator context to the
+                # planner via the next round's experiment_history. Only added
+                # when the gate actually ran (chosen_time_budget was set);
+                # the keys are absent on records produced with the gate
+                # disabled, so the reflector doesn't have to filter None.
+                # See docs/time_estimator_implement.md §J.1.
+                if time_check is not None:
+                    final_record["memory"]["time_estimate_minutes"] = (
+                        time_check.get("estimated_minutes")
+                    )
+                    final_record["memory"]["time_budget_minutes"] = (
+                        time_check.get("limit_minutes")
+                    )
+                    final_record["memory"]["time_mode"] = (
+                        "trial" if plan.is_trial else "formal"
+                    )
                 # Trial context
                 if trial_config.is_trial:
                     final_record["is_trial"] = True
@@ -988,6 +1013,17 @@ def main():
             "eval_portion":    args.eval_portion,
             "train_portion":   args.train_portion,
         })
+        # Clamp the LLM's per-round ExperimentPlan portions to the operator's
+        # CLI values. Without this, the top-level trial_portion only sizes the
+        # sample set; the LLM is still free to pick its own ExperimentPlan
+        # portions, which can blow past the time-budget gate. Mirrors
+        # run_exploration_adaptive.py's plan_overrides wiring.
+        input_dict["plan_overrides"] = {
+            "is_trial":      True,
+            "trial_portion": args.trial_portion,
+            "train_portion": args.train_portion,
+            "eval_portion":  args.eval_portion,
+        }
     if args.human_advice:
         input_dict["human_advice"] = args.human_advice
     if args.trial_time_budget_minutes is not None:
