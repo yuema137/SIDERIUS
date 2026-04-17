@@ -10,7 +10,7 @@ import json
 import subprocess
 import pytest
 from unittest.mock import patch, MagicMock, mock_open
-from core.sandbox_executor import TidmadSandbox
+from core.sandbox_executor import TidmadSandbox, get_plugin_dir
 
 
 # ==========================================
@@ -244,3 +244,42 @@ class TestSandboxPluginDir:
         _, kwargs = mock_run.call_args
         assert "env" in kwargs
         assert kwargs["env"]["SIDERIUS_PLUGIN_DIRS"] == sandbox.plugin_dir
+
+
+# ==========================================
+# get_plugin_dir helper (Phase 4)
+# ==========================================
+
+class TestGetPluginDir:
+    """``get_plugin_dir`` is the single source of truth for the workspace-rooted
+    plugin layout. The workflow uses it to predict where the tuner's sandbox
+    will look, so the two MUST agree on the path. See
+    docs/run_scoped_plugins.md (Phase 4)."""
+
+    def test_layout_matches_doc(self, tmp_path):
+        """Path is exactly ``<workspace>/plugins/<run_name>/`` (absolutised)."""
+        result = get_plugin_dir(str(tmp_path), "run_a")
+        expected = _os.path.join(str(tmp_path), "plugins", "run_a")
+        assert result == expected
+
+    def test_returns_absolute_path(self, tmp_path, monkeypatch):
+        """Workflow may pass a relative workspace; the returned path must be
+        absolute so it equals the sandbox's ``self.plugin_dir`` (which is
+        always absolute via ``os.path.abspath(workspace)``)."""
+        monkeypatch.chdir(tmp_path)
+        result = get_plugin_dir("./relative_ws", "run_a")
+        assert _os.path.isabs(result)
+        assert result.endswith(_os.path.join("relative_ws", "plugins", "run_a"))
+
+    def test_matches_sandbox_plugin_dir(self, tmp_path):
+        """Regression guard for the Phase 4 contract: the helper and the
+        sandbox MUST resolve to the same string. If they ever drift, the
+        workflow's ``_register_plugin`` writes one place and the training
+        subprocess scans another — silent breakage."""
+        sb = TidmadSandbox(run_name="run_x", workspace=str(tmp_path))
+        assert get_plugin_dir(str(tmp_path), "run_x") == sb.plugin_dir
+
+    def test_distinct_run_names_distinct_dirs(self, tmp_path):
+        a = get_plugin_dir(str(tmp_path), "run_a")
+        b = get_plugin_dir(str(tmp_path), "run_b")
+        assert a != b
