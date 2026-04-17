@@ -1011,6 +1011,17 @@ def main():
             "eval_portion":    args.eval_portion,
             "train_portion":   args.train_portion,
         })
+        # Clamp the LLM's per-round ExperimentPlan portions to the operator's
+        # CLI values. Without this, the top-level trial_portion only sizes the
+        # sample set; the LLM is still free to pick its own ExperimentPlan
+        # portions, which can blow past the time-budget gate. Mirrors
+        # run_exploration_adaptive.py's plan_overrides wiring.
+        input_dict["plan_overrides"] = {
+            "is_trial":      True,
+            "trial_portion": args.trial_portion,
+            "train_portion": args.train_portion,
+            "eval_portion":  args.eval_portion,
+        }
     if args.human_advice:
         input_dict["human_advice"] = args.human_advice
     if args.trial_time_budget_minutes is not None:
