@@ -14,7 +14,7 @@
 | A.4 — confirm existing proposer retry loop catches the A.1 validator (no new wiring) + 3 integration tests | 2026-04-16 | `ff59aa8` | 3 new tests in `TestSegmentationSizeRetryIntegration`; 28 full pipeline_runner suite green |
 | A.5 — Phase A acceptance gate (stubborn-LLM scenario covered by A.4 unit tests; dual-mode test deferred to C.3) | 2026-04-16 | `b904fe2` | 272 tests (266 proposer + 6 dataset_config) |
 | B.1 — `ConfigAdjustment` schema + `ImplementorOutput.baseline_config_adjustments` dict; §2.4 policy enforced (forbidden list for dataset-level fields; ±20% delta on numeric; bool/str rejected) | 2026-04-17 | `240fd5e` | 22 new tests; 88 full implementor suite green |
-| B.2a — baseline-self-check helper + wiring into `_validate_code`; existing retry loop picks up schema-relax path | 2026-04-17 | (this commit) | 17 new tests; 105 full implementor suite green |
+| B.2a — baseline-self-check helper + wiring into `_validate_code`; existing retry loop picks up schema-relax path | 2026-04-17 | `4ca5ca4` | 17 new tests; 105 full implementor suite green |
 
 ---
 
