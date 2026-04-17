@@ -241,7 +241,13 @@ total_minutes        = ms_per_step_estimate × total_steps / 60000
 
 If three consecutive runs on the same GPU violate their estimates (`actual_minutes > estimated_minutes`) — even after the EMA has had a chance to correct — emit a warning. This catches qualitative changes the EMA can't track smoothly: driver upgrade, partition switch (gpu-shared → gpu-debug), a neighboring job hogging the node. User intervention: clear the calibration file or investigate the environment.
 
-#### 2.6.7 Accuracy layers summary
+#### 2.6.7 Calibration timing invariant
+
+`actual_ms_per_step` is computed as `train_time × 1000 / total_train_steps`, so the EMA's accuracy depends on `train_time` being the wall-time of training **and nothing else**. Audited 2026-04-16: in `nodes/ml_hyperparameter_tune_agent.py` the timer is captured tightly around the training subprocess (3 adjacent lines: `t0 = time.time()` → `_run_skill("training_skill", ...)` → `train_time = time.time() - t0`). The skill's wrapper resolves directly to `sandbox.execute_training()` → `subprocess.run(["python", "execute_tools/train_engine_sandbox.py", ...])` — pure subprocess, no LLM call. Inference and scoring are timed in their own separate `t0 → call → t1` blocks; the LLM `brain.reflect()` call runs **after** all three timers are already captured, so its latency cannot pollute any of them. The F3 calibration update (which only consumes `train_time`) therefore sees an uncontaminated measurement.
+
+**Invariant for future edits**: the three timer blocks for train / inference / scoring must remain LLM-free between their `t0` and the matching `time.time() - t0`. Any new LLM call must be placed strictly after all three timers are captured (i.e. in the reflect / commit phase). Adding a `_run_skill` call between `t0` and the timer-end is also safe only if that skill is itself LLM-free (e.g. `evaluate_*_skill` are fine; a future LLM-backed skill would not be).
+
+#### 2.6.8 Accuracy layers summary
 
 | Layer | Captures | Phase |
 |---|---|---|
