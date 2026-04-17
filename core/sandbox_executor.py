@@ -45,11 +45,21 @@ def _format_subprocess_error(e: subprocess.CalledProcessError, label: str = "Sub
     return "\n".join(parts)
 
 
-def _subprocess_env() -> dict:
+def _subprocess_env(plugin_dir: Optional[str] = None) -> dict:
     """
     Returns an env dict for subprocesses with ml_models and execute_tools
     added to PYTHONPATH, so flat imports in those scripts resolve correctly
     regardless of the working directory.
+
+    Args:
+        plugin_dir: Optional run-scoped plugin directory. When provided, the
+            returned env sets ``SIDERIUS_PLUGIN_DIRS=<plugin_dir>`` so the
+            training/inference/scoring subprocess scans only this directory
+            instead of the legacy global ``agent_generated/models/``. See
+            docs/run_scoped_plugins.md (Phase 2). When ``None``, the env var
+            is not set and the subprocess falls back to the legacy global
+            dir — this preserves back-compat for any caller outside the
+            tuner sandbox flow.
     """
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     extra_paths = [
@@ -60,6 +70,8 @@ def _subprocess_env() -> dict:
     env = os.environ.copy()
     existing = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = os.pathsep.join(extra_paths + ([existing] if existing else []))
+    if plugin_dir:
+        env["SIDERIUS_PLUGIN_DIRS"] = plugin_dir
     return env
 
 # --- Storage Strategies ---
@@ -159,6 +171,16 @@ class TidmadSandbox:
         for key, d in self.dirs.items():
             if key != "data":  # data dir is read-only input, not agent-generated output
                 _ensure_dir(d)
+
+        # Run-scoped plugin directory — see docs/run_scoped_plugins.md (Phase 2).
+        # Lives under ``self.base_dir`` (the workspace) alongside
+        # ``configs/<run_name>/``, so two sandboxes on different workspaces
+        # never collide and tests that point ``workspace`` at ``tmp_path`` are
+        # automatically self-contained. Created eagerly so downstream steps
+        # (seed plugin copy in Phase 3, implementor writes in Phase 4) have a
+        # stable target without having to mkdir.
+        self.plugin_dir = os.path.join(self.base_dir, "plugins", run_name)
+        _ensure_dir(self.plugin_dir)
 
         self.run_name = run_name
         self.progress_bar = progress_bar
@@ -272,7 +294,7 @@ class TidmadSandbox:
                     stderr=subprocess.PIPE,
                     text=True,
                     cwd=os.getcwd(),
-                    env=_subprocess_env(),
+                    env=_subprocess_env(plugin_dir=self.plugin_dir),
                 )
 
             if not self.progress_bar and result.stdout:
@@ -360,7 +382,7 @@ class TidmadSandbox:
                 stdout=None if self.progress_bar else subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True, cwd=os.getcwd(),
-                env=_subprocess_env(),
+                env=_subprocess_env(plugin_dir=self.plugin_dir),
             )
             if not self.progress_bar and result.stdout:
                 print(f"--- Inference Output ---\n{result.stdout}")
@@ -422,7 +444,7 @@ class TidmadSandbox:
                 stdout=None if self.progress_bar else subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True, cwd=os.getcwd(),
-                env=_subprocess_env(),
+                env=_subprocess_env(plugin_dir=self.plugin_dir),
             )
 
             # Merge training results (loss history) with scoring results

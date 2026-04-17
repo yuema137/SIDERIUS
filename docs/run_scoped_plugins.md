@@ -1,6 +1,16 @@
 # Run-scoped plugin directories
 
-**Status**: design (2026-04-17) — not yet implemented
+**Status**: in progress (started 2026-04-17)
+
+## Progress
+
+| Phase | Status | Commit | Notes |
+|-------|--------|--------|-------|
+| 1 — plugin_loader env var support | ✅ done | `634a12e` | `_resolve_plugin_dirs` + `SIDERIUS_PLUGIN_DIRS`; 9 new unit tests |
+| 2 — tuner sandbox sets env var | ✅ done | (pending commit) | `TidmadSandbox.plugin_dir` + env wiring; 6 new unit tests |
+| 3 — seed plugin copy | ⬜ pending | — | `seed_plugin_path` schema field, AST validation, copy at run start |
+| 4 — implementor writes into run dir | ⬜ pending | — | workflow populates `ImplementorInput.plugin_dir` with run-scoped path |
+| 5 — deprecate global dir | ⬜ out of scope (future) | — | drop `AGENT_GENERATED_DIR` fallback; requires full caller audit |
 
 ## Problem
 
@@ -27,15 +37,21 @@ Nothing else.
 
 ### Directory layout
 
+Legacy plugins stay at the repo root (read-only back-compat). Per-run
+plugins live under the **workspace**, alongside other per-run outputs
+(`configs/<run_name>/`, `records/<run_name>/`). Two workspaces never
+collide; tests that point `workspace` at `tmp_path` are automatically
+self-contained.
+
 ```
-agent_generated/
-├── models/                        # legacy global dir — preserved for back-compat
-│   └── <old>.py
-└── runs/
-    └── <run_name>/
-        └── models/
-            ├── <seed_plugin>.py           # copied in at run start (if seed is a plugin)
-            └── <proposed_plugin>.py       # written by implementor during the run
+<repo>/agent_generated/
+└── models/                        # legacy global dir — preserved for back-compat
+    └── <old>.py
+
+<workspace>/plugins/
+└── <run_name>/
+    ├── <seed_plugin>.py           # copied in at run start (if seed is a plugin)
+    └── <proposed_plugin>.py       # written by implementor during the run
 ```
 
 ### Plugin resolution
@@ -70,7 +86,7 @@ tests that override it continue to work unchanged.
 
 | Actor | What it does |
 |-------|--------------|
-| Tuner node (`nodes/ml_hyperparameter_tune_agent.py`) | Creates `agent_generated/runs/<run_name>/models/` at run start. Sets `SIDERIUS_PLUGIN_DIRS=<that dir>` in the training-subprocess env. Copies seed plugin file into the dir if the seed is a plugin (see below). |
+| Tuner node (`nodes/ml_hyperparameter_tune_agent.py`) | Constructs a `TidmadSandbox(run_name=...)`. The sandbox creates `<workspace>/plugins/<run_name>/` and exposes it as `self.plugin_dir`; it also sets `SIDERIUS_PLUGIN_DIRS=self.plugin_dir` in the env it passes to every subprocess it spawns. Seed plugin copy (Phase 3) happens inside the tuner before the first training call. |
 | Training subprocess (`execute_tools/train_engine_sandbox.py`) | No change. Inherits env var from `subprocess.run(env=...)`. `plugin_loader` picks it up automatically. |
 | Implementor node (`nodes/ml_model_implementor.py`) | Receives `plugin_dir` via `ImplementorInput` (already exists — `default="agent_generated/models"`). The caller — workflow or orchestrator — populates it with the run-scoped dir. |
 | Workflow (`workflows/model_exploration.py`) | When assembling `ImplementorInput`, passes the run-scoped `plugin_dir`. When copying validated plugins, copies to the run-scoped dir. |
@@ -104,6 +120,12 @@ files in the run dir.
   change. It remains writable and readable. A future change may migrate
   older plugins into a per-run layout and retire the global dir — that is
   out of scope here.
+- **Why workspace-rooted, not repo-rooted?** The initial design placed
+  per-run dirs under `<repo>/agent_generated/runs/...` for consistency
+  with the legacy global dir. This caused test pollution (every
+  `TidmadSandbox(workspace=tmp_path)` leaked a real dir into the repo)
+  and conflated "agent-generated artifacts that ship with the repo" with
+  "per-run outputs that don't". Workspace-rooting removes both problems.
 
 ## Phased migration
 
