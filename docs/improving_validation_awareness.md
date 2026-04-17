@@ -1,6 +1,6 @@
 # Validation-Awareness Across Proposer + Implementor
 
-**Status**: Phase A complete 2026-04-16; Phase B.1 + B.2a landed 2026-04-17, B.2b+ in progress; **Phase D.4 landed 2026-04-17** (reactive constraint-aware retry); D.1/D.2/D.3/D.5 pending
+**Status**: Phase A complete 2026-04-16; Phase B.1 + B.2a landed 2026-04-17, B.2b+ in progress; **Phase D.4 landed 2026-04-17** (reactive constraint-aware retry); **Phase D.1 step 1 landed 2026-04-17** (source-excerpt helpers); D.1 wiring, D.2/D.3/D.5 pending
 **Author**: design discussion 2026-04-16; Phase D addendum 2026-04-17
 **Motivation**: two iter-1 runs (`exploit_cnn_v1`, `explore_novel_v1`, launched 2026-04-16 23:02) burned their entire 9-attempt budgets and produced **zero successful rounds** because the proposer wrote `baseline_config` values that violated downstream validation rules. Both runs reached `status="partial", completed_rounds=0, all_records=[]` after ~2.5 minutes each, then advanced to iter-2 and would have repeated the same failure mode for the rest of the 20-iteration budget. A **second class of failure** surfaced during the Phase C.3 re-launch on 2026-04-17: `exploit_cnn_v1` iter-1 burned 9 attempts on the same pydantic `@model_validator(mode='after')` cross-field invariant (`nondecreasing channels`) — the tuner's planner cannot see this kind of rule because `PLUGIN_CONFIG_CLASS.model_json_schema()` drops `@model_validator` bodies. Phase D closes this new gap.
 
@@ -18,6 +18,7 @@
 | C.3 (test infra) — Tier-3 replay test `test_baseline_validation_fix.py` for propose→implement→validate slice of the 2026-04-16 failures | 2026-04-17 | `3458ef0` | 2 new real-LLM tests; both passed (601 s) |
 | D observation — `exploit_cnn_v1` iter-1 re-launch burned 9 attempts on `@model_validator` cross-field invariant (`nondecreasing channels`); root-caused to `model_json_schema()` dropping validator bodies | 2026-04-17 | run log `logs/exploit_cnn_v1_20260417_005517.log` | design below |
 | D.4 — reactive constraint-aware retry: `skipped_schema_violation` record type, wrapper returns structured `schema_violation` on `ValidationError`, tuner saves record + continues without advancing round | 2026-04-17 | `51c0b87` (schema) + `8785f8d` (wrapper) + `5c65106` (tuner) + `5e65655` (tests + doc) | 3 new schema tests + 10 new D.4 tests (`test_constraint_aware_retry.py`); 193 full `tune_ml_hyperparam_agent` suite green |
+| D.1 step 1 — source-excerpt helpers: `_extract_config_class_source` (via `inspect.getsource`) + `format_plugin_source_excerpt_block` (pinned heading wrapper). Works uniformly for built-in and plugin config classes. Truncation at 4000 chars with marker. Not yet wired into the planner prompt. | 2026-04-17 | `9682964` | 11 new tests in `test_plugin_source_excerpt.py` (all pass) |
 
 ---
 
@@ -335,17 +336,31 @@ The project actively encourages this pattern via CLAUDE.md ("Pydantic validation
 
 Cheapest preventive fix. The planner already gets the json-schema dict; we additionally feed it the raw config-class block so `@model_validator` bodies are visible.
 
-- [ ] Add extraction helper `_extract_config_class_excerpt(plugin_src: str) -> str` in `nodes/ml_hyperparameter_tune_agent.py` (or `agent/prompts.py` if shared): returns the `class *Config(BaseModel):` body plus any `@field_validator`/`@model_validator` decorators that appear before `PLUGIN_CONFIG_CLASS = ...`. Strip the `PLUGIN_MODEL_CLASS` forward code — it's not schema-relevant and would bloat the prompt.
-- [ ] Truncate to ≤4000 chars; append `"... (truncated)"` marker if cut.
-- [ ] Read plugin source once per run in `HyperparamTuningAgent.run()` (plugin path already in `agent_input`), cache as `self._plugin_source_excerpt`, pass to `brain.plan(..., plugin_source_excerpt=...)`.
-- [ ] Update `build_exploration_checklist` (or render it in the planner prompt adjacent to the checklist) to inject the excerpt under a pinned heading like `## PLUGIN CONFIG SCHEMA (authoritative — read these validators carefully)`.
-- [ ] Unit tests (`tests/unit/agent/ml_hyperparameter_tune_agent/test_plugin_source_excerpt.py`, new file):
-  - [ ] extraction returns config class + validators only; forward code stripped
-  - [ ] excerpt trimmed to ≤4000 chars with truncation marker
-  - [ ] plugin lacking any `@*_validator` still returns a clean excerpt (just the class body)
-  - [ ] plugin missing `PLUGIN_CONFIG_CLASS` returns empty string (graceful)
-  - [ ] planner prompt renders the excerpt section when supplied; omits the whole section when empty
-- [ ] Drawback: prompt bloat every planner call. Common-case excerpt is 500–1500 chars so bearable; track in production.
+**Design note (pivoted during implementation 2026-04-17).** The original sketch proposed a regex/AST helper that takes a plugin `plugin_src: str`, locates the `class *Config(BaseModel):` block, and strips the `PLUGIN_MODEL_CLASS` forward code. Replaced with `inspect.getsource(config_cls)`: it takes the already-resolved class object, returns exactly the class body (decorators inside the class are included; the model class body is not), and **works uniformly for built-in config classes** (`ml_models/models_format_sandbox.py` — which also carry `@model_validator`s at lines 33, 94, 330, 388) **and agent-generated plugins** without any file-path or registry heuristics. No string parsing, no whitespace-sensitive slicing, and no "plugin-only" second code path. Truncation at 4000 chars still applies. Deviation flagged so the doc matches what shipped.
+
+**Step 1 (landed 2026-04-17, commit `9682964`)** — helpers only, not yet rendered in the planner prompt.
+
+- [x] Added `_extract_config_class_source(config_cls)` in `agent/prompts.py` — wraps `inspect.getsource`, returns `""` on `OSError`/`TypeError` (dynamic classes / missing source), and on `config_cls is None`.
+- [x] Truncation to `_PLUGIN_SOURCE_EXCERPT_MAX_CHARS = 4000` with `"... (truncated)"` marker appended when cut.
+- [x] Added `format_plugin_source_excerpt_block(config_cls)` sibling — wraps the extracted source in the pinned heading `## PLUGIN CONFIG SCHEMA (authoritative — read validators carefully)` + python code fence. Returns `""` (no empty block) when extraction yields nothing.
+- [x] Unit tests (`tests/unit/agent/tune_ml_hyperparam_agent/test_plugin_source_excerpt.py`, 11 tests):
+  - [x] `TestExtractor::test_none_returns_empty` — `None` input.
+  - [x] `TestExtractor::test_model_validator_body_present` — the exact `dual_path_skip_fusion_cnn` monotone-invariant shape; confirms decorator + body + error-message string all visible in the excerpt.
+  - [x] `TestExtractor::test_field_validator_decorator_present` — per-field `@field_validator` surfaces.
+  - [x] `TestExtractor::test_per_field_only_class_still_returns_source` — class with no validators still returns its body (per-field `multiple_of=8` appears in Python syntax, easier for the LLM to parse than JSON-schema slugs).
+  - [x] `TestExtractor::test_truncates_when_over_limit` — monkeypatches `inspect.getsource` to return an oversize string; excerpt ends with the marker and respects the byte budget.
+  - [x] `TestExtractor::test_graceful_on_dynamic_class` — class created via `type(...)` → `""`.
+  - [x] `TestExtractor::test_real_builtin_config_class` — regression guard on `PUNetConfig` (built-in has `@model_validator`s; D.1 must work for built-ins, not only plugins).
+  - [x] `TestBlockFormatter::{test_none_returns_empty, test_heading_and_fence_present, test_embeds_extracted_source, test_empty_when_source_unavailable}` — block wrapper contracts.
+
+**Step 2 (pending)** — wiring:
+
+- [ ] Add `plugin_source_excerpt: str = ""` parameter to `LLMBridge.plan()` in `agent/llm_bridge.py`; append to `final_user_prompt` adjacent to the existing `exploration_checklist` injection.
+- [ ] In `nodes/ml_hyperparameter_tune_agent.py`, build the excerpt once per run via `format_plugin_source_excerpt_block(config_cls)` (the class object is already resolved at the existing `get_config_class(model_type_setting)` call site) and thread it through `brain.plan(..., plugin_source_excerpt=excerpt)`.
+- [ ] Unit test: `brain.plan` rendering — excerpt present in rendered user prompt when supplied; section omitted when empty. (Recording-bridge style, no real LLM.)
+- [ ] Tuner-integration test: mock `brain.plan` and assert `plugin_source_excerpt` kwarg is populated with the monotone-class body on a run against a config class that has `@model_validator`.
+
+**Drawback (unchanged from design)**: prompt bloat every planner call. Common-case excerpt is 500–1500 chars so bearable; track in production.
 
 #### D.2 — `ImplementorOutput.schema_constraints` plain-English rules (medium effort, preventive, clean)
 
