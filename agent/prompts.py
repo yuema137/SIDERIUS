@@ -541,8 +541,10 @@ def get_planner_user_prompt(
             f"train={train_s/60:.1f} min, inference={infer_s/60:.1f} min, "
             f"total={total_s/60:.1f} min"
             + (f" (segmentation_size={seg})" if seg else "") + ".\n"
-            f"Compare this against the time budget in the Expert Advice and "
-            f"adjust segmentation_size or model complexity accordingly.\n"
+            f"The time budget is a HARD UPPER LIMIT, not a target. If the last "
+            f"run exceeded it, reduce model complexity. If it was well under, "
+            f"do NOT scale up just because there is headroom — smaller "
+            f"experiments are equally valid as long as they test the hypothesis.\n"
         )
 
     # Round context with phase information (when provided)
