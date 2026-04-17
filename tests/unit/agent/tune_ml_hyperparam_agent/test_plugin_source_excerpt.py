@@ -11,6 +11,8 @@ Covers the two helpers in ``agent/prompts.py`` that surface
 
 See docs/improving_validation_awareness.md §D.1.
 """
+import textwrap
+
 from pydantic import BaseModel, Field, model_validator, field_validator
 
 from agent.prompts import (
@@ -18,6 +20,7 @@ from agent.prompts import (
     _extract_config_class_source,
     format_plugin_source_excerpt_block,
 )
+from ml_models.plugin_loader import _load_plugin
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +153,86 @@ class TestBlockFormatter:
         reading an empty block)."""
         DynCfg = type("DynCfg2", (BaseModel,), {"__module__": __name__})
         assert format_plugin_source_excerpt_block(DynCfg) == ""
+
+
+# ===========================================================================
+# Plugin-loader integration — regression guard on the sys.modules registration
+# ===========================================================================
+
+_PLUGIN_SRC_WITH_VALIDATOR = textwrap.dedent("""\
+    import torch
+    import torch.nn as nn
+    from pydantic import BaseModel, Field, model_validator
+
+    PLUGIN_MODEL_TYPE = "monotone_test_plugin"
+
+    class MonotoneTestCfg(BaseModel):
+        model_type: str = "monotone_test_plugin"
+        segmentation_size: int = Field(default=1000, ge=100)
+        batch_size: int = 1
+        a: int = Field(default=1, ge=1)
+        b: int = Field(default=2, ge=1)
+        c: int = Field(default=3, ge=1)
+
+        @model_validator(mode='after')
+        def _check_abc_monotone(self):
+            if not (self.a <= self.b <= self.c):
+                raise ValueError('a, b, c must be nondecreasing')
+            return self
+
+    class MonotoneTestModel(nn.Module):
+        def __init__(self, config):
+            super().__init__()
+            self.linear = nn.Linear(config.segmentation_size, config.segmentation_size)
+
+        def forward(self, x):
+            out = self.linear(x.float())
+            return out.unsqueeze(1).expand(-1, 256, -1)
+
+    PLUGIN_CONFIG_CLASS = MonotoneTestCfg
+    PLUGIN_MODEL_CLASS  = MonotoneTestModel
+""")
+
+
+class TestPluginLoaderIntegration:
+    """Regression guard on the bug discovered 2026-04-17 during Phase D.5
+    preparation: ``ml_models/plugin_loader._load_plugin`` used to register
+    plugins under the placeholder name ``"_siderius_plugin_tmp"`` without
+    adding them to ``sys.modules``. Python's inspect machinery therefore
+    treated every plugin config class as a built-in, and
+    ``_extract_config_class_source`` silently returned ``""`` — defeating the
+    entire point of Phase D.1 for plugin runs (the failing-case class).
+
+    The fix: each plugin is now registered as
+    ``siderius_plugin_<filename_stem>`` in ``sys.modules``. These tests lock
+    in that contract by exercising the full path end-to-end."""
+
+    def test_extractor_resolves_plugin_class(self, tmp_path):
+        """Plugin loaded via the real loader → extractor returns source with
+        the validator body present. If the sys.modules registration
+        regresses, ``inspect.getsource`` would raise ``TypeError`` again and
+        this returns ``""``."""
+        plugin_path = tmp_path / "monotone_test_plugin.py"
+        plugin_path.write_text(_PLUGIN_SRC_WITH_VALIDATOR)
+
+        plugin = _load_plugin(str(plugin_path))
+        assert plugin is not None, "pre-condition: plugin should load cleanly"
+
+        src = _extract_config_class_source(plugin["config_class"])
+        assert "class MonotoneTestCfg" in src
+        assert "@model_validator" in src
+        assert "nondecreasing" in src
+
+    def test_block_formatter_resolves_plugin_class(self, tmp_path):
+        plugin_path = tmp_path / "monotone_test_plugin2.py"
+        plugin_path.write_text(_PLUGIN_SRC_WITH_VALIDATOR)
+
+        plugin = _load_plugin(str(plugin_path))
+        block = format_plugin_source_excerpt_block(plugin["config_class"])
+
+        assert "## PLUGIN CONFIG SCHEMA" in block
+        assert "@model_validator" in block
+        assert "nondecreasing" in block
 
 
 # ===========================================================================
