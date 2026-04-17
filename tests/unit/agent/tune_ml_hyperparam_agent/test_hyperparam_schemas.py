@@ -363,6 +363,59 @@ class TestExperimentRecordOOM:
         assert record.file_index == ExperimentRecord.model_fields["file_index"].default
 
 
+class TestExperimentRecordSchemaViolation:
+    """Phase D.4 — skipped_schema_violation records are emitted when the plugin's
+    Pydantic config class rejects a tuner-proposed model_config (e.g. via a
+    @model_validator(mode='after') cross-field invariant). They share the shape
+    of skipped_oom_risk / skipped_time_risk: denoising_score=None, no timing,
+    and memory.conclusion + memory.memory_update carry the structured violation
+    info for the next round's planner."""
+
+    def _base_record(self):
+        return {
+            "exp_id":          "dual_path_skip_fusion_cnn_run_007",
+            "status":          "skipped_schema_violation",
+            "model_type":      "dual_path_skip_fusion_cnn",
+            "timestamp":       "2026-04-17 14:00:00",
+            "file_index":      6,
+            "params":          {"model_config": {}, "train_config": {}, "loss_config": {}},
+            "denoising_score": None,
+            "memory": {
+                "expert_advice_followed": "",
+                "hypothesis":    "widen bottleneck",
+                "conclusion":    (
+                    "Skipped: config violated plugin schema. "
+                    "Violating fields: context_bottleneck_channels. "
+                    "Offending values: stem=32, l2=96, l3=128, bottleneck=96."
+                ),
+                "discovery":     "nondecreasing channels rule enforced by plugin",
+                "memory_update": (
+                    "DO NOT repeat context_bottleneck_channels=96 with "
+                    "context_level3_channels=128. Plugin requires "
+                    "stem <= l2 <= l3 <= bottleneck."
+                ),
+            },
+        }
+
+    def test_valid_schema_violation_record(self):
+        rec = ExperimentRecord.model_validate(self._base_record())
+        assert rec.status == "skipped_schema_violation"
+        assert rec.denoising_score is None
+        assert rec.timing is None
+
+    def test_memory_update_preserved(self):
+        rec = ExperimentRecord.model_validate(self._base_record())
+        assert "DO NOT repeat" in rec.memory.memory_update
+
+    def test_invalid_status_literal_still_rejected(self):
+        """Ensure we didn't accidentally open the Literal too wide."""
+        r = self._base_record()
+        r["status"] = "skipped_something_else"
+        with pytest.raises(ValidationError) as exc:
+            ExperimentRecord.model_validate(r)
+        assert "status" in str(exc.value)
+
+
 class TestExperimentRecordExecutionErrors:
     """Test the training/inference error status values."""
 
