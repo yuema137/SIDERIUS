@@ -1,6 +1,6 @@
 # Validation-Awareness Across Proposer + Implementor
 
-**Status**: design — not yet implemented
+**Status**: in progress (Phase A.1 landed 2026-04-16)
 **Author**: design discussion 2026-04-16
 **Motivation**: two iter-1 runs (`exploit_cnn_v1`, `explore_novel_v1`, launched 2026-04-16 23:02) burned their entire 9-attempt budgets and produced **zero successful rounds** because the proposer wrote `baseline_config` values that violated downstream validation rules. Both runs reached `status="partial", completed_rounds=0, all_records=[]` after ~2.5 minutes each, then advanced to iter-2 and would have repeated the same failure mode for the rest of the 20-iteration budget.
 
@@ -8,7 +8,8 @@
 
 | Phase | Date | Commit | Tests |
 |---|---|---|---|
-| (design only — not yet implemented) | 2026-04-16 | — | — |
+| Design doc | 2026-04-16 | `ba1d9d0` | n/a |
+| A.1 — `ProposalOutput` segmentation_size validator + `DatasetConfig.valid_segmentation_sizes()` helper | 2026-04-16 | (this commit) | 6 helper + 9 validator tests; 253 full proposer suite + 899 full agent unit suite all green |
 
 ---
 
@@ -138,16 +139,20 @@ The policy is enforced as a pydantic validator on `ConfigAdjustment` and surface
 
 Catches `segmentation_size=16384` before the implementor is even invoked.
 
-#### A.1 — Schema validator on `ProposalOutput.baseline_config`
-- [ ] Add `model_validator(mode="after")` on `ProposalOutput` in `agent/schemas/proposal.py`
-- [ ] Validator checks `DATASET_CONFIG.psd_segment_length % seg == 0` where `seg = baseline_config['model_config']['segmentation_size']`
-- [ ] Error message lists valid divisors (mirror format from `nodes/ml_hyperparameter_tune_agent.py:57`)
-- [ ] Validator no-ops gracefully when `segmentation_size` is absent (some proposals may omit it)
-- [ ] Unit tests: `tests/unit/agent/ml_model_proposal_agent/test_baseline_config_validators.py`
-  - [ ] valid divisor passes
-  - [ ] invalid divisor (16384) raises with valid-divisor list in message
-  - [ ] missing `model_config` key — no error raised
-  - [ ] missing `segmentation_size` key — no error raised
+#### A.1 — Schema validator on `ProposalOutput.baseline_config` ✅
+- [x] Add `model_validator(mode="after")` on `ProposalOutput` in `agent/schemas/proposal.py`
+- [x] Validator checks `DATASET_CONFIG.psd_segment_length % seg == 0` where `seg = baseline_config['model_config']['segmentation_size']`
+- [x] Error message lists valid divisors (uses new `DatasetConfig.valid_segmentation_sizes()` helper instead of mirroring the tuner's slow `range(100, psd+1)` enumeration — sqrt-based, ~3000 iterations vs 10M)
+- [x] Validator no-ops gracefully when `segmentation_size` is absent (some proposals may omit it)
+- [x] Unit tests: `tests/unit/agent/ml_model_proposal_agent/test_baseline_config_validators.py`
+  - [x] valid divisor passes (also batch-checks 100, 1000, 1250, 16000, 50000)
+  - [x] invalid divisor (16384) raises with valid-divisor list in message
+  - [x] missing `model_config` key — no error raised
+  - [x] missing `segmentation_size` key — no error raised
+  - [x] empty `baseline_config={}` — no error raised (backward compat with existing tests)
+  - [x] negative / zero / non-int values rejected with type-specific message
+- [x] Helper test file: `tests/unit/execute_tools/test_dataset_config.py` (6 tests covering `valid_segmentation_sizes`)
+- [x] Verified by 253 full proposer-agent suite + 899 full agent unit suite — zero regressions
 
 #### A.2 — Proposer prompt: known-constraints block
 - [ ] Add `_format_known_constraints_block(dataset_config)` helper in `agent/prompts.py`

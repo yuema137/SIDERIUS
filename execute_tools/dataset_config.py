@@ -42,6 +42,28 @@ class DatasetConfig(BaseModel):
         description="Format string for validation file names. Use {file_index}.",
     )
 
+    def valid_segmentation_sizes(self, lo: int = 100, hi: int = 100_000) -> list[int]:
+        """Return sorted divisors of ``psd_segment_length`` in ``[lo, hi]``.
+
+        ``segmentation_size`` (a model-config field) must exactly divide
+        ``psd_segment_length`` so a PSD segment splits cleanly into ML segments.
+        This helper enumerates the legal values for use in validators and prompts.
+
+        Uses sqrt enumeration so it is fast even for large ``psd_segment_length``.
+        """
+        psd = self.psd_segment_length
+        divisors: set[int] = set()
+        i = 1
+        while i * i <= psd:
+            if psd % i == 0:
+                if lo <= i <= hi:
+                    divisors.add(i)
+                j = psd // i
+                if lo <= j <= hi:
+                    divisors.add(j)
+            i += 1
+        return sorted(divisors)
+
 
 # ---------------------------------------------------------------------------
 # TIDMAD dataset (default)
