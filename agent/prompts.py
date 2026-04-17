@@ -379,6 +379,46 @@ def build_exploration_checklist(
 # 3. USER PROMPT GENERATORS (The Context)
 # ==========================================
 
+def _format_known_constraints_block(dataset_config=None) -> str:
+    """
+    Render a SYSTEM-ENFORCED DATASET CONSTRAINTS block listing the dataset-level
+    rules that the proposer's ``baseline_config`` is machine-validated against.
+
+    Used by the proposing-stage prompt only — the comparison and causal-reasoning
+    stages don't write ``baseline_config`` and don't need this block.
+
+    Returns an empty string when ``dataset_config`` is None (backward-compat for
+    callers that don't supply one — those callers pre-date this validator).
+
+    See ``docs/improving_validation_awareness.md`` Phase A.2.
+
+    Args:
+        dataset_config: A ``DatasetConfig`` (typically ``TIDMAD``). When None,
+            the helper no-ops and returns "".
+
+    Returns:
+        Formatted block string, or "" when ``dataset_config`` is None.
+    """
+    if dataset_config is None:
+        return ""
+
+    psd = dataset_config.psd_segment_length
+    valid = dataset_config.valid_segmentation_sizes()
+    return f"""## SYSTEM-ENFORCED DATASET CONSTRAINTS
+
+Your `baseline_config` will be machine-validated against the dataset rules below.
+A violation rejects the proposal and re-prompts you with the error — burning one
+of your retry attempts. Pick valid values now.
+
+  segmentation_size — must EXACTLY divide psd_segment_length ({psd:,}).
+                      Valid values: {valid}.
+                      Powers of 2 such as 16384, 8192, 4096 are INVALID
+                      because they do not divide {psd:,}. Use a divisor from
+                      the list above (16000 is the nearest valid neighbor of 16384).
+
+"""
+
+
 def _format_fixed_params_block(plan_overrides=None, max_epochs=None):
     """
     Render a SYSTEM-FIXED PARAMETERS block for the planner prompt when the

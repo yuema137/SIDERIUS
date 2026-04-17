@@ -9,7 +9,8 @@
 | Phase | Date | Commit | Tests |
 |---|---|---|---|
 | Design doc | 2026-04-16 | `ba1d9d0` | n/a |
-| A.1 — `ProposalOutput` segmentation_size validator + `DatasetConfig.valid_segmentation_sizes()` helper | 2026-04-16 | (this commit) | 6 helper + 9 validator tests; 253 full proposer suite + 899 full agent unit suite all green |
+| A.1 — `ProposalOutput` segmentation_size validator + `DatasetConfig.valid_segmentation_sizes()` helper | 2026-04-16 | `7c935b0` | 6 helper + 9 validator tests; 253 full proposer suite + 899 full agent unit suite all green |
+| A.2 + A.3 — `_format_known_constraints_block` helper, `{known_constraints_block}` placeholder in `proposing_stage.md`, wired in `nodes/ml_model_proposal_agent.py` with `DATASET_CONFIG` | 2026-04-16 | (this commit) | 10 new tests; 263 full proposer suite green |
 
 ---
 
@@ -154,19 +155,23 @@ Catches `segmentation_size=16384` before the implementor is even invoked.
 - [x] Helper test file: `tests/unit/execute_tools/test_dataset_config.py` (6 tests covering `valid_segmentation_sizes`)
 - [x] Verified by 253 full proposer-agent suite + 899 full agent unit suite — zero regressions
 
-#### A.2 — Proposer prompt: known-constraints block
-- [ ] Add `_format_known_constraints_block(dataset_config)` helper in `agent/prompts.py`
-- [ ] Block lists: `psd_segment_length`, valid `segmentation_size` divisors, any other dataset-level constants
-- [ ] Inject block into the **proposing stage** prompt (not the comparison/causal-reasoning stages — they don't write `baseline_config`)
-- [ ] Unit tests: `tests/unit/agent/ml_model_proposal_agent/test_known_constraints_block.py`
-  - [ ] block renders with valid divisors
-  - [ ] block absent when `dataset_config` not passed (backward compat)
-  - [ ] block precedes the `baseline_config` instruction in the rendered prompt
+#### A.2 — Proposer prompt: known-constraints block ✅
+- [x] Add `_format_known_constraints_block(dataset_config)` helper in `agent/prompts.py`
+- [x] Block lists: `psd_segment_length`, valid `segmentation_size` divisors, calls out invalid powers-of-2 (16384/8192/4096) explicitly, mentions 16000 as recovery hint
+- [x] Inject block into the **proposing stage** prompt only (not the comparison/causal-reasoning stages — they don't write `baseline_config`); placeholder `{known_constraints_block}` placed right before `## Rules` for high salience near `baseline_config` description
+- [x] Unit tests: `tests/unit/agent/ml_model_proposal_agent/test_known_constraints_block.py` (10 tests)
+  - [x] empty when `dataset_config` is None (backward compat)
+  - [x] block includes psd_segment_length, valid divisors, invalid-power-of-2 callout, recovery hint
+  - [x] high-salience heading present
+  - [x] proposing_stage prompt renders block when supplied
+  - [x] placeholder collapses to empty string when block is "" (no leftover braces)
+  - [x] block precedes `## Rules` in rendered prompt
+  - [x] other stages (comparison, causal_reasoning) ignore the unknown placeholder
 
-#### A.3 — Wire `dataset_config` through to the proposer
-- [ ] Confirm `DATASET_CONFIG` is importable inside the proposer node
-- [ ] `nodes/ml_model_proposal_agent.py` passes `dataset_config=DATASET_CONFIG` to `_format_known_constraints_block`
-- [ ] No new field on `ProposalInput` — `DATASET_CONFIG` is a global constant for now
+#### A.3 — Wire `dataset_config` through to the proposer ✅
+- [x] `DATASET_CONFIG` importable inside the proposer node (via `from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG`)
+- [x] `nodes/ml_model_proposal_agent.py` passes `dataset_config=DATASET_CONFIG` to `_format_known_constraints_block`, injected via `template_vars["known_constraints_block"]` in the stage runner
+- [x] No new field on `ProposalInput` — `DATASET_CONFIG` is a global constant for now
 
 #### A.4 — Verify existing retry loop catches the validator
 - [ ] `nodes/ml_model_proposal_agent.py` already retries on validation failure with `previous_failures` — confirm by reading the retry path
