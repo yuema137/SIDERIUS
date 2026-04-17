@@ -780,6 +780,22 @@ class HyperparamTuningAgent:
                         "memory_update": reflection.get("memory_update"),
                     },
                 }
+                # Phase J — surface pre-flight time-estimator context to the
+                # planner via the next round's experiment_history. Only added
+                # when the gate actually ran (chosen_time_budget was set);
+                # the keys are absent on records produced with the gate
+                # disabled, so the reflector doesn't have to filter None.
+                # See docs/time_estimator_implement.md §J.1.
+                if time_check is not None:
+                    final_record["memory"]["time_estimate_minutes"] = (
+                        time_check.get("estimated_minutes")
+                    )
+                    final_record["memory"]["time_budget_minutes"] = (
+                        time_check.get("limit_minutes")
+                    )
+                    final_record["memory"]["time_mode"] = (
+                        "trial" if plan.is_trial else "formal"
+                    )
                 # Trial context
                 if trial_config.is_trial:
                     final_record["is_trial"] = True

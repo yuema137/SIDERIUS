@@ -843,3 +843,74 @@ class TestTimeBudgetGate:
         called_skills = [s for s, _ in skill_calls]
         assert "evaluate_time_skill" not in called_skills
         assert "training_skill" in called_skills
+
+    # --- Phase J: success-record carries time-estimator memory --------------
+    #
+    # When the gate passes, the success record's memory block must surface the
+    # pre-flight estimate, the active budget, and the mode so the next planner
+    # round sees them via experiment_history. When the gate is disabled (both
+    # budgets None), the keys must be absent — not None — so the reflector
+    # doesn't have to filter them. See docs/time_estimator_implement.md §J.1.
+
+    def test_success_record_memory_carries_time_fields_formal(self, tmp_path):
+        """Gate-pass in formal mode → memory carries the three time fields
+        sourced from the time_check dict and time_mode='formal'."""
+        agent, _, _, saved_records, _, cleanup = self._make_agent(
+            FAKE_TIME_CHECK_OK
+        )
+        try:
+            agent.run(_make_input_with_budget(tmp_path, formal_budget=30.0))
+        finally:
+            cleanup()
+        rec = saved_records[0]
+        assert rec["status"] == "success"
+        mem = rec["memory"]
+        assert mem["time_estimate_minutes"] == 12.0   # FAKE_TIME_CHECK_OK
+        assert mem["time_budget_minutes"] == 30.0
+        assert mem["time_mode"] == "formal"
+
+    def test_success_record_memory_time_mode_trial(self, tmp_path):
+        """Gate-pass in trial mode → time_mode='trial' and the carried budget
+        matches the trial budget (not the formal one). max_rounds=2 because
+        the agent forces the FINAL round to formal — we assert on the first
+        (trial) record."""
+        agent, mock_brain, _, saved_records, _, cleanup = self._make_agent(
+            FAKE_TIME_CHECK_OK, enable_trial_mode=True,
+        )
+        mock_brain.plan.return_value = {**FAKE_PLAN_RESPONSE, "is_trial": True}
+        try:
+            agent.run(_make_input_with_budget(
+                tmp_path,
+                max_rounds=2,
+                trial_budget=15.0,
+                formal_budget=240.0,
+                is_trial=True,
+            ))
+        finally:
+            cleanup()
+        # First saved record is the trial round (FAKE_TIME_CHECK_OK reports
+        # limit_minutes=30.0 regardless of which budget was actually picked,
+        # because it's a fixed fake — what we care about here is time_mode).
+        trial_rec = saved_records[0]
+        assert trial_rec["status"] == "success"
+        assert trial_rec["memory"]["time_mode"] == "trial"
+        assert trial_rec["memory"]["time_estimate_minutes"] == 12.0
+
+    def test_success_record_omits_time_fields_when_gate_disabled(self, tmp_path):
+        """Both budgets None → gate skipped entirely → the three time keys
+        must be ABSENT from the saved record's memory dict (not present with
+        None values), so the reflector sees the same shape as pre-Phase-J
+        records."""
+        agent, _, _, saved_records, _, cleanup = self._make_agent(
+            FAKE_TIME_CHECK_OK
+        )
+        try:
+            agent.run(_make_input_with_budget(tmp_path))  # both None
+        finally:
+            cleanup()
+        rec = saved_records[0]
+        assert rec["status"] == "success"
+        mem = rec["memory"]
+        assert "time_estimate_minutes" not in mem
+        assert "time_budget_minutes" not in mem
+        assert "time_mode" not in mem
