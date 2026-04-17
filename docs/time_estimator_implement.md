@@ -805,11 +805,11 @@ The existing `skipped_time_risk` record's `memory.conclusion` already includes `
 
 Phases I and J both landed 2026-04-16; H1b is now unblocked. Run a real multi-round tuner job to exercise the per-round calibration update path AND the Phase-J success-path feedback channel under real LLM planning.
 
-- [ ] **Test A — positive trial path + protected from formal blowup.** Tuner run with `--max_rounds 3 --is_trial --trial_portion 0.01 --train_portion 0.1 --force_model wavenet --trial_time_budget_minutes 5 --formal_time_budget_minutes 5 --data_dir /home/klz/Data/TIDMAD/ --provider openai --model_id gpt-5-mini` (per `feedback_prefer_openai_for_smoke.md`). Acceptance:
+- [ ] **Test A — positive trial path + protected from formal blowup.** Tuner run with `--max_rounds 3 --is_trial --trial_portion 0.01 --train_portion 0.1 --force_model wavenet --trial_time_budget_minutes 5 --formal_time_budget_minutes 1 --data_dir /home/klz/Data/TIDMAD/ --provider openai --model_id gpt-5-mini` (per `feedback_prefer_openai_for_smoke.md`). The `--formal_time_budget_minutes 1` is intentionally tight: only `eval_portion` is mode-forced, training-side `trial_portion`/`train_portion` come from the LLM plan, so a 5-min formal budget would pass trivially under common LLM choices (~2 min for `tp=0.1, train_p=1.0` on wavenet/RTX 5090). Setting it to 1 deterministically rejects any formal round the LLM chooses, exercising the gate path under both behaviours. Acceptance:
   - Gate passes for trial rounds, training completes
   - `~/.siderius/time_calibration_<lilab_gpu>.json` gains real history entries with finite `ratio` and consistent `estimate_violated`
   - **(Phase J)** Round-2 and round-3 success records' `memory` carries the three time fields populated from the active mode's budget; the round-1 fields are visible in the round-2 planner prompt's `experiment_history`
-  - The `--formal_time_budget_minutes 5` flag silently no-ops if the LLM never picks formal; if it does, the round lands as `skipped_time_risk` (no real ~20 min formal training)
+  - If the LLM picks formal in any round, that round deterministically lands as `skipped_time_risk` with `time_mode="formal"` and `time_budget_minutes=1.0` (no real formal training); if the LLM stays in trial mode for all 3 rounds, the formal budget silently no-ops
 - [ ] **Test B — negative trial path.** Same as A but `--trial_time_budget_minutes 0.01`. Acceptance:
   - All 3 rounds land as `skipped_time_risk` records
   - **(Phase J)** Each record's `memory` carries the three time fields with `time_mode="trial"` and `time_budget_minutes=0.01`
