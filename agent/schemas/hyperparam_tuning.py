@@ -502,6 +502,18 @@ class HyperparamTuningInput(BaseModel):
     model_type: str = Field(
         description="Architecture to tune. One of the registered model keys, or 'auto' to let the agent decide.",
     )
+    seed_plugin_path: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional path to a plugin .py file used as the seed model for "
+            "this run. When set, the file's PLUGIN_MODEL_TYPE must equal "
+            "model_type. The tuner copies the file into the run's plugin "
+            "directory (<workspace>/plugins/<run_name>/) at run start, so "
+            "the training subprocess sees it via SIDERIUS_PLUGIN_DIRS. "
+            "Leave None when seeding from a built-in model_type. "
+            "See docs/run_scoped_plugins.md (Phase 3)."
+        ),
+    )
     file_index: int = Field(
         default=6,
         ge=0,
@@ -647,6 +659,66 @@ class HyperparamTuningInput(BaseModel):
         if self.is_trial and self.trial_strategy == "target" and not self.target_files:
             raise ValueError(
                 "target_files must be non-empty when is_trial=True and trial_strategy='target'."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_seed_plugin_path(self):
+        """Validate that ``seed_plugin_path`` (if set) points at a real plugin
+        file whose declared ``PLUGIN_MODEL_TYPE`` matches ``model_type``.
+
+        Uses ``ast.parse`` rather than executing the file so that a malicious
+        or broken seed cannot run code at validation time, and so that
+        ``sys.modules`` is not polluted before the tuner has even started.
+        See docs/run_scoped_plugins.md (Phase 3).
+        """
+        if not self.seed_plugin_path:
+            return self
+
+        import ast
+        import os as _os
+
+        path = self.seed_plugin_path
+        if not _os.path.isfile(path):
+            raise ValueError(
+                f"seed_plugin_path does not exist or is not a file: {path}"
+            )
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                tree = ast.parse(f.read(), filename=path)
+        except SyntaxError as e:
+            raise ValueError(
+                f"seed_plugin_path is not valid Python ({path}): {e}"
+            )
+
+        declared_type: Optional[str] = None
+        for node in tree.body:
+            if not isinstance(node, ast.Assign):
+                continue
+            for target in node.targets:
+                if (
+                    isinstance(target, ast.Name)
+                    and target.id == "PLUGIN_MODEL_TYPE"
+                    and isinstance(node.value, ast.Constant)
+                    and isinstance(node.value.value, str)
+                ):
+                    declared_type = node.value.value
+                    break
+            if declared_type is not None:
+                break
+
+        if declared_type is None:
+            raise ValueError(
+                f"seed_plugin_path file does not declare a top-level "
+                f'PLUGIN_MODEL_TYPE = "..." string constant: {path}'
+            )
+        if declared_type != self.model_type:
+            raise ValueError(
+                f"seed_plugin_path declares PLUGIN_MODEL_TYPE={declared_type!r} "
+                f"but the tuner's model_type is {self.model_type!r}. "
+                f"They must match, otherwise the training subprocess would "
+                f"register the seed under the wrong key."
             )
         return self
 

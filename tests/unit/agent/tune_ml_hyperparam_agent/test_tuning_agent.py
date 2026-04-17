@@ -37,6 +37,7 @@ from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from nodes.ml_hyperparameter_tune_agent import (
     HyperparamTuningAgent,
     _serialize_expert_advice,
+    _copy_seed_plugin,
 )
 
 
@@ -935,3 +936,83 @@ class TestTimeBudgetGate:
         assert mem["time_estimate_minutes"] == 90.0
         assert mem["time_budget_minutes"] == 30.0
         assert mem["time_mode"] == "formal"
+
+
+# ---------------------------------------------------------------------------
+# _copy_seed_plugin — Phase 3 of docs/run_scoped_plugins.md
+# ---------------------------------------------------------------------------
+
+class TestCopySeedPlugin:
+    """The helper stages a validated seed plugin in the run's plugin dir so
+    the training subprocess finds it via ``SIDERIUS_PLUGIN_DIRS``. Validation
+    (file exists, PLUGIN_MODEL_TYPE matches) is the schema's job — this
+    helper only performs the file-level side effects, which is what these
+    tests cover."""
+
+    def _make_plugin(self, dirpath, name="seed.py", content="PLUGIN_MODEL_TYPE = 'x'\n"):
+        path = os.path.join(dirpath, name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return path
+
+    def test_copy_places_file_in_dst_dir(self, tmp_path):
+        src_dir = tmp_path / "src"
+        dst_dir = tmp_path / "dst"
+        src_dir.mkdir()
+        dst_dir.mkdir()
+        src = self._make_plugin(str(src_dir), name="attn_fcnet_plugin.py")
+
+        result = _copy_seed_plugin(src, str(dst_dir))
+
+        assert os.path.isfile(result)
+        assert os.path.basename(result) == "attn_fcnet_plugin.py"
+        assert os.path.dirname(result) == str(dst_dir)
+
+    def test_copy_preserves_contents(self, tmp_path):
+        src_dir = tmp_path / "src"
+        dst_dir = tmp_path / "dst"
+        src_dir.mkdir()
+        dst_dir.mkdir()
+        payload = "PLUGIN_MODEL_TYPE = 'xx'\n# marker: 12345\n"
+        src = self._make_plugin(str(src_dir), content=payload)
+
+        result = _copy_seed_plugin(src, str(dst_dir))
+
+        with open(result, "r", encoding="utf-8") as f:
+            assert f.read() == payload
+
+    def test_copy_same_file_is_noop(self, tmp_path):
+        """When src and dst resolve to the same path (re-run with the same
+        run_name, no workspace change), shutil.copy2 would raise
+        SameFileError — the helper must short-circuit instead."""
+        run_dir = tmp_path / "plugins" / "run_a"
+        run_dir.mkdir(parents=True)
+        src = self._make_plugin(str(run_dir), name="seed.py")
+
+        # dst_dir is the same directory; copy should skip without error
+        result = _copy_seed_plugin(src, str(run_dir))
+
+        assert result == os.path.join(str(run_dir), "seed.py")
+        assert os.path.isfile(result)
+
+    def test_copy_overwrites_existing_destination(self, tmp_path):
+        """Run_name reuse case: the newer caller's seed must win over a stale
+        copy from a prior invocation."""
+        src_dir = tmp_path / "src"
+        dst_dir = tmp_path / "dst"
+        src_dir.mkdir()
+        dst_dir.mkdir()
+        # Pre-existing stale copy in dst
+        stale = self._make_plugin(
+            str(dst_dir), name="seed.py", content="STALE\n"
+        )
+        # Fresh src with different content
+        src = self._make_plugin(
+            str(src_dir), name="seed.py", content="FRESH\n"
+        )
+
+        result = _copy_seed_plugin(src, str(dst_dir))
+
+        assert result == stale  # same path
+        with open(result, "r", encoding="utf-8") as f:
+            assert f.read() == "FRESH\n"
