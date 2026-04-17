@@ -10,7 +10,8 @@
 |---|---|---|---|
 | Design doc | 2026-04-16 | `ba1d9d0` | n/a |
 | A.1 — `ProposalOutput` segmentation_size validator + `DatasetConfig.valid_segmentation_sizes()` helper | 2026-04-16 | `7c935b0` | 6 helper + 9 validator tests; 253 full proposer suite + 899 full agent unit suite all green |
-| A.2 + A.3 — `_format_known_constraints_block` helper, `{known_constraints_block}` placeholder in `proposing_stage.md`, wired in `nodes/ml_model_proposal_agent.py` with `DATASET_CONFIG` | 2026-04-16 | (this commit) | 10 new tests; 263 full proposer suite green |
+| A.2 + A.3 — `_format_known_constraints_block` helper, `{known_constraints_block}` placeholder in `proposing_stage.md`, wired in `nodes/ml_model_proposal_agent.py` with `DATASET_CONFIG` | 2026-04-16 | `8c37d61` | 10 new tests; 263 full proposer suite green |
+| A.4 — confirm existing proposer retry loop catches the A.1 validator (no new wiring) + 3 integration tests | 2026-04-16 | (this commit) | 3 new tests in `TestSegmentationSizeRetryIntegration`; 28 full pipeline_runner suite green |
 
 ---
 
@@ -173,9 +174,13 @@ Catches `segmentation_size=16384` before the implementor is even invoked.
 - [x] `nodes/ml_model_proposal_agent.py` passes `dataset_config=DATASET_CONFIG` to `_format_known_constraints_block`, injected via `template_vars["known_constraints_block"]` in the stage runner
 - [x] No new field on `ProposalInput` — `DATASET_CONFIG` is a global constant for now
 
-#### A.4 — Verify existing retry loop catches the validator
-- [ ] `nodes/ml_model_proposal_agent.py` already retries on validation failure with `previous_failures` — confirm by reading the retry path
-- [ ] Unit test: simulate proposer attempt 1 with invalid `segmentation_size`, verify `previous_failures` contains the validator error on attempt 2
+#### A.4 — Verify existing retry loop catches the validator ✅
+- [x] Confirmed by reading `nodes/ml_model_proposal_agent.py:795-868`: `_run_pipeline` already wraps the proposing stage in a `for attempt in range(_MAX_PROPOSING_RETRIES + 1)` loop. On `ValidationError` (which is what A.1's segmentation_size validator raises), the error summary is appended to `accumulated["proposing_stage_errors"]`, which the next attempt's user prompt re-emits via `json.dumps(accumulated, ...)`. No new wiring needed.
+- [x] Note: the doc previously referred to `previous_failures`; the actual mechanism is the per-call `accumulated["proposing_stage_errors"]` channel. `inp.previous_failures` is a separate cross-call channel from the orchestration layer.
+- [x] Integration tests in `tests/unit/agent/ml_model_proposal_agent/test_pipeline_runner.py::TestSegmentationSizeRetryIntegration` (3 tests):
+  - [x] invalid segmentation_size=16384 on attempt 1 → 16000 on attempt 2 succeeds; only the proposing stage retries
+  - [x] retry's user prompt contains `proposing_stage_errors` with the validator's diagnostic naming `segmentation_size` and the offending value `16384`
+  - [x] never-corrected stubborn LLM exhausts retries and raises `RuntimeError` cleanly (count: 2 reasoning stages + `_MAX_PROPOSING_RETRIES + 1` proposing attempts)
 
 #### A.5 — Phase A acceptance test
 - [ ] Pseudo-mode dual-mode test: feed the proposer a deliberately-stubborn LLM that picks `16384` on attempt 1, valid divisor on attempt 2; confirm proposer reaches success with `total_attempts=2`
