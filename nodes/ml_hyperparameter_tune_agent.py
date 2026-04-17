@@ -1030,9 +1030,32 @@ def main():
     parser.add_argument("--max_rounds", type=int, default=10,
                         help="Maximum number of experiment rounds to prevent token drain.")
 
-    model_choices = list(MODEL_REGISTRY.keys()) + ["auto"]
-    parser.add_argument("--force_model", type=str, choices=model_choices, default="auto",
-                        help="Force a specific architecture or let the agent decide (auto).")
+    # ``--force_model`` accepts any string (not just MODEL_REGISTRY keys),
+    # because plugin models seeded via ``--seed_plugin_path`` are not in the
+    # registry at CLI parse time — the seed plugin only gets registered
+    # after the tuner copies it into the run-scoped plugin dir
+    # (docs/run_scoped_plugins.md, Phase 3/4). The schema validator and the
+    # planner reject unknown model_types at runtime with a clearer error.
+    builtin_choices = list(MODEL_REGISTRY.keys()) + ["auto"]
+    parser.add_argument("--force_model", type=str, default="auto",
+                        help=(
+                            "Force a specific architecture or let the agent decide "
+                            "('auto'). Built-in choices: "
+                            f"{', '.join(builtin_choices)}. Plugin model_types are "
+                            "also accepted when paired with --seed_plugin_path."
+                        ))
+    parser.add_argument("--seed_plugin_path", type=str, default=None,
+                        help=(
+                            "Path to a plugin .py file used as the seed model "
+                            "for this run. Required when --force_model is a "
+                            "plugin model_type (i.e. not a built-in). The file's "
+                            "PLUGIN_MODEL_TYPE must equal --force_model. The "
+                            "tuner copies the file into "
+                            "<workspace>/plugins/<run_name>/ at run start so "
+                            "the training subprocess sees it via "
+                            "SIDERIUS_PLUGIN_DIRS. See "
+                            "docs/run_scoped_plugins.md (Phase 3)."
+                        ))
 
     parser.add_argument("--run_name", type=str, default="test_run",
                         help="Run name for the auto-exploration.")
@@ -1082,8 +1105,25 @@ def main():
 
     args = parser.parse_args()
 
+    # Preflight: catch the "plugin model_type without seed file" mistake
+    # before any sandbox setup. The schema validator would catch this later
+    # (planner crashes on get_config_class), but flagging it here gives the
+    # operator an actionable message instead of a stack trace mid-run.
+    if (
+        args.force_model != "auto"
+        and args.force_model not in MODEL_REGISTRY
+        and args.seed_plugin_path is None
+    ):
+        parser.error(
+            f"--force_model={args.force_model!r} is not a built-in model "
+            f"({', '.join(builtin_choices)}). If this is a plugin model, "
+            f"pass --seed_plugin_path /path/to/{args.force_model}.py so the "
+            f"tuner can stage it into the run-scoped plugin dir."
+        )
+
     input_dict = {
         "model_type":      args.force_model,
+        "seed_plugin_path": args.seed_plugin_path,
         "file_index":      args.file_index,
         "max_rounds":      args.max_rounds,
         "expert_advice":   args.expert_advice,
