@@ -283,6 +283,66 @@ class TestExperimentRecordSuccess:
         assert "hypothesis" in str(exc.value)
 
 
+# ---------------------------------------------------------------------------
+# Phase J — ExperimentMemory time fields (planner-feedback channel)
+# ---------------------------------------------------------------------------
+
+class TestExperimentMemoryTimeFields:
+    """The three optional time fields on ExperimentMemory carry pre-flight
+    estimator context to the next planner round via experiment_history.
+    All three default to None so records emitted before the gate ran (or with
+    the gate disabled) validate unchanged. See docs/time_estimator_implement.md
+    §J.1.
+    """
+
+    def _base_memory(self):
+        return {
+            "expert_advice_followed": "test",
+            "hypothesis": "test",
+        }
+
+    def test_time_fields_default_none(self):
+        mem = ExperimentMemory.model_validate(self._base_memory())
+        assert mem.time_estimate_minutes is None
+        assert mem.time_budget_minutes is None
+        assert mem.time_mode is None
+
+    def test_time_fields_accept_concrete_values(self):
+        mem = ExperimentMemory.model_validate({
+            **self._base_memory(),
+            "time_estimate_minutes": 2.3,
+            "time_budget_minutes": 5.0,
+            "time_mode": "trial",
+        })
+        assert mem.time_estimate_minutes == 2.3
+        assert mem.time_budget_minutes == 5.0
+        assert mem.time_mode == "trial"
+
+    def test_time_mode_accepts_formal(self):
+        mem = ExperimentMemory.model_validate({
+            **self._base_memory(),
+            "time_mode": "formal",
+        })
+        assert mem.time_mode == "formal"
+
+    def test_time_mode_rejects_other_strings(self):
+        """Literal["trial", "formal"] — anything else must fail validation."""
+        with pytest.raises(ValidationError) as exc:
+            ExperimentMemory.model_validate({
+                **self._base_memory(),
+                "time_mode": "snapshot",
+            })
+        assert "time_mode" in str(exc.value)
+
+    def test_existing_record_round_trip_unchanged(self, valid_success_record):
+        """Records produced before Phase J (no time_* keys) still validate and
+        the three time fields read back as None."""
+        rec = ExperimentRecord.model_validate(valid_success_record)
+        assert rec.memory.time_estimate_minutes is None
+        assert rec.memory.time_budget_minutes is None
+        assert rec.memory.time_mode is None
+
+
 class TestExperimentRecordOOM:
 
     def test_valid_oom_record(self, valid_oom_record):
