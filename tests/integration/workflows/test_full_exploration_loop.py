@@ -339,15 +339,10 @@ class TestFullExplorationLoop:
         run_dir = os.path.join(workspace, run_name)
         model_name = validate_workflow_outputs(run_dir, run_name, results)
 
-        # --- Cleanup registered plugin (side effect of _register_plugin) ---
-        plugin_file = os.path.join("agent_generated", "models", f"{model_name}.py")
-        plugin_desc_dir = os.path.join("agent_generated", "models", model_name)
-        if os.path.exists(plugin_file):
-            os.remove(plugin_file)
-            print(f"  [CLEANUP] Removed {plugin_file}")
-        if os.path.isdir(plugin_desc_dir):
-            shutil.rmtree(plugin_desc_dir)
-            print(f"  [CLEANUP] Removed {plugin_desc_dir}/")
+        # No global-dir cleanup needed — since docs/run_scoped_plugins.md
+        # Phase 4, _register_plugin writes into the tuner's workspace-rooted
+        # plugin dir (which lives under ``tmp_path``) instead of the legacy
+        # ``<repo>/agent_generated/models/``. tmp_path teardown handles it.
 
         print(f"\n{'='*60}")
         print(f"  TIER 3 TEST PASSED — model '{model_name}' explored successfully")
