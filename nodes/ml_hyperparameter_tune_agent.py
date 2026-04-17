@@ -538,6 +538,13 @@ class HyperparamTuningAgent:
                                     "suggestion",
                                     "Reduce model size, batch_size, segmentation_size, or train_portion.",
                                 ),
+                                # Phase J — same three fields the success
+                                # record carries, so the planner sees the
+                                # same shape regardless of pass/fail.
+                                # See docs/time_estimator_implement.md §J.3.
+                                "time_estimate_minutes": time_check.get("estimated_minutes"),
+                                "time_budget_minutes":   time_check.get("limit_minutes"),
+                                "time_mode":             "trial" if plan.is_trial else "formal",
                             },
                         }
                         ExperimentRecord.model_validate(time_record)

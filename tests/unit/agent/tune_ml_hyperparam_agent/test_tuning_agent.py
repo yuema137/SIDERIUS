@@ -914,3 +914,24 @@ class TestTimeBudgetGate:
         assert "time_estimate_minutes" not in mem
         assert "time_budget_minutes" not in mem
         assert "time_mode" not in mem
+
+    def test_skipped_time_risk_record_carries_time_fields(self, tmp_path):
+        """Phase J §J.3 — the skipped_time_risk record must carry the same
+        three time fields as the success record, so the planner sees the
+        same shape regardless of pass/fail. Default plan is formal."""
+        agent, _, _, saved_records, _, cleanup = self._make_agent(
+            FAKE_TIME_CHECK_OVER
+        )
+        try:
+            agent.run(_make_input_with_budget(
+                tmp_path, max_rounds=1, formal_budget=30.0,
+            ))
+        finally:
+            cleanup()
+        rec = saved_records[0]
+        assert rec["status"] == "skipped_time_risk"
+        mem = rec["memory"]
+        # Values come from FAKE_TIME_CHECK_OVER
+        assert mem["time_estimate_minutes"] == 90.0
+        assert mem["time_budget_minutes"] == 30.0
+        assert mem["time_mode"] == "formal"
