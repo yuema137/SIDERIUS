@@ -1,6 +1,6 @@
 # Validation-Awareness Across Proposer + Implementor
 
-**Status**: in progress (Phase A.1 landed 2026-04-16)
+**Status**: Phase A complete 2026-04-16; Phase B not started
 **Author**: design discussion 2026-04-16
 **Motivation**: two iter-1 runs (`exploit_cnn_v1`, `explore_novel_v1`, launched 2026-04-16 23:02) burned their entire 9-attempt budgets and produced **zero successful rounds** because the proposer wrote `baseline_config` values that violated downstream validation rules. Both runs reached `status="partial", completed_rounds=0, all_records=[]` after ~2.5 minutes each, then advanced to iter-2 and would have repeated the same failure mode for the rest of the 20-iteration budget.
 
@@ -11,7 +11,8 @@
 | Design doc | 2026-04-16 | `ba1d9d0` | n/a |
 | A.1 — `ProposalOutput` segmentation_size validator + `DatasetConfig.valid_segmentation_sizes()` helper | 2026-04-16 | `7c935b0` | 6 helper + 9 validator tests; 253 full proposer suite + 899 full agent unit suite all green |
 | A.2 + A.3 — `_format_known_constraints_block` helper, `{known_constraints_block}` placeholder in `proposing_stage.md`, wired in `nodes/ml_model_proposal_agent.py` with `DATASET_CONFIG` | 2026-04-16 | `8c37d61` | 10 new tests; 263 full proposer suite green |
-| A.4 — confirm existing proposer retry loop catches the A.1 validator (no new wiring) + 3 integration tests | 2026-04-16 | (this commit) | 3 new tests in `TestSegmentationSizeRetryIntegration`; 28 full pipeline_runner suite green |
+| A.4 — confirm existing proposer retry loop catches the A.1 validator (no new wiring) + 3 integration tests | 2026-04-16 | `ff59aa8` | 3 new tests in `TestSegmentationSizeRetryIntegration`; 28 full pipeline_runner suite green |
+| A.5 — Phase A acceptance gate (stubborn-LLM scenario covered by A.4 unit tests; dual-mode test deferred to C.3) | 2026-04-16 | (this commit — doc only) | 272 tests (266 proposer + 6 dataset_config) |
 
 ---
 
@@ -182,9 +183,11 @@ Catches `segmentation_size=16384` before the implementor is even invoked.
   - [x] retry's user prompt contains `proposing_stage_errors` with the validator's diagnostic naming `segmentation_size` and the offending value `16384`
   - [x] never-corrected stubborn LLM exhausts retries and raises `RuntimeError` cleanly (count: 2 reasoning stages + `_MAX_PROPOSING_RETRIES + 1` proposing attempts)
 
-#### A.5 — Phase A acceptance test
-- [ ] Pseudo-mode dual-mode test: feed the proposer a deliberately-stubborn LLM that picks `16384` on attempt 1, valid divisor on attempt 2; confirm proposer reaches success with `total_attempts=2`
-- [ ] Run full proposer test suite
+#### A.5 — Phase A acceptance test ✅
+- [x] Stubborn-LLM-picks-16384-then-16000 scenario covered by the A.4 unit tests (`TestSegmentationSizeRetryIntegration`). A separate dual-mode integration test in `tests/integration/nodes/` was considered but deferred — the three A.4 unit tests already lock in the contract end-to-end (mocked bridge, real `ProposalOutput` schema, real retry loop, real prompt injection). The more valuable real-API exercise lives in Phase C.3's re-launch of the killed runs.
+- [x] Full proposer test suite + helper suite green: 272 tests (`tests/unit/agent/ml_model_proposal_agent/` 266 + `tests/unit/execute_tools/test_dataset_config.py` 6), zero regressions across A.1 → A.4.
+
+**Phase A status: complete.** The proposer now (a) sees the dataset divisor rule in its prompt next to `baseline_config`, (b) machine-validates its own emitted `segmentation_size`, and (c) retries on violation with the validator error visible to the next LLM call. The 9-for-9 iter-1 failure mode observed on 2026-04-16 is closed from the proposer side.
 
 ---
 
