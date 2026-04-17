@@ -7,7 +7,7 @@
 | Phase | Status | Commit | Notes |
 |-------|--------|--------|-------|
 | 1 — plugin_loader env var support | ✅ done | `634a12e` | `_resolve_plugin_dirs` + `SIDERIUS_PLUGIN_DIRS`; 9 new unit tests |
-| 2 — tuner sandbox sets env var | ✅ done | (pending commit) | `TidmadSandbox.plugin_dir` + env wiring; 6 new unit tests |
+| 2 — tuner sandbox sets env var | ✅ done | `5db4a78` | `TidmadSandbox.plugin_dir` + env wiring; 6 new unit tests |
 | 3 — seed plugin copy | ⬜ pending | — | `seed_plugin_path` schema field, AST validation, copy at run start |
 | 4 — implementor writes into run dir | ⬜ pending | — | workflow populates `ImplementorInput.plugin_dir` with run-scoped path |
 | 5 — deprecate global dir | ⬜ out of scope (future) | — | drop `AGENT_GENERATED_DIR` fallback; requires full caller audit |
