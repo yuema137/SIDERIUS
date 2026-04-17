@@ -189,6 +189,11 @@ def main():
         sys.exit(1)
     with open(args.advice) as f:
         advice = json.load(f)
+    # Allow advice values to be either a string or a list of lines (joined with
+    # "\n" before consumption). The list form keeps long prose readable in the
+    # JSON file without changing what the LLM ultimately sees.
+    advice = {k: ("\n".join(v) if isinstance(v, list) else v)
+              for k, v in advice.items()}
 
     # LLM config — from file if provided, else default uniform gemini
     if args.llm_config:
