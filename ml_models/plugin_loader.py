@@ -22,6 +22,14 @@ AGENT_GENERATED_DIR = os.path.join(
     "agent_generated", "models",
 )
 
+# Env var name used to opt into run-scoped plugin directories. When set to a
+# non-empty ``os.pathsep``-separated list of directory paths, plugin loading
+# scans *only* those directories and ignores ``AGENT_GENERATED_DIR``. When
+# unset or empty, the loader falls back to scanning ``AGENT_GENERATED_DIR``
+# (legacy global-dir mode) — this is the back-compat default.
+# See docs/run_scoped_plugins.md.
+_PLUGIN_DIRS_ENV_VAR = "SIDERIUS_PLUGIN_DIRS"
+
 # Prefix for per-plugin module names registered in ``sys.modules`` after load.
 # The full name is ``_MODULE_NAME_PREFIX + <filename stem>`` so each plugin gets
 # a unique, stable identity. Stability is required for ``inspect.getsource`` /
@@ -80,33 +88,61 @@ def _load_plugin(path: str) -> dict | None:
     }
 
 
+def _resolve_plugin_dirs() -> list[str]:
+    """Return the ordered list of directories to scan for plugins.
+
+    Priority:
+      1. ``SIDERIUS_PLUGIN_DIRS`` env var — ``os.pathsep``-separated list of
+         directory paths. Per-run mode: scans exactly those directories,
+         does NOT fall back to ``AGENT_GENERATED_DIR``.
+      2. ``[AGENT_GENERATED_DIR]`` — legacy global-dir mode. Back-compat
+         default when the env var is unset or empty.
+
+    Whitespace-only or empty entries in the env var are filtered out so
+    that ``SIDERIUS_PLUGIN_DIRS=":dir_a::dir_b:"`` still resolves to
+    ``["dir_a", "dir_b"]`` — this matches how shells commonly compose
+    path-like variables.
+    """
+    env = os.environ.get(_PLUGIN_DIRS_ENV_VAR, "").strip()
+    if env:
+        return [p for p in env.split(os.pathsep) if p.strip()]
+    return [AGENT_GENERATED_DIR]
+
+
 def extend_registries(model_registry: dict, config_registry: dict) -> list:
     """
-    Scan agent_generated/models/ and extend both registries in-place.
-    Also populates PLUGIN_OUTPUT_TYPE_REGISTRY.
-    Returns list of successfully loaded plugin model_type strings.
+    Scan the resolved plugin directories (see ``_resolve_plugin_dirs``)
+    and extend both registries in-place. Also populates
+    ``PLUGIN_OUTPUT_TYPE_REGISTRY``.
+
+    Returns the list of successfully loaded plugin ``model_type`` strings,
+    in the order they were loaded across all scanned directories. When the
+    same ``model_type`` appears in more than one directory, the later
+    directory's plugin overwrites the earlier one (matching the existing
+    shadow-warning behavior).
     """
     loaded = []
-    if not os.path.isdir(AGENT_GENERATED_DIR):
-        return loaded
-
-    for fname in sorted(os.listdir(AGENT_GENERATED_DIR)):
-        if not fname.endswith(".py") or fname.startswith("_"):
+    for plugin_dir in _resolve_plugin_dirs():
+        if not os.path.isdir(plugin_dir):
             continue
 
-        plugin = _load_plugin(os.path.join(AGENT_GENERATED_DIR, fname))
-        if plugin is None:
-            continue
+        for fname in sorted(os.listdir(plugin_dir)):
+            if not fname.endswith(".py") or fname.startswith("_"):
+                continue
 
-        model_type = plugin["model_type"]
-        if model_type in model_registry:
-            print(f"[PluginLoader] Warning: plugin '{model_type}' shadows an existing registry entry.")
+            plugin = _load_plugin(os.path.join(plugin_dir, fname))
+            if plugin is None:
+                continue
 
-        model_registry[model_type]  = plugin["model_class"]
-        config_registry[model_type] = plugin["config_class"]
-        PLUGIN_OUTPUT_TYPE_REGISTRY[model_type] = plugin["output_type"]
-        loaded.append(model_type)
-        print(f"[PluginLoader] Loaded plugin: '{model_type}' from {fname}")
+            model_type = plugin["model_type"]
+            if model_type in model_registry:
+                print(f"[PluginLoader] Warning: plugin '{model_type}' shadows an existing registry entry.")
+
+            model_registry[model_type]  = plugin["model_class"]
+            config_registry[model_type] = plugin["config_class"]
+            PLUGIN_OUTPUT_TYPE_REGISTRY[model_type] = plugin["output_type"]
+            loaded.append(model_type)
+            print(f"[PluginLoader] Loaded plugin: '{model_type}' from {fname}")
 
     return loaded
 
