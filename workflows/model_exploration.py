@@ -340,7 +340,7 @@ def run_workflow(
     cleanup_denoised: bool = False,
     max_epochs: int | None = None,
     plan_overrides: dict | None = None,
-    # --- Time-budget gate (evaluate_time_skill, docs/time_estimator_implement.md §2.7.2 / Phase I) ---
+    # --- Time-budget gate (evaluate_time_skill, docs/resource_estimator_implement.md §2.7.2 / Phase I) ---
     trial_time_budget_minutes: float | None = None,
     formal_time_budget_minutes: float | None = None,
     # --- Reasoning pipeline ---
@@ -397,7 +397,7 @@ def run_workflow(
             evaluate_time_skill gate on trial-mode rounds (plan.is_trial=True).
             Fanned out to BOTH ProposalInput (proposer's baseline gate) and
             HyperparamTuningInput (tuner's per-round gate). None = trial gate
-            disabled. See docs/time_estimator_implement.md §2.7.2 / Phase I.
+            disabled. See docs/resource_estimator_implement.md §2.7.2 / Phase I.
         formal_time_budget_minutes: Same as above, but for formal-mode rounds
             (plan.is_trial=False). Sized independently because formal runs
             use the full dataset and are 50–100x longer.
@@ -530,7 +530,7 @@ def run_workflow(
                 # --- Propose ---
                 # Forward the trial-mode mirror + budget set so the proposer's
                 # evaluate_time_skill gate constructs the same sample_set the
-                # tuner will (docs/time_estimator_implement.md §2.7.2).
+                # tuner will (docs/resource_estimator_implement.md §2.7.2).
                 propose_input = local_full_context(
                     interpretation,
                     attempt_storage,

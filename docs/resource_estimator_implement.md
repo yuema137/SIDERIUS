@@ -1,8 +1,8 @@
-# Time-Budget Estimator Skill
+# Resource Estimator (Time + VRAM Budgets)
 
-**Status**: implemented + smoke-tested on lilab (Phases A–G complete; H1a lilab direct-skill smoke verified 2026-04-16; **Phase I — trial/formal budget split — landed 2026-04-16 across 5 commits**; **Phase J — success-path time info to planner — landed 2026-04-16 across 3 commits**; **H1b lilab tuner-integration smoke verified 2026-04-16 on RTX 5090, k(wavenet)=4.22**; H2 SDSC deferred)
-**Author**: design discussion 2026-04-16
-**Motivation**: two trial-mode runs (`exploit_cnn_v1`, `explore_novel_v1`) stalled in Round 1 for 1h 50min and 2h 27min respectively, both blowing past the 1-hour trial budget stated in the expert advice. Neither was blocked, because the planner has no pre-flight wall-time estimate — only a VRAM check.
+**Status**: time skill implemented + smoke-tested on lilab (Phases A–G complete; H1a lilab direct-skill smoke verified 2026-04-16; **Phase I — trial/formal budget split — landed 2026-04-16 across 5 commits**; **Phase J — success-path time info to planner — landed 2026-04-16 across 3 commits**; **H1b lilab tuner-integration smoke verified 2026-04-16 on RTX 5090, k(wavenet)=4.22**; H2 SDSC deferred). **Phase K — VRAM budget gate alongside the time gate — design landed 2026-04-18; implementation pending.**
+**Author**: design discussion 2026-04-16; Phase K extension 2026-04-18.
+**Motivation**: two trial-mode runs (`exploit_cnn_v1`, `explore_novel_v1`) stalled in Round 1 for 1h 50min and 2h 27min respectively, both blowing past the 1-hour trial budget stated in the expert advice. Neither was blocked, because the planner has no pre-flight wall-time estimate — only a VRAM check. **Phase K motivation (2026-04-17)**: `explore_novel_v1` iterations 3 and 4 burned 9/9 attempts each to `"GPU has only 0.01 GB free"` because the existing VRAM gate uses momentary `free_bytes × 0.8` as its limit and another process held 25.7 GB on the shared 32 GB card. The planner has no operator-supplied VRAM ceiling to optimise against — symmetric to the time-gate gap §1.2 fixed.
 
 ## Progress log
 
@@ -22,6 +22,17 @@
 | J — success-path time info to planner | 2026-04-16 | `bbbc174`, `265bfb5`, `4b8fb94` | 5 schema + 3 success-path + 1 skipped-record Phase-J tests pass (182 tuner total) |
 | H1b — lilab tuner-integration smoke | 2026-04-16 | `17ab26e` (CLI fix) + this commit (doc) | RTX 5090, run_name=h1b_test_a, k(wavenet)=4.22 after 2 history entries; Test A composite covered Tests B+C |
 | H2 — SDSC smoke run (Slurm batch, chained) | deferred | — | gated on H1b passing; tests batch-system specifics (env-var override, GPU stability across restarts, concurrent-writer safety) |
+| **K — VRAM budget gate (design)** | 2026-04-18 | (this commit) | design only; **tuner-side only**; sub-phases K.0–K.7 below |
+| K.0 — skill rename `evaluate_resource_skill` → `evaluate_vram_skill` | pending | — | mechanical rename + caller update |
+| K.1 — schema additions on `HyperparamTuningInput` + `ExperimentMemory` (no proposer-side fields) | pending | — | mirrors Phase I.1 + J.4, tuner-only scope |
+| K.2 — skill `vram_budget_gb` kwarg + contention-detection log | pending | — | budget vs free-VRAM `min` |
+| K.3 — tuner per-mode pick + `vram_estimate_gb` in success/skipped memory | pending | — | mirrors I.2 + J |
+| K.4 — protocol pass-through (`valid→tune` budget kwargs only; **no** proposer-side `vram_risk` plumbing) | pending | — | mirrors I.3, narrowed scope |
+| K.5 — CLI + workflow fan-out (tuner-side only) | pending | — | mirrors I.4 |
+| K.6 — planner prompt: numeric budget block + decision tree | pending | — | new prompt section, replaces abstract "GPU MEMORY RULES" |
+| K.7 — iteration-boundary gate-exhaustion feedback to proposer | pending | — | new schema `GateExhaustionInfo`; surfaces to next-iteration proposer when no attempt ever trained |
+| K.8 — explore_novel re-launch under contention | pending | — | acceptance: rejects against budget not free-VRAM; gate-exhaustion path also exercised by deliberately under-budgeting one iteration |
+| K.deferred — proposer `_apply_vram_gate` + `vram_risk` field + retire `time_risk` redundancy on `ProposalOutput` | deferred | — | gated on registering plugins pre-validation; tracked in §10.17 |
 
 ---
 
@@ -865,3 +876,809 @@ No data-layer changes, no schema changes that block older records from loading (
 6. **Gate-and-revise switch threshold (§2.7.4)**: v1 ships gate-and-annotate. Concrete trigger to revisit: if >20% of baselines across a 2-week window get rejected by the tuner's round-0 gate, switch the proposer to gate-and-revise. Need a small telemetry counter on `ProposalOutput.time_risk is not None` to measure this — open whether that lives in the workspace records or a separate log.
 7. **`build_sample_set` location (§2.7.5)**: currently inside `nodes/ml_hyperparameter_tune_agent.py`. Cleanest is to relocate to `agent/skills/evaluate_time_skill/sample_set_util.py` (or `agent/utils/`) so both nodes import from a neutral place. Defer the call: if Phase E2 finds the import works without circularity, leave it where it is; otherwise relocate. Decide in E2.
 8. **Proposer's response to skill `status="error"`**: v1 silently warns and proceeds (no `time_risk` set). Alternative: hard-fail the proposal so the workflow can't silently emit an unestimated baseline. Lean toward warn-and-proceed because skill errors are usually environmental (no `data_dir`, CUDA hiccup) rather than the baseline being broken — but worth confirming in smoke testing.
+
+---
+
+## 10. Phase K — VRAM Budget Extension (design 2026-04-18)
+
+Phase K extends the per-round resource gate to enforce a configurable VRAM
+budget alongside the time budget that landed in Phases I + J. The two gates
+share the same call sites (proposer baseline + tuner per-round), the same
+two-budget split (trial vs formal), the same skipped-record semantics, and
+the same workflow fan-out plumbing — all of which is already in place from
+the time work. Phase K's net new surface is one renamed skill, four schema
+fields, two protocol kwargs, two CLI flags, and one planner-prompt section.
+
+### 10.1 Why this is needed
+
+`agent/skills/evaluate_resource_skill/wrapper.py` (the existing VRAM gate)
+sets its limit as `free_bytes × 0.8` — i.e. whatever happens to be free on
+the GPU at the instant of the check. Three problems:
+
+1. **Contention pathology.** On 2026-04-17, `explore_novel_v1` iterations
+   3 and 4 burned 9/9 attempts each to the message
+   `"GPU has only 0.01 GB free"` — another process held 25.7 GB on the
+   shared 32 GB card. The configs being checked were no larger than ones
+   that had run successfully in iteration 1; only the moment-to-moment free
+   VRAM had moved. **The gate moved with the contention.**
+2. **No numeric ceiling for the LLM.** The planner prompt section
+   "GPU MEMORY RULES" (`agent/prompts.py:74-82`) names no GB ceiling. The
+   LLM is told reactively about `skipped_oom_risk` records, never given a
+   forward target. The expert-advice block says *"VRAM CEILING: 4 GB"* in
+   prose, but nothing programmatic enforces a 4 GB number end-to-end.
+3. **No mode split.** Trial and formal rounds have meaningfully different
+   VRAM profiles (DataLoader buffer sizes scale with `train_portion`;
+   formal often runs higher batch). One global ceiling can't gate both.
+
+The fix mirrors Phase I exactly: replace one effective ceiling with two
+operator-supplied budgets (`trial_vram_budget_gb`, `formal_vram_budget_gb`),
+pick per-round based on `plan.is_trial`, fall through to None → gate
+disabled. The defensive `free_bytes × 0.8` floor stays as a contention
+guard but is no longer the operating budget.
+
+### 10.2 Two skills, not one fused "evaluate_resources_skill"
+
+Confirmed 2026-04-18: keep `evaluate_vram_skill` (renamed from
+`evaluate_resource_skill`) and `evaluate_time_skill` as two siblings,
+called sequentially at the same gate sites. Reasoning matches §2.8.2:
+
+- VRAM is a static accounting calculation against a hardware ceiling;
+  time is a measured + learned quantity with cross-server EMA calibration
+  (§2.6). Almost no shared internals.
+- Independent toggling — a user may set only one budget; the other defaults
+  to None and skips that gate.
+- Cleanest test surfaces (VRAM tests need no GPU; time tests cover warmup +
+  calibration paths). Fusion would entangle three test surfaces.
+
+The "joint" behaviour is at the **call site**, not inside either skill:
+the tuner runs VRAM first (cheap, no GPU runtime), then time (~1–3 s
+warmup) only if VRAM passed.
+
+### 10.3 The lever-decision logic lives in the planner prompt
+
+The skill's responsibility is to **return estimations**, not to prescribe
+the fix. The current time skill's `_suggest_lever` (§2.4) bakes a
+3-branch decision into the skill output — branch 1 (*"raise batch_size
+first"*) explicitly trades time for VRAM, which is counterproductive once
+both budgets exist. Phase K removes the prescription from both skills'
+output (downgrade `suggestion` to a verdict-style summary such as
+`"VRAM over budget; time within budget"`) and moves the lever logic into
+the planner prompt where the LLM has full context to reason about both
+axes at once.
+
+Two design rules for the prompt block:
+
+1. **Provide information, not prescriptions.** Surface the raw numbers
+   (estimate, budget, factor over/under, current batch_size) and let the
+   LLM reason. Do not encode "if batch_size > 1" or any other
+   precondition as static rules — the LLM can read those conditions off
+   the inputs directly.
+2. **One channel only.** The planner sees resource information **only**
+   from this prompt block (and from `experiment_history`'s memory fields
+   for previous rounds). Do not also surface VRAM verdicts via
+   `expert_advice` — that creates a duplicated, potentially-conflicting
+   second channel. (Time's `time_risk → expert_advice` route is kept for
+   Phase K to avoid retroactively breaking Phase J, but is marked for
+   retirement in §10.17.)
+
+Per-round numeric block fed by the four budget fields, the active mode,
+and the current/previous round estimates:
+
+```
+[ACTIVE RESOURCE BUDGETS — round 3, mode=trial]
+  VRAM:  estimate 5.20 GB   budget 4.00 GB   factor 1.30  (over)
+  Time:  estimate 8.40 min  budget 20.0 min  factor 0.42  (under)
+  Current batch_size: 4
+```
+
+When either budget is `None`, that line reads
+`"(no budget — gate disabled)"` and `factor` is omitted, so the LLM
+knows it doesn't need to consider that axis.
+
+Static guidance block, appended once near the existing exploration
+checklist:
+
+```
+[RESOURCE GATE — RESOLVING OVER-BUDGET CONFIGS]
+
+You will be shown vram_estimate_gb, time_estimate_minutes, the matching
+budgets, the resulting factors (>1 = over budget, <1 = under), and the
+current batch_size.
+
+When deciding the next config:
+
+  - If both factors are ≤ 1: continue per the exploration plan.
+  - Otherwise, first consider whether changing batch_size alone can bring
+    BOTH factors ≤ 1.
+      - Lowering batch_size reduces vram_factor and raises time_factor.
+      - Raising batch_size does the opposite.
+      - batch_size cannot go below 1; whether you have room to lower or
+        raise depends on the current batch_size shown above.
+  - If batch_size adjustment alone cannot satisfy both budgets
+    simultaneously, reduce model depth/width (num_blocks,
+    hidden_channels, embedding_dim, etc.). Both axes shrink together.
+
+Constraint: do NOT change segmentation_size to fit either budget. It is
+pinned by frequency-resolution physics (must divide PSD_SEGMENT_LENGTH;
+the valid divisor list is in your expert advice). Lowering seg_size to
+escape the time gate inflates step count and typically makes the overrun
+worse, not better.
+
+The gates run again before training, so a misjudgement just costs one
+skipped attempt (no round consumed). Prefer the cheaper lever first.
+```
+
+### 10.4 Schema additions (tuner-side only; mirrors Phase I.1 + J.4)
+
+| Schema | Field | Type | Default | Mirrors |
+|---|---|---|---|---|
+| `HyperparamTuningInput` | `trial_vram_budget_gb` | `Optional[float]` | `None` | `trial_time_budget_minutes` |
+| `HyperparamTuningInput` | `formal_vram_budget_gb` | `Optional[float]` | `None` | `formal_time_budget_minutes` |
+| `ExperimentMemory` | `vram_estimate_gb` | `Optional[float]` | `None` | `time_estimate_minutes` (J.1) |
+| `ExperimentMemory` | `vram_budget_gb` | `Optional[float]` | `None` | `time_budget_minutes` (J.1) |
+
+**Not added in Phase K** (deferred per §10.17): `ProposalInput.{trial,formal}_vram_budget_gb`
+and `ProposalOutput.vram_risk`. The proposer-side gate would degrade to a
+warn-and-proceed no-op for the same reason Phase E2's time gate does
+(brand-new `model_name` not yet in `MODEL_REGISTRY` when the proposer
+runs), so the plumbing is dead code today.
+
+`ExperimentMemory.time_mode` (already added in J.1) now describes both
+gates' active mode for the round — no second `vram_mode` field needed,
+they always agree.
+
+### 10.5 Skill rename + budget kwarg
+
+Rename `agent/skills/evaluate_resource_skill/` →
+`agent/skills/evaluate_vram_skill/` so the two siblings read parallel:
+
+```
+agent/skills/evaluate_vram_skill/      # was evaluate_resource_skill
+agent/skills/evaluate_time_skill/
+```
+
+`run_skill` gains one optional kwarg:
+
+```python
+def run_skill(sandbox, *, model_type, model_config, train_config, loss_config,
+              vram_budget_gb: Optional[float] = None):
+    ...
+    free_bytes, total_vram = torch.cuda.mem_get_info(0)
+    defensive_limit = free_bytes * SAFETY_PCT          # existing 0.8 floor
+    if vram_budget_gb is not None:
+        budget_limit = vram_budget_gb * GB
+        limit_bytes  = min(defensive_limit, budget_limit)
+        if defensive_limit < budget_limit * 0.5:
+            print(f"[VRAM] Contention detected: budget={vram_budget_gb:.1f} GB, "
+                  f"free-VRAM cap={defensive_limit / GB:.2f} GB; using "
+                  f"{limit_bytes / GB:.2f} GB")
+    else:
+        limit_bytes = defensive_limit                   # backward-compat
+    feasible = total_est <= limit_bytes
+    ...
+    return {
+        ..., "estimated_gb": ..., "limit_gb": ..., "vram_budget_gb": vram_budget_gb,
+        "suggestion": "Reduce model depth/width."        # downgraded — no per-lever branching
+    }
+```
+
+Three properties:
+
+- `vram_budget_gb is None` → behaviour byte-identical to today (limit
+  = `free_bytes × 0.8`). Backward-compatible.
+- `vram_budget_gb is not None` → limit is the **min** of the operator
+  budget and the defensive floor. The floor protects against catastrophic
+  contention (no point promising a 4 GB run when only 0.5 GB is actually
+  free); the budget is the intended ceiling the LLM optimises against.
+- The contention-detection log line surfaces the divergence between the
+  two so the user knows whether a `skipped_oom_risk` was caused by the
+  budget or by a stuck neighbour process.
+
+### 10.6 No calibration file in v1
+
+Time needs `~/.siderius/time_calibration_<gpu>.json` because ms/step is
+hardware-dependent and learned per (GPU, model_type) via asymmetric EMA
+(§2.6.5). VRAM is deterministic from the bytes formula already in
+`_estimate_bytes` (model overhead + activations + output logits + focal
+one-hot + transformer attention). No learned correction in Phase K.
+
+If post-Phase-K telemetry shows systematic estimation drift (e.g. cuDNN
+workspace allocations the formula misses), revisit with a calibration
+file shaped like time's. Not pre-empted in v1. **Open Q-K-1**: post-K
+smoke runs should log `(estimated_gb, peak_vram_actual_gb)` per
+completed training so this question can be answered with data.
+
+### 10.7 Joint orchestration at the call sites
+
+Renumber the tuner round-loop from the current 3-step (VRAM-check + Train
++ Score + Reflect, with VRAM mislabeled as `[Step 1/3]`) to a clean
+two-block structure: **two pre-flight gates**, then **three execution
+steps**. This avoids fractional numbering and surfaces the gate-vs-work
+distinction in the log:
+
+```
+[Pre-flight 1/2] VRAM check  ──► skipped_oom_risk on fail
+[Pre-flight 2/2] Time check  ──► skipped_time_risk on fail (skipped if VRAM failed)
+[Step 1/3]       Train
+[Step 2/3]       Score
+[Step 3/3]       Reflect
+```
+
+VRAM short-circuits time so the more expensive warmup (~1–3 s) doesn't
+run on a config that's already failing the cheap check.
+
+| VRAM gate | Time gate | Outcome |
+|---|---|---|
+| pass | pass | proceed to training |
+| fail | not run (short-circuited) | `skipped_oom_risk` record, continue (no round consumed) |
+| pass | fail | `skipped_time_risk` record, continue (no round consumed) |
+| pass (no budget set) | pass (no budget set) | proceed to training (both gates disabled) |
+
+One skipped record per attempt, never two — keeps the
+`max_attempts = max_rounds × 3` accounting clean.
+
+### 10.8 Per-mode pick (mirror Phase I.2)
+
+Tuner `[Pre-flight 1/2]`:
+```python
+chosen_vram_budget = (input.trial_vram_budget_gb if plan.is_trial
+                      else input.formal_vram_budget_gb)
+```
+
+Identical structure to the time gate's per-mode pick (§2.7.3 + Phase I.2).
+No proposer-side per-mode pick in Phase K (deferred per §10.17).
+
+### 10.9 Protocol pass-through (mirror Phase I.3, narrowed)
+
+- `agent/schemas/protocols/ml_model_valid_to_ml_model_tune.local_validated_model`:
+  add `trial_vram_budget_gb` + `formal_vram_budget_gb` as caller kwargs;
+  conditional-inclusion pattern preserved (only added to the result dict
+  when the caller supplied them). **No `vram_risk` surfacing** —
+  resource info reaches the planner via the prompt block (§10.11) only
+  (single-channel rule, §10.3).
+- `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py`:
+  **no change in Phase K** (no proposer-side VRAM gate; deferred per
+  §10.17).
+- `agent/schemas/protocols/ml_model_propose_to_ml_model_impl.py`: no
+  change (implementor doesn't need budget fields).
+
+### 10.10 CLI surface (mirror Phase I.4, narrowed)
+
+- `run_exploration_adaptive.py`: `--trial_vram_budget_gb`,
+  `--formal_vram_budget_gb`. Default `None`. Startup banner extends to
+  print both per-mode VRAM budgets next to the time budgets.
+- `workflows/model_exploration.py`: fan out both fields to
+  `HyperparamTuningInput` (via `local_validated_model`) only. **No
+  `ProposalInput` fan-out** (no proposer-side gate in Phase K).
+- `nodes/ml_hyperparameter_tune_agent.py` argparse: add the two flags.
+- `nodes/ml_model_proposal_agent.py` argparse: **no change** (debug-only
+  entry point + no proposer-side gate).
+
+### 10.11 Planner prompt update
+
+`agent/prompts.py` planner sections change as follows:
+
+1. **Remove** the abstract "GPU MEMORY RULES" section (lines 74–82). It
+   has no numeric ceiling and is now strictly less informative than
+   §10.3's two new blocks.
+2. **Add** the `[ACTIVE RESOURCE BUDGETS]` block (numeric, per-round),
+   fed by the two tuner-input budget fields and the active mode. Renders
+   `vram_estimate_gb`, `time_estimate_minutes`, the matching budgets,
+   the resulting factors, and the current `batch_size` so the LLM can
+   reason about both axes at once.
+3. **Append** the `[RESOURCE GATE — RESOLVING OVER-BUDGET CONFIGS]`
+   guidance block (static text from §10.3), positioned near the existing
+   exploration checklist.
+
+Both blocks are static-text injections from the planner-side prompt
+builder; no per-round LLM parameter changes. The `experiment_history`
+block already carries `time_estimate_minutes` and `time_budget_minutes`
+per round (Phase J); §10.4's `vram_estimate_gb` + `vram_budget_gb`
+additions extend the same memory channel so previous rounds' estimates
+are visible automatically.
+
+**Single-channel rule (§10.3 rule 2).** The planner sees resource
+information **only** via these two prompt blocks plus the
+`experiment_history` memory fields. Phase K does not surface any
+`vram_risk` text via `expert_advice`. Time's existing `time_risk →
+expert_advice` route is preserved for now to avoid retroactively breaking
+Phase J, and is queued for retirement in §10.17.
+
+### 10.12 Files touched
+
+| Path | Change |
+|---|---|
+| `agent/skills/evaluate_resource_skill/` → `agent/skills/evaluate_vram_skill/` | rename directory; update `wrapper.py` to accept `vram_budget_gb` kwarg + emit contention-detection log; downgrade `suggestion` to verdict-style summary |
+| `agent/skills/evaluate_vram_skill/skill_config.json` | add `vram_budget_gb` to parameters block (optional) |
+| `agent/schemas/hyperparam_tuning.py` | add `trial_vram_budget_gb` + `formal_vram_budget_gb` to `HyperparamTuningInput`; add `vram_estimate_gb` + `vram_budget_gb` to `ExperimentMemory`; **K.7**: add `GateExhaustionInfo` model + `HyperparamTuningOutput.gate_exhaustion` field |
+| `agent/schemas/proposal.py` | **K.7**: add `ProposalInput.prior_iteration_gate_exhaustion: Optional[GateExhaustionInfo]` (proposer-side VRAM gate fields remain deferred per §10.17) |
+| `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py` | **K.7**: add `prior_tune_output` kwarg; surface its `gate_exhaustion` into `ProposalInput.prior_iteration_gate_exhaustion` (other proposer-side VRAM kwargs deferred per §10.17) |
+| `agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py` | accept the two VRAM budget kwargs (conditional-inclusion pattern); forward into `HyperparamTuningInput` |
+| `nodes/ml_hyperparameter_tune_agent.py` | rename skill name in `_run_skill` calls; renumber the round-loop to `[Pre-flight 1/2]` + `[Pre-flight 2/2]` + `[Step 1/3]..[Step 3/3]`; pass `chosen_vram_budget` per-round; emit `vram_estimate_gb` + `vram_budget_gb` in success-record memory (mirroring Phase J for time); same fields on `skipped_oom_risk` record; add `--trial_vram_budget_gb` / `--formal_vram_budget_gb` to argparse; **K.7**: implement `_build_gate_exhaustion` and populate `HyperparamTuningOutput.gate_exhaustion` at finalisation |
+| `nodes/ml_model_proposal_agent.py` | **no change in Phase K** for the proposer-side VRAM gate (deferred per §10.17). The proposer's *prompt* changes via `agent/prompts.py` for K.7 — no node logic touched. |
+| `agent/prompts.py` | remove abstract "GPU MEMORY RULES" section; add `[ACTIVE RESOURCE BUDGETS]` block (per-round, numeric, includes vram/time estimates + factors + current batch_size); append `[RESOURCE GATE — RESOLVING OVER-BUDGET CONFIGS]` guidance block (static); **K.7**: add conditional `[PRIOR ITERATION GATE EXHAUSTION]` block in the proposer template |
+| `run_exploration_adaptive.py` | add `--trial_vram_budget_gb` / `--formal_vram_budget_gb`; extend startup banner |
+| `workflows/model_exploration.py` | fan out both VRAM budget fields to `HyperparamTuningInput` only (via `local_validated_model`); **K.7**: retain previous tuner output and pass as `prior_tune_output` to next-iteration `local_full_context` |
+| `tests/unit/agent/skills/test_evaluate_vram_skill.py` | new — budget kwarg routing, defensive-floor + budget min, contention-detection log, None-pass-through behaviour |
+| `tests/unit/agent/tune_ml_hyperparam_agent/test_tuning_agent.py` | new tests — per-mode VRAM pick, joint short-circuit (VRAM fail → time skill not invoked), `vram_estimate_gb` in success-record memory; **K.7**: `_build_gate_exhaustion` truth-table tests |
+| `tests/unit/agent/tune_ml_hyperparam_agent/test_hyperparam_schemas.py` | extend with `TestGateExhaustionInfo` for K.7 schema |
+| `tests/unit/agent/protocols/test_ml_model_valid_to_ml_model_tune.py` | extend — assert two new VRAM budget kwargs survive |
+| `tests/unit/agent/protocols/test_ml_result_interp_to_ml_model_propose.py` | **K.7**: extend — assert `prior_tune_output.gate_exhaustion` lands as `ProposalInput.prior_iteration_gate_exhaustion` |
+| `tests/unit/agent/ml_model_proposal_agent/test_prompt_builder.py` (or equivalent) | **K.7**: assert prompt builder includes `[PRIOR ITERATION GATE EXHAUSTION]` block when field is set, omits when None |
+| (cross-ref doc-pointer comments in 12 source files) | `docs/time_estimator_implement.md` → `docs/resource_estimator_implement.md` |
+
+### 10.13 Iteration-boundary gate-exhaustion feedback to the proposer
+
+Phase K's per-round gate (§10.7) protects the *current* tuner iteration:
+oversize attempts are skipped and the round is not consumed. But it
+does nothing across iteration boundaries. If the proposer's baseline is
+fundamentally too heavy for the active budgets, every attempt the tuner
+generates from that baseline can hit the gate, the tuner exits with no
+trained model, and the next iteration's proposer has no idea this
+happened — it sees no `experiment_history` entries with useful scores
+and may propose another over-budget architecture for the same reason.
+
+§10.13 closes that loop: when a tuner iteration ends without ever
+training successfully, package a structured `GateExhaustionInfo` and
+surface it to the next iteration's proposer as a hard learning signal.
+
+#### 10.13.1 Detection criterion
+
+Trigger the signal when **all of the following** hold for the finished
+tuner iteration:
+
+- `total_attempts > 0` (the tuner actually ran).
+- `ever_trained == False` — no record has `status="success"`.
+- `gate_skip_count > 0` — at least one attempt was rejected by either
+  `evaluate_vram_skill` or `evaluate_time_skill`
+  (`status in {"skipped_oom_risk", "skipped_time_risk"}`).
+
+The third clause filters out unrelated all-failure modes (e.g. every
+attempt errored during training due to a code bug). When `ever_trained
+== False` but no attempt was gate-rejected, leave `gate_exhaustion =
+None` — the proposer doesn't need the budget-related learning signal
+because the failure wasn't budget-related.
+
+#### 10.13.2 Schema additions
+
+```python
+# agent/schemas/hyperparam_tuning.py
+
+class GateExhaustionInfo(BaseModel):
+    """
+    Populated by the tuner when an iteration ends without ever training
+    successfully AND at least one attempt was rejected by the pre-flight
+    resource gate. Surfaced to the next iteration's proposer so it can
+    learn the architecture was too heavy for the active budgets.
+    """
+    total_attempts: int
+    vram_gated_attempts: int
+    time_gated_attempts: int
+    other_failure_attempts: int   # error_*, skipped_schema_violation, etc.
+
+    active_mode: Literal["trial", "formal"]
+    vram_budget_gb: Optional[float]
+    time_budget_minutes: Optional[float]
+
+    # Round-0 (baseline) factors — diagnoses whether the proposer's own
+    # baseline was already over budget vs the tuner mutating it heavier.
+    baseline_vram_estimate_gb: Optional[float]
+    baseline_vram_factor: Optional[float]
+    baseline_time_estimate_minutes: Optional[float]
+    baseline_time_factor: Optional[float]
+
+    # Worst case across all attempts — bounds how much lighter the next
+    # baseline must be.
+    worst_vram_factor: Optional[float]
+    worst_time_factor: Optional[float]
+
+    summary_message: str   # human/LLM-readable one-paragraph synthesis
+
+
+class HyperparamTuningOutput(BaseModel):
+    ...existing fields...
+    gate_exhaustion: Optional[GateExhaustionInfo] = Field(
+        default=None,
+        description=(
+            "Populated only when the iteration ended without ever training "
+            "successfully and ≥1 attempt was rejected by the pre-flight "
+            "resource gate. Consumed by the next iteration's proposer."
+        ),
+    )
+```
+
+```python
+# agent/schemas/proposal.py
+
+class ProposalInput(BaseModel):
+    ...existing fields...
+    prior_iteration_gate_exhaustion: Optional[GateExhaustionInfo] = Field(
+        default=None,
+        description=(
+            "When the previous iteration's tuner exited under gate "
+            "exhaustion, this field carries the structured failure "
+            "report. Surfaced to the proposer prompt as a hard "
+            "learning signal."
+        ),
+    )
+```
+
+#### 10.13.3 Tuner population logic (at finalisation)
+
+In `nodes/ml_hyperparameter_tune_agent.py`, just before constructing
+the final `HyperparamTuningOutput`, scan `all_records` and populate
+`gate_exhaustion` if the §10.13.1 criterion holds. Implementation
+sketch:
+
+```python
+def _build_gate_exhaustion(records, plan_active_mode,
+                           vram_budget_gb, time_budget_minutes):
+    if not records:
+        return None
+    ever_trained = any(r.status == "success" for r in records)
+    if ever_trained:
+        return None
+    vram_gated = [r for r in records if r.status == "skipped_oom_risk"]
+    time_gated = [r for r in records if r.status == "skipped_time_risk"]
+    if not vram_gated and not time_gated:
+        return None   # all-failure but not budget-related
+    other = [r for r in records
+             if r.status not in {"skipped_oom_risk", "skipped_time_risk"}]
+    baseline = records[0]   # round-0
+    return GateExhaustionInfo(
+        total_attempts=len(records),
+        vram_gated_attempts=len(vram_gated),
+        time_gated_attempts=len(time_gated),
+        other_failure_attempts=len(other),
+        active_mode=plan_active_mode,
+        vram_budget_gb=vram_budget_gb,
+        time_budget_minutes=time_budget_minutes,
+        baseline_vram_estimate_gb=_safe_get(baseline.memory, "vram_estimate_gb"),
+        baseline_vram_factor=_factor(baseline, "vram", vram_budget_gb),
+        baseline_time_estimate_minutes=_safe_get(baseline.memory, "time_estimate_minutes"),
+        baseline_time_factor=_factor(baseline, "time", time_budget_minutes),
+        worst_vram_factor=_max_factor(records, "vram", vram_budget_gb),
+        worst_time_factor=_max_factor(records, "time", time_budget_minutes),
+        summary_message=_render_summary(...),
+    )
+```
+
+`_render_summary` produces a one-paragraph LLM-readable synthesis like:
+
+> "All 9 attempts (rounds 1–3, 3 attempts/round) were rejected by the
+> pre-flight VRAM gate. The baseline already estimated 6.4 GB vs the
+> 4.0 GB trial budget (factor 1.6×); the tuner's mutations went up to
+> 8.1 GB (factor 2.0×). The proposed architecture is fundamentally too
+> heavy for the active VRAM budget. Time estimates were within budget
+> throughout (worst factor 0.6×)."
+
+#### 10.13.4 Propagation through the workflow
+
+```
+tuner emits HyperparamTuningOutput.gate_exhaustion
+  → workflow holds previous tune output
+  → next-iteration interp→propose protocol surfaces it as
+      ProposalInput.prior_iteration_gate_exhaustion
+  → proposer prompt renders the [PRIOR ITERATION GATE EXHAUSTION] block
+```
+
+Concretely:
+
+- `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.local_full_context`:
+  add a kwarg `prior_tune_output: Optional[HyperparamTuningOutput]`.
+  When supplied AND its `gate_exhaustion` is non-None, copy the
+  `GateExhaustionInfo` into the returned `ProposalInput`.
+- `workflows/model_exploration.py`: after each tuner run, retain the
+  output and pass it as `prior_tune_output` to the next iteration's
+  `local_full_context` call.
+
+#### 10.13.5 Proposer prompt section
+
+`agent/prompts.py` gains a new conditional block in the proposer
+template:
+
+```
+[PRIOR ITERATION GATE EXHAUSTION]
+{summary_message}
+
+Resource accounting:
+  Mode active:       {active_mode}
+  VRAM budget:       {vram_budget_gb} GB
+  Time budget:       {time_budget_minutes} min
+  Baseline factors:  VRAM {baseline_vram_factor}×   Time {baseline_time_factor}×
+  Worst factors:     VRAM {worst_vram_factor}×      Time {worst_time_factor}×
+  Attempt counts:    {total} total, {vram_gated} VRAM-gated,
+                     {time_gated} time-gated, {other} other failures
+
+For this iteration: propose an architecture that fits the budgets
+shown above. The previous proposal could not be trained even after
+the tuner attempted to adjust hyperparameters within its lever set
+(batch_size, model depth/width). Reduce parameter count and/or layer
+count enough that the resulting baseline estimates land below the
+budgets.
+```
+
+The block renders only when `ProposalInput.prior_iteration_gate_exhaustion`
+is non-None. Otherwise it is omitted entirely (no empty section).
+
+#### 10.13.6 Why this is not the same as Deferred-1 (proposer-side gate)
+
+Deferred-1 (§10.17) is a *pre-flight check* on the proposer's own
+baseline — it would need `MODEL_REGISTRY` populated for the new
+`model_name`, which doesn't happen until the implementor + validator
+run. It is dead code today and stays deferred.
+
+§10.13's feedback signal is *post-hoc*: it observes what happened
+*after* the implementor + validator + tuner all ran, so the model_type
+is registered, attempts have run, and we have measured estimates from
+the per-round gate. No registry timing problem.
+
+The two are complementary, not redundant. When Deferred-1 lands, it
+catches over-budget proposals at proposal time (cheap, prevents the
+whole impl→valid→tune cycle from being wasted). §10.13 catches the
+case where the proposer's baseline passes the proposer-side check but
+the tuner still can't find a working mutation — i.e. the architecture
+is borderline-fit at baseline but every neighbour blows the budget.
+
+#### 10.13.7 Tests
+
+- Unit: `GateExhaustionInfo` schema validation + serialisation.
+- Unit: `_build_gate_exhaustion` returns `None` when `ever_trained=True`.
+- Unit: `_build_gate_exhaustion` returns `None` when `ever_trained=False`
+  but `gate_skip_count == 0`.
+- Unit: `_build_gate_exhaustion` populates correctly when both
+  conditions hold; baseline factors come from round-0 record; worst
+  factors are the max across all records.
+- Unit: protocol surfaces `prior_iteration_gate_exhaustion` to
+  `ProposalInput` when `prior_tune_output.gate_exhaustion` is non-None;
+  leaves it None otherwise.
+- Unit: proposer prompt builder includes the new block when the field
+  is set; omits the block entirely when None.
+
+### 10.14 Phased implementation checklist
+
+Order matches Phase I + E2 logic: schema first, skill second, agent
+integration third, prompt last (so the planner sees the new budgets only
+after the gates that enforce them are wired). Each sub-phase ends with
+its targeted pytest invocation green and a committable state.
+
+**Top-level progress** (tick as each sub-phase commits + verifies):
+
+- [ ] K.0 — Skill rename (mechanical)
+- [ ] K.1 — Schema additions (tuner-side only)
+- [ ] K.2 — Skill `vram_budget_gb` kwarg + contention-detection log
+- [ ] K.3 — Tuner integration (per-mode pick + memory fields)
+- [ ] K.4 — Protocol pass-through (`valid→tune` only)
+- [ ] K.5 — CLI + workflow fan-out
+- [ ] K.6 — Planner prompt (numeric block + guidance block)
+- [ ] K.7 — Iteration-boundary gate-exhaustion feedback (§10.13)
+- [ ] K.8 — Smoke run on lilab under contention
+
+#### K.0 Skill rename (mechanical) [ ]
+
+- [ ] `git mv agent/skills/evaluate_resource_skill agent/skills/evaluate_vram_skill`.
+- [ ] Search-replace `"evaluate_resource_skill"` → `"evaluate_vram_skill"`
+      across all callers (currently `nodes/ml_hyperparameter_tune_agent.py`
+      and any test fixtures referencing the skill name string).
+- [ ] Verify: `pytest tests/unit/agent/ -q` → all green; no test refers
+      to the old name.
+
+#### K.1 Schema additions (tuner-side only) [ ]
+
+- [ ] `HyperparamTuningInput`: add `trial_vram_budget_gb`,
+      `formal_vram_budget_gb` (Optional[float], default None) with
+      docstrings describing the per-mode behaviour.
+- [ ] `ExperimentMemory`: add `vram_estimate_gb`, `vram_budget_gb` (both
+      Optional[float], default None); pre-Phase-K records still validate.
+- [ ] **Skipped (deferred per §10.17)**: `ProposalInput` /
+      `ProposalOutput` additions.
+- [ ] Tests: extend `test_hyperparam_schemas.py` with
+      `TestExperimentMemoryVramFields` mirroring
+      `TestExperimentMemoryTimeFields`.
+- [ ] Tests: extend `test_hyperparam_schemas.py` with
+      `TestVramBudgetFields` for the two new input fields (default-None,
+      type validation, both-set, mode-pick semantics in protocol layer
+      covered separately in K.4).
+- [ ] Verify: `pytest tests/unit/agent/tune_ml_hyperparam_agent/test_hyperparam_schemas.py -q`.
+
+#### K.2 Skill budget kwarg [ ]
+
+- [ ] `evaluate_vram_skill/wrapper.py`: accept `vram_budget_gb`; compute
+      `limit_bytes = min(defensive_limit, budget_limit)`; emit the
+      contention-detection log line when
+      `defensive_limit < budget_limit × 0.5`.
+- [ ] When `vram_budget_gb is None`, behaviour is byte-identical to
+      today (one regression test for this).
+- [ ] Downgrade the `suggestion` field to a verdict-style summary; no
+      per-lever branching inside the skill (guidance lives in the prompt
+      per §10.3).
+- [ ] `skill_config.json`: add `vram_budget_gb` to the parameters block
+      (optional).
+- [ ] Tests: budget pass-through, defensive vs budget min, contention
+      log, None-disabled path, suggestion-string content.
+- [ ] Verify: `pytest tests/unit/agent/skills/test_evaluate_vram_skill.py -q`.
+
+#### K.3 Tuner integration [ ]
+
+- [ ] `nodes/ml_hyperparameter_tune_agent.py`: per-round
+      `chosen_vram_budget = trial if plan.is_trial else formal`; pass to
+      `_run_skill("evaluate_vram_skill", ...)`.
+- [ ] Stash the VRAM-skill result alongside `time_check` so the success
+      record can lift `vram_estimate_gb` + `vram_budget_gb` into memory
+      (mirrors Phase J).
+- [ ] Same `vram_estimate_gb` + `vram_budget_gb` keys go on the
+      `skipped_oom_risk` record (mirrors §J.3 for time).
+- [ ] One-time startup warning when both VRAM budgets are None.
+- [ ] Renumber the round-loop log lines from the current `[Step 1/3]`
+      VRAM check + `[Step ?/3]` time check + `[Step 1/3]..[Step 3/3]`
+      execution into the clean `[Pre-flight 1/2]` + `[Pre-flight 2/2]` +
+      `[Step 1/3]..[Step 3/3]` scheme defined in §10.7.
+- [ ] Tests: per-mode pick, joint short-circuit (VRAM fail → time skill
+      not invoked), success-record memory, skipped-record memory,
+      gate-disabled path.
+- [ ] Verify: `pytest tests/unit/agent/tune_ml_hyperparam_agent/test_tuning_agent.py -q`.
+
+#### K.4 Protocol pass-through (`valid→tune` only) [ ]
+
+- [ ] `ml_model_valid_to_ml_model_tune.local_validated_model`: add
+      `trial_vram_budget_gb` + `formal_vram_budget_gb` kwargs;
+      conditional-inclusion pattern (only added to `HyperparamTuningInput`
+      when caller supplies them).
+- [ ] **Do NOT** surface `proposal.vram_risk` (no such field in Phase K).
+- [ ] **Do NOT** modify `ml_result_interp_to_ml_model_propose.py`
+      (no proposer-side gate in Phase K).
+- [ ] Tests: extend `test_ml_model_valid_to_ml_model_tune.py`; assert
+      both VRAM kwargs survive default-None and user-supplied paths;
+      assert independence (one set, other None).
+- [ ] Verify: `pytest tests/unit/agent/protocols/ -q`.
+
+#### K.5 CLI + workflow [ ]
+
+- [ ] `run_exploration_adaptive.py`: `--trial_vram_budget_gb`,
+      `--formal_vram_budget_gb`; startup banner extends to print both
+      VRAM budgets next to the time budgets.
+- [ ] `workflows/model_exploration.py`: forward both fields to
+      `local_validated_model` only (no `local_full_context` touch).
+- [ ] `nodes/ml_hyperparameter_tune_agent.py` argparse: add both flags.
+- [ ] Verify: `--help` on both entry points lists the new flags.
+
+#### K.6 Planner prompt [ ]
+
+- [ ] `agent/prompts.py`: remove abstract "GPU MEMORY RULES" section
+      (lines 74–82).
+- [ ] Add `[ACTIVE RESOURCE BUDGETS]` block fed by the two tuner-input
+      VRAM budget fields + active mode + current-round vram + time
+      estimates + computed factors + current `batch_size`.
+- [ ] Append `[RESOURCE GATE — RESOLVING OVER-BUDGET CONFIGS]` guidance
+      block (verbatim text from §10.3).
+- [ ] Wire the planner builder to pass current-round `vram_estimate_gb`
+      + `time_estimate_minutes` + `batch_size` so the LLM sees the
+      estimation pair plus the lever's current setting.
+- [ ] Tests: prompt builder includes the new sections when budgets are
+      set; renders `"(no budget — gate disabled)"` when they're None;
+      omits `factor` when budget is None; guidance block text appears
+      verbatim.
+- [ ] Verify: `pytest tests/unit/agent/ -q`.
+
+#### K.7 Iteration-boundary gate-exhaustion feedback (§10.13) [ ]
+
+- [ ] `agent/schemas/hyperparam_tuning.py`: add `GateExhaustionInfo`
+      Pydantic model per §10.13.2; add
+      `HyperparamTuningOutput.gate_exhaustion: Optional[GateExhaustionInfo] = None`.
+- [ ] `agent/schemas/proposal.py`: add
+      `ProposalInput.prior_iteration_gate_exhaustion: Optional[GateExhaustionInfo] = None`
+      (import `GateExhaustionInfo` from `hyperparam_tuning`).
+- [ ] `nodes/ml_hyperparameter_tune_agent.py`: implement
+      `_build_gate_exhaustion(...)` per §10.13.3; call at finalisation
+      and pass the result into `HyperparamTuningOutput(gate_exhaustion=...)`.
+- [ ] `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.local_full_context`:
+      add `prior_tune_output: Optional[HyperparamTuningOutput] = None`
+      kwarg; surface `prior_tune_output.gate_exhaustion` into the
+      returned `ProposalInput`.
+- [ ] `workflows/model_exploration.py`: retain previous tuner output;
+      pass to next iteration's `local_full_context` call as
+      `prior_tune_output=...`.
+- [ ] `agent/prompts.py`: add the conditional
+      `[PRIOR ITERATION GATE EXHAUSTION]` block per §10.13.5.
+- [ ] Tests per §10.13.7: schema validation, `_build_gate_exhaustion`
+      truth-table, protocol pass-through, prompt builder
+      conditional-rendering.
+- [ ] Verify: `pytest tests/unit/agent/tune_ml_hyperparam_agent/ tests/unit/agent/protocols/ tests/unit/agent/ml_model_proposal_agent/ -q`.
+
+#### K.8 Smoke (mirror Phase H1b) [ ]
+
+- [ ] Re-launch `explore_novel_v1` with
+      `--trial_vram_budget_gb 4 --formal_vram_budget_gb 8` under
+      intentional contention (a second process holding ~25 GB on the
+      same GPU).
+- [ ] Acceptance:
+      - Gate rejects oversize configs against the 4 GB budget, **not**
+        against momentary free-VRAM (no `"GPU has only 0.01 GB free"`
+        aborts when budget is set).
+      - The LLM's next attempt picks the right lever per the §10.3
+        guidance — first batch_size when only one factor is over and
+        the lever has room, depth/width when batch can't satisfy both.
+      - Joint short-circuit holds: time skill's warmup not invoked on
+        VRAM-failed attempts (verifiable from the skill's stdout
+        signature in the run log).
+      - `experiment_history` for round N+1 carries round N's
+        `vram_estimate_gb` + `vram_budget_gb` alongside the
+        time fields (Phase J already proved the time-side propagation
+        works; this verifies the VRAM-side mirror).
+- [ ] Gate-exhaustion exercise: deliberately under-budget one
+      iteration (e.g. `--trial_vram_budget_gb 0.5`) so the tuner
+      cannot escape the gate; verify the next iteration's proposer
+      prompt includes `[PRIOR ITERATION GATE EXHAUSTION]` with the
+      correct counts and factors, AND the next proposal proposes a
+      qualitatively lighter architecture (parameters and/or layer
+      count substantially reduced versus the failing baseline).
+
+### 10.15 Acceptance + rollback
+
+**Acceptance**: §10.14's K.8 smoke completes with a non-zero number of
+`skipped_oom_risk` records that show the operator budget rather than
+free-VRAM as the binding ceiling, and the `vram_estimate_gb` field
+appears in the following round's `experiment_history` block
+(planner-visible).
+
+**Rollback**: per-skill, per-budget, additive, gated on
+`vram_budget_gb is not None`. Setting both VRAM budgets to None reverts
+to current behaviour (byte-identical to pre-Phase-K). Codebase
+rollback: revert K.2–K.7 in reverse; K.1 (schema additions) is safe to
+leave in place as dormant infrastructure. K.0 (skill rename) is the
+only step coupled to all callers — if rolling K.0 back, also revert the
+caller updates that reference the new name.
+
+### 10.16 Phase K open questions
+
+- **Q-K-1** (carries forward from §10.6): VRAM estimation drift. If
+  post-K smoke shows `peak_vram_actual_gb` consistently exceeding
+  `estimated_gb` by >20%, the formula in `_estimate_bytes` is missing a
+  term (likely cuDNN workspace or PyTorch caching allocator overhead).
+  Decide whether to add a static safety multiplier (cheap) or a
+  calibration file shaped like time's (more accurate, more code).
+  Telemetry needed before deciding.
+- **Q-K-2**: Budget defaults. Both VRAM budgets default to `None` for
+  symmetry with time. If we want non-`None` defaults later: trial ≈ 4 GB
+  (matches the prose ceiling currently in expert advice); formal ≈ 8 GB
+  (educated guess; the formal-mode VRAM profile hasn't been
+  characterised yet). Revisit once a few formal runs have completed.
+- **Q-K-3**: Joint-record consistency. K.6's `[ACTIVE RESOURCE BUDGETS]`
+  block surfaces previous-round estimates from `experiment_history`. If
+  the previous round's record was a `skipped_*_risk` (not a success),
+  some fields may be partially populated (the gate that ran has them;
+  the gate that didn't run because of short-circuit doesn't). Decide
+  whether the prompt should render `"(not measured — VRAM failed first)"`
+  vs simply omitting the line. Lean toward explicit "not measured" so
+  the LLM doesn't infer absence from silence.
+
+### 10.17 Deferred from Phase K (future cleanup)
+
+Two related cleanups are explicitly out of scope for Phase K. They are
+captured here so they are easy to find later, not abandoned.
+
+**Deferred-1 — Proposer-side VRAM gate.** Adding `_apply_vram_gate` to
+`nodes/ml_model_proposal_agent.py` plus the `vram_risk` field on
+`ProposalOutput` plus protocol pass-through plus
+`test_baseline_vram_gate.py` would mirror Phase E2 perfectly — but
+inherits E2's same dead-code property: the brand-new `model_name` the
+proposer just invented isn't in `MODEL_REGISTRY` until the implementor
+runs and the validator registers it, so `_count_params` raises and the
+gate degrades to warn-and-proceed. Net behaviour today: no actual
+gating. Defer until plugins can be tentatively registered at proposal
+time (or until a parameter-counting path exists that doesn't need
+`MODEL_REGISTRY`).
+
+**Deferred-2 — Retire `time_risk` redundancy on `ProposalOutput`.**
+Phase J's `time_risk → expert_advice` route was useful when the planner
+had no other channel for time information. With Phase K's
+`[ACTIVE RESOURCE BUDGETS]` prompt block carrying numeric estimates +
+budgets + factors directly, `time_risk` becomes a redundant second
+channel that violates the §10.3 "one channel only" rule. Phase K keeps
+it to avoid retroactively breaking Phase J's tests and behaviour, but
+the cleanup should: (a) remove `_apply_time_gate`'s
+`output.time_risk = ...` write, (b) drop the `proposal.time_risk`
+prepend in `local_validated_model`, (c) drop the field from
+`ProposalOutput`, (d) update the relevant tests. Coordinate with
+Deferred-1 — both touch the same files, so they should land together
+when the proposer-side gate becomes activatable.

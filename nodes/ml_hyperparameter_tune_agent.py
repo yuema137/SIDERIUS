@@ -183,7 +183,7 @@ class HyperparamTuningAgent:
         # Per-mode time-budget gate (Phase I). Each mode has its own optional
         # ceiling; the per-round pick happens inside the loop based on
         # plan.is_trial. Mirrors the "additive, opt-in" stance in
-        # docs/time_estimator_implement.md §5 — when both budgets are None the
+        # docs/resource_estimator_implement.md §5 — when both budgets are None the
         # gate never fires; when only one is set, rounds in the other mode skip
         # the gate (one-time warning printed below per mode).
         trial_time_budget = agent_input.trial_time_budget_minutes
@@ -581,7 +581,7 @@ class HyperparamTuningAgent:
                 # and continue without consuming a round. Skipped entirely
                 # when the budget for the active mode is None (one-time
                 # warning per mode printed at startup).
-                # See docs/time_estimator_implement.md §2.7 / E1 / Phase I.
+                # See docs/resource_estimator_implement.md §2.7 / E1 / Phase I.
                 # The result is stashed so the post-flight calibration update
                 # (Phase F) can compare warmup vs actual ms/step.
                 # Phase I: per-mode budget pick. plan.is_trial decides which
@@ -637,7 +637,7 @@ class HyperparamTuningAgent:
                                 # Phase J — same three fields the success
                                 # record carries, so the planner sees the
                                 # same shape regardless of pass/fail.
-                                # See docs/time_estimator_implement.md §J.3.
+                                # See docs/resource_estimator_implement.md §J.3.
                                 "time_estimate_minutes": time_check.get("estimated_minutes"),
                                 "time_budget_minutes":   time_check.get("limit_minutes"),
                                 "time_mode":             "trial" if plan.is_trial else "formal",
@@ -888,7 +888,7 @@ class HyperparamTuningAgent:
                 # when the gate actually ran (chosen_time_budget was set);
                 # the keys are absent on records produced with the gate
                 # disabled, so the reflector doesn't have to filter None.
-                # See docs/time_estimator_implement.md §J.1.
+                # See docs/resource_estimator_implement.md §J.1.
                 if time_check is not None:
                     final_record["memory"]["time_estimate_minutes"] = (
                         time_check.get("estimated_minutes")
@@ -916,7 +916,7 @@ class HyperparamTuningAgent:
                 # Phase F post-flight: update per-GPU calibration from this
                 # successful run. Only runs when the gate used the real-dataset
                 # warmup path (the static formula has no warmup signal to
-                # calibrate against). See docs/time_estimator_implement.md §2.6.5.
+                # calibrate against). See docs/resource_estimator_implement.md §2.6.5.
                 if time_check is not None:
                     bd = time_check.get("breakdown") or {}
                     if bd.get("source") == "real_dataset_warmup":

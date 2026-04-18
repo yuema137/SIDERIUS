@@ -4,7 +4,7 @@ Per-GPU learned calibration for evaluate_time_skill.
 Maintains a `k(gpu, model_type)` correction factor that multiplies the
 warmup-measured ms/step. Updated post-training via an asymmetric EMA
 (faster correction toward safety, slower drift toward optimism) — see
-docs/time_estimator_implement.md §2.6.5.
+docs/resource_estimator_implement.md §2.6.5.
 
 File layout (one JSON per GPU; lives at ``$SIDERIUS_CALIBRATION_DIR`` or
 ``~/.siderius``):

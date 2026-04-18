@@ -291,7 +291,7 @@ class TestExperimentMemoryTimeFields:
     """The three optional time fields on ExperimentMemory carry pre-flight
     estimator context to the next planner round via experiment_history.
     All three default to None so records emitted before the gate ran (or with
-    the gate disabled) validate unchanged. See docs/time_estimator_implement.md
+    the gate disabled) validate unchanged. See docs/resource_estimator_implement.md
     §J.1.
     """
 

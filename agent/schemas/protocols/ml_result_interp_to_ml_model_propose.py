@@ -79,7 +79,7 @@ def local_full_context(
         sampling_seed         : run-level data-sampling parameters that mirror
                                 HyperparamTuningInput exactly. Forwarded so the proposer's
                                 evaluate_time_skill gate constructs the same SampleSet the
-                                tuner will use (docs/time_estimator_implement.md §2.7.2/§2.7.5).
+                                tuner will use (docs/resource_estimator_implement.md §2.7.2/§2.7.5).
                                 Each falls through to the ProposalInput schema default when
                                 None — partial workflow plumbing must not silently reset a
                                 field the caller didn't touch.

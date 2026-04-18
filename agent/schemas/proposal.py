@@ -483,7 +483,7 @@ class ProposalInput(BaseModel):
                     "The proposal agent must not reuse any of these names.",
     )
     # --- Run-level data + time-budget context (workflow-supplied) ---
-    # See docs/time_estimator_implement.md §2.7.2. These fields originate at the
+    # See docs/resource_estimator_implement.md §2.7.2. These fields originate at the
     # workflow/CLI entry point and fan out to both this node and the tuner so
     # the proposer can call build_sample_set + evaluate_time_skill on its own
     # baseline before emitting. The training-side trial-mode set mirrors

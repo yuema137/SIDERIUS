@@ -239,7 +239,7 @@ class TestDeviationNotePropagation:
 # HyperparamTuningInput (here) so the tuner's per-round evaluate_time_skill
 # gate sees the same numbers as the proposer's baseline gate. The per-round
 # pick (trial vs formal) happens inside the tuner based on plan.is_trial.
-# See docs/time_estimator_implement.md §2.7.2 / Phase I.
+# See docs/resource_estimator_implement.md §2.7.2 / Phase I.
 # ---------------------------------------------------------------------------
 
 class TestTimeBudgetFanOut:

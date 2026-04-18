@@ -496,7 +496,7 @@ class TestDynamicTrialFormal:
 #   - feasible=True    → training proceeds.
 #   - feasible=False   → emit skipped_time_risk record, continue (no round consumed).
 #   - budget=None      → skill not called at all (one-time warning at startup).
-# See docs/time_estimator_implement.md §2.7 / E1.
+# See docs/resource_estimator_implement.md §2.7 / E1.
 # ---------------------------------------------------------------------------
 
 FAKE_TIME_CHECK_OK = {
@@ -851,7 +851,7 @@ class TestTimeBudgetGate:
     # pre-flight estimate, the active budget, and the mode so the next planner
     # round sees them via experiment_history. When the gate is disabled (both
     # budgets None), the keys must be absent — not None — so the reflector
-    # doesn't have to filter them. See docs/time_estimator_implement.md §J.1.
+    # doesn't have to filter them. See docs/resource_estimator_implement.md §J.1.
 
     def test_success_record_memory_carries_time_fields_formal(self, tmp_path):
         """Gate-pass in formal mode → memory carries the three time fields

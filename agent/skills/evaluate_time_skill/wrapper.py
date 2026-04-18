@@ -3,7 +3,7 @@ evaluate_time_skill/wrapper.py
 
 Pre-flight wall-time estimator for a proposed training experiment.
 
-Pipeline (full design in docs/time_estimator_implement.md):
+Pipeline (full design in docs/resource_estimator_implement.md):
     1. Compute total step count from sample_set, seg_size, batch_size,
        train_portion, epochs (pure arithmetic).
     2. Count model params by instantiating the real model class.

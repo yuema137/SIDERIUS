@@ -127,7 +127,7 @@ class TestLocalFullContext:
 # and fan out into BOTH ProposalInput (here) and HyperparamTuningInput (via
 # the validator→tuner protocol) so the proposer's baseline gate and the
 # tuner's per-round gate construct the same SampleSet and see the same
-# wall-time budget. See docs/time_estimator_implement.md §2.7.2/§2.7.5.
+# wall-time budget. See docs/resource_estimator_implement.md §2.7.2/§2.7.5.
 #
 # The training-side trial-mode set (is_trial / trial_strategy / trial_portion
 # / target_files / train_portion / sampling_seed) mirrors the tuner exactly;

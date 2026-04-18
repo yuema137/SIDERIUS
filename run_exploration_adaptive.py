@@ -123,7 +123,7 @@ def parse_args():
             "Wall-time budget (minutes) for the evaluate_time_skill gate on "
             "rounds where plan.is_trial=True. Forwarded to BOTH the proposer's "
             "baseline gate and the tuner's per-round gate. None disables the "
-            "trial gate (docs/time_estimator_implement.md §2.7 / Phase I)."
+            "trial gate (docs/resource_estimator_implement.md §2.7 / Phase I)."
         ),
     )
     parser.add_argument(

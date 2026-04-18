@@ -114,7 +114,7 @@ class ExperimentMemory(BaseModel):
     # next round's experiment_history. Populated only when the time gate ran
     # (i.e. the active mode's budget was set); absent on records produced with
     # the gate disabled, so the reflector doesn't have to filter None values.
-    # See docs/time_estimator_implement.md §J.1.
+    # See docs/resource_estimator_implement.md §J.1.
     time_estimate_minutes: Optional[float] = Field(
         default=None,
         description="Pre-flight wall-time prediction from evaluate_time_skill (minutes).",
@@ -591,7 +591,7 @@ class HyperparamTuningInput(BaseModel):
     )
 
     # --- Time-budget gate (evaluate_time_skill) ---
-    # See docs/time_estimator_implement.md §2.7 + Phase I. The single
+    # See docs/resource_estimator_implement.md §2.7 + Phase I. The single
     # `time_budget_minutes` field used in Phases D-G was split into two so the
     # per-round gate uses the right ceiling for the mode the round runs in.
     # Both fields originate at the workflow/CLI level and are forwarded through
