@@ -128,6 +128,22 @@ class ExperimentMemory(BaseModel):
         description="Which budget was active for this round — 'trial' or 'formal'.",
     )
 
+    # Phase K — pre-flight VRAM-budget context surfaced to the planner via the
+    # next round's experiment_history. Populated only when the VRAM gate ran
+    # with a budget set; absent on records where the gate was disabled. Mirrors
+    # the time fields above so the planner sees both resource estimates side by
+    # side. Mode is inferred from `time_mode` (the two gates run in the same
+    # round) — no separate vram_mode is stored.
+    # See docs/resource_estimator_implement.md §10.4.
+    vram_estimate_gb: Optional[float] = Field(
+        default=None,
+        description="Pre-flight VRAM prediction from evaluate_vram_skill (GB).",
+    )
+    vram_budget_gb: Optional[float] = Field(
+        default=None,
+        description="Active mode's VRAM ceiling the estimate was checked against (GB).",
+    )
+
 
 class ExperimentRecord(BaseModel):
     exp_id: str
@@ -619,6 +635,36 @@ class HyperparamTuningInput(BaseModel):
             "at startup and skips the time check for formal rounds. Sized "
             "independently from the trial budget because formal runs use the "
             "full dataset and have a wall-time scale 50–100× longer."
+        ),
+    )
+
+    # --- VRAM-budget gate (evaluate_vram_skill, Phase K) ---
+    # Mirrors the trial/formal split of the time gate. The tuner picks the
+    # right one per round via plan.is_trial. Each is independently optional:
+    # setting only the trial budget gates trial rounds and skips formal rounds,
+    # and vice versa. The budget here acts as an operator-defined ceiling; the
+    # skill compares vram_estimate against min(defensive_floor, budget).
+    # See docs/resource_estimator_implement.md §10.4 / §10.5.
+    trial_vram_budget_gb: Optional[float] = Field(
+        default=None,
+        description=(
+            "VRAM budget in GB against which evaluate_vram_skill gates rounds "
+            "where the planner picks trial mode (plan.is_trial=True). "
+            "None = trial VRAM gate disabled; the tuner prints a one-time "
+            "warning at startup and skips the VRAM check for trial rounds. "
+            "Operator-defined ceiling — set conservatively so the gate rejects "
+            "models that exceed it even when raw free-VRAM is plentiful."
+        ),
+    )
+    formal_vram_budget_gb: Optional[float] = Field(
+        default=None,
+        description=(
+            "VRAM budget in GB against which evaluate_vram_skill gates rounds "
+            "where the planner picks formal mode (plan.is_trial=False). "
+            "None = formal VRAM gate disabled; the tuner prints a one-time "
+            "warning at startup and skips the VRAM check for formal rounds. "
+            "Sized independently from the trial budget because formal runs may "
+            "use larger batch sizes or full-dataset sampling."
         ),
     )
     data_dir: Optional[str] = Field(

@@ -236,6 +236,62 @@ class TestHyperparamTuningInput:
 
 
 # ---------------------------------------------------------------------------
+# Phase K — HyperparamTuningInput VRAM budget fields. Mirror of the Phase I
+# trial/formal time-budget split. Both are independently optional; the tuner
+# picks per round based on plan.is_trial (exercised in K.3 tuner tests).
+# See docs/resource_estimator_implement.md §10.4.
+# ---------------------------------------------------------------------------
+
+class TestVramBudgetFields:
+
+    def test_both_default_none(self, valid_input_dict):
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        assert inp.trial_vram_budget_gb is None
+        assert inp.formal_vram_budget_gb is None
+
+    def test_trial_budget_set_alone(self, valid_input_dict):
+        """Setting only the trial budget leaves the formal budget None so the
+        formal gate stays disabled — one budget per mode, no cross-contamination."""
+        valid_input_dict["trial_vram_budget_gb"] = 4.0
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        assert inp.trial_vram_budget_gb == 4.0
+        assert inp.formal_vram_budget_gb is None
+
+    def test_formal_budget_set_alone(self, valid_input_dict):
+        valid_input_dict["formal_vram_budget_gb"] = 8.0
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        assert inp.trial_vram_budget_gb is None
+        assert inp.formal_vram_budget_gb == 8.0
+
+    def test_both_budgets_set(self, valid_input_dict):
+        valid_input_dict["trial_vram_budget_gb"] = 4.0
+        valid_input_dict["formal_vram_budget_gb"] = 8.0
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        assert inp.trial_vram_budget_gb == 4.0
+        assert inp.formal_vram_budget_gb == 8.0
+
+    def test_budgets_round_trip_through_json(self, valid_input_dict):
+        valid_input_dict["trial_vram_budget_gb"] = 4.0
+        valid_input_dict["formal_vram_budget_gb"] = 8.0
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        reloaded = HyperparamTuningInput.model_validate_json(inp.model_dump_json())
+        assert reloaded.trial_vram_budget_gb == 4.0
+        assert reloaded.formal_vram_budget_gb == 8.0
+
+    def test_budgets_round_trip_when_unset(self, valid_input_dict):
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        reloaded = HyperparamTuningInput.model_validate_json(inp.model_dump_json())
+        assert reloaded.trial_vram_budget_gb is None
+        assert reloaded.formal_vram_budget_gb is None
+
+    def test_non_numeric_budget_rejected(self, valid_input_dict):
+        valid_input_dict["trial_vram_budget_gb"] = "not a number"
+        with pytest.raises(ValidationError) as exc:
+            HyperparamTuningInput.model_validate(valid_input_dict)
+        assert "trial_vram_budget_gb" in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
 # 2. Per-record validation — ExperimentRecord
 # ---------------------------------------------------------------------------
 
@@ -341,6 +397,59 @@ class TestExperimentMemoryTimeFields:
         assert rec.memory.time_estimate_minutes is None
         assert rec.memory.time_budget_minutes is None
         assert rec.memory.time_mode is None
+
+
+# ---------------------------------------------------------------------------
+# Phase K — ExperimentMemory VRAM fields (planner-feedback channel, mirror of
+# the time fields). Mode is shared with the time fields via `time_mode`; no
+# separate vram_mode. See docs/resource_estimator_implement.md §10.4.
+# ---------------------------------------------------------------------------
+
+class TestExperimentMemoryVramFields:
+    """The two optional VRAM fields on ExperimentMemory carry pre-flight
+    estimator context to the next planner round via experiment_history,
+    mirroring the time fields. Both default to None so pre-Phase-K records
+    (and records where the gate was disabled) validate unchanged."""
+
+    def _base_memory(self):
+        return {
+            "expert_advice_followed": "test",
+            "hypothesis": "test",
+        }
+
+    def test_vram_fields_default_none(self):
+        mem = ExperimentMemory.model_validate(self._base_memory())
+        assert mem.vram_estimate_gb is None
+        assert mem.vram_budget_gb is None
+
+    def test_vram_fields_accept_concrete_values(self):
+        mem = ExperimentMemory.model_validate({
+            **self._base_memory(),
+            "vram_estimate_gb": 2.3,
+            "vram_budget_gb": 4.0,
+        })
+        assert mem.vram_estimate_gb == 2.3
+        assert mem.vram_budget_gb == 4.0
+
+    def test_vram_fields_independent_of_time_fields(self):
+        """Setting VRAM fields alone must not force the time fields — the two
+        gates are independent. The per-round tuner populates whichever the
+        gate saw."""
+        mem = ExperimentMemory.model_validate({
+            **self._base_memory(),
+            "vram_estimate_gb": 1.7,
+            "vram_budget_gb": 4.0,
+        })
+        assert mem.time_estimate_minutes is None
+        assert mem.time_budget_minutes is None
+        assert mem.time_mode is None
+
+    def test_existing_record_round_trip_unchanged(self, valid_success_record):
+        """Records produced before Phase K (no vram_* keys) still validate and
+        the two VRAM fields read back as None."""
+        rec = ExperimentRecord.model_validate(valid_success_record)
+        assert rec.memory.vram_estimate_gb is None
+        assert rec.memory.vram_budget_gb is None
 
 
 class TestExperimentRecordOOM:
