@@ -1,6 +1,6 @@
 # Resource Estimator (Time + VRAM Budgets)
 
-**Status**: time skill implemented + smoke-tested on lilab (Phases A–G complete; H1a lilab direct-skill smoke verified 2026-04-16; **Phase I — trial/formal budget split — landed 2026-04-16 across 5 commits**; **Phase J — success-path time info to planner — landed 2026-04-16 across 3 commits**; **H1b lilab tuner-integration smoke verified 2026-04-16 on RTX 5090, k(wavenet)=4.22**; H2 SDSC deferred). **Phase K — VRAM budget gate alongside the time gate — design landed 2026-04-18; K.0–K.2 implemented 2026-04-18; K.2.5 (3-phase × 2-resource estimator distribution: training/inference/scoring × VRAM/time) commits 1–5 of 7 shipped 2026-04-18 (inference_defaults → training_skill estimator → inference_skill estimator → denoising_score_skill estimator + `core/server_configs/` → evaluate_vram_skill peak aggregator); commits 6 (time sum-aggregator) and 7 (doc sync) pending. K.3+ pending.**
+**Status**: time skill implemented + smoke-tested on lilab (Phases A–G complete; H1a lilab direct-skill smoke verified 2026-04-16; **Phase I — trial/formal budget split — landed 2026-04-16 across 5 commits**; **Phase J — success-path time info to planner — landed 2026-04-16 across 3 commits**; **H1b lilab tuner-integration smoke verified 2026-04-16 on RTX 5090, k(wavenet)=4.22**; H2 SDSC deferred). **Phase K — VRAM budget gate alongside the time gate — design landed 2026-04-18; K.0–K.2 implemented 2026-04-18; K.2.5 (3-phase × 2-resource estimator distribution: training/inference/scoring × VRAM/time) shipped 2026-04-18 across 7 commits: inference_defaults → training_skill estimator → inference_skill estimator → denoising_score_skill estimator + `core/server_configs/` → evaluate_vram_skill peak aggregator → evaluate_time_skill sum aggregator → doc sync. K.3+ pending.**
 **Author**: design discussion 2026-04-16; Phase K extension 2026-04-18.
 **Motivation**: two trial-mode runs (`exploit_cnn_v1`, `explore_novel_v1`) stalled in Round 1 for 1h 50min and 2h 27min respectively, both blowing past the 1-hour trial budget stated in the expert advice. Neither was blocked, because the planner has no pre-flight wall-time estimate — only a VRAM check. **Phase K motivation (2026-04-17)**: `explore_novel_v1` iterations 3 and 4 burned 9/9 attempts each to `"GPU has only 0.01 GB free"` because the existing VRAM gate uses momentary `free_bytes × 0.8` as its limit and another process held 25.7 GB on the shared 32 GB card. The planner has no operator-supplied VRAM ceiling to optimise against — symmetric to the time-gate gap §1.2 fixed.
 
@@ -31,8 +31,8 @@
 | K.2.5-3 — `inference_skill/estimator.py` (peak VRAM + wall time) | 2026-04-18 | `9cec35d` | `num_params × 4 B` + forward activations + attn at `inference_batch`; `1/3` forward-only time ratio |
 | K.2.5-4 — `denoising_score_skill/estimator.py` + `core/server_configs/` | 2026-04-18 | `8857204` | VRAM=0; time = `segments × per_psd_segment_seconds / num_workers`; per-server config files (deviation #2 below); ligroup measured 0.613 s/PSD-segment |
 | K.2.5-5 — `evaluate_vram_skill` as peak aggregator over 3 phases | 2026-04-18 | `661ad5d` | `dominant_phase` + `phase_breakdown`; interface-preserving; 18/18 skill tests |
-| K.2.5-6 — `evaluate_time_skill` as sum aggregator over 3 phases | pending | — | delete monolithic body; sum across 3 phases; preserve `estimated_minutes` + `breakdown.source` + `breakdown.gpu_name` for Phase F EMA trigger |
-| K.2.5-7 — mark K.2.5 complete in design doc | pending | — | flip checkboxes + record design deviations |
+| K.2.5-6 — `evaluate_time_skill` as sum aggregator over 3 phases | 2026-04-18 | `d40a0b1` | thin sum aggregator; preserves `breakdown.source`+`gpu_name` for Phase F EMA trigger; deleted 9 helper-coverage tests (moved to training estimator); 53/53 time+3-phase estimator tests; 276/276 across the full tuner suite |
+| K.2.5-7 — mark K.2.5 complete in design doc | 2026-04-18 | (this commit) | flip checkboxes + wire up all cross-references |
 | K.3 — tuner per-mode pick + `vram_estimate_gb` in success/skipped memory | pending | — | mirrors I.2 + J |
 | K.4 — protocol pass-through (`valid→tune` budget kwargs only; **no** proposer-side `vram_risk` plumbing) | pending | — | mirrors I.3, narrowed scope |
 | K.5 — CLI + workflow fan-out (tuner-side only) | pending | — | mirrors I.4 |
@@ -1038,12 +1038,11 @@ they always agree.
 
 The VRAM skill has two responsibilities: a **budget gate** (K.2, shipped
 2026-04-18 — `min(defensive, budget)` with contention log) and
-**multi-phase aggregation** (K.2.5 — commits 1–5 shipped 2026-04-18; the
-VRAM side is complete; the symmetric time-side refactor is commit 6,
-still pending). K.2.5 also applies the same distribution pattern to the
-time skill, because a round's wall-time has exactly the same structure:
-three phases run sequentially, each on a different resource axis, each
-with its own memory + time profile.
+**multi-phase aggregation** (K.2.5, shipped 2026-04-18). K.2.5 also
+applies the same distribution pattern to the time skill, because a
+round's wall-time has exactly the same structure: three phases run
+sequentially, each on a different resource axis, each with its own
+memory + time profile.
 
 **Three phases, two resources, per-phase adjustability:**
 
@@ -1663,7 +1662,7 @@ its targeted pytest invocation green and a committable state.
 - [x] K.0 — Skill rename (mechanical) *(2026-04-18)*
 - [x] K.1 — Schema additions (tuner-side only) *(2026-04-18)*
 - [x] K.2 — Skill `vram_budget_gb` kwarg + contention-detection log *(2026-04-18)*
-- [~] K.2.5 — Distribute per-phase estimators to owning skills (3 phases × 2 resources: VRAM=peak, time=sum) *(commits 1–5/7 shipped 2026-04-18; commit 6 — time sum-aggregator — and commit 7 — doc sync — pending)*
+- [x] K.2.5 — Distribute per-phase estimators to owning skills (3 phases × 2 resources: VRAM=peak, time=sum) *(shipped 2026-04-18 across 7 commits; design deviations recorded in §10.5)*
 - [ ] K.3 — Tuner integration (per-mode pick + memory fields)
 - [ ] K.4 — Protocol pass-through (`valid→tune` only)
 - [ ] K.5 — CLI + workflow fan-out
@@ -1855,62 +1854,61 @@ directly via a frozen pydantic model; there is no baseline.
 - [x] Verified:
       `pytest tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_vram_skill.py -q` → 18/18 green.
 
-**Commit 6 — `refactor(skill): evaluate_time_skill as sum aggregator over 3 phases`** *(pending)*
+**Commit 6 — `refactor(skill): evaluate_time_skill as sum aggregator over 3 phases`** *(shipped 2026-04-18, `d40a0b1`)*
 
-Riskier than commits 1–5: this commit must preserve Phase B–F behaviour
-for the training-only path. Pre-refactor tests stay as regression.
+Riskier than commits 1–5 because it had to preserve the Phase F EMA
+trigger's read path byte-for-byte. Two constraints discovered during
+planning, both addressed:
 
-**Hard compatibility constraint** (discovered during commit 6 planning):
-`nodes/ml_hyperparameter_tune_agent.py:921` reads
-`time_check["breakdown"]["source"]` and `time_check["breakdown"]["gpu_name"]`
-to decide whether to trigger the Phase F `k(gpu, model_type)` EMA
-update. The wrapper MUST preserve a flat `breakdown` dict (not just
-`phase_breakdown`) whose fields include `source` + `gpu_name` for the
-training phase. Plan: populate flat `breakdown` from the training-phase
-estimator's return + keep `phase_breakdown` alongside it.
+1. **`breakdown.source` + `breakdown.gpu_name` compat**:
+   `nodes/ml_hyperparameter_tune_agent.py:921` reads
+   `time_check["breakdown"]["source"]` and
+   `time_check["breakdown"]["gpu_name"]` to decide whether to trigger
+   the Phase F `k(gpu, model_type)` EMA update. The wrapper populates
+   the flat `breakdown` from the training-phase estimator's internal
+   breakdown (renaming `ms_source` → `source`) so these keys survive.
+2. **`"tinynet"` fixture breakage**: the inference estimator's
+   `assert_inference_batch_registered(model_type)` loudly rejects
+   unregistered plugins. The test fixture's `model_type="tinynet"`
+   placeholder was swapped to `"rnn"` (registered), with `num_params`
+   supplied via the monkeypatched `_count_params` so the inference
+   estimator's static fallback still works without touching torch.
 
-**Fixture detail** (discovered during commit 6 planning): the current
-`test_evaluate_time_skill.py` uses `"tinynet"` as a placeholder
-`model_type` in `_base_kwargs`. Post-refactor the inference estimator
-calls `assert_inference_batch_registered("tinynet")` which raises
-`ValueError`. Fix: change the fixture to `"rnn"` (registered) and pass
-`num_params` explicitly to avoid an internal `_count_params` call.
+- [x] `agent/skills/evaluate_time_skill/wrapper.py` — deleted the
+      monolithic step-count body (helpers `_total_train_steps` +
+      `_static_ms_per_step` now live only in
+      `training_skill/estimator.py`); calls the three
+      `estimate_wall_time_seconds` functions; sums `seconds`. Derives
+      the inference ms/step from the training warmup via
+      `_INFERENCE_VS_TRAINING_RATIO = 1/3`. Preserves existing return
+      fields + adds `dominant_phase` + `phase_breakdown`.
+- [x] `evaluate_time_skill/calibration.py` — untouched. Imported only
+      by `training_skill/estimator.py` now.
+- [x] `tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_time_skill.py`:
+      - `_base_kwargs` `model_type`: `"tinynet"` → `"rnn"`.
+      - Deleted 9 helper tests (6 parametrized `_total_train_steps`
+        + 3 `_static_ms_per_step`) — coverage moved to
+        `training_skill/test_estimator.py` in commit 2.
+      - `test_run_skill_respects_safety_multiplier` →
+        `test_run_skill_safety_multiplier_surfaced_in_breakdown`,
+        asserts against `phase_breakdown["training"]["breakdown"]["safety_multiplier"]`
+        and the training-phase seconds formula.
+      - New tests: `test_run_skill_phase_breakdown_contains_all_three_phases`,
+        `test_run_skill_estimated_minutes_is_sum_of_phase_seconds`,
+        `test_run_skill_dominant_phase_is_training_for_typical_config`,
+        `test_warmup_scales_inference_ms_by_one_third`.
+- [x] Verified:
+      `pytest tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_time_skill.py tests/unit/agent/training_skill tests/unit/agent/inference_skill tests/unit/agent/denoising_score_skill -q`
+      → 53/53 green; full tuner-side suite → 276/276 green.
 
-- [ ] `agent/skills/evaluate_time_skill/wrapper.py` — delete the
-      monolithic step-count body (helpers `_total_train_steps` and
-      `_static_ms_per_step` duplicated in `training_skill/estimator.py`);
-      call the three `estimate_wall_time_seconds` functions; sum
-      `seconds`. Preserve existing return fields
-      (`estimated_minutes`, `limit_minutes`, `feasible`, `verdict`,
-      `suggestion`, `breakdown`) + add `dominant_phase` +
-      `phase_breakdown`. `breakdown` carries the training-phase's
-      flat dict including `source` + `gpu_name` keys for Phase F EMA
-      compat.
-- [ ] Keep `evaluate_time_skill/calibration.py` exactly as-is — it's
-      imported only by `training_skill/estimator.py` now.
-- [ ] Update `tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_time_skill.py`:
-      - Change `_base_kwargs` `model_type` default from `"tinynet"` to
-        `"rnn"`; pass `num_params` to bypass inference estimator's
-        internal `_count_params` call.
-      - Rewrite `test_run_skill_respects_safety_multiplier` to assert
-        against `phase_breakdown["training"]["breakdown"]["safety_multiplier"]`
-        (estimated_minutes is now the sum; safety lives on the
-        training phase).
-      - Consider deleting the 6 parametrized `_total_train_steps`
-        tests + 3 `_static_ms_per_step` tests (coverage already in
-        `training_skill/test_estimator.py`).
-      - Add: sum semantics (training X s + inference Y s + scoring Z s
-        → `estimated_minutes == (X+Y+Z)/60`), `dominant_phase == "training"`
-        in typical case, budget gate feasibility keyed on the sum.
-- [ ] Verify:
-      `pytest tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_time_skill.py tests/unit/agent/training_skill tests/unit/agent/inference_skill tests/unit/agent/denoising_score_skill -q`.
-
-**Commit 7 — `docs(resource_estimator): mark K.2.5 complete`** *(pending)*
-- [ ] After commit 6 lands: flip K.2.5 top-level checkbox (§10.14) from
-      `[~]` to `[x]`; flip commits 6 + 7 checkboxes to `[x]`; update the
-      progress-log table row (line ~30) for commit 7 with its hash;
-      update §10.5 opening paragraph's "(K.2.5 — commits 1–5 shipped
-      …; 6–7 pending)" to "(K.2.5, shipped YYYY-MM-DD)".
+**Commit 7 — `docs(resource_estimator): mark K.2.5 complete`** *(shipped 2026-04-18, this commit)*
+- [x] Flipped K.2.5 top-level checkbox (§10.14) from `[~]` to `[x]`.
+- [x] Flipped commits 6 + 7 inline checkboxes to `[x]` with hashes.
+- [x] Added commit 6 + commit 7 rows to the progress-log table
+      (line ~30).
+- [x] Updated §10.5 opening paragraph: "shipped 2026-04-18".
+- [x] Updated the top-of-doc status line: K.2.5 fully shipped across
+      7 commits.
 
 #### K.3 Tuner integration [ ]
 
