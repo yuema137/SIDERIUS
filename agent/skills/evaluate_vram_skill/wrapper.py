@@ -2,7 +2,8 @@
 evaluate_vram_skill/wrapper.py
 
 Proactively estimates GPU VRAM usage for a proposed experiment config and
-checks it against the 80% safety limit of currently available VRAM.
+checks it against a per-mode operator budget (optional) combined with a
+defensive 80% cap on currently available VRAM.
 
 Call this BEFORE training to avoid OOM crashes.
 
@@ -14,10 +15,21 @@ Memory model (worst-case, float32 training):
   - Activations (bwd):     ~2 × output_logits (rough conv/rnn estimate)
   - Focal one_hot:         batch × 256 × seg_size × 8 B  (int64, only for focal loss)
   - Transformer attention: batch × nhead × seg² × 4 B × num_layers  (transformer only)
+
+Limit selection (Phase K):
+  - vram_budget_gb is None  → limit = free_bytes × 0.8 (backward-compat floor).
+                              The 4 GB minimum-free hard-error stays active.
+  - vram_budget_gb is set   → limit = min(free_bytes × 0.8, budget_gb × GB).
+                              The 4 GB minimum-free hard-error is skipped so a
+                              contended GPU produces a feasibility verdict (and
+                              a skipped_oom_risk record) instead of crashing
+                              the tuning loop. A contention log is emitted when
+                              the defensive cap drops below half the budget.
+
+See docs/resource_estimator_implement.md §10.5 / §10.7.
 """
 
-import sys
-import os
+from typing import Optional
 
 import torch
 from pydantic import ValidationError
@@ -140,16 +152,21 @@ def _estimate_bytes(
 def run_skill(sandbox, **kwargs):
     """
     Required kwargs: model_type, model_config, train_config, loss_config
+    Optional kwargs:
+      * vram_budget_gb — operator-set per-mode VRAM ceiling (GB). When set,
+        the limit becomes ``min(free × 0.80, budget × GB)`` and the 4 GB
+        minimum-free floor is skipped (Phase K). See module docstring.
     Returns a result dict with status, feasibility verdict, and breakdown.
     """
-    model_type = kwargs.get("model_type", "fcnet")
-    model_cfg  = kwargs.get("model_config", {})
-    train_cfg  = kwargs.get("train_config", {})
-    loss_cfg   = kwargs.get("loss_config", {})
-    loss_type  = loss_cfg.get("loss_type", "ce")
-    device     = train_cfg.get("device", "cpu")
+    model_type     = kwargs.get("model_type", "fcnet")
+    model_cfg      = kwargs.get("model_config", {})
+    train_cfg      = kwargs.get("train_config", {})
+    loss_cfg       = kwargs.get("loss_config", {})
+    vram_budget_gb: Optional[float] = kwargs.get("vram_budget_gb")
+    loss_type      = loss_cfg.get("loss_type", "ce")
+    device         = train_cfg.get("device", "cpu")
 
-    print(f"\n>>> [Skill: ResourceEval] Checking VRAM for {model_type.upper()} "
+    print(f"\n>>> [Skill: VRAMEval] Checking VRAM for {model_type.upper()} "
           f"(bs={train_cfg.get('batch_size')}, seg={model_cfg.get('segmentation_size')}, "
           f"loss={loss_type})...")
 
@@ -207,8 +224,13 @@ def run_skill(sandbox, **kwargs):
         free_bytes, total_vram = torch.cuda.mem_get_info(0)
         already_used = total_vram - free_bytes
 
+        # Phase K: the 4 GB minimum-free floor is a backward-compat safety net
+        # for the no-budget path. When a budget is set, a contended GPU should
+        # produce a feasibility verdict (so the tuner saves a skipped_oom_risk
+        # record and keeps planning) rather than crash the tuning loop — so the
+        # floor is skipped here.
         _MIN_FREE = 4 * _GB
-        if free_bytes < _MIN_FREE:
+        if vram_budget_gb is None and free_bytes < _MIN_FREE:
             msg = (
                 f"GPU has only {free_bytes / _GB:.2f} GB free "
                 f"(total {total_vram / _GB:.1f} GB, {already_used / _GB:.2f} GB in use). "
@@ -218,8 +240,24 @@ def run_skill(sandbox, **kwargs):
             print(f"    ERROR: {msg}")
             return {"status": "error", "message": msg}
 
-        limit_bytes = free_bytes * _SAFETY_PCT
-        feasible    = total_est <= limit_bytes
+        defensive_limit = free_bytes * _SAFETY_PCT
+        if vram_budget_gb is None:
+            limit_bytes = defensive_limit
+        else:
+            budget_limit = vram_budget_gb * _GB
+            limit_bytes  = min(defensive_limit, budget_limit)
+            # Contention log: the defensive free-VRAM cap has pinched the
+            # effective limit below half the operator's nominal budget — some
+            # other process is holding VRAM. See
+            # docs/resource_estimator_implement.md §10.5.
+            if defensive_limit < budget_limit * 0.5:
+                print(
+                    f"    [VRAM] Contention detected: "
+                    f"budget={vram_budget_gb:.2f} GB, "
+                    f"free-VRAM cap={defensive_limit / _GB:.2f} GB; "
+                    f"using {limit_bytes / _GB:.2f} GB"
+                )
+        feasible = total_est <= limit_bytes
 
         # ── 4. Build human-readable report ────────────────────────────────
         breakdown_gb = {k: f"{v / _GB:.3f} GB" for k, v in breakdown.items()}
@@ -234,32 +272,35 @@ def run_skill(sandbox, **kwargs):
         }
         bottleneck = max(components, key=components.get)
 
+        if vram_budget_gb is None:
+            limit_desc = (
+                f"Safety limit: {limit_bytes / _GB:.2f} GB "
+                f"({int(_SAFETY_PCT*100)}% of free)."
+            )
+        else:
+            limit_desc = (
+                f"Limit: {limit_bytes / _GB:.2f} GB "
+                f"(min of defensive {defensive_limit / _GB:.2f} GB "
+                f"and budget {vram_budget_gb:.2f} GB)."
+            )
         verdict = (
             f"{'✅ FITS' if feasible else '❌ OOM RISK'} — "
             f"Estimated {total_est / _GB:.2f} GB vs "
             f"{free_bytes / _GB:.2f} GB free ({total_vram / _GB:.1f} GB total, "
             f"{already_used / _GB:.2f} GB already used). "
-            f"Safety limit: {limit_bytes / _GB:.2f} GB ({int(_SAFETY_PCT*100)}%). "
+            f"{limit_desc} "
             f"Bottleneck: {bottleneck}."
         )
 
+        # Phase K: per-lever guidance lives in the planner prompt (§10.3,
+        # single-channel rule), not inside the skill. The suggestion is now a
+        # one-line verdict-style summary.
         suggestion = ""
         if not feasible:
-            # Suggest the most effective reduction
-            if bottleneck in ("focal_onehot", "output_logits", "activations"):
-                safe_bs = int(train_cfg.get("batch_size", 1) * limit_bytes / total_est * 0.9)
-                safe_bs = max(1, safe_bs)
-                suggestion = (
-                    f"Reduce batch_size to ~{safe_bs} "
-                    f"or reduce segmentation_size."
-                )
-            elif bottleneck == "transformer_attn":
-                suggestion = (
-                    "Reduce segmentation_size (attention scales O(T²)), "
-                    "or reduce nhead/num_layers."
-                )
-            else:
-                suggestion = "Reduce model size (embedding_dim, latent_dims, num_layers)."
+            suggestion = (
+                "Config exceeds the VRAM limit — reduce model complexity "
+                "(depth, width, batch_size, or segmentation_size)."
+            )
 
         print(f"    VRAM free   : {free_bytes / _GB:.2f} GB / {total_vram / _GB:.1f} GB")
         print(f"    Estimated   : {total_est / _GB:.2f} GB")
@@ -268,16 +309,17 @@ def run_skill(sandbox, **kwargs):
             print(f"    Suggestion  : {suggestion}")
 
         return {
-            "status":      "success",
-            "feasible":    feasible,
-            "verdict":     verdict,
-            "suggestion":  suggestion,
-            "num_params":  num_params,
-            "breakdown":   breakdown_gb,
-            "vram_free_gb":  round(free_bytes  / _GB, 3),
-            "vram_total_gb": round(total_vram  / _GB, 1),
-            "estimated_gb":  round(total_est   / _GB, 3),
-            "limit_gb":      round(limit_bytes / _GB, 3),
+            "status":         "success",
+            "feasible":       feasible,
+            "verdict":        verdict,
+            "suggestion":     suggestion,
+            "num_params":     num_params,
+            "breakdown":      breakdown_gb,
+            "vram_free_gb":   round(free_bytes  / _GB, 3),
+            "vram_total_gb":  round(total_vram  / _GB, 1),
+            "estimated_gb":   round(total_est   / _GB, 3),
+            "limit_gb":       round(limit_bytes / _GB, 3),
+            "vram_budget_gb": vram_budget_gb,
         }
 
     except Exception as e:

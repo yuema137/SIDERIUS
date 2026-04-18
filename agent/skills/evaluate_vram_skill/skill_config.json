@@ -28,6 +28,10 @@
           "loss_type": { "type": "string" }
         },
         "required": ["loss_type"]
+      },
+      "vram_budget_gb": {
+        "type": ["number", "null"],
+        "description": "Optional operator-set VRAM ceiling in GB (Phase K). When set, the effective limit becomes min(free × 0.80, budget × GB) and the 4 GB minimum-free floor is skipped. When null/absent, behaviour is byte-identical to the legacy defensive-only path."
       }
     },
     "required": ["model_type", "model_config", "train_config", "loss_config"]
