@@ -1,6 +1,6 @@
 # Resource Estimator (Time + VRAM Budgets)
 
-**Status**: time skill implemented + smoke-tested on lilab (Phases A–G complete; H1a lilab direct-skill smoke verified 2026-04-16; **Phase I — trial/formal budget split — landed 2026-04-16 across 5 commits**; **Phase J — success-path time info to planner — landed 2026-04-16 across 3 commits**; **H1b lilab tuner-integration smoke verified 2026-04-16 on RTX 5090, k(wavenet)=4.22**; H2 SDSC deferred). **Phase K — VRAM budget gate alongside the time gate — design landed 2026-04-18; K.0–K.2 implemented 2026-04-18; K.2.5 (3-phase × 2-resource estimator distribution: training/inference/scoring × VRAM/time) and K.3+ pending.**
+**Status**: time skill implemented + smoke-tested on lilab (Phases A–G complete; H1a lilab direct-skill smoke verified 2026-04-16; **Phase I — trial/formal budget split — landed 2026-04-16 across 5 commits**; **Phase J — success-path time info to planner — landed 2026-04-16 across 3 commits**; **H1b lilab tuner-integration smoke verified 2026-04-16 on RTX 5090, k(wavenet)=4.22**; H2 SDSC deferred). **Phase K — VRAM budget gate alongside the time gate — design landed 2026-04-18; K.0–K.2 implemented 2026-04-18; K.2.5 (3-phase × 2-resource estimator distribution: training/inference/scoring × VRAM/time) commits 1–5 of 7 shipped 2026-04-18 (inference_defaults → training_skill estimator → inference_skill estimator → denoising_score_skill estimator + `core/server_configs/` → evaluate_vram_skill peak aggregator); commits 6 (time sum-aggregator) and 7 (doc sync) pending. K.3+ pending.**
 **Author**: design discussion 2026-04-16; Phase K extension 2026-04-18.
 **Motivation**: two trial-mode runs (`exploit_cnn_v1`, `explore_novel_v1`) stalled in Round 1 for 1h 50min and 2h 27min respectively, both blowing past the 1-hour trial budget stated in the expert advice. Neither was blocked, because the planner has no pre-flight wall-time estimate — only a VRAM check. **Phase K motivation (2026-04-17)**: `explore_novel_v1` iterations 3 and 4 burned 9/9 attempts each to `"GPU has only 0.01 GB free"` because the existing VRAM gate uses momentary `free_bytes × 0.8` as its limit and another process held 25.7 GB on the shared 32 GB card. The planner has no operator-supplied VRAM ceiling to optimise against — symmetric to the time-gate gap §1.2 fixed.
 
@@ -26,7 +26,13 @@
 | K.0 — skill rename `evaluate_resource_skill` → `evaluate_vram_skill` | 2026-04-18 | `7bb167e` | mechanical rename + caller update |
 | K.1 — schema additions on `HyperparamTuningInput` + `ExperimentMemory` (no proposer-side fields) | 2026-04-18 | `7104993` | mirrors Phase I.1 + J.4, tuner-only scope |
 | K.2 — skill `vram_budget_gb` kwarg + contention-detection log | 2026-04-18 | `888dd61` | budget vs free-VRAM `min`; 18/18 skill tests |
-| K.2.5 — distribute per-phase estimators to owning skills (3 phases × 2 resources) | pending | — | per-phase `estimator.py` in training/inference/scoring skills exporting both `estimate_peak_bytes` and `estimate_wall_time_seconds`; `core/inference_defaults.py` + `core/scoring_defaults.py`; both resource wrappers become thin aggregators (VRAM=peak, time=sum) |
+| K.2.5-1 — extract `inference_batch_for` to `core/inference_defaults.py` | 2026-04-18 | `2fad44f` | model-type → batch-size contract (silent lookup + `assert_inference_batch_registered` loud variant; see deviation #1 below) |
+| K.2.5-2 — `training_skill/estimator.py` (peak VRAM + wall time) | 2026-04-18 | `ff43866` | CE vs focal, RNN vs transformer, batch scaling; Phase B–F time regression |
+| K.2.5-3 — `inference_skill/estimator.py` (peak VRAM + wall time) | 2026-04-18 | `9cec35d` | `num_params × 4 B` + forward activations + attn at `inference_batch`; `1/3` forward-only time ratio |
+| K.2.5-4 — `denoising_score_skill/estimator.py` + `core/server_configs/` | 2026-04-18 | `8857204` | VRAM=0; time = `segments × per_psd_segment_seconds / num_workers`; per-server config files (deviation #2 below); ligroup measured 0.613 s/PSD-segment |
+| K.2.5-5 — `evaluate_vram_skill` as peak aggregator over 3 phases | 2026-04-18 | `661ad5d` | `dominant_phase` + `phase_breakdown`; interface-preserving; 18/18 skill tests |
+| K.2.5-6 — `evaluate_time_skill` as sum aggregator over 3 phases | pending | — | delete monolithic body; sum across 3 phases; preserve `estimated_minutes` + `breakdown.source` + `breakdown.gpu_name` for Phase F EMA trigger |
+| K.2.5-7 — mark K.2.5 complete in design doc | pending | — | flip checkboxes + record design deviations |
 | K.3 — tuner per-mode pick + `vram_estimate_gb` in success/skipped memory | pending | — | mirrors I.2 + J |
 | K.4 — protocol pass-through (`valid→tune` budget kwargs only; **no** proposer-side `vram_risk` plumbing) | pending | — | mirrors I.3, narrowed scope |
 | K.5 — CLI + workflow fan-out (tuner-side only) | pending | — | mirrors I.4 |
@@ -1032,10 +1038,12 @@ they always agree.
 
 The VRAM skill has two responsibilities: a **budget gate** (K.2, shipped
 2026-04-18 — `min(defensive, budget)` with contention log) and
-**multi-phase aggregation** (K.2.5). K.2.5 also applies the same
-distribution pattern to the time skill, because a round's wall-time has
-exactly the same structure: three phases run sequentially, each on a
-different resource axis, each with its own memory + time profile.
+**multi-phase aggregation** (K.2.5 — commits 1–5 shipped 2026-04-18; the
+VRAM side is complete; the symmetric time-side refactor is commit 6,
+still pending). K.2.5 also applies the same distribution pattern to the
+time skill, because a round's wall-time has exactly the same structure:
+three phases run sequentially, each on a different resource axis, each
+with its own memory + time profile.
 
 **Three phases, two resources, per-phase adjustability:**
 
@@ -1075,13 +1083,22 @@ agent/skills/
     calibration.py         # UNCHANGED — used only by training_skill/estimator.py
 
 core/
-  inference_defaults.py    # NEW — inference_batch_for(model_type).
-                           #       Source of truth shared between
+  inference_defaults.py    # NEW — inference_batch_for(model_type) (silent,
+                           #       sandbox-internal) +
+                           #       assert_inference_batch_registered(model_type)
+                           #       (loud, raises on unknown plugin). Single
+                           #       source of truth shared between
                            #       sandbox_executor.execute_inference and
                            #       inference_skill/estimator.py.
-  scoring_defaults.py      # NEW — server_cpu_factor(hostname) for
-                           #       scoring-time cross-server variance.
-                           #       Static table in v1; EMA deferred (Q-K-5).
+                           #       See "Design deviation #1" below.
+  server_configs/          # NEW — per-host ServerConfig files (replaces the
+                           #       originally planned scoring_defaults.py
+                           #       baseline × factor split; see "Design
+                           #       deviation #2" below).
+    _base.py               #   ServerConfig schema (pydantic, frozen, extra=forbid)
+    __init__.py            #   get_server_config(hostname=None) with
+                           #   warn-once fallback to ligroup for unknown hosts
+    ligroup.py             #   measured per_psd_segment_seconds=0.613 (2026-04-18)
 ```
 
 **Aggregator contracts (final shape, post K.2.5):**
@@ -1164,7 +1181,54 @@ def run_skill(sandbox, *, model_type, model_config, train_config, loss_config,
   Both skills gain `dominant_phase` + `phase_breakdown` — new fields K.6
   may optionally surface in the prompt.
 
-### 10.6 No VRAM calibration file in v1; scoring-time uses a static hostname table
+**Design deviations recorded during implementation (commits 1–5, 2026-04-18):**
+
+1. **`inference_defaults.py` exposes a split contract, not a single
+   function.** The doc originally called for
+   `inference_batch_for(model_type) -> int` with "unknown model-type →
+   `ValueError`" in every call site. In practice, the sandbox executor
+   needs a *silent* lookup (it runs per-attempt and shouldn't crash if a
+   future plugin type arrives unregistered — the registered models cover
+   all current callers), while the pre-flight VRAM estimator is the
+   right place to loudly reject an unregistered plugin before we try to
+   estimate its memory footprint. The module therefore exposes
+   **two** entry points: `inference_batch_for(model_type)` (silent — the
+   dict lookup sandbox uses) and `assert_inference_batch_registered(model_type)`
+   (loud — `ValueError` on miss, called by the inference estimator at
+   VRAM-check time). This keeps the hot sandbox path branch-free while
+   giving the estimator the early, explicit failure it needs.
+
+2. **Per-host `ServerConfig` files replaced the `baseline × factor`
+   split.** The doc originally called for
+   `core/scoring_defaults.py` with `BASELINE_PER_SEGMENT_SECONDS` +
+   `server_cpu_factor(hostname)`. During implementation it became clear
+   the baseline constant is *itself* server-dependent (there is no
+   server-neutral "reference" measurement — the only measurement we
+   have is one specific host), so the factor-against-baseline formulation
+   adds indirection without adding information. Replaced with a
+   per-host config file registry under `core/server_configs/`, where
+   each host contributes its own measured `per_psd_segment_seconds`
+   directly via a frozen `ServerConfig` pydantic model. Unknown
+   hostnames warn once and fall back to the ligroup config. Lilab was
+   replaced by `ligroup` (literal `socket.gethostname()` on our lab
+   host) as the registered key; there is no aliasing layer. Measured
+   `ligroup.per_psd_segment_seconds = 0.613` (N=100 PSD segments,
+   warm-cache single-process on `/home/klz/Data/TIDMAD/abra_validation_0000.h5`,
+   2026-04-18; stdev 1.34 ms, p95 614.9 ms).
+
+3. **VRAM wrapper return dict drops the old flat `breakdown`.** The
+   pre-K.2.5 wrapper returned a flat `breakdown` dict of byte-tagged
+   training-phase components. That key is now gone — replaced by
+   `phase_breakdown: {training, inference, scoring}` where each phase
+   carries its own `breakdown` sub-dict. A repo-wide grep confirmed no
+   external code read `result["breakdown"]` from the VRAM skill before
+   the refactor, so this is a schema simplification, not a breaking
+   change. (The time skill's `breakdown.source` + `breakdown.gpu_name`
+   keys, which `nodes/ml_hyperparameter_tune_agent.py:921` reads to
+   trigger the Phase F EMA update, are preserved — that constraint
+   carries into commit 6.)
+
+### 10.6 No VRAM calibration file in v1; scoring-time uses per-host ServerConfig files
 
 **VRAM** is deterministic from the bytes formulae in the per-phase
 estimators (§10.5: `training_skill/estimator.py` for weights + grads +
@@ -1185,23 +1249,46 @@ from Phase F, owned by `evaluate_time_skill/calibration.py` and imported
 only by `training_skill/estimator.py` after K.2.5. No change.
 
 **Scoring time** is CPU-bound and therefore server-dependent (lilab vs
-SDSC have very different CPU profiles). K.2.5 introduces a static
-hostname-keyed multiplier table in `core/scoring_defaults.py`:
+SDSC have very different CPU profiles). K.2.5 introduces a per-host
+`ServerConfig` registry in `core/server_configs/`:
 
 ```python
-_SERVER_CPU_FACTOR = {
-    "lilab":   1.0,   # reference; base formula calibrated here
-    "expanse": 2.5,   # SDSC — bootstrap guess until real telemetry
-}
-# unknown hostname → 1.0 + one-time warning, same pattern as unknown GPU in Phase F
+# core/server_configs/_base.py
+class ServerConfig(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    hostname:                str   = Field(..., min_length=1)
+    per_psd_segment_seconds: float = Field(..., gt=0.0)
+
+# core/server_configs/ligroup.py
+CONFIG = ServerConfig(
+    hostname="ligroup",
+    per_psd_segment_seconds=0.613,   # measured 2026-04-18, N=100, warm cache
+)
+
+# core/server_configs/__init__.py
+def get_server_config(hostname: Optional[str] = None) -> ServerConfig:
+    if hostname is None:
+        hostname = socket.gethostname()
+    try:
+        mod = importlib.import_module(f"core.server_configs.{hostname}")
+    except ModuleNotFoundError:
+        # unknown host → fall back to ligroup + one-time UserWarning
+        ...
+    return mod.CONFIG
 ```
 
-This captures the coarse cross-server variance without introducing the
-full EMA machinery. Scoring is ~5–20% of total wall-time today, so a
-~2× error on scoring is a ~10–40% error on the summed-time budget —
-tolerable for a v1 gate. Full EMA (k_scoring learned per hostname,
-updated per completed round) is deferred as **Q-K-5**, to be revisited
-once post-K smoke shows whether the static factors are accurate enough.
+The scoring-time formula is then simply
+`total_psd_segments × cfg.per_psd_segment_seconds / max(num_workers, 1)` —
+no baseline × factor. The originally planned `scoring_defaults.py`
+(`baseline_per_segment × server_cpu_factor(hostname)`) was replaced
+during implementation — see "Design deviation #2" below.
+
+Cross-server variance is captured by each host contributing its own
+measured constant, not a multiplier against a shared baseline. Full
+EMA (`per_psd_segment_seconds` learned per hostname, updated per
+completed round) is deferred as **Q-K-5**, to be revisited once post-K
+smoke shows whether the static per-host measurements are accurate
+enough.
 
 ### 10.7 Joint orchestration at the call sites
 
@@ -1303,21 +1390,21 @@ Phase J, and is queued for retirement in §10.17.
 
 | Path | Change |
 |---|---|
-| `agent/skills/evaluate_resource_skill/` → `agent/skills/evaluate_vram_skill/` | **K.0+K.2+K.2.5**: rename directory; update `wrapper.py` to accept `vram_budget_gb` kwarg + emit contention-detection log + downgrade `suggestion` to verdict-style summary (K.2); then delete `_estimate_bytes`, become a peak aggregator over 3 per-phase estimators (training + inference + scoring), expose `dominant_phase` + `phase_breakdown` (K.2.5) |
+| `agent/skills/evaluate_resource_skill/` → `agent/skills/evaluate_vram_skill/` | **K.0+K.2+K.2.5** (K.0 shipped `7bb167e`, K.2 shipped `888dd61`, K.2.5 peak-aggregator shipped `661ad5d`): rename directory; update `wrapper.py` to accept `vram_budget_gb` kwarg + emit contention-detection log + downgrade `suggestion` to verdict-style summary (K.2); then delete `_estimate_bytes`, become a peak aggregator over 3 per-phase estimators (training + inference + scoring), expose `dominant_phase` + `phase_breakdown` (K.2.5). **Note**: the pre-K.2.5 flat `breakdown` field in the return dict was removed (no external readers); see §10.5 "Design deviation #3". |
 | `agent/skills/evaluate_time_skill/wrapper.py` | **K.2.5**: delete monolithic training-only step-count + ms/step body; become a sum aggregator over 3 per-phase `estimate_wall_time_seconds` calls; preserve existing return fields (`estimated_minutes`, `budget_minutes`, `feasible`); expose `dominant_phase` + `phase_breakdown` |
 | `agent/skills/evaluate_time_skill/calibration.py` | **K.2.5**: unchanged in substance (asymmetric EMA of `k(gpu, model_type)` from Phase F stays); imported only by `training_skill/estimator.py` after refactor |
 | `agent/skills/evaluate_vram_skill/skill_config.json` | add `vram_budget_gb` to parameters block (optional) |
-| `core/inference_defaults.py` | **K.2.5 NEW**: `inference_batch_for(model_type) -> int` — one source of truth shared between `sandbox_executor.py` and `inference_skill/estimator.py` |
-| `core/scoring_defaults.py` | **K.2.5 NEW**: `server_cpu_factor(hostname) -> float` — static hostname-keyed multiplier for scoring-time cross-server variance (lilab=1.0; others bootstrap 1.0 + warn). EMA deferred to Q-K-5. |
+| `core/inference_defaults.py` | **K.2.5 NEW (shipped `2fad44f`)**: split contract — `inference_batch_for(model_type) -> int` (silent lookup for sandbox hot path) + `assert_inference_batch_registered(model_type)` (loud `ValueError` for the pre-flight VRAM estimator). Single source of truth shared between `sandbox_executor.py` and `inference_skill/estimator.py`. See §10.5 "Design deviation #1". |
+| `core/server_configs/` | **K.2.5 NEW (shipped `8857204`)**: per-host `ServerConfig` file registry — replaces the originally planned `core/scoring_defaults.py` (`baseline × server_cpu_factor` split). `_base.py` (frozen pydantic `ServerConfig` with `hostname` + `per_psd_segment_seconds`), `__init__.py` (`get_server_config(hostname=None)` dispatch with warn-once fallback to ligroup for unknown hosts), `ligroup.py` (measured 0.613 s/PSD-segment). See §10.5 "Design deviation #2". |
 | `core/sandbox_executor.py` | **K.2.5**: refactor the hard-coded inference-batch dict (~L346–L350) to call `inference_defaults.inference_batch_for` |
-| `agent/skills/training_skill/estimator.py` | **K.2.5 NEW**: `estimate_peak_bytes(...)` — training-phase memory (weights × 16 B + output logits + backward activations + focal one_hot + transformer attention); `estimate_wall_time_seconds(...)` — step-count × ms/step × `k(gpu, model_type)` (Phase F calibration carried over) |
-| `agent/skills/inference_skill/estimator.py` | **K.2.5 NEW**: `estimate_peak_bytes(...)` — weights × 4 B + one batch's forward activations + attn at `inference_batch`; no grads / Adam / focal; `estimate_wall_time_seconds(...)` — forward-only step count at `inference_batch` × inference-ms/step |
-| `agent/skills/denoising_score_skill/estimator.py` | **K.2.5 NEW**: `estimate_peak_bytes(...)` returns `{phase: "scoring", total_bytes: 0}` (CPU-only by design); `estimate_wall_time_seconds(...)` = `segments × per_segment_seconds / num_workers × server_cpu_factor(hostname)` |
-| `tests/unit/core/test_inference_defaults.py` | **K.2.5 NEW**: model-type → batch-size contract |
-| `tests/unit/core/test_scoring_defaults.py` | **K.2.5 NEW**: hostname → factor contract (known hosts return non-1.0, unknown hosts return 1.0 with warning) |
-| `tests/unit/agent/training_skill/test_estimator.py` | **K.2.5 NEW**: VRAM numeric correctness (CE vs focal, RNN vs transformer, batch scaling); time numeric correctness against Phase B-F regression (same inputs → same ms output as pre-refactor) |
-| `tests/unit/agent/inference_skill/test_estimator.py` | **K.2.5 NEW**: VRAM numeric correctness + `training ≥ inference` invariant for a representative config (+ monkeypatched inversion test); time monotone in `segments` and `inference_batch` |
-| `tests/unit/agent/denoising_score_skill/test_estimator.py` | **K.2.5 NEW**: VRAM always 0; time scales with segments and inversely with num_workers; hostname factor applied |
+| `agent/skills/training_skill/estimator.py` | **K.2.5 NEW (shipped `ff43866`)**: `estimate_peak_bytes(...)` — training-phase memory (weights × 16 B + output logits + backward activations + focal one_hot + transformer attention); `estimate_wall_time_seconds(...)` — step-count × ms/step × `k(gpu, model_type)` (Phase F calibration carried over via `from agent.skills.evaluate_time_skill import calibration`) |
+| `agent/skills/inference_skill/estimator.py` | **K.2.5 NEW (shipped `9cec35d`)**: `estimate_peak_bytes(...)` — weights × 4 B + one batch's forward activations + attn at `inference_batch`; no grads / Adam / focal; `estimate_wall_time_seconds(...)` — forward-only step count at `inference_batch` × inference-ms/step (no Phase F `k` — inference never calibrated) |
+| `agent/skills/denoising_score_skill/estimator.py` | **K.2.5 NEW (shipped `8857204`)**: `estimate_peak_bytes(...)` returns `{phase: "scoring", total_bytes: 0}` (CPU-only by design); `estimate_wall_time_seconds(...)` = `total_psd_segments × cfg.per_psd_segment_seconds / max(num_workers, 1)` where `cfg = get_server_config(hostname)` — no factor against a baseline, per-host constant directly |
+| `tests/unit/core/test_inference_defaults.py` | **K.2.5 NEW (shipped `2fad44f`)**: covers both `inference_batch_for` (silent) and `assert_inference_batch_registered` (loud) entry points |
+| `tests/unit/core/test_server_configs.py` | **K.2.5 NEW (shipped `8857204`)** — replaces the originally planned `test_scoring_defaults.py`: `get_server_config` ligroup resolution, unknown-host fallback with warn-once, `socket.gethostname` default path; `ServerConfig` schema tests (rejects nonpositive/empty/extra, frozen) |
+| `tests/unit/agent/training_skill/test_estimator.py` | **K.2.5 NEW (shipped `ff43866`)**: VRAM numeric correctness (CE vs focal, RNN vs transformer, batch scaling); time numeric correctness against Phase B–F regression (same inputs → same ms output as pre-refactor) |
+| `tests/unit/agent/inference_skill/test_estimator.py` | **K.2.5 NEW (shipped `9cec35d`)**: VRAM numeric correctness + `training ≥ inference` invariant for a representative config (+ monkeypatched inversion test); time monotone in segments and `inference_batch` |
+| `tests/unit/agent/denoising_score_skill/test_estimator.py` | **K.2.5 NEW (shipped `8857204`)**: VRAM always 0; time scales with segments and inversely with num_workers; unknown host falls back to ligroup with UserWarning; ligroup arithmetic against the 0.613 measured constant |
 | `tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_time_skill.py` | **K.2.5**: extend — sum-aggregation regression (training-only input preserves today's estimate), 3-phase breakdown presence, dominant_phase = "training" in typical case |
 | `agent/schemas/hyperparam_tuning.py` | add `trial_vram_budget_gb` + `formal_vram_budget_gb` to `HyperparamTuningInput`; add `vram_estimate_gb` + `vram_budget_gb` to `ExperimentMemory`; **K.7**: add `GateExhaustionInfo` model + `HyperparamTuningOutput.gate_exhaustion` field |
 | `agent/schemas/proposal.py` | **K.7**: add `ProposalInput.prior_iteration_gate_exhaustion: Optional[GateExhaustionInfo]` (proposer-side VRAM gate fields remain deferred per §10.17) |
@@ -1328,7 +1415,7 @@ Phase J, and is queued for retirement in §10.17.
 | `agent/prompts.py` | remove abstract "GPU MEMORY RULES" section; add `[ACTIVE RESOURCE BUDGETS]` block (per-round, numeric, includes vram/time estimates + factors + current batch_size); append `[RESOURCE GATE — RESOLVING OVER-BUDGET CONFIGS]` guidance block (static); **K.7**: add conditional `[PRIOR ITERATION GATE EXHAUSTION]` block in the proposer template |
 | `run_exploration_adaptive.py` | add `--trial_vram_budget_gb` / `--formal_vram_budget_gb`; extend startup banner |
 | `workflows/model_exploration.py` | fan out both VRAM budget fields to `HyperparamTuningInput` only (via `local_validated_model`); **K.7**: retain previous tuner output and pass as `prior_tune_output` to next-iteration `local_full_context` |
-| `tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_vram_skill.py` | **K.2**: new — budget kwarg routing, defensive-floor + budget min, contention-detection log, None-pass-through behaviour. **K.2.5**: training-dominant regression, inference-dominant crossover, `phase_breakdown` presence (all 3 phases incl. scoring=0) |
+| `tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_vram_skill.py` | **K.2** (shipped `888dd61`): new — budget kwarg routing, defensive-floor + budget min, contention-detection log, None-pass-through behaviour. **K.2.5** (shipped `661ad5d`): training-dominant regression (`test_focal_loss_increases_training_phase_estimate`), inference-dominant crossover (monkeypatch `inference_batch_for` → 10 000), `phase_breakdown` presence for all 3 phases incl. scoring=0, CPU path exposes `phase_breakdown` |
 | `tests/unit/agent/tune_ml_hyperparam_agent/test_tuning_agent.py` | new tests — per-mode VRAM pick, joint short-circuit (VRAM fail → time skill not invoked), `vram_estimate_gb` in success-record memory; **K.7**: `_build_gate_exhaustion` truth-table tests |
 | `tests/unit/agent/tune_ml_hyperparam_agent/test_hyperparam_schemas.py` | extend with `TestGateExhaustionInfo` for K.7 schema |
 | `tests/unit/agent/protocols/test_ml_model_valid_to_ml_model_tune.py` | extend — assert two new VRAM budget kwargs survive |
@@ -1576,7 +1663,7 @@ its targeted pytest invocation green and a committable state.
 - [x] K.0 — Skill rename (mechanical) *(2026-04-18)*
 - [x] K.1 — Schema additions (tuner-side only) *(2026-04-18)*
 - [x] K.2 — Skill `vram_budget_gb` kwarg + contention-detection log *(2026-04-18)*
-- [ ] K.2.5 — Distribute per-phase estimators to owning skills (3 phases × 2 resources: VRAM=peak, time=sum)
+- [~] K.2.5 — Distribute per-phase estimators to owning skills (3 phases × 2 resources: VRAM=peak, time=sum) *(commits 1–5/7 shipped 2026-04-18; commit 6 — time sum-aggregator — and commit 7 — doc sync — pending)*
 - [ ] K.3 — Tuner integration (per-mode pick + memory fields)
 - [ ] K.4 — Protocol pass-through (`valid→tune` only)
 - [ ] K.5 — CLI + workflow fan-out
@@ -1644,22 +1731,25 @@ deployment target**; the SDSC hostname factor is a bootstrap guess
 (1.0 + warn on unknown host) and is tuned in a later smoke run — not
 in K.2.5.
 
-**Commit 1 — `refactor(core): extract inference_batch_for to inference_defaults`**
-- [ ] `core/inference_defaults.py` (new) — expose
-      `inference_batch_for(model_type: str) -> int`. Lift the table
-      currently at `core/sandbox_executor.py:346–350`
-      (`transformer=1, rnn=10, fcnet=punet=wavenet=25`). Unknown
-      model-type → `ValueError` (loud — callers must know the shape).
-- [ ] `core/sandbox_executor.py` — replace the local
+**Commit 1 — `refactor(core): extract inference_batch_for to inference_defaults`** *(shipped 2026-04-18, `2fad44f`)*
+- [x] `core/inference_defaults.py` (new) — exposes **two** functions
+      (design deviation #1, §10.5): `inference_batch_for(model_type)`
+      (silent lookup for sandbox hot path; returns registered int) +
+      `assert_inference_batch_registered(model_type)` (loud —
+      `ValueError` on unknown plugin; called by the pre-flight
+      inference VRAM estimator). Lifts the table from
+      `core/sandbox_executor.py:346–350`
+      (`transformer=1, rnn=10, fcnet=punet=wavenet=25`).
+- [x] `core/sandbox_executor.py` — replaces the local
       `_INFERENCE_BATCH_SIZE` dict lookup with
       `inference_defaults.inference_batch_for(...)`.
-- [ ] `tests/unit/core/test_inference_defaults.py` (new) — known
-      model-types return expected integers; unknown model-type raises.
-- [ ] Verify:
-      `pytest tests/unit/core/test_inference_defaults.py tests/unit/core/test_sandbox_executor.py -q`.
+- [x] `tests/unit/core/test_inference_defaults.py` (new) — covers both
+      entry points.
+- [x] Verified:
+      `pytest tests/unit/core/test_inference_defaults.py tests/unit/core/test_sandbox_executor.py -q` → green.
 
-**Commit 2 — `feat(skill): training_skill/estimator.py — peak VRAM + wall time`**
-- [ ] `agent/skills/training_skill/estimator.py` (new) exports two
+**Commit 2 — `feat(skill): training_skill/estimator.py — peak VRAM + wall time`** *(shipped 2026-04-18, `ff43866`)*
+- [x] `agent/skills/training_skill/estimator.py` (new) exports two
       functions:
       - `estimate_peak_bytes(model_type, model_config, train_config,
         loss_config, num_params) -> {"phase": "training", "total_bytes", "breakdown"}` —
@@ -1668,118 +1758,159 @@ in K.2.5.
         (2×) + focal one_hot + transformer attention at
         `train_config.batch_size`.
       - `estimate_wall_time_seconds(model_type, model_config,
-        train_config, sample_set, *, ms_per_step=None, gpu_name=None) ->
-        {"phase": "training", "seconds", "breakdown"}` — body is the
-        step-count × ms/step × `k(gpu, model_type)` logic currently in
-        `evaluate_time_skill/wrapper.py`. Imports
-        `evaluate_time_skill.calibration` for the k lookup.
-- [ ] `tests/unit/agent/training_skill/test_estimator.py` (new):
-      - VRAM: CE vs focal, RNN vs transformer, batch/seg scaling.
-      - Time: same inputs as an existing `test_evaluate_time_skill.py`
-        case → same `seconds` output to within rounding (regression).
-- [ ] Verify:
-      `pytest tests/unit/agent/training_skill/test_estimator.py -q`.
+        train_config, sample_set, *, ms_per_step=None, gpu_name=None,
+        num_params=None, loss_type="ce") -> {"phase": "training",
+        "seconds", "breakdown"}` — body is the step-count × ms/step ×
+        `k(gpu, model_type)` logic. Imports
+        `evaluate_time_skill.calibration` for the k lookup. Preserves
+        `SAFETY_MULTIPLIER = 1.1` baked into the returned seconds.
+- [x] `tests/unit/agent/training_skill/test_estimator.py` (new):
+      VRAM (CE vs focal, RNN vs transformer, batch/seg scaling); time
+      regression against existing `test_evaluate_time_skill.py`.
+- [x] Verified:
+      `pytest tests/unit/agent/training_skill/test_estimator.py -q` → green.
 
-**Commit 3 — `feat(skill): inference_skill/estimator.py — peak VRAM + wall time`**
-- [ ] `agent/skills/inference_skill/estimator.py` (new) exports two
+**Commit 3 — `feat(skill): inference_skill/estimator.py — peak VRAM + wall time`** *(shipped 2026-04-18, `9cec35d`)*
+- [x] `agent/skills/inference_skill/estimator.py` (new) exports two
       functions:
       - `estimate_peak_bytes(model_type, model_config, num_params) ->
         {"phase": "inference", "total_bytes", "breakdown"}` —
         `num_params × 4 B` (weights only, no grads/Adam) + one
         inference-batch forward's output logits + forward activations
         (1×, no backward storage) + attention at `inference_batch`
-        (from `inference_defaults.inference_batch_for`). No focal
-        one_hot — loss is not computed at inference.
-      - `estimate_wall_time_seconds(model_type, model_config,
-        sample_set, *, inference_ms_per_step=None) ->
-        {"phase": "inference", "seconds", "breakdown"}` — forward-only
-        step count at `inference_batch` × inference-ms/step. Rough
-        factor: `ms_per_step_inference ≈ ms_per_step_training / 3`
-        (no backward pass). Phase F's `k(gpu, model_type)` is *not*
-        applied — inference ms/step wasn't calibrated.
-- [ ] `tests/unit/agent/inference_skill/test_estimator.py` (new):
-      - VRAM numeric correctness.
-      - `training ≥ inference` invariant holds for a representative
-        RNN config.
-      - Monkeypatched `inference_batch_for` → huge batch → inference
-        wins; the aggregator (tested in commit 5) picks it as dominant.
-      - Time monotone in `segments` and `inference_batch`.
-- [ ] Verify:
-      `pytest tests/unit/agent/inference_skill/test_estimator.py -q`.
+        (via `inference_defaults.inference_batch_for` after calling
+        `assert_inference_batch_registered` to loudly fail unknown
+        plugins). No focal one_hot.
+      - `estimate_wall_time_seconds(...)` — forward-only step count at
+        `inference_batch` × inference-ms/step. Rough factor:
+        `_INFERENCE_VS_TRAINING_RATIO = 1/3` (no backward pass). Phase
+        F's `k(gpu, model_type)` is *not* applied.
+- [x] `tests/unit/agent/inference_skill/test_estimator.py` (new):
+      VRAM numeric correctness; `training ≥ inference` invariant;
+      monkeypatched `inference_batch_for` crossover; time monotone in
+      segments and `inference_batch`.
+- [x] Verified:
+      `pytest tests/unit/agent/inference_skill/test_estimator.py -q` → green.
 
-**Commit 4 — `feat(skill): denoising_score_skill/estimator.py — 0 VRAM + CPU-FFT time`**
-- [ ] `core/scoring_defaults.py` (new) — expose
-      `server_cpu_factor(hostname: str) -> float`. Static table:
-      `{"lilab": 1.0, "expanse": 2.5}`. Unknown host → 1.0 with
-      one-time stderr warning (mirrors Phase F's unknown-GPU pattern).
-      **Lilab-priority note**: `expanse: 2.5` is a bootstrap guess;
-      real SDSC telemetry tunes it after Phase H2.
-- [ ] `tests/unit/core/test_scoring_defaults.py` (new) — known hosts
-      return expected factors; unknown host returns 1.0 + emits
-      warning (captured via `capsys`/`caplog`).
-- [ ] `agent/skills/denoising_score_skill/estimator.py` (new) exports:
-      - `estimate_peak_bytes(...) -> {"phase": "scoring", "total_bytes": 0, "breakdown": {}}` —
-        trivial (scoring is pure NumPy/FFT by design).
+**Commit 4 — `feat(skill): denoising_score_skill/estimator.py — 0 VRAM + per-server CPU time`** *(shipped 2026-04-18, `8857204`)*
+
+**Design deviation #2 (§10.5)**: The originally planned
+`core/scoring_defaults.py` (`baseline × server_cpu_factor`) was replaced
+with a per-host `ServerConfig` registry under `core/server_configs/`.
+Each host contributes its own measured `per_psd_segment_seconds`
+directly via a frozen pydantic model; there is no baseline.
+
+- [x] `core/server_configs/_base.py` (new) — `ServerConfig` pydantic
+      schema (`frozen=True, extra="forbid"`; `hostname: str (min_length=1)`,
+      `per_psd_segment_seconds: float (gt=0.0)`).
+- [x] `core/server_configs/ligroup.py` (new) — ligroup's measured
+      constant: `per_psd_segment_seconds = 0.613` (N=100 PSD segments,
+      warm cache, stdev 1.34 ms, p95 614.9 ms; measured 2026-04-18 on
+      `/home/klz/Data/TIDMAD/abra_validation_0000.h5`).
+- [x] `core/server_configs/__init__.py` (new) —
+      `get_server_config(hostname=None)` dispatch with
+      `importlib.import_module` dynamic lookup; unknown host → fall
+      back to `ligroup.CONFIG` with one-time `UserWarning` (dedup via
+      module-level `_WARNED_HOSTS` set). `hostname=None` defaults to
+      `socket.gethostname()`.
+- [x] `tests/unit/core/test_server_configs.py` (new) — ligroup
+      resolution, unknown-host fallback + warn-once, default
+      `socket.gethostname` path, schema tests (nonpositive/empty/extra,
+      frozen).
+- [x] `agent/skills/denoising_score_skill/estimator.py` (new) exports:
+      - `estimate_peak_bytes() -> {"phase": "scoring", "total_bytes": 0, "breakdown": {}}`.
       - `estimate_wall_time_seconds(sample_set, *, num_workers=8,
-        hostname=None) -> {"phase": "scoring", "seconds", "breakdown"}` —
-        `segments × per_segment_seconds / max(num_workers, 1) ×
-        server_cpu_factor(hostname)`. `per_segment_seconds` is a
-        module-level constant seeded from lilab smoke.
-- [ ] `tests/unit/agent/denoising_score_skill/test_estimator.py` (new):
-      - VRAM always 0.
-      - Time scales with segments; inversely with num_workers.
-      - Hostname factor applied; unknown host warns once.
-- [ ] Verify:
-      `pytest tests/unit/core/test_scoring_defaults.py tests/unit/agent/denoising_score_skill/test_estimator.py -q`.
+        hostname=None)` = `total_psd_segments × cfg.per_psd_segment_seconds
+        / max(num_workers, 1)` where `cfg = get_server_config(hostname)`
+        — no factor, per-host constant directly.
+- [x] `tests/unit/agent/denoising_score_skill/test_estimator.py` (new):
+      VRAM always 0; linear in segments; inverse in num_workers
+      (floored to 1); arithmetic against measured 0.613 constant;
+      unknown host falls back to ligroup with UserWarning.
+- [x] Verified:
+      `pytest tests/unit/core/test_server_configs.py tests/unit/agent/denoising_score_skill/test_estimator.py -q` → green.
 
-**Commit 5 — `refactor(skill): evaluate_vram_skill as peak aggregator over 3 phases`**
-- [ ] `agent/skills/evaluate_vram_skill/wrapper.py` — delete
-      `_estimate_bytes`; import the three
-      `estimate_peak_bytes` functions; count params once; call each
-      with the already-counted `num_params`; take
-      `max(phases, key=lambda p: p["total_bytes"])`. Expose
+**Commit 5 — `refactor(skill): evaluate_vram_skill as peak aggregator over 3 phases`** *(shipped 2026-04-18, `661ad5d`)*
+- [x] `agent/skills/evaluate_vram_skill/wrapper.py` — deleted
+      `_estimate_bytes`; imported the three `estimate_peak_bytes`
+      functions; counts params once; calls each with the
+      already-counted `num_params`; takes
+      `max(phases, key=lambda p: p["total_bytes"])`. Exposes
       `dominant_phase` + `phase_breakdown` (all 3 phases) in the
-      return dict. Keep the budget gate + contention log untouched.
-- [ ] Extend `tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_vram_skill.py`:
-      - Regression: training-dominant config returns same
-        `estimated_gb` as K.2 within floating-point tolerance.
-      - Crossover: monkeypatched `inference_batch_for` → inference
-        dominates → `result["dominant_phase"] == "inference"`.
-      - `phase_breakdown` contains all three phases, with
-        `scoring.total_bytes == 0`.
-- [ ] Verify:
-      `pytest tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_vram_skill.py -q`.
+      return dict. Budget gate + contention log untouched. Verdict
+      changed "Bottleneck: X" → "Dominant phase: X". **Design
+      deviation #3 (§10.5)**: the pre-K.2.5 flat `breakdown` field is
+      gone (no external readers confirmed via repo-wide grep).
+- [x] Extended `tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_vram_skill.py`:
+      - Renamed `test_focal_loss_increases_estimate` →
+        `test_focal_loss_increases_training_phase_estimate`; targets
+        `phase_breakdown["training"]["total_bytes"]` instead of
+        `estimated_gb` (semantic shift: for small RNN, inference now
+        dominates both CE + focal so `estimated_gb` is identical).
+      - New `TestPeakAggregation`: phase_breakdown completeness
+        (all 3 phases, scoring=0), training-dominant regression
+        (big_rnn+focal), inference-dominant crossover (monkeypatched
+        `inference_batch_for` → 10 000), CPU path exposes
+        `phase_breakdown`.
+- [x] Verified:
+      `pytest tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_vram_skill.py -q` → 18/18 green.
 
-**Commit 6 — `refactor(skill): evaluate_time_skill as sum aggregator over 3 phases`**
+**Commit 6 — `refactor(skill): evaluate_time_skill as sum aggregator over 3 phases`** *(pending)*
 
-Riskier: this commit must preserve Phase B–F behaviour byte-for-byte
+Riskier than commits 1–5: this commit must preserve Phase B–F behaviour
 for the training-only path. Pre-refactor tests stay as regression.
 
+**Hard compatibility constraint** (discovered during commit 6 planning):
+`nodes/ml_hyperparameter_tune_agent.py:921` reads
+`time_check["breakdown"]["source"]` and `time_check["breakdown"]["gpu_name"]`
+to decide whether to trigger the Phase F `k(gpu, model_type)` EMA
+update. The wrapper MUST preserve a flat `breakdown` dict (not just
+`phase_breakdown`) whose fields include `source` + `gpu_name` for the
+training phase. Plan: populate flat `breakdown` from the training-phase
+estimator's return + keep `phase_breakdown` alongside it.
+
+**Fixture detail** (discovered during commit 6 planning): the current
+`test_evaluate_time_skill.py` uses `"tinynet"` as a placeholder
+`model_type` in `_base_kwargs`. Post-refactor the inference estimator
+calls `assert_inference_batch_registered("tinynet")` which raises
+`ValueError`. Fix: change the fixture to `"rnn"` (registered) and pass
+`num_params` explicitly to avoid an internal `_count_params` call.
+
 - [ ] `agent/skills/evaluate_time_skill/wrapper.py` — delete the
-      monolithic step-count body; call the three
-      `estimate_wall_time_seconds` functions; sum `seconds`. Preserve
-      existing return fields (`estimated_minutes`, `budget_minutes`,
-      `feasible`, `verdict`, `suggestion`, …) + add
-      `dominant_phase` + `phase_breakdown`.
+      monolithic step-count body (helpers `_total_train_steps` and
+      `_static_ms_per_step` duplicated in `training_skill/estimator.py`);
+      call the three `estimate_wall_time_seconds` functions; sum
+      `seconds`. Preserve existing return fields
+      (`estimated_minutes`, `limit_minutes`, `feasible`, `verdict`,
+      `suggestion`, `breakdown`) + add `dominant_phase` +
+      `phase_breakdown`. `breakdown` carries the training-phase's
+      flat dict including `source` + `gpu_name` keys for Phase F EMA
+      compat.
 - [ ] Keep `evaluate_time_skill/calibration.py` exactly as-is — it's
       imported only by `training_skill/estimator.py` now.
-- [ ] Extend `tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_time_skill.py`:
-      - Regression: every existing Phase B–F test (22 tests) still
-        passes — the sum across training + 0 + 0 must equal today's
-        training-only number (inference/scoring phases add non-zero
-        seconds now; adjust assertions to tolerate, document the new
-        baseline).
-      - Sum semantics: training 60 s + inference 10 s + scoring 5 s
-        → `estimated_minutes == 75/60`.
-      - `dominant_phase == "training"` in typical case.
-      - Budget gate feasibility keyed on the sum.
+- [ ] Update `tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_time_skill.py`:
+      - Change `_base_kwargs` `model_type` default from `"tinynet"` to
+        `"rnn"`; pass `num_params` to bypass inference estimator's
+        internal `_count_params` call.
+      - Rewrite `test_run_skill_respects_safety_multiplier` to assert
+        against `phase_breakdown["training"]["breakdown"]["safety_multiplier"]`
+        (estimated_minutes is now the sum; safety lives on the
+        training phase).
+      - Consider deleting the 6 parametrized `_total_train_steps`
+        tests + 3 `_static_ms_per_step` tests (coverage already in
+        `training_skill/test_estimator.py`).
+      - Add: sum semantics (training X s + inference Y s + scoring Z s
+        → `estimated_minutes == (X+Y+Z)/60`), `dominant_phase == "training"`
+        in typical case, budget gate feasibility keyed on the sum.
 - [ ] Verify:
       `pytest tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_time_skill.py tests/unit/agent/training_skill tests/unit/agent/inference_skill tests/unit/agent/denoising_score_skill -q`.
 
-**Commit 7 — `docs(resource_estimator): mark K.2.5 complete`**
-- [ ] Flip K.2.5 checkboxes to `[x]` in §10.14 top-level progress list;
-      add commit hash to the progress-log table row; update §10.5
-      opening paragraph's "(K.2.5)" to "(K.2.5, shipped YYYY-MM-DD)".
+**Commit 7 — `docs(resource_estimator): mark K.2.5 complete`** *(pending)*
+- [ ] After commit 6 lands: flip K.2.5 top-level checkbox (§10.14) from
+      `[~]` to `[x]`; flip commits 6 + 7 checkboxes to `[x]`; update the
+      progress-log table row (line ~30) for commit 7 with its hash;
+      update §10.5 opening paragraph's "(K.2.5 — commits 1–5 shipped
+      …; 6–7 pending)" to "(K.2.5, shipped YYYY-MM-DD)".
 
 #### K.3 Tuner integration [ ]
 
