@@ -156,7 +156,7 @@ def _mock_run_skill(skill_folder, sandbox, **params):
     """Dispatch fake skill results based on skill_folder."""
     skill_results = {
         "check_config_format_skill": FAKE_CONFIG_MANUAL,
-        "evaluate_resource_skill": FAKE_RESOURCE_CHECK_OK,
+        "evaluate_vram_skill": FAKE_RESOURCE_CHECK_OK,
         "training_skill": FAKE_TRAIN_RESULT,
         "inference_skill": FAKE_INFERENCE_RESULT,
         "denoising_score_skill": FAKE_SCORE_RESULT,
@@ -608,7 +608,7 @@ class TestTimeBudgetGate:
             skill_calls.append((skill_folder, params))
             if skill_folder == "check_config_format_skill":
                 return FAKE_CONFIG_MANUAL
-            if skill_folder == "evaluate_resource_skill":
+            if skill_folder == "evaluate_vram_skill":
                 return FAKE_RESOURCE_CHECK_OK
             if skill_folder == "evaluate_time_skill":
                 return time_check_result

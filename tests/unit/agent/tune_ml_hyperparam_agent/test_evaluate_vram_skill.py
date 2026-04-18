@@ -1,5 +1,5 @@
 """
-Tests for agent/skills/evaluate_resource_skill/wrapper.py
+Tests for agent/skills/evaluate_vram_skill/wrapper.py
 
 Covers:
   - Error: no GPU available (CUDA not present)
@@ -14,7 +14,7 @@ Covers:
 import pytest
 from unittest.mock import patch
 
-from agent.skills.evaluate_resource_skill.wrapper import run_skill
+from agent.skills.evaluate_vram_skill.wrapper import run_skill
 
 # ---------------------------------------------------------------------------
 # Shared fixtures / constants
@@ -28,7 +28,7 @@ _3GB  = 3  * _GB   # below the 4 GB floor → should error
 
 
 class FakeSandbox:
-    """Minimal stand-in; evaluate_resource_skill never calls sandbox methods."""
+    """Minimal stand-in; evaluate_vram_skill never calls sandbox methods."""
     pass
 
 

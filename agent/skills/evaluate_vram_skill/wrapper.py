@@ -1,5 +1,5 @@
 """
-evaluate_resource_skill/wrapper.py
+evaluate_vram_skill/wrapper.py
 
 Proactively estimates GPU VRAM usage for a proposed experiment config and
 checks it against the 80% safety limit of currently available VRAM.

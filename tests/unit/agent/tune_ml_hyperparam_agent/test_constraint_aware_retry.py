@@ -9,7 +9,7 @@ Covers the three layers that make up the fix:
      ``greater_than_equal`` …) from cross-field ``@model_validator(mode='after')``
      errors (``value_error``, ``loc='__root__'``).
 
-  2. ``evaluate_resource_skill.run_skill``: when the plugin's
+  2. ``evaluate_vram_skill.run_skill``: when the plugin's
      ``PLUGIN_CONFIG_CLASS(**model_cfg)`` raises ``ValidationError``, the
      wrapper returns ``status='schema_violation'`` with the structured
      violation list and the offending config — instead of bubbling a generic
@@ -33,7 +33,7 @@ from agent.schemas.hyperparam_tuning import (
     HyperparamTuningInput,
 )
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
-from agent.skills.evaluate_resource_skill.wrapper import (
+from agent.skills.evaluate_vram_skill.wrapper import (
     run_skill,
     _extract_schema_violations,
 )
@@ -70,7 +70,7 @@ class _MockMultOfCfg(BaseModel):
 
 
 class FakeSandbox:
-    """Minimal stand-in — ``evaluate_resource_skill`` never calls sandbox methods."""
+    """Minimal stand-in — ``evaluate_vram_skill`` never calls sandbox methods."""
     pass
 
 
@@ -127,7 +127,7 @@ class TestWrapperSchemaViolation:
     def test_model_validator_violation_returns_schema_violation(self):
         cfg = {"a": 5, "b": 3, "c": 3}
         with patch(
-            "agent.skills.evaluate_resource_skill.wrapper.get_config_class",
+            "agent.skills.evaluate_vram_skill.wrapper.get_config_class",
             return_value=_MockMonotoneCfg,
         ):
             result = run_skill(
@@ -152,7 +152,7 @@ class TestWrapperSchemaViolation:
     def test_multiple_of_violation_returns_schema_violation(self):
         cfg = {"channels": 9}
         with patch(
-            "agent.skills.evaluate_resource_skill.wrapper.get_config_class",
+            "agent.skills.evaluate_vram_skill.wrapper.get_config_class",
             return_value=_MockMultOfCfg,
         ):
             result = run_skill(
@@ -171,7 +171,7 @@ class TestWrapperSchemaViolation:
     def test_ge_violation_returns_schema_violation(self):
         cfg = {"channels": 0}
         with patch(
-            "agent.skills.evaluate_resource_skill.wrapper.get_config_class",
+            "agent.skills.evaluate_vram_skill.wrapper.get_config_class",
             return_value=_MockMultOfCfg,
         ):
             result = run_skill(
@@ -232,7 +232,7 @@ FAKE_CONFIG_MANUAL = {
     "data": {"punet": {"fields": ["depth"]}},
 }
 
-# Mirrors the shape ``evaluate_resource_skill.run_skill`` returns when
+# Mirrors the shape ``evaluate_vram_skill.run_skill`` returns when
 # ``PLUGIN_CONFIG_CLASS(**model_cfg)`` raises a ``ValidationError``. Kept as
 # a dict (not an actual wrapper call) so the tuner test doesn't depend on
 # the real plugin / MODEL_REGISTRY.

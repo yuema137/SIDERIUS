@@ -359,7 +359,7 @@ class TestBaselineValidationFix:
         assert spec is not None and spec.loader is not None
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        # This is the exact call the tuner's evaluate_resource_skill makes
+        # This is the exact call the tuner's evaluate_vram_skill makes
         # and that used to raise ValidationError.
         mod.PLUGIN_CONFIG_CLASS(**model_cfg)
         print(

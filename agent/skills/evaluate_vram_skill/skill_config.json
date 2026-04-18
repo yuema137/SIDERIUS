@@ -1,5 +1,5 @@
 {
-  "name": "evaluate_resource_skill",
+  "name": "evaluate_vram_skill",
   "description": "Evaluate whether a proposed experiment configuration fits within available GPU VRAM (80% safety limit). Must be called before training to prevent OOM crashes.",
   "parameters": {
     "type": "object",

@@ -491,7 +491,7 @@ class HyperparamTuningAgent:
                 }
 
                 print(f"\n[Step 0/3] Resource check...")
-                resource_check = _run_skill("evaluate_resource_skill", sandbox, **active_params)
+                resource_check = _run_skill("evaluate_vram_skill", sandbox, **active_params)
                 if resource_check.get("status") == "error":
                     raise RuntimeError(f"Resource check error: {resource_check.get('message')}")
 
