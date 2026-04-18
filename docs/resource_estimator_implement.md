@@ -1,6 +1,6 @@
 # Resource Estimator (Time + VRAM Budgets)
 
-**Status**: time skill implemented + smoke-tested on lilab (Phases A–G complete; H1a lilab direct-skill smoke verified 2026-04-16; **Phase I — trial/formal budget split — landed 2026-04-16 across 5 commits**; **Phase J — success-path time info to planner — landed 2026-04-16 across 3 commits**; **H1b lilab tuner-integration smoke verified 2026-04-16 on RTX 5090, k(wavenet)=4.22**; H2 SDSC deferred). **Phase K — VRAM budget gate alongside the time gate — design landed 2026-04-18; implementation pending.**
+**Status**: time skill implemented + smoke-tested on lilab (Phases A–G complete; H1a lilab direct-skill smoke verified 2026-04-16; **Phase I — trial/formal budget split — landed 2026-04-16 across 5 commits**; **Phase J — success-path time info to planner — landed 2026-04-16 across 3 commits**; **H1b lilab tuner-integration smoke verified 2026-04-16 on RTX 5090, k(wavenet)=4.22**; H2 SDSC deferred). **Phase K — VRAM budget gate alongside the time gate — design landed 2026-04-18; K.0–K.2 implemented 2026-04-18; K.2.5 (3-phase × 2-resource estimator distribution: training/inference/scoring × VRAM/time) and K.3+ pending.**
 **Author**: design discussion 2026-04-16; Phase K extension 2026-04-18.
 **Motivation**: two trial-mode runs (`exploit_cnn_v1`, `explore_novel_v1`) stalled in Round 1 for 1h 50min and 2h 27min respectively, both blowing past the 1-hour trial budget stated in the expert advice. Neither was blocked, because the planner has no pre-flight wall-time estimate — only a VRAM check. **Phase K motivation (2026-04-17)**: `explore_novel_v1` iterations 3 and 4 burned 9/9 attempts each to `"GPU has only 0.01 GB free"` because the existing VRAM gate uses momentary `free_bytes × 0.8` as its limit and another process held 25.7 GB on the shared 32 GB card. The planner has no operator-supplied VRAM ceiling to optimise against — symmetric to the time-gate gap §1.2 fixed.
 
@@ -23,9 +23,10 @@
 | H1b — lilab tuner-integration smoke | 2026-04-16 | `17ab26e` (CLI fix) + this commit (doc) | RTX 5090, run_name=h1b_test_a, k(wavenet)=4.22 after 2 history entries; Test A composite covered Tests B+C |
 | H2 — SDSC smoke run (Slurm batch, chained) | deferred | — | gated on H1b passing; tests batch-system specifics (env-var override, GPU stability across restarts, concurrent-writer safety) |
 | **K — VRAM budget gate (design)** | 2026-04-18 | (this commit) | design only; **tuner-side only**; sub-phases K.0–K.7 below |
-| K.0 — skill rename `evaluate_resource_skill` → `evaluate_vram_skill` | pending | — | mechanical rename + caller update |
-| K.1 — schema additions on `HyperparamTuningInput` + `ExperimentMemory` (no proposer-side fields) | pending | — | mirrors Phase I.1 + J.4, tuner-only scope |
-| K.2 — skill `vram_budget_gb` kwarg + contention-detection log | pending | — | budget vs free-VRAM `min` |
+| K.0 — skill rename `evaluate_resource_skill` → `evaluate_vram_skill` | 2026-04-18 | `7bb167e` | mechanical rename + caller update |
+| K.1 — schema additions on `HyperparamTuningInput` + `ExperimentMemory` (no proposer-side fields) | 2026-04-18 | `7104993` | mirrors Phase I.1 + J.4, tuner-only scope |
+| K.2 — skill `vram_budget_gb` kwarg + contention-detection log | 2026-04-18 | `888dd61` | budget vs free-VRAM `min`; 18/18 skill tests |
+| K.2.5 — distribute per-phase estimators to owning skills (3 phases × 2 resources) | pending | — | per-phase `estimator.py` in training/inference/scoring skills exporting both `estimate_peak_bytes` and `estimate_wall_time_seconds`; `core/inference_defaults.py` + `core/scoring_defaults.py`; both resource wrappers become thin aggregators (VRAM=peak, time=sum) |
 | K.3 — tuner per-mode pick + `vram_estimate_gb` in success/skipped memory | pending | — | mirrors I.2 + J |
 | K.4 — protocol pass-through (`valid→tune` budget kwargs only; **no** proposer-side `vram_risk` plumbing) | pending | — | mirrors I.3, narrowed scope |
 | K.5 — CLI + workflow fan-out (tuner-side only) | pending | — | mirrors I.4 |
@@ -1027,66 +1028,180 @@ runs), so the plumbing is dead code today.
 gates' active mode for the round — no second `vram_mode` field needed,
 they always agree.
 
-### 10.5 Skill rename + budget kwarg
+### 10.5 VRAM + time skills — distributed per-phase estimators
 
-Rename `agent/skills/evaluate_resource_skill/` →
-`agent/skills/evaluate_vram_skill/` so the two siblings read parallel:
+The VRAM skill has two responsibilities: a **budget gate** (K.2, shipped
+2026-04-18 — `min(defensive, budget)` with contention log) and
+**multi-phase aggregation** (K.2.5). K.2.5 also applies the same
+distribution pattern to the time skill, because a round's wall-time has
+exactly the same structure: three phases run sequentially, each on a
+different resource axis, each with its own memory + time profile.
+
+**Three phases, two resources, per-phase adjustability:**
+
+| Phase | VRAM | Time | Adjustability |
+|---|---|---|---|
+| Training | `num_params × 16 B` + backward activations + focal one-hot + attention | step-count × ms/step × `k(gpu, model_type)` | **Direct** — planner's `train_config` / `loss_config` / `model_config` levers all act here |
+| Inference | `num_params × 4 B` + one forward at `inference_batch` + attention at `inference_batch` | forward-step-count × inference-ms/step | **Dependent on training** — no dedicated lever; `inference_batch` is fixed in `core/inference_defaults.py`; architecture is the *same* trained model. Moves only through the `model_config` the planner already adjusted for training. |
+| Scoring | **0 GB** — `execute_tools/denoising_score_single.py` is pure NumPy/FFT, no `torch.cuda` imports | `segments × per_segment_seconds / num_workers × server_factor` | **Independent + non-adjustable** — fixed evaluation protocol, runs after training + inference; the planner sees its cost but has no lever to shrink it. |
+
+**Aggregation rules:**
+
+- **VRAM: peak across phases.** Phases run in *isolated subprocesses*
+  via `core.sandbox_executor.execute_{training,inference,scoring}`, so
+  allocator caches are reclaimed between phases. They compete against
+  the same ceiling one at a time; the binding constraint is the phase
+  with the highest peak. `feasible = max(phase_peaks) ≤ limit`.
+- **Time: sum across phases.** Phases run sequentially, so the total
+  wall-time is the sum. `feasible = Σ phase_seconds ≤ budget × 60`.
+
+**File layout after K.2.5:**
 
 ```
-agent/skills/evaluate_vram_skill/      # was evaluate_resource_skill
-agent/skills/evaluate_time_skill/
+agent/skills/
+  training_skill/
+    wrapper.py             # existing — dispatches to sandbox_executor
+    estimator.py           # NEW — estimate_peak_bytes + estimate_wall_time_seconds
+  inference_skill/
+    wrapper.py             # existing
+    estimator.py           # NEW — no grads/Adam/focal/backward; uses inference batch
+  denoising_score_skill/
+    wrapper.py             # existing
+    estimator.py           # NEW — VRAM trivially 0; CPU-FFT time with hostname factor
+  evaluate_vram_skill/
+    wrapper.py             # thin peak aggregator
+  evaluate_time_skill/
+    wrapper.py             # thin sum aggregator (was monolithic training-only)
+    calibration.py         # UNCHANGED — used only by training_skill/estimator.py
+
+core/
+  inference_defaults.py    # NEW — inference_batch_for(model_type).
+                           #       Source of truth shared between
+                           #       sandbox_executor.execute_inference and
+                           #       inference_skill/estimator.py.
+  scoring_defaults.py      # NEW — server_cpu_factor(hostname) for
+                           #       scoring-time cross-server variance.
+                           #       Static table in v1; EMA deferred (Q-K-5).
 ```
 
-`run_skill` gains one optional kwarg:
+**Aggregator contracts (final shape, post K.2.5):**
 
 ```python
+# evaluate_vram_skill/wrapper.py — peak-VRAM aggregator
 def run_skill(sandbox, *, model_type, model_config, train_config, loss_config,
               vram_budget_gb: Optional[float] = None):
-    ...
-    free_bytes, total_vram = torch.cuda.mem_get_info(0)
-    defensive_limit = free_bytes * SAFETY_PCT          # existing 0.8 floor
-    if vram_budget_gb is not None:
-        budget_limit = vram_budget_gb * GB
-        limit_bytes  = min(defensive_limit, budget_limit)
-        if defensive_limit < budget_limit * 0.5:
-            print(f"[VRAM] Contention detected: budget={vram_budget_gb:.1f} GB, "
-                  f"free-VRAM cap={defensive_limit / GB:.2f} GB; using "
-                  f"{limit_bytes / GB:.2f} GB")
-    else:
-        limit_bytes = defensive_limit                   # backward-compat
-    feasible = total_est <= limit_bytes
-    ...
+    num_params = _count_params(model_type, model_config, loss_config["loss_type"])
+    phases = [
+        training_estimator.estimate_peak_bytes(model_config, train_config, loss_config, num_params),
+        inference_estimator.estimate_peak_bytes(model_type, model_config, num_params),
+        denoising_score_estimator.estimate_peak_bytes(),          # returns {"phase": "scoring", "total_bytes": 0}
+    ]
+    dominant = max(phases, key=lambda p: p["total_bytes"])
+    # limit selection + contention log: unchanged from K.2
+    feasible = dominant["total_bytes"] <= limit_bytes
     return {
-        ..., "estimated_gb": ..., "limit_gb": ..., "vram_budget_gb": vram_budget_gb,
-        "suggestion": "Reduce model depth/width."        # downgraded — no per-lever branching
+        "estimated_gb":    dominant["total_bytes"] / GB,
+        "limit_gb":        limit_bytes / GB,
+        "vram_budget_gb":  vram_budget_gb,
+        "dominant_phase":  dominant["phase"],
+        "phase_breakdown": {p["phase"]: p for p in phases},     # all 3 phases
+        "feasible":        feasible,
+        ...,
+    }
+
+# evaluate_time_skill/wrapper.py — sum-time aggregator
+def run_skill(sandbox, *, model_type, model_config, train_config, loss_config,
+              sample_set, time_budget_minutes: Optional[float] = None, **kwargs):
+    phases = [
+        training_estimator.estimate_wall_time_seconds(model_type, model_config, train_config, sample_set, **kwargs),
+        inference_estimator.estimate_wall_time_seconds(model_type, model_config, sample_set),
+        denoising_score_estimator.estimate_wall_time_seconds(sample_set, num_workers=8),
+    ]
+    total_sec = sum(p["seconds"] for p in phases)
+    feasible  = (time_budget_minutes is None) or (total_sec / 60.0 <= time_budget_minutes)
+    return {
+        "estimated_minutes":     total_sec / 60.0,
+        "budget_minutes":        time_budget_minutes,
+        "phase_breakdown":       {p["phase"]: p for p in phases},
+        "dominant_phase":        max(phases, key=lambda p: p["seconds"])["phase"],
+        "feasible":              feasible,
+        ...,
     }
 ```
 
-Three properties:
+**Properties:**
 
-- `vram_budget_gb is None` → behaviour byte-identical to today (limit
-  = `free_bytes × 0.8`). Backward-compatible.
-- `vram_budget_gb is not None` → limit is the **min** of the operator
-  budget and the defensive floor. The floor protects against catastrophic
-  contention (no point promising a 4 GB run when only 0.5 GB is actually
-  free); the budget is the intended ceiling the LLM optimises against.
-- The contention-detection log line surfaces the divergence between the
-  two so the user knows whether a `skipped_oom_risk` was caused by the
-  budget or by a stuck neighbour process.
+- **Per-phase ownership (drift prevention).** Each estimator lives next
+  to the tensor-allocation or execution code that produces the peak —
+  `training_skill/estimator.py` next to the training dispatcher,
+  `inference_skill/estimator.py` next to the inference dispatcher, etc.
+  If `execute_tools/inference_single.py` is later changed to use
+  `train_cfg.batch_size` or accumulate outputs on GPU, the forecast MUST
+  be updated in the *same* commit in `inference_skill/estimator.py`.
+  The invariant "training-peak-VRAM ≥ inference-peak-VRAM" is enforced
+  *structurally* by colocation, not by a docstring comment.
+- **Inference is dependent, not independent.** The planner sees
+  inference's VRAM and time estimates in the `[ACTIVE RESOURCE BUDGETS]`
+  block (K.6), but has no direct lever to shrink them — inference
+  architecture IS training architecture. This avoids misleading the
+  planner into thinking `inference_batch` is tunable when it is not.
+- **Scoring is independent + non-adjustable.** Planner sees the cost but
+  cannot touch it. Scoring's VRAM estimator always returns 0; its time
+  estimator uses a hostname-keyed CPU factor (v1 lilab-calibrated) to
+  handle the cross-server variance between local and eventual SDSC
+  runs. Full EMA calibration for scoring time is deferred (**Q-K-5**).
+- **Time-calibration infrastructure (Phase F) stays put.**
+  `evaluate_time_skill/calibration.py` continues to own the asymmetric
+  EMA for `k(gpu, model_type)`. After K.2.5 it is imported only by
+  `training_skill/estimator.py` (the only phase the EMA was learned
+  for). Inference time uses a deterministic forward-only formula;
+  scoring time uses the hostname factor.
+- **Interface preservation.** The VRAM wrapper's existing return fields
+  (`estimated_gb`, `limit_gb`, `vram_budget_gb`, `feasible`,
+  `suggestion`, `verdict`) remain unchanged so K.3 / K.4 / K.5 / K.7 /
+  K.8 are unaffected. The time wrapper's existing fields
+  (`estimated_minutes`, `budget_minutes`, `feasible`, …) likewise.
+  Both skills gain `dominant_phase` + `phase_breakdown` — new fields K.6
+  may optionally surface in the prompt.
 
-### 10.6 No calibration file in v1
+### 10.6 No VRAM calibration file in v1; scoring-time uses a static hostname table
 
-Time needs `~/.siderius/time_calibration_<gpu>.json` because ms/step is
-hardware-dependent and learned per (GPU, model_type) via asymmetric EMA
-(§2.6.5). VRAM is deterministic from the bytes formula already in
-`_estimate_bytes` (model overhead + activations + output logits + focal
-one-hot + transformer attention). No learned correction in Phase K.
+**VRAM** is deterministic from the bytes formulae in the per-phase
+estimators (§10.5: `training_skill/estimator.py` for weights + grads +
+Adam + backward activations + focal one-hot + transformer attention;
+`inference_skill/estimator.py` for weights + one forward pass at
+`inference_batch`; `denoising_score_skill/estimator.py` trivially 0).
+No learned correction in Phase K.
 
-If post-Phase-K telemetry shows systematic estimation drift (e.g. cuDNN
-workspace allocations the formula misses), revisit with a calibration
-file shaped like time's. Not pre-empted in v1. **Open Q-K-1**: post-K
-smoke runs should log `(estimated_gb, peak_vram_actual_gb)` per
-completed training so this question can be answered with data.
+If post-Phase-K telemetry shows systematic VRAM-estimation drift (e.g.
+cuDNN workspace allocations the formula misses), revisit with a
+calibration file shaped like time's. Not pre-empted in v1.
+**Open Q-K-1**: post-K smoke runs should log
+`(estimated_gb, peak_vram_actual_gb)` per completed training so this
+question can be answered with data.
+
+**Training time** continues to use the asymmetric-EMA `k(gpu, model_type)`
+from Phase F, owned by `evaluate_time_skill/calibration.py` and imported
+only by `training_skill/estimator.py` after K.2.5. No change.
+
+**Scoring time** is CPU-bound and therefore server-dependent (lilab vs
+SDSC have very different CPU profiles). K.2.5 introduces a static
+hostname-keyed multiplier table in `core/scoring_defaults.py`:
+
+```python
+_SERVER_CPU_FACTOR = {
+    "lilab":   1.0,   # reference; base formula calibrated here
+    "expanse": 2.5,   # SDSC — bootstrap guess until real telemetry
+}
+# unknown hostname → 1.0 + one-time warning, same pattern as unknown GPU in Phase F
+```
+
+This captures the coarse cross-server variance without introducing the
+full EMA machinery. Scoring is ~5–20% of total wall-time today, so a
+~2× error on scoring is a ~10–40% error on the summed-time budget —
+tolerable for a v1 gate. Full EMA (k_scoring learned per hostname,
+updated per completed round) is deferred as **Q-K-5**, to be revisited
+once post-K smoke shows whether the static factors are accurate enough.
 
 ### 10.7 Joint orchestration at the call sites
 
@@ -1188,8 +1303,22 @@ Phase J, and is queued for retirement in §10.17.
 
 | Path | Change |
 |---|---|
-| `agent/skills/evaluate_resource_skill/` → `agent/skills/evaluate_vram_skill/` | rename directory; update `wrapper.py` to accept `vram_budget_gb` kwarg + emit contention-detection log; downgrade `suggestion` to verdict-style summary |
+| `agent/skills/evaluate_resource_skill/` → `agent/skills/evaluate_vram_skill/` | **K.0+K.2+K.2.5**: rename directory; update `wrapper.py` to accept `vram_budget_gb` kwarg + emit contention-detection log + downgrade `suggestion` to verdict-style summary (K.2); then delete `_estimate_bytes`, become a peak aggregator over 3 per-phase estimators (training + inference + scoring), expose `dominant_phase` + `phase_breakdown` (K.2.5) |
+| `agent/skills/evaluate_time_skill/wrapper.py` | **K.2.5**: delete monolithic training-only step-count + ms/step body; become a sum aggregator over 3 per-phase `estimate_wall_time_seconds` calls; preserve existing return fields (`estimated_minutes`, `budget_minutes`, `feasible`); expose `dominant_phase` + `phase_breakdown` |
+| `agent/skills/evaluate_time_skill/calibration.py` | **K.2.5**: unchanged in substance (asymmetric EMA of `k(gpu, model_type)` from Phase F stays); imported only by `training_skill/estimator.py` after refactor |
 | `agent/skills/evaluate_vram_skill/skill_config.json` | add `vram_budget_gb` to parameters block (optional) |
+| `core/inference_defaults.py` | **K.2.5 NEW**: `inference_batch_for(model_type) -> int` — one source of truth shared between `sandbox_executor.py` and `inference_skill/estimator.py` |
+| `core/scoring_defaults.py` | **K.2.5 NEW**: `server_cpu_factor(hostname) -> float` — static hostname-keyed multiplier for scoring-time cross-server variance (lilab=1.0; others bootstrap 1.0 + warn). EMA deferred to Q-K-5. |
+| `core/sandbox_executor.py` | **K.2.5**: refactor the hard-coded inference-batch dict (~L346–L350) to call `inference_defaults.inference_batch_for` |
+| `agent/skills/training_skill/estimator.py` | **K.2.5 NEW**: `estimate_peak_bytes(...)` — training-phase memory (weights × 16 B + output logits + backward activations + focal one_hot + transformer attention); `estimate_wall_time_seconds(...)` — step-count × ms/step × `k(gpu, model_type)` (Phase F calibration carried over) |
+| `agent/skills/inference_skill/estimator.py` | **K.2.5 NEW**: `estimate_peak_bytes(...)` — weights × 4 B + one batch's forward activations + attn at `inference_batch`; no grads / Adam / focal; `estimate_wall_time_seconds(...)` — forward-only step count at `inference_batch` × inference-ms/step |
+| `agent/skills/denoising_score_skill/estimator.py` | **K.2.5 NEW**: `estimate_peak_bytes(...)` returns `{phase: "scoring", total_bytes: 0}` (CPU-only by design); `estimate_wall_time_seconds(...)` = `segments × per_segment_seconds / num_workers × server_cpu_factor(hostname)` |
+| `tests/unit/core/test_inference_defaults.py` | **K.2.5 NEW**: model-type → batch-size contract |
+| `tests/unit/core/test_scoring_defaults.py` | **K.2.5 NEW**: hostname → factor contract (known hosts return non-1.0, unknown hosts return 1.0 with warning) |
+| `tests/unit/agent/training_skill/test_estimator.py` | **K.2.5 NEW**: VRAM numeric correctness (CE vs focal, RNN vs transformer, batch scaling); time numeric correctness against Phase B-F regression (same inputs → same ms output as pre-refactor) |
+| `tests/unit/agent/inference_skill/test_estimator.py` | **K.2.5 NEW**: VRAM numeric correctness + `training ≥ inference` invariant for a representative config (+ monkeypatched inversion test); time monotone in `segments` and `inference_batch` |
+| `tests/unit/agent/denoising_score_skill/test_estimator.py` | **K.2.5 NEW**: VRAM always 0; time scales with segments and inversely with num_workers; hostname factor applied |
+| `tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_time_skill.py` | **K.2.5**: extend — sum-aggregation regression (training-only input preserves today's estimate), 3-phase breakdown presence, dominant_phase = "training" in typical case |
 | `agent/schemas/hyperparam_tuning.py` | add `trial_vram_budget_gb` + `formal_vram_budget_gb` to `HyperparamTuningInput`; add `vram_estimate_gb` + `vram_budget_gb` to `ExperimentMemory`; **K.7**: add `GateExhaustionInfo` model + `HyperparamTuningOutput.gate_exhaustion` field |
 | `agent/schemas/proposal.py` | **K.7**: add `ProposalInput.prior_iteration_gate_exhaustion: Optional[GateExhaustionInfo]` (proposer-side VRAM gate fields remain deferred per §10.17) |
 | `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py` | **K.7**: add `prior_tune_output` kwarg; surface its `gate_exhaustion` into `ProposalInput.prior_iteration_gate_exhaustion` (other proposer-side VRAM kwargs deferred per §10.17) |
@@ -1199,7 +1328,7 @@ Phase J, and is queued for retirement in §10.17.
 | `agent/prompts.py` | remove abstract "GPU MEMORY RULES" section; add `[ACTIVE RESOURCE BUDGETS]` block (per-round, numeric, includes vram/time estimates + factors + current batch_size); append `[RESOURCE GATE — RESOLVING OVER-BUDGET CONFIGS]` guidance block (static); **K.7**: add conditional `[PRIOR ITERATION GATE EXHAUSTION]` block in the proposer template |
 | `run_exploration_adaptive.py` | add `--trial_vram_budget_gb` / `--formal_vram_budget_gb`; extend startup banner |
 | `workflows/model_exploration.py` | fan out both VRAM budget fields to `HyperparamTuningInput` only (via `local_validated_model`); **K.7**: retain previous tuner output and pass as `prior_tune_output` to next-iteration `local_full_context` |
-| `tests/unit/agent/skills/test_evaluate_vram_skill.py` | new — budget kwarg routing, defensive-floor + budget min, contention-detection log, None-pass-through behaviour |
+| `tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_vram_skill.py` | **K.2**: new — budget kwarg routing, defensive-floor + budget min, contention-detection log, None-pass-through behaviour. **K.2.5**: training-dominant regression, inference-dominant crossover, `phase_breakdown` presence (all 3 phases incl. scoring=0) |
 | `tests/unit/agent/tune_ml_hyperparam_agent/test_tuning_agent.py` | new tests — per-mode VRAM pick, joint short-circuit (VRAM fail → time skill not invoked), `vram_estimate_gb` in success-record memory; **K.7**: `_build_gate_exhaustion` truth-table tests |
 | `tests/unit/agent/tune_ml_hyperparam_agent/test_hyperparam_schemas.py` | extend with `TestGateExhaustionInfo` for K.7 schema |
 | `tests/unit/agent/protocols/test_ml_model_valid_to_ml_model_tune.py` | extend — assert two new VRAM budget kwargs survive |
@@ -1444,9 +1573,10 @@ its targeted pytest invocation green and a committable state.
 
 **Top-level progress** (tick as each sub-phase commits + verifies):
 
-- [ ] K.0 — Skill rename (mechanical)
-- [ ] K.1 — Schema additions (tuner-side only)
-- [ ] K.2 — Skill `vram_budget_gb` kwarg + contention-detection log
+- [x] K.0 — Skill rename (mechanical) *(2026-04-18)*
+- [x] K.1 — Schema additions (tuner-side only) *(2026-04-18)*
+- [x] K.2 — Skill `vram_budget_gb` kwarg + contention-detection log *(2026-04-18)*
+- [ ] K.2.5 — Distribute per-phase estimators to owning skills (3 phases × 2 resources: VRAM=peak, time=sum)
 - [ ] K.3 — Tuner integration (per-mode pick + memory fields)
 - [ ] K.4 — Protocol pass-through (`valid→tune` only)
 - [ ] K.5 — CLI + workflow fan-out
@@ -1497,6 +1627,159 @@ its targeted pytest invocation green and a committable state.
 - [ ] Tests: budget pass-through, defensive vs budget min, contention
       log, None-disabled path, suggestion-string content.
 - [ ] Verify: `pytest tests/unit/agent/skills/test_evaluate_vram_skill.py -q`.
+
+#### K.2.5 Distribute per-phase estimators to owning skills (3 × 2) [ ]
+
+Rationale + final aggregator contracts in §10.5. Mid-way between the
+K.2 budget kwarg and the K.3 tuner integration. Applied symmetrically
+to both resource skills: VRAM = peak over 3 phases, time = sum over 3
+phases. **Interface-preserving** for both wrappers' existing return
+fields, so K.3 / K.4 / K.5 / K.7 / K.8 are unaffected. The refactor
+adds `dominant_phase: str` and `phase_breakdown: dict[str, dict]` to
+each wrapper's return — K.6 may optionally surface these in the prompt.
+
+Seven commits in order. Each commit must end with its targeted pytest
+invocation green before the next begins. **Lilab is the priority
+deployment target**; the SDSC hostname factor is a bootstrap guess
+(1.0 + warn on unknown host) and is tuned in a later smoke run — not
+in K.2.5.
+
+**Commit 1 — `refactor(core): extract inference_batch_for to inference_defaults`**
+- [ ] `core/inference_defaults.py` (new) — expose
+      `inference_batch_for(model_type: str) -> int`. Lift the table
+      currently at `core/sandbox_executor.py:346–350`
+      (`transformer=1, rnn=10, fcnet=punet=wavenet=25`). Unknown
+      model-type → `ValueError` (loud — callers must know the shape).
+- [ ] `core/sandbox_executor.py` — replace the local
+      `_INFERENCE_BATCH_SIZE` dict lookup with
+      `inference_defaults.inference_batch_for(...)`.
+- [ ] `tests/unit/core/test_inference_defaults.py` (new) — known
+      model-types return expected integers; unknown model-type raises.
+- [ ] Verify:
+      `pytest tests/unit/core/test_inference_defaults.py tests/unit/core/test_sandbox_executor.py -q`.
+
+**Commit 2 — `feat(skill): training_skill/estimator.py — peak VRAM + wall time`**
+- [ ] `agent/skills/training_skill/estimator.py` (new) exports two
+      functions:
+      - `estimate_peak_bytes(model_type, model_config, train_config,
+        loss_config, num_params) -> {"phase": "training", "total_bytes", "breakdown"}` —
+        body is the current `_estimate_bytes` in the VRAM wrapper:
+        `num_params × 16 B` + output logits + backward activations
+        (2×) + focal one_hot + transformer attention at
+        `train_config.batch_size`.
+      - `estimate_wall_time_seconds(model_type, model_config,
+        train_config, sample_set, *, ms_per_step=None, gpu_name=None) ->
+        {"phase": "training", "seconds", "breakdown"}` — body is the
+        step-count × ms/step × `k(gpu, model_type)` logic currently in
+        `evaluate_time_skill/wrapper.py`. Imports
+        `evaluate_time_skill.calibration` for the k lookup.
+- [ ] `tests/unit/agent/training_skill/test_estimator.py` (new):
+      - VRAM: CE vs focal, RNN vs transformer, batch/seg scaling.
+      - Time: same inputs as an existing `test_evaluate_time_skill.py`
+        case → same `seconds` output to within rounding (regression).
+- [ ] Verify:
+      `pytest tests/unit/agent/training_skill/test_estimator.py -q`.
+
+**Commit 3 — `feat(skill): inference_skill/estimator.py — peak VRAM + wall time`**
+- [ ] `agent/skills/inference_skill/estimator.py` (new) exports two
+      functions:
+      - `estimate_peak_bytes(model_type, model_config, num_params) ->
+        {"phase": "inference", "total_bytes", "breakdown"}` —
+        `num_params × 4 B` (weights only, no grads/Adam) + one
+        inference-batch forward's output logits + forward activations
+        (1×, no backward storage) + attention at `inference_batch`
+        (from `inference_defaults.inference_batch_for`). No focal
+        one_hot — loss is not computed at inference.
+      - `estimate_wall_time_seconds(model_type, model_config,
+        sample_set, *, inference_ms_per_step=None) ->
+        {"phase": "inference", "seconds", "breakdown"}` — forward-only
+        step count at `inference_batch` × inference-ms/step. Rough
+        factor: `ms_per_step_inference ≈ ms_per_step_training / 3`
+        (no backward pass). Phase F's `k(gpu, model_type)` is *not*
+        applied — inference ms/step wasn't calibrated.
+- [ ] `tests/unit/agent/inference_skill/test_estimator.py` (new):
+      - VRAM numeric correctness.
+      - `training ≥ inference` invariant holds for a representative
+        RNN config.
+      - Monkeypatched `inference_batch_for` → huge batch → inference
+        wins; the aggregator (tested in commit 5) picks it as dominant.
+      - Time monotone in `segments` and `inference_batch`.
+- [ ] Verify:
+      `pytest tests/unit/agent/inference_skill/test_estimator.py -q`.
+
+**Commit 4 — `feat(skill): denoising_score_skill/estimator.py — 0 VRAM + CPU-FFT time`**
+- [ ] `core/scoring_defaults.py` (new) — expose
+      `server_cpu_factor(hostname: str) -> float`. Static table:
+      `{"lilab": 1.0, "expanse": 2.5}`. Unknown host → 1.0 with
+      one-time stderr warning (mirrors Phase F's unknown-GPU pattern).
+      **Lilab-priority note**: `expanse: 2.5` is a bootstrap guess;
+      real SDSC telemetry tunes it after Phase H2.
+- [ ] `tests/unit/core/test_scoring_defaults.py` (new) — known hosts
+      return expected factors; unknown host returns 1.0 + emits
+      warning (captured via `capsys`/`caplog`).
+- [ ] `agent/skills/denoising_score_skill/estimator.py` (new) exports:
+      - `estimate_peak_bytes(...) -> {"phase": "scoring", "total_bytes": 0, "breakdown": {}}` —
+        trivial (scoring is pure NumPy/FFT by design).
+      - `estimate_wall_time_seconds(sample_set, *, num_workers=8,
+        hostname=None) -> {"phase": "scoring", "seconds", "breakdown"}` —
+        `segments × per_segment_seconds / max(num_workers, 1) ×
+        server_cpu_factor(hostname)`. `per_segment_seconds` is a
+        module-level constant seeded from lilab smoke.
+- [ ] `tests/unit/agent/denoising_score_skill/test_estimator.py` (new):
+      - VRAM always 0.
+      - Time scales with segments; inversely with num_workers.
+      - Hostname factor applied; unknown host warns once.
+- [ ] Verify:
+      `pytest tests/unit/core/test_scoring_defaults.py tests/unit/agent/denoising_score_skill/test_estimator.py -q`.
+
+**Commit 5 — `refactor(skill): evaluate_vram_skill as peak aggregator over 3 phases`**
+- [ ] `agent/skills/evaluate_vram_skill/wrapper.py` — delete
+      `_estimate_bytes`; import the three
+      `estimate_peak_bytes` functions; count params once; call each
+      with the already-counted `num_params`; take
+      `max(phases, key=lambda p: p["total_bytes"])`. Expose
+      `dominant_phase` + `phase_breakdown` (all 3 phases) in the
+      return dict. Keep the budget gate + contention log untouched.
+- [ ] Extend `tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_vram_skill.py`:
+      - Regression: training-dominant config returns same
+        `estimated_gb` as K.2 within floating-point tolerance.
+      - Crossover: monkeypatched `inference_batch_for` → inference
+        dominates → `result["dominant_phase"] == "inference"`.
+      - `phase_breakdown` contains all three phases, with
+        `scoring.total_bytes == 0`.
+- [ ] Verify:
+      `pytest tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_vram_skill.py -q`.
+
+**Commit 6 — `refactor(skill): evaluate_time_skill as sum aggregator over 3 phases`**
+
+Riskier: this commit must preserve Phase B–F behaviour byte-for-byte
+for the training-only path. Pre-refactor tests stay as regression.
+
+- [ ] `agent/skills/evaluate_time_skill/wrapper.py` — delete the
+      monolithic step-count body; call the three
+      `estimate_wall_time_seconds` functions; sum `seconds`. Preserve
+      existing return fields (`estimated_minutes`, `budget_minutes`,
+      `feasible`, `verdict`, `suggestion`, …) + add
+      `dominant_phase` + `phase_breakdown`.
+- [ ] Keep `evaluate_time_skill/calibration.py` exactly as-is — it's
+      imported only by `training_skill/estimator.py` now.
+- [ ] Extend `tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_time_skill.py`:
+      - Regression: every existing Phase B–F test (22 tests) still
+        passes — the sum across training + 0 + 0 must equal today's
+        training-only number (inference/scoring phases add non-zero
+        seconds now; adjust assertions to tolerate, document the new
+        baseline).
+      - Sum semantics: training 60 s + inference 10 s + scoring 5 s
+        → `estimated_minutes == 75/60`.
+      - `dominant_phase == "training"` in typical case.
+      - Budget gate feasibility keyed on the sum.
+- [ ] Verify:
+      `pytest tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_time_skill.py tests/unit/agent/training_skill tests/unit/agent/inference_skill tests/unit/agent/denoising_score_skill -q`.
+
+**Commit 7 — `docs(resource_estimator): mark K.2.5 complete`**
+- [ ] Flip K.2.5 checkboxes to `[x]` in §10.14 top-level progress list;
+      add commit hash to the progress-log table row; update §10.5
+      opening paragraph's "(K.2.5)" to "(K.2.5, shipped YYYY-MM-DD)".
 
 #### K.3 Tuner integration [ ]
 
@@ -1554,6 +1837,12 @@ its targeted pytest invocation green and a committable state.
 - [ ] Wire the planner builder to pass current-round `vram_estimate_gb`
       + `time_estimate_minutes` + `batch_size` so the LLM sees the
       estimation pair plus the lever's current setting.
+- [ ] *Optional (post-K.2.5)*: surface `dominant_phase` from the VRAM
+      skill result so the `[ACTIVE RESOURCE BUDGETS]` block can say e.g.
+      `dominant phase: training` — lets the planner distinguish between
+      "the forward step is OOM" and "the whole train step is OOM" when
+      choosing levers. Skip if it bloats the prompt without changing
+      smoke-run decisions.
 - [ ] Tests: prompt builder includes the new sections when budgets are
       set; renders `"(no budget — gate disabled)"` when they're None;
       omits `factor` when budget is None; guidance block text appears
@@ -1633,8 +1922,11 @@ caller updates that reference the new name.
 
 - **Q-K-1** (carries forward from §10.6): VRAM estimation drift. If
   post-K smoke shows `peak_vram_actual_gb` consistently exceeding
-  `estimated_gb` by >20%, the formula in `_estimate_bytes` is missing a
-  term (likely cuDNN workspace or PyTorch caching allocator overhead).
+  `estimated_gb` by >20%, a term is missing from the per-phase estimator
+  whose phase dominates (`training_skill/estimator.py` for training-bound
+  workloads, `inference_skill/estimator.py` otherwise — use the wrapper's
+  `dominant_phase` field to locate which one). Likely suspects: cuDNN
+  workspace or the PyTorch caching allocator's fragmentation overhead.
   Decide whether to add a static safety multiplier (cheap) or a
   calibration file shaped like time's (more accurate, more code).
   Telemetry needed before deciding.
@@ -1651,6 +1943,20 @@ caller updates that reference the new name.
   whether the prompt should render `"(not measured — VRAM failed first)"`
   vs simply omitting the line. Lean toward explicit "not measured" so
   the LLM doesn't infer absence from silence.
+- **Q-K-4** *(addressed by K.2.5)*: Time-side phase asymmetry. Before
+  K.2.5 the time skill modelled training wall-time only, while the VRAM
+  skill (post-K.2.5) spans training + inference + scoring. K.2.5
+  resolves this by symmetrically distributing time estimators across
+  the same three phases and summing. Kept here as a historical pointer
+  for anyone reading the pre-K.2.5 doc.
+- **Q-K-5**: Scoring-time EMA calibration. K.2.5 ships a static
+  hostname-keyed multiplier (`core/scoring_defaults.py`) as a
+  pragmatic v1. If post-K smoke shows the static factors drift by >30%
+  on any server (particularly once SDSC H2 runs surface real
+  `expanse` data), replace the static table with an asymmetric-EMA
+  calibration of `k_scoring(hostname)` mirroring Phase F's
+  `k(gpu, model_type)`. Until then, static table + "unknown host → 1.0
+  + warn" is the contract.
 
 ### 10.17 Deferred from Phase K (future cleanup)
 
