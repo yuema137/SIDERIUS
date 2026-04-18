@@ -27,6 +27,10 @@ agent_generated/models/*
 !agent_generated/models/.gitkeep
 agent_generated/tests/*
 !agent_generated/tests/.gitkeep
+# Per-run plugin dirs (docs/run_scoped_plugins.md) — each run writes its own
+# models under agent_generated/runs/<run_name>/models/; nothing in here is
+# source.
+agent_generated/runs/
 
 # Local persistent memories (private to each developer's checkout).
 # These are loaded by Claude via the auto-memory pointer in

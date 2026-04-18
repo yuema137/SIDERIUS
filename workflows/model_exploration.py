@@ -245,23 +245,31 @@ def _make_storage(workspace: str, run_name: str) -> StorageConfig:
     )
 
 
-def _register_plugin(impl_output, model_name: str):
+def _register_plugin(impl_output, model_name: str, dest_plugin_dir: str):
     """
-    Copy validated plugin files to agent_generated/models/ so the tuning
-    agent's plugin loader can find and register the model.
+    Copy validated plugin files to ``dest_plugin_dir`` (the tuner's run-scoped
+    plugin dir) so the training subprocess discovers them via
+    ``SIDERIUS_PLUGIN_DIRS``.
 
     Copies:
-      - {model_file_path} → agent_generated/models/{model_name}.py
-      - {description_file_path} → agent_generated/models/{model_name}/description.md
+      - {model_file_path}       → {dest_plugin_dir}/{model_name}.py
+      - {description_file_path} → {dest_plugin_dir}/{model_name}/description.md
+
+    Pre-Phase-4 this function copied to the legacy global
+    ``agent_generated/models/``, which the training subprocess no longer
+    scans once ``SIDERIUS_PLUGIN_DIRS`` is set (Phase 2). See
+    docs/run_scoped_plugins.md.
+
+    Also extends the in-process ``MODEL_REGISTRY`` / ``PLUGIN_CONFIG_REGISTRY``
+    so the tuner's planner (same Python process as the workflow) can resolve
+    the new model type without a re-scan.
 
     Skips gracefully if source files don't exist (e.g. in unit tests with mocks).
     """
-    dest_dir = os.path.join(SIDERIUS_ROOT, "agent_generated", "models")
-
     # Copy plugin file
     if os.path.isfile(impl_output.model_file_path):
-        os.makedirs(dest_dir, exist_ok=True)
-        dest_plugin = os.path.join(dest_dir, f"{model_name}.py")
+        os.makedirs(dest_plugin_dir, exist_ok=True)
+        dest_plugin = os.path.join(dest_plugin_dir, f"{model_name}.py")
         shutil.copy2(impl_output.model_file_path, dest_plugin)
         print(f"    Plugin registered → {dest_plugin}")
     else:
@@ -270,7 +278,7 @@ def _register_plugin(impl_output, model_name: str):
 
     # Copy description
     if os.path.isfile(impl_output.description_file_path):
-        desc_dest_dir = os.path.join(dest_dir, model_name)
+        desc_dest_dir = os.path.join(dest_plugin_dir, model_name)
         os.makedirs(desc_dest_dir, exist_ok=True)
         dest_desc = os.path.join(desc_dest_dir, "description.md")
         shutil.copy2(impl_output.description_file_path, dest_desc)
@@ -641,13 +649,21 @@ def run_workflow(
                   f"attempts without passing validation. Skipping to next iteration.")
             continue
 
-        # --- Register validated plugin so the tuning agent can load it ---
-        _register_plugin(impl_output, proposal.model_name)
-
-        # --- Tune ---
+        # --- Tune (set up storage + run-scoped plugin dir up front) ---
         tuning_dir = os.path.join(iter_dir, proposal.model_name)
         os.makedirs(tuning_dir, exist_ok=True)
         tuning_storage = _make_storage(tuning_dir, run_name)
+
+        # --- Register validated plugin into the tuner's run-scoped dir so
+        #     the training subprocess picks it up via SIDERIUS_PLUGIN_DIRS
+        #     (docs/run_scoped_plugins.md, Phase 4). The tuner's sandbox has
+        #     not been constructed yet, but ``get_plugin_dir`` is the
+        #     single source of truth for the layout, so the workflow can
+        #     write here safely; the sandbox will ``_ensure_dir`` the same
+        #     path moments later without disturbing existing contents.
+        from core.sandbox_executor import get_plugin_dir
+        dest_plugin_dir = get_plugin_dir(tuning_dir, run_name)
+        _register_plugin(impl_output, proposal.model_name, dest_plugin_dir)
 
         print(f"  [{iteration}] Tuning '{proposal.model_name}' for {max_rounds} rounds...")
         tune_llm = llm_config.get("tune")

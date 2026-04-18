@@ -8,12 +8,19 @@ All tests use a temporary plugin written to a tmp_path directory — no real
 agent_generated/ files are created or modified.
 """
 import os
+import sys
+import subprocess
 import textwrap
 import importlib
 import pytest
 import torch
 
-from ml_models.plugin_loader import extend_registries, _load_plugin
+from ml_models.plugin_loader import (
+    extend_registries,
+    _load_plugin,
+    _resolve_plugin_dirs,
+    _PLUGIN_DIRS_ENV_VAR,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -230,3 +237,251 @@ class TestPluginModelCallable:
         x   = torch.randint(0, 256, (1, 500))
         out = model(x)
         assert not torch.isnan(out).any()
+
+
+# ---------------------------------------------------------------------------
+# _resolve_plugin_dirs — env var precedence and parsing
+# ---------------------------------------------------------------------------
+
+class TestResolvePluginDirs:
+    """Phase 1 of docs/run_scoped_plugins.md — env var drives the scan list,
+    with fallback to AGENT_GENERATED_DIR when unset. These tests pin down the
+    parsing contract so no caller can regress to the old single-dir scan."""
+
+    def test_env_unset_falls_back_to_agent_generated_dir(self, monkeypatch):
+        monkeypatch.delenv(_PLUGIN_DIRS_ENV_VAR, raising=False)
+        import ml_models.plugin_loader as pl
+        assert _resolve_plugin_dirs() == [pl.AGENT_GENERATED_DIR]
+
+    def test_empty_env_falls_back_to_agent_generated_dir(self, monkeypatch):
+        """Empty and whitespace-only env var must behave identically to
+        unset — otherwise a shell that exports the var without a value
+        would silently disable plugin loading."""
+        monkeypatch.setenv(_PLUGIN_DIRS_ENV_VAR, "")
+        import ml_models.plugin_loader as pl
+        assert _resolve_plugin_dirs() == [pl.AGENT_GENERATED_DIR]
+
+        monkeypatch.setenv(_PLUGIN_DIRS_ENV_VAR, "   ")
+        assert _resolve_plugin_dirs() == [pl.AGENT_GENERATED_DIR]
+
+    def test_single_dir(self, monkeypatch):
+        monkeypatch.setenv(_PLUGIN_DIRS_ENV_VAR, "/tmp/dir_a")
+        assert _resolve_plugin_dirs() == ["/tmp/dir_a"]
+
+    def test_multiple_dirs_preserve_order(self, monkeypatch):
+        """Order matters because the shadow-warning semantics depend on it
+        (later directory wins when two plugins share a model_type)."""
+        monkeypatch.setenv(
+            _PLUGIN_DIRS_ENV_VAR,
+            os.pathsep.join(["/tmp/dir_a", "/tmp/dir_b", "/tmp/dir_c"]),
+        )
+        assert _resolve_plugin_dirs() == ["/tmp/dir_a", "/tmp/dir_b", "/tmp/dir_c"]
+
+    def test_empty_entries_filtered(self, monkeypatch):
+        """Leading/trailing/duplicate separators produce empty segments in
+        shell-composed path vars. Must be dropped, not passed through as
+        empty strings (which would later crash os.path.isdir)."""
+        sep = os.pathsep
+        monkeypatch.setenv(
+            _PLUGIN_DIRS_ENV_VAR,
+            f"{sep}/tmp/dir_a{sep}{sep}/tmp/dir_b{sep}",
+        )
+        assert _resolve_plugin_dirs() == ["/tmp/dir_a", "/tmp/dir_b"]
+
+
+# ---------------------------------------------------------------------------
+# extend_registries — multi-directory scanning (Phase 1)
+# ---------------------------------------------------------------------------
+
+def _make_plugin_src(model_type: str) -> str:
+    """Return VALID_PLUGIN_SRC rewritten for a different PLUGIN_MODEL_TYPE.
+
+    Lets us fabricate two distinct plugins without duplicating the whole
+    template. We substitute the literal "test_plugin_model" token — the
+    class names stay the same (harmless for these tests) but the registered
+    model_type differs, so both plugins coexist in the registry."""
+    return VALID_PLUGIN_SRC.replace("test_plugin_model", model_type)
+
+
+class TestExtendRegistriesMultiDir:
+
+    def test_env_var_overrides_legacy_dir(self, tmp_path, monkeypatch):
+        """When SIDERIUS_PLUGIN_DIRS is set, the loader must scan ONLY that
+        dir — not AGENT_GENERATED_DIR. We prove this by pointing
+        AGENT_GENERATED_DIR at a directory holding a plugin that must NOT
+        appear in the registry."""
+        # Legacy global dir — should be ignored when env var is set.
+        legacy_dir = tmp_path / "legacy"
+        legacy_dir.mkdir()
+        (legacy_dir / "legacy_plugin.py").write_text(_make_plugin_src("legacy_plugin"))
+
+        # Run-scoped dir — the only one that should be scanned.
+        run_dir = tmp_path / "run_models"
+        run_dir.mkdir()
+        (run_dir / "run_plugin.py").write_text(_make_plugin_src("run_plugin"))
+
+        import ml_models.plugin_loader as pl
+        monkeypatch.setattr(pl, "AGENT_GENERATED_DIR", str(legacy_dir))
+        monkeypatch.setenv(_PLUGIN_DIRS_ENV_VAR, str(run_dir))
+
+        model_reg, config_reg = {}, {}
+        loaded = extend_registries(model_reg, config_reg)
+
+        assert "run_plugin" in loaded
+        assert "legacy_plugin" not in loaded, (
+            "legacy dir must be skipped when SIDERIUS_PLUGIN_DIRS is set"
+        )
+        assert "run_plugin" in model_reg
+        assert "legacy_plugin" not in model_reg
+
+    def test_two_dirs_both_loaded(self, tmp_path, monkeypatch):
+        dir_a = tmp_path / "a"
+        dir_b = tmp_path / "b"
+        dir_a.mkdir()
+        dir_b.mkdir()
+        (dir_a / "plugin_a.py").write_text(_make_plugin_src("plugin_a"))
+        (dir_b / "plugin_b.py").write_text(_make_plugin_src("plugin_b"))
+
+        monkeypatch.setenv(
+            _PLUGIN_DIRS_ENV_VAR,
+            os.pathsep.join([str(dir_a), str(dir_b)]),
+        )
+        model_reg, config_reg = {}, {}
+        loaded = extend_registries(model_reg, config_reg)
+
+        assert "plugin_a" in loaded and "plugin_b" in loaded
+        assert "plugin_a" in model_reg and "plugin_b" in model_reg
+
+    def test_missing_legacy_dir_ok_when_env_set(self, tmp_path, monkeypatch):
+        """AGENT_GENERATED_DIR not existing must not break the env-var path
+        — this is the production scenario when the global dir has been
+        cleaned out."""
+        run_dir = tmp_path / "run_models"
+        run_dir.mkdir()
+        (run_dir / "run_plugin.py").write_text(_make_plugin_src("run_only_plugin"))
+
+        import ml_models.plugin_loader as pl
+        monkeypatch.setattr(pl, "AGENT_GENERATED_DIR", str(tmp_path / "does_not_exist"))
+        monkeypatch.setenv(_PLUGIN_DIRS_ENV_VAR, str(run_dir))
+
+        model_reg, config_reg = {}, {}
+        loaded = extend_registries(model_reg, config_reg)
+
+        assert loaded == ["run_only_plugin"]
+
+    def test_missing_env_dir_silently_skipped(self, tmp_path, monkeypatch):
+        """A non-existent dir in the env var must not raise — the loader
+        should skip it. This matches the existing ``os.path.isdir`` guard
+        for the legacy dir."""
+        real_dir = tmp_path / "real"
+        real_dir.mkdir()
+        (real_dir / "p.py").write_text(_make_plugin_src("real_plugin"))
+        missing = tmp_path / "missing"
+
+        monkeypatch.setenv(
+            _PLUGIN_DIRS_ENV_VAR,
+            os.pathsep.join([str(missing), str(real_dir)]),
+        )
+        model_reg, config_reg = {}, {}
+        loaded = extend_registries(model_reg, config_reg)
+
+        assert loaded == ["real_plugin"]
+
+
+# ---------------------------------------------------------------------------
+# Bootstrap registry mirror — regression guard for the 2026-04-17 fix
+# ---------------------------------------------------------------------------
+
+_BOOTSTRAP_MIRROR_SCRIPT = textwrap.dedent("""\
+    import sys
+    import ml_models.plugin_loader as pl
+
+    # Redirect the loader at the tmp plugin dir BEFORE triggering bootstrap.
+    pl.AGENT_GENERATED_DIR = sys.argv[1]
+
+    # Importing models_sandbox triggers:
+    #   1) line 11: bare ``from models_format_sandbox import ...`` — loads
+    #      the bare module identity because ml_models/ is on sys.path.
+    #   2) the bootstrap at the bottom: loads packaged
+    #      ``ml_models.models_format_sandbox``, populates its registry, then
+    #      mirrors onto the bare identity.
+    import ml_models.models_sandbox  # noqa: F401
+
+    bare = sys.modules.get('models_format_sandbox')
+    pkg  = sys.modules.get('ml_models.models_format_sandbox')
+
+    assert bare is not None, "bare models_format_sandbox was not loaded"
+    assert pkg is not None, "packaged ml_models.models_format_sandbox was not loaded"
+    assert bare is not pkg, (
+        "bare and packaged should be distinct module objects when ml_models/ "
+        "is on sys.path — if they are the same, this test is no longer "
+        "exercising the duplicate-module scenario"
+    )
+
+    assert "test_plugin_model" in pkg.PLUGIN_CONFIG_REGISTRY, (
+        "plugin missing from packaged registry: "
+        + str(list(pkg.PLUGIN_CONFIG_REGISTRY.keys()))
+    )
+    assert "test_plugin_model" in bare.PLUGIN_CONFIG_REGISTRY, (
+        "plugin missing from bare registry (mirror regression): "
+        + str(list(bare.PLUGIN_CONFIG_REGISTRY.keys()))
+    )
+
+    # The exact code path the training subprocess takes.
+    cls = bare.get_config_class("test_plugin_model")
+    assert cls is not None, (
+        "bare get_config_class('test_plugin_model') returned None — this is "
+        "the exact failure mode fixed on 2026-04-17"
+    )
+
+    print("OK")
+""")
+
+
+class TestBootstrapRegistryMirror:
+    """Regression guard for the duplicate-module bootstrap fix (2026-04-17).
+
+    With ``ml_models/`` on sys.path (the training subprocess env), the bare
+    ``models_format_sandbox`` and packaged ``ml_models.models_format_sandbox``
+    resolve to two distinct module objects. The bootstrap in
+    ``ml_models/models_sandbox.py`` mirrors the populated packaged registry
+    onto the bare module so bare-import callers — ``execute_tools/
+    train_engine_sandbox.py``, ``execute_tools/inference_single.py``,
+    ``ml_models/loss_models_sandbox.py`` — see the same plugins.
+
+    Without the mirror, ``get_config_class()`` called through the bare
+    identity reads an empty ``PLUGIN_CONFIG_REGISTRY`` and returns ``None``
+    for every plugin, crashing the training subprocess with
+    ``ValueError: Unknown model_type in config: <plugin>``.
+
+    This must run in a subprocess because pytest's own environment only
+    places the project root on sys.path, so the duplicate-module scenario
+    cannot be reproduced in-process.
+    """
+
+    def test_both_module_identities_carry_plugin_after_bootstrap(self, tmp_path):
+        models_dir = tmp_path / "models"
+        models_dir.mkdir()
+        (models_dir / "test_plugin_model.py").write_text(VALID_PLUGIN_SRC)
+
+        import ml_models.plugin_loader as pl
+        ml_models_dir = os.path.dirname(os.path.abspath(pl.__file__))
+        project_root  = os.path.dirname(ml_models_dir)
+
+        # Mirror the training subprocess PYTHONPATH: project root + ml_models/.
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.pathsep.join([project_root, ml_models_dir])
+
+        result = subprocess.run(
+            [sys.executable, "-c", _BOOTSTRAP_MIRROR_SCRIPT, str(models_dir)],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, (
+            f"subprocess failed (returncode={result.returncode})\n"
+            f"stdout:\n{result.stdout}\n"
+            f"stderr:\n{result.stderr}"
+        )
+        assert "OK" in result.stdout, f"missing OK marker; stdout={result.stdout!r}"

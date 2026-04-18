@@ -57,6 +57,7 @@ from workflows.model_exploration import (
     load_tuning_outputs_from_paths,
     tuning_outputs_to_summaries,
     run_workflow,
+    _register_plugin,
 )
 
 
@@ -562,9 +563,24 @@ class TestRunWorkflowMultiIteration:
 # ---------------------------------------------------------------------------
 
 class TestRunWorkflowValidationRetry:
+    """Exercise the *outer* propose→implement→validate retry loop.
+
+    The workflow has two retry layers (see ``run_workflow``):
+      - **inner** ``max_impl_attempts``: validator failure re-runs the
+        implementor with the validator's error as feedback, keeping the
+        same proposal. Default is 3.
+      - **outer** ``max_proposal_attempts``: only triggered when all inner
+        impl retries are exhausted; generates a brand new proposal.
+
+    These tests are about the OUTER loop, so they pin
+    ``max_impl_attempts=1`` to disable the inner one — otherwise the first
+    validator failure is absorbed by an impl retry (same proposal) and
+    the outer loop never sees it.
+    """
 
     def test_retries_on_validation_failure(self, workflow_env):
-        # First attempt fails, second passes
+        # First validation fails (impl retries are off → bubbles to outer
+        # loop), second proposal's validation passes.
         workflow_env["valid"].return_value.run.side_effect = [
             _make_validator_output(passed=False),
             _make_validator_output(passed=True),
@@ -575,6 +591,7 @@ class TestRunWorkflowValidationRetry:
             source_run_name="v1",
             workspace=workflow_env["workspace"],
             run_name="test_run",
+            max_impl_attempts=1,
         )
         assert len(results) == 1
         assert workflow_env["propose"].return_value.run.call_count == 2
@@ -591,6 +608,7 @@ class TestRunWorkflowValidationRetry:
             source_run_name="v1",
             workspace=workflow_env["workspace"],
             run_name="test_run",
+            max_impl_attempts=1,
         )
         # Second proposal call should have previous_failures
         second_call_input = workflow_env["propose"].return_value.run.call_args_list[1][0][0]
@@ -598,6 +616,8 @@ class TestRunWorkflowValidationRetry:
         assert "shape mismatch" in second_call_input.previous_failures[0]
 
     def test_stops_after_max_proposal_attempts(self, workflow_env):
+        # Default max_impl_attempts=3, so 2 outer attempts × 3 impl retries
+        # = 6 validator calls. Only the OUTER count matters here.
         workflow_env["valid"].return_value.run.return_value = _make_validator_output(passed=False)
         results = run_workflow(
             data_dir=workflow_env["data_dir"],
@@ -622,8 +642,119 @@ class TestRunWorkflowValidationRetry:
             source_run_name="v1",
             workspace=workflow_env["workspace"],
             run_name="test_run",
+            max_impl_attempts=1,
         )
         run_dir = os.path.join(workflow_env["workspace"], "test_run")
         iter_dir = os.path.join(run_dir, "iteration_001")
         assert os.path.isdir(os.path.join(iter_dir, "attempt_001_gated_tcn"))
         assert os.path.isdir(os.path.join(iter_dir, "attempt_002_gated_tcn"))
+
+
+# ---------------------------------------------------------------------------
+# _register_plugin tests (Phase 4 — docs/run_scoped_plugins.md)
+# ---------------------------------------------------------------------------
+
+class TestRegisterPlugin:
+    """Phase 4 contract: ``_register_plugin`` must copy the validated plugin
+    into the *caller-supplied* ``dest_plugin_dir`` (the tuner's run-scoped
+    plugin dir). Pre-Phase-4 it copied to the legacy global
+    ``<repo>/agent_generated/models/``, which the training subprocess no
+    longer scans once SIDERIUS_PLUGIN_DIRS is set."""
+
+    def _make_implementor_output_with_real_files(self, tmp_path, model_type="gated_tcn"):
+        """Build an ImplementorOutput whose model_file_path /
+        description_file_path point at real files inside tmp_path so
+        ``_register_plugin``'s ``shutil.copy2`` calls actually run."""
+        src_models = tmp_path / "src" / "models"
+        src_models.mkdir(parents=True)
+        plugin_src = src_models / f"{model_type}.py"
+        plugin_src.write_text(
+            f'PLUGIN_MODEL_TYPE = "{model_type}"\n'
+            "class PLUGIN_CONFIG_CLASS: ...\n"
+            "class PLUGIN_MODEL_CLASS: ...\n"
+        )
+        desc_src_dir = src_models / model_type
+        desc_src_dir.mkdir()
+        desc_src = desc_src_dir / "description.md"
+        desc_src.write_text("# Test plugin description\n")
+        test_src = tmp_path / "src" / "tests" / f"test_{model_type}.py"
+        test_src.parent.mkdir(parents=True)
+        test_src.write_text("def test_noop(): pass\n")
+
+        return ImplementorOutput(
+            model_type=model_type,
+            model_file_path=str(plugin_src),
+            test_file_path=str(test_src),
+            description_file_path=str(desc_src),
+            config_fields={"n_layers": 4},
+            model_description="A test plugin.",
+            mathematical_definition="y = f(x)",
+        )
+
+    def test_writes_plugin_into_supplied_dest(self, tmp_path):
+        """Plugin file lands at ``<dest_plugin_dir>/<model_name>.py`` —
+        nowhere else. This is the core Phase 4 promise."""
+        impl = self._make_implementor_output_with_real_files(tmp_path)
+        dest = tmp_path / "ws" / "plugins" / "tune_run"
+        _register_plugin(impl, "gated_tcn", str(dest))
+
+        assert (dest / "gated_tcn.py").is_file()
+        # And the file actually contains the source we wrote.
+        assert "PLUGIN_MODEL_TYPE" in (dest / "gated_tcn.py").read_text()
+
+    def test_writes_description_into_supplied_dest(self, tmp_path):
+        impl = self._make_implementor_output_with_real_files(tmp_path)
+        dest = tmp_path / "ws" / "plugins" / "tune_run"
+        _register_plugin(impl, "gated_tcn", str(dest))
+
+        assert (dest / "gated_tcn" / "description.md").is_file()
+        assert "Test plugin description" in (dest / "gated_tcn" / "description.md").read_text()
+
+    def test_does_not_touch_legacy_global_dir(self, tmp_path, monkeypatch):
+        """Regression guard for the silent-breakage case the previous design
+        had: with ``SIDERIUS_PLUGIN_DIRS`` set, anything written to the
+        legacy ``<repo>/agent_generated/models/`` is invisible to the
+        training subprocess. Phase 4 must NOT write there."""
+        # Run from a tmp cwd so any accidental "agent_generated/models/..."
+        # write would land here, where we can detect it.
+        monkeypatch.chdir(tmp_path)
+        impl = self._make_implementor_output_with_real_files(tmp_path)
+        dest = tmp_path / "ws" / "plugins" / "tune_run"
+        _register_plugin(impl, "gated_tcn", str(dest))
+
+        legacy = tmp_path / "agent_generated" / "models" / "gated_tcn.py"
+        assert not legacy.exists(), (
+            f"_register_plugin wrote to the legacy global dir at {legacy} — "
+            "this regresses Phase 4. The training subprocess no longer scans "
+            "that path when SIDERIUS_PLUGIN_DIRS is set."
+        )
+
+    def test_creates_dest_dir_if_missing(self, tmp_path):
+        """The workflow constructs ``dest_plugin_dir`` via ``get_plugin_dir``
+        and may call ``_register_plugin`` before the tuner's sandbox has
+        ``_ensure_dir``-ed it. The function must create the dir on its own."""
+        impl = self._make_implementor_output_with_real_files(tmp_path)
+        dest = tmp_path / "fresh" / "plugins" / "tune_run"
+        assert not dest.exists()
+        _register_plugin(impl, "gated_tcn", str(dest))
+        assert (dest / "gated_tcn.py").is_file()
+
+    def test_skips_when_source_plugin_missing(self, tmp_path, capsys):
+        """Defensive: if the implementor output points at a path that
+        doesn't exist (e.g. mocked output in a unit test), the function
+        warns and returns instead of raising."""
+        impl = ImplementorOutput(
+            model_type="ghost",
+            model_file_path=str(tmp_path / "does_not_exist.py"),
+            test_file_path=str(tmp_path / "test_ghost.py"),
+            description_file_path=str(tmp_path / "ghost" / "description.md"),
+            config_fields={},
+            model_description="x",
+            mathematical_definition="x",
+        )
+        dest = tmp_path / "ws" / "plugins" / "tune_run"
+        _register_plugin(impl, "ghost", str(dest))  # must not raise
+
+        captured = capsys.readouterr()
+        assert "plugin file not found" in captured.out
+        assert not (dest / "ghost.py").exists()
