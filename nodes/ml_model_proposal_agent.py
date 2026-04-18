@@ -22,7 +22,6 @@ Node contract:
 import os
 import json
 import argparse
-import importlib
 
 from pydantic import ValidationError
 
@@ -32,7 +31,6 @@ from agent.schemas.proposal import ProposalInput, ProposalOutput, FalsifiablePre
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
-from execute_tools.sample_set_builder import build_sample_set
 
 # Maximum number of retries when the proposing stage produces invalid output.
 # Total attempts = _MAX_PROPOSING_RETRIES + 1.
@@ -40,90 +38,6 @@ _MAX_PROPOSING_RETRIES = 2
 
 # One retry when causal_reasoning produces a prediction below minimum_boldness.
 _MAX_REASONING_RETRIES = 1
-
-# Module-level flag so the "time-gate disabled" warning prints exactly once
-# per process — mirrors the tuner's startup-once policy.
-_TIME_GATE_WARNED = False
-
-
-def _apply_time_gate(output: ProposalOutput, inp: ProposalInput) -> None:
-    """Phase E2 — proposer baseline-gate (gate-and-annotate, §2.7.4).
-
-    Mutates ``output.time_risk`` in place:
-      - feasible        → leaves None (default).
-      - infeasible      → sets it to the lever-suggestion text from the skill.
-      - status=error    → leaves None and prints a warning. The proposer never
-                          blocks on a skill failure (a brand-new model_type that
-                          isn't yet in MODEL_REGISTRY trips this path; the
-                          downstream tuner round will gate again with the real
-                          implementation in place).
-
-    No-op when the budget for the active mode (``inp.is_trial`` ?
-    ``trial_time_budget_minutes`` : ``formal_time_budget_minutes``) is None.
-    Phase I splits the single budget into two so each mode has its own ceiling;
-    the proposer picks the one that matches the mode it's estimating against.
-    """
-    global _TIME_GATE_WARNED
-    chosen_budget = (inp.trial_time_budget_minutes
-                     if inp.is_trial
-                     else inp.formal_time_budget_minutes)
-    if chosen_budget is None:
-        if not _TIME_GATE_WARNED:
-            mode_label = "trial" if inp.is_trial else "formal"
-            print(f"[time-gate disabled / {mode_label}] selected mode budget is "
-                  f"None — proposer's baseline gate will not run.")
-            _TIME_GATE_WARNED = True
-        return
-
-    baseline = output.baseline_config or {}
-    model_config = baseline.get("model_config") or {}
-    train_config = baseline.get("train_config") or {}
-    loss_config  = baseline.get("loss_config")  or {}
-
-    sample_set = build_sample_set(
-        is_trial=inp.is_trial,
-        file_index=6,                       # ignored when is_trial=True
-        trial_strategy=inp.trial_strategy,
-        trial_portion=inp.trial_portion,
-        target_files=inp.target_files or None,
-        seed=inp.sampling_seed,
-    )
-
-    mode_label = "trial" if inp.is_trial else "formal"
-    print(f"\n>>> [Baseline time-gate / {mode_label}] Checking "
-          f"'{output.model_name}' against {chosen_budget:.0f} min budget...")
-    skill_module = importlib.import_module(
-        "agent.skills.evaluate_time_skill.wrapper"
-    )
-    # The skill's first arg is `sandbox`, but evaluate_time_skill never reads
-    # it — pass None so the proposer doesn't need to instantiate a sandbox
-    # just to call the gate.
-    result = skill_module.run_skill(
-        None,
-        model_type=output.model_name,
-        model_config=model_config,
-        train_config=train_config,
-        loss_config=loss_config,
-        sample_set=sample_set,
-        train_portion=inp.train_portion,
-        time_budget_minutes=chosen_budget,
-        data_dir=inp.data_dir,
-    )
-
-    status = result.get("status")
-    if status == "error":
-        # Don't block the proposer — the most common failure here is the
-        # newly-proposed model_type not being in MODEL_REGISTRY yet.
-        print(f"   [time-gate warning] skill returned error: "
-              f"{result.get('message', '')[:200]} — leaving time_risk=None.")
-        return
-
-    if not result.get("feasible", True):
-        suggestion = result.get("suggestion") or result.get("verdict") or ""
-        output.time_risk = suggestion
-        print(f"   [time-gate ❌ INFEASIBLE] time_risk set: {suggestion}")
-    else:
-        print(f"   [time-gate ✅ FITS] {result.get('verdict', '')}")
 
 
 def _check_citation_discipline(
@@ -508,17 +422,6 @@ class MLModelProposalAgent:
             output = self._run_pipeline(inp)
         else:
             output = self._run_legacy(inp)
-
-        # --- Phase E2: baseline time-budget gate (gate-and-annotate) ---
-        # Runs the same evaluate_time_skill the tuner uses, against the
-        # proposer's just-emitted baseline_config. On infeasible, attaches a
-        # time_risk note that the validator→tuner protocol will surface to
-        # the planner. See docs/time_estimator_implement.md §2.7.
-        try:
-            _apply_time_gate(output, inp)
-        except Exception as exc:  # pragma: no cover — defensive
-            print(f"   [time-gate warning] unexpected error: {exc} — "
-                  f"leaving time_risk=None.")
 
         # --- Persist ---
         if inp.storage.backend == "local" and inp.storage.local:

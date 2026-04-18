@@ -536,7 +536,7 @@ class ProposalInput(BaseModel):
         default=None,
         description="Wall-time budget in minutes against which evaluate_time_skill "
                     "gates the baseline config when inp.is_trial=True. None = "
-                    "trial gate disabled (no estimate, no time_risk annotation). "
+                    "trial gate disabled (no estimate). "
                     "See §2.7 + Phase I — the single time_budget_minutes field "
                     "used in Phases D-G was split into trial/formal so each mode "
                     "has its own ceiling.",
@@ -706,19 +706,6 @@ class ProposalOutput(BaseModel):
                     "Empty = no issues found. Non-empty = the validator surfaces "
                     "these as warnings. This is a flag, not a veto.",
     )
-    time_risk: Optional[str] = Field(
-        default=None,
-        description="Non-None when evaluate_time_skill estimated the baseline_config "
-                    "would exceed the wall-time budget (gate-and-annotate, "
-                    "docs/time_estimator_implement.md §2.7.4). Carries the suggestion "
-                    "text from _suggest_lever so the validator→tuner protocol can "
-                    "prepend it to expert_advice as round-0 guidance. None = baseline "
-                    "fits the budget or the gate was disabled (the budget for the "
-                    "active mode — trial_time_budget_minutes or "
-                    "formal_time_budget_minutes — was not supplied at the workflow "
-                    "level).",
-    )
-
     @model_validator(mode="after")
     def _validate_baseline_segmentation_size(self):
         """Ensure ``baseline_config`` respects the dataset's ``segmentation_size`` rule.
