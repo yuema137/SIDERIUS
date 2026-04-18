@@ -196,6 +196,24 @@ class HyperparamTuningAgent:
             print("[time-gate disabled / formal] formal_time_budget_minutes is None "
                   "— evaluate_time_skill will not gate formal-mode rounds.")
 
+        # Per-mode VRAM-budget gate (Phase K). Mirrors the time-gate shape: each
+        # mode has its own optional ceiling, per-round pick happens inside the
+        # loop based on plan.is_trial. When the mode's budget is None, the VRAM
+        # skill falls back to the defensive free×0.8 behaviour (no operator
+        # ceiling) — the skill still runs, but the vram_*_gb memory fields are
+        # omitted so the planner sees "this round wasn't operator-budgeted."
+        # See docs/resource_estimator_implement.md §10.4 / §10.8.
+        trial_vram_budget = agent_input.trial_vram_budget_gb
+        formal_vram_budget = agent_input.formal_vram_budget_gb
+        if trial_vram_budget is None:
+            print("[vram-gate disabled / trial] trial_vram_budget_gb is None "
+                  "— evaluate_vram_skill uses free×0.8 defensive limit for "
+                  "trial-mode rounds.")
+        if formal_vram_budget is None:
+            print("[vram-gate disabled / formal] formal_vram_budget_gb is None "
+                  "— evaluate_vram_skill uses free×0.8 defensive limit for "
+                  "formal-mode rounds.")
+
         # --- Initialize sandbox and brain (via factory for DI / pseudo-mode) ---
         sandbox = self._sandbox_factory(
             metadata_source="local",
@@ -490,8 +508,28 @@ class HyperparamTuningAgent:
                     "loss_config":  plan.loss_cfg,
                 }
 
-                print(f"\n[Step 0/3] Resource check...")
-                resource_check = _run_skill("evaluate_vram_skill", sandbox, **active_params)
+                # Phase K: per-mode VRAM-budget pick. plan.is_trial decides
+                # which ceiling applies for THIS round; the unselected one is
+                # ignored. When the chosen budget is None the skill still runs
+                # but falls back to free×0.8 defensive behaviour (no operator
+                # ceiling) — the memory's vram_*_gb fields are omitted in that
+                # case so the planner sees "this round wasn't operator-budgeted."
+                # See docs/resource_estimator_implement.md §10.4 / §10.8.
+                chosen_vram_budget = (trial_vram_budget
+                                      if plan.is_trial
+                                      else formal_vram_budget)
+                vram_budget_desc = (f"{chosen_vram_budget} GB"
+                                    if chosen_vram_budget is not None
+                                    else "free×0.8")
+                print(f"\n[Pre-flight 1/2] VRAM check "
+                      f"(mode={'trial' if plan.is_trial else 'formal'}, "
+                      f"budget={vram_budget_desc})...")
+                resource_check = _run_skill(
+                    "evaluate_vram_skill",
+                    sandbox,
+                    **active_params,
+                    vram_budget_gb=chosen_vram_budget,
+                )
                 if resource_check.get("status") == "error":
                     raise RuntimeError(f"Resource check error: {resource_check.get('message')}")
 
@@ -572,11 +610,25 @@ class HyperparamTuningAgent:
                             "memory_update": resource_check.get("suggestion", "Reduce batch_size or segmentation_size."),
                         },
                     }
+                    # Phase K — surface the same two VRAM fields the success
+                    # record carries so the planner sees the same shape
+                    # regardless of pass/fail. Omitted when the gate is
+                    # disabled (chosen_vram_budget is None), mirroring §J.3
+                    # for time. Mode is inferred from `time_mode` on records
+                    # where the time gate also ran — no separate vram_mode.
+                    # See docs/resource_estimator_implement.md §10.4 / §10.8.
+                    if chosen_vram_budget is not None:
+                        oom_record["memory"]["vram_estimate_gb"] = (
+                            resource_check.get("estimated_gb")
+                        )
+                        oom_record["memory"]["vram_budget_gb"] = (
+                            resource_check.get("limit_gb")
+                        )
                     ExperimentRecord.model_validate(oom_record)
                     sandbox.save_record(oom_record)
                     continue
 
-                # [Step 0.5/3] Wall-time gate. Mirrors the VRAM gate above:
+                # [Pre-flight 2/2] Wall-time gate. Mirrors the VRAM gate above:
                 # error → raise; infeasible → emit skipped_time_risk record
                 # and continue without consuming a round. Skipped entirely
                 # when the budget for the active mode is None (one-time
@@ -593,7 +645,7 @@ class HyperparamTuningAgent:
                                       else formal_time_budget)
                 time_check = None
                 if chosen_time_budget is not None:
-                    print(f"\n[Step 0.5/3] Time check "
+                    print(f"\n[Pre-flight 2/2] Time check "
                           f"(mode={'trial' if plan.is_trial else 'formal'}, "
                           f"budget={chosen_time_budget} min)...")
                     time_check = _run_skill(
@@ -898,6 +950,19 @@ class HyperparamTuningAgent:
                     )
                     final_record["memory"]["time_mode"] = (
                         "trial" if plan.is_trial else "formal"
+                    )
+                # Phase K — surface pre-flight VRAM-estimator context to the
+                # planner the same way Phase J surfaces time context. Only
+                # added when the gate ran with a budget (chosen_vram_budget
+                # was set); omitted when the gate fell back to free×0.8.
+                # Mode is inferred from `time_mode` above when present.
+                # See docs/resource_estimator_implement.md §10.4.
+                if chosen_vram_budget is not None:
+                    final_record["memory"]["vram_estimate_gb"] = (
+                        resource_check.get("estimated_gb")
+                    )
+                    final_record["memory"]["vram_budget_gb"] = (
+                        resource_check.get("limit_gb")
                     )
                 # Trial context
                 if trial_config.is_trial:

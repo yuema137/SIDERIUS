@@ -112,7 +112,15 @@ FAKE_CONFIG_MANUAL = {
     "data": {"punet": {"fields": ["depth", "segmentation_size"]}},
 }
 
-FAKE_RESOURCE_CHECK_OK = {"status": "success", "feasible": True}
+FAKE_RESOURCE_CHECK_OK = {
+    "status": "success",
+    "feasible": True,
+    "estimated_gb": 2.5,
+    "limit_gb": 6.0,
+    "vram_budget_gb": 8.0,
+    "verdict": "FITS",
+    "suggestion": "",
+}
 
 FAKE_RESOURCE_CHECK_OOM = {
     "status": "success",
@@ -524,10 +532,13 @@ def _make_input_with_budget(
     max_rounds=1,
     trial_budget=None,
     formal_budget=None,
+    trial_vram_budget=None,
+    formal_vram_budget=None,
     data_dir=None,
     is_trial=False,
 ):
-    """Phase I: helper takes both budgets independently.
+    """Phase I/K: helper takes both time budgets and both VRAM budgets
+    independently.
 
     The default ``FAKE_PLAN_RESPONSE`` has no ``is_trial`` key so the LLM-side
     plan defaults to formal mode → tests passing only ``formal_budget`` will
@@ -548,6 +559,8 @@ def _make_input_with_budget(
         progress_bar=False,
         trial_time_budget_minutes=trial_budget,
         formal_time_budget_minutes=formal_budget,
+        trial_vram_budget_gb=trial_vram_budget,
+        formal_vram_budget_gb=formal_vram_budget,
         data_dir=data_dir,
         is_trial=is_trial,
     )
@@ -936,6 +949,284 @@ class TestTimeBudgetGate:
         assert mem["time_estimate_minutes"] == 90.0
         assert mem["time_budget_minutes"] == 30.0
         assert mem["time_mode"] == "formal"
+
+
+# ---------------------------------------------------------------------------
+# [Pre-flight 1/2] VRAM-budget gate (Phase K)
+#
+# evaluate_vram_skill runs BEFORE evaluate_time_skill. Mirrors the time gate's
+# shape with one key difference: the VRAM skill ALWAYS runs (it still enforces
+# the defensive free×0.8 floor even without a budget); the budget only tightens
+# the ceiling. The memory-field guard is keyed on chosen_vram_budget is not
+# None — when absent, vram_*_gb fields are omitted from the saved record.
+# See docs/resource_estimator_implement.md §10.4 / §10.7 / §10.8.
+# ---------------------------------------------------------------------------
+
+
+FAKE_RESOURCE_CHECK_OVER = {
+    "status": "success",
+    "feasible": False,
+    "estimated_gb": 12.0,
+    "limit_gb": 8.0,
+    "vram_budget_gb": 8.0,
+    "verdict": "OOM RISK — Estimated 12 GB exceeds 8 GB limit.",
+    "suggestion": "Reduce batch_size.",
+}
+
+
+class TestVramBudgetGate:
+    """Phase K — per-mode VRAM-budget pick + memory propagation."""
+
+    def _make_agent(
+        self,
+        vram_check_result=FAKE_RESOURCE_CHECK_OK,
+        *,
+        time_check_result=FAKE_TIME_CHECK_OK,
+        enable_trial_mode=False,
+    ):
+        """Mirror of TestTimeBudgetGate._make_agent with a configurable VRAM
+        result. Time gate defaults to FITS so VRAM-focused assertions aren't
+        clouded by the time check also blocking."""
+        cm_brain = patch("nodes.ml_hyperparameter_tune_agent.LLMBridge")
+        cm_sandbox = patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox")
+        cm_skill = patch("nodes.ml_hyperparameter_tune_agent._run_skill")
+        cm_tmp = tempfile.TemporaryDirectory()
+        cm_anchor = (patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map")
+                     if enable_trial_mode else None)
+        cm_exists = (patch("os.path.exists", return_value=True)
+                     if enable_trial_mode else None)
+
+        MockBridge = cm_brain.__enter__()
+        MockSandbox = cm_sandbox.__enter__()
+        mock_skill = cm_skill.__enter__()
+        configs_dir = cm_tmp.__enter__()
+        if cm_anchor is not None:
+            mock_anchor = cm_anchor.__enter__()
+            mock_anchor.return_value = {"anchors": {}, "s_max": 1.0}
+        if cm_exists is not None:
+            cm_exists.__enter__()
+
+        mock_brain = MockBridge.return_value
+        mock_brain.plan.return_value = FAKE_PLAN_RESPONSE
+        mock_brain.reflect.return_value = FAKE_REFLECT_RESPONSE
+
+        saved_records = []
+        skill_calls = []
+        mock_sandbox = MockSandbox.return_value
+        mock_sandbox.get_summary.side_effect = lambda: list(saved_records)
+        mock_sandbox.save_record.side_effect = lambda r: saved_records.append(r)
+        mock_sandbox.dirs = (
+            {"configs": configs_dir, "data": configs_dir}
+            if enable_trial_mode
+            else {"configs": configs_dir}
+        )
+        if enable_trial_mode:
+            mock_sandbox.score_vector.return_value = FAKE_SCORE_VECTOR_RESULT
+
+        def dispatch(skill_folder, sandbox, **params):
+            skill_calls.append((skill_folder, params))
+            if skill_folder == "check_config_format_skill":
+                return FAKE_CONFIG_MANUAL
+            if skill_folder == "evaluate_vram_skill":
+                return vram_check_result
+            if skill_folder == "evaluate_time_skill":
+                return time_check_result
+            if skill_folder == "training_skill":
+                return FAKE_TRAIN_RESULT
+            if skill_folder == "inference_skill":
+                return FAKE_INFERENCE_RESULT
+            if skill_folder == "denoising_score_skill":
+                return FAKE_SCORE_RESULT
+            return {"status": "error", "message": f"unknown skill {skill_folder}"}
+
+        mock_skill.side_effect = dispatch
+
+        agent = HyperparamTuningAgent()
+
+        def cleanup():
+            if cm_exists is not None:
+                cm_exists.__exit__(None, None, None)
+            if cm_anchor is not None:
+                cm_anchor.__exit__(None, None, None)
+            cm_brain.__exit__(None, None, None)
+            cm_sandbox.__exit__(None, None, None)
+            cm_skill.__exit__(None, None, None)
+            cm_tmp.__exit__(None, None, None)
+
+        return agent, mock_brain, mock_sandbox, saved_records, skill_calls, cleanup
+
+    # --- per-mode budget pick -----------------------------------------------
+
+    def test_trial_mode_round_picks_trial_vram_budget(self, tmp_path):
+        """plan.is_trial=True → evaluate_vram_skill receives the trial VRAM
+        budget. max_rounds=2 because the agent forces the FINAL round to
+        formal — we assert on the first (trial) call."""
+        agent, mock_brain, _, _, skill_calls, cleanup = self._make_agent(
+            enable_trial_mode=True,
+        )
+        mock_brain.plan.return_value = {**FAKE_PLAN_RESPONSE, "is_trial": True}
+        try:
+            agent.run(_make_input_with_budget(
+                tmp_path,
+                max_rounds=2,
+                trial_vram_budget=6.0,
+                formal_vram_budget=24.0,
+                is_trial=True,
+            ))
+        finally:
+            cleanup()
+        vram_calls = [p for s, p in skill_calls if s == "evaluate_vram_skill"]
+        assert len(vram_calls) == 2
+        # First round runs as trial → trial vram budget.
+        assert vram_calls[0]["vram_budget_gb"] == 6.0
+
+    def test_formal_mode_round_picks_formal_vram_budget(self, tmp_path):
+        """plan.is_trial=False (default) → evaluate_vram_skill receives the
+        formal VRAM budget. The trial budget is ignored even when set."""
+        agent, _, _, _, skill_calls, cleanup = self._make_agent()
+        try:
+            agent.run(_make_input_with_budget(
+                tmp_path,
+                trial_vram_budget=6.0,
+                formal_vram_budget=24.0,
+            ))
+        finally:
+            cleanup()
+        vram_calls = [p for s, p in skill_calls if s == "evaluate_vram_skill"]
+        assert len(vram_calls) == 1
+        assert vram_calls[0]["vram_budget_gb"] == 24.0
+
+    def test_none_budget_passes_none_to_skill(self, tmp_path):
+        """Both VRAM budgets None → skill still runs (defensive free×0.8
+        floor is enforced inside the wrapper), but the kwarg value is None
+        so the skill knows to use its fallback path."""
+        agent, _, _, _, skill_calls, cleanup = self._make_agent()
+        try:
+            agent.run(_make_input_with_budget(tmp_path))
+        finally:
+            cleanup()
+        vram_calls = [p for s, p in skill_calls if s == "evaluate_vram_skill"]
+        assert len(vram_calls) == 1
+        assert vram_calls[0]["vram_budget_gb"] is None
+
+    # --- joint short-circuit ------------------------------------------------
+
+    def test_vram_fail_short_circuits_time_check(self, tmp_path):
+        """VRAM gate returning feasible=False must `continue` the loop, so
+        evaluate_time_skill is never called even when a time budget is set."""
+        agent, _, _, saved_records, skill_calls, cleanup = self._make_agent(
+            vram_check_result=FAKE_RESOURCE_CHECK_OVER,
+        )
+        try:
+            agent.run(_make_input_with_budget(
+                tmp_path,
+                formal_budget=30.0,
+                formal_vram_budget=8.0,
+            ))
+        finally:
+            cleanup()
+        called = [s for s, _ in skill_calls]
+        assert "evaluate_vram_skill" in called
+        assert "evaluate_time_skill" not in called
+        assert "training_skill" not in called
+        # The skipped_oom_risk record is what was saved.
+        assert saved_records and saved_records[0]["status"] == "skipped_oom_risk"
+
+    # --- success-record memory ---------------------------------------------
+
+    def test_success_record_memory_carries_vram_fields_formal(self, tmp_path):
+        """Gate-pass in formal mode with a budget set → memory carries
+        vram_estimate_gb and vram_budget_gb sourced from the resource_check
+        dict (estimated_gb / limit_gb)."""
+        agent, _, _, saved_records, _, cleanup = self._make_agent()
+        try:
+            agent.run(_make_input_with_budget(
+                tmp_path, formal_vram_budget=8.0,
+            ))
+        finally:
+            cleanup()
+        rec = saved_records[0]
+        assert rec["status"] == "success"
+        mem = rec["memory"]
+        assert mem["vram_estimate_gb"] == 2.5   # FAKE_RESOURCE_CHECK_OK
+        assert mem["vram_budget_gb"] == 6.0     # limit_gb (min of defensive, budget)
+
+    def test_success_record_memory_vram_fields_trial_mode(self, tmp_path):
+        """Gate-pass in trial mode → the memory's vram fields carry the
+        estimate the gate used; mode is inferable via time_mode when the
+        time gate also ran."""
+        agent, mock_brain, _, saved_records, _, cleanup = self._make_agent(
+            enable_trial_mode=True,
+        )
+        mock_brain.plan.return_value = {**FAKE_PLAN_RESPONSE, "is_trial": True}
+        try:
+            agent.run(_make_input_with_budget(
+                tmp_path,
+                max_rounds=2,
+                trial_vram_budget=6.0,
+                formal_vram_budget=24.0,
+                is_trial=True,
+            ))
+        finally:
+            cleanup()
+        trial_rec = saved_records[0]
+        assert trial_rec["status"] == "success"
+        assert trial_rec["memory"]["vram_estimate_gb"] == 2.5
+        assert trial_rec["memory"]["vram_budget_gb"] == 6.0
+
+    def test_success_record_omits_vram_fields_when_gate_disabled(self, tmp_path):
+        """Both VRAM budgets None → the two vram_*_gb keys must be ABSENT
+        from the saved record's memory dict (not present with None values),
+        so the reflector sees the same shape as pre-Phase-K records."""
+        agent, _, _, saved_records, _, cleanup = self._make_agent()
+        try:
+            agent.run(_make_input_with_budget(tmp_path))  # both vram None
+        finally:
+            cleanup()
+        rec = saved_records[0]
+        assert rec["status"] == "success"
+        mem = rec["memory"]
+        assert "vram_estimate_gb" not in mem
+        assert "vram_budget_gb" not in mem
+
+    # --- skipped_oom_risk record memory ------------------------------------
+
+    def test_skipped_oom_risk_record_carries_vram_fields(self, tmp_path):
+        """Mirror of the time gate's §J.3 — the skipped_oom_risk record must
+        carry the same two vram fields as the success record so the planner
+        sees the same shape regardless of pass/fail."""
+        agent, _, _, saved_records, _, cleanup = self._make_agent(
+            vram_check_result=FAKE_RESOURCE_CHECK_OVER,
+        )
+        try:
+            agent.run(_make_input_with_budget(
+                tmp_path, formal_vram_budget=8.0,
+            ))
+        finally:
+            cleanup()
+        rec = saved_records[0]
+        assert rec["status"] == "skipped_oom_risk"
+        mem = rec["memory"]
+        # Values come from FAKE_RESOURCE_CHECK_OVER
+        assert mem["vram_estimate_gb"] == 12.0
+        assert mem["vram_budget_gb"] == 8.0
+
+    def test_skipped_oom_risk_record_omits_vram_fields_when_disabled(self, tmp_path):
+        """No VRAM budget set but the defensive floor still flags OOM risk →
+        the skipped_oom_risk record must omit vram_*_gb keys (gate-disabled
+        shape), mirroring the success-record behaviour."""
+        agent, _, _, saved_records, _, cleanup = self._make_agent(
+            vram_check_result=FAKE_RESOURCE_CHECK_OVER,
+        )
+        try:
+            agent.run(_make_input_with_budget(tmp_path))  # both vram None
+        finally:
+            cleanup()
+        rec = saved_records[0]
+        assert rec["status"] == "skipped_oom_risk"
+        mem = rec["memory"]
+        assert "vram_estimate_gb" not in mem
+        assert "vram_budget_gb" not in mem
 
 
 # ---------------------------------------------------------------------------
