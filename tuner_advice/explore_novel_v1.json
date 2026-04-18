@@ -28,6 +28,9 @@
     "MODEL SIZE GUIDANCE:",
     "Actively explore larger models. Do NOT default to minimal configurations. The VRAM ceiling is 4 GB — use it. Your proposed baseline_config should target a model large enough to be competitive (at minimum several million parameters). If your chosen architecture family naturally operates at larger scale (e.g. FNO with wide channels, deep SSM with large state dimensions, multi-layer RNN), embrace that scale rather than shrinking it for caution. The tuner will reduce complexity if VRAM or time budgets are exceeded — your job as the proposer is to aim for meaningful capacity, not to pre-emptively nerf the model.",
     "",
+    "SEGMENTATION_SIZE FLOOR:",
+    "Set baseline_config.model_config.segmentation_size to EITHER 40000 OR 50000. Smaller divisors (<=25000) caused formal-mode training + inference to take >10 hours per round in the previous run. 40000 or 50000 preserves adequate frequency resolution while keeping step counts tractable. Do NOT pick smaller values even if you think the architecture needs finer resolution — use the model's internal spectral branches for that instead.",
+    "",
     "STRATEGY:",
     "1. Use wavenet as a performance baseline (score ~5.58). Understand its strengths: dilated causal convolution for receptive field, gated activation for selectivity, skip connections for multi-scale aggregation.",
     "2. Identify the root bottleneck from the interpretation (e.g. low-frequency blindness, lack of global context). Ask: what architecture family addresses this bottleneck most directly?",
@@ -52,7 +55,7 @@
   "tune": [
     "Focus on finding good hyperparameters for this specific architecture. Try 2-3 learning rate values and 1-2 loss functions within the rounds.",
     "",
-    "CRITICAL CONSTRAINT — segmentation_size: Must exactly divide psd_segment_length=10000000. Valid values: [100, 125, 128, 160, 200, 250, 320, 400, 500, 625, 640, 800, 1000, 1250, 1600, 2000, 2500, 3125, 3200, 4000, 5000, 6250, 8000, 10000, 12500, 16000, 20000, 25000, 40000, 50000]. NEVER use 4096, 8192, or other powers of 2 unless they appear in this list. segmentation_size determines frequency resolution and must NOT be reduced just to save time.",
+    "CRITICAL CONSTRAINT — segmentation_size: Must exactly divide psd_segment_length=10000000. Valid values: [100, 125, 128, 160, 200, 250, 320, 400, 500, 625, 640, 800, 1000, 1250, 1600, 2000, 2500, 3125, 3200, 4000, 5000, 6250, 8000, 10000, 12500, 16000, 20000, 25000, 40000, 50000]. NEVER use 4096, 8192, or other powers of 2 unless they appear in this list. segmentation_size determines frequency resolution and must NOT be reduced just to save time. FOR THIS RUN: use ONLY 40000 or 50000 from the above list. Smaller divisors make formal-mode inference take >10 hours and are not permitted for this run.",
     "",
     "VRAM CEILING: 4 GB. Initial target: stay under 3.5 GB at baseline config.",
     "TIME BUDGET: The budget is a HARD UPPER LIMIT, not a target — there is no benefit to scaling up just to fill available headroom. Pick the smallest configuration that can plausibly test your hypothesis. trial_portion and train_portion are enforced by the system and cannot be changed. If previous experiments exceeded the time budget or the 4 GB VRAM ceiling, reduce MODEL COMPLEXITY (fewer layers, smaller hidden dimensions, fewer attention heads) — not segmentation_size or data portions."
