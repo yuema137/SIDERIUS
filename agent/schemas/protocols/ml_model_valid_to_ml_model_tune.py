@@ -56,6 +56,9 @@ def local_validated_model(
     trial_time_budget_minutes: Optional[float] = None,
     formal_time_budget_minutes: Optional[float] = None,
     data_dir: Optional[str] = None,
+    # --- VRAM-budget gate (evaluate_vram_skill, Phase K two-budget split) ---
+    trial_vram_budget_gb: Optional[float] = None,
+    formal_vram_budget_gb: Optional[float] = None,
 ) -> HyperparamTuningInput:
     """
     Map ValidatorOutput + ProposalOutput -> HyperparamTuningInput in-memory.
@@ -90,6 +93,16 @@ def local_validated_model(
         plan.is_trial. When the chosen budget is None the gate is skipped
         for that round (one-time warning per mode at startup).
         See §2.7.2 fan-in / Phase I.
+      - trial_vram_budget_gb / formal_vram_budget_gb :
+        workflow-supplied per-mode VRAM ceilings for the tuner's per-round
+        evaluate_vram_skill gate (Phase K two-budget split). Each budget
+        defaults to None; the per-round gate picks the one matching
+        plan.is_trial. When the chosen budget is None the skill still runs
+        but falls back to the defensive free×0.8 behaviour (no operator
+        ceiling). **No `proposal.vram_risk` surfacing in Phase K** — the
+        proposer-side gate is deferred per §10.17. Resource info reaches
+        the planner via the prompt block only (single-channel rule, §10.3).
+        See docs/resource_estimator_implement.md §10.9.
     """
     # Prepend planner-visible warnings to expert_advice so the tuner's planner
     # knows up front about (a) implementation deviating from the spec and
@@ -135,6 +148,8 @@ def local_validated_model(
         trial_time_budget_minutes=trial_time_budget_minutes,
         formal_time_budget_minutes=formal_time_budget_minutes,
         data_dir=data_dir,
+        trial_vram_budget_gb=trial_vram_budget_gb,
+        formal_vram_budget_gb=formal_vram_budget_gb,
     )
 
 

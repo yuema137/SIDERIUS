@@ -303,6 +303,80 @@ class TestTimeBudgetFanOut:
 
 
 # ---------------------------------------------------------------------------
+# VRAM-budget context fan-out (Phase K two-budget split)
+#
+# trial_vram_budget_gb / formal_vram_budget_gb fan out from the workflow/CLI
+# into HyperparamTuningInput (no proposer-side gate in Phase K — unlike the
+# time budgets, the interp→propose protocol is NOT touched). The per-round
+# pick (trial vs formal) happens inside the tuner based on plan.is_trial.
+# See docs/resource_estimator_implement.md §10.9 / §10.17.
+# ---------------------------------------------------------------------------
+
+
+class TestVramBudgetFanOut:
+
+    def test_trial_vram_budget_gb_passed_through(
+        self, validator_output, proposal_output, storage
+    ):
+        result = local_validated_model(
+            validator_output, proposal_output, storage,
+            trial_vram_budget_gb=6.0,
+        )
+        assert result.trial_vram_budget_gb == 6.0
+        # Phase K: setting the trial budget alone must NOT touch the formal one.
+        assert result.formal_vram_budget_gb is None
+
+    def test_formal_vram_budget_gb_passed_through(
+        self, validator_output, proposal_output, storage
+    ):
+        result = local_validated_model(
+            validator_output, proposal_output, storage,
+            formal_vram_budget_gb=24.0,
+        )
+        assert result.formal_vram_budget_gb == 24.0
+        # Phase K: setting the formal budget alone must NOT touch the trial one.
+        assert result.trial_vram_budget_gb is None
+
+    def test_both_vram_budgets_independent(
+        self, validator_output, proposal_output, storage
+    ):
+        """Phase K two-budget split: caller sets both — both survive the
+        protocol mapping with their own values, no cross-contamination."""
+        result = local_validated_model(
+            validator_output, proposal_output, storage,
+            trial_vram_budget_gb=6.0,
+            formal_vram_budget_gb=24.0,
+        )
+        assert result.trial_vram_budget_gb == 6.0
+        assert result.formal_vram_budget_gb == 24.0
+
+    def test_vram_defaults_none_when_omitted(
+        self, validator_output, proposal_output, storage
+    ):
+        """When the caller supplies neither VRAM kwarg, both fields default
+        to None so the tuner's per-round gate falls back to free×0.8."""
+        result = local_validated_model(validator_output, proposal_output, storage)
+        assert result.trial_vram_budget_gb is None
+        assert result.formal_vram_budget_gb is None
+
+    def test_vram_and_time_budgets_independent(
+        self, validator_output, proposal_output, storage
+    ):
+        """Caller can set VRAM budgets without touching time budgets, and
+        vice versa — the two gates are configured independently."""
+        result = local_validated_model(
+            validator_output, proposal_output, storage,
+            trial_vram_budget_gb=6.0,
+            formal_vram_budget_gb=24.0,
+        )
+        # VRAM set, time still default None.
+        assert result.trial_vram_budget_gb == 6.0
+        assert result.formal_vram_budget_gb == 24.0
+        assert result.trial_time_budget_minutes is None
+        assert result.formal_time_budget_minutes is None
+
+
+# ---------------------------------------------------------------------------
 # database_validated_model
 # ---------------------------------------------------------------------------
 
