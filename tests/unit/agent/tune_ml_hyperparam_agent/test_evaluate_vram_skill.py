@@ -190,8 +190,12 @@ class TestCpuDevice:
 
 class TestMemoryBreakdown:
 
-    def test_focal_loss_increases_estimate(self):
-        """Focal loss (one_hot int64) should produce a higher estimate than CE."""
+    def test_focal_loss_increases_training_phase_estimate(self):
+        """Focal loss (one_hot int64) increases the *training-phase* byte
+        total. Post-K.2.5 the wrapper reports the peak across phases, and
+        for the small RNN config inference dominates both CE and focal —
+        so the loss-type difference only surfaces inside
+        ``phase_breakdown['training']``, not in ``estimated_gb`` itself."""
         with patch("torch.cuda.is_available", return_value=True), \
              patch("torch.cuda.mem_get_info", return_value=(_16GB, _16GB)):
             result_ce = run_skill(
@@ -208,7 +212,10 @@ class TestMemoryBreakdown:
                 train_config=CUDA_TRAIN_CFG,
                 loss_config=FOCAL_LOSS_CFG,
             )
-        assert result_focal["estimated_gb"] > result_ce["estimated_gb"]
+        assert (
+            result_focal["phase_breakdown"]["training"]["total_bytes"]
+            > result_ce["phase_breakdown"]["training"]["total_bytes"]
+        )
 
     def test_result_contains_num_params(self):
         """Result must include the exact parameter count from model instantiation."""
@@ -384,3 +391,94 @@ class TestVramBudget:
         # Mentions the generic lever list
         for lever in ("depth", "width", "batch_size", "segmentation_size"):
             assert lever in s
+
+
+# ---------------------------------------------------------------------------
+# K.2.5 — peak aggregator over 3 phases
+# ---------------------------------------------------------------------------
+
+class TestPeakAggregation:
+    """K.2.5 turns this skill into a peak aggregator over training,
+    inference, and scoring. The binding constraint is the single phase
+    with the highest byte total (phases run in isolated subprocesses, so
+    they compete against the same VRAM ceiling one at a time)."""
+
+    def test_phase_breakdown_contains_all_three_phases(self):
+        """Every successful call exposes all 3 phases; scoring is always 0."""
+        with patch("torch.cuda.is_available", return_value=True), \
+             patch("torch.cuda.mem_get_info", return_value=(_16GB, _16GB)):
+            result = run_skill(
+                FakeSandbox(),
+                model_type="rnn",
+                model_config=SMALL_RNN_CFG,
+                train_config=CUDA_TRAIN_CFG,
+                loss_config=CE_LOSS_CFG,
+            )
+        assert set(result["phase_breakdown"].keys()) == {"training", "inference", "scoring"}
+        assert result["phase_breakdown"]["scoring"]["total_bytes"] == 0
+        assert result["phase_breakdown"]["scoring"]["phase"]       == "scoring"
+
+    def test_training_dominant_matches_pre_k25_training_formula(self):
+        """**Regression**: when training dominates, ``estimated_gb`` equals the
+        training-phase byte total / GB — i.e. the pre-K.2.5 training-only
+        formula is preserved exactly in that regime. A large-batch + focal
+        config guarantees training dominance over inference (which uses the
+        registered inference_batch, typically ≤25)."""
+        big_rnn = {
+            "model_type": "rnn",
+            "segmentation_size": 50000,
+            "embedding_dim": 64,
+            "hidden_dim": 64,
+            "num_layers": 2,
+        }
+        big_train = {"lr": 1e-4, "epochs": 1, "batch_size": 512, "device": "cuda"}
+        with patch("torch.cuda.is_available", return_value=True), \
+             patch("torch.cuda.mem_get_info", return_value=(_16GB, _16GB)):
+            result = run_skill(
+                FakeSandbox(),
+                model_type="rnn",
+                model_config=big_rnn,
+                train_config=big_train,
+                loss_config=FOCAL_LOSS_CFG,
+                vram_budget_gb=1000.0,  # take the feasibility gate out of the way
+            )
+        assert result["dominant_phase"] == "training"
+        training_bytes = result["phase_breakdown"]["training"]["total_bytes"]
+        assert result["estimated_gb"] == pytest.approx(training_bytes / _GB, abs=0.01)
+
+    def test_monkeypatched_huge_inference_batch_makes_inference_dominant(self):
+        """**Crossover**: monkeypatch the inference batch to a huge number
+        → inference's forward activations swamp training's grads+Adam. This
+        is exactly the regime K.2.5 makes observable; before the peak
+        aggregator, ``estimated_gb`` would have been the training-only
+        number and the planner would have silently under-forecast."""
+        from agent.skills.inference_skill import estimator as inf_est
+        with patch("torch.cuda.is_available", return_value=True), \
+             patch("torch.cuda.mem_get_info", return_value=(_16GB, _16GB)), \
+             patch.object(inf_est, "inference_batch_for", return_value=10_000):
+            result = run_skill(
+                FakeSandbox(),
+                model_type="rnn",
+                model_config=SMALL_RNN_CFG,
+                train_config=CUDA_TRAIN_CFG,
+                loss_config=CE_LOSS_CFG,
+            )
+        assert result["dominant_phase"] == "inference"
+        inference_bytes = result["phase_breakdown"]["inference"]["total_bytes"]
+        training_bytes  = result["phase_breakdown"]["training"]["total_bytes"]
+        assert inference_bytes > training_bytes
+        assert result["estimated_gb"] == pytest.approx(inference_bytes / _GB, abs=0.01)
+
+    def test_cpu_path_still_exposes_phase_breakdown(self):
+        """CPU short-circuit skips the feasibility gate but must still
+        return the per-phase breakdown (callers downstream may inspect
+        it even without a GPU)."""
+        result = run_skill(
+            FakeSandbox(),
+            model_type="rnn",
+            model_config=SMALL_RNN_CFG,
+            train_config=CPU_TRAIN_CFG,
+            loss_config=CE_LOSS_CFG,
+        )
+        assert set(result["phase_breakdown"].keys()) == {"training", "inference", "scoring"}
+        assert "dominant_phase" in result

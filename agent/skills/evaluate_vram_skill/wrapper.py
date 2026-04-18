@@ -1,20 +1,27 @@
 """
 evaluate_vram_skill/wrapper.py
 
-Proactively estimates GPU VRAM usage for a proposed experiment config and
-checks it against a per-mode operator budget (optional) combined with a
-defensive 80% cap on currently available VRAM.
+Peak-VRAM aggregator over the three execution phases. Estimates the
+worst-case GPU VRAM ceiling a proposed experiment will hit and checks it
+against a per-mode operator budget (optional) combined with a defensive
+80% cap on currently available VRAM.
 
 Call this BEFORE training to avoid OOM crashes.
 
-Memory model (worst-case, float32 training):
-  - Model weights:         num_params × 4 B
-  - Gradients:             num_params × 4 B
-  - Adam optimizer states: num_params × 8 B  (m + v)
-  - Output logits:         batch × 256 × seg_size × 4 B
-  - Activations (bwd):     ~2 × output_logits (rough conv/rnn estimate)
-  - Focal one_hot:         batch × 256 × seg_size × 8 B  (int64, only for focal loss)
-  - Transformer attention: batch × nhead × seg² × 4 B × num_layers  (transformer only)
+Aggregation (K.2.5):
+  The three phases — training, inference, scoring — run in *isolated
+  subprocesses* via ``core.sandbox_executor.execute_*``, so each phase
+  gets the whole GPU to itself. The binding constraint is the single
+  phase with the highest peak, not a sum. This wrapper calls the three
+  per-phase estimators and takes the max:
+
+      training_skill/estimator.py:estimate_peak_bytes
+      inference_skill/estimator.py:estimate_peak_bytes
+      denoising_score_skill/estimator.py:estimate_peak_bytes   (= 0)
+
+  Per-phase VRAM formulae live next to the code that actually allocates
+  the tensors in each phase — see each estimator's docstring. This
+  wrapper only picks the peak.
 
 Limit selection (Phase K):
   - vram_budget_gb is None  → limit = free_bytes × 0.8 (backward-compat floor).
@@ -26,7 +33,7 @@ Limit selection (Phase K):
                               the tuning loop. A contention log is emitted when
                               the defensive cap drops below half the budget.
 
-See docs/resource_estimator_implement.md §10.5 / §10.7.
+See docs/resource_estimator_implement.md §10.5 / §10.7 / §10.14 Commit 5.
 """
 
 from typing import Optional
@@ -36,10 +43,12 @@ from pydantic import ValidationError
 from ml_models.models_sandbox import MODEL_REGISTRY
 from ml_models.models_format_sandbox import get_config_class
 
+from agent.skills.training_skill        import estimator as _training_est
+from agent.skills.inference_skill       import estimator as _inference_est
+from agent.skills.denoising_score_skill import estimator as _scoring_est
+
 
 # ── constants ────────────────────────────────────────────────────────────────
-_BYTES_F32  = 4
-_BYTES_I64  = 8
 _SAFETY_PCT = 0.80          # block if estimated > 80 % of free VRAM
 _GB         = 1024 ** 3
 
@@ -104,51 +113,6 @@ def _format_schema_violation_verdict(violations: list[dict]) -> str:
     return "Schema rejected config: " + "; ".join(parts) + extra
 
 
-def _estimate_bytes(
-    model_type: str,
-    model_cfg: dict,
-    train_cfg: dict,
-    loss_cfg: dict,
-    num_params: int,
-) -> dict:
-    """Return a breakdown dict with byte estimates for each memory component."""
-    seg_size   = model_cfg.get("segmentation_size", 40000)
-    batch_size = train_cfg.get("batch_size", 1)
-    loss_type  = loss_cfg.get("loss_type", "ce")
-
-    # --- fixed model overhead (weights + grads + Adam m + v) ---
-    model_overhead = num_params * 16 * _BYTES_F32 // 4   # = num_params * 16 B
-
-    # --- output logits: [B, 256, T] float32 ---
-    output_logits = batch_size * 256 * seg_size * _BYTES_F32
-
-    # --- activations stored for backward pass (rough estimate) ---
-    # For conv/rnn models activations ≈ 2× output; for fcnet (linear) ≈ 1×
-    act_factor = 1 if model_type == "fcnet" else 2
-    activations = act_factor * output_logits
-
-    # --- focal loss one_hot: [B, 256, T] int64 ---
-    focal_onehot = batch_size * 256 * seg_size * _BYTES_I64 if loss_type == "focal" else 0
-
-    # --- transformer self-attention: [B, nhead, T, T] float32 per layer ---
-    transformer_attn = 0
-    if model_type == "transformer":
-        nhead      = model_cfg.get("nhead", 2)
-        num_layers = model_cfg.get("num_layers", 2)
-        transformer_attn = batch_size * nhead * seg_size * seg_size * _BYTES_F32 * num_layers
-
-    total = model_overhead + output_logits + activations + focal_onehot + transformer_attn
-
-    return {
-        "model_overhead_bytes":    model_overhead,
-        "output_logits_bytes":     output_logits,
-        "activations_bytes":       activations,
-        "focal_onehot_bytes":      focal_onehot,
-        "transformer_attn_bytes":  transformer_attn,
-        "total_bytes":             total,
-    }
-
-
 def run_skill(sandbox, **kwargs):
     """
     Required kwargs: model_type, model_config, train_config, loss_config
@@ -200,20 +164,33 @@ def run_skill(sandbox, **kwargs):
             }
         print(f"    Parameters  : {num_params:,}")
 
-        # ── 2. Estimate memory breakdown ──────────────────────────────────
-        breakdown = _estimate_bytes(model_type, model_cfg, train_cfg, loss_cfg, num_params)
-        total_est = breakdown["total_bytes"]
+        # ── 2. Peak-VRAM aggregation over the 3 phases ────────────────────
+        # Phases run in isolated subprocesses via sandbox_executor, so the
+        # binding constraint is the single phase with the highest peak,
+        # not a sum. See §10.5.
+        training_phase  = _training_est.estimate_peak_bytes(
+            model_type, model_cfg, train_cfg, loss_cfg, num_params,
+        )
+        inference_phase = _inference_est.estimate_peak_bytes(
+            model_type, model_cfg, num_params,
+        )
+        scoring_phase   = _scoring_est.estimate_peak_bytes()
+        phases          = [training_phase, inference_phase, scoring_phase]
+        dominant        = max(phases, key=lambda p: p["total_bytes"])
+        total_est       = dominant["total_bytes"]
+        phase_breakdown = {p["phase"]: p for p in phases}
 
         # ── 3. Query actual VRAM via nvidia interface ─────────────────────
         if device != "cuda":
             # CPU mode — no VRAM constraint
             print("    Device is CPU — skipping VRAM check.")
             return {
-                "status": "success",
-                "feasible": True,
-                "verdict": "CPU mode — no VRAM constraint.",
-                "breakdown": {k: f"{v / _GB:.3f} GB" for k, v in breakdown.items()},
-                "num_params": num_params,
+                "status":          "success",
+                "feasible":        True,
+                "verdict":         "CPU mode — no VRAM constraint.",
+                "num_params":      num_params,
+                "dominant_phase":  dominant["phase"],
+                "phase_breakdown": phase_breakdown,
             }
 
         if not torch.cuda.is_available():
@@ -260,18 +237,6 @@ def run_skill(sandbox, **kwargs):
         feasible = total_est <= limit_bytes
 
         # ── 4. Build human-readable report ────────────────────────────────
-        breakdown_gb = {k: f"{v / _GB:.3f} GB" for k, v in breakdown.items()}
-
-        # Identify bottleneck (largest single component)
-        components = {
-            "focal_onehot":      breakdown["focal_onehot_bytes"],
-            "transformer_attn":  breakdown["transformer_attn_bytes"],
-            "activations":       breakdown["activations_bytes"],
-            "output_logits":     breakdown["output_logits_bytes"],
-            "model_overhead":    breakdown["model_overhead_bytes"],
-        }
-        bottleneck = max(components, key=components.get)
-
         if vram_budget_gb is None:
             limit_desc = (
                 f"Safety limit: {limit_bytes / _GB:.2f} GB "
@@ -289,7 +254,7 @@ def run_skill(sandbox, **kwargs):
             f"{free_bytes / _GB:.2f} GB free ({total_vram / _GB:.1f} GB total, "
             f"{already_used / _GB:.2f} GB already used). "
             f"{limit_desc} "
-            f"Bottleneck: {bottleneck}."
+            f"Dominant phase: {dominant['phase']}."
         )
 
         # Phase K: per-lever guidance lives in the planner prompt (§10.3,
@@ -309,17 +274,18 @@ def run_skill(sandbox, **kwargs):
             print(f"    Suggestion  : {suggestion}")
 
         return {
-            "status":         "success",
-            "feasible":       feasible,
-            "verdict":        verdict,
-            "suggestion":     suggestion,
-            "num_params":     num_params,
-            "breakdown":      breakdown_gb,
-            "vram_free_gb":   round(free_bytes  / _GB, 3),
-            "vram_total_gb":  round(total_vram  / _GB, 1),
-            "estimated_gb":   round(total_est   / _GB, 3),
-            "limit_gb":       round(limit_bytes / _GB, 3),
-            "vram_budget_gb": vram_budget_gb,
+            "status":          "success",
+            "feasible":        feasible,
+            "verdict":         verdict,
+            "suggestion":      suggestion,
+            "num_params":      num_params,
+            "dominant_phase":  dominant["phase"],
+            "phase_breakdown": phase_breakdown,
+            "vram_free_gb":    round(free_bytes  / _GB, 3),
+            "vram_total_gb":   round(total_vram  / _GB, 1),
+            "estimated_gb":    round(total_est   / _GB, 3),
+            "limit_gb":        round(limit_bytes / _GB, 3),
+            "vram_budget_gb":  vram_budget_gb,
         }
 
     except Exception as e:
