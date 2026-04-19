@@ -1,6 +1,6 @@
 # Resource Estimator (Time + VRAM Budgets)
 
-**Status**: time skill implemented + smoke-tested on lilab (Phases A–G complete; H1a lilab direct-skill smoke verified 2026-04-16; **Phase I — trial/formal budget split — landed 2026-04-16 across 5 commits**; **Phase J — success-path time info to planner — landed 2026-04-16 across 3 commits**; **H1b lilab tuner-integration smoke verified 2026-04-16 on RTX 5090, k(wavenet)=4.22**; H2 SDSC deferred). **Phase K — VRAM budget gate alongside the time gate — design landed 2026-04-18; K.0–K.2 implemented 2026-04-18; K.2.5 (3-phase × 2-resource estimator distribution: training/inference/scoring × VRAM/time) shipped 2026-04-18 across 7 commits: inference_defaults → training_skill estimator → inference_skill estimator → denoising_score_skill estimator + `core/server_configs/` → evaluate_vram_skill peak aggregator → evaluate_time_skill sum aggregator → doc sync. K.3+ pending.**
+**Status**: time skill implemented + smoke-tested on lilab (Phases A–G complete; H1a lilab direct-skill smoke verified 2026-04-16; **Phase I — trial/formal budget split — landed 2026-04-16 across 5 commits**; **Phase J — success-path time info to planner — landed 2026-04-16 across 3 commits**; **H1b lilab tuner-integration smoke verified 2026-04-16 on RTX 5090, k(wavenet)=4.22**; H2 SDSC deferred). **Phase K — VRAM budget gate alongside the time gate — design landed 2026-04-18; K.0–K.2 implemented 2026-04-18; K.2.5 (3-phase × 2-resource estimator distribution: training/inference/scoring × VRAM/time) shipped 2026-04-18 across 7 commits: inference_defaults → training_skill estimator → inference_skill estimator → denoising_score_skill estimator + `core/server_configs/` → evaluate_vram_skill peak aggregator → evaluate_time_skill sum aggregator → doc sync; K.3–K.6 shipped 2026-04-18; K.7.1 (gate-exhaustion schema) shipped 2026-04-18; K.7.2–K.7.6 + K.8 pending.**
 **Author**: design discussion 2026-04-16; Phase K extension 2026-04-18.
 **Motivation**: two trial-mode runs (`exploit_cnn_v1`, `explore_novel_v1`) stalled in Round 1 for 1h 50min and 2h 27min respectively, both blowing past the 1-hour trial budget stated in the expert advice. Neither was blocked, because the planner has no pre-flight wall-time estimate — only a VRAM check. **Phase K motivation (2026-04-17)**: `explore_novel_v1` iterations 3 and 4 burned 9/9 attempts each to `"GPU has only 0.01 GB free"` because the existing VRAM gate uses momentary `free_bytes × 0.8` as its limit and another process held 25.7 GB on the shared 32 GB card. The planner has no operator-supplied VRAM ceiling to optimise against — symmetric to the time-gate gap §1.2 fixed.
 
@@ -33,11 +33,12 @@
 | K.2.5-5 — `evaluate_vram_skill` as peak aggregator over 3 phases | 2026-04-18 | `661ad5d` | `dominant_phase` + `phase_breakdown`; interface-preserving; 18/18 skill tests |
 | K.2.5-6 — `evaluate_time_skill` as sum aggregator over 3 phases | 2026-04-18 | `d40a0b1` | thin sum aggregator; preserves `breakdown.source`+`gpu_name` for Phase F EMA trigger; deleted 9 helper-coverage tests (moved to training estimator); 53/53 time+3-phase estimator tests; 276/276 across the full tuner suite |
 | K.2.5-7 — mark K.2.5 complete in design doc | 2026-04-18 | (this commit) | flip checkboxes + wire up all cross-references |
-| K.3 — tuner per-mode pick + `vram_estimate_gb` in success/skipped memory | pending | — | mirrors I.2 + J |
-| K.4 — protocol pass-through (`valid→tune` budget kwargs only; **no** proposer-side `vram_risk` plumbing) | pending | — | mirrors I.3, narrowed scope |
-| K.5 — CLI + workflow fan-out (tuner-side only) | pending | — | mirrors I.4 |
-| K.6 — planner prompt: numeric budget block + decision tree | pending | — | new prompt section, replaces abstract "GPU MEMORY RULES" |
-| K.7 — iteration-boundary gate-exhaustion feedback to proposer | pending | — | new schema `GateExhaustionInfo`; surfaces to next-iteration proposer when no attempt ever trained |
+| K.3 — tuner per-mode pick + `vram_estimate_gb` in success/skipped memory | 2026-04-18 | `ca763ec` | mirrors I.2 + J; per-round joint short-circuit (VRAM fail → time skill not invoked) |
+| K.4 — protocol pass-through (`valid→tune` budget kwargs only; **no** proposer-side `vram_risk` plumbing) | 2026-04-18 | `e368b2b` | mirrors I.3, narrowed scope; both VRAM kwargs survive default-None and user-supplied paths |
+| K.5 — CLI + workflow fan-out (tuner-side only) | 2026-04-18 | `6bf81f9` | `--trial_vram_budget_gb` / `--formal_vram_budget_gb` on `run_exploration_adaptive.py`; workflow forwards to `local_validated_model` only |
+| K.6 — planner prompt: numeric budget block + decision tree | 2026-04-18 | `34e0e0f` | new `[ACTIVE RESOURCE BUDGETS]` per-round block + `[RESOURCE GATE — RESOLVING OVER-BUDGET CONFIGS]` static guidance; abstract "GPU MEMORY RULES" section removed; 13 new prompt-builder tests |
+| K.7.1 — schema: `GateExhaustionInfo` + `HyperparamTuningOutput.gate_exhaustion` | 2026-04-18 | (this commit) | 14-field Pydantic model per §10.13.2; 11 new schema tests (full-populated, required-only, missing-required, Literal enforcement, JSON round-trip, output default-None + populated) |
+| K.7.2–K.7.6 — proposer schema + tuner helper + protocol + workflow + prompt block | pending | — | each sub-phase tracked in §10.14 K.7 sub-checklist |
 | K.8 — explore_novel re-launch under contention | pending | — | acceptance: rejects against budget not free-VRAM; gate-exhaustion path also exercised by deliberately under-budgeting one iteration |
 | K.deferred — proposer `_apply_vram_gate` + `vram_risk` field + retire `time_risk` redundancy on `ProposalOutput` | deferred | — | gated on registering plugins pre-validation; tracked in §10.17 |
 
@@ -1663,11 +1664,11 @@ its targeted pytest invocation green and a committable state.
 - [x] K.1 — Schema additions (tuner-side only) *(2026-04-18)*
 - [x] K.2 — Skill `vram_budget_gb` kwarg + contention-detection log *(2026-04-18)*
 - [x] K.2.5 — Distribute per-phase estimators to owning skills (3 phases × 2 resources: VRAM=peak, time=sum) *(shipped 2026-04-18 across 7 commits; design deviations recorded in §10.5)*
-- [ ] K.3 — Tuner integration (per-mode pick + memory fields)
-- [ ] K.4 — Protocol pass-through (`valid→tune` only)
-- [ ] K.5 — CLI + workflow fan-out
-- [ ] K.6 — Planner prompt (numeric block + guidance block)
-- [ ] K.7 — Iteration-boundary gate-exhaustion feedback (§10.13)
+- [x] K.3 — Tuner integration (per-mode pick + memory fields) *(2026-04-18, `ca763ec`)*
+- [x] K.4 — Protocol pass-through (`valid→tune` only) *(2026-04-18, `e368b2b`)*
+- [x] K.5 — CLI + workflow fan-out *(2026-04-18, `6bf81f9`)*
+- [x] K.6 — Planner prompt (numeric block + guidance block) *(2026-04-18, `34e0e0f`)*
+- [~] K.7 — Iteration-boundary gate-exhaustion feedback (§10.13) *(in progress: K.7.1 shipped; K.7.2–K.7.6 pending)*
 - [ ] K.8 — Smoke run on lilab under contention
 
 #### K.0 Skill rename (mechanical) [ ]
@@ -1978,11 +1979,13 @@ planning, both addressed:
       verbatim.
 - [ ] Verify: `pytest tests/unit/agent/ -q`.
 
-#### K.7 Iteration-boundary gate-exhaustion feedback (§10.13) [ ]
+#### K.7 Iteration-boundary gate-exhaustion feedback (§10.13) [~]
 
-- [ ] `agent/schemas/hyperparam_tuning.py`: add `GateExhaustionInfo`
+- [x] **K.7.1** — `agent/schemas/hyperparam_tuning.py`: add `GateExhaustionInfo`
       Pydantic model per §10.13.2; add
       `HyperparamTuningOutput.gate_exhaustion: Optional[GateExhaustionInfo] = None`.
+      *(2026-04-18; 11 new tests in `TestGateExhaustionInfo` +
+      `TestHyperparamTuningOutputGateExhaustion`; 103/103 schema tests green.)*
 - [ ] `agent/schemas/proposal.py`: add
       `ProposalInput.prior_iteration_gate_exhaustion: Optional[GateExhaustionInfo] = None`
       (import `GateExhaustionInfo` from `hyperparam_tuning`).

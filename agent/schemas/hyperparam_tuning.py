@@ -870,6 +870,111 @@ class HyperparamTuningInput(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Phase K (K.7) — iteration-boundary gate-exhaustion feedback
+# See docs/resource_estimator_implement.md §10.13.
+# ---------------------------------------------------------------------------
+
+class GateExhaustionInfo(BaseModel):
+    """
+    Structured failure report produced by the tuner when an iteration ends
+    without ever training successfully AND at least one attempt was rejected
+    by the pre-flight resource gate (vram or time).
+
+    Surfaced to the next iteration's proposer via
+    ``ProposalInput.prior_iteration_gate_exhaustion`` so it can learn that
+    the prior architecture was fundamentally too heavy for the active
+    budgets and propose something lighter.
+    """
+
+    # --- Counts (every attempt is in exactly one bucket) ---
+    total_attempts: int = Field(
+        description="Total number of attempts in the iteration (len(all_records)).",
+    )
+    vram_gated_attempts: int = Field(
+        description="Attempts rejected by evaluate_vram_skill (status='skipped_oom_risk').",
+    )
+    time_gated_attempts: int = Field(
+        description="Attempts rejected by evaluate_time_skill (status='skipped_time_risk').",
+    )
+    other_failure_attempts: int = Field(
+        description=(
+            "Attempts that fell into none of the gate buckets — covers "
+            "error_*, skipped_schema_violation, etc. Always 0 when the "
+            "trigger criterion fires (no successes), but distinguishing "
+            "gate-rejected from other-failed clarifies the picture for "
+            "the next proposer."
+        ),
+    )
+
+    # --- Active budgets ---
+    active_mode: Literal["trial", "formal"] = Field(
+        description=(
+            "Which budget set the iteration ran against. Sourced from "
+            "plan.is_trial of the most recent plan."
+        ),
+    )
+    vram_budget_gb: Optional[float] = Field(
+        default=None,
+        description="Active mode's VRAM ceiling. None when the VRAM gate was disabled.",
+    )
+    time_budget_minutes: Optional[float] = Field(
+        default=None,
+        description="Active mode's time ceiling. None when the time gate was disabled.",
+    )
+
+    # --- Baseline (round-0) factors — diagnoses whether the proposer's own
+    # baseline was already over budget vs the tuner mutating it heavier. ---
+    baseline_vram_estimate_gb: Optional[float] = Field(
+        default=None,
+        description="round-0 record's vram_estimate_gb (memory.vram_estimate_gb).",
+    )
+    baseline_vram_factor: Optional[float] = Field(
+        default=None,
+        description=(
+            "baseline_vram_estimate_gb / vram_budget_gb. None when either "
+            "side is missing."
+        ),
+    )
+    baseline_time_estimate_minutes: Optional[float] = Field(
+        default=None,
+        description="round-0 record's time_estimate_minutes (memory.time_estimate_minutes).",
+    )
+    baseline_time_factor: Optional[float] = Field(
+        default=None,
+        description=(
+            "baseline_time_estimate_minutes / time_budget_minutes. None when "
+            "either side is missing."
+        ),
+    )
+
+    # --- Worst-case factors — bounds how much lighter the next baseline must be. ---
+    worst_vram_factor: Optional[float] = Field(
+        default=None,
+        description=(
+            "max(vram_estimate_gb / vram_budget_gb) across all records that "
+            "carry a vram_estimate_gb. None when no record carries one."
+        ),
+    )
+    worst_time_factor: Optional[float] = Field(
+        default=None,
+        description=(
+            "max(time_estimate_minutes / time_budget_minutes) across all "
+            "records that carry a time_estimate_minutes. None when no record "
+            "carries one."
+        ),
+    )
+
+    # --- Synthesis ---
+    summary_message: str = Field(
+        description=(
+            "Human/LLM-readable one-paragraph synthesis of the failure mode, "
+            "rendered by _render_summary in the tuner. Forms the lead line of "
+            "the proposer's [PRIOR ITERATION GATE EXHAUSTION] prompt block."
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Agent output
 # ---------------------------------------------------------------------------
 
@@ -921,6 +1026,18 @@ class HyperparamTuningOutput(BaseModel):
         description=(
             "Complete experiment history including successful, failed, and OOM-skipped rounds. "
             "Each record contains params, results, timing, and LLM-generated memory fields."
+        ),
+    )
+
+    # --- Phase K (K.7) — iteration-boundary feedback to the next proposer ---
+    gate_exhaustion: Optional[GateExhaustionInfo] = Field(
+        default=None,
+        description=(
+            "Populated only when the iteration ended without ever training "
+            "successfully AND >=1 attempt was rejected by the pre-flight "
+            "resource gate. Consumed by the next iteration's proposer via "
+            "ProposalInput.prior_iteration_gate_exhaustion. None on healthy "
+            "runs (any success) and on all-failure-but-not-budget-related runs."
         ),
     )
 

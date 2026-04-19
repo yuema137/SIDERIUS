@@ -16,6 +16,7 @@ from agent.schemas.hyperparam_tuning import (
     ExpertAdvice,
     ExperimentPlan,
     TrialConfig,
+    GateExhaustionInfo,
     HyperparamTuningInput,
     HyperparamTuningOutput,
     ExperimentRecord,
@@ -450,6 +451,155 @@ class TestExperimentMemoryVramFields:
         rec = ExperimentRecord.model_validate(valid_success_record)
         assert rec.memory.vram_estimate_gb is None
         assert rec.memory.vram_budget_gb is None
+
+
+# ---------------------------------------------------------------------------
+# Phase K (K.7) — GateExhaustionInfo schema. Populated by the tuner when an
+# iteration ends without ever training successfully AND >=1 attempt was
+# rejected by the pre-flight resource gate. Consumed by the next iteration's
+# proposer via ProposalInput.prior_iteration_gate_exhaustion (K.7.2).
+# See docs/resource_estimator_implement.md §10.13.2.
+# ---------------------------------------------------------------------------
+
+class TestGateExhaustionInfo:
+
+    def _full_kwargs(self):
+        """One realistic populated instance — VRAM-bound trial-mode failure
+        mirroring the §10.13.3 example: 9 attempts, all VRAM-gated, baseline
+        already over budget at 1.6x, worst at 2.0x, time within budget."""
+        return {
+            "total_attempts": 9,
+            "vram_gated_attempts": 9,
+            "time_gated_attempts": 0,
+            "other_failure_attempts": 0,
+            "active_mode": "trial",
+            "vram_budget_gb": 4.0,
+            "time_budget_minutes": 20.0,
+            "baseline_vram_estimate_gb": 6.4,
+            "baseline_vram_factor": 1.6,
+            "baseline_time_estimate_minutes": 12.0,
+            "baseline_time_factor": 0.6,
+            "worst_vram_factor": 2.0,
+            "worst_time_factor": 0.6,
+            "summary_message": (
+                "All 9 attempts were rejected by the pre-flight VRAM gate. "
+                "Baseline 1.6x over budget; worst 2.0x. Architecture too heavy."
+            ),
+        }
+
+    def test_full_populated_validates(self):
+        info = GateExhaustionInfo.model_validate(self._full_kwargs())
+        assert info.total_attempts == 9
+        assert info.vram_gated_attempts == 9
+        assert info.time_gated_attempts == 0
+        assert info.other_failure_attempts == 0
+        assert info.active_mode == "trial"
+        assert info.vram_budget_gb == 4.0
+        assert info.baseline_vram_factor == 1.6
+        assert info.worst_vram_factor == 2.0
+
+    def test_required_fields_only_with_optionals_default_none(self):
+        """Only counts + active_mode + summary_message are required — all
+        budget/factor fields default to None so a gate-exhaustion record can
+        be built even when one axis is fully disabled."""
+        info = GateExhaustionInfo.model_validate({
+            "total_attempts": 3,
+            "vram_gated_attempts": 0,
+            "time_gated_attempts": 3,
+            "other_failure_attempts": 0,
+            "active_mode": "formal",
+            "summary_message": "All 3 attempts were rejected by the time gate.",
+        })
+        assert info.vram_budget_gb is None
+        assert info.time_budget_minutes is None
+        assert info.baseline_vram_estimate_gb is None
+        assert info.baseline_vram_factor is None
+        assert info.baseline_time_estimate_minutes is None
+        assert info.baseline_time_factor is None
+        assert info.worst_vram_factor is None
+        assert info.worst_time_factor is None
+
+    def test_missing_required_count_raises(self):
+        kwargs = self._full_kwargs()
+        del kwargs["total_attempts"]
+        with pytest.raises(ValidationError) as exc:
+            GateExhaustionInfo.model_validate(kwargs)
+        assert "total_attempts" in str(exc.value)
+
+    def test_missing_summary_message_raises(self):
+        kwargs = self._full_kwargs()
+        del kwargs["summary_message"]
+        with pytest.raises(ValidationError) as exc:
+            GateExhaustionInfo.model_validate(kwargs)
+        assert "summary_message" in str(exc.value)
+
+    def test_missing_active_mode_raises(self):
+        kwargs = self._full_kwargs()
+        del kwargs["active_mode"]
+        with pytest.raises(ValidationError) as exc:
+            GateExhaustionInfo.model_validate(kwargs)
+        assert "active_mode" in str(exc.value)
+
+    def test_active_mode_rejects_other_strings(self):
+        """Literal["trial", "formal"] — anything else must fail. Mirrors the
+        time_mode test on ExperimentMemory."""
+        kwargs = self._full_kwargs()
+        kwargs["active_mode"] = "snapshot"
+        with pytest.raises(ValidationError) as exc:
+            GateExhaustionInfo.model_validate(kwargs)
+        assert "active_mode" in str(exc.value)
+
+    def test_round_trip_through_json(self):
+        info = GateExhaustionInfo.model_validate(self._full_kwargs())
+        reloaded = GateExhaustionInfo.model_validate_json(info.model_dump_json())
+        assert reloaded == info
+
+
+class TestHyperparamTuningOutputGateExhaustion:
+    """K.7 — the new optional gate_exhaustion field on HyperparamTuningOutput.
+    Defaults to None so pre-K.7 outputs validate unchanged; accepts a
+    populated GateExhaustionInfo when the tuner builds one."""
+
+    def test_default_none_when_omitted(self, valid_output_dict):
+        assert "gate_exhaustion" not in valid_output_dict
+        out = HyperparamTuningOutput.model_validate(valid_output_dict)
+        assert out.gate_exhaustion is None
+
+    def test_accepts_populated_info(self, valid_output_dict):
+        valid_output_dict["gate_exhaustion"] = {
+            "total_attempts": 9,
+            "vram_gated_attempts": 9,
+            "time_gated_attempts": 0,
+            "other_failure_attempts": 0,
+            "active_mode": "trial",
+            "vram_budget_gb": 4.0,
+            "time_budget_minutes": 20.0,
+            "baseline_vram_estimate_gb": 6.4,
+            "baseline_vram_factor": 1.6,
+            "baseline_time_estimate_minutes": 12.0,
+            "baseline_time_factor": 0.6,
+            "worst_vram_factor": 2.0,
+            "worst_time_factor": 0.6,
+            "summary_message": "VRAM-gated baseline 1.6x; worst 2.0x.",
+        }
+        out = HyperparamTuningOutput.model_validate(valid_output_dict)
+        assert out.gate_exhaustion is not None
+        assert out.gate_exhaustion.vram_gated_attempts == 9
+        assert out.gate_exhaustion.active_mode == "trial"
+        assert out.gate_exhaustion.worst_vram_factor == 2.0
+
+    def test_round_trip_preserves_gate_exhaustion(self, valid_output_dict):
+        valid_output_dict["gate_exhaustion"] = {
+            "total_attempts": 3,
+            "vram_gated_attempts": 0,
+            "time_gated_attempts": 3,
+            "other_failure_attempts": 0,
+            "active_mode": "formal",
+            "summary_message": "All 3 attempts were rejected by the time gate.",
+        }
+        out = HyperparamTuningOutput.model_validate(valid_output_dict)
+        reloaded = HyperparamTuningOutput.model_validate_json(out.model_dump_json())
+        assert reloaded.gate_exhaustion == out.gate_exhaustion
 
 
 class TestExperimentRecordOOM:
