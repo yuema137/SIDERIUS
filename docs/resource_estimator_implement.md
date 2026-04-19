@@ -2447,21 +2447,49 @@ wall-clock ≤10 s. Runs in CI on every push.
 
 ##### K.9.0 Pseudo data design [ ]
 
+**Decision: real plugin file required.** The initial draft proposed
+short-circuiting at the gate via `RecordingSandbox`, but tracing the
+code shows that's not viable: `evaluate_vram_skill.run_skill` calls
+`_count_params(model_type, ...)` → `MODEL_REGISTRY[model_type](...)`
+BEFORE the inference estimator runs. An invented `model_type` not in
+the registry crashes at registry lookup, never reaching the K.2.5-8
+soft-fallback path. The K.8.1 production trace works because the
+implementor materialises a real plugin file and the loader registers
+it before the gate runs; K.9 must mirror that to exercise K.2.5-8.
+
+- [ ] Create `tests/pseudo_data/plugins/pe_wavenet_delta.py` — a
+      minimal scalable plugin that conforms to the plugin contract
+      (`PLUGIN_MODEL_TYPE`, `PLUGIN_CONFIG_CLASS`, `PLUGIN_MODEL_CLASS`).
+      Architecture is an `nn.Linear`-stack model with `hidden_dim` as
+      the size lever — round 1 (large `hidden_dim`) makes the param
+      count bust a tight VRAM budget; round 2 (small `hidden_dim`)
+      fits. NOT in `core/inference_defaults._INFERENCE_BATCH_SIZES`
+      so the K.2.5-8 path fires on every gate call. ~30–40 LOC.
 - [ ] Create `tests/pseudo_data/api_call_outputs/ml_hyperparameter_tune_agent_k9_invented/`
       mirroring the existing `ml_hyperparameter_tune_agent/` folder:
-      - `generate.json` — sequence of planner responses. Round 1
-        proposes an invented `model_type` (e.g. `pe_wavenet_delta`,
-        matching the K.8.1 case). Round 2 reacts to the gate verdict
-        (lower `batch_size` or swap to a registered seed).
-      - `reflect.json` — minimal reflector responses (one per round).
-- [ ] Decide whether the invented model needs a fake plugin file or
-      whether the test can short-circuit at the gate (preferred: the
-      gate is the point of the test, so plugin instantiation is not
-      required — RecordingSandbox can be configured to skip the
-      training subprocess for over-budget rounds).
-- [ ] Document the canned responses in
-      `tests/pseudo_data/api_call_outputs/ml_hyperparameter_tune_agent_k9_invented/README.md`
-      so a future reader understands the choreography.
+      - `generate.json` — array of two `ExperimentPlan`-shaped dicts.
+        Plan 1: `model_type="pe_wavenet_delta"`, large `hidden_dim`
+        (over budget). Plan 2: same `model_type`, small `hidden_dim`
+        (under budget) — lever choice = architectural width reduction.
+        Note: `model_type_setting="pe_wavenet_delta"` forces the
+        tuner to use that model_type for both rounds (line 690-693
+        of the agent), so the canned plans don't propose a registered
+        seed swap; the lever is purely architectural.
+      - `reflect.json` — single reflector response (only round 2's
+        success triggers reflect; round 1's `skipped_oom_risk` does
+        not call the reflector).
+- [ ] Create `tests/pseudo_data/train_outputs/pe_wavenet_delta/`
+      mirroring the existing `train_outputs/punet/` folder, with
+      `execute_training.json` / `execute_inference.json` /
+      `execute_scoring.json`. Round 1 never reaches the sandbox
+      (gated out at VRAM check), so a single canned set is enough
+      for round 2. Each file is a `status`/`message`/`results` dict
+      shaped exactly like the real `TidmadSandbox.execute_*` returns.
+- [ ] Document the choreography in
+      `tests/pseudo_data/api_call_outputs/ml_hyperparameter_tune_agent_k9_invented/README.md`:
+      which round triggers what gate path, what the K.2.5-8 fallback
+      adds, why the budget number was chosen, and how the plugin's
+      `hidden_dim` lever maps to over/under verdicts.
 
 ##### K.9.1 Test scaffold [ ]
 
