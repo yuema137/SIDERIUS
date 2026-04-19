@@ -12,7 +12,11 @@ from __future__ import annotations
 from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from agent.schemas.hyperparam_tuning import ExpertAdvice, ExpertAdviceInput
+from agent.schemas.hyperparam_tuning import (
+    ExpertAdvice,
+    ExpertAdviceInput,
+    GateExhaustionInfo,
+)
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 
@@ -597,6 +601,20 @@ class ProposalInput(BaseModel):
                     "iteration. The workflow populates this when retrying after a "
                     "validation failure so the proposal agent avoids the same mistakes. "
                     "Each entry is the error_message from a ValidatorOutput.",
+    )
+    prior_iteration_gate_exhaustion: Optional[GateExhaustionInfo] = Field(
+        default=None,
+        description=(
+            "When the previous iteration's tuner exited under gate "
+            "exhaustion (no record ever trained successfully AND ≥1 "
+            "attempt was rejected by the pre-flight resource gate), "
+            "this field carries the structured failure report from "
+            "HyperparamTuningOutput.gate_exhaustion. Surfaced to the "
+            "proposer prompt as a hard learning signal so the next "
+            "baseline is qualitatively lighter. None when the prior "
+            "iteration succeeded or no prior iteration exists. "
+            "See docs/resource_estimator_implement.md §10.13."
+        ),
     )
     mindset: Optional[str] = Field(
         default=None,
