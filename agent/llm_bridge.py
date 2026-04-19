@@ -271,7 +271,16 @@ class LLMBridge:
              max_rounds: Optional[int] = None,
              trial_allowed: bool = True,
              plan_overrides: Optional[Dict] = None,
-             max_epochs: Optional[int] = None) -> Dict:
+             max_epochs: Optional[int] = None,
+             # --- Phase K (K.6) — [ACTIVE RESOURCE BUDGETS] block inputs ---
+             trial_vram_budget_gb: Optional[float] = None,
+             formal_vram_budget_gb: Optional[float] = None,
+             trial_time_budget_minutes: Optional[float] = None,
+             formal_time_budget_minutes: Optional[float] = None,
+             last_vram_estimate_gb: Optional[float] = None,
+             last_time_estimate_minutes: Optional[float] = None,
+             last_batch_size: Optional[int] = None,
+             last_mode: Optional[str] = None) -> Dict:
         """
         Uses the Planner logic to observe Research Memory and decide next steps.
         Incorporates physical constraints from config_manual and architecture
@@ -294,6 +303,22 @@ class LLMBridge:
                               renders a SYSTEM-FIXED PARAMETERS block so the LLM
                               knows which knobs it does not control.
             max_epochs:       Hard cap on epochs. Forwarded to the FIXED block.
+            trial_vram_budget_gb,
+            formal_vram_budget_gb,
+            trial_time_budget_minutes,
+            formal_time_budget_minutes:
+                Operator-supplied per-mode resource budgets. Forwarded into the
+                [ACTIVE RESOURCE BUDGETS] planner-prompt block (Phase K, §10.3
+                / §10.11). None on any field renders "(no budget — gate
+                disabled)" on that axis.
+            last_vram_estimate_gb,
+            last_time_estimate_minutes,
+            last_batch_size,
+            last_mode:
+                Resource snapshot from the most recent prior attempt's record,
+                surfaced into the same [ACTIVE RESOURCE BUDGETS] block so the
+                LLM has a concrete number to react to. None means "no prior
+                data" (round 1 before any pre-flight has run).
         """
         system_prompt = PLANNER_PROMPT
 
@@ -314,6 +339,14 @@ class LLMBridge:
             trial_allowed=trial_allowed,
             plan_overrides=plan_overrides,
             max_epochs=max_epochs,
+            trial_vram_budget_gb=trial_vram_budget_gb,
+            formal_vram_budget_gb=formal_vram_budget_gb,
+            trial_time_budget_minutes=trial_time_budget_minutes,
+            formal_time_budget_minutes=formal_time_budget_minutes,
+            last_vram_estimate_gb=last_vram_estimate_gb,
+            last_time_estimate_minutes=last_time_estimate_minutes,
+            last_batch_size=last_batch_size,
+            last_mode=last_mode,
         )
 
         # Assemble final prompt: user prompt + plugin source + checklist + description + manual.

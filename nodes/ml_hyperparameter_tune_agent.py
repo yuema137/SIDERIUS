@@ -326,6 +326,25 @@ class HyperparamTuningAgent:
                 # docs/improving_validation_awareness.md §D.1.
                 plugin_source_excerpt = format_plugin_source_excerpt_block(config_cls)
 
+                # Phase K (K.6) — extract the most recent prior attempt's
+                # resource snapshot so the [ACTIVE RESOURCE BUDGETS] block can
+                # show the LLM a concrete number to react to. Looks at the
+                # last memory entry regardless of status (success / skipped):
+                # the resource fields are absent on records produced with the
+                # gates disabled and on schema-violation records. Round 1
+                # gives None on every field, which collapses to "(no prior
+                # estimate)" in the rendered block.
+                # See docs/resource_estimator_implement.md §10.3 / §10.11.
+                last_record = memory_history[-1] if memory_history else {}
+                last_memory = last_record.get("memory") or {}
+                last_train_cfg = (
+                    (last_record.get("params") or {}).get("train_config") or {}
+                )
+                last_vram_estimate_gb = last_memory.get("vram_estimate_gb")
+                last_time_estimate_minutes = last_memory.get("time_estimate_minutes")
+                last_batch_size = last_train_cfg.get("batch_size")
+                last_mode = last_memory.get("time_mode")
+
                 # B. THINK: Plan next experiment
                 decision = brain.plan(
                     memory_history,
@@ -340,6 +359,14 @@ class HyperparamTuningAgent:
                     trial_allowed=trial_allowed,
                     plan_overrides=agent_input.plan_overrides,
                     max_epochs=agent_input.max_epochs,
+                    trial_vram_budget_gb=trial_vram_budget,
+                    formal_vram_budget_gb=formal_vram_budget,
+                    trial_time_budget_minutes=trial_time_budget,
+                    formal_time_budget_minutes=formal_time_budget,
+                    last_vram_estimate_gb=last_vram_estimate_gb,
+                    last_time_estimate_minutes=last_time_estimate_minutes,
+                    last_batch_size=last_batch_size,
+                    last_mode=last_mode,
                 )
 
                 # Validate LLM output into ExperimentPlan (with fallback)
