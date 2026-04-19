@@ -143,6 +143,26 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--trial_vram_budget_gb", type=float, default=None,
+        help=(
+            "Per-mode VRAM ceiling (GB) for the evaluate_vram_skill gate on "
+            "rounds where plan.is_trial=True. Forwarded to the tuner's "
+            "per-round gate only (no proposer-side VRAM gate in Phase K). "
+            "None → skill falls back to free×0.8 defensive limit "
+            "(docs/resource_estimator_implement.md §10.9 / Phase K)."
+        ),
+    )
+    parser.add_argument(
+        "--formal_vram_budget_gb", type=float, default=None,
+        help=(
+            "Per-mode VRAM ceiling (GB) for the evaluate_vram_skill gate on "
+            "rounds where plan.is_trial=False. Sized independently from the "
+            "trial budget — formal rounds often use larger batch_size and "
+            "segmentation_size so the VRAM ceiling can differ. "
+            "None → skill falls back to free×0.8 defensive limit."
+        ),
+    )
+    parser.add_argument(
         "--source_paths", type=str, nargs="+", default=None,
         help="Seed run output JSON paths. Defaults to wavenet + punet trial runs.",
     )
@@ -227,6 +247,13 @@ def main():
                          if args.formal_time_budget_minutes is not None
                          else "disabled")
     print(f"  Time budget   : trial={trial_budget_str}  |  formal={formal_budget_str}")
+    trial_vram_str = (f"{args.trial_vram_budget_gb} GB"
+                      if args.trial_vram_budget_gb is not None
+                      else "disabled (free×0.8)")
+    formal_vram_str = (f"{args.formal_vram_budget_gb} GB"
+                       if args.formal_vram_budget_gb is not None
+                       else "disabled (free×0.8)")
+    print(f"  VRAM budget   : trial={trial_vram_str}  |  formal={formal_vram_str}")
     print(f"  Data dir      : {args.data_dir or 'unset (skill uses static formula)'}")
     print(f"  Advice    : {args.advice}")
     print(f"  LLM config: {args.llm_config or 'default (gemini-3.1-pro-preview uniform)'}")
@@ -262,6 +289,10 @@ def main():
         trial_time_budget_minutes=args.trial_time_budget_minutes,
         formal_time_budget_minutes=args.formal_time_budget_minutes,
         data_dir=args.data_dir,
+        # VRAM-budget gate (Phase K two-budget split — fans out to the tuner only;
+        # no proposer-side gate per §10.17 / §10.9).
+        trial_vram_budget_gb=args.trial_vram_budget_gb,
+        formal_vram_budget_gb=args.formal_vram_budget_gb,
         # Advice
         human_advice_propose=advice.get("propose"),
         human_advice_implement=advice.get("implement"),

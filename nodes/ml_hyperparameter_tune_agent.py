@@ -1168,6 +1168,20 @@ def main():
                         help="TIDMAD data directory used by evaluate_time_skill's real-dataset "
                              "warmup. None makes the skill fall back to its static formula.")
 
+    # evaluate_vram_skill gate (Phase K two-budget split). Each default is
+    # None which keeps that mode's budget disabled — skill falls back to the
+    # defensive free×0.8 limit. Matches run_exploration_adaptive.py.
+    parser.add_argument("--trial_vram_budget_gb", type=float, default=None,
+                        help="Per-mode VRAM ceiling (GB) for the evaluate_vram_skill "
+                             "gate on rounds where plan.is_trial=True. None → "
+                             "skill uses free×0.8 defensive limit.")
+    parser.add_argument("--formal_vram_budget_gb", type=float, default=None,
+                        help="Per-mode VRAM ceiling (GB) for the evaluate_vram_skill "
+                             "gate on rounds where plan.is_trial=False. None → "
+                             "skill uses free×0.8 defensive limit. Sized "
+                             "independently from the trial budget because formal "
+                             "rounds often use larger batch_size / segmentation_size.")
+
     args = parser.parse_args()
 
     # Preflight: catch the "plugin model_type without seed file" mistake
@@ -1231,6 +1245,10 @@ def main():
         input_dict["formal_time_budget_minutes"] = args.formal_time_budget_minutes
     if args.data_dir is not None:
         input_dict["data_dir"] = args.data_dir
+    if args.trial_vram_budget_gb is not None:
+        input_dict["trial_vram_budget_gb"] = args.trial_vram_budget_gb
+    if args.formal_vram_budget_gb is not None:
+        input_dict["formal_vram_budget_gb"] = args.formal_vram_budget_gb
 
     agent_input = HyperparamTuningInput.model_validate(input_dict)
 

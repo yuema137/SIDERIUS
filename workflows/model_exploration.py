@@ -343,6 +343,10 @@ def run_workflow(
     # --- Time-budget gate (evaluate_time_skill, docs/resource_estimator_implement.md §2.7.2 / Phase I) ---
     trial_time_budget_minutes: float | None = None,
     formal_time_budget_minutes: float | None = None,
+    # --- VRAM-budget gate (evaluate_vram_skill, docs/resource_estimator_implement.md §10.9 / Phase K) ---
+    # Tuner-only fan-out; no proposer-side gate in Phase K (§10.17).
+    trial_vram_budget_gb: float | None = None,
+    formal_vram_budget_gb: float | None = None,
     # --- Reasoning pipeline ---
     exploration_mode: str = "auto",
     minimum_boldness: float = 0.05,
@@ -401,6 +405,14 @@ def run_workflow(
         formal_time_budget_minutes: Same as above, but for formal-mode rounds
             (plan.is_trial=False). Sized independently because formal runs
             use the full dataset and are 50–100x longer.
+        trial_vram_budget_gb: Per-mode VRAM ceiling (GB) for the
+            evaluate_vram_skill gate on trial-mode rounds. Fanned out to
+            HyperparamTuningInput only — Phase K has no proposer-side VRAM
+            gate (deferred per §10.17). None → tuner's skill falls back to
+            the defensive free×0.8 limit. See §10.9 / Phase K.
+        formal_vram_budget_gb: Same as above, but for formal-mode rounds.
+            Sized independently because formal rounds often use larger
+            batch_size / segmentation_size so the VRAM ceiling can differ.
 
     Returns:
         List of HyperparamTuningOutput objects, one per successful iteration.
@@ -692,6 +704,8 @@ def run_workflow(
             trial_time_budget_minutes=trial_time_budget_minutes,
             formal_time_budget_minutes=formal_time_budget_minutes,
             data_dir=data_dir,
+            trial_vram_budget_gb=trial_vram_budget_gb,
+            formal_vram_budget_gb=formal_vram_budget_gb,
         )
         if human_advice_tune is not None:
             tune_input.human_advice = human_advice_tune
