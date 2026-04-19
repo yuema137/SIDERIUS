@@ -639,6 +639,17 @@ class ProposalInput(BaseModel):
                     "When running standalone, the node reads interpretation output "
                     "from storage.local.workspace.",
     )
+    debug_dump_proposing_prompt_path: Optional[str] = Field(
+        default=None,
+        description=(
+            "Debug instrumentation (Phase K.8): when set, the proposer's "
+            "pipeline mode writes the rendered proposing-stage system "
+            "prompt to this path before calling the LLM. Used by smoke "
+            "runs to audit the exact text the LLM saw — in particular "
+            "the K.7.6 [PRIOR ITERATION GATE EXHAUSTION] block. "
+            "None = no dump (default; production behaviour)."
+        ),
+    )
 
 
 class ProposalOutput(BaseModel):

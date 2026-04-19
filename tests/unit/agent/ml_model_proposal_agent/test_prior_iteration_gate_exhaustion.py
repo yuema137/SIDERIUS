@@ -396,3 +396,51 @@ class TestPipelineTemplateVarsCarryBlock:
         assert "[PRIOR ITERATION GATE EXHAUSTION]" not in system_prompt
         # And no stray placeholder text either
         assert "{prior_iteration_gate_exhaustion_block}" not in system_prompt
+
+
+class TestDebugDumpProposingPrompt:
+    """Phase K.8 instrumentation: when
+    ``ProposalInput.debug_dump_proposing_prompt_path`` is set, the
+    pipeline's proposing-stage system prompt is written to that path
+    so smoke runs can audit it. None (default) → no file written."""
+
+    def _agent(self):
+        bridge = MagicMock()
+        bridge.generate.side_effect = [
+            TestPipelineTemplateVarsCarryBlock._FAKE_COMPARISON,
+            TestPipelineTemplateVarsCarryBlock._FAKE_REASONING,
+            TestPipelineTemplateVarsCarryBlock._FAKE_PROPOSING,
+        ]
+        agent = MLModelProposalAgent(
+            provider="gemini", model_id="test",
+            bridge_factory=lambda **kw: bridge,
+        )
+        return agent, bridge
+
+    def test_dump_path_set_writes_rendered_prompt(self, tmp_path):
+        agent, _ = self._agent()
+        dump_path = tmp_path / "debug" / "iter002_proposing.md"
+        inp = _pipeline_input(
+            tmp_path,
+            gate_info=_gate_exhaustion(
+                summary_message="All attempts hit the VRAM gate.",
+            ),
+        )
+        inp.debug_dump_proposing_prompt_path = str(dump_path)
+        agent.run(inp)
+        assert dump_path.exists(), "dump file should be created"
+        contents = dump_path.read_text()
+        # The dumped file IS the rendered proposing-stage system prompt.
+        assert "[PRIOR ITERATION GATE EXHAUSTION]" in contents
+        assert "All attempts hit the VRAM gate." in contents
+
+    def test_dump_path_none_writes_nothing(self, tmp_path):
+        agent, _ = self._agent()
+        inp = _pipeline_input(tmp_path, gate_info=None)
+        # Field defaults to None — no dump file should appear under tmp_path.
+        agent.run(inp)
+        # Nothing under tmp_path/debug/ should exist.
+        debug_dir = tmp_path / "debug"
+        assert not debug_dir.exists(), (
+            "no debug dir should be created when path is None"
+        )

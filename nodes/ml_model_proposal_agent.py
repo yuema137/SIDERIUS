@@ -738,6 +738,17 @@ class MLModelProposalAgent:
             template_vars=template_vars,
         )
 
+        # Phase K.8 debug instrumentation: optionally dump the rendered
+        # proposing-stage system prompt so smoke runs can audit the exact
+        # text the LLM saw (in particular the K.7.6 [PRIOR ITERATION GATE
+        # EXHAUSTION] block). No-op when the field is None (default).
+        if inp.debug_dump_proposing_prompt_path:
+            from pathlib import Path
+            dump_path = Path(inp.debug_dump_proposing_prompt_path)
+            dump_path.parent.mkdir(parents=True, exist_ok=True)
+            dump_path.write_text(proposing_prompt)
+            print(f"   [debug] dumped proposing-stage system prompt → {dump_path}")
+
         # Extract scientific content from reasoning stages once — these don't change on retry.
         reasoning_output = accumulated.get("causal_reasoning", {})
         comparison_output = accumulated.get("comparison", {})

@@ -352,6 +352,8 @@ def run_workflow(
     minimum_boldness: float = 0.05,
     # --- Implementation retry ---
     max_impl_attempts: int = 3,
+    # --- Phase K.8 debug instrumentation ---
+    debug_dump_prompts: bool = False,
 ) -> list[HyperparamTuningOutput]:
     """
     Execute the model exploration workflow for one or more iterations.
@@ -570,6 +572,15 @@ def run_workflow(
                     propose_input.previous_failures = previous_failures
                 if human_advice_mindset is not None:
                     propose_input.mindset = human_advice_mindset
+
+                # Phase K.8 debug — dump rendered proposing-stage system
+                # prompt under {run_dir}/debug/ when the flag is on.
+                if debug_dump_prompts:
+                    propose_input.debug_dump_proposing_prompt_path = os.path.join(
+                        run_dir, "debug",
+                        f"iter{iteration:03d}_attempt{attempt:03d}"
+                        "_proposing_system_prompt.md",
+                    )
 
                 proposal = MLModelProposalAgent(
                     **llm_config.get("propose"),

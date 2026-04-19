@@ -185,6 +185,16 @@ def parse_args():
             "Default 0.05 (5%% relative improvement required)."
         ),
     )
+    parser.add_argument(
+        "--debug_dump_prompts", action="store_true",
+        help=(
+            "Phase K.8 debug instrumentation: dump each iteration's "
+            "rendered proposing-stage system prompt to "
+            "{workspace}/{run_name}/debug/iter{N}_attempt{M}_proposing_system_prompt.md "
+            "so smoke runs can audit the exact text the LLM saw "
+            "(in particular the K.7.6 [PRIOR ITERATION GATE EXHAUSTION] block)."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -305,6 +315,8 @@ def main():
         minimum_boldness=args.minimum_boldness,
         # Implementation retry
         max_impl_attempts=args.max_impl_attempts,
+        # Phase K.8 debug instrumentation
+        debug_dump_prompts=args.debug_dump_prompts,
     )
 
 
