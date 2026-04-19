@@ -177,6 +177,55 @@ Output only the JSON object — no preamble, no markdown fences, no commentary."
 # Prompt builders
 # ---------------------------------------------------------------------------
 
+def _format_prior_iteration_gate_exhaustion_block(info) -> str:
+    """Render the [PRIOR ITERATION GATE EXHAUSTION] block per §10.13.5.
+
+    Returns "" when ``info`` is None so callers can unconditionally splice
+    the result into a template (no empty section). When populated, the
+    block carries the structured failure report from the previous
+    iteration's tuner so the next proposer can size its baseline below
+    the binding ceiling. See docs/resource_estimator_implement.md §10.13.
+
+    Numeric fields render as ``"n/a"`` when None — happens when the
+    corresponding axis was disabled (budget None) or no record carried
+    that estimate. Counts always render numerically.
+    """
+    if info is None:
+        return ""
+
+    def _num(v, suffix=""):
+        return f"{v}{suffix}" if v is not None else "n/a"
+
+    def _factor(v):
+        return f"{v:.2f}×" if v is not None else "n/a"
+
+    lines = [
+        "[PRIOR ITERATION GATE EXHAUSTION]",
+        info.summary_message,
+        "",
+        "Resource accounting:",
+        f"  Mode active:       {info.active_mode}",
+        f"  VRAM budget:       {_num(info.vram_budget_gb, ' GB')}",
+        f"  Time budget:       {_num(info.time_budget_minutes, ' min')}",
+        f"  Baseline factors:  VRAM {_factor(info.baseline_vram_factor)}   "
+        f"Time {_factor(info.baseline_time_factor)}",
+        f"  Worst factors:     VRAM {_factor(info.worst_vram_factor)}      "
+        f"Time {_factor(info.worst_time_factor)}",
+        f"  Attempt counts:    {info.total_attempts} total, "
+        f"{info.vram_gated_attempts} VRAM-gated,",
+        f"                     {info.time_gated_attempts} time-gated, "
+        f"{info.other_failure_attempts} other failures",
+        "",
+        "For this iteration: propose an architecture that fits the budgets",
+        "shown above. The previous proposal could not be trained even after",
+        "the tuner attempted to adjust hyperparameters within its lever set",
+        "(batch_size, model depth/width). Reduce parameter count and/or layer",
+        "count enough that the resulting baseline estimates land below the",
+        "budgets.",
+    ]
+    return "\n".join(lines)
+
+
 def _build_reasoning_prompt(inp: ProposalInput) -> str:
     """Build the user prompt for the reasoning call."""
     interp = inp.interpretation
@@ -327,6 +376,15 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
         for i, failure in enumerate(inp.previous_failures, 1):
             lines.append(f"  {i}. {failure}")
         lines.append("")
+
+    # Phase K.7.6 — cross-iteration gate-exhaustion report from the prior
+    # tuner (§10.13). Only renders when the prior iteration ended without
+    # ever training successfully AND ≥1 attempt was rejected by the gate.
+    gate_block = _format_prior_iteration_gate_exhaustion_block(
+        inp.prior_iteration_gate_exhaustion
+    )
+    if gate_block:
+        lines += [gate_block, ""]
 
     # --- Expert advice (from upstream agents) ---
     expert_advice_str = serialize_expert_advice(inp.expert_advice) if inp.expert_advice else ""
@@ -572,6 +630,15 @@ class MLModelProposalAgent:
             # template_vars replace is a no-op when the placeholder is absent.
             # See docs/improving_validation_awareness.md Phase A.2/A.3.
             "known_constraints_block": _format_known_constraints_block(DATASET_CONFIG),
+            # Phase K.7.6 — proposing-stage placeholder for the previous
+            # iteration's gate-exhaustion report (§10.13.5). Resolves to ""
+            # when the prior iteration succeeded (or when there is no prior
+            # iteration), so the placeholder collapses to nothing visible.
+            "prior_iteration_gate_exhaustion_block": (
+                _format_prior_iteration_gate_exhaustion_block(
+                    inp.prior_iteration_gate_exhaustion
+                )
+            ),
         }
 
         for stage in pipeline.stages:

@@ -1,6 +1,6 @@
 # Resource Estimator (Time + VRAM Budgets)
 
-**Status**: time skill implemented + smoke-tested on lilab (Phases A–G complete; H1a lilab direct-skill smoke verified 2026-04-16; **Phase I — trial/formal budget split — landed 2026-04-16 across 5 commits**; **Phase J — success-path time info to planner — landed 2026-04-16 across 3 commits**; **H1b lilab tuner-integration smoke verified 2026-04-16 on RTX 5090, k(wavenet)=4.22**; H2 SDSC deferred). **Phase K — VRAM budget gate alongside the time gate — design landed 2026-04-18; K.0–K.2 implemented 2026-04-18; K.2.5 (3-phase × 2-resource estimator distribution: training/inference/scoring × VRAM/time) shipped 2026-04-18 across 7 commits: inference_defaults → training_skill estimator → inference_skill estimator → denoising_score_skill estimator + `core/server_configs/` → evaluate_vram_skill peak aggregator → evaluate_time_skill sum aggregator → doc sync; K.3–K.6 shipped 2026-04-18; K.7.1 (gate-exhaustion schema) shipped 2026-04-18; K.7.2 (proposer-side schema field) shipped 2026-04-18; K.7.3 (tuner `_build_gate_exhaustion` + finalisation) shipped 2026-04-18; K.7.4 (interp→propose protocol pass-through) shipped 2026-04-18; K.7.5 (workflow retains previous tuner output across iterations) shipped 2026-04-18; K.7.6 + K.8 pending.**
+**Status**: time skill implemented + smoke-tested on lilab (Phases A–G complete; H1a lilab direct-skill smoke verified 2026-04-16; **Phase I — trial/formal budget split — landed 2026-04-16 across 5 commits**; **Phase J — success-path time info to planner — landed 2026-04-16 across 3 commits**; **H1b lilab tuner-integration smoke verified 2026-04-16 on RTX 5090, k(wavenet)=4.22**; H2 SDSC deferred). **Phase K — VRAM budget gate alongside the time gate — design landed 2026-04-18; K.0–K.2 implemented 2026-04-18; K.2.5 (3-phase × 2-resource estimator distribution: training/inference/scoring × VRAM/time) shipped 2026-04-18 across 7 commits: inference_defaults → training_skill estimator → inference_skill estimator → denoising_score_skill estimator + `core/server_configs/` → evaluate_vram_skill peak aggregator → evaluate_time_skill sum aggregator → doc sync; K.3–K.6 shipped 2026-04-18; K.7.1 (gate-exhaustion schema) shipped 2026-04-18; K.7.2 (proposer-side schema field) shipped 2026-04-18; K.7.3 (tuner `_build_gate_exhaustion` + finalisation) shipped 2026-04-18; K.7.4 (interp→propose protocol pass-through) shipped 2026-04-18; K.7.5 (workflow retains previous tuner output across iterations) shipped 2026-04-18; K.7.6 (proposer prompt `[PRIOR ITERATION GATE EXHAUSTION]` block + pipeline placeholder) shipped 2026-04-18 — **K.7 complete**; K.8 smoke pending.**
 **Author**: design discussion 2026-04-16; Phase K extension 2026-04-18.
 **Motivation**: two trial-mode runs (`exploit_cnn_v1`, `explore_novel_v1`) stalled in Round 1 for 1h 50min and 2h 27min respectively, both blowing past the 1-hour trial budget stated in the expert advice. Neither was blocked, because the planner has no pre-flight wall-time estimate — only a VRAM check. **Phase K motivation (2026-04-17)**: `explore_novel_v1` iterations 3 and 4 burned 9/9 attempts each to `"GPU has only 0.01 GB free"` because the existing VRAM gate uses momentary `free_bytes × 0.8` as its limit and another process held 25.7 GB on the shared 32 GB card. The planner has no operator-supplied VRAM ceiling to optimise against — symmetric to the time-gate gap §1.2 fixed.
 
@@ -42,7 +42,7 @@
 | K.7.3 — tuner: `_build_gate_exhaustion` + finalisation call | 2026-04-18 | `86e6aff` | helper + `_render_gate_exhaustion_summary` per §10.13.3; truth table covered by 12 new tests in `test_build_gate_exhaustion.py` (empty/ever-trained/no-gate-skip → None; VRAM-only/time-only/mixed populated; disabled-axis None factors); 297/297 tuner tests green |
 | K.7.4 — protocol: `interp→propose.local_full_context` surfaces `prior_tune_output.gate_exhaustion` | 2026-04-18 | (this commit) | new optional `prior_tune_output` kwarg; surfaces only when both kwarg AND `gate_exhaustion` are non-None; 4 new tests in `TestLocalFullContextGateExhaustionPassThrough` (default-None, no-gate, surfaces, kwarg-isolation); 28/28 protocol tests green; 317/317 workflow+proposer tests green |
 | K.7.5 — workflow: retain previous tuner output across iterations | 2026-04-18 | `e9bcfd6` | `previous_tune_output` carried in long-term memory block; passed as `prior_tune_output=` to next iteration's `local_full_context`; 3 new tests in `TestRunWorkflowGateExhaustionPropagation` (iter1 has no prior; iter2 receives iter1's gate_exhaustion verbatim via round-trip equality; iter2 stays None when iter1 succeeded); 38/38 workflow tests green |
-| K.7.6 — prompt block | pending | — | tracked in §10.14 K.7 sub-checklist |
+| K.7.6 — proposer prompt: `[PRIOR ITERATION GATE EXHAUSTION]` block + pipeline placeholder | 2026-04-18 | (this commit) | new `_format_prior_iteration_gate_exhaustion_block` helper in `nodes/ml_model_proposal_agent.py` (returns "" when None, else renders §10.13.5 block with `n/a` fallbacks for disabled axes); injected in both legacy `_build_reasoning_prompt` and pipeline `template_vars["prior_iteration_gate_exhaustion_block"]`; new `{prior_iteration_gate_exhaustion_block}` placeholder in `proposing_stage.md`; 19 new tests in `test_prior_iteration_gate_exhaustion.py` (helper truth-table, legacy injection, pipeline placeholder substitution, end-to-end round-trip via mocked bridge); 275/275 proposer tests green |
 | K.8 — explore_novel re-launch under contention | pending | — | acceptance: rejects against budget not free-VRAM; gate-exhaustion path also exercised by deliberately under-budgeting one iteration |
 | K.deferred — proposer `_apply_vram_gate` + `vram_risk` field + retire `time_risk` redundancy on `ProposalOutput` | deferred | — | gated on registering plugins pre-validation; tracked in §10.17 |
 
@@ -1672,7 +1672,7 @@ its targeted pytest invocation green and a committable state.
 - [x] K.4 — Protocol pass-through (`valid→tune` only) *(2026-04-18, `e368b2b`)*
 - [x] K.5 — CLI + workflow fan-out *(2026-04-18, `6bf81f9`)*
 - [x] K.6 — Planner prompt (numeric block + guidance block) *(2026-04-18, `34e0e0f`)*
-- [~] K.7 — Iteration-boundary gate-exhaustion feedback (§10.13) *(in progress: K.7.1–K.7.5 shipped; K.7.6 pending)*
+- [x] K.7 — Iteration-boundary gate-exhaustion feedback (§10.13) *(K.7.1–K.7.6 shipped 2026-04-18)*
 - [ ] K.8 — Smoke run on lilab under contention
 
 #### K.0 Skill rename (mechanical) [ ]
@@ -1983,7 +1983,7 @@ planning, both addressed:
       verbatim.
 - [ ] Verify: `pytest tests/unit/agent/ -q`.
 
-#### K.7 Iteration-boundary gate-exhaustion feedback (§10.13) [~]
+#### K.7 Iteration-boundary gate-exhaustion feedback (§10.13) [x]
 
 - [x] **K.7.1** — `agent/schemas/hyperparam_tuning.py`: add `GateExhaustionInfo`
       Pydantic model per §10.13.2; add
@@ -2016,12 +2016,27 @@ planning, both addressed:
       covering iter1-no-prior, iter2-receives-iter1-gate-exhaustion via
       round-trip equality, iter2-stays-None-when-iter1-succeeded;
       38/38 workflow tests green.)*
-- [ ] `agent/prompts.py`: add the conditional
-      `[PRIOR ITERATION GATE EXHAUSTION]` block per §10.13.5.
-- [ ] Tests per §10.13.7: schema validation, `_build_gate_exhaustion`
-      truth-table, protocol pass-through, prompt builder
-      conditional-rendering.
-- [ ] Verify: `pytest tests/unit/agent/tune_ml_hyperparam_agent/ tests/unit/agent/protocols/ tests/unit/agent/ml_model_proposal_agent/ -q`.
+- [x] **K.7.6** — `nodes/ml_model_proposal_agent.py`: add
+      `_format_prior_iteration_gate_exhaustion_block` helper rendering
+      the §10.13.5 block (returns "" when None, else renders summary +
+      resource accounting + verdict; numeric fields fall back to "n/a"
+      for disabled axes); inject in both legacy `_build_reasoning_prompt`
+      and pipeline `template_vars["prior_iteration_gate_exhaustion_block"]`;
+      add matching `{prior_iteration_gate_exhaustion_block}` placeholder
+      to `agent/prompt_templates/proposal/proposing_stage.md`.
+      *(2026-04-18; 19 new tests in `test_prior_iteration_gate_exhaustion.py`
+      covering helper truth-table, legacy injection, pipeline placeholder
+      substitution, and end-to-end round-trip via mocked bridge;
+      275/275 proposer tests green.)*
+      *Note: helper lives in `nodes/ml_model_proposal_agent.py` rather
+      than `agent/prompts.py` because the proposer's prompt-building
+      pattern (both legacy and pipeline) lives in the node file —
+      `agent/prompts.py` holds tuner/planner helpers only.*
+- [x] Tests per §10.13.7: schema validation (K.7.1),
+      `_build_gate_exhaustion` truth-table (K.7.3), protocol
+      pass-through (K.7.4), prompt builder conditional-rendering (K.7.6).
+- [x] Verify: `pytest tests/unit/agent/ml_model_proposal_agent/ -q`
+      → 275/275 green.
 
 #### K.8 Smoke (mirror Phase H1b) [ ]
 
