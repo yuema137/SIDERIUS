@@ -482,11 +482,16 @@ def run_workflow(
     iteration_results: list[HyperparamTuningOutput] = []
     best_score_overall: float | None = None
 
-    # Long-term memory: three variables carried forward across iterations
+    # Long-term memory: variables carried forward across iterations
     previous_proposal_data: dict | None = None  # serialized ProposalOutput from iter N-1
     current_runtime_vocab = list(vocab_seed)     # starts with seed, grows with discoveries
     model_knowledge_cache: dict = {}             # per-model Phase 1 cache (grows once per model)
     latest_new_summary = None                    # ModelRunSummary from the most recent tune
+    # Phase K.7.5 — retain the previous iteration's tuner output so the
+    # interp→propose protocol can surface its gate_exhaustion to the next
+    # proposer (docs/resource_estimator_implement.md §10.13). None on
+    # iteration 1; assigned at the end of every subsequent iteration.
+    previous_tune_output: HyperparamTuningOutput | None = None
 
     # --- Iteration loop ---
     for iteration in range(1, max_iterations + 1):
@@ -558,6 +563,7 @@ def run_workflow(
                     trial_time_budget_minutes=trial_time_budget_minutes,
                     formal_time_budget_minutes=formal_time_budget_minutes,
                     data_dir=data_dir,
+                    prior_tune_output=previous_tune_output,
                 )
                 propose_input.existing_model_types = list(all_model_types)
                 if previous_failures:
@@ -712,6 +718,9 @@ def run_workflow(
 
         tune_output = HyperparamTuningAgent().run(tune_input)
         iteration_results.append(tune_output)
+        # Phase K.7.5 — retain for the next iteration's local_full_context
+        # call so its gate_exhaustion (if any) reaches the next proposer.
+        previous_tune_output = tune_output
 
         # --- Update long-term memory for next iteration ---
         all_model_types.append(proposal.model_name)

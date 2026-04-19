@@ -43,9 +43,10 @@ import pytest
 from unittest.mock import MagicMock, patch, call
 
 from agent.schemas.hyperparam_tuning import (
+    ExpertAdvice,
+    GateExhaustionInfo,
     HyperparamTuningInput,
     HyperparamTuningOutput,
-    ExpertAdvice,
 )
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.proposal import ProposalOutput
@@ -648,6 +649,131 @@ class TestRunWorkflowValidationRetry:
         iter_dir = os.path.join(run_dir, "iteration_001")
         assert os.path.isdir(os.path.join(iter_dir, "attempt_001_gated_tcn"))
         assert os.path.isdir(os.path.join(iter_dir, "attempt_002_gated_tcn"))
+
+
+# ---------------------------------------------------------------------------
+# Phase K.7.5 — gate-exhaustion propagation across iterations (§10.13)
+# ---------------------------------------------------------------------------
+
+class TestRunWorkflowGateExhaustionPropagation:
+    """The workflow must retain the previous iteration's tuner output and
+    pass it as ``prior_tune_output=`` to the next iteration's
+    ``local_full_context`` call. The protocol then surfaces
+    ``gate_exhaustion`` (when present) into the next proposer's
+    ``ProposalInput.prior_iteration_gate_exhaustion``.
+
+    Iteration 1 has no prior, so its ProposalInput must carry
+    ``prior_iteration_gate_exhaustion=None``. Iteration 2 must receive
+    iteration 1's gate_exhaustion verbatim.
+
+    See docs/resource_estimator_implement.md §10.13.
+    """
+
+    def _gate_exhaustion(self):
+        return GateExhaustionInfo(
+            total_attempts=9,
+            vram_gated_attempts=9,
+            time_gated_attempts=0,
+            other_failure_attempts=0,
+            active_mode="trial",
+            vram_budget_gb=4.0,
+            time_budget_minutes=20.0,
+            baseline_vram_estimate_gb=6.4,
+            baseline_vram_factor=1.6,
+            baseline_time_estimate_minutes=8.0,
+            baseline_time_factor=0.4,
+            worst_vram_factor=2.0,
+            worst_time_factor=0.6,
+            summary_message="All 9 attempts were rejected by the VRAM gate.",
+        )
+
+    def test_iter1_proposal_has_no_prior_gate_exhaustion(self, workflow_env):
+        """First iteration runs with no prior tuner output, so the proposer's
+        prior_iteration_gate_exhaustion must be None — confirms the
+        ``previous_tune_output`` variable is initialised to None and the
+        protocol leaves the field at its schema default on iteration 1."""
+        names = iter(["model_a", "model_b"])
+        workflow_env["propose"].return_value.run.side_effect = (
+            lambda inp: _make_proposal_output(next(names))
+        )
+        workflow_env["tune"].return_value.run.side_effect = [
+            _make_tune_output(model_type="model_a", score=1.6),
+            _make_tune_output(model_type="model_b", score=1.7),
+        ]
+        run_workflow(
+            data_dir=workflow_env["data_dir"],
+            model_types=["punet"],
+            source_run_name="v1",
+            workspace=workflow_env["workspace"],
+            run_name="test_run",
+            max_iterations=2,
+        )
+        iter1_propose_input = (
+            workflow_env["propose"].return_value.run.call_args_list[0][0][0]
+        )
+        assert iter1_propose_input.prior_iteration_gate_exhaustion is None
+
+    def test_iter2_proposal_receives_iter1_gate_exhaustion(self, workflow_env):
+        """When iteration 1's tuner output carries a populated gate_exhaustion,
+        iteration 2's proposer must see the same payload, surfaced into
+        ProposalInput.prior_iteration_gate_exhaustion via the protocol."""
+        gate = self._gate_exhaustion()
+
+        iter1_tune = _make_tune_output(model_type="model_a", score=1.6)
+        iter1_tune.gate_exhaustion = gate
+        iter2_tune = _make_tune_output(model_type="model_b", score=1.7)
+
+        names = iter(["model_a", "model_b"])
+        workflow_env["propose"].return_value.run.side_effect = (
+            lambda inp: _make_proposal_output(next(names))
+        )
+        workflow_env["tune"].return_value.run.side_effect = [iter1_tune, iter2_tune]
+
+        run_workflow(
+            data_dir=workflow_env["data_dir"],
+            model_types=["punet"],
+            source_run_name="v1",
+            workspace=workflow_env["workspace"],
+            run_name="test_run",
+            max_iterations=2,
+        )
+        iter2_propose_input = (
+            workflow_env["propose"].return_value.run.call_args_list[1][0][0]
+        )
+        surfaced = iter2_propose_input.prior_iteration_gate_exhaustion
+        assert surfaced is not None
+        assert isinstance(surfaced, GateExhaustionInfo)
+        # Round-trip equality — every field crossed the workflow → protocol hop
+        assert surfaced.model_dump() == gate.model_dump()
+
+    def test_iter2_proposal_no_gate_exhaustion_when_iter1_succeeded(self, workflow_env):
+        """When iteration 1's tuner succeeds (gate_exhaustion=None), the next
+        proposer must NOT see a stale or fabricated gate_exhaustion — the
+        protocol pass-through is gated on the field actually being populated."""
+        iter1_tune = _make_tune_output(model_type="model_a", score=1.6)
+        iter2_tune = _make_tune_output(model_type="model_b", score=1.7)
+        # Default factory produces gate_exhaustion=None; assert that explicitly
+        # so this test fails loudly if the factory is ever changed.
+        assert iter1_tune.gate_exhaustion is None
+
+        names = iter(["model_a", "model_b"])
+        workflow_env["propose"].return_value.run.side_effect = (
+            lambda inp: _make_proposal_output(next(names))
+        )
+        workflow_env["tune"].return_value.run.side_effect = [iter1_tune, iter2_tune]
+
+        run_workflow(
+            data_dir=workflow_env["data_dir"],
+            model_types=["punet"],
+            source_run_name="v1",
+            workspace=workflow_env["workspace"],
+            run_name="test_run",
+            max_iterations=2,
+        )
+        iter2_propose_input = (
+            workflow_env["propose"].return_value.run.call_args_list[1][0][0]
+        )
+        assert iter2_propose_input.prior_iteration_gate_exhaustion is None
 
 
 # ---------------------------------------------------------------------------
