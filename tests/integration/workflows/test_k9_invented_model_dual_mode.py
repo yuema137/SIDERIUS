@@ -204,20 +204,26 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(
     output = agent.run(agent_input)
 
     # --- Smoke / wiring assertions ---
+    # NOTE: ``len(output.all_records) == 2`` is intentionally NOT here; it
+    # belongs to Layer 2. Putting it before Layer 1 would mask K.2.5-8
+    # regressions (a hard-fail in the inference estimator returns
+    # ``status="error"`` and saves zero records, so this assertion would
+    # fire first with ``0 == 2`` instead of the more diagnostic Layer 1
+    # message ``"K.2.5-8 warning line missing"``. Verified in the K.9.3
+    # regression-revert check.
     assert isinstance(output, HyperparamTuningOutput)
     HyperparamTuningOutput.model_validate(output.model_dump())
     assert output.run_name == run_name
     assert output.model_type == _PLUGIN_MODEL_TYPE
-    # Pseudo mode: round 1 OOM-skipped, round 2 succeeds → 2 records.
-    # Real-LLM mode is exempt because the LLM may pick differently.
-    if bridge is not None:
-        assert len(output.all_records) == 2
 
     # ------------------------------------------------------------------
     # Layer 1 — gate stdout (capsys). Both modes.
     # ------------------------------------------------------------------
     # The K.2.5-8 warning fires unconditionally for unregistered model_type;
     # the verdict line follows when the gate runs to completion (no crash).
+    # This block is positioned before any record-count assertion so a
+    # hard-fail regression in the inference estimator (which would return
+    # zero records) surfaces first as a clear K.2.5-8 contract violation.
     stdout = capsys.readouterr().out
     assert "!!! [evaluate_vram_skill]" in stdout, (
         "K.2.5-8 warning line missing — fallback path not exercised."
@@ -236,6 +242,9 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(
     # Layer 2 — per-record memory. Pseudo mode only (real-LLM may diverge).
     # ------------------------------------------------------------------
     if bridge is not None:
+        # Pseudo mode: round 1 OOM-skipped, round 2 succeeds → exactly 2 records.
+        # Real-LLM mode is exempt because the LLM may pick differently.
+        assert len(output.all_records) == 2
         oom_records = [r for r in output.all_records if r.status == "skipped_oom_risk"]
         success_records = [r for r in output.all_records if r.status == "success"]
         assert len(oom_records) == 1, "Round 1 should be the only OOM-skipped record."
