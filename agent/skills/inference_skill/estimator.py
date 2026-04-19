@@ -22,15 +22,25 @@ Key differences from training wall time:
   * Static fallback: training-static formula scaled down by
     ``_INFERENCE_VS_TRAINING_RATIO`` to reflect "no backward pass".
 
-Contract (K.2.5 Commit 3). Both entry points call
-``assert_inference_batch_registered`` first: unregistered model types
-(plugins without a batch entry) fail loudly here so the planning gate
-cannot silently forecast against a guessed batch size. The executor
-(``sandbox_executor.execute_inference``) keeps the silent fallback —
-those two callers have asymmetric tolerance for being wrong, by
-design. See ``core/inference_defaults.py`` docstring.
+Contract (K.2.5 Commit 3, revised by K.2.5-8 on 2026-04-18). Both
+entry points used to call ``assert_inference_batch_registered`` first
+to crash loudly on unregistered model types. K.8.1 surfaced that this
+crashed every gate the proposer triggered on an invented model_type
+(`pe_wavenet_delta`), bypassing K.7's gate-exhaustion feedback loop.
 
-See docs/resource_estimator_implement.md §10.5 + §10.14 Commit 3.
+K.2.5-8 replaces the hard-fail with a soft fallback that matches the
+runtime behaviour: ``inference_batch_for(model_type)`` is called
+unconditionally (silent fallback to 25 for unknown model types), and
+the substitution is surfaced as an ``inference_batch_uncalibrated:
+bool`` flag in the returned ``breakdown`` dict. Callers
+(``evaluate_vram_skill`` / ``evaluate_time_skill`` wrappers) emit a
+prominent warning when the flag is set and propagate it into
+``ExperimentMemory`` for post-hoc audit. The architecture-level
+activation estimate remains uncalibrated for novel models — that
+limitation is documented in §10.14 K.2.5-8 ("Limitations").
+
+See docs/resource_estimator_implement.md §10.5 + §10.14 Commit 3 +
+§10.14 K.2.5-8.
 """
 
 from __future__ import annotations
@@ -39,8 +49,8 @@ import math
 from typing import Any, Dict, List, Optional
 
 from core.inference_defaults import (
-    assert_inference_batch_registered,
     inference_batch_for,
+    is_inference_batch_registered,
 )
 from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
 
@@ -81,14 +91,15 @@ def estimate_peak_bytes(
                       optional ``nhead`` / ``num_layers`` for transformer).
         num_params:   Exact parameter count from a prior CPU instantiation.
 
-    Raises:
-        ValueError: If ``model_type`` has no registered inference batch
-            (via ``assert_inference_batch_registered``).
-
     Returns:
         ``{"phase": "inference", "total_bytes": int, "breakdown": {...}}``.
+        ``breakdown.inference_batch_uncalibrated`` is ``True`` when
+        ``model_type`` has no entry in ``_INFERENCE_BATCH_SIZES`` and
+        the runtime fallback (25) was substituted (K.2.5-8). Callers
+        should surface this flag prominently — the per-sample
+        activation model is uncalibrated for the novel architecture.
     """
-    assert_inference_batch_registered(model_type)
+    inference_batch_uncalibrated = not is_inference_batch_registered(model_type)
     inf_batch = inference_batch_for(model_type)
 
     seg_size = model_config.get("segmentation_size", 40000)
@@ -116,6 +127,7 @@ def estimate_peak_bytes(
             "activations_bytes":      activations,
             "transformer_attn_bytes": transformer_attn,
             "inference_batch":        inf_batch,
+            "inference_batch_uncalibrated": inference_batch_uncalibrated,
         },
     }
 
@@ -183,13 +195,13 @@ def estimate_wall_time_seconds(
         num_params: Only needed by the static fallback. If absent, the
             model is instantiated internally via ``_count_params``.
 
-    Raises:
-        ValueError: If ``model_type`` has no registered inference batch.
-
     Returns:
         ``{"phase": "inference", "seconds": float, "breakdown": {...}}``.
+        ``breakdown.inference_batch_uncalibrated`` is ``True`` when
+        the runtime fallback (25) was substituted for an unregistered
+        ``model_type`` (K.2.5-8).
     """
-    assert_inference_batch_registered(model_type)
+    inference_batch_uncalibrated = not is_inference_batch_registered(model_type)
     inf_batch = inference_batch_for(model_type)
 
     seg_size = int(model_config.get("segmentation_size", 1000))
@@ -215,5 +227,6 @@ def estimate_wall_time_seconds(
             "inference_batch":       inf_batch,
             "ms_per_step":           round(ms_per_step, 6),
             "ms_source":             ms_source,
+            "inference_batch_uncalibrated": inference_batch_uncalibrated,
         },
     }

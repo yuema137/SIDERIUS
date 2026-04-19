@@ -12,8 +12,10 @@ K.2.5 Commit 3 covers:
   * **inversion**: monkeypatched huge ``inference_batch`` → inference
     VRAM exceeds training VRAM — the exact crossover the aggregator
     (commit 5) must surface to the planner.
-  * ``ValueError`` on unregistered model_type (via
-    ``assert_inference_batch_registered``).
+  * **K.2.5-8**: unregistered model_type uses runtime fallback batch
+    (25) and surfaces ``inference_batch_uncalibrated: True`` instead
+    of crashing the gate.
+  * registered model_type → ``inference_batch_uncalibrated: False``.
 
 - ``estimate_wall_time_seconds``:
   * shape ``{"phase", "seconds", "breakdown"}``.
@@ -21,7 +23,8 @@ K.2.5 Commit 3 covers:
   * monotone in ``inference_batch`` at fixed ms/step (larger batch →
     fewer steps → less time).
   * static fallback invokes ``_count_params`` (monkeypatched).
-  * ``ValueError`` on unregistered model_type.
+  * **K.2.5-8**: unregistered model_type uses runtime fallback batch
+    and flags the breakdown.
 """
 
 from __future__ import annotations
@@ -124,15 +127,29 @@ class TestEstimatePeakBytes:
         inference = est.estimate_peak_bytes("rnn", mc, num_params=1_000_000)
         assert inference["total_bytes"] > training["total_bytes"]
 
-    def test_raises_on_unregistered_model_type(self):
-        """Planning-time estimator must fail loudly for plugins without
-        a registered batch — no silent guessing at 25."""
-        with pytest.raises(ValueError, match="no registered inference batch"):
-            est.estimate_peak_bytes(
-                "unregistered_plugin",
-                {"segmentation_size": 16000},
-                num_params=100_000,
-            )
+    def test_unregistered_model_type_uses_runtime_fallback(self):
+        """K.2.5-8: post-fallback, unregistered model_types no longer
+        crash the gate. The estimator substitutes the runtime default
+        (25) and marks the breakdown so callers can warn + audit.
+
+        Pre-K.2.5-8 this raised ``ValueError``; that path crashed every
+        gate the proposer triggered on a model_type it invented (e.g.
+        ``pe_wavenet_delta`` in the K.8.1 smoke), bypassing K.7's
+        gate-exhaustion feedback. See §10.14 K.2.5-8."""
+        out = est.estimate_peak_bytes(
+            "unregistered_plugin",
+            {"segmentation_size": 16000},
+            num_params=100_000,
+        )
+        assert out["breakdown"]["inference_batch"] == 25
+        assert out["breakdown"]["inference_batch_uncalibrated"] is True
+
+    def test_registered_model_type_is_not_uncalibrated(self):
+        """K.2.5-8: known seed model_types must not get flagged."""
+        out = est.estimate_peak_bytes(
+            "wavenet", {"segmentation_size": 16000}, num_params=100_000,
+        )
+        assert out["breakdown"]["inference_batch_uncalibrated"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -205,11 +222,14 @@ class TestEstimateWallTimeSeconds:
         assert calls == ["rnn"]
         assert out["breakdown"]["ms_source"] == "static_formula"
 
-    def test_raises_on_unregistered_model_type(self):
-        with pytest.raises(ValueError, match="no registered inference batch"):
-            est.estimate_wall_time_seconds(
-                "unregistered_plugin",
-                {"segmentation_size": 16000},
-                _sample_set(),
-                inference_ms_per_step=1.0,
-            )
+    def test_unregistered_model_type_uses_runtime_fallback(self):
+        """K.2.5-8 wall-time mirror: unregistered model_types use the
+        runtime fallback batch and flag the breakdown."""
+        out = est.estimate_wall_time_seconds(
+            "unregistered_plugin",
+            {"segmentation_size": 16000},
+            _sample_set(),
+            inference_ms_per_step=1.0,
+        )
+        assert out["breakdown"]["inference_batch"] == 25
+        assert out["breakdown"]["inference_batch_uncalibrated"] is True

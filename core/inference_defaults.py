@@ -9,20 +9,29 @@ Colocating both callers on one function means the VRAM/time forecast for
 the inference phase cannot drift from what actually runs: changing an
 inference batch size for any model type means editing exactly one table.
 
-Two callers, asymmetric tolerance for unknown ``model_type``:
+Three callers, two tiers of tolerance for unknown ``model_type``:
 
 - ``inference_batch_for`` — used by ``sandbox_executor.execute_inference``
   at **runtime**. Falls back silently to ``_DEFAULT_INFERENCE_BATCH``
   (25), matching pre-K.2.5 ``.get(model_type, 25)`` behaviour so plugin
   models that never registered a custom batch keep running.
 
-- ``assert_inference_batch_registered`` — used by the planning-time
-  estimator in ``inference_skill/estimator.py`` **before** calling
-  ``inference_batch_for``. Raises ``ValueError`` on unknown model types
-  so the VRAM/time gate refuses to silently forecast against a guessed
-  batch size (a wrong number there would poison the planner's decision).
+- ``is_inference_batch_registered`` — used by the planning-time
+  estimator in ``inference_skill/estimator.py`` (post-K.2.5-8).
+  Returns ``bool`` so the estimator can call ``inference_batch_for``
+  unconditionally (matching runtime) and surface the substitution as
+  an ``inference_batch_uncalibrated`` flag through the gate breakdown.
+  See docs/resource_estimator_implement.md §10.14 K.2.5-8 for the
+  rationale (the original loud-assert path crashed every gate that ran
+  on a proposer-invented model_type).
 
-See docs/resource_estimator_implement.md §10.5 (Phase K.2.5).
+- ``assert_inference_batch_registered`` — kept for callers that still
+  want the loud-fail semantics (no in-tree caller uses it post-K.2.5-8;
+  retained for downstream plugins or future re-use). Raises
+  ``ValueError`` on unknown model types.
+
+See docs/resource_estimator_implement.md §10.5 (Phase K.2.5) +
+§10.14 K.2.5-8 (soft fallback for unregistered model_type).
 """
 
 from typing import Dict
@@ -53,6 +62,19 @@ def inference_batch_for(model_type: str) -> int:
     than a silent forecast against a guessed batch.
     """
     return _INFERENCE_BATCH_SIZES.get(model_type, _DEFAULT_INFERENCE_BATCH)
+
+
+def is_inference_batch_registered(model_type: str) -> bool:
+    """Return ``True`` iff ``model_type`` has a registered inference batch.
+
+    Soft companion to ``assert_inference_batch_registered``. Used by the
+    planning-time estimator (K.2.5-8) so it can call
+    ``inference_batch_for`` unconditionally — matching runtime behaviour
+    — and surface the substitution to callers via an
+    ``inference_batch_uncalibrated`` breakdown flag, rather than
+    crashing the gate on every proposer-invented model_type.
+    """
+    return model_type in _INFERENCE_BATCH_SIZES
 
 
 def assert_inference_batch_registered(model_type: str) -> None:
