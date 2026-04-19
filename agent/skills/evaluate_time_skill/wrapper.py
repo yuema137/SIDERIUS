@@ -360,6 +360,26 @@ def run_skill(sandbox, **kwargs) -> dict:
     phase_breakdown = {p["phase"]: p for p in phases}
     dominant   = max(phases, key=lambda p: p["seconds"])["phase"]
 
+    # K.2.5-8: surface the inference estimator's soft-fallback flag.
+    # Mirror of the warning emitted by evaluate_vram_skill — same flag,
+    # same model_type, same architecture-uncalibrated caveat. Both gates
+    # call the same inference estimator, so the flag is identical; we
+    # warn once per gate so audit logs from either side are
+    # self-contained. See docs/resource_estimator_implement.md §10.14
+    # K.2.5-8.
+    inference_batch_uncalibrated = bool(
+        inference["breakdown"].get("inference_batch_uncalibrated")
+    )
+    if inference_batch_uncalibrated:
+        print(
+            f"!!! [evaluate_time_skill] model_type {model_type!r} has no "
+            f"registered inference batch in core/inference_defaults.py — "
+            f"using runtime fallback "
+            f"({inference['breakdown']['inference_batch']}). "
+            f"Inference-phase wall-time estimate is UNCALIBRATED for this "
+            f"novel architecture. Treat verdict as best-effort."
+        )
+
     feasible = total_min <= budget_min
 
     # Flat breakdown: preserves the pre-K.2.5 contract so
@@ -410,4 +430,5 @@ def run_skill(sandbox, **kwargs) -> dict:
         "breakdown":         breakdown,
         "dominant_phase":    dominant,
         "phase_breakdown":   phase_breakdown,
+        "inference_batch_uncalibrated": inference_batch_uncalibrated,
     }

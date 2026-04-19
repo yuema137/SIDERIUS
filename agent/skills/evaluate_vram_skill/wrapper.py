@@ -180,6 +180,29 @@ def run_skill(sandbox, **kwargs):
         total_est       = dominant["total_bytes"]
         phase_breakdown = {p["phase"]: p for p in phases}
 
+        # K.2.5-8: surface the inference estimator's soft-fallback flag.
+        # When the proposer invents a model_type that isn't registered in
+        # core/inference_defaults._INFERENCE_BATCH_SIZES, the estimator
+        # substitutes the runtime default (25) instead of crashing. The
+        # per-sample activation model is still uncalibrated for the novel
+        # architecture, so emit a prominent warning and propagate the
+        # flag so downstream records can mark it for post-hoc audit.
+        # See docs/resource_estimator_implement.md §10.14 K.2.5-8.
+        inference_batch_uncalibrated = bool(
+            inference_phase["breakdown"].get("inference_batch_uncalibrated")
+        )
+        if inference_batch_uncalibrated:
+            print(
+                f"!!! [evaluate_vram_skill] model_type {model_type!r} has no "
+                f"registered inference batch in core/inference_defaults.py — "
+                f"using runtime fallback "
+                f"({inference_phase['breakdown']['inference_batch']}). "
+                f"Inference-phase VRAM estimate is UNCALIBRATED for this "
+                f"novel architecture; the per-sample activation model "
+                f"assumes wavenet/punet/fcnet-like behaviour. Treat verdict "
+                f"as best-effort."
+            )
+
         # ── 3. Query actual VRAM via nvidia interface ─────────────────────
         if device != "cuda":
             # CPU mode — no VRAM constraint
@@ -191,6 +214,7 @@ def run_skill(sandbox, **kwargs):
                 "num_params":      num_params,
                 "dominant_phase":  dominant["phase"],
                 "phase_breakdown": phase_breakdown,
+                "inference_batch_uncalibrated": inference_batch_uncalibrated,
             }
 
         if not torch.cuda.is_available():
@@ -286,6 +310,7 @@ def run_skill(sandbox, **kwargs):
             "estimated_gb":    round(total_est   / _GB, 3),
             "limit_gb":        round(limit_bytes / _GB, 3),
             "vram_budget_gb":  vram_budget_gb,
+            "inference_batch_uncalibrated": inference_batch_uncalibrated,
         }
 
     except Exception as e:

@@ -93,6 +93,7 @@ _EXPECTED_KEYS = {
     "status", "feasible", "verdict", "suggestion",
     "estimated_minutes", "limit_minutes", "breakdown",
     "dominant_phase", "phase_breakdown",
+    "inference_batch_uncalibrated",  # K.2.5-8 — soft-fallback flag (always present, True/False)
 }
 
 
@@ -263,3 +264,47 @@ def test_warmup_scales_inference_ms_by_one_third(monkeypatch):
     inf_bd = result["phase_breakdown"]["inference"]["breakdown"]
     assert inf_bd["ms_source"] == "derived_from_training_warmup"
     assert inf_bd["ms_per_step"] == pytest.approx(3.0, rel=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# K.2.5-8 — soft fallback for unregistered model_type in inference estimator.
+# Mirror of the surfacing tests in test_evaluate_vram_skill.py. Both wrappers
+# call the same inference estimator and must independently (a) emit a
+# prominent !!! stdout warning and (b) propagate inference_batch_uncalibrated
+# onto the return dict so the tuner can stash it on ExperimentMemory.
+# See docs/resource_estimator_implement.md §10.14 K.2.5-8.
+# ---------------------------------------------------------------------------
+
+class TestUnregisteredModelTypeFallback:
+
+    def test_unregistered_model_type_emits_warning_and_flags_breakdown(
+        self, monkeypatch, capsys,
+    ):
+        """An invented model_type (the K.8.1 ``pe_wavenet_delta`` case) must
+        not crash the time gate, must emit a prominent ``!!! [evaluate_time_skill]``
+        warning line, and must surface ``inference_batch_uncalibrated == True``
+        on the return dict so the tuner record can carry it."""
+        _patch_count_params(monkeypatch, 100_000)
+        result = ts.run_skill(
+            FakeSandbox(),
+            **_base_kwargs(model_type="pe_wavenet_delta"),
+        )
+        assert result["status"] == "success"
+        assert result["inference_batch_uncalibrated"] is True
+
+        captured = capsys.readouterr()
+        assert "!!! [evaluate_time_skill]" in captured.out
+        assert "pe_wavenet_delta" in captured.out
+        assert "uncalibrated" in captured.out.lower()
+
+    def test_registered_model_type_does_not_emit_warning(
+        self, monkeypatch, capsys,
+    ):
+        """Regression: the warning must fire ONLY for unregistered model_types
+        — otherwise every seed-model gate call (rnn/wavenet/punet/...) would
+        spam the run log."""
+        _patch_count_params(monkeypatch, 100_000)
+        result = ts.run_skill(FakeSandbox(), **_base_kwargs())  # default rnn
+        assert result["inference_batch_uncalibrated"] is False
+        captured = capsys.readouterr()
+        assert "!!! [evaluate_time_skill]" not in captured.out

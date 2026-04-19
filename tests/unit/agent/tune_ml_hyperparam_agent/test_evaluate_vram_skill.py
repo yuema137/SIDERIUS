@@ -482,3 +482,83 @@ class TestPeakAggregation:
         )
         assert set(result["phase_breakdown"].keys()) == {"training", "inference", "scoring"}
         assert "dominant_phase" in result
+
+
+# ---------------------------------------------------------------------------
+# K.2.5-8 — soft fallback for unregistered model_type in inference estimator.
+# Mirrors the surfacing tests in test_evaluate_time_skill.py. Both gates call
+# the same inference estimator, so the breakdown flag is identical; both
+# wrappers must (a) emit a prominent !!! stdout warning so the substitution is
+# never silent and (b) propagate the flag onto their return dict so the tuner
+# can stash it in ExperimentMemory.inference_batch_uncalibrated.
+# See docs/resource_estimator_implement.md §10.14 K.2.5-8.
+# ---------------------------------------------------------------------------
+
+class TestUnregisteredModelTypeFallback:
+
+    def test_unregistered_model_type_emits_warning_and_flags_breakdown(
+        self, monkeypatch, capsys,
+    ):
+        """A model_type with no entry in _INFERENCE_BATCH_SIZES (the K.8.1
+        ``pe_wavenet_delta`` case) must:
+          1. NOT crash the gate (pre-K.2.5-8 raised ValueError),
+          2. Emit a prominent ``!!! [evaluate_vram_skill]`` warning line so the
+             substitution is auditable in the run log,
+          3. Carry ``inference_batch_uncalibrated == True`` on the return dict
+             so the tuner can stash it on the ExperimentMemory record."""
+        # _count_params would fail on an unregistered model_type because it
+        # indexes MODEL_REGISTRY. Stub it so the test exercises the gate path,
+        # not the model-loading path.
+        import agent.skills.evaluate_vram_skill.wrapper as vw
+        monkeypatch.setattr(vw, "_count_params", lambda mt, mc, lt: 100_000)
+
+        with patch("torch.cuda.is_available", return_value=True), \
+             patch("torch.cuda.mem_get_info", return_value=(_16GB, _16GB)):
+            result = run_skill(
+                FakeSandbox(),
+                model_type="pe_wavenet_delta",
+                model_config=SMALL_RNN_CFG,
+                train_config=CUDA_TRAIN_CFG,
+                loss_config=CE_LOSS_CFG,
+            )
+
+        assert result["status"] == "success"
+        assert result["inference_batch_uncalibrated"] is True
+
+        captured = capsys.readouterr()
+        assert "!!! [evaluate_vram_skill]" in captured.out
+        assert "pe_wavenet_delta" in captured.out
+        assert "uncalibrated" in captured.out.lower()
+
+    def test_registered_model_type_does_not_emit_warning(self, capsys):
+        """Regression: the warning must fire ONLY for unregistered model_types.
+        Every successful gate call on a seed model (rnn/wavenet/punet/...) would
+        otherwise spam the run log."""
+        with patch("torch.cuda.is_available", return_value=True), \
+             patch("torch.cuda.mem_get_info", return_value=(_16GB, _16GB)):
+            result = run_skill(
+                FakeSandbox(),
+                model_type="rnn",
+                model_config=SMALL_RNN_CFG,
+                train_config=CUDA_TRAIN_CFG,
+                loss_config=CE_LOSS_CFG,
+            )
+        assert result["inference_batch_uncalibrated"] is False
+        captured = capsys.readouterr()
+        assert "!!! [evaluate_vram_skill]" not in captured.out
+
+    def test_cpu_path_also_propagates_flag(self, monkeypatch):
+        """The CPU short-circuit returns early but must still surface the flag
+        so downstream records stay consistent across device modes."""
+        import agent.skills.evaluate_vram_skill.wrapper as vw
+        monkeypatch.setattr(vw, "_count_params", lambda mt, mc, lt: 100_000)
+
+        result = run_skill(
+            FakeSandbox(),
+            model_type="pe_wavenet_delta",
+            model_config=SMALL_RNN_CFG,
+            train_config=CPU_TRAIN_CFG,
+            loss_config=CE_LOSS_CFG,
+        )
+        assert result["status"] == "success"
+        assert result["inference_batch_uncalibrated"] is True
