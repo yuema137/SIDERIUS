@@ -239,7 +239,7 @@ class TestDeviationNotePropagation:
 # HyperparamTuningInput (here) so the tuner's per-round evaluate_time_skill
 # gate sees the same numbers as the proposer's baseline gate. The per-round
 # pick (trial vs formal) happens inside the tuner based on plan.is_trial.
-# See docs/time_estimator_implement.md §2.7.2 / Phase I.
+# See docs/resource_estimator_implement.md §2.7.2 / Phase I.
 # ---------------------------------------------------------------------------
 
 class TestTimeBudgetFanOut:
@@ -303,69 +303,77 @@ class TestTimeBudgetFanOut:
 
 
 # ---------------------------------------------------------------------------
-# time_risk propagation — proposer's baseline gate annotates ProposalOutput
-# with a time_risk string, which this protocol must surface to the tuner as a
-# round-0 warning in expert_advice. Ordering: spec → inheritance → time_risk
-# so the strongest architectural-fidelity signal comes first.
-# See docs/time_estimator_implement.md §2.7.4.
+# VRAM-budget context fan-out (Phase K two-budget split)
+#
+# trial_vram_budget_gb / formal_vram_budget_gb fan out from the workflow/CLI
+# into HyperparamTuningInput (no proposer-side gate in Phase K — unlike the
+# time budgets, the interp→propose protocol is NOT touched). The per-round
+# pick (trial vs formal) happens inside the tuner based on plan.is_trial.
+# See docs/resource_estimator_implement.md §10.9 / §10.17.
 # ---------------------------------------------------------------------------
 
-class TestTimeRiskPropagation:
 
-    def test_time_risk_prepended(self, validator_output, proposal_output, storage):
-        """When ProposalOutput carries a time_risk string, it must be prepended
-        to expert_advice with a recognisable NOTE prefix."""
-        proposal_output.time_risk = (
-            "baseline exceeds 30-min budget by 18m; consider reducing trial_portion."
+class TestVramBudgetFanOut:
+
+    def test_trial_vram_budget_gb_passed_through(
+        self, validator_output, proposal_output, storage
+    ):
+        result = local_validated_model(
+            validator_output, proposal_output, storage,
+            trial_vram_budget_gb=6.0,
         )
-        result = local_validated_model(validator_output, proposal_output, storage)
-        assert isinstance(result.expert_advice, str)
-        assert "time-budget risk on baseline" in result.expert_advice
-        assert "reducing trial_portion" in result.expert_advice
-        # original proposal advice must still be present
-        assert "receptive field size" in result.expert_advice
+        assert result.trial_vram_budget_gb == 6.0
+        # Phase K: setting the trial budget alone must NOT touch the formal one.
+        assert result.formal_vram_budget_gb is None
 
-    def test_no_time_risk_leaves_advice_structured(
+    def test_formal_vram_budget_gb_passed_through(
         self, validator_output, proposal_output, storage
     ):
-        """time_risk=None + no deviation notes → expert_advice stays structured."""
-        assert proposal_output.time_risk is None
-        result = local_validated_model(validator_output, proposal_output, storage)
-        assert isinstance(result.expert_advice, ExpertAdvice)
-
-    def test_time_risk_ordering_after_deviation_notes(
-        self, validator_output, proposal_output, storage
-    ):
-        """When all three signals fire, order must be:
-        spec_deviation → inheritance_deviation → time_risk → serialized advice.
-        Rationale: spec deviation is the strongest signal about architectural
-        fidelity, inheritance is weaker, and time_risk is the latest-stage
-        warning before tuning starts."""
-        validator_output.spec_deviation_notes = "NOTE: spec deviation detail."
-        validator_output.inheritance_deviation_notes = (
-            "NOTE: inheritance deviation detail."
+        result = local_validated_model(
+            validator_output, proposal_output, storage,
+            formal_vram_budget_gb=24.0,
         )
-        proposal_output.time_risk = "baseline exceeds budget by 10m."
-        result = local_validated_model(validator_output, proposal_output, storage)
-        ea = result.expert_advice
-        assert isinstance(ea, str)
-        spec_pos = ea.index("spec deviation detail")
-        inherit_pos = ea.index("inheritance deviation detail")
-        time_pos = ea.index("time-budget risk on baseline")
-        advice_pos = ea.index("receptive field size")
-        assert spec_pos < inherit_pos < time_pos < advice_pos
+        assert result.formal_vram_budget_gb == 24.0
+        # Phase K: setting the formal budget alone must NOT touch the trial one.
+        assert result.trial_vram_budget_gb is None
 
-    def test_time_risk_only_without_deviations(
+    def test_both_vram_budgets_independent(
         self, validator_output, proposal_output, storage
     ):
-        """time_risk alone (no deviation notes) still prepends correctly."""
-        proposal_output.time_risk = "baseline exceeds budget by 5m."
+        """Phase K two-budget split: caller sets both — both survive the
+        protocol mapping with their own values, no cross-contamination."""
+        result = local_validated_model(
+            validator_output, proposal_output, storage,
+            trial_vram_budget_gb=6.0,
+            formal_vram_budget_gb=24.0,
+        )
+        assert result.trial_vram_budget_gb == 6.0
+        assert result.formal_vram_budget_gb == 24.0
+
+    def test_vram_defaults_none_when_omitted(
+        self, validator_output, proposal_output, storage
+    ):
+        """When the caller supplies neither VRAM kwarg, both fields default
+        to None so the tuner's per-round gate falls back to free×0.8."""
         result = local_validated_model(validator_output, proposal_output, storage)
-        ea = result.expert_advice
-        assert isinstance(ea, str)
-        time_pos = ea.index("time-budget risk on baseline")
-        advice_pos = ea.index("receptive field size")
-        assert time_pos < advice_pos
+        assert result.trial_vram_budget_gb is None
+        assert result.formal_vram_budget_gb is None
+
+    def test_vram_and_time_budgets_independent(
+        self, validator_output, proposal_output, storage
+    ):
+        """Caller can set VRAM budgets without touching time budgets, and
+        vice versa — the two gates are configured independently."""
+        result = local_validated_model(
+            validator_output, proposal_output, storage,
+            trial_vram_budget_gb=6.0,
+            formal_vram_budget_gb=24.0,
+        )
+        # VRAM set, time still default None.
+        assert result.trial_vram_budget_gb == 6.0
+        assert result.formal_vram_budget_gb == 24.0
+        assert result.trial_time_budget_minutes is None
+        assert result.formal_time_budget_minutes is None
 
 
 # ---------------------------------------------------------------------------

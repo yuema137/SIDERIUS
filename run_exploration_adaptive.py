@@ -123,7 +123,7 @@ def parse_args():
             "Wall-time budget (minutes) for the evaluate_time_skill gate on "
             "rounds where plan.is_trial=True. Forwarded to BOTH the proposer's "
             "baseline gate and the tuner's per-round gate. None disables the "
-            "trial gate (docs/time_estimator_implement.md §2.7 / Phase I)."
+            "trial gate (docs/resource_estimator_implement.md §2.7 / Phase I)."
         ),
     )
     parser.add_argument(
@@ -141,6 +141,47 @@ def parse_args():
             "TIDMAD data directory used by evaluate_time_skill's real-dataset "
             "warmup. None makes the skill fall back to its static formula."
         ),
+    )
+    parser.add_argument(
+        "--trial_vram_budget_gb", type=float, default=None,
+        help=(
+            "Per-mode VRAM ceiling (GB) for the evaluate_vram_skill gate on "
+            "rounds where plan.is_trial=True. Forwarded to the tuner's "
+            "per-round gate only (no proposer-side VRAM gate in Phase K). "
+            "None → skill falls back to free×0.8 defensive limit "
+            "(docs/resource_estimator_implement.md §10.9 / Phase K)."
+        ),
+    )
+    parser.add_argument(
+        "--formal_vram_budget_gb", type=float, default=None,
+        help=(
+            "Per-mode VRAM ceiling (GB) for the evaluate_vram_skill gate on "
+            "rounds where plan.is_trial=False. Sized independently from the "
+            "trial budget — formal rounds often use larger batch_size and "
+            "segmentation_size so the VRAM ceiling can differ. "
+            "None → skill falls back to free×0.8 defensive limit."
+        ),
+    )
+    # --- Formal-mode training levers (Phase M, docs/resource_estimator_implement.md §12) ---
+    # Eval side in formal mode is hardcoded to snapshot + eval_portion=1.0 in
+    # the tuner (intentionally NOT operator-configurable — see §12.2).
+    parser.add_argument(
+        "--formal_strategy", type=str, default="snapshot",
+        choices=["snapshot", "anchors", "target"],
+        help=(
+            "Training-side sampling strategy on formal rounds. Overrides the "
+            "planner's trial_strategy on any round promoted to formal. "
+            "Default 'snapshot' (all 20 files) — anchors/target are mostly for "
+            "diagnostics."
+        ),
+    )
+    parser.add_argument(
+        "--formal_portion", type=float, default=0.1,
+        help="Fraction of segments per file for formal training scope (default 0.1).",
+    )
+    parser.add_argument(
+        "--formal_train_portion", type=float, default=1.0,
+        help="Per-epoch iteration fraction from the formal training scope (default 1.0).",
     )
     parser.add_argument(
         "--source_paths", type=str, nargs="+", default=None,
@@ -163,6 +204,16 @@ def parse_args():
             "|predicted - current| / |current| must exceed this value. "
             "Predictions below the threshold trigger a causal_reasoning retry. "
             "Default 0.05 (5%% relative improvement required)."
+        ),
+    )
+    parser.add_argument(
+        "--debug_dump_prompts", action="store_true",
+        help=(
+            "Phase K.8 debug instrumentation: dump each iteration's "
+            "rendered proposing-stage system prompt to "
+            "{workspace}/{run_name}/debug/iter{N}_attempt{M}_proposing_system_prompt.md "
+            "so smoke runs can audit the exact text the LLM saw "
+            "(in particular the K.7.6 [PRIOR ITERATION GATE EXHAUSTION] block)."
         ),
     )
     return parser.parse_args()
@@ -227,6 +278,15 @@ def main():
                          if args.formal_time_budget_minutes is not None
                          else "disabled")
     print(f"  Time budget   : trial={trial_budget_str}  |  formal={formal_budget_str}")
+    trial_vram_str = (f"{args.trial_vram_budget_gb} GB"
+                      if args.trial_vram_budget_gb is not None
+                      else "disabled (free×0.8)")
+    formal_vram_str = (f"{args.formal_vram_budget_gb} GB"
+                       if args.formal_vram_budget_gb is not None
+                       else "disabled (free×0.8)")
+    print(f"  VRAM budget   : trial={trial_vram_str}  |  formal={formal_vram_str}")
+    print(f"  Formal train  : strategy={args.formal_strategy}  portion={args.formal_portion}  train_portion={args.formal_train_portion}")
+    print(f"  Formal eval   : LOCKED to snapshot + eval_portion=1.0 (Phase M)")
     print(f"  Data dir      : {args.data_dir or 'unset (skill uses static formula)'}")
     print(f"  Advice    : {args.advice}")
     print(f"  LLM config: {args.llm_config or 'default (gemini-3.1-pro-preview uniform)'}")
@@ -262,6 +322,14 @@ def main():
         trial_time_budget_minutes=args.trial_time_budget_minutes,
         formal_time_budget_minutes=args.formal_time_budget_minutes,
         data_dir=args.data_dir,
+        # VRAM-budget gate (Phase K two-budget split — fans out to the tuner only;
+        # no proposer-side gate per §10.17 / §10.9).
+        trial_vram_budget_gb=args.trial_vram_budget_gb,
+        formal_vram_budget_gb=args.formal_vram_budget_gb,
+        # Formal-mode training levers (Phase M — eval side is LOCKED in tuner)
+        formal_strategy=args.formal_strategy,
+        formal_portion=args.formal_portion,
+        formal_train_portion=args.formal_train_portion,
         # Advice
         human_advice_propose=advice.get("propose"),
         human_advice_implement=advice.get("implement"),
@@ -274,6 +342,8 @@ def main():
         minimum_boldness=args.minimum_boldness,
         # Implementation retry
         max_impl_attempts=args.max_impl_attempts,
+        # Phase K.8 debug instrumentation
+        debug_dump_prompts=args.debug_dump_prompts,
     )
 
 

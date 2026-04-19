@@ -114,7 +114,7 @@ class ExperimentMemory(BaseModel):
     # next round's experiment_history. Populated only when the time gate ran
     # (i.e. the active mode's budget was set); absent on records produced with
     # the gate disabled, so the reflector doesn't have to filter None values.
-    # See docs/time_estimator_implement.md §J.1.
+    # See docs/resource_estimator_implement.md §J.1.
     time_estimate_minutes: Optional[float] = Field(
         default=None,
         description="Pre-flight wall-time prediction from evaluate_time_skill (minutes).",
@@ -126,6 +126,40 @@ class ExperimentMemory(BaseModel):
     time_mode: Optional[Literal["trial", "formal"]] = Field(
         default=None,
         description="Which budget was active for this round — 'trial' or 'formal'.",
+    )
+
+    # Phase K — pre-flight VRAM-budget context surfaced to the planner via the
+    # next round's experiment_history. Populated only when the VRAM gate ran
+    # with a budget set; absent on records where the gate was disabled. Mirrors
+    # the time fields above so the planner sees both resource estimates side by
+    # side. Mode is inferred from `time_mode` (the two gates run in the same
+    # round) — no separate vram_mode is stored.
+    # See docs/resource_estimator_implement.md §10.4.
+    vram_estimate_gb: Optional[float] = Field(
+        default=None,
+        description="Pre-flight VRAM prediction from evaluate_vram_skill (GB).",
+    )
+    vram_budget_gb: Optional[float] = Field(
+        default=None,
+        description="Active mode's VRAM ceiling the estimate was checked against (GB).",
+    )
+
+    # K.2.5-8 — soft-fallback flag from the inference estimator. Set to True
+    # when the proposer invented a model_type that has no entry in
+    # core/inference_defaults._INFERENCE_BATCH_SIZES; the estimator falls
+    # back to the runtime default (25) and the per-sample activation model
+    # is uncalibrated for the novel architecture. Operators reviewing the
+    # gate verdict (or K.7's gate_exhaustion summary) can use this flag to
+    # discount estimates from rounds that ran on a guess. Default None
+    # keeps pre-K.2.5-8 records valid. See §10.14 K.2.5-8.
+    inference_batch_uncalibrated: Optional[bool] = Field(
+        default=None,
+        description=(
+            "True when the inference estimator substituted the runtime "
+            "fallback inference_batch (25) for an unregistered model_type; "
+            "estimate is uncalibrated for the novel architecture. "
+            "None on records where the gate did not run."
+        ),
     )
 
 
@@ -571,6 +605,30 @@ class HyperparamTuningInput(BaseModel):
         description="When True, train and eval scopes use the same segment indices (different physical files).",
     )
 
+    # --- Formal-mode training levers (Phase M — see docs/resource_estimator_implement.md §12) ---
+    # Formal-mode eval is hardcoded to snapshot + eval_portion=1.0 in the
+    # tuner (intentionally not operator-configurable — see §12.2 rationale).
+    formal_strategy: Literal["snapshot", "anchors", "target"] = Field(
+        default="snapshot",
+        description=(
+            "Training-side sampling strategy in formal mode. Overrides the "
+            "planner's trial_strategy on any round promoted to formal. Eval "
+            "side is always locked to snapshot + eval_portion=1.0."
+        ),
+    )
+    formal_portion: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of segments per file for training scope in formal mode.",
+    )
+    formal_train_portion: float = Field(
+        default=1.0,
+        ge=0.01,
+        le=1.0,
+        description="Per-epoch iteration fraction from the formal training scope.",
+    )
+
     # --- Reproducibility seeds (optional — auto-generated when not provided) ---
     sampling_seed: Optional[int] = Field(
         default=None,
@@ -591,7 +649,7 @@ class HyperparamTuningInput(BaseModel):
     )
 
     # --- Time-budget gate (evaluate_time_skill) ---
-    # See docs/time_estimator_implement.md §2.7 + Phase I. The single
+    # See docs/resource_estimator_implement.md §2.7 + Phase I. The single
     # `time_budget_minutes` field used in Phases D-G was split into two so the
     # per-round gate uses the right ceiling for the mode the round runs in.
     # Both fields originate at the workflow/CLI level and are forwarded through
@@ -619,6 +677,36 @@ class HyperparamTuningInput(BaseModel):
             "at startup and skips the time check for formal rounds. Sized "
             "independently from the trial budget because formal runs use the "
             "full dataset and have a wall-time scale 50–100× longer."
+        ),
+    )
+
+    # --- VRAM-budget gate (evaluate_vram_skill, Phase K) ---
+    # Mirrors the trial/formal split of the time gate. The tuner picks the
+    # right one per round via plan.is_trial. Each is independently optional:
+    # setting only the trial budget gates trial rounds and skips formal rounds,
+    # and vice versa. The budget here acts as an operator-defined ceiling; the
+    # skill compares vram_estimate against min(defensive_floor, budget).
+    # See docs/resource_estimator_implement.md §10.4 / §10.5.
+    trial_vram_budget_gb: Optional[float] = Field(
+        default=None,
+        description=(
+            "VRAM budget in GB against which evaluate_vram_skill gates rounds "
+            "where the planner picks trial mode (plan.is_trial=True). "
+            "None = trial VRAM gate disabled; the tuner prints a one-time "
+            "warning at startup and skips the VRAM check for trial rounds. "
+            "Operator-defined ceiling — set conservatively so the gate rejects "
+            "models that exceed it even when raw free-VRAM is plentiful."
+        ),
+    )
+    formal_vram_budget_gb: Optional[float] = Field(
+        default=None,
+        description=(
+            "VRAM budget in GB against which evaluate_vram_skill gates rounds "
+            "where the planner picks formal mode (plan.is_trial=False). "
+            "None = formal VRAM gate disabled; the tuner prints a one-time "
+            "warning at startup and skips the VRAM check for formal rounds. "
+            "Sized independently from the trial budget because formal runs may "
+            "use larger batch sizes or full-dataset sampling."
         ),
     )
     data_dir: Optional[str] = Field(
@@ -824,6 +912,111 @@ class HyperparamTuningInput(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Phase K (K.7) — iteration-boundary gate-exhaustion feedback
+# See docs/resource_estimator_implement.md §10.13.
+# ---------------------------------------------------------------------------
+
+class GateExhaustionInfo(BaseModel):
+    """
+    Structured failure report produced by the tuner when an iteration ends
+    without ever training successfully AND at least one attempt was rejected
+    by the pre-flight resource gate (vram or time).
+
+    Surfaced to the next iteration's proposer via
+    ``ProposalInput.prior_iteration_gate_exhaustion`` so it can learn that
+    the prior architecture was fundamentally too heavy for the active
+    budgets and propose something lighter.
+    """
+
+    # --- Counts (every attempt is in exactly one bucket) ---
+    total_attempts: int = Field(
+        description="Total number of attempts in the iteration (len(all_records)).",
+    )
+    vram_gated_attempts: int = Field(
+        description="Attempts rejected by evaluate_vram_skill (status='skipped_oom_risk').",
+    )
+    time_gated_attempts: int = Field(
+        description="Attempts rejected by evaluate_time_skill (status='skipped_time_risk').",
+    )
+    other_failure_attempts: int = Field(
+        description=(
+            "Attempts that fell into none of the gate buckets — covers "
+            "error_*, skipped_schema_violation, etc. Always 0 when the "
+            "trigger criterion fires (no successes), but distinguishing "
+            "gate-rejected from other-failed clarifies the picture for "
+            "the next proposer."
+        ),
+    )
+
+    # --- Active budgets ---
+    active_mode: Literal["trial", "formal"] = Field(
+        description=(
+            "Which budget set the iteration ran against. Sourced from "
+            "plan.is_trial of the most recent plan."
+        ),
+    )
+    vram_budget_gb: Optional[float] = Field(
+        default=None,
+        description="Active mode's VRAM ceiling. None when the VRAM gate was disabled.",
+    )
+    time_budget_minutes: Optional[float] = Field(
+        default=None,
+        description="Active mode's time ceiling. None when the time gate was disabled.",
+    )
+
+    # --- Baseline (round-0) factors — diagnoses whether the proposer's own
+    # baseline was already over budget vs the tuner mutating it heavier. ---
+    baseline_vram_estimate_gb: Optional[float] = Field(
+        default=None,
+        description="round-0 record's vram_estimate_gb (memory.vram_estimate_gb).",
+    )
+    baseline_vram_factor: Optional[float] = Field(
+        default=None,
+        description=(
+            "baseline_vram_estimate_gb / vram_budget_gb. None when either "
+            "side is missing."
+        ),
+    )
+    baseline_time_estimate_minutes: Optional[float] = Field(
+        default=None,
+        description="round-0 record's time_estimate_minutes (memory.time_estimate_minutes).",
+    )
+    baseline_time_factor: Optional[float] = Field(
+        default=None,
+        description=(
+            "baseline_time_estimate_minutes / time_budget_minutes. None when "
+            "either side is missing."
+        ),
+    )
+
+    # --- Worst-case factors — bounds how much lighter the next baseline must be. ---
+    worst_vram_factor: Optional[float] = Field(
+        default=None,
+        description=(
+            "max(vram_estimate_gb / vram_budget_gb) across all records that "
+            "carry a vram_estimate_gb. None when no record carries one."
+        ),
+    )
+    worst_time_factor: Optional[float] = Field(
+        default=None,
+        description=(
+            "max(time_estimate_minutes / time_budget_minutes) across all "
+            "records that carry a time_estimate_minutes. None when no record "
+            "carries one."
+        ),
+    )
+
+    # --- Synthesis ---
+    summary_message: str = Field(
+        description=(
+            "Human/LLM-readable one-paragraph synthesis of the failure mode, "
+            "rendered by _render_summary in the tuner. Forms the lead line of "
+            "the proposer's [PRIOR ITERATION GATE EXHAUSTION] prompt block."
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Agent output
 # ---------------------------------------------------------------------------
 
@@ -875,6 +1068,18 @@ class HyperparamTuningOutput(BaseModel):
         description=(
             "Complete experiment history including successful, failed, and OOM-skipped rounds. "
             "Each record contains params, results, timing, and LLM-generated memory fields."
+        ),
+    )
+
+    # --- Phase K (K.7) — iteration-boundary feedback to the next proposer ---
+    gate_exhaustion: Optional[GateExhaustionInfo] = Field(
+        default=None,
+        description=(
+            "Populated only when the iteration ended without ever training "
+            "successfully AND >=1 attempt was rejected by the pre-flight "
+            "resource gate. Consumed by the next iteration's proposer via "
+            "ProposalInput.prior_iteration_gate_exhaustion. None on healthy "
+            "runs (any success) and on all-failure-but-not-budget-related runs."
         ),
     )
 

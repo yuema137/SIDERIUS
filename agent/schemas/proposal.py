@@ -12,7 +12,11 @@ from __future__ import annotations
 from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from agent.schemas.hyperparam_tuning import ExpertAdvice, ExpertAdviceInput
+from agent.schemas.hyperparam_tuning import (
+    ExpertAdvice,
+    ExpertAdviceInput,
+    GateExhaustionInfo,
+)
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 
@@ -483,7 +487,7 @@ class ProposalInput(BaseModel):
                     "The proposal agent must not reuse any of these names.",
     )
     # --- Run-level data + time-budget context (workflow-supplied) ---
-    # See docs/time_estimator_implement.md §2.7.2. These fields originate at the
+    # See docs/resource_estimator_implement.md §2.7.2. These fields originate at the
     # workflow/CLI entry point and fan out to both this node and the tuner so
     # the proposer can call build_sample_set + evaluate_time_skill on its own
     # baseline before emitting. The training-side trial-mode set mirrors
@@ -536,7 +540,7 @@ class ProposalInput(BaseModel):
         default=None,
         description="Wall-time budget in minutes against which evaluate_time_skill "
                     "gates the baseline config when inp.is_trial=True. None = "
-                    "trial gate disabled (no estimate, no time_risk annotation). "
+                    "trial gate disabled (no estimate). "
                     "See §2.7 + Phase I — the single time_budget_minutes field "
                     "used in Phases D-G was split into trial/formal so each mode "
                     "has its own ceiling.",
@@ -598,6 +602,20 @@ class ProposalInput(BaseModel):
                     "validation failure so the proposal agent avoids the same mistakes. "
                     "Each entry is the error_message from a ValidatorOutput.",
     )
+    prior_iteration_gate_exhaustion: Optional[GateExhaustionInfo] = Field(
+        default=None,
+        description=(
+            "When the previous iteration's tuner exited under gate "
+            "exhaustion (no record ever trained successfully AND ≥1 "
+            "attempt was rejected by the pre-flight resource gate), "
+            "this field carries the structured failure report from "
+            "HyperparamTuningOutput.gate_exhaustion. Surfaced to the "
+            "proposer prompt as a hard learning signal so the next "
+            "baseline is qualitatively lighter. None when the prior "
+            "iteration succeeded or no prior iteration exists. "
+            "See docs/resource_estimator_implement.md §10.13."
+        ),
+    )
     mindset: Optional[str] = Field(
         default=None,
         description="Mindset block injected at {# EXPLORATION_MODE_BLOCK #} in the "
@@ -620,6 +638,17 @@ class ProposalInput(BaseModel):
         description="Where this node reads its inputs and writes its proposal output. "
                     "When running standalone, the node reads interpretation output "
                     "from storage.local.workspace.",
+    )
+    debug_dump_proposing_prompt_path: Optional[str] = Field(
+        default=None,
+        description=(
+            "Debug instrumentation (Phase K.8): when set, the proposer's "
+            "pipeline mode writes the rendered proposing-stage system "
+            "prompt to this path before calling the LLM. Used by smoke "
+            "runs to audit the exact text the LLM saw — in particular "
+            "the K.7.6 [PRIOR ITERATION GATE EXHAUSTION] block. "
+            "None = no dump (default; production behaviour)."
+        ),
     )
 
 
@@ -706,19 +735,6 @@ class ProposalOutput(BaseModel):
                     "Empty = no issues found. Non-empty = the validator surfaces "
                     "these as warnings. This is a flag, not a veto.",
     )
-    time_risk: Optional[str] = Field(
-        default=None,
-        description="Non-None when evaluate_time_skill estimated the baseline_config "
-                    "would exceed the wall-time budget (gate-and-annotate, "
-                    "docs/time_estimator_implement.md §2.7.4). Carries the suggestion "
-                    "text from _suggest_lever so the validator→tuner protocol can "
-                    "prepend it to expert_advice as round-0 guidance. None = baseline "
-                    "fits the budget or the gate was disabled (the budget for the "
-                    "active mode — trial_time_budget_minutes or "
-                    "formal_time_budget_minutes — was not supplied at the workflow "
-                    "level).",
-    )
-
     @model_validator(mode="after")
     def _validate_baseline_segmentation_size(self):
         """Ensure ``baseline_config`` respects the dataset's ``segmentation_size`` rule.

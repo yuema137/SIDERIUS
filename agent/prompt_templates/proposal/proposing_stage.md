@@ -44,6 +44,8 @@ A JSON object with these fields:
 }
 ```
 
+{prior_iteration_gate_exhaustion_block}
+
 {known_constraints_block}
 ## Rules
 

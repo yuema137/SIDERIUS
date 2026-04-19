@@ -82,10 +82,28 @@ class RecordingLLMBridge:
         and pop from the ``"generate"`` queue (since the predefined response
         is the ExperimentPlan dict that ``plan`` would have returned).
 
+        The 5th tuple element is a dict of every remaining kwarg the agent
+        forwarded. Tests that need to assert on K.6-style fields
+        (``trial_vram_budget_gb``, ``last_vram_estimate_gb``, ``last_mode``,
+        ...) read it as ``bridge.calls[i][4][key]``. Existing tests that
+        only inspect ``calls[i][0]`` continue to work unchanged.
+
         ``**kwargs`` swallows any new optional planner arg (e.g.
         ``plan_overrides``, ``max_epochs``) so adding one to the real bridge
         doesn't require touching every fixture."""
-        self.calls.append(("plan", memory_history, expert_advice, force_model))
+        recorded_kwargs = {
+            "config_manual": config_manual,
+            "model_description": model_description,
+            "exploration_checklist": exploration_checklist,
+            "plugin_source_excerpt": plugin_source_excerpt,
+            "current_round": current_round,
+            "max_rounds": max_rounds,
+            "trial_allowed": trial_allowed,
+            **kwargs,
+        }
+        self.calls.append(
+            ("plan", memory_history, expert_advice, force_model, recorded_kwargs)
+        )
         return self._pop("generate")
 
     def generate_text(self, system_prompt: str, user_prompt: str) -> str:

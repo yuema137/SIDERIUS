@@ -340,14 +340,27 @@ def run_workflow(
     cleanup_denoised: bool = False,
     max_epochs: int | None = None,
     plan_overrides: dict | None = None,
-    # --- Time-budget gate (evaluate_time_skill, docs/time_estimator_implement.md §2.7.2 / Phase I) ---
+    # --- Time-budget gate (evaluate_time_skill, docs/resource_estimator_implement.md §2.7.2 / Phase I) ---
     trial_time_budget_minutes: float | None = None,
     formal_time_budget_minutes: float | None = None,
+    # --- VRAM-budget gate (evaluate_vram_skill, docs/resource_estimator_implement.md §10.9 / Phase K) ---
+    # Tuner-only fan-out; no proposer-side gate in Phase K (§10.17).
+    trial_vram_budget_gb: float | None = None,
+    formal_vram_budget_gb: float | None = None,
+    # --- Formal-mode training levers (Phase M, docs/resource_estimator_implement.md §12) ---
+    # Training-side knobs applied on any round promoted to formal. Eval side in
+    # formal mode is hardcoded to snapshot + eval_portion=1.0 in the tuner so
+    # formal scores are architecturally comparable — see §12.2.
+    formal_strategy: str = "snapshot",
+    formal_portion: float = 0.1,
+    formal_train_portion: float = 1.0,
     # --- Reasoning pipeline ---
     exploration_mode: str = "auto",
     minimum_boldness: float = 0.05,
     # --- Implementation retry ---
     max_impl_attempts: int = 3,
+    # --- Phase K.8 debug instrumentation ---
+    debug_dump_prompts: bool = False,
 ) -> list[HyperparamTuningOutput]:
     """
     Execute the model exploration workflow for one or more iterations.
@@ -397,10 +410,18 @@ def run_workflow(
             evaluate_time_skill gate on trial-mode rounds (plan.is_trial=True).
             Fanned out to BOTH ProposalInput (proposer's baseline gate) and
             HyperparamTuningInput (tuner's per-round gate). None = trial gate
-            disabled. See docs/time_estimator_implement.md §2.7.2 / Phase I.
+            disabled. See docs/resource_estimator_implement.md §2.7.2 / Phase I.
         formal_time_budget_minutes: Same as above, but for formal-mode rounds
             (plan.is_trial=False). Sized independently because formal runs
             use the full dataset and are 50–100x longer.
+        trial_vram_budget_gb: Per-mode VRAM ceiling (GB) for the
+            evaluate_vram_skill gate on trial-mode rounds. Fanned out to
+            HyperparamTuningInput only — Phase K has no proposer-side VRAM
+            gate (deferred per §10.17). None → tuner's skill falls back to
+            the defensive free×0.8 limit. See §10.9 / Phase K.
+        formal_vram_budget_gb: Same as above, but for formal-mode rounds.
+            Sized independently because formal rounds often use larger
+            batch_size / segmentation_size so the VRAM ceiling can differ.
 
     Returns:
         List of HyperparamTuningOutput objects, one per successful iteration.
@@ -470,11 +491,16 @@ def run_workflow(
     iteration_results: list[HyperparamTuningOutput] = []
     best_score_overall: float | None = None
 
-    # Long-term memory: three variables carried forward across iterations
+    # Long-term memory: variables carried forward across iterations
     previous_proposal_data: dict | None = None  # serialized ProposalOutput from iter N-1
     current_runtime_vocab = list(vocab_seed)     # starts with seed, grows with discoveries
     model_knowledge_cache: dict = {}             # per-model Phase 1 cache (grows once per model)
     latest_new_summary = None                    # ModelRunSummary from the most recent tune
+    # Phase K.7.5 — retain the previous iteration's tuner output so the
+    # interp→propose protocol can surface its gate_exhaustion to the next
+    # proposer (docs/resource_estimator_implement.md §10.13). None on
+    # iteration 1; assigned at the end of every subsequent iteration.
+    previous_tune_output: HyperparamTuningOutput | None = None
 
     # --- Iteration loop ---
     for iteration in range(1, max_iterations + 1):
@@ -530,7 +556,7 @@ def run_workflow(
                 # --- Propose ---
                 # Forward the trial-mode mirror + budget set so the proposer's
                 # evaluate_time_skill gate constructs the same sample_set the
-                # tuner will (docs/time_estimator_implement.md §2.7.2).
+                # tuner will (docs/resource_estimator_implement.md §2.7.2).
                 propose_input = local_full_context(
                     interpretation,
                     attempt_storage,
@@ -546,12 +572,22 @@ def run_workflow(
                     trial_time_budget_minutes=trial_time_budget_minutes,
                     formal_time_budget_minutes=formal_time_budget_minutes,
                     data_dir=data_dir,
+                    prior_tune_output=previous_tune_output,
                 )
                 propose_input.existing_model_types = list(all_model_types)
                 if previous_failures:
                     propose_input.previous_failures = previous_failures
                 if human_advice_mindset is not None:
                     propose_input.mindset = human_advice_mindset
+
+                # Phase K.8 debug — dump rendered proposing-stage system
+                # prompt under {run_dir}/debug/ when the flag is on.
+                if debug_dump_prompts:
+                    propose_input.debug_dump_proposing_prompt_path = os.path.join(
+                        run_dir, "debug",
+                        f"iter{iteration:03d}_attempt{attempt:03d}"
+                        "_proposing_system_prompt.md",
+                    )
 
                 proposal = MLModelProposalAgent(
                     **llm_config.get("propose"),
@@ -692,12 +728,20 @@ def run_workflow(
             trial_time_budget_minutes=trial_time_budget_minutes,
             formal_time_budget_minutes=formal_time_budget_minutes,
             data_dir=data_dir,
+            trial_vram_budget_gb=trial_vram_budget_gb,
+            formal_vram_budget_gb=formal_vram_budget_gb,
+            formal_strategy=formal_strategy,
+            formal_portion=formal_portion,
+            formal_train_portion=formal_train_portion,
         )
         if human_advice_tune is not None:
             tune_input.human_advice = human_advice_tune
 
         tune_output = HyperparamTuningAgent().run(tune_input)
         iteration_results.append(tune_output)
+        # Phase K.7.5 — retain for the next iteration's local_full_context
+        # call so its gate_exhaustion (if any) reaches the next proposer.
+        previous_tune_output = tune_output
 
         # --- Update long-term memory for next iteration ---
         all_model_types.append(proposal.model_name)

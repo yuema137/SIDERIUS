@@ -1,6 +1,6 @@
 {
   "name": "evaluate_time_skill",
-  "description": "Estimate training wall-time for a proposed experiment config by (1) computing total step count from sample_set + seg_size + batch_size + epochs, (2) measuring ms/step via a real-dataset GPU warmup, (3) applying a learned per-GPU correction factor and a safety multiplier. Returns feasibility verdict vs time_budget_minutes. Must be called AFTER evaluate_resource_skill and BEFORE training_skill.",
+  "description": "Estimate training wall-time for a proposed experiment config by (1) computing total step count from sample_set + seg_size + batch_size + epochs, (2) measuring ms/step via a real-dataset GPU warmup, (3) applying a learned per-GPU correction factor and a safety multiplier. Returns feasibility verdict vs time_budget_minutes. Must be called AFTER evaluate_vram_skill and BEFORE training_skill.",
   "parameters": {
     "type": "object",
     "properties": {

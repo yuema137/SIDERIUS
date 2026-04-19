@@ -56,6 +56,13 @@ def local_validated_model(
     trial_time_budget_minutes: Optional[float] = None,
     formal_time_budget_minutes: Optional[float] = None,
     data_dir: Optional[str] = None,
+    # --- VRAM-budget gate (evaluate_vram_skill, Phase K two-budget split) ---
+    trial_vram_budget_gb: Optional[float] = None,
+    formal_vram_budget_gb: Optional[float] = None,
+    # --- Formal-mode training levers (Phase M) ---
+    formal_strategy: Literal["snapshot", "anchors", "target"] = "snapshot",
+    formal_portion: float = 0.1,
+    formal_train_portion: float = 1.0,
 ) -> HyperparamTuningInput:
     """
     Map ValidatorOutput + ProposalOutput -> HyperparamTuningInput in-memory.
@@ -68,16 +75,11 @@ def local_validated_model(
     Consumes from ml-model-propose (ProposalOutput, held by workflow):
       - expert_advice  : structured guidance for the tuning agent
       - baseline_config: safe starting configuration for the new model
-      - time_risk      : non-None when the proposer's evaluate_time_skill gate
-                         flagged the baseline as over-budget. Prepended to
-                         expert_advice as a planner-visible warning so the
-                         LLM doesn't immediately re-propose the rejected
-                         baseline (docs/time_estimator_implement.md §2.7.4).
 
     Populates in ml-model-tune (HyperparamTuningInput):
       - model_type    : from ValidatorOutput
-      - expert_advice : from ProposalOutput, with deviation + time-risk notes
-                        prepended in the order spec → inheritance → time_risk.
+      - expert_advice : from ProposalOutput, with deviation notes prepended
+                        in the order spec → inheritance.
       - storage       : passed through from the workflow
       - max_rounds    : tuning budget (caller-supplied, default 50)
       - file_index    : data split index (caller-supplied, default 6; ignored when is_trial=True)
@@ -95,24 +97,34 @@ def local_validated_model(
         plan.is_trial. When the chosen budget is None the gate is skipped
         for that round (one-time warning per mode at startup).
         See §2.7.2 fan-in / Phase I.
+      - trial_vram_budget_gb / formal_vram_budget_gb :
+        workflow-supplied per-mode VRAM ceilings for the tuner's per-round
+        evaluate_vram_skill gate (Phase K two-budget split). Each budget
+        defaults to None; the per-round gate picks the one matching
+        plan.is_trial. When the chosen budget is None the skill still runs
+        but falls back to the defensive free×0.8 behaviour (no operator
+        ceiling). **No `proposal.vram_risk` surfacing in Phase K** — the
+        proposer-side gate is deferred per §10.17. Resource info reaches
+        the planner via the prompt block only (single-channel rule, §10.3).
+        See docs/resource_estimator_implement.md §10.9.
+      - formal_strategy / formal_portion / formal_train_portion :
+        operator-configurable training-side sample-set knobs for any round
+        promoted to formal (Phase M). Defaults snapshot / 0.1 / 1.0.
+        Eval-side in formal mode is hardcoded to snapshot + eval_portion=1.0
+        inside the tuner — intentionally NOT operator-configurable, so
+        formal scores are architecturally comparable across architectures.
+        See docs/resource_estimator_implement.md §12.
     """
     # Prepend planner-visible warnings to expert_advice so the tuner's planner
-    # knows up front about (a) implementation deviating from the spec, (b)
-    # unverified inherited components, and (c) the proposer's time-budget gate
-    # firing on the baseline. Order is intentional: spec deviation is the
-    # strongest signal about architectural fidelity, inheritance deviation is
-    # weaker, and the time risk is the latest-stage warning before tuning starts.
+    # knows up front about (a) implementation deviating from the spec and
+    # (b) unverified inherited components. Order is intentional: spec deviation
+    # is the strongest signal about architectural fidelity; inheritance deviation
+    # is weaker.
     expert_advice = proposal.expert_advice
-    time_risk_note = (
-        f"NOTE: time-budget risk on baseline — {proposal.time_risk}"
-        if proposal.time_risk
-        else None
-    )
     deviation_notes = [
         n for n in (
             output.spec_deviation_notes,
             output.inheritance_deviation_notes,
-            time_risk_note,
         ) if n
     ]
     if deviation_notes:
@@ -147,6 +159,11 @@ def local_validated_model(
         trial_time_budget_minutes=trial_time_budget_minutes,
         formal_time_budget_minutes=formal_time_budget_minutes,
         data_dir=data_dir,
+        trial_vram_budget_gb=trial_vram_budget_gb,
+        formal_vram_budget_gb=formal_vram_budget_gb,
+        formal_strategy=formal_strategy,
+        formal_portion=formal_portion,
+        formal_train_portion=formal_train_portion,
     )
 
 

@@ -22,7 +22,6 @@ Node contract:
 import os
 import json
 import argparse
-import importlib
 
 from pydantic import ValidationError
 
@@ -32,7 +31,6 @@ from agent.schemas.proposal import ProposalInput, ProposalOutput, FalsifiablePre
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
-from execute_tools.sample_set_builder import build_sample_set
 
 # Maximum number of retries when the proposing stage produces invalid output.
 # Total attempts = _MAX_PROPOSING_RETRIES + 1.
@@ -40,90 +38,6 @@ _MAX_PROPOSING_RETRIES = 2
 
 # One retry when causal_reasoning produces a prediction below minimum_boldness.
 _MAX_REASONING_RETRIES = 1
-
-# Module-level flag so the "time-gate disabled" warning prints exactly once
-# per process — mirrors the tuner's startup-once policy.
-_TIME_GATE_WARNED = False
-
-
-def _apply_time_gate(output: ProposalOutput, inp: ProposalInput) -> None:
-    """Phase E2 — proposer baseline-gate (gate-and-annotate, §2.7.4).
-
-    Mutates ``output.time_risk`` in place:
-      - feasible        → leaves None (default).
-      - infeasible      → sets it to the lever-suggestion text from the skill.
-      - status=error    → leaves None and prints a warning. The proposer never
-                          blocks on a skill failure (a brand-new model_type that
-                          isn't yet in MODEL_REGISTRY trips this path; the
-                          downstream tuner round will gate again with the real
-                          implementation in place).
-
-    No-op when the budget for the active mode (``inp.is_trial`` ?
-    ``trial_time_budget_minutes`` : ``formal_time_budget_minutes``) is None.
-    Phase I splits the single budget into two so each mode has its own ceiling;
-    the proposer picks the one that matches the mode it's estimating against.
-    """
-    global _TIME_GATE_WARNED
-    chosen_budget = (inp.trial_time_budget_minutes
-                     if inp.is_trial
-                     else inp.formal_time_budget_minutes)
-    if chosen_budget is None:
-        if not _TIME_GATE_WARNED:
-            mode_label = "trial" if inp.is_trial else "formal"
-            print(f"[time-gate disabled / {mode_label}] selected mode budget is "
-                  f"None — proposer's baseline gate will not run.")
-            _TIME_GATE_WARNED = True
-        return
-
-    baseline = output.baseline_config or {}
-    model_config = baseline.get("model_config") or {}
-    train_config = baseline.get("train_config") or {}
-    loss_config  = baseline.get("loss_config")  or {}
-
-    sample_set = build_sample_set(
-        is_trial=inp.is_trial,
-        file_index=6,                       # ignored when is_trial=True
-        trial_strategy=inp.trial_strategy,
-        trial_portion=inp.trial_portion,
-        target_files=inp.target_files or None,
-        seed=inp.sampling_seed,
-    )
-
-    mode_label = "trial" if inp.is_trial else "formal"
-    print(f"\n>>> [Baseline time-gate / {mode_label}] Checking "
-          f"'{output.model_name}' against {chosen_budget:.0f} min budget...")
-    skill_module = importlib.import_module(
-        "agent.skills.evaluate_time_skill.wrapper"
-    )
-    # The skill's first arg is `sandbox`, but evaluate_time_skill never reads
-    # it — pass None so the proposer doesn't need to instantiate a sandbox
-    # just to call the gate.
-    result = skill_module.run_skill(
-        None,
-        model_type=output.model_name,
-        model_config=model_config,
-        train_config=train_config,
-        loss_config=loss_config,
-        sample_set=sample_set,
-        train_portion=inp.train_portion,
-        time_budget_minutes=chosen_budget,
-        data_dir=inp.data_dir,
-    )
-
-    status = result.get("status")
-    if status == "error":
-        # Don't block the proposer — the most common failure here is the
-        # newly-proposed model_type not being in MODEL_REGISTRY yet.
-        print(f"   [time-gate warning] skill returned error: "
-              f"{result.get('message', '')[:200]} — leaving time_risk=None.")
-        return
-
-    if not result.get("feasible", True):
-        suggestion = result.get("suggestion") or result.get("verdict") or ""
-        output.time_risk = suggestion
-        print(f"   [time-gate ❌ INFEASIBLE] time_risk set: {suggestion}")
-    else:
-        print(f"   [time-gate ✅ FITS] {result.get('verdict', '')}")
 
 
 def _check_citation_discipline(
@@ -262,6 +176,55 @@ Output only the JSON object — no preamble, no markdown fences, no commentary."
 # ---------------------------------------------------------------------------
 # Prompt builders
 # ---------------------------------------------------------------------------
+
+def _format_prior_iteration_gate_exhaustion_block(info) -> str:
+    """Render the [PRIOR ITERATION GATE EXHAUSTION] block per §10.13.5.
+
+    Returns "" when ``info`` is None so callers can unconditionally splice
+    the result into a template (no empty section). When populated, the
+    block carries the structured failure report from the previous
+    iteration's tuner so the next proposer can size its baseline below
+    the binding ceiling. See docs/resource_estimator_implement.md §10.13.
+
+    Numeric fields render as ``"n/a"`` when None — happens when the
+    corresponding axis was disabled (budget None) or no record carried
+    that estimate. Counts always render numerically.
+    """
+    if info is None:
+        return ""
+
+    def _num(v, suffix=""):
+        return f"{v}{suffix}" if v is not None else "n/a"
+
+    def _factor(v):
+        return f"{v:.2f}×" if v is not None else "n/a"
+
+    lines = [
+        "[PRIOR ITERATION GATE EXHAUSTION]",
+        info.summary_message,
+        "",
+        "Resource accounting:",
+        f"  Mode active:       {info.active_mode}",
+        f"  VRAM budget:       {_num(info.vram_budget_gb, ' GB')}",
+        f"  Time budget:       {_num(info.time_budget_minutes, ' min')}",
+        f"  Baseline factors:  VRAM {_factor(info.baseline_vram_factor)}   "
+        f"Time {_factor(info.baseline_time_factor)}",
+        f"  Worst factors:     VRAM {_factor(info.worst_vram_factor)}      "
+        f"Time {_factor(info.worst_time_factor)}",
+        f"  Attempt counts:    {info.total_attempts} total, "
+        f"{info.vram_gated_attempts} VRAM-gated,",
+        f"                     {info.time_gated_attempts} time-gated, "
+        f"{info.other_failure_attempts} other failures",
+        "",
+        "For this iteration: propose an architecture that fits the budgets",
+        "shown above. The previous proposal could not be trained even after",
+        "the tuner attempted to adjust hyperparameters within its lever set",
+        "(batch_size, model depth/width). Reduce parameter count and/or layer",
+        "count enough that the resulting baseline estimates land below the",
+        "budgets.",
+    ]
+    return "\n".join(lines)
+
 
 def _build_reasoning_prompt(inp: ProposalInput) -> str:
     """Build the user prompt for the reasoning call."""
@@ -414,6 +377,15 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
             lines.append(f"  {i}. {failure}")
         lines.append("")
 
+    # Phase K.7.6 — cross-iteration gate-exhaustion report from the prior
+    # tuner (§10.13). Only renders when the prior iteration ended without
+    # ever training successfully AND ≥1 attempt was rejected by the gate.
+    gate_block = _format_prior_iteration_gate_exhaustion_block(
+        inp.prior_iteration_gate_exhaustion
+    )
+    if gate_block:
+        lines += [gate_block, ""]
+
     # --- Expert advice (from upstream agents) ---
     expert_advice_str = serialize_expert_advice(inp.expert_advice) if inp.expert_advice else ""
     if expert_advice_str:
@@ -508,17 +480,6 @@ class MLModelProposalAgent:
             output = self._run_pipeline(inp)
         else:
             output = self._run_legacy(inp)
-
-        # --- Phase E2: baseline time-budget gate (gate-and-annotate) ---
-        # Runs the same evaluate_time_skill the tuner uses, against the
-        # proposer's just-emitted baseline_config. On infeasible, attaches a
-        # time_risk note that the validator→tuner protocol will surface to
-        # the planner. See docs/time_estimator_implement.md §2.7.
-        try:
-            _apply_time_gate(output, inp)
-        except Exception as exc:  # pragma: no cover — defensive
-            print(f"   [time-gate warning] unexpected error: {exc} — "
-                  f"leaving time_risk=None.")
 
         # --- Persist ---
         if inp.storage.backend == "local" and inp.storage.local:
@@ -669,6 +630,15 @@ class MLModelProposalAgent:
             # template_vars replace is a no-op when the placeholder is absent.
             # See docs/improving_validation_awareness.md Phase A.2/A.3.
             "known_constraints_block": _format_known_constraints_block(DATASET_CONFIG),
+            # Phase K.7.6 — proposing-stage placeholder for the previous
+            # iteration's gate-exhaustion report (§10.13.5). Resolves to ""
+            # when the prior iteration succeeded (or when there is no prior
+            # iteration), so the placeholder collapses to nothing visible.
+            "prior_iteration_gate_exhaustion_block": (
+                _format_prior_iteration_gate_exhaustion_block(
+                    inp.prior_iteration_gate_exhaustion
+                )
+            ),
         }
 
         for stage in pipeline.stages:
@@ -767,6 +737,17 @@ class MLModelProposalAgent:
             exploration_mode=mode,
             template_vars=template_vars,
         )
+
+        # Phase K.8 debug instrumentation: optionally dump the rendered
+        # proposing-stage system prompt so smoke runs can audit the exact
+        # text the LLM saw (in particular the K.7.6 [PRIOR ITERATION GATE
+        # EXHAUSTION] block). No-op when the field is None (default).
+        if inp.debug_dump_proposing_prompt_path:
+            from pathlib import Path
+            dump_path = Path(inp.debug_dump_proposing_prompt_path)
+            dump_path.parent.mkdir(parents=True, exist_ok=True)
+            dump_path.write_text(proposing_prompt)
+            print(f"   [debug] dumped proposing-stage system prompt → {dump_path}")
 
         # Extract scientific content from reasoning stages once — these don't change on retry.
         reasoning_output = accumulated.get("causal_reasoning", {})

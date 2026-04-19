@@ -71,15 +71,6 @@ Plan your experiments across rounds, not just one at a time:
     - Fewer epochs with a better learning rate schedule
     - Different loss functions that may converge faster
 
-### GPU MEMORY RULES — CRITICAL:
-- Every experiment is pre-checked against available GPU VRAM before training.
-- If a record has **status = "skipped_oom_risk"**, that config was REJECTED because it would cause an out-of-memory crash. It was NEVER trained. You MUST NOT propose the same or a larger config.
-- When you see a "skipped_oom_risk" record, read its `memory.memory_update` field — it contains the specific fix (e.g. "Reduce batch_size to ~N").
-- The dominant memory consumers are:
-    - focal loss: allocates a one_hot tensor of shape [batch × 256 × seg_size] in int64 (8 bytes each)
-    - transformer: attention matrix scales as batch × nhead × seg_size² — keep seg_size small (≤ 2000)
-    - large batch_size with large segmentation_size on any model
-
 ### TRAINING vs VALIDATION — CRITICAL:
 - `final_loss` / `loss_history` in memory records = measured on the **TRAINING dataset**.
 - `denoising_score` in memory records = measured on the **VALIDATION dataset**.
@@ -450,6 +441,140 @@ def format_plugin_source_excerpt_block(config_cls) -> str:
 
 
 # ==========================================
+# 2.5 RESOURCE-GATE BLOCKS (Phase K, K.6 — see §10.3 / §10.11)
+# ==========================================
+
+# Static guidance text appended to the planner user prompt. Tells the LLM how
+# to read the per-round [ACTIVE RESOURCE BUDGETS] block and which lever to
+# pick when factors are over budget. Verbatim from
+# docs/resource_estimator_implement.md §10.3.
+RESOURCE_GATE_GUIDANCE_BLOCK = """### [RESOURCE GATE — RESOLVING OVER-BUDGET CONFIGS]
+
+You will be shown vram_estimate_gb, time_estimate_minutes, the matching
+budgets, the resulting factors (>1 = over budget, <1 = under), and the
+current batch_size.
+
+When deciding the next config:
+
+  - If both factors are <= 1: continue per the exploration plan.
+  - Otherwise, first consider whether changing batch_size alone can bring
+    BOTH factors <= 1.
+      - Lowering batch_size reduces vram_factor and raises time_factor.
+      - Raising batch_size does the opposite.
+      - batch_size cannot go below 1; whether you have room to lower or
+        raise depends on the current batch_size shown above.
+  - If batch_size adjustment alone cannot satisfy both budgets
+    simultaneously, reduce model depth/width (num_blocks,
+    hidden_channels, embedding_dim, etc.). Both axes shrink together.
+
+Constraint: do NOT change segmentation_size to fit either budget. It is
+pinned by frequency-resolution physics (must divide PSD_SEGMENT_LENGTH;
+the valid divisor list is in your expert advice). Lowering seg_size to
+escape the time gate inflates step count and typically makes the overrun
+worse, not better.
+
+The gates run again before training, so a misjudgement just costs one
+skipped attempt (no round consumed). Prefer the cheaper lever first.
+"""
+
+
+def _format_active_resource_budgets_block(
+    *,
+    current_round=None,
+    last_mode=None,
+    trial_vram_budget_gb=None,
+    formal_vram_budget_gb=None,
+    trial_time_budget_minutes=None,
+    formal_time_budget_minutes=None,
+    last_vram_estimate_gb=None,
+    last_time_estimate_minutes=None,
+    last_batch_size=None,
+):
+    """Render the per-round [ACTIVE RESOURCE BUDGETS] block (K.6).
+
+    The planner runs BEFORE this round's pre-flight gates, so the estimates
+    shown are those of the most recent prior attempt (success or skipped).
+    The mode label is the prior attempt's mode (`time_mode` on the record).
+    For round 1 with no prior attempts, both estimates are None and the
+    block falls back to "(no prior estimate)" lines.
+
+    Returns "" when no budget AND no prior estimate is available — nothing
+    informative to show.
+
+    See docs/resource_estimator_implement.md §10.3 / §10.11.
+    """
+    any_budget = any(
+        b is not None for b in (
+            trial_vram_budget_gb, formal_vram_budget_gb,
+            trial_time_budget_minutes, formal_time_budget_minutes,
+        )
+    )
+    any_estimate = any(
+        e is not None for e in (last_vram_estimate_gb, last_time_estimate_minutes)
+    )
+    if not any_budget and not any_estimate:
+        return ""
+
+    # Fall back to "trial" when the prior round's mode is unknown (round 1
+    # before any attempts have run). The exploration default is trial mode;
+    # if the operator only set formal budgets the active-mode line still
+    # surfaces "(no budget — gate disabled)" and the LLM can react.
+    mode = last_mode if last_mode in ("trial", "formal") else "trial"
+    if mode == "trial":
+        active_vram_budget = trial_vram_budget_gb
+        active_time_budget = trial_time_budget_minutes
+    else:
+        active_vram_budget = formal_vram_budget_gb
+        active_time_budget = formal_time_budget_minutes
+
+    if current_round is not None:
+        header = f"[ACTIVE RESOURCE BUDGETS — round {current_round}, mode={mode}]"
+    else:
+        header = f"[ACTIVE RESOURCE BUDGETS — mode={mode}]"
+
+    # VRAM line
+    if active_vram_budget is None:
+        vram_line = "  VRAM:  (no budget — gate disabled)"
+    elif last_vram_estimate_gb is None:
+        vram_line = (
+            f"  VRAM:  (no prior estimate)   "
+            f"budget {active_vram_budget:.2f} GB"
+        )
+    else:
+        factor = last_vram_estimate_gb / active_vram_budget
+        verdict = "over" if factor > 1.0 else "under"
+        vram_line = (
+            f"  VRAM:  estimate {last_vram_estimate_gb:.2f} GB   "
+            f"budget {active_vram_budget:.2f} GB   "
+            f"factor {factor:.2f}  ({verdict})"
+        )
+
+    # Time line
+    if active_time_budget is None:
+        time_line = "  Time:  (no budget — gate disabled)"
+    elif last_time_estimate_minutes is None:
+        time_line = (
+            f"  Time:  (no prior estimate)   "
+            f"budget {active_time_budget:.1f} min"
+        )
+    else:
+        factor = last_time_estimate_minutes / active_time_budget
+        verdict = "over" if factor > 1.0 else "under"
+        time_line = (
+            f"  Time:  estimate {last_time_estimate_minutes:.2f} min   "
+            f"budget {active_time_budget:.1f} min   "
+            f"factor {factor:.2f}  ({verdict})"
+        )
+
+    if last_batch_size is not None:
+        bs_line = f"  Current batch_size: {last_batch_size}"
+    else:
+        bs_line = "  Current batch_size: (not yet set)"
+
+    return "\n".join([header, vram_line, time_line, bs_line])
+
+
+# ==========================================
 # 3. USER PROMPT GENERATORS (The Context)
 # ==========================================
 
@@ -560,6 +685,15 @@ def get_planner_user_prompt(
     trial_allowed=True,
     plan_overrides=None,
     max_epochs=None,
+    # --- Phase K (K.6) — [ACTIVE RESOURCE BUDGETS] block inputs ---
+    trial_vram_budget_gb=None,
+    formal_vram_budget_gb=None,
+    trial_time_budget_minutes=None,
+    formal_time_budget_minutes=None,
+    last_vram_estimate_gb=None,
+    last_time_estimate_minutes=None,
+    last_batch_size=None,
+    last_mode=None,
 ):
     """
     Constructs the prompt for the Planner.
@@ -576,6 +710,25 @@ def get_planner_user_prompt(
                         a SYSTEM-FIXED PARAMETERS block is rendered so the LLM
                         does not waste reasoning on overridden knobs.
         max_epochs:     Hard cap on epochs. Rendered alongside plan_overrides.
+
+        trial_vram_budget_gb,
+        formal_vram_budget_gb,
+        trial_time_budget_minutes,
+        formal_time_budget_minutes:
+            Operator-supplied per-mode resource budgets. Forwarded into the
+            [ACTIVE RESOURCE BUDGETS] block so the LLM sees the numeric
+            ceiling that the upcoming pre-flight gate will enforce. None for
+            any field means "(no budget — gate disabled)" on that axis.
+            See docs/resource_estimator_implement.md §10.3 / §10.11.
+        last_vram_estimate_gb,
+        last_time_estimate_minutes,
+        last_batch_size,
+        last_mode:
+            Resource fields from the most recent prior attempt's record
+            (success or skipped). Surface what the LAST config produced so
+            the LLM has a concrete number to react to. None for any field
+            means "no prior data" — typically round 1 before any pre-flight
+            has run. See §10.3 / §10.11.
     """
     history_context = json.dumps(memory_history, indent=2) if memory_history else "No previous experiments recorded."
 
@@ -703,6 +856,25 @@ def get_planner_user_prompt(
 
     fixed_params_block = _format_fixed_params_block(plan_overrides, max_epochs)
 
+    # Phase K (K.6) — per-round numeric resource block + static guidance.
+    # Both blocks are blank-string when no budgets/estimates are configured,
+    # which collapses cleanly in the f-string template.
+    active_budgets_block = _format_active_resource_budgets_block(
+        current_round=current_round,
+        last_mode=last_mode,
+        trial_vram_budget_gb=trial_vram_budget_gb,
+        formal_vram_budget_gb=formal_vram_budget_gb,
+        trial_time_budget_minutes=trial_time_budget_minutes,
+        formal_time_budget_minutes=formal_time_budget_minutes,
+        last_vram_estimate_gb=last_vram_estimate_gb,
+        last_time_estimate_minutes=last_time_estimate_minutes,
+        last_batch_size=last_batch_size,
+    )
+    active_budgets_section = f"\n{active_budgets_block}\n" if active_budgets_block else ""
+    resource_gate_guidance_section = (
+        f"\n{RESOURCE_GATE_GUIDANCE_BLOCK}\n" if active_budgets_block else ""
+    )
+
     return f"""
 {fixed_params_block}
 ### Human Expert Advice:
@@ -710,7 +882,7 @@ def get_planner_user_prompt(
 
 ### Current Research Memory:
 {history_context}
-{oom_warning}{slow_warning}{round_context}
+{oom_warning}{slow_warning}{round_context}{active_budgets_section}{resource_gate_guidance_section}
 ### INSTRUCTIONS:
 1. **Review Memory**: Look for patterns and previous failures/successes.
    - Records with status='skipped_oom_risk' were NEVER trained — they exceeded GPU memory.

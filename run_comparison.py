@@ -378,7 +378,10 @@ def run_agent(model_type: str, agent_workspace: str, agent_run_name: str,
               provider: str, model_id: str, max_rounds: int, progress_bar: bool = False,
               file_index: int = 6, is_trial: bool = False, human_advice: str = None,
               cleanup_denoised: bool = False,
-              reflect_provider: str = None, reflect_model_id: str = None):
+              reflect_provider: str = None, reflect_model_id: str = None,
+              formal_strategy: str = "snapshot",
+              formal_portion: float = 0.1,
+              formal_train_portion: float = 1.0):
     """
     Launches nodes/ml_hyperparameter_tune_agent.py as a subprocess, locked to
     model_type, for max_rounds rounds.
@@ -421,6 +424,10 @@ def run_agent(model_type: str, agent_workspace: str, agent_run_name: str,
         cmd.append("--progress_bar")
     if cleanup_denoised:
         cmd.append("--cleanup_denoised")
+    # Phase M — formal-mode training levers (eval side locked in tuner)
+    cmd.extend(["--formal_strategy", formal_strategy])
+    cmd.extend(["--formal_portion", str(formal_portion)])
+    cmd.extend(["--formal_train_portion", str(formal_train_portion)])
 
     print(f"\n{'='*60}")
     print(f"  PHASE 3 — AGENT EXPLORATION: {model_type.upper()}")
@@ -525,6 +532,22 @@ def main():
     parser.add_argument(
         "--cleanup_denoised", action="store_true",
         help="Delete denoised HDF5 files after scoring each round to save disk space.",
+    )
+    # --- Formal-mode training levers (Phase M, docs/resource_estimator_implement.md §12) ---
+    # Forwarded to the agent subprocess. Eval side in formal mode is hardcoded
+    # to snapshot + eval_portion=1.0 in the tuner — NOT operator-configurable.
+    parser.add_argument(
+        "--formal_strategy", type=str, default="snapshot",
+        choices=["snapshot", "anchors", "target"],
+        help="Training-side strategy on formal rounds (default snapshot).",
+    )
+    parser.add_argument(
+        "--formal_portion", type=float, default=0.1,
+        help="Fraction of segments per file for formal training scope (default 0.1).",
+    )
+    parser.add_argument(
+        "--formal_train_portion", type=float, default=1.0,
+        help="Per-epoch iteration fraction for formal training (default 1.0).",
     )
     args = parser.parse_args()
 
@@ -685,6 +708,9 @@ def main():
         is_trial=args.is_trial,
         human_advice=human_advice or None,
         cleanup_denoised=args.cleanup_denoised,
+        formal_strategy=args.formal_strategy,
+        formal_portion=args.formal_portion,
+        formal_train_portion=args.formal_train_portion,
     )
 
     print(f"\n{'#'*60}")

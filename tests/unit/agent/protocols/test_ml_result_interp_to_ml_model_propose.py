@@ -127,7 +127,7 @@ class TestLocalFullContext:
 # and fan out into BOTH ProposalInput (here) and HyperparamTuningInput (via
 # the validator→tuner protocol) so the proposer's baseline gate and the
 # tuner's per-round gate construct the same SampleSet and see the same
-# wall-time budget. See docs/time_estimator_implement.md §2.7.2/§2.7.5.
+# wall-time budget. See docs/resource_estimator_implement.md §2.7.2/§2.7.5.
 #
 # The training-side trial-mode set (is_trial / trial_strategy / trial_portion
 # / target_files / train_portion / sampling_seed) mirrors the tuner exactly;
@@ -266,6 +266,109 @@ class TestTimeBudgetContextFields:
         assert result.train_portion == 0.1
         assert result.sampling_seed is None
         assert result.data_dir is None
+
+
+# ---------------------------------------------------------------------------
+# Phase K.7.4 — prior_tune_output pass-through (§10.13)
+# ---------------------------------------------------------------------------
+
+class TestLocalFullContextGateExhaustionPassThrough:
+    """The protocol must surface `prior_tune_output.gate_exhaustion` into
+    `ProposalInput.prior_iteration_gate_exhaustion` when present, and leave
+    the field at its schema default (None) otherwise.
+
+    See docs/resource_estimator_implement.md §10.13.
+    """
+
+    @pytest.fixture
+    def gate_exhaustion(self):
+        from agent.schemas.hyperparam_tuning import GateExhaustionInfo
+        return GateExhaustionInfo(
+            total_attempts=9,
+            vram_gated_attempts=9,
+            time_gated_attempts=0,
+            other_failure_attempts=0,
+            active_mode="trial",
+            vram_budget_gb=4.0,
+            time_budget_minutes=20.0,
+            baseline_vram_estimate_gb=6.4,
+            baseline_vram_factor=1.6,
+            baseline_time_estimate_minutes=8.0,
+            baseline_time_factor=0.4,
+            worst_vram_factor=2.0,
+            worst_time_factor=0.6,
+            summary_message="All 9 attempts were rejected by the VRAM gate.",
+        )
+
+    def _make_tune_output(self, gate_exhaustion=None):
+        from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
+        return HyperparamTuningOutput(
+            run_name="prev_iter",
+            model_type="punet",
+            file_index=0,
+            status="partial",
+            completed_rounds=0,
+            total_attempts=9,
+            best_exp_id=None,
+            best_denoising_score=None,
+            best_config=None,
+            best_file_vector=None,
+            all_records=[],
+            started_at="2026-04-18 10:00:00",
+            finished_at="2026-04-18 11:00:00",
+            gate_exhaustion=gate_exhaustion,
+        )
+
+    def test_default_none_when_kwarg_omitted(self, storage):
+        """No prior_tune_output kwarg → field stays at schema default (None).
+        Confirms backward compat: existing callers don't need to touch this."""
+        output = make_interpretation_output(["punet"])
+        result = local_full_context(output, storage)
+        assert result.prior_iteration_gate_exhaustion is None
+
+    def test_default_none_when_prior_tune_output_has_no_gate_exhaustion(self, storage):
+        """A successful prior iteration carries gate_exhaustion=None — the
+        protocol must NOT surface anything in that case."""
+        output = make_interpretation_output(["punet"])
+        prior = self._make_tune_output(gate_exhaustion=None)
+        result = local_full_context(output, storage, prior_tune_output=prior)
+        assert result.prior_iteration_gate_exhaustion is None
+
+    def test_surfaces_gate_exhaustion_when_present(self, storage, gate_exhaustion):
+        """Prior iteration exhausted the gate → the structured report
+        must reach the proposer's input field."""
+        from agent.schemas.hyperparam_tuning import GateExhaustionInfo
+        output = make_interpretation_output(["punet"])
+        prior = self._make_tune_output(gate_exhaustion=gate_exhaustion)
+        result = local_full_context(output, storage, prior_tune_output=prior)
+        assert isinstance(
+            result.prior_iteration_gate_exhaustion, GateExhaustionInfo
+        )
+        # Round-trip equality — every field survives the protocol hop
+        assert (
+            result.prior_iteration_gate_exhaustion.model_dump()
+            == gate_exhaustion.model_dump()
+        )
+
+    def test_kwarg_independent_of_other_pass_through_fields(
+        self, storage, gate_exhaustion
+    ):
+        """Surfacing gate_exhaustion must not silently reset any of the
+        other workflow-supplied kwargs — verifies the partial-plumbing
+        guarantee documented at the top of the function."""
+        output = make_interpretation_output(["punet"])
+        prior = self._make_tune_output(gate_exhaustion=gate_exhaustion)
+        result = local_full_context(
+            output,
+            storage,
+            prior_tune_output=prior,
+            trial_time_budget_minutes=60.0,
+        )
+        assert result.prior_iteration_gate_exhaustion is not None
+        assert result.trial_time_budget_minutes == 60.0
+        # Untouched kwargs keep their schema defaults
+        assert result.formal_time_budget_minutes is None
+        assert result.is_trial is False
 
 
 # ---------------------------------------------------------------------------

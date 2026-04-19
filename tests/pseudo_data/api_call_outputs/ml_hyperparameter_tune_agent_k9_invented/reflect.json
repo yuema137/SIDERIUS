@@ -1,0 +1,6 @@
+{
+  "conclusion": "Positive. After collapsing hidden_dim from 2048 to 128 in response to the round 1 over-budget verdict, the trial run fits the 0.1 GB ceiling and produces a denoising_score of 0.65 on the sparse trial portion. The architectural-width lever was the binding one as predicted; the activation term at seg=1000 was always small relative to the params term.",
+  "key_factor": "hidden_dim reduced from 2048 to 128. All other levers (seg_size=1000, batch_size=1, ce loss, lr=1e-4, trial_portion=0.05) held constant, so round-over-round attribution is unambiguous.",
+  "discovery": "On this invented model_type the K.2.5-8 fallback flag (inference_batch_uncalibrated=True) appeared on every gate call but did not block the tuner — the verdict still resolved cleanly to over/under budget at the 3-phase peak. This confirms the soft-fallback path keeps the gate actionable for novel architectures the proposer invents.",
+  "memory_update": "For pe_wavenet_delta, hidden_dim=128 fits the 0.1 GB trial budget with ~75 MB headroom. Future rounds in this family can sweep hidden_dim within [128, 512] to trade score against margin; going below 64 risks under-parameterisation given the [B, T] -> [B, 256, T] contract."
+}

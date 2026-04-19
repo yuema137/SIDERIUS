@@ -16,6 +16,7 @@ from agent.schemas.hyperparam_tuning import (
     ExpertAdvice,
     ExperimentPlan,
     TrialConfig,
+    GateExhaustionInfo,
     HyperparamTuningInput,
     HyperparamTuningOutput,
     ExperimentRecord,
@@ -236,6 +237,62 @@ class TestHyperparamTuningInput:
 
 
 # ---------------------------------------------------------------------------
+# Phase K — HyperparamTuningInput VRAM budget fields. Mirror of the Phase I
+# trial/formal time-budget split. Both are independently optional; the tuner
+# picks per round based on plan.is_trial (exercised in K.3 tuner tests).
+# See docs/resource_estimator_implement.md §10.4.
+# ---------------------------------------------------------------------------
+
+class TestVramBudgetFields:
+
+    def test_both_default_none(self, valid_input_dict):
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        assert inp.trial_vram_budget_gb is None
+        assert inp.formal_vram_budget_gb is None
+
+    def test_trial_budget_set_alone(self, valid_input_dict):
+        """Setting only the trial budget leaves the formal budget None so the
+        formal gate stays disabled — one budget per mode, no cross-contamination."""
+        valid_input_dict["trial_vram_budget_gb"] = 4.0
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        assert inp.trial_vram_budget_gb == 4.0
+        assert inp.formal_vram_budget_gb is None
+
+    def test_formal_budget_set_alone(self, valid_input_dict):
+        valid_input_dict["formal_vram_budget_gb"] = 8.0
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        assert inp.trial_vram_budget_gb is None
+        assert inp.formal_vram_budget_gb == 8.0
+
+    def test_both_budgets_set(self, valid_input_dict):
+        valid_input_dict["trial_vram_budget_gb"] = 4.0
+        valid_input_dict["formal_vram_budget_gb"] = 8.0
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        assert inp.trial_vram_budget_gb == 4.0
+        assert inp.formal_vram_budget_gb == 8.0
+
+    def test_budgets_round_trip_through_json(self, valid_input_dict):
+        valid_input_dict["trial_vram_budget_gb"] = 4.0
+        valid_input_dict["formal_vram_budget_gb"] = 8.0
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        reloaded = HyperparamTuningInput.model_validate_json(inp.model_dump_json())
+        assert reloaded.trial_vram_budget_gb == 4.0
+        assert reloaded.formal_vram_budget_gb == 8.0
+
+    def test_budgets_round_trip_when_unset(self, valid_input_dict):
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        reloaded = HyperparamTuningInput.model_validate_json(inp.model_dump_json())
+        assert reloaded.trial_vram_budget_gb is None
+        assert reloaded.formal_vram_budget_gb is None
+
+    def test_non_numeric_budget_rejected(self, valid_input_dict):
+        valid_input_dict["trial_vram_budget_gb"] = "not a number"
+        with pytest.raises(ValidationError) as exc:
+            HyperparamTuningInput.model_validate(valid_input_dict)
+        assert "trial_vram_budget_gb" in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
 # 2. Per-record validation — ExperimentRecord
 # ---------------------------------------------------------------------------
 
@@ -291,7 +348,7 @@ class TestExperimentMemoryTimeFields:
     """The three optional time fields on ExperimentMemory carry pre-flight
     estimator context to the next planner round via experiment_history.
     All three default to None so records emitted before the gate ran (or with
-    the gate disabled) validate unchanged. See docs/time_estimator_implement.md
+    the gate disabled) validate unchanged. See docs/resource_estimator_implement.md
     §J.1.
     """
 
@@ -341,6 +398,256 @@ class TestExperimentMemoryTimeFields:
         assert rec.memory.time_estimate_minutes is None
         assert rec.memory.time_budget_minutes is None
         assert rec.memory.time_mode is None
+
+
+# ---------------------------------------------------------------------------
+# Phase K — ExperimentMemory VRAM fields (planner-feedback channel, mirror of
+# the time fields). Mode is shared with the time fields via `time_mode`; no
+# separate vram_mode. See docs/resource_estimator_implement.md §10.4.
+# ---------------------------------------------------------------------------
+
+class TestExperimentMemoryVramFields:
+    """The two optional VRAM fields on ExperimentMemory carry pre-flight
+    estimator context to the next planner round via experiment_history,
+    mirroring the time fields. Both default to None so pre-Phase-K records
+    (and records where the gate was disabled) validate unchanged."""
+
+    def _base_memory(self):
+        return {
+            "expert_advice_followed": "test",
+            "hypothesis": "test",
+        }
+
+    def test_vram_fields_default_none(self):
+        mem = ExperimentMemory.model_validate(self._base_memory())
+        assert mem.vram_estimate_gb is None
+        assert mem.vram_budget_gb is None
+
+    def test_vram_fields_accept_concrete_values(self):
+        mem = ExperimentMemory.model_validate({
+            **self._base_memory(),
+            "vram_estimate_gb": 2.3,
+            "vram_budget_gb": 4.0,
+        })
+        assert mem.vram_estimate_gb == 2.3
+        assert mem.vram_budget_gb == 4.0
+
+    def test_vram_fields_independent_of_time_fields(self):
+        """Setting VRAM fields alone must not force the time fields — the two
+        gates are independent. The per-round tuner populates whichever the
+        gate saw."""
+        mem = ExperimentMemory.model_validate({
+            **self._base_memory(),
+            "vram_estimate_gb": 1.7,
+            "vram_budget_gb": 4.0,
+        })
+        assert mem.time_estimate_minutes is None
+        assert mem.time_budget_minutes is None
+        assert mem.time_mode is None
+
+    def test_existing_record_round_trip_unchanged(self, valid_success_record):
+        """Records produced before Phase K (no vram_* keys) still validate and
+        the two VRAM fields read back as None."""
+        rec = ExperimentRecord.model_validate(valid_success_record)
+        assert rec.memory.vram_estimate_gb is None
+        assert rec.memory.vram_budget_gb is None
+
+
+# ---------------------------------------------------------------------------
+# K.2.5-8 — ExperimentMemory.inference_batch_uncalibrated. Populated by the
+# tuner when the inference estimator substituted the runtime fallback batch
+# (25) for an unregistered model_type. Optional so pre-K.2.5-8 records and
+# records where the gate did not run still validate. See §10.14 K.2.5-8.
+# ---------------------------------------------------------------------------
+
+class TestExperimentMemoryInferenceBatchUncalibrated:
+
+    def _base_memory(self):
+        return {
+            "expert_advice_followed": "test",
+            "hypothesis": "test",
+        }
+
+    def test_field_defaults_to_none(self):
+        mem = ExperimentMemory.model_validate(self._base_memory())
+        assert mem.inference_batch_uncalibrated is None
+
+    def test_field_accepts_true(self):
+        mem = ExperimentMemory.model_validate({
+            **self._base_memory(),
+            "inference_batch_uncalibrated": True,
+        })
+        assert mem.inference_batch_uncalibrated is True
+
+    def test_field_accepts_false(self):
+        mem = ExperimentMemory.model_validate({
+            **self._base_memory(),
+            "inference_batch_uncalibrated": False,
+        })
+        assert mem.inference_batch_uncalibrated is False
+
+    def test_field_round_trips_through_json(self):
+        mem = ExperimentMemory.model_validate({
+            **self._base_memory(),
+            "inference_batch_uncalibrated": True,
+        })
+        reloaded = ExperimentMemory.model_validate_json(mem.model_dump_json())
+        assert reloaded.inference_batch_uncalibrated is True
+
+    def test_existing_record_round_trip_unchanged(self, valid_success_record):
+        """Records produced before K.2.5-8 (no inference_batch_uncalibrated key)
+        still validate and the field reads back as None."""
+        rec = ExperimentRecord.model_validate(valid_success_record)
+        assert rec.memory.inference_batch_uncalibrated is None
+
+
+# ---------------------------------------------------------------------------
+# Phase K (K.7) — GateExhaustionInfo schema. Populated by the tuner when an
+# iteration ends without ever training successfully AND >=1 attempt was
+# rejected by the pre-flight resource gate. Consumed by the next iteration's
+# proposer via ProposalInput.prior_iteration_gate_exhaustion (K.7.2).
+# See docs/resource_estimator_implement.md §10.13.2.
+# ---------------------------------------------------------------------------
+
+class TestGateExhaustionInfo:
+
+    def _full_kwargs(self):
+        """One realistic populated instance — VRAM-bound trial-mode failure
+        mirroring the §10.13.3 example: 9 attempts, all VRAM-gated, baseline
+        already over budget at 1.6x, worst at 2.0x, time within budget."""
+        return {
+            "total_attempts": 9,
+            "vram_gated_attempts": 9,
+            "time_gated_attempts": 0,
+            "other_failure_attempts": 0,
+            "active_mode": "trial",
+            "vram_budget_gb": 4.0,
+            "time_budget_minutes": 20.0,
+            "baseline_vram_estimate_gb": 6.4,
+            "baseline_vram_factor": 1.6,
+            "baseline_time_estimate_minutes": 12.0,
+            "baseline_time_factor": 0.6,
+            "worst_vram_factor": 2.0,
+            "worst_time_factor": 0.6,
+            "summary_message": (
+                "All 9 attempts were rejected by the pre-flight VRAM gate. "
+                "Baseline 1.6x over budget; worst 2.0x. Architecture too heavy."
+            ),
+        }
+
+    def test_full_populated_validates(self):
+        info = GateExhaustionInfo.model_validate(self._full_kwargs())
+        assert info.total_attempts == 9
+        assert info.vram_gated_attempts == 9
+        assert info.time_gated_attempts == 0
+        assert info.other_failure_attempts == 0
+        assert info.active_mode == "trial"
+        assert info.vram_budget_gb == 4.0
+        assert info.baseline_vram_factor == 1.6
+        assert info.worst_vram_factor == 2.0
+
+    def test_required_fields_only_with_optionals_default_none(self):
+        """Only counts + active_mode + summary_message are required — all
+        budget/factor fields default to None so a gate-exhaustion record can
+        be built even when one axis is fully disabled."""
+        info = GateExhaustionInfo.model_validate({
+            "total_attempts": 3,
+            "vram_gated_attempts": 0,
+            "time_gated_attempts": 3,
+            "other_failure_attempts": 0,
+            "active_mode": "formal",
+            "summary_message": "All 3 attempts were rejected by the time gate.",
+        })
+        assert info.vram_budget_gb is None
+        assert info.time_budget_minutes is None
+        assert info.baseline_vram_estimate_gb is None
+        assert info.baseline_vram_factor is None
+        assert info.baseline_time_estimate_minutes is None
+        assert info.baseline_time_factor is None
+        assert info.worst_vram_factor is None
+        assert info.worst_time_factor is None
+
+    def test_missing_required_count_raises(self):
+        kwargs = self._full_kwargs()
+        del kwargs["total_attempts"]
+        with pytest.raises(ValidationError) as exc:
+            GateExhaustionInfo.model_validate(kwargs)
+        assert "total_attempts" in str(exc.value)
+
+    def test_missing_summary_message_raises(self):
+        kwargs = self._full_kwargs()
+        del kwargs["summary_message"]
+        with pytest.raises(ValidationError) as exc:
+            GateExhaustionInfo.model_validate(kwargs)
+        assert "summary_message" in str(exc.value)
+
+    def test_missing_active_mode_raises(self):
+        kwargs = self._full_kwargs()
+        del kwargs["active_mode"]
+        with pytest.raises(ValidationError) as exc:
+            GateExhaustionInfo.model_validate(kwargs)
+        assert "active_mode" in str(exc.value)
+
+    def test_active_mode_rejects_other_strings(self):
+        """Literal["trial", "formal"] — anything else must fail. Mirrors the
+        time_mode test on ExperimentMemory."""
+        kwargs = self._full_kwargs()
+        kwargs["active_mode"] = "snapshot"
+        with pytest.raises(ValidationError) as exc:
+            GateExhaustionInfo.model_validate(kwargs)
+        assert "active_mode" in str(exc.value)
+
+    def test_round_trip_through_json(self):
+        info = GateExhaustionInfo.model_validate(self._full_kwargs())
+        reloaded = GateExhaustionInfo.model_validate_json(info.model_dump_json())
+        assert reloaded == info
+
+
+class TestHyperparamTuningOutputGateExhaustion:
+    """K.7 — the new optional gate_exhaustion field on HyperparamTuningOutput.
+    Defaults to None so pre-K.7 outputs validate unchanged; accepts a
+    populated GateExhaustionInfo when the tuner builds one."""
+
+    def test_default_none_when_omitted(self, valid_output_dict):
+        assert "gate_exhaustion" not in valid_output_dict
+        out = HyperparamTuningOutput.model_validate(valid_output_dict)
+        assert out.gate_exhaustion is None
+
+    def test_accepts_populated_info(self, valid_output_dict):
+        valid_output_dict["gate_exhaustion"] = {
+            "total_attempts": 9,
+            "vram_gated_attempts": 9,
+            "time_gated_attempts": 0,
+            "other_failure_attempts": 0,
+            "active_mode": "trial",
+            "vram_budget_gb": 4.0,
+            "time_budget_minutes": 20.0,
+            "baseline_vram_estimate_gb": 6.4,
+            "baseline_vram_factor": 1.6,
+            "baseline_time_estimate_minutes": 12.0,
+            "baseline_time_factor": 0.6,
+            "worst_vram_factor": 2.0,
+            "worst_time_factor": 0.6,
+            "summary_message": "VRAM-gated baseline 1.6x; worst 2.0x.",
+        }
+        out = HyperparamTuningOutput.model_validate(valid_output_dict)
+        assert out.gate_exhaustion is not None
+        assert out.gate_exhaustion.vram_gated_attempts == 9
+        assert out.gate_exhaustion.active_mode == "trial"
+        assert out.gate_exhaustion.worst_vram_factor == 2.0
+
+    def test_round_trip_preserves_gate_exhaustion(self, valid_output_dict):
+        valid_output_dict["gate_exhaustion"] = {
+            "total_attempts": 3,
+            "vram_gated_attempts": 0,
+            "time_gated_attempts": 3,
+            "other_failure_attempts": 0,
+            "active_mode": "formal",
+            "summary_message": "All 3 attempts were rejected by the time gate.",
+        }
+        out = HyperparamTuningOutput.model_validate(valid_output_dict)
+        reloaded = HyperparamTuningOutput.model_validate_json(out.model_dump_json())
+        assert reloaded.gate_exhaustion == out.gate_exhaustion
 
 
 class TestExperimentRecordOOM:

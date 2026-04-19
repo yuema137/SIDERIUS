@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional
 from ml_models.models_format_sandbox import get_config_class, TrainConfig, LossConfig, ExperimentConfig, PLUGIN_CONFIG_REGISTRY
 from execute_tools.scoring_utils import validate_sample_set
 from execute_tools.data_paths import TIDMAD_DATA_DIR
+from core.inference_defaults import inference_batch_for
 
 
 def _tidmad_data_dir() -> str:
@@ -340,15 +341,6 @@ class TidmadSandbox:
             print(f"!!! [Executor Internal Error] !!!: {str(e)}") 
             return {"status": "error", "message": str(e)}
 
-    # Inference batch sizes matching the original TIDMAD paper (inference.py).
-    # These were chosen to keep GPU memory under ~2 GB per model.
-    # transformer=1 due to O(T²) attention memory; rnn=10 due to LSTM hidden states.
-    _INFERENCE_BATCH_SIZE = {
-        "punet": 25, "wavenet": 25, "fcnet": 25,
-        "rnn": 10,
-        "transformer": 1,
-    }
-
     def _validate_model_and_loss(self, model_type: str, m_cfg: Dict, l_cfg: Dict):
         """Validate model and loss configs via Pydantic. Used by inference."""
         if model_type in PLUGIN_CONFIG_REGISTRY:
@@ -378,7 +370,7 @@ class TidmadSandbox:
         with open(m_path, 'w') as f: json.dump(validated_m, f)
         with open(l_path, 'w') as f: json.dump(validated_l, f)
         model_path = os.path.abspath(os.path.join(self.dirs["models"], f"model_{model_type}_{exp_id}_agent.pth"))
-        inf_bs = str(self._INFERENCE_BATCH_SIZE.get(model_type, 25))
+        inf_bs = str(inference_batch_for(model_type))
 
         cmd = [sys.executable, "execute_tools/inference_single.py", "--mode", "agent", "-m", model_type,
                "--model_cfg", m_path, "--loss_cfg", l_path,

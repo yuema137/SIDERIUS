@@ -27,6 +27,7 @@ from agent.schemas.hyperparam_tuning import (
     ExperimentRecord,
     ExperimentPlan,
     ExpertAdvice,
+    GateExhaustionInfo,
     TrialConfig,
     serialize_expert_advice,
 )
@@ -80,6 +81,53 @@ def _validate_data_config(
             )
 
 
+def _resolve_sample_set_cfg(
+    mode: str,
+    agent_input: HyperparamTuningInput,
+    plan: ExperimentPlan,
+) -> dict:
+    """Resolve sample-set config for one round based on trial/formal/single_file mode.
+
+    Formal-mode eval is LOCKED to snapshot + eval_portion=1.0 so scores are
+    architecturally comparable across architectures (Phase M, §12.2). Formal
+    training levers come from ``agent_input.formal_*``. Trial-mode values come
+    from the planner. Single-file mode uses safe defaults.
+
+    Args:
+        mode: One of ``"trial"``, ``"formal"``, ``"single_file"``.
+        agent_input: Carries the operator-configurable ``formal_*`` knobs.
+        plan: Planner-produced ExperimentPlan (source of trial-mode values).
+
+    Returns:
+        A dict with exactly 5 keys — ``trial_strategy``, ``trial_portion``,
+        ``train_portion``, ``eval_strategy``, ``eval_portion``.
+    """
+    if mode == "formal":
+        return {
+            "trial_strategy": agent_input.formal_strategy,
+            "trial_portion":  agent_input.formal_portion,
+            "train_portion":  agent_input.formal_train_portion,
+            "eval_strategy":  "snapshot",
+            "eval_portion":   1.0,
+        }
+    if mode == "trial":
+        return {
+            "trial_strategy": plan.trial_strategy,
+            "trial_portion":  plan.trial_portion,
+            "train_portion":  plan.train_portion,
+            "eval_strategy":  plan.eval_strategy,
+            "eval_portion":   plan.eval_portion,
+        }
+    # single_file
+    return {
+        "trial_strategy": "snapshot",
+        "trial_portion":  plan.trial_portion,
+        "train_portion":  plan.train_portion,
+        "eval_strategy":  "snapshot",
+        "eval_portion":   1.0,
+    }
+
+
 def _copy_seed_plugin(src: str, dst_dir: str) -> str:
     """Copy the seed plugin file into the run's plugin directory.
 
@@ -117,6 +165,198 @@ def _run_skill(skill_folder: str, sandbox: TidmadSandbox, **params) -> dict:
 
 # _serialize_expert_advice is now shared — imported as serialize_expert_advice
 _serialize_expert_advice = serialize_expert_advice
+
+
+# ---------------------------------------------------------------------------
+# Gate-exhaustion feedback helper (Phase K.7 — see §10.13)
+# ---------------------------------------------------------------------------
+
+def _build_gate_exhaustion(
+    records: list,
+    active_mode: str,
+    vram_budget_gb: Optional[float],
+    time_budget_minutes: Optional[float],
+) -> Optional[GateExhaustionInfo]:
+    """
+    Build the structured gate-exhaustion report for the next iteration's
+    proposer (§10.13). Returns ``None`` unless **all** of:
+
+      * ``records`` is non-empty (the tuner actually ran).
+      * No record has ``status == "success"`` (nothing ever trained).
+      * At least one record has ``status in {"skipped_oom_risk",
+        "skipped_time_risk"}`` (the failure was budget-related, not just
+        a code bug or schema violation).
+
+    When triggered, packages per-axis baseline + worst-case factors plus a
+    one-paragraph summary so the next proposer can size its baseline below
+    the binding ceiling. See docs/resource_estimator_implement.md §10.13.
+    """
+    if not records:
+        return None
+    if any(r.get("status") == "success" for r in records):
+        return None
+
+    vram_gated = [r for r in records if r.get("status") == "skipped_oom_risk"]
+    time_gated = [r for r in records if r.get("status") == "skipped_time_risk"]
+    if not vram_gated and not time_gated:
+        return None
+    other = [
+        r for r in records
+        if r.get("status") not in {"skipped_oom_risk", "skipped_time_risk"}
+    ]
+
+    baseline_mem = (records[0].get("memory") or {})
+    baseline_vram = baseline_mem.get("vram_estimate_gb")
+    baseline_time = baseline_mem.get("time_estimate_minutes")
+
+    def _factor(estimate, budget):
+        if estimate is None or budget is None or budget <= 0:
+            return None
+        return round(float(estimate) / float(budget), 3)
+
+    def _worst_factor(key, budget):
+        if budget is None or budget <= 0:
+            return None
+        ests = [
+            (r.get("memory") or {}).get(key)
+            for r in records
+        ]
+        ests = [e for e in ests if e is not None]
+        if not ests:
+            return None
+        return round(max(float(e) for e in ests) / float(budget), 3)
+
+    baseline_vram_factor = _factor(baseline_vram, vram_budget_gb)
+    baseline_time_factor = _factor(baseline_time, time_budget_minutes)
+    worst_vram_factor = _worst_factor("vram_estimate_gb", vram_budget_gb)
+    worst_time_factor = _worst_factor("time_estimate_minutes", time_budget_minutes)
+
+    summary = _render_gate_exhaustion_summary(
+        total=len(records),
+        vram_gated=len(vram_gated),
+        time_gated=len(time_gated),
+        other=len(other),
+        active_mode=active_mode,
+        vram_budget_gb=vram_budget_gb,
+        time_budget_minutes=time_budget_minutes,
+        baseline_vram=baseline_vram,
+        baseline_vram_factor=baseline_vram_factor,
+        baseline_time=baseline_time,
+        baseline_time_factor=baseline_time_factor,
+        worst_vram_factor=worst_vram_factor,
+        worst_time_factor=worst_time_factor,
+    )
+
+    return GateExhaustionInfo(
+        total_attempts=len(records),
+        vram_gated_attempts=len(vram_gated),
+        time_gated_attempts=len(time_gated),
+        other_failure_attempts=len(other),
+        active_mode=active_mode,
+        vram_budget_gb=vram_budget_gb,
+        time_budget_minutes=time_budget_minutes,
+        baseline_vram_estimate_gb=baseline_vram,
+        baseline_vram_factor=baseline_vram_factor,
+        baseline_time_estimate_minutes=baseline_time,
+        baseline_time_factor=baseline_time_factor,
+        worst_vram_factor=worst_vram_factor,
+        worst_time_factor=worst_time_factor,
+        summary_message=summary,
+    )
+
+
+def _render_gate_exhaustion_summary(
+    *,
+    total: int,
+    vram_gated: int,
+    time_gated: int,
+    other: int,
+    active_mode: str,
+    vram_budget_gb: Optional[float],
+    time_budget_minutes: Optional[float],
+    baseline_vram: Optional[float],
+    baseline_vram_factor: Optional[float],
+    baseline_time: Optional[float],
+    baseline_time_factor: Optional[float],
+    worst_vram_factor: Optional[float],
+    worst_time_factor: Optional[float],
+) -> str:
+    """One-paragraph LLM-readable synthesis of the gate-exhaustion state.
+
+    The wording adapts to which axis was the binding ceiling — VRAM-only,
+    time-only, or mixed — so the next proposer reads a clear instruction
+    rather than a generic "everything failed" line. See §10.13.3.
+    """
+    parts = []
+
+    # Lead sentence — what failed and how widely.
+    if vram_gated and not time_gated:
+        parts.append(
+            f"All {total} attempt(s) ({vram_gated} VRAM-gated, {other} other "
+            f"failures) were rejected by the pre-flight VRAM gate."
+        )
+    elif time_gated and not vram_gated:
+        parts.append(
+            f"All {total} attempt(s) ({time_gated} time-gated, {other} other "
+            f"failures) were rejected by the pre-flight time gate."
+        )
+    else:
+        parts.append(
+            f"Of {total} attempt(s), {vram_gated} were rejected by the VRAM "
+            f"gate and {time_gated} by the time gate "
+            f"({other} other failures); none ever trained successfully."
+        )
+
+    # VRAM diagnostic.
+    if vram_budget_gb is not None and baseline_vram is not None:
+        parts.append(
+            f"The baseline already estimated {baseline_vram:.2f} GB VRAM vs "
+            f"the {vram_budget_gb:.2f} GB {active_mode} budget "
+            f"(factor {baseline_vram_factor:.2f}×); the tuner's mutations "
+            f"reached factor {worst_vram_factor:.2f}× at worst."
+        )
+    elif vram_budget_gb is not None and worst_vram_factor is not None:
+        parts.append(
+            f"VRAM estimates reached factor {worst_vram_factor:.2f}× of the "
+            f"{vram_budget_gb:.2f} GB {active_mode} budget at worst "
+            f"(baseline estimate not recorded)."
+        )
+
+    # Time diagnostic.
+    if time_budget_minutes is not None and baseline_time is not None:
+        parts.append(
+            f"The baseline estimated {baseline_time:.2f} min wall-time vs the "
+            f"{time_budget_minutes:.2f} min {active_mode} budget "
+            f"(factor {baseline_time_factor:.2f}×); worst was factor "
+            f"{worst_time_factor:.2f}×."
+        )
+    elif time_budget_minutes is not None and worst_time_factor is not None:
+        parts.append(
+            f"Time estimates reached factor {worst_time_factor:.2f}× of the "
+            f"{time_budget_minutes:.2f} min {active_mode} budget at worst "
+            f"(baseline estimate not recorded)."
+        )
+
+    # Verdict line — point the next proposer at the right lever.
+    if vram_gated and not time_gated:
+        parts.append(
+            "Verdict: the proposed architecture is too heavy for the active "
+            "VRAM budget. Reduce parameter count and/or layer count so the "
+            "next baseline lands below the budget."
+        )
+    elif time_gated and not vram_gated:
+        parts.append(
+            "Verdict: the proposed architecture is too slow for the active "
+            "time budget. Reduce model depth/width or computation per step "
+            "so the next baseline lands below the budget."
+        )
+    else:
+        parts.append(
+            "Verdict: the proposed architecture is over budget on multiple "
+            "axes. Both parameter count AND per-step compute must come down."
+        )
+
+    return " ".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -183,7 +423,7 @@ class HyperparamTuningAgent:
         # Per-mode time-budget gate (Phase I). Each mode has its own optional
         # ceiling; the per-round pick happens inside the loop based on
         # plan.is_trial. Mirrors the "additive, opt-in" stance in
-        # docs/time_estimator_implement.md §5 — when both budgets are None the
+        # docs/resource_estimator_implement.md §5 — when both budgets are None the
         # gate never fires; when only one is set, rounds in the other mode skip
         # the gate (one-time warning printed below per mode).
         trial_time_budget = agent_input.trial_time_budget_minutes
@@ -195,6 +435,24 @@ class HyperparamTuningAgent:
         if formal_time_budget is None:
             print("[time-gate disabled / formal] formal_time_budget_minutes is None "
                   "— evaluate_time_skill will not gate formal-mode rounds.")
+
+        # Per-mode VRAM-budget gate (Phase K). Mirrors the time-gate shape: each
+        # mode has its own optional ceiling, per-round pick happens inside the
+        # loop based on plan.is_trial. When the mode's budget is None, the VRAM
+        # skill falls back to the defensive free×0.8 behaviour (no operator
+        # ceiling) — the skill still runs, but the vram_*_gb memory fields are
+        # omitted so the planner sees "this round wasn't operator-budgeted."
+        # See docs/resource_estimator_implement.md §10.4 / §10.8.
+        trial_vram_budget = agent_input.trial_vram_budget_gb
+        formal_vram_budget = agent_input.formal_vram_budget_gb
+        if trial_vram_budget is None:
+            print("[vram-gate disabled / trial] trial_vram_budget_gb is None "
+                  "— evaluate_vram_skill uses free×0.8 defensive limit for "
+                  "trial-mode rounds.")
+        if formal_vram_budget is None:
+            print("[vram-gate disabled / formal] formal_vram_budget_gb is None "
+                  "— evaluate_vram_skill uses free×0.8 defensive limit for "
+                  "formal-mode rounds.")
 
         # --- Initialize sandbox and brain (via factory for DI / pseudo-mode) ---
         sandbox = self._sandbox_factory(
@@ -279,6 +537,10 @@ class HyperparamTuningAgent:
         completed_rounds = 0
         total_attempts = 0
         max_attempts = max_rounds * 3
+        # Pre-initialise so finalisation can safely read `plan` for the
+        # gate-exhaustion mode lookup even if the loop never assigns it
+        # (e.g. max_rounds=0 or an early-exit path).
+        plan: Optional[ExperimentPlan] = None
 
         while completed_rounds < max_rounds and total_attempts < max_attempts:
             total_attempts += 1
@@ -308,6 +570,25 @@ class HyperparamTuningAgent:
                 # docs/improving_validation_awareness.md §D.1.
                 plugin_source_excerpt = format_plugin_source_excerpt_block(config_cls)
 
+                # Phase K (K.6) — extract the most recent prior attempt's
+                # resource snapshot so the [ACTIVE RESOURCE BUDGETS] block can
+                # show the LLM a concrete number to react to. Looks at the
+                # last memory entry regardless of status (success / skipped):
+                # the resource fields are absent on records produced with the
+                # gates disabled and on schema-violation records. Round 1
+                # gives None on every field, which collapses to "(no prior
+                # estimate)" in the rendered block.
+                # See docs/resource_estimator_implement.md §10.3 / §10.11.
+                last_record = memory_history[-1] if memory_history else {}
+                last_memory = last_record.get("memory") or {}
+                last_train_cfg = (
+                    (last_record.get("params") or {}).get("train_config") or {}
+                )
+                last_vram_estimate_gb = last_memory.get("vram_estimate_gb")
+                last_time_estimate_minutes = last_memory.get("time_estimate_minutes")
+                last_batch_size = last_train_cfg.get("batch_size")
+                last_mode = last_memory.get("time_mode")
+
                 # B. THINK: Plan next experiment
                 decision = brain.plan(
                     memory_history,
@@ -322,6 +603,14 @@ class HyperparamTuningAgent:
                     trial_allowed=trial_allowed,
                     plan_overrides=agent_input.plan_overrides,
                     max_epochs=agent_input.max_epochs,
+                    trial_vram_budget_gb=trial_vram_budget,
+                    formal_vram_budget_gb=formal_vram_budget,
+                    trial_time_budget_minutes=trial_time_budget,
+                    formal_time_budget_minutes=formal_time_budget,
+                    last_vram_estimate_gb=last_vram_estimate_gb,
+                    last_time_estimate_minutes=last_time_estimate_minutes,
+                    last_batch_size=last_batch_size,
+                    last_mode=last_mode,
                 )
 
                 # Validate LLM output into ExperimentPlan (with fallback)
@@ -367,9 +656,16 @@ class HyperparamTuningAgent:
                 else:
                     mode = "single_file"
 
-                # In formal mode, eval uses all segments (portion=1.0).
-                # In trial mode, eval uses the LLM's eval_portion.
-                eval_portion = plan.eval_portion if mode == "trial" else 1.0
+                # Phase M — mode-gated sample-set config. Formal-mode eval is
+                # LOCKED to snapshot + 1.0 so scores are architecturally
+                # comparable; formal training is operator-configurable via
+                # agent_input.formal_* fields. See docs/resource_estimator_implement.md §12.
+                _cfg = _resolve_sample_set_cfg(mode, agent_input, plan)
+                cfg_trial_strategy = _cfg["trial_strategy"]
+                cfg_trial_portion  = _cfg["trial_portion"]
+                cfg_train_portion  = _cfg["train_portion"]
+                cfg_eval_strategy  = _cfg["eval_strategy"]
+                cfg_eval_portion   = _cfg["eval_portion"]
 
                 # Generate deterministic seeds for reproducibility.
                 import hashlib
@@ -387,13 +683,13 @@ class HyperparamTuningAgent:
                     is_trial=plan.is_trial,
                     mode=mode,
                     # Training
-                    trial_strategy=plan.trial_strategy if mode != "single_file" else "snapshot",
-                    trial_portion=plan.trial_portion,
-                    train_portion=plan.train_portion,
+                    trial_strategy=cfg_trial_strategy,
+                    trial_portion=cfg_trial_portion,
+                    train_portion=cfg_train_portion,
                     target_files=plan.target_files if plan.is_trial else [],
                     # Validation
-                    eval_strategy=plan.eval_strategy if mode != "single_file" else "snapshot",
-                    eval_portion=eval_portion,
+                    eval_strategy=cfg_eval_strategy,
+                    eval_portion=cfg_eval_portion,
                     # Alignment
                     train_validation_align=plan.train_validation_align,
                     # Legacy
@@ -490,8 +786,28 @@ class HyperparamTuningAgent:
                     "loss_config":  plan.loss_cfg,
                 }
 
-                print(f"\n[Step 0/3] Resource check...")
-                resource_check = _run_skill("evaluate_resource_skill", sandbox, **active_params)
+                # Phase K: per-mode VRAM-budget pick. plan.is_trial decides
+                # which ceiling applies for THIS round; the unselected one is
+                # ignored. When the chosen budget is None the skill still runs
+                # but falls back to free×0.8 defensive behaviour (no operator
+                # ceiling) — the memory's vram_*_gb fields are omitted in that
+                # case so the planner sees "this round wasn't operator-budgeted."
+                # See docs/resource_estimator_implement.md §10.4 / §10.8.
+                chosen_vram_budget = (trial_vram_budget
+                                      if plan.is_trial
+                                      else formal_vram_budget)
+                vram_budget_desc = (f"{chosen_vram_budget} GB"
+                                    if chosen_vram_budget is not None
+                                    else "free×0.8")
+                print(f"\n[Pre-flight 1/2] VRAM check "
+                      f"(mode={'trial' if plan.is_trial else 'formal'}, "
+                      f"budget={vram_budget_desc})...")
+                resource_check = _run_skill(
+                    "evaluate_vram_skill",
+                    sandbox,
+                    **active_params,
+                    vram_budget_gb=chosen_vram_budget,
+                )
                 if resource_check.get("status") == "error":
                     raise RuntimeError(f"Resource check error: {resource_check.get('message')}")
 
@@ -572,16 +888,38 @@ class HyperparamTuningAgent:
                             "memory_update": resource_check.get("suggestion", "Reduce batch_size or segmentation_size."),
                         },
                     }
+                    # Phase K — surface the same two VRAM fields the success
+                    # record carries so the planner sees the same shape
+                    # regardless of pass/fail. Omitted when the gate is
+                    # disabled (chosen_vram_budget is None), mirroring §J.3
+                    # for time. Mode is inferred from `time_mode` on records
+                    # where the time gate also ran — no separate vram_mode.
+                    # See docs/resource_estimator_implement.md §10.4 / §10.8.
+                    if chosen_vram_budget is not None:
+                        oom_record["memory"]["vram_estimate_gb"] = (
+                            resource_check.get("estimated_gb")
+                        )
+                        oom_record["memory"]["vram_budget_gb"] = (
+                            resource_check.get("limit_gb")
+                        )
+                    # K.2.5-8 — soft-fallback flag is independent of the
+                    # budget being set; the gate runs unconditionally and the
+                    # flag tells us whether the inference estimate was
+                    # against a registered batch. Recorded on every
+                    # skipped_oom_risk so post-hoc analysis can discount
+                    # rejections that came from an uncalibrated estimate.
+                    if resource_check.get("inference_batch_uncalibrated"):
+                        oom_record["memory"]["inference_batch_uncalibrated"] = True
                     ExperimentRecord.model_validate(oom_record)
                     sandbox.save_record(oom_record)
                     continue
 
-                # [Step 0.5/3] Wall-time gate. Mirrors the VRAM gate above:
+                # [Pre-flight 2/2] Wall-time gate. Mirrors the VRAM gate above:
                 # error → raise; infeasible → emit skipped_time_risk record
                 # and continue without consuming a round. Skipped entirely
                 # when the budget for the active mode is None (one-time
                 # warning per mode printed at startup).
-                # See docs/time_estimator_implement.md §2.7 / E1 / Phase I.
+                # See docs/resource_estimator_implement.md §2.7 / E1 / Phase I.
                 # The result is stashed so the post-flight calibration update
                 # (Phase F) can compare warmup vs actual ms/step.
                 # Phase I: per-mode budget pick. plan.is_trial decides which
@@ -593,7 +931,7 @@ class HyperparamTuningAgent:
                                       else formal_time_budget)
                 time_check = None
                 if chosen_time_budget is not None:
-                    print(f"\n[Step 0.5/3] Time check "
+                    print(f"\n[Pre-flight 2/2] Time check "
                           f"(mode={'trial' if plan.is_trial else 'formal'}, "
                           f"budget={chosen_time_budget} min)...")
                     time_check = _run_skill(
@@ -637,12 +975,18 @@ class HyperparamTuningAgent:
                                 # Phase J — same three fields the success
                                 # record carries, so the planner sees the
                                 # same shape regardless of pass/fail.
-                                # See docs/time_estimator_implement.md §J.3.
+                                # See docs/resource_estimator_implement.md §J.3.
                                 "time_estimate_minutes": time_check.get("estimated_minutes"),
                                 "time_budget_minutes":   time_check.get("limit_minutes"),
                                 "time_mode":             "trial" if plan.is_trial else "formal",
                             },
                         }
+                        # K.2.5-8 — propagate inference soft-fallback flag.
+                        # Either gate's result carries the same flag (both
+                        # call the same inference estimator); the time
+                        # wrapper's flag is the natural source here.
+                        if time_check.get("inference_batch_uncalibrated"):
+                            time_record["memory"]["inference_batch_uncalibrated"] = True
                         ExperimentRecord.model_validate(time_record)
                         sandbox.save_record(time_record)
                         continue
@@ -888,7 +1232,7 @@ class HyperparamTuningAgent:
                 # when the gate actually ran (chosen_time_budget was set);
                 # the keys are absent on records produced with the gate
                 # disabled, so the reflector doesn't have to filter None.
-                # See docs/time_estimator_implement.md §J.1.
+                # See docs/resource_estimator_implement.md §J.1.
                 if time_check is not None:
                     final_record["memory"]["time_estimate_minutes"] = (
                         time_check.get("estimated_minutes")
@@ -899,6 +1243,25 @@ class HyperparamTuningAgent:
                     final_record["memory"]["time_mode"] = (
                         "trial" if plan.is_trial else "formal"
                     )
+                # Phase K — surface pre-flight VRAM-estimator context to the
+                # planner the same way Phase J surfaces time context. Only
+                # added when the gate ran with a budget (chosen_vram_budget
+                # was set); omitted when the gate fell back to free×0.8.
+                # Mode is inferred from `time_mode` above when present.
+                # See docs/resource_estimator_implement.md §10.4.
+                if chosen_vram_budget is not None:
+                    final_record["memory"]["vram_estimate_gb"] = (
+                        resource_check.get("estimated_gb")
+                    )
+                    final_record["memory"]["vram_budget_gb"] = (
+                        resource_check.get("limit_gb")
+                    )
+                # K.2.5-8 — soft-fallback flag from the inference estimator.
+                # Independent of vram_budget being set; recorded whenever
+                # the gate reported a substitution so post-hoc audit can
+                # identify success rounds that ran against a guessed batch.
+                if resource_check.get("inference_batch_uncalibrated"):
+                    final_record["memory"]["inference_batch_uncalibrated"] = True
                 # Trial context
                 if trial_config.is_trial:
                     final_record["is_trial"] = True
@@ -916,7 +1279,7 @@ class HyperparamTuningAgent:
                 # Phase F post-flight: update per-GPU calibration from this
                 # successful run. Only runs when the gate used the real-dataset
                 # warmup path (the static formula has no warmup signal to
-                # calibrate against). See docs/time_estimator_implement.md §2.6.5.
+                # calibrate against). See docs/resource_estimator_implement.md §2.6.5.
                 if time_check is not None:
                     bd = time_check.get("breakdown") or {}
                     if bd.get("source") == "real_dataset_warmup":
@@ -973,6 +1336,31 @@ class HyperparamTuningAgent:
         ]
         top_record = max(successful_records, key=lambda r: r["denoising_score"]) if successful_records else None
 
+        # Phase K.7 — gate-exhaustion feedback for the next iteration's
+        # proposer (§10.13). active_mode comes from the most recent plan;
+        # the helper returns None unless the trigger criterion fires.
+        gate_active_mode = "trial" if (plan is not None and plan.is_trial) else "formal"
+        gate_vram_budget = (
+            trial_vram_budget if gate_active_mode == "trial" else formal_vram_budget
+        )
+        gate_time_budget = (
+            trial_time_budget if gate_active_mode == "trial" else formal_time_budget
+        )
+        gate_exhaustion = _build_gate_exhaustion(
+            records=all_records,
+            active_mode=gate_active_mode,
+            vram_budget_gb=gate_vram_budget,
+            time_budget_minutes=gate_time_budget,
+        )
+        if gate_exhaustion is not None:
+            print(
+                f"[gate-exhaustion] iteration ended without ever training; "
+                f"{gate_exhaustion.vram_gated_attempts} VRAM-gated, "
+                f"{gate_exhaustion.time_gated_attempts} time-gated, "
+                f"{gate_exhaustion.other_failure_attempts} other failures. "
+                f"Surfacing to next proposer."
+            )
+
         agent_output = HyperparamTuningOutput.model_validate({
             "run_name":             run_name,
             "model_type":           model_type_setting,
@@ -987,6 +1375,7 @@ class HyperparamTuningAgent:
             "all_records":          all_records,
             "started_at":           started_at,
             "finished_at":          finished_at,
+            "gate_exhaustion":      gate_exhaustion,
         })
 
         output_path = os.path.join(workspace, f"run_output_{run_name}.json")
@@ -1081,6 +1470,18 @@ def main():
                         help="Fraction of segments per file for validation (default: 0.1).")
     parser.add_argument("--train_portion", type=float, default=0.1,
                         help="Per-epoch subsample from training scope (default: 0.1).")
+
+    # Formal-mode training levers (Phase M). Eval side is hardcoded to
+    # snapshot + eval_portion=1.0 in the tuner — not operator-configurable.
+    # See docs/resource_estimator_implement.md §12.
+    parser.add_argument("--formal_strategy", type=str, default="snapshot",
+                        choices=["snapshot", "anchors", "target"],
+                        help="Training-side sampling strategy in formal mode (default: snapshot).")
+    parser.add_argument("--formal_portion", type=float, default=0.1,
+                        help="Fraction of segments per file for formal training scope (default: 0.1).")
+    parser.add_argument("--formal_train_portion", type=float, default=1.0,
+                        help="Per-epoch iteration fraction for formal training (default: 1.0).")
+
     parser.add_argument("--human_advice", type=str, default=None,
                         help="Human guidance for the agent (injected alongside expert_advice).")
     parser.add_argument("--cleanup_denoised", action="store_true",
@@ -1102,6 +1503,20 @@ def main():
     parser.add_argument("--data_dir", type=str, default=None,
                         help="TIDMAD data directory used by evaluate_time_skill's real-dataset "
                              "warmup. None makes the skill fall back to its static formula.")
+
+    # evaluate_vram_skill gate (Phase K two-budget split). Each default is
+    # None which keeps that mode's budget disabled — skill falls back to the
+    # defensive free×0.8 limit. Matches run_exploration_adaptive.py.
+    parser.add_argument("--trial_vram_budget_gb", type=float, default=None,
+                        help="Per-mode VRAM ceiling (GB) for the evaluate_vram_skill "
+                             "gate on rounds where plan.is_trial=True. None → "
+                             "skill uses free×0.8 defensive limit.")
+    parser.add_argument("--formal_vram_budget_gb", type=float, default=None,
+                        help="Per-mode VRAM ceiling (GB) for the evaluate_vram_skill "
+                             "gate on rounds where plan.is_trial=False. None → "
+                             "skill uses free×0.8 defensive limit. Sized "
+                             "independently from the trial budget because formal "
+                             "rounds often use larger batch_size / segmentation_size.")
 
     args = parser.parse_args()
 
@@ -1158,6 +1573,12 @@ def main():
             "train_portion": args.train_portion,
             "eval_portion":  args.eval_portion,
         }
+    # Phase M — formal-mode training levers. Always forwarded (trial or not)
+    # because they apply whenever a round is promoted to formal.
+    input_dict["formal_strategy"]      = args.formal_strategy
+    input_dict["formal_portion"]       = args.formal_portion
+    input_dict["formal_train_portion"] = args.formal_train_portion
+
     if args.human_advice:
         input_dict["human_advice"] = args.human_advice
     if args.trial_time_budget_minutes is not None:
@@ -1166,6 +1587,10 @@ def main():
         input_dict["formal_time_budget_minutes"] = args.formal_time_budget_minutes
     if args.data_dir is not None:
         input_dict["data_dir"] = args.data_dir
+    if args.trial_vram_budget_gb is not None:
+        input_dict["trial_vram_budget_gb"] = args.trial_vram_budget_gb
+    if args.formal_vram_budget_gb is not None:
+        input_dict["formal_vram_budget_gb"] = args.formal_vram_budget_gb
 
     agent_input = HyperparamTuningInput.model_validate(input_dict)
 

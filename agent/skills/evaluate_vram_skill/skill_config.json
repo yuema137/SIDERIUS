@@ -1,5 +1,5 @@
 {
-  "name": "evaluate_resource_skill",
+  "name": "evaluate_vram_skill",
   "description": "Evaluate whether a proposed experiment configuration fits within available GPU VRAM (80% safety limit). Must be called before training to prevent OOM crashes.",
   "parameters": {
     "type": "object",
@@ -28,6 +28,10 @@
           "loss_type": { "type": "string" }
         },
         "required": ["loss_type"]
+      },
+      "vram_budget_gb": {
+        "type": ["number", "null"],
+        "description": "Optional operator-set VRAM ceiling in GB (Phase K). When set, the effective limit becomes min(free × 0.80, budget × GB) and the 4 GB minimum-free floor is skipped. When null/absent, behaviour is byte-identical to the legacy defensive-only path."
       }
     },
     "required": ["model_type", "model_config", "train_config", "loss_config"]

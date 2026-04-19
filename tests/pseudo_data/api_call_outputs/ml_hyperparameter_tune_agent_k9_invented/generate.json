@@ -1,0 +1,66 @@
+[
+  {
+    "model_type": "pe_wavenet_delta",
+    "hypothesis": "Round 1 — start the invented pe_wavenet_delta family at a deliberately wide hidden_dim=2048 to establish a sparse baseline reference. I expect the trial-mode gate to flag it as over budget on this tight 0.1 GB ceiling, exposing the K.2.5-8 fallback path on an unregistered model_type. The follow-up round will narrow hidden_dim once the gate verdict surfaces width as the binding axis.",
+    "reasoning": "There are no prior records, and the operator-frozen budget is 0.1 GB. I deliberately pick a wide hidden_dim=2048 with seg=1000 so the model-overhead term (16x params at training) dominates; this lets the round 1 gate verdict cleanly attribute the failure to architectural width rather than activation size. Loss=ce keeps the breakdown free of focal one-hot bytes so the post-mortem narrative stays tight. epochs=1 and batch_size=1 minimise everything that is NOT the lever under test.",
+    "model_config": {
+      "model_type": "pe_wavenet_delta",
+      "segmentation_size": 1000,
+      "batch_size": 1,
+      "hidden_dim": 2048
+    },
+    "train_config": {
+      "lr": 0.0001,
+      "epochs": 1,
+      "batch_size": 1,
+      "optimizer_type": "adamw",
+      "weight_decay": 0.00001,
+      "device": "cuda"
+    },
+    "loss_config": {
+      "loss_type": "ce",
+      "reduction": "mean",
+      "use_class_weights": false
+    },
+    "is_trial": true,
+    "trial_strategy": "snapshot",
+    "trial_portion": 0.05,
+    "target_files": [],
+    "train_portion": 0.1,
+    "eval_strategy": "snapshot",
+    "eval_portion": 0.05,
+    "train_validation_align": true
+  },
+  {
+    "model_type": "pe_wavenet_delta",
+    "hypothesis": "Round 2 — the round 1 verdict (~151 MB peak vs 100 MB budget) attributes the failure to model overhead at hidden_dim=2048. Reducing hidden_dim from 2048 to 128 collapses the params term by ~96x while keeping the architecture, seg_size, batch_size and loss identical, so the gate should pass and produce the first non-skipped score. I expect a non-degenerate denoising_score on this trial portion.",
+    "reasoning": "The active resource budget block in this round's prompt makes the binding ceiling explicit (0.1 GB). The K.2.5-8 fallback flag from round 1 confirms inference-batch is uncalibrated for this novel model_type but the verdict is still actionable — the over-budget margin (~50 MB) maps cleanly to the 16x-params training-overhead term. I keep every other lever fixed (seg_size=1000, batch_size=1, ce loss, lr=1e-4) so the only signal in the round-over-round comparison is hidden_dim. trial_portion=0.05 stays apples-to-apples with round 1.",
+    "model_config": {
+      "model_type": "pe_wavenet_delta",
+      "segmentation_size": 1000,
+      "batch_size": 1,
+      "hidden_dim": 128
+    },
+    "train_config": {
+      "lr": 0.0001,
+      "epochs": 1,
+      "batch_size": 1,
+      "optimizer_type": "adamw",
+      "weight_decay": 0.00001,
+      "device": "cuda"
+    },
+    "loss_config": {
+      "loss_type": "ce",
+      "reduction": "mean",
+      "use_class_weights": false
+    },
+    "is_trial": true,
+    "trial_strategy": "snapshot",
+    "trial_portion": 0.05,
+    "target_files": [],
+    "train_portion": 0.1,
+    "eval_strategy": "snapshot",
+    "eval_portion": 0.05,
+    "train_validation_align": true
+  }
+]
