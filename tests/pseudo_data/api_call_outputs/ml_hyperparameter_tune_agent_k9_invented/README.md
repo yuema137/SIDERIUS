@@ -18,8 +18,15 @@ registered seed (`punet`).
   lookup before the K.2.5-8 path can ever fire.
 - **Sandbox results**: `tests/pseudo_data/train_outputs/pe_wavenet_delta/`
   Returned by `RecordingSandbox` for round 2's `execute_training` /
-  `execute_inference` / `execute_scoring` calls. Round 1 never reaches the
-  sandbox — it is gated out at the VRAM check.
+  `execute_inference` / `score_vector` calls. Round 1 never reaches the
+  sandbox — it is gated out at the VRAM check. **Trial mode uses
+  `sandbox.score_vector` (not `sandbox.execute_scoring`)** because the
+  tuner takes the anchor-normalised path whenever
+  `segment_anchors.json` is present, which `RecordingSandbox` stubs at
+  construction time. `execute_scoring.json` is kept alongside the others
+  for symmetry with the existing `train_outputs/punet/` folder, but is
+  unused in trial mode and would only be popped if a future formal-mode
+  K.9 variant is added.
 
 ## Choreography
 
