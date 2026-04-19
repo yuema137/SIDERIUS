@@ -1677,51 +1677,51 @@ its targeted pytest invocation green and a committable state.
 - [x] K.7 — Iteration-boundary gate-exhaustion feedback (§10.13) *(K.7.1–K.7.6 shipped 2026-04-18)*
 - [~] K.8 — Co-budget smoke + cross-iteration awareness *(K.8.0 instrumentation shipped 2026-04-18; K.8.1 launching)*
 
-#### K.0 Skill rename (mechanical) [ ]
+#### K.0 Skill rename (mechanical) [x]
 
-- [ ] `git mv agent/skills/evaluate_resource_skill agent/skills/evaluate_vram_skill`.
-- [ ] Search-replace `"evaluate_resource_skill"` → `"evaluate_vram_skill"`
+- [x] `git mv agent/skills/evaluate_resource_skill agent/skills/evaluate_vram_skill`.
+- [x] Search-replace `"evaluate_resource_skill"` → `"evaluate_vram_skill"`
       across all callers (currently `nodes/ml_hyperparameter_tune_agent.py`
       and any test fixtures referencing the skill name string).
-- [ ] Verify: `pytest tests/unit/agent/ -q` → all green; no test refers
+- [x] Verify: `pytest tests/unit/agent/ -q` → all green; no test refers
       to the old name.
 
-#### K.1 Schema additions (tuner-side only) [ ]
+#### K.1 Schema additions (tuner-side only) [x]
 
-- [ ] `HyperparamTuningInput`: add `trial_vram_budget_gb`,
+- [x] `HyperparamTuningInput`: add `trial_vram_budget_gb`,
       `formal_vram_budget_gb` (Optional[float], default None) with
       docstrings describing the per-mode behaviour.
-- [ ] `ExperimentMemory`: add `vram_estimate_gb`, `vram_budget_gb` (both
+- [x] `ExperimentMemory`: add `vram_estimate_gb`, `vram_budget_gb` (both
       Optional[float], default None); pre-Phase-K records still validate.
 - [ ] **Skipped (deferred per §10.17)**: `ProposalInput` /
       `ProposalOutput` additions.
-- [ ] Tests: extend `test_hyperparam_schemas.py` with
+- [x] Tests: extend `test_hyperparam_schemas.py` with
       `TestExperimentMemoryVramFields` mirroring
       `TestExperimentMemoryTimeFields`.
-- [ ] Tests: extend `test_hyperparam_schemas.py` with
+- [x] Tests: extend `test_hyperparam_schemas.py` with
       `TestVramBudgetFields` for the two new input fields (default-None,
       type validation, both-set, mode-pick semantics in protocol layer
       covered separately in K.4).
-- [ ] Verify: `pytest tests/unit/agent/tune_ml_hyperparam_agent/test_hyperparam_schemas.py -q`.
+- [x] Verify: `pytest tests/unit/agent/tune_ml_hyperparam_agent/test_hyperparam_schemas.py -q`.
 
-#### K.2 Skill budget kwarg [ ]
+#### K.2 Skill budget kwarg [x]
 
-- [ ] `evaluate_vram_skill/wrapper.py`: accept `vram_budget_gb`; compute
+- [x] `evaluate_vram_skill/wrapper.py`: accept `vram_budget_gb`; compute
       `limit_bytes = min(defensive_limit, budget_limit)`; emit the
       contention-detection log line when
       `defensive_limit < budget_limit × 0.5`.
-- [ ] When `vram_budget_gb is None`, behaviour is byte-identical to
+- [x] When `vram_budget_gb is None`, behaviour is byte-identical to
       today (one regression test for this).
-- [ ] Downgrade the `suggestion` field to a verdict-style summary; no
+- [x] Downgrade the `suggestion` field to a verdict-style summary; no
       per-lever branching inside the skill (guidance lives in the prompt
       per §10.3).
-- [ ] `skill_config.json`: add `vram_budget_gb` to the parameters block
+- [x] `skill_config.json`: add `vram_budget_gb` to the parameters block
       (optional).
-- [ ] Tests: budget pass-through, defensive vs budget min, contention
+- [x] Tests: budget pass-through, defensive vs budget min, contention
       log, None-disabled path, suggestion-string content.
-- [ ] Verify: `pytest tests/unit/agent/skills/test_evaluate_vram_skill.py -q`.
+- [x] Verify: `pytest tests/unit/agent/skills/test_evaluate_vram_skill.py -q`.
 
-#### K.2.5 Distribute per-phase estimators to owning skills (3 × 2) [ ]
+#### K.2.5 Distribute per-phase estimators to owning skills (3 × 2) [x]
 
 Rationale + final aggregator contracts in §10.5. Mid-way between the
 K.2 budget kwarg and the K.3 tuner integration. Applied symmetrically
@@ -2078,60 +2078,60 @@ points so it is never silent.
   Symmetric to Phase F's asymmetric-EMA learning, but for the
   registry rather than the calibration constant. Tracked separately.
 
-#### K.3 Tuner integration [ ]
+#### K.3 Tuner integration [x]
 
-- [ ] `nodes/ml_hyperparameter_tune_agent.py`: per-round
+- [x] `nodes/ml_hyperparameter_tune_agent.py`: per-round
       `chosen_vram_budget = trial if plan.is_trial else formal`; pass to
       `_run_skill("evaluate_vram_skill", ...)`.
-- [ ] Stash the VRAM-skill result alongside `time_check` so the success
+- [x] Stash the VRAM-skill result alongside `time_check` so the success
       record can lift `vram_estimate_gb` + `vram_budget_gb` into memory
       (mirrors Phase J).
-- [ ] Same `vram_estimate_gb` + `vram_budget_gb` keys go on the
+- [x] Same `vram_estimate_gb` + `vram_budget_gb` keys go on the
       `skipped_oom_risk` record (mirrors §J.3 for time).
-- [ ] One-time startup warning when both VRAM budgets are None.
-- [ ] Renumber the round-loop log lines from the current `[Step 1/3]`
+- [x] One-time startup warning when both VRAM budgets are None.
+- [x] Renumber the round-loop log lines from the current `[Step 1/3]`
       VRAM check + `[Step ?/3]` time check + `[Step 1/3]..[Step 3/3]`
       execution into the clean `[Pre-flight 1/2]` + `[Pre-flight 2/2]` +
       `[Step 1/3]..[Step 3/3]` scheme defined in §10.7.
-- [ ] Tests: per-mode pick, joint short-circuit (VRAM fail → time skill
+- [x] Tests: per-mode pick, joint short-circuit (VRAM fail → time skill
       not invoked), success-record memory, skipped-record memory,
       gate-disabled path.
-- [ ] Verify: `pytest tests/unit/agent/tune_ml_hyperparam_agent/test_tuning_agent.py -q`.
+- [x] Verify: `pytest tests/unit/agent/tune_ml_hyperparam_agent/test_tuning_agent.py -q`.
 
-#### K.4 Protocol pass-through (`valid→tune` only) [ ]
+#### K.4 Protocol pass-through (`valid→tune` only) [x]
 
-- [ ] `ml_model_valid_to_ml_model_tune.local_validated_model`: add
+- [x] `ml_model_valid_to_ml_model_tune.local_validated_model`: add
       `trial_vram_budget_gb` + `formal_vram_budget_gb` kwargs;
       conditional-inclusion pattern (only added to `HyperparamTuningInput`
       when caller supplies them).
-- [ ] **Do NOT** surface `proposal.vram_risk` (no such field in Phase K).
-- [ ] **Do NOT** modify `ml_result_interp_to_ml_model_propose.py`
+- [x] **Do NOT** surface `proposal.vram_risk` (no such field in Phase K).
+- [x] **Do NOT** modify `ml_result_interp_to_ml_model_propose.py`
       (no proposer-side gate in Phase K).
-- [ ] Tests: extend `test_ml_model_valid_to_ml_model_tune.py`; assert
+- [x] Tests: extend `test_ml_model_valid_to_ml_model_tune.py`; assert
       both VRAM kwargs survive default-None and user-supplied paths;
       assert independence (one set, other None).
-- [ ] Verify: `pytest tests/unit/agent/protocols/ -q`.
+- [x] Verify: `pytest tests/unit/agent/protocols/ -q`.
 
-#### K.5 CLI + workflow [ ]
+#### K.5 CLI + workflow [x]
 
-- [ ] `run_exploration_adaptive.py`: `--trial_vram_budget_gb`,
+- [x] `run_exploration_adaptive.py`: `--trial_vram_budget_gb`,
       `--formal_vram_budget_gb`; startup banner extends to print both
       VRAM budgets next to the time budgets.
-- [ ] `workflows/model_exploration.py`: forward both fields to
+- [x] `workflows/model_exploration.py`: forward both fields to
       `local_validated_model` only (no `local_full_context` touch).
-- [ ] `nodes/ml_hyperparameter_tune_agent.py` argparse: add both flags.
-- [ ] Verify: `--help` on both entry points lists the new flags.
+- [x] `nodes/ml_hyperparameter_tune_agent.py` argparse: add both flags.
+- [x] Verify: `--help` on both entry points lists the new flags.
 
-#### K.6 Planner prompt [ ]
+#### K.6 Planner prompt [x]
 
-- [ ] `agent/prompts.py`: remove abstract "GPU MEMORY RULES" section
+- [x] `agent/prompts.py`: remove abstract "GPU MEMORY RULES" section
       (lines 74–82).
-- [ ] Add `[ACTIVE RESOURCE BUDGETS]` block fed by the two tuner-input
+- [x] Add `[ACTIVE RESOURCE BUDGETS]` block fed by the two tuner-input
       VRAM budget fields + active mode + current-round vram + time
       estimates + computed factors + current `batch_size`.
-- [ ] Append `[RESOURCE GATE — RESOLVING OVER-BUDGET CONFIGS]` guidance
+- [x] Append `[RESOURCE GATE — RESOLVING OVER-BUDGET CONFIGS]` guidance
       block (verbatim text from §10.3).
-- [ ] Wire the planner builder to pass current-round `vram_estimate_gb`
+- [x] Wire the planner builder to pass current-round `vram_estimate_gb`
       + `time_estimate_minutes` + `batch_size` so the LLM sees the
       estimation pair plus the lever's current setting.
 - [ ] *Optional (post-K.2.5)*: surface `dominant_phase` from the VRAM
@@ -2140,11 +2140,11 @@ points so it is never silent.
       "the forward step is OOM" and "the whole train step is OOM" when
       choosing levers. Skip if it bloats the prompt without changing
       smoke-run decisions.
-- [ ] Tests: prompt builder includes the new sections when budgets are
+- [x] Tests: prompt builder includes the new sections when budgets are
       set; renders `"(no budget — gate disabled)"` when they're None;
       omits `factor` when budget is None; guidance block text appears
       verbatim.
-- [ ] Verify: `pytest tests/unit/agent/ -q`.
+- [x] Verify: `pytest tests/unit/agent/ -q`.
 
 #### K.7 Iteration-boundary gate-exhaustion feedback (§10.13) [x]
 
