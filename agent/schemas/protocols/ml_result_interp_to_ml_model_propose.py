@@ -31,7 +31,11 @@ from agent.schemas.proposal import (
     ReasoningPipelineConfig,
     VocabEntry,
 )
-from agent.schemas.hyperparam_tuning import ExpertAdviceInput, serialize_expert_advice
+from agent.schemas.hyperparam_tuning import (
+    ExpertAdviceInput,
+    HyperparamTuningOutput,
+    serialize_expert_advice,
+)
 from agent.schemas.storage import StorageConfig
 
 
@@ -54,6 +58,8 @@ def local_full_context(
     trial_time_budget_minutes: Optional[float] = None,
     formal_time_budget_minutes: Optional[float] = None,
     data_dir: Optional[str] = None,
+    # --- Cross-iteration feedback (Phase K.7 — see §10.13) ---
+    prior_tune_output: Optional[HyperparamTuningOutput] = None,
 ) -> ProposalInput:
     """
     Local in-memory protocol — transfers the complete interpretation directly.
@@ -88,6 +94,16 @@ def local_full_context(
                                 The proposer's baseline gate picks the one matching inp.is_trial.
                                 Each None independently disables the gate for that mode.
       - data_dir             : TIDMAD data directory; required for the skill's real-dataset warmup.
+      - prior_tune_output    : the previous iteration's tuner output. When supplied AND its
+                                ``gate_exhaustion`` field is non-None, the structured failure
+                                report is surfaced to the proposer as
+                                ``ProposalInput.prior_iteration_gate_exhaustion`` so the next
+                                baseline can be sized below the binding ceiling
+                                (Phase K.7 — docs/resource_estimator_implement.md §10.13).
+                                Pass-through only — when None or when its ``gate_exhaustion``
+                                is None, the field stays at its ``ProposalInput`` default
+                                (None) and the proposer prompt's [PRIOR ITERATION GATE
+                                EXHAUSTION] block is suppressed.
 
     Populates in ml-model-propose (ProposalInput):
       - interpretation       : full serialised InterpretationOutput (all fields above)
@@ -171,6 +187,16 @@ def local_full_context(
         result["formal_time_budget_minutes"] = formal_time_budget_minutes
     if data_dir is not None:
         result["data_dir"] = data_dir
+
+    # Phase K.7 — surface the previous iteration's gate-exhaustion report,
+    # if any. The tuner only populates `gate_exhaustion` when its iteration
+    # ended without ever training successfully AND ≥1 attempt was rejected
+    # by the pre-flight resource gate; otherwise it's None and we leave the
+    # ProposalInput default (None) in place. See §10.13.
+    if prior_tune_output is not None and prior_tune_output.gate_exhaustion is not None:
+        result["prior_iteration_gate_exhaustion"] = (
+            prior_tune_output.gate_exhaustion.model_dump()
+        )
 
     return ProposalInput.model_validate(result)
 
