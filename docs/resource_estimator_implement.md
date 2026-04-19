@@ -1676,6 +1676,7 @@ its targeted pytest invocation green and a committable state.
 - [x] K.6 — Planner prompt (numeric block + guidance block) *(2026-04-18, `34e0e0f`)*
 - [x] K.7 — Iteration-boundary gate-exhaustion feedback (§10.13) *(K.7.1–K.7.6 shipped 2026-04-18)*
 - [~] K.8 — Co-budget smoke + cross-iteration awareness *(K.8.0 instrumentation shipped 2026-04-18; K.8.1 launching)*
+- [ ] K.9 — Dual-mode regression test: tuner gates + K.2.5-8 fallback (pseudo, fast) *(planned 2026-04-18)*
 
 #### K.0 Skill rename (mechanical) [x]
 
@@ -2422,6 +2423,137 @@ call latency); ~$1–2 in API spend.
 2. Skip K.8.3 contention emulation (recommend skip).
 3. Pinning model choice — wavenet/punet OK, or start from a heavier
    seed (e.g., transformer) so iter 1 is guaranteed to overshoot 0.5 GB.
+
+#### K.9 Dual-mode regression test for tuner gates + K.2.5-8 fallback (pseudo, fast) [ ]
+
+**Surfaced by**: K.8.1 v2/v3 hangs (2026-04-18). Real-LLM smoke against
+OpenAI wedged twice on a CLOSE-WAIT socket; each re-run cost 15+ wall-min
+to detect. The K.2.5-8 fix itself is unit-tested at the estimator and
+wrapper layers, but no test exercises the full tuner gate → record →
+gate_exhaustion path with a planner-invented model_type. K.9 closes that
+gap with a fast pseudo-mode regression so future K.2.5-8-style failures
+are caught in seconds rather than via a real-LLM smoke that may or may
+not converge.
+
+**Goal**: prove in pseudo mode that when the tuner planner proposes an
+unregistered `model_type`, (a) the gate emits the K.2.5-8 stdout
+warning, (b) the per-record JSON carries
+`inference_batch_uncalibrated: True`, (c) the planner reacts on the
+next round (lever choice or model swap), and (d) `gate_exhaustion` is
+finalised correctly when the budget binds.
+
+**Constraints**: pure pseudo. No real LLM, no GPU, no API key. Total
+wall-clock ≤10 s. Runs in CI on every push.
+
+##### K.9.0 Pseudo data design [ ]
+
+- [ ] Create `tests/pseudo_data/api_call_outputs/ml_hyperparameter_tune_agent_k9_invented/`
+      mirroring the existing `ml_hyperparameter_tune_agent/` folder:
+      - `generate.json` — sequence of planner responses. Round 1
+        proposes an invented `model_type` (e.g. `pe_wavenet_delta`,
+        matching the K.8.1 case). Round 2 reacts to the gate verdict
+        (lower `batch_size` or swap to a registered seed).
+      - `reflect.json` — minimal reflector responses (one per round).
+- [ ] Decide whether the invented model needs a fake plugin file or
+      whether the test can short-circuit at the gate (preferred: the
+      gate is the point of the test, so plugin instantiation is not
+      required — RecordingSandbox can be configured to skip the
+      training subprocess for over-budget rounds).
+- [ ] Document the canned responses in
+      `tests/pseudo_data/api_call_outputs/ml_hyperparameter_tune_agent_k9_invented/README.md`
+      so a future reader understands the choreography.
+
+##### K.9.1 Test scaffold [ ]
+
+- [ ] New file `tests/integration/workflows/test_k9_invented_model_dual_mode.py`.
+- [ ] `@pytest.mark.dual_mode` marker — runs in pseudo mode by
+      default, switches to real LLM only with `--real-llm`.
+- [ ] One test function: `test_invented_model_type_triggers_k2_5_8_fallback_path`.
+- [ ] Fixture wires:
+      - `RecordingLLMBridge.for_agent("ml_hyperparameter_tune_agent_k9_invented")`
+        as the planner+reflector bridge.
+      - `RecordingSandbox` configured to return canned training results
+        for the round(s) that the gate lets through; over-budget rounds
+        never reach the sandbox.
+      - `HyperparamTuningInput` with a tight `trial_vram_budget_gb`
+        chosen so the invented model's first config exceeds the budget
+        (forces the K.2.5-8 path through the gate's over-budget branch).
+
+##### K.9.2 Layer assertions (mirror K.8.1 evidence) [ ]
+
+- [ ] **Layer 1 — gate stdout (capsys)**
+      - Assert `!!! [evaluate_vram_skill]` line is present for the
+        invented `model_type` round.
+      - Assert the line cites the invented `model_type` name + the
+        `inference_batch=25` fallback.
+      - Assert the verdict line follows (gate did not crash).
+- [ ] **Layer 2 — per-record JSON (`{workspace}/tune_*.json`)**
+      - Assert at least one `ExperimentMemory` record has
+        `inference_batch_uncalibrated == True`.
+      - Assert the same record's `vram_budget_gb` matches the input
+        budget (binding ceiling, not free-VRAM).
+      - Assert that round N+1's `experiment_history` block carries
+        round N's `vram_estimate_gb` (mirror of K.6 propagation).
+- [ ] **Layer 3 — planner reaction**
+      - Inspect `bridge.calls` for round 2's planner prompt.
+      - Assert it includes the `[ACTIVE RESOURCE BUDGETS]` block AND
+        the round 1 over-budget verdict in the experiment history.
+      - Assert round 2's planner output (canned) lowers `batch_size`
+        OR swaps to a registered model_type — whichever the canned
+        response was scripted to do, the test asserts the route taken
+        is consistent with the gate feedback.
+- [ ] **Layer 4 — `HyperparamTuningOutput.gate_exhaustion`** *(canonical
+      path: round 2 trains successfully)*
+      - Round 2's canned sandbox returns a non-error result →
+        `gate_exhaustion is None` (success path zeroes the field per
+        §10.13.1).
+      - `best_denoising_score` is populated from the canned sandbox.
+      - Future K.9 variant: scripts an all-rounds-exhaust scenario and
+        asserts `gate_exhaustion` is populated with
+        `vram_gated_attempts >= 1`, `vram_budget_gb == budget`,
+        `active_mode == "trial"`, non-empty `summary_message`. Tracked
+        but not blocking for K.9 acceptance.
+
+##### K.9.3 Acceptance [ ]
+
+- [ ] `pytest tests/integration/workflows/test_k9_invented_model_dual_mode.py -v`
+      passes in pseudo mode in ≤10 s wall-clock, no API key, no GPU.
+- [ ] `pytest tests/integration/workflows/test_k9_invented_model_dual_mode.py -v --real-llm`
+      passes when `OPENAI_API_KEY` is set (sanity-check that the canned
+      pseudo data is shaped like real responses). Skip cleanly when key
+      absent.
+- [ ] Adding a regression to `inference_skill/estimator.py` that
+      re-introduces the hard `assert_inference_batch_registered` call
+      causes K.9 to fail loudly (Layer 1 stdout check). Verify by
+      temporary local revert before commit.
+- [ ] Existing `pytest tests/unit/agent/ -q` stays green (no regression
+      from new fixtures or shared-state leakage).
+
+##### K.9.4 Doc + closeout [ ]
+
+- [ ] Update §10.14 top-level K.9 row to `[x]` with commit SHA.
+- [ ] Cross-link from K.2.5-8 §"Tests" subsection to K.9 (existing K.2.5-8
+      tests cover the estimator + wrapper layers; K.9 covers the
+      end-to-end tuner+gate+memory layer).
+- [ ] Update K.8 status note: K.8.1 real-LLM smoke is no longer the
+      only verification path for K.2.5-8 — K.9 covers the regression
+      surface; K.8.1 remains as the qualitative end-to-end proof.
+
+##### Scope boundaries (explicit)
+
+- **In scope**: tuner planner ↔ gates ↔ ExperimentMemory propagation ↔
+  K.7 finalisation, with the K.2.5-8 soft-fallback path as the trigger.
+- **Out of scope**: proposer → implementor → validator → tuner pipeline
+  (covered by K.8.1 real-LLM smoke + by the protocol/integration
+  test tiers per CLAUDE.md). K.9 mocks the upstream output so the test
+  is independent of proposer/implementor changes.
+- **Out of scope**: real-LLM behavioural drift detection. The pseudo
+  mode validates wiring and contract; only `--real-llm` runs validate
+  that the live planner actually picks the lever the canned responses
+  assume. Both are useful; K.9's value is the wiring half.
+
+**Estimated effort**: ~30 min (test file + 1–2 canned response files).
+No new production code.
 
 ### 10.15 Acceptance + rollback
 
