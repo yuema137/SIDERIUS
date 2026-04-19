@@ -1,6 +1,6 @@
 # Resource Estimator (Time + VRAM Budgets)
 
-**Status**: time skill implemented + smoke-tested on lilab (Phases A–G complete; H1a lilab direct-skill smoke verified 2026-04-16; **Phase I — trial/formal budget split — landed 2026-04-16 across 5 commits**; **Phase J — success-path time info to planner — landed 2026-04-16 across 3 commits**; **H1b lilab tuner-integration smoke verified 2026-04-16 on RTX 5090, k(wavenet)=4.22**; H2 SDSC deferred). **Phase K — VRAM budget gate alongside the time gate — design landed 2026-04-18; K.0–K.2 implemented 2026-04-18; K.2.5 (3-phase × 2-resource estimator distribution: training/inference/scoring × VRAM/time) shipped 2026-04-18 across 7 commits: inference_defaults → training_skill estimator → inference_skill estimator → denoising_score_skill estimator + `core/server_configs/` → evaluate_vram_skill peak aggregator → evaluate_time_skill sum aggregator → doc sync; K.3–K.6 shipped 2026-04-18; K.7.1 (gate-exhaustion schema) shipped 2026-04-18; K.7.2 (proposer-side schema field) shipped 2026-04-18; K.7.3 (tuner `_build_gate_exhaustion` + finalisation) shipped 2026-04-18; K.7.4 (interp→propose protocol pass-through) shipped 2026-04-18; K.7.5 (workflow retains previous tuner output across iterations) shipped 2026-04-18; K.7.6 (proposer prompt `[PRIOR ITERATION GATE EXHAUSTION]` block + pipeline placeholder) shipped 2026-04-18 — **K.7 complete**; K.8 smoke pending.**
+**Status**: time skill implemented + smoke-tested on lilab (Phases A–G complete; H1a lilab direct-skill smoke verified 2026-04-16; **Phase I — trial/formal budget split — landed 2026-04-16 across 5 commits**; **Phase J — success-path time info to planner — landed 2026-04-16 across 3 commits**; **H1b lilab tuner-integration smoke verified 2026-04-16 on RTX 5090, k(wavenet)=4.22**; H2 SDSC deferred). **Phase K — VRAM budget gate alongside the time gate — design landed 2026-04-18; K.0–K.2 implemented 2026-04-18; K.2.5 (3-phase × 2-resource estimator distribution: training/inference/scoring × VRAM/time) shipped 2026-04-18 across 7 commits: inference_defaults → training_skill estimator → inference_skill estimator → denoising_score_skill estimator + `core/server_configs/` → evaluate_vram_skill peak aggregator → evaluate_time_skill sum aggregator → doc sync; K.3–K.6 shipped 2026-04-18; K.7.1 (gate-exhaustion schema) shipped 2026-04-18; K.7.2 (proposer-side schema field) shipped 2026-04-18; K.7.3 (tuner `_build_gate_exhaustion` + finalisation) shipped 2026-04-18; K.7.4 (interp→propose protocol pass-through) shipped 2026-04-18; K.7.5 (workflow retains previous tuner output across iterations) shipped 2026-04-18; K.7.6 (proposer prompt `[PRIOR ITERATION GATE EXHAUSTION]` block + pipeline placeholder) shipped 2026-04-18 — **K.7 complete**; K.8 smoke ran 2026-04-18 and surfaced K.2.5-8 defect (inference estimator's hard assert crashes the gate on proposer-invented `model_type`s); K.2.5-8 (soft fallback + 3-channel surfacing) shipped 2026-04-18 across 4 commits: estimator soft fallback → wrapper warnings → tuner record propagation → doc sync; K.8.1 re-run pending against patched code.**
 **Author**: design discussion 2026-04-16; Phase K extension 2026-04-18.
 **Motivation**: two trial-mode runs (`exploit_cnn_v1`, `explore_novel_v1`) stalled in Round 1 for 1h 50min and 2h 27min respectively, both blowing past the 1-hour trial budget stated in the expert advice. Neither was blocked, because the planner has no pre-flight wall-time estimate — only a VRAM check. **Phase K motivation (2026-04-17)**: `explore_novel_v1` iterations 3 and 4 burned 9/9 attempts each to `"GPU has only 0.01 GB free"` because the existing VRAM gate uses momentary `free_bytes × 0.8` as its limit and another process held 25.7 GB on the shared 32 GB card. The planner has no operator-supplied VRAM ceiling to optimise against — symmetric to the time-gate gap §1.2 fixed.
 
@@ -43,7 +43,8 @@
 | K.7.4 — protocol: `interp→propose.local_full_context` surfaces `prior_tune_output.gate_exhaustion` | 2026-04-18 | (this commit) | new optional `prior_tune_output` kwarg; surfaces only when both kwarg AND `gate_exhaustion` are non-None; 4 new tests in `TestLocalFullContextGateExhaustionPassThrough` (default-None, no-gate, surfaces, kwarg-isolation); 28/28 protocol tests green; 317/317 workflow+proposer tests green |
 | K.7.5 — workflow: retain previous tuner output across iterations | 2026-04-18 | `e9bcfd6` | `previous_tune_output` carried in long-term memory block; passed as `prior_tune_output=` to next iteration's `local_full_context`; 3 new tests in `TestRunWorkflowGateExhaustionPropagation` (iter1 has no prior; iter2 receives iter1's gate_exhaustion verbatim via round-trip equality; iter2 stays None when iter1 succeeded); 38/38 workflow tests green |
 | K.7.6 — proposer prompt: `[PRIOR ITERATION GATE EXHAUSTION]` block + pipeline placeholder | 2026-04-18 | (this commit) | new `_format_prior_iteration_gate_exhaustion_block` helper in `nodes/ml_model_proposal_agent.py` (returns "" when None, else renders §10.13.5 block with `n/a` fallbacks for disabled axes); injected in both legacy `_build_reasoning_prompt` and pipeline `template_vars["prior_iteration_gate_exhaustion_block"]`; new `{prior_iteration_gate_exhaustion_block}` placeholder in `proposing_stage.md`; 19 new tests in `test_prior_iteration_gate_exhaustion.py` (helper truth-table, legacy injection, pipeline placeholder substitution, end-to-end round-trip via mocked bridge); 275/275 proposer tests green |
-| K.8 — explore_novel re-launch under contention | pending | — | acceptance: rejects against budget not free-VRAM; gate-exhaustion path also exercised by deliberately under-budgeting one iteration |
+| K.8 — co-budget smoke + cross-iteration awareness | in progress | — | K.8.0 done (Option A `--debug_dump_prompts` instrumentation: schema field + proposer dump + workflow plumb + CLI flag; 2 new unit tests; 341/341 proposer+workflow tests green); **K.8.1 ran on lilab and surfaced K.2.5-8 defect** (inference estimator's `assert_inference_batch_registered` crashes the gate on any proposer-invented `model_type`; all 9 attempts burned with `Loop Error`, K.7 feedback silent); K.2.5-8 implementation landed 2026-04-18 (4 commits); K.8.1 re-run pending; K.8.2 / K.8.4 / K.8.5 pending (K.8.3 contention emulation deferred) |
+| K.2.5-8 — soft fallback for unregistered model_type in inference estimator | implemented | 2026-04-18 | Shipped across 4 commits: estimator soft fallback (`is_inference_batch_registered` + breakdown flag) → wrapper surfacing (`!!!` warnings + return dict flag in both gates) → tuner record propagation (`ExperimentMemory.inference_batch_uncalibrated` set at oom/time/final record sites) → doc sync. 307/307 tuner-side + 15/15 inference-defaults tests green. K.8.1 re-run pending to verify the gate-doesn't-crash acceptance criterion. |
 | K.deferred — proposer `_apply_vram_gate` + `vram_risk` field + retire `time_risk` redundancy on `ProposalOutput` | deferred | — | gated on registering plugins pre-validation; tracked in §10.17 |
 
 ---
@@ -1668,12 +1669,13 @@ its targeted pytest invocation green and a committable state.
 - [x] K.1 — Schema additions (tuner-side only) *(2026-04-18)*
 - [x] K.2 — Skill `vram_budget_gb` kwarg + contention-detection log *(2026-04-18)*
 - [x] K.2.5 — Distribute per-phase estimators to owning skills (3 phases × 2 resources: VRAM=peak, time=sum) *(shipped 2026-04-18 across 7 commits; design deviations recorded in §10.5)*
+- [x] K.2.5-8 — Soft fallback for unregistered model_type in inference estimator *(surfaced by K.8.1 smoke 2026-04-18; design + implementation landed 2026-04-18 across 4 commits; K.8.1 re-run pending against patched code)*
 - [x] K.3 — Tuner integration (per-mode pick + memory fields) *(2026-04-18, `ca763ec`)*
 - [x] K.4 — Protocol pass-through (`valid→tune` only) *(2026-04-18, `e368b2b`)*
 - [x] K.5 — CLI + workflow fan-out *(2026-04-18, `6bf81f9`)*
 - [x] K.6 — Planner prompt (numeric block + guidance block) *(2026-04-18, `34e0e0f`)*
 - [x] K.7 — Iteration-boundary gate-exhaustion feedback (§10.13) *(K.7.1–K.7.6 shipped 2026-04-18)*
-- [ ] K.8 — Smoke run on lilab under contention
+- [~] K.8 — Co-budget smoke + cross-iteration awareness *(K.8.0 instrumentation shipped 2026-04-18; K.8.1 launching)*
 
 #### K.0 Skill rename (mechanical) [ ]
 
@@ -1915,6 +1917,167 @@ planning, both addressed:
 - [x] Updated the top-of-doc status line: K.2.5 fully shipped across
       7 commits.
 
+#### K.2.5-8 Soft fallback for unregistered model_type in inference estimator [x]
+
+**Surfaced by**: K.8.1 smoke (2026-04-18). The proposer invented
+`pe_wavenet_delta` (a positional-encoding variant of wavenet); the
+tuner's pre-flight VRAM gate called
+`inference_skill/estimator.estimate_peak_bytes`, which called
+`assert_inference_batch_registered("pe_wavenet_delta")` →
+`ValueError`. The error bubbled up as `RuntimeError: Resource check
+error`, the tuner's outer loop caught it as "Loop Error", retried the
+LLM 9 times (all crashed identically), and the iteration ended with
+`completed_rounds: 0`, `all_records: []`, `gate_exhaustion: null`.
+K.7's cross-iteration feedback channel stayed silent because the
+exception path doesn't write per-record entries.
+
+**Why the K.2.5 design crashed in the workflow**: `core/inference_defaults.py`
+intentionally exposes two functions with asymmetric tolerance for
+unknown model_types:
+
+- `inference_batch_for(model_type)` — silent fallback to
+  `_DEFAULT_INFERENCE_BATCH = 25`. Used by
+  `core/sandbox_executor.execute_inference` at runtime.
+- `assert_inference_batch_registered(model_type)` — loud `ValueError`.
+  Used by `inference_skill/estimator` at planning-time so the gate
+  refuses to forecast against a guessed batch.
+
+The K.2.5 author's reasoning ("a wrong number poisons the planner")
+was sound *in isolation*. The unintended consequence is that the gate
+now lies about what runtime would do: runtime would happily run
+`pe_wavenet_delta` at batch=25, but the gate refuses to estimate that
+case at all. In an `exploration_mode` workflow — whose entire purpose
+is to invent novel `model_type` names — every iteration's first
+attempt crashes on this asymmetry.
+
+**The fix**: replace the hard assertion with a soft fallback that
+matches the runtime behaviour, and surface the substitution at three
+points so it is never silent.
+
+##### What changes
+
+- [x] `agent/skills/inference_skill/estimator.py` —
+      `estimate_peak_bytes` no longer calls
+      `assert_inference_batch_registered`. Instead:
+      ```python
+      inference_batch = inference_batch_for(model_type)
+      inference_batch_uncalibrated = (
+          model_type not in _INFERENCE_BATCH_SIZES
+      )
+      ```
+      Returns include `inference_batch_uncalibrated: bool` in the
+      `breakdown` dict so callers can detect the substitution.
+      `estimate_wall_time_seconds` mirrors the same change.
+- [x] `core/inference_defaults.py` — keep
+      `assert_inference_batch_registered` exposed (other callers may
+      still want the loud-fail semantics), but `inference_skill` no
+      longer calls it. Add a docstring note that the planning-time
+      caller now uses the soft fallback per K.2.5-8.
+- [x] `agent/skills/evaluate_vram_skill/wrapper.py` +
+      `agent/skills/evaluate_time_skill/wrapper.py` — when the
+      breakdown shows `inference_batch_uncalibrated == True`, emit a
+      prominent stdout line BEFORE the verdict line:
+      ```
+      !!! [evaluate_vram_skill] model_type 'pe_wavenet_delta' has no
+          registered inference batch in core/inference_defaults.py —
+          using runtime fallback (25). Inference-phase VRAM/time
+          estimate is uncalibrated for this novel architecture; the
+          per-sample activation model assumes the architecture behaves
+          like a wavenet/punet/fcnet derivative. Treat verdict as
+          best-effort.
+      ```
+      Stash the flag in the wrapper's returned dict so downstream
+      records can capture it.
+- [x] `agent/schemas/hyperparam_tuning.py` — `ExperimentMemory` gains
+      `inference_batch_uncalibrated: Optional[bool] = None`. Pre-K.2.5-8
+      records still validate (None default).
+- [x] `nodes/ml_hyperparameter_tune_agent.py` — when building the
+      success-record memory and the `skipped_oom_risk` /
+      `skipped_time_risk` records, propagate the flag from the gate
+      result into `ExperimentMemory.inference_batch_uncalibrated`.
+
+##### Tests
+
+- [x] `tests/unit/agent/inference_skill/test_estimator.py` — extend:
+      - `test_unregistered_model_type_uses_runtime_fallback`:
+        unknown `model_type` → no exception, `breakdown.inference_batch == 25`,
+        `breakdown.inference_batch_uncalibrated == True`.
+      - `test_registered_model_type_is_not_uncalibrated`:
+        `wavenet` / `punet` / etc. → flag is `False`.
+- [x] `tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_vram_skill.py` —
+      extend with `test_unregistered_model_type_emits_warning_and_flags_breakdown`:
+      capture stdout (capsys), assert the `!!!` warning line is
+      present, assert wrapper return carries
+      `inference_batch_uncalibrated == True`.
+- [x] Same for `test_evaluate_time_skill.py`.
+- [x] `tests/unit/agent/tune_ml_hyperparam_agent/test_hyperparam_schemas.py` —
+      add a one-liner that builds an `ExperimentMemory` with the new
+      field set and validates round-trip.
+
+##### Acceptance
+
+- [ ] All four K.8.1 layer assertions become observable on a re-run
+      (gate stops crashing on novel model_types). *Pending K.8.1 re-run
+      against the patched code.*
+- [x] Existing tuner-side test suite stays green
+      (`pytest tests/unit/agent/tune_ml_hyperparam_agent -q`). *307/307
+      green 2026-04-18.*
+- [x] Existing `tests/unit/core/test_inference_defaults.py` stays
+      green — `assert_inference_batch_registered` is unchanged,
+      simply no longer called from the inference estimator. *15/15
+      green 2026-04-18.*
+
+##### Limitations (explicit)
+
+- **Architecture-level activation estimate remains uncalibrated for
+  novel `model_type`s.** The fix only patches the *batch dimension* of
+  the inference estimate (using runtime's batch=25). The per-sample
+  activation model in `inference_skill/estimator.estimate_peak_bytes`
+  still assumes the novel architecture has wavenet/punet/fcnet-like
+  forward activations. For a proposer-derivative of an existing seed
+  architecture (the common case), this is a reasonable approximation.
+  For a structurally different novel architecture (e.g. a new
+  attention variant), the estimate could be substantially off in
+  either direction.
+- **Mitigation in the meantime**: the prominent stdout warning + the
+  per-record `inference_batch_uncalibrated: True` flag make the
+  uncertainty auditable. Operators reviewing K.7's `gate_exhaustion`
+  summary or the per-record JSON can identify which rounds ran
+  against a soft estimate.
+- **K.7 attribution is honest**: `gate_exhaustion.vram_gated_attempts`
+  counts only configs that the gate actually rejected on budget
+  grounds (real over-budget verdicts), not configs the gate failed to
+  estimate. Soft-fallback estimates that pass the budget proceed
+  normally; soft-fallback estimates that exceed the budget are
+  recorded as legitimate `skipped_oom_risk` events with the
+  uncalibrated flag set so post-hoc analysis can discount them.
+
+##### Out of scope (deferred)
+
+- **Per-architecture inference-batch calibration for plugin models.**
+  When `ml_model_implementor` materialises a new plugin, it could
+  optionally probe a tiny forward pass to learn the true VRAM curve
+  and write a `core/inference_defaults.py` entry (or a sibling
+  per-plugin override file). This would close the loop entirely but
+  requires (a) a calibration harness in the implementor or a new
+  sub-skill, (b) a write-back path that does not race with concurrent
+  proposals, (c) a decision on whether plugin calibrations live
+  in-tree (version-controlled) or in the workspace (run-local).
+  Tracked separately; not blocking for K.8.
+- **Per-architecture training/scoring estimate calibration.** Same
+  problem in the other two phases — `training_skill/estimator` and
+  `denoising_score_skill/estimator` also assume the seed architecture
+  family. K.2.5-8 addresses only the inference phase because it is
+  the one the planning-time gate actually called the assert on. The
+  training phase already uses `train_config.batch_size` (LLM-chosen,
+  not table-driven), so it does not hit the same hard-fail wall — but
+  its activation model is the same approximation. Future work.
+- **Auto-registration on first successful run.** Once a novel
+  `model_type` actually completes a round, the warmup line could
+  back-fill `_INFERENCE_BATCH_SIZES` from the observed batch size.
+  Symmetric to Phase F's asymmetric-EMA learning, but for the
+  registry rather than the calibration constant. Tracked separately.
+
 #### K.3 Tuner integration [ ]
 
 - [ ] `nodes/ml_hyperparameter_tune_agent.py`: per-round
@@ -2038,7 +2201,20 @@ planning, both addressed:
 - [x] Verify: `pytest tests/unit/agent/ml_model_proposal_agent/ -q`
       → 275/275 green.
 
-#### K.8 Co-budget smoke + cross-iteration awareness [ ]
+#### K.8 Co-budget smoke + cross-iteration awareness [~]
+
+**Status (2026-04-18)**: K.8.0 done — Option A instrumentation
+implemented (CLI flag `--debug_dump_prompts`, schema field
+`ProposalInput.debug_dump_proposing_prompt_path`, workflow plumb,
+proposer dump hook). K.8.1 ran on lilab — surfaced a real defect:
+the proposer invented `pe_wavenet_delta`, the VRAM gate's inference
+estimator hard-failed via `assert_inference_batch_registered`, and
+the workflow burned all 9 attempts with `Loop Error` (0 completed
+rounds, empty `all_records`, `gate_exhaustion: null` — K.7 feedback
+silent). **K.2.5-8 (soft fallback for unregistered model_type) shipped
+2026-04-18 across 4 commits**; see §10.14 K.2.5-8 above. **K.8.1
+re-run pending against patched code.** K.8.2 / K.8.3 (optional) /
+K.8.4 / K.8.5 still pending.
 
 **Goal**: prove end-to-end with a real LLM that (a) the joint VRAM+time
 gate fires correctly and the tuner adapts, and (b) when the gate
@@ -2049,26 +2225,38 @@ proposes a qualitatively lighter architecture.
 model (`wavenet`), 1 file (`--target_files 6`), `--max_epochs 1`,
 OpenAI tiered config. Each run should finish in ≤10 min on lilab.
 
-##### K.8.0 Pre-flight (no LLM yet)
+##### K.8.0 Pre-flight + instrumentation [x]
 
-- [ ] **Env validation**
-      - lilab GPU visible: `nvidia-smi` shows ≥30 GB free on RTX 5090.
-      - `OPENAI_API_KEY` set.
-      - Workspaces clean: `/home/klz/Data/SIDEREIS_DATA/exploration_k8a`
-        and `..._k8b`.
-      - Seed run outputs exist for `wavenet` (workflow source path).
-- [ ] **Decide instrumentation level for Layer 4 inspection**
-      - **Option A (preferred, ~15 LOC)**: add a `--debug_dump_prompts`
-        CLI flag that writes each iteration's rendered proposing-stage
-        system prompt to
-        `{workspace}/debug/iter{N}_proposing_system_prompt.md`.
-        Lets us audit the exact text the LLM saw.
-      - **Option B (no code change)**: rely on indirect evidence — if
-        iter-2 proposer output shows substantially lighter dims +
-        budget-aware motivation, the block must have reached it.
-        Cheaper but weaker.
-      - Recommended: Option A — one-time hook, makes the smoke
-        audit-able and is reusable for future smoke runs.
+- [x] **Env validation** (2026-04-18)
+      - lilab GPU visible: `nvidia-smi` confirmed RTX 5090, 31.9 GB
+        free, no contention from other processes.
+      - `OPENAI_API_KEY` available via `set -a && source .env && set +a`
+        (length 164).
+      - Workspaces `exploration_k8a_co_budget` /
+        `exploration_k8b_gate_exhaustion` will be created on launch
+        (clean state — no preexisting dirs).
+      - Seed `run_output_*.json` confirmed at
+        `/home/klz/Data/SIDEREIS_DATA/{wavenet,punet}/small_sample_trial_v0/agent/`.
+- [x] **Option A instrumentation chosen + implemented** (2026-04-18)
+      - `agent/schemas/proposal.py`: new optional
+        `ProposalInput.debug_dump_proposing_prompt_path` field.
+      - `nodes/ml_model_proposal_agent.py`: in `_run_pipeline`, after
+        rendering the proposing-stage system prompt, write it to the
+        path when set (mkdir-p the parent; print a `[debug]` line so
+        smoke run logs surface the artifact location).
+      - `workflows/model_exploration.py`: new `debug_dump_prompts: bool`
+        kwarg; per-iteration the workflow patches
+        `propose_input.debug_dump_proposing_prompt_path` to
+        `{run_dir}/debug/iter{N:03d}_attempt{M:03d}_proposing_system_prompt.md`.
+      - `run_exploration_adaptive.py`: `--debug_dump_prompts`
+        boolean flag plumbed through to `run_workflow`.
+      - 2 new unit tests in `test_prior_iteration_gate_exhaustion.py`
+        cover the dump (writes when path set; no-op + no debug dir
+        created when None). 21/21 K.7.6 tests + 341/341 proposer +
+        workflow tests green.
+      - Path layout `iter{N}_attempt{M}` chosen so proposer retries
+        within the same iteration each get their own file (no
+        overwrites).
 
 ##### K.8.1 Run A — Co-budget adaptation (single iteration, normal-tight budget)
 
@@ -2084,11 +2272,17 @@ PYTHONPATH=.:ml_models .venv/bin/python run_exploration_adaptive.py \
     --max_iterations 1 --max_rounds 3 --max_epochs 1 \
     --trial_strategy target --target_files 6 \
     --trial_vram_budget_gb 4 --formal_vram_budget_gb 8 \
-    --trial_time_budget_minutes 5 \
+    --trial_time_budget_minutes 5 --formal_time_budget_minutes 30 \
     --advice tuner_advice/exploration_adaptive_v1.json \
     --llm_config llm_configs/openai_tiered_v1.json \
     --exploration_mode exploit
 ```
+
+> **Note on formal budgets**: K.8.1 is trial-only (`is_trial=True` is
+> hardcoded in `run_exploration_adaptive.py`, `--max_iterations 1`), so
+> `--formal_*_budget_*` values are inert — they are set defensively for
+> consistency with the trial pair so the command is copy-pasteable for
+> future formal smokes.
 
 - [ ] **Layer 1 — skill stdout (gate decision)**
       - VRAM gate's effective limit equals `min(budget=4 GB, free×0.8)`
@@ -2130,7 +2324,7 @@ PYTHONPATH=.:ml_models .venv/bin/python run_exploration_adaptive.py \
     --max_iterations 2 --max_rounds 3 --max_epochs 1 \
     --trial_strategy target --target_files 6 \
     --trial_vram_budget_gb 0.5 --formal_vram_budget_gb 1 \
-    --trial_time_budget_minutes 5 \
+    --trial_time_budget_minutes 5 --formal_time_budget_minutes 30 \
     --advice tuner_advice/exploration_adaptive_v1.json \
     --llm_config llm_configs/openai_tiered_v1.json \
     --exploration_mode explore \
