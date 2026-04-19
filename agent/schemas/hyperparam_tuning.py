@@ -144,6 +144,24 @@ class ExperimentMemory(BaseModel):
         description="Active mode's VRAM ceiling the estimate was checked against (GB).",
     )
 
+    # K.2.5-8 — soft-fallback flag from the inference estimator. Set to True
+    # when the proposer invented a model_type that has no entry in
+    # core/inference_defaults._INFERENCE_BATCH_SIZES; the estimator falls
+    # back to the runtime default (25) and the per-sample activation model
+    # is uncalibrated for the novel architecture. Operators reviewing the
+    # gate verdict (or K.7's gate_exhaustion summary) can use this flag to
+    # discount estimates from rounds that ran on a guess. Default None
+    # keeps pre-K.2.5-8 records valid. See §10.14 K.2.5-8.
+    inference_batch_uncalibrated: Optional[bool] = Field(
+        default=None,
+        description=(
+            "True when the inference estimator substituted the runtime "
+            "fallback inference_batch (25) for an unregistered model_type; "
+            "estimate is uncalibrated for the novel architecture. "
+            "None on records where the gate did not run."
+        ),
+    )
+
 
 class ExperimentRecord(BaseModel):
     exp_id: str

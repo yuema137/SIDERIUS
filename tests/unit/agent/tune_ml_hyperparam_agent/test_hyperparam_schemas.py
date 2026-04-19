@@ -454,6 +454,54 @@ class TestExperimentMemoryVramFields:
 
 
 # ---------------------------------------------------------------------------
+# K.2.5-8 — ExperimentMemory.inference_batch_uncalibrated. Populated by the
+# tuner when the inference estimator substituted the runtime fallback batch
+# (25) for an unregistered model_type. Optional so pre-K.2.5-8 records and
+# records where the gate did not run still validate. See §10.14 K.2.5-8.
+# ---------------------------------------------------------------------------
+
+class TestExperimentMemoryInferenceBatchUncalibrated:
+
+    def _base_memory(self):
+        return {
+            "expert_advice_followed": "test",
+            "hypothesis": "test",
+        }
+
+    def test_field_defaults_to_none(self):
+        mem = ExperimentMemory.model_validate(self._base_memory())
+        assert mem.inference_batch_uncalibrated is None
+
+    def test_field_accepts_true(self):
+        mem = ExperimentMemory.model_validate({
+            **self._base_memory(),
+            "inference_batch_uncalibrated": True,
+        })
+        assert mem.inference_batch_uncalibrated is True
+
+    def test_field_accepts_false(self):
+        mem = ExperimentMemory.model_validate({
+            **self._base_memory(),
+            "inference_batch_uncalibrated": False,
+        })
+        assert mem.inference_batch_uncalibrated is False
+
+    def test_field_round_trips_through_json(self):
+        mem = ExperimentMemory.model_validate({
+            **self._base_memory(),
+            "inference_batch_uncalibrated": True,
+        })
+        reloaded = ExperimentMemory.model_validate_json(mem.model_dump_json())
+        assert reloaded.inference_batch_uncalibrated is True
+
+    def test_existing_record_round_trip_unchanged(self, valid_success_record):
+        """Records produced before K.2.5-8 (no inference_batch_uncalibrated key)
+        still validate and the field reads back as None."""
+        rec = ExperimentRecord.model_validate(valid_success_record)
+        assert rec.memory.inference_batch_uncalibrated is None
+
+
+# ---------------------------------------------------------------------------
 # Phase K (K.7) — GateExhaustionInfo schema. Populated by the tuner when an
 # iteration ends without ever training successfully AND >=1 attempt was
 # rejected by the pre-flight resource gate. Consumed by the next iteration's

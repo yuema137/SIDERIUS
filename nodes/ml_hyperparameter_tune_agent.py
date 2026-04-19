@@ -848,6 +848,14 @@ class HyperparamTuningAgent:
                         oom_record["memory"]["vram_budget_gb"] = (
                             resource_check.get("limit_gb")
                         )
+                    # K.2.5-8 — soft-fallback flag is independent of the
+                    # budget being set; the gate runs unconditionally and the
+                    # flag tells us whether the inference estimate was
+                    # against a registered batch. Recorded on every
+                    # skipped_oom_risk so post-hoc analysis can discount
+                    # rejections that came from an uncalibrated estimate.
+                    if resource_check.get("inference_batch_uncalibrated"):
+                        oom_record["memory"]["inference_batch_uncalibrated"] = True
                     ExperimentRecord.model_validate(oom_record)
                     sandbox.save_record(oom_record)
                     continue
@@ -919,6 +927,12 @@ class HyperparamTuningAgent:
                                 "time_mode":             "trial" if plan.is_trial else "formal",
                             },
                         }
+                        # K.2.5-8 — propagate inference soft-fallback flag.
+                        # Either gate's result carries the same flag (both
+                        # call the same inference estimator); the time
+                        # wrapper's flag is the natural source here.
+                        if time_check.get("inference_batch_uncalibrated"):
+                            time_record["memory"]["inference_batch_uncalibrated"] = True
                         ExperimentRecord.model_validate(time_record)
                         sandbox.save_record(time_record)
                         continue
@@ -1188,6 +1202,12 @@ class HyperparamTuningAgent:
                     final_record["memory"]["vram_budget_gb"] = (
                         resource_check.get("limit_gb")
                     )
+                # K.2.5-8 — soft-fallback flag from the inference estimator.
+                # Independent of vram_budget being set; recorded whenever
+                # the gate reported a substitution so post-hoc audit can
+                # identify success rounds that ran against a guessed batch.
+                if resource_check.get("inference_batch_uncalibrated"):
+                    final_record["memory"]["inference_batch_uncalibrated"] = True
                 # Trial context
                 if trial_config.is_trial:
                     final_record["is_trial"] = True
