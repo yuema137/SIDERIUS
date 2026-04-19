@@ -605,6 +605,30 @@ class HyperparamTuningInput(BaseModel):
         description="When True, train and eval scopes use the same segment indices (different physical files).",
     )
 
+    # --- Formal-mode training levers (Phase M — see docs/resource_estimator_implement.md §12) ---
+    # Formal-mode eval is hardcoded to snapshot + eval_portion=1.0 in the
+    # tuner (intentionally not operator-configurable — see §12.2 rationale).
+    formal_strategy: Literal["snapshot", "anchors", "target"] = Field(
+        default="snapshot",
+        description=(
+            "Training-side sampling strategy in formal mode. Overrides the "
+            "planner's trial_strategy on any round promoted to formal. Eval "
+            "side is always locked to snapshot + eval_portion=1.0."
+        ),
+    )
+    formal_portion: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of segments per file for training scope in formal mode.",
+    )
+    formal_train_portion: float = Field(
+        default=1.0,
+        ge=0.01,
+        le=1.0,
+        description="Per-epoch iteration fraction from the formal training scope.",
+    )
+
     # --- Reproducibility seeds (optional — auto-generated when not provided) ---
     sampling_seed: Optional[int] = Field(
         default=None,

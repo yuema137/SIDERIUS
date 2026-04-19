@@ -162,6 +162,27 @@ def parse_args():
             "None → skill falls back to free×0.8 defensive limit."
         ),
     )
+    # --- Formal-mode training levers (Phase M, docs/resource_estimator_implement.md §12) ---
+    # Eval side in formal mode is hardcoded to snapshot + eval_portion=1.0 in
+    # the tuner (intentionally NOT operator-configurable — see §12.2).
+    parser.add_argument(
+        "--formal_strategy", type=str, default="snapshot",
+        choices=["snapshot", "anchors", "target"],
+        help=(
+            "Training-side sampling strategy on formal rounds. Overrides the "
+            "planner's trial_strategy on any round promoted to formal. "
+            "Default 'snapshot' (all 20 files) — anchors/target are mostly for "
+            "diagnostics."
+        ),
+    )
+    parser.add_argument(
+        "--formal_portion", type=float, default=0.1,
+        help="Fraction of segments per file for formal training scope (default 0.1).",
+    )
+    parser.add_argument(
+        "--formal_train_portion", type=float, default=1.0,
+        help="Per-epoch iteration fraction from the formal training scope (default 1.0).",
+    )
     parser.add_argument(
         "--source_paths", type=str, nargs="+", default=None,
         help="Seed run output JSON paths. Defaults to wavenet + punet trial runs.",
@@ -264,6 +285,8 @@ def main():
                        if args.formal_vram_budget_gb is not None
                        else "disabled (free×0.8)")
     print(f"  VRAM budget   : trial={trial_vram_str}  |  formal={formal_vram_str}")
+    print(f"  Formal train  : strategy={args.formal_strategy}  portion={args.formal_portion}  train_portion={args.formal_train_portion}")
+    print(f"  Formal eval   : LOCKED to snapshot + eval_portion=1.0 (Phase M)")
     print(f"  Data dir      : {args.data_dir or 'unset (skill uses static formula)'}")
     print(f"  Advice    : {args.advice}")
     print(f"  LLM config: {args.llm_config or 'default (gemini-3.1-pro-preview uniform)'}")
@@ -303,6 +326,10 @@ def main():
         # no proposer-side gate per §10.17 / §10.9).
         trial_vram_budget_gb=args.trial_vram_budget_gb,
         formal_vram_budget_gb=args.formal_vram_budget_gb,
+        # Formal-mode training levers (Phase M — eval side is LOCKED in tuner)
+        formal_strategy=args.formal_strategy,
+        formal_portion=args.formal_portion,
+        formal_train_portion=args.formal_train_portion,
         # Advice
         human_advice_propose=advice.get("propose"),
         human_advice_implement=advice.get("implement"),

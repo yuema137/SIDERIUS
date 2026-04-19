@@ -198,6 +198,22 @@ def main():
         "--train_portion", type=float, default=0.1)
     parser.add_argument(
         "--eval_portion", type=float, default=0.1)
+    # --- Formal-mode training levers (Phase M, docs/resource_estimator_implement.md §12) ---
+    # Eval side in formal mode is hardcoded to snapshot + eval_portion=1.0 in
+    # the tuner (intentionally NOT operator-configurable — see §12.2).
+    parser.add_argument(
+        "--formal_strategy", type=str, default="snapshot",
+        choices=["snapshot", "anchors", "target"],
+        help="Training-side strategy on formal rounds (default snapshot).",
+    )
+    parser.add_argument(
+        "--formal_portion", type=float, default=0.1,
+        help="Fraction of segments per file for formal training scope (default 0.1).",
+    )
+    parser.add_argument(
+        "--formal_train_portion", type=float, default=1.0,
+        help="Per-epoch iteration fraction for formal training (default 1.0).",
+    )
     parser.add_argument(
         "--cleanup_denoised", action="store_true",
         help="Delete denoised H5 files after scoring (recommended for production)."
@@ -312,6 +328,10 @@ def main():
             train_portion=args.train_portion,
             eval_strategy=args.trial_strategy,
             eval_portion=args.eval_portion,
+            # Phase M — formal-mode training levers (eval side locked in tuner)
+            formal_strategy=args.formal_strategy,
+            formal_portion=args.formal_portion,
+            formal_train_portion=args.formal_train_portion,
             cleanup_denoised=args.cleanup_denoised,
             max_epochs=args.max_epochs,
             human_advice_interpret=args.human_advice_interpret,

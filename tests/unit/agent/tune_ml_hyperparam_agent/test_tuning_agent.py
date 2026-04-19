@@ -466,7 +466,13 @@ class TestDynamicTrialFormal:
 
     def test_formal_round_builds_two_sample_sets(self, agent_and_mocks, tmp_path):
         """Formal round: two build_sample_set calls — one for train, one for eval.
-        Eval has portion=1.0, train has trial_portion (default 0.02)."""
+
+        Phase M invariants (docs/resource_estimator_implement.md §12):
+          * Eval side is LOCKED to snapshot + portion=1.0 — not configurable.
+          * Train side comes from ``agent_input.formal_strategy/portion/train_portion``
+            (defaults snapshot / 0.1 / 1.0), so train_portion defaults to 1.0 in
+            formal mode regardless of what the planner chose for the trial rounds.
+        """
         agent, _, _, _ = agent_and_mocks
         skill_calls = []
         original_mock = _mock_run_skill
@@ -482,17 +488,18 @@ class TestDynamicTrialFormal:
             agent.run(_make_trial_input(tmp_path, max_rounds=1, is_trial=True))
 
             # Final round (max_rounds=1) → formal mode → two build_sample_set calls:
-            # one for training scope, one for eval scope (portion=1.0)
+            # one for training scope (formal_portion=0.1), one for eval scope
+            # (locked to snapshot + portion=1.0).
             build_calls = mock_build.call_args_list
             assert len(build_calls) == 2, f"Expected 2 build_sample_set calls for formal, got {len(build_calls)}"
-            # One call should have portion=1.0 (eval)
             portions = [c.kwargs.get("trial_portion") for c in build_calls]
             assert 1.0 in portions, f"Expected eval portion=1.0, got {portions}"
 
-            # Training skill receives train_portion
+            # Training skill receives formal_train_portion (default 1.0 under
+            # Phase M — not the planner's plan.train_portion).
             train_calls = [(f, p) for f, p in skill_calls if f == "training_skill"]
             assert len(train_calls) >= 1
-            assert train_calls[0][1].get("train_portion") == 0.1
+            assert train_calls[0][1].get("train_portion") == 1.0
 
 
 # ---------------------------------------------------------------------------

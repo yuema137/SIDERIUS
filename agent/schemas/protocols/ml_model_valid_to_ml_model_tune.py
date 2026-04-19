@@ -59,6 +59,10 @@ def local_validated_model(
     # --- VRAM-budget gate (evaluate_vram_skill, Phase K two-budget split) ---
     trial_vram_budget_gb: Optional[float] = None,
     formal_vram_budget_gb: Optional[float] = None,
+    # --- Formal-mode training levers (Phase M) ---
+    formal_strategy: Literal["snapshot", "anchors", "target"] = "snapshot",
+    formal_portion: float = 0.1,
+    formal_train_portion: float = 1.0,
 ) -> HyperparamTuningInput:
     """
     Map ValidatorOutput + ProposalOutput -> HyperparamTuningInput in-memory.
@@ -103,6 +107,13 @@ def local_validated_model(
         proposer-side gate is deferred per §10.17. Resource info reaches
         the planner via the prompt block only (single-channel rule, §10.3).
         See docs/resource_estimator_implement.md §10.9.
+      - formal_strategy / formal_portion / formal_train_portion :
+        operator-configurable training-side sample-set knobs for any round
+        promoted to formal (Phase M). Defaults snapshot / 0.1 / 1.0.
+        Eval-side in formal mode is hardcoded to snapshot + eval_portion=1.0
+        inside the tuner — intentionally NOT operator-configurable, so
+        formal scores are architecturally comparable across architectures.
+        See docs/resource_estimator_implement.md §12.
     """
     # Prepend planner-visible warnings to expert_advice so the tuner's planner
     # knows up front about (a) implementation deviating from the spec and
@@ -150,6 +161,9 @@ def local_validated_model(
         data_dir=data_dir,
         trial_vram_budget_gb=trial_vram_budget_gb,
         formal_vram_budget_gb=formal_vram_budget_gb,
+        formal_strategy=formal_strategy,
+        formal_portion=formal_portion,
+        formal_train_portion=formal_train_portion,
     )
 
 

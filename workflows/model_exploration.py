@@ -347,6 +347,13 @@ def run_workflow(
     # Tuner-only fan-out; no proposer-side gate in Phase K (§10.17).
     trial_vram_budget_gb: float | None = None,
     formal_vram_budget_gb: float | None = None,
+    # --- Formal-mode training levers (Phase M, docs/resource_estimator_implement.md §12) ---
+    # Training-side knobs applied on any round promoted to formal. Eval side in
+    # formal mode is hardcoded to snapshot + eval_portion=1.0 in the tuner so
+    # formal scores are architecturally comparable — see §12.2.
+    formal_strategy: str = "snapshot",
+    formal_portion: float = 0.1,
+    formal_train_portion: float = 1.0,
     # --- Reasoning pipeline ---
     exploration_mode: str = "auto",
     minimum_boldness: float = 0.05,
@@ -723,6 +730,9 @@ def run_workflow(
             data_dir=data_dir,
             trial_vram_budget_gb=trial_vram_budget_gb,
             formal_vram_budget_gb=formal_vram_budget_gb,
+            formal_strategy=formal_strategy,
+            formal_portion=formal_portion,
+            formal_train_portion=formal_train_portion,
         )
         if human_advice_tune is not None:
             tune_input.human_advice = human_advice_tune

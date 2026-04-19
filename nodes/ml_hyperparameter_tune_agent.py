@@ -81,6 +81,53 @@ def _validate_data_config(
             )
 
 
+def _resolve_sample_set_cfg(
+    mode: str,
+    agent_input: HyperparamTuningInput,
+    plan: ExperimentPlan,
+) -> dict:
+    """Resolve sample-set config for one round based on trial/formal/single_file mode.
+
+    Formal-mode eval is LOCKED to snapshot + eval_portion=1.0 so scores are
+    architecturally comparable across architectures (Phase M, §12.2). Formal
+    training levers come from ``agent_input.formal_*``. Trial-mode values come
+    from the planner. Single-file mode uses safe defaults.
+
+    Args:
+        mode: One of ``"trial"``, ``"formal"``, ``"single_file"``.
+        agent_input: Carries the operator-configurable ``formal_*`` knobs.
+        plan: Planner-produced ExperimentPlan (source of trial-mode values).
+
+    Returns:
+        A dict with exactly 5 keys — ``trial_strategy``, ``trial_portion``,
+        ``train_portion``, ``eval_strategy``, ``eval_portion``.
+    """
+    if mode == "formal":
+        return {
+            "trial_strategy": agent_input.formal_strategy,
+            "trial_portion":  agent_input.formal_portion,
+            "train_portion":  agent_input.formal_train_portion,
+            "eval_strategy":  "snapshot",
+            "eval_portion":   1.0,
+        }
+    if mode == "trial":
+        return {
+            "trial_strategy": plan.trial_strategy,
+            "trial_portion":  plan.trial_portion,
+            "train_portion":  plan.train_portion,
+            "eval_strategy":  plan.eval_strategy,
+            "eval_portion":   plan.eval_portion,
+        }
+    # single_file
+    return {
+        "trial_strategy": "snapshot",
+        "trial_portion":  plan.trial_portion,
+        "train_portion":  plan.train_portion,
+        "eval_strategy":  "snapshot",
+        "eval_portion":   1.0,
+    }
+
+
 def _copy_seed_plugin(src: str, dst_dir: str) -> str:
     """Copy the seed plugin file into the run's plugin directory.
 
@@ -609,9 +656,16 @@ class HyperparamTuningAgent:
                 else:
                     mode = "single_file"
 
-                # In formal mode, eval uses all segments (portion=1.0).
-                # In trial mode, eval uses the LLM's eval_portion.
-                eval_portion = plan.eval_portion if mode == "trial" else 1.0
+                # Phase M — mode-gated sample-set config. Formal-mode eval is
+                # LOCKED to snapshot + 1.0 so scores are architecturally
+                # comparable; formal training is operator-configurable via
+                # agent_input.formal_* fields. See docs/resource_estimator_implement.md §12.
+                _cfg = _resolve_sample_set_cfg(mode, agent_input, plan)
+                cfg_trial_strategy = _cfg["trial_strategy"]
+                cfg_trial_portion  = _cfg["trial_portion"]
+                cfg_train_portion  = _cfg["train_portion"]
+                cfg_eval_strategy  = _cfg["eval_strategy"]
+                cfg_eval_portion   = _cfg["eval_portion"]
 
                 # Generate deterministic seeds for reproducibility.
                 import hashlib
@@ -629,13 +683,13 @@ class HyperparamTuningAgent:
                     is_trial=plan.is_trial,
                     mode=mode,
                     # Training
-                    trial_strategy=plan.trial_strategy if mode != "single_file" else "snapshot",
-                    trial_portion=plan.trial_portion,
-                    train_portion=plan.train_portion,
+                    trial_strategy=cfg_trial_strategy,
+                    trial_portion=cfg_trial_portion,
+                    train_portion=cfg_train_portion,
                     target_files=plan.target_files if plan.is_trial else [],
                     # Validation
-                    eval_strategy=plan.eval_strategy if mode != "single_file" else "snapshot",
-                    eval_portion=eval_portion,
+                    eval_strategy=cfg_eval_strategy,
+                    eval_portion=cfg_eval_portion,
                     # Alignment
                     train_validation_align=plan.train_validation_align,
                     # Legacy
@@ -1416,6 +1470,18 @@ def main():
                         help="Fraction of segments per file for validation (default: 0.1).")
     parser.add_argument("--train_portion", type=float, default=0.1,
                         help="Per-epoch subsample from training scope (default: 0.1).")
+
+    # Formal-mode training levers (Phase M). Eval side is hardcoded to
+    # snapshot + eval_portion=1.0 in the tuner — not operator-configurable.
+    # See docs/resource_estimator_implement.md §12.
+    parser.add_argument("--formal_strategy", type=str, default="snapshot",
+                        choices=["snapshot", "anchors", "target"],
+                        help="Training-side sampling strategy in formal mode (default: snapshot).")
+    parser.add_argument("--formal_portion", type=float, default=0.1,
+                        help="Fraction of segments per file for formal training scope (default: 0.1).")
+    parser.add_argument("--formal_train_portion", type=float, default=1.0,
+                        help="Per-epoch iteration fraction for formal training (default: 1.0).")
+
     parser.add_argument("--human_advice", type=str, default=None,
                         help="Human guidance for the agent (injected alongside expert_advice).")
     parser.add_argument("--cleanup_denoised", action="store_true",
@@ -1507,6 +1573,12 @@ def main():
             "train_portion": args.train_portion,
             "eval_portion":  args.eval_portion,
         }
+    # Phase M — formal-mode training levers. Always forwarded (trial or not)
+    # because they apply whenever a round is promoted to formal.
+    input_dict["formal_strategy"]      = args.formal_strategy
+    input_dict["formal_portion"]       = args.formal_portion
+    input_dict["formal_train_portion"] = args.formal_train_portion
+
     if args.human_advice:
         input_dict["human_advice"] = args.human_advice
     if args.trial_time_budget_minutes is not None:

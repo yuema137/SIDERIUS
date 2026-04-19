@@ -1676,7 +1676,7 @@ its targeted pytest invocation green and a committable state.
 - [x] K.6 — Planner prompt (numeric block + guidance block) *(2026-04-18, `34e0e0f`)*
 - [x] K.7 — Iteration-boundary gate-exhaustion feedback (§10.13) *(K.7.1–K.7.6 shipped 2026-04-18)*
 - [~] K.8 — Co-budget smoke + cross-iteration awareness *(K.8.0 instrumentation shipped 2026-04-18; K.8.1 launching)*
-- [~] K.9 — Dual-mode regression test: tuner gates + K.2.5-8 fallback (pseudo, fast) *(K.9.0 `a59c41e`, K.9.1 `dfacb01` 2026-04-18; K.9.2 implemented 2026-04-19, pending commit; K.9.3/K.9.4 pending)*
+- [~] K.9 — Dual-mode regression test: tuner gates + K.2.5-8 fallback (pseudo, fast) *(K.9.0 `a59c41e`, K.9.1 `dfacb01` 2026-04-18; K.9.2 `f4b4ba1`, K.9.3 `acd483c` 2026-04-19; K.9.4 pending)*
 
 #### K.0 Skill rename (mechanical) [x]
 
@@ -2588,24 +2588,33 @@ auditability):
         `active_mode == "trial"`, non-empty `summary_message`. Tracked
         but not blocking for K.9 acceptance.
 
-##### K.9.3 Acceptance [~]
+##### K.9.3 Acceptance [x] *(`acd483c` 2026-04-19)*
 
 - [x] `pytest tests/integration/workflows/test_k9_invented_model_dual_mode.py -v`
-      passes in pseudo mode in **0.98 s** wall-clock, no API key, no
+      passes in pseudo mode in **0.97 s** wall-clock, no API key, no
       GPU. Verified 2026-04-19 alongside `tests/helpers/test_recording_fakes.py`
       (21 tests total, all green) — confirms the
       `RecordingLLMBridge.plan()` kwargs-capture extension didn't
       regress existing recording-bridge contracts.
-- [ ] `pytest tests/integration/workflows/test_k9_invented_model_dual_mode.py -v --real-llm`
-      passes when `OPENAI_API_KEY` is set (sanity-check that the canned
-      pseudo data is shaped like real responses). Skip cleanly when key
-      absent.
-- [ ] Adding a regression to `inference_skill/estimator.py` that
+- [x] `pytest tests/integration/workflows/test_k9_invented_model_dual_mode.py -v --real-llm`
+      passes against `gpt-5-mini` in **135.41 s (2:15)** when
+      `OPENAI_API_KEY` is set, confirming the canned pseudo data is
+      shaped like real responses. Skips cleanly when key absent.
+- [x] Adding a regression to `inference_skill/estimator.py` that
       re-introduces the hard `assert_inference_batch_registered` call
-      causes K.9 to fail loudly (Layer 1 stdout check). Verify by
-      temporary local revert before commit.
-- [ ] Existing `pytest tests/unit/agent/ -q` stays green (no regression
-      from new fixtures or shared-state leakage).
+      causes K.9 to fail loudly in **0.94 s** with Layer 1 as the
+      gating assertion: `"K.2.5-8 warning line missing — fallback path
+      not exercised."` Verified 2026-04-19 by local revert. **Reorder
+      caveat**: the original K.9.2 test ordering placed the smoke
+      `len(output.all_records) == 2` check before Layer 1, so the
+      regression surfaced first as the generic `0 == 2` rather than
+      the named K.2.5-8 contract violation. K.9.3 reordered the
+      assertions (commit `acd483c`) so the diagnostic Layer 1 message
+      fires first — see the inline NOTE in
+      `test_k9_invented_model_dual_mode.py` for rationale.
+- [x] Existing `pytest tests/unit/agent/ -q` stays green: **1122
+      passed in 101.29 s**, no regression from new fixtures or
+      shared-state leakage. Verified 2026-04-19.
 
 ##### K.9.4 Doc + closeout [ ]
 
@@ -2719,3 +2728,525 @@ prepend in `local_validated_model`, (c) drop the field from
 `ProposalOutput`, (d) update the relevant tests. Coordinate with
 Deferred-1 — both touch the same files, so they should land together
 when the proposer-side gate becomes activatable.
+
+## 11. Phase L — Per-round attempt budget + fail-round abort (design 2026-04-19)
+
+### 11.1 Why this is needed
+
+Phase K's per-round time/VRAM gates protect each round from oversize
+configs, but the existing tuner loop accounting was attempt-based,
+not success-based:
+
+```python
+# nodes/ml_hyperparameter_tune_agent.py — pre-Phase-L
+max_attempts = max_rounds * 3        # shared pool across all rounds
+while completed_rounds < max_rounds and total_attempts < max_attempts:
+    is_last_needed_round = (completed_rounds == max_rounds - 1)
+    if is_last_needed_round: plan.is_trial = False
+```
+
+In practice — confirmed by the v2 0418 runs (`explore_novel_v2_0418`,
+`exploit_cnn_v2_0418`) — this caused two distinct failure modes:
+
+**1. Formal round never runs.** `iteration_005` of `explore_novel_v2_0418`
+exhausted the 9-attempt cap with `completed_rounds=1`. Because the
+formal-promotion gate (`completed_rounds == max_rounds - 1`) only fires
+after `max_rounds - 1` successes, no round was ever promoted to formal.
+The iteration's "best score" of 5.9653 is a **trial-mode** evaluation
+on 5% of data, never validated on the full eval set.
+
+**2. Failure signal lost to the proposer.** Per §10.13.1 the
+`gate_exhaustion` field is zeroed whenever **any** round succeeds,
+including a single trial-mode success. Iter 005 had 1 trial success
+and 8 time-gate skips; the proposer for iter 006 saw `gate_exhaustion =
+None` and an apparently-strong 5.9653 score, with no signal that the
+architecture barely fit the time gate and never reached formal mode.
+
+Aggregate across the same 5 completed iterations of `explore_novel_v2_0418`:
+**80% of records were `skipped_time_risk`**, with median time-overshoot
+of **64.76× budget** (max 4578×). The gates worked correctly; the loop
+accounting is what wasted attempts and masked the failure.
+
+### 11.2 New semantics — per-round budget + success-counted rounds
+
+```python
+N = attempts_per_round                # default 3, CLI-adjustable
+max_rounds                            # target SUCCESSFUL rounds (CLI)
+max_fail_rounds                       # default 3, CLI-adjustable
+
+completed_rounds   = 0
+consecutive_fails  = 0
+plan: Optional[ExperimentPlan] = None
+
+while completed_rounds < max_rounds and consecutive_fails < max_fail_rounds:
+    round_succeeded = False
+    # Last round (the one that would push completed_rounds to max_rounds)
+    # is formal-mode for EVERY attempt in that round.
+    is_formal_round = (completed_rounds == max_rounds - 1)
+
+    for attempt in range(N):
+        plan = bridge.plan(...)
+        if is_formal_round:
+            plan.is_trial = False
+        # gate → train → score → save record
+        if record.status == "success":
+            round_succeeded = True
+            completed_rounds  += 1
+            consecutive_fails  = 0
+            break
+        # else: status in {skipped_time_risk, skipped_oom_risk, error_*}
+        # — record is saved; loop advances to next attempt of the same round.
+
+    if not round_succeeded:
+        consecutive_fails += 1
+
+# Termination reasons:
+#   completed_rounds  >= max_rounds       → "completed"
+#   consecutive_fails >= max_fail_rounds  → "aborted_fail_rounds"
+```
+
+**Worst-case attempt count** = `max_rounds × N` (same as today by default).
+**Best case** = `max_rounds` (each round succeeds first try).
+
+**Strict formal-success policy** (option A in design discussion): if the
+formal round itself fails all N attempts, that counts as one failed
+round (`consecutive_fails += 1`); the loop continues trying to land a
+formal round until `max_fail_rounds` consecutive failures abort. The
+iteration's `status` is "completed" only when a formal round has
+actually landed. (Lenient option B was rejected — without a formal
+score the iteration's contribution to the search is too weak.)
+
+### 11.3 Schema + memory additions
+
+`HyperparamTuningOutput` gains:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `attempts_per_round` | `int` | Echo of the CLI value; useful for post-hoc audit. |
+| `max_fail_rounds` | `int` | Echo of the CLI value. |
+| `consecutive_fail_rounds_at_exit` | `int` | The terminal value of `consecutive_fails`. Lets the proposer protocol distinguish "completed cleanly" (0) from "aborted at the cap" (== `max_fail_rounds`). |
+| `termination_reason` | `Literal["completed","aborted_fail_rounds"]` | Already implicitly present via `status`; promoted to a first-class field for clarity. |
+
+`ExperimentMemory` per-record gains:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `round_index` | `int` | Which logical round this attempt belonged to (1-indexed). Currently every record's "round number" is reconstructed from order; explicit index makes the per-round bucketing unambiguous in §10.13.1's exhaustion math. |
+| `attempt_in_round` | `int` | 1..N. Lets the proposer see "round 2 burned all 3 attempts on time-gate". |
+
+### 11.4 Detection-criterion amendment (§10.13.1 → L.4)
+
+The current §10.13.1 trigger fires only when `ever_trained == False`.
+Phase L adds a second trigger that fires even when *some* rounds
+succeeded:
+
+> **Trigger A (existing)**: `ever_trained == False` AND `gate_skip_count > 0`.
+>
+> **Trigger B (new in Phase L)**: `consecutive_fail_rounds_at_exit >= max_fail_rounds`
+> AND the consecutive-failure burst was dominated by gate skips
+> (`gate_skip_count_in_burst / total_attempts_in_burst >= 0.5`).
+
+Trigger B's reason string in `GateExhaustionInfo` is:
+
+> `"model too large — N consecutive rounds exhausted attempts at the
+> time/VRAM gate after K successful rounds; proposer should reduce
+> model size before the next iteration"`
+
+(N = `max_fail_rounds`, K = `completed_rounds` at abort.)
+
+This way the proposer learns about both extreme cases (no successes at
+all → Trigger A; some successes but the search collapsed → Trigger B).
+
+### 11.5 CLI surface
+
+Two new flags on **`run_exploration_adaptive.py`** + the tuner agent CLI:
+
+| Flag | Default | Forwarded to |
+|------|--------:|--------------|
+| `--attempts_per_round` | `3` | tuner only (per-round attempt budget; previously hardcoded as `max_rounds * 3` shared) |
+| `--max_fail_rounds` | `3` | tuner only (consecutive-failure abort trigger) |
+
+Both forwarded through the same protocol pass-through pattern as Phase
+K's `--trial_vram_budget_gb` / `--formal_vram_budget_gb`.
+
+### 11.6 Generalization — attempts at every stage (deferred)
+
+The user noted (2026-04-19): attempt counts should be configurable
+**at every stage**, not just the tuner — proposer, implementor,
+validator each have implicit retry behaviour today (mostly
+single-shot or hardcoded). Phase L scope is the tuner only because:
+(a) the tuner is where the v2 0418 evidence is, (b) the proposer/
+implementor/validator stages don't currently surface their attempt
+counts in a way that maps cleanly to a single CLI flag, and (c) doing
+all stages at once risks an over-fit abstraction.
+
+**Follow-up (post-Phase-L)**: audit each stage's retry behaviour,
+catalogue what "an attempt" means at each stage, then design a
+unified `--attempts_at_<stage>` flag family. Tracked here so it
+isn't lost.
+
+### 11.7 Files touched
+
+| File | Change |
+|------|--------|
+| `nodes/ml_hyperparameter_tune_agent.py` | Replace lines ~488–1336: outer `while` loop becomes `while completed_rounds < max_rounds and consecutive_fails < max_fail_rounds`; add inner `for attempt in range(N)` loop; replace `is_last_needed_round` with `is_formal_round`; track `consecutive_fails`; populate new output fields. |
+| `agent/schemas/hyperparam_tuning.py` | Add `attempts_per_round`, `max_fail_rounds` to `HyperparamTuningInput`; add `attempts_per_round`, `max_fail_rounds`, `consecutive_fail_rounds_at_exit`, `termination_reason` to `HyperparamTuningOutput`; add `round_index`, `attempt_in_round` to `ExperimentMemory`. |
+| `agent/skills/.../_build_gate_exhaustion` (in tuner) | Add Trigger B branch with the 50%-of-burst gate-skip check. |
+| `nodes/ml_model_proposal_agent.py` | Surface Trigger B's reason string in the `[PRIOR ITERATION GATE EXHAUSTION]` prompt block (already populated via §10.13.4 protocol). |
+| `run_exploration_adaptive.py` | Add `--attempts_per_round`, `--max_fail_rounds` argparse entries; forward through the workflow's tuner-input builder. |
+| `agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py` | Pass-through for the two new flags (mirror Phase K.4). |
+| `tests/integration/workflows/test_k9_invented_model_dual_mode.py` | Update — see §11.8. |
+| `tests/unit/agent/tune_ml_hyperparam_agent/` | Add `test_per_round_attempt_budget.py` covering: (a) round succeeds within N attempts, (b) round fails all N → consecutive_fails increments, (c) `max_fail_rounds` consecutive failures abort the loop, (d) formal-round promotion fires only when `completed_rounds == max_rounds - 1`. |
+
+### 11.8 K.9 test changes
+
+The existing K.9 test (`test_k9_invented_model_dual_mode.py`) hardcodes
+assumptions from the pre-Phase-L design that need updating:
+
+1. **Comment block at lines ~152–158** explicitly references
+   `max_attempts = max_rounds * 3` and the "spin through remaining
+   attempts" behaviour. Both go away under Phase L — `max_fail_rounds=3`
+   default means the loop aborts cleanly after 3 consecutive failed
+   rounds rather than spinning. Rewrite the comment to describe the
+   per-round budget.
+2. **Bridge response queue depth**: K.9 registers 2 canned `generate`
+   responses (one per round). Under Phase L with `max_rounds=2`,
+   `attempts_per_round=3`, `max_fail_rounds=3`:
+   - Round 1: attempt 1 returns canned plan #1 → gate verdicts over
+     budget → record saved as `skipped_oom_risk`. Round 1 is **not** a
+     success; it consumes 1 of N=3 attempts.
+   - K.9 currently expects round 1 to "fail and move on". Under
+     Phase L, the loop will spend up to 3 attempts on round 1 trying
+     to land a success. The bridge needs a 2nd canned plan that
+     causes round 1's attempt 2 to also OOM-skip, then a 3rd that
+     causes attempt 3 to succeed (= the round 2 plan from the old
+     design, repurposed).
+   - **Cleaner rewrite**: change the K.9 choreography to "round 1
+     OOM-skips on attempt 1, succeeds on attempt 2; round 2 (formal)
+     succeeds on attempt 1". Bridge needs 3 canned plans + 1 reflect.
+3. **Layer 2 assertions**: `len(output.all_records) == 2` becomes
+   `== 3` (the additional OOM-skipped attempt #1 of round 1).
+4. **Layer 4 assertion**: `output.gate_exhaustion is None` still holds
+   under Phase L's new accounting (Trigger B requires
+   `consecutive_fail_rounds >= 3` which a 2-round successful run
+   doesn't hit). But add a **new assertion** that
+   `output.consecutive_fail_rounds_at_exit == 0` and
+   `output.termination_reason == "completed"`.
+
+Add a sibling test `test_l_fail_round_abort_dual_mode.py` that:
+- Uses `max_rounds=3`, `attempts_per_round=3`, `max_fail_rounds=3`.
+- Canned planner returns oversize plans for 9 attempts in a row
+  (3 rounds × 3 attempts, all OOM-skipped).
+- Asserts `consecutive_fail_rounds_at_exit == 3`,
+  `termination_reason == "aborted_fail_rounds"`, and
+  `gate_exhaustion` is populated with Trigger B's reason string.
+
+### 11.9 Phased implementation checklist
+
+- [ ] **L.1** — Schema additions to `HyperparamTuningInput`/`Output`
+      and `ExperimentMemory`. Schema unit tests.
+- [ ] **L.2** — Tuner agent loop rewrite (the big one). Includes the
+      strict formal-success policy and the new fields population.
+- [ ] **L.3** — `_build_gate_exhaustion` extension for Trigger B.
+- [ ] **L.4** — CLI flags on `ml_hyperparameter_tune_agent.py` and
+      `run_exploration_adaptive.py`.
+- [ ] **L.5** — Protocol pass-through for the two new flags.
+- [ ] **L.6** — Unit test: `test_per_round_attempt_budget.py`
+      (4 sub-cases per §11.7 row 7).
+- [ ] **L.7** — K.9 test rewrite per §11.8 (1)–(4).
+- [ ] **L.8** — New integration test: `test_l_fail_round_abort_dual_mode.py`.
+- [ ] **L.9** — Real-LLM smoke run (small `max_rounds=2`,
+      `--real-llm`) confirming the new flow end-to-end.
+- [ ] **L.10** — Doc closeout: flip §11 row to `[x]`; cross-link
+      from §10.13.1 to §11.4.
+
+### 11.10 Open questions
+
+- **Q1**: Should `max_fail_rounds` default scale with `max_rounds`
+  (e.g. `min(3, max_rounds)`)? For `max_rounds=2` runs (K.9), 3
+  consecutive fail-rounds is unreachable — the loop will exit on
+  `completed_rounds >= max_rounds` first. Probably fine; surfaces only
+  as a small wasted attempt in the worst case.
+- **Q2**: `consecutive_fails` resets to 0 on any success. Should
+  it instead persist a running tally so an iteration with pattern
+  fail-fail-success-fail-fail-success-fail-fail-fail still aborts?
+  Current semantics says "no" — the success "earned" a fresh budget.
+  Revisit if real runs show pathological alternation.
+- **Q3**: Should the formal round itself have a separate
+  `attempts_per_formal_round` budget, since formal runs are 50–100×
+  longer (one failed formal attempt is much more expensive than one
+  failed trial attempt)? Defer to v2 of Phase L if the v1 evidence
+  shows formal-attempt waste.
+
+### 11.11 Acceptance + rollback
+
+**Acceptance**: a 3-iteration `run_exploration_adaptive.py` smoke run
+on lilab with `--max_rounds 3 --attempts_per_round 3 --max_fail_rounds 3`
+and a small model (`punet`) shows: (a) at least one iteration completes
+all 3 rounds including formal, (b) no iteration spins past
+`max_rounds × attempts_per_round = 9` total attempts, (c) when an
+iteration is intentionally given an absurdly tight time budget (say
+0.01 min), it aborts with `termination_reason == "aborted_fail_rounds"`
+and the proposer for the next iteration sees Trigger B's reason string.
+
+**Rollback**: Phase L is a single contiguous diff to
+`ml_hyperparameter_tune_agent.py` plus additive schema fields. Revert
+is `git revert <L.2 commit>` plus dropping the new schema fields
+(backward-compat: old records without `round_index` /
+`attempt_in_round` should still validate, so add as `Optional` with
+`None` default).
+
+---
+
+## 12. Phase M — Formal-mode sample-set fix (design 2026-04-19)
+
+### 12.1 Why this is needed
+
+Investigation of the `exploit_cnn_v2_0418` run surfaced a bug that
+invalidates formal-round score rankings:
+
+> Iterations 004 (`auxiliary_pyramid_skip_wavenet`) and 007
+> (`dual_cycle_skipgated_wavenet_xl`) both posted a formal score of
+> **5.8246** to full float64 precision, despite running different
+> architectures, different losses (`focal_cw` vs `ce`), and different
+> learning rates (3e-4 vs 6e-4). Their per-file vectors were
+> byte-identical on files 10 and 19 and differed only on file 0.
+
+Root cause, located in `nodes/ml_hyperparameter_tune_agent.py:653-667`:
+
+```python
+if trial_config.mode in ("trial", "formal"):
+    train_sample_set = build_sample_set(
+        is_trial=True,                          # hardcoded
+        trial_strategy=trial_config.trial_strategy,   # copies planner choice
+        trial_portion=trial_config.trial_portion,
+        ...
+    )
+    eval_sample_set = build_sample_set(
+        is_trial=True,                          # hardcoded
+        trial_strategy=trial_config.eval_strategy,
+        trial_portion=trial_config.eval_portion,
+        ...
+    )
+```
+
+Consequences:
+
+1. The `is_trial=False` branch inside `build_sample_set` (which would
+   return `{file_index: [0..199]}` — full coverage of one file) is
+   **never reached** for a formal round.
+2. Whatever `trial_strategy` the planner chose for the trial rounds
+   (typically `"anchors"` in this run) is silently carried into the
+   formal round. Formal mode therefore trains and evaluates on the
+   same 3 anchor files (0, 10, 19) as trial mode.
+3. Line 614 already promotes `eval_portion → 1.0` for formal, so eval
+   covers all 200 segments **of those 3 anchor files** — 600 segments,
+   not the full 4000. The `file_vector` has non-None entries only
+   at indices 0, 10, 19.
+4. With only 3 files scored and a 256-class argmax output head,
+   different architectures that converge to the same dominant-class
+   byte pattern on files 10 and 19 produce byte-identical PSDs,
+   byte-identical SNRs, byte-identical per-file scores, and
+   byte-identical aggregate scores. The 5.8246 collision is the
+   signature of this degeneracy, not a genuine score tie.
+
+Until Phase M is merged, formal-round scores cannot be used to rank
+architectures — they reward accidentally-colliding argmax collapses
+on the anchor subset.
+
+### 12.2 New semantics — formal-mode sample-set invariants
+
+| Axis | Trial | Formal (after Phase M) |
+|------|-------|----------------------|
+| training strategy | `plan.trial_strategy` (planner choice) | **`formal_strategy`** (operator input; default `"snapshot"`) |
+| training portion | `plan.trial_portion` | **`formal_portion`** (operator input; default `0.1`) |
+| train_portion | `plan.train_portion` | **`formal_train_portion`** (operator input; default `1.0`) |
+| eval strategy | `plan.eval_strategy` | **locked to `"snapshot"`** — not configurable |
+| eval_portion | `plan.eval_portion` | **locked to `1.0`** — not configurable |
+
+Rationale for locking the eval side: the *entire point* of a formal
+round is that its score is comparable across architectures. Letting
+operators configure the eval scope re-opens the door to anchor-only
+evals and architecture-collision artifacts. The training side stays
+configurable because operators legitimately need to control training
+cost and the degree of data exposure when promoting a trial to formal.
+
+### 12.3 Schema additions
+
+Three new fields on `HyperparamTuningInput`, grouped under a new
+`# --- Formal-mode training levers ---` comment:
+
+| Field | Type | Default | Purpose |
+|-------|------|---------|---------|
+| `formal_strategy` | `Literal["snapshot", "anchors", "target"]` | `"snapshot"` | Training-side sampling strategy in formal mode. Overrides `plan.trial_strategy` on any round promoted to formal. |
+| `formal_portion` | `float [0.0, 1.0]` | `0.1` | Fraction of segments per file for formal training scope. |
+| `formal_train_portion` | `float [0.01, 1.0]` | `1.0` | Per-epoch iteration fraction from the formal training scope. |
+
+No `formal_eval_strategy` / `formal_eval_portion` fields are added —
+those are hardcoded invariants in `ml_hyperparameter_tune_agent.py`.
+
+### 12.4 CLI surface
+
+Three new flags on `nodes/ml_hyperparameter_tune_agent.py` main parser
+and propagated through every upstream wrapper:
+
+```
+--formal_strategy {snapshot,anchors,target}   (default: snapshot)
+--formal_portion FLOAT                        (default: 0.1)
+--formal_train_portion FLOAT                  (default: 1.0)
+```
+
+Wrappers that need the forward (identified by grep on
+`HyperparamTuningInput(` / `trial_strategy=`):
+
+- `run_exploration_adaptive.py` — add the 3 flags, forward to tuner.
+- `run_exploration.py` — same.
+- `run_comparison.py` — same.
+- `workflows/model_exploration.py` — accept as kwargs, forward.
+- `agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py` —
+  add as kwargs, set defaults, forward into `HyperparamTuningInput`.
+- `sdsc_submission_scripts/run_exploration_test.py`,
+  `sdsc_submission_scripts/run_one_iteration.py` — same.
+
+### 12.5 Tuner logic change
+
+Replace `ml_hyperparameter_tune_agent.py` lines ~612–647 with a
+mode-gated cfg block. Final `TrialConfig` fields read from the chosen
+bundle:
+
+```python
+if mode == "formal":
+    cfg_trial_strategy = agent_input.formal_strategy
+    cfg_trial_portion  = agent_input.formal_portion
+    cfg_train_portion  = agent_input.formal_train_portion
+    cfg_eval_strategy  = "snapshot"   # LOCKED
+    cfg_eval_portion   = 1.0          # LOCKED
+elif mode == "trial":
+    cfg_trial_strategy = plan.trial_strategy
+    cfg_trial_portion  = plan.trial_portion
+    cfg_train_portion  = plan.train_portion
+    cfg_eval_strategy  = plan.eval_strategy
+    cfg_eval_portion   = plan.eval_portion
+else:  # single_file
+    cfg_trial_strategy = "snapshot"
+    cfg_trial_portion  = plan.trial_portion
+    cfg_train_portion  = plan.train_portion
+    cfg_eval_strategy  = "snapshot"
+    cfg_eval_portion   = 1.0
+```
+
+The two `build_sample_set(is_trial=True, ...)` calls are left intact
+— `is_trial=True` in the builder just routes the sampling logic;
+downstream inference/scoring do not branch on it. The fix is entirely
+about which `(strategy, portion)` tuple is passed in.
+
+The separate promotion at line 614 (`eval_portion = plan.eval_portion
+if mode == "trial" else 1.0`) is removed — its job is now done inside
+the mode-gated block.
+
+### 12.6 Files touched
+
+| File | Change |
+|------|--------|
+| `agent/schemas/hyperparam_tuning.py` | Add 3 fields on `HyperparamTuningInput`. |
+| `nodes/ml_hyperparameter_tune_agent.py` | Mode-gated cfg block + 3 new argparse flags. |
+| `agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py` | Pass-through for the 3 flags. |
+| `run_exploration_adaptive.py` | Add CLI flags + forward. |
+| `run_exploration.py` | **Defaults-only** (hardcoded wrapper with no CLI; picks up snapshot/0.1/1.0 via workflow defaults). |
+| `run_comparison.py` | Add CLI flags + forward to tuner subprocess. |
+| `workflows/model_exploration.py` | Accept kwargs, forward to `local_validated_model`. |
+| `sdsc_submission_scripts/run_exploration_test.py` | **Defaults-only** (hardcoded smoke test with no CLI; picks up defaults via workflow). |
+| `sdsc_submission_scripts/run_one_iteration.py` | Add CLI flags + forward. |
+| `tests/unit/agent/tune_ml_hyperparam_agent/test_formal_sample_set.py` | New unit test (see §12.7). |
+
+### 12.7 Test plan
+
+One new unit test file
+`tests/unit/agent/tune_ml_hyperparam_agent/test_formal_sample_set.py`
+covering the invariants:
+
+1. **Formal default produces 20-file snapshot training**: construct a
+   `TrialConfig` with `mode="formal"` and defaults, call
+   `build_sample_set`, assert `len(sample_set) == 20` and each file
+   has ~20 segments (`0.1 × 200`).
+2. **Formal eval is locked to full snapshot**: same setup, eval-side
+   sample_set has `len == 20` and each file has 200 segments.
+3. **Operator override respected on training side**: set
+   `formal_portion=0.5`, assert each file has ~100 segments.
+4. **Eval lock is immovable**: set `eval_portion=0.01` on the plan
+   object; assert the formal-mode eval sample_set still has
+   `len==20` with 200 segments per file.
+5. **Trial mode unchanged**: regression guard — `mode="trial"` with
+   planner-supplied `trial_strategy="anchors"` still produces a
+   3-file sample_set.
+
+No integration test is added — Phase M's contract is exhaustively
+covered by the unit test, and the existing K.9 dual-mode tests will
+catch any downstream breakage in the tuner agent loop.
+
+### 12.8 Phased implementation checklist
+
+- [x] **M.1** — Add `formal_strategy` / `formal_portion` /
+  `formal_train_portion` fields to `HyperparamTuningInput`
+  (defaults snapshot / 0.1 / 1.0).
+- [x] **M.2** — Replace the `trial_config` build block in
+  `ml_hyperparameter_tune_agent.py` with the mode-gated cfg. Removed
+  the now-redundant `eval_portion = ... if mode == "trial" else 1.0`
+  line.
+- [x] **M.3** — Added the 3 new CLI flags to the agent's argparse
+  and forward them into `HyperparamTuningInput()`.
+- [x] **M.4** — Updated
+  `agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py` to
+  accept and forward the 3 kwargs with matching defaults.
+- [x] **M.5** — Propagated the flags through the CLI-driven
+  wrappers (`workflows/model_exploration.py`,
+  `run_exploration_adaptive.py`, `sdsc_submission_scripts/run_one_iteration.py`,
+  `run_comparison.py`). Deviation: `run_exploration.py` and
+  `sdsc_submission_scripts/run_exploration_test.py` are hardcoded
+  wrappers with no CLI — left defaults-driven (they pick up
+  snapshot/0.1/1.0 through the workflow default chain). §12.6
+  updated to note which wrappers are CLI-propagated vs defaults-only.
+- [x] **M.6** — Wrote `tests/unit/agent/tune_ml_hyperparam_agent/test_formal_sample_set.py`
+  covering the 5 invariants in §12.7 + 1 extra single-file-mode
+  regression guard (6 tests). **Refactor deviation**: extracted the
+  mode dispatch into a pure module-level helper
+  `_resolve_sample_set_cfg(mode, agent_input, plan) -> dict` in
+  `nodes/ml_hyperparameter_tune_agent.py` so the tests can exercise
+  the dispatch directly. The helper replaces the inline `if mode ==
+  "formal"` block at §12.5 one-for-one — no behavioural change, just
+  testability. Also updated the pre-existing
+  `test_formal_round_builds_two_sample_sets` which asserted
+  `train_portion == 0.1` (pinned pre-M buggy behaviour) to assert
+  `train_portion == 1.0` (the formal_train_portion default).
+- [x] **M.7** — Verified the M.6 helper + propagation against the
+  three test layers called out in this section (2026-04-19, all green
+  in 101s):
+    - `tests/unit/agent/tune_ml_hyperparam_agent/test_formal_sample_set.py`
+      — 6/6 (the 5 invariants in §12.7 + the single-file regression).
+    - `tests/unit/agent/tune_ml_hyperparam_agent/` — full suite
+      (307 tests, including the updated
+      `test_formal_round_builds_two_sample_sets`).
+    - `tests/integration/workflows/test_k9_invented_model_dual_mode.py`
+      — 1/1 in pseudo mode (no API, no GPU). This is the K.9 hop the
+      checklist requires; the dual-mode `--real-api-call` path is
+      out of scope here.
+  Commit then bundles the 10 Phase M files (schema + tuner +
+  protocol + 4 wrappers + 2 test files + this doc) into a single
+  "bug fix + test" commit, per the original M.7 plan.
+- [ ] **M.8** — Relaunch the v2_0418 runs (killed on 2026-04-19
+  before starting Phase M) with the fix in place so formal scores
+  become architecturally comparable again.
+
+### 12.9 Acceptance + rollback
+
+**Acceptance**: unit test passes; K.9 pseudo-mode integration test
+still passes; a fresh `run_exploration_adaptive.py` smoke iteration
+produces a formal record whose `file_vector` has **20 non-None
+entries** (not 3), whose `training_psd_segments` reflects
+`0.1 × 200 × 20 = 400` (or whatever the configured formal_portion
+implies), and whose `eval_psd_segments == 20 × 200 = 4000`.
+
+**Rollback**: Phase M is an additive schema change + a contained
+replacement of one code block. `git revert` is safe. The three
+schema fields have defaults so existing callers that don't pass
+them continue to work.
