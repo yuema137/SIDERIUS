@@ -114,15 +114,21 @@ def _mock_cuda(monkeypatch):
 
 @pytest.mark.dual_mode
 def test_invented_model_type_triggers_k2_5_8_fallback_path(
-    tmp_path, request, monkeypatch
+    tmp_path, request, monkeypatch, capsys
 ):
-    """K.9.1 scaffold — agent runs the 2-round invented-model_type loop
-    end-to-end without crashing.
+    """K.9 — agent runs the 2-round invented-model_type loop end-to-end.
 
-    Asserts only the bare minimum needed to prove the wiring (plugin
-    registration, mocked CUDA, canned bridge + sandbox, schema-valid
-    output). Deeper Layer 1-4 assertions on stdout, per-record JSON,
-    planner reaction, and ``gate_exhaustion`` land in K.9.2.
+    Layered assertions (mirrors the K.8.1 evidence layout):
+      Layer 1 — gate stdout: K.2.5-8 warning + verdict line are present.
+      Layer 2 — per-record memory: ``inference_batch_uncalibrated``,
+                ``vram_budget_gb``, ``vram_estimate_gb`` all populated;
+                round 1 over budget, round 2 fits.
+      Layer 3 — planner reaction (pseudo only): round 2's plan() call
+                receives the K.6 budget kwargs (``trial_vram_budget_gb``,
+                ``last_vram_estimate_gb``, ``last_mode``); the canned
+                planner output lowers ``hidden_dim`` from round 1.
+      Layer 4 — ``gate_exhaustion is None`` (success path); best score
+                populated from the canned sandbox.
     """
     from tests.conftest import _is_real_llm, _is_real_training
     from tests.helpers.recording_llm_bridge import RecordingLLMBridge
@@ -197,11 +203,120 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(
 
     output = agent.run(agent_input)
 
-    # --- Minimum scaffold assertions (Layer 1-4 added in K.9.2) ---
+    # --- Smoke / wiring assertions ---
     assert isinstance(output, HyperparamTuningOutput)
     HyperparamTuningOutput.model_validate(output.model_dump())
     assert output.run_name == run_name
     assert output.model_type == _PLUGIN_MODEL_TYPE
-    # Round 1 is OOM-skipped; round 2 reaches the sandbox and succeeds.
-    # Both rounds are persisted as records.
-    assert len(output.all_records) == 2
+    # Pseudo mode: round 1 OOM-skipped, round 2 succeeds → 2 records.
+    # Real-LLM mode is exempt because the LLM may pick differently.
+    if bridge is not None:
+        assert len(output.all_records) == 2
+
+    # ------------------------------------------------------------------
+    # Layer 1 — gate stdout (capsys). Both modes.
+    # ------------------------------------------------------------------
+    # The K.2.5-8 warning fires unconditionally for unregistered model_type;
+    # the verdict line follows when the gate runs to completion (no crash).
+    stdout = capsys.readouterr().out
+    assert "!!! [evaluate_vram_skill]" in stdout, (
+        "K.2.5-8 warning line missing — fallback path not exercised."
+    )
+    assert _PLUGIN_MODEL_TYPE in stdout, (
+        f"Warning line should cite the invented model_type {_PLUGIN_MODEL_TYPE!r}."
+    )
+    assert "(25)" in stdout, (
+        "Warning should cite the runtime fallback inference_batch (25)."
+    )
+    # Verdict line printed by the wrapper after the warning. Both 'YES' (round 2
+    # fits) and 'NO' (round 1 over budget) outcomes are reachable here.
+    assert "Feasible" in stdout, "Gate should print a verdict line after the warning."
+
+    # ------------------------------------------------------------------
+    # Layer 2 — per-record memory. Pseudo mode only (real-LLM may diverge).
+    # ------------------------------------------------------------------
+    if bridge is not None:
+        oom_records = [r for r in output.all_records if r.status == "skipped_oom_risk"]
+        success_records = [r for r in output.all_records if r.status == "success"]
+        assert len(oom_records) == 1, "Round 1 should be the only OOM-skipped record."
+        assert len(success_records) == 1, "Round 2 should be the only success record."
+        oom_record = oom_records[0]
+        success_record = success_records[0]
+
+        # K.2.5-8 flag — set on every gate-touched record for an unregistered model_type.
+        assert oom_record.memory.inference_batch_uncalibrated is True
+        assert success_record.memory.inference_batch_uncalibrated is True
+
+        # vram_budget_gb is the binding ceiling = min(operator_budget, 0.8×free).
+        # Mocked free=20 GB so the cap=16 GB never binds; operator's 0.1 GB wins.
+        assert oom_record.memory.vram_budget_gb == pytest.approx(0.1)
+        assert success_record.memory.vram_budget_gb == pytest.approx(0.1)
+
+        # vram_estimate_gb populated on both records; round 1 over, round 2 under.
+        assert oom_record.memory.vram_estimate_gb is not None
+        assert success_record.memory.vram_estimate_gb is not None
+        assert oom_record.memory.vram_estimate_gb > 0.1, (
+            f"Round 1 should be over budget; got {oom_record.memory.vram_estimate_gb} GB."
+        )
+        assert success_record.memory.vram_estimate_gb < 0.1, (
+            f"Round 2 should fit; got {success_record.memory.vram_estimate_gb} GB."
+        )
+
+    # ------------------------------------------------------------------
+    # Layer 3 — planner reaction. Pseudo mode only (bridge.calls is the
+    # whole point; the real LLMBridge has no recorded-calls surface and
+    # the real LLM is free to pick its own plan).
+    # ------------------------------------------------------------------
+    if bridge is not None:
+        plan_calls = [c for c in bridge.calls if c[0] == "plan"]
+        assert len(plan_calls) >= 2, (
+            f"Expected ≥2 plan() calls (one per round); got {len(plan_calls)}."
+        )
+
+        # Round 2's plan() kwargs carry the K.6 [ACTIVE RESOURCE BUDGETS] inputs
+        # the agent forwards. Mirrors the prompt-block contract end-to-end.
+        # Note: ``last_mode`` is sourced from the prior record's ``time_mode``
+        # (agent ml_hyperparameter_tune_agent.py:543), and K.9 disables the time
+        # gate (trial_time_budget_minutes=None) so ``time_mode`` is never set
+        # and ``last_mode`` is legitimately None here. We don't assert on it.
+        round_2_kwargs = plan_calls[1][4]
+        assert round_2_kwargs["trial_vram_budget_gb"] == pytest.approx(0.1)
+        assert round_2_kwargs["last_vram_estimate_gb"] is not None
+        assert round_2_kwargs["last_vram_estimate_gb"] == pytest.approx(
+            oom_record.memory.vram_estimate_gb
+        ), "Round 2 should see round 1's vram_estimate_gb in last_vram_estimate_gb."
+
+        # Round 2's memory_history (positional arg) carries round 1's full record,
+        # including the same vram_estimate_gb — proves K.6 history-block plumbing.
+        round_2_history = plan_calls[1][1]
+        assert len(round_2_history) >= 1, (
+            "Round 2's memory_history should include round 1's record."
+        )
+        assert round_2_history[-1]["memory"]["vram_estimate_gb"] == pytest.approx(
+            oom_record.memory.vram_estimate_gb
+        )
+
+        # Canned planner reaction: round 2 lowers hidden_dim from 2048 → 128
+        # in response to the round 1 over-budget verdict.
+        h_round1 = oom_record.params["model_config"]["hidden_dim"]
+        h_round2 = success_record.params["model_config"]["hidden_dim"]
+        assert h_round2 < h_round1, (
+            f"Round 2 should react by lowering hidden_dim; got {h_round1} → {h_round2}."
+        )
+
+    # ------------------------------------------------------------------
+    # Layer 4 — gate_exhaustion + best score.
+    # ------------------------------------------------------------------
+    # Success path zeroes gate_exhaustion (§10.13.1) — any success in the run
+    # means "the gate didn't exhaust the budget; the next iteration doesn't
+    # need a budget-shrink hint."
+    assert output.gate_exhaustion is None, (
+        f"Success path should zero gate_exhaustion; got {output.gate_exhaustion!r}."
+    )
+
+    # Best score: pseudo mode gets the canned 0.65 verbatim; real-LLM mode
+    # only checks population (the real LLM's plan may produce any score).
+    if bridge is not None:
+        assert output.best_denoising_score == pytest.approx(0.65)
+    else:
+        assert output.best_denoising_score is not None
