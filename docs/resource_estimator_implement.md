@@ -2038,33 +2038,196 @@ planning, both addressed:
 - [x] Verify: `pytest tests/unit/agent/ml_model_proposal_agent/ -q`
       → 275/275 green.
 
-#### K.8 Smoke (mirror Phase H1b) [ ]
+#### K.8 Co-budget smoke + cross-iteration awareness [ ]
 
-- [ ] Re-launch `explore_novel_v1` with
-      `--trial_vram_budget_gb 4 --formal_vram_budget_gb 8` under
-      intentional contention (a second process holding ~25 GB on the
-      same GPU).
-- [ ] Acceptance:
-      - Gate rejects oversize configs against the 4 GB budget, **not**
-        against momentary free-VRAM (no `"GPU has only 0.01 GB free"`
-        aborts when budget is set).
-      - The LLM's next attempt picks the right lever per the §10.3
-        guidance — first batch_size when only one factor is over and
-        the lever has room, depth/width when batch can't satisfy both.
-      - Joint short-circuit holds: time skill's warmup not invoked on
-        VRAM-failed attempts (verifiable from the skill's stdout
-        signature in the run log).
-      - `experiment_history` for round N+1 carries round N's
-        `vram_estimate_gb` + `vram_budget_gb` alongside the
-        time fields (Phase J already proved the time-side propagation
-        works; this verifies the VRAM-side mirror).
-- [ ] Gate-exhaustion exercise: deliberately under-budget one
-      iteration (e.g. `--trial_vram_budget_gb 0.5`) so the tuner
-      cannot escape the gate; verify the next iteration's proposer
-      prompt includes `[PRIOR ITERATION GATE EXHAUSTION]` with the
-      correct counts and factors, AND the next proposal proposes a
-      qualitatively lighter architecture (parameters and/or layer
-      count substantially reduced versus the failing baseline).
+**Goal**: prove end-to-end with a real LLM that (a) the joint VRAM+time
+gate fires correctly and the tuner adapts, and (b) when the gate
+exhausts, the next iteration's proposer sees the §10.13.5 report and
+proposes a qualitatively lighter architecture.
+
+**Constraints**: fast & light. Two short workflow runs, single small
+model (`wavenet`), 1 file (`--target_files 6`), `--max_epochs 1`,
+OpenAI tiered config. Each run should finish in ≤10 min on lilab.
+
+##### K.8.0 Pre-flight (no LLM yet)
+
+- [ ] **Env validation**
+      - lilab GPU visible: `nvidia-smi` shows ≥30 GB free on RTX 5090.
+      - `OPENAI_API_KEY` set.
+      - Workspaces clean: `/home/klz/Data/SIDEREIS_DATA/exploration_k8a`
+        and `..._k8b`.
+      - Seed run outputs exist for `wavenet` (workflow source path).
+- [ ] **Decide instrumentation level for Layer 4 inspection**
+      - **Option A (preferred, ~15 LOC)**: add a `--debug_dump_prompts`
+        CLI flag that writes each iteration's rendered proposing-stage
+        system prompt to
+        `{workspace}/debug/iter{N}_proposing_system_prompt.md`.
+        Lets us audit the exact text the LLM saw.
+      - **Option B (no code change)**: rely on indirect evidence — if
+        iter-2 proposer output shows substantially lighter dims +
+        budget-aware motivation, the block must have reached it.
+        Cheaper but weaker.
+      - Recommended: Option A — one-time hook, makes the smoke
+        audit-able and is reusable for future smoke runs.
+
+##### K.8.1 Run A — Co-budget adaptation (single iteration, normal-tight budget)
+
+**Hypothesis**: with `--trial_vram_budget_gb 4 --trial_time_budget_minutes 5`,
+the tuner sees at least one round rejected by the budget gate and
+adapts (lower `batch_size` or model dims) until a config trains
+successfully.
+
+- [ ] **Launch** (run inside `tmux` so output is captured):
+```
+PYTHONPATH=.:ml_models .venv/bin/python run_exploration_adaptive.py \
+    --run_name k8a_co_budget \
+    --max_iterations 1 --max_rounds 3 --max_epochs 1 \
+    --trial_strategy target --target_files 6 \
+    --trial_vram_budget_gb 4 --formal_vram_budget_gb 8 \
+    --trial_time_budget_minutes 5 \
+    --advice tuner_advice/exploration_adaptive_v1.json \
+    --llm_config llm_configs/openai_tiered_v1.json \
+    --exploration_mode exploit
+```
+
+- [ ] **Layer 1 — skill stdout (gate decision)**
+      - VRAM gate's effective limit equals `min(budget=4 GB, free×0.8)`
+        — when free is large, **budget binds** (no
+        `"GPU has only X GB free"`-only abort).
+      - At least one round shows `[evaluate_vram_skill] OVER BUDGET`
+        with the budget cited.
+      - On the same over-budget round the time-skill warmup line is
+        **absent** (joint short-circuit per K.3).
+- [ ] **Layer 2 — per-record JSON (`{workspace}/tune_k8a_co_budget.json`)**
+      - At least one `status == "skipped_oom_risk"` record exists.
+      - Its `reason` cites the operator budget, not free-VRAM.
+      - Round N+1's `experiment_history` block carries round N's
+        `vram_estimate_gb` AND `vram_budget_gb` (mirror of K.6's
+        time-side propagation; satisfies §10.15 acceptance line 2).
+- [ ] **Layer 3 — planner lever choice (§10.3 guidance)**
+      - When ratio over budget is small AND `batch_size > 1`, planner
+        reduces `batch_size` first (cheap lever).
+      - When `batch_size == 1` and still over budget, planner reduces
+        depth/width (architectural lever).
+      - Spot-check `planner_reasoning` text references the budget.
+- [ ] **Layer 4 — tuner output (`HyperparamTuningOutput`)**
+      - At least one round trains successfully → `gate_exhaustion = None`
+        (success path zeroes the field per §10.13.1).
+      - `best_denoising_score` is populated.
+      - `completed_rounds == 3`.
+
+##### K.8.2 Run B — Gate exhaustion + cross-iteration awareness (2 iterations, very tight budget)
+
+**Hypothesis**: with `--trial_vram_budget_gb 0.5`, every wavenet config
+fails the gate in iter 1; iter 1's `gate_exhaustion` field is populated
+and propagates to iter 2's proposer prompt; iter 2 proposes a
+qualitatively lighter architecture.
+
+- [ ] **Launch**:
+```
+PYTHONPATH=.:ml_models .venv/bin/python run_exploration_adaptive.py \
+    --run_name k8b_gate_exhaustion \
+    --max_iterations 2 --max_rounds 3 --max_epochs 1 \
+    --trial_strategy target --target_files 6 \
+    --trial_vram_budget_gb 0.5 --formal_vram_budget_gb 1 \
+    --trial_time_budget_minutes 5 \
+    --advice tuner_advice/exploration_adaptive_v1.json \
+    --llm_config llm_configs/openai_tiered_v1.json \
+    --exploration_mode explore \
+    --debug_dump_prompts            # only if Option A chosen in K.8.0
+```
+
+- [ ] **Layer 1 — iter 1 tuner output (`tune_k8b_gate_exhaustion.json` after iter 1)**
+      - Every `all_records[]` entry has `status == "skipped_oom_risk"`
+        (or other failure — none `success`).
+      - `gate_exhaustion` is non-None and contains:
+        - `total_attempts == 3` (or `max_rounds`).
+        - `vram_gated_attempts >= 1`.
+        - `active_mode == "trial"`.
+        - `vram_budget_gb == 0.5`.
+        - `baseline_vram_factor > 1.0` (over-budget).
+        - `worst_vram_factor >= baseline_vram_factor`.
+        - `summary_message` is a non-empty sentence.
+- [ ] **Layer 2 — workflow propagation (`run_output_k8b_gate_exhaustion.json` or workflow log)**
+      - Iter 2's `ProposalInput.prior_iteration_gate_exhaustion`
+        deep-equals iter 1's `tune_output.gate_exhaustion` (round-trip
+        via `model_dump()`).
+      - Confirms K.7.5 (workflow retains output) + K.7.4 (protocol
+        surfaces it) wiring works in real run, not just unit tests.
+- [ ] **Layer 3 — iter 2 proposing-stage system prompt** *(requires Option A instrumentation)*
+      - File `debug/iter2_proposing_system_prompt.md` exists.
+      - Contains literal header `[PRIOR ITERATION GATE EXHAUSTION]`.
+      - Contains iter 1's `summary_message`.
+      - Contains the verdict paragraph
+        (`"propose an architecture that fits the budgets"`).
+      - File `debug/iter1_proposing_system_prompt.md` does NOT contain
+        the header (no prior iteration to report).
+- [ ] **Layer 4 — iter 2 proposer output (`propose_*.json` for iter 2)**
+      - `model_name` differs from iter 1's.
+      - **Lighter architecture**: total parameter count substantially
+        smaller than iter 1's failing baseline (heuristic: ≥30%
+        reduction in either depth/width fields, or ≥50% reduction in
+        inferred param count).
+      - `motivation` text references a budget/VRAM constraint or the
+        gate-exhaustion report.
+      - `expert_advice.constraints` includes a tight VRAM bound
+        (e.g., `"VRAM<0.5"` or similar).
+- [ ] **Layer 5 (bonus) — iter 2 outcome**
+      - If iter 2's lighter model fits → at least one round succeeds,
+        `gate_exhaustion = None` for iter 2 (proves the loop
+        self-corrects).
+      - If iter 2 still exhausts → `gate_exhaustion` populated again
+        with smaller `baseline_vram_factor` than iter 1 (proves the
+        proposer moved in the right direction even if not all the way).
+
+##### K.8.3 Optional — Contention emulation (skip if K.8.1 already satisfies acceptance)
+
+Originally specified above: hold ~25 GB on the GPU via a dummy process
+and re-run K.8.1 with the same budget. Verifies the gate rejects
+against budget even when free-VRAM would have allowed differently.
+
+- [ ] Spawn dummy CUDA-tensor holder in a side process
+      (`torch.zeros(..., device="cuda")` to occupy ~25 GB).
+- [ ] Re-run K.8.1 command with `--run_name k8c_contention`.
+- [ ] Verify rejection messages still cite the operator budget (4 GB),
+      not the now-tiny free-VRAM (~6 GB).
+
+**Skip rationale**: K.8.1's tight-budget setup already exercises the
+`min(budget, free×0.8) → budget` branch when budget < free. K.8.3 only
+adds value if reviewers want the explicit contention scenario from the
+original spec; otherwise it's redundant.
+
+##### K.8.4 Acceptance summary (gates before declaring K.8 done)
+
+Per §10.15 acceptance:
+- [ ] Non-zero `skipped_oom_risk` records in K.8.1 with operator budget
+      as the binding ceiling (not free-VRAM).
+- [ ] `vram_estimate_gb` field appears in iteration N+1's
+      `experiment_history` block (planner-visible).
+
+Per K.8 acceptance above:
+- [ ] K.8.1 Layer 1–4 all pass.
+- [ ] K.8.2 Layer 1–4 all pass (Layer 5 is bonus, not required).
+
+##### K.8.5 Doc + closeout
+
+- [ ] Update progress log K.8 row with `(this commit)` + summary of
+      K.8.1 + K.8.2 evidence (counts, factors, key proof points).
+- [ ] Flip `§10.14` top-level K.8 → `[x]`.
+- [ ] If Option A instrumentation was added, decide: keep behind flag
+      (cheap, useful for future smoke runs) or revert (smaller surface
+      area).
+- [ ] Single commit covering K.8 doc updates + (if kept) the
+      debug-dump flag.
+
+**Estimated cost**: ~30–40 min wall-clock across both runs (mostly LLM
+call latency); ~$1–2 in API spend.
+
+**Open decisions for the operator**:
+1. Option A vs B for Layer 4 (recommend A).
+2. Skip K.8.3 contention emulation (recommend skip).
+3. Pinning model choice — wavenet/punet OK, or start from a heavier
+   seed (e.g., transformer) so iter 1 is guaranteed to overshoot 0.5 GB.
 
 ### 10.15 Acceptance + rollback
 
