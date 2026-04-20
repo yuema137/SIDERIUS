@@ -182,8 +182,11 @@ Each fix must land with:
 | 6-doc | `8a56e5b` | `docs: detail Commit 6 plan — pre-flight revision loop design` | 1 | +65 / −8 |
 | 6 | `2d61eeb` | `feat(proposer): pre-flight cost-check loop with up-to-3 revisions` | 4 | +872 / −89 |
 | 7 | (this commit) | `docs: mark Fix 1 + Fix 2 landed in reliable_resource_proposer.md` | 2 | (doc-only) |
+| 8 | (pending) | `test(proposer): extend N.5 dual-mode with triple-guard regression (blacklist + pre-flight + emit)` | 1 | (test-only) |
 
 **Fix 1 + Fix 2 landed** as of Commit 6 (`2d61eeb`, 2026-04-20). The proposer now (a) reads a structured `disallowed_architectural_patterns` blacklist rendered as a `[DISALLOWED PATTERNS]` sub-block under `[RECENT GATE EXHAUSTIONS]`, and (b) runs a static-formula pre-flight cost check on every draft `baseline_config`, revising up to 2× before emit. Branch total across commits 1–6: **+2,711 / −103** over 17 files, **132 new unit tests**.
+
+**Commit 8 (Triple-Guard regression test)** — pending. Extends the existing `test_n_recent_gate_exhaustions_dual_mode.py` so a single dual-mode test drives all three feedback channels on one iter-2 proposer prompt dump: `[RECENT GATE EXHAUSTIONS]` (narrative, already covered by N.5), `[DISALLOWED PATTERNS]` (Fix 1, currently unit-test-only), and `[PRE-FLIGHT REJECTION]` (Fix 2, currently unit-test-only). This replaces the originally-planned multi-hour real smoke run as §10's acceptance artifact — deterministic, <1 s runtime, no API key / GPU needed.
 
 ---
 
@@ -257,6 +260,12 @@ Each commit in §9's checklist is one atomic diff with its own verification step
 | # | Commit subject | Primary files | Verification |
 |---|----------------|---------------|--------------|
 | 7 | `docs: mark Fix 1 + Fix 2 landed in reliable_resource_proposer.md` | `docs/reliable_resource_proposer.md`, `docs/resource_estimator_implement.md` | Visual diff review; progress table row added |
+
+### 8.4 Regression test — Triple-Guard dual-mode extension (1 commit)
+
+| # | Commit subject | Primary files | Verification |
+|---|----------------|---------------|--------------|
+| 8 | `test(proposer): extend N.5 dual-mode with triple-guard regression (blacklist + pre-flight + emit)` | `tests/integration/workflows/test_n_recent_gate_exhaustions_dual_mode.py` | Pseudo-mode only: iter-1 tuner output carries `disallowed_architectural_patterns=["scan_over_T"]`; iter-2 proposer's canned bridge emits an over-budget draft then a feasible one; iter-2 prompt dumps contain all three guard blocks; emitted `ProposalOutput.preflight_factor <= 1.0` |
 
 ---
 
@@ -417,13 +426,57 @@ Each checkbox is a pre-commit gate. Do not proceed to the next commit until ever
 - [x] No code changes in this commit — docs only
 - [x] User approves doc diff → commit
 
+### Commit 8 — Triple-Guard regression test → pending
+
+**Rationale.** `test_n_recent_gate_exhaustions_dual_mode.py` (N.5) as shipped only covers the narrative `[RECENT GATE EXHAUSTIONS]` propagation (iter-1 summary reaches iter-2 prompt through a successful iter-2 filter). Fix 1's structured `[DISALLOWED PATTERNS]` sub-block and Fix 2's `[PRE-FLIGHT REJECTION]` revision loop are covered by node-layer unit tests but **not end-to-end at the workflow layer**. This commit extends N.5 into a single "Triple-Guard" regression that drives all three feedback channels on one iter-2 prompt dump. It is deterministic (<1 s, no API key, no GPU) and serves as the canonical acceptance artifact in place of §10's original multi-hour real re-run — which was deemed low-value given the three guard channels are each already covered at the unit layer.
+
+**Scenario (iter-1 → iter-2 proposer).**
+
+- **Iter 1 tuner** (extends N.5): same `GateExhaustionInfo` sentinel **plus** `disallowed_architectural_patterns=["scan_over_T"]` — this activates Fix 1's structured channel in iter 2's proposer prompt.
+- **Iter 2 proposer** (real agent, mocked bridge): the canned bridge emits the pipeline **across two proposing attempts**, with Stages 1–2 called exactly once each per Decision 6:
+  - Draft 1: `_FAKE_PROPOSING` carries `parameter_count_estimate` large enough that the static formula verdicts `factor > 1.0` at the test's `trial_time_budget_minutes` → Fix 2 rejects.
+  - Draft 2: fresh `_FAKE_PROPOSING` with a small `parameter_count_estimate` → feasible → emitted.
+- `_FAKE_PROPOSING.baseline_config.train_config` populated with the keys the pre-flight helper reads (`lr`, `epochs`, `batch_size`, `optimizer_type`, etc.) and a non-recurrent/non-scan `model_name` so the feasible draft is not itself tripping the blacklist.
+
+**Assertions on the dumped iter-2 proposing prompts** (paths: `{workspace}/{run_name}/debug/iter002_attempt{NNN}_proposing_system_prompt.md`):
+
+- Draft-1 dump contains `[RECENT GATE EXHAUSTIONS` (narrative guard, existing N.5 assertion).
+- Draft-1 dump contains `[DISALLOWED PATTERNS]` with the English description for `scan_over_T` (Fix 1 guard).
+- Draft-2 dump contains `[PRE-FLIGHT REJECTION]` with all four prescriptive numbers — `{num_params:,}`, `{estimated_minutes:.1f}`, `{factor:.1f}`, `{budget:.1f}` (Fix 2 guard).
+
+**Assertions on the emitted `ProposalOutput`:**
+
+- `preflight_factor <= 1.0` — pre-flight passed on the retry.
+- `preflight_estimated_minutes` populated (audit fields written).
+- `memo_consistency_notes` does **not** contain `PREFLIGHT_OVERBUDGET_EMITTED` (emit path was success, not exhaustion).
+
+**Assertions on bridge call count (Decision 6 invariant):**
+
+- Iter-2 bridge's `generate` called exactly **4 times** — comparison + reasoning + draft-1 proposing + draft-2 proposing — proving Stages 1–2 are not re-run on pre-flight rejection.
+
+Checklist:
+
+- [ ] Extend iter-1 tuner output: set `gate_exhaustion.disallowed_architectural_patterns = ["scan_over_T"]`
+- [ ] Derive the over-budget / feasible `parameter_count_estimate` pair from the test's `trial_time_budget_minutes` using the static formula `num_params × seg × batch × 6e-10 × total_steps` so verdicts flip deterministically; comment the arithmetic inline
+- [ ] Fill `_FAKE_PROPOSING.baseline_config.train_config` with pre-flight-consumable values (`lr`, `epochs`, `batch_size`, `optimizer_type="adamw"`, `device="cuda"`)
+- [ ] Extend `_make_canned_bridge_factory` so iter-2's bridge emits 4 outputs (comparison, reasoning, over-budget draft, feasible draft); iter-1 and iter-3 bridges remain 3-output as in current N.5
+- [ ] Assert: iter-2 draft-1 dump contains `[RECENT GATE EXHAUSTIONS` **and** `[DISALLOWED PATTERNS]` **and** the `scan_over_T` English description
+- [ ] Assert: iter-2 draft-2 dump contains `[PRE-FLIGHT REJECTION]` with all four prescriptive numeric fields formatted per Decision 7
+- [ ] Assert: emitted `ProposalOutput.preflight_factor <= 1.0` and `preflight_estimated_minutes > 0`
+- [ ] Assert: emitted `ProposalOutput.memo_consistency_notes` free of `PREFLIGHT_OVERBUDGET_EMITTED`
+- [ ] Assert: iter-2 bridge's `generate.call_count == 4` (Stages 1–2 not re-run on pre-flight rejection)
+- [ ] Existing N.5 assertions remain untouched and still pass (iter-3 narrative-propagation regression guard preserved)
+- [ ] Test command shown to user → run green → user approves commit
+
 ---
 
 ## 10. Acceptance Criterion
 
-Re-run `explore_novel_v3_0420` with identical seeds after commits 1–6 land. **Expected outcome**: iter 2 either (a) never emits a selective-scan architecture (Fix 1 blacklist enforced via the Phase N aggregate window) or (b) self-rejects during proposer-side pre-flight (Fix 2 `factor > 1.0` check catches it before commit). The tuner should see **≤1 gate-exhausted iteration** across a 4-iteration run, not 2.
+**Canonical acceptance artifact** — Commit 8's Triple-Guard dual-mode regression test. A single iter-2 prompt dump must carry all three feedback channels in the expected blocks: `[RECENT GATE EXHAUSTIONS]` (narrative), `[DISALLOWED PATTERNS]` (Fix 1), and `[PRE-FLIGHT REJECTION]` (Fix 2). The emitted `ProposalOutput` must record `preflight_factor <= 1.0` and not carry the exhaustion note. Deterministic, <1 s, no API key / GPU required. This replaces the originally-planned multi-hour real re-run.
 
-Secondary metric: the proposer's reasoning-stage LLM call count rises by at most 3× (worst-case 3 revisions per proposal); the tuner's wasted-attempt count drops by ~9× per saved iteration.
+**Deferred — opportunistic real validation.** If and when `explore_novel_v3_0420` (or a comparable explore-mode run) is re-run for unrelated reasons, observe whether iter 2 either (a) never emits a selective-scan architecture (Fix 1 blacklist enforced via the Phase N aggregate window) or (b) self-rejects during proposer-side pre-flight (Fix 2 `factor > 1.0`). Target: **≤1 gate-exhausted iteration** across a 4-iteration run versus the prior 2. Not gating on this branch.
+
+**Secondary metric** — the proposer's proposing-stage LLM call count rises by at most 3× per iteration (worst-case 3 revisions per proposal); the tuner's wasted-attempt count drops by ~9× per saved iteration.
 
 ---
 
