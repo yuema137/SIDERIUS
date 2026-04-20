@@ -1,0 +1,8 @@
+[
+  {
+    "conclusion": "Positive (round 1). hidden_dim=128 fits the 0.1 GB ceiling and produces a denoising_score of 0.65 on the trial portion. This success anchors the iteration so consecutive_fail_rounds tracking has a baseline to count from in subsequent rounds.",
+    "key_factor": "hidden_dim=128 with seg=1000 and batch=1 lands ~75 MB inside the 0.1 GB budget — a safe pick to guarantee a single successful round before the L.8 fixture deliberately switches to oversize plans.",
+    "discovery": "L.8 baseline: this is the only success in the iteration. Subsequent rounds will deliberately OOM-skip on every attempt to drive the consecutive_fail_rounds counter to max_fail_rounds=3.",
+    "memory_update": "Round 1 pinned at hidden_dim=128 as the L.8 anchor. Future analyses of this iteration's gate_exhaustion summary should expect Trigger B (Phase L) framing — 'model too large after 1 successful round' — rather than Trigger A's no-successes framing."
+  }
+]

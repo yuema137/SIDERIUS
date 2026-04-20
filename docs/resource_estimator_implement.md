@@ -2961,14 +2961,28 @@ assumptions from the pre-Phase-L design that need updating:
    `output.termination_reason == "completed"`.
 
 Add a sibling test `test_l_fail_round_abort_dual_mode.py` that:
-- Uses `max_rounds=3`, `attempts_per_round=3`,
-  `attempts_per_formal_round=3` (explicit override of the default 5
-  to keep the canned-plan count manageable), `max_fail_rounds=3`.
-- Canned planner returns oversize plans for 9 attempts in a row
+- Uses `max_rounds=4`, `attempts_per_round=3`,
+  `attempts_per_formal_round=3` (explicit override of the default 5;
+  defensive — formal-promotion is unreachable here), `max_fail_rounds=3`.
+- Canned planner returns one fits-budget plan for round 1 (the
+  success-anchor) followed by 9 oversize plans for rounds 2-4
   (3 rounds × 3 attempts, all OOM-skipped).
 - Asserts `consecutive_fail_rounds_at_exit == 3`,
   `termination_reason == "aborted_fail_rounds"`, and
-  `gate_exhaustion` is populated with Trigger B's reason string.
+  `gate_exhaustion` is populated with Trigger B's reason string
+  ("Model too large after K successful rounds" framing per §11.4).
+
+**Deviation from earlier draft**: an earlier draft of this section
+specified `max_rounds=3` with all 9 attempts OOM-skipped. That
+scenario hits Trigger A (no-successes branch) of
+`_build_gate_exhaustion`, not Trigger B — the L.3 implementation gates
+Trigger B behind `completed_rounds > 0` so the two triggers are
+mutually exclusive. The corrected design (used by the actual L.8
+fixture) inserts a successful round 1 before the fail-round burst
+so Trigger B's framing is the one validated end-to-end. Trigger A's
+no-successes path remains covered by the K-phase tests
+(`test_k7_phase_k_dual_mode.py`) and the `_build_gate_exhaustion`
+unit suite.
 
 ### 11.9 Phased implementation checklist
 
@@ -3059,9 +3073,25 @@ Add a sibling test `test_l_fail_round_abort_dual_mode.py` that:
       per non-skipped attempt — round 2 formal also calls the sandbox
       now). Pseudo-mode K.9 test passes; 338/338 tuner unit suite
       still green.*
-- [ ] **L.8** — New integration test: `test_l_fail_round_abort_dual_mode.py`
+- [x] **L.8** — New integration test: `test_l_fail_round_abort_dual_mode.py`
       with explicit `attempts_per_formal_round=3` override (default
       is 5 — see §11.8).
+      *Done 2026-04-19: dual-mode test added at
+      `tests/integration/workflows/test_l_fail_round_abort_dual_mode.py`
+      with new pseudo-data folder
+      `tests/pseudo_data/api_call_outputs/ml_hyperparameter_tune_agent_l_fail_round_abort/`
+      (10 canned plans + 1 reflect). Choreography: round 1 succeeds at
+      `hidden_dim=128` (the success-anchor for Trigger B reachability),
+      then rounds 2-4 each burn their 3-attempt budget on
+      `hidden_dim=2048` plans → 9 OOM-skips → consecutive_fails reaches
+      `max_fail_rounds=3` → abort. **Deviation from §11.8 draft:**
+      changed `max_rounds=3` → `max_rounds=4` and inserted the
+      success-anchor because the original "all-9-OOM" choreography
+      hits Trigger A (no-successes) instead of Trigger B (the L.3
+      `completed_rounds > 0` guard makes the two mutually exclusive).
+      The corrected fixture validates Trigger B's "Model too large
+      after K successful rounds" framing per §11.4. Pseudo-mode L.8
+      passes; K.9 unaffected; full tuner unit suite (338) still green.*
 - [ ] **L.9** — Real-LLM smoke run (small `max_rounds=2`,
       `--real-llm`) confirming the new flow end-to-end.
 - [ ] **L.10** — Doc closeout: flip §11 row to `[x]`; cross-link
