@@ -134,15 +134,17 @@ The observed failure mode — `SIGKILL` from the kernel — is silent and irreco
 
 ## 4. Implementation Order — The 5-Commit Plan
 
-| # | Scope | Files | Verification |
-|---|---|---|---|
-| 1 | **Design doc** | `docs/optimize_inference_and_scoring.md` (this file) | User review before landing; no code impact |
-| 2 | **Subprocess RAM hardening (Fix 1)** | `core/sandbox_executor.py` + `tests/unit/core/test_sandbox_rlimit.py` | Unit test: spawn a subprocess that allocates >24 GB and assert it raises `MemoryError` rather than SIGKILL; second test confirms normal subprocesses under the ceiling run unaffected |
-| 3 | **Parent-process instrumentation (Fix 4)** | `nodes/ml_hyperparameter_tune_agent.py` + `run_exploration_adaptive.py` + `tests/unit/agent/tune_ml_hyperparam_agent/test_memory_probe.py` | Unit test: drive a 2-iter mock workflow, assert `[MEM]` lines are present with monotonic iter indices and emit a valid `memory_trace.jsonl` entry at each boundary |
-| 4 | **Scoring micro-optimizations (Fix 2)** | `execute_tools/scoring_utils.py` + `tests/unit/execute_tools/test_scoring_utils_rfft.py` | Unit test 1 (correctness): bit-equivalence between old and new paths on a synthetic segment, `rtol=1e-7`. Unit test 2 (memory): `tracemalloc` assertion that peak allocation per segment ≤ 100 MB |
-| 5 | **Inference memory hygiene (Fix 3)** | `execute_tools/inference_single.py` | Manual smoke run (2-file inference) with `memory_profiler`, diff-note attached to the commit; no unit test (change is a `del`+`gc.collect` pattern with no observable output) |
+| # | Status | Scope | Files | Verification | Commit |
+|---|---|---|---|---|---|
+| 1 | [x] | **Design doc** | `docs/optimize_inference_and_scoring.md` (this file) | User review before landing; no code impact | `193269d` |
+| 2 | [x] | **Subprocess RAM hardening (Fix 1)** | `core/sandbox_executor.py` + `tests/unit/core/test_sandbox_rlimit.py` | Unit test: spawn a subprocess that allocates >24 GB and assert it raises `MemoryError` rather than SIGKILL; second test confirms normal subprocesses under the ceiling run unaffected | `d5ef2af` |
+| 3 | [ ] | **Parent-process instrumentation (Fix 4)** | `nodes/ml_hyperparameter_tune_agent.py` + `run_exploration_adaptive.py` + `tests/unit/agent/tune_ml_hyperparam_agent/test_memory_probe.py` | Unit test: drive a 2-iter mock workflow, assert `[MEM]` lines are present with monotonic iter indices and emit a valid `memory_trace.jsonl` entry at each boundary | — |
+| 4 | [ ] | **Scoring micro-optimizations (Fix 2)** | `execute_tools/scoring_utils.py` + `tests/unit/execute_tools/test_scoring_utils_rfft.py` | Unit test 1 (correctness): bit-equivalence between old and new paths on a synthetic segment, `rtol=1e-7`. Unit test 2 (memory): `tracemalloc` assertion that peak allocation per segment ≤ 100 MB | — |
+| 5 | [ ] | **Inference memory hygiene (Fix 3)** | `execute_tools/inference_single.py` | Manual smoke run (2-file inference) with `memory_profiler`, diff-note attached to the commit; no unit test (change is a `del`+`gc.collect` pattern with no observable output) | — |
 
 Sequence rationale: Fix 1 ships the catchable failure mode before Fix 4 relies on it for diagnostic logging. Fix 2 must land after Fix 4 so the RSS curve captured by the probe directly measures Fix 2's effect. Each commit is reversible in isolation.
+
+**Commit 2 — landed `d5ef2af` (2026-04-20)**: `_limited_preexec(gb)` + `_is_oom_failure(e)` helpers in `core/sandbox_executor.py`; `preexec_fn=_limited_preexec(_subprocess_rss_gb())` threaded into `execute_training`, `execute_inference`, `execute_scoring`; default 24 GiB ceiling, `SIDERIUS_SUBPROCESS_RSS_GB` env var override (`0` disables). `_format_subprocess_error` tags OOM-class failures (`-9` or `MemoryError` in stderr) with `[oom_host_ram]`, and the three entry points return `status="oom_host_ram"` so the orchestrator can record a structured failure. 26 new unit tests (`tests/unit/core/test_sandbox_rlimit.py`) + 23 pre-existing sandbox tests all pass.
 
 ---
 
