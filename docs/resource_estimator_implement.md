@@ -3827,10 +3827,10 @@ shrink.
 
 ### 14.N.5 Implementation checklist
 
-- [ ] **N.1** — Schema change: `ProposalInput.prior_iteration_gate_exhaustion` → `recent_gate_exhaustions` (List, default `[]`, ≤10 validator). Rewrite/delete `TestProposalInputGateExhaustion` to cover the list field.
-- [ ] **N.2** — Protocol signature change: `local_full_context` kwarg rename + body iteration. 4 new tests in a `TestRecentGateExhaustionsAggregation` class.
-- [ ] **N.3** — Workflow change: `previous_tune_output` → `recent_tune_outputs: deque(maxlen=3)`. Append after each tuner run. Pass to next iteration's protocol call. 1 new test in `TestRunWorkflowGateExhaustionPropagation` covering the 4-iteration eviction case.
-- [ ] **N.4** — Proposer formatter: rename helper + refactor to accept a list + relative-iter labels + header-arithmetic. Rename template placeholder. ~4 new tests replacing the existing K.7.6 singular-rendering cases.
+- [x] **N.1** — Schema change: `ProposalInput.prior_iteration_gate_exhaustion` → `recent_gate_exhaustions` (List, default `[]`, ≤10 validator). Rewrite/delete `TestProposalInputGateExhaustion` to cover the list field. *(Landed 2026-04-20 — commit `ac32885`; tests in `TestProposalInputRecentGateExhaustions` green.)*
+- [x] **N.2** — Protocol signature change: `local_full_context` kwarg rename + body iteration. 4 new tests in a `TestRecentGateExhaustionsAggregation` class. *(Landed 2026-04-20 — commit `ac32885`; tests in `TestLocalFullContextRecentGateExhaustionsAggregation` green.)*
+- [~] **N.3** — Workflow change: `previous_tune_output` → `recent_tune_outputs: deque(maxlen=3)`. Append after each tuner run. Pass to next iteration's protocol call. 1 new test in `TestRunWorkflowGateExhaustionPropagation` covering the 4-iteration eviction case. *(In progress 2026-04-20 — workflow code landed; 4-iter eviction test pending.)*
+- [~] **N.4** — Proposer formatter: rename helper + refactor to accept a list + relative-iter labels + header-arithmetic. Rename template placeholder. ~4 new tests replacing the existing K.7.6 singular-rendering cases. *(In progress 2026-04-20 — helper + call-sites + template placeholder landed; test file renamed via `git mv`, rewrite pending.)*
 - [ ] **N.5** — Dual-mode integration test per §14.N.4. Pseudo-data folder under `tests/pseudo_data/api_call_outputs/` mirroring the L.8 pattern.
 - [ ] **N.6** — Doc closeout: flip this checklist to `[x]`; append a "closed" row to the top-of-doc tracker.
 

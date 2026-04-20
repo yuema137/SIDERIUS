@@ -775,6 +775,69 @@ class TestRunWorkflowGateExhaustionPropagation:
         )
         assert iter2_propose_input.recent_gate_exhaustions == []
 
+    def test_four_iteration_deque_evicts_oldest(self, workflow_env):
+        """Phase N (§14.N.4) — 4-iteration mock loop where every iter emits
+        a sentinel gate_exhaustion. The workflow's ``recent_tune_outputs``
+        is a ``deque(maxlen=3)``, so by the time iteration 4's proposer is
+        called, the deque holds iters 1, 2, 3 (oldest-first, iter 1 not yet
+        evicted); and then iter 4's tune-end append evicts iter 1, leaving
+        iters 2, 3, 4 — which a hypothetical iter 5 would see.
+
+        Assertions follow §14.N.4's "iter N's protocol call receives the
+        deque containing iters (N-3, N-2, N-1)" rule, plus the eviction
+        claim via a 5th iteration's view."""
+        # Distinct sentinel summaries so we can assert identity + order
+        gates = [
+            GateExhaustionInfo(
+                total_attempts=1, vram_gated_attempts=1, time_gated_attempts=0,
+                other_failure_attempts=0, active_mode="trial",
+                vram_budget_gb=4.0, time_budget_minutes=20.0,
+                baseline_vram_estimate_gb=6.4, baseline_vram_factor=1.6,
+                baseline_time_estimate_minutes=8.0, baseline_time_factor=0.4,
+                worst_vram_factor=2.0, worst_time_factor=0.6,
+                summary_message=f"SENTINEL-iter{i}",
+            )
+            for i in range(1, 6)
+        ]
+        tunes = []
+        for i, gate in enumerate(gates, start=1):
+            t = _make_tune_output(model_type=f"model_{i}", score=1.5 + 0.1 * i)
+            t.gate_exhaustion = gate
+            tunes.append(t)
+
+        names = iter(f"model_{i}" for i in range(1, 6))
+        workflow_env["propose"].return_value.run.side_effect = (
+            lambda inp: _make_proposal_output(next(names))
+        )
+        workflow_env["tune"].return_value.run.side_effect = tunes
+
+        run_workflow(
+            data_dir=workflow_env["data_dir"],
+            model_types=["punet"],
+            source_run_name="v1",
+            workspace=workflow_env["workspace"],
+            run_name="test_run",
+            max_iterations=5,
+        )
+
+        call_args = workflow_env["propose"].return_value.run.call_args_list
+
+        # Iter 4's proposer sees iters 1, 2, 3 — deque at capacity (3), no
+        # eviction yet (that happens after iter 4's own tune-end append).
+        iter4 = call_args[3][0][0]
+        assert len(iter4.recent_gate_exhaustions) == 3
+        summaries4 = [g.summary_message for g in iter4.recent_gate_exhaustions]
+        assert summaries4 == ["SENTINEL-iter1", "SENTINEL-iter2", "SENTINEL-iter3"]
+
+        # Iter 5's proposer observes the eviction: iter 1 gone, window slid
+        # forward to iters 2, 3, 4. This is the §14.N.4 eviction claim.
+        iter5 = call_args[4][0][0]
+        assert len(iter5.recent_gate_exhaustions) == 3
+        summaries5 = [g.summary_message for g in iter5.recent_gate_exhaustions]
+        assert summaries5 == ["SENTINEL-iter2", "SENTINEL-iter3", "SENTINEL-iter4"]
+        # Iter 1 must not leak into any propose call after iter 4
+        assert "SENTINEL-iter1" not in summaries5
+
 
 # ---------------------------------------------------------------------------
 # _register_plugin tests (Phase 4 — docs/run_scoped_plugins.md)

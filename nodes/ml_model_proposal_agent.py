@@ -25,11 +25,13 @@ import argparse
 
 from pydantic import ValidationError
 
+from typing import List
+
 from agent.llm_bridge import LLMBridge
 from agent.prompts import _format_known_constraints_block
 from agent.schemas.proposal import ProposalInput, ProposalOutput, FalsifiablePrediction
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
-from agent.schemas.hyperparam_tuning import serialize_expert_advice
+from agent.schemas.hyperparam_tuning import GateExhaustionInfo, serialize_expert_advice
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 
 # Maximum number of retries when the proposing stage produces invalid output.
@@ -177,20 +179,26 @@ Output only the JSON object — no preamble, no markdown fences, no commentary."
 # Prompt builders
 # ---------------------------------------------------------------------------
 
-def _format_prior_iteration_gate_exhaustion_block(info) -> str:
-    """Render the [PRIOR ITERATION GATE EXHAUSTION] block per §10.13.5.
+def _format_recent_gate_exhaustions_block(
+    entries: List[GateExhaustionInfo],
+) -> str:
+    """Render the [RECENT GATE EXHAUSTIONS] block per §14.N.3.
 
-    Returns "" when ``info`` is None so callers can unconditionally splice
-    the result into a template (no empty section). When populated, the
-    block carries the structured failure report from the previous
-    iteration's tuner so the next proposer can size its baseline below
-    the binding ceiling. See docs/resource_estimator_implement.md §10.13.
+    Aggregate-window successor to the K.7.6 singular helper: carries the
+    structured failure reports from up to the last 3 tuner iterations so
+    the next proposer can spot *repeated* abort-class failures on the same
+    architecture family and switch family rather than shrink.
 
-    Numeric fields render as ``"n/a"`` when None — happens when the
-    corresponding axis was disabled (budget None) or no record carried
-    that estimate. Counts always render numerically.
+    Empty list → "" so callers can unconditionally splice the result into
+    a template (no empty section, no header).
+
+    Non-empty list → header tagged with the entry count, each entry
+    labelled with a relative iteration tag (``iter N-k``, oldest first,
+    ``iter N-1`` = most recent), entries separated by a horizontal rule,
+    and a closing paragraph that tells the LLM to switch family when the
+    same failure mode recurs. See docs/resource_estimator_implement.md §14.N.
     """
-    if info is None:
+    if not entries:
         return ""
 
     def _num(v, suffix=""):
@@ -199,29 +207,47 @@ def _format_prior_iteration_gate_exhaustion_block(info) -> str:
     def _factor(v):
         return f"{v:.2f}×" if v is not None else "n/a"
 
-    lines = [
-        "[PRIOR ITERATION GATE EXHAUSTION]",
-        info.summary_message,
+    def _entry_lines(info: GateExhaustionInfo, label: str) -> list:
+        return [
+            f"{label}",
+            info.summary_message,
+            "",
+            "Resource accounting:",
+            f"  Mode active:       {info.active_mode}",
+            f"  VRAM budget:       {_num(info.vram_budget_gb, ' GB')}",
+            f"  Time budget:       {_num(info.time_budget_minutes, ' min')}",
+            f"  Baseline factors:  VRAM {_factor(info.baseline_vram_factor)}   "
+            f"Time {_factor(info.baseline_time_factor)}",
+            f"  Worst factors:     VRAM {_factor(info.worst_vram_factor)}      "
+            f"Time {_factor(info.worst_time_factor)}",
+            f"  Attempt counts:    {info.total_attempts} total, "
+            f"{info.vram_gated_attempts} VRAM-gated,",
+            f"                     {info.time_gated_attempts} time-gated, "
+            f"{info.other_failure_attempts} other failures",
+        ]
+
+    n = len(entries)
+    plural = "s" if n > 1 else ""
+    separator = "-" * 68
+    lines = [f"[RECENT GATE EXHAUSTIONS (last {n} iteration{plural})]"]
+
+    for i, info in enumerate(entries):
+        # entries[0] is oldest → iter N-n ... entries[-1] is newest → iter N-1
+        rel = n - i
+        suffix = " (most recent)" if rel == 1 else ""
+        label = f"iter N-{rel}{suffix}:"
+        if i > 0:
+            lines += ["", separator, ""]
+        lines += _entry_lines(info, label)
+
+    lines += [
         "",
-        "Resource accounting:",
-        f"  Mode active:       {info.active_mode}",
-        f"  VRAM budget:       {_num(info.vram_budget_gb, ' GB')}",
-        f"  Time budget:       {_num(info.time_budget_minutes, ' min')}",
-        f"  Baseline factors:  VRAM {_factor(info.baseline_vram_factor)}   "
-        f"Time {_factor(info.baseline_time_factor)}",
-        f"  Worst factors:     VRAM {_factor(info.worst_vram_factor)}      "
-        f"Time {_factor(info.worst_time_factor)}",
-        f"  Attempt counts:    {info.total_attempts} total, "
-        f"{info.vram_gated_attempts} VRAM-gated,",
-        f"                     {info.time_gated_attempts} time-gated, "
-        f"{info.other_failure_attempts} other failures",
-        "",
-        "For this iteration: propose an architecture that fits the budgets",
-        "shown above. The previous proposal could not be trained even after",
-        "the tuner attempted to adjust hyperparameters within its lever set",
-        "(batch_size, model depth/width). Reduce parameter count and/or layer",
-        "count enough that the resulting baseline estimates land below the",
-        "budgets.",
+        "For this iteration: if the same architecture family or scale appears",
+        "in multiple entries above, that is a strong signal the family is",
+        "structurally infeasible under the active budgets — propose a",
+        "different family, not a smaller variant of the same family. If only",
+        "a single entry is shown, reduce parameter count and/or layer count",
+        "enough that the resulting baseline estimates land below the budgets.",
     ]
     return "\n".join(lines)
 
@@ -377,14 +403,11 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
             lines.append(f"  {i}. {failure}")
         lines.append("")
 
-    # Phase K.7.6 — cross-iteration gate-exhaustion report from the prior
-    # tuner (§10.13). Phase N (§14.N) widened the carrier from a single
-    # GateExhaustionInfo to a bounded list; until the formatter is refactored
-    # (Phase N step N.4), render only the most-recent entry so behaviour is
-    # unchanged from the single-step K.7.6 baseline.
-    gate_block = _format_prior_iteration_gate_exhaustion_block(
-        inp.recent_gate_exhaustions[-1] if inp.recent_gate_exhaustions else None
-    )
+    # Phase N (§14.N) — aggregate-window cross-iteration gate-exhaustion
+    # report. Rendered from up to the last 3 tuner iterations so the
+    # proposer can spot repeated abort-class failures on the same family
+    # and switch family rather than shrink. Empty list → no block.
+    gate_block = _format_recent_gate_exhaustions_block(inp.recent_gate_exhaustions)
     if gate_block:
         lines += [gate_block, ""]
 
@@ -632,17 +655,11 @@ class MLModelProposalAgent:
             # template_vars replace is a no-op when the placeholder is absent.
             # See docs/improving_validation_awareness.md Phase A.2/A.3.
             "known_constraints_block": _format_known_constraints_block(DATASET_CONFIG),
-            # Phase K.7.6 — proposing-stage placeholder for the previous
-            # iteration's gate-exhaustion report (§10.13.5). Phase N
-            # (§14.N) widened the carrier to a list; until the formatter
-            # refactor (N.4) ships, feed only the most-recent entry so
-            # rendering is byte-identical to K.7.6.
-            "prior_iteration_gate_exhaustion_block": (
-                _format_prior_iteration_gate_exhaustion_block(
-                    inp.recent_gate_exhaustions[-1]
-                    if inp.recent_gate_exhaustions
-                    else None
-                )
+            # Phase N (§14.N.3) — proposing-stage placeholder for the
+            # aggregate-window gate-exhaustion report across up to the
+            # last 3 tuner iterations. Empty list collapses to "".
+            "recent_gate_exhaustions_block": _format_recent_gate_exhaustions_block(
+                inp.recent_gate_exhaustions
             ),
         }
 

@@ -63,6 +63,7 @@ import glob
 import shutil
 import argparse
 import time
+from collections import deque
 
 # Ensure SIDERIUS root and ml_models/ are importable.
 # ml_models/ uses flat internal imports (e.g. from models_format_sandbox import ...)
@@ -503,11 +504,12 @@ def run_workflow(
     current_runtime_vocab = list(vocab_seed)     # starts with seed, grows with discoveries
     model_knowledge_cache: dict = {}             # per-model Phase 1 cache (grows once per model)
     latest_new_summary = None                    # ModelRunSummary from the most recent tune
-    # Phase K.7.5 — retain the previous iteration's tuner output so the
-    # interp→propose protocol can surface its gate_exhaustion to the next
-    # proposer (docs/resource_estimator_implement.md §10.13). None on
-    # iteration 1; assigned at the end of every subsequent iteration.
-    previous_tune_output: HyperparamTuningOutput | None = None
+    # Phase N (§14.N) — bounded FIFO of the last 3 tuner outputs so the
+    # interp→propose protocol can surface their gate_exhaustion summaries
+    # (oldest-first) to the next proposer as the aggregate-window
+    # [RECENT GATE EXHAUSTIONS] block. Empty on iteration 1; each iter-end
+    # append auto-evicts the oldest when len > 3.
+    recent_tune_outputs: deque[HyperparamTuningOutput] = deque(maxlen=3)
 
     # --- Iteration loop ---
     for iteration in range(1, max_iterations + 1):
@@ -579,9 +581,7 @@ def run_workflow(
                     trial_time_budget_minutes=trial_time_budget_minutes,
                     formal_time_budget_minutes=formal_time_budget_minutes,
                     data_dir=data_dir,
-                    recent_tune_outputs=(
-                        [previous_tune_output] if previous_tune_output is not None else []
-                    ),
+                    recent_tune_outputs=list(recent_tune_outputs),
                 )
                 propose_input.existing_model_types = list(all_model_types)
                 if previous_failures:
@@ -751,9 +751,10 @@ def run_workflow(
 
         tune_output = HyperparamTuningAgent().run(tune_input)
         iteration_results.append(tune_output)
-        # Phase K.7.5 — retain for the next iteration's local_full_context
-        # call so its gate_exhaustion (if any) reaches the next proposer.
-        previous_tune_output = tune_output
+        # Phase N (§14.N) — append to the bounded FIFO; deque(maxlen=3)
+        # auto-evicts the oldest entry so the next iteration's
+        # local_full_context call sees only the most recent 3.
+        recent_tune_outputs.append(tune_output)
 
         # --- Update long-term memory for next iteration ---
         all_model_types.append(proposal.model_name)
