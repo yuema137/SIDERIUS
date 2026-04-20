@@ -3007,13 +3007,41 @@ Add a sibling test `test_l_fail_round_abort_dual_mode.py` that:
       round(s)" framing. 7 new tests in `test_build_gate_exhaustion.py`
       (3 truth-table guards + 3 populated-path + 1 mixed-axis); 19/19
       gate-exhaustion tests green.*
-- [ ] **L.4** — CLI flags on `ml_hyperparameter_tune_agent.py` and
+- [x] **L.4** — CLI flags on `ml_hyperparameter_tune_agent.py` and
       `run_exploration_adaptive.py` (`--attempts_per_round`,
       `--attempts_per_formal_round`, `--max_fail_rounds`).
-- [ ] **L.5** — Protocol pass-through for the three new flags.
-- [ ] **L.6** — Unit test: `test_per_round_attempt_budget.py`
+      *Done 2026-04-19 in `cec5674` (combined with L.5 — coupled pair):
+      3 argparse entries on each CLI; `run_exploration_adaptive.py`
+      summary print shows `trial=3/round formal=5/round fail-brake=3
+      (Phase L)`; both CLIs forward through `run_workflow(...)` to the
+      protocol layer. 176/176 tuner unit suite + 35/35 protocol tests
+      green.*
+- [x] **L.5** — Protocol pass-through for the three new flags.
+      *Done 2026-04-19 in `cec5674`: `local_validated_model` gains 3
+      kwargs (defaults 3/5/3 mirror schema defaults); `run_workflow`
+      adds the matching kwargs and forwards them; new
+      `TestAttemptBudgetFanOut` class (5 tests) covers each kwarg
+      independently + defaults-when-omitted. 35/35 protocol tests green.*
+- [x] **L.6** — Unit test: `test_per_round_attempt_budget.py`
       (5 sub-cases per §11.7 row 7, including the formal-vs-trial
-      budget asymmetry).
+      budget asymmetry). *Done 2026-04-19: 5 test classes covering
+      (a) trial round succeeds within budget, (b) increment+reset of
+      ``consecutive_fails`` via 4-attempt arithmetic
+      (`OOM, OK, OOM, OOM` → only outcome consistent with both
+      operations), (c) abort at ``max_fail_rounds``, (d) formal
+      promotion fires only on the LAST round (``max_rounds=3`` with
+      4-attempt formal budget burned on round 3 only), (e) formal
+      budget asymmetry (``attempts_per_round=1`` /
+      ``attempts_per_formal_round=3``, round 2 burns 3 attempts
+      that the trial budget would have forbidden). The design-doc
+      text for sub-case (e) reads "round 1 fails on attempt 1" which
+      is impossible under Phase L semantics (formal promotion needs
+      ``completed_rounds == max_rounds - 1``); the test uses the
+      corrected interpretation (round 1 succeeds, round 2 burns
+      formal budget) — same load-bearing assertion. New scriptable
+      ``_make_scripted_skill`` factory walks a per-attempt VRAM
+      verdict list, raises ``IndexError`` on schedule overrun (early
+      fail signal). 338/338 tuner unit suite green.*
 - [ ] **L.7** — K.9 test rewrite per §11.8 (1)–(4).
 - [ ] **L.8** — New integration test: `test_l_fail_round_abort_dual_mode.py`
       with explicit `attempts_per_formal_round=3` override (default
