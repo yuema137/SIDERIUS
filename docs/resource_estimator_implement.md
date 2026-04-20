@@ -3428,3 +3428,152 @@ implies), and whose `eval_psd_segments == 20 × 200 = 4000`.
 replacement of one code block. `git revert` is safe. The three
 schema fields have defaults so existing callers that don't pass
 them continue to work.
+
+---
+
+## 13. Known concerns + future improvements (post-Phase L review, 2026-04-19)
+
+A code-level audit on 2026-04-19 (after the Phase L close-out) raised
+the issues below. None block the current main function (Phase K + L
+gate-exhaustion + per-round budget + formal-promotion), so they are
+**not urgent** and are filed here for future stability work rather
+than as Phase M+ blockers.
+
+### 13.1 Formal-portion defaults (verified-plumbed but value-sensitive)
+
+The formal-mode override chain is fully wired end-to-end:
+
+- CLI: `run_exploration_adaptive.py:168-185` exposes `--formal_strategy`,
+  `--formal_portion`, `--formal_train_portion`.
+- Workflow: `workflows/model_exploration.py:354-356, 740-742` accepts
+  the trio and forwards into `HyperparamTuningInput`.
+- Protocol: `agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py:63-65, 180-182`
+  carries the trio through validator→tuner.
+- Tuner enforcement: `nodes/ml_hyperparameter_tune_agent.py:_resolve_sample_set_cfg`
+  (lines 105-112) ignores the planner's `trial_*` fields entirely in
+  formal mode and reads from `agent_input.formal_*`. Eval is hardcoded
+  to `(snapshot, 1.0)` per Phase M §12.2.
+
+**Status**: not a defect. The defaults are
+`formal_portion=0.1`, `formal_train_portion=1.0`, deliberately kept
+on the small side — formal mode's correctness contribution comes
+primarily from the **eval-side lock** (`snapshot + eval_portion=1.0`,
+hardcoded in `_resolve_sample_set_cfg`), not from a large training
+scope. Formal training is meant to confirm the trial-mode winner on
+a comparable-eval baseline, not to retrain at full scale.
+
+**Implication for operators**: if the goal is "use much more
+training data in formal than in trial", that has to be explicit at
+the CLI (`--formal_portion 0.5` or higher). Audit recorded here so
+future readers understand the default is by-design, not an
+oversight.
+
+### 13.2 No transient-vs-structural retry distinction at the attempt level
+
+Today a NaN-loss from a bad seed, or a transient runtime CUDA OOM
+from a co-tenant, consumes one of the 3 (trial) / 5 (formal)
+attempt slots and triggers a *fresh LLM plan call*. Same-plan
+retry with a fresh seed is never tried.
+
+- **Why it matters**: cheap signal (one bad seed) is conflated with
+  expensive signal (the plan itself is wrong). Wastes plan-call
+  budget on transient failures.
+- **Possible fix**: split the inner loop into "same-plan transient
+  retry (cap 1-2)" vs "fresh-plan retry (counts toward N)".
+  Probably a Phase N+ discussion.
+
+### 13.3 No subprocess-level retry on training/inference errors
+
+`core/sandbox_executor.py` lines 265-342 (training) and 357-405
+(inference) call `subprocess.run(check=True)` once. Any
+`CalledProcessError` is captured and surfaced as `error_*`; the
+tuner consumes it and moves on. There is no internal retry, even
+for clearly-transient failures (NaN loss on bad init, file-IO
+race, transient CUDA OOM).
+
+- **Why it matters**: combined with §13.2, single-attempt sandbox
+  errors aggressively eat budget.
+- **Possible fix**: wrap each subprocess call in a small bounded
+  retry (1-2 retries) for known-transient error signatures.
+
+### 13.4 LLM bridge defaults to indefinite retry
+
+`agent/llm_bridge.py:427-459` retries on 429 / 5xx / timeout /
+connection errors with exponential backoff (2.5 s → 60 s cap).
+Default `max_retries=None` → retries indefinitely. The docstring
+justifies this for Slurm batch ("wall time as natural timeout"),
+but a quota-exhausted gpt-5-mini on lilab interactive runs will
+spin every 60 s forever.
+
+- **Why it matters**: silent runaway on lilab; no obvious failure
+  surface for an operator to react to.
+- **Possible fix**: set a finite `max_retries` default for the
+  interactive `run_exploration_adaptive.py` path (Slurm path can
+  keep `None`). Could also surface a one-line "still retrying after
+  N attempts" warning every K minutes.
+
+### 13.5 Formal-round failure can loop and burn `N × max_fail_rounds` attempts
+
+`is_formal_round = (completed_rounds == max_rounds - 1)` re-fires on
+every outer iteration while `completed_rounds` is stuck at
+`max_rounds - 1`. If the formal round fails its full
+`attempts_per_formal_round=5` budget, `consecutive_fails`
+increments to 1 and the outer loop **re-enters formal** for another
+5 attempts. Worst-case:
+`attempts_per_formal_round × max_fail_rounds = 5 × 3 = 15` formal
+attempts before the abort brake fires.
+
+- **Why it matters**: 15 formal attempts × ~1 hour each = 15-hour
+  worst-case formal burn before abort. May exceed Slurm wall.
+- **Possible fix**: separate fail-brake counter for formal
+  (e.g. `max_formal_fail_rounds=1`), or have any formal failure
+  count as `consecutive_fails += max_fail_rounds` (single-shot
+  formal abort).
+
+### 13.6 `max_fail_rounds` is dead with `max_rounds=2` (smoke test caveat)
+
+Already filed as Phase L Open Q1 (§11.10). Worth restating here
+because the L.9 real-LLM smoke ran K.9 at `max_rounds=2`, meaning
+the abort brake was unreachable under real-LLM — only Phase L's
+success path was actually exercised end-to-end with a real model.
+Pseudo-mode covered the abort path (L.8); a future real-LLM smoke
+with `max_rounds≥4` would close the gap.
+
+### 13.7 Workflow does not retry an aborted tuning iteration
+
+`workflows/model_exploration.py:750-793` accepts the tuner's
+`termination_reason="aborted_fail_rounds"` outcome as terminal:
+the iteration's record is appended to `iteration_results` and the
+gate-exhaustion signal flows forward to the next iteration's
+proposer. There is no "stop the workflow if N consecutive
+iterations abort" guard.
+
+- **Why it matters**: if the proposer's next iteration also
+  produces an oversized model, multiple iterations can stack up
+  wasted before the operator notices.
+- **Possible fix**: `--max_consecutive_iteration_aborts=2` flag
+  on `run_exploration_adaptive.py`, exits the workflow loop when
+  reached.
+
+### 13.8 Validator-stage retry can burn `max_proposal × max_impl = 9` LLM calls per iteration
+
+`workflows/model_exploration.py:554-693`: if Gemini validator quota
+is exhausted (a known historical pain point with this project),
+every iteration burns up to 9 validator retries before the
+iteration is skipped.
+
+- **Why it matters**: in a quota-exhausted state the workflow
+  silently chews through every iteration's full retry budget on
+  doomed validator calls.
+- **Possible fix**: circuit-breaker — if the validator returns the
+  same quota-exhausted error twice in a row, fail the iteration
+  immediately rather than burning the rest of the inner loop.
+
+---
+
+**Triage status (2026-04-19)**: §13.1 is the most user-visible and
+should be addressed soon (probably as part of Phase M extension or
+a focused defaults-tuning patch). §13.2-§13.8 are stability
+improvements with no current blocking impact on the main function;
+they are good follow-up candidates for a "Phase N — stability
+hardening" pass once Phase M lands.
