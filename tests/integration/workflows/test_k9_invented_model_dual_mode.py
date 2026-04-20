@@ -7,19 +7,28 @@ canned pseudo-data folder
 ``tests/pseudo_data/api_call_outputs/ml_hyperparameter_tune_agent_k9_invented/``
 and the plugin file ``tests/pseudo_data/plugins/pe_wavenet_delta.py``.
 
-Choreography (see the pseudo-data folder's README for full rationale):
-  Round 1: planner picks ``hidden_dim=2048`` → VRAM gate emits the
-           K.2.5-8 warning AND verdicts over budget (~151 MB > 100 MB)
-           → record saved as ``skipped_oom_risk``; sandbox never reached.
-  Round 2: planner reacts by collapsing to ``hidden_dim=128`` → gate
-           emits the K.2.5-8 warning again but verdicts under budget
-           → time gate passes → ``RecordingSandbox`` returns the canned
-           training/inference/scoring trio → reflector returns the
-           canned reflection → record saved with ``status="success"``.
+Choreography under Phase L (see the pseudo-data folder's README and
+``docs/resource_estimator_implement.md`` §11.8 for full rationale):
+  Round 1, attempt 1: planner picks ``hidden_dim=2048`` → VRAM gate
+           emits the K.2.5-8 warning AND verdicts over budget
+           (~151 MB > 100 MB) → record saved as ``skipped_oom_risk``;
+           sandbox never reached. Round 1 is NOT yet a success — the
+           inner attempt budget continues.
+  Round 1, attempt 2: planner reacts by collapsing to ``hidden_dim=128``
+           → gate emits the K.2.5-8 warning again but verdicts under
+           budget → time gate passes → ``RecordingSandbox`` returns the
+           canned training/inference/scoring trio → reflector returns
+           the first canned reflection → record saved with
+           ``status="success"``. Round 1 succeeds; ``completed_rounds``
+           advances 0 → 1; inner loop breaks.
+  Round 2, attempt 1: ``completed_rounds == max_rounds - 1`` so the
+           agent forces ``plan.is_trial=False`` for formal promotion.
+           Planner returns ``hidden_dim=128`` again; gate fits;
+           sandbox + reflector run; second canned reflection consumed.
+           ``completed_rounds`` 1 → 2; outer loop exits with
+           ``termination_reason="completed"``.
 
-This file holds **only K.9.1 — the scaffold**. Layer 1-4 assertions are
-added in K.9.2 (same file). For now the test asserts only that the
-agent runs end-to-end and produces a populated ``HyperparamTuningOutput``.
+Total: 3 records (1 OOM-skip + 2 success), 3 plan calls, 2 reflect calls.
 
 Run with:
   .venv/bin/pytest tests/integration/workflows/test_k9_invented_model_dual_mode.py -v -s
@@ -83,11 +92,10 @@ def _disable_sleeps(monkeypatch):
     """Replace ``time.sleep`` with a no-op for the duration of the test.
 
     The tuner's main loop sleeps 2 s after a successful round and 5 s
-    after a caught exception. Once the canned bridge is exhausted (after
-    the 2 plan + 1 reflect calls K.9 needs), the loop spins for another
-    ``max_attempts - 2`` iterations before terminating, each one hitting
-    the 5 s catch-block sleep. With sleeps neutralised the whole test
-    runs in well under a second of wall-clock.
+    after a caught exception. Under Phase L the canned bridge is sized
+    exactly to the planned attempt sequence (3 plans + 2 reflects), so
+    no spin-through padding is needed — but neutralising sleeps still
+    keeps wall-clock under a second.
     """
     import time as _time
     monkeypatch.setattr(_time, "sleep", lambda *a, **kw: None)
@@ -120,15 +128,20 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(
 
     Layered assertions (mirrors the K.8.1 evidence layout):
       Layer 1 — gate stdout: K.2.5-8 warning + verdict line are present.
-      Layer 2 — per-record memory: ``inference_batch_uncalibrated``,
-                ``vram_budget_gb``, ``vram_estimate_gb`` all populated;
-                round 1 over budget, round 2 fits.
-      Layer 3 — planner reaction (pseudo only): round 2's plan() call
-                receives the K.6 budget kwargs (``trial_vram_budget_gb``,
-                ``last_vram_estimate_gb``, ``last_mode``); the canned
-                planner output lowers ``hidden_dim`` from round 1.
-      Layer 4 — ``gate_exhaustion is None`` (success path); best score
-                populated from the canned sandbox.
+      Layer 2 — per-record memory: 3 records (1 OOM-skip + 2 success);
+                ``inference_batch_uncalibrated``, ``vram_budget_gb``,
+                ``vram_estimate_gb`` all populated; round 1 attempt 1
+                over budget, both successes fit.
+      Layer 3 — planner reaction (pseudo only): plan() call #2 (the
+                attempt 2 retry of round 1) receives the K.6 budget
+                kwargs (``trial_vram_budget_gb``, ``last_vram_estimate_gb``);
+                canned planner output lowers ``hidden_dim`` from
+                attempt 1's value. plan() call #3 (the formal-promotion
+                round) also carries the kwargs.
+      Layer 4 — ``gate_exhaustion is None`` (success path);
+                ``termination_reason == 'completed'`` and
+                ``consecutive_fail_rounds_at_exit == 0`` (Phase L);
+                best score populated from the canned sandbox.
     """
     from tests.conftest import _is_real_llm, _is_real_training
     from tests.helpers.recording_llm_bridge import RecordingLLMBridge
@@ -147,14 +160,17 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(
         model_type=_PLUGIN_MODEL_TYPE,
         # ``max_rounds`` must be >= 2 so the agent does NOT promote round 1
         # to formal mode. The agent forces ``plan.is_trial = False`` on the
-        # last needed round (``ml_hyperparameter_tune_agent.py:591-595``) so
-        # the final round always produces a formal-mode result. K.9 needs
-        # round 1 in trial mode so the trial VRAM budget binds — hence
-        # max_rounds=2. The bridge is intentionally exhausted after round 2
-        # succeeds (only 2 canned plans + 1 reflect); the agent's main loop
-        # then spins through the remaining attempts up to
-        # ``max_attempts = max_rounds * 3`` and terminates. ``_disable_sleeps``
-        # makes that spin instantaneous.
+        # formal round (``completed_rounds == max_rounds - 1``) so the final
+        # round always produces a formal-mode result. K.9 needs round 1 in
+        # trial mode so the trial VRAM budget binds — hence max_rounds=2.
+        #
+        # Phase L (§11): outer loop counts only successes. With the default
+        # ``attempts_per_round=3``, ``attempts_per_formal_round=5``,
+        # ``max_fail_rounds=3``, the planned attempt sequence is exactly:
+        #   round 1 attempt 1 (OOM) + round 1 attempt 2 (success)
+        #   + round 2 attempt 1 (formal success) = 3 attempts total.
+        # The bridge is sized to match (3 plans + 2 reflects) — no
+        # spin-through padding needed.
         max_rounds=2,
         is_trial=True,
         trial_strategy="snapshot",
@@ -242,14 +258,26 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(
     # Layer 2 — per-record memory. Pseudo mode only (real-LLM may diverge).
     # ------------------------------------------------------------------
     if bridge is not None:
-        # Pseudo mode: round 1 OOM-skipped, round 2 succeeds → exactly 2 records.
-        # Real-LLM mode is exempt because the LLM may pick differently.
-        assert len(output.all_records) == 2
+        # Pseudo mode under Phase L: round 1 attempt 1 OOM-skips, round 1
+        # attempt 2 succeeds (resets consecutive_fails), round 2 attempt 1
+        # (formal) succeeds → exactly 3 records. Real-LLM mode is exempt
+        # because the LLM may pick differently.
+        assert len(output.all_records) == 3
         oom_records = [r for r in output.all_records if r.status == "skipped_oom_risk"]
         success_records = [r for r in output.all_records if r.status == "success"]
-        assert len(oom_records) == 1, "Round 1 should be the only OOM-skipped record."
-        assert len(success_records) == 1, "Round 2 should be the only success record."
+        assert len(oom_records) == 1, (
+            "Round 1 attempt 1 should be the only OOM-skipped record."
+        )
+        assert len(success_records) == 2, (
+            "Round 1 attempt 2 (trial) and round 2 attempt 1 (formal) "
+            "should both succeed."
+        )
         oom_record = oom_records[0]
+        # success_records[0] = round 1 attempt 2 (trial); [1] = round 2 (formal).
+        # Both have hidden_dim=128 (the formal-promotion plan reuses the trial
+        # arch), so we use the trial-mode one for the per-record VRAM/budget
+        # assertions to keep the apples-to-apples comparison against round 1
+        # attempt 1 (same is_trial=True, same trial_portion).
         success_record = success_records[0]
 
         # K.2.5-8 flag — set on every gate-touched record for an unregistered model_type.
@@ -282,45 +310,72 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(
             f"Expected ≥2 plan() calls (one per round); got {len(plan_calls)}."
         )
 
-        # Round 2's plan() kwargs carry the K.6 [ACTIVE RESOURCE BUDGETS] inputs
-        # the agent forwards. Mirrors the prompt-block contract end-to-end.
+        # plan() call #2 = round 1 attempt 2 (the retry-after-OOM, still
+        # within round 1). Its kwargs carry the K.6 [ACTIVE RESOURCE BUDGETS]
+        # inputs the agent forwards, and its memory_history includes the
+        # attempt 1 OOM-skip record so the planner can lower hidden_dim.
+        # Mirrors the prompt-block contract end-to-end.
         # Note: ``last_mode`` is sourced from the prior record's ``time_mode``
         # (agent ml_hyperparameter_tune_agent.py:543), and K.9 disables the time
         # gate (trial_time_budget_minutes=None) so ``time_mode`` is never set
         # and ``last_mode`` is legitimately None here. We don't assert on it.
-        round_2_kwargs = plan_calls[1][4]
-        assert round_2_kwargs["trial_vram_budget_gb"] == pytest.approx(0.1)
-        assert round_2_kwargs["last_vram_estimate_gb"] is not None
-        assert round_2_kwargs["last_vram_estimate_gb"] == pytest.approx(
+        attempt_2_kwargs = plan_calls[1][4]
+        assert attempt_2_kwargs["trial_vram_budget_gb"] == pytest.approx(0.1)
+        assert attempt_2_kwargs["last_vram_estimate_gb"] is not None
+        assert attempt_2_kwargs["last_vram_estimate_gb"] == pytest.approx(
             oom_record.memory.vram_estimate_gb
-        ), "Round 2 should see round 1's vram_estimate_gb in last_vram_estimate_gb."
+        ), "Attempt 2 should see attempt 1's vram_estimate_gb in last_vram_estimate_gb."
 
-        # Round 2's memory_history (positional arg) carries round 1's full record,
-        # including the same vram_estimate_gb — proves K.6 history-block plumbing.
-        round_2_history = plan_calls[1][1]
-        assert len(round_2_history) >= 1, (
-            "Round 2's memory_history should include round 1's record."
+        # plan() call #2's memory_history (positional arg) carries the attempt
+        # 1 OOM-skip record, including the same vram_estimate_gb — proves K.6
+        # history-block plumbing across attempts within a round.
+        attempt_2_history = plan_calls[1][1]
+        assert len(attempt_2_history) >= 1, (
+            "Attempt 2's memory_history should include attempt 1's record."
         )
-        assert round_2_history[-1]["memory"]["vram_estimate_gb"] == pytest.approx(
+        assert attempt_2_history[-1]["memory"]["vram_estimate_gb"] == pytest.approx(
             oom_record.memory.vram_estimate_gb
         )
 
-        # Canned planner reaction: round 2 lowers hidden_dim from 2048 → 128
-        # in response to the round 1 over-budget verdict.
-        h_round1 = oom_record.params["model_config"]["hidden_dim"]
-        h_round2 = success_record.params["model_config"]["hidden_dim"]
-        assert h_round2 < h_round1, (
-            f"Round 2 should react by lowering hidden_dim; got {h_round1} → {h_round2}."
+        # plan() call #3 = round 2 attempt 1 (formal promotion). Sanity check
+        # the K.6 budget kwargs are still threaded through on the formal round
+        # (formal_vram_budget_gb defaults to trial when unset, so the budget
+        # block is non-empty here too).
+        assert len(plan_calls) >= 3, (
+            f"Expected 3 plan() calls (round 1 attempts 1+2 + round 2 formal); "
+            f"got {len(plan_calls)}."
+        )
+        formal_kwargs = plan_calls[2][4]
+        assert formal_kwargs["trial_vram_budget_gb"] == pytest.approx(0.1)
+
+        # Canned planner reaction: attempt 2 lowers hidden_dim from 2048 → 128
+        # in response to attempt 1's over-budget verdict (within round 1).
+        h_attempt1 = oom_record.params["model_config"]["hidden_dim"]
+        h_attempt2 = success_record.params["model_config"]["hidden_dim"]
+        assert h_attempt2 < h_attempt1, (
+            f"Attempt 2 should react by lowering hidden_dim; "
+            f"got {h_attempt1} → {h_attempt2}."
         )
 
     # ------------------------------------------------------------------
-    # Layer 4 — gate_exhaustion + best score.
+    # Layer 4 — Phase L termination + gate_exhaustion + best score.
     # ------------------------------------------------------------------
     # Success path zeroes gate_exhaustion (§10.13.1) — any success in the run
     # means "the gate didn't exhaust the budget; the next iteration doesn't
     # need a budget-shrink hint."
     assert output.gate_exhaustion is None, (
         f"Success path should zero gate_exhaustion; got {output.gate_exhaustion!r}."
+    )
+    # Phase L termination contract (§11.8 (4)): the run completes both rounds
+    # successfully (consecutive_fails was reset on the round 1 attempt 2 success
+    # and never re-incremented), so the loop exits via the success path.
+    assert output.termination_reason == "completed", (
+        f"Successful 2-round run should terminate with 'completed'; "
+        f"got {output.termination_reason!r}."
+    )
+    assert output.consecutive_fail_rounds_at_exit == 0, (
+        f"consecutive_fail_rounds_at_exit should be 0 after a clean run; "
+        f"got {output.consecutive_fail_rounds_at_exit}."
     )
 
     # Best score: pseudo mode gets the canned 0.65 verbatim; real-LLM mode

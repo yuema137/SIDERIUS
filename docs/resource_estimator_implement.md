@@ -3042,7 +3042,23 @@ Add a sibling test `test_l_fail_round_abort_dual_mode.py` that:
       ``_make_scripted_skill`` factory walks a per-attempt VRAM
       verdict list, raises ``IndexError`` on schedule overrun (early
       fail signal). 338/338 tuner unit suite green.*
-- [ ] **L.7** — K.9 test rewrite per §11.8 (1)–(4).
+- [x] **L.7** — K.9 test rewrite per §11.8 (1)–(4).
+      *Done 2026-04-19: K.9 dual-mode test rewritten for the Phase L
+      3-attempt choreography (round 1 attempt 1 OOM-skip + round 1
+      attempt 2 success + round 2 attempt 1 formal success = 3
+      records). Layer 2 record counts updated (2→3 records, 1→2
+      successes); Layer 3 plan_calls[1] reinterpreted as the
+      round-1-attempt-2 retry (was round 2 under pre-L), with a new
+      plan_calls[2] sanity check for the formal round; Layer 4 added
+      `termination_reason == "completed"` and
+      `consecutive_fail_rounds_at_exit == 0` per §11.8 (4). K.9 pseudo
+      data extended: 3rd generate.json plan, reflect.json promoted to
+      2-element array. Sandbox queue depth increased: each of
+      `train_outputs/pe_wavenet_delta/{execute_training,execute_inference,
+      score_vector}.json` promoted to 2-element FIFO arrays (one entry
+      per non-skipped attempt — round 2 formal also calls the sandbox
+      now). Pseudo-mode K.9 test passes; 338/338 tuner unit suite
+      still green.*
 - [ ] **L.8** — New integration test: `test_l_fail_round_abort_dual_mode.py`
       with explicit `attempts_per_formal_round=3` override (default
       is 5 — see §11.8).

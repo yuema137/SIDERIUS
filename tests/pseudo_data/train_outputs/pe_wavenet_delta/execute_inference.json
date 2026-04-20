@@ -1,5 +1,12 @@
-{
-  "status": "success",
-  "message": "Inference finished.",
-  "results": {}
-}
+[
+  {
+    "status": "success",
+    "message": "Inference finished.",
+    "results": {}
+  },
+  {
+    "status": "success",
+    "message": "Inference finished.",
+    "results": {}
+  }
+]
