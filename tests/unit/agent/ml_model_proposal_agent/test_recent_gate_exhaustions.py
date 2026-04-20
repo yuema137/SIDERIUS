@@ -462,3 +462,142 @@ class TestDebugDumpProposingPrompt:
         assert not debug_dir.exists(), (
             "no debug dir should be created when path is None"
         )
+
+
+# ---------------------------------------------------------------------------
+# Fix 1 Commit 4 — [DISALLOWED PATTERNS] sub-block rendering
+# ---------------------------------------------------------------------------
+#
+# The tuner (Commit 3) populates
+# ``GateExhaustionInfo.disallowed_architectural_patterns`` on attempts that
+# exceeded the structural-overshoot thresholds. This block ensures the
+# proposer renders each tag with its English description — imported from
+# the tagger's ``ARCHITECTURAL_PATTERNS`` (single source of truth) — under
+# a hard ``DO NOT PROPOSE`` banner inside the entry's rendering.
+#
+# See docs/reliable_resource_proposer.md §9 Commit 4.
+
+
+from agent.utils.architectural_pattern_tagger import ARCHITECTURAL_PATTERNS
+
+
+class TestDisallowedPatternsSubBlock:
+
+    def test_empty_patterns_produces_no_disallowed_block(self):
+        """Zero-noise: default empty list must NOT render the banner — the
+        aggregate-window block should look exactly as it did pre-Fix-1 for
+        entries without structural bans."""
+        info = _gate_exhaustion(disallowed_architectural_patterns=[])
+        block = _format_recent_gate_exhaustions_block([info])
+        assert "[DISALLOWED PATTERNS]" not in block
+        assert "DO NOT PROPOSE" not in block
+
+    def test_single_pattern_renders_banner_and_description(self):
+        info = _gate_exhaustion(
+            disallowed_architectural_patterns=["scan_over_T"],
+        )
+        block = _format_recent_gate_exhaustions_block([info])
+        assert "[DISALLOWED PATTERNS] DO NOT PROPOSE:" in block
+        # The English description must be the one from the tagger (single
+        # source of truth) — not a copy in the proposer. This assertion
+        # would fail silently if someone duplicated the text.
+        assert ARCHITECTURAL_PATTERNS["scan_over_T"] in block
+        assert "- scan_over_T:" in block
+
+    def test_multi_pattern_renders_in_stored_order(self):
+        """The tuner emits tags sorted; the renderer preserves that order
+        verbatim so the LLM's prompt is deterministic across runs."""
+        info = _gate_exhaustion(
+            disallowed_architectural_patterns=[
+                "dense_attention_over_T",
+                "recurrent_over_T",
+                "scan_over_T",
+            ],
+        )
+        block = _format_recent_gate_exhaustions_block([info])
+        # All three tag→description pairs present
+        for tag, desc in [
+            ("dense_attention_over_T", ARCHITECTURAL_PATTERNS["dense_attention_over_T"]),
+            ("recurrent_over_T",       ARCHITECTURAL_PATTERNS["recurrent_over_T"]),
+            ("scan_over_T",            ARCHITECTURAL_PATTERNS["scan_over_T"]),
+        ]:
+            assert f"- {tag}: {desc}" in block
+        # Order preserved: dense_attention_over_T → recurrent_over_T → scan_over_T
+        pos_dense = block.index("- dense_attention_over_T:")
+        pos_rec = block.index("- recurrent_over_T:")
+        pos_scan = block.index("- scan_over_T:")
+        assert pos_dense < pos_rec < pos_scan
+
+    def test_disallowed_block_appears_after_resource_accounting(self):
+        """The sub-block sits inside its parent entry — after the Resource
+        accounting numbers, so the LLM reads the structural ban after seeing
+        why the iteration failed numerically."""
+        info = _gate_exhaustion(
+            disallowed_architectural_patterns=["scan_over_T"],
+        )
+        block = _format_recent_gate_exhaustions_block([info])
+        pos_accounting = block.index("Resource accounting:")
+        pos_disallowed = block.index("[DISALLOWED PATTERNS]")
+        assert pos_accounting < pos_disallowed
+
+    def test_disallowed_block_is_per_entry_not_global(self):
+        """With 2 entries where only one has patterns, the banner appears
+        once and sits inside that entry's section (between ``iter N-2:`` and
+        the separator before ``iter N-1``)."""
+        older_with_ban = _gate_exhaustion(
+            summary_message="older: scan class banned",
+            disallowed_architectural_patterns=["scan_over_T"],
+        )
+        newer_clean = _gate_exhaustion(
+            summary_message="newer: marginal overshoot, no ban",
+            disallowed_architectural_patterns=[],
+        )
+        block = _format_recent_gate_exhaustions_block(
+            [older_with_ban, newer_clean]
+        )
+        # Exactly one banner
+        assert block.count("[DISALLOWED PATTERNS] DO NOT PROPOSE:") == 1
+        # Banner belongs to the older entry (appears between iter N-2 and iter N-1)
+        pos_older = block.index("iter N-2:")
+        pos_banner = block.index("[DISALLOWED PATTERNS]")
+        pos_newer = block.index("iter N-1 (most recent):")
+        assert pos_older < pos_banner < pos_newer
+
+    def test_unknown_tag_is_dropped_defensively(self):
+        """If a tag reaches the renderer without a description (e.g. the
+        tagger vocabulary grew but the description map wasn't updated),
+        the renderer drops it silently rather than emitting a bare tag
+        the LLM cannot action. The tagger's own completeness-invariant
+        tests prevent this in practice; this is belt-and-suspenders."""
+        info = _gate_exhaustion(
+            disallowed_architectural_patterns=["scan_over_T", "unknown_future_tag"],
+        )
+        block = _format_recent_gate_exhaustions_block([info])
+        # The known tag renders fully
+        assert "- scan_over_T:" in block
+        assert ARCHITECTURAL_PATTERNS["scan_over_T"] in block
+        # The unknown tag is silently dropped
+        assert "unknown_future_tag" not in block
+
+    def test_all_unknown_tags_produces_no_block(self):
+        """If ALL tags on an entry are unknown, no banner is emitted —
+        a bare ``DO NOT PROPOSE:`` with nothing under it would be worse
+        than silence."""
+        info = _gate_exhaustion(
+            disallowed_architectural_patterns=["unknown_a", "unknown_b"],
+        )
+        block = _format_recent_gate_exhaustions_block([info])
+        assert "[DISALLOWED PATTERNS]" not in block
+
+    def test_every_tag_in_vocabulary_has_a_description(self):
+        """Tagger-side completeness mirror: every v1 tag in the tagger's
+        ``ARCHITECTURAL_PATTERNS`` is known to the renderer, because the
+        renderer imports that same dict. Equality check guards against
+        someone splitting the vocabulary across modules in the future."""
+        # This is a tautology given the import, but the assertion documents
+        # the intent: vocabulary and descriptions must live together.
+        assert set(ARCHITECTURAL_PATTERNS) == {
+            "recurrent_over_T",
+            "scan_over_T",
+            "dense_attention_over_T",
+        }

@@ -32,6 +32,7 @@ from agent.prompts import _format_known_constraints_block
 from agent.schemas.proposal import ProposalInput, ProposalOutput, FalsifiablePrediction
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from agent.schemas.hyperparam_tuning import GateExhaustionInfo, serialize_expert_advice
+from agent.utils.architectural_pattern_tagger import ARCHITECTURAL_PATTERNS
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 
 # Maximum number of retries when the proposing stage produces invalid output.
@@ -208,7 +209,7 @@ def _format_recent_gate_exhaustions_block(
         return f"{v:.2f}×" if v is not None else "n/a"
 
     def _entry_lines(info: GateExhaustionInfo, label: str) -> list:
-        return [
+        lines = [
             f"{label}",
             info.summary_message,
             "",
@@ -225,6 +226,22 @@ def _format_recent_gate_exhaustions_block(
             f"                     {info.time_gated_attempts} time-gated, "
             f"{info.other_failure_attempts} other failures",
         ]
+        # Fix 1 — surface structured architectural bans as a hard DO-NOT-PROPOSE
+        # block. Tags are rendered with their English descriptions imported
+        # from the tagger (single source of truth). Only tags with a
+        # registered description appear; unknown tags are dropped defensively
+        # (the completeness invariant in the tagger's tests prevents this in
+        # practice). See docs/reliable_resource_proposer.md §9 Commit 4.
+        described = [
+            (t, ARCHITECTURAL_PATTERNS[t])
+            for t in info.disallowed_architectural_patterns
+            if t in ARCHITECTURAL_PATTERNS
+        ]
+        if described:
+            lines += ["", "[DISALLOWED PATTERNS] DO NOT PROPOSE:"]
+            for tag, description in described:
+                lines.append(f"  - {tag}: {description}")
+        return lines
 
     n = len(entries)
     plural = "s" if n > 1 else ""
