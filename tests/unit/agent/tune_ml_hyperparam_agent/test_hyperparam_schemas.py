@@ -602,6 +602,62 @@ class TestGateExhaustionInfo:
         reloaded = GateExhaustionInfo.model_validate_json(info.model_dump_json())
         assert reloaded == info
 
+    # --- Fix 1 — disallowed_architectural_patterns field. See
+    # docs/reliable_resource_proposer.md §7 Decision 1 + §9 Commit 1 checklist. ---
+
+    def test_disallowed_patterns_default_empty(self):
+        """New Fix-1 field must default to [] so pre-Fix-1 records and every
+        existing GateExhaustionInfo test continue to round-trip unchanged."""
+        info = GateExhaustionInfo.model_validate(self._full_kwargs())
+        assert info.disallowed_architectural_patterns == []
+
+    def test_disallowed_patterns_accepts_populated_list(self):
+        """Tuner populates this with v1 vocabulary tags when the classifier
+        fires on a gate-exhausted iteration (Commit 3)."""
+        kwargs = self._full_kwargs()
+        kwargs["disallowed_architectural_patterns"] = [
+            "recurrent_over_T",
+            "scan_over_T",
+        ]
+        info = GateExhaustionInfo.model_validate(kwargs)
+        assert info.disallowed_architectural_patterns == [
+            "recurrent_over_T",
+            "scan_over_T",
+        ]
+
+    def test_disallowed_patterns_round_trip_through_json(self):
+        """Patterns must survive model_dump_json → model_validate_json so the
+        proposer reads the same list the tuner wrote (Commit 4)."""
+        kwargs = self._full_kwargs()
+        kwargs["disallowed_architectural_patterns"] = [
+            "scan_over_T",
+            "dense_attention_over_T",
+        ]
+        info = GateExhaustionInfo.model_validate(kwargs)
+        reloaded = GateExhaustionInfo.model_validate_json(info.model_dump_json())
+        assert reloaded.disallowed_architectural_patterns == [
+            "scan_over_T",
+            "dense_attention_over_T",
+        ]
+
+    def test_disallowed_patterns_rejects_non_list(self):
+        """A bare string (common LLM mistake) must be rejected so a
+        mispopulated field cannot silently render as one-char-per-line tags."""
+        kwargs = self._full_kwargs()
+        kwargs["disallowed_architectural_patterns"] = "recurrent_over_T"
+        with pytest.raises(ValidationError) as exc:
+            GateExhaustionInfo.model_validate(kwargs)
+        assert "disallowed_architectural_patterns" in str(exc.value)
+
+    def test_existing_full_instance_round_trip_preserves_new_field(self):
+        """Round-tripping the canonical _full_kwargs() instance through JSON
+        must preserve the empty default — no silent drift into missing or
+        None on reload (backward-compat guard for Commit 3/4)."""
+        info = GateExhaustionInfo.model_validate(self._full_kwargs())
+        reloaded = GateExhaustionInfo.model_validate_json(info.model_dump_json())
+        assert reloaded.disallowed_architectural_patterns == []
+        assert reloaded == info
+
 
 class TestHyperparamTuningOutputGateExhaustion:
     """K.7 — the new optional gate_exhaustion field on HyperparamTuningOutput.

@@ -269,15 +269,17 @@ class TestTimeBudgetContextFields:
 
 
 # ---------------------------------------------------------------------------
-# Phase K.7.4 — prior_tune_output pass-through (§10.13)
+# Phase N (§14.N.2) — recent_tune_outputs aggregation pass-through
+# Replaces K.7.4's singular prior_tune_output test class.
 # ---------------------------------------------------------------------------
 
-class TestLocalFullContextGateExhaustionPassThrough:
-    """The protocol must surface `prior_tune_output.gate_exhaustion` into
-    `ProposalInput.prior_iteration_gate_exhaustion` when present, and leave
-    the field at its schema default (None) otherwise.
+class TestLocalFullContextRecentGateExhaustionsAggregation:
+    """The protocol must iterate ``recent_tune_outputs``, extract each
+    non-None ``gate_exhaustion``, and surface the resulting list (oldest
+    first) into ``ProposalInput.recent_gate_exhaustions``. Empty sequence
+    or all-None entries → field stays at the schema default ([]).
 
-    See docs/resource_estimator_implement.md §10.13.
+    See docs/resource_estimator_implement.md §14.N.
     """
 
     @pytest.fixture
@@ -300,6 +302,25 @@ class TestLocalFullContextGateExhaustionPassThrough:
             summary_message="All 9 attempts were rejected by the VRAM gate.",
         )
 
+    def _second_gate_exhaustion(self):
+        from agent.schemas.hyperparam_tuning import GateExhaustionInfo
+        return GateExhaustionInfo(
+            total_attempts=3,
+            vram_gated_attempts=0,
+            time_gated_attempts=3,
+            other_failure_attempts=0,
+            active_mode="trial",
+            vram_budget_gb=8.0,
+            time_budget_minutes=20.0,
+            baseline_vram_estimate_gb=1.2,
+            baseline_vram_factor=0.15,
+            baseline_time_estimate_minutes=45.0,
+            baseline_time_factor=2.25,
+            worst_vram_factor=0.2,
+            worst_time_factor=3.1,
+            summary_message="All 3 attempts exceeded the 20 min time budget.",
+        )
+
     def _make_tune_output(self, gate_exhaustion=None):
         from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
         return HyperparamTuningOutput(
@@ -319,52 +340,86 @@ class TestLocalFullContextGateExhaustionPassThrough:
             gate_exhaustion=gate_exhaustion,
         )
 
-    def test_default_none_when_kwarg_omitted(self, storage):
-        """No prior_tune_output kwarg → field stays at schema default (None).
-        Confirms backward compat: existing callers don't need to touch this."""
+    def test_default_empty_when_kwarg_omitted(self, storage):
+        """No ``recent_tune_outputs`` kwarg → field stays at schema default
+        ([]). Confirms backward compat: existing callers don't need to
+        touch this."""
         output = make_interpretation_output(["punet"])
         result = local_full_context(output, storage)
-        assert result.prior_iteration_gate_exhaustion is None
+        assert result.recent_gate_exhaustions == []
 
-    def test_default_none_when_prior_tune_output_has_no_gate_exhaustion(self, storage):
-        """A successful prior iteration carries gate_exhaustion=None — the
-        protocol must NOT surface anything in that case."""
+    def test_default_empty_when_all_outputs_have_no_gate_exhaustion(self, storage):
+        """Successful prior iterations carry ``gate_exhaustion=None`` — the
+        protocol must skip them and leave the list empty."""
         output = make_interpretation_output(["punet"])
-        prior = self._make_tune_output(gate_exhaustion=None)
-        result = local_full_context(output, storage, prior_tune_output=prior)
-        assert result.prior_iteration_gate_exhaustion is None
+        priors = [
+            self._make_tune_output(gate_exhaustion=None),
+            self._make_tune_output(gate_exhaustion=None),
+        ]
+        result = local_full_context(output, storage, recent_tune_outputs=priors)
+        assert result.recent_gate_exhaustions == []
 
-    def test_surfaces_gate_exhaustion_when_present(self, storage, gate_exhaustion):
-        """Prior iteration exhausted the gate → the structured report
-        must reach the proposer's input field."""
+    def test_surfaces_single_gate_exhaustion_when_only_one_populated(
+        self, storage, gate_exhaustion
+    ):
+        """Three recent outputs, only the middle one aborted → output list
+        has length 1. Filtering must drop the None entries, not substitute
+        placeholders."""
         from agent.schemas.hyperparam_tuning import GateExhaustionInfo
         output = make_interpretation_output(["punet"])
-        prior = self._make_tune_output(gate_exhaustion=gate_exhaustion)
-        result = local_full_context(output, storage, prior_tune_output=prior)
+        priors = [
+            self._make_tune_output(gate_exhaustion=None),
+            self._make_tune_output(gate_exhaustion=gate_exhaustion),
+            self._make_tune_output(gate_exhaustion=None),
+        ]
+        result = local_full_context(output, storage, recent_tune_outputs=priors)
+        assert len(result.recent_gate_exhaustions) == 1
         assert isinstance(
-            result.prior_iteration_gate_exhaustion, GateExhaustionInfo
+            result.recent_gate_exhaustions[0], GateExhaustionInfo
         )
-        # Round-trip equality — every field survives the protocol hop
         assert (
-            result.prior_iteration_gate_exhaustion.model_dump()
+            result.recent_gate_exhaustions[0].model_dump()
             == gate_exhaustion.model_dump()
+        )
+
+    def test_preserves_oldest_first_order_for_multi_entry_aggregation(
+        self, storage, gate_exhaustion
+    ):
+        """Two populated outputs → list contains both in the same order the
+        workflow passed them (oldest first). Order is load-bearing because
+        the proposer renders each entry with a relative-iteration label."""
+        output = make_interpretation_output(["punet"])
+        second = self._second_gate_exhaustion()
+        priors = [
+            self._make_tune_output(gate_exhaustion=gate_exhaustion),
+            self._make_tune_output(gate_exhaustion=second),
+        ]
+        result = local_full_context(output, storage, recent_tune_outputs=priors)
+        assert len(result.recent_gate_exhaustions) == 2
+        assert (
+            result.recent_gate_exhaustions[0].model_dump()
+            == gate_exhaustion.model_dump()
+        )
+        assert (
+            result.recent_gate_exhaustions[1].model_dump()
+            == second.model_dump()
         )
 
     def test_kwarg_independent_of_other_pass_through_fields(
         self, storage, gate_exhaustion
     ):
-        """Surfacing gate_exhaustion must not silently reset any of the
-        other workflow-supplied kwargs — verifies the partial-plumbing
+        """Surfacing recent gate exhaustions must not silently reset any of
+        the other workflow-supplied kwargs — verifies the partial-plumbing
         guarantee documented at the top of the function."""
         output = make_interpretation_output(["punet"])
-        prior = self._make_tune_output(gate_exhaustion=gate_exhaustion)
+        priors = [self._make_tune_output(gate_exhaustion=gate_exhaustion)]
         result = local_full_context(
             output,
             storage,
-            prior_tune_output=prior,
+            recent_tune_outputs=priors,
             trial_time_budget_minutes=60.0,
         )
-        assert result.prior_iteration_gate_exhaustion is not None
+        assert len(result.recent_gate_exhaustions) == 1
         assert result.trial_time_budget_minutes == 60.0
         # Untouched kwargs keep their schema defaults
         assert result.formal_time_budget_minutes is None
