@@ -534,426 +534,332 @@ class HyperparamTuningAgent:
             print(f"No model description found for '{model_type_setting}': {e}")
 
         # --- Autonomous Research Loop ---
+        # Phase L (§11) — success-counted outer loop with per-round inner
+        # attempt budget. Pre-Phase-L the tuner used a single shared
+        # ``max_rounds * 3`` attempt pool and counted both successes and
+        # failures against ``max_rounds``; that meant a few unlucky rounds
+        # could exhaust the pool before any formal round ever ran. Phase L
+        # gives each round its own budget (``attempts_per_round`` for
+        # trial rounds, ``attempts_per_formal_round`` for the formal
+        # round) and only increments ``completed_rounds`` on success.
+        # ``consecutive_fails`` aborts the iteration after
+        # ``max_fail_rounds`` rounds in a row exhaust their inner budget.
         completed_rounds = 0
         total_attempts = 0
-        max_attempts = max_rounds * 3
+        consecutive_fails = 0
+        attempts_per_round_setting = agent_input.attempts_per_round
+        attempts_per_formal_round_setting = agent_input.attempts_per_formal_round
+        max_fail_rounds_setting = agent_input.max_fail_rounds
         # Pre-initialise so finalisation can safely read `plan` for the
         # gate-exhaustion mode lookup even if the loop never assigns it
         # (e.g. max_rounds=0 or an early-exit path).
         plan: Optional[ExperimentPlan] = None
 
-        while completed_rounds < max_rounds and total_attempts < max_attempts:
-            total_attempts += 1
-            iteration = completed_rounds + 1
-            try:
-                print(f"\n\n{'='*60}\nROUND {iteration}/{max_rounds} "
-                      f"(attempt {total_attempts}): Planning...\n{'='*60}")
+        while completed_rounds < max_rounds and consecutive_fails < max_fail_rounds_setting:
+            round_index = completed_rounds + 1
+            is_formal_round = (completed_rounds == max_rounds - 1)
+            N = attempts_per_formal_round_setting if is_formal_round else attempts_per_round_setting
+            round_succeeded = False
 
-                # A. OBSERVE: Retrieve full Research Memory from summary.json
-                memory_history = sandbox.get_summary()
-
-                # Build exploration checklist from config schema + past records
-                from agent.prompts import (
-                    build_exploration_checklist,
-                    format_plugin_source_excerpt_block,
-                )
-                from ml_models.models_format_sandbox import get_config_class
-                config_cls = get_config_class(model_type_setting)
-                config_schema = config_cls.model_json_schema() if config_cls else {}
-                checklist = build_exploration_checklist(
-                    config_schema=config_schema,
-                    memory_history=memory_history,
-                )
-                # Phase D.1 — surface the raw config class source (validator
-                # bodies included) so the planner sees cross-field invariants
-                # that ``model_json_schema()`` drops. See
-                # docs/improving_validation_awareness.md §D.1.
-                plugin_source_excerpt = format_plugin_source_excerpt_block(config_cls)
-
-                # Phase K (K.6) — extract the most recent prior attempt's
-                # resource snapshot so the [ACTIVE RESOURCE BUDGETS] block can
-                # show the LLM a concrete number to react to. Looks at the
-                # last memory entry regardless of status (success / skipped):
-                # the resource fields are absent on records produced with the
-                # gates disabled and on schema-violation records. Round 1
-                # gives None on every field, which collapses to "(no prior
-                # estimate)" in the rendered block.
-                # See docs/resource_estimator_implement.md §10.3 / §10.11.
-                last_record = memory_history[-1] if memory_history else {}
-                last_memory = last_record.get("memory") or {}
-                last_train_cfg = (
-                    (last_record.get("params") or {}).get("train_config") or {}
-                )
-                last_vram_estimate_gb = last_memory.get("vram_estimate_gb")
-                last_time_estimate_minutes = last_memory.get("time_estimate_minutes")
-                last_batch_size = last_train_cfg.get("batch_size")
-                last_mode = last_memory.get("time_mode")
-
-                # B. THINK: Plan next experiment
-                decision = brain.plan(
-                    memory_history,
-                    expert_advice=expert_advice_str,
-                    force_model=model_type_setting,
-                    config_manual=config_manual_data,
-                    model_description=model_description,
-                    exploration_checklist=checklist,
-                    plugin_source_excerpt=plugin_source_excerpt,
-                    current_round=iteration,
-                    max_rounds=max_rounds,
-                    trial_allowed=trial_allowed,
-                    plan_overrides=agent_input.plan_overrides,
-                    max_epochs=agent_input.max_epochs,
-                    trial_vram_budget_gb=trial_vram_budget,
-                    formal_vram_budget_gb=formal_vram_budget,
-                    trial_time_budget_minutes=trial_time_budget,
-                    formal_time_budget_minutes=formal_time_budget,
-                    last_vram_estimate_gb=last_vram_estimate_gb,
-                    last_time_estimate_minutes=last_time_estimate_minutes,
-                    last_batch_size=last_batch_size,
-                    last_mode=last_mode,
-                )
-
-                # Validate LLM output into ExperimentPlan (with fallback)
-                plan = ExperimentPlan.with_defaults(decision)
-
-                # Apply hard overrides from operator config (before other overrides).
-                # Unknown keys are warned and skipped; invalid values are warned
-                # and skipped — the run continues with the LLM's original value.
-                if agent_input.plan_overrides:
-                    valid_fields = set(ExperimentPlan.model_fields.keys())
-                    unknown = set(agent_input.plan_overrides) - valid_fields
-                    if unknown:
-                        print(f"  [WARN] plan_overrides: ignoring unknown keys: {unknown}")
-                    safe_overrides = {k: v for k, v in agent_input.plan_overrides.items() if k in valid_fields}
-                    if safe_overrides:
-                        try:
-                            merged = plan.model_dump(by_alias=True) | safe_overrides
-                            plan = ExperimentPlan.model_validate(merged)
-                            print(f"  Plan overrides applied: {list(safe_overrides.keys())}")
-                        except Exception as e:
-                            print(f"  [WARN] plan_overrides validation failed ({e}); "
-                                  f"using LLM plan as-is")
-
-                # Override chain: expert constraint → final-round constraint → hard caps
-                is_last_needed_round = (completed_rounds == max_rounds - 1)
-                if not trial_allowed:
-                    plan.is_trial = False
-                if is_last_needed_round:
-                    plan.is_trial = False
-
-                # Enforce max_epochs hard cap (prevents LLM from choosing excessively long training)
-                if agent_input.max_epochs is not None:
-                    planned_epochs = plan.train_cfg.get("epochs", 1)
-                    if planned_epochs > agent_input.max_epochs:
-                        print(f"  Clamping epochs: {planned_epochs} → {agent_input.max_epochs} (max_epochs)")
-                        plan.train_cfg["epochs"] = agent_input.max_epochs
-
-                # Build and validate TrialConfig from plan + overrides
-                if plan.is_trial:
-                    mode = "trial"
-                elif trial_allowed:
-                    mode = "formal"
-                else:
-                    mode = "single_file"
-
-                # Phase M — mode-gated sample-set config. Formal-mode eval is
-                # LOCKED to snapshot + 1.0 so scores are architecturally
-                # comparable; formal training is operator-configurable via
-                # agent_input.formal_* fields. See docs/resource_estimator_implement.md §12.
-                _cfg = _resolve_sample_set_cfg(mode, agent_input, plan)
-                cfg_trial_strategy = _cfg["trial_strategy"]
-                cfg_trial_portion  = _cfg["trial_portion"]
-                cfg_train_portion  = _cfg["train_portion"]
-                cfg_eval_strategy  = _cfg["eval_strategy"]
-                cfg_eval_portion   = _cfg["eval_portion"]
-
-                # Generate deterministic seeds for reproducibility.
-                import hashlib
-                seed_input = f"{run_name}_{total_attempts}".encode()
-                seed_hash = int(hashlib.sha256(seed_input).hexdigest(), 16)
-                train_sampling_seed = agent_input.sampling_seed if agent_input.sampling_seed is not None else seed_hash % (2**31)
-                train_base_seed = agent_input.train_base_seed if agent_input.train_base_seed is not None else (seed_hash >> 31) % (2**31)
-                # Eval seed: same as train when aligned, different otherwise
-                if plan.train_validation_align:
-                    eval_sampling_seed = train_sampling_seed
-                else:
-                    eval_sampling_seed = (seed_hash >> 62) % (2**31)
-
-                trial_config = TrialConfig(
-                    is_trial=plan.is_trial,
-                    mode=mode,
-                    # Training
-                    trial_strategy=cfg_trial_strategy,
-                    trial_portion=cfg_trial_portion,
-                    train_portion=cfg_train_portion,
-                    target_files=plan.target_files if plan.is_trial else [],
-                    # Validation
-                    eval_strategy=cfg_eval_strategy,
-                    eval_portion=cfg_eval_portion,
-                    # Alignment
-                    train_validation_align=plan.train_validation_align,
-                    # Legacy
-                    file_index=file_index if mode == "single_file" else None,
-                    # Seeds
-                    train_sampling_seed=train_sampling_seed,
-                    eval_sampling_seed=eval_sampling_seed,
-                    train_base_seed=train_base_seed,
-                )
-
-                # Validate integer relationships between dataset, PSD, ML segments
-                _validate_data_config(trial_config, plan.model_cfg.get("segmentation_size", 10000))
-
-                # Build TWO independent SampleSets — training and validation
-                if trial_config.mode in ("trial", "formal"):
-                    train_sample_set = build_sample_set(
-                        is_trial=True,
-                        trial_strategy=trial_config.trial_strategy,
-                        trial_portion=trial_config.trial_portion,
-                        target_files=trial_config.target_files or None,
-                        seed=trial_config.train_sampling_seed,
+            for attempt_in_round in range(1, N + 1):
+                total_attempts += 1
+                iteration = round_index  # legacy alias for prints + brain.plan(current_round=...)
+                try:
+                    print(f"\n\n{'='*60}\nROUND {iteration}/{max_rounds} "
+                          f"(attempt {attempt_in_round}/{N}, total {total_attempts}): "
+                          f"Planning...\n{'='*60}")
+    
+                    # A. OBSERVE: Retrieve full Research Memory from summary.json
+                    memory_history = sandbox.get_summary()
+    
+                    # Build exploration checklist from config schema + past records
+                    from agent.prompts import (
+                        build_exploration_checklist,
+                        format_plugin_source_excerpt_block,
                     )
-                    eval_sample_set = build_sample_set(
-                        is_trial=True,
-                        trial_strategy=trial_config.eval_strategy,
-                        trial_portion=trial_config.eval_portion,
-                        target_files=trial_config.target_files or None,
-                        seed=trial_config.eval_sampling_seed,
+                    from ml_models.models_format_sandbox import get_config_class
+                    config_cls = get_config_class(model_type_setting)
+                    config_schema = config_cls.model_json_schema() if config_cls else {}
+                    checklist = build_exploration_checklist(
+                        config_schema=config_schema,
+                        memory_history=memory_history,
                     )
-                    print(f"  {trial_config.mode.capitalize()} mode: "
-                          f"train: {trial_config.trial_strategy} portion={trial_config.trial_portion} "
-                          f"| eval: {trial_config.eval_strategy} portion={trial_config.eval_portion} "
-                          f"| train_portion/epoch={trial_config.train_portion} "
-                          f"| align={trial_config.train_validation_align}")
-                else:
-                    train_sample_set = None
-                    eval_sample_set = None
-                    print(f"  Legacy mode: file_index={file_index}")
-
-                # Segment counts for records and reflector context
-                if train_sample_set:
-                    train_psd_segments = sum(len(v) for v in train_sample_set.values())
-                else:
-                    train_psd_segments = DATASET_CONFIG.segments_per_file  # legacy single-file
-
-                if eval_sample_set:
-                    eval_psd_segments = sum(len(v) for v in eval_sample_set.values())
-                else:
-                    eval_psd_segments = DATASET_CONFIG.segments_per_file  # legacy single-file
-
-                # When force_model is set, override the LLM's model_type choice.
-                if model_type_setting != "auto":
-                    model_type = model_type_setting
-                else:
-                    model_type = plan.model_type
-                exp_id = f"{model_type}_{run_name}_{total_attempts:03d}"
-                hypothesis = plan.hypothesis
-
-                print(f"Action: {model_type.upper()} | ID: {exp_id}")
-                print(f"Hypothesis: {hypothesis}")
-                print(f"Reasoning: {plan.reasoning or 'No reasoning provided.'}")
-
-                # Save validated TrialConfig
-                trial_config_path = os.path.join(
-                    sandbox.dirs["configs"], f"trial_config_{exp_id}.json"
-                )
-                with open(trial_config_path, "w", encoding="utf-8") as f:
-                    json.dump(trial_config.model_dump(), f, indent=2)
-
-                # C. ACT: Execute the Atomic Skill Pipeline (Train -> Inf -> Score)
-                model_config = plan.model_cfg.copy()
-                # Ensure model_config.model_type matches the forced model type
-                model_config["model_type"] = model_type
-                active_params = {
-                    "exp_id":            exp_id,
-                    "run_name":          run_name,
-                    "model_type":        model_type,
-                    "model_config":      model_config,
-                    "train_config":      plan.train_cfg,
-                    "loss_config":       plan.loss_cfg,
-                    "sample_set":        train_sample_set,    # training data (from training files)
-                    "train_portion":     trial_config.train_portion,
-                    "train_base_seed":   trial_config.train_base_seed,
-                    "eval_sample_set":   eval_sample_set,     # validation data (from validation files)
-                }
-
-                # Clean params for records — exclude bulky SampleSet dicts
-                record_params = {
-                    "exp_id":       exp_id,
-                    "run_name":     run_name,
-                    "model_type":   model_type,
-                    "model_config": model_config,
-                    "train_config": plan.train_cfg,
-                    "loss_config":  plan.loss_cfg,
-                }
-
-                # Phase K: per-mode VRAM-budget pick. plan.is_trial decides
-                # which ceiling applies for THIS round; the unselected one is
-                # ignored. When the chosen budget is None the skill still runs
-                # but falls back to free×0.8 defensive behaviour (no operator
-                # ceiling) — the memory's vram_*_gb fields are omitted in that
-                # case so the planner sees "this round wasn't operator-budgeted."
-                # See docs/resource_estimator_implement.md §10.4 / §10.8.
-                chosen_vram_budget = (trial_vram_budget
-                                      if plan.is_trial
-                                      else formal_vram_budget)
-                vram_budget_desc = (f"{chosen_vram_budget} GB"
-                                    if chosen_vram_budget is not None
-                                    else "free×0.8")
-                print(f"\n[Pre-flight 1/2] VRAM check "
-                      f"(mode={'trial' if plan.is_trial else 'formal'}, "
-                      f"budget={vram_budget_desc})...")
-                resource_check = _run_skill(
-                    "evaluate_vram_skill",
-                    sandbox,
-                    **active_params,
-                    vram_budget_gb=chosen_vram_budget,
-                )
-                if resource_check.get("status") == "error":
-                    raise RuntimeError(f"Resource check error: {resource_check.get('message')}")
-
-                # Phase D.4 — constraint-aware retry. The wrapper returns
-                # ``status="schema_violation"`` when the plugin's
-                # ``PLUGIN_CONFIG_CLASS(**model_cfg)`` call raised a
-                # ``ValidationError``. This typically happens when the tuner
-                # planner proposes a config that violates a cross-field
-                # invariant (e.g. U-Net non-decreasing channels) that
-                # ``model_json_schema()`` cannot represent. Save a
-                # ``skipped_schema_violation`` record so the violating
-                # fields/values surface in next round's ``memory_history``;
-                # the attempt does NOT count as a completed round.
-                # See docs/improving_validation_awareness.md §D.4.
-                if resource_check.get("status") == "schema_violation":
-                    violations = resource_check.get("violations", [])
-                    offending = resource_check.get("offending_config", {})
-                    violating_fields = ", ".join(v.get("loc", "?") for v in violations) or "unknown"
-                    print(f"Schema violation — this attempt does NOT count as a round.")
-                    print(f"   Violating fields : {violating_fields}")
-                    for v in violations:
-                        print(f"   - {v.get('loc')} ({v.get('type')}): {v.get('msg')}")
-
-                    violation_summary = "; ".join(
-                        f"{v.get('loc')}={v.get('input')!r} → {v.get('msg')}"
-                        for v in violations
-                    ) or "unspecified schema violation"
-                    schema_record = {
-                        "exp_id":          exp_id,
-                        "status":          "skipped_schema_violation",
-                        "model_type":      model_type,
-                        "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "file_index":      file_index,
-                        "params":          record_params,
-                        "denoising_score": None,
-                        "memory": {
-                            "expert_advice_followed": expert_advice_str,
-                            "hypothesis":    hypothesis,
-                            "conclusion":    (
-                                f"Skipped: plugin schema rejected the proposed model_config. "
-                                f"Violating fields: {violating_fields}. "
-                                f"Offending values: {offending}."
-                            ),
-                            "discovery":     resource_check.get("verdict", ""),
-                            "memory_update": (
-                                f"DO NOT repeat this exact combination — plugin schema requires: "
-                                f"{violation_summary}. Propose a config that satisfies every "
-                                f"@model_validator(mode='after') and per-field bound in the "
-                                f"plugin's PLUGIN_CONFIG_CLASS."
-                            ),
-                        },
+                    # Phase D.1 — surface the raw config class source (validator
+                    # bodies included) so the planner sees cross-field invariants
+                    # that ``model_json_schema()`` drops. See
+                    # docs/improving_validation_awareness.md §D.1.
+                    plugin_source_excerpt = format_plugin_source_excerpt_block(config_cls)
+    
+                    # Phase K (K.6) — extract the most recent prior attempt's
+                    # resource snapshot so the [ACTIVE RESOURCE BUDGETS] block can
+                    # show the LLM a concrete number to react to. Looks at the
+                    # last memory entry regardless of status (success / skipped):
+                    # the resource fields are absent on records produced with the
+                    # gates disabled and on schema-violation records. Round 1
+                    # gives None on every field, which collapses to "(no prior
+                    # estimate)" in the rendered block.
+                    # See docs/resource_estimator_implement.md §10.3 / §10.11.
+                    last_record = memory_history[-1] if memory_history else {}
+                    last_memory = last_record.get("memory") or {}
+                    last_train_cfg = (
+                        (last_record.get("params") or {}).get("train_config") or {}
+                    )
+                    last_vram_estimate_gb = last_memory.get("vram_estimate_gb")
+                    last_time_estimate_minutes = last_memory.get("time_estimate_minutes")
+                    last_batch_size = last_train_cfg.get("batch_size")
+                    last_mode = last_memory.get("time_mode")
+    
+                    # B. THINK: Plan next experiment
+                    decision = brain.plan(
+                        memory_history,
+                        expert_advice=expert_advice_str,
+                        force_model=model_type_setting,
+                        config_manual=config_manual_data,
+                        model_description=model_description,
+                        exploration_checklist=checklist,
+                        plugin_source_excerpt=plugin_source_excerpt,
+                        current_round=iteration,
+                        max_rounds=max_rounds,
+                        trial_allowed=trial_allowed,
+                        plan_overrides=agent_input.plan_overrides,
+                        max_epochs=agent_input.max_epochs,
+                        trial_vram_budget_gb=trial_vram_budget,
+                        formal_vram_budget_gb=formal_vram_budget,
+                        trial_time_budget_minutes=trial_time_budget,
+                        formal_time_budget_minutes=formal_time_budget,
+                        last_vram_estimate_gb=last_vram_estimate_gb,
+                        last_time_estimate_minutes=last_time_estimate_minutes,
+                        last_batch_size=last_batch_size,
+                        last_mode=last_mode,
+                    )
+    
+                    # Validate LLM output into ExperimentPlan (with fallback)
+                    plan = ExperimentPlan.with_defaults(decision)
+    
+                    # Apply hard overrides from operator config (before other overrides).
+                    # Unknown keys are warned and skipped; invalid values are warned
+                    # and skipped — the run continues with the LLM's original value.
+                    if agent_input.plan_overrides:
+                        valid_fields = set(ExperimentPlan.model_fields.keys())
+                        unknown = set(agent_input.plan_overrides) - valid_fields
+                        if unknown:
+                            print(f"  [WARN] plan_overrides: ignoring unknown keys: {unknown}")
+                        safe_overrides = {k: v for k, v in agent_input.plan_overrides.items() if k in valid_fields}
+                        if safe_overrides:
+                            try:
+                                merged = plan.model_dump(by_alias=True) | safe_overrides
+                                plan = ExperimentPlan.model_validate(merged)
+                                print(f"  Plan overrides applied: {list(safe_overrides.keys())}")
+                            except Exception as e:
+                                print(f"  [WARN] plan_overrides validation failed ({e}); "
+                                      f"using LLM plan as-is")
+    
+                    # Override chain: expert constraint → formal-round constraint → hard caps.
+                    # Phase L: is_formal_round is set in the outer loop (the round that
+                    # would push completed_rounds to max_rounds). Every attempt in that
+                    # round runs in formal mode, regardless of what the planner chose.
+                    if not trial_allowed:
+                        plan.is_trial = False
+                    if is_formal_round:
+                        plan.is_trial = False
+    
+                    # Enforce max_epochs hard cap (prevents LLM from choosing excessively long training)
+                    if agent_input.max_epochs is not None:
+                        planned_epochs = plan.train_cfg.get("epochs", 1)
+                        if planned_epochs > agent_input.max_epochs:
+                            print(f"  Clamping epochs: {planned_epochs} → {agent_input.max_epochs} (max_epochs)")
+                            plan.train_cfg["epochs"] = agent_input.max_epochs
+    
+                    # Build and validate TrialConfig from plan + overrides
+                    if plan.is_trial:
+                        mode = "trial"
+                    elif trial_allowed:
+                        mode = "formal"
+                    else:
+                        mode = "single_file"
+    
+                    # Phase M — mode-gated sample-set config. Formal-mode eval is
+                    # LOCKED to snapshot + 1.0 so scores are architecturally
+                    # comparable; formal training is operator-configurable via
+                    # agent_input.formal_* fields. See docs/resource_estimator_implement.md §12.
+                    _cfg = _resolve_sample_set_cfg(mode, agent_input, plan)
+                    cfg_trial_strategy = _cfg["trial_strategy"]
+                    cfg_trial_portion  = _cfg["trial_portion"]
+                    cfg_train_portion  = _cfg["train_portion"]
+                    cfg_eval_strategy  = _cfg["eval_strategy"]
+                    cfg_eval_portion   = _cfg["eval_portion"]
+    
+                    # Generate deterministic seeds for reproducibility.
+                    import hashlib
+                    seed_input = f"{run_name}_{total_attempts}".encode()
+                    seed_hash = int(hashlib.sha256(seed_input).hexdigest(), 16)
+                    train_sampling_seed = agent_input.sampling_seed if agent_input.sampling_seed is not None else seed_hash % (2**31)
+                    train_base_seed = agent_input.train_base_seed if agent_input.train_base_seed is not None else (seed_hash >> 31) % (2**31)
+                    # Eval seed: same as train when aligned, different otherwise
+                    if plan.train_validation_align:
+                        eval_sampling_seed = train_sampling_seed
+                    else:
+                        eval_sampling_seed = (seed_hash >> 62) % (2**31)
+    
+                    trial_config = TrialConfig(
+                        is_trial=plan.is_trial,
+                        mode=mode,
+                        # Training
+                        trial_strategy=cfg_trial_strategy,
+                        trial_portion=cfg_trial_portion,
+                        train_portion=cfg_train_portion,
+                        target_files=plan.target_files if plan.is_trial else [],
+                        # Validation
+                        eval_strategy=cfg_eval_strategy,
+                        eval_portion=cfg_eval_portion,
+                        # Alignment
+                        train_validation_align=plan.train_validation_align,
+                        # Legacy
+                        file_index=file_index if mode == "single_file" else None,
+                        # Seeds
+                        train_sampling_seed=train_sampling_seed,
+                        eval_sampling_seed=eval_sampling_seed,
+                        train_base_seed=train_base_seed,
+                    )
+    
+                    # Validate integer relationships between dataset, PSD, ML segments
+                    _validate_data_config(trial_config, plan.model_cfg.get("segmentation_size", 10000))
+    
+                    # Build TWO independent SampleSets — training and validation
+                    if trial_config.mode in ("trial", "formal"):
+                        train_sample_set = build_sample_set(
+                            is_trial=True,
+                            trial_strategy=trial_config.trial_strategy,
+                            trial_portion=trial_config.trial_portion,
+                            target_files=trial_config.target_files or None,
+                            seed=trial_config.train_sampling_seed,
+                        )
+                        eval_sample_set = build_sample_set(
+                            is_trial=True,
+                            trial_strategy=trial_config.eval_strategy,
+                            trial_portion=trial_config.eval_portion,
+                            target_files=trial_config.target_files or None,
+                            seed=trial_config.eval_sampling_seed,
+                        )
+                        print(f"  {trial_config.mode.capitalize()} mode: "
+                              f"train: {trial_config.trial_strategy} portion={trial_config.trial_portion} "
+                              f"| eval: {trial_config.eval_strategy} portion={trial_config.eval_portion} "
+                              f"| train_portion/epoch={trial_config.train_portion} "
+                              f"| align={trial_config.train_validation_align}")
+                    else:
+                        train_sample_set = None
+                        eval_sample_set = None
+                        print(f"  Legacy mode: file_index={file_index}")
+    
+                    # Segment counts for records and reflector context
+                    if train_sample_set:
+                        train_psd_segments = sum(len(v) for v in train_sample_set.values())
+                    else:
+                        train_psd_segments = DATASET_CONFIG.segments_per_file  # legacy single-file
+    
+                    if eval_sample_set:
+                        eval_psd_segments = sum(len(v) for v in eval_sample_set.values())
+                    else:
+                        eval_psd_segments = DATASET_CONFIG.segments_per_file  # legacy single-file
+    
+                    # When force_model is set, override the LLM's model_type choice.
+                    if model_type_setting != "auto":
+                        model_type = model_type_setting
+                    else:
+                        model_type = plan.model_type
+                    exp_id = f"{model_type}_{run_name}_{total_attempts:03d}"
+                    hypothesis = plan.hypothesis
+    
+                    print(f"Action: {model_type.upper()} | ID: {exp_id}")
+                    print(f"Hypothesis: {hypothesis}")
+                    print(f"Reasoning: {plan.reasoning or 'No reasoning provided.'}")
+    
+                    # Save validated TrialConfig
+                    trial_config_path = os.path.join(
+                        sandbox.dirs["configs"], f"trial_config_{exp_id}.json"
+                    )
+                    with open(trial_config_path, "w", encoding="utf-8") as f:
+                        json.dump(trial_config.model_dump(), f, indent=2)
+    
+                    # C. ACT: Execute the Atomic Skill Pipeline (Train -> Inf -> Score)
+                    model_config = plan.model_cfg.copy()
+                    # Ensure model_config.model_type matches the forced model type
+                    model_config["model_type"] = model_type
+                    active_params = {
+                        "exp_id":            exp_id,
+                        "run_name":          run_name,
+                        "model_type":        model_type,
+                        "model_config":      model_config,
+                        "train_config":      plan.train_cfg,
+                        "loss_config":       plan.loss_cfg,
+                        "sample_set":        train_sample_set,    # training data (from training files)
+                        "train_portion":     trial_config.train_portion,
+                        "train_base_seed":   trial_config.train_base_seed,
+                        "eval_sample_set":   eval_sample_set,     # validation data (from validation files)
                     }
-                    ExperimentRecord.model_validate(schema_record)
-                    sandbox.save_record(schema_record)
-                    continue
-
-                if not resource_check.get("feasible", True):
-                    print(f"Resource check FAILED — this attempt does NOT count as a round.")
-                    print(f"   Verdict   : {resource_check.get('verdict', '')}")
-                    print(f"   Suggestion: {resource_check.get('suggestion', '')}")
-
-                    oom_record = {
-                        "exp_id":          exp_id,
-                        "status":          "skipped_oom_risk",
-                        "model_type":      model_type,
-                        "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "file_index":      file_index,
-                        "params":          record_params,
-                        "denoising_score": None,
-                        "memory": {
-                            "expert_advice_followed": expert_advice_str,
-                            "hypothesis":    hypothesis,
-                            "conclusion":    (
-                                f"Skipped: estimated VRAM ({resource_check.get('estimated_gb', '?')} GB) "
-                                f"exceeds 80% safety limit ({resource_check.get('limit_gb', '?')} GB)."
-                            ),
-                            "discovery":     resource_check.get("verdict", ""),
-                            "memory_update": resource_check.get("suggestion", "Reduce batch_size or segmentation_size."),
-                        },
+    
+                    # Clean params for records — exclude bulky SampleSet dicts
+                    record_params = {
+                        "exp_id":       exp_id,
+                        "run_name":     run_name,
+                        "model_type":   model_type,
+                        "model_config": model_config,
+                        "train_config": plan.train_cfg,
+                        "loss_config":  plan.loss_cfg,
                     }
-                    # Phase K — surface the same two VRAM fields the success
-                    # record carries so the planner sees the same shape
-                    # regardless of pass/fail. Omitted when the gate is
-                    # disabled (chosen_vram_budget is None), mirroring §J.3
-                    # for time. Mode is inferred from `time_mode` on records
-                    # where the time gate also ran — no separate vram_mode.
+    
+                    # Phase K: per-mode VRAM-budget pick. plan.is_trial decides
+                    # which ceiling applies for THIS round; the unselected one is
+                    # ignored. When the chosen budget is None the skill still runs
+                    # but falls back to free×0.8 defensive behaviour (no operator
+                    # ceiling) — the memory's vram_*_gb fields are omitted in that
+                    # case so the planner sees "this round wasn't operator-budgeted."
                     # See docs/resource_estimator_implement.md §10.4 / §10.8.
-                    if chosen_vram_budget is not None:
-                        oom_record["memory"]["vram_estimate_gb"] = (
-                            resource_check.get("estimated_gb")
-                        )
-                        oom_record["memory"]["vram_budget_gb"] = (
-                            resource_check.get("limit_gb")
-                        )
-                    # K.2.5-8 — soft-fallback flag is independent of the
-                    # budget being set; the gate runs unconditionally and the
-                    # flag tells us whether the inference estimate was
-                    # against a registered batch. Recorded on every
-                    # skipped_oom_risk so post-hoc analysis can discount
-                    # rejections that came from an uncalibrated estimate.
-                    if resource_check.get("inference_batch_uncalibrated"):
-                        oom_record["memory"]["inference_batch_uncalibrated"] = True
-                    ExperimentRecord.model_validate(oom_record)
-                    sandbox.save_record(oom_record)
-                    continue
-
-                # [Pre-flight 2/2] Wall-time gate. Mirrors the VRAM gate above:
-                # error → raise; infeasible → emit skipped_time_risk record
-                # and continue without consuming a round. Skipped entirely
-                # when the budget for the active mode is None (one-time
-                # warning per mode printed at startup).
-                # See docs/resource_estimator_implement.md §2.7 / E1 / Phase I.
-                # The result is stashed so the post-flight calibration update
-                # (Phase F) can compare warmup vs actual ms/step.
-                # Phase I: per-mode budget pick. plan.is_trial decides which
-                # ceiling applies for THIS round; the unselected one is
-                # ignored. The skill itself stays mode-agnostic — it gets a
-                # single time_budget_minutes kwarg.
-                chosen_time_budget = (trial_time_budget
-                                      if plan.is_trial
-                                      else formal_time_budget)
-                time_check = None
-                if chosen_time_budget is not None:
-                    print(f"\n[Pre-flight 2/2] Time check "
+                    chosen_vram_budget = (trial_vram_budget
+                                          if plan.is_trial
+                                          else formal_vram_budget)
+                    vram_budget_desc = (f"{chosen_vram_budget} GB"
+                                        if chosen_vram_budget is not None
+                                        else "free×0.8")
+                    print(f"\n[Pre-flight 1/2] VRAM check "
                           f"(mode={'trial' if plan.is_trial else 'formal'}, "
-                          f"budget={chosen_time_budget} min)...")
-                    time_check = _run_skill(
-                        "evaluate_time_skill",
+                          f"budget={vram_budget_desc})...")
+                    resource_check = _run_skill(
+                        "evaluate_vram_skill",
                         sandbox,
                         **active_params,
-                        time_budget_minutes=chosen_time_budget,
-                        data_dir=time_data_dir,
+                        vram_budget_gb=chosen_vram_budget,
                     )
-                    if time_check.get("status") == "error":
-                        raise RuntimeError(
-                            f"Time check error: {time_check.get('message')}"
-                        )
-
-                    if not time_check.get("feasible", True):
-                        print(f"Time check FAILED — this attempt does NOT count as a round.")
-                        print(f"   Verdict   : {time_check.get('verdict', '')}")
-                        print(f"   Suggestion: {time_check.get('suggestion', '')}")
-
-                        time_record = {
+                    if resource_check.get("status") == "error":
+                        raise RuntimeError(f"Resource check error: {resource_check.get('message')}")
+    
+                    # Phase D.4 — constraint-aware retry. The wrapper returns
+                    # ``status="schema_violation"`` when the plugin's
+                    # ``PLUGIN_CONFIG_CLASS(**model_cfg)`` call raised a
+                    # ``ValidationError``. This typically happens when the tuner
+                    # planner proposes a config that violates a cross-field
+                    # invariant (e.g. U-Net non-decreasing channels) that
+                    # ``model_json_schema()`` cannot represent. Save a
+                    # ``skipped_schema_violation`` record so the violating
+                    # fields/values surface in next round's ``memory_history``;
+                    # the attempt does NOT count as a completed round.
+                    # See docs/improving_validation_awareness.md §D.4.
+                    if resource_check.get("status") == "schema_violation":
+                        violations = resource_check.get("violations", [])
+                        offending = resource_check.get("offending_config", {})
+                        violating_fields = ", ".join(v.get("loc", "?") for v in violations) or "unknown"
+                        print(f"Schema violation — this attempt does NOT count as a round.")
+                        print(f"   Violating fields : {violating_fields}")
+                        for v in violations:
+                            print(f"   - {v.get('loc')} ({v.get('type')}): {v.get('msg')}")
+    
+                        violation_summary = "; ".join(
+                            f"{v.get('loc')}={v.get('input')!r} → {v.get('msg')}"
+                            for v in violations
+                        ) or "unspecified schema violation"
+                        schema_record = {
                             "exp_id":          exp_id,
-                            "status":          "skipped_time_risk",
+                            "status":          "skipped_schema_violation",
                             "model_type":      model_type,
                             "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
                             "file_index":      file_index,
@@ -963,372 +869,534 @@ class HyperparamTuningAgent:
                                 "expert_advice_followed": expert_advice_str,
                                 "hypothesis":    hypothesis,
                                 "conclusion":    (
-                                    f"Skipped: estimated wall-time "
-                                    f"({time_check.get('estimated_minutes', '?')} min) "
-                                    f"exceeds budget ({time_check.get('limit_minutes', '?')} min)."
+                                    f"Skipped: plugin schema rejected the proposed model_config. "
+                                    f"Violating fields: {violating_fields}. "
+                                    f"Offending values: {offending}."
                                 ),
-                                "discovery":     time_check.get("verdict", ""),
-                                "memory_update": time_check.get(
-                                    "suggestion",
-                                    "Reduce model size, batch_size, segmentation_size, or train_portion.",
+                                "discovery":     resource_check.get("verdict", ""),
+                                "memory_update": (
+                                    f"DO NOT repeat this exact combination — plugin schema requires: "
+                                    f"{violation_summary}. Propose a config that satisfies every "
+                                    f"@model_validator(mode='after') and per-field bound in the "
+                                    f"plugin's PLUGIN_CONFIG_CLASS."
                                 ),
-                                # Phase J — same three fields the success
-                                # record carries, so the planner sees the
-                                # same shape regardless of pass/fail.
-                                # See docs/resource_estimator_implement.md §J.3.
-                                "time_estimate_minutes": time_check.get("estimated_minutes"),
-                                "time_budget_minutes":   time_check.get("limit_minutes"),
-                                "time_mode":             "trial" if plan.is_trial else "formal",
                             },
                         }
-                        # K.2.5-8 — propagate inference soft-fallback flag.
-                        # Either gate's result carries the same flag (both
-                        # call the same inference estimator); the time
-                        # wrapper's flag is the natural source here.
-                        if time_check.get("inference_batch_uncalibrated"):
-                            time_record["memory"]["inference_batch_uncalibrated"] = True
-                        ExperimentRecord.model_validate(time_record)
-                        sandbox.save_record(time_record)
+                        schema_record["memory"]["round_index"] = round_index
+                        schema_record["memory"]["attempt_in_round"] = attempt_in_round
+                        ExperimentRecord.model_validate(schema_record)
+                        sandbox.save_record(schema_record)
                         continue
-
-                print(f"\n[Step 1/3] Training...")
-                t0 = time.time()
-                train_status = _run_skill("training_skill", sandbox, **active_params)
-                train_time = round(time.time() - t0, 1)
-                if train_status.get("status") == "error":
-                    error_msg = train_status.get("message", "Unknown training error")
-                    is_oom = "CUDA out of memory" in error_msg or "OutOfMemoryError" in error_msg
-                    # Truncate long tracebacks — keep last 500 chars for the LLM
-                    short_msg = error_msg[-500:] if len(error_msg) > 500 else error_msg
-                    error_record = {
-                        "exp_id":          exp_id,
-                        "status":          "error_training_oom" if is_oom else "error_training",
-                        "model_type":      model_type,
-                        "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "file_index":      file_index,
-                        "params":          record_params,
-                        "denoising_score": None,
+    
+                    if not resource_check.get("feasible", True):
+                        print(f"Resource check FAILED — this attempt does NOT count as a round.")
+                        print(f"   Verdict   : {resource_check.get('verdict', '')}")
+                        print(f"   Suggestion: {resource_check.get('suggestion', '')}")
+    
+                        oom_record = {
+                            "exp_id":          exp_id,
+                            "status":          "skipped_oom_risk",
+                            "model_type":      model_type,
+                            "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "file_index":      file_index,
+                            "params":          record_params,
+                            "denoising_score": None,
+                            "memory": {
+                                "expert_advice_followed": expert_advice_str,
+                                "hypothesis":    hypothesis,
+                                "conclusion":    (
+                                    f"Skipped: estimated VRAM ({resource_check.get('estimated_gb', '?')} GB) "
+                                    f"exceeds 80% safety limit ({resource_check.get('limit_gb', '?')} GB)."
+                                ),
+                                "discovery":     resource_check.get("verdict", ""),
+                                "memory_update": resource_check.get("suggestion", "Reduce batch_size or segmentation_size."),
+                            },
+                        }
+                        # Phase K — surface the same two VRAM fields the success
+                        # record carries so the planner sees the same shape
+                        # regardless of pass/fail. Omitted when the gate is
+                        # disabled (chosen_vram_budget is None), mirroring §J.3
+                        # for time. Mode is inferred from `time_mode` on records
+                        # where the time gate also ran — no separate vram_mode.
+                        # See docs/resource_estimator_implement.md §10.4 / §10.8.
+                        if chosen_vram_budget is not None:
+                            oom_record["memory"]["vram_estimate_gb"] = (
+                                resource_check.get("estimated_gb")
+                            )
+                            oom_record["memory"]["vram_budget_gb"] = (
+                                resource_check.get("limit_gb")
+                            )
+                        # K.2.5-8 — soft-fallback flag is independent of the
+                        # budget being set; the gate runs unconditionally and the
+                        # flag tells us whether the inference estimate was
+                        # against a registered batch. Recorded on every
+                        # skipped_oom_risk so post-hoc analysis can discount
+                        # rejections that came from an uncalibrated estimate.
+                        if resource_check.get("inference_batch_uncalibrated"):
+                            oom_record["memory"]["inference_batch_uncalibrated"] = True
+                        oom_record["memory"]["round_index"] = round_index
+                        oom_record["memory"]["attempt_in_round"] = attempt_in_round
+                        ExperimentRecord.model_validate(oom_record)
+                        sandbox.save_record(oom_record)
+                        continue
+    
+                    # [Pre-flight 2/2] Wall-time gate. Mirrors the VRAM gate above:
+                    # error → raise; infeasible → emit skipped_time_risk record
+                    # and continue without consuming a round. Skipped entirely
+                    # when the budget for the active mode is None (one-time
+                    # warning per mode printed at startup).
+                    # See docs/resource_estimator_implement.md §2.7 / E1 / Phase I.
+                    # The result is stashed so the post-flight calibration update
+                    # (Phase F) can compare warmup vs actual ms/step.
+                    # Phase I: per-mode budget pick. plan.is_trial decides which
+                    # ceiling applies for THIS round; the unselected one is
+                    # ignored. The skill itself stays mode-agnostic — it gets a
+                    # single time_budget_minutes kwarg.
+                    chosen_time_budget = (trial_time_budget
+                                          if plan.is_trial
+                                          else formal_time_budget)
+                    time_check = None
+                    if chosen_time_budget is not None:
+                        print(f"\n[Pre-flight 2/2] Time check "
+                              f"(mode={'trial' if plan.is_trial else 'formal'}, "
+                              f"budget={chosen_time_budget} min)...")
+                        time_check = _run_skill(
+                            "evaluate_time_skill",
+                            sandbox,
+                            **active_params,
+                            time_budget_minutes=chosen_time_budget,
+                            data_dir=time_data_dir,
+                        )
+                        if time_check.get("status") == "error":
+                            raise RuntimeError(
+                                f"Time check error: {time_check.get('message')}"
+                            )
+    
+                        if not time_check.get("feasible", True):
+                            print(f"Time check FAILED — this attempt does NOT count as a round.")
+                            print(f"   Verdict   : {time_check.get('verdict', '')}")
+                            print(f"   Suggestion: {time_check.get('suggestion', '')}")
+    
+                            time_record = {
+                                "exp_id":          exp_id,
+                                "status":          "skipped_time_risk",
+                                "model_type":      model_type,
+                                "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
+                                "file_index":      file_index,
+                                "params":          record_params,
+                                "denoising_score": None,
+                                "memory": {
+                                    "expert_advice_followed": expert_advice_str,
+                                    "hypothesis":    hypothesis,
+                                    "conclusion":    (
+                                        f"Skipped: estimated wall-time "
+                                        f"({time_check.get('estimated_minutes', '?')} min) "
+                                        f"exceeds budget ({time_check.get('limit_minutes', '?')} min)."
+                                    ),
+                                    "discovery":     time_check.get("verdict", ""),
+                                    "memory_update": time_check.get(
+                                        "suggestion",
+                                        "Reduce model size, batch_size, segmentation_size, or train_portion.",
+                                    ),
+                                    # Phase J — same three fields the success
+                                    # record carries, so the planner sees the
+                                    # same shape regardless of pass/fail.
+                                    # See docs/resource_estimator_implement.md §J.3.
+                                    "time_estimate_minutes": time_check.get("estimated_minutes"),
+                                    "time_budget_minutes":   time_check.get("limit_minutes"),
+                                    "time_mode":             "trial" if plan.is_trial else "formal",
+                                },
+                            }
+                            # K.2.5-8 — propagate inference soft-fallback flag.
+                            # Either gate's result carries the same flag (both
+                            # call the same inference estimator); the time
+                            # wrapper's flag is the natural source here.
+                            if time_check.get("inference_batch_uncalibrated"):
+                                time_record["memory"]["inference_batch_uncalibrated"] = True
+                            time_record["memory"]["round_index"] = round_index
+                            time_record["memory"]["attempt_in_round"] = attempt_in_round
+                            ExperimentRecord.model_validate(time_record)
+                            sandbox.save_record(time_record)
+                            continue
+    
+                    print(f"\n[Step 1/3] Training...")
+                    t0 = time.time()
+                    train_status = _run_skill("training_skill", sandbox, **active_params)
+                    train_time = round(time.time() - t0, 1)
+                    if train_status.get("status") == "error":
+                        error_msg = train_status.get("message", "Unknown training error")
+                        is_oom = "CUDA out of memory" in error_msg or "OutOfMemoryError" in error_msg
+                        # Truncate long tracebacks — keep last 500 chars for the LLM
+                        short_msg = error_msg[-500:] if len(error_msg) > 500 else error_msg
+                        error_record = {
+                            "exp_id":          exp_id,
+                            "status":          "error_training_oom" if is_oom else "error_training",
+                            "model_type":      model_type,
+                            "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "file_index":      file_index,
+                            "params":          record_params,
+                            "denoising_score": None,
+                            "memory": {
+                                "expert_advice_followed": expert_advice_str,
+                                "hypothesis":    hypothesis,
+                                "conclusion":    f"Training failed: {short_msg}",
+                                "discovery":     "CUDA OOM — reduce model size, batch_size, or segmentation_size." if is_oom else f"Training crashed: {short_msg}",
+                                "memory_update": "This config exceeds GPU memory. Try smaller architecture." if is_oom else "Fix the error before retrying this config.",
+                            },
+                        }
+                        error_record["memory"]["round_index"] = round_index
+                        error_record["memory"]["attempt_in_round"] = attempt_in_round
+                        ExperimentRecord.model_validate(error_record)
+                        sandbox.save_record(error_record)
+                        print(f"  Saved error record: {error_record['status']}")
+                        continue
+    
+                    print(f"[Step 2/3] Inference...")
+                    t0 = time.time()
+                    inf_status = _run_skill("inference_skill", sandbox, **active_params)
+                    inference_time = round(time.time() - t0, 1)
+                    if inf_status.get("status") == "error":
+                        error_msg = inf_status.get("message", "Unknown inference error")
+                        is_oom = "CUDA out of memory" in error_msg or "OutOfMemoryError" in error_msg
+                        short_msg = error_msg[-500:] if len(error_msg) > 500 else error_msg
+                        error_record = {
+                            "exp_id":          exp_id,
+                            "status":          "error_inference_oom" if is_oom else "error_inference",
+                            "model_type":      model_type,
+                            "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "file_index":      file_index,
+                            "params":          record_params,
+                            "denoising_score": None,
+                            "memory": {
+                                "expert_advice_followed": expert_advice_str,
+                                "hypothesis":    hypothesis,
+                                "conclusion":    f"Inference failed: {short_msg}",
+                                "discovery":     "CUDA OOM during inference — reduce batch_size or model size." if is_oom else f"Inference crashed: {short_msg}",
+                                "memory_update": "Inference OOM — the model trained but can't infer. Try smaller batch." if is_oom else "Fix the inference error before retrying.",
+                            },
+                        }
+                        error_record["memory"]["round_index"] = round_index
+                        error_record["memory"]["attempt_in_round"] = attempt_in_round
+                        ExperimentRecord.model_validate(error_record)
+                        sandbox.save_record(error_record)
+                        print(f"  Saved error record: {error_record['status']}")
+                        continue
+    
+                    print(f"[Step 3/3] Scoring...")
+                    t0 = time.time()
+                    if anchor_map_data is not None:
+                        # Anchor-normalized scoring (both trial and formal modes).
+                        # Trial: sparse SampleSet. Formal: full SampleSet (all 20 × 200).
+                        def _denoised_fn(fi):
+                            return f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_{fi:04d}.h5"
+                        file_vector, final_scalar = sandbox.score_vector(
+                            sample_set=eval_sample_set,
+                            anchor_map=anchor_map_data["anchors"],
+                            s_max=anchor_map_data["s_max"],
+                            denoised_filename_fn=_denoised_fn,
+                        )
+                        score_res = {
+                            "status": "success",
+                            "results": {
+                                "denoising_score": final_scalar,
+                                "file_vector": file_vector,
+                            },
+                        }
+                    else:
+                        # Legacy single-file mode (trial_allowed=False, no anchor map)
+                        score_res = _run_skill("denoising_score_skill", sandbox, **active_params)
+                    scoring_time = round(time.time() - t0, 1)
+    
+                    # Extract results from each stage
+                    train_results = train_status.get("results", {})
+                    score_results = score_res.get("results", {})
+    
+                    # Cleanup denoised files to save disk space
+                    if agent_input.cleanup_denoised:
+                        import glob as _glob
+                        pattern = os.path.join(
+                            sandbox.base_dir,
+                            f"abra_validation_denoised_*_{exp_id}_*.h5",
+                        )
+                        denoised_files = _glob.glob(pattern)
+                        if denoised_files:
+                            total_bytes = sum(os.path.getsize(f) for f in denoised_files)
+                            for f in denoised_files:
+                                os.remove(f)
+                            print(f"  Cleaned up {len(denoised_files)} denoised files "
+                                  f"({total_bytes / (1024**3):.1f} GB freed)")
+    
+                    # D. REFLECT: Analyze results and generate insights
+                    print(f"\nGenerating Research Memory...")
+    
+                    current_score     = score_results.get("denoising_score")
+                    current_loss_type = active_params["loss_config"].get("loss_type")
+                    successful = [
+                        r for r in memory_history
+                        if r.get("status") == "success" and r.get("denoising_score") is not None
+                    ]
+                    baseline_record = next(
+                        (r for r in memory_history if "baseline" in r.get("exp_id", "")), None
+                    )
+                    all_scores   = [r["denoising_score"] for r in successful]
+                    best_score   = max(all_scores) if all_scores else None
+                    best_record  = max(successful, key=lambda r: r["denoising_score"]) if successful else None
+                    sorted_scores = sorted(all_scores, reverse=True)
+                    rank = sorted_scores.index(current_score) + 1 if current_score in sorted_scores else None
+    
+                    same_loss_finals = [
+                        r["final_loss"]
+                        for r in successful
+                        if r.get("params", {}).get("loss_config", {}).get("loss_type") == current_loss_type
+                        and r.get("final_loss") is not None
+                    ]
+                    current_final_loss = train_results.get("final_loss")
+                    if current_final_loss is not None:
+                        all_same_loss_finals  = same_loss_finals + [current_final_loss]
+                        sorted_finals         = sorted(all_same_loss_finals)
+                        same_loss_loss_rank   = sorted_finals.index(current_final_loss) + 1
+                        same_loss_total       = len(all_same_loss_finals)
+                    else:
+                        same_loss_loss_rank = None
+                        same_loss_total     = len(same_loss_finals)
+    
+                    current_params  = train_results.get("model_params")
+                    current_epochs  = active_params["train_config"].get("epochs")
+                    baseline_params = baseline_record.get("model_params") if baseline_record else None
+                    baseline_epochs = baseline_record.get("params", {}).get("train_config", {}).get("epochs") if baseline_record else None
+                    params_ratio    = round(current_params / baseline_params, 3) if (current_params and baseline_params) else None
+                    epochs_ratio    = round(current_epochs / baseline_epochs, 3) if (current_epochs and baseline_epochs) else None
+    
+                    worst_score     = min(all_scores) if all_scores else None
+                    score_range     = (best_score - worst_score) if (best_score is not None and worst_score is not None and best_score != worst_score) else None
+                    score_threshold = (best_score - 0.05 * score_range) if score_range is not None else best_score
+                    best_params     = best_record.get("model_params") if best_record else None
+                    best_epochs     = best_record.get("params", {}).get("train_config", {}).get("epochs") if best_record else None
+                    is_more_efficient = (
+                        score_threshold is not None
+                        and current_score is not None
+                        and current_score >= score_threshold
+                        and (
+                            (current_params is not None and best_params is not None and current_params < best_params)
+                            or (current_epochs is not None and best_epochs is not None and current_epochs < best_epochs)
+                        )
+                    )
+    
+                    reflection_context = {
+                        "baseline_score":           baseline_record.get("denoising_score") if baseline_record else None,
+                        "best_score_so_far":        best_score,
+                        "is_new_best":              current_score is not None and (best_score is None or current_score > best_score),
+                        "rank":                     rank,
+                        "total_experiments":        len(successful),
+                        "best_config_so_far":       best_record.get("params") if best_record else None,
+                        "best_same_loss_final_loss": min(same_loss_finals) if same_loss_finals else None,
+                        "current_loss_type":        current_loss_type,
+                        "same_loss_loss_rank":      same_loss_loss_rank,
+                        "same_loss_total":          same_loss_total,
+                        "baseline_params":          baseline_params,
+                        "baseline_epochs":          baseline_epochs,
+                        "current_params":           current_params,
+                        "current_epochs":           current_epochs,
+                        "params_ratio":             params_ratio,
+                        "epochs_ratio":             epochs_ratio,
+                        "is_more_efficient":        is_more_efficient,
+                        "training_psd_segments":    train_psd_segments,
+                        "eval_psd_segments":        eval_psd_segments,
+                        "baseline_psd_segments":    baseline_record.get("training_psd_segments") if baseline_record else None,
+                        "trial_portion":            trial_config.trial_portion if trial_config.mode != "single_file" else None,
+                        "eval_portion":             trial_config.eval_portion if trial_config.mode != "single_file" else None,
+                    }
+    
+                    # Pass both training and scoring results to the reflector
+                    reflect_results = {**train_results, **score_results}
+                    reflection = brain.reflect(exp_id, hypothesis, reflect_results, reflection_context)
+    
+                    # Defensive unwrap: LLM occasionally emits [{...}] instead of {...}.
+                    if isinstance(reflection, list) and len(reflection) == 1 and isinstance(reflection[0], dict):
+                        print("[reflect] LLM returned a single-element list — unwrapping to dict.")
+                        reflection = reflection[0]
+                    if not isinstance(reflection, dict):
+                        print(f"[reflect] LLM returned non-dict ({type(reflection).__name__}); using empty reflection.")
+                        reflection = {}
+    
+                    print(f"{'-'*30}")
+                    print(f"RESEARCH REFLECTION for {exp_id}:")
+                    print(f"Conclusion  : {reflection.get('conclusion', 'N/A')}")
+                    print(f"Key Factor  : {reflection.get('key_factor', 'N/A')}")
+                    print(f"Discovery   : {reflection.get('discovery', 'N/A')}")
+                    print(f"Memory Update: {reflection.get('memory_update', 'N/A')}")
+                    print(f"{'-'*30}")
+    
+                    # E. COMMIT: Build, validate, and save the finalized record
+                    final_record = {
+                        "exp_id":     exp_id,
+                        "status":     "success",
+                        "model_type": model_type,
+                        "timestamp":  time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "file_index": file_index,
+                        "params":     record_params,
+                        # Training results
+                        "final_loss":    train_results.get("final_loss"),
+                        "loss_history":  train_results.get("loss_history"),
+                        "model_params":  train_results.get("model_params"),
+                        # Scoring results
+                        "denoising_score": score_results.get("denoising_score"),
+                        "file_vector":     score_results.get("file_vector"),
+                        # Data volume
+                        "training_psd_segments": train_psd_segments,
+                        "eval_psd_segments":    eval_psd_segments,
+                        "timing": {
+                            "train_time_s":     train_time,
+                            "inference_time_s": inference_time,
+                            "scoring_time_s":   scoring_time,
+                        },
                         "memory": {
                             "expert_advice_followed": expert_advice_str,
                             "hypothesis":    hypothesis,
-                            "conclusion":    f"Training failed: {short_msg}",
-                            "discovery":     "CUDA OOM — reduce model size, batch_size, or segmentation_size." if is_oom else f"Training crashed: {short_msg}",
-                            "memory_update": "This config exceeds GPU memory. Try smaller architecture." if is_oom else "Fix the error before retrying this config.",
+                            "conclusion":    reflection.get("conclusion"),
+                            "key_factor":    reflection.get("key_factor"),
+                            "discovery":     reflection.get("discovery"),
+                            "memory_update": reflection.get("memory_update"),
                         },
                     }
-                    ExperimentRecord.model_validate(error_record)
-                    sandbox.save_record(error_record)
-                    print(f"  Saved error record: {error_record['status']}")
-                    continue
-
-                print(f"[Step 2/3] Inference...")
-                t0 = time.time()
-                inf_status = _run_skill("inference_skill", sandbox, **active_params)
-                inference_time = round(time.time() - t0, 1)
-                if inf_status.get("status") == "error":
-                    error_msg = inf_status.get("message", "Unknown inference error")
-                    is_oom = "CUDA out of memory" in error_msg or "OutOfMemoryError" in error_msg
-                    short_msg = error_msg[-500:] if len(error_msg) > 500 else error_msg
-                    error_record = {
-                        "exp_id":          exp_id,
-                        "status":          "error_inference_oom" if is_oom else "error_inference",
-                        "model_type":      model_type,
-                        "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "file_index":      file_index,
-                        "params":          record_params,
-                        "denoising_score": None,
-                        "memory": {
-                            "expert_advice_followed": expert_advice_str,
-                            "hypothesis":    hypothesis,
-                            "conclusion":    f"Inference failed: {short_msg}",
-                            "discovery":     "CUDA OOM during inference — reduce batch_size or model size." if is_oom else f"Inference crashed: {short_msg}",
-                            "memory_update": "Inference OOM — the model trained but can't infer. Try smaller batch." if is_oom else "Fix the inference error before retrying.",
-                        },
-                    }
-                    ExperimentRecord.model_validate(error_record)
-                    sandbox.save_record(error_record)
-                    print(f"  Saved error record: {error_record['status']}")
-                    continue
-
-                print(f"[Step 3/3] Scoring...")
-                t0 = time.time()
-                if anchor_map_data is not None:
-                    # Anchor-normalized scoring (both trial and formal modes).
-                    # Trial: sparse SampleSet. Formal: full SampleSet (all 20 × 200).
-                    def _denoised_fn(fi):
-                        return f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_{fi:04d}.h5"
-                    file_vector, final_scalar = sandbox.score_vector(
-                        sample_set=eval_sample_set,
-                        anchor_map=anchor_map_data["anchors"],
-                        s_max=anchor_map_data["s_max"],
-                        denoised_filename_fn=_denoised_fn,
-                    )
-                    score_res = {
-                        "status": "success",
-                        "results": {
-                            "denoising_score": final_scalar,
-                            "file_vector": file_vector,
-                        },
-                    }
-                else:
-                    # Legacy single-file mode (trial_allowed=False, no anchor map)
-                    score_res = _run_skill("denoising_score_skill", sandbox, **active_params)
-                scoring_time = round(time.time() - t0, 1)
-
-                # Extract results from each stage
-                train_results = train_status.get("results", {})
-                score_results = score_res.get("results", {})
-
-                # Cleanup denoised files to save disk space
-                if agent_input.cleanup_denoised:
-                    import glob as _glob
-                    pattern = os.path.join(
-                        sandbox.base_dir,
-                        f"abra_validation_denoised_*_{exp_id}_*.h5",
-                    )
-                    denoised_files = _glob.glob(pattern)
-                    if denoised_files:
-                        total_bytes = sum(os.path.getsize(f) for f in denoised_files)
-                        for f in denoised_files:
-                            os.remove(f)
-                        print(f"  Cleaned up {len(denoised_files)} denoised files "
-                              f"({total_bytes / (1024**3):.1f} GB freed)")
-
-                # D. REFLECT: Analyze results and generate insights
-                print(f"\nGenerating Research Memory...")
-
-                current_score     = score_results.get("denoising_score")
-                current_loss_type = active_params["loss_config"].get("loss_type")
-                successful = [
-                    r for r in memory_history
-                    if r.get("status") == "success" and r.get("denoising_score") is not None
-                ]
-                baseline_record = next(
-                    (r for r in memory_history if "baseline" in r.get("exp_id", "")), None
-                )
-                all_scores   = [r["denoising_score"] for r in successful]
-                best_score   = max(all_scores) if all_scores else None
-                best_record  = max(successful, key=lambda r: r["denoising_score"]) if successful else None
-                sorted_scores = sorted(all_scores, reverse=True)
-                rank = sorted_scores.index(current_score) + 1 if current_score in sorted_scores else None
-
-                same_loss_finals = [
-                    r["final_loss"]
-                    for r in successful
-                    if r.get("params", {}).get("loss_config", {}).get("loss_type") == current_loss_type
-                    and r.get("final_loss") is not None
-                ]
-                current_final_loss = train_results.get("final_loss")
-                if current_final_loss is not None:
-                    all_same_loss_finals  = same_loss_finals + [current_final_loss]
-                    sorted_finals         = sorted(all_same_loss_finals)
-                    same_loss_loss_rank   = sorted_finals.index(current_final_loss) + 1
-                    same_loss_total       = len(all_same_loss_finals)
-                else:
-                    same_loss_loss_rank = None
-                    same_loss_total     = len(same_loss_finals)
-
-                current_params  = train_results.get("model_params")
-                current_epochs  = active_params["train_config"].get("epochs")
-                baseline_params = baseline_record.get("model_params") if baseline_record else None
-                baseline_epochs = baseline_record.get("params", {}).get("train_config", {}).get("epochs") if baseline_record else None
-                params_ratio    = round(current_params / baseline_params, 3) if (current_params and baseline_params) else None
-                epochs_ratio    = round(current_epochs / baseline_epochs, 3) if (current_epochs and baseline_epochs) else None
-
-                worst_score     = min(all_scores) if all_scores else None
-                score_range     = (best_score - worst_score) if (best_score is not None and worst_score is not None and best_score != worst_score) else None
-                score_threshold = (best_score - 0.05 * score_range) if score_range is not None else best_score
-                best_params     = best_record.get("model_params") if best_record else None
-                best_epochs     = best_record.get("params", {}).get("train_config", {}).get("epochs") if best_record else None
-                is_more_efficient = (
-                    score_threshold is not None
-                    and current_score is not None
-                    and current_score >= score_threshold
-                    and (
-                        (current_params is not None and best_params is not None and current_params < best_params)
-                        or (current_epochs is not None and best_epochs is not None and current_epochs < best_epochs)
-                    )
-                )
-
-                reflection_context = {
-                    "baseline_score":           baseline_record.get("denoising_score") if baseline_record else None,
-                    "best_score_so_far":        best_score,
-                    "is_new_best":              current_score is not None and (best_score is None or current_score > best_score),
-                    "rank":                     rank,
-                    "total_experiments":        len(successful),
-                    "best_config_so_far":       best_record.get("params") if best_record else None,
-                    "best_same_loss_final_loss": min(same_loss_finals) if same_loss_finals else None,
-                    "current_loss_type":        current_loss_type,
-                    "same_loss_loss_rank":      same_loss_loss_rank,
-                    "same_loss_total":          same_loss_total,
-                    "baseline_params":          baseline_params,
-                    "baseline_epochs":          baseline_epochs,
-                    "current_params":           current_params,
-                    "current_epochs":           current_epochs,
-                    "params_ratio":             params_ratio,
-                    "epochs_ratio":             epochs_ratio,
-                    "is_more_efficient":        is_more_efficient,
-                    "training_psd_segments":    train_psd_segments,
-                    "eval_psd_segments":        eval_psd_segments,
-                    "baseline_psd_segments":    baseline_record.get("training_psd_segments") if baseline_record else None,
-                    "trial_portion":            trial_config.trial_portion if trial_config.mode != "single_file" else None,
-                    "eval_portion":             trial_config.eval_portion if trial_config.mode != "single_file" else None,
-                }
-
-                # Pass both training and scoring results to the reflector
-                reflect_results = {**train_results, **score_results}
-                reflection = brain.reflect(exp_id, hypothesis, reflect_results, reflection_context)
-
-                # Defensive unwrap: LLM occasionally emits [{...}] instead of {...}.
-                if isinstance(reflection, list) and len(reflection) == 1 and isinstance(reflection[0], dict):
-                    print("[reflect] LLM returned a single-element list — unwrapping to dict.")
-                    reflection = reflection[0]
-                if not isinstance(reflection, dict):
-                    print(f"[reflect] LLM returned non-dict ({type(reflection).__name__}); using empty reflection.")
-                    reflection = {}
-
-                print(f"{'-'*30}")
-                print(f"RESEARCH REFLECTION for {exp_id}:")
-                print(f"Conclusion  : {reflection.get('conclusion', 'N/A')}")
-                print(f"Key Factor  : {reflection.get('key_factor', 'N/A')}")
-                print(f"Discovery   : {reflection.get('discovery', 'N/A')}")
-                print(f"Memory Update: {reflection.get('memory_update', 'N/A')}")
-                print(f"{'-'*30}")
-
-                # E. COMMIT: Build, validate, and save the finalized record
-                final_record = {
-                    "exp_id":     exp_id,
-                    "status":     "success",
-                    "model_type": model_type,
-                    "timestamp":  time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "file_index": file_index,
-                    "params":     record_params,
-                    # Training results
-                    "final_loss":    train_results.get("final_loss"),
-                    "loss_history":  train_results.get("loss_history"),
-                    "model_params":  train_results.get("model_params"),
-                    # Scoring results
-                    "denoising_score": score_results.get("denoising_score"),
-                    "file_vector":     score_results.get("file_vector"),
-                    # Data volume
-                    "training_psd_segments": train_psd_segments,
-                    "eval_psd_segments":    eval_psd_segments,
-                    "timing": {
-                        "train_time_s":     train_time,
-                        "inference_time_s": inference_time,
-                        "scoring_time_s":   scoring_time,
-                    },
-                    "memory": {
-                        "expert_advice_followed": expert_advice_str,
-                        "hypothesis":    hypothesis,
-                        "conclusion":    reflection.get("conclusion"),
-                        "key_factor":    reflection.get("key_factor"),
-                        "discovery":     reflection.get("discovery"),
-                        "memory_update": reflection.get("memory_update"),
-                    },
-                }
-                # Phase J — surface pre-flight time-estimator context to the
-                # planner via the next round's experiment_history. Only added
-                # when the gate actually ran (chosen_time_budget was set);
-                # the keys are absent on records produced with the gate
-                # disabled, so the reflector doesn't have to filter None.
-                # See docs/resource_estimator_implement.md §J.1.
-                if time_check is not None:
-                    final_record["memory"]["time_estimate_minutes"] = (
-                        time_check.get("estimated_minutes")
-                    )
-                    final_record["memory"]["time_budget_minutes"] = (
-                        time_check.get("limit_minutes")
-                    )
-                    final_record["memory"]["time_mode"] = (
-                        "trial" if plan.is_trial else "formal"
-                    )
-                # Phase K — surface pre-flight VRAM-estimator context to the
-                # planner the same way Phase J surfaces time context. Only
-                # added when the gate ran with a budget (chosen_vram_budget
-                # was set); omitted when the gate fell back to free×0.8.
-                # Mode is inferred from `time_mode` above when present.
-                # See docs/resource_estimator_implement.md §10.4.
-                if chosen_vram_budget is not None:
-                    final_record["memory"]["vram_estimate_gb"] = (
-                        resource_check.get("estimated_gb")
-                    )
-                    final_record["memory"]["vram_budget_gb"] = (
-                        resource_check.get("limit_gb")
-                    )
-                # K.2.5-8 — soft-fallback flag from the inference estimator.
-                # Independent of vram_budget being set; recorded whenever
-                # the gate reported a substitution so post-hoc audit can
-                # identify success rounds that ran against a guessed batch.
-                if resource_check.get("inference_batch_uncalibrated"):
-                    final_record["memory"]["inference_batch_uncalibrated"] = True
-                # Trial context
-                if trial_config.is_trial:
-                    final_record["is_trial"] = True
-                    final_record["trial_strategy"] = trial_config.trial_strategy
-                    final_record["trial_portion"] = trial_config.trial_portion
-                    final_record["eval_strategy"] = trial_config.eval_strategy
-                    final_record["eval_portion"] = trial_config.eval_portion
-                    final_record["train_portion"] = trial_config.train_portion
-                    if trial_config.trial_strategy == "target":
-                        final_record["target_files"] = trial_config.target_files
-
-                ExperimentRecord.model_validate(final_record)
-                sandbox.save_record(final_record)
-
-                # Phase F post-flight: update per-GPU calibration from this
-                # successful run. Only runs when the gate used the real-dataset
-                # warmup path (the static formula has no warmup signal to
-                # calibrate against). See docs/resource_estimator_implement.md §2.6.5.
-                if time_check is not None:
-                    bd = time_check.get("breakdown") or {}
-                    if bd.get("source") == "real_dataset_warmup":
-                        gpu_name = bd.get("gpu_name")
-                        warmup_ms = float(bd.get("ms_per_step_warmup") or 0.0)
-                        total_steps = int(bd.get("total_train_steps") or 0)
-                        if gpu_name and warmup_ms > 0 and total_steps > 0 and train_time > 0:
-                            try:
-                                actual_ms = train_time * 1000.0 / total_steps
-                                entry = time_calibration.make_entry(
-                                    gpu_name=gpu_name,
-                                    model_type=model_type,
-                                    seg_size=int(active_params["model_config"].get("segmentation_size", 0)),
-                                    batch_size=int(active_params["train_config"].get("batch_size", 1)),
-                                    total_steps=total_steps,
-                                    warmup_ms_per_step=warmup_ms,
-                                    actual_ms_per_step=actual_ms,
-                                    estimated_minutes=float(time_check.get("estimated_minutes") or 0.0),
-                                    actual_minutes=train_time / 60.0,
-                                )
-                                table = time_calibration.load_table(gpu_name)
-                                time_calibration.update_k(table, entry)
-                                time_calibration.save_table(gpu_name, table)
-                                drift = time_calibration.detect_drift(table)
-                                if drift:
-                                    print(f"  [time-calibration] {drift}")
-                                else:
-                                    new_k = time_calibration.lookup_k(table, model_type)
-                                    print(
-                                        f"  [time-calibration] {gpu_name} / {model_type}: "
-                                        f"ratio={entry['ratio']:.3f} → k={new_k:.3f}"
+                    # Phase J — surface pre-flight time-estimator context to the
+                    # planner via the next round's experiment_history. Only added
+                    # when the gate actually ran (chosen_time_budget was set);
+                    # the keys are absent on records produced with the gate
+                    # disabled, so the reflector doesn't have to filter None.
+                    # See docs/resource_estimator_implement.md §J.1.
+                    if time_check is not None:
+                        final_record["memory"]["time_estimate_minutes"] = (
+                            time_check.get("estimated_minutes")
+                        )
+                        final_record["memory"]["time_budget_minutes"] = (
+                            time_check.get("limit_minutes")
+                        )
+                        final_record["memory"]["time_mode"] = (
+                            "trial" if plan.is_trial else "formal"
+                        )
+                    # Phase K — surface pre-flight VRAM-estimator context to the
+                    # planner the same way Phase J surfaces time context. Only
+                    # added when the gate ran with a budget (chosen_vram_budget
+                    # was set); omitted when the gate fell back to free×0.8.
+                    # Mode is inferred from `time_mode` above when present.
+                    # See docs/resource_estimator_implement.md §10.4.
+                    if chosen_vram_budget is not None:
+                        final_record["memory"]["vram_estimate_gb"] = (
+                            resource_check.get("estimated_gb")
+                        )
+                        final_record["memory"]["vram_budget_gb"] = (
+                            resource_check.get("limit_gb")
+                        )
+                    # K.2.5-8 — soft-fallback flag from the inference estimator.
+                    # Independent of vram_budget being set; recorded whenever
+                    # the gate reported a substitution so post-hoc audit can
+                    # identify success rounds that ran against a guessed batch.
+                    if resource_check.get("inference_batch_uncalibrated"):
+                        final_record["memory"]["inference_batch_uncalibrated"] = True
+                    # Phase L — round bookkeeping for the per-round budget audit.
+                    final_record["memory"]["round_index"] = round_index
+                    final_record["memory"]["attempt_in_round"] = attempt_in_round
+                    # Trial context
+                    if trial_config.is_trial:
+                        final_record["is_trial"] = True
+                        final_record["trial_strategy"] = trial_config.trial_strategy
+                        final_record["trial_portion"] = trial_config.trial_portion
+                        final_record["eval_strategy"] = trial_config.eval_strategy
+                        final_record["eval_portion"] = trial_config.eval_portion
+                        final_record["train_portion"] = trial_config.train_portion
+                        if trial_config.trial_strategy == "target":
+                            final_record["target_files"] = trial_config.target_files
+    
+                    ExperimentRecord.model_validate(final_record)
+                    sandbox.save_record(final_record)
+    
+                    # Phase F post-flight: update per-GPU calibration from this
+                    # successful run. Only runs when the gate used the real-dataset
+                    # warmup path (the static formula has no warmup signal to
+                    # calibrate against). See docs/resource_estimator_implement.md §2.6.5.
+                    if time_check is not None:
+                        bd = time_check.get("breakdown") or {}
+                        if bd.get("source") == "real_dataset_warmup":
+                            gpu_name = bd.get("gpu_name")
+                            warmup_ms = float(bd.get("ms_per_step_warmup") or 0.0)
+                            total_steps = int(bd.get("total_train_steps") or 0)
+                            if gpu_name and warmup_ms > 0 and total_steps > 0 and train_time > 0:
+                                try:
+                                    actual_ms = train_time * 1000.0 / total_steps
+                                    entry = time_calibration.make_entry(
+                                        gpu_name=gpu_name,
+                                        model_type=model_type,
+                                        seg_size=int(active_params["model_config"].get("segmentation_size", 0)),
+                                        batch_size=int(active_params["train_config"].get("batch_size", 1)),
+                                        total_steps=total_steps,
+                                        warmup_ms_per_step=warmup_ms,
+                                        actual_ms_per_step=actual_ms,
+                                        estimated_minutes=float(time_check.get("estimated_minutes") or 0.0),
+                                        actual_minutes=train_time / 60.0,
                                     )
-                            except Exception as cal_exc:  # pragma: no cover — defensive
-                                print(f"  [time-calibration skipped] {cal_exc}")
+                                    table = time_calibration.load_table(gpu_name)
+                                    time_calibration.update_k(table, entry)
+                                    time_calibration.save_table(gpu_name, table)
+                                    drift = time_calibration.detect_drift(table)
+                                    if drift:
+                                        print(f"  [time-calibration] {drift}")
+                                    else:
+                                        new_k = time_calibration.lookup_k(table, model_type)
+                                        print(
+                                            f"  [time-calibration] {gpu_name} / {model_type}: "
+                                            f"ratio={entry['ratio']:.3f} → k={new_k:.3f}"
+                                        )
+                                except Exception as cal_exc:  # pragma: no cover — defensive
+                                    print(f"  [time-calibration skipped] {cal_exc}")
+    
+                    # Phase L — success path: mark the round landed, reset the
+                    # consecutive-failure counter, and break out of the inner
+                    # attempt loop so the outer while moves on to the next round.
+                    round_succeeded = True
+                    completed_rounds += 1
+                    consecutive_fails = 0
+                    print(f"Round {completed_rounds}/{max_rounds} Complete. "
+                          f"Score: {score_results.get('denoising_score', 'N/A')}")
+    
+                    time.sleep(2)  # Cool-down to avoid API rate limits
+                    break
+    
+                except Exception as e:
+                    print(f"Loop Error: {e}")
+                    traceback.print_exc()
+                    time.sleep(5)
 
-                completed_rounds += 1
-                print(f"Round {completed_rounds}/{max_rounds} Complete. "
-                      f"Score: {score_results.get('denoising_score', 'N/A')}")
-
-                time.sleep(2)  # Cool-down to avoid API rate limits
-
-            except Exception as e:
-                print(f"Loop Error: {e}")
-                traceback.print_exc()
-                time.sleep(5)
+            # Phase L — inner attempt loop ended without a successful
+            # break. Bump the consecutive-failure counter so the outer
+            # while can decide whether to abort the iteration.
+            if not round_succeeded:
+                consecutive_fails += 1
+                print(
+                    f"Round {round_index} exhausted all {N} attempt(s) "
+                    f"without a successful experiment "
+                    f"(consecutive_fail_rounds={consecutive_fails}/"
+                    f"{max_fail_rounds_setting})."
+                )
 
         # --- Build, validate, and save the run output ---
         finished_at = time.strftime("%Y-%m-%d %H:%M:%S")
-        run_status = "completed" if completed_rounds >= max_rounds else "partial"
+        # Phase L (§11) — termination_reason captures *why* the outer
+        # loop exited. ``aborted_fail_rounds`` fires when the
+        # consecutive-fail counter hits ``max_fail_rounds`` before all
+        # rounds completed; otherwise we either landed every round
+        # ("completed") or stopped early for some other reason
+        # ("partial" — currently unreachable with ``max_rounds >= 1``,
+        # kept as a defensive fallback).
+        if completed_rounds >= max_rounds:
+            run_status = "completed"
+            termination_reason = "completed"
+        elif consecutive_fails >= max_fail_rounds_setting:
+            run_status = "partial"
+            termination_reason = "aborted_fail_rounds"
+        else:
+            run_status = "partial"
+            termination_reason = "completed"
         all_records = sandbox.get_summary()
         successful_records = [
             r for r in all_records
@@ -1362,20 +1430,26 @@ class HyperparamTuningAgent:
             )
 
         agent_output = HyperparamTuningOutput.model_validate({
-            "run_name":             run_name,
-            "model_type":           model_type_setting,
-            "file_index":           file_index,
-            "status":               run_status,
-            "completed_rounds":     completed_rounds,
-            "total_attempts":       total_attempts,
-            "best_exp_id":          top_record.get("exp_id") if top_record else None,
-            "best_denoising_score": top_record.get("denoising_score") if top_record else None,
-            "best_config":          top_record.get("params") if top_record else None,
-            "best_file_vector":     top_record.get("file_vector") if top_record else None,
-            "all_records":          all_records,
-            "started_at":           started_at,
-            "finished_at":          finished_at,
-            "gate_exhaustion":      gate_exhaustion,
+            "run_name":                          run_name,
+            "model_type":                        model_type_setting,
+            "file_index":                        file_index,
+            "status":                            run_status,
+            "completed_rounds":                  completed_rounds,
+            "total_attempts":                    total_attempts,
+            "best_exp_id":                       top_record.get("exp_id") if top_record else None,
+            "best_denoising_score":              top_record.get("denoising_score") if top_record else None,
+            "best_config":                       top_record.get("params") if top_record else None,
+            "best_file_vector":                  top_record.get("file_vector") if top_record else None,
+            "all_records":                       all_records,
+            "started_at":                        started_at,
+            "finished_at":                       finished_at,
+            "gate_exhaustion":                   gate_exhaustion,
+            # Phase L (§11) — echo budget settings + termination metadata.
+            "attempts_per_round":                attempts_per_round_setting,
+            "attempts_per_formal_round":         attempts_per_formal_round_setting,
+            "max_fail_rounds":                   max_fail_rounds_setting,
+            "consecutive_fail_rounds_at_exit":   consecutive_fails,
+            "termination_reason":                termination_reason,
         })
 
         output_path = os.path.join(workspace, f"run_output_{run_name}.json")
@@ -1383,11 +1457,21 @@ class HyperparamTuningAgent:
             f.write(agent_output.model_dump_json(indent=4))
         print(f"Output validated and saved -> {output_path}")
 
-        if completed_rounds >= max_rounds:
+        if termination_reason == "completed":
             print(f"\nCompleted {completed_rounds} research rounds. Loop terminated.")
+        elif termination_reason == "aborted_fail_rounds":
+            print(
+                f"\nAborted after {consecutive_fails} consecutive fail-rounds "
+                f"(max_fail_rounds={max_fail_rounds_setting}); "
+                f"{completed_rounds}/{max_rounds} rounds completed across "
+                f"{total_attempts} total attempts."
+            )
         else:
-            print(f"\nReached attempt limit ({max_attempts}) with only "
-                  f"{completed_rounds}/{max_rounds} rounds completed.")
+            print(
+                f"\nLoop ended with status={run_status}; "
+                f"{completed_rounds}/{max_rounds} rounds completed across "
+                f"{total_attempts} total attempts."
+            )
 
         return agent_output
 

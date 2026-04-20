@@ -253,11 +253,23 @@ FAKE_SCHEMA_VIOLATION = {
 }
 
 
-def _make_input(tmp_path, max_rounds=1):
+def _make_input(
+    tmp_path,
+    max_rounds=1,
+    attempts_per_round=3,
+    attempts_per_formal_round=3,
+    max_fail_rounds=1,
+):
+    # Phase L (§11): pin tight per-round + fail-round budgets so failure-mode
+    # tests run a deterministic, small number of attempts regardless of the
+    # default budget knobs (which the design may tune over time).
     return HyperparamTuningInput(
         model_type="punet",
         file_index=6,
         max_rounds=max_rounds,
+        attempts_per_round=attempts_per_round,
+        attempts_per_formal_round=attempts_per_formal_round,
+        max_fail_rounds=max_fail_rounds,
         expert_advice="",
         llm_provider="gemini",
         llm_model_id="test-model",
@@ -302,13 +314,20 @@ class TestTunerSchemaViolationBehavior:
 
     def test_does_not_raise_does_not_advance_rounds(self, agent_and_saved, tmp_path):
         """All 3 attempts return ``schema_violation`` — ``completed_rounds``
-        stays at 0, status flips to ``partial``, no exception bubbles up."""
+        stays at 0, status flips to ``partial``, no exception bubbles up.
+
+        Phase L: ``_make_input`` pins ``attempts_per_formal_round=3`` and
+        ``max_fail_rounds=1`` so the formal round (max_rounds=1 → round 1
+        is formal) burns its 3-attempt inner budget, ticks
+        ``consecutive_fails`` to 1 == ``max_fail_rounds``, and aborts.
+        """
         agent, saved = agent_and_saved
         output = agent.run(_make_input(tmp_path, max_rounds=1))
-        # max_rounds=1 → max_attempts = max_rounds * 3 = 3 (see agent loop cap).
         assert output.status == "partial"
         assert output.completed_rounds == 0
         assert output.total_attempts == 3
+        assert output.termination_reason == "aborted_fail_rounds"
+        assert output.consecutive_fail_rounds_at_exit == 1
 
     def test_all_records_saved_as_skipped_schema_violation(self, agent_and_saved, tmp_path):
         agent, saved = agent_and_saved
