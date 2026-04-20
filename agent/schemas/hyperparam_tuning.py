@@ -1082,6 +1082,30 @@ class GateExhaustionInfo(BaseModel):
         ),
     )
 
+    # --- Fix 1 (docs/reliable_resource_proposer.md §7 Decision 1 + §8.1) ---
+    # Structured architectural-class blacklist. Written by the tuner when an
+    # iteration ends with all-gate-exhausted attempts whose worst-case factor
+    # exceeds the configured thresholds; read by the next iteration's proposer
+    # as a hard DO-NOT-PROPOSE list surfaced into the [DISALLOWED PATTERNS]
+    # prompt block. Empty by default so pre-Fix-1 records round-trip unchanged.
+    disallowed_architectural_patterns: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Structured architectural-class tags the tuner has marked as "
+            "infeasible for the active (seg_size, budget) combination. "
+            "Populated from the classifier in "
+            "agent/utils/architectural_classifier.py over every gate-rejected "
+            "attempt in this iteration, but only when worst_time_factor > 5.0 "
+            "OR worst_vram_factor > 2.0 — marginal overshoots do not ban the "
+            "class because they may be recoverable by reducing depth/width. "
+            "The next iteration's proposer renders each tag under a "
+            "[DISALLOWED PATTERNS] DO-NOT-PROPOSE block with its English "
+            "description. v1 vocabulary (extensible without schema migration): "
+            "'recurrent_over_T', 'scan_over_T', 'dense_attention_over_T'. "
+            "Empty list (default) preserves pre-Fix-1 behavior."
+        ),
+    )
+
 
 # ---------------------------------------------------------------------------
 # Agent output
