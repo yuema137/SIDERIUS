@@ -20,6 +20,7 @@ import gc
 from typing import Optional
 import numpy as np
 import h5py
+from scipy.fft import rfft as _scipy_rfft
 
 from execute_tools.dataset_config import SEGMENT_LENGTH, SEGMENTS_PER_FILE, NUM_FILES
 
@@ -65,16 +66,39 @@ def get_one_sec_psd(
         volt_range = h5f["timeseries"]["channel0001"].attrs["voltage_range_mV"]
         sampling_freq = h5f["timeseries"]["channel0001"].attrs["sampling_frequency"]
 
-        scaling = np.float32(volt_range / (2 * 128.0))
-        ts = np.array(data, dtype=np.float32) * scaling
+        # Fix 2 (docs/optimize_inference_and_scoring.md §2.2) — Deferred
+        # Scaling + scipy.fft migration.
+        #
+        # DFT linearity permits |FFT(c·x)|² = c²·|FFT(x)|², so the
+        # time-domain scaling scalar is absorbed into a post-FFT
+        # prefactor and the full-array float32 multiply is eliminated.
+        # scipy.fft.rfft honors the float32 input (emits complex64);
+        # numpy.fft.rfft would silently promote to complex128 and double
+        # the FFT output footprint.
+        #
+        # We also break up the post-FFT expression and use in-place
+        # numpy ops to free intermediates eagerly. Keeping everything
+        # in one fused expression (`np.abs(fft)**2 * prefactor`) would
+        # hold ~160 MB live on a 10⁷-sample segment; the staged form
+        # below peaks at ~80 MB.
+        scaling = volt_range / (2.0 * 128.0)
         dt = 1.0 / sampling_freq
+        prefactor = np.float32(scaling * scaling * dt / SEGMENT_LENGTH)
 
-        psd_chunk = (
-            dt / SEGMENT_LENGTH * (abs(np.fft.rfft(ts)) ** 2)
-        )[1:]
+        ts = np.asarray(data, dtype=np.float32)
+        del data
+
+        fft_out = _scipy_rfft(ts)  # complex64 when ts is float32
+        del ts
+
+        psd_chunk = np.abs(fft_out)           # float32, len N/2+1
+        del fft_out
+        np.square(psd_chunk, out=psd_chunk)   # |·|² in place
+        np.multiply(psd_chunk, prefactor, out=psd_chunk)
+        psd_chunk = psd_chunk[1:]
+
         freq_array = np.linspace(0, sampling_freq / 2, SEGMENT_LENGTH // 2)
 
-    del data, ts
     gc.collect()
     return freq_array, psd_chunk
 
