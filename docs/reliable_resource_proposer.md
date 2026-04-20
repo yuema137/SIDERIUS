@@ -178,11 +178,11 @@ Each fix must land with:
 | 2 | `45ea78d` | `feat(tagger): architectural-pattern tagger for failed proposals` | 5 | +391 / −5 |
 | 3 | `284bbcd` | `feat(tuner): populate disallowed_architectural_patterns on gate exhaustion` | 2 | +470 / −0 |
 | 4 | `4036d98` | `feat(proposer): render [DISALLOWED PATTERNS] sub-block from disallowed tags` | 2 | +157 / −1 |
-| 5 | _pending_ | `feat(proposer): estimate_proposal_time static-mode wrapper` | — | — |
+| 5 | `6849d6c` | `feat(proposer): estimate_proposal_time static-formula wrapper` | 2 | +546 / −0 |
 | 6 | _pending_ | `feat(proposer): pre-flight cost-check loop with up-to-3 revisions` | — | — |
 | 7 | _pending_ | `docs: mark Fix 1 + Fix 2 landed` | — | — |
 
-**Next up**: Commit 5 — create `agent/utils/proposer_preflight.py` with `estimate_proposal_time(baseline_config, time_budget_minutes, seg_size=None, sample_set=None) -> dict`. Calls `evaluate_time_skill.run_skill(sandbox=None, data_dir=None, ...)` in static-formula mode only; synthesises a representative `sample_set` when none provided. Unit-test overbudget + feasible configs, error handling, and no-GPU/no-disk invariants.
+**Next up**: Commit 6 — wire `estimate_proposal_time` into the proposer's reasoning stage. After the LLM drafts a `baseline_config`, call the pre-flight; when `factor > 1.0`, inject a `[PRE-FLIGHT REJECTION]` block into the next LLM call with the verdict + suggestion + factor; allow up to 3 inner revisions per proposing-stage call; on exhaustion emit the best-factor candidate with a warning. `ProposalOutput` gains `preflight_estimated_minutes` + `preflight_factor` audit fields. Integration test (pseudo mode): canned over-budget draft triggers a revision, second draft passes.
 
 ---
 
@@ -324,18 +324,19 @@ Each checkbox is a pre-commit gate. Do not proceed to the next commit until ever
 - [x] Existing `test_recent_gate_exhaustions.py` still passes (25 existing tests green alongside 8 new = 33 total)
 - [x] Tests green (33 passed in 0.23s) → committed
 
-### Commit 5 — `estimate_proposal_time` wrapper
+### Commit 5 — `estimate_proposal_time` wrapper → landed `6849d6c`
 
-- [ ] `agent/utils/proposer_preflight.py` created with:
-  - `estimate_proposal_time(baseline_config, time_budget_minutes, seg_size=None, sample_set=None) -> dict`
-  - Returns `{"estimated_minutes": float, "factor": float, "verdict": str, "feasible": bool}`
-- [ ] Internally synthesizes a representative `sample_set` (20 files × 2 PSDs) when none provided
-- [ ] Calls `evaluate_time_skill.run_skill(sandbox=None, data_dir=None, ...)` — static-formula path only
-- [ ] Unit test: iter-2-style config (12-block SSM, seg=40000, epochs=10, budget=20min) → `factor > 10.0`, `feasible=False`
-- [ ] Unit test: iter-4-style config (6-block TCN, seg=40000, epochs=2, budget=20min) → `factor < 5.0`, `feasible=True`
-- [ ] Unit test: invalid config (missing required field) raises a clear error (not silent factor=∞)
-- [ ] Unit test: no GPU required (runs on CPU-only CI), no disk I/O required
-- [ ] Tests green → commit
+- [x] `agent/utils/proposer_preflight.py` created with `estimate_proposal_time(*, model_type, model_config, train_config, loss_config, num_params, time_budget_minutes, sample_set=None, train_portion=0.1) -> dict` returning `{"estimated_minutes", "factor", "verdict", "feasible"}`
+- [x] Internally synthesises a representative `sample_set` (snapshot, `trial_portion=0.1`, seed=0 → 20 files × 20 segs) when none provided
+- [x] **Design deviation from the original checklist**: the wrapper invokes the three per-phase estimators (`training_skill` / `inference_skill` / `denoising_score_skill`) directly in static-formula mode (`ms_per_step=None`, `gpu_name=None`) rather than calling `evaluate_time_skill.run_skill`. Reason: `run_skill` unconditionally calls `_count_params` → `MODEL_REGISTRY[model_type]`, which `KeyError`s for a draft proposal whose class hasn't been implemented yet. The per-phase estimators accept caller-supplied `num_params` and skip the registry lookup entirely. Surfaced to the user before implementation (2026-04-20); accepted.
+- [x] Caller supplies `num_params` as a required kwarg (covered by `ValueError` when `≤0`); Commit 6 decides how the proposer gets it
+- [x] Unit test: iter-2-style config (12-block SSM, seg=40000, epochs=10, 50M params, budget=20min) → `factor > 10.0`, `feasible=False`
+- [x] Unit test: iter-4-style config (6-block TCN, seg=40000, epochs=2, 500k params, budget=20min) → `factor < 5.0`, `feasible=True` (1M params at 2 epochs reads as factor≈1.13× — a real marginal overshoot, not a test bug; downshifted to 500k for the clearly-feasible case)
+- [x] Unit test: `num_params ≤ 0` and `time_budget_minutes ≤ 0` raise `ValueError` with descriptive message (not silent `factor=0`)
+- [x] Unit test: invented `model_type` (not in `MODEL_REGISTRY`) does not raise — the novel-architecture invariant
+- [x] Unit test: no GPU required (runs on CPU-only CI), no disk I/O required (default sample_set is synthesised; no `data_dir` parameter)
+- [x] Unit test: factor monotonic in both `num_params` and `epochs` (guards the aggregation logic)
+- [x] Tests green (18 passed in 0.06s) → committed
 
 ### Commit 6 — Pre-flight revision loop
 
