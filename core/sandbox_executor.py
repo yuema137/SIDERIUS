@@ -4,7 +4,7 @@ import sys
 import json
 import subprocess
 import datetime
-from typing import Dict, Any, Optional
+from typing import Callable, Dict, Any, Optional
 from ml_models.models_format_sandbox import get_config_class, TrainConfig, LossConfig, ExperimentConfig, PLUGIN_CONFIG_REGISTRY
 from execute_tools.scoring_utils import validate_sample_set
 from execute_tools.data_paths import TIDMAD_DATA_DIR
@@ -13,6 +13,91 @@ from core.inference_defaults import inference_batch_for
 
 def _tidmad_data_dir() -> str:
     return TIDMAD_DATA_DIR
+
+
+# ---------------------------------------------------------------------------
+# Subprocess host-RAM hardening (Fix 1 of docs/optimize_inference_and_scoring.md)
+# ---------------------------------------------------------------------------
+#
+# Context: on 2026-04-20 the orchestrator was terminated by the kernel's
+# global OOM-killer mid-scoring with a 36.9 GB anon-RSS. SIGKILL is silent
+# and irrecoverable — the parent had no chance to log or persist partial
+# records. Wiring RLIMIT_AS into every subprocess we spawn converts the
+# failure mode from "kernel kills the process" to "Python raises
+# MemoryError", which the orchestrator can catch, record as a structured
+# ``oom_host_ram`` failure, and skip past.
+#
+# The ceiling applies to virtual address space (RLIMIT_AS), not RSS, because
+# RSS is not a POSIX-enforceable limit. VMS is a superset of RSS, so an AS
+# cap transitively caps RSS.
+
+_DEFAULT_SUBPROCESS_RSS_GB = 24
+
+
+def _subprocess_rss_gb() -> int:
+    """Host-RAM ceiling (GiB) applied to every sandboxed subprocess.
+
+    Configurable via the ``SIDERIUS_SUBPROCESS_RSS_GB`` environment variable.
+    A value of ``0`` disables the ceiling entirely (pre-Fix-1 behaviour).
+    Non-numeric or negative values fall back to the 24 GiB default.
+    """
+    raw = os.environ.get("SIDERIUS_SUBPROCESS_RSS_GB")
+    if raw is None:
+        return _DEFAULT_SUBPROCESS_RSS_GB
+    try:
+        v = int(raw)
+    except ValueError:
+        return _DEFAULT_SUBPROCESS_RSS_GB
+    return v if v >= 0 else _DEFAULT_SUBPROCESS_RSS_GB
+
+
+def _limited_preexec(gb: int) -> Optional[Callable[[], None]]:
+    """Return a ``preexec_fn`` that caps the child's virtual address space.
+
+    The callable is invoked by ``subprocess`` after ``fork`` and before
+    ``exec``, so the limit takes effect for the child only — the parent is
+    unaffected.
+
+    Returns ``None`` when:
+      * ``gb <= 0`` — the caller (via env var) disabled the ceiling;
+      * the POSIX ``resource`` module is unavailable (non-POSIX hosts such
+        as Windows).
+
+    ``subprocess.run`` treats ``preexec_fn=None`` as "no hook", so callers
+    can thread the return value through unconditionally.
+    """
+    if gb <= 0:
+        return None
+    try:
+        import resource as _resource
+    except ImportError:
+        return None
+    limit_bytes = gb * (1024 ** 3)
+
+    def _apply_limit() -> None:
+        _resource.setrlimit(_resource.RLIMIT_AS, (limit_bytes, limit_bytes))
+
+    return _apply_limit
+
+
+def _is_oom_failure(e: subprocess.CalledProcessError) -> bool:
+    """Does ``e`` look like a host-RAM exhaustion in the child?
+
+    Two signatures qualify:
+      1. ``MemoryError`` appears in stderr — the RLIMIT_AS ceiling caught
+         the allocation and Python raised a catchable exception. This is
+         the post-Fix-1 happy path.
+      2. The process was killed by SIGKILL (``returncode == -9``) — the
+         kernel OOM-killer intervened, typically because the ceiling was
+         disabled or the allocation was too large to be intercepted (e.g.
+         a single ``mmap`` bigger than the cap). This is the pre-Fix-1
+         failure mode and the case Fix 1 exists to prevent.
+    """
+    if e.returncode == -9:
+        return True
+    if e.stderr and "MemoryError" in e.stderr:
+        return True
+    return False
 
 
 def _format_subprocess_error(e: subprocess.CalledProcessError, label: str = "Subprocess") -> str:
@@ -35,6 +120,13 @@ def _format_subprocess_error(e: subprocess.CalledProcessError, label: str = "Sub
         }
         sig_desc = signal_names.get(signal_num, f"signal {signal_num}")
         parts.append(f"Killed by {sig_desc}")
+
+    if _is_oom_failure(e):
+        parts.append(
+            "[oom_host_ram] Host RAM exhaustion detected — either RLIMIT_AS "
+            "ceiling hit (Python MemoryError) or kernel SIGKILL. See Fix 1 "
+            "in docs/optimize_inference_and_scoring.md."
+        )
 
     if e.stderr:
         parts.append(f"--- stderr ---\n{e.stderr}")
@@ -316,6 +408,7 @@ class TidmadSandbox:
                     text=True,
                     cwd=os.getcwd(),
                     env=_subprocess_env(plugin_dir=self.plugin_dir),
+                    preexec_fn=_limited_preexec(_subprocess_rss_gb()),
                 )
 
             if not self.progress_bar and result.stdout:
@@ -336,7 +429,8 @@ class TidmadSandbox:
         except subprocess.CalledProcessError as e:
             error_msg = _format_subprocess_error(e, "Train")
             print(f"--- Train Script Error ---\n{error_msg}")
-            return {"status": "error", "message": error_msg}
+            status = "oom_host_ram" if _is_oom_failure(e) else "error"
+            return {"status": status, "message": error_msg}
         except Exception as e:
             print(f"!!! [Executor Internal Error] !!!: {str(e)}") 
             return {"status": "error", "message": str(e)}
@@ -395,6 +489,7 @@ class TidmadSandbox:
                 stderr=subprocess.PIPE,
                 text=True, cwd=os.getcwd(),
                 env=_subprocess_env(plugin_dir=self.plugin_dir),
+                preexec_fn=_limited_preexec(_subprocess_rss_gb()),
             )
             if not self.progress_bar and result.stdout:
                 print(f"--- Inference Output ---\n{result.stdout}")
@@ -402,7 +497,8 @@ class TidmadSandbox:
         except subprocess.CalledProcessError as e:
             error_msg = _format_subprocess_error(e, "Inference")
             print(f"--- Inference Error ---\n{error_msg}")
-            return {"status": "error", "message": error_msg}
+            status = "oom_host_ram" if _is_oom_failure(e) else "error"
+            return {"status": status, "message": error_msg}
 
     def score_vector(self, sample_set, anchor_map: dict, s_max: float,
                      denoised_filename_fn: callable, **kwargs) -> tuple:
@@ -457,6 +553,7 @@ class TidmadSandbox:
                 stderr=subprocess.PIPE,
                 text=True, cwd=os.getcwd(),
                 env=_subprocess_env(plugin_dir=self.plugin_dir),
+                preexec_fn=_limited_preexec(_subprocess_rss_gb()),
             )
 
             # Merge training results (loss history) with scoring results
@@ -468,10 +565,15 @@ class TidmadSandbox:
                 results.update(json.load(f))
 
             if os.path.exists(score_json_path): os.remove(score_json_path)
-            
+
             # Note: We NO LONGER call self.recorder.save_record(record) here.
             # We return results to ml_hyperparameter_tune_agent.py, which adds LLM memory and then saves.
             return {"status": "success", "results": results}
+        except subprocess.CalledProcessError as e:
+            error_msg = _format_subprocess_error(e, "Scoring")
+            print(f"--- Scoring Script Error ---\n{error_msg}")
+            status = "oom_host_ram" if _is_oom_failure(e) else "error"
+            return {"status": status, "message": error_msg}
         except Exception as e:
             print(f"--- Scoring Internal Error ---\n{str(e)}")
             return {"status": "error", "message": str(e)}
