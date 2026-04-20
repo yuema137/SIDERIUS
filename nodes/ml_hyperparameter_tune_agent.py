@@ -1294,6 +1294,14 @@ class HyperparamTuningAgent:
                         continue
     
                     print(f"[Step 3/3] Scoring...")
+                    # Fix 4 — memory probe around the scoring block. See
+                    # docs/optimize_inference_and_scoring.md §3 Fix 4. The
+                    # tuner's ``round_index`` is the iter axis inside the
+                    # tuner scope; workflow-scope probes (different
+                    # ``scope`` field) give the outer iteration index.
+                    from core.memory_probe import probe_memory
+                    probe_memory(iter_idx=round_index, phase="pre_score",
+                                 workspace=workspace, scope="tuner")
                     t0 = time.time()
                     if anchor_map_data is not None:
                         # Anchor-normalized scoring (both trial and formal modes).
@@ -1317,6 +1325,8 @@ class HyperparamTuningAgent:
                         # Legacy single-file mode (trial_allowed=False, no anchor map)
                         score_res = _run_skill("denoising_score_skill", sandbox, **active_params)
                     scoring_time = round(time.time() - t0, 1)
+                    probe_memory(iter_idx=round_index, phase="post_score",
+                                 workspace=workspace, scope="tuner")
     
                     # Extract results from each stage
                     train_results = train_status.get("results", {})
