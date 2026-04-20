@@ -176,13 +176,13 @@ Each fix must land with:
 |--------|-----|---------|-------|---|
 | 1 | `ef02dc3` | `feat(schema): add disallowed_architectural_patterns to GateExhaustionInfo` | 2 | +80 / −0 |
 | 2 | `45ea78d` | `feat(tagger): architectural-pattern tagger for failed proposals` | 5 | +391 / −5 |
-| 3 | _pending_ | `feat(tuner): populate disallowed_architectural_patterns on gate exhaustion` | — | — |
+| 3 | `284bbcd` | `feat(tuner): populate disallowed_architectural_patterns on gate exhaustion` | 2 | +470 / −0 |
 | 4 | _pending_ | `feat(proposer): render DO-NOT-PROPOSE block from disallowed patterns` | — | — |
 | 5 | _pending_ | `feat(proposer): estimate_proposal_time static-mode wrapper` | — | — |
 | 6 | _pending_ | `feat(proposer): pre-flight cost-check loop with up-to-3 revisions` | — | — |
 | 7 | _pending_ | `docs: mark Fix 1 + Fix 2 landed` | — | — |
 
-**Next up**: Commit 3 — populate `disallowed_architectural_patterns` inside the tuner's `GateExhaustionInfo` builder over every gate-rejected attempt, gated on the §7 Decision 2 thresholds (`worst_time_factor > 5.0` OR `worst_vram_factor > 2.0`).
+**Next up**: Commit 4 — extend the proposer's `[RECENT GATE EXHAUSTIONS]` prompt renderer with a `[DISALLOWED PATTERNS]` sub-section that imports `ARCHITECTURAL_PATTERNS` from the tagger and renders each tag's English description. Unit-test zero-noise (empty patterns → no block) and multi-pattern deterministic ordering.
 
 ---
 
@@ -290,17 +290,22 @@ Each checkbox is a pre-commit gate. Do not proceed to the next commit until ever
 - [x] **Follow-up**: Commit 1's schema docstring in `agent/schemas/hyperparam_tuning.py` updated from `architectural_classifier.py` to `architectural_pattern_tagger.py` (folded into this commit)
 - [x] Test command shown to user → 22 new + 126 existing tests green → user approved commit
 
-### Commit 3 — Tuner population
+### Commit 3 — Tuner population → landed `284bbcd`
 
-- [ ] Tuner's `_build_gate_exhaustion_info` (or equivalent) calls `tag_architecture` over every gate-rejected attempt's `model_type` + `model_config`
-- [ ] Threshold applied: only attempts with `worst_time_factor > 5×` OR `worst_vram_factor > 2×` contribute
-- [ ] Union of tags populated on the new field; deterministic sort order preserved
-- [ ] Unit test: iter-2-style synthetic records (9 × scan arch, factor=18772) → patterns == `["scan_over_T"]`
-- [ ] Unit test: iter-3-style synthetic records (9 × GRU arch, factor=28) → patterns == `["recurrent_over_T"]`
-- [ ] Unit test: mixed records (some scan, some GRU) → patterns == `["recurrent_over_T", "scan_over_T"]` (sorted)
-- [ ] Unit test: marginal overshoot (factor=1.2×) → patterns == `[]` (threshold gate works)
-- [ ] Unit test: healthy iteration (`gate_exhaustion` remains None) → unchanged
-- [ ] Tests green → commit
+- [x] Tuner's `_build_gate_exhaustion` calls `tag_architecture` via the new `_collect_disallowed_patterns` helper over every gate-rejected attempt's `model_type` + `model_config`
+- [x] Threshold applied **per attempt** (not aggregate): only attempts whose individual `time_factor > 5×` OR `vram_factor > 2×` contribute; thresholds imported from `agent/utils/architectural_pattern_tagger.py`
+- [x] Union of tags populated on the new field; deterministic sort order preserved via `sorted(set(...))`
+- [x] Unit test: iter-2-style synthetic records (9 × scan arch, factor=18772) → patterns == `["scan_over_T"]`
+- [x] Unit test: iter-3-style synthetic records (9 × GRU arch, factor=28) → patterns == `["recurrent_over_T"]`
+- [x] Unit test: mixed records (some scan, some GRU) → patterns == `["recurrent_over_T", "scan_over_T"]` (sorted)
+- [x] Unit test: marginal overshoot (factor=1.2×) → patterns == `[]` (threshold gate works)
+- [x] Unit test: boundary case — factor *exactly* at threshold is **not** banned (strict `>`)
+- [x] Unit test: VRAM-factor-alone trigger — OR-symmetry of the threshold gate
+- [x] Unit test: non-gate failures (schema violation, runtime error) never contribute tags
+- [x] Unit test: a successful arch (`gated_fourier_tcn`) is never falsely banned
+- [x] Unit test: healthy iteration (`gate_exhaustion` remains None) → unchanged
+- [x] Unit test: Trigger B burst path populates patterns on the fail-round records
+- [x] Tests green (15 new + 145 existing = 160 passed) → committed
 
 ### Commit 4 — Proposer renderer
 
