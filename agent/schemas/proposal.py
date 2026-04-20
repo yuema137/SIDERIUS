@@ -752,6 +752,37 @@ class ProposalOutput(BaseModel):
                     "Empty = no issues found. Non-empty = the validator surfaces "
                     "these as warnings. This is a flag, not a veto.",
     )
+    # Fix 2 Commit 6 — proposer-side pre-flight cost-check audit fields.
+    # See docs/reliable_resource_proposer.md §9 Commit 6 Decisions 5 + 7.
+    parameter_count_estimate: Optional[int] = Field(
+        default=None,
+        description="LLM-emitted estimate of the total trainable parameter count "
+                    "for baseline_config. Consumed by the proposer's pre-flight "
+                    "static-cost gate (Fix 2) — an order-of-magnitude estimate "
+                    "is sufficient for gate-level decisions. None = pre-flight "
+                    "was not run for this draft (either the LLM omitted the field "
+                    "or the active time budget was disabled). See "
+                    "docs/reliable_resource_proposer.md §7 Decision 3 + §9 Commit 6.",
+    )
+    preflight_estimated_minutes: Optional[float] = Field(
+        default=None,
+        description="Pre-flight static-formula wall-time estimate in minutes for "
+                    "the emitted baseline_config, evaluated against "
+                    "trial_time_budget_minutes (trial mode) or "
+                    "formal_time_budget_minutes (formal mode). None = pre-flight "
+                    "skipped; see parameter_count_estimate + memo_consistency_notes "
+                    "for the reason. Populated by estimate_proposal_time. "
+                    "Audit-only — does not gate downstream validation.",
+    )
+    preflight_factor: Optional[float] = Field(
+        default=None,
+        description="preflight_estimated_minutes / active_budget_minutes, rounded "
+                    "to 3 decimal places. factor <= 1.0 means the draft is "
+                    "predicted to fit; factor > 1.0 would have triggered a "
+                    "pre-flight rejection. On exhaustion of the pre-flight revision "
+                    "loop the emitted candidate is the lowest-factor draft seen "
+                    "(not necessarily the last one).",
+    )
     @model_validator(mode="after")
     def _validate_baseline_segmentation_size(self):
         """Ensure ``baseline_config`` respects the dataset's ``segmentation_size`` rule.

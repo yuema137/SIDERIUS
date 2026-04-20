@@ -40,6 +40,7 @@ A JSON object with these fields:
     "train_config": {"lr": 1e-4, "epochs": 10, "batch_size": 1, "optimizer_type": "adamw", "weight_decay": 1e-5, "device": "cuda"},
     "loss_config": {"loss_type": "focal", "alpha": 0.5, "gamma": 2.0, "reduction": "mean"}
   },
+  "parameter_count_estimate": 1234567,
   "memo_consistency_notes": []
 }
 ```
@@ -82,6 +83,17 @@ A JSON object with these fields:
    impossibility, an incompatible layer combination), document it in
    `memo_consistency_notes`. This is a flag for the validator, not a
    reason to abandon the proposal.
+
+8. **Parameter count estimate.** You MUST supply `parameter_count_estimate`
+   as a positive integer — your best estimate of the total trainable
+   parameter count at the `baseline_config`. This drives the proposer-side
+   pre-flight cost gate: the static cost model multiplies your estimate by
+   the active `segmentation_size` and training steps to predict wall-time.
+   An order-of-magnitude estimate is sufficient — be realistic about
+   multi-head attention, state dimensions, dilated convolution stacks, and
+   bidirectional layers. If your estimate exceeds the active time budget,
+   the gate will reject the draft and ask you to revise toward a simpler
+   or lighter architectural class.
 
 {# EXPLORATION_MODE_BLOCK #}
 

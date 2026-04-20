@@ -33,6 +33,7 @@ from agent.schemas.proposal import ProposalInput, ProposalOutput, FalsifiablePre
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from agent.schemas.hyperparam_tuning import GateExhaustionInfo, serialize_expert_advice
 from agent.utils.architectural_pattern_tagger import ARCHITECTURAL_PATTERNS
+from agent.utils.proposer_preflight import estimate_proposal_time
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 
 # Maximum number of retries when the proposing stage produces invalid output.
@@ -41,6 +42,92 @@ _MAX_PROPOSING_RETRIES = 2
 
 # One retry when causal_reasoning produces a prediction below minimum_boldness.
 _MAX_REASONING_RETRIES = 1
+
+# Fix 2 Commit 6 — total number of proposing-stage calls the pre-flight
+# revision loop is allowed. 1 initial draft + 2 revisions. The structural-
+# retry loop (_MAX_PROPOSING_RETRIES) is nested inside each pre-flight
+# attempt; schema errors do not burn a pre-flight budget slot.
+_MAX_PREFLIGHT_ATTEMPTS = 3
+
+
+def _active_time_budget_minutes(inp: ProposalInput) -> float | None:
+    """Select the budget the pre-flight gate should check against.
+
+    Returns ``None`` when the relevant budget is unset — the caller treats
+    that as "pre-flight disabled for this proposal" rather than "budget=0".
+    """
+    if inp.is_trial:
+        return inp.trial_time_budget_minutes
+    return inp.formal_time_budget_minutes
+
+
+def _build_preflight_rejection_block(
+    num_params: int,
+    estimated_minutes: float,
+    factor: float,
+    budget_minutes: float,
+) -> str:
+    """Render the prescriptive ``[PRE-FLIGHT REJECTION]`` block.
+
+    Decision 7 (§9 Commit 6): all four numeric substitutions must appear so
+    the LLM's next revision is grounded in concrete numbers, not a vague
+    "too slow" signal. Vague feedback produces vague revisions.
+    """
+    return (
+        f"[PRE-FLIGHT REJECTION]\n"
+        f"Based on your estimated {num_params:,} parameters, the static cost "
+        f"model predicts a {estimated_minutes:.1f} min runtime, which is "
+        f"{factor:.1f}x over the {budget_minutes:.1f} min budget.\n"
+        f"Please simplify the architecture or use a more efficient model "
+        f"family. To fit within the budget you must reduce compute by roughly "
+        f"{factor:.1f}x — reduce parameter_count_estimate, reduce depth/width, "
+        f"or switch to a lighter architectural class (e.g. TCN, FFT-based, or "
+        f"windowed-attention) if the current family is structurally too "
+        f"expensive at the active segmentation_size."
+    )
+
+
+def _run_preflight_check(
+    inp: ProposalInput,
+    output: ProposalOutput,
+) -> float | None:
+    """Evaluate the static-formula pre-flight gate on a candidate ``output``.
+
+    Mutates ``output`` in place: sets ``preflight_estimated_minutes`` and
+    ``preflight_factor`` when the gate runs; appends a ``PREFLIGHT_SKIPPED``
+    note to ``memo_consistency_notes`` when the LLM failed to supply a
+    usable ``parameter_count_estimate``.
+
+    Returns the numeric ``factor`` when the gate ran, or ``None`` when it
+    was skipped (budget disabled, or params missing / non-positive). The
+    caller uses ``None`` as the "pre-flight inconclusive — do not revise"
+    signal.
+    """
+    budget = _active_time_budget_minutes(inp)
+    if budget is None:
+        return None
+
+    num_params = output.parameter_count_estimate
+    if num_params is None or num_params <= 0:
+        output.memo_consistency_notes.append(
+            "PREFLIGHT_SKIPPED: parameter_count_estimate was None or "
+            "non-positive; pre-flight gate could not run for this draft."
+        )
+        return None
+
+    baseline = output.baseline_config or {}
+    verdict = estimate_proposal_time(
+        model_type=output.model_name,
+        model_config=baseline.get("model_config") or {},
+        train_config=baseline.get("train_config") or {},
+        loss_config=baseline.get("loss_config") or {},
+        num_params=num_params,
+        time_budget_minutes=budget,
+        train_portion=inp.train_portion,
+    )
+    output.preflight_estimated_minutes = verdict["estimated_minutes"]
+    output.preflight_factor = verdict["factor"]
+    return verdict["factor"]
 
 
 def _check_citation_discipline(
@@ -163,7 +250,8 @@ Output a JSON object with exactly these fields:
       "device": "cuda"
     },
     "loss_config": { "loss_type": "focal", "alpha": 0.5, "gamma": 2.0, "reduction": "mean" }
-  }
+  },
+  "parameter_count_estimate": 1234567
 }
 
 Hard constraints — violating any of these makes the proposal invalid:
@@ -172,6 +260,10 @@ Hard constraints — violating any of these makes the proposal invalid:
 - The forward contract is fixed: input [B, T] int64 → output [B, 256, T] float32
 - baseline_config must be conservative: fits comfortably in <10 GB VRAM
 - expert_advice.constraints must include at least one VRAM limit and one parameter count limit
+- parameter_count_estimate must be a positive integer — your best estimate of the total
+  trainable parameter count at the baseline_config. An order-of-magnitude estimate is
+  sufficient; be realistic about multi-head attention, state dims, dilated stacks, etc.
+  This drives the proposer-side pre-flight cost check.
 
 Output only the JSON object — no preamble, no markdown fences, no commentary."""
 
@@ -540,32 +632,87 @@ class MLModelProposalAgent:
     # ------------------------------------------------------------------
 
     def _run_legacy(self, inp: ProposalInput) -> ProposalOutput:
-        """Original 2-call pattern: reasoning (text) + commit (JSON)."""
+        """Original 2-call pattern: reasoning (text) + commit (JSON).
+
+        Wrapped with the Fix 2 Commit 6 pre-flight revision loop: up to
+        ``_MAX_PREFLIGHT_ATTEMPTS`` commit calls, with ``[PRE-FLIGHT
+        REJECTION]`` appended on each revision. Legacy mode has no
+        structural-retry inner loop — a schema-violating draft raises
+        immediately (unchanged behavior).
+        """
         reasoning_prompt = _build_reasoning_prompt(inp)
         reasoning = self.bridge.generate_text(PROPOSAL_REASONING_PROMPT, reasoning_prompt)
         print(f"   Legacy reasoning complete ({len(reasoning)} chars).")
 
-        commit_prompt = _build_commit_prompt(reasoning, inp.existing_model_types)
-        raw = self.bridge.generate(PROPOSAL_COMMIT_PROMPT, commit_prompt)
+        base_commit_prompt = _build_commit_prompt(reasoning, inp.existing_model_types)
+        budget = _active_time_budget_minutes(inp)
+        preflight_errors: list[str] = []
+        candidates: list[ProposalOutput] = []
 
-        proposed_name = raw.get("model_name", "")
-        if proposed_name in inp.existing_model_types:
-            raise ValueError(
-                f"LLM proposed model_name '{proposed_name}' which already exists in "
-                f"existing_model_types: {inp.existing_model_types}. "
-                f"Re-run or adjust the constraints."
-            )
+        for preflight_attempt in range(_MAX_PREFLIGHT_ATTEMPTS):
+            commit_prompt = base_commit_prompt
+            if preflight_errors:
+                commit_prompt = (
+                    base_commit_prompt
+                    + "\n\n---\n\n"
+                    + "\n\n".join(preflight_errors)
+                )
 
-        output = ProposalOutput.model_validate({
-            "model_name":              proposed_name,
-            "model_description":       raw.get("model_description", ""),
-            "mathematical_definition": raw.get("mathematical_definition", ""),
-            "motivation":              raw.get("motivation", ""),
-            "expert_advice":           raw.get("expert_advice", {}),
-            "baseline_config":         raw.get("baseline_config", {}),
-        })
-        print(f"Proposed model (legacy): '{output.model_name}'")
-        return output
+            raw = self.bridge.generate(PROPOSAL_COMMIT_PROMPT, commit_prompt)
+
+            proposed_name = raw.get("model_name", "")
+            if proposed_name in inp.existing_model_types:
+                raise ValueError(
+                    f"LLM proposed model_name '{proposed_name}' which already exists in "
+                    f"existing_model_types: {inp.existing_model_types}. "
+                    f"Re-run or adjust the constraints."
+                )
+
+            output = ProposalOutput.model_validate({
+                "model_name":               proposed_name,
+                "model_description":        raw.get("model_description", ""),
+                "mathematical_definition":  raw.get("mathematical_definition", ""),
+                "motivation":               raw.get("motivation", ""),
+                "expert_advice":            raw.get("expert_advice", {}),
+                "baseline_config":          raw.get("baseline_config", {}),
+                "parameter_count_estimate": raw.get("parameter_count_estimate"),
+            })
+
+            factor = _run_preflight_check(inp, output)
+            if factor is None or factor <= 1.0:
+                print(f"Proposed model (legacy): '{output.model_name}'")
+                return output
+
+            candidates.append(output)
+            if preflight_attempt < _MAX_PREFLIGHT_ATTEMPTS - 1:
+                preflight_errors.append(
+                    _build_preflight_rejection_block(
+                        num_params=output.parameter_count_estimate,
+                        estimated_minutes=output.preflight_estimated_minutes,
+                        factor=factor,
+                        budget_minutes=budget,
+                    )
+                )
+                print(
+                    f"   Pre-flight rejected (factor={factor:.2f}x); "
+                    f"requesting revision {preflight_attempt + 2}/"
+                    f"{_MAX_PREFLIGHT_ATTEMPTS}."
+                )
+
+        best = min(candidates, key=lambda o: o.preflight_factor)
+        best.memo_consistency_notes.append(
+            f"PREFLIGHT_OVERBUDGET_EMITTED: all {_MAX_PREFLIGHT_ATTEMPTS} "
+            f"pre-flight attempts exceeded the {budget:.1f} min budget; "
+            f"emitting lowest-factor candidate "
+            f"(factor={best.preflight_factor:.2f}x, "
+            f"estimated {best.preflight_estimated_minutes:.1f} min). "
+            f"The tuner's real-data gate may still reject this at trial time."
+        )
+        print(
+            f"Proposed model (legacy, pre-flight exhausted): '{best.model_name}' "
+            f"factor={best.preflight_factor:.2f}x"
+        )
+        return best
 
     # ------------------------------------------------------------------
     # Pipeline mode (B.11 + B.12 — 3-stage reasoning pipeline)
@@ -812,80 +959,135 @@ class MLModelProposalAgent:
                 elif kind == "discovery":
                     discoveries.append(candidate)
 
-        last_exc: Exception | None = None
-        for attempt in range(_MAX_PROPOSING_RETRIES + 1):
-            proposing_user = json.dumps(accumulated, indent=2, default=str)
-            if agent_cards_block:
-                proposing_user += f"\n\n{agent_cards_block}"
-            if expert_context_block:
-                proposing_user += f"\n\n{expert_context_block}"
+        # Fix 2 Commit 6 — two-layer loop: the outer pre-flight revision
+        # loop wraps the existing structural-retry inner loop. Schema errors
+        # are handled by the inner loop (burn structural-retry slots); pre-
+        # flight rejections are handled by the outer loop (burn pre-flight
+        # slots). Stages 1+2 are never re-run from either loop.
+        budget = _active_time_budget_minutes(inp)
+        preflight_candidates: list[ProposalOutput] = []
 
-            print(f"   Stage 'proposing': calling LLM (attempt {attempt + 1})...")
-            raw = self.bridge.generate(proposing_prompt, proposing_user)
+        for preflight_attempt in range(_MAX_PREFLIGHT_ATTEMPTS):
+            output: ProposalOutput | None = None
+            last_exc: Exception | None = None
 
-            try:
-                proposed_name = raw.get("model_name", "")
-                if proposed_name in inp.existing_model_types:
-                    raise ValueError(
-                        f"model_name '{proposed_name}' already exists in "
-                        f"existing_model_types: {inp.existing_model_types}. "
-                        f"Choose a different name."
-                    )
+            for attempt in range(_MAX_PROPOSING_RETRIES + 1):
+                proposing_user = json.dumps(accumulated, indent=2, default=str)
+                if agent_cards_block:
+                    proposing_user += f"\n\n{agent_cards_block}"
+                if expert_context_block:
+                    proposing_user += f"\n\n{expert_context_block}"
 
-                output = ProposalOutput.model_validate({
-                    "model_name":              proposed_name,
-                    "model_description":       raw.get("model_description", ""),
-                    "mathematical_definition": raw.get("mathematical_definition", ""),
-                    "motivation":              raw.get("motivation", ""),
-                    "expert_advice":           raw.get("expert_advice", {}),
-                    "baseline_config":         raw.get("baseline_config", {}),
-                    "inherited_components":    inherited,
-                    "falsifiable_prediction":  prediction,
-                    "proposed_vocab_links":    vocab_links,
-                    "proposed_vocab_candidates": vocab_candidates,
-                    "proposed_discoveries":    discoveries,
-                    "memo_consistency_notes":  raw.get("memo_consistency_notes", []),
-                })
-                # Citation discipline check — violations are warnings, not hard failures.
-                citation_violations = _check_citation_discipline(
-                    citation_sources=reasoning_output.get("citation_sources", []),
-                    causal_hypothesis=reasoning_output.get("causal_hypothesis", ""),
-                    proposed_change=reasoning_output.get("proposed_change", ""),
+                print(
+                    f"   Stage 'proposing': calling LLM "
+                    f"(pre-flight {preflight_attempt + 1}/{_MAX_PREFLIGHT_ATTEMPTS}, "
+                    f"structural {attempt + 1}/{_MAX_PROPOSING_RETRIES + 1})..."
                 )
-                if citation_violations:
-                    output.memo_consistency_notes.extend(citation_violations)
-                    print(
-                        f"   Citation check: {len(citation_violations)} violation(s) "
-                        f"appended to memo_consistency_notes."
+                raw = self.bridge.generate(proposing_prompt, proposing_user)
+
+                try:
+                    proposed_name = raw.get("model_name", "")
+                    if proposed_name in inp.existing_model_types:
+                        raise ValueError(
+                            f"model_name '{proposed_name}' already exists in "
+                            f"existing_model_types: {inp.existing_model_types}. "
+                            f"Choose a different name."
+                        )
+
+                    output = ProposalOutput.model_validate({
+                        "model_name":               proposed_name,
+                        "model_description":        raw.get("model_description", ""),
+                        "mathematical_definition":  raw.get("mathematical_definition", ""),
+                        "motivation":               raw.get("motivation", ""),
+                        "expert_advice":            raw.get("expert_advice", {}),
+                        "baseline_config":          raw.get("baseline_config", {}),
+                        "inherited_components":     inherited,
+                        "falsifiable_prediction":   prediction,
+                        "proposed_vocab_links":     vocab_links,
+                        "proposed_vocab_candidates": vocab_candidates,
+                        "proposed_discoveries":     discoveries,
+                        "memo_consistency_notes":   raw.get("memo_consistency_notes", []),
+                        "parameter_count_estimate": raw.get("parameter_count_estimate"),
+                    })
+                    # Citation discipline — warnings, not hard failures.
+                    citation_violations = _check_citation_discipline(
+                        citation_sources=reasoning_output.get("citation_sources", []),
+                        causal_hypothesis=reasoning_output.get("causal_hypothesis", ""),
+                        proposed_change=reasoning_output.get("proposed_change", ""),
                     )
+                    if citation_violations:
+                        output.memo_consistency_notes.extend(citation_violations)
+                        print(
+                            f"   Citation check: {len(citation_violations)} "
+                            f"violation(s) appended to memo_consistency_notes."
+                        )
+                    break  # structurally valid — proceed to pre-flight
+
+                except (ValidationError, ValueError) as exc:
+                    last_exc = exc
+                    if isinstance(exc, ValidationError):
+                        error_summary = "; ".join(
+                            f"{' → '.join(str(l) for l in e['loc'])}: {e['msg']}"
+                            for e in exc.errors()[:5]
+                        )
+                    else:
+                        error_summary = str(exc)
+
+                    if attempt < _MAX_PROPOSING_RETRIES:
+                        print(
+                            f"   Proposing attempt {attempt + 1} failed — "
+                            f"injecting error and retrying."
+                        )
+                        errors_so_far = accumulated.get("proposing_stage_errors", [])
+                        errors_so_far.append(
+                            f"Attempt {attempt + 1} error: {error_summary}. "
+                            f"Correct this in your next response."
+                        )
+                        accumulated["proposing_stage_errors"] = errors_so_far
+
+            if output is None:
+                raise RuntimeError(
+                    f"Proposing stage failed after {_MAX_PROPOSING_RETRIES + 1} "
+                    f"structural attempts. Last error: {last_exc}"
+                ) from last_exc
+
+            # ---- Outer: pre-flight cost gate on the structurally-valid draft ----
+            factor = _run_preflight_check(inp, output)
+            if factor is None or factor <= 1.0:
                 print(f"Proposed model (pipeline): '{output.model_name}'")
                 return output
 
-            except (ValidationError, ValueError) as exc:
-                last_exc = exc
-                # Summarise Pydantic errors concisely; ValueError message is already short.
-                if isinstance(exc, ValidationError):
-                    error_summary = "; ".join(
-                        f"{' → '.join(str(l) for l in e['loc'])}: {e['msg']}"
-                        for e in exc.errors()[:5]
-                    )
-                else:
-                    error_summary = str(exc)
+            preflight_candidates.append(output)
+            if preflight_attempt < _MAX_PREFLIGHT_ATTEMPTS - 1:
+                rejection = _build_preflight_rejection_block(
+                    num_params=output.parameter_count_estimate,
+                    estimated_minutes=output.preflight_estimated_minutes,
+                    factor=factor,
+                    budget_minutes=budget,
+                )
+                errors_so_far = accumulated.get("proposing_stage_errors", [])
+                errors_so_far.append(rejection)
+                accumulated["proposing_stage_errors"] = errors_so_far
+                print(
+                    f"   Pre-flight rejected (factor={factor:.2f}x); "
+                    f"requesting revision "
+                    f"{preflight_attempt + 2}/{_MAX_PREFLIGHT_ATTEMPTS}."
+                )
 
-                if attempt < _MAX_PROPOSING_RETRIES:
-                    print(f"   Proposing attempt {attempt + 1} failed — injecting error and retrying.")
-                    # Inject the error into accumulated so the next attempt sees it.
-                    errors_so_far = accumulated.get("proposing_stage_errors", [])
-                    errors_so_far.append(
-                        f"Attempt {attempt + 1} error: {error_summary}. "
-                        f"Correct this in your next response."
-                    )
-                    accumulated["proposing_stage_errors"] = errors_so_far
-
-        raise RuntimeError(
-            f"Proposing stage failed after {_MAX_PROPOSING_RETRIES + 1} attempts. "
-            f"Last error: {last_exc}"
-        ) from last_exc
+        best = min(preflight_candidates, key=lambda o: o.preflight_factor)
+        best.memo_consistency_notes.append(
+            f"PREFLIGHT_OVERBUDGET_EMITTED: all {_MAX_PREFLIGHT_ATTEMPTS} "
+            f"pre-flight attempts exceeded the {budget:.1f} min budget; "
+            f"emitting lowest-factor candidate "
+            f"(factor={best.preflight_factor:.2f}x, "
+            f"estimated {best.preflight_estimated_minutes:.1f} min). "
+            f"The tuner's real-data gate may still reject this at trial time."
+        )
+        print(
+            f"Proposed model (pipeline, pre-flight exhausted): "
+            f"'{best.model_name}' factor={best.preflight_factor:.2f}x"
+        )
+        return best
 
     @staticmethod
     def _render_vocabulary(vocab_seed: list) -> str:
