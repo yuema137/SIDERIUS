@@ -2972,14 +2972,41 @@ Add a sibling test `test_l_fail_round_abort_dual_mode.py` that:
 
 ### 11.9 Phased implementation checklist
 
-- [ ] **L.1** — Schema additions to `HyperparamTuningInput`/`Output`
+- [x] **L.1** — Schema additions to `HyperparamTuningInput`/`Output`
       and `ExperimentMemory` (3 input/output fields including
       `attempts_per_formal_round`, plus the 2 record fields). Schema
-      unit tests.
-- [ ] **L.2** — Tuner agent loop rewrite (the big one). Includes the
+      unit tests. *Done 2026-04-19 in `d7ffdc3`: 13 new schema tests
+      across 3 classes; 121/121 schema tests + 326/326 full tuner
+      unit suite green.*
+- [x] **L.2** — Tuner agent loop rewrite (the big one). Includes the
       strict formal-success policy, the per-round/per-formal-round
       attempt-budget split, and the new fields population.
-- [ ] **L.3** — `_build_gate_exhaustion` extension for Trigger B.
+      *Done 2026-04-19 in `acc432c`: outer `while` counts only
+      successes, inner `for` runs ``N = attempts_per_formal_round if
+      is_formal_round else attempts_per_round`` per round; success →
+      break + reset `consecutive_fails`, exhaustion → bump it; aborts
+      when `consecutive_fails == max_fail_rounds`. Finalisation builds
+      `termination_reason` ("completed" | "aborted_fail_rounds") +
+      echoes the budget knobs. Every record now carries `round_index`
+      + `attempt_in_round` in `memory`. `_make_input` helpers in two
+      test files pinned to the pre-Phase-L worst case
+      (`max_rounds * 3` attempts) so existing tests stay stable;
+      `test_does_not_raise_does_not_advance_rounds` updated to assert
+      the new termination fields. 326/326 tuner unit suite green.*
+- [x] **L.3** — `_build_gate_exhaustion` extension for Trigger B.
+      *Done 2026-04-19 (uncommitted, pending verification): added
+      keyword args `consecutive_fail_rounds_at_exit`, `max_fail_rounds`,
+      `completed_rounds` (defaults 0/0/0 so existing call sites stay
+      green); Trigger B fires when consecutive_fail_rounds_at_exit
+      ≥ max_fail_rounds > 0 AND completed_rounds > 0 AND burst
+      gate-skip ratio ≥ 0.5; burst = records with
+      `round_index == completed_rounds + 1`. When fired, the report
+      uses burst records only (focused baseline + worst factors) and
+      a new `_render_gate_exhaustion_trigger_b_summary` writes the
+      "Model too large — N consecutive rounds … after K successful
+      round(s)" framing. 7 new tests in `test_build_gate_exhaustion.py`
+      (3 truth-table guards + 3 populated-path + 1 mixed-axis); 19/19
+      gate-exhaustion tests green.*
 - [ ] **L.4** — CLI flags on `ml_hyperparameter_tune_agent.py` and
       `run_exploration_adaptive.py` (`--attempts_per_round`,
       `--attempts_per_formal_round`, `--max_fail_rounds`).

@@ -294,3 +294,180 @@ class TestRenderGateExhaustionSummary:
         )
         assert "baseline estimate not recorded" in msg
         assert "1.50×" in msg
+
+
+# ---------------------------------------------------------------------------
+# Phase L — Trigger B (some successes, then a fail-round burst). See §11.4.
+# ---------------------------------------------------------------------------
+
+def _round(record: dict, round_index: int) -> dict:
+    """Tag a record with its Phase L round_index so burst lookup works."""
+    record = {**record, "memory": dict(record.get("memory") or {})}
+    record["memory"]["round_index"] = round_index
+    return record
+
+
+class TestBuildGateExhaustionTriggerBTruthTable:
+    """Truth table for the Phase L Trigger B branch — fires only when
+    (a) the loop hit the consecutive-failure brake (not max_rounds),
+    (b) at least one round previously succeeded, and
+    (c) the burst was dominated (>=50%) by VRAM/time gate skips.
+    """
+
+    def test_max_fail_rounds_zero_disables_trigger_b(self):
+        """Defaults (max_fail_rounds=0) preserve pre-Phase-L behaviour:
+        Trigger B never fires, only Trigger A. Records with successes
+        therefore return None even with a burst of fail-rounds."""
+        records = [
+            _round(_success(), 1),
+            _round(_vram_gated(), 2),
+            _round(_vram_gated(), 2),
+        ]
+        assert _build_gate_exhaustion(
+            records=records,
+            active_mode="trial",
+            vram_budget_gb=4.0,
+            time_budget_minutes=20.0,
+            # max_fail_rounds defaulted to 0
+        ) is None
+
+    def test_completed_rounds_zero_falls_through_to_trigger_a(self):
+        """K=0 ('after K successful rounds') makes Trigger B inapplicable;
+        Trigger A handles the no-success case under its own framing."""
+        records = [
+            _round(_vram_gated(), 1),
+            _round(_vram_gated(), 1),
+            _round(_vram_gated(), 1),
+        ]
+        info = _build_gate_exhaustion(
+            records=records,
+            active_mode="trial",
+            vram_budget_gb=4.0,
+            time_budget_minutes=20.0,
+            consecutive_fail_rounds_at_exit=3,
+            max_fail_rounds=3,
+            completed_rounds=0,
+        )
+        assert info is not None
+        # Trigger A summary, NOT Trigger B's "Model too large" lead.
+        assert "Model too large" not in info.summary_message
+        assert "All 3 attempt" in info.summary_message
+
+    def test_burst_below_50pct_gate_skip_does_not_fire(self):
+        """Burst with 1 gate-skip + 2 schema-violations (33%) does not
+        meet the 0.5 threshold → no Trigger B; Trigger A also blocked
+        by the prior success."""
+        records = [
+            _round(_success(), 1),
+            _round(_vram_gated(), 2),
+            _round(_schema_violation(), 2),
+            _round(_schema_violation(), 2),
+        ]
+        assert _build_gate_exhaustion(
+            records=records,
+            active_mode="trial",
+            vram_budget_gb=4.0,
+            time_budget_minutes=20.0,
+            consecutive_fail_rounds_at_exit=3,
+            max_fail_rounds=3,
+            completed_rounds=1,
+        ) is None
+
+    def test_consecutive_fails_below_threshold_does_not_fire(self):
+        """consecutive_fail_rounds_at_exit < max_fail_rounds means the
+        loop didn't actually hit the brake, so Trigger B is moot."""
+        records = [
+            _round(_success(), 1),
+            _round(_vram_gated(), 2),
+            _round(_vram_gated(), 2),
+        ]
+        assert _build_gate_exhaustion(
+            records=records,
+            active_mode="trial",
+            vram_budget_gb=4.0,
+            time_budget_minutes=20.0,
+            consecutive_fail_rounds_at_exit=1,
+            max_fail_rounds=3,
+            completed_rounds=1,
+        ) is None
+
+
+class TestBuildGateExhaustionTriggerBPopulated:
+
+    def test_trigger_b_focuses_report_on_burst_records(self):
+        """Successful rounds 1-2 had small VRAM estimates; round 3
+        burst was all VRAM-gated. The report's baseline + worst factors
+        must come from the burst, not the small successful records."""
+        records = [
+            # Successful rounds — should NOT influence the report.
+            _round(_success(score=5.0, vram_estimate_gb=1.0), 1),
+            _round(_success(score=6.0, vram_estimate_gb=1.5), 2),
+            # Burst — round 3, all VRAM-gated, escalating estimates.
+            _round(_vram_gated(vram_estimate_gb=8.0), 3),
+            _round(_vram_gated(vram_estimate_gb=10.0), 3),
+            _round(_vram_gated(vram_estimate_gb=12.0), 3),
+        ]
+        info = _build_gate_exhaustion(
+            records=records,
+            active_mode="formal",
+            vram_budget_gb=4.0,
+            time_budget_minutes=20.0,
+            consecutive_fail_rounds_at_exit=3,
+            max_fail_rounds=3,
+            completed_rounds=2,
+        )
+        assert isinstance(info, GateExhaustionInfo)
+        # Counts reflect the burst only (3), not all records (5).
+        assert info.total_attempts == 3
+        assert info.vram_gated_attempts == 3
+        # Baseline = first burst record (vram=8.0), NOT records[0] (vram=1.0).
+        assert info.baseline_vram_estimate_gb == 8.0
+        assert info.baseline_vram_factor == 2.0  # 8.0 / 4.0
+        # Worst over burst (max=12.0), not over the small successful records.
+        assert info.worst_vram_factor == 3.0  # 12.0 / 4.0
+
+    def test_trigger_b_summary_uses_phase_l_framing(self):
+        records = [
+            _round(_success(), 1),
+            _round(_success(), 2),
+            _round(_vram_gated(vram_estimate_gb=8.0), 3),
+            _round(_vram_gated(vram_estimate_gb=9.0), 3),
+        ]
+        info = _build_gate_exhaustion(
+            records=records,
+            active_mode="formal",
+            vram_budget_gb=4.0,
+            time_budget_minutes=20.0,
+            consecutive_fail_rounds_at_exit=3,
+            max_fail_rounds=3,
+            completed_rounds=2,
+        )
+        msg = info.summary_message
+        # Lead phrase per §11.4 spec.
+        assert "Model too large" in msg
+        assert "3 consecutive rounds" in msg
+        assert "after 2 successful round(s)" in msg
+        assert "reduce model size" in msg
+        # Burst-focused diagnostic.
+        assert "Burst baseline" in msg
+        assert "2.00×" in msg  # baseline factor 8.0/4.0
+
+    def test_trigger_b_with_mixed_burst_axis_says_vram_time(self):
+        """Burst has both VRAM- and time-gated attempts → axis label
+        becomes 'VRAM/time'."""
+        records = [
+            _round(_success(), 1),
+            _round(_vram_gated(vram_estimate_gb=8.0), 2),
+            _round(_time_gated(time_estimate_minutes=30.0), 2),
+        ]
+        info = _build_gate_exhaustion(
+            records=records,
+            active_mode="trial",
+            vram_budget_gb=4.0,
+            time_budget_minutes=20.0,
+            consecutive_fail_rounds_at_exit=3,
+            max_fail_rounds=3,
+            completed_rounds=1,
+        )
+        assert info is not None
+        assert "VRAM/time gate" in info.summary_message

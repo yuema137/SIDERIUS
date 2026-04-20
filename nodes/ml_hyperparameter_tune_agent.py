@@ -176,79 +176,148 @@ def _build_gate_exhaustion(
     active_mode: str,
     vram_budget_gb: Optional[float],
     time_budget_minutes: Optional[float],
+    *,
+    consecutive_fail_rounds_at_exit: int = 0,
+    max_fail_rounds: int = 0,
+    completed_rounds: int = 0,
 ) -> Optional[GateExhaustionInfo]:
     """
     Build the structured gate-exhaustion report for the next iteration's
-    proposer (§10.13). Returns ``None`` unless **all** of:
+    proposer (§10.13). Two triggers can fire:
+
+    **Trigger A (Phase K, §10.13.1)** — *no rounds ever succeeded*. Fires when:
 
       * ``records`` is non-empty (the tuner actually ran).
-      * No record has ``status == "success"`` (nothing ever trained).
+      * No record has ``status == "success"``.
       * At least one record has ``status in {"skipped_oom_risk",
-        "skipped_time_risk"}`` (the failure was budget-related, not just
-        a code bug or schema violation).
+        "skipped_time_risk"}`` (failure was budget-related, not a code
+        bug or schema violation).
 
-    When triggered, packages per-axis baseline + worst-case factors plus a
-    one-paragraph summary so the next proposer can size its baseline below
-    the binding ceiling. See docs/resource_estimator_implement.md §10.13.
+    **Trigger B (Phase L, §11.4)** — *some rounds succeeded then the
+    search collapsed*. Fires when:
+
+      * ``consecutive_fail_rounds_at_exit >= max_fail_rounds > 0``
+        (the outer loop aborted on the consecutive-failure brake, not
+        on ``max_rounds``).
+      * ``completed_rounds > 0`` (at least one round succeeded — this
+        is the "after K successful rounds" framing that distinguishes
+        Trigger B from Trigger A).
+      * Burst gate-skip ratio ``>= 0.5`` — the trailing failure burst
+        (records whose ``round_index == completed_rounds + 1``) was
+        dominated by VRAM/time gate skips, not by code bugs.
+
+    Returns ``None`` if neither trigger fires. When Trigger B fires, the
+    report is keyed off the burst records (focused on the round that
+    repeatedly failed). When Trigger A fires, the report is keyed off
+    the full record list (no successful round to anchor on).
     """
     if not records:
         return None
-    if any(r.get("status") == "success" for r in records):
-        return None
-
-    vram_gated = [r for r in records if r.get("status") == "skipped_oom_risk"]
-    time_gated = [r for r in records if r.get("status") == "skipped_time_risk"]
-    if not vram_gated and not time_gated:
-        return None
-    other = [
-        r for r in records
-        if r.get("status") not in {"skipped_oom_risk", "skipped_time_risk"}
-    ]
-
-    baseline_mem = (records[0].get("memory") or {})
-    baseline_vram = baseline_mem.get("vram_estimate_gb")
-    baseline_time = baseline_mem.get("time_estimate_minutes")
 
     def _factor(estimate, budget):
         if estimate is None or budget is None or budget <= 0:
             return None
         return round(float(estimate) / float(budget), 3)
 
-    def _worst_factor(key, budget):
+    def _worst_factor(rs, key, budget):
         if budget is None or budget <= 0:
             return None
-        ests = [
-            (r.get("memory") or {}).get(key)
-            for r in records
-        ]
+        ests = [(r.get("memory") or {}).get(key) for r in rs]
         ests = [e for e in ests if e is not None]
         if not ests:
             return None
         return round(max(float(e) for e in ests) / float(budget), 3)
 
+    # --- Trigger B (Phase L) — some successes, then a fail-round burst.
+    trigger_b_fired = False
+    burst_records: list = []
+    if (
+        max_fail_rounds > 0
+        and consecutive_fail_rounds_at_exit >= max_fail_rounds
+        and completed_rounds > 0
+    ):
+        burst_round_idx = completed_rounds + 1
+        burst_records = [
+            r for r in records
+            if (r.get("memory") or {}).get("round_index") == burst_round_idx
+        ]
+        if burst_records:
+            burst_gate = [
+                r for r in burst_records
+                if r.get("status") in {"skipped_oom_risk", "skipped_time_risk"}
+            ]
+            if len(burst_gate) / len(burst_records) >= 0.5:
+                trigger_b_fired = True
+
+    # --- Trigger A (Phase K) — no successes at all + budget-gated.
+    trigger_a_fired = False
+    if not any(r.get("status") == "success" for r in records):
+        if any(
+            r.get("status") in {"skipped_oom_risk", "skipped_time_risk"}
+            for r in records
+        ):
+            trigger_a_fired = True
+
+    if not (trigger_a_fired or trigger_b_fired):
+        return None
+
+    # When Trigger B fires, focus the report on the burst (more
+    # actionable for the proposer); otherwise fall back to all records.
+    report_records = burst_records if trigger_b_fired else records
+
+    vram_gated = [r for r in report_records if r.get("status") == "skipped_oom_risk"]
+    time_gated = [r for r in report_records if r.get("status") == "skipped_time_risk"]
+    other = [
+        r for r in report_records
+        if r.get("status") not in {"skipped_oom_risk", "skipped_time_risk"}
+    ]
+
+    baseline_mem = (report_records[0].get("memory") or {})
+    baseline_vram = baseline_mem.get("vram_estimate_gb")
+    baseline_time = baseline_mem.get("time_estimate_minutes")
+
     baseline_vram_factor = _factor(baseline_vram, vram_budget_gb)
     baseline_time_factor = _factor(baseline_time, time_budget_minutes)
-    worst_vram_factor = _worst_factor("vram_estimate_gb", vram_budget_gb)
-    worst_time_factor = _worst_factor("time_estimate_minutes", time_budget_minutes)
+    worst_vram_factor = _worst_factor(report_records, "vram_estimate_gb", vram_budget_gb)
+    worst_time_factor = _worst_factor(report_records, "time_estimate_minutes", time_budget_minutes)
 
-    summary = _render_gate_exhaustion_summary(
-        total=len(records),
-        vram_gated=len(vram_gated),
-        time_gated=len(time_gated),
-        other=len(other),
-        active_mode=active_mode,
-        vram_budget_gb=vram_budget_gb,
-        time_budget_minutes=time_budget_minutes,
-        baseline_vram=baseline_vram,
-        baseline_vram_factor=baseline_vram_factor,
-        baseline_time=baseline_time,
-        baseline_time_factor=baseline_time_factor,
-        worst_vram_factor=worst_vram_factor,
-        worst_time_factor=worst_time_factor,
-    )
+    if trigger_b_fired:
+        summary = _render_gate_exhaustion_trigger_b_summary(
+            total=len(report_records),
+            vram_gated=len(vram_gated),
+            time_gated=len(time_gated),
+            other=len(other),
+            active_mode=active_mode,
+            vram_budget_gb=vram_budget_gb,
+            time_budget_minutes=time_budget_minutes,
+            baseline_vram=baseline_vram,
+            baseline_vram_factor=baseline_vram_factor,
+            baseline_time=baseline_time,
+            baseline_time_factor=baseline_time_factor,
+            worst_vram_factor=worst_vram_factor,
+            worst_time_factor=worst_time_factor,
+            consecutive_fail_rounds_at_exit=consecutive_fail_rounds_at_exit,
+            completed_rounds=completed_rounds,
+        )
+    else:
+        summary = _render_gate_exhaustion_summary(
+            total=len(report_records),
+            vram_gated=len(vram_gated),
+            time_gated=len(time_gated),
+            other=len(other),
+            active_mode=active_mode,
+            vram_budget_gb=vram_budget_gb,
+            time_budget_minutes=time_budget_minutes,
+            baseline_vram=baseline_vram,
+            baseline_vram_factor=baseline_vram_factor,
+            baseline_time=baseline_time,
+            baseline_time_factor=baseline_time_factor,
+            worst_vram_factor=worst_vram_factor,
+            worst_time_factor=worst_time_factor,
+        )
 
     return GateExhaustionInfo(
-        total_attempts=len(records),
+        total_attempts=len(report_records),
         vram_gated_attempts=len(vram_gated),
         time_gated_attempts=len(time_gated),
         other_failure_attempts=len(other),
@@ -354,6 +423,82 @@ def _render_gate_exhaustion_summary(
         parts.append(
             "Verdict: the proposed architecture is over budget on multiple "
             "axes. Both parameter count AND per-step compute must come down."
+        )
+
+    return " ".join(parts)
+
+
+def _render_gate_exhaustion_trigger_b_summary(
+    *,
+    total: int,
+    vram_gated: int,
+    time_gated: int,
+    other: int,
+    active_mode: str,
+    vram_budget_gb: Optional[float],
+    time_budget_minutes: Optional[float],
+    baseline_vram: Optional[float],
+    baseline_vram_factor: Optional[float],
+    baseline_time: Optional[float],
+    baseline_time_factor: Optional[float],
+    worst_vram_factor: Optional[float],
+    worst_time_factor: Optional[float],
+    consecutive_fail_rounds_at_exit: int,
+    completed_rounds: int,
+) -> str:
+    """One-paragraph LLM-readable synthesis for the Phase L Trigger B
+    case — the search collapsed into a fail-round burst after some
+    successful rounds (§11.4). Lead sentence makes the
+    "model too large after K successful rounds" framing explicit so the
+    next proposer reduces model size before exploring further.
+    """
+    # Lead sentence — Trigger B framing per §11.4 spec.
+    if vram_gated and not time_gated:
+        gated_axis = "VRAM"
+    elif time_gated and not vram_gated:
+        gated_axis = "time"
+    else:
+        gated_axis = "VRAM/time"
+    parts = [
+        f"Model too large — {consecutive_fail_rounds_at_exit} consecutive "
+        f"rounds exhausted attempts at the {gated_axis} gate after "
+        f"{completed_rounds} successful round(s); proposer should reduce "
+        f"model size before the next iteration."
+    ]
+    parts.append(
+        f"Burst breakdown: {total} attempt(s) "
+        f"({vram_gated} VRAM-gated, {time_gated} time-gated, "
+        f"{other} other failures)."
+    )
+
+    # VRAM diagnostic.
+    if vram_budget_gb is not None and baseline_vram is not None:
+        parts.append(
+            f"Burst baseline estimated {baseline_vram:.2f} GB VRAM vs the "
+            f"{vram_budget_gb:.2f} GB {active_mode} budget "
+            f"(factor {baseline_vram_factor:.2f}×); worst factor in burst "
+            f"reached {worst_vram_factor:.2f}×."
+        )
+    elif vram_budget_gb is not None and worst_vram_factor is not None:
+        parts.append(
+            f"Burst VRAM estimates reached factor {worst_vram_factor:.2f}× "
+            f"of the {vram_budget_gb:.2f} GB {active_mode} budget at worst "
+            f"(burst baseline estimate not recorded)."
+        )
+
+    # Time diagnostic.
+    if time_budget_minutes is not None and baseline_time is not None:
+        parts.append(
+            f"Burst baseline estimated {baseline_time:.2f} min wall-time vs "
+            f"the {time_budget_minutes:.2f} min {active_mode} budget "
+            f"(factor {baseline_time_factor:.2f}×); worst factor in burst "
+            f"reached {worst_time_factor:.2f}×."
+        )
+    elif time_budget_minutes is not None and worst_time_factor is not None:
+        parts.append(
+            f"Burst time estimates reached factor {worst_time_factor:.2f}× "
+            f"of the {time_budget_minutes:.2f} min {active_mode} budget at "
+            f"worst (burst baseline estimate not recorded)."
         )
 
     return " ".join(parts)
@@ -1419,6 +1564,9 @@ class HyperparamTuningAgent:
             active_mode=gate_active_mode,
             vram_budget_gb=gate_vram_budget,
             time_budget_minutes=gate_time_budget,
+            consecutive_fail_rounds_at_exit=consecutive_fails,
+            max_fail_rounds=max_fail_rounds_setting,
+            completed_rounds=completed_rounds,
         )
         if gate_exhaustion is not None:
             print(
