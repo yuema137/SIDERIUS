@@ -2770,7 +2770,8 @@ accounting is what wasted attempts and masked the failure.
 ### 11.2 New semantics — per-round budget + success-counted rounds
 
 ```python
-N = attempts_per_round                # default 3, CLI-adjustable
+N_trial  = attempts_per_round         # default 3, CLI-adjustable
+N_formal = attempts_per_formal_round  # default 5, CLI-adjustable
 max_rounds                            # target SUCCESSFUL rounds (CLI)
 max_fail_rounds                       # default 3, CLI-adjustable
 
@@ -2783,6 +2784,7 @@ while completed_rounds < max_rounds and consecutive_fails < max_fail_rounds:
     # Last round (the one that would push completed_rounds to max_rounds)
     # is formal-mode for EVERY attempt in that round.
     is_formal_round = (completed_rounds == max_rounds - 1)
+    N = N_formal if is_formal_round else N_trial
 
     for attempt in range(N):
         plan = bridge.plan(...)
@@ -2805,7 +2807,17 @@ while completed_rounds < max_rounds and consecutive_fails < max_fail_rounds:
 #   consecutive_fails >= max_fail_rounds  → "aborted_fail_rounds"
 ```
 
-**Worst-case attempt count** = `max_rounds × N` (same as today by default).
+**Why two budgets**: trial attempts are fast and cheap (small data
+scope), so a moderate retry budget covers most "estimator was off"
+cases. The formal round is the **only round whose score is comparable
+across architectures**, and an iteration with no formal score is
+effectively wasted (the proposer gets no usable signal). It is
+therefore worth giving the formal round more retry headroom even at
+the cost of more compute per failed round.
+
+**Worst-case attempt count** = `(max_rounds - 1) × N_trial + N_formal`.
+With defaults (`max_rounds=3, N_trial=3, N_formal=5`) that is
+`2×3 + 5 = 11` attempts.
 **Best case** = `max_rounds` (each round succeeds first try).
 
 **Strict formal-success policy** (option A in design discussion): if the
@@ -2818,11 +2830,20 @@ score the iteration's contribution to the search is too weak.)
 
 ### 11.3 Schema + memory additions
 
-`HyperparamTuningOutput` gains:
+`HyperparamTuningInput` gains:
+
+| Field | Type | Default | Meaning |
+|-------|------|--------:|---------|
+| `attempts_per_round` | `int` | `3` | Per-round attempt budget for trial rounds. |
+| `attempts_per_formal_round` | `int` | `5` | Per-round attempt budget for the formal-promotion round. Higher than the trial default because an iteration with no formal score is effectively wasted (no comparable result, no usable signal for the next-iteration proposer). |
+| `max_fail_rounds` | `int` | `3` | Consecutive-failure abort trigger. |
+
+`HyperparamTuningOutput` gains (echo of the input values + terminal state):
 
 | Field | Type | Meaning |
 |-------|------|---------|
 | `attempts_per_round` | `int` | Echo of the CLI value; useful for post-hoc audit. |
+| `attempts_per_formal_round` | `int` | Echo of the CLI value. |
 | `max_fail_rounds` | `int` | Echo of the CLI value. |
 | `consecutive_fail_rounds_at_exit` | `int` | The terminal value of `consecutive_fails`. Lets the proposer protocol distinguish "completed cleanly" (0) from "aborted at the cap" (== `max_fail_rounds`). |
 | `termination_reason` | `Literal["completed","aborted_fail_rounds"]` | Already implicitly present via `status`; promoted to a first-class field for clarity. |
@@ -2832,7 +2853,7 @@ score the iteration's contribution to the search is too weak.)
 | Field | Type | Meaning |
 |-------|------|---------|
 | `round_index` | `int` | Which logical round this attempt belonged to (1-indexed). Currently every record's "round number" is reconstructed from order; explicit index makes the per-round bucketing unambiguous in §10.13.1's exhaustion math. |
-| `attempt_in_round` | `int` | 1..N. Lets the proposer see "round 2 burned all 3 attempts on time-gate". |
+| `attempt_in_round` | `int` | 1..N for the round in question (N = `attempts_per_round` for trial rounds, `attempts_per_formal_round` for the formal round). Lets the proposer see "round 2 burned all 3 attempts on time-gate" or "formal round burned all 5 attempts before aborting". |
 
 ### 11.4 Detection-criterion amendment (§10.13.1 → L.4)
 
@@ -2859,15 +2880,16 @@ all → Trigger A; some successes but the search collapsed → Trigger B).
 
 ### 11.5 CLI surface
 
-Two new flags on **`run_exploration_adaptive.py`** + the tuner agent CLI:
+Three new flags on **`run_exploration_adaptive.py`** + the tuner agent CLI:
 
 | Flag | Default | Forwarded to |
 |------|--------:|--------------|
-| `--attempts_per_round` | `3` | tuner only (per-round attempt budget; previously hardcoded as `max_rounds * 3` shared) |
+| `--attempts_per_round` | `3` | tuner only (per-round attempt budget for trial rounds; previously hardcoded as `max_rounds * 3` shared) |
+| `--attempts_per_formal_round` | `5` | tuner only (per-round attempt budget for the formal-promotion round; intentionally higher than the trial budget — see §11.2 rationale) |
 | `--max_fail_rounds` | `3` | tuner only (consecutive-failure abort trigger) |
 
-Both forwarded through the same protocol pass-through pattern as Phase
-K's `--trial_vram_budget_gb` / `--formal_vram_budget_gb`.
+All three forwarded through the same protocol pass-through pattern as
+Phase K's `--trial_vram_budget_gb` / `--formal_vram_budget_gb`.
 
 ### 11.6 Generalization — attempts at every stage (deferred)
 
@@ -2889,14 +2911,14 @@ isn't lost.
 
 | File | Change |
 |------|--------|
-| `nodes/ml_hyperparameter_tune_agent.py` | Replace lines ~488–1336: outer `while` loop becomes `while completed_rounds < max_rounds and consecutive_fails < max_fail_rounds`; add inner `for attempt in range(N)` loop; replace `is_last_needed_round` with `is_formal_round`; track `consecutive_fails`; populate new output fields. |
-| `agent/schemas/hyperparam_tuning.py` | Add `attempts_per_round`, `max_fail_rounds` to `HyperparamTuningInput`; add `attempts_per_round`, `max_fail_rounds`, `consecutive_fail_rounds_at_exit`, `termination_reason` to `HyperparamTuningOutput`; add `round_index`, `attempt_in_round` to `ExperimentMemory`. |
+| `nodes/ml_hyperparameter_tune_agent.py` | Replace lines ~488–1336: outer `while` loop becomes `while completed_rounds < max_rounds and consecutive_fails < max_fail_rounds`; add inner `for attempt in range(N)` loop where `N = attempts_per_formal_round if is_formal_round else attempts_per_round`; replace `is_last_needed_round` with `is_formal_round`; track `consecutive_fails`; populate new output fields. |
+| `agent/schemas/hyperparam_tuning.py` | Add `attempts_per_round`, `attempts_per_formal_round`, `max_fail_rounds` to `HyperparamTuningInput`; add the same three plus `consecutive_fail_rounds_at_exit`, `termination_reason` to `HyperparamTuningOutput`; add `round_index`, `attempt_in_round` to `ExperimentMemory`. |
 | `agent/skills/.../_build_gate_exhaustion` (in tuner) | Add Trigger B branch with the 50%-of-burst gate-skip check. |
 | `nodes/ml_model_proposal_agent.py` | Surface Trigger B's reason string in the `[PRIOR ITERATION GATE EXHAUSTION]` prompt block (already populated via §10.13.4 protocol). |
-| `run_exploration_adaptive.py` | Add `--attempts_per_round`, `--max_fail_rounds` argparse entries; forward through the workflow's tuner-input builder. |
-| `agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py` | Pass-through for the two new flags (mirror Phase K.4). |
+| `run_exploration_adaptive.py` | Add `--attempts_per_round`, `--attempts_per_formal_round`, `--max_fail_rounds` argparse entries; forward through the workflow's tuner-input builder. |
+| `agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py` | Pass-through for the three new flags (mirror Phase K.4). |
 | `tests/integration/workflows/test_k9_invented_model_dual_mode.py` | Update — see §11.8. |
-| `tests/unit/agent/tune_ml_hyperparam_agent/` | Add `test_per_round_attempt_budget.py` covering: (a) round succeeds within N attempts, (b) round fails all N → consecutive_fails increments, (c) `max_fail_rounds` consecutive failures abort the loop, (d) formal-round promotion fires only when `completed_rounds == max_rounds - 1`. |
+| `tests/unit/agent/tune_ml_hyperparam_agent/` | Add `test_per_round_attempt_budget.py` covering: (a) trial round succeeds within `attempts_per_round` attempts, (b) trial round fails all `attempts_per_round` attempts → `consecutive_fails` increments, (c) `max_fail_rounds` consecutive failures abort the loop, (d) formal-round promotion fires only when `completed_rounds == max_rounds - 1`, (e) formal round uses `attempts_per_formal_round` (not `attempts_per_round`) — set `attempts_per_round=1`, `attempts_per_formal_round=3`, plan an oversize-then-fitting sequence; assert round 1 fails on attempt 1 (1-budget) while round 2 (formal) burns 2 attempts before succeeding. |
 
 ### 11.8 K.9 test changes
 
@@ -2911,10 +2933,12 @@ assumptions from the pre-Phase-L design that need updating:
    per-round budget.
 2. **Bridge response queue depth**: K.9 registers 2 canned `generate`
    responses (one per round). Under Phase L with `max_rounds=2`,
-   `attempts_per_round=3`, `max_fail_rounds=3`:
-   - Round 1: attempt 1 returns canned plan #1 → gate verdicts over
-     budget → record saved as `skipped_oom_risk`. Round 1 is **not** a
-     success; it consumes 1 of N=3 attempts.
+   `attempts_per_round=3`, `attempts_per_formal_round=5` (default),
+   `max_fail_rounds=3`:
+   - Round 1 (trial): attempt 1 returns canned plan #1 → gate verdicts
+     over budget → record saved as `skipped_oom_risk`. Round 1 is
+     **not** a success; it consumes 1 of `attempts_per_round=3`
+     attempts.
    - K.9 currently expects round 1 to "fail and move on". Under
      Phase L, the loop will spend up to 3 attempts on round 1 trying
      to land a success. The bridge needs a 2nd canned plan that
@@ -2924,6 +2948,9 @@ assumptions from the pre-Phase-L design that need updating:
    - **Cleaner rewrite**: change the K.9 choreography to "round 1
      OOM-skips on attempt 1, succeeds on attempt 2; round 2 (formal)
      succeeds on attempt 1". Bridge needs 3 canned plans + 1 reflect.
+     Round 2's `attempts_per_formal_round=5` budget is irrelevant
+     because attempt 1 already succeeds — no need to special-case it
+     in the test.
 3. **Layer 2 assertions**: `len(output.all_records) == 2` becomes
    `== 3` (the additional OOM-skipped attempt #1 of round 1).
 4. **Layer 4 assertion**: `output.gate_exhaustion is None` still holds
@@ -2934,7 +2961,9 @@ assumptions from the pre-Phase-L design that need updating:
    `output.termination_reason == "completed"`.
 
 Add a sibling test `test_l_fail_round_abort_dual_mode.py` that:
-- Uses `max_rounds=3`, `attempts_per_round=3`, `max_fail_rounds=3`.
+- Uses `max_rounds=3`, `attempts_per_round=3`,
+  `attempts_per_formal_round=3` (explicit override of the default 5
+  to keep the canned-plan count manageable), `max_fail_rounds=3`.
 - Canned planner returns oversize plans for 9 attempts in a row
   (3 rounds × 3 attempts, all OOM-skipped).
 - Asserts `consecutive_fail_rounds_at_exit == 3`,
@@ -2944,17 +2973,24 @@ Add a sibling test `test_l_fail_round_abort_dual_mode.py` that:
 ### 11.9 Phased implementation checklist
 
 - [ ] **L.1** — Schema additions to `HyperparamTuningInput`/`Output`
-      and `ExperimentMemory`. Schema unit tests.
+      and `ExperimentMemory` (3 input/output fields including
+      `attempts_per_formal_round`, plus the 2 record fields). Schema
+      unit tests.
 - [ ] **L.2** — Tuner agent loop rewrite (the big one). Includes the
-      strict formal-success policy and the new fields population.
+      strict formal-success policy, the per-round/per-formal-round
+      attempt-budget split, and the new fields population.
 - [ ] **L.3** — `_build_gate_exhaustion` extension for Trigger B.
 - [ ] **L.4** — CLI flags on `ml_hyperparameter_tune_agent.py` and
-      `run_exploration_adaptive.py`.
-- [ ] **L.5** — Protocol pass-through for the two new flags.
+      `run_exploration_adaptive.py` (`--attempts_per_round`,
+      `--attempts_per_formal_round`, `--max_fail_rounds`).
+- [ ] **L.5** — Protocol pass-through for the three new flags.
 - [ ] **L.6** — Unit test: `test_per_round_attempt_budget.py`
-      (4 sub-cases per §11.7 row 7).
+      (5 sub-cases per §11.7 row 7, including the formal-vs-trial
+      budget asymmetry).
 - [ ] **L.7** — K.9 test rewrite per §11.8 (1)–(4).
-- [ ] **L.8** — New integration test: `test_l_fail_round_abort_dual_mode.py`.
+- [ ] **L.8** — New integration test: `test_l_fail_round_abort_dual_mode.py`
+      with explicit `attempts_per_formal_round=3` override (default
+      is 5 — see §11.8).
 - [ ] **L.9** — Real-LLM smoke run (small `max_rounds=2`,
       `--real-llm`) confirming the new flow end-to-end.
 - [ ] **L.10** — Doc closeout: flip §11 row to `[x]`; cross-link
@@ -2972,22 +3008,30 @@ Add a sibling test `test_l_fail_round_abort_dual_mode.py` that:
   fail-fail-success-fail-fail-success-fail-fail-fail still aborts?
   Current semantics says "no" — the success "earned" a fresh budget.
   Revisit if real runs show pathological alternation.
-- **Q3**: Should the formal round itself have a separate
-  `attempts_per_formal_round` budget, since formal runs are 50–100×
-  longer (one failed formal attempt is much more expensive than one
-  failed trial attempt)? Defer to v2 of Phase L if the v1 evidence
-  shows formal-attempt waste.
+- **Q3 — Resolved 2026-04-19**: Formal round gets a separate
+  `attempts_per_formal_round` budget, default **5** (vs trial's **3**).
+  Rationale: formal is the only round whose denoising_score is
+  comparable across architectures, so an iteration with no formal
+  score is wasted entirely — the proposer gets no usable signal for
+  the next iteration. Spending more attempts on formal is worth it
+  because failure cost is opportunity cost (a missed comparable
+  measurement), not just compute. Worst-case per failed formal round
+  at `formal_time_budget=30 min` is `5 × 30 = 150 min`; per iteration
+  at `max_fail_rounds=3` is `~7.5 h`, which fits inside an overnight
+  slot. Operator can lower with `--attempts_per_formal_round`.
 
 ### 11.11 Acceptance + rollback
 
 **Acceptance**: a 3-iteration `run_exploration_adaptive.py` smoke run
-on lilab with `--max_rounds 3 --attempts_per_round 3 --max_fail_rounds 3`
-and a small model (`punet`) shows: (a) at least one iteration completes
-all 3 rounds including formal, (b) no iteration spins past
-`max_rounds × attempts_per_round = 9` total attempts, (c) when an
-iteration is intentionally given an absurdly tight time budget (say
-0.01 min), it aborts with `termination_reason == "aborted_fail_rounds"`
-and the proposer for the next iteration sees Trigger B's reason string.
+on lilab with `--max_rounds 3 --attempts_per_round 3
+--attempts_per_formal_round 5 --max_fail_rounds 3` and a small model
+(`punet`) shows: (a) at least one iteration completes all 3 rounds
+including formal, (b) no iteration spins past
+`(max_rounds - 1) × attempts_per_round + attempts_per_formal_round
+= 2 × 3 + 5 = 11` total attempts, (c) when an iteration is
+intentionally given an absurdly tight time budget (say 0.01 min), it
+aborts with `termination_reason == "aborted_fail_rounds"` and the
+proposer for the next iteration sees Trigger B's reason string.
 
 **Rollback**: Phase L is a single contiguous diff to
 `ml_hyperparameter_tune_agent.py` plus additive schema fields. Revert
