@@ -233,6 +233,18 @@ def main():
                 denoised[i:i+actual_n] = dn.reshape(actual_n, input_size)
                 injected[i:i+actual_n] = ij.reshape(actual_n, input_size)
 
+        # Fix 3 (docs/optimize_inference_and_scoring.md §3) — free the raw
+        # int8 buffers before the write phase. create_abra_file below emits
+        # transient .flatten().astype(int8) copies of denoised + injected;
+        # keeping alltrain/alltarget (~3.7 GB together on a 201-segment
+        # validation file) live through that call inflates the call peak
+        # unnecessarily. train_loader/target_loader are views over these
+        # buffers, so the actual release comes from dropping the owners.
+        # Measured effect: single-call peak 9.43 GB → 5.68 GB (−3.75 GB,
+        # −40%) on abra_validation_0000.h5.
+        del train_loader, target_loader, alltrain, alltarget
+        gc.collect()
+
         # 4. Save Output
         idx_str = str(args.file_index).zfill(4)
         out_dir = args.output_dir if args.output_dir else args.data_dir
