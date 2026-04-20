@@ -177,12 +177,12 @@ Each fix must land with:
 | 1 | `ef02dc3` | `feat(schema): add disallowed_architectural_patterns to GateExhaustionInfo` | 2 | +80 / −0 |
 | 2 | `45ea78d` | `feat(tagger): architectural-pattern tagger for failed proposals` | 5 | +391 / −5 |
 | 3 | `284bbcd` | `feat(tuner): populate disallowed_architectural_patterns on gate exhaustion` | 2 | +470 / −0 |
-| 4 | _pending_ | `feat(proposer): render DO-NOT-PROPOSE block from disallowed patterns` | — | — |
+| 4 | `4036d98` | `feat(proposer): render [DISALLOWED PATTERNS] sub-block from disallowed tags` | 2 | +157 / −1 |
 | 5 | _pending_ | `feat(proposer): estimate_proposal_time static-mode wrapper` | — | — |
 | 6 | _pending_ | `feat(proposer): pre-flight cost-check loop with up-to-3 revisions` | — | — |
 | 7 | _pending_ | `docs: mark Fix 1 + Fix 2 landed` | — | — |
 
-**Next up**: Commit 4 — extend the proposer's `[RECENT GATE EXHAUSTIONS]` prompt renderer with a `[DISALLOWED PATTERNS]` sub-section that imports `ARCHITECTURAL_PATTERNS` from the tagger and renders each tag's English description. Unit-test zero-noise (empty patterns → no block) and multi-pattern deterministic ordering.
+**Next up**: Commit 5 — create `agent/utils/proposer_preflight.py` with `estimate_proposal_time(baseline_config, time_budget_minutes, seg_size=None, sample_set=None) -> dict`. Calls `evaluate_time_skill.run_skill(sandbox=None, data_dir=None, ...)` in static-formula mode only; synthesises a representative `sample_set` when none provided. Unit-test overbudget + feasible configs, error handling, and no-GPU/no-disk invariants.
 
 ---
 
@@ -307,19 +307,22 @@ Each checkbox is a pre-commit gate. Do not proceed to the next commit until ever
 - [x] Unit test: Trigger B burst path populates patterns on the fail-round records
 - [x] Tests green (15 new + 145 existing = 160 passed) → committed
 
-### Commit 4 — Proposer renderer
+### Commit 4 — Proposer renderer → landed `4036d98`
 
-- [ ] `[RECENT GATE EXHAUSTIONS]` prompt block extended with a `[DISALLOWED PATTERNS]` sub-section when any recent exhaustion has non-empty `disallowed_architectural_patterns`
-- [ ] Each tag rendered with its English description (mapping table colocated with the renderer):
+- [x] `[RECENT GATE EXHAUSTIONS]` prompt block extended with a `[DISALLOWED PATTERNS]` sub-section when any recent exhaustion has non-empty `disallowed_architectural_patterns`
+- [x] Each tag rendered with its English description (mapping table colocated with the renderer):
   - `recurrent_over_T` → "Avoid any RNN/GRU/LSTM or other recurrence over the time dimension at the active segmentation_size."
   - `scan_over_T` → "Avoid selective-scan / SSM / Mamba-style sequential state recurrence over the time dimension."
   - `dense_attention_over_T` → "Avoid dense (non-windowed) attention over the time dimension at the active segmentation_size."
-- [ ] Tag→description map lives in `agent/utils/architectural_pattern_tagger.py` as `ARCHITECTURAL_PATTERNS` (single source of truth; tagger and renderer share it)
-- [ ] Unit test: `GateExhaustionInfo` with `patterns=["scan_over_T"]` → rendered prompt contains the English description
-- [ ] Unit test: empty patterns → no `[DISALLOWED PATTERNS]` block in the prompt (zero-noise when not applicable)
-- [ ] Unit test: multiple patterns → all descriptions appear, deterministic order
-- [ ] Existing `test_n_recent_gate_exhaustions_dual_mode.py` still passes (backward-compat for the aggregate-window block)
-- [ ] Tests green → commit
+- [x] Tag→description map lives in `agent/utils/architectural_pattern_tagger.py` as `ARCHITECTURAL_PATTERNS` (single source of truth; tagger and renderer share it)
+- [x] Unit test: `GateExhaustionInfo` with `patterns=["scan_over_T"]` → rendered prompt contains the English description
+- [x] Unit test: empty patterns → no `[DISALLOWED PATTERNS]` block in the prompt (zero-noise when not applicable)
+- [x] Unit test: multiple patterns → all descriptions appear, deterministic order
+- [x] Unit test: per-entry scoping — multi-entry block with tags only on one entry renders the banner inside that entry, not globally
+- [x] Unit test: unknown tag (not in `ARCHITECTURAL_PATTERNS`) dropped defensively; all-unknown → no bare banner
+- [x] Unit test: vocabulary-completeness invariant — `set(ARCHITECTURAL_PATTERNS) == {recurrent_over_T, scan_over_T, dense_attention_over_T}`
+- [x] Existing `test_recent_gate_exhaustions.py` still passes (25 existing tests green alongside 8 new = 33 total)
+- [x] Tests green (33 passed in 0.23s) → committed
 
 ### Commit 5 — `estimate_proposal_time` wrapper
 
