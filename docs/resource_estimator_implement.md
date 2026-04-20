@@ -3092,8 +3092,21 @@ unit suite.
       The corrected fixture validates Trigger B's "Model too large
       after K successful rounds" framing per §11.4. Pseudo-mode L.8
       passes; K.9 unaffected; full tuner unit suite (338) still green.*
-- [ ] **L.9** — Real-LLM smoke run (small `max_rounds=2`,
+- [x] **L.9** — Real-LLM smoke run (small `max_rounds=2`,
       `--real-llm`) confirming the new flow end-to-end.
+      *Done 2026-04-19: ran the K.9 dual-mode test
+      (`tests/integration/workflows/test_k9_invented_model_dual_mode.py`)
+      under `--real-llm` with `OPENAI_API_KEY` (gpt-5-mini, the
+      project-default tuner planner per CLAUDE.md memory). Test
+      passed in 104 s — confirms (a) the Phase L per-round
+      attempt-budget loop runs end-to-end with a real planner without
+      crashing, (b) the K.2.5-8 warning + verdict line still surface
+      in stdout under real-LLM (Layer 1 assertions in K.9 are
+      non-mode-gated), (c) the agent exits cleanly through
+      `HyperparamTuningOutput.model_validate`. Layers 2-3 (record
+      counts, planner reaction) are pseudo-only by design; the smoke
+      validates the new code path executes, not that the LLM picks
+      the canned choreography.*
 - [ ] **L.10** — Doc closeout: flip §11 row to `[x]`; cross-link
       from §10.13.1 to §11.4.
 
