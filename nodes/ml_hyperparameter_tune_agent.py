@@ -36,6 +36,11 @@ from execute_tools.scoring_utils import SampleSet
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 from execute_tools.build_anchor_map import load_anchor_map
 from agent.skills.evaluate_time_skill import calibration as time_calibration
+from agent.utils.architectural_pattern_tagger import (
+    TIME_FACTOR_THRESHOLD,
+    VRAM_FACTOR_THRESHOLD,
+    tag_architecture,
+)
 
 
 def _validate_data_config(
@@ -171,6 +176,60 @@ _serialize_expert_advice = serialize_expert_advice
 # Gate-exhaustion feedback helper (Phase K.7 — see §10.13)
 # ---------------------------------------------------------------------------
 
+
+def _collect_disallowed_patterns(
+    records: list,
+    *,
+    vram_budget_gb: Optional[float],
+    time_budget_minutes: Optional[float],
+) -> list:
+    """Return the sorted union of architectural-pattern tags for records that
+    exceeded the §7 Decision 2 thresholds.
+
+    For each gate-rejected attempt (``status in {"skipped_oom_risk",
+    "skipped_time_risk"}``) we compute its individual ``time_factor`` and
+    ``vram_factor`` from the per-attempt ``memory`` block. Only attempts that
+    overshot by at least ``TIME_FACTOR_THRESHOLD`` (time) or
+    ``VRAM_FACTOR_THRESHOLD`` (VRAM) contribute tags — a marginal 1.3× is a
+    hyperparameter choice, not an architectural infeasibility, and banning the
+    whole class on it would over-constrain the next proposer. See
+    ``docs/reliable_resource_proposer.md`` §7 Decision 2 + §9 Commit 3.
+
+    Non-gate failures (code bugs, schema violations) are skipped regardless of
+    factor — their failure mode is not resource-structural.
+
+    Returns a deterministic sorted list (empty if no attempt qualifies).
+    """
+    tags: set = set()
+    for r in records:
+        if r.get("status") not in {"skipped_oom_risk", "skipped_time_risk"}:
+            continue
+        mem = r.get("memory") or {}
+
+        vram_factor = None
+        if vram_budget_gb and vram_budget_gb > 0:
+            vram_est = mem.get("vram_estimate_gb")
+            if vram_est is not None:
+                vram_factor = float(vram_est) / float(vram_budget_gb)
+
+        time_factor = None
+        if time_budget_minutes and time_budget_minutes > 0:
+            time_est = mem.get("time_estimate_minutes")
+            if time_est is not None:
+                time_factor = float(time_est) / float(time_budget_minutes)
+
+        exceeds_time = time_factor is not None and time_factor > TIME_FACTOR_THRESHOLD
+        exceeds_vram = vram_factor is not None and vram_factor > VRAM_FACTOR_THRESHOLD
+        if not (exceeds_time or exceeds_vram):
+            continue
+
+        model_type = r.get("model_type") or ""
+        model_config = r.get("model_config") or {}
+        tags.update(tag_architecture(model_type, model_config))
+
+    return sorted(tags)
+
+
 def _build_gate_exhaustion(
     records: list,
     active_mode: str,
@@ -281,6 +340,12 @@ def _build_gate_exhaustion(
     worst_vram_factor = _worst_factor(report_records, "vram_estimate_gb", vram_budget_gb)
     worst_time_factor = _worst_factor(report_records, "time_estimate_minutes", time_budget_minutes)
 
+    disallowed_patterns = _collect_disallowed_patterns(
+        report_records,
+        vram_budget_gb=vram_budget_gb,
+        time_budget_minutes=time_budget_minutes,
+    )
+
     if trigger_b_fired:
         summary = _render_gate_exhaustion_trigger_b_summary(
             total=len(report_records),
@@ -331,6 +396,7 @@ def _build_gate_exhaustion(
         worst_vram_factor=worst_vram_factor,
         worst_time_factor=worst_time_factor,
         summary_message=summary,
+        disallowed_architectural_patterns=disallowed_patterns,
     )
 
 
