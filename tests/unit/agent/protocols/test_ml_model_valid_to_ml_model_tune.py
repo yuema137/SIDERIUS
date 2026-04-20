@@ -380,6 +380,76 @@ class TestVramBudgetFanOut:
 # database_validated_model
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Per-round attempt-budget fan-out (Phase L, §11.5)
+#
+# attempts_per_round / attempts_per_formal_round / max_fail_rounds are
+# tuner-only knobs. The protocol must surface caller overrides to
+# HyperparamTuningInput and otherwise leave the schema defaults (3/5/3).
+# ---------------------------------------------------------------------------
+
+
+class TestAttemptBudgetFanOut:
+
+    def test_attempts_per_round_passed_through(
+        self, validator_output, proposal_output, storage
+    ):
+        result = local_validated_model(
+            validator_output, proposal_output, storage,
+            attempts_per_round=7,
+        )
+        assert result.attempts_per_round == 7
+        # Other Phase L knobs untouched -> schema defaults.
+        assert result.attempts_per_formal_round == 5
+        assert result.max_fail_rounds == 3
+
+    def test_attempts_per_formal_round_passed_through(
+        self, validator_output, proposal_output, storage
+    ):
+        result = local_validated_model(
+            validator_output, proposal_output, storage,
+            attempts_per_formal_round=8,
+        )
+        assert result.attempts_per_formal_round == 8
+        assert result.attempts_per_round == 3
+        assert result.max_fail_rounds == 3
+
+    def test_max_fail_rounds_passed_through(
+        self, validator_output, proposal_output, storage
+    ):
+        result = local_validated_model(
+            validator_output, proposal_output, storage,
+            max_fail_rounds=5,
+        )
+        assert result.max_fail_rounds == 5
+        assert result.attempts_per_round == 3
+        assert result.attempts_per_formal_round == 5
+
+    def test_all_three_independent(
+        self, validator_output, proposal_output, storage
+    ):
+        """All three knobs survive together with independent values."""
+        result = local_validated_model(
+            validator_output, proposal_output, storage,
+            attempts_per_round=2,
+            attempts_per_formal_round=4,
+            max_fail_rounds=1,
+        )
+        assert result.attempts_per_round == 2
+        assert result.attempts_per_formal_round == 4
+        assert result.max_fail_rounds == 1
+
+    def test_defaults_match_schema_when_omitted(
+        self, validator_output, proposal_output, storage
+    ):
+        """Caller passes nothing -> protocol surfaces the documented
+        Phase L defaults (3/5/3, see §11.5)."""
+        result = local_validated_model(validator_output, proposal_output, storage)
+        assert result.attempts_per_round == 3
+        assert result.attempts_per_formal_round == 5
+        assert result.max_fail_rounds == 3
+
+
 class TestDatabaseValidatedModel:
 
     def test_raises_not_implemented(self, validator_output, storage):

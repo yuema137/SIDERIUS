@@ -17,20 +17,30 @@ registered seed (`punet`).
   `extend_registries(...)`. Without this, `_count_params` crashes at registry
   lookup before the K.2.5-8 path can ever fire.
 - **Sandbox results**: `tests/pseudo_data/train_outputs/pe_wavenet_delta/`
-  Returned by `RecordingSandbox` for round 2's `execute_training` /
-  `execute_inference` / `score_vector` calls. Round 1 never reaches the
-  sandbox — it is gated out at the VRAM check. **Trial mode uses
-  `sandbox.score_vector` (not `sandbox.execute_scoring`)** because the
-  tuner takes the anchor-normalised path whenever
-  `segment_anchors.json` is present, which `RecordingSandbox` stubs at
-  construction time. `execute_scoring.json` is kept alongside the others
-  for symmetry with the existing `train_outputs/punet/` folder, but is
-  unused in trial mode and would only be popped if a future formal-mode
-  K.9 variant is added.
+  Returned by `RecordingSandbox` for the two non-skipped attempts in this
+  choreography: round 1 attempt 2 (trial) and round 2 attempt 1 (formal).
+  Each of `execute_training.json`, `execute_inference.json`, and
+  `score_vector.json` is therefore a 2-element JSON array (FIFO-popped
+  per call). Round 1 attempt 1 never reaches the sandbox — it is gated
+  out at the VRAM check, so the queue depth is exactly 2, not 3.
+  **Both trial and formal modes use `sandbox.score_vector` (not
+  `sandbox.execute_scoring`)** because the tuner takes the anchor-normalised
+  path whenever `segment_anchors.json` is present, which `RecordingSandbox`
+  stubs at construction time. `execute_scoring.json` is kept alongside the
+  others as a single-entry stub for symmetry with the existing
+  `train_outputs/punet/` folder, but is unused in this test (the agent
+  takes the score_vector branch for both rounds).
 
-## Choreography
+## Choreography (Phase L semantics)
 
-### Round 1 (`generate.json[0]`) — over budget
+Under Phase L (`docs/resource_estimator_implement.md` §11), the outer
+loop counts only successes against `max_rounds`; an OOM-skipped attempt
+consumes one slot of the inner per-round budget but does not advance
+`completed_rounds`. With `max_rounds=2`, `attempts_per_round=3`
+(default), `attempts_per_formal_round=5` (default), `max_fail_rounds=3`,
+the test produces **3 records** across **2 successful rounds**:
+
+### Round 1, attempt 1 (`generate.json[0]`) — over budget
 
 - Planner returns `hidden_dim=2048` for `pe_wavenet_delta`. Param count
   ≈ 9.4M (`2·H² + 512·H + 256` at H=2048).
@@ -38,23 +48,46 @@ registered seed (`punet`).
   `pe_wavenet_delta` + the runtime fallback `inference_batch=25`. Predicted
   3-phase peak ≈ 151 MB (training overhead `16·params ≈ 150 MB` dominates;
   activation terms at `seg=1000`, `batch=1` add ~1 MB).
-- Verdict: **over budget** (151 MB > 100 MB ceiling). Round 1 is recorded as
-  `skipped_oom_risk` with `inference_batch_uncalibrated=True`. The reflector
-  is **not** invoked on this round (per the tuner agent's skipped-record
-  branch).
+- Verdict: **over budget** (151 MB > 100 MB ceiling). Recorded as
+  `skipped_oom_risk` with `inference_batch_uncalibrated=True`,
+  `round_index=1`, `attempt_in_round=1`. The reflector is **not** invoked
+  on this attempt (per the tuner agent's skipped-record branch). Round 1
+  is **not** a success yet — the inner attempt budget continues.
 
-### Round 2 (`generate.json[1]`) — fits
+### Round 1, attempt 2 (`generate.json[1]`) — fits, round 1 succeeds
 
-- Planner reacts to the round 1 verdict by collapsing `hidden_dim` from 2048
-  to 128 — every other lever held constant. Param count ≈ 98k.
-- VRAM gate emits the same `!!! [evaluate_vram_skill]` warning (model_type is
-  still unregistered) but predicted 3-phase peak ≈ 26 MB. Verdict: **fits**
-  (26 MB < 100 MB).
-- Time gate runs next, also emits `!!! [evaluate_time_skill]` warning, and
-  passes (tiny model on a small sample set).
+- Planner reacts to the attempt 1 verdict by collapsing `hidden_dim` from
+  2048 to 128 — every other lever held constant. Param count ≈ 98k.
+- VRAM gate emits the same `!!! [evaluate_vram_skill]` warning (model_type
+  still unregistered) but predicted 3-phase peak ≈ 26 MB. Verdict:
+  **fits** (26 MB < 100 MB).
+- Time gate runs next, also emits `!!! [evaluate_time_skill]` warning,
+  and passes (tiny model on a small sample set).
 - `RecordingSandbox` returns the canned `train_outputs/pe_wavenet_delta/`
-  trio. The reflector is invoked with the canned `denoising_score=0.65` and
-  returns `reflect.json`.
+  trio. The reflector is invoked with the canned `denoising_score=0.65`
+  and returns `reflect.json[0]`. Recorded as `success` with
+  `round_index=1`, `attempt_in_round=2`. Round 1 succeeds:
+  `completed_rounds` advances 0 → 1, `consecutive_fails` resets to 0,
+  inner loop breaks.
+
+### Round 2, attempt 1 (`generate.json[2]`) — formal promotion
+
+- `completed_rounds == max_rounds - 1 == 1` so the agent forces
+  `plan.is_trial = False` regardless of what the canned plan claims.
+- Planner returns `hidden_dim=128` (same architecture as round 1's
+  successful attempt) for the formal-mode validation.
+- Gate emits the K.2.5-8 warning again (still unregistered) and verdicts
+  fits at the same ~26 MB peak.
+- Sandbox + reflector run with `reflect.json[1]`. Recorded as `success`
+  with `round_index=2`, `attempt_in_round=1`. Round 2 succeeds:
+  `completed_rounds` 1 → 2, outer loop exits with
+  `termination_reason="completed"`.
+
+Total: 3 records (1 OOM-skip + 2 success), 3 plan calls, 2 reflect calls.
+The Phase L formal-budget asymmetry (`attempts_per_formal_round=5`) is
+unused because round 2 succeeds on attempt 1 — for the
+fail-then-abort variant see
+`tests/integration/workflows/test_l_fail_round_abort_dual_mode.py` (L.8).
 
 ## Why budget = 0.1 GB
 

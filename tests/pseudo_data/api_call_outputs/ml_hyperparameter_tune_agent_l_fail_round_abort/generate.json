@@ -1,0 +1,322 @@
+[
+  {
+    "model_type": "pe_wavenet_delta",
+    "hypothesis": "Round 1 — anchor the iteration with a width that fits the 0.1 GB ceiling so the loop has at least one success before deliberately exploring an over-budget regime in subsequent rounds. hidden_dim=128 is known to pass the gate at ~26 MB peak from prior K.9 evidence on this family.",
+    "reasoning": "L.8 fixture: round 1 must succeed so completed_rounds advances to 1; that is the precondition for Trigger B (Phase L) to be reachable in later rounds. Width=128 + seg=1000 + batch=1 lands well inside the 0.1 GB budget with ~75 MB headroom, so the gate verdict is unambiguous.",
+    "model_config": {
+      "model_type": "pe_wavenet_delta",
+      "segmentation_size": 1000,
+      "batch_size": 1,
+      "hidden_dim": 128
+    },
+    "train_config": {
+      "lr": 0.0001,
+      "epochs": 1,
+      "batch_size": 1,
+      "optimizer_type": "adamw",
+      "weight_decay": 0.00001,
+      "device": "cuda"
+    },
+    "loss_config": {
+      "loss_type": "ce",
+      "reduction": "mean",
+      "use_class_weights": false
+    },
+    "is_trial": true,
+    "trial_strategy": "snapshot",
+    "trial_portion": 0.05,
+    "target_files": [],
+    "train_portion": 0.1,
+    "eval_strategy": "snapshot",
+    "eval_portion": 0.05,
+    "train_validation_align": true
+  },
+  {
+    "model_type": "pe_wavenet_delta",
+    "hypothesis": "Round 2 attempt 1 — deliberately oversize hidden_dim=2048 to bust the 0.1 GB budget. This fixture exercises Phase L's per-round attempt budget: this attempt OOM-skips, the next two attempts in this round will repeat the same oversize plan to exhaust the per-round budget, and the round will fail without producing a success.",
+    "reasoning": "L.8 fixture: rounds 2-4 each OOM-skip on every attempt to drive consecutive_fail_rounds to 3 → abort. Width=2048 puts 3-phase peak at ~151 MB, ~50 MB over the 0.1 GB ceiling — clean over-budget margin attributable to the params term (16x at training).",
+    "model_config": {
+      "model_type": "pe_wavenet_delta",
+      "segmentation_size": 1000,
+      "batch_size": 1,
+      "hidden_dim": 2048
+    },
+    "train_config": {
+      "lr": 0.0001,
+      "epochs": 1,
+      "batch_size": 1,
+      "optimizer_type": "adamw",
+      "weight_decay": 0.00001,
+      "device": "cuda"
+    },
+    "loss_config": {
+      "loss_type": "ce",
+      "reduction": "mean",
+      "use_class_weights": false
+    },
+    "is_trial": true,
+    "trial_strategy": "snapshot",
+    "trial_portion": 0.05,
+    "target_files": [],
+    "train_portion": 0.1,
+    "eval_strategy": "snapshot",
+    "eval_portion": 0.05,
+    "train_validation_align": true
+  },
+  {
+    "model_type": "pe_wavenet_delta",
+    "hypothesis": "Round 2 attempt 2 — repeat the oversize hidden_dim=2048 plan. In a real run the planner would react to attempt 1's verdict and shrink, but this L.8 fixture intentionally keeps the plan oversized across all attempts in rounds 2-4 to force consecutive_fails to reach max_fail_rounds=3.",
+    "reasoning": "L.8 fixture: deliberately stuck-planner scenario. Verifies the inner per-round attempt budget exhausts cleanly without a success.",
+    "model_config": {
+      "model_type": "pe_wavenet_delta",
+      "segmentation_size": 1000,
+      "batch_size": 1,
+      "hidden_dim": 2048
+    },
+    "train_config": {
+      "lr": 0.0001,
+      "epochs": 1,
+      "batch_size": 1,
+      "optimizer_type": "adamw",
+      "weight_decay": 0.00001,
+      "device": "cuda"
+    },
+    "loss_config": {
+      "loss_type": "ce",
+      "reduction": "mean",
+      "use_class_weights": false
+    },
+    "is_trial": true,
+    "trial_strategy": "snapshot",
+    "trial_portion": 0.05,
+    "target_files": [],
+    "train_portion": 0.1,
+    "eval_strategy": "snapshot",
+    "eval_portion": 0.05,
+    "train_validation_align": true
+  },
+  {
+    "model_type": "pe_wavenet_delta",
+    "hypothesis": "Round 2 attempt 3 — final attempt of round 2's per-round budget. Stays oversized so the round exhausts without a success and consecutive_fail_rounds advances to 1.",
+    "reasoning": "L.8 fixture: stuck-planner across the whole round. After this attempt the inner loop exits and the outer loop advances to round 3.",
+    "model_config": {
+      "model_type": "pe_wavenet_delta",
+      "segmentation_size": 1000,
+      "batch_size": 1,
+      "hidden_dim": 2048
+    },
+    "train_config": {
+      "lr": 0.0001,
+      "epochs": 1,
+      "batch_size": 1,
+      "optimizer_type": "adamw",
+      "weight_decay": 0.00001,
+      "device": "cuda"
+    },
+    "loss_config": {
+      "loss_type": "ce",
+      "reduction": "mean",
+      "use_class_weights": false
+    },
+    "is_trial": true,
+    "trial_strategy": "snapshot",
+    "trial_portion": 0.05,
+    "target_files": [],
+    "train_portion": 0.1,
+    "eval_strategy": "snapshot",
+    "eval_portion": 0.05,
+    "train_validation_align": true
+  },
+  {
+    "model_type": "pe_wavenet_delta",
+    "hypothesis": "Round 3 attempt 1 — same oversized plan; round 3 is the second of the consecutive fail-round burst. consecutive_fail_rounds will be 1 going into this round and 2 after it.",
+    "reasoning": "L.8 fixture: continued stuck-planner. Drives consecutive_fail_rounds toward max_fail_rounds=3.",
+    "model_config": {
+      "model_type": "pe_wavenet_delta",
+      "segmentation_size": 1000,
+      "batch_size": 1,
+      "hidden_dim": 2048
+    },
+    "train_config": {
+      "lr": 0.0001,
+      "epochs": 1,
+      "batch_size": 1,
+      "optimizer_type": "adamw",
+      "weight_decay": 0.00001,
+      "device": "cuda"
+    },
+    "loss_config": {
+      "loss_type": "ce",
+      "reduction": "mean",
+      "use_class_weights": false
+    },
+    "is_trial": true,
+    "trial_strategy": "snapshot",
+    "trial_portion": 0.05,
+    "target_files": [],
+    "train_portion": 0.1,
+    "eval_strategy": "snapshot",
+    "eval_portion": 0.05,
+    "train_validation_align": true
+  },
+  {
+    "model_type": "pe_wavenet_delta",
+    "hypothesis": "Round 3 attempt 2 — repeat oversized plan within round 3.",
+    "reasoning": "L.8 fixture: stuck-planner.",
+    "model_config": {
+      "model_type": "pe_wavenet_delta",
+      "segmentation_size": 1000,
+      "batch_size": 1,
+      "hidden_dim": 2048
+    },
+    "train_config": {
+      "lr": 0.0001,
+      "epochs": 1,
+      "batch_size": 1,
+      "optimizer_type": "adamw",
+      "weight_decay": 0.00001,
+      "device": "cuda"
+    },
+    "loss_config": {
+      "loss_type": "ce",
+      "reduction": "mean",
+      "use_class_weights": false
+    },
+    "is_trial": true,
+    "trial_strategy": "snapshot",
+    "trial_portion": 0.05,
+    "target_files": [],
+    "train_portion": 0.1,
+    "eval_strategy": "snapshot",
+    "eval_portion": 0.05,
+    "train_validation_align": true
+  },
+  {
+    "model_type": "pe_wavenet_delta",
+    "hypothesis": "Round 3 attempt 3 — final attempt of round 3. Round 3 ends without a success; consecutive_fail_rounds advances to 2.",
+    "reasoning": "L.8 fixture: stuck-planner. After this attempt the outer loop advances to round 4.",
+    "model_config": {
+      "model_type": "pe_wavenet_delta",
+      "segmentation_size": 1000,
+      "batch_size": 1,
+      "hidden_dim": 2048
+    },
+    "train_config": {
+      "lr": 0.0001,
+      "epochs": 1,
+      "batch_size": 1,
+      "optimizer_type": "adamw",
+      "weight_decay": 0.00001,
+      "device": "cuda"
+    },
+    "loss_config": {
+      "loss_type": "ce",
+      "reduction": "mean",
+      "use_class_weights": false
+    },
+    "is_trial": true,
+    "trial_strategy": "snapshot",
+    "trial_portion": 0.05,
+    "target_files": [],
+    "train_portion": 0.1,
+    "eval_strategy": "snapshot",
+    "eval_portion": 0.05,
+    "train_validation_align": true
+  },
+  {
+    "model_type": "pe_wavenet_delta",
+    "hypothesis": "Round 4 attempt 1 — third consecutive fail-round burst start. After round 4 fully fails, consecutive_fail_rounds will reach max_fail_rounds=3 and the outer loop will abort.",
+    "reasoning": "L.8 fixture: final fail-round of the burst. Note that completed_rounds is still 1 (only round 1 succeeded), and max_rounds-1=3, so the formal-promotion gate (completed_rounds == max_rounds-1) does NOT fire — round 4 stays in trial mode and uses attempts_per_round=3, not attempts_per_formal_round.",
+    "model_config": {
+      "model_type": "pe_wavenet_delta",
+      "segmentation_size": 1000,
+      "batch_size": 1,
+      "hidden_dim": 2048
+    },
+    "train_config": {
+      "lr": 0.0001,
+      "epochs": 1,
+      "batch_size": 1,
+      "optimizer_type": "adamw",
+      "weight_decay": 0.00001,
+      "device": "cuda"
+    },
+    "loss_config": {
+      "loss_type": "ce",
+      "reduction": "mean",
+      "use_class_weights": false
+    },
+    "is_trial": true,
+    "trial_strategy": "snapshot",
+    "trial_portion": 0.05,
+    "target_files": [],
+    "train_portion": 0.1,
+    "eval_strategy": "snapshot",
+    "eval_portion": 0.05,
+    "train_validation_align": true
+  },
+  {
+    "model_type": "pe_wavenet_delta",
+    "hypothesis": "Round 4 attempt 2 — repeat oversized plan within round 4.",
+    "reasoning": "L.8 fixture: stuck-planner.",
+    "model_config": {
+      "model_type": "pe_wavenet_delta",
+      "segmentation_size": 1000,
+      "batch_size": 1,
+      "hidden_dim": 2048
+    },
+    "train_config": {
+      "lr": 0.0001,
+      "epochs": 1,
+      "batch_size": 1,
+      "optimizer_type": "adamw",
+      "weight_decay": 0.00001,
+      "device": "cuda"
+    },
+    "loss_config": {
+      "loss_type": "ce",
+      "reduction": "mean",
+      "use_class_weights": false
+    },
+    "is_trial": true,
+    "trial_strategy": "snapshot",
+    "trial_portion": 0.05,
+    "target_files": [],
+    "train_portion": 0.1,
+    "eval_strategy": "snapshot",
+    "eval_portion": 0.05,
+    "train_validation_align": true
+  },
+  {
+    "model_type": "pe_wavenet_delta",
+    "hypothesis": "Round 4 attempt 3 — last attempt of the iteration. After this OOM-skip, the inner loop exits, consecutive_fail_rounds becomes 3 == max_fail_rounds, and the outer loop aborts with termination_reason='aborted_fail_rounds'.",
+    "reasoning": "L.8 fixture: triggers the abort. Total: 1 success + 9 OOM-skips = 10 records.",
+    "model_config": {
+      "model_type": "pe_wavenet_delta",
+      "segmentation_size": 1000,
+      "batch_size": 1,
+      "hidden_dim": 2048
+    },
+    "train_config": {
+      "lr": 0.0001,
+      "epochs": 1,
+      "batch_size": 1,
+      "optimizer_type": "adamw",
+      "weight_decay": 0.00001,
+      "device": "cuda"
+    },
+    "loss_config": {
+      "loss_type": "ce",
+      "reduction": "mean",
+      "use_class_weights": false
+    },
+    "is_trial": true,
+    "trial_strategy": "snapshot",
+    "trial_portion": 0.05,
+    "target_files": [],
+    "train_portion": 0.1,
+    "eval_strategy": "snapshot",
+    "eval_portion": 0.05,
+    "train_validation_align": true
+  }
+]

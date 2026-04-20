@@ -162,6 +162,30 @@ class ExperimentMemory(BaseModel):
         ),
     )
 
+    # Phase L — per-round attempt-budget bookkeeping. The tuner now counts
+    # SUCCESSFUL rounds, not raw attempts, so a single round can span
+    # multiple attempts (each one a separate ExperimentRecord). These two
+    # fields disambiguate the bucketing for §10.13.1's exhaustion math and
+    # for any post-hoc audit that needs to know "this skipped_oom_risk
+    # record was the 2nd attempt of round 1 (which still landed on attempt
+    # 3)". Optional with default None for backward compat with pre-L
+    # records. See docs/resource_estimator_implement.md §11.3.
+    round_index: Optional[int] = Field(
+        default=None,
+        description=(
+            "Which logical round this attempt belonged to (1-indexed). "
+            "Same value across all attempts of the same round."
+        ),
+    )
+    attempt_in_round: Optional[int] = Field(
+        default=None,
+        description=(
+            "Attempt counter within the round (1..N). N = "
+            "attempts_per_round for trial rounds, attempts_per_formal_round "
+            "for the formal-promotion round."
+        ),
+    )
+
 
 class ExperimentRecord(BaseModel):
     exp_id: str
@@ -557,6 +581,49 @@ class HyperparamTuningInput(BaseModel):
         default=50,
         ge=1,
         description="Maximum number of completed experiment rounds (OOM-skipped attempts do not count).",
+    )
+
+    # --- Phase L — per-round attempt budget + fail-round abort ---
+    # Pre-Phase-L the tuner used a single shared pool (max_rounds * 3) and
+    # counted any attempt against it, so a string of trial-round failures
+    # could exhaust the pool before the loop ever reached the formal-promotion
+    # round (the v2 0418 incident — see docs §11.1). Phase L splits the
+    # budget per round and counts SUCCESSFUL rounds against max_rounds, with
+    # a separate consecutive-failure brake (max_fail_rounds) that aborts the
+    # iteration cleanly when the architecture is fundamentally too heavy.
+    # The formal round gets its own (typically larger) budget because formal
+    # is the only round with cross-architecture comparable scoring; an
+    # iteration with no formal score is wasted entirely. See docs §11.2-11.5.
+    attempts_per_round: int = Field(
+        default=3,
+        ge=1,
+        description=(
+            "Per-round attempt budget for trial rounds. Each round retries up "
+            "to this many times after a gate-skip or error before the round "
+            "is declared failed and consecutive_fails increments."
+        ),
+    )
+    attempts_per_formal_round: int = Field(
+        default=5,
+        ge=1,
+        description=(
+            "Per-round attempt budget for the formal-promotion round. Higher "
+            "than attempts_per_round (default 5 vs 3) because the formal "
+            "round is the only one whose denoising_score is comparable across "
+            "architectures, so an iteration with no formal score gives the "
+            "next-iteration proposer no usable signal."
+        ),
+    )
+    max_fail_rounds: int = Field(
+        default=3,
+        ge=1,
+        description=(
+            "Consecutive-failed-round abort trigger. When this many rounds in "
+            "a row exhaust their attempt budget without a success, the tuner "
+            "exits with termination_reason='aborted_fail_rounds' and (if the "
+            "burst was gate-dominated) populates gate_exhaustion via Trigger "
+            "B for the next-iteration proposer."
+        ),
     )
 
     # --- Trial mode (optional — all defaults preserve normal single-file behavior) ---
@@ -1080,6 +1147,46 @@ class HyperparamTuningOutput(BaseModel):
             "resource gate. Consumed by the next iteration's proposer via "
             "ProposalInput.prior_iteration_gate_exhaustion. None on healthy "
             "runs (any success) and on all-failure-but-not-budget-related runs."
+        ),
+    )
+
+    # --- Phase L — per-round attempt-budget echoes + terminal state ---
+    # The three echo fields make the post-hoc audit unambiguous: a record
+    # showing "ran 11 attempts, completed_rounds=2, consecutive_fail_rounds_at_exit=0"
+    # only makes sense if the reader knows the budget that was in force.
+    # termination_reason promotes the existing implicit "did the loop exit
+    # because of max_rounds vs max_fail_rounds" question to a first-class
+    # field that downstream protocols (notably interp→propose) can branch
+    # on without re-deriving from counts. Defaults preserve forward-compat
+    # for tests/code that build outputs without specifying these fields.
+    # See docs §11.3.
+    attempts_per_round: int = Field(
+        default=3,
+        description="Echo of the input attempts_per_round used for this run.",
+    )
+    attempts_per_formal_round: int = Field(
+        default=5,
+        description="Echo of the input attempts_per_formal_round used for this run.",
+    )
+    max_fail_rounds: int = Field(
+        default=3,
+        description="Echo of the input max_fail_rounds used for this run.",
+    )
+    consecutive_fail_rounds_at_exit: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Terminal value of the loop's consecutive-failure counter. "
+            "0 on a healthy completion; equals max_fail_rounds when the "
+            "loop aborted via the consecutive-failure brake."
+        ),
+    )
+    termination_reason: Literal["completed", "aborted_fail_rounds"] = Field(
+        default="completed",
+        description=(
+            "Why the loop exited. 'completed' = reached max_rounds successful "
+            "rounds; 'aborted_fail_rounds' = max_fail_rounds consecutive "
+            "rounds exhausted their attempt budgets."
         ),
     )
 

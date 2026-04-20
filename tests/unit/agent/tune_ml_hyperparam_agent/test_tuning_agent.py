@@ -145,10 +145,18 @@ FAKE_SCORE_RESULT = {
 
 
 def _make_input(tmp_path, max_rounds=1, expert_advice="", model_type="punet"):
+    # Phase L (§11): pin per-round + fail-round budgets so this helper
+    # matches the pre-Phase-L worst-case of ``max_rounds * 3`` total
+    # attempts (3 attempts per round × ``max_rounds`` consecutive
+    # fail-rounds). Tests that need different budgets should construct
+    # ``HyperparamTuningInput`` directly.
     return HyperparamTuningInput(
         model_type=model_type,
         file_index=6,
         max_rounds=max_rounds,
+        attempts_per_round=3,
+        attempts_per_formal_round=3,
+        max_fail_rounds=max_rounds,
         expert_advice=expert_advice,
         llm_provider="gemini",
         llm_model_id="test-model",

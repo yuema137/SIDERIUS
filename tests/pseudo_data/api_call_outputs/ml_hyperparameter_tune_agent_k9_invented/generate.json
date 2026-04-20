@@ -62,5 +62,37 @@
     "eval_strategy": "snapshot",
     "eval_portion": 0.05,
     "train_validation_align": true
+  },
+  {
+    "model_type": "pe_wavenet_delta",
+    "hypothesis": "Round 2 (formal) — re-run hidden_dim=128 in formal mode to obtain the cross-architecture-comparable denoising_score the proposer needs. Round 1 already confirmed hidden_dim=128 fits the 0.1 GB ceiling at trial-portion=0.05; round 2 simply promotes that configuration to the formal evaluation surface (snapshot, eval_portion=1.0) without changing any architectural lever.",
+    "reasoning": "Phase L formal-promotion semantics: this round runs with completed_rounds == max_rounds - 1, so the agent forces plan.is_trial=False regardless of what this canned plan claims. The intent is to produce a formal score on the same architecture round 1 validated — keeping every architectural lever (seg_size=1000, batch_size=1, hidden_dim=128, ce loss, lr=1e-4) identical so the formal score is attributable to a single configuration. The K.2.5-8 fallback flag is expected to fire again on the gate (model_type still unregistered) but the verdict resolves cleanly under-budget at hidden_dim=128.",
+    "model_config": {
+      "model_type": "pe_wavenet_delta",
+      "segmentation_size": 1000,
+      "batch_size": 1,
+      "hidden_dim": 128
+    },
+    "train_config": {
+      "lr": 0.0001,
+      "epochs": 1,
+      "batch_size": 1,
+      "optimizer_type": "adamw",
+      "weight_decay": 0.00001,
+      "device": "cuda"
+    },
+    "loss_config": {
+      "loss_type": "ce",
+      "reduction": "mean",
+      "use_class_weights": false
+    },
+    "is_trial": false,
+    "trial_strategy": "snapshot",
+    "trial_portion": 0.05,
+    "target_files": [],
+    "train_portion": 0.1,
+    "eval_strategy": "snapshot",
+    "eval_portion": 0.05,
+    "train_validation_align": true
   }
 ]
