@@ -1171,3 +1171,118 @@ class TestTrialConfig:
     def test_invalid_mode_rejected(self):
         with pytest.raises(ValidationError):
             TrialConfig(is_trial=True, mode="unknown", **self._SEEDS)
+
+
+# ---------------------------------------------------------------------------
+# Phase L — per-round attempt budget + fail-round abort schema fields
+# See docs/resource_estimator_implement.md §11.3.
+# ---------------------------------------------------------------------------
+
+class TestPhaseLAttemptBudgetInput:
+    """Three new HyperparamTuningInput fields wired with schema defaults."""
+
+    def test_defaults(self, valid_input_dict):
+        agent_input = HyperparamTuningInput.model_validate(valid_input_dict)
+        assert agent_input.attempts_per_round == 3
+        assert agent_input.attempts_per_formal_round == 5
+        assert agent_input.max_fail_rounds == 3
+
+    def test_overrides_accepted(self, valid_input_dict):
+        valid_input_dict.update(
+            attempts_per_round=2,
+            attempts_per_formal_round=8,
+            max_fail_rounds=4,
+        )
+        agent_input = HyperparamTuningInput.model_validate(valid_input_dict)
+        assert agent_input.attempts_per_round == 2
+        assert agent_input.attempts_per_formal_round == 8
+        assert agent_input.max_fail_rounds == 4
+
+    def test_zero_rejected_for_attempts_per_round(self, valid_input_dict):
+        valid_input_dict["attempts_per_round"] = 0
+        with pytest.raises(ValidationError):
+            HyperparamTuningInput.model_validate(valid_input_dict)
+
+    def test_zero_rejected_for_attempts_per_formal_round(self, valid_input_dict):
+        valid_input_dict["attempts_per_formal_round"] = 0
+        with pytest.raises(ValidationError):
+            HyperparamTuningInput.model_validate(valid_input_dict)
+
+    def test_zero_rejected_for_max_fail_rounds(self, valid_input_dict):
+        valid_input_dict["max_fail_rounds"] = 0
+        with pytest.raises(ValidationError):
+            HyperparamTuningInput.model_validate(valid_input_dict)
+
+
+class TestPhaseLAttemptBudgetOutput:
+    """Five new HyperparamTuningOutput fields: 3 echoes + 2 terminal-state."""
+
+    def test_defaults_when_not_provided(self, valid_output_dict):
+        """A pre-Phase-L output blob must still validate (forward compat)."""
+        out = HyperparamTuningOutput.model_validate(valid_output_dict)
+        assert out.attempts_per_round == 3
+        assert out.attempts_per_formal_round == 5
+        assert out.max_fail_rounds == 3
+        assert out.consecutive_fail_rounds_at_exit == 0
+        assert out.termination_reason == "completed"
+
+    def test_explicit_completed_run(self, valid_output_dict):
+        valid_output_dict.update(
+            attempts_per_round=3,
+            attempts_per_formal_round=5,
+            max_fail_rounds=3,
+            consecutive_fail_rounds_at_exit=0,
+            termination_reason="completed",
+        )
+        out = HyperparamTuningOutput.model_validate(valid_output_dict)
+        assert out.termination_reason == "completed"
+        assert out.consecutive_fail_rounds_at_exit == 0
+
+    def test_aborted_fail_rounds_run(self, valid_output_dict):
+        valid_output_dict.update(
+            consecutive_fail_rounds_at_exit=3,
+            termination_reason="aborted_fail_rounds",
+        )
+        out = HyperparamTuningOutput.model_validate(valid_output_dict)
+        assert out.termination_reason == "aborted_fail_rounds"
+        assert out.consecutive_fail_rounds_at_exit == 3
+
+    def test_invalid_termination_reason_rejected(self, valid_output_dict):
+        valid_output_dict["termination_reason"] = "max_attempts"
+        with pytest.raises(ValidationError):
+            HyperparamTuningOutput.model_validate(valid_output_dict)
+
+    def test_negative_consecutive_fail_rounds_rejected(self, valid_output_dict):
+        valid_output_dict["consecutive_fail_rounds_at_exit"] = -1
+        with pytest.raises(ValidationError):
+            HyperparamTuningOutput.model_validate(valid_output_dict)
+
+
+class TestPhaseLExperimentMemoryRoundFields:
+    """round_index + attempt_in_round on ExperimentMemory."""
+
+    def test_optional_for_backward_compat(self):
+        """Pre-Phase-L records have no round_index/attempt_in_round."""
+        mem = ExperimentMemory(
+            expert_advice_followed="x",
+            hypothesis="h",
+        )
+        assert mem.round_index is None
+        assert mem.attempt_in_round is None
+
+    def test_explicit_values_preserved(self):
+        mem = ExperimentMemory(
+            expert_advice_followed="x",
+            hypothesis="h",
+            round_index=2,
+            attempt_in_round=5,
+        )
+        assert mem.round_index == 2
+        assert mem.attempt_in_round == 5
+
+    def test_round_fields_round_trip_through_record(self, valid_success_record):
+        valid_success_record["memory"]["round_index"] = 1
+        valid_success_record["memory"]["attempt_in_round"] = 2
+        record = ExperimentRecord.model_validate(valid_success_record)
+        assert record.memory.round_index == 1
+        assert record.memory.attempt_in_round == 2
