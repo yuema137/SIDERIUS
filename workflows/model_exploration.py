@@ -512,6 +512,8 @@ def run_workflow(
     recent_tune_outputs: deque[HyperparamTuningOutput] = deque(maxlen=3)
 
     # --- Iteration loop ---
+    from core.memory_probe import probe_memory
+
     for iteration in range(1, max_iterations + 1):
         iter_dir = os.path.join(run_dir, f"iteration_{iteration:03d}")
         os.makedirs(iter_dir, exist_ok=True)
@@ -520,6 +522,11 @@ def run_workflow(
         print(f"  ITERATION {iteration}/{max_iterations}")
         print(f"  Directory: {iter_dir}")
         print(f"{'='*60}\n")
+
+        # Fix 4 — parent-process memory probe at iteration entry.
+        # See docs/optimize_inference_and_scoring.md §3 Fix 4.
+        probe_memory(iter_idx=iteration, phase="start",
+                     workspace=workspace, scope="workflow")
 
         # --- Interpret (once per iteration) ---
         # Iteration 1: all seeds are new (cache is empty).
@@ -789,6 +796,13 @@ def run_workflow(
 
         print(f"\n  [{iteration}] Complete: {proposal.model_name} "
               f"best_score={tune_output.best_denoising_score}")
+
+        # Fix 4 — parent-process memory probe at iteration exit. Fires
+        # even on the iteration that triggers the target-score break
+        # (placed before the break check) so the last iteration's
+        # terminal RSS is always logged.
+        probe_memory(iter_idx=iteration, phase="end",
+                     workspace=workspace, scope="workflow")
 
         if target_score is not None and best_score_overall is not None and best_score_overall >= target_score:
             print(f"\n  Target score {target_score} reached "
