@@ -340,14 +340,71 @@ Each checkbox is a pre-commit gate. Do not proceed to the next commit until ever
 
 ### Commit 6 — Pre-flight revision loop
 
-- [ ] Proposer's reasoning stage (after the LLM drafts `baseline_config`) calls `estimate_proposal_time`
-- [ ] If `factor > 1.0`, the verdict + suggestion + factor are injected back into the next LLM call as a `[PRE-FLIGHT REJECTION]` block; LLM is instructed to revise
-- [ ] Max 3 inner revisions per proposing-stage call; on exhaustion, emit the best-factor candidate and surface a warning to the output
-- [ ] `ProposalOutput` gains an optional field `preflight_estimated_minutes: Optional[float]` + `preflight_factor: Optional[float]` for audit
-- [ ] Integration test (pseudo mode, extends `test_n_recent_gate_exhaustions_dual_mode.py` pattern): canned bridge emits over-budget draft on call 1, feasible draft on call 2 → proposer emits the revised proposal; `preflight_factor < 1.0` recorded
-- [ ] Integration test: canned bridge emits over-budget draft 3 times → proposer emits last draft with warning + records all three `factor` values
-- [ ] Existing proposer unit tests still pass
-- [ ] Tests green → commit
+#### Detailed design
+
+**Decision 5 — `num_params` sourcing (Option A: LLM-emitted).** The LLM is required to supply `parameter_count_estimate: int` alongside `baseline_config`. The static formula is insensitive to order-of-magnitude errors (an iter-2-style 18,772× overshoot reads as ≫1× at any plausible param count), so the LLM's own estimate is accurate enough for gate-level decisions and avoids a fragile in-code heuristic that would have to parse unfamiliar `model_config` keys for each novel architecture. *Confirmed 2026-04-20 by y5ma@ucsd.edu.*
+
+**Decision 6 — Two-layer loop (structural retry nested inside pre-flight revision).** The pre-flight revision loop is the **outer** loop; the existing `_MAX_PROPOSING_RETRIES` structural-validation loop is the **inner** loop. Each pre-flight attempt produces one structurally-valid draft (via the inner loop); pre-flight is then evaluated; on rejection the outer loop injects `[PRE-FLIGHT REJECTION]` into the next proposing-stage call. Keeping the loops separate means a structurally-malformed draft is not charged against the pre-flight revision budget, and a pre-flight rejection is not confused for a schema error in the retry-error trace. *Confirmed 2026-04-20 by y5ma@ucsd.edu.*
+
+**Decision 7 — Prescriptive rejection block.** The `[PRE-FLIGHT REJECTION]` block injected on the next proposing-stage call must name **specific numbers** — the LLM's own `parameter_count_estimate`, the predicted wall-time in minutes, the factor, and the active budget — and must tell the LLM concretely what to change (reduce params / depth / width, or switch architectural class). Vague feedback (*"it's too slow"*) produces vague revisions. Template:
+
+> `[PRE-FLIGHT REJECTION]`
+> Based on your estimated `{num_params:,}` parameters, the static cost model predicts a `{estimated_minutes:.1f}` min runtime, which is `{factor:.1f}x` over the `{budget:.1f}` min budget.
+> Please simplify the architecture or use a more efficient model family. To fit within the budget you must reduce compute by roughly `{factor:.1f}x` — reduce `parameter_count_estimate`, reduce depth/width, or switch to a lighter architectural class (e.g. TCN, FFT-based, or windowed-attention) if the current family is structurally too expensive at the active `segmentation_size`.
+
+*Confirmed 2026-04-20 by y5ma@ucsd.edu.*
+
+**Decision 8 — Best-factor emit on exhaustion.** When all 3 pre-flight attempts fail, the proposer emits the candidate with the **lowest recorded `factor`** (not necessarily the last draft) and appends `PREFLIGHT_OVERBUDGET_EMITTED: ...` to `memo_consistency_notes` naming the best factor seen. The tuner's real-data gate is still the authoritative reject; the proposer's job here is best-effort, not veto.
+
+**Decision 9 — Skip conditions.** Pre-flight is skipped entirely (with no LLM revision and no warning) when either (a) the active budget is `None` (trial-mode with `trial_time_budget_minutes=None`, or formal-mode with `formal_time_budget_minutes=None`), or (b) the LLM omits `parameter_count_estimate` / emits a non-positive value. Case (b) adds a `PREFLIGHT_SKIPPED: parameter_count_estimate not provided` note to `memo_consistency_notes` so it is visible in the audit trail.
+
+#### Implementation scope
+
+1. **Schema** (`agent/schemas/proposal.py` — `ProposalOutput`): add three optional fields
+
+  ```python
+  parameter_count_estimate: Optional[int] = None           # LLM-emitted
+  preflight_estimated_minutes: Optional[float] = None      # audit
+  preflight_factor: Optional[float] = None                 # audit
+  ```
+
+2. **Prompt updates** — both modes:
+  - `PROPOSAL_COMMIT_PROMPT` in `nodes/ml_model_proposal_agent.py` (legacy mode): add `"parameter_count_estimate": <int>` to the JSON schema example + one hard-constraint line
+  - `agent/prompt_templates/proposal/proposing_stage.md` (pipeline mode): same addition + a new numbered rule *"Parameter count estimate"* explaining what to produce and why
+
+3. **Helpers on `MLModelProposalAgent`** (module-level constants + private methods):
+  - Module-level: `_MAX_PREFLIGHT_ATTEMPTS = 3`
+  - `_active_time_budget_minutes(inp) -> Optional[float]` — trial vs formal selector
+  - `_run_preflight_check(inp, output, raw) -> Optional[float]` — calls `estimate_proposal_time`, sets `output.preflight_estimated_minutes` + `output.preflight_factor`, returns `factor` (or `None` if skipped)
+  - `_build_preflight_rejection_block(num_params, estimated_minutes, factor, budget) -> str` — prescriptive text per Decision 7
+
+4. **Wiring** — each mode wraps its proposing-stage call with the outer pre-flight loop:
+  - **Legacy** (`_run_legacy`): outer loop of up to `_MAX_PREFLIGHT_ATTEMPTS` iterations. Each iteration rebuilds the commit prompt (with appended `[PRE-FLIGHT REJECTION]` block on iterations ≥ 2), calls `self.bridge.generate(PROPOSAL_COMMIT_PROMPT, commit_prompt)`, validates, then runs pre-flight. Break on `factor <= 1.0` or pre-flight skipped. On exhaustion, emit best-factor candidate with `PREFLIGHT_OVERBUDGET_EMITTED` note.
+  - **Pipeline** (`_run_pipeline`): the existing `for attempt in range(_MAX_PROPOSING_RETRIES + 1)` block becomes an inner structural-retry loop (unchanged semantics). A new outer loop of up to `_MAX_PREFLIGHT_ATTEMPTS` wraps it. Pre-flight rejection is appended to `accumulated["proposing_stage_errors"]` (same channel structural errors use) and `proposing_user` is rebuilt so the next inner-loop iteration sees it.
+
+  Neither mode re-runs Stages 1–2 on pre-flight rejection; only the proposing stage is called again.
+
+#### Checklist
+
+- [ ] `ProposalOutput` gains `parameter_count_estimate`, `preflight_estimated_minutes`, `preflight_factor` (all `Optional`, default `None`)
+- [ ] `PROPOSAL_COMMIT_PROMPT` updated: JSON schema gains `parameter_count_estimate`; hard-constraints gains one line
+- [ ] `proposing_stage.md` template updated: JSON schema gains `parameter_count_estimate`; a new numbered "Parameter count estimate" rule is added
+- [ ] `_active_time_budget_minutes` helper — returns `inp.trial_time_budget_minutes` when `inp.is_trial` else `inp.formal_time_budget_minutes`; `None` passes through
+- [ ] `_run_preflight_check` helper — skips cleanly when budget or `parameter_count_estimate` is missing (with audit note in case b); otherwise calls `estimate_proposal_time` and attaches audit fields
+- [ ] `_build_preflight_rejection_block` helper — produces the Decision 7 template with all four numeric substitutions
+- [ ] `_run_legacy` wraps the commit call in the outer pre-flight loop with best-factor tracking
+- [ ] `_run_pipeline` wraps the structural retry block in the outer pre-flight loop; `[PRE-FLIGHT REJECTION]` feeds through `accumulated["proposing_stage_errors"]`
+- [ ] Exhaustion path emits the best-factor candidate with `PREFLIGHT_OVERBUDGET_EMITTED: best_factor={...:.2f}x` appended to `memo_consistency_notes`
+- [ ] Unit test — pipeline mode, **success path**: bad draft (factor > 1) → revised good draft (factor < 1) emitted; `preflight_factor < 1.0` recorded
+- [ ] Unit test — pipeline mode, **exhaustion path**: 3 over-budget drafts → best-factor candidate emitted with `PREFLIGHT_OVERBUDGET_EMITTED` note; Stages 1 + 2 called exactly once each
+- [ ] Unit test — pre-flight **skipped** when `trial_time_budget_minutes=None` (no extra LLM calls, no audit fields set)
+- [ ] Unit test — pre-flight **skipped** when `parameter_count_estimate` absent or ≤0, with `PREFLIGHT_SKIPPED` note added
+- [ ] Unit test — rejection block contains all four prescriptive numbers (`num_params`, `estimated_minutes`, `factor`, `budget`)
+- [ ] Unit test — audit fields (`preflight_estimated_minutes`, `preflight_factor`) populated on success path
+- [ ] Unit test — legacy mode also runs pre-flight (single-mode smoke — bad → good draft path)
+- [ ] Existing `test_pipeline_runner.py` (structural retry) + `test_recent_gate_exhaustions.py` (Commit 4 renderer) + `test_proposer_preflight.py` (Commit 5 wrapper) still green
+- [ ] Test command shown to user → approved → run
+- [ ] Tests green → user approves → commit
 
 ### Commit 7 — Docs
 
