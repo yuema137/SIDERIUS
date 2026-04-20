@@ -1750,6 +1750,25 @@ def main():
                              "independently from the trial budget because formal "
                              "rounds often use larger batch_size / segmentation_size.")
 
+    # Per-round attempt budget (Phase L, §11). All three default to the
+    # schema defaults so the CLI surface matches the schema-only path.
+    parser.add_argument("--attempts_per_round", type=int, default=3,
+                        help="Inner attempt budget for trial rounds (default 3). "
+                             "Each round runs up to N attempts; success → break + "
+                             "reset the consecutive-fail counter, exhaustion → "
+                             "bump it. See docs/resource_estimator_implement.md §11.")
+    parser.add_argument("--attempts_per_formal_round", type=int, default=5,
+                        help="Inner attempt budget for the formal-promotion round "
+                             "(default 5, intentionally higher than --attempts_per_round). "
+                             "Formal is the only cross-architecture comparable "
+                             "measurement, so an iteration with no formal score is "
+                             "wasted entirely — extra attempts are worth the cost.")
+    parser.add_argument("--max_fail_rounds", type=int, default=3,
+                        help="Consecutive-failure brake (default 3). The outer "
+                             "loop aborts with termination_reason='aborted_fail_rounds' "
+                             "after this many consecutive rounds exhaust their inner "
+                             "attempt budget.")
+
     args = parser.parse_args()
 
     # Preflight: catch the "plugin model_type without seed file" mistake
@@ -1823,6 +1842,12 @@ def main():
         input_dict["trial_vram_budget_gb"] = args.trial_vram_budget_gb
     if args.formal_vram_budget_gb is not None:
         input_dict["formal_vram_budget_gb"] = args.formal_vram_budget_gb
+
+    # Phase L (§11) — per-round attempt budget. Always forwarded so a CLI
+    # invocation matches the workflow path. Schema validators enforce ge=1.
+    input_dict["attempts_per_round"] = args.attempts_per_round
+    input_dict["attempts_per_formal_round"] = args.attempts_per_formal_round
+    input_dict["max_fail_rounds"] = args.max_fail_rounds
 
     agent_input = HyperparamTuningInput.model_validate(input_dict)
 

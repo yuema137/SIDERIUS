@@ -63,6 +63,13 @@ def local_validated_model(
     formal_strategy: Literal["snapshot", "anchors", "target"] = "snapshot",
     formal_portion: float = 0.1,
     formal_train_portion: float = 1.0,
+    # --- Per-round attempt budget (Phase L, §11) ---
+    # Tuner-only fan-out; no proposer-side equivalent. Defaults mirror the
+    # schema defaults so omitting them at the workflow/CLI surface yields
+    # the documented Phase L behaviour. See §11.5.
+    attempts_per_round: int = 3,
+    attempts_per_formal_round: int = 5,
+    max_fail_rounds: int = 3,
 ) -> HyperparamTuningInput:
     """
     Map ValidatorOutput + ProposalOutput -> HyperparamTuningInput in-memory.
@@ -114,6 +121,15 @@ def local_validated_model(
         inside the tuner — intentionally NOT operator-configurable, so
         formal scores are architecturally comparable across architectures.
         See docs/resource_estimator_implement.md §12.
+      - attempts_per_round / attempts_per_formal_round / max_fail_rounds :
+        Phase L per-round attempt budget + consecutive-failure brake
+        (defaults 3 / 5 / 3). Trial rounds get ``attempts_per_round`` inner
+        attempts; the formal-promotion round (the last successful round)
+        gets ``attempts_per_formal_round`` because formal is the only
+        cross-architecture comparable measurement. The outer loop aborts
+        with ``termination_reason='aborted_fail_rounds'`` after
+        ``max_fail_rounds`` consecutive rounds exhaust their inner
+        budget. See docs/resource_estimator_implement.md §11.
     """
     # Prepend planner-visible warnings to expert_advice so the tuner's planner
     # knows up front about (a) implementation deviating from the spec and
@@ -164,6 +180,9 @@ def local_validated_model(
         formal_strategy=formal_strategy,
         formal_portion=formal_portion,
         formal_train_portion=formal_train_portion,
+        attempts_per_round=attempts_per_round,
+        attempts_per_formal_round=attempts_per_formal_round,
+        max_fail_rounds=max_fail_rounds,
     )
 
 

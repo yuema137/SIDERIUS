@@ -183,6 +183,38 @@ def parse_args():
         "--formal_train_portion", type=float, default=1.0,
         help="Per-epoch iteration fraction from the formal training scope (default 1.0).",
     )
+    # --- Per-round attempt budget (Phase L, docs/resource_estimator_implement.md §11) ---
+    parser.add_argument(
+        "--attempts_per_round", type=int, default=3,
+        help=(
+            "Inner attempt budget for trial rounds (default 3). Tuner-only "
+            "fan-out — no proposer-side equivalent. Each round runs up to N "
+            "attempts; success → break + reset the consecutive-fail counter, "
+            "exhaustion → bump it. See docs/resource_estimator_implement.md §11."
+        ),
+    )
+    parser.add_argument(
+        "--attempts_per_formal_round", type=int, default=5,
+        help=(
+            "Inner attempt budget for the formal-promotion round (default 5, "
+            "intentionally higher than --attempts_per_round). Formal is the "
+            "only cross-architecture comparable measurement, so an iteration "
+            "with no formal score is wasted entirely — extra attempts are "
+            "worth the cost. Worst-case wall-time per failed formal round at "
+            "formal_time_budget=30 min is 5 × 30 = 150 min; per iteration at "
+            "max_fail_rounds=3 is ~7.5 h."
+        ),
+    )
+    parser.add_argument(
+        "--max_fail_rounds", type=int, default=3,
+        help=(
+            "Consecutive-failure brake (default 3). The tuner outer loop "
+            "aborts with termination_reason='aborted_fail_rounds' after this "
+            "many consecutive rounds exhaust their inner attempt budget. "
+            "Phase L addition — replaces the pre-Phase-L 'max_rounds * 3' "
+            "shared attempt pool which could starve the formal round."
+        ),
+    )
     parser.add_argument(
         "--source_paths", type=str, nargs="+", default=None,
         help="Seed run output JSON paths. Defaults to wavenet + punet trial runs.",
@@ -287,6 +319,7 @@ def main():
     print(f"  VRAM budget   : trial={trial_vram_str}  |  formal={formal_vram_str}")
     print(f"  Formal train  : strategy={args.formal_strategy}  portion={args.formal_portion}  train_portion={args.formal_train_portion}")
     print(f"  Formal eval   : LOCKED to snapshot + eval_portion=1.0 (Phase M)")
+    print(f"  Attempt budget: trial={args.attempts_per_round}/round  formal={args.attempts_per_formal_round}/round  fail-brake={args.max_fail_rounds} (Phase L)")
     print(f"  Data dir      : {args.data_dir or 'unset (skill uses static formula)'}")
     print(f"  Advice    : {args.advice}")
     print(f"  LLM config: {args.llm_config or 'default (gemini-3.1-pro-preview uniform)'}")
@@ -330,6 +363,10 @@ def main():
         formal_strategy=args.formal_strategy,
         formal_portion=args.formal_portion,
         formal_train_portion=args.formal_train_portion,
+        # Per-round attempt budget (Phase L, §11 — tuner-only fan-out)
+        attempts_per_round=args.attempts_per_round,
+        attempts_per_formal_round=args.attempts_per_formal_round,
+        max_fail_rounds=args.max_fail_rounds,
         # Advice
         human_advice_propose=advice.get("propose"),
         human_advice_implement=advice.get("implement"),

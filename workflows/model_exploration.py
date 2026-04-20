@@ -354,6 +354,13 @@ def run_workflow(
     formal_strategy: str = "snapshot",
     formal_portion: float = 0.1,
     formal_train_portion: float = 1.0,
+    # --- Per-round attempt budget (Phase L, docs/resource_estimator_implement.md §11) ---
+    # Tuner-only fan-out (no proposer-side equivalent). Defaults mirror the
+    # schema/protocol defaults so omitting them at the workflow surface yields
+    # the documented Phase L behaviour.
+    attempts_per_round: int = 3,
+    attempts_per_formal_round: int = 5,
+    max_fail_rounds: int = 3,
     # --- Reasoning pipeline ---
     exploration_mode: str = "auto",
     minimum_boldness: float = 0.05,
@@ -733,6 +740,9 @@ def run_workflow(
             formal_strategy=formal_strategy,
             formal_portion=formal_portion,
             formal_train_portion=formal_train_portion,
+            attempts_per_round=attempts_per_round,
+            attempts_per_formal_round=attempts_per_formal_round,
+            max_fail_rounds=max_fail_rounds,
         )
         if human_advice_tune is not None:
             tune_input.human_advice = human_advice_tune
