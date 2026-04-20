@@ -579,7 +579,9 @@ def run_workflow(
                     trial_time_budget_minutes=trial_time_budget_minutes,
                     formal_time_budget_minutes=formal_time_budget_minutes,
                     data_dir=data_dir,
-                    prior_tune_output=previous_tune_output,
+                    recent_tune_outputs=(
+                        [previous_tune_output] if previous_tune_output is not None else []
+                    ),
                 )
                 propose_input.existing_model_types = list(all_model_types)
                 if previous_failures:

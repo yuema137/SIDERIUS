@@ -21,7 +21,7 @@ database_full_context   DB-backed transfer: interp agent writes the interpretati
                         StorageConfig backend. Raises NotImplementedError until wired.
 """
 
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Sequence
 
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.proposal import (
@@ -58,8 +58,8 @@ def local_full_context(
     trial_time_budget_minutes: Optional[float] = None,
     formal_time_budget_minutes: Optional[float] = None,
     data_dir: Optional[str] = None,
-    # --- Cross-iteration feedback (Phase K.7 — see §10.13) ---
-    prior_tune_output: Optional[HyperparamTuningOutput] = None,
+    # --- Cross-iteration feedback (Phase K.7 → Phase N — see §10.13, §14.N) ---
+    recent_tune_outputs: Sequence[HyperparamTuningOutput] = (),
 ) -> ProposalInput:
     """
     Local in-memory protocol — transfers the complete interpretation directly.
@@ -94,16 +94,17 @@ def local_full_context(
                                 The proposer's baseline gate picks the one matching inp.is_trial.
                                 Each None independently disables the gate for that mode.
       - data_dir             : TIDMAD data directory; required for the skill's real-dataset warmup.
-      - prior_tune_output    : the previous iteration's tuner output. When supplied AND its
-                                ``gate_exhaustion`` field is non-None, the structured failure
-                                report is surfaced to the proposer as
-                                ``ProposalInput.prior_iteration_gate_exhaustion`` so the next
-                                baseline can be sized below the binding ceiling
-                                (Phase K.7 — docs/resource_estimator_implement.md §10.13).
-                                Pass-through only — when None or when its ``gate_exhaustion``
-                                is None, the field stays at its ``ProposalInput`` default
-                                (None) and the proposer prompt's [PRIOR ITERATION GATE
-                                EXHAUSTION] block is suppressed.
+      - recent_tune_outputs  : the last up-to-K tuner outputs (oldest first), where K is
+                                the workflow's bounded FIFO size (Phase N sets K=3, §14.N).
+                                Each output's ``gate_exhaustion`` is extracted; None values
+                                are skipped. The surviving entries populate
+                                ``ProposalInput.recent_gate_exhaustions`` so the proposer
+                                prompt can render the [RECENT GATE EXHAUSTIONS] block over
+                                multiple recent iterations — Phase N (§14.N) fix for the
+                                §13.9 single-step-memory gap. When the sequence is empty
+                                or all elements' ``gate_exhaustion`` are None, the
+                                ProposalInput field stays at its schema default (``[]``)
+                                and the prompt block is suppressed.
 
     Populates in ml-model-propose (ProposalInput):
       - interpretation       : full serialised InterpretationOutput (all fields above)
@@ -188,15 +189,21 @@ def local_full_context(
     if data_dir is not None:
         result["data_dir"] = data_dir
 
-    # Phase K.7 — surface the previous iteration's gate-exhaustion report,
-    # if any. The tuner only populates `gate_exhaustion` when its iteration
-    # ended without ever training successfully AND ≥1 attempt was rejected
-    # by the pre-flight resource gate; otherwise it's None and we leave the
-    # ProposalInput default (None) in place. See §10.13.
-    if prior_tune_output is not None and prior_tune_output.gate_exhaustion is not None:
-        result["prior_iteration_gate_exhaustion"] = (
-            prior_tune_output.gate_exhaustion.model_dump()
-        )
+    # Phase N (§14.N) — aggregate gate-exhaustion reports across up to K
+    # recent iterations. Oldest-first order is preserved from the caller;
+    # iterations whose tuner returned ``gate_exhaustion=None`` are dropped
+    # (so ``recent_gate_exhaustions`` is a sparse record of aborts only).
+    # When every entry's ``gate_exhaustion`` is None the field stays at its
+    # ProposalInput default ([]) and the proposer prompt's [RECENT GATE
+    # EXHAUSTIONS] block is suppressed. Replaces K.7.4's singular pass-through
+    # — see §10.13 for detection criteria, §14.N for the window semantics.
+    collected_gate_exhaustions = [
+        tune_out.gate_exhaustion.model_dump()
+        for tune_out in recent_tune_outputs
+        if tune_out is not None and tune_out.gate_exhaustion is not None
+    ]
+    if collected_gate_exhaustions:
+        result["recent_gate_exhaustions"] = collected_gate_exhaustions
 
     return ProposalInput.model_validate(result)
 

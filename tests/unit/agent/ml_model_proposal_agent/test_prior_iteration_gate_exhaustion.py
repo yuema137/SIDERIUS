@@ -77,7 +77,7 @@ def _proposal_input(tmp_path, gate_info=None) -> ProposalInput:
     return ProposalInput(
         interpretation=_minimal_interp(),
         existing_model_types=["wavenet"],
-        prior_iteration_gate_exhaustion=gate_info,
+        recent_gate_exhaustions=[gate_info] if gate_info is not None else [],
         storage=StorageConfig(
             backend="local",
             local=LocalStorageConfig(workspace=str(tmp_path), run_name="test"),
@@ -89,7 +89,7 @@ def _pipeline_input(tmp_path, gate_info=None) -> ProposalInput:
     return ProposalInput(
         interpretation=_minimal_interp(),
         existing_model_types=["wavenet"],
-        prior_iteration_gate_exhaustion=gate_info,
+        recent_gate_exhaustions=[gate_info] if gate_info is not None else [],
         reasoning_pipeline=ReasoningPipelineConfig(
             exploration_mode="exploit",
             stages=[

@@ -602,20 +602,37 @@ class ProposalInput(BaseModel):
                     "validation failure so the proposal agent avoids the same mistakes. "
                     "Each entry is the error_message from a ValidatorOutput.",
     )
-    prior_iteration_gate_exhaustion: Optional[GateExhaustionInfo] = Field(
-        default=None,
+    recent_gate_exhaustions: List[GateExhaustionInfo] = Field(
+        default_factory=list,
         description=(
-            "When the previous iteration's tuner exited under gate "
-            "exhaustion (no record ever trained successfully AND ≥1 "
-            "attempt was rejected by the pre-flight resource gate), "
-            "this field carries the structured failure report from "
-            "HyperparamTuningOutput.gate_exhaustion. Surfaced to the "
-            "proposer prompt as a hard learning signal so the next "
-            "baseline is qualitatively lighter. None when the prior "
-            "iteration succeeded or no prior iteration exists. "
-            "See docs/resource_estimator_implement.md §10.13."
+            "Phase N (§14.N.1) — gate-exhaustion summaries from the "
+            "most recent up-to-3 tuner iterations, oldest first. "
+            "Iterations whose tuner produced no gate_exhaustion are "
+            "omitted entirely (not represented as None). Empty list "
+            "(the default) means no recent abort/gate-exhaustion "
+            "feedback to surface; the proposer prompt's [RECENT GATE "
+            "EXHAUSTIONS] block is suppressed. Populated by the "
+            "interp→propose protocol from the workflow's bounded FIFO "
+            "of recent HyperparamTuningOutputs. Replaces K.7.2's "
+            "single-slot prior_iteration_gate_exhaustion. See "
+            "docs/resource_estimator_implement.md §10.13 + §14.N."
         ),
     )
+
+    @field_validator("recent_gate_exhaustions", mode="after")
+    @classmethod
+    def _cap_recent_gate_exhaustions(
+        cls, v: List[GateExhaustionInfo]
+    ) -> List[GateExhaustionInfo]:
+        """Safety rail: workflow enforces ``maxlen=3`` via a deque, but the
+        schema guards against a caller supplying an unbounded list. Cap at 10.
+        """
+        if len(v) > 10:
+            raise ValueError(
+                f"recent_gate_exhaustions has {len(v)} entries; "
+                f"maximum allowed is 10 (workflow enforces 3)."
+            )
+        return v
     mindset: Optional[str] = Field(
         default=None,
         description="Mindset block injected at {# EXPLORATION_MODE_BLOCK #} in the "

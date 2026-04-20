@@ -378,10 +378,12 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
         lines.append("")
 
     # Phase K.7.6 — cross-iteration gate-exhaustion report from the prior
-    # tuner (§10.13). Only renders when the prior iteration ended without
-    # ever training successfully AND ≥1 attempt was rejected by the gate.
+    # tuner (§10.13). Phase N (§14.N) widened the carrier from a single
+    # GateExhaustionInfo to a bounded list; until the formatter is refactored
+    # (Phase N step N.4), render only the most-recent entry so behaviour is
+    # unchanged from the single-step K.7.6 baseline.
     gate_block = _format_prior_iteration_gate_exhaustion_block(
-        inp.prior_iteration_gate_exhaustion
+        inp.recent_gate_exhaustions[-1] if inp.recent_gate_exhaustions else None
     )
     if gate_block:
         lines += [gate_block, ""]
@@ -631,12 +633,15 @@ class MLModelProposalAgent:
             # See docs/improving_validation_awareness.md Phase A.2/A.3.
             "known_constraints_block": _format_known_constraints_block(DATASET_CONFIG),
             # Phase K.7.6 — proposing-stage placeholder for the previous
-            # iteration's gate-exhaustion report (§10.13.5). Resolves to ""
-            # when the prior iteration succeeded (or when there is no prior
-            # iteration), so the placeholder collapses to nothing visible.
+            # iteration's gate-exhaustion report (§10.13.5). Phase N
+            # (§14.N) widened the carrier to a list; until the formatter
+            # refactor (N.4) ships, feed only the most-recent entry so
+            # rendering is byte-identical to K.7.6.
             "prior_iteration_gate_exhaustion_block": (
                 _format_prior_iteration_gate_exhaustion_block(
-                    inp.prior_iteration_gate_exhaustion
+                    inp.recent_gate_exhaustions[-1]
+                    if inp.recent_gate_exhaustions
+                    else None
                 )
             ),
         }

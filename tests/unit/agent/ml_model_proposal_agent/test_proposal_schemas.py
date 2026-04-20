@@ -72,14 +72,16 @@ class TestProposalInput:
         assert isinstance(inp.human_advice, ExpertAdvice)
 
 
-class TestProposalInputGateExhaustion:
-    """K.7.2 — ProposalInput.prior_iteration_gate_exhaustion field.
+class TestProposalInputRecentGateExhaustions:
+    """Phase N (§14.N.1) — ProposalInput.recent_gate_exhaustions field.
 
-    See docs/resource_estimator_implement.md §10.13.2. The field is
-    populated by the interp→propose protocol when the previous
-    iteration's tuner exited under gate exhaustion; the proposer
-    prompt then renders a [PRIOR ITERATION GATE EXHAUSTION] block
-    (K.7.6).
+    Replaces the K.7.2 singular ``prior_iteration_gate_exhaustion`` field
+    with a bounded list (oldest-first). Populated by the interp→propose
+    protocol from the workflow's bounded FIFO of recent tuner outputs;
+    consumed by the proposer prompt as the [RECENT GATE EXHAUSTIONS]
+    block.
+
+    See docs/resource_estimator_implement.md §14.N + §10.13.
     """
 
     @pytest.fixture
@@ -106,48 +108,82 @@ class TestProposalInputGateExhaustion:
             ),
         )
 
-    def test_default_none_when_omitted(self):
+    def _second_gate_exhaustion(self):
+        return GateExhaustionInfo(
+            total_attempts=3,
+            vram_gated_attempts=0,
+            time_gated_attempts=3,
+            other_failure_attempts=0,
+            active_mode="trial",
+            vram_budget_gb=8.0,
+            time_budget_minutes=20.0,
+            baseline_vram_estimate_gb=1.2,
+            baseline_vram_factor=0.15,
+            baseline_time_estimate_minutes=45.0,
+            baseline_time_factor=2.25,
+            worst_vram_factor=0.2,
+            worst_time_factor=3.1,
+            summary_message="All 3 attempts exceeded the 20 min time budget.",
+        )
+
+    def test_default_empty_when_omitted(self):
         inp = ProposalInput(interpretation={})
-        assert inp.prior_iteration_gate_exhaustion is None
+        assert inp.recent_gate_exhaustions == []
 
-    def test_accepts_populated_info_object(self, gate_exhaustion):
+    def test_accepts_single_entry_list(self, gate_exhaustion):
         inp = ProposalInput(
             interpretation={},
-            prior_iteration_gate_exhaustion=gate_exhaustion,
+            recent_gate_exhaustions=[gate_exhaustion],
         )
-        assert isinstance(inp.prior_iteration_gate_exhaustion, GateExhaustionInfo)
-        assert inp.prior_iteration_gate_exhaustion.total_attempts == 9
-        assert inp.prior_iteration_gate_exhaustion.active_mode == "trial"
-        assert inp.prior_iteration_gate_exhaustion.worst_vram_factor == 2.0
+        assert len(inp.recent_gate_exhaustions) == 1
+        assert isinstance(inp.recent_gate_exhaustions[0], GateExhaustionInfo)
+        assert inp.recent_gate_exhaustions[0].total_attempts == 9
 
-    def test_accepts_populated_info_as_dict(self, gate_exhaustion):
-        """Pydantic should coerce a dict into GateExhaustionInfo, mirroring
-        the existing dict-coercion pattern for ExpertAdvice."""
+    def test_accepts_multi_entry_list_preserves_order(self, gate_exhaustion):
+        older = gate_exhaustion
+        newer = self._second_gate_exhaustion()
         inp = ProposalInput(
             interpretation={},
-            prior_iteration_gate_exhaustion=gate_exhaustion.model_dump(),
+            recent_gate_exhaustions=[older, newer],
         )
-        assert isinstance(inp.prior_iteration_gate_exhaustion, GateExhaustionInfo)
-        assert inp.prior_iteration_gate_exhaustion.summary_message.startswith(
+        assert len(inp.recent_gate_exhaustions) == 2
+        # Oldest-first order preserved — the protocol layer depends on this.
+        assert inp.recent_gate_exhaustions[0].vram_gated_attempts == 9
+        assert inp.recent_gate_exhaustions[1].time_gated_attempts == 3
+
+    def test_accepts_list_of_dicts_coerced_to_info(self, gate_exhaustion):
+        """Pydantic should coerce a list of dicts into GateExhaustionInfo
+        objects — mirrors the protocol's output which serialises each entry
+        via ``model_dump()`` before handing it to ``ProposalInput``."""
+        inp = ProposalInput(
+            interpretation={},
+            recent_gate_exhaustions=[gate_exhaustion.model_dump()],
+        )
+        assert isinstance(inp.recent_gate_exhaustions[0], GateExhaustionInfo)
+        assert inp.recent_gate_exhaustions[0].summary_message.startswith(
             "All 9 attempts"
         )
 
-    def test_round_trip_preserves_gate_exhaustion(self, gate_exhaustion):
-        """JSON round-trip must preserve the field — the protocol layer
-        serialises ProposalInput across the workflow boundary."""
+    def test_round_trip_preserves_entries(self, gate_exhaustion):
+        """JSON round-trip must preserve every entry verbatim — the protocol
+        layer serialises ProposalInput across the workflow boundary."""
         inp = ProposalInput(
             interpretation={},
-            prior_iteration_gate_exhaustion=gate_exhaustion,
+            recent_gate_exhaustions=[gate_exhaustion, self._second_gate_exhaustion()],
         )
         round_tripped = ProposalInput.model_validate_json(inp.model_dump_json())
-        assert round_tripped.prior_iteration_gate_exhaustion is not None
+        assert len(round_tripped.recent_gate_exhaustions) == 2
         assert (
-            round_tripped.prior_iteration_gate_exhaustion.model_dump()
+            round_tripped.recent_gate_exhaustions[0].model_dump()
             == gate_exhaustion.model_dump()
         )
+        assert (
+            round_tripped.recent_gate_exhaustions[1].model_dump()
+            == self._second_gate_exhaustion().model_dump()
+        )
 
-    def test_invalid_active_mode_in_dict_raises(self):
-        """Passing a malformed dict should fail validation, not silently
+    def test_invalid_entry_dict_raises(self):
+        """Malformed dicts in the list must fail validation, not silently
         coerce — guards against the protocol layer dropping garbage in."""
         bad_dict = {
             "total_attempts": 1,
@@ -160,8 +196,19 @@ class TestProposalInputGateExhaustion:
         with pytest.raises(ValidationError):
             ProposalInput(
                 interpretation={},
-                prior_iteration_gate_exhaustion=bad_dict,
+                recent_gate_exhaustions=[bad_dict],
             )
+
+    def test_rejects_over_ten_entries(self, gate_exhaustion):
+        """Schema safety rail: the workflow enforces maxlen=3 via a deque,
+        but the schema itself caps the list at 10 entries to guard against
+        an unbounded caller. See §14.N.1."""
+        with pytest.raises(ValidationError) as exc:
+            ProposalInput(
+                interpretation={},
+                recent_gate_exhaustions=[gate_exhaustion] * 11,
+            )
+        assert "maximum allowed is 10" in str(exc.value)
 
 
 class TestProposalOutput:

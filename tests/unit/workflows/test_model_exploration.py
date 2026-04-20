@@ -687,11 +687,11 @@ class TestRunWorkflowGateExhaustionPropagation:
             summary_message="All 9 attempts were rejected by the VRAM gate.",
         )
 
-    def test_iter1_proposal_has_no_prior_gate_exhaustion(self, workflow_env):
+    def test_iter1_proposal_has_empty_recent_gate_exhaustions(self, workflow_env):
         """First iteration runs with no prior tuner output, so the proposer's
-        prior_iteration_gate_exhaustion must be None — confirms the
-        ``previous_tune_output`` variable is initialised to None and the
-        protocol leaves the field at its schema default on iteration 1."""
+        ``recent_gate_exhaustions`` must be empty — confirms the workflow's
+        retained-outputs carrier is initialised empty and the protocol
+        produces ``[]`` on iteration 1."""
         names = iter(["model_a", "model_b"])
         workflow_env["propose"].return_value.run.side_effect = (
             lambda inp: _make_proposal_output(next(names))
@@ -711,12 +711,12 @@ class TestRunWorkflowGateExhaustionPropagation:
         iter1_propose_input = (
             workflow_env["propose"].return_value.run.call_args_list[0][0][0]
         )
-        assert iter1_propose_input.prior_iteration_gate_exhaustion is None
+        assert iter1_propose_input.recent_gate_exhaustions == []
 
     def test_iter2_proposal_receives_iter1_gate_exhaustion(self, workflow_env):
         """When iteration 1's tuner output carries a populated gate_exhaustion,
-        iteration 2's proposer must see the same payload, surfaced into
-        ProposalInput.prior_iteration_gate_exhaustion via the protocol."""
+        iteration 2's proposer must see the same payload, surfaced as a
+        single-entry ``recent_gate_exhaustions`` list via the protocol."""
         gate = self._gate_exhaustion()
 
         iter1_tune = _make_tune_output(model_type="model_a", score=1.6)
@@ -740,16 +740,16 @@ class TestRunWorkflowGateExhaustionPropagation:
         iter2_propose_input = (
             workflow_env["propose"].return_value.run.call_args_list[1][0][0]
         )
-        surfaced = iter2_propose_input.prior_iteration_gate_exhaustion
-        assert surfaced is not None
-        assert isinstance(surfaced, GateExhaustionInfo)
+        surfaced = iter2_propose_input.recent_gate_exhaustions
+        assert len(surfaced) == 1
+        assert isinstance(surfaced[0], GateExhaustionInfo)
         # Round-trip equality — every field crossed the workflow → protocol hop
-        assert surfaced.model_dump() == gate.model_dump()
+        assert surfaced[0].model_dump() == gate.model_dump()
 
     def test_iter2_proposal_no_gate_exhaustion_when_iter1_succeeded(self, workflow_env):
         """When iteration 1's tuner succeeds (gate_exhaustion=None), the next
-        proposer must NOT see a stale or fabricated gate_exhaustion — the
-        protocol pass-through is gated on the field actually being populated."""
+        proposer must NOT see a stale or fabricated entry — the protocol
+        filters None entries out, leaving ``recent_gate_exhaustions`` empty."""
         iter1_tune = _make_tune_output(model_type="model_a", score=1.6)
         iter2_tune = _make_tune_output(model_type="model_b", score=1.7)
         # Default factory produces gate_exhaustion=None; assert that explicitly
@@ -773,7 +773,7 @@ class TestRunWorkflowGateExhaustionPropagation:
         iter2_propose_input = (
             workflow_env["propose"].return_value.run.call_args_list[1][0][0]
         )
-        assert iter2_propose_input.prior_iteration_gate_exhaustion is None
+        assert iter2_propose_input.recent_gate_exhaustions == []
 
 
 # ---------------------------------------------------------------------------
