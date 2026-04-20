@@ -3598,6 +3598,92 @@ iteration is skipped.
   same quota-exhausted error twice in a row, fail the iteration
   immediately rather than burning the rest of the inner loop.
 
+### 13.9 Cross-iteration failure memory is single-step (no Cumulative Negative Feedback)
+
+`workflows/model_exploration.py:502-582` + `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py:192-198`:
+the K.7.6 `[PRIOR ITERATION GATE EXHAUSTION]` block is a pass-through
+of the *immediately preceding* tuner output's `gate_exhaustion` field.
+It surfaces only when iter N-1 either aborted (Trigger B) or had zero
+successes (Trigger A). Once a successful iteration intervenes,
+`previous_tune_output.gate_exhaustion` is None on iter N+1, and the
+earlier abort's warning is dropped from the proposer's context.
+
+Meanwhile the positive memory channels (`model_knowledge_cache`,
+`current_runtime_vocab`, `latest_new_summary` → interpretation rollup)
+accumulate successful architectures across all past iterations. There
+is no symmetric **negative** memory — no persistent record of
+"architecture family X at scale Y was a structural bottleneck for
+this hardware/time budget."
+
+- **Why it matters**: the proposer can oscillate between
+  undersized and oversized configurations across iterations. Concrete
+  scenario: iter 1 aborts on a too-large model → iter 2 sees the
+  warning, proposes small, succeeds → iter 3 now sees iter 2's
+  successful output (no gate_exhaustion), K.7.6 block is gone, iter 1's
+  lesson is lost → iter 3 is free to propose a larger model again.
+  If iter 3 partially succeeds but is still marginal, the cycle can
+  repeat, wasting compute on re-discovering the same structural
+  ceiling.
+- **What's particularly expensive**: aborted iterations already
+  consume the `max_iterations` quota (see §11.8). Re-aborting on the
+  same class of oversized configuration in a later iteration is
+  double-loss: quota burned + no forward progress.
+- **Possible fix directions** (any of these, or a combination):
+  1. **Aggregate-window gate-exhaustion**: surface the gate_exhaustion
+     summaries from the last K iterations (not just N-1), concatenated
+     in the K.7.6 block. K=3 would cover the common "abort → success →
+     drift back" pattern at negligible token cost.
+  2. **Persistent "architecture constraint" memory**: add a new field
+     parallel to `model_knowledge_cache` that records compact
+     constraints discovered across the run (e.g., "spectral+dual-path
+     family: ms/step floor ≥27 at seg=40000 → infeasible for 20-min
+     trial budget"). Grows once per aborted iteration, never shrinks.
+     The proposer reads it every iteration regardless of the immediate
+     prior outcome.
+  3. **Negative-example summaries in interpretation**: extend the
+     interpretation agent to explicitly flag abort-class failures in
+     its rollup, so even iterations that didn't fail themselves surface
+     "avoid this direction" signals to the next proposer.
+- **Why it matters enough to call out**: the current design has
+  asymmetric memory — unbounded positive, single-step negative. For a
+  research workflow where negative results are as informative as
+  positive ones, this is a structural gap, not just a stability
+  polish. Fixing it probably belongs to a "Phase M+ — cumulative
+  negative feedback / global constraint memory" follow-up.
+
+#### 13.9.1 Decision (2026-04-20) — Option A now, Option B as Phase N follow-up
+
+After observing the gap surface live during the v3 explore-mode run
+(iter 1 aborted on `spectral_gated_dualpath_net`; iter 2 proposer lost
+the warning and was free to propose another oversized family), the
+chosen resolution is:
+
+- **Option A — Aggregate-window gate-exhaustion (ships this session
+  as "Phase N — Cumulative Negative Feedback, partial").** Replace
+  the single-slot `previous_tune_output` in the workflow with a
+  bounded FIFO of the last K=3 tuner outputs; concatenate their
+  `gate_exhaustion` summaries into the K.7.6 prompt block. Preserves
+  the K.7 contract (same data model, same payload shape) while
+  closing the "abort → success → drift back" pattern at negligible
+  token cost. Full spec in §14.
+- **Option B — Persistent architecture-constraint memory
+  (scheduled as full Phase N).** A new memory channel parallel to
+  `model_knowledge_cache` that records compact constraints discovered
+  across the run (architecture family + scale + binding gate +
+  worst factor), grows once per aborted iteration, never shrinks.
+  Deferred because it requires its own data model, LLM summariser,
+  and prompt integration — scope too large to couple with today's
+  fix. Design stub in §14.N.6.
+- **Option C — Negative examples in interpretation.** Not pursued:
+  duplicates the memory into the interpretation agent and adds a
+  second LLM cost for a signal already produced cheaply by the
+  tuner.
+
+The §13.9 gap itself stays open until Option B lands. Option A
+narrows the window in which a warning can be lost from "1 successful
+iteration" to "3 successful iterations" — a practical mitigation,
+not a structural fix.
+
 ---
 
 **Triage status (2026-04-19)**: §13.1 is the most user-visible and
@@ -3605,4 +3691,158 @@ should be addressed soon (probably as part of Phase M extension or
 a focused defaults-tuning patch). §13.2-§13.8 are stability
 improvements with no current blocking impact on the main function;
 they are good follow-up candidates for a "Phase N — stability
-hardening" pass once Phase M lands.
+hardening" pass once Phase M lands. §13.9 is a separate architectural
+gap (not a stability issue) that should be scoped as its own
+"cumulative negative feedback" phase rather than folded into Phase N.
+
+**Update (2026-04-20)**: §13.9 is now being partially resolved in
+§14 as "Phase N — Cumulative Negative Feedback (partial — Option A)".
+The §13.2-§13.8 stability-hardening pass originally envisioned under
+the Phase N banner is retitled / reparented in a future phase; the
+"Phase N" name is claimed by the negative-feedback work per the
+§13.9.1 decision.
+
+## 14. Phase N — Cumulative Negative Feedback (partial — Option A, design 2026-04-20)
+
+### 14.N.0 Context + scope boundary
+
+Addresses the §13.9 gap. **Scope is Option A only**: widen the
+gate-exhaustion propagation window from 1 iteration to 3 iterations.
+Option B (persistent architecture-constraint memory) is deliberately
+out of scope for this phase — see §14.N.6 for its design stub.
+
+No change to the detection criteria (§10.13.1, §11.4), no change to
+`GateExhaustionInfo`, no change to the tuner finalisation logic. All
+changes are in the plumbing layer: workflow retention, protocol
+signature, proposer prompt formatter.
+
+### 14.N.1 Data model
+
+The carrier field on `ProposalInput` changes from a single optional
+`GateExhaustionInfo` to a bounded list:
+
+```python
+# agent/schemas/proposal.py — after Phase N
+class ProposalInput(BaseModel):
+    ...existing fields...
+    recent_gate_exhaustions: List[GateExhaustionInfo] = Field(
+        default_factory=list,
+        description=(
+            "Gate-exhaustion summaries from the most recent up-to-3 "
+            "tuner iterations, oldest first. Iterations whose tuner "
+            "produced no gate_exhaustion are omitted (not represented "
+            "as None). Empty list = no recent abort/gate-exhaustion "
+            "feedback to surface. Consumed by the proposer prompt via "
+            "the [RECENT GATE EXHAUSTIONS] block."
+        ),
+    )
+```
+
+Semantics:
+
+- **Order**: oldest first. If iterations N-3, N-2, N-1 all produced a
+  `gate_exhaustion`, the list is `[info_{N-3}, info_{N-2}, info_{N-1}]`.
+- **Filtering**: iterations whose tuner returned
+  `gate_exhaustion == None` are omitted entirely. The list is a
+  sparse record of "recent aborts/exhaustions only", not a dense
+  per-iteration trace.
+- **Bound**: the workflow-side deque enforces `maxlen=3`; the schema
+  itself does not impose a hard upper bound (a caller that wants K=5
+  can supply a 5-element list). A `@field_validator` caps it at 10
+  entries as a safety rail.
+- **Empty list**: canonical "no feedback" state. The proposer
+  formatter renders an empty string (no block).
+
+### 14.N.2 Files touched
+
+| File | Change |
+|------|--------|
+| `workflows/model_exploration.py` | Replace `previous_tune_output: Optional[HyperparamTuningOutput] = None` with `recent_tune_outputs: deque[HyperparamTuningOutput] = deque(maxlen=3)`. After each tuner run, `recent_tune_outputs.append(tune_output)`. Pass the whole deque to the next iteration's protocol call. |
+| `agent/schemas/proposal.py::ProposalInput` | Remove `prior_iteration_gate_exhaustion: Optional[GateExhaustionInfo]`. Add `recent_gate_exhaustions: List[GateExhaustionInfo] = []` per §14.N.1. Clean break — no shim. |
+| `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py::local_full_context` | Signature change: `prior_tune_output: Optional[HyperparamTuningOutput]` → `recent_tune_outputs: Sequence[HyperparamTuningOutput] = ()`. Body: iterate, pull `tune.gate_exhaustion`, skip None, produce the `recent_gate_exhaustions` list in oldest-first order. |
+| `nodes/ml_model_proposal_agent.py` | Rename `_format_prior_iteration_gate_exhaustion_block` → `_format_recent_gate_exhaustions_block`. Accept a list; when empty, return `""`; when non-empty, render each entry labelled with a relative iteration tag (`iter N-3 / iter N-2 / iter N-1`) and separated by a horizontal rule. Both legacy and pipeline templates receive the renamed placeholder. |
+| `agent/prompt_templates/proposal/proposing_stage.md` | Rename placeholder `{prior_iteration_gate_exhaustion_block}` → `{recent_gate_exhaustions_block}`. |
+
+### 14.N.3 Prompt block header
+
+The rendered block's header changes to reflect the aggregate-window
+semantics:
+
+```
+[RECENT GATE EXHAUSTIONS (last up to 3 iterations)]
+iter N-3 (most recent of the older entries):
+  <summary_message>
+
+  Resource accounting: ...
+--------------------------------------------------------------------
+iter N-2:
+  ...
+--------------------------------------------------------------------
+iter N-1 (most recent):
+  ...
+
+For this iteration: if the same architecture family or scale appears
+in multiple entries above, that is a strong signal the family is
+structurally infeasible under the active budgets — propose a
+different family, not a smaller variant of the same family.
+```
+
+The closing guidance paragraph is the key behavioural nudge beyond
+K.7.6: when the window shows *repeated* abort-class failures on
+the same family, the proposer should switch family rather than
+shrink.
+
+### 14.N.4 Test plan
+
+- **Unit — formatter (`nodes/ml_model_proposal_agent.py`)**: 4
+  cases. 0 entries → `""`. 1 entry → single-labelled block,
+  header mentions "1 iteration". 2 entries → two-labelled blocks
+  separated by a rule. 3 entries → three-labelled blocks, header
+  mentions "3 iterations". Field numeric-to-string rendering
+  (n/a for disabled axes) is inherited from the K.7.6 helper and
+  not re-tested here.
+- **Unit — protocol
+  (`ml_result_interp_to_ml_model_propose.local_full_context`)**:
+  input `recent_tune_outputs = []` → `recent_gate_exhaustions = []`.
+  Input with 3 outputs where only the middle one has
+  `gate_exhaustion` set → output list length 1. Input with all 3
+  set → output list length 3, order preserved.
+- **Unit — workflow (`workflows/model_exploration.py`)**: run a
+  4-iteration mock loop where every iter emits a sentinel
+  `gate_exhaustion`. After iter 4, the deque holds exactly iters
+  2, 3, 4 (iter 1 evicted). Iter N's protocol call receives the
+  deque containing iters (N-3, N-2, N-1).
+- **Unit — schema**: `ProposalInput` accepts empty list (default),
+  1/2/3-entry lists, rejects >10-entry lists via the validator cap.
+  Removal of the old singular field is covered by existing K.7.2
+  tests being deleted/rewritten.
+- **Dual-mode integration**: new
+  `tests/integration/workflows/test_n_recent_gate_exhaustions_dual_mode.py`
+  mirroring the L.8 structure — 3-iteration pseudo flow where iter 1
+  aborts (Trigger A), iter 2 succeeds, iter 3 runs with the proposer
+  prompt. Assert the dumped proposing-stage system prompt (using the
+  K.8.0 `debug_dump_proposing_prompt_path` machinery) contains
+  "[RECENT GATE EXHAUSTIONS" and the iter 1 `summary_message`
+  substring, even though iter 2 succeeded in between.
+
+### 14.N.5 Implementation checklist
+
+- [ ] **N.1** — Schema change: `ProposalInput.prior_iteration_gate_exhaustion` → `recent_gate_exhaustions` (List, default `[]`, ≤10 validator). Rewrite/delete `TestProposalInputGateExhaustion` to cover the list field.
+- [ ] **N.2** — Protocol signature change: `local_full_context` kwarg rename + body iteration. 4 new tests in a `TestRecentGateExhaustionsAggregation` class.
+- [ ] **N.3** — Workflow change: `previous_tune_output` → `recent_tune_outputs: deque(maxlen=3)`. Append after each tuner run. Pass to next iteration's protocol call. 1 new test in `TestRunWorkflowGateExhaustionPropagation` covering the 4-iteration eviction case.
+- [ ] **N.4** — Proposer formatter: rename helper + refactor to accept a list + relative-iter labels + header-arithmetic. Rename template placeholder. ~4 new tests replacing the existing K.7.6 singular-rendering cases.
+- [ ] **N.5** — Dual-mode integration test per §14.N.4. Pseudo-data folder under `tests/pseudo_data/api_call_outputs/` mirroring the L.8 pattern.
+- [ ] **N.6** — Doc closeout: flip this checklist to `[x]`; append a "closed" row to the top-of-doc tracker.
+
+### 14.N.6 Option B (deferred) — Persistent architecture-constraint memory
+
+When scheduled as a full phase, Option B will add a new memory
+channel parallel to `model_knowledge_cache`:
+`architecture_constraints: List[ArchitectureConstraint]` where each
+entry compactly records "family + scale class + binding gate +
+worst factor" for an iteration that aborted. It grows once per
+abort, never shrinks, and is rendered into every proposer prompt
+regardless of the immediately-prior outcome — unlike the §14.N
+window which is still sensitive to how many recent iterations
+aborted. Full design to be drafted when Option A's behaviour is
+observed in real runs and the need is empirically confirmed.
