@@ -1,6 +1,6 @@
 # Resource Estimator (Time + VRAM Budgets)
 
-**Status**: time skill implemented + smoke-tested on lilab (Phases A–G complete; H1a lilab direct-skill smoke verified 2026-04-16; **Phase I — trial/formal budget split — landed 2026-04-16 across 5 commits**; **Phase J — success-path time info to planner — landed 2026-04-16 across 3 commits**; **H1b lilab tuner-integration smoke verified 2026-04-16 on RTX 5090, k(wavenet)=4.22**; H2 SDSC deferred). **Phase K — VRAM budget gate alongside the time gate — design landed 2026-04-18; K.0–K.2 implemented 2026-04-18; K.2.5 (3-phase × 2-resource estimator distribution: training/inference/scoring × VRAM/time) shipped 2026-04-18 across 7 commits: inference_defaults → training_skill estimator → inference_skill estimator → denoising_score_skill estimator + `core/server_configs/` → evaluate_vram_skill peak aggregator → evaluate_time_skill sum aggregator → doc sync; K.3–K.6 shipped 2026-04-18; K.7.1 (gate-exhaustion schema) shipped 2026-04-18; K.7.2 (proposer-side schema field) shipped 2026-04-18; K.7.3 (tuner `_build_gate_exhaustion` + finalisation) shipped 2026-04-18; K.7.4 (interp→propose protocol pass-through) shipped 2026-04-18; K.7.5 (workflow retains previous tuner output across iterations) shipped 2026-04-18; K.7.6 (proposer prompt `[PRIOR ITERATION GATE EXHAUSTION]` block + pipeline placeholder) shipped 2026-04-18 — **K.7 complete**; K.8 smoke ran 2026-04-18 and surfaced K.2.5-8 defect (inference estimator's hard assert crashes the gate on proposer-invented `model_type`s); K.2.5-8 (soft fallback + 3-channel surfacing) shipped 2026-04-18 across 4 commits: estimator soft fallback → wrapper warnings → tuner record propagation → doc sync; K.8.1 re-run pending against patched code.**
+**Status**: time skill implemented + smoke-tested on lilab (Phases A–G complete; H1a lilab direct-skill smoke verified 2026-04-16; **Phase I — trial/formal budget split — landed 2026-04-16 across 5 commits**; **Phase J — success-path time info to planner — landed 2026-04-16 across 3 commits**; **H1b lilab tuner-integration smoke verified 2026-04-16 on RTX 5090, k(wavenet)=4.22**; H2 SDSC deferred). **Phase K — VRAM budget gate alongside the time gate — design landed 2026-04-18; K.0–K.2 implemented 2026-04-18; K.2.5 (3-phase × 2-resource estimator distribution: training/inference/scoring × VRAM/time) shipped 2026-04-18 across 7 commits: inference_defaults → training_skill estimator → inference_skill estimator → denoising_score_skill estimator + `core/server_configs/` → evaluate_vram_skill peak aggregator → evaluate_time_skill sum aggregator → doc sync; K.3–K.6 shipped 2026-04-18; K.7.1 (gate-exhaustion schema) shipped 2026-04-18; K.7.2 (proposer-side schema field) shipped 2026-04-18; K.7.3 (tuner `_build_gate_exhaustion` + finalisation) shipped 2026-04-18; K.7.4 (interp→propose protocol pass-through) shipped 2026-04-18; K.7.5 (workflow retains previous tuner output across iterations) shipped 2026-04-18; K.7.6 (proposer prompt `[PRIOR ITERATION GATE EXHAUSTION]` block + pipeline placeholder) shipped 2026-04-18 — **K.7 complete**; K.8 smoke ran 2026-04-18 and surfaced K.2.5-8 defect (inference estimator's hard assert crashes the gate on proposer-invented `model_type`s); K.2.5-8 (soft fallback + 3-channel surfacing) shipped 2026-04-18 across 4 commits: estimator soft fallback → wrapper warnings → tuner record propagation → doc sync; K.8.1 re-run pending against patched code.** **Phase L — per-round attempt budget + fail-round abort — landed 2026-04-19 across 9 commits: design (`21d0007`) → schema (L.1) → outer-loop rewrite (L.2) → Trigger B branch in `_build_gate_exhaustion` (L.3) → CLI/protocol pass-through (L.4-L.5) → unit tests (L.6, 5 sub-cases) → K.9 dual-mode rewrite for the 3-attempt choreography (L.7) → fail-round abort dual-mode test (L.8) → real-LLM smoke (L.9, K.9 dual-mode under `--real-llm` with gpt-5-mini, passed 104 s); 340/340 tuner unit + integration tests green.**
 **Author**: design discussion 2026-04-16; Phase K extension 2026-04-18.
 **Motivation**: two trial-mode runs (`exploit_cnn_v1`, `explore_novel_v1`) stalled in Round 1 for 1h 50min and 2h 27min respectively, both blowing past the 1-hour trial budget stated in the expert advice. Neither was blocked, because the planner has no pre-flight wall-time estimate — only a VRAM check. **Phase K motivation (2026-04-17)**: `explore_novel_v1` iterations 3 and 4 burned 9/9 attempts each to `"GPU has only 0.01 GB free"` because the existing VRAM gate uses momentary `free_bytes × 0.8` as its limit and another process held 25.7 GB on the shared 32 GB card. The planner has no operator-supplied VRAM ceiling to optimise against — symmetric to the time-gate gap §1.2 fixed.
 
@@ -45,6 +45,7 @@
 | K.7.6 — proposer prompt: `[PRIOR ITERATION GATE EXHAUSTION]` block + pipeline placeholder | 2026-04-18 | (this commit) | new `_format_prior_iteration_gate_exhaustion_block` helper in `nodes/ml_model_proposal_agent.py` (returns "" when None, else renders §10.13.5 block with `n/a` fallbacks for disabled axes); injected in both legacy `_build_reasoning_prompt` and pipeline `template_vars["prior_iteration_gate_exhaustion_block"]`; new `{prior_iteration_gate_exhaustion_block}` placeholder in `proposing_stage.md`; 19 new tests in `test_prior_iteration_gate_exhaustion.py` (helper truth-table, legacy injection, pipeline placeholder substitution, end-to-end round-trip via mocked bridge); 275/275 proposer tests green |
 | K.8 — co-budget smoke + cross-iteration awareness | in progress | — | K.8.0 done (Option A `--debug_dump_prompts` instrumentation: schema field + proposer dump + workflow plumb + CLI flag; 2 new unit tests; 341/341 proposer+workflow tests green); **K.8.1 ran on lilab and surfaced K.2.5-8 defect** (inference estimator's `assert_inference_batch_registered` crashes the gate on any proposer-invented `model_type`; all 9 attempts burned with `Loop Error`, K.7 feedback silent); K.2.5-8 implementation landed 2026-04-18 (4 commits); K.8.1 re-run pending; K.8.2 / K.8.4 / K.8.5 pending (K.8.3 contention emulation deferred) |
 | K.2.5-8 — soft fallback for unregistered model_type in inference estimator | implemented | 2026-04-18 | Shipped across 4 commits: estimator soft fallback (`is_inference_batch_registered` + breakdown flag) → wrapper surfacing (`!!!` warnings + return dict flag in both gates) → tuner record propagation (`ExperimentMemory.inference_batch_uncalibrated` set at oom/time/final record sites) → doc sync. 307/307 tuner-side + 15/15 inference-defaults tests green. K.8.1 re-run pending to verify the gate-doesn't-crash acceptance criterion. |
+| **L — per-round attempt budget + fail-round abort** | 2026-04-19 | 9 commits: `21d0007` (design) → `d7ffdc3` (L.1 schema) → `acc432c` (L.2 outer-loop rewrite) → `2de139a` (L.3 Trigger B) → `cec5674` (L.4-L.5 CLI+protocol) → `7805efa` (L.6 unit tests) → `787772d` (L.7 K.9 rewrite) → `c9e7d46` (L.8 abort dual-mode) → `1197bf2` (L.9 real-LLM smoke) | Outer `while` counts only successes against `max_rounds`; inner per-round attempt budget (`attempts_per_round=3` trial / `attempts_per_formal_round=5` formal default); aborts when `consecutive_fail_rounds_at_exit == max_fail_rounds=3`. New schema fields: `round_index` + `attempt_in_round` on `ExperimentMemory`; `consecutive_fail_rounds_at_exit` + `termination_reason` (`"completed"` \| `"aborted_fail_rounds"`) + 3 echoed budget knobs on `HyperparamTuningOutput`. `_build_gate_exhaustion` extended with **Trigger B** (had-some-successes branch, "Model too large after K successful rounds" framing per §11.4) — mutually exclusive with Trigger A via the `completed_rounds > 0` guard. New L.6 unit-test file + L.7 K.9 rewrite (3-attempt choreography) + L.8 fail-round abort dual-mode test (with §11.8 deviation note: success-anchor inserted so the test actually hits Trigger B, not Trigger A). L.9 real-LLM smoke (K.9 under `--real-llm`, gpt-5-mini) passed in 104 s. 340/340 tuner unit + integration tests green. |
 | K.deferred — proposer `_apply_vram_gate` + `vram_risk` field + retire `time_risk` redundancy on `ProposalOutput` | deferred | — | gated on registering plugins pre-validation; tracked in §10.17 |
 
 ---
@@ -1444,6 +1445,16 @@ training successfully, package a structured `GateExhaustionInfo` and
 surface it to the next iteration's proposer as a hard learning signal.
 
 #### 10.13.1 Detection criterion
+
+> **Cross-reference (Phase L)**: this section describes Trigger A only —
+> the no-successes branch. Phase L (§11.4) adds **Trigger B** for the
+> "had successes, then a fail-round burst" case (`completed_rounds > 0`
+> + `consecutive_fail_rounds_at_exit >= max_fail_rounds`). The two
+> triggers are mutually exclusive (Trigger B's
+> `completed_rounds > 0` guard makes them disjoint), and each renders
+> a distinct `summary_message` framing for the proposer. Read §11.4
+> together with this section for the full Phase K + L detection
+> contract.
 
 Trigger the signal when **all of the following** hold for the finished
 tuner iteration:
@@ -3107,8 +3118,17 @@ unit suite.
       counts, planner reaction) are pseudo-only by design; the smoke
       validates the new code path executes, not that the LLM picks
       the canned choreography.*
-- [ ] **L.10** — Doc closeout: flip §11 row to `[x]`; cross-link
+- [x] **L.10** — Doc closeout: flip §11 row to `[x]`; cross-link
       from §10.13.1 to §11.4.
+      *Done 2026-04-19. Three edits in this commit: (1) appended Phase L
+      completion sentence to the top-of-doc Status string; (2) added a
+      new Phase L row to the master tracker table (§ "Implementation
+      milestones") between the K.2.5-8 row and the K.deferred row,
+      listing all 9 Phase L commit hashes; (3) inserted a
+      Phase-L-cross-reference blockquote at the head of §10.13.1
+      pointing readers to §11.4 for the Trigger B "had-some-successes"
+      branch and clarifying the Trigger A vs Trigger B mutual
+      exclusivity.*
 
 ### 11.10 Open questions
 
