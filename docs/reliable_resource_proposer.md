@@ -179,10 +179,11 @@ Each fix must land with:
 | 3 | `284bbcd` | `feat(tuner): populate disallowed_architectural_patterns on gate exhaustion` | 2 | +470 / −0 |
 | 4 | `4036d98` | `feat(proposer): render [DISALLOWED PATTERNS] sub-block from disallowed tags` | 2 | +157 / −1 |
 | 5 | `6849d6c` | `feat(proposer): estimate_proposal_time static-formula wrapper` | 2 | +546 / −0 |
-| 6 | _pending_ | `feat(proposer): pre-flight cost-check loop with up-to-3 revisions` | — | — |
-| 7 | _pending_ | `docs: mark Fix 1 + Fix 2 landed` | — | — |
+| 6-doc | `8a56e5b` | `docs: detail Commit 6 plan — pre-flight revision loop design` | 1 | +65 / −8 |
+| 6 | `2d61eeb` | `feat(proposer): pre-flight cost-check loop with up-to-3 revisions` | 4 | +872 / −89 |
+| 7 | (this commit) | `docs: mark Fix 1 + Fix 2 landed in reliable_resource_proposer.md` | 2 | (doc-only) |
 
-**Next up**: Commit 6 — wire `estimate_proposal_time` into the proposer's reasoning stage. After the LLM drafts a `baseline_config`, call the pre-flight; when `factor > 1.0`, inject a `[PRE-FLIGHT REJECTION]` block into the next LLM call with the verdict + suggestion + factor; allow up to 3 inner revisions per proposing-stage call; on exhaustion emit the best-factor candidate with a warning. `ProposalOutput` gains `preflight_estimated_minutes` + `preflight_factor` audit fields. Integration test (pseudo mode): canned over-budget draft triggers a revision, second draft passes.
+**Fix 1 + Fix 2 landed** as of Commit 6 (`2d61eeb`, 2026-04-20). The proposer now (a) reads a structured `disallowed_architectural_patterns` blacklist rendered as a `[DISALLOWED PATTERNS]` sub-block under `[RECENT GATE EXHAUSTIONS]`, and (b) runs a static-formula pre-flight cost check on every draft `baseline_config`, revising up to 2× before emit. Branch total across commits 1–6: **+2,711 / −103** over 17 files, **132 new unit tests**.
 
 ---
 
@@ -338,7 +339,9 @@ Each checkbox is a pre-commit gate. Do not proceed to the next commit until ever
 - [x] Unit test: factor monotonic in both `num_params` and `epochs` (guards the aggregation logic)
 - [x] Tests green (18 passed in 0.06s) → committed
 
-### Commit 6 — Pre-flight revision loop
+### Commit 6 — Pre-flight revision loop → landed `2d61eeb`
+
+(Detailed design landed as a standalone doc commit `8a56e5b`.)
 
 #### Detailed design
 
@@ -386,33 +389,33 @@ Each checkbox is a pre-commit gate. Do not proceed to the next commit until ever
 
 #### Checklist
 
-- [ ] `ProposalOutput` gains `parameter_count_estimate`, `preflight_estimated_minutes`, `preflight_factor` (all `Optional`, default `None`)
-- [ ] `PROPOSAL_COMMIT_PROMPT` updated: JSON schema gains `parameter_count_estimate`; hard-constraints gains one line
-- [ ] `proposing_stage.md` template updated: JSON schema gains `parameter_count_estimate`; a new numbered "Parameter count estimate" rule is added
-- [ ] `_active_time_budget_minutes` helper — returns `inp.trial_time_budget_minutes` when `inp.is_trial` else `inp.formal_time_budget_minutes`; `None` passes through
-- [ ] `_run_preflight_check` helper — skips cleanly when budget or `parameter_count_estimate` is missing (with audit note in case b); otherwise calls `estimate_proposal_time` and attaches audit fields
-- [ ] `_build_preflight_rejection_block` helper — produces the Decision 7 template with all four numeric substitutions
-- [ ] `_run_legacy` wraps the commit call in the outer pre-flight loop with best-factor tracking
-- [ ] `_run_pipeline` wraps the structural retry block in the outer pre-flight loop; `[PRE-FLIGHT REJECTION]` feeds through `accumulated["proposing_stage_errors"]`
-- [ ] Exhaustion path emits the best-factor candidate with `PREFLIGHT_OVERBUDGET_EMITTED: best_factor={...:.2f}x` appended to `memo_consistency_notes`
-- [ ] Unit test — pipeline mode, **success path**: bad draft (factor > 1) → revised good draft (factor < 1) emitted; `preflight_factor < 1.0` recorded
-- [ ] Unit test — pipeline mode, **exhaustion path**: 3 over-budget drafts → best-factor candidate emitted with `PREFLIGHT_OVERBUDGET_EMITTED` note; Stages 1 + 2 called exactly once each
-- [ ] Unit test — pre-flight **skipped** when `trial_time_budget_minutes=None` (no extra LLM calls, no audit fields set)
-- [ ] Unit test — pre-flight **skipped** when `parameter_count_estimate` absent or ≤0, with `PREFLIGHT_SKIPPED` note added
-- [ ] Unit test — rejection block contains all four prescriptive numbers (`num_params`, `estimated_minutes`, `factor`, `budget`)
-- [ ] Unit test — audit fields (`preflight_estimated_minutes`, `preflight_factor`) populated on success path
-- [ ] Unit test — legacy mode also runs pre-flight (single-mode smoke — bad → good draft path)
-- [ ] Existing `test_pipeline_runner.py` (structural retry) + `test_recent_gate_exhaustions.py` (Commit 4 renderer) + `test_proposer_preflight.py` (Commit 5 wrapper) still green
-- [ ] Test command shown to user → approved → run
-- [ ] Tests green → user approves → commit
+- [x] `ProposalOutput` gains `parameter_count_estimate`, `preflight_estimated_minutes`, `preflight_factor` (all `Optional`, default `None`)
+- [x] `PROPOSAL_COMMIT_PROMPT` updated: JSON schema gains `parameter_count_estimate`; hard-constraints gains one line
+- [x] `proposing_stage.md` template updated: JSON schema gains `parameter_count_estimate`; a new numbered "Parameter count estimate" rule is added
+- [x] `_active_time_budget_minutes` helper — returns `inp.trial_time_budget_minutes` when `inp.is_trial` else `inp.formal_time_budget_minutes`; `None` passes through
+- [x] `_run_preflight_check` helper — skips cleanly when budget or `parameter_count_estimate` is missing (with audit note in case b); otherwise calls `estimate_proposal_time` and attaches audit fields
+- [x] `_build_preflight_rejection_block` helper — produces the Decision 7 template with all four numeric substitutions
+- [x] `_run_legacy` wraps the commit call in the outer pre-flight loop with best-factor tracking
+- [x] `_run_pipeline` wraps the structural retry block in the outer pre-flight loop; `[PRE-FLIGHT REJECTION]` feeds through `accumulated["proposing_stage_errors"]`
+- [x] Exhaustion path emits the best-factor candidate with `PREFLIGHT_OVERBUDGET_EMITTED: best_factor={...:.2f}x` appended to `memo_consistency_notes`
+- [x] Unit test — pipeline mode, **success path**: bad draft (factor > 1) → revised good draft (factor < 1) emitted; `preflight_factor < 1.0` recorded
+- [x] Unit test — pipeline mode, **exhaustion path**: 3 over-budget drafts → best-factor candidate emitted with `PREFLIGHT_OVERBUDGET_EMITTED` note; Stages 1 + 2 called exactly once each
+- [x] Unit test — pre-flight **skipped** when `trial_time_budget_minutes=None` (no extra LLM calls, no audit fields set)
+- [x] Unit test — pre-flight **skipped** when `parameter_count_estimate` absent or ≤0, with `PREFLIGHT_SKIPPED` note added
+- [x] Unit test — rejection block contains all four prescriptive numbers (`num_params`, `estimated_minutes`, `factor`, `budget`)
+- [x] Unit test — audit fields (`preflight_estimated_minutes`, `preflight_factor`) populated on success path
+- [x] Unit test — legacy mode also runs pre-flight (single-mode smoke — bad → good draft path)
+- [x] Existing `test_pipeline_runner.py` (structural retry) + `test_recent_gate_exhaustions.py` (Commit 4 renderer) + `test_proposer_preflight.py` (Commit 5 wrapper) still green
+- [x] Test command shown to user → approved → run
+- [x] Tests green (116/116 in 0.37 s: 17 new + 28 pipeline-runner + 34 recent-gate + 18 preflight-wrapper + 19 schema) → user approved → committed `2d61eeb`
 
-### Commit 7 — Docs
+### Commit 7 — Docs → landed (this commit)
 
-- [ ] In `docs/reliable_resource_proposer.md`: mark §8.1 and §8.2 commits checkboxes fully ticked with SHAs
-- [ ] Add a "Landed" section at the top summarizing commit SHAs and the branch's diff stat
-- [ ] Add row to `docs/resource_estimator_implement.md` progress table: `| **O — Reliable proposer pre-flight: blacklist + static-mode cost check** | 2026-04-20 | ... |`
-- [ ] No code changes in this commit — docs only
-- [ ] User approves doc diff → commit
+- [x] In `docs/reliable_resource_proposer.md`: mark §8.1 and §8.2 commits checkboxes fully ticked with SHAs (§9 Commit 6 checklist all ticked with `2d61eeb`; Fix 1 already fully ticked in earlier commits)
+- [x] Add a "Landed" summary paragraph at the top of §6 alongside the branch progress table (branch rollup: +2,711 / −103 across 17 files, 132 new unit tests)
+- [x] Add row to `docs/resource_estimator_implement.md` progress table: `| **O — Reliable proposer pre-flight: blacklist + static-mode cost check** | 2026-04-20 | ... |`
+- [x] No code changes in this commit — docs only
+- [x] User approves doc diff → commit
 
 ---
 
