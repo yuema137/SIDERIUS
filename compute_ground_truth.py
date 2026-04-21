@@ -4,30 +4,32 @@
 compute_ground_truth.py
 
 Computes the theoretical ground-truth (ceiling) denoising score for the 20
-TIDMAD validation files — i.e., the score a perfect denoiser (output == CH2)
-would achieve. Produces two outputs:
+fine TIDMAD validation files under the **Option B global-s_max convention**
+— i.e., the score a perfect denoiser (output == CH2) would achieve on the
+same ruler used by ``scoring_utils.score_vector`` and by
+``compute_raw_baseline.py``.
 
-1. Per-file scores under the LEGACY file-local formula (one JSON per file,
-   format mirror of ``raw_baseline/raw_baseline_score_file_XXXX.json``).
-   Use these as the dashboard per-file ceiling line, and for direct
-   comparison against raw_baseline.
+Perfect-denoiser substitution: the denoised CH1 equals CH2, so
+``snr_squid[f][i] == snr_sg[f][i] == anchor[f][i]``. The per-file and
+grand-mean formulas collapse to anchor-only expressions:
 
-2. A single scalar ceiling under the ANCHOR-NORMALIZED formula (same formula
-   used by ``execute_tools.scoring_utils.score_vector``, i.e. the scoring
-   pipeline the LLM-driven tuner optimizes).
+    per_segment      = anchor[f][i]² / s_max_GLOBAL
+    per_file_linear  = mean_i(per_segment)
+    per_file_score   = log_{5.27}(round(per_file_linear, 2) + 1e-10)
 
-Both are computed directly from ``segment_anchors.json``: no HDF5 reads are
-required because the anchor map already stores the per-segment CH2 SNRs we
-would otherwise derive from CH2 PSDs. Runs in milliseconds.
+    grand_mean       = ( Σ_{f,i} per_segment ) / ( Σ_f |S_f| )
+    scalar_score     = log_{5.27}(round(grand_mean, 2) + 1e-10)
 
-Caveat: the anchor map is produced with scipy.fft; ``compute_raw_baseline.py``
-uses numpy.fft. Numerical differences are <1e-5 relative, but if you need
-bit-exact parity with raw_baseline, re-derive the CH2 SNRs from HDF5 using
-the same code path as raw_baseline.
+Both are read directly from ``segment_anchors.json`` — no HDF5 reads, runs
+in milliseconds.
 
 Output files:
-  {output_dir}/ground_truth_score_file_{index:04d}.json     (legacy per-file)
+  {output_dir}/ground_truth_score_file_{index:04d}.json     (per-file ceiling)
   {output_dir}/ceiling_anchor_normalized.json               (scalar ceiling)
+
+Per-file JSON schema mirrors ``raw_baseline_score_file_XXXX.json`` so the
+dashboard and any downstream consumer can load baseline and ceiling the
+same way.
 
 Usage:
   # Compute everything (skip already-done per-file JSONs):
@@ -47,40 +49,43 @@ import os
 from datetime import datetime
 
 # ---------------------------------------------------------------------------
-# Core formulas
+# Core formulas — all use the global s_max from the anchor map.
 # ---------------------------------------------------------------------------
 
-def _legacy_per_file_ceiling(anchors_f: list[float]) -> float:
-    """Legacy file-local score with denoiser output == CH2 (so snr_squid
-    identically equals snr_sg). Mirrors ``compute_raw_baseline._calculate_score``:
 
-        max_sg   = max(snr_sg)                                  # per-file max
-        weights  = snr_sg / max_sg                              # ∈ [0, 1]
-        score    = mean_s(weights * snr_squid)                  # = mean(snr_sg²) / max_sg
-        score    = round(score, 2) + 1e-10                      # matches raw_baseline exactly
-        return log_{5.27}(score)
+def _global_per_file_ceiling(anchors_f: list[float], s_max: float) -> float:
+    """Perfect-denoiser per-file ceiling under the global-s_max ruler.
+
+        per_segment     = anchor[i]² / s_max_GLOBAL
+        per_file_linear = mean_i(per_segment)
+        return            log_{5.27}(round(per_file_linear, 2) + 1e-10)
+
+    Same ruler as ``compute_raw_baseline._calculate_score`` and as
+    ``scoring_utils.score_vector`` (``legacy_mode=False``), so baseline,
+    ceiling, and model scores are mutually comparable.
+
+    See ``docs/align_denoising_score.md`` §4.1.
     """
     n = len(anchors_f)
-    max_sg = max(anchors_f) if max(anchors_f) != 0 else 1.0
-    raw = sum(v * v for v in anchors_f) / (n * max_sg)
-    score = round(raw, 2) + 1e-10
-    return float(math.log(score, 5.27))
+    per_file_linear = sum(v * v for v in anchors_f) / (n * s_max)
+    score_lin = round(per_file_linear, 2) + 1e-10
+    return float(math.log(score_lin, 5.27))
 
 
 def _anchor_normalized_ceiling(
     anchors: dict[str, list[float]], s_max: float
 ) -> tuple[list[float], float]:
-    """Anchor-normalized ceiling with denoiser output == CH2.
+    """Grand-mean scalar ceiling under the global-s_max ruler.
 
-    Per-segment:   weighted_snr[f,i] = anchor[f,i]² / s_max
-    Per-file:      file_vector[f]    = mean_i(weighted_snr[f,i])
-    Grand mean:    grand             = Σ_{f,i} weighted_snr  /  Σ_f |S_f|
-    Scalar:        score             = log_{5.27}(round(grand, 2) + 1e-10)
+    Per-segment:   per_segment[f,i] = anchor[f,i]² / s_max
+    Per-file:      file_vector[f]   = mean_i(per_segment[f,i])
+    Grand mean:    grand            = Σ_{f,i} per_segment  /  Σ_f |S_f|
+    Scalar:        score            = log_{5.27}(round(grand, 2) + 1e-10)
 
     Same aggregation as ``scoring_utils.score_vector`` (grand mean + TIDMAD
-    round); the only change is that snr_squid is replaced by anchor (the
-    perfect-denoiser substitution). Using the grand mean makes the scalar
-    legacy-compatible regardless of whether every file has the same
+    round); the only change is that ``snr_squid`` is replaced by ``anchor``
+    (the perfect-denoiser substitution). Using the grand mean makes the
+    scalar legacy-compatible regardless of whether every file has the same
     segment count; when ``|S_f|`` is uniform (the typical 200-per-file
     anchor map) it equals ``mean_f(file_vector)``.
 
@@ -111,7 +116,7 @@ def _anchor_normalized_ceiling(
 def main():
     parser = argparse.ArgumentParser(
         description="Compute theoretical ground-truth (perfect-denoiser) "
-                    "scores from an anchor map.",
+                    "scores under the Option B global-s_max convention.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -153,11 +158,11 @@ def main():
     print(f"  anchor_map : {args.anchor_map}")
     print(f"  output_dir : {args.output_dir}")
     print(f"  num_files  : {num_files}")
-    print(f"  s_max      : {s_max:.6g}")
+    print(f"  s_max      : {s_max:.6g}  (global, from anchor map)")
     print(f"  override   : {args.override}")
     print(f"{'='*60}\n")
 
-    # --- 1. Per-file legacy ceiling ---
+    # --- 1. Per-file ceiling under global s_max ---
     computed = 0
     skipped = 0
     for f_str in sorted(anchors, key=int):
@@ -170,12 +175,13 @@ def main():
             skipped += 1
             continue
 
-        score = _legacy_per_file_ceiling(anchors[f_str])
+        score = _global_per_file_ceiling(anchors[f_str], s_max)
         result = {
             "file_index":  f_idx,
             "score":       score,
             "mode":        "fine",
-            "formula":     "legacy_file_local_ceiling",
+            "s_max":       s_max,
+            "formula":     "option_b_global_s_max_ceiling",
             "source":      os.path.basename(args.anchor_map),
             "computed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
@@ -203,7 +209,7 @@ def main():
 
     print(f"\n{'='*60}")
     print(f"  Done.  per-file computed={computed}  skipped={skipped}")
-    print(f"         scalar ceiling (anchor-normalized) = {scalar:.4f}")
+    print(f"         scalar ceiling (global s_max) = {scalar:.4f}")
     print(f"{'='*60}\n")
 
 
