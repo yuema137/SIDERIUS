@@ -72,21 +72,35 @@ def _anchor_normalized_ceiling(
 ) -> tuple[list[float], float]:
     """Anchor-normalized ceiling with denoiser output == CH2.
 
-    Per-segment:  weighted_snr[s,f] = anchor[s,f]² / s_max
-    Per-file:     file_vector[f]    = mean_s(weighted_snr[s,f])
-    Scalar:       score             = log_{5.27}(mean_f(file_vector[f]) + 1e-10)
+    Per-segment:   weighted_snr[f,i] = anchor[f,i]² / s_max
+    Per-file:      file_vector[f]    = mean_i(weighted_snr[f,i])
+    Grand mean:    grand             = Σ_{f,i} weighted_snr  /  Σ_f |S_f|
+    Scalar:        score             = log_{5.27}(round(grand, 2) + 1e-10)
 
-    Same aggregation as ``scoring_utils.score_vector``; the only change is
-    that snr_squid is replaced by anchor (the perfect-denoiser substitution).
+    Same aggregation as ``scoring_utils.score_vector`` (grand mean + TIDMAD
+    round); the only change is that snr_squid is replaced by anchor (the
+    perfect-denoiser substitution). Using the grand mean makes the scalar
+    legacy-compatible regardless of whether every file has the same
+    segment count; when ``|S_f|`` is uniform (the typical 200-per-file
+    anchor map) it equals ``mean_f(file_vector)``.
+
+    See ``docs/align_denoising_score.md`` §C.2.
 
     Returns:
         (file_vector, scalar_score)
     """
     file_vector: list[float] = []
+    total_weighted = 0.0
+    total_count = 0
     for f in sorted(anchors, key=int):
         a = anchors[f]
-        file_vector.append(sum(v * v for v in a) / len(a) / s_max)
-    scalar = math.log(sum(file_vector) / len(file_vector) + 1e-10, 5.27)
+        file_sum = sum(v * v for v in a) / s_max
+        file_vector.append(file_sum / len(a))
+        total_weighted += file_sum
+        total_count += len(a)
+    grand_mean = total_weighted / total_count
+    # TIDMAD round: legacy applies ``np.round(·, 2) + 1e-10`` before log.
+    scalar = math.log(round(grand_mean, 2) + 1e-10, 5.27)
     return file_vector, float(scalar)
 
 

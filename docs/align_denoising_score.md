@@ -830,7 +830,13 @@ In order. Each step gets its own commit for bisectability.
       aggregation `Σ/(Σ|S_f|)` implemented. Unit tests updated to assert
       `log_{5.27}(round(grand_mean, 2) + 1e-10)` and to exercise
       `legacy_mode=True` (13/13).
-- [ ] **C.2** Add TIDMAD round to `_anchor_normalized_ceiling`.
+- [x] **C.2** Add TIDMAD round to `_anchor_normalized_ceiling`. Also
+      restructured to compute the grand mean
+      (`Σ_{f,i} anchor²/s_max / Σ_f |S_f|`) so the scalar is
+      legacy-compatible under non-uniform `|S_f|`; under uniform
+      `|S_f|` it equals `mean_f(file_vector)` as before. Hand-computed
+      unit tests in `tests/unit/test_compute_ground_truth.py` (7/7) lock
+      the formula against accidental drift.
 - [ ] **D**   Rebuild `segment_anchors.json` (one-shot command;
       regenerated artifacts committed to the data mount, not the repo).
 - [ ] **4.1** Strip private copies from `compute_raw_baseline.py`;
