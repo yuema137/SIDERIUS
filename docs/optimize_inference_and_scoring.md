@@ -120,6 +120,26 @@ The observed failure mode — `SIGKILL` from the kernel — is silent and irreco
 | Action | Add explicit `del alltrain, alltarget, denoised; gc.collect()` at end of each per-file iteration, mirroring the trial-mode cleanup at lines 204–205 |
 | Effect | Caps per-file RSS growth in the inference subprocess; combined with Fix 1, the subprocess stays well under the 24 GB ceiling for 20-file eval loops |
 
+#### Trial-mode audit (2026-04-20, no change required)
+
+The symmetric question — does the trial-mode loop at `inference_single.py:151–205` need the same pre-write release pattern? — was measured against the same harness used for Commit 5. Smoke: 20-file loop over real TIDMAD data, `SEGS_PER_FILE=10` (matching `trial_portion=0.05`), GPU forward pass elided, two runs with `FIX3_ENABLED=0/1`:
+
+| Metric                         | FIX3=0 (current)  | FIX3=1 (mirrored fix) | Δ           |
+|--------------------------------|-------------------|-----------------------|-------------|
+| `rss_load` (peak alloc)        | 4.023 GB          | 4.022 GB              | −0.001 GB   |
+| `rss_write_enter` peak         | 4.023 GB          | 3.836 GB              | −0.187 GB   |
+| **`ru_maxrss` (cumulative)**   | **7.581 GB**      | **7.580 GB**          | **−0.001 GB** |
+| residual drift, file 0 → 19    | +0.001 GB         | +0.009 GB             | +0.008 GB   |
+
+Two findings follow:
+
+1. **Trial mode is already plateau-stable.** Per-file residual `Δ` hovers at ±0.01 GB for files 1–19 in both variants. The existing end-of-iteration `del + gc.collect()` (lines 204–205) prevents cross-file accumulation; there is no staircase to fix.
+2. **OS-visible peak (`ru_maxrss`) is unchanged** between the two variants. The Python allocator retains freed pages in-process rather than returning them to the OS, so `create_abra_file`'s transient `.flatten().astype(int8)` copies (~400 MB at trial-mode payload sizes) reuse already-mapped pages regardless of when the raw buffers are released. The −0.187 GB difference at `rss_write_enter` is Python-accounting-visible but allocator-reabsorbed before the write phase peaks.
+
+This contrasts with the normal-mode case (Commit 5), where the per-file payload is ~30× larger (one contiguous ~1.9 GB `denoised` array) and the write-phase transients *do* force allocator expansion — hence the measured 9.43 GB → 5.68 GB win there. At trial-mode payload sizes the mechanism no longer bites.
+
+Decision: **no code change to the trial-mode path.** A structural mirror of Commit 5 in this branch was prototyped, measured (numbers above), and reverted to avoid adding code that carries a misleading resemblance to the high-impact normal-mode fix. If trial-mode payloads grow (e.g. `trial_portion` raised past ~0.3 or input-size / batch-size regimes shift), re-run this harness and re-evaluate.
+
 ### Fix 4 — Parent-process instrumentation
 
 | Item | Detail |
