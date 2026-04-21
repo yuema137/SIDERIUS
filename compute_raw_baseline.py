@@ -36,7 +36,6 @@ import math
 import os
 from datetime import datetime
 
-import h5py
 import numpy as np
 from tqdm import tqdm
 
@@ -51,21 +50,36 @@ from execute_tools.scoring_utils import process_segment
 # See ``docs/align_denoising_score.md`` §4.1.
 # ---------------------------------------------------------------------------
 
+# Number of seconds (and hence 1-second segments) per TIDMAD validation file
+# under the legacy LIST-input shortcut. Real ``abra_validation_*.h5`` files
+# actually contain 201 seconds of data; legacy ``calculateBenchmark`` when
+# called with a list of files uses ``n = 200 * len(file_list)`` and silently
+# ignores the trailing second. Matching that behavior bit-for-bit requires
+# the same fixed cap here — reading ``length // 10_000_000`` would yield
+# 201 and run past the end of the 1-element file list.
+_LEGACY_LIST_PATH_N = 200
+
+
 def _calculate_score(data_dir, fname, coarse, parallel, num_workers):
     """Byte-strict legacy per-file score.
 
-    Mirrors ``denoising_score_old.calculateBenchmark(path, [fname], args)``:
-        n = length // 10_000_000        # no cap
+    Mirrors ``denoising_score_old.calculateBenchmark(path, [fname], args)``
+    under its **list-input path**, which is how the legacy CLI is
+    invoked:
+
+        n = 200 * len(file_list)        # list-path shortcut
         if coarse:
-            n = int(n / 10)             # no ``max(1, ·)`` guard
+            n = int(n / 10)
         snr_sg  = snr_sg / np.amax(snr_sg)
         score   = np.round(Σ snr_sg·snr_squid / n, 2) + 1e-10
         return math.log(score, 5.27)
+
+    ``_calculate_score`` is always called on one file at a time from
+    ``main()``, so ``len(file_list) = 1`` and ``n = 200``. No HDF5
+    length read is needed; the 201-second trailing data is intentionally
+    ignored to match legacy.
     """
-    fpath = os.path.join(data_dir, fname)
-    with h5py.File(fpath, 'r') as f:
-        length = f['/timeseries/channel0001/timeseries'].shape[0]
-    n = length // 10_000_000
+    n = _LEGACY_LIST_PATH_N
     if coarse:
         n = int(n / 10)
 

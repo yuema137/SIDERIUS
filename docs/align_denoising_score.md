@@ -1,6 +1,6 @@
 # Aligning the SIDERIUS Denoising Score to 100% Legacy Parity
 
-**Status:** In progress — Phase A + B complete, Phases C / 4.1 / 5 / D remaining.
+**Status:** In progress — Phases A, B, C, 4.1, 5.1 complete. Phases D, 4.2, 5.2 remaining.
 **Owner:** scoring layer (`execute_tools/scoring_utils.py`, `compute_raw_baseline.py`,
 `compute_ground_truth.py`, `execute_tools/build_anchor_map.py`).
 **Reference specification (authoritative):** `/home/tidmad/TIDMAD/denoising_score_old.py`.
@@ -648,11 +648,21 @@ here, and vice-versa.
                          decimals=2) + 1e-10
        return float(math.log(score, 5.27))
    ```
-4. The `min(·, 200)` cap and `max(1, n // 10)` guards are **removed** — the
-   legacy script has no such guards and they could mask malformed data in
-   a way that silently diverges. Real 200-second files give `n = 200` and
-   `int(n/10) = 20` either way.
-5. With these changes, `compute_raw_baseline._calculate_score` is a
+4. **`n` is hardcoded to 200** (fine) / `int(200/10) = 20` (coarse),
+   matching legacy's LIST-input shortcut `n = 200 * len(file_list)` for a
+   single-file list. Originally the plan was to derive `n` from the HDF5
+   length (`length // 10_000_000`); that turned out to be wrong. Real
+   `abra_validation_*.h5` files are **201 seconds** (2,010,000,000
+   samples) — one second longer than legacy assumes. A length-derived
+   `n = 201` would overrun the 1-element `file_list` inside
+   `get_one_sec_psd` (which computes `file_num = start // 200`) at
+   `i = 200`. Legacy's list-path silently caps the trailing second; we
+   match that by hardcoding `n = 200`.
+5. The `min(·, 200)` cap and `max(1, n // 10)` guards from the
+   pre-refactor code were guarding against the same out-of-range
+   issue. Under the hardcoded `n` they are no longer needed — there is
+   nothing to cap.
+6. With these changes, `compute_raw_baseline._calculate_score` is a
    per-file, byte-strict transcription of `denoising_score_old.calculateBenchmark`
    invoked with a single-file list.
 
@@ -840,24 +850,30 @@ In order. Each step gets its own commit for bisectability.
 - [ ] **D**   Rebuild `segment_anchors.json` (one-shot command;
       regenerated artifacts committed to the data mount, not the repo).
 - [x] **4.1** Strip private copies from `compute_raw_baseline.py`;
-      re-import strict primitives; remove `min(·, 200)` / `max(1, ·//10)`
-      guards. Private `_get_one_sec_psd`, `_find_peak`, `_get_snr`,
-      `_process_iteration` deleted; `_calculate_score` now a byte-strict
-      transcription of `denoising_score_old.calculateBenchmark` on a
-      single-file list. Mocked unit tests in
-      `tests/unit/test_compute_raw_baseline.py` (3/3) cover the
-      aggregation and the guard removal. (Regeneration of
-      `raw_baseline/*.json` via `python compute_raw_baseline.py --override`
-      is a downstream artifact step — separate from this commit.)
+      re-import strict primitives. Private `_get_one_sec_psd`,
+      `_find_peak`, `_get_snr`, `_process_iteration` deleted;
+      `_calculate_score` now a byte-strict transcription of
+      `denoising_score_old.calculateBenchmark` on a single-file list
+      with `n = 200` hardcoded to match legacy's LIST-input shortcut.
+      `import h5py` dropped — no length read needed. Mocked unit tests
+      in `tests/unit/test_compute_raw_baseline.py` (3/3) cover fine
+      n=200 iteration count, coarse n=20 stride, and hand-computed
+      aggregation. (Regeneration of `raw_baseline/*.json` via
+      `python compute_raw_baseline.py --override` is a downstream
+      artifact step — separate from this commit.)
 - [ ] **4.2** Rerun `python compute_ground_truth.py --override` with the
       rebuilt anchor map; verify ceilings are ≥ prior denoiser scores
       (sanity check).
-- [ ] **5.1a** Copy the five legacy scoring functions verbatim into
-      `tests/fixtures/legacy_scoring.py`, apply the one-line
-      `.astype(np.float64)` patch inside `GetOneSecPSD` to restore numpy
-      1.x semantics under numpy 2.4.3.
-- [ ] **5.1b** Parity test committed and passing at `|Δ| < 1e-10`
-      against the fixture's `calculateBenchmark` (fine and coarse).
+- [x] **5.1a** Legacy five functions copied verbatim into
+      `tests/fixtures/legacy_scoring.py`. One-line
+      `.astype(np.float64)` patch inside `GetOneSecPSD` restores numpy
+      1.x `complex128` semantics under numpy 2.4.3 (Option B).
+- [x] **5.1b** Parity test `tests/integration/scoring/test_legacy_parity.py`
+      committed and passing at `|Δ| < 1e-10` (3/3, ~217s runtime):
+      (i) `compute_raw_baseline._calculate_score` coarse, (ii) fine,
+      (iii) `score_vector(legacy_mode=True)` — the production merge
+      gate. Marked `@pytest.mark.real_run`; skips if
+      `abra_validation_0000.h5` is absent.
 - [ ] **5.2** Anchor-map consistency assertion committed.
 
 ---
