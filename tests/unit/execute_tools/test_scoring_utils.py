@@ -281,14 +281,21 @@ class TestScoreVector:
 
     @patch("execute_tools.scoring_utils.get_snr", side_effect=_mock_get_snr_fixed)
     @patch("execute_tools.scoring_utils.get_one_sec_psd", side_effect=_mock_get_one_sec_psd)
-    def test_legacy_mode_uses_file_list_local_smax(self, mock_psd, mock_snr):
-        """``legacy_mode=True`` computes ``s_max = np.amax(collected snr_sg)``
-        and ignores any anchor map / explicit s_max argument.
+    def test_legacy_mode_derives_s_max_globally_from_collected_pairs(self, mock_psd, mock_snr):
+        """``legacy_mode=True`` derives ``s_max`` globally as
+        ``np.amax(snr_sg)`` over *all pairs collected across the sample_set*
+        — not per-file. It ignores any anchor map or explicit ``s_max``
+        argument passed in.
 
-        Mocked ``snr_sg = 2.0`` for every segment, so the legacy s_max is 2.0.
-        For a single segment this yields grand_mean = (2/2) * 2 = 2.0 and
-        the scalar becomes ``log_{5.27}(round(2.0, 2) + 1e-10)`` regardless
-        of the anchor map or s_max we pass in.
+        Mocked ``snr_sg = 2.0`` for every segment, so the global-over-
+        collected-data s_max is 2.0. For a single segment this yields
+        grand_mean = (2/2) * 2 = 2.0 and the scalar becomes
+        ``log_{5.27}(round(2.0, 2) + 1e-10)`` regardless of the anchor map
+        or s_max we pass in.
+
+        This is distinct from the Option B convention (``legacy_mode=False``),
+        where ``s_max`` is the global maximum over the anchor map — a fixed
+        constant independent of which segments happen to be sampled.
         """
         sample_set: SampleSet = {6: [0]}
         _, scalar_legacy = score_vector(
