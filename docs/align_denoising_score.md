@@ -839,10 +839,16 @@ In order. Each step gets its own commit for bisectability.
       the formula against accidental drift.
 - [ ] **D**   Rebuild `segment_anchors.json` (one-shot command;
       regenerated artifacts committed to the data mount, not the repo).
-- [ ] **4.1** Strip private copies from `compute_raw_baseline.py`;
+- [x] **4.1** Strip private copies from `compute_raw_baseline.py`;
       re-import strict primitives; remove `min(·, 200)` / `max(1, ·//10)`
-      guards; re-run `python compute_raw_baseline.py --override` to
-      regenerate `raw_baseline/*.json`.
+      guards. Private `_get_one_sec_psd`, `_find_peak`, `_get_snr`,
+      `_process_iteration` deleted; `_calculate_score` now a byte-strict
+      transcription of `denoising_score_old.calculateBenchmark` on a
+      single-file list. Mocked unit tests in
+      `tests/unit/test_compute_raw_baseline.py` (3/3) cover the
+      aggregation and the guard removal. (Regeneration of
+      `raw_baseline/*.json` via `python compute_raw_baseline.py --override`
+      is a downstream artifact step — separate from this commit.)
 - [ ] **4.2** Rerun `python compute_ground_truth.py --override` with the
       rebuilt anchor map; verify ceilings are ≥ prior denoiser scores
       (sanity check).

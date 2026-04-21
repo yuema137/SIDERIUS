@@ -31,7 +31,6 @@ Usage examples:
 
 import argparse
 import concurrent.futures
-import gc
 import json
 import math
 import os
@@ -41,79 +40,41 @@ import h5py
 import numpy as np
 from tqdm import tqdm
 
+from execute_tools.scoring_utils import process_segment
+
 # ---------------------------------------------------------------------------
-# Scoring functions (copied verbatim from denoising_score_single.py to avoid
-# import side-effects; do NOT modify the originals)
+# Per-file legacy score (byte-strict transcription of
+# ``denoising_score_old.calculateBenchmark`` invoked on a single-file list).
+#
+# All PSD/SNR primitives live in ``execute_tools.scoring_utils`` — there is
+# one definition shared by every scoring entry point. No private copies.
+# See ``docs/align_denoising_score.md`` §4.1.
 # ---------------------------------------------------------------------------
-
-def _get_one_sec_psd(file_path, files, ch, start=0):
-    file_list = []
-    if isinstance(files, list):
-        file_list = [os.path.join(file_path, f) for f in files]
-    elif files.endswith(".h5"):
-        file_list = [os.path.join(file_path, files)]
-
-    N = 10_000_000
-    file_num   = start // 200
-    start_idx  = N * (start % 200)
-
-    with h5py.File(file_list[file_num], 'r') as h5f:
-        key = 'channel0001' if ch == 1 else 'channel0002'
-        data = h5f['timeseries'][key]['timeseries'][start_idx:start_idx + N]
-        volt_range    = h5f['timeseries']['channel0001'].attrs['voltage_range_mV']
-        sampling_freq = h5f['timeseries']['channel0001'].attrs['sampling_frequency']
-
-        scaling   = np.float32(volt_range / (2 * 128.0))
-        ts        = np.array(data, dtype=np.float32) * scaling
-        dt        = 1.0 / sampling_freq
-        psd_chunk = dt / N * (abs(np.fft.rfft(ts)) ** 2)[1:]
-        freq_arr  = np.linspace(0, sampling_freq / 2, int(N / 2))
-
-    del data, ts
-    gc.collect()
-    return freq_arr, psd_chunk
-
-
-def _find_peak(pwr):
-    peakdiff  = pwr[1:-1] - pwr[:-2] - pwr[2:]
-    peak_idx  = int(np.where(peakdiff == np.amax(peakdiff))[0][0]) + 1
-    return peak_idx
-
-
-def _get_snr(freq, pwr, target=0):
-    center_id   = _find_peak(pwr) if target == 0 else int(np.where(freq == target)[0][0])
-    sig_range   = 1
-    noise_range = 50
-    signal = np.sum(pwr[center_id - sig_range : center_id + sig_range + 1])
-    noise  = np.sum(pwr[center_id - noise_range : center_id + noise_range + 1]) - signal
-    if noise <= 0:
-        noise = 1e-5
-    return [signal / noise, freq[center_id]]
-
-
-def _process_iteration(i, path, file, coarse):
-    start_index = i * 10 if coarse else i
-    freq_sg,    psd_sg    = _get_one_sec_psd(path, file, ch=2, start=start_index)
-    snr_sg,     center_f  = _get_snr(freq_sg, psd_sg)
-    freq_squid, psd_squid = _get_one_sec_psd(path, file, ch=1, start=start_index)
-    snr_squid             = _get_snr(freq_squid, psd_squid, center_f)[0]
-    return i, snr_sg, snr_squid
-
 
 def _calculate_score(data_dir, fname, coarse, parallel, num_workers):
+    """Byte-strict legacy per-file score.
+
+    Mirrors ``denoising_score_old.calculateBenchmark(path, [fname], args)``:
+        n = length // 10_000_000        # no cap
+        if coarse:
+            n = int(n / 10)             # no ``max(1, ·)`` guard
+        snr_sg  = snr_sg / np.amax(snr_sg)
+        score   = np.round(Σ snr_sg·snr_squid / n, 2) + 1e-10
+        return math.log(score, 5.27)
+    """
     fpath = os.path.join(data_dir, fname)
     with h5py.File(fpath, 'r') as f:
         length = f['/timeseries/channel0001/timeseries'].shape[0]
-    n = min(length // 10_000_000, 200)  # cap at 200: single-file addressing assumes start < 200
+    n = length // 10_000_000
     if coarse:
-        n = max(1, n // 10)
+        n = int(n / 10)
 
     snr_squid = np.zeros(n)
     snr_sg    = np.zeros(n)
 
     if parallel:
         with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as ex:
-            tasks = [ex.submit(_process_iteration, i, data_dir, fname, coarse)
+            tasks = [ex.submit(process_segment, i, data_dir, fname, coarse)
                      for i in range(n)]
             for fut in tqdm(concurrent.futures.as_completed(tasks), total=n,
                             desc=f"  scoring {fname}"):
@@ -122,12 +83,11 @@ def _calculate_score(data_dir, fname, coarse, parallel, num_workers):
                 snr_squid[i] = s_squid
     else:
         for i in tqdm(range(n), desc=f"  scoring {fname}"):
-            _, s_sg, s_squid = _process_iteration(i, data_dir, fname, coarse)
+            _, s_sg, s_squid = process_segment(i, data_dir, fname, coarse)
             snr_sg[i]    = s_sg
             snr_squid[i] = s_squid
 
-    max_sg = np.amax(snr_sg)
-    snr_sg = snr_sg / (max_sg if max_sg != 0 else 1.0)
+    snr_sg = snr_sg / np.amax(snr_sg)
     score  = np.round(np.sum(np.multiply(snr_sg, snr_squid)) / snr_squid.size,
                       decimals=2) + 1e-10
     return float(math.log(score, 5.27))
