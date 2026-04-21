@@ -165,7 +165,6 @@ SIDERIUS/
 │   ├── soft_edge_for_all_nodes.md
 │   ├── learning_from_sota_agents.md
 │   ├── running_chain_test.md         # ⭐ Operational runbook for chain runs (lilab + SDSC)
-│   ├── tidmad_signal_frequencies.txt # Physical reference: 309 injected signal frequencies
 │   ├── first_model_proposal_demo_architecture.md
 │   ├── small_sample_trial_dependencies_improve.md
 │   └── memories/                     # Per-developer shared memories (gitignored, see README inside)
@@ -569,7 +568,7 @@ More in [`docs/memories/reference_sdsc_workspace_paths.md`](docs/memories/refere
 - [`docs/running_chain_test.md`](docs/running_chain_test.md) — runbook for chain runs on lilab and SDSC
 
 ### Reference data
-- [`docs/tidmad_signal_frequencies.txt`](docs/tidmad_signal_frequencies.txt) — 309 injected signal frequencies (kHz–MHz), distributed across 20 files
+- [`reference_data/tidmad_signal_frequencies.txt`](reference_data/tidmad_signal_frequencies.txt) — 309 injected signal frequencies (kHz–MHz), distributed across 20 files
 
 ### Per-developer memories (gitignored)
 - `docs/memories/` — local-only shared notes. See `docs/memories/README.md` for the format. Currently captures:
