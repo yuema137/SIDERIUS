@@ -1,6 +1,6 @@
 # Aligning the SIDERIUS Denoising Score to 100% Legacy Parity
 
-**Status:** In progress — Phases A, B, C, 4.1, 5.1 complete. Phases D, 4.2, 5.2 remaining.
+**Status:** In progress — Phases A, B, C, 4.1, 5.1, 5.2, D complete. Phase 4.2 remaining.
 **Owner:** scoring layer (`execute_tools/scoring_utils.py`, `compute_raw_baseline.py`,
 `compute_ground_truth.py`, `execute_tools/build_anchor_map.py`).
 **Reference specification (authoritative):** `/home/tidmad/TIDMAD/denoising_score_old.py`.
@@ -847,8 +847,12 @@ In order. Each step gets its own commit for bisectability.
       `|S_f|` it equals `mean_f(file_vector)` as before. Hand-computed
       unit tests in `tests/unit/test_compute_ground_truth.py` (7/7) lock
       the formula against accidental drift.
-- [ ] **D**   Rebuild `segment_anchors.json` (one-shot command;
-      regenerated artifacts committed to the data mount, not the repo).
+- [x] **D**   Rebuilt `segment_anchors.json` under strict primitives
+      (Option B). New `s_max = 295_715_680.1425` (previous stale value
+      was `295_715_731.2500`; |Δ|≈51, consistent with the float32 FFT
+      drift amplification observed in the 5.2 recomputation before
+      rebuild). Regenerated artifact lives on the data mount at
+      `/home/klz/Data/TIDMAD/segment_anchors.json`, not in the repo.
 - [x] **4.1** Strip private copies from `compute_raw_baseline.py`;
       re-import strict primitives. Private `_get_one_sec_psd`,
       `_find_peak`, `_get_snr`, `_process_iteration` deleted;
@@ -874,7 +878,16 @@ In order. Each step gets its own commit for bisectability.
       (iii) `score_vector(legacy_mode=True)` — the production merge
       gate. Marked `@pytest.mark.real_run`; skips if
       `abra_validation_0000.h5` is absent.
-- [ ] **5.2** Anchor-map consistency assertion committed.
+- [x] **5.2** Anchor-map consistency assertion committed at
+      `tests/integration/scoring/test_anchor_map_consistency.py`
+      (2/2 passing post-Phase-D). Two tests: (i) static — top-level
+      `s_max` equals `max(max(segs) for segs in anchors.values())`;
+      (ii) strict-primitive recomputation — CH2 SNR for a sparse
+      5×3 grid (files 0, 5, 10, 15, 19 × segments 0, 100, 199)
+      matches stored anchors at `|Δ| < 1e-10`. Test (ii) is the
+      canonical canary for stale anchor maps — if a future refactor
+      changes a primitive silently, this test goes red and points
+      at the required rebuild command.
 
 ---
 
