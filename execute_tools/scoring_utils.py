@@ -13,14 +13,27 @@ Two layers:
    (sparse sampling) directly comparable to formal mode (all 20 files).
 
 All functions operate on raw HDF5 data and are stateless.
+
+LEGACY PARITY: every function here is a byte-strict transcription of the
+reference implementation at ``/home/tidmad/TIDMAD/denoising_score_old.py``.
+See ``docs/align_denoising_score.md`` for the full alignment contract. In
+particular:
+
+* scaling is applied in the time domain (``TS = data.astype(float32) * scaling``);
+* the FFT is ``np.fft.rfft`` in ``complex128`` precision — enforced under
+  numpy ≥ 2.0 by ``TS.astype(np.float64)`` immediately before ``rfft``, which
+  restores the implicit float32→float64 promotion performed by numpy ≤ 1.x
+  under which the canonical TIDMAD benchmark numbers were generated;
+* the zero-noise trap in ``get_snr`` uses strict equality (``noise == 0``).
+
+scipy.fft is prohibited here: it uses a different pocketfft backend with a
+different butterfly ordering, and does not produce bit-identical output.
 """
 
 import os
 import gc
-from typing import Optional
 import numpy as np
 import h5py
-from scipy.fft import rfft as _scipy_rfft
 
 from execute_tools.dataset_config import SEGMENT_LENGTH, SEGMENTS_PER_FILE, NUM_FILES
 
@@ -38,67 +51,65 @@ def get_one_sec_psd(
     """
     Compute the Power Spectral Density for a single 1-second segment.
 
+    Byte-strict transcription of ``denoising_score_old.GetOneSecPSD`` under
+    Option B (complex128 FFT — see ``docs/align_denoising_score.md`` §1.3).
+
+    * scaling is ``np.float32(volt_range / (2 * 128.0))``;
+    * scaling is applied **in the time domain** — ``TS = data.astype(float32) * scaling``;
+    * ``TS`` is explicitly upcast to float64 immediately before ``np.fft.rfft``
+      so the FFT runs in complex128 (matches numpy 1.x implicit promotion
+      under which the canonical TIDMAD benchmark numbers were generated);
+    * the reshape ``TS.reshape(len(TS)//N, N)`` is kept literally to match
+      the legacy call shape — for a single N-length slice it is a no-op;
+    * the freq grid uses the literal legacy Nyquist ``5 * 1e6``, not
+      ``sampling_freq / 2``, because the legacy spec hardcodes that value.
+
     Args:
         file_path: Directory containing the HDF5 files.
         files:     Filename or list of filenames (each 200 seconds).
         ch:        Channel number (1 = SQUID/denoised, 2 = ground truth).
         start:     Segment index (0-based). Segment ``start`` in file
-                   ``start // 200`` at offset ``(start % 200) * SEGMENT_LENGTH``.
+                   ``start // SEGMENTS_PER_FILE`` at offset
+                   ``(start % SEGMENTS_PER_FILE) * SEGMENT_LENGTH``.
 
     Returns:
-        (freq_array, psd_chunk) — frequency bins and PSD values.
+        (freq_array, psd_chunk) — float64 frequency bins and float64 PSD
+        values. Length is ``SEGMENT_LENGTH // 2`` (DC bin dropped).
     """
     if isinstance(files, str):
         file_list = [os.path.join(file_path, files)]
     else:
         file_list = [os.path.join(file_path, f) for f in files]
 
+    N = SEGMENT_LENGTH
     file_num = start // SEGMENTS_PER_FILE
-    start_index = SEGMENT_LENGTH * (start % SEGMENTS_PER_FILE)
+    start_index = N * (start % SEGMENTS_PER_FILE)
 
     file = file_list[file_num]
     with h5py.File(file, "r") as h5f:
         channel_key = f"channel{ch:04d}"
         data = h5f["timeseries"][channel_key]["timeseries"][
-            start_index : start_index + SEGMENT_LENGTH
+            start_index : start_index + N
         ]
-
         volt_range = h5f["timeseries"]["channel0001"].attrs["voltage_range_mV"]
         sampling_freq = h5f["timeseries"]["channel0001"].attrs["sampling_frequency"]
 
-        # Fix 2 (docs/optimize_inference_and_scoring.md §2.2) — Deferred
-        # Scaling + scipy.fft migration.
-        #
-        # DFT linearity permits |FFT(c·x)|² = c²·|FFT(x)|², so the
-        # time-domain scaling scalar is absorbed into a post-FFT
-        # prefactor and the full-array float32 multiply is eliminated.
-        # scipy.fft.rfft honors the float32 input (emits complex64);
-        # numpy.fft.rfft would silently promote to complex128 and double
-        # the FFT output footprint.
-        #
-        # We also break up the post-FFT expression and use in-place
-        # numpy ops to free intermediates eagerly. Keeping everything
-        # in one fused expression (`np.abs(fft)**2 * prefactor`) would
-        # hold ~160 MB live on a 10⁷-sample segment; the staged form
-        # below peaks at ~80 MB.
-        scaling = volt_range / (2.0 * 128.0)
+        scaling = np.float32(volt_range / (2 * 128.0))
+        TS = np.array(data, dtype=np.float32) * scaling
         dt = 1.0 / sampling_freq
-        prefactor = np.float32(scaling * scaling * dt / SEGMENT_LENGTH)
 
-        ts = np.asarray(data, dtype=np.float32)
-        del data
+        # Option B — force complex128 FFT by upcasting TS to float64 at
+        # the rfft call site. Under numpy ≥ 2.0, np.fft.rfft preserves
+        # float32 precision (returns complex64); under numpy ≤ 1.x it
+        # implicitly promoted to float64 (returned complex128). The
+        # canonical TIDMAD benchmark numbers were produced under the
+        # complex128 path, so we force it explicitly here.
+        psd_chunk = dt / N * (
+            abs(np.fft.rfft(TS.astype(np.float64).reshape(len(TS) // N, N))) ** 2
+        ).sum(0)[1:]
+        freq_array = np.linspace(0, 5 * 1e6, int(N / 2))
 
-        fft_out = _scipy_rfft(ts)  # complex64 when ts is float32
-        del ts
-
-        psd_chunk = np.abs(fft_out)           # float32, len N/2+1
-        del fft_out
-        np.square(psd_chunk, out=psd_chunk)   # |·|² in place
-        np.multiply(psd_chunk, prefactor, out=psd_chunk)
-        psd_chunk = psd_chunk[1:]
-
-        freq_array = np.linspace(0, sampling_freq / 2, SEGMENT_LENGTH // 2)
-
+    del data, TS, dt
     gc.collect()
     return freq_array, psd_chunk
 
@@ -116,6 +127,12 @@ def get_snr(
 ) -> tuple[float, float]:
     """
     Compute signal-to-noise ratio around a spectral peak.
+
+    Byte-strict transcription of ``denoising_score_old.getSNR``. The
+    zero-noise trap uses strict equality ``noise == 0`` (not ``<= 0``) —
+    the legacy spec only guards the exact-zero case. In practice PSD
+    values are ``|FFT|² / N ≥ 0`` so ``noise`` is never negative; the
+    ``== 0`` form is deliberately preserved for byte-strict parity.
 
     Args:
         freq:   Frequency array from ``get_one_sec_psd``.
@@ -136,7 +153,7 @@ def get_snr(
     noise = (
         np.sum(pwr[center_id - noise_range : center_id + noise_range + 1]) - signal
     )
-    if noise <= 0:
+    if noise == 0:
         noise = 1e-5
     return signal / noise, freq[center_id]
 
@@ -287,7 +304,13 @@ def score_segments(
 
 
 def _score_one_file(args: tuple) -> tuple[int, float]:
-    """Worker function for parallel scoring. Unpacks args for ProcessPoolExecutor."""
+    """Worker for ``score_segments``-based anchor-only per-file scoring.
+
+    Kept for backward compatibility with callers that used the pre-refactor
+    ``score_vector``. The new ``score_vector`` goes through
+    ``_collect_raw_pairs`` instead so it can operate in both anchor mode
+    and ``legacy_mode``.
+    """
     data_dir, denoised_filename, file_index, segment_indices, anchor_map, s_max, raw_data_dir = args
     score = score_segments(
         data_dir=data_dir,
@@ -301,44 +324,115 @@ def _score_one_file(args: tuple) -> tuple[int, float]:
     return file_index, score
 
 
+def _collect_raw_pairs(
+    args: tuple,
+) -> tuple[int, list[tuple[float, float]]]:
+    """
+    Worker — compute raw ``(snr_sg, snr_squid)`` for every requested segment
+    of one file, using byte-strict legacy primitives.
+
+    Returns ``(file_index, [(snr_sg, snr_squid), ...])`` preserving the order
+    of ``segment_indices``. The caller decides how to normalize these pairs
+    (anchor ``s_max`` vs legacy file-list-local ``np.amax``).
+
+    Args tuple layout:
+        (data_dir, denoised_filename, file_index, segment_indices, raw_data_dir)
+    """
+    data_dir, denoised_filename, file_index, segment_indices, raw_data_dir = args
+    if raw_data_dir is None:
+        raw_data_dir = data_dir
+
+    raw_filename = f"abra_validation_{file_index:04d}.h5"
+    pairs: list[tuple[float, float]] = []
+    for local_idx, seg_idx in enumerate(segment_indices):
+        # CH2 (ground truth) from the raw validation file — provides both
+        # snr_sg and the center frequency for the matched-filter CH1 SNR.
+        freq_ch2, psd_ch2 = get_one_sec_psd(raw_data_dir, raw_filename, ch=2, start=seg_idx)
+        snr_sg, center_freq = get_snr(freq_ch2, psd_ch2)
+
+        # CH1 (SQUID / denoised) from the denoised file. Trial-mode layouts
+        # pack sampled segments contiguously, so read by ``local_idx`` not
+        # ``seg_idx``. Formal mode has all 200 segments in place and
+        # ``local_idx == seg_idx``.
+        freq_ch1, psd_ch1 = get_one_sec_psd(data_dir, denoised_filename, ch=1, start=local_idx)
+        snr_squid = get_snr(freq_ch1, psd_ch1, target=center_freq)[0]
+
+        pairs.append((float(snr_sg), float(snr_squid)))
+    return file_index, pairs
+
+
 def score_vector(
     data_dir: str,
     sample_set: SampleSet,
-    anchor_map: dict,
-    s_max: float,
+    anchor_map: dict | None = None,
+    s_max: float | None = None,
     denoised_filename_fn: callable = None,
     raw_data_dir: str | None = None,
     parallel: bool = True,
     num_workers: int = 8,
-) -> tuple[list[float], float]:
+    legacy_mode: bool = False,
+) -> tuple[list[float | None], float]:
     """
-    Score multiple files and return the length-20 score vector + scalar.
+    Score multiple files and return the length-``NUM_FILES`` per-file vector
+    plus a scalar score aligned with the legacy TIDMAD formula.
+
+    Two-phase design (see ``docs/align_denoising_score.md`` §B):
+
+    1. Collect raw ``(snr_sg, snr_squid)`` pairs for every sampled segment
+       across every sampled file, via ``_collect_raw_pairs``.
+    2. Choose ``s_max`` per ``legacy_mode``, normalize, aggregate as the
+       **grand mean** across all sampled segments, then apply the TIDMAD
+       ``round(·, 2) + 1e-10`` step before ``log_{5.27}``.
 
     Args:
         data_dir:              Directory containing the denoised HDF5 files.
         sample_set:            ``{file_index: [segment_indices]}`` — which
                                segments to score per file.
-        anchor_map:            The ``"anchors"`` dict from ``segment_anchors.json``.
-        s_max:                 Global maximum CH2 SNR from the anchor map.
-        denoised_filename_fn:  Optional callable ``(file_index) → filename``.
-                               Defaults to ``"abra_validation_denoised_{model}_{idx}.h5"``
-                               pattern — but since the model name varies, the caller
-                               should provide this.
-        raw_data_dir:          Directory containing the raw validation files
-                               (``abra_validation_XXXX.h5``). Defaults to
-                               ``data_dir`` when ``None``.
-        parallel:              Use multiprocessing to score files in parallel.
-        num_workers:           Number of parallel workers.
+        anchor_map:            The ``"anchors"`` dict from
+                               ``segment_anchors.json``. Only read in
+                               ``legacy_mode=False``. Accepted but unused
+                               in ``legacy_mode=True``.
+        s_max:                 Global maximum CH2 SNR. Required when
+                               ``legacy_mode=False``; ignored when
+                               ``legacy_mode=True`` (computed from the
+                               collected ``snr_sg`` values as
+                               ``np.amax`` of the current file list).
+        denoised_filename_fn:  Callable ``(file_index) → filename`` that
+                               resolves the denoised HDF5 for each file
+                               index. Must be provided — there is no
+                               default.
+        raw_data_dir:          Directory containing the raw validation
+                               files (``abra_validation_XXXX.h5``).
+                               Defaults to ``data_dir`` when ``None``.
+        parallel:              Use multiprocessing to collect across files
+                               in parallel.
+        num_workers:           Max parallel workers.
+        legacy_mode:           When True, reproduces
+                               ``denoising_score_old.calculateBenchmark``
+                               bit-for-bit on ``sample_set`` (provided the
+                               underlying primitives match — see Phase A).
+                               The ``s_max`` used for normalization is
+                               ``np.amax`` over the CURRENTLY sampled
+                               ``snr_sg`` values, mirroring legacy's
+                               file-list-local maximum. No anchor map is
+                               consulted.
 
     Returns:
-        (file_vector, final_scalar_score):
-        - ``file_vector``: length-20 list. ``None`` for files not in
-          the sample set.
-        - ``final_scalar_score``: ``log_{5.27}(mean_of_present_scores + 1e-10)``.
+        (file_vector, final_scalar):
+        - ``file_vector``: length-``NUM_FILES`` list. Entry ``f`` is the
+          per-file weighted mean
+          ``mean_i( snr_sg[f][i] / s_max_used * snr_squid[f][i] )`` for
+          files in ``sample_set``, ``None`` otherwise.
+        - ``final_scalar``: the legacy-style score
+          ``log_{5.27}(round(grand_mean, 2) + 1e-10)``
+          where ``grand_mean = Σ_{f,i} (snr_sg/s_max_used · snr_squid)
+          / Σ_f |S_f|``. For uniform ``|S_f|`` this equals the mean
+          of ``file_vector`` entries; for non-uniform sampling the grand
+          mean is the legacy-compatible aggregation.
 
     Raises:
-        ValueError: If ``denoised_filename_fn`` is None and the caller hasn't
-                    provided a way to resolve denoised filenames.
+        ValueError: If ``denoised_filename_fn`` is None, or if
+                    ``legacy_mode=False`` and ``s_max`` is None.
     """
     import math
     import concurrent.futures
@@ -348,33 +442,77 @@ def score_vector(
             "denoised_filename_fn is required — the scorer needs to know "
             "which denoised file to read for each file_index."
         )
+    if not legacy_mode and s_max is None:
+        raise ValueError(
+            "Non-legacy mode requires s_max (from the anchor map). "
+            "Pass legacy_mode=True to compute s_max from the current "
+            "file list instead."
+        )
 
-    file_vector: list[Optional[float]] = [None] * NUM_FILES
+    file_vector: list[float | None] = [None] * NUM_FILES
 
-    # Build task args for each file
+    # ------------------------------------------------------------------
+    # Phase 1 — collect raw (snr_sg, snr_squid) pairs
+    # ------------------------------------------------------------------
     tasks = []
     for file_index, segment_indices in sample_set.items():
         denoised_filename = denoised_filename_fn(file_index)
         tasks.append((
             data_dir, denoised_filename, file_index, segment_indices,
-            anchor_map, s_max, raw_data_dir,
+            raw_data_dir,
         ))
 
+    raw_pairs: dict[int, list[tuple[float, float]]] = {}
+    if not tasks:
+        return file_vector, float("-inf")
+
     if parallel and len(tasks) > 1:
-        with concurrent.futures.ProcessPoolExecutor(max_workers=min(num_workers, len(tasks))) as executor:
-            for fi, score in executor.map(_score_one_file, tasks):
-                file_vector[fi] = score
+        with concurrent.futures.ProcessPoolExecutor(
+            max_workers=min(num_workers, len(tasks))
+        ) as executor:
+            for fi, pairs in executor.map(_collect_raw_pairs, tasks):
+                raw_pairs[fi] = pairs
     else:
         for task_args in tasks:
-            fi, score = _score_one_file(task_args)
-            file_vector[fi] = score
+            fi, pairs = _collect_raw_pairs(task_args)
+            raw_pairs[fi] = pairs
 
-    # Aggregate: mean of scored entries (skip None for files not in sample_set)
-    valid_scores = [s for s in file_vector if s is not None and not math.isnan(s)]
-    if valid_scores:
-        mean_score = sum(valid_scores) / len(valid_scores)
-        final_scalar = math.log(mean_score + 1e-10, 5.27)
+    # ------------------------------------------------------------------
+    # Phase 2 — choose s_max, normalize, aggregate as legacy grand mean
+    # ------------------------------------------------------------------
+    if legacy_mode:
+        all_snr_sg = [sg for pairs in raw_pairs.values() for (sg, _) in pairs]
+        if not all_snr_sg:
+            return file_vector, float("-inf")
+        # Legacy uses ``np.amax(snr_sg)`` as the normalizer. We cast to
+        # a float array and take ``np.amax`` to match the legacy call
+        # shape exactly (same op as ``snr_sg/np.amax(snr_sg)``).
+        s_max_used = float(np.amax(np.asarray(all_snr_sg, dtype=np.float64)))
+        if s_max_used == 0.0:
+            # Legacy divides without a guard; we refuse to divide by 0
+            # but this branch cannot be reached on real physics data
+            # (CH2 always has non-zero SNR at the peak).
+            s_max_used = 1.0
     else:
-        final_scalar = float("-inf")
+        s_max_used = float(s_max)
 
+    total_weighted = 0.0
+    total_count = 0
+    for fi, pairs in raw_pairs.items():
+        if not pairs:
+            continue
+        file_sum = 0.0
+        for sg, sq in pairs:
+            file_sum += (sg / s_max_used) * sq
+        file_vector[fi] = file_sum / len(pairs)
+        total_weighted += file_sum
+        total_count += len(pairs)
+
+    if total_count == 0:
+        return file_vector, float("-inf")
+
+    grand_mean = total_weighted / total_count
+    # TIDMAD round — legacy applies ``np.round(·, 2) + 1e-10`` before log.
+    score_linear = round(grand_mean, 2) + 1e-10
+    final_scalar = math.log(score_linear, 5.27)
     return file_vector, final_scalar
