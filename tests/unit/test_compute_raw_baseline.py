@@ -1,23 +1,31 @@
 """
 Unit tests for ``compute_raw_baseline._calculate_score`` — global-s_max
-per-file aggregation under the Option B convention.
+per-file aggregation under the Option B convention — and for
+``_maybe_write_anchor_normalized_scalar``, the grand-mean aggregator.
 
 The PSD/SNR primitives themselves are tested in ``test_scoring_utils.py``;
 this test fixes the *aggregation* formula
 
     per_segment = (snr_sg[i] / s_max_GLOBAL) * snr_squid[i]
-    score       = log_{5.27}(round(mean_i(per_segment), 2) + 1e-10)
+    log_score   = log_{5.27}(round(mean_i(per_segment), 2) + 1e-10)
+    linear_sum  = Σ_i per_segment[i]            (unrounded, for grand-mean)
+    n_segments  = n
 
 and the fixed segment counts — ``n = 200`` (fine) or ``n = 20`` (coarse,
 every 10th segment). No HDF5 read — ``process_segment`` is the only
 function mocked out.
 
-See ``docs/align_denoising_score.md`` §4.1.
+See ``docs/align_denoising_score.md`` §4.1 and Decision 13 in
+``docs/aggregated_score_table_awareness.md``.
 """
 from __future__ import annotations
 
+import json
 import math
+import os
 from unittest.mock import patch
+
+import pytest
 
 import compute_raw_baseline
 
@@ -39,22 +47,54 @@ class TestCalculateScoreFine:
         per_segment = (2.0 / 4.0) * 3.0 = 1.5  (for every i)
         mean        = 1.5
         round(1.5, 2) = 1.5
-        score       = 1.5 + 1e-10
-        return        log_{5.27}(1.5 + 1e-10)
+        log_score   = log_{5.27}(1.5 + 1e-10)
+        linear_sum  = 1.5 * 200 = 300.0
+        n_segments  = 200
         """
         def _const_process(i, data_dir, fname, coarse):
             return i, 2.0, 3.0
 
         with patch.object(compute_raw_baseline, "process_segment",
                           side_effect=_const_process):
-            got = compute_raw_baseline._calculate_score(
+            log_score, linear_sum, n_segments = compute_raw_baseline._calculate_score(
                 data_dir="/fake", fname="f.h5",
                 s_max=_TEST_S_MAX,
                 coarse=False, parallel=False, num_workers=1,
             )
 
-        expected = math.log(1.5 + 1e-10, 5.27)
-        assert abs(got - expected) < 1e-12
+        expected_log = math.log(1.5 + 1e-10, 5.27)
+        assert abs(log_score - expected_log) < 1e-12
+        assert abs(linear_sum - 300.0) < 1e-9
+        assert n_segments == 200
+
+    def test_linear_sum_is_unrounded(self):
+        """The returned ``linear_sum`` must be the *unrounded* Σ per_segment —
+        the grand-mean aggregator relies on pre-round precision to recover
+        weak-signal files where ``round(mean, 2)`` would zero out.
+
+        snr_sg=0.004, snr_squid=0.5, s_max=4.0, n=200.
+          per_seg    = (0.004 / 4.0) * 0.5 = 5.0e-4
+          mean       = 5.0e-4
+          round(mean, 2) = 0.0  → log_score clipped at -13.854...
+          linear_sum = 5.0e-4 * 200 = 0.1  (precisely recoverable)
+        """
+        def _const_process(i, data_dir, fname, coarse):
+            return i, 0.004, 0.5
+
+        with patch.object(compute_raw_baseline, "process_segment",
+                          side_effect=_const_process):
+            log_score, linear_sum, n_segments = compute_raw_baseline._calculate_score(
+                data_dir="/fake", fname="f.h5",
+                s_max=_TEST_S_MAX,
+                coarse=False, parallel=False, num_workers=1,
+            )
+
+        # log gets clipped at the 1e-10 floor: log_{5.27}(1e-10)
+        expected_clipped = math.log(1e-10, 5.27)
+        assert abs(log_score - expected_clipped) < 1e-9
+        # linear_sum retains full precision
+        assert abs(linear_sum - 0.1) < 1e-12
+        assert n_segments == 200
 
     def test_fine_calls_process_segment_200_times(self):
         """Fine mode iterates over indices 0..199."""
@@ -123,18 +163,166 @@ class TestCalculateScoreCoarse:
 
         with patch.object(compute_raw_baseline, "process_segment",
                           side_effect=_const_process):
-            got_small = compute_raw_baseline._calculate_score(
+            log_small, _, _ = compute_raw_baseline._calculate_score(
                 data_dir="/fake", fname="f.h5",
                 s_max=4.0, coarse=True, parallel=False, num_workers=1,
             )
-            got_large = compute_raw_baseline._calculate_score(
+            log_large, _, _ = compute_raw_baseline._calculate_score(
                 data_dir="/fake", fname="f.h5",
                 s_max=8.0, coarse=True, parallel=False, num_workers=1,
             )
 
         # smaller s_max -> larger per_segment -> larger score
-        assert got_small > got_large
+        assert log_small > log_large
         # Δ should equal log_{5.27}(2) to ~1e-10
-        import math as _m
-        expected_delta = _m.log(2.0, 5.27)
-        assert abs((got_small - got_large) - expected_delta) < 1e-9
+        expected_delta = math.log(2.0, 5.27)
+        assert abs((log_small - log_large) - expected_delta) < 1e-9
+
+
+# =============================================================================
+# _maybe_write_anchor_normalized_scalar — grand-mean aggregator over the 20
+# fine per-file JSONs. Symmetric with
+# ``compute_ground_truth._anchor_normalized_ceiling``.
+# =============================================================================
+
+
+def _write_fine_json(
+    output_dir: str,
+    idx: int,
+    *,
+    score: float = 1.0,
+    linear_sum: float | None = 100.0,
+    n_segments: int | None = 200,
+    s_max: float = 4.0,
+) -> None:
+    """Helper to synthesize one per-file JSON fixture. If linear_sum or
+    n_segments is None, that key is omitted (legacy-without-fields case)."""
+    payload: dict = {
+        "file_index": idx,
+        "score":      score,
+        "mode":       "fine",
+        "data_file":  f"abra_validation_{idx:04d}.h5",
+        "s_max":      s_max,
+        "formula":    "option_b_global_s_max",
+        "computed_at": "test",
+    }
+    if linear_sum is not None:
+        payload["linear_sum"] = linear_sum
+    if n_segments is not None:
+        payload["n_segments"] = n_segments
+    with open(os.path.join(output_dir,
+                           f"raw_baseline_score_file_{idx:04d}.json"), "w") as f:
+        json.dump(payload, f)
+
+
+class TestMaybeWriteAnchorNormalizedScalar:
+
+    def test_writes_scalar_when_all_20_fine_present(self, tmp_path):
+        """Complete set of 20 fine JSONs with linear_sum + n_segments — the
+        aggregator must emit scalar_anchor_normalized.json with the exact
+        shape of ceiling_anchor_normalized.json.
+
+        Uniform per-file linear_sum=100, n_segments=200:
+          grand_mean = (100 * 20) / (200 * 20) = 0.5
+          scalar     = log_{5.27}(round(0.5, 2) + 1e-10) = log_{5.27}(0.5 + 1e-10)
+        """
+        for i in range(20):
+            _write_fine_json(str(tmp_path), i, linear_sum=100.0, n_segments=200)
+
+        compute_raw_baseline._maybe_write_anchor_normalized_scalar(
+            output_dir=str(tmp_path),
+            s_max=_TEST_S_MAX,
+            anchor_src="segment_anchors.json",
+        )
+
+        scalar_path = tmp_path / "scalar_anchor_normalized.json"
+        assert scalar_path.exists()
+        with open(scalar_path) as f:
+            got = json.load(f)
+
+        # Exact key parity with ceiling_anchor_normalized.json.
+        assert set(got.keys()) == {
+            "scalar_score", "file_vector", "formula",
+            "s_max", "num_files", "source", "computed_at",
+        }
+        assert got["num_files"] == 20
+        assert got["formula"] == "anchor_normalized_raw_baseline"
+        assert got["s_max"] == _TEST_S_MAX
+        assert got["source"] == "segment_anchors.json"
+        assert len(got["file_vector"]) == 20
+        # file_vector is linear per-file means (linear_sum / n_segments).
+        for v in got["file_vector"]:
+            assert abs(v - 0.5) < 1e-12
+        expected_scalar = math.log(round(0.5, 2) + 1e-10, 5.27)
+        assert abs(got["scalar_score"] - expected_scalar) < 1e-9
+
+    def test_skip_when_any_fine_index_missing(self, tmp_path, capsys):
+        """If any of files 0..19 is missing, the scalar file must NOT be
+        written, and the missing indices must be printed."""
+        for i in range(19):  # omit file 19
+            _write_fine_json(str(tmp_path), i)
+
+        compute_raw_baseline._maybe_write_anchor_normalized_scalar(
+            output_dir=str(tmp_path),
+            s_max=_TEST_S_MAX,
+            anchor_src="segment_anchors.json",
+        )
+
+        assert not (tmp_path / "scalar_anchor_normalized.json").exists()
+        captured = capsys.readouterr()
+        assert "missing fine indices" in captured.out
+        assert "[19]" in captured.out
+
+    def test_skip_when_legacy_json_lacks_new_fields(self, tmp_path, capsys):
+        """If a per-file JSON predates Decision 13 (no linear_sum /
+        n_segments), the aggregator must NOT silently use the lossy ``score``
+        — it must skip and prompt the user to re-run with --override."""
+        for i in range(19):
+            _write_fine_json(str(tmp_path), i)
+        # File 5 is a legacy JSON — missing the new fields.
+        _write_fine_json(str(tmp_path), 19, linear_sum=None, n_segments=None)
+
+        compute_raw_baseline._maybe_write_anchor_normalized_scalar(
+            output_dir=str(tmp_path),
+            s_max=_TEST_S_MAX,
+            anchor_src="segment_anchors.json",
+        )
+
+        assert not (tmp_path / "scalar_anchor_normalized.json").exists()
+        captured = capsys.readouterr()
+        assert "linear_sum/n_segments" in captured.out
+        assert "[19]" in captured.out
+
+    def test_grand_mean_weights_by_n_segments(self, tmp_path):
+        """When per-file n_segments varies, the grand mean weighs linear_sums
+        by their segment counts. Hand-compute with two distinct counts:
+
+          10 files at n=100, linear_sum=10  (per-file mean = 0.1)
+          10 files at n=300, linear_sum=90  (per-file mean = 0.3)
+          total_linear = 10*10 + 10*90 = 1000
+          total_n      = 10*100 + 10*300 = 4000
+          grand_mean   = 1000 / 4000 = 0.25
+          scalar       = log_{5.27}(round(0.25, 2) + 1e-10) = log_{5.27}(0.25 + 1e-10)
+        """
+        for i in range(10):
+            _write_fine_json(str(tmp_path), i, linear_sum=10.0, n_segments=100)
+        for i in range(10, 20):
+            _write_fine_json(str(tmp_path), i, linear_sum=90.0, n_segments=300)
+
+        compute_raw_baseline._maybe_write_anchor_normalized_scalar(
+            output_dir=str(tmp_path),
+            s_max=_TEST_S_MAX,
+            anchor_src="segment_anchors.json",
+        )
+
+        scalar_path = tmp_path / "scalar_anchor_normalized.json"
+        assert scalar_path.exists()
+        with open(scalar_path) as f:
+            got = json.load(f)
+
+        expected_scalar = math.log(round(0.25, 2) + 1e-10, 5.27)
+        assert abs(got["scalar_score"] - expected_scalar) < 1e-9
+
+        # Per-file linear means preserve both groups.
+        assert got["file_vector"][:10] == pytest.approx([0.1] * 10, abs=1e-12)
+        assert got["file_vector"][10:] == pytest.approx([0.3] * 10, abs=1e-12)
