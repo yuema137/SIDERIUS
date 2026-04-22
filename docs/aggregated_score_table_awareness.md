@@ -967,26 +967,29 @@ and §7.2 scope note.
 **Goal:** downstream agents see the rendered table; proposer respects the
 candidate/non-candidate split per Decision 7.
 
-Steps:
-- [ ] Interpreter prompt (whichever template file renders
-      `best_file_vector`): replace with `{SCORE_COMPARISON_TABLE}` fed from
-      `InterpretationInput.best_score_table.rendered_markdown`.
-- [ ] `nodes/proposal_helpers.py::select_candidate_models` — read from
-      `per_model_score_tables`, populate candidate summaries with
-      `"score_table": score_tables.get(mt)` (replaces the
-      `"file_vector": ...` line 60).
-- [ ] `nodes/ml_model_proposal_agent.py::_run_pipeline` — in the
-      `non_candidates_overview` loop (lines 753–766), compute the one-liner
-      `log_scalar=X.XX, recovery=YY%` from the model's `score_table.aggregate`
-      and add to each overview entry.
-- [ ] Update the proposer comparison-stage prompt template to render each
-      candidate's `score_table.rendered_markdown` (replacing any prior
-      file_vector dump) and include non-candidates' one-liners.
-- [ ] Real-run test: one proposer iteration in `@real_run`; assert the
-      rendered prompt contains the comparison table for the top-ranked
-      candidate and the compact line for a non-candidate.
-- [ ] Commit: `feat(interp+proposer): render score_table in prompts
-      (candidate full / non-candidate one-liner)`.
+**Sub-commit plan (approved 2026-04-22):** split across 5 sub-commits so
+each lands reviewable and reversible. Ordering A → B → C → D → E is
+forced by data-flow dependencies (C reads the key B renames; D gates
+on C since it probes `rendered_markdown` consumption).
+
+| # | Scope | Primary files |
+|---|-------|---------------|
+| A | Interpreter per-model prompt swap: `_build_per_model_prompt` drops the 20-line per-file listing in favor of `summary.best_score_table.rendered_markdown` + `formal_score_table.rendered_markdown`. **Steer:** keep the explicit "Weak Frequency Files" callout even with the table present — it acts as an attention mechanism for the LLM. | `nodes/result_interpretation_agent.py`, `tests/unit/agent/result_interpretation_agent/test_interpretation_agent.py` |
+| B | Candidate-summary key rename: `select_candidate_models` returns `"score_table": <serialized dict>` instead of `"file_vector": [...]`. | `nodes/proposal_helpers.py`, associated tests |
+| C | Proposer prompt (`_build_reasoning_prompt`): candidates render full `rendered_markdown`; non-candidates get a compact one-liner. **Steer:** the one-liner MUST include `num_sampled_files`, e.g. `recovery=55% on 20 files` (trial vs. formal context is otherwise invisible). | `nodes/ml_model_proposal_agent.py`, associated tests |
+| D | Adversarial re-probe now that `rendered_markdown` is consumed. **Steer:** specifically cover truncated tables — an LLM-constructed JSON with a partial `rows` list must be caught by schema validation (not silently rendered). | `tests/unit/execute_tools/test_score_table_adversarial.py` extension (+ proposer hardening if a crash surfaces) |
+| E | `@real_run` integration test: one proposer iteration asserting the rendered prompt contains the comparison table for the top-ranked candidate and the compact line for a non-candidate. Close out design-doc check-offs. | `tests/integration/...`, `docs/aggregated_score_table_awareness.md` |
+
+Steps (live checklist):
+- [ ] **A.** Interpreter prompt swap (retain Weak-Frequency-Files callout).
+- [ ] **B.** `select_candidate_models` → `"score_table"` key.
+- [ ] **C.** Proposer prompt render: candidates full markdown, non-candidates
+      `log_scalar=X.XX, recovery=YY% on N files`.
+- [ ] **D.** Adversarial re-probe incl. truncated `rows` list; harden if
+      crash surfaces.
+- [ ] **E.** `@real_run` test + final commit:
+      `feat(interp+proposer): render score_table in prompts (candidate
+      full / non-candidate one-liner)`.
 
 ---
 
