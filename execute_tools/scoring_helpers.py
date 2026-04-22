@@ -220,10 +220,19 @@ def render_comparison_table(table: ScoreComparisonTable) -> str:
         f"| raw baseline         | {_fmt_log(agg.raw_baseline_scalar):>10} |"
     )
     lines.append("")
-    lines.append(
-        f"Recovery: **{agg.percent_of_ceiling_log * 100:.1f}% of ceiling** "
-        f"(model_scalar / ground_truth_scalar)."
-    )
+    if agg.model_scalar < agg.raw_baseline_scalar:
+        # Below-baseline guard: when the model scores worse than the raw
+        # baseline, the log-space ratio flips sign and the "% of ceiling"
+        # framing is actively misleading (e.g. -108.3% of ceiling). Replace
+        # with an honest one-liner the LLM can reason about directly.
+        lines.append(
+            "Recovery: < 0% (Model performance is below raw baseline)."
+        )
+    else:
+        lines.append(
+            f"Recovery: **{agg.percent_of_ceiling_log * 100:.1f}% of ceiling** "
+            f"(model_scalar / ground_truth_scalar)."
+        )
 
     if agg.num_sampled_files < 20:
         lines.append("")

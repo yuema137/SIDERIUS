@@ -238,6 +238,25 @@ each source. This is the only aggregation in the pipeline.
 Recovery: **55.1% of ceiling** (model_scalar / ground_truth_scalar).
 ```
 
+**Below-baseline relabel (Phase 4 closeout hardening):** when
+`model_scalar < raw_baseline_scalar` the Recovery line is replaced by:
+
+```markdown
+Recovery: < 0% (Model performance is below raw baseline).
+```
+
+Rationale: log-space scalars can be negative (below the ε-shifted log
+floor), and a negative `raw_baseline_scalar` flips the sign of the
+`model_scalar / ground_truth_scalar` ratio in ways that produce
+actively misleading percentages — e.g. an all-negative file_vector
+with `model_scalar=-7.5`, `ground_truth_scalar=-1.386` yields
+`percent_of_ceiling_log = +5.41` which would render as **"541% of
+ceiling"** despite the model being worse than raw baseline. The
+machine-readable `aggregate.percent_of_ceiling_log` field is left
+untouched for programmatic consumers; only the LLM-facing markdown is
+sanitized. Covered by
+`tests/unit/execute_tools/test_score_table_adversarial.py::TestBelowBaselineRelabel`.
+
 If the run sampled fewer than 20 files (trial mode), append one footer line
 below the aggregate table:
 
@@ -899,6 +918,41 @@ reference the removed `per_model_file_vectors` key.
       with per_model_score_tables; wire score_table through protocols`.
       11 files, +363/-74. Phase 4 complete.
 
+**Adversarial probes (pre-Phase-5 audit, now in CI)**
+
+Full suite at `tests/unit/execute_tools/test_score_table_adversarial.py`
+(promoted from the throwaway `/tmp/adversarial_score_table.py` probe
+script after Phase 4 Stage 2 landed). Covers: schema validator
+robustness on LLM-style junk values, `build_score_table` subset edge
+cases, the below-baseline relabel guard in `render_comparison_table`,
+and proposer prompt-render resilience to malformed `rendered_markdown`.
+
+- [x] Schema robustness: `None`, `NaN`, `Inf` accepted (canonical
+      unsampled marker). LLM string nulls `"n/a"`, `"N/A"`, `"-"`, `""`
+      all cleanly rejected with readable `ValidationError`. `rows`
+      length ≠ 20, `num_sampled_files<1`, `file_index>19`, and extra
+      keys all rejected. Numeric-string coercion (`"5.5"` → 5.5) is
+      Pydantic-default and not exploitable on our path — carrier is
+      always `model_dump()` → `model_validate()`.
+- [x] `build_score_table` subset edges: `model_scalar=None` + all-None
+      fv returns `None` gracefully; `model_scalar` set + all-None fv
+      raises with clear message; single-file sample works; `fv`
+      length ≠ 20 raises.
+- [x] **FINDING RESOLVED (option b hardening, in Phase 4 closeout):**
+      when `model_scalar < raw_baseline_scalar`, `render_comparison_
+      table` now emits `"Recovery: < 0% (Model performance is below
+      raw baseline)."` instead of the raw `percent_of_ceiling_log *
+      100` percentage. Machine-readable `aggregate.percent_of_ceiling_
+      log` field is untouched. See §6 for the rendered format and
+      `tests/unit/execute_tools/test_score_table_adversarial.py::
+      TestBelowBaselineRelabel` for the guard tests.
+- [x] Proposer prompt-render resilience: `_build_reasoning_prompt`
+      tolerates empty / whitespace-noisy / unicode / non-table / even
+      `aggregate`-missing `rendered_markdown`. This passes because the
+      current block only reads `rows[].model`; `rendered_markdown` is
+      unused in Phase 4. **Must be re-probed in Phase 5** once prompt
+      consumption flips to the rendered table.
+
 *Decision 6 scope reminder:* the hard swap applies only to
 `InterpretationOutput.per_model_file_vectors`. `ExperimentRecordSchema.file_vector`,
 `HyperparamTuningOutput.best_file_vector`, and
@@ -997,6 +1051,15 @@ Unit:
     rendering and 4-dp log rounding.
 - `tests/unit/agent/schemas/test_score_table.py` — Pydantic validation,
   serialization round-trip.
+- `tests/unit/execute_tools/test_score_table_adversarial.py` (Phase 4
+  closeout): adversarial probes covering (a) schema validator rejection
+  of LLM string nulls (`"n/a"`, `"N/A"`, `"-"`, `""`) and length /
+  bounds / extra-field violations; (b) `build_score_table` subset edge
+  cases (all-None fv, single-file sample, wrong length); (c) the
+  below-baseline relabel guard in `render_comparison_table` — ensures
+  the `< 0%` honest line replaces the misleading percentage whenever
+  `model_scalar < raw_baseline_scalar`, and that the normal `% of
+  ceiling` framing remains for the happy path. 24 tests, all green.
 
 Protocol (dual-mode):
 - `tests/integration/protocols/test_tune_to_interp.py` — extend to assert
