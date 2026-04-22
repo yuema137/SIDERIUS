@@ -33,8 +33,11 @@ from agent.schemas.hyperparam_tuning import (
 )
 from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_utils import SampleSet
+from execute_tools.scoring_helpers import build_score_table
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 from execute_tools.build_anchor_map import load_anchor_map
+from nodes.scoring_reference import load_reference_scores
+from agent.schemas.score_table import ScoreComparisonTable
 from agent.skills.evaluate_time_skill import calibration as time_calibration
 from agent.utils.architectural_pattern_tagger import (
     TIME_FACTOR_THRESHOLD,
@@ -706,6 +709,20 @@ class HyperparamTuningAgent:
                 )
             print(f"Trial mode enabled: anchor map loaded.")
 
+        # Pre-load reference scores (raw_baseline + ground_truth per-file
+        # logs, linear_sums, n_segments, and full-20 scalars). One disk
+        # read per run — cached at module level after the first call.
+        # Used every round to build the per-file score-comparison table
+        # attached to each ExperimentRecord and substituted into the
+        # tuner/reflector/interp/proposer prompts.
+        # See docs/aggregated_score_table_awareness.md §7.1.
+        reference_scores = load_reference_scores()
+        print(
+            f"Reference scores loaded: s_max={reference_scores.s_max:.4e}, "
+            f"raw_scalar_full={reference_scores.raw_scalar_full:.4f}, "
+            f"gt_scalar_full={reference_scores.gt_scalar_full:.4f}."
+        )
+
         # Save run configuration once
         started_at = time.strftime("%Y-%m-%d %H:%M:%S")
         run_config = {
@@ -1331,7 +1348,31 @@ class HyperparamTuningAgent:
                     # Extract results from each stage
                     train_results = train_status.get("results", {})
                     score_results = score_res.get("results", {})
-    
+
+                    # Build the per-file score-comparison table (model vs
+                    # raw_baseline vs ground_truth) with subset-scoped
+                    # aggregates. Defensive try/except — the 15-hour tuning
+                    # loop must not crash on a rendering bug; a None
+                    # score_table simply skips the enriched prompt block in
+                    # the next round. See docs/aggregated_score_table_awareness.md §7.1.
+                    score_table: Optional[ScoreComparisonTable] = None
+                    _sc_fv = score_results.get("file_vector")
+                    _sc_scalar = score_results.get("denoising_score")
+                    if _sc_fv is not None and _sc_scalar is not None:
+                        try:
+                            score_table = build_score_table(
+                                model_fv_log=_sc_fv,
+                                model_scalar=_sc_scalar,
+                                reference=reference_scores,
+                            )
+                        except Exception as e:
+                            print(
+                                f"[score_table] build_score_table failed: "
+                                f"{type(e).__name__}: {e} — continuing with "
+                                f"score_table=None."
+                            )
+                            score_table = None
+
                     # Cleanup denoised files to save disk space
                     if agent_input.cleanup_denoised:
                         import glob as _glob
@@ -1426,6 +1467,11 @@ class HyperparamTuningAgent:
                         "baseline_psd_segments":    baseline_record.get("training_psd_segments") if baseline_record else None,
                         "trial_portion":            trial_config.trial_portion if trial_config.mode != "single_file" else None,
                         "eval_portion":             trial_config.eval_portion if trial_config.mode != "single_file" else None,
+                        # Pre-rendered per-file comparison table (model vs
+                        # raw_baseline vs ground_truth) — consumed verbatim
+                        # by the reflector prompt in sub-commit C. None on
+                        # failed/skipped rounds so the prompt can branch.
+                        "score_comparison_table":   score_table.rendered_markdown if score_table else None,
                     }
     
                     # Pass both training and scoring results to the reflector
@@ -1463,6 +1509,11 @@ class HyperparamTuningAgent:
                         # Scoring results
                         "denoising_score": score_results.get("denoising_score"),
                         "file_vector":     score_results.get("file_vector"),
+                        # Per-file comparison table enrichment. Stored as a
+                        # plain dict on the record (ExperimentRecord.model_validate
+                        # coerces it back to ScoreComparisonTable below). None
+                        # when scoring failed or no scalar was produced.
+                        "score_table":     score_table.model_dump() if score_table else None,
                         # Data volume
                         "training_psd_segments": train_psd_segments,
                         "eval_psd_segments":    eval_psd_segments,
@@ -1625,6 +1676,22 @@ class HyperparamTuningAgent:
         ]
         top_record = max(successful_records, key=lambda r: r["denoising_score"]) if successful_records else None
 
+        # Dual-track best-record selection for score_table propagation:
+        #   best_*  — highest denoising_score across all successful records
+        #             (may be a trial-mode record on subset indices).
+        #   formal_* — highest denoising_score among formal-mode records only
+        #             (full 20-file subset). Formal records have no "is_trial"
+        #             key (it's set to True only when trial_config.is_trial);
+        #             absence == formal. Surfaces the "canonical" table to
+        #             downstream nodes without the trial-mode subset caveat.
+        formal_records = [
+            r for r in successful_records if not r.get("is_trial", False)
+        ]
+        formal_top_record = (
+            max(formal_records, key=lambda r: r["denoising_score"])
+            if formal_records else None
+        )
+
         # Phase K.7 — gate-exhaustion feedback for the next iteration's
         # proposer (§10.13). active_mode comes from the most recent plan;
         # the helper returns None unless the trigger criterion fires.
@@ -1664,6 +1731,8 @@ class HyperparamTuningAgent:
             "best_denoising_score":              top_record.get("denoising_score") if top_record else None,
             "best_config":                       top_record.get("params") if top_record else None,
             "best_file_vector":                  top_record.get("file_vector") if top_record else None,
+            "best_score_table":                  top_record.get("score_table") if top_record else None,
+            "formal_score_table":                formal_top_record.get("score_table") if formal_top_record else None,
             "all_records":                       all_records,
             "started_at":                        started_at,
             "finished_at":                       finished_at,

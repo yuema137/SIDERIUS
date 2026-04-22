@@ -39,6 +39,32 @@ from nodes.ml_hyperparameter_tune_agent import (
     _serialize_expert_advice,
     _copy_seed_plugin,
 )
+from nodes.scoring_reference import ReferenceScores
+
+
+# ---------------------------------------------------------------------------
+# Synthetic reference-scores bundle — patched into every agent fixture so
+# tests never touch the real on-disk reference JSONs.
+# ---------------------------------------------------------------------------
+
+def _synth_reference() -> ReferenceScores:
+    """Hand-built 20-file reference bundle for hermetic tests.
+
+    Numbers are illustrative only — the agent stores the full bundle as a
+    frozen dataclass and never reads the on-disk files when this stub is
+    injected.
+    """
+    return ReferenceScores(
+        raw_per_file_log=[-2.7] * 20,
+        gt_per_file_log=[7.0] * 20,
+        raw_per_file_linear_sum=[2.0] * 20,
+        raw_per_file_n_segments=[200] * 20,
+        gt_per_file_linear_sum=[2000.0] * 20,
+        gt_per_file_n_segments=[200] * 20,
+        raw_scalar_full=-2.7,
+        gt_scalar_full=7.0,
+        s_max=295_715_680.14,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +217,8 @@ class TestHyperparamTuningAgentRun:
         with patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge, \
              patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox, \
              patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill), \
+             patch("nodes.ml_hyperparameter_tune_agent.load_reference_scores",
+                   return_value=_synth_reference()), \
              tempfile.TemporaryDirectory() as configs_dir:
 
             mock_brain = MockBridge.return_value
@@ -302,6 +330,8 @@ class TestHyperparamTuningAgentOOM:
         with patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge, \
              patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox, \
              patch("nodes.ml_hyperparameter_tune_agent._run_skill") as mock_skill, \
+             patch("nodes.ml_hyperparameter_tune_agent.load_reference_scores",
+                   return_value=_synth_reference()), \
              tempfile.TemporaryDirectory() as configs_dir:
 
             mock_brain = MockBridge.return_value
@@ -385,6 +415,8 @@ class TestDynamicTrialFormal:
              patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox, \
              patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill), \
              patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map") as mock_anchor, \
+             patch("nodes.ml_hyperparameter_tune_agent.load_reference_scores",
+                   return_value=_synth_reference()), \
              patch("os.path.exists", return_value=True), \
              tempfile.TemporaryDirectory() as configs_dir:
 
@@ -595,6 +627,10 @@ class TestTimeBudgetGate:
         cm_brain = patch("nodes.ml_hyperparameter_tune_agent.LLMBridge")
         cm_sandbox = patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox")
         cm_skill = patch("nodes.ml_hyperparameter_tune_agent._run_skill")
+        cm_ref = patch(
+            "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
+            return_value=_synth_reference(),
+        )
         cm_tmp = tempfile.TemporaryDirectory()
         cm_anchor = (patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map")
                      if enable_trial_mode else None)
@@ -604,6 +640,7 @@ class TestTimeBudgetGate:
         MockBridge = cm_brain.__enter__()
         MockSandbox = cm_sandbox.__enter__()
         mock_skill = cm_skill.__enter__()
+        cm_ref.__enter__()
         configs_dir = cm_tmp.__enter__()
         if cm_anchor is not None:
             mock_anchor = cm_anchor.__enter__()
@@ -660,6 +697,7 @@ class TestTimeBudgetGate:
             cm_brain.__exit__(None, None, None)
             cm_sandbox.__exit__(None, None, None)
             cm_skill.__exit__(None, None, None)
+            cm_ref.__exit__(None, None, None)
             cm_tmp.__exit__(None, None, None)
 
         return agent, mock_brain, mock_sandbox, saved_records, skill_calls, cleanup
@@ -1005,6 +1043,10 @@ class TestVramBudgetGate:
         cm_brain = patch("nodes.ml_hyperparameter_tune_agent.LLMBridge")
         cm_sandbox = patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox")
         cm_skill = patch("nodes.ml_hyperparameter_tune_agent._run_skill")
+        cm_ref = patch(
+            "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
+            return_value=_synth_reference(),
+        )
         cm_tmp = tempfile.TemporaryDirectory()
         cm_anchor = (patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map")
                      if enable_trial_mode else None)
@@ -1014,6 +1056,7 @@ class TestVramBudgetGate:
         MockBridge = cm_brain.__enter__()
         MockSandbox = cm_sandbox.__enter__()
         mock_skill = cm_skill.__enter__()
+        cm_ref.__enter__()
         configs_dir = cm_tmp.__enter__()
         if cm_anchor is not None:
             mock_anchor = cm_anchor.__enter__()
@@ -1066,6 +1109,7 @@ class TestVramBudgetGate:
             cm_brain.__exit__(None, None, None)
             cm_sandbox.__exit__(None, None, None)
             cm_skill.__exit__(None, None, None)
+            cm_ref.__exit__(None, None, None)
             cm_tmp.__exit__(None, None, None)
 
         return agent, mock_brain, mock_sandbox, saved_records, skill_calls, cleanup
@@ -1322,3 +1366,151 @@ class TestCopySeedPlugin:
         assert result == stale  # same path
         with open(result, "r", encoding="utf-8") as f:
             assert f.read() == "FRESH\n"
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 sub-commit B — score_table propagation through the tuner.
+# Verifies: per-round attachment, reflector-context threading, dual-track
+# best/formal selection in the run output, and fault-tolerance on rendering.
+# See docs/aggregated_score_table_awareness.md §7.1 and §9 for the contract.
+# ---------------------------------------------------------------------------
+
+
+# Trial-mode score_vector stub with real values (not NaN) so build_score_table
+# produces a valid table end-to-end. All 20 files sampled → the subset-scoped
+# aggregate will equal the full-20 scalars from _synth_reference() (Decision 14).
+FAKE_SCORE_VECTOR_FULL = ([1.0] * 20, 2.5)
+
+
+class TestScoreTablePropagation:
+    """Sub-commit B: score_table threading from scoring → record → reflector →
+    run output. Mirrors the TestDynamicTrialFormal fixture but captures the
+    reflection_context arg and inspects saved records."""
+
+    @pytest.fixture
+    def agent_and_mocks(self):
+        with patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge, \
+             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox, \
+             patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill), \
+             patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map") as mock_anchor, \
+             patch("nodes.ml_hyperparameter_tune_agent.load_reference_scores",
+                   return_value=_synth_reference()), \
+             patch("os.path.exists", return_value=True), \
+             tempfile.TemporaryDirectory() as configs_dir:
+
+            mock_brain = MockBridge.return_value
+            mock_brain.plan.return_value = FAKE_PLAN_WITH_TRIAL
+            mock_brain.reflect.return_value = FAKE_REFLECT_RESPONSE
+            mock_anchor.return_value = {"anchors": {}, "s_max": 1.0}
+
+            saved_records = []
+            mock_sandbox = MockSandbox.return_value
+            mock_sandbox.get_summary.side_effect = lambda: list(saved_records)
+            mock_sandbox.save_record.side_effect = lambda r: saved_records.append(r)
+            mock_sandbox.dirs = {"configs": configs_dir, "data": configs_dir}
+            mock_sandbox.score_vector.return_value = FAKE_SCORE_VECTOR_FULL
+
+            agent = HyperparamTuningAgent()
+            yield agent, mock_brain, mock_sandbox, saved_records
+
+    def test_score_table_attached_to_record(self, agent_and_mocks, tmp_path):
+        """Trial-path scoring returns (fv, scalar) → build_score_table populates
+        the record's ``score_table`` field with a serialized ScoreComparisonTable."""
+        agent, _, _, saved_records = agent_and_mocks
+        agent.run(_make_trial_input(tmp_path, max_rounds=1, is_trial=True))
+
+        assert len(saved_records) == 1
+        rec = saved_records[0]
+        assert rec["score_table"] is not None
+        assert "rendered_markdown" in rec["score_table"]
+        assert "rows" in rec["score_table"]
+        assert len(rec["score_table"]["rows"]) == 20
+        # Aggregate block present; num_sampled == 20 since full fv has no None.
+        assert rec["score_table"]["aggregate"]["num_sampled_files"] == 20
+        assert rec["score_table"]["aggregate"]["model_scalar"] == pytest.approx(2.5)
+
+    def test_reflection_context_includes_markdown(self, agent_and_mocks, tmp_path):
+        """brain.reflect receives the pre-rendered markdown so sub-commit C's
+        REFLECTOR_PROMPT token substitution has a string to splice in."""
+        agent, mock_brain, _, _ = agent_and_mocks
+        agent.run(_make_trial_input(tmp_path, max_rounds=1, is_trial=True))
+
+        mock_brain.reflect.assert_called_once()
+        reflect_kwargs = mock_brain.reflect.call_args
+        # brain.reflect is called positionally: (exp_id, hypothesis, results, context)
+        context = reflect_kwargs.args[3]
+        assert "score_comparison_table" in context
+        md = context["score_comparison_table"]
+        assert isinstance(md, str) and md.startswith("### Per-file performance")
+
+    def test_score_table_none_on_legacy_path(self, tmp_path):
+        """Formal-only mode (no anchor_map → legacy ``denoising_score_skill``
+        path) produces a record with no ``file_vector`` — score_table must be
+        None, never a phantom table."""
+        with patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge, \
+             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox, \
+             patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill), \
+             patch("nodes.ml_hyperparameter_tune_agent.load_reference_scores",
+                   return_value=_synth_reference()), \
+             tempfile.TemporaryDirectory() as configs_dir:
+
+            mock_brain = MockBridge.return_value
+            mock_brain.plan.return_value = FAKE_PLAN_RESPONSE   # no is_trial
+            mock_brain.reflect.return_value = FAKE_REFLECT_RESPONSE
+
+            saved = []
+            mock_sandbox = MockSandbox.return_value
+            mock_sandbox.get_summary.side_effect = lambda: list(saved)
+            mock_sandbox.save_record.side_effect = lambda r: saved.append(r)
+            mock_sandbox.dirs = {"configs": configs_dir}
+
+            agent = HyperparamTuningAgent()
+            agent.run(_make_input(tmp_path, max_rounds=1))
+
+            assert len(saved) == 1
+            assert saved[0]["score_table"] is None
+
+    def test_best_and_formal_score_tables_in_output(self, agent_and_mocks, tmp_path):
+        """max_rounds=2, is_trial=True → round 0 trial, round 1 forced formal
+        (final-round rule). Both succeed. HyperparamTuningOutput must carry:
+          - best_score_table     — from the max-scoring record (any mode)
+          - formal_score_table   — from the max-scoring formal-only record
+        """
+        agent, _, _, saved_records = agent_and_mocks
+        output = agent.run(_make_trial_input(tmp_path, max_rounds=2, is_trial=True))
+
+        assert output.status == "completed"
+        assert len(saved_records) == 2
+        # Exactly one trial record + one formal record (final round forced).
+        trial_recs = [r for r in saved_records if r.get("is_trial", False)]
+        formal_recs = [r for r in saved_records if not r.get("is_trial", False)]
+        assert len(trial_recs) == 1 and len(formal_recs) == 1
+
+        # Both top-level tables present and shaped correctly.
+        assert output.best_score_table is not None
+        assert output.formal_score_table is not None
+        assert len(output.best_score_table.rows) == 20
+        assert len(output.formal_score_table.rows) == 20
+        # formal_score_table must come from the formal record, which is never
+        # marked is_trial=True. Scores are tied (score_vector mock is constant),
+        # so we verify by shape, not by exp_id.
+        assert output.formal_score_table.aggregate.num_sampled_files == 20
+
+    def test_build_score_table_failure_is_fault_tolerant(self, agent_and_mocks, tmp_path):
+        """If build_score_table raises, the tuner loop must not crash; the
+        record is saved with ``score_table=None`` and the run completes."""
+        agent, _, _, saved_records = agent_and_mocks
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("synthetic rendering failure")
+
+        with patch("nodes.ml_hyperparameter_tune_agent.build_score_table",
+                   side_effect=_boom):
+            output = agent.run(_make_trial_input(tmp_path, max_rounds=1, is_trial=True))
+
+        assert output.status == "completed"
+        assert len(saved_records) == 1
+        assert saved_records[0]["score_table"] is None
+        # And the top-level output tables correctly reflect the miss.
+        assert output.best_score_table is None
+        assert output.formal_score_table is None

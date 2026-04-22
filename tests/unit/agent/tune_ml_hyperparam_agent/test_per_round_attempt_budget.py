@@ -34,6 +34,24 @@ from agent.schemas.hyperparam_tuning import (
 )
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
+from nodes.scoring_reference import ReferenceScores
+
+
+def _synth_reference_stub() -> ReferenceScores:
+    """Minimal in-memory ReferenceScores so the agent's pre-loop
+    ``load_reference_scores()`` call is hermetic — no on-disk JSONs required.
+    """
+    return ReferenceScores(
+        raw_per_file_log=[-2.7] * 20,
+        gt_per_file_log=[7.0] * 20,
+        raw_per_file_linear_sum=[2.0] * 20,
+        raw_per_file_n_segments=[200] * 20,
+        gt_per_file_linear_sum=[2000.0] * 20,
+        gt_per_file_n_segments=[200] * 20,
+        raw_scalar_full=-2.7,
+        gt_scalar_full=7.0,
+        s_max=295_715_680.14,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +186,8 @@ def agent_with_scripted_skill():
             patch("nodes.ml_hyperparameter_tune_agent.LLMBridge"),
             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox"),
             patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=side_effect),
+            patch("nodes.ml_hyperparameter_tune_agent.load_reference_scores",
+                  return_value=_synth_reference_stub()),
             tempfile.TemporaryDirectory(),
         )
         return cm, counter
@@ -176,14 +196,15 @@ def agent_with_scripted_skill():
 
 
 def _setup(make_factory, vram_verdicts):
-    """Open all four context managers + return (agent, saved_records, counter,
+    """Open all five context managers + return (agent, saved_records, counter,
     cleanup-callable)."""
-    (mock_bridge_cm, mock_sandbox_cm, mock_skill_cm, configs_cm), counter = (
+    (mock_bridge_cm, mock_sandbox_cm, mock_skill_cm, mock_ref_cm, configs_cm), counter = (
         make_factory(vram_verdicts)
     )
     MockBridge = mock_bridge_cm.__enter__()
     MockSandbox = mock_sandbox_cm.__enter__()
     mock_skill_cm.__enter__()
+    mock_ref_cm.__enter__()
     configs_dir = configs_cm.__enter__()
 
     mock_brain = MockBridge.return_value
@@ -198,6 +219,7 @@ def _setup(make_factory, vram_verdicts):
 
     def cleanup():
         configs_cm.__exit__(None, None, None)
+        mock_ref_cm.__exit__(None, None, None)
         mock_skill_cm.__exit__(None, None, None)
         mock_sandbox_cm.__exit__(None, None, None)
         mock_bridge_cm.__exit__(None, None, None)
