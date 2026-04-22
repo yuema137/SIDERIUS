@@ -1514,3 +1514,89 @@ class TestScoreTablePropagation:
         # And the top-level output tables correctly reflect the miss.
         assert output.best_score_table is None
         assert output.formal_score_table is None
+
+    def test_score_table_md_threaded_to_brain_plan(self, agent_and_mocks, tmp_path):
+        """Sub-commit C: the tuner picks the best-so-far record's
+        ``score_table.rendered_markdown`` and threads it into ``brain.plan()``
+        via the ``score_table_md`` kwarg. Round 1 (empty memory) → None;
+        round 2 (one prior record) → the prior record's rendered_markdown."""
+        agent, mock_brain, _, saved_records = agent_and_mocks
+        agent.run(_make_trial_input(tmp_path, max_rounds=2, is_trial=True))
+
+        # Two planner calls — one per round.
+        assert mock_brain.plan.call_count == 2
+
+        # Round 1: no memory → no best record → None fallback handled by bridge.
+        first_kwargs = mock_brain.plan.call_args_list[0].kwargs
+        assert first_kwargs.get("score_table_md") is None
+
+        # Round 2: the single prior record's rendered_markdown is threaded.
+        second_kwargs = mock_brain.plan.call_args_list[1].kwargs
+        assert second_kwargs.get("score_table_md") is not None
+        assert second_kwargs["score_table_md"] == saved_records[0]["score_table"]["rendered_markdown"]
+
+    def test_score_table_md_picks_highest_scoring_record(self, tmp_path):
+        """With multiple prior records, the tuner threads the ``rendered_markdown``
+        from the record with the highest ``denoising_score``, not the most recent."""
+        with patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge, \
+             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox, \
+             patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill), \
+             patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map") as mock_anchor, \
+             patch("nodes.ml_hyperparameter_tune_agent.load_reference_scores",
+                   return_value=_synth_reference()), \
+             patch("os.path.exists", return_value=True), \
+             tempfile.TemporaryDirectory() as configs_dir:
+
+            mock_brain = MockBridge.return_value
+            mock_brain.plan.return_value = FAKE_PLAN_WITH_TRIAL
+            mock_brain.reflect.return_value = FAKE_REFLECT_RESPONSE
+            mock_anchor.return_value = {"anchors": {}, "s_max": 1.0}
+
+            # Build a real, schema-valid ScoreComparisonTable once; override
+            # only rendered_markdown so the seeded records still pass
+            # ScoreComparisonTable validation at run-output assembly, and we
+            # can distinguish HIGH vs LOW by the marker string.
+            from execute_tools.scoring_helpers import build_score_table
+            _valid_table = build_score_table(
+                model_fv_log=[1.0] * 20,
+                model_scalar=2.5,
+                reference=_synth_reference(),
+            ).model_dump()
+            high_table = {**_valid_table, "rendered_markdown": "### HIGH-TABLE"}
+            low_table = {**_valid_table, "rendered_markdown": "### LOW-TABLE"}
+
+            # Seed the sandbox with two prior successful records — HIGH then LOW.
+            # The best-so-far selector must pick HIGH on the first planner call.
+            _seed_params = {"model_config": {}, "train_config": {}, "loss_config": {}}
+            seeded = [
+                {
+                    "exp_id": "prior_HIGH",
+                    "status": "success",
+                    "model_type": "punet",
+                    "timestamp": "2026-04-22T00:00:00",
+                    "params": _seed_params,
+                    "denoising_score": 9.99,
+                    "score_table": high_table,
+                },
+                {
+                    "exp_id": "prior_LOW",
+                    "status": "success",
+                    "model_type": "punet",
+                    "timestamp": "2026-04-22T00:01:00",
+                    "params": _seed_params,
+                    "denoising_score": 0.01,
+                    "score_table": low_table,
+                },
+            ]
+            mock_sandbox = MockSandbox.return_value
+            mock_sandbox.get_summary.side_effect = lambda: list(seeded)
+            mock_sandbox.save_record.side_effect = lambda r: seeded.append(r)
+            mock_sandbox.dirs = {"configs": configs_dir, "data": configs_dir}
+            mock_sandbox.score_vector.return_value = FAKE_SCORE_VECTOR_FULL
+
+            agent = HyperparamTuningAgent()
+            agent.run(_make_trial_input(tmp_path, max_rounds=1, is_trial=True))
+
+            assert mock_brain.plan.call_count == 1
+            threaded = mock_brain.plan.call_args.kwargs.get("score_table_md")
+            assert threaded == "### HIGH-TABLE"

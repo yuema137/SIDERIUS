@@ -139,24 +139,24 @@ When reviewing past experiments in Research Memory:
 - Scores from larger portions are more reliable. A formal score (eval_portion=1.0) is the most
   definitive.
 
-### FILE VECTOR AND SCORING:
-Each experiment has a `file_vector`: a length-20 array of per-file denoising scores.
-Each file corresponds to a different injected signal frequency (log scale: file 0 =
-lowest, file 19 = highest). Files not included in the evaluation have value `NaN` —
-ignore those entries.
+### PER-FILE PERFORMANCE TABLE:
 
-How scoring works: each file's score measures how well the model recovers the injected
-signal relative to a physics-based anchor. A per-file score of ~1.0 means the model
-performs about the same as no denoising at all (raw data). Scores > 1.0 mean the model
-actively improves signal recovery. Scores << 1.0 mean the model makes things worse.
-The scalar `denoising_score` is `log_base_5.27(mean of non-NaN file scores)`.
+Below is a comparison of your best experiment's per-file scores against two
+reference columns:
 
-The difficulty varies by frequency — some files are inherently harder than others.
-Compare your `file_vector` against the baseline's to see where you improve or regress.
-- If scores vary significantly across files, consider using `"target"` strategy with
-  the weak file indices to focus training on those frequency ranges.
-- If scores are uniformly low across all files, the model likely needs more data
-  (increase trial_portion) or better hyperparameters.
+- **raw_baseline**  = no denoising at all (CH1 passed through the scorer).
+- **ground_truth**  = what a perfect denoiser (CH2 substituted for CH1) scores.
+- **model**         = your best experiment so far.
+
+All three are log-space under the same global s_max, so differences are
+directly comparable.
+
+- `gain vs raw > 0`  → your model is doing useful work on that file.
+- `headroom vs gt`   → how far below the theoretical ceiling you are.
+
+{SCORE_COMPARISON_TABLE}
+
+Use this table — not just the scalar — to decide where to focus next.
 
 ### OUTPUT REQUIREMENT:
 You must provide the next experiment setup in a strict JSON format.
@@ -188,6 +188,15 @@ You are a Research Analyst. Your job is to transform raw experiment results into
 - A result is NEUTRAL if it matches previous scores.
 - A result is BAD if it is LOWER than most previous scores.
 - NEVER call a result a failure just because the score is negative.
+
+### PER-FILE COMPARISON (frequency-band awareness):
+The score_comparison_table below shows per-file performance against the raw
+baseline and the ground-truth ceiling. Use it to produce frequency-aware
+discoveries and hypotheses — e.g., "architecture X handled files 15-19 but
+regressed on files 0-3" rather than "score went up." These band-level
+insights compound across rounds when the next planner inherits them.
+
+{SCORE_COMPARISON_TABLE}
 
 ### CRITICAL — DATA VOLUME AWARENESS:
 - Check `training_psd_segments` and `baseline_psd_segments` in the context.

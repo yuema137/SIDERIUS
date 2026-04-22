@@ -43,6 +43,19 @@ from agent.prompts import (
 )
 
 
+# Fallback markdown injected at the {SCORE_COMPARISON_TABLE} token when no
+# per-file table is available. Italicised Markdown so the LLM reads them as
+# meta-notes, not table rows. See docs/aggregated_score_table_awareness.md §9.
+_PLANNER_SCORE_TABLE_FALLBACK = (
+    "_(No prior round yet — this is round 1. A comparison table will appear "
+    "once your first experiment completes.)_"
+)
+_REFLECTOR_SCORE_TABLE_FALLBACK = (
+    "_(This experiment produced no score_table — either the scorer failed or "
+    "file_vector/denoising_score was missing.)_"
+)
+
+
 # ---------------------------------------------------------------------------
 # Tool-call result — flattens the OpenAI SDK's nested response structure
 # so callers remain SDK-agnostic.
@@ -280,7 +293,8 @@ class LLMBridge:
              last_vram_estimate_gb: Optional[float] = None,
              last_time_estimate_minutes: Optional[float] = None,
              last_batch_size: Optional[int] = None,
-             last_mode: Optional[str] = None) -> Dict:
+             last_mode: Optional[str] = None,
+             score_table_md: Optional[str] = None) -> Dict:
         """
         Uses the Planner logic to observe Research Memory and decide next steps.
         Incorporates physical constraints from config_manual and architecture
@@ -319,8 +333,18 @@ class LLMBridge:
                 surfaced into the same [ACTIVE RESOURCE BUDGETS] block so the
                 LLM has a concrete number to react to. None means "no prior
                 data" (round 1 before any pre-flight has run).
+            score_table_md:
+                Pre-rendered markdown from the best-so-far record's
+                ``score_table.rendered_markdown``. Substituted into the
+                ``{SCORE_COMPARISON_TABLE}`` placeholder in ``PLANNER_PROMPT``
+                (see docs/aggregated_score_table_awareness.md §9.1). ``None``
+                on iteration 1 (no prior records) renders the "no prior round
+                yet" fallback.
         """
-        system_prompt = PLANNER_PROMPT
+        system_prompt = PLANNER_PROMPT.replace(
+            "{SCORE_COMPARISON_TABLE}",
+            score_table_md or _PLANNER_SCORE_TABLE_FALLBACK,
+        )
 
         # --- 2. Inject model description + config manual ---
         manual_context = ""
@@ -376,8 +400,20 @@ class LLMBridge:
         different model than the planner — it is a templated structured-
         extraction task, not a reasoning task, and does not need a frontier
         model.
+
+        The ``{SCORE_COMPARISON_TABLE}`` token in ``REFLECTOR_PROMPT`` is
+        substituted with ``reflection_context["score_comparison_table"]`` when
+        present (threaded by the tuner per sub-commit B), otherwise a fallback
+        notice. See docs/aggregated_score_table_awareness.md §9.4.
         """
-        system_prompt = REFLECTOR_PROMPT
+        score_table_md = (
+            reflection_context.get("score_comparison_table")
+            if reflection_context else None
+        )
+        system_prompt = REFLECTOR_PROMPT.replace(
+            "{SCORE_COMPARISON_TABLE}",
+            score_table_md or _REFLECTOR_SCORE_TABLE_FALLBACK,
+        )
         user_prompt = get_reflector_user_prompt(exp_id, hypothesis, actual_results, reflection_context)
 
         return self._chat_json(self.reflect_client, self.reflect_model_name,

@@ -836,7 +836,29 @@ class HyperparamTuningAgent:
                     last_time_estimate_minutes = last_memory.get("time_estimate_minutes")
                     last_batch_size = last_train_cfg.get("batch_size")
                     last_mode = last_memory.get("time_mode")
-    
+
+                    # Pick the best-so-far score_table for the planner-prompt
+                    # {SCORE_COMPARISON_TABLE} substitution. Filter to
+                    # successful records with a populated score_table dict,
+                    # then max by denoising_score. Empty history or no
+                    # populated score_table → None, which the bridge replaces
+                    # with the "no prior round yet" fallback. See
+                    # docs/aggregated_score_table_awareness.md §9.1.
+                    best_score_table_md: Optional[str] = None
+                    _records_with_table = [
+                        r for r in memory_history
+                        if r.get("status") == "success"
+                        and r.get("denoising_score") is not None
+                        and isinstance(r.get("score_table"), dict)
+                        and r["score_table"].get("rendered_markdown")
+                    ]
+                    if _records_with_table:
+                        _best_rec = max(
+                            _records_with_table,
+                            key=lambda r: r["denoising_score"],
+                        )
+                        best_score_table_md = _best_rec["score_table"]["rendered_markdown"]
+
                     # B. THINK: Plan next experiment
                     decision = brain.plan(
                         memory_history,
@@ -859,6 +881,7 @@ class HyperparamTuningAgent:
                         last_time_estimate_minutes=last_time_estimate_minutes,
                         last_batch_size=last_batch_size,
                         last_mode=last_mode,
+                        score_table_md=best_score_table_md,
                     )
     
                     # Validate LLM output into ExperimentPlan (with fallback)

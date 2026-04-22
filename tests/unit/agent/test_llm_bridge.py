@@ -14,7 +14,11 @@ import pytest
 from typing import Optional
 from unittest.mock import MagicMock, patch, PropertyMock
 
-from agent.llm_bridge import LLMBridge, ToolCallResult, _KNOWN_PROVIDERS
+from agent.llm_bridge import (
+    LLMBridge, ToolCallResult, _KNOWN_PROVIDERS,
+    _PLANNER_SCORE_TABLE_FALLBACK, _REFLECTOR_SCORE_TABLE_FALLBACK,
+)
+from agent.prompts import PLANNER_PROMPT, REFLECTOR_PROMPT
 
 
 # ---------------------------------------------------------------------------
@@ -677,3 +681,148 @@ class TestCallWithRetryDelay:
         with patch("agent.llm_bridge.time.sleep") as mock_sleep:
             bridge._call_with_retry(fn, label="test")
         mock_sleep.assert_called_once_with(2.5)
+
+
+# ---------------------------------------------------------------------------
+# Score-table substitution (docs/aggregated_score_table_awareness.md §9)
+# ---------------------------------------------------------------------------
+
+_TABLE_MARKER = "||SCORE-TABLE-MARKER-XYZ||"
+_RENDERED_SENTINEL = (
+    f"### Per-file performance (log-space)\n"
+    f"| file | raw_baseline | ground_truth | model |\n"
+    f"{_TABLE_MARKER}"
+)
+
+
+class TestScoreTablePromptStaticContent:
+    """Verify the Phase 3 sub-commit C prompt rewrites land the expected
+    tokens and section headers, and remove the old FILE VECTOR block."""
+
+    def test_planner_prompt_contains_score_table_token(self):
+        assert "{SCORE_COMPARISON_TABLE}" in PLANNER_PROMPT
+
+    def test_reflector_prompt_contains_score_table_token(self):
+        assert "{SCORE_COMPARISON_TABLE}" in REFLECTOR_PROMPT
+
+    def test_planner_prompt_has_new_section_header(self):
+        assert "### PER-FILE PERFORMANCE TABLE:" in PLANNER_PROMPT
+
+    def test_reflector_prompt_has_new_section_header(self):
+        assert "### PER-FILE COMPARISON" in REFLECTOR_PROMPT
+
+    def test_old_file_vector_section_removed_from_planner(self):
+        """The §9.1 rewrite deletes the 'FILE VECTOR AND SCORING' block and
+        the '~1.0 means no denoising' prose."""
+        assert "FILE VECTOR AND SCORING" not in PLANNER_PROMPT
+        assert "per-file score of ~1.0" not in PLANNER_PROMPT
+
+    def test_planner_references_best_experiment_not_most_recent(self):
+        """User-locked choice: the planner anchor is the best-so-far
+        experiment, not the most recent. See the sub-commit C sign-off."""
+        assert "best experiment" in PLANNER_PROMPT
+
+
+class TestPlanScoreTableSubstitution:
+    """LLMBridge.plan() substitutes the {SCORE_COMPARISON_TABLE} token in
+    PLANNER_PROMPT with the caller-supplied rendered markdown, or a fallback
+    when unset."""
+
+    def _bridge_with_mocked_create(self, create_mock):
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.chat.completions.create = create_mock
+            return LLMBridge(provider="gemini", model_id="test-model")
+
+    def test_plan_substitutes_score_table_md_into_system_prompt(self):
+        create_mock = MagicMock(return_value=_chat_response(VALID_JSON_STR))
+        bridge = self._bridge_with_mocked_create(create_mock)
+        bridge.plan(
+            memory_history=[],
+            expert_advice="none",
+            score_table_md=_RENDERED_SENTINEL,
+        )
+        sent_system = create_mock.call_args.kwargs["messages"][0]["content"]
+        assert _TABLE_MARKER in sent_system
+        assert "{SCORE_COMPARISON_TABLE}" not in sent_system
+        # Fallback must NOT appear when a real table is supplied
+        assert _PLANNER_SCORE_TABLE_FALLBACK not in sent_system
+
+    def test_plan_none_uses_planner_fallback(self):
+        create_mock = MagicMock(return_value=_chat_response(VALID_JSON_STR))
+        bridge = self._bridge_with_mocked_create(create_mock)
+        bridge.plan(memory_history=[], expert_advice="none")  # no score_table_md
+        sent_system = create_mock.call_args.kwargs["messages"][0]["content"]
+        assert _PLANNER_SCORE_TABLE_FALLBACK in sent_system
+        assert "{SCORE_COMPARISON_TABLE}" not in sent_system
+
+    def test_plan_empty_string_treated_as_none(self):
+        """An empty string is falsy — should fall back to the planner
+        fallback text, consistent with None."""
+        create_mock = MagicMock(return_value=_chat_response(VALID_JSON_STR))
+        bridge = self._bridge_with_mocked_create(create_mock)
+        bridge.plan(memory_history=[], expert_advice="none", score_table_md="")
+        sent_system = create_mock.call_args.kwargs["messages"][0]["content"]
+        assert _PLANNER_SCORE_TABLE_FALLBACK in sent_system
+
+
+class TestReflectScoreTableSubstitution:
+    """LLMBridge.reflect() reads score_comparison_table from reflection_context
+    and substitutes into REFLECTOR_PROMPT; falls back when absent."""
+
+    def _bridge_with_mocked_create(self, create_mock):
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.chat.completions.create = create_mock
+            return LLMBridge(provider="gemini", model_id="test-model")
+
+    def test_reflect_substitutes_from_context(self):
+        create_mock = MagicMock(return_value=_chat_response(VALID_JSON_STR))
+        bridge = self._bridge_with_mocked_create(create_mock)
+        bridge.reflect(
+            exp_id="exp_001",
+            hypothesis="hypo",
+            actual_results={"denoising_score": 1.5},
+            reflection_context={"score_comparison_table": _RENDERED_SENTINEL},
+        )
+        sent_system = create_mock.call_args.kwargs["messages"][0]["content"]
+        assert _TABLE_MARKER in sent_system
+        assert "{SCORE_COMPARISON_TABLE}" not in sent_system
+        assert _REFLECTOR_SCORE_TABLE_FALLBACK not in sent_system
+
+    def test_reflect_none_context_uses_reflector_fallback(self):
+        create_mock = MagicMock(return_value=_chat_response(VALID_JSON_STR))
+        bridge = self._bridge_with_mocked_create(create_mock)
+        bridge.reflect(
+            exp_id="exp_001",
+            hypothesis="hypo",
+            actual_results={"denoising_score": 1.5},
+            reflection_context=None,
+        )
+        sent_system = create_mock.call_args.kwargs["messages"][0]["content"]
+        assert _REFLECTOR_SCORE_TABLE_FALLBACK in sent_system
+        assert "{SCORE_COMPARISON_TABLE}" not in sent_system
+
+    def test_reflect_context_without_key_uses_reflector_fallback(self):
+        create_mock = MagicMock(return_value=_chat_response(VALID_JSON_STR))
+        bridge = self._bridge_with_mocked_create(create_mock)
+        bridge.reflect(
+            exp_id="exp_001",
+            hypothesis="hypo",
+            actual_results={"denoising_score": 1.5},
+            reflection_context={"baseline_score": 0.5},  # no score_comparison_table
+        )
+        sent_system = create_mock.call_args.kwargs["messages"][0]["content"]
+        assert _REFLECTOR_SCORE_TABLE_FALLBACK in sent_system
+
+    def test_reflect_context_with_null_key_uses_reflector_fallback(self):
+        """sub-commit B wires None into the context on failed rounds — the
+        bridge must treat explicit None as 'no table', not as a literal."""
+        create_mock = MagicMock(return_value=_chat_response(VALID_JSON_STR))
+        bridge = self._bridge_with_mocked_create(create_mock)
+        bridge.reflect(
+            exp_id="exp_001",
+            hypothesis="hypo",
+            actual_results={"denoising_score": 1.5},
+            reflection_context={"score_comparison_table": None},
+        )
+        sent_system = create_mock.call_args.kwargs["messages"][0]["content"]
+        assert _REFLECTOR_SCORE_TABLE_FALLBACK in sent_system

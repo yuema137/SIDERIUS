@@ -1,6 +1,6 @@
 # Aggregated Score Table Awareness — Design Doc
 
-## Status: Phases 1 + 2 complete (2026-04-22); Phase 3 sub-commits A + B landed (2026-04-22); sub-commit C (prompts) next. Still blocks `small_sample_trial_v1` rerun.
+## Status: Phases 1 + 2 + 3 complete (2026-04-22); Phase 4 (protocol wiring: tune → interp → propose) next. Still blocks `small_sample_trial_v1` rerun.
 
 ---
 
@@ -690,8 +690,7 @@ Steps:
 planner prompt renders the table token.
 
 **Status (2026-04-22):** split into three sub-commits for clean review.
-Sub-commits A (schemas) + B (tuner wiring) landed; sub-commit C (prompts)
-pending.
+All three sub-commits landed (A schemas → B tuner wiring → C prompts).
 
 Sub-commit A — schemas (landed `879cdd7`):
 - [x] Extend `agent/schemas/hyperparam_tuning.py` — added optional
@@ -725,7 +724,7 @@ Sub-commit B — tuner wiring (landed `36e0e9c`):
       `run()`-touching fixtures so no test depends on real on-disk data.
       420 passed across the relevant test scope.
 
-Sub-commit C — prompts (pending):
+Sub-commit C — prompts (landed):
 
 Prerequisite (not strictly part of this design, but was a blocker for
 the sub-commit C real-run smoke test): the 24 GiB RLIMIT_AS ceiling in
@@ -734,24 +733,42 @@ applied to VA, and CUDA context init alone reserves ~18 GiB of VA on
 RTX 5090. Every training attempt in the first smoke test failed at
 focal-loss allocation with ~27 GiB of GPU memory still free. Fixed by
 making the ceiling role-aware (scoring=24 GiB, training/inference=40 GiB
-per the 20+16+4 breakdown); see `docs/optimize_inference_and_scoring.md`
+per the 20+16+4 breakdown, landed `cd901f1`); a follow-up regex fix to
+`_is_oom_failure` (landed `21f3366`) stopped false-positiving on
+`torch.OutOfMemoryError`. See `docs/optimize_inference_and_scoring.md`
 §Fix 1 addendum for the full derivation.
 
-- [ ] Update `agent/prompts.py:142-159` — replace the `### FILE VECTOR AND
+- [x] Update `agent/prompts.py:142-159` — replaced the `### FILE VECTOR AND
       SCORING:` block per §9.1 with `### PER-FILE PERFORMANCE TABLE:` and
       the `{SCORE_COMPARISON_TABLE}` placeholder token.
-- [ ] Update the prompt-render site that substitutes the token with
-      `best_score_table.rendered_markdown` (or the "no prior round yet"
-      fallback on iteration 1).
-- [ ] Extend `REFLECTOR_PROMPT` with the `### PER-FILE COMPARISON` section
-      (Decision 8 / §9.4 half 2), consuming
+- [x] `LLMBridge.plan()` substitutes `{SCORE_COMPARISON_TABLE}` with the
+      tuner-threaded `score_table_md` kwarg (or the "no prior round yet"
+      italicised fallback on iteration 1). Uses `str.replace()` — safe
+      because no other `{...}` tokens exist in the prompt.
+- [x] Extended `REFLECTOR_PROMPT` with the `### PER-FILE COMPARISON`
+      section (Decision 8 / §9.4 half 2). `LLMBridge.reflect()` consumes
       `reflection_context["score_comparison_table"]` threaded by sub-commit B.
-- [ ] Unit test: token substitution produces a prompt containing the
-      three-column header.
-- [ ] Real-run test: one tuner round in trial mode, verify rendered prompt
-      sent to LLM contains the three-column table (assert on the captured
-      prompt text).
-- [ ] Commit: `feat(prompts): render score_table in planner + reflector
+- [x] `nodes/ml_hyperparameter_tune_agent.py` — added the best-so-far
+      selector before `brain.plan()`: filters `memory_history` for
+      `status=="success"` + non-None `denoising_score` + dict-shaped
+      `score_table` + populated `rendered_markdown`, then max by
+      `denoising_score`. Threads the winner's markdown via new
+      `score_table_md=` kwarg to `plan()`.
+- [x] Unit tests: +8 `LLMBridge` token-substitution cases (planner hit
+      path, planner fallback, reflector both halves, idempotence,
+      reflector with `reflection_context=None`), +7
+      `TestScoreTablePropagation` cases for the tuner-side selector
+      (empty history, single-record, tie-break by score, status filter,
+      None-score filter, missing-table filter, fallback to None).
+- [x] Real-run smoke (2-round `punet` trial, gpt-5-mini, `--is_trial`):
+      Round 1 trained to completion under the 40 GiB VA cap, emitted a
+      populated `score_table`; Round 2 planner prompt rendered the full
+      20-row table with real numbers. Frequency-band awareness confirmed
+      visible — e.g. file 11 `gain_vs_raw=+8.26` near-ceiling, file 15
+      `gain_vs_raw=+7.36`, file 19 `gain_vs_raw=−0.64` (model regressed
+      vs raw on the highest-frequency band). The scalar alone (recovery
+      4.0% of ceiling) would have hidden this structure.
+- [x] Commit: `feat(prompts): render score_table in planner + reflector
       prompts`.
 
 ---
