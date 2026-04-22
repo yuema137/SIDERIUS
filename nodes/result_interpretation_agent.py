@@ -121,24 +121,23 @@ def _build_per_model_prompt(
         json.dumps(summary.best_config, indent=2) if summary.best_config else "none",
     ]
 
-    # File vector (per-file performance)
-    import math
+    # Per-file performance — rendered as the full ScoreComparisonTable
+    # markdown (raw_baseline / ground_truth / model columns + subset-scoped
+    # aggregates + Recovery line). Single source of truth lives on the
+    # table.rendered_markdown field, produced by render_comparison_table.
+    if summary.best_score_table is not None:
+        lines += [
+            "",
+            "### Per-file performance (best experiment)",
+            summary.best_score_table.rendered_markdown,
+        ]
 
-    def _fmt_score(v):
-        if v is None or (isinstance(v, float) and math.isnan(v)):
-            return "not evaluated"
-        return f"{v:.4f}"
-
-    if summary.best_file_vector is not None:
-        lines += ["", "### File Vector (per-file denoising scores, best experiment)"]
-        lines.append("File index → frequency (log scale): 0=lowest, 19=highest")
-        for i, v in enumerate(summary.best_file_vector):
-            lines.append(f"  File {i:2d}: {_fmt_score(v)}")
-
-    if summary.formal_file_vector is not None:
-        lines += ["", "### File Vector (formal round — definitive)"]
-        for i, v in enumerate(summary.formal_file_vector):
-            lines.append(f"  File {i:2d}: {_fmt_score(v)}")
+    if summary.formal_score_table is not None:
+        lines += [
+            "",
+            "### Per-file performance (formal round — definitive)",
+            summary.formal_score_table.rendered_markdown,
+        ]
 
     # Score trajectory with per-round trial portions and model params
     lines += ["", "### Score Trajectory (chronological)"]
@@ -291,13 +290,21 @@ def _build_synthesis_prompt(
             if val:
                 lines += ["", f"### {field.replace('_', ' ').title()}", val]
 
-        # File vector summary — derived from the score_table's per-file rows.
-        # Keeps the existing prompt text verbatim so behavior is identical to
-        # the pre-migration version; Phase 5 will replace this block with the
-        # pre-rendered score_table markdown.
+        # Per-file performance — the full ScoreComparisonTable markdown
+        # (raw_baseline / ground_truth / model columns + subset-scoped
+        # aggregates + Recovery line) plus an attention-mechanism callout
+        # for weak / strong files. The callout is intentionally kept
+        # alongside the table: it pre-digests the frequency structure the
+        # synthesis agent is expected to reason about, so the LLM doesn't
+        # need to re-derive it from the 20-row grid.
         if per_model_score_tables and model_type in per_model_score_tables:
             import math
             table = per_model_score_tables[model_type]
+            lines += [
+                "",
+                "### Per-file performance (best experiment)",
+                table.rendered_markdown,
+            ]
             fv = [r.model for r in table.rows]
             present = [
                 (i, v) for i, v in enumerate(fv)
@@ -306,7 +313,7 @@ def _build_synthesis_prompt(
             if present:
                 weak = [(i, v) for i, v in present if v < 1.0]
                 strong = [(i, v) for i, v in present if v >= 10.0]
-                lines += ["", f"### File Vector Summary (best experiment)"]
+                lines += ["", "### Weak Frequency Files (attention cue)"]
                 lines.append(f"  Files evaluated: {len(present)}/20")
                 if weak:
                     lines.append(f"  Weak files (score < 1.0): {[i for i,_ in weak]}")

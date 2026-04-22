@@ -436,21 +436,23 @@ ENRICHED_SUMMARY = ModelRunSummary(
 
 class TestBuildPerModelPrompt:
 
-    def test_includes_file_vector(self):
+    def test_includes_best_score_table_rendered_markdown(self):
+        # Phase 5 A: per-model prompt drops the 20-line per-file listing and
+        # renders the full ScoreComparisonTable markdown instead. The fixture's
+        # rendered_markdown carries the sentinel "(test fixture)" line.
         prompt = _build_per_model_prompt(ENRICHED_SUMMARY, "PUNet description")
-        assert "File Vector" in prompt
-        assert "78.0000" in prompt  # file 7 has the highest value
-        assert "File  0:" in prompt
+        assert "Per-file performance (best experiment)" in prompt
+        assert "(test fixture)" in prompt
 
     def test_includes_formal_score(self):
         prompt = _build_per_model_prompt(ENRICHED_SUMMARY, "PUNet description")
         assert "Formal round score" in prompt
         assert "1.6" in prompt
 
-    def test_includes_formal_file_vector(self):
+    def test_includes_formal_score_table(self):
+        # Formal round's rendered markdown lands under its own section header.
         prompt = _build_per_model_prompt(ENRICHED_SUMMARY, "PUNet description")
-        assert "formal round" in prompt.lower()
-        assert "80.0000" in prompt  # formal file 7
+        assert "Per-file performance (formal round" in prompt
 
     def test_includes_model_params(self):
         prompt = _build_per_model_prompt(ENRICHED_SUMMARY, "PUNet description")
@@ -477,14 +479,18 @@ class TestBuildPerModelPrompt:
     def test_skips_none_fields(self):
         """When new fields are None (old data), prompt still works."""
         prompt = _build_per_model_prompt(PUNET_SUMMARY, "PUNet description")
-        assert "File Vector" not in prompt
+        assert "Per-file performance" not in prompt
         assert "Formal round score" not in prompt
         assert "Training PSD segments" not in prompt
 
 
 class TestBuildSynthesisPrompt:
 
-    def test_includes_file_vector_summary(self):
+    def test_includes_score_table_and_weak_callout(self):
+        # Phase 5 A: synthesis prompt renders the full ScoreComparisonTable
+        # markdown AND the explicit "Weak Frequency Files" attention-cue
+        # block. The callout stays because it pre-digests the frequency
+        # structure the LLM is expected to reason about.
         prompt = _build_synthesis_prompt(
             per_model_summaries={"punet": FAKE_PER_MODEL_RESPONSE},
             per_model_best={"punet": 1.8},
@@ -494,7 +500,9 @@ class TestBuildSynthesisPrompt:
             overall_best_config=None,
             per_model_score_tables={"punet": ENRICHED_SUMMARY.best_score_table},
         )
-        assert "File Vector Summary" in prompt
+        assert "Per-file performance (best experiment)" in prompt
+        assert "(test fixture)" in prompt
+        assert "Weak Frequency Files (attention cue)" in prompt
         assert "Weak files" in prompt
 
     def test_includes_params(self):
@@ -532,7 +540,7 @@ class TestBuildSynthesisPrompt:
             overall_best_config=None,
         )
         assert "punet" in prompt
-        assert "File Vector" not in prompt
+        assert "Per-file performance" not in prompt
 
 
 # ---------------------------------------------------------------------------
