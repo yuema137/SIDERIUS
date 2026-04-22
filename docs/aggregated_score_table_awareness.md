@@ -726,6 +726,17 @@ Sub-commit B — tuner wiring (landed `36e0e9c`):
       420 passed across the relevant test scope.
 
 Sub-commit C — prompts (pending):
+
+Prerequisite (not strictly part of this design, but was a blocker for
+the sub-commit C real-run smoke test): the 24 GiB RLIMIT_AS ceiling in
+`core/sandbox_executor.py` was calibrated against observed RSS but
+applied to VA, and CUDA context init alone reserves ~18 GiB of VA on
+RTX 5090. Every training attempt in the first smoke test failed at
+focal-loss allocation with ~27 GiB of GPU memory still free. Fixed by
+making the ceiling role-aware (scoring=24 GiB, training/inference=40 GiB
+per the 20+16+4 breakdown); see `docs/optimize_inference_and_scoring.md`
+§Fix 1 addendum for the full derivation.
+
 - [ ] Update `agent/prompts.py:142-159` — replace the `### FILE VECTOR AND
       SCORING:` block per §9.1 with `### PER-FILE PERFORMANCE TABLE:` and
       the `{SCORE_COMPARISON_TABLE}` placeholder token.
