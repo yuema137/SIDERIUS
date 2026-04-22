@@ -1,6 +1,6 @@
 # Aggregated Score Table Awareness — Design Doc
 
-## Status: Phases 1 + 2 complete (2026-04-22); Phase 3 (tuner plumbing) next. Still blocks `small_sample_trial_v1` rerun.
+## Status: Phases 1 + 2 complete (2026-04-22); Phase 3 sub-commits A + B landed (2026-04-22); sub-commit C (prompts) next. Still blocks `small_sample_trial_v1` rerun.
 
 ---
 
@@ -689,34 +689,59 @@ Steps:
 **Goal:** tuner emits records and run-output carrying `score_table`; tuner
 planner prompt renders the table token.
 
-Steps:
-- [ ] Extend `agent/schemas/hyperparam_tuning.py` — add optional
-      `score_table: Optional[ScoreComparisonTable]` on `ExperimentRecordSchema`;
-      add `best_score_table` + `formal_score_table` on `HyperparamTuningOutput`
-      (per Decision 11). `file_vector` fields stay.
-- [ ] Wire `nodes/ml_hyperparameter_tune_agent.py` — after
-      `score_vector(...)` returns, call `load_reference_scores()` +
-      `build_score_table(...)`; populate `record.score_table`.
-- [ ] Populate `best_score_table` + `formal_score_table` at run-output
-      emission time, mirroring how `best_file_vector` is populated today
-      (line ~1666).
+**Status (2026-04-22):** split into three sub-commits for clean review.
+Sub-commits A (schemas) + B (tuner wiring) landed; sub-commit C (prompts)
+pending.
+
+Sub-commit A — schemas (landed `879cdd7`):
+- [x] Extend `agent/schemas/hyperparam_tuning.py` — added optional
+      `score_table: Optional[ScoreComparisonTable]` on `ExperimentRecord`;
+      added `best_score_table` + `formal_score_table` on `HyperparamTuningOutput`
+      (per Decision 11). `file_vector` fields kept for backwards compat.
+- [x] Unit tests: +7 cases covering backward-compat optional, populated
+      round-trip, invalid rejection, both-tables-independently-populated.
+
+Sub-commit B — tuner wiring (landed `36e0e9c`):
+- [x] Wire `nodes/ml_hyperparameter_tune_agent.py` — pre-load
+      `reference_scores = load_reference_scores()` once in `run()` (module-
+      cached, one disk read per run). After `score_vector(...)` returns,
+      call `build_score_table(...)` inside a try/except with None fallback
+      so rendering bugs never crash the long tuning loop. Populate
+      `final_record["score_table"]` next to `file_vector`.
+- [x] Populate `best_score_table` + `formal_score_table` at run-output
+      emission time via dual-track selection: `best` from `top_record`
+      (highest `denoising_score` across all modes); `formal` from
+      `max(successful_records where not is_trial)` — surfaces the canonical
+      full-20 table without the trial-mode subset caveat.
+- [x] Reflector plumbing (Decision 8 / §9.4 half 1): thread
+      `score_table.rendered_markdown` into `reflection_context` at line
+      1406 as `score_comparison_table`. Token consumption in
+      `REFLECTOR_PROMPT` pending in sub-commit C.
+- [x] Unit tests: +5 TestScoreTablePropagation cases — per-record
+      attachment, reflector-context threading, legacy-path None,
+      dual-track output populated, and `build_score_table` fault-tolerance
+      (monkeypatched exception → `score_table=None`, run completes).
+      Hermetic `load_reference_scores` stubs added to all existing
+      `run()`-touching fixtures so no test depends on real on-disk data.
+      420 passed across the relevant test scope.
+
+Sub-commit C — prompts (pending):
 - [ ] Update `agent/prompts.py:142-159` — replace the `### FILE VECTOR AND
       SCORING:` block per §9.1 with `### PER-FILE PERFORMANCE TABLE:` and
       the `{SCORE_COMPARISON_TABLE}` placeholder token.
 - [ ] Update the prompt-render site that substitutes the token with
       `best_score_table.rendered_markdown` (or the "no prior round yet"
       fallback on iteration 1).
-- [ ] Reflector plumbing (per Decision 8 / §9.4): thread
-      `score_table.rendered_markdown` into `reflection_context` at line
-      ~1406 as `score_comparison_table`; extend `REFLECTOR_PROMPT` with the
-      `### PER-FILE COMPARISON` section.
-- [ ] Unit test: per-record `score_table` populated correctly (mocked
-      reference data).
+- [ ] Extend `REFLECTOR_PROMPT` with the `### PER-FILE COMPARISON` section
+      (Decision 8 / §9.4 half 2), consuming
+      `reflection_context["score_comparison_table"]` threaded by sub-commit B.
+- [ ] Unit test: token substitution produces a prompt containing the
+      three-column header.
 - [ ] Real-run test: one tuner round in trial mode, verify rendered prompt
       sent to LLM contains the three-column table (assert on the captured
       prompt text).
-- [ ] Commit: `feat(tuner): score_table on records + run-output + planner +
-      reflector prompts`.
+- [ ] Commit: `feat(prompts): render score_table in planner + reflector
+      prompts`.
 
 ---
 
