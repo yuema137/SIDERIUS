@@ -53,23 +53,34 @@ from datetime import datetime
 # ---------------------------------------------------------------------------
 
 
-def _global_per_file_ceiling(anchors_f: list[float], s_max: float) -> float:
+def _global_per_file_ceiling(
+    anchors_f: list[float], s_max: float
+) -> tuple[float, float, int]:
     """Perfect-denoiser per-file ceiling under the global-s_max ruler.
 
         per_segment     = anchor[i]² / s_max_GLOBAL
-        per_file_linear = mean_i(per_segment)
-        return            log_{5.27}(round(per_file_linear, 2) + 1e-10)
+        linear_sum      = Σ_i per_segment                   (unrounded)
+        per_file_linear = linear_sum / n
+        log_score       = log_{5.27}(round(per_file_linear, 2) + 1e-10)
 
     Same ruler as ``compute_raw_baseline._calculate_score`` and as
     ``scoring_utils.score_vector`` (``legacy_mode=False``), so baseline,
     ceiling, and model scores are mutually comparable.
 
+    Returns a 3-tuple ``(log_score, linear_sum, n_segments)``. The unrounded
+    ``linear_sum`` + ``n_segments`` are required by subset-aware aggregation
+    in ``execute_tools.scoring_helpers.build_score_table`` (see Decision 14
+    in ``docs/aggregated_score_table_awareness.md``) — the per-file log
+    score is lossy under ``round(·, 2)`` at weak-injection files.
+
     See ``docs/align_denoising_score.md`` §4.1.
     """
     n = len(anchors_f)
-    per_file_linear = sum(v * v for v in anchors_f) / (n * s_max)
+    linear_sum = sum(v * v for v in anchors_f) / s_max
+    per_file_linear = linear_sum / n
     score_lin = round(per_file_linear, 2) + 1e-10
-    return float(math.log(score_lin, 5.27))
+    log_score = float(math.log(score_lin, 5.27))
+    return log_score, float(linear_sum), n
 
 
 def _anchor_normalized_ceiling(
@@ -175,10 +186,14 @@ def main():
             skipped += 1
             continue
 
-        score = _global_per_file_ceiling(anchors[f_str], s_max)
+        score, linear_sum, n_segments = _global_per_file_ceiling(
+            anchors[f_str], s_max
+        )
         result = {
             "file_index":  f_idx,
             "score":       score,
+            "linear_sum":  linear_sum,
+            "n_segments":  n_segments,
             "mode":        "fine",
             "s_max":       s_max,
             "formula":     "option_b_global_s_max_ceiling",
