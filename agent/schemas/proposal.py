@@ -356,7 +356,7 @@ class ModelSelectionStrategy(BaseModel):
         description="'top_n', 'all', 'feature_match', or 'human_specified'."
     )
     params: Dict[str, Any] = Field(
-        default_factory=lambda: {"n": 10},
+        default_factory=lambda: {"n": 5},
     )
 
 

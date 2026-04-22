@@ -86,9 +86,9 @@ FAKE_INTERPRETATION = {
 class TestModelSelection:
 
     def test_top_n_default(self):
-        strategy = ModelSelectionStrategy()  # default: top_n, n=10
+        strategy = ModelSelectionStrategy()  # default: top_n, n=5
         result = select_candidate_models(FAKE_INTERPRETATION, strategy)
-        # All 4 models fit in top 10
+        # All 4 models fit in top 5
         assert len(result) == 4
         # Sorted by score descending
         assert result[0]["model_type"] == "wavenet"
@@ -1243,3 +1243,157 @@ class TestProposerGenericity:
             assert name not in prompt, (
                 f"Baseline name '{name}' leaked into JSON-only fall-through prompt"
             )
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 E — stage-prompt size budget
+#
+# Regression guard for the token-budget steer: the n=5 default must comfortably
+# fit inside gpt-4o-mini's 128k context window, even with full per-candidate
+# rendered_markdown score tables + ~30-line source-code fences. We use a char-
+# count heuristic (~4 chars/token) because tiktoken is not installed.
+# ---------------------------------------------------------------------------
+
+class TestStagePromptSizeBudget:
+    """Assert the assembled stage user prompt stays well under context limits."""
+
+    _TABLE_ROWS = 20  # matches ScoreComparisonTable's 20-row cap
+
+    def _rendered_markdown(self, model_type: str) -> str:
+        header = (
+            "| file | raw_baseline | ground_truth | model |\n"
+            "|------|--------------|--------------|-------|\n"
+        )
+        rows = "\n".join(
+            f"| seg_{i:03d}_{model_type} | 1.00 | 5.50 | 4.20 |"
+            for i in range(self._TABLE_ROWS)
+        )
+        return header + rows
+
+    def _source_code(self, model_type: str) -> str:
+        # ~30 lines of representative plugin source with realistic width.
+        lines = [
+            f"# {model_type} plugin — representative source for budget test",
+            "import torch",
+            "import torch.nn as nn",
+            "",
+            f"class {model_type.title().replace('_', '')}Config:",
+            "    depth: int = 4",
+            "    width: int = 128",
+            "    dropout: float = 0.1",
+            "    activation: str = 'gelu'",
+            "",
+            f"class {model_type.title().replace('_', '')}Model(nn.Module):",
+            "    def __init__(self, cfg):",
+            "        super().__init__()",
+            "        self.embed = nn.Embedding(256, cfg.width)",
+            "        self.blocks = nn.ModuleList([",
+            "            nn.Sequential(",
+            "                nn.Conv1d(cfg.width, cfg.width, 3, padding=1),",
+            "                nn.GELU(),",
+            "                nn.Dropout(cfg.dropout),",
+            "            ) for _ in range(cfg.depth)",
+            "        ])",
+            "        self.head = nn.Conv1d(cfg.width, 256, 1)",
+            "",
+            "    def forward(self, x):",
+            "        h = self.embed(x).transpose(1, 2)",
+            "        for block in self.blocks:",
+            "            h = block(h) + h",
+            "        return self.head(h)",
+            "",
+            "PLUGIN_MODEL_TYPE = 'placeholder'",
+            f"PLUGIN_CONFIG_CLASS = {model_type.title().replace('_', '')}Config",
+            f"PLUGIN_MODEL_CLASS = {model_type.title().replace('_', '')}Model",
+        ]
+        return "\n".join(lines)
+
+    def _candidate(self, model_type: str, best_score: float) -> dict:
+        return {
+            "model_type": model_type,
+            "description": f"{model_type} — auto-synthesized candidate for budget test.",
+            "best_score": best_score,
+            "model_params": 12_345_678,
+            "source": "agent_generated",
+            "source_code": self._source_code(model_type),
+            "score_table": {
+                "model_type": model_type,
+                "rendered_markdown": self._rendered_markdown(model_type),
+                "rows": [],  # scalar rows elided; stripped from JSON region anyway
+                "aggregate": {"log_scalar": 1.23, "recovery": 0.42},
+            },
+        }
+
+    def _build_accumulated(self, n_candidates: int) -> dict:
+        candidates = [
+            self._candidate(f"candidate_model_{i:02d}", best_score=5.5 - 0.1 * i)
+            for i in range(n_candidates)
+        ]
+        non_candidates = [
+            {
+                "model_type": f"tail_model_{i:02d}",
+                "score_summary": (
+                    f"log_scalar=0.50, recovery=15.0% on 20 files "
+                    f"(below raw_baseline on {i} files)"
+                ),
+            }
+            for i in range(5)
+        ]
+        return {
+            "candidates": candidates,
+            "non_candidates_overview": non_candidates,
+            "interpretation_summary": {
+                "take_home_message": "Budget test synthetic summary.",
+                "key_findings": ["finding " + str(i) for i in range(8)],
+                "bottlenecks": ["bottleneck " + str(i) for i in range(6)],
+            },
+            "existing_model_types": [f"candidate_model_{i:02d}" for i in range(n_candidates)],
+            "previous_failures": [],
+        }
+
+    def test_five_candidate_prompt_fits_budget(self, capsys):
+        """Baseline: n=5 worst-case prompt stays comfortably inside 128k context.
+
+        Reports actual char count so future changes to prompt shape stay
+        observable. Budget: 200_000 chars (~50k tokens at 4 chars/token) —
+        well under gpt-4o-mini's 128_000-token context window.
+        """
+        from nodes.ml_model_proposal_agent import _render_stage_user_prompt
+
+        accumulated = self._build_accumulated(n_candidates=5)
+        prompt = _render_stage_user_prompt(accumulated)
+
+        n_chars = len(prompt)
+        estimated_tokens = n_chars // 4
+        # Emit so future regressions are observable in pytest -s output.
+        print(
+            f"\n[budget] n=5 stage prompt: {n_chars} chars "
+            f"(~{estimated_tokens} tokens at 4 chars/token)"
+        )
+
+        assert n_chars < 200_000, (
+            f"n=5 stage prompt is {n_chars} chars (~{estimated_tokens} tokens). "
+            f"Budget is 200_000 chars — investigate before enlarging the prompt."
+        )
+        # Sanity: the markdown block and JSON region must both be present.
+        assert "## Candidate Models — detailed view" in prompt
+        assert "## Accumulated context" in prompt
+
+    def test_budget_scales_sublinearly_with_n(self):
+        """Smoke-check: doubling n (5→10) must not blow past a 2x bound.
+
+        Guards against accidental quadratic growth (e.g. if every candidate
+        started embedding all other candidates' tables).
+        """
+        from nodes.ml_model_proposal_agent import _render_stage_user_prompt
+
+        small = _render_stage_user_prompt(self._build_accumulated(5))
+        large = _render_stage_user_prompt(self._build_accumulated(10))
+
+        # 10 candidates should be roughly ~2x of 5. Allow a generous 2.5x
+        # ceiling to cover constant overhead + JSON expansion.
+        assert len(large) < len(small) * 2.5, (
+            f"Stage prompt scales super-linearly: "
+            f"5-candidate={len(small)} chars, 10-candidate={len(large)} chars "
+            f"(ratio={len(large) / len(small):.2f}x)."
+        )

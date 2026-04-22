@@ -64,6 +64,7 @@ import shutil
 import argparse
 import time
 from collections import deque
+from typing import Optional
 
 # Ensure SIDERIUS root and ml_models/ are importable.
 # ml_models/ uses flat internal imports (e.g. from models_format_sandbox import ...)
@@ -114,6 +115,7 @@ def _get_reasoning_pipeline(
     llm_config: WorkflowLLMConfig,
     exploration_mode: str = "auto",
     minimum_boldness: float = 0.05,
+    n_candidates: Optional[int] = None,
 ):
     """Build a ReasoningPipelineConfig from the workflow's ProposalLLMConfig.
 
@@ -129,16 +131,27 @@ def _get_reasoning_pipeline(
         minimum_boldness: Minimum required boldness for a FalsifiablePrediction
             (|predicted - current| / |current|). Predictions below this threshold
             trigger a causal_reasoning retry. Default 0.05.
+        n_candidates: Optional override for the top-N candidate cut used by the
+            comparison stage. When None, falls through to the schema default
+            (ModelSelectionStrategy → {"n": 5}). Set to a larger value for
+            large-scale experiments that want more past models in the prompt.
     """
     if llm_config.propose and isinstance(llm_config.propose, ProposalLLMConfig):
         from agent.schemas.proposal import (
-            ReasoningPipelineConfig, ReasoningStage, ResearchPolicy,
+            ModelSelectionStrategy, ReasoningPipelineConfig, ReasoningStage,
+            ResearchPolicy,
+        )
+        selection = (
+            ModelSelectionStrategy(params={"n": n_candidates})
+            if n_candidates is not None
+            else ModelSelectionStrategy()
         )
         pipeline = ReasoningPipelineConfig(
             stages=[
                 ReasoningStage(name="comparison", system_prompt_key="COMPARATIVE_ANALYSIS"),
                 ReasoningStage(name="causal_reasoning", system_prompt_key="CAUSAL_REASONING"),
             ],
+            model_selection=selection,
             exploration_mode=exploration_mode,
             policy=ResearchPolicy(minimum_boldness=minimum_boldness),
         )
@@ -365,6 +378,7 @@ def run_workflow(
     # --- Reasoning pipeline ---
     exploration_mode: str = "auto",
     minimum_boldness: float = 0.05,
+    n_candidates: Optional[int] = None,
     # --- Implementation retry ---
     max_impl_attempts: int = 3,
     # --- Phase K.8 debug instrumentation ---
@@ -486,6 +500,7 @@ def run_workflow(
         llm_config,
         exploration_mode=exploration_mode,
         minimum_boldness=minimum_boldness,
+        n_candidates=n_candidates,
     )
     if vocab_seed:
         print(f"  Vocab seed: {len(vocab_seed)} entries loaded.")

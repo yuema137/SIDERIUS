@@ -450,7 +450,7 @@ class TestReasoningPipelineConfig:
     def test_model_selection_defaults(self):
         config = ReasoningPipelineConfig()
         assert config.model_selection.method == "top_n"
-        assert config.model_selection.params == {"n": 10}
+        assert config.model_selection.params == {"n": 5}
 
     def test_custom_model_selection(self):
         config = ReasoningPipelineConfig(

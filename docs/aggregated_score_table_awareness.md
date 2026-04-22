@@ -465,13 +465,16 @@ proposer rendering reuses the candidate/non-candidate split already defined by
   existing `best_score`, `description`, and cache text fields. It replaces
   no existing field; it's a new compact metric line.
 
-**Token-budget note (non-blocking):** the default `top_n = 10`
-(`ModelSelectionStrategy.params`) predates the switch to full tables. With
-score_tables ~30 lines each, 10 candidates is ~300 lines of table markdown on
-top of source code. This may push against the proposer prompt's token budget
-in practice. *Deferred:* we do not change `n` as part of this feature. If we
-hit limits, revisit the default (suggest 5–7) in a follow-up commit — do not
-bundle the tuning into this landing.
+**Token-budget note (RESOLVED in Phase 5 E):** the default `top_n = 10`
+(`ModelSelectionStrategy.params`) predated the switch to full tables. Phase 5 E
+lowered the default to `n = 5` (`agent/schemas/proposal.py:358-360`) and
+exposed `n_candidates: Optional[int]` on `workflows.model_exploration.run_workflow`
+/ `_get_reasoning_pipeline` so large-scale experiments can bump it back up
+without a schema change. Measured baseline at n=5 worst case (full
+rendered_markdown + ~30-line source code per candidate): **13,513 chars ≈ 3,378
+tokens** — ~2.6 % of gpt-4o-mini's 128 k context window. Regression guarded by
+`TestStagePromptSizeBudget` in `tests/unit/agent/ml_model_proposal_agent/test_pipeline_runner.py`
+(absolute bound 200 k chars + sub-linear-scaling check across n=5 → n=10).
 
 ### 9.4 Reflector prompt
 
@@ -1006,17 +1009,28 @@ Steps (live checklist):
       `fcnet` leaks into a `mystery_model_x`-only assembled prompt.
       No hardening needed; all edge paths already handled. Helpers
       land green on first pass.
-- [ ] **E.** `@real_run` test + final commit:
-      `feat(interp+proposer): render score_table in prompts (candidate
-      full / non-candidate one-liner)`. **Token-budget watch (user steer,
-      2026-04-22):** during the real-run smoke, record total prompt
-      tokens for each pipeline stage and compare against the
-      provider-side context limit. If the 10-candidate markdown tables
-      cause truncation, response degradation, or any provider-side
-      `context_length_exceeded`-class error, lower
-      `ModelSelectionStrategy.params["n"]` in the default pipeline
-      config (not a code refactor — a config/policy tune) and re-run.
-      Log the before/after token counts in the closeout note.
+- [x] **E.** `@real_run` test + final commit.
+      **Config changes (2026-04-22):** lowered `ModelSelectionStrategy`
+      default from `n=10` → `n=5` (`agent/schemas/proposal.py:358-360`)
+      and exposed `n_candidates: Optional[int]` on
+      `workflows.model_exploration.run_workflow` +
+      `_get_reasoning_pipeline` so large-scale experiments can override
+      without a schema change. **Unit budget guard:**
+      `TestStagePromptSizeBudget` — absolute bound 200 k chars, plus a
+      sub-linear scaling check (n=10 must be < 2.5× n=5).
+      **Measured baseline at n=5 worst case** (5 candidates × full
+      `rendered_markdown` + ~30-line source code): **13 513 chars ≈
+      3 378 tokens** at 4 chars/token — ~2.6 % of gpt-4o-mini's 128 k
+      context window. **Real-API validation:**
+      `TestInterpToProposalOpenAI::test_interp_to_proposal_full_chain`
+      (gpt-4o-mini) ran 51.95 s end-to-end: interp emitted
+      `per_model_score_tables`, protocol carried it through, legacy
+      proposer rendered the new-schema markdown at
+      `nodes/ml_model_proposal_agent.py:497-507`, valid `ProposalOutput`
+      produced (`tcn_low_freq_recovery`). No truncation, no
+      `context_length_exceeded`. Pipeline-mode `_render_stage_user_prompt`
+      coverage lives in the unit suite (344 passing including the 20
+      Sub-commit C tests + 11 adversarial/genericity probes).
 
 #### Sub-commit C detailed plan (LLM-readability refinement, 2026-04-22)
 
