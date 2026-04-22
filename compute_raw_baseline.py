@@ -3,17 +3,26 @@
 """
 compute_raw_baseline.py
 
-Computes the denoising score on raw (undenoised) validation files and saves
-one JSON result per file index. Run this once before starting the dashboard;
-results are used as a reference baseline line in the score chart.
+Computes the denoising score on raw (undenoised) validation files under the
+**Option B global-s_max convention** and saves one JSON per file index.
+
+Per-file formula (same ruler as ``scoring_utils.score_vector`` and as the
+ground-truth ceiling — global ``s_max`` from the anchor map):
+
+    per_segment  = (snr_sg[i] / s_max_GLOBAL) · snr_squid_raw[i]
+    score        = log_{5.27}(round(mean_i(per_segment), 2) + 1e-10)
+
+where ``snr_squid_raw`` is the raw CH1 SNR at the CH2 peak frequency
+(i.e. no denoiser applied), computed via the Option B primitives
+(``get_one_sec_psd`` upcasts to ``float64`` before ``np.fft.rfft``).
 
 File index mapping:
-  0 – 19  : fine scoring   (abra_validation_0000.h5 … abra_validation_0019.h5)
-  20 – 39 : coarse scoring (abra_validation_0020.h5 … abra_validation_0039.h5,
-                            using 1/10th of segments — same as --coarse flag)
+  0 – 19  : fine scoring   (abra_validation_0000.h5 … 0019.h5, 200 segments)
+  20 – 39 : coarse scoring (abra_validation_0020.h5 … 0039.h5, 20 segments
+                            — every 10th segment; uses the same global s_max
+                            so coarse scores are directly comparable to fine)
 
-Output: {output_dir}/raw_baseline_score_file_{index:04d}.json
-        e.g.  raw_baseline/raw_baseline_score_file_0000.json
+Output: ``{output_dir}/raw_baseline_score_file_{index:04d}.json``
 
 Usage examples:
   # Compute all 40 files (skip already-done ones):
@@ -31,106 +40,78 @@ Usage examples:
 
 import argparse
 import concurrent.futures
-import gc
 import json
 import math
 import os
 from datetime import datetime
 
-import h5py
 import numpy as np
 from tqdm import tqdm
 
+from execute_tools.build_anchor_map import load_anchor_map
+from execute_tools.scoring_utils import process_segment
+
 # ---------------------------------------------------------------------------
-# Scoring functions (copied verbatim from denoising_score_single.py to avoid
-# import side-effects; do NOT modify the originals)
+# Per-file score under the Option B global-s_max convention.
+#
+# Primitives (``get_one_sec_psd``, ``get_snr``) live in
+# ``execute_tools.scoring_utils`` — same Option B path as ``score_vector``
+# and the ground-truth ceiling. File-local ``amax(snr_sg)`` normalization
+# has been removed: we divide by the global ``s_max`` from the anchor map
+# so baseline and model scores share one ruler.
+# See ``docs/align_denoising_score.md`` §4.1.
 # ---------------------------------------------------------------------------
 
-def _get_one_sec_psd(file_path, files, ch, start=0):
-    file_list = []
-    if isinstance(files, list):
-        file_list = [os.path.join(file_path, f) for f in files]
-    elif files.endswith(".h5"):
-        file_list = [os.path.join(file_path, files)]
-
-    N = 10_000_000
-    file_num   = start // 200
-    start_idx  = N * (start % 200)
-
-    with h5py.File(file_list[file_num], 'r') as h5f:
-        key = 'channel0001' if ch == 1 else 'channel0002'
-        data = h5f['timeseries'][key]['timeseries'][start_idx:start_idx + N]
-        volt_range    = h5f['timeseries']['channel0001'].attrs['voltage_range_mV']
-        sampling_freq = h5f['timeseries']['channel0001'].attrs['sampling_frequency']
-
-        scaling   = np.float32(volt_range / (2 * 128.0))
-        ts        = np.array(data, dtype=np.float32) * scaling
-        dt        = 1.0 / sampling_freq
-        psd_chunk = dt / N * (abs(np.fft.rfft(ts)) ** 2)[1:]
-        freq_arr  = np.linspace(0, sampling_freq / 2, int(N / 2))
-
-    del data, ts
-    gc.collect()
-    return freq_arr, psd_chunk
+_FINE_SEGMENTS = 200
+_COARSE_SEGMENTS = 20  # every 10th of a 200-segment file
 
 
-def _find_peak(pwr):
-    peakdiff  = pwr[1:-1] - pwr[:-2] - pwr[2:]
-    peak_idx  = int(np.where(peakdiff == np.amax(peakdiff))[0][0]) + 1
-    return peak_idx
+def _calculate_score(
+    data_dir: str,
+    fname: str,
+    s_max: float,
+    coarse: bool,
+    parallel: bool,
+    num_workers: int,
+) -> float:
+    """Global-s_max per-file score.
 
+        per_segment  = (snr_sg[i] / s_max_GLOBAL) · snr_squid[i]
+        score        = log_{5.27}(round(mean_i(per_segment), 2) + 1e-10)
 
-def _get_snr(freq, pwr, target=0):
-    center_id   = _find_peak(pwr) if target == 0 else int(np.where(freq == target)[0][0])
-    sig_range   = 1
-    noise_range = 50
-    signal = np.sum(pwr[center_id - sig_range : center_id + sig_range + 1])
-    noise  = np.sum(pwr[center_id - noise_range : center_id + noise_range + 1]) - signal
-    if noise <= 0:
-        noise = 1e-5
-    return [signal / noise, freq[center_id]]
+    ``s_max`` is always the global value from ``segment_anchors.json`` —
+    the same ruler that ``scoring_utils.score_vector`` uses for model
+    evaluations and that ``compute_ground_truth._anchor_normalized_ceiling``
+    uses for the theoretical ceiling. Baseline, model, and ceiling are
+    therefore mutually comparable.
 
-
-def _process_iteration(i, path, file, coarse):
-    start_index = i * 10 if coarse else i
-    freq_sg,    psd_sg    = _get_one_sec_psd(path, file, ch=2, start=start_index)
-    snr_sg,     center_f  = _get_snr(freq_sg, psd_sg)
-    freq_squid, psd_squid = _get_one_sec_psd(path, file, ch=1, start=start_index)
-    snr_squid             = _get_snr(freq_squid, psd_squid, center_f)[0]
-    return i, snr_sg, snr_squid
-
-
-def _calculate_score(data_dir, fname, coarse, parallel, num_workers):
-    fpath = os.path.join(data_dir, fname)
-    with h5py.File(fpath, 'r') as f:
-        length = f['/timeseries/channel0001/timeseries'].shape[0]
-    n = min(length // 10_000_000, 200)  # cap at 200: single-file addressing assumes start < 200
-    if coarse:
-        n = max(1, n // 10)
+    Both fine (n=200) and coarse (n=20, every 10th segment) modes use the
+    same ``s_max`` — a coarse run is a sparse sampling of the same
+    physical signal, so it must be weighed on the same ruler as a fine run.
+    """
+    n = _FINE_SEGMENTS if not coarse else _COARSE_SEGMENTS
 
     snr_squid = np.zeros(n)
-    snr_sg    = np.zeros(n)
+    snr_sg = np.zeros(n)
 
     if parallel:
         with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as ex:
-            tasks = [ex.submit(_process_iteration, i, data_dir, fname, coarse)
+            tasks = [ex.submit(process_segment, i, data_dir, fname, coarse)
                      for i in range(n)]
             for fut in tqdm(concurrent.futures.as_completed(tasks), total=n,
                             desc=f"  scoring {fname}"):
                 i, s_sg, s_squid = fut.result()
-                snr_sg[i]    = s_sg
+                snr_sg[i] = s_sg
                 snr_squid[i] = s_squid
     else:
         for i in tqdm(range(n), desc=f"  scoring {fname}"):
-            _, s_sg, s_squid = _process_iteration(i, data_dir, fname, coarse)
-            snr_sg[i]    = s_sg
+            _, s_sg, s_squid = process_segment(i, data_dir, fname, coarse)
+            snr_sg[i] = s_sg
             snr_squid[i] = s_squid
 
-    max_sg = np.amax(snr_sg)
-    snr_sg = snr_sg / (max_sg if max_sg != 0 else 1.0)
-    score  = np.round(np.sum(np.multiply(snr_sg, snr_squid)) / snr_squid.size,
-                      decimals=2) + 1e-10
-    return float(math.log(score, 5.27))
+    per_segment = (snr_sg / s_max) * snr_squid
+    linear = float(np.round(float(np.mean(per_segment)), decimals=2)) + 1e-10
+    return float(math.log(linear, 5.27))
 
 
 # ---------------------------------------------------------------------------
@@ -139,13 +120,20 @@ def _calculate_score(data_dir, fname, coarse, parallel, num_workers):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Compute raw (undenoised) baseline denoising scores.",
+        description="Compute raw (undenoised) baseline denoising scores "
+                    "under the Option B global-s_max convention.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
     parser.add_argument(
         "--data_dir", "-d", type=str, default=None,
-        help="Directory containing abra_validation_*.h5 files. Default: from tidmad_data_config.yaml.",
+        help="Directory containing abra_validation_*.h5 files. "
+             "Default: TIDMAD_DATA_DIR.",
+    )
+    parser.add_argument(
+        "--anchor_map", type=str, default=None,
+        help="Path to segment_anchors.json (for global s_max). "
+             "Default: {TIDMAD_DATA_DIR}/segment_anchors.json.",
     )
     parser.add_argument(
         "--output_dir", "-o", type=str, default=None,
@@ -173,15 +161,23 @@ def main():
     if args.data_dir is None:
         from execute_tools.data_paths import TIDMAD_DATA_DIR
         args.data_dir = TIDMAD_DATA_DIR
+    if args.anchor_map is None:
+        from execute_tools.data_paths import TIDMAD_DATA_DIR
+        args.anchor_map = os.path.join(TIDMAD_DATA_DIR, "segment_anchors.json")
     if args.output_dir is None:
         from execute_tools.data_paths import SIDERIUS_DATA_DIR
         args.output_dir = os.path.join(SIDERIUS_DATA_DIR, "raw_baseline")
 
     os.makedirs(args.output_dir, exist_ok=True)
 
+    anchor_data = load_anchor_map(args.anchor_map)
+    s_max = float(anchor_data["s_max"])
+
     print(f"\n{'='*60}")
     print(f"  compute_raw_baseline.py")
     print(f"  data_dir   : {args.data_dir}")
+    print(f"  anchor_map : {args.anchor_map}")
+    print(f"  s_max      : {s_max:.6g}  (global, from anchor map)")
     print(f"  output_dir : {args.output_dir}")
     print(f"  indices    : {args.indices}")
     print(f"  override   : {args.override}")
@@ -197,8 +193,8 @@ def main():
             continue
 
         coarse = idx >= 20
-        mode   = "coarse" if coarse else "fine"
-        fname  = f"abra_validation_{idx:04d}.h5"
+        mode = "coarse" if coarse else "fine"
+        fname = f"abra_validation_{idx:04d}.h5"
         out_path = os.path.join(args.output_dir,
                                 f"raw_baseline_score_file_{idx:04d}.json")
 
@@ -217,15 +213,21 @@ def main():
         print(f"[COMPUTE] index={idx:02d}  mode={mode}  file={fname}")
         try:
             score = _calculate_score(
-                args.data_dir, fname, coarse,
-                args.parallel, args.num_workers,
+                data_dir=args.data_dir,
+                fname=fname,
+                s_max=s_max,
+                coarse=coarse,
+                parallel=args.parallel,
+                num_workers=args.num_workers,
             )
             result = {
-                "file_index":   idx,
-                "score":        score,
-                "mode":         mode,
-                "data_file":    fname,
-                "computed_at":  datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "file_index":  idx,
+                "score":       score,
+                "mode":        mode,
+                "data_file":   fname,
+                "s_max":       s_max,
+                "formula":     "option_b_global_s_max",
+                "computed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
             with open(out_path, "w") as f:
                 json.dump(result, f, indent=2)

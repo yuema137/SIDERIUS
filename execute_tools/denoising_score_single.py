@@ -1,171 +1,174 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+denoising_score_single.py — single-file denoising score CLI.
 
-import numpy as np
-import h5py as h5
-import h5py
-import logging
+Thin wrapper around :func:`execute_tools.scoring_utils.score_vector` that
+produces one scalar denoising score for one validation file. Used by
+``core/sandbox_executor.py::execute_scoring`` via subprocess (it runs under
+a separate RSS-limited preexec, which is why the interface is CLI, not
+in-process).
+
+**Scoring convention** — Option B, anchor-normalized, global ``s_max``:
+
+    per_segment  = (snr_sg[i] / s_max_GLOBAL) · snr_squid[i]
+    grand_mean   = mean_i(per_segment)                # 200 segments / file
+    score        = log_{5.27}(round(grand_mean, 2) + 1e-10)
+
+where ``s_max`` is read from ``segment_anchors.json`` (built on the fine
+validation files 0–19). This is the same formula and the same global ruler
+used by ``scoring_utils.score_vector`` and by the ground-truth ceiling, so
+baseline, model, and ceiling scores are directly comparable.
+
+The legacy ``--coarse`` and ``--weak`` flags are accepted for CLI backward
+compatibility (sandbox_executor would break without them) but are no-ops;
+a warning is logged when they are used.
+"""
+from __future__ import annotations
+
 import argparse
-import os
-import gc
 import json
-from tqdm import tqdm
-import concurrent.futures
-import math
+import logging
+import os
+import sys
 
-logging.basicConfig(format='%(asctime)s %(levelname)s: %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p', level=logging.ERROR)
+logging.basicConfig(
+    format="%(asctime)s %(levelname)s: %(message)s",
+    datefmt="%m/%d/%Y %I:%M:%S %p",
+    level=logging.INFO,
+)
 
-def GetOneSecPSD(file_path, files, ch, start=0):
-    file_list = []
-    if isinstance(files, list):
-        for f in files:
-            file_list.append(os.path.join(file_path, f))
-    elif files.endswith(".h5"):
-        file_list = [os.path.join(file_path, files)]
-    else:
-        logging.error('Not acceptable data format!')
-        
-    N = 10000000
-    fileNum = start // 200 
-    startIndex = N * (start % 200)
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 
-    file = file_list[fileNum]
-    with h5.File(file, 'r') as h5f:
-        if ch == 1:
-            data = h5f['timeseries']['channel0001']['timeseries'][startIndex:startIndex+N]
-        elif ch == 2:
-            data = h5f['timeseries']['channel0002']['timeseries'][startIndex:startIndex+N]
-        
-        volt_range = h5f['timeseries']['channel0001'].attrs['voltage_range_mV']
-        sampling_freq = h5f['timeseries']['channel0001'].attrs['sampling_frequency']
-
-        scaling = np.float32(volt_range/(2*128.0))
-        TS = np.array(data, dtype=np.float32)*scaling
-        dt = 1.0 / sampling_freq
-
-        psd_chunk = dt/N*(abs(np.fft.rfft(TS))**2)[1:]
-        freq_array = np.linspace(0, sampling_freq/2, int(N/2))
-        
-    del data, TS
-    gc.collect()
-    return freq_array, psd_chunk
-
-def findPeak(pwr):
-    peakdiff = pwr[1:-1]-pwr[:-2]-pwr[2:]
-    peakIndex = int(np.where(peakdiff==np.amax(peakdiff))[0][0])+1
-    return peakIndex
-    
-def getSNR(freq, pwr, target=0):
-    if target == 0:
-        center_id = findPeak(pwr)
-    else:
-        center_id = int(np.where(freq==target)[0][0])
-    sig_range = 1
-    noise_range = 50
-    signal = np.sum(pwr[center_id-sig_range:center_id+sig_range+1])
-    noise = np.sum(pwr[center_id-noise_range:center_id+noise_range+1])-signal
-    if noise <= 0:
-        noise = 1e-5
-    return [signal/noise, freq[center_id]]
-
-def process_iteration(i, path, file, coarse):
-    start_index = i * 10 if coarse else i
-    freq_sg, psd_sg = GetOneSecPSD(path, file, ch=2, start=start_index)
-    snr_sg, center_freq = getSNR(freq_sg, psd_sg)
-    
-    freq_squid, psd_squid = GetOneSecPSD(path, file, ch=1, start=start_index)
-    snr_squid = getSNR(freq_squid, psd_squid, center_freq)[0]
-    return i, snr_sg, snr_squid
-
-def calculateBenchmark(path, file, args):
-    if isinstance(file, list):
-        file_to_open = os.path.join(path, file[0])
-    else:
-        file_to_open = os.path.join(path, file)
-
-    with h5py.File(file_to_open, 'r') as f:
-        dataset = f['/timeseries/channel0001/timeseries']
-        length = dataset.shape[0]
-        n = length // 10000000 
-
-    if args.coarse:
-        n = int(n/10)
-        
-    snr_squid = np.zeros(shape=(n,))
-    snr_sg = np.zeros(shape=(n,))
-    
-    if args.parallel:
-        with concurrent.futures.ProcessPoolExecutor(max_workers=args.num_workers) as executor:
-            tasks = [executor.submit(process_iteration, i, path, file, args.coarse) for i in range(n)]
-            for future in tqdm(concurrent.futures.as_completed(tasks), total=n, desc="Calculating SNR"):
-                i, result_snr_sg, result_snr_squid = future.result()
-                snr_sg[i] = result_snr_sg
-                snr_squid[i] = result_snr_squid
-    else:
-        for i in tqdm(range(n)):
-            i, result_snr_sg, result_snr_squid = process_iteration(i, path, file, args.coarse)
-            snr_sg[i] = result_snr_sg
-            snr_squid[i] = result_snr_squid
-            
-    snr_sg = snr_sg/(np.amax(snr_sg) if np.amax(snr_sg) != 0 else 1.0)
-    score = np.round(np.sum(np.multiply(snr_sg, snr_squid))/snr_squid.size, decimals=2) + 1e-10
-    return math.log(score, 5.27)
-
-# ==========================================
-# 1. Parser (Updated for Mode alignment)
-# ==========================================
-parser = argparse.ArgumentParser(description="Calculate Denoising Score for Fix or Agent mode.")
-parser.add_argument('--mode', type=str, choices=['fix', 'agent'], default='fix', help='Run calculation for baseline (fix) or Agent results.')
-parser.add_argument('--data_dir', '-d', type=str, default=None)
-parser.add_argument('--denoising_model', '-m', type=str, default='punet')
-parser.add_argument('--exp_id', type=str, default="default_run", help="Experiment ID (Required for Agent mode)")
-parser.add_argument("--run_name", type=str,  default="test_run", help="Run name for the auto-exploration.")
-parser.add_argument('--file_index', '-i', type=int, default=6)
-parser.add_argument('-c', '--coarse', action='store_true')
-parser.add_argument('-p', '--parallel', action='store_true')
-parser.add_argument('-n', '--num_workers', type=int, default=8)
-parser.add_argument('-w', '--weak', action='store_true')
-parser.add_argument('--output_json', type=str, help="Optional: Path to update experiment results with score")
+parser = argparse.ArgumentParser(
+    description="Single-file denoising score (Option B, global s_max).",
+)
+parser.add_argument("--mode", type=str, choices=["fix", "agent"], default="fix",
+                    help="Baseline (fix) or agent-produced (agent) denoised file.")
+parser.add_argument("--data_dir", "-d", type=str, default=None,
+                    help="Directory containing the denoised HDF5 file.")
+parser.add_argument("--raw_data_dir", type=str, default=None,
+                    help="Directory containing the raw abra_validation_XXXX.h5 "
+                         "files (used for CH2 center-freq pickup). "
+                         "Default: TIDMAD_DATA_DIR.")
+parser.add_argument("--anchor_map", type=str, default=None,
+                    help="Path to segment_anchors.json (used for global s_max). "
+                         "Default: {TIDMAD_DATA_DIR}/segment_anchors.json.")
+parser.add_argument("--denoising_model", "-m", type=str, default="punet")
+parser.add_argument("--exp_id", type=str, default="default_run",
+                    help="Experiment ID (required for agent mode).")
+parser.add_argument("--run_name", type=str, default="test_run",
+                    help="Run name for the auto-exploration.")
+parser.add_argument("--file_index", "-i", type=int, default=6,
+                    help="Validation file index (0–19 fine).")
+parser.add_argument("-c", "--coarse", action="store_true",
+                    help="(Deprecated no-op; kept for CLI compatibility.)")
+parser.add_argument("-p", "--parallel", action="store_true",
+                    help="Use parallel workers inside score_vector.")
+parser.add_argument("-n", "--num_workers", type=int, default=8)
+parser.add_argument("-w", "--weak", action="store_true",
+                    help="(Deprecated no-op; kept for CLI compatibility.)")
+parser.add_argument("--output_json", type=str,
+                    help="Optional path; denoising_score is merged into this JSON.")
 
 args = parser.parse_args()
 
+# ---------------------------------------------------------------------------
+# Deprecation notices for legacy flags
+# ---------------------------------------------------------------------------
+
+if args.coarse:
+    logging.warning(
+        "--coarse flag is maintained for CLI compatibility; "
+        "scoring now uses the Option B global alignment."
+    )
+if args.weak:
+    logging.warning(
+        "--weak flag is maintained for CLI compatibility; "
+        "scoring now uses the Option B global alignment."
+    )
+
+# ---------------------------------------------------------------------------
+# Resolve defaults
+# ---------------------------------------------------------------------------
+
+from execute_tools.data_paths import TIDMAD_DATA_DIR  # noqa: E402
+
 if args.data_dir is None:
-    from execute_tools.data_paths import TIDMAD_DATA_DIR
     args.data_dir = TIDMAD_DATA_DIR
+if args.raw_data_dir is None:
+    args.raw_data_dir = TIDMAD_DATA_DIR
+if args.anchor_map is None:
+    args.anchor_map = os.path.join(TIDMAD_DATA_DIR, "segment_anchors.json")
 
-# Index logic
-actual_index = args.file_index + 20 if args.weak else args.file_index
-idx_str = str(actual_index).zfill(4)
+# ---------------------------------------------------------------------------
+# Filename construction (preserved from legacy for sandbox compatibility)
+# ---------------------------------------------------------------------------
 
-# ==========================================
-# 2. Filename Construction (Consistent with inference_single.py)
-# ==========================================
+idx_str = f"{args.file_index:04d}"
 if args.denoising_model == "none":
     fname = f"abra_validation_{idx_str}.h5"
-elif args.mode == 'fix':
-    # Baseline: abra_validation_denoised_punet_0000.h5
+elif args.mode == "fix":
     fname = f"abra_validation_denoised_{args.denoising_model}_{idx_str}.h5"
-else:
-    # Agent: abra_validation_denoised_punet_exp1_0000.h5
-    fname = f"abra_validation_denoised_{args.denoising_model}_{args.run_name}_{args.exp_id}_{idx_str}.h5"
+else:  # agent
+    fname = (
+        f"abra_validation_denoised_{args.denoising_model}"
+        f"_{args.run_name}_{args.exp_id}_{idx_str}.h5"
+    )
 
 full_path = os.path.join(args.data_dir, fname)
 
-# ==========================================
-# 3. Calculation and Logging
-# ==========================================
-if os.path.exists(full_path):
-    print(f"Calculating score for [{args.mode.upper()}] mode: {fname}")
-    score = calculateBenchmark(args.data_dir, [fname], args)
-    print(f"\nFinal Denoising Score: {score:.4f}")
-    
-    # Optional: Update JSON results for the Agent
-    if args.output_json and os.path.exists(args.output_json):
-        with open(args.output_json, 'r') as f:
-            data = json.load(f)
-        data['denoising_score'] = score
-        with open(args.output_json, 'w') as f:
-            json.dump(data, f, indent=4)
-        print(f"Updated {args.output_json} with score.")
-else:
+if not os.path.exists(full_path):
     print(f"Error: File not found at {full_path}")
+    sys.exit(1)
+
+# ---------------------------------------------------------------------------
+# Score via score_vector
+# ---------------------------------------------------------------------------
+
+from execute_tools.build_anchor_map import load_anchor_map  # noqa: E402
+from execute_tools.dataset_config import SEGMENTS_PER_FILE  # noqa: E402
+from execute_tools.scoring_utils import score_vector  # noqa: E402
+
+anchor_data = load_anchor_map(args.anchor_map)
+s_max = float(anchor_data["s_max"])
+anchors = anchor_data["anchors"]
+
+sample_set = {args.file_index: list(range(SEGMENTS_PER_FILE))}
+
+
+def _denoised_fn(_fi: int) -> str:
+    # score_vector calls this per file-index; we only have one file here.
+    return fname
+
+
+print(f"Calculating score for [{args.mode.upper()}] mode: {fname}")
+print(f"  s_max (global, from anchor map) = {s_max:.4f}")
+
+_, scalar = score_vector(
+    data_dir=args.data_dir,
+    sample_set=sample_set,
+    anchor_map=anchors,
+    s_max=s_max,
+    denoised_filename_fn=_denoised_fn,
+    raw_data_dir=args.raw_data_dir,
+    parallel=args.parallel,
+    num_workers=args.num_workers,
+    legacy_mode=False,
+)
+
+print(f"\nFinal Denoising Score: {scalar:.4f}")
+
+# ---------------------------------------------------------------------------
+# Optional: merge into output JSON
+# ---------------------------------------------------------------------------
+
+if args.output_json and os.path.exists(args.output_json):
+    with open(args.output_json, "r") as f:
+        data = json.load(f)
+    data["denoising_score"] = scalar
+    with open(args.output_json, "w") as f:
+        json.dump(data, f, indent=4)
+    print(f"Updated {args.output_json} with score.")

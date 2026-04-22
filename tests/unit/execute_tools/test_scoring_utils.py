@@ -138,6 +138,14 @@ class TestScoreVector:
     def _filename_fn(self, file_index):
         return f"denoised_{file_index:04d}.h5"
 
+    # Note on ``parallel=False``: the new ``score_vector`` dispatches to
+    # ``ProcessPoolExecutor`` whenever there is more than one file AND
+    # ``parallel=True``. ``@patch`` decorators cannot cross process
+    # boundaries — the workers re-import ``execute_tools.scoring_utils``
+    # and see the unmocked functions. All tests here pass
+    # ``parallel=False`` to keep execution in the main process so mocks
+    # take effect.
+
     @patch("execute_tools.scoring_utils.get_snr", side_effect=_mock_get_snr_fixed)
     @patch("execute_tools.scoring_utils.get_one_sec_psd", side_effect=_mock_get_one_sec_psd)
     def test_vector_length_is_20(self, mock_psd, mock_snr):
@@ -148,6 +156,7 @@ class TestScoreVector:
             anchor_map=MOCK_ANCHOR_MAP,
             s_max=MOCK_S_MAX,
             denoised_filename_fn=self._filename_fn,
+            parallel=False,
         )
         assert len(vector) == NUM_FILES
 
@@ -161,6 +170,7 @@ class TestScoreVector:
             anchor_map=MOCK_ANCHOR_MAP,
             s_max=MOCK_S_MAX,
             denoised_filename_fn=self._filename_fn,
+            parallel=False,
         )
         # File 6 should have a real numeric score
         assert vector[6] is not None and not math.isnan(vector[6])
@@ -171,8 +181,11 @@ class TestScoreVector:
 
     @patch("execute_tools.scoring_utils.get_snr", side_effect=_mock_get_snr_fixed)
     @patch("execute_tools.scoring_utils.get_one_sec_psd", side_effect=_mock_get_one_sec_psd)
-    def test_scalar_is_log_of_mean(self, mock_psd, mock_snr):
-        """final_scalar_score = log_{5.27}(mean_of_non_nan + 1e-10)"""
+    def test_scalar_is_log_of_round_grand_mean(self, mock_psd, mock_snr):
+        """``final_scalar = log_{5.27}(round(grand_mean, 2) + 1e-10)``.
+
+        Single file, single segment ⇒ grand_mean == vector[6].
+        """
         sample_set: SampleSet = {6: [0]}
         vector, scalar = score_vector(
             data_dir="/fake",
@@ -180,14 +193,23 @@ class TestScoreVector:
             anchor_map=MOCK_ANCHOR_MAP,
             s_max=MOCK_S_MAX,
             denoised_filename_fn=self._filename_fn,
+            parallel=False,
         )
-        expected = math.log(vector[6] + 1e-10, 5.27)
+        # TIDMAD round: legacy applies ``round(·, 2) + 1e-10`` before log.
+        # Under these mock values the rounded mean is 0.0 and the scalar
+        # collapses to ``log(1e-10, 5.27)``; we still assert the exact
+        # formula holds bit-for-bit.
+        expected = math.log(round(vector[6], 2) + 1e-10, 5.27)
         assert abs(scalar - expected) < 1e-10
 
     @patch("execute_tools.scoring_utils.get_snr", side_effect=_mock_get_snr_fixed)
     @patch("execute_tools.scoring_utils.get_one_sec_psd", side_effect=_mock_get_one_sec_psd)
-    def test_multiple_files_averaged(self, mock_psd, mock_snr):
-        """Scalar averages non-NaN file scores before log."""
+    def test_multiple_files_grand_mean(self, mock_psd, mock_snr):
+        """Scalar uses the legacy grand mean (not mean-of-file-means).
+
+        With uniform ``|S_f|=1`` across two files, the grand mean equals
+        the simple mean of the two ``file_vector`` entries.
+        """
         sample_set: SampleSet = {0: [0], 19: [199]}
         vector, scalar = score_vector(
             data_dir="/fake",
@@ -195,9 +217,10 @@ class TestScoreVector:
             anchor_map=MOCK_ANCHOR_MAP,
             s_max=MOCK_S_MAX,
             denoised_filename_fn=self._filename_fn,
+            parallel=False,
         )
-        mean_score = (vector[0] + vector[19]) / 2.0
-        expected = math.log(mean_score + 1e-10, 5.27)
+        grand_mean = (vector[0] + vector[19]) / 2.0
+        expected = math.log(round(grand_mean, 2) + 1e-10, 5.27)
         assert abs(scalar - expected) < 1e-10
 
     def test_raises_without_filename_fn(self):
@@ -208,6 +231,19 @@ class TestScoreVector:
                 anchor_map=MOCK_ANCHOR_MAP,
                 s_max=MOCK_S_MAX,
                 denoised_filename_fn=None,
+                parallel=False,
+            )
+
+    def test_raises_without_s_max_in_non_legacy_mode(self):
+        """Non-legacy mode requires ``s_max`` from the anchor map."""
+        with pytest.raises(ValueError, match="Non-legacy mode requires s_max"):
+            score_vector(
+                data_dir="/fake",
+                sample_set={0: [0]},
+                anchor_map=MOCK_ANCHOR_MAP,
+                s_max=None,
+                denoised_filename_fn=self._filename_fn,
+                parallel=False,
             )
 
     @patch("execute_tools.scoring_utils.get_snr", side_effect=_mock_get_snr_fixed)
@@ -220,6 +256,7 @@ class TestScoreVector:
             anchor_map=MOCK_ANCHOR_MAP,
             s_max=MOCK_S_MAX,
             denoised_filename_fn=self._filename_fn,
+            parallel=False,
         )
         assert all(v is None for v in vector)
         assert scalar == float("-inf")
@@ -236,7 +273,41 @@ class TestScoreVector:
             anchor_map=MOCK_ANCHOR_MAP,
             s_max=MOCK_S_MAX,
             denoised_filename_fn=self._filename_fn,
+            parallel=False,
         )
         present = [v for v in vector if v is not None]
         assert len(present) == 1
         assert vector[6] is not None and not math.isnan(vector[6])
+
+    @patch("execute_tools.scoring_utils.get_snr", side_effect=_mock_get_snr_fixed)
+    @patch("execute_tools.scoring_utils.get_one_sec_psd", side_effect=_mock_get_one_sec_psd)
+    def test_legacy_mode_derives_s_max_globally_from_collected_pairs(self, mock_psd, mock_snr):
+        """``legacy_mode=True`` derives ``s_max`` globally as
+        ``np.amax(snr_sg)`` over *all pairs collected across the sample_set*
+        — not per-file. It ignores any anchor map or explicit ``s_max``
+        argument passed in.
+
+        Mocked ``snr_sg = 2.0`` for every segment, so the global-over-
+        collected-data s_max is 2.0. For a single segment this yields
+        grand_mean = (2/2) * 2 = 2.0 and the scalar becomes
+        ``log_{5.27}(round(2.0, 2) + 1e-10)`` regardless of the anchor map
+        or s_max we pass in.
+
+        This is distinct from the Option B convention (``legacy_mode=False``),
+        where ``s_max`` is the global maximum over the anchor map — a fixed
+        constant independent of which segments happen to be sampled.
+        """
+        sample_set: SampleSet = {6: [0]}
+        _, scalar_legacy = score_vector(
+            data_dir="/fake",
+            sample_set=sample_set,
+            anchor_map=None,
+            s_max=None,  # legacy_mode ignores s_max
+            denoised_filename_fn=self._filename_fn,
+            legacy_mode=True,
+            parallel=False,
+        )
+        # snr_sg=2, snr_squid=2, s_max=np.amax([2.0])=2.0
+        # grand_mean = (2/2) * 2 = 2.0 ; round(2.0, 2) = 2.0
+        expected = math.log(2.0 + 1e-10, 5.27)
+        assert abs(scalar_legacy - expected) < 1e-10
