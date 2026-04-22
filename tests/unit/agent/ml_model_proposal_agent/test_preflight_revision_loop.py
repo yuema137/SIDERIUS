@@ -24,6 +24,8 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock
 
+from ._prompt_utils import extract_accumulated_json
+
 from agent.schemas.proposal import (
     ProposalInput,
     ReasoningPipelineConfig,
@@ -273,7 +275,7 @@ class TestPipelineSuccessPath:
         _agent(bridge).run(_pipeline_input(tmp_path))
 
         revision_prompt = captured[3]
-        revision_data = json.loads(revision_prompt.split("\n\n")[0])
+        revision_data = extract_accumulated_json(revision_prompt)
         errors = revision_data.get("proposing_stage_errors", [])
         assert any("[PRE-FLIGHT REJECTION]" in e for e in errors)
         rejection = next(e for e in errors if "[PRE-FLIGHT REJECTION]" in e)

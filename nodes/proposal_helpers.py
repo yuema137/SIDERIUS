@@ -8,7 +8,7 @@ and no side effects. They prepare context for the reasoning pipeline.
 
 import os
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from agent.schemas.proposal import (
     ModelSelectionStrategy,
@@ -197,6 +197,135 @@ def enrich_candidates_with_source(candidates: List[Dict[str, Any]]) -> List[Dict
             if source:
                 candidate["source_code_lines"] = len(source.split("\n"))
     return candidates
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 C — stage user-prompt rendering helpers
+#
+# These lift the heavy, read-intensive content (score_table markdown + source
+# code) out of the JSON-escaped candidate dicts into a top-level markdown
+# block the LLM reads natively. Scalar metadata stays in the JSON region.
+# See docs/aggregated_score_table_awareness.md §"Sub-commit C detailed plan".
+# ---------------------------------------------------------------------------
+
+
+def build_score_summary_line(score_table: Optional[Dict[str, Any]]) -> Optional[str]:
+    """One-liner summary for a non-candidate model's score table.
+
+    Reads ``aggregate.{model_scalar, raw_baseline_scalar, percent_of_ceiling_log,
+    num_sampled_files}`` from a serialized ``ScoreComparisonTable`` dict and
+    returns one of:
+
+    * ``"log_scalar=X.XX, recovery=YY% on N files"`` — normal case.
+    * ``"log_scalar=X.XX, below raw baseline on N files"`` — when
+      ``model_scalar < raw_baseline_scalar``. Mirrors the below-baseline
+      guard in ``execute_tools.scoring_helpers.render_comparison_table`` so
+      we never emit a misleading sign-flipped percentage here.
+
+    Returns ``None`` when ``score_table`` is ``None`` or lacks an
+    ``aggregate`` sub-dict — caller decides whether to omit the field.
+    """
+    if not isinstance(score_table, dict):
+        return None
+    agg = score_table.get("aggregate")
+    if not isinstance(agg, dict):
+        return None
+
+    model_scalar = agg.get("model_scalar")
+    raw_baseline = agg.get("raw_baseline_scalar")
+    recovery = agg.get("percent_of_ceiling_log")
+    n_files = agg.get("num_sampled_files")
+    if model_scalar is None or n_files is None:
+        return None
+
+    if raw_baseline is not None and model_scalar < raw_baseline:
+        return (
+            f"log_scalar={model_scalar:.2f}, "
+            f"below raw baseline on {n_files} files"
+        )
+
+    if recovery is None:
+        return f"log_scalar={model_scalar:.2f} on {n_files} files"
+
+    return (
+        f"log_scalar={model_scalar:.2f}, "
+        f"recovery={recovery * 100:.1f}% on {n_files} files"
+    )
+
+
+def build_candidate_markdown_block(candidates: List[Dict[str, Any]]) -> str:
+    """Top-level markdown block rendering each candidate's full detail.
+
+    For each candidate dict, emits a section:
+
+    ```
+    ### Candidate: <model_type>
+
+    <score_table.rendered_markdown>
+
+    #### Source Code
+    ```python
+    <source_code>
+    ```
+
+    ---
+    ```
+
+    Falls back to ``_Score table unavailable._`` / ``_Source code
+    unavailable._`` when the corresponding field is missing. Returns an
+    empty string when ``candidates`` is empty — callers typically omit
+    the whole block (heading + separator) on an empty return.
+    """
+    if not candidates:
+        return ""
+
+    sections: List[str] = ["## Candidate Models — detailed view", ""]
+    for candidate in candidates:
+        mt = candidate.get("model_type", "<unknown>")
+        sections.append(f"### Candidate: {mt}")
+        sections.append("")
+
+        table = candidate.get("score_table")
+        rendered = table.get("rendered_markdown") if isinstance(table, dict) else None
+        if rendered:
+            sections.append(rendered)
+        else:
+            sections.append("_Score table unavailable._")
+        sections.append("")
+
+        source = candidate.get("source_code")
+        sections.append("#### Source Code")
+        if source:
+            sections.append("```python")
+            sections.append(source)
+            sections.append("```")
+        else:
+            sections.append("_Source code unavailable._")
+        sections.append("")
+        sections.append("---")
+        sections.append("")
+
+    return "\n".join(sections).rstrip() + "\n"
+
+
+def strip_heavy_fields_for_json(
+    candidates: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Shallow copy per candidate with heavy fields removed for JSON dump.
+
+    Removes ``score_table``, ``source_code``, and ``source_code_lines`` —
+    the fields that live in the top-level markdown block after
+    ``build_candidate_markdown_block``. Preserves every other field so
+    stage prompts that enumerate candidate scalars (``best_score``,
+    ``model_params``, ``description``, ``source``, ...) keep working.
+
+    Input list is not mutated.
+    """
+    _HEAVY_FIELDS = ("score_table", "source_code", "source_code_lines")
+    return [
+        {k: v for k, v in candidate.items() if k not in _HEAVY_FIELDS}
+        for candidate in candidates
+    ]
 
 
 def resolve_exploration_mode(

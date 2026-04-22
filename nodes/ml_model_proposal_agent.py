@@ -25,7 +25,7 @@ import argparse
 
 from pydantic import ValidationError
 
-from typing import List
+from typing import Any, Dict, List
 
 from agent.llm_bridge import LLMBridge
 from agent.prompts import _format_known_constraints_block
@@ -361,6 +361,53 @@ def _format_recent_gate_exhaustions_block(
     return "\n".join(lines)
 
 
+def _render_stage_user_prompt(accumulated: Dict[str, Any]) -> str:
+    """Render a pipeline-stage user prompt: native markdown + clean JSON.
+
+    Splits the stage user prompt into two concatenated regions:
+
+    * **Top-level markdown** — one section per candidate, carrying the full
+      `ScoreComparisonTable.rendered_markdown` + fenced source code block.
+      This is what the LLM reads for high-density per-file reasoning. Empty
+      when there are no candidates.
+    * **JSON region** — scalar metadata (`best_score`, `model_params`, etc.),
+      non-candidate overview one-liners, `interpretation_summary`, and the
+      rest of the pipeline state.
+
+    Before dumping the JSON region, we:
+
+    * Strip `score_table`, `source_code`, `source_code_lines` from every
+      candidate entry (the heavy content now lives in the top-level markdown).
+    * Drop `per_model_score_tables` from `interpretation_summary` — redundant
+      with the top-level markdown and the non-candidate `score_summary` lines.
+    """
+    from nodes.proposal_helpers import (
+        build_candidate_markdown_block,
+        strip_heavy_fields_for_json,
+    )
+
+    candidates = accumulated.get("candidates") or []
+    markdown_block = build_candidate_markdown_block(candidates)
+
+    cleaned: Dict[str, Any] = dict(accumulated)
+    cleaned["candidates"] = strip_heavy_fields_for_json(candidates)
+    interp_summary = cleaned.get("interpretation_summary")
+    if isinstance(interp_summary, dict) and "per_model_score_tables" in interp_summary:
+        cleaned["interpretation_summary"] = {
+            k: v for k, v in interp_summary.items() if k != "per_model_score_tables"
+        }
+
+    json_region = (
+        "## Accumulated context\n\n"
+        "```json\n"
+        + json.dumps(cleaned, indent=2, default=str)
+        + "\n```"
+    )
+    if markdown_block:
+        return f"{markdown_block}\n{json_region}"
+    return json_region
+
+
 def _build_reasoning_prompt(inp: ProposalInput) -> str:
     """Build the user prompt for the reasoning call."""
     interp = inp.interpretation
@@ -443,26 +490,21 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
     if eff_comp:
         lines += ["### Efficiency Comparison (cross-model)", eff_comp, ""]
 
-    # Per-model score tables. The carrier is a serialized ScoreComparisonTable
-    # (dict) per model; we synthesize the per-file score list from rows[i].model
-    # so the weak/strong rendering below stays byte-identical. Phase 5 replaces
-    # this block with the pre-rendered table markdown.
+    # Per-model score tables — full rendered_markdown per model (Phase 5 C).
+    # Legacy path has no ModelSelectionStrategy to split on, so every model
+    # gets the complete 3-column table (raw_baseline / ground_truth / model)
+    # plus the subset-scoped aggregate scalars.
     score_tables = interp.get("per_model_score_tables")
     if score_tables:
-        import math
-        lines.append("### Per-model File Vectors (per-file denoising scores)")
-        lines.append("File index → frequency (log scale): 0=lowest, 19=highest")
-        for mt, table in score_tables.items():
-            rows = table.get("rows", []) if isinstance(table, dict) else []
-            fv = [r.get("model") for r in rows]
-            present = [
-                (i, v) for i, v in enumerate(fv)
-                if v is not None and not (isinstance(v, float) and math.isnan(v))
-            ]
-            weak = [i for i, v in present if v < 1.0]
-            strong = [i for i, v in present if v >= 10.0]
-            lines.append(f"  {mt}: weak files (score<1.0)={weak}, strong files (score>=10)={strong}")
+        lines.append("### Per-model score tables")
         lines.append("")
+        for mt, table in score_tables.items():
+            rendered = table.get("rendered_markdown") if isinstance(table, dict) else None
+            if not rendered:
+                continue
+            lines.append(f"#### {mt}")
+            lines.append(rendered)
+            lines.append("")
 
     # Weak frequency files
     weak_files = interp.get("weak_frequency_files")
@@ -725,7 +767,12 @@ class MLModelProposalAgent:
 
     def _run_pipeline(self, inp: ProposalInput) -> ProposalOutput:
         """Three-stage pipeline: comparison → reasoning → proposing."""
-        from nodes.proposal_helpers import select_candidate_models, resolve_exploration_mode, enrich_candidates_with_source
+        from nodes.proposal_helpers import (
+            select_candidate_models,
+            resolve_exploration_mode,
+            enrich_candidates_with_source,
+            build_score_summary_line,
+        )
         from agent.prompt_templates.proposal import load_stage_prompt, render_expert_context, render_agent_cards
 
         pipeline = inp.reasoning_pipeline
@@ -754,6 +801,7 @@ class MLModelProposalAgent:
         cache = inp.interpretation.get("model_knowledge_cache") or {}
         descriptions = inp.interpretation.get("model_descriptions") or {}
         per_best = inp.interpretation.get("per_model_best") or {}
+        score_tables = inp.interpretation.get("per_model_score_tables") or {}
 
         non_candidates_overview = []
         for mt in inp.interpretation.get("model_types", []):
@@ -765,6 +813,11 @@ class MLModelProposalAgent:
                 "best_score": per_best.get(mt),
                 "description": descriptions.get(mt),
             }
+            # Phase 5 C: compact score-table summary so the LLM sees the
+            # per-file recovery context without the 20-row markdown weight.
+            summary_line = build_score_summary_line(score_tables.get(mt))
+            if summary_line:
+                overview["score_summary"] = summary_line
             for field in _CACHE_TEXT_FIELDS:
                 if entry.get(field):
                     overview[field] = entry[field]
@@ -854,8 +907,8 @@ class MLModelProposalAgent:
                 mindset=inp.mindset,
             )
 
-            # Build user prompt: accumulated context + agent cards + expert context + vocab
-            user_prompt = json.dumps(accumulated, indent=2, default=str)
+            # Build user prompt: candidate markdown block + JSON region + cards + context + vocab
+            user_prompt = _render_stage_user_prompt(accumulated)
             if agent_cards_block:
                 user_prompt += f"\n\n{agent_cards_block}"
             if expert_context_block:
@@ -908,7 +961,7 @@ class MLModelProposalAgent:
                                 template_vars=template_vars,
                                 mindset=inp.mindset,
                             )
-                            retry_user = json.dumps(accumulated, indent=2, default=str)
+                            retry_user = _render_stage_user_prompt(accumulated)
                             if agent_cards_block:
                                 retry_user += f"\n\n{agent_cards_block}"
                             if expert_context_block:
@@ -977,7 +1030,7 @@ class MLModelProposalAgent:
             last_exc: Exception | None = None
 
             for attempt in range(_MAX_PROPOSING_RETRIES + 1):
-                proposing_user = json.dumps(accumulated, indent=2, default=str)
+                proposing_user = _render_stage_user_prompt(accumulated)
                 if agent_cards_block:
                     proposing_user += f"\n\n{agent_cards_block}"
                 if expert_context_block:

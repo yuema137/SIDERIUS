@@ -976,20 +976,170 @@ on C since it probes `rendered_markdown` consumption).
 |---|-------|---------------|
 | A | Interpreter per-model prompt swap: `_build_per_model_prompt` drops the 20-line per-file listing in favor of `summary.best_score_table.rendered_markdown` + `formal_score_table.rendered_markdown`. **Steer:** keep the explicit "Weak Frequency Files" callout even with the table present — it acts as an attention mechanism for the LLM. | `nodes/result_interpretation_agent.py`, `tests/unit/agent/result_interpretation_agent/test_interpretation_agent.py` |
 | B | Candidate-summary key rename: `select_candidate_models` returns `"score_table": <serialized dict>` instead of `"file_vector": [...]`. | `nodes/proposal_helpers.py`, associated tests |
-| C | Proposer prompt (`_build_reasoning_prompt`): candidates render full `rendered_markdown`; non-candidates get a compact one-liner. **Steer:** the one-liner MUST include `num_sampled_files`, e.g. `recovery=55% on 20 files` (trial vs. formal context is otherwise invisible). | `nodes/ml_model_proposal_agent.py`, associated tests |
+| C | Proposer prompt (pipeline + legacy). Pipeline path: lift `rendered_markdown` + `source_code` out of the JSON-escaped candidate dicts into a **top-level markdown block** the LLM reads natively; non-candidates gain a `score_summary` one-liner; `per_model_score_tables` dropped from `interpretation_summary` as it is now redundant. Legacy `_build_reasoning_prompt`: replace weak/strong one-liner with per-model `rendered_markdown`. **Steers:** (1) top-level rendering > JSON-escaped markdown for LLM readability; (2) the non-candidate one-liner MUST include `num_sampled_files`, e.g. `recovery=55% on 20 files`. | `nodes/proposal_helpers.py` (3 new helpers), `nodes/ml_model_proposal_agent.py` (pipeline + legacy), `tests/unit/agent/ml_model_proposal_agent/{test_pipeline_runner,test_proposal_agent}.py` |
 | D | Adversarial re-probe now that `rendered_markdown` is consumed. **Steer:** specifically cover truncated tables — an LLM-constructed JSON with a partial `rows` list must be caught by schema validation (not silently rendered). | `tests/unit/execute_tools/test_score_table_adversarial.py` extension (+ proposer hardening if a crash surfaces) |
 | E | `@real_run` integration test: one proposer iteration asserting the rendered prompt contains the comparison table for the top-ranked candidate and the compact line for a non-candidate. Close out design-doc check-offs. | `tests/integration/...`, `docs/aggregated_score_table_awareness.md` |
 
 Steps (live checklist):
-- [ ] **A.** Interpreter prompt swap (retain Weak-Frequency-Files callout).
-- [ ] **B.** `select_candidate_models` → `"score_table"` key.
-- [ ] **C.** Proposer prompt render: candidates full markdown, non-candidates
-      `log_scalar=X.XX, recovery=YY% on N files`.
+- [x] **A.** Interpreter prompt swap (retain Weak-Frequency-Files callout). `b7ade87`.
+- [x] **B.** `select_candidate_models` → `"score_table"` key. `8d93d44`.
+- [x] **C.** Proposer prompt render (LLM readability refinement).
+      Pipeline: lift `rendered_markdown` + `source_code` into a top-level
+      markdown block above the cleaned JSON region (via
+      `_render_stage_user_prompt` — replaces 3 `json.dumps` sites);
+      non-candidates gain `score_summary` one-liner; drop
+      `per_model_score_tables` from `interpretation_summary`.
+      Legacy: per-model `rendered_markdown` sections. Three new helpers
+      in `nodes/proposal_helpers.py` + 20 new unit tests across 4 classes.
+      See "Sub-commit C detailed plan" below.
 - [ ] **D.** Adversarial re-probe incl. truncated `rows` list; harden if
       crash surfaces.
 - [ ] **E.** `@real_run` test + final commit:
       `feat(interp+proposer): render score_table in prompts (candidate
       full / non-candidate one-liner)`.
+
+#### Sub-commit C detailed plan (LLM-readability refinement, 2026-04-22)
+
+**Architectural insight.** The pipeline stage user prompt is currently a
+single `json.dumps(accumulated, ...)` call (3 sites: `ml_model_proposal_agent.py:858,911,980`).
+With Sub-commit B, candidates carry the full serialized `ScoreComparisonTable`
+dict under `"score_table"`. JSON-escaping a 20-row markdown table collapses
+it into a `\n`-soup string — technically parseable by the LLM, but
+suboptimal for reasoning. Sub-commit C lifts the heavy, read-intensive
+content out of JSON into a top-level markdown block the LLM consumes
+natively, while scalar metadata stays in the JSON registry.
+
+**User-prompt shape after C.** Each pipeline stage user prompt becomes
+two concatenated regions:
+
+```
+## Candidate Models — detailed view
+
+### Candidate: wavenet
+<score_table.rendered_markdown>
+
+#### Source Code
+```python
+<source code for wavenet>
+```
+
+---
+
+### Candidate: gated_fno
+...
+
+## Accumulated context
+
+```json
+{
+  "candidates": [
+    {"model_type": "wavenet", "best_score": 5.5, "description": "...",
+     "model_params": 55000, "training_segments": 200, "source": "seed"}
+  ],
+  "non_candidates_overview": [
+    {"model_type": "punet", "best_score": 1.8,
+     "score_summary": "log_scalar=1.80, recovery=17.8% on 20 files",
+     "description": "...", "key_findings": [...]}
+  ],
+  "interpretation_summary": { /* per_model_score_tables dropped */ },
+  "existing_model_types": [...],
+  "previous_failures": [...]
+}
+```
+
+**Field migration table.**
+
+| Field | Today | After C |
+|---|---|---|
+| `candidate["score_table"]` | in JSON dict | **stripped from JSON** → top-level markdown via `rendered_markdown` |
+| `candidate["source_code"]`, `["source_code_lines"]` | in JSON dict (`\n`-escaped) | **stripped from JSON** → fenced Python code block in top-level markdown |
+| `candidate["model_type/best_score/description/model_params/training_segments/source"]` | in JSON | unchanged — stays in JSON as scalar metadata |
+| `non_candidates_overview[i]["score_summary"]` | absent | **new**: `"log_scalar=X.XX, recovery=YY% on N files"` or `"log_scalar=X.XX, below raw baseline on N files"` |
+| `interpretation_summary["per_model_score_tables"]` | duplicated | **dropped** — redundant with top-level markdown + non-candidate one-liners |
+
+**New helpers in `nodes/proposal_helpers.py`.**
+
+1. `build_score_summary_line(score_table_dict) -> Optional[str]`
+   - Reads `aggregate.{model_scalar, raw_baseline_scalar, percent_of_ceiling_log, num_sampled_files}`.
+   - Mirrors the below-baseline guard in `render_comparison_table`: when
+     `model_scalar < raw_baseline_scalar`, emit the "below raw baseline"
+     variant instead of a misleading negative/flipped percentage.
+   - Returns `None` when `score_table_dict` is `None` (fully-failed run) —
+     caller decides whether to omit the field entirely.
+
+2. `build_candidate_markdown_block(candidates: list[dict]) -> str`
+   - For each candidate, emits: `### Candidate: <model_type>` → blank line
+     → `score_table.rendered_markdown` → `#### Source Code` →
+     fenced python block with the source (or `_Source code unavailable._`
+     if absent) → `---` separator.
+   - Returns `""` when `candidates` is empty (legacy shape caller checks
+     before concatenation).
+
+3. `strip_heavy_fields_for_json(candidates: list[dict]) -> list[dict]`
+   - Shallow-copy per candidate with `score_table`, `source_code`, and
+     `source_code_lines` removed. Preserves every other field (so stage
+     prompts that enumerate candidate scalars continue to work).
+
+**Pipeline-path refactor in `nodes/ml_model_proposal_agent.py`.**
+
+- Extract user-prompt construction into
+  `_render_stage_user_prompt(accumulated: dict) -> str` (used at the 3
+  `json.dumps(accumulated)` sites). Inside:
+  - Pull `candidates` and build the top-level markdown via
+    `build_candidate_markdown_block`.
+  - Build a cleaned copy of `accumulated` where `candidates` is stripped,
+    `interpretation_summary` no longer contains `per_model_score_tables`,
+    everything else is passthrough.
+  - Return `f"{markdown_block}\n\n## Accumulated context\n\n```json\n{dump}\n```"`
+    (omit the markdown block + its leading `## Candidate Models — detailed view`
+    header when there are no candidates — legacy-mode tests expect it
+    absent).
+- Update the non-candidate loop at `:758-771` to compute
+  `score_summary = build_score_summary_line(score_tables.get(mt))` and
+  attach it to `overview` when non-None. Left-join on `interp.get("per_model_score_tables", {})`.
+
+**Legacy-path change in `nodes/ml_model_proposal_agent.py:450-465`.**
+
+- Replace the weak/strong one-liner block with per-model rendered_markdown
+  sections: iterate `interp.get("per_model_score_tables")`, emit
+  `#### <model_type>` + blank line + `rendered_markdown` per table, skip
+  entries where `rendered_markdown` is missing/empty. No candidate split
+  in this path (no `ModelSelectionStrategy`) — every model gets the full
+  table.
+
+**Tests.**
+
+- `tests/unit/agent/ml_model_proposal_agent/test_pipeline_runner.py`:
+  - New `TestScoreSummaryLine` class — happy path (positive recovery),
+    below-baseline (mirrors `render_comparison_table` guard), trial mode
+    subset (`num_sampled_files=3 on 3 files`), None input.
+  - New `TestCandidateMarkdownBlock` class — headings present, rendered
+    markdown verbatim, source code falls back to "unavailable" when absent,
+    empty string on empty list.
+  - New `TestStripHeavyFieldsForJson` — score_table/source_code removed,
+    other fields preserved, input list not mutated.
+  - New `TestStageUserPrompt` (integration-style, no LLM) — after
+    `_render_stage_user_prompt(accumulated)`:
+    * Top-level markdown block present with `## Candidate Models` header
+      when candidates exist.
+    * `"rendered_markdown"` key does NOT appear anywhere in the JSON
+      region (confirming strip worked).
+    * `score_summary` present on each non-candidate overview entry.
+    * `per_model_score_tables` absent from `interpretation_summary`.
+- `tests/unit/agent/ml_model_proposal_agent/test_proposal_agent.py`:
+  - `test_includes_file_vectors` → rename to
+    `test_includes_rendered_markdown_per_model`; assert the rendered table
+    heading + rendered_markdown substring in the legacy prompt.
+  - Other `TestBuildReasoningPromptEnriched` expectations unchanged
+    (they do not probe the file_vector text directly).
+
+**Out of scope for C.**
+
+- `ModelSelectionStrategy.params["n"]` stays at 10 — Decision 7's
+  token-budget note is explicitly deferred.
+- `agent/prompt_templates/proposal/comparison_stage*.md` natural-language
+  references to "file_vector" are LLM-facing guidance, not code. Leave
+  for a docs-only follow-up if needed.
 
 ---
 

@@ -324,14 +324,20 @@ class TestBuildReasoningPromptEnriched:
             storage={"backend": "local", "local": {"workspace": "/tmp/test", "run_name": "r1"}},
         )
 
-    def test_includes_file_vectors(self):
+    def test_includes_rendered_markdown_per_model(self):
+        """Phase 5 C: legacy path emits per-model ``rendered_markdown`` under a
+        ``### Per-model score tables`` heading instead of a weak-files one-liner.
+        """
         fv = [0.001, 0.01] + [5.0] * 18
         inp = self._make_enriched_input(
             per_model_score_tables={"punet": _make_score_table_dict(fv)},
         )
         prompt = _build_reasoning_prompt(inp)
-        assert "File Vector" in prompt
-        assert "weak files" in prompt.lower()
+        assert "### Per-model score tables" in prompt
+        assert "#### punet" in prompt
+        # `_make_score_table_dict` stamps `rendered_markdown="(test)"` — that
+        # sentinel must make it through the legacy renderer verbatim.
+        assert "(test)" in prompt
 
     def test_includes_weak_frequency_files(self):
         inp = self._make_enriched_input(

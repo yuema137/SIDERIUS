@@ -25,6 +25,8 @@ from agent.schemas.proposal import (
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
 
+from ._prompt_utils import extract_accumulated_json
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -172,7 +174,7 @@ class TestBoldnessEnforcement:
 
         # Call index 2 is the causal_reasoning retry; its user prompt is call_args[0][1].
         retry_user_prompt = mock.generate.call_args_list[2][0][1]
-        retry_context = json.loads(retry_user_prompt.split("\n\n")[0])  # strip vocab block
+        retry_context = extract_accumulated_json(retry_user_prompt)
         errors = retry_context.get("proposing_stage_errors", [])
         assert any("BOLDNESS_TOO_LOW" in e for e in errors), (
             f"BOLDNESS_TOO_LOW not in retry user prompt errors. Got: {errors}"
@@ -190,7 +192,7 @@ class TestBoldnessEnforcement:
         agent.run(inp)
 
         retry_user_prompt = mock.generate.call_args_list[2][0][1]
-        retry_context = json.loads(retry_user_prompt.split("\n\n")[0])
+        retry_context = extract_accumulated_json(retry_user_prompt)
         errors = retry_context.get("proposing_stage_errors", [])
         boldness_error = next(e for e in errors if "BOLDNESS_TOO_LOW" in e)
         assert "5.5" in boldness_error   # current_value
