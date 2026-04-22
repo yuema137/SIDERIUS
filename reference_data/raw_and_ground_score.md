@@ -9,6 +9,7 @@ directly comparable at every index.
 - **Global s_max:** `295_715_680.1425` (identical across all 41 reference JSONs)
 - **Raw baseline JSONs:** `{SIDERIUS_DATA_DIR}/raw_baseline/raw_baseline_score_file_XXXX.json`
 - **Ground-truth JSONs:** `{SIDERIUS_DATA_DIR}/ground_truth/ground_truth_score_file_XXXX.json`
+- **Scalar baseline:** `{SIDERIUS_DATA_DIR}/raw_baseline/scalar_anchor_normalized.json`
 - **Scalar ceiling:** `{SIDERIUS_DATA_DIR}/ground_truth/ceiling_anchor_normalized.json`
 - **Generators:** `compute_raw_baseline.py`, `compute_ground_truth.py`
 - **Regenerated:** 2026-04-21
@@ -68,12 +69,19 @@ scalar_score = log_{5.27}(round(grand_mean, 2) + 1e-10)
 | metric                         | scalar_score | source                                                   |
 |--------------------------------|-------------:|----------------------------------------------------------|
 | ground-truth ceiling           |      10.1134 | `ground_truth/ceiling_anchor_normalized.json`            |
-| raw baseline (grand mean)      |          n/a | not pre-computed; `score_vector` reproduces it on demand |
+| raw baseline (grand mean)      |       1.0011 | `raw_baseline/scalar_anchor_normalized.json`             |
+| headroom (ceiling − baseline)  |       9.1123 | derived                                                   |
 
-The production scorer `execute_tools.scoring_utils.score_vector` uses this
-exact same grand-mean path for model evaluations. Under trial-mode
-non-uniform sampling (`|S_f|` differs across files), the grand mean does not
-equal `mean_f(per_file_log)` — which is why averaging the per-file log scores
-is misleading and not shown here.
+Both scalars are computed by the same anchor-normalized grand-mean path —
+`compute_raw_baseline._maybe_write_anchor_normalized_scalar` and
+`compute_ground_truth._anchor_normalized_ceiling` are symmetric aggregators
+that sum `linear_sum` and `n_segments` across the 20 fine files before the
+TIDMAD `round(·, 2) + 1e-10` and `log_{5.27}`. The production scorer
+`execute_tools.scoring_utils.score_vector` uses this exact same grand-mean
+path for model evaluations, so the three numbers sit on one ruler.
+
+Under trial-mode non-uniform sampling (`|S_f|` differs across files), the
+grand mean does not equal `mean_f(per_file_log)` — which is why averaging
+the per-file log scores is misleading and not shown here.
 
 See `docs/align_denoising_score.md` §4 and §C.2 for the full derivation.
