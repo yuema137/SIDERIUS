@@ -1,6 +1,6 @@
 # Aggregated Score Table Awareness — Design Doc
 
-## Status: design (pre-implementation). Blocks `small_sample_trial_v1` rerun.
+## Status: Phases 1 + 2 complete (2026-04-22); Phase 3 (tuner plumbing) next. Still blocks `small_sample_trial_v1` rerun.
 
 ---
 
@@ -608,6 +608,11 @@ Steps:
 
 ### Phase 2 — Schema + loader + renderer
 
+**Status:** ✅ complete. Landed on `master` 2026-04-22 as one commit
+(`a0ec78e`), following the GT-generator upgrade sibling commit
+(`5c37c94`) that aligned the ground-truth per-file JSONs with the
+Phase-1 raw-baseline schema (linear_sum + n_segments).
+
 **Goal:** three new files exist, all deterministic, all unit-tested. No node
 touches them yet.
 
@@ -624,17 +629,17 @@ Design-time answers locked (2026-04-22, this session):
   contract. `build_score_table` returns `None` iff `model_scalar is None`.
 
 Steps:
-- [ ] Create `agent/schemas/score_table.py` with `PerFileRow`,
+- [x] Create `agent/schemas/score_table.py` with `PerFileRow`,
       `AggregateScalars` (5 fields incl. `num_sampled_files`), and
       `ScoreComparisonTable` per §4.
-- [ ] Create `nodes/scoring_reference.py` — `ReferenceScores` frozen
+- [x] Create `nodes/scoring_reference.py` — `ReferenceScores` frozen
       dataclass (9 fields per §5: two log vectors, two linear_sum vectors,
       two n_segments vectors, both full-20 scalars, s_max).
       `load_reference_scores()` reads the 20 raw + 20 gt per-file JSONs +
       `scalar_anchor_normalized.json` + `ceiling_anchor_normalized.json`;
       module-level cache; missing file raises `FileNotFoundError` with a
       pointer to `compute_raw_baseline.py` / `compute_ground_truth.py`.
-- [ ] Create `execute_tools/scoring_helpers.py::build_score_table(
+- [x] Create `execute_tools/scoring_helpers.py::build_score_table(
       model_fv_log: list[Optional[float]], model_scalar: Optional[float],
       reference: ReferenceScores) -> Optional[ScoreComparisonTable]`:
       - If `model_scalar is None` → return `None` (hard skip, Decision 14).
@@ -644,30 +649,38 @@ Steps:
         is not None]`; computes subset grand-mean for raw + gt from the
         reference linear sums over `sampled`; model scalar passed in
         as-is (already subset-scoped by `score_vector`).
-- [ ] Add `execute_tools/scoring_helpers.py::render_comparison_table(table)`
+- [x] Add `execute_tools/scoring_helpers.py::render_comparison_table(table)`
       — pure markdown per §6; 4-dp log rounding; "N/A" for None entries;
       append `_Note: scalars computed over {n} sampled files._` when
-      `aggregate.num_sampled_files < 20`.
-- [ ] Unit test `tests/unit/agent/schemas/test_score_table.py` — Pydantic
-      validation (all-None row, mixed row, aggregate invariants) + JSON
-      round-trip.
-- [ ] Unit test `tests/unit/nodes/test_scoring_reference.py` — happy path
-      (tmp_path fixture with synthesized JSONs), missing raw file path,
-      missing gt file path, missing scalar-anchor file path, cache
-      behavior (second call returns same object).
-- [ ] Unit test `tests/unit/execute_tools/test_scoring_helpers.py`:
-      - `build_score_table` full-20 path (aggregate matches full scalars).
-      - Trial-mode subset (aggregate re-computes; assert vs hand-math).
-      - `model_scalar=None` → returns `None`.
-      - `render_comparison_table` exact markdown output under full-20 and
-        subset cases (fixture string compare); N/A cells correct;
-        subset-footer appears only when <20.
-- [ ] Real-run test: `.venv/bin/python -c "from nodes.scoring_reference
+      `aggregate.num_sampled_files < 20`. Negatives use U+2212 for column
+      alignment.
+- [x] Unit test `tests/unit/agent/schemas/test_score_table.py` — 14 tests:
+      Pydantic validation (all-None row, mixed row, file_index bounds,
+      num_sampled_files bounds 1..20, extra-forbidden) + JSON round-trip.
+- [x] Unit test `tests/unit/nodes/test_scoring_reference.py` — 10 tests:
+      happy-path shapes + value alignment; missing raw/gt/scalar files;
+      legacy per-file JSON without `linear_sum` or `n_segments`; s_max
+      mismatch; cache-returns-same-object and cache-reset behaviors.
+- [x] Unit test `tests/unit/execute_tools/test_scoring_helpers.py` — 16
+      tests: full-20 aggregate matches on-disk scalars by construction;
+      trial-mode subset (files 10..14) aggregate vs hand-math; rows
+      None-propagate; `model_scalar=None` → `None`; wrong-length FV and
+      all-None-FV-with-non-None-scalar raise; markdown header + exactly
+      20 body rows + N/A cells + aggregate block + conditional subset
+      footer + Unicode-minus rendering.
+- [x] Real-run test: `.venv/bin/python -c "from nodes.scoring_reference
       import load_reference_scores; r = load_reference_scores();
-      print(r.raw_scalar_full, r.gt_scalar_full, r.s_max)"` — verifies the
-      actual Phase-1 on-disk JSONs load correctly.
-- [ ] Commit: `feat(score_table): add ScoreComparisonTable schema + reference
-      loader + renderer`.
+      print(r.raw_scalar_full, r.gt_scalar_full, r.s_max)"` — reproduces
+      `raw_scalar_full=1.001141`, `gt_scalar_full=10.113401`,
+      `s_max=2.95716e+08`, matching `reference_data/
+      raw_and_ground_score.md` byte-exact.
+- [x] Sibling commit `5c37c94`: upgrade `compute_ground_truth.py` to
+      emit `linear_sum` + `n_segments` and regenerate all 20 fine GT
+      JSONs. Scalar ceiling unchanged at 10.113401 after regen (proves
+      formula symmetry; no value drift).
+- [x] Commit `a0ec78e`: `feat(score_table): add ScoreComparisonTable
+      schema + reference loader + renderer`. Single commit (8 files,
+      1379 insertions) per the Phase 2 checklist.
 
 ---
 
