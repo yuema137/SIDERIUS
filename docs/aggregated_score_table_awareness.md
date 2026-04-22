@@ -105,13 +105,16 @@ class PerFileRow(BaseModel):
     headroom_vs_gt: Optional[float]   # ground_truth - model
 
 class AggregateScalars(BaseModel):
-    raw_baseline_scalar: float        # final_scalar from score_vector() on raw CH1
-    ground_truth_scalar: float        # final_scalar from score_vector() on CH2 (ceiling)
+    # All three scalars are computed over the SAME subset of file indices —
+    # the ones where model_fv_log[i] is not None. See Decision 14.
+    raw_baseline_scalar: float        # grand-mean over the sampled subset
+    ground_truth_scalar: float        # grand-mean over the sampled subset
     model_scalar: float               # final_scalar from score_vector() on denoised CH1
     percent_of_ceiling_log: float     # model_scalar / ground_truth_scalar
+    num_sampled_files: int            # |sampled_indices|; 20 for formal, <20 for trial
 
 class ScoreComparisonTable(BaseModel):
-    rows: List[PerFileRow]            # len == 20
+    rows: List[PerFileRow]            # len == 20 (always — non-sampled files carry model=None)
     aggregate: AggregateScalars
     s_max_global: float               # 295_715_680.1425
     reference_source: str             # "reference_data/raw_and_ground_score.md"
@@ -130,11 +133,29 @@ and the human/LLM-consumable markdown (for prompt injection).
 New module **`nodes/scoring_reference.py`**:
 
 ```python
-def load_reference_scores() -> tuple[list[float], list[float], float, float, float]:
+@dataclass(frozen=True)
+class ReferenceScores:
+    # Per-file log-space values — feed directly into PerFileRow.raw_baseline /
+    # PerFileRow.ground_truth.
+    raw_per_file_log:        list[float]      # len 20
+    gt_per_file_log:         list[float]      # len 20
+    # Per-file linear_sum + n_segments — required by build_score_table to
+    # recompute the raw/gt grand-mean scalars over a non-full subset
+    # (trial-mode runs). See Decision 14.
+    raw_per_file_linear_sum: list[float]      # len 20
+    raw_per_file_n_segments: list[int]        # len 20
+    gt_per_file_linear_sum:  list[float]      # len 20
+    gt_per_file_n_segments:  list[int]        # len 20
+    # On-disk full-20-file scalars — cheap reference values, redundant with
+    # the subset-aware recomputation when all 20 files are sampled.
+    raw_scalar_full:         float
+    gt_scalar_full:          float
+    s_max:                   float
+
+def load_reference_scores() -> ReferenceScores:
     """
-    Returns (raw_per_file_log, gt_per_file_log, raw_scalar, gt_scalar, s_max).
-    Reads from {SIDERIUS_DATA_DIR}/raw_baseline/*.json (20 files)
-    and {SIDERIUS_DATA_DIR}/ground_truth/*.json (20 files + ceiling_anchor_normalized.json).
+    Reads from {SIDERIUS_DATA_DIR}/raw_baseline/*.json (20 per-file + scalar)
+    and {SIDERIUS_DATA_DIR}/ground_truth/*.json (20 per-file + scalar).
     Cached module-level on first call.
     """
 ```
@@ -217,6 +238,13 @@ each source. This is the only aggregation in the pipeline.
 Recovery: **55.1% of ceiling** (model_scalar / ground_truth_scalar).
 ```
 
+If the run sampled fewer than 20 files (trial mode), append one footer line
+below the aggregate table:
+
+```markdown
+_Note: scalars computed over {num_sampled_files} sampled files._
+```
+
 N/A rendering for `None` entries (file not included in a trial-mode run).
 Numbers pre-rounded to 4 dp (log space is the only space).
 
@@ -226,6 +254,27 @@ columns) but keep their `raw_baseline` and `ground_truth` anchors. The full
 20-row topology is always visible — the LLM reasons about which files to
 include next round, and omitting skipped rows would hide that structure.
 `rows` length is always 20.
+
+**Decision 14 (resolved → subset-scoped aggregates):** in trial mode the model
+only scored a subset of files, so quoting the full-20-file ceiling or baseline
+alongside a subset model scalar would compare apples to oranges. Instead,
+`build_score_table` identifies the sampled indices (where `model_fv_log[i] is
+not None`) and recomputes **all three aggregate scalars** — raw, ground
+truth, and model — over that same subset, using the grand-mean formula from
+Phase 1 (`Σ linear_sum[f] / Σ n_segments[f]` then `log_{5.27}(round(·, 2) +
+1e-10)`). This is why `ReferenceScores` carries `linear_sum` and
+`n_segments` per file, not just the pre-computed scalars — subset
+re-aggregation requires the unrounded linear primitives.
+
+The **only** skip condition is `model_scalar is None` (totally failed run):
+in that case `build_score_table` returns `None` and the record carries no
+`score_table`. If even one file was scored, we build the table — partial
+information is strictly more useful than no information.
+
+For a full 20-file formal run, the recomputed `raw_baseline_scalar` equals
+`ReferenceScores.raw_scalar_full` by construction (same formula, same linear
+sums). The `num_sampled_files=20` field on `AggregateScalars` makes the scope
+explicit regardless.
 
 ## 7. Schema changes
 
@@ -562,28 +611,61 @@ Steps:
 **Goal:** three new files exist, all deterministic, all unit-tested. No node
 touches them yet.
 
+Design-time answers locked (2026-04-22, this session):
+- **Q-P2-A** → (i) plain `rendered_markdown: str` field, populated by
+  `build_score_table` at construction time; survives JSON round-trip
+  identically in run_output records.
+- **Q-P2-B** → structured `ReferenceScores` frozen dataclass (see §5); no
+  5-tuple.
+- **Q-P2-C** → per-file row values use the log-space `"score"` field from
+  the on-disk per-file JSONs (byte-matches `reference_data/
+  raw_and_ground_score.md`).
+- **Q-P2-D** → subset-scoped aggregates; see Decision 14 for the full
+  contract. `build_score_table` returns `None` iff `model_scalar is None`.
+
 Steps:
 - [ ] Create `agent/schemas/score_table.py` with `PerFileRow`,
-      `AggregateScalars`, `ScoreComparisonTable` per §4.
-- [ ] Create `nodes/scoring_reference.py::load_reference_scores()` — reads
-      the 20+20 per-file JSONs + both scalar JSONs; module-level cache;
-      missing-file raises configuration error.
-- [ ] Create `execute_tools/scoring_helpers.py::build_score_table(...)` —
-      pure math, None-propagates for trial-mode entries, always returns
-      `rows` of length 20.
+      `AggregateScalars` (5 fields incl. `num_sampled_files`), and
+      `ScoreComparisonTable` per §4.
+- [ ] Create `nodes/scoring_reference.py` — `ReferenceScores` frozen
+      dataclass (9 fields per §5: two log vectors, two linear_sum vectors,
+      two n_segments vectors, both full-20 scalars, s_max).
+      `load_reference_scores()` reads the 20 raw + 20 gt per-file JSONs +
+      `scalar_anchor_normalized.json` + `ceiling_anchor_normalized.json`;
+      module-level cache; missing file raises `FileNotFoundError` with a
+      pointer to `compute_raw_baseline.py` / `compute_ground_truth.py`.
+- [ ] Create `execute_tools/scoring_helpers.py::build_score_table(
+      model_fv_log: list[Optional[float]], model_scalar: Optional[float],
+      reference: ReferenceScores) -> Optional[ScoreComparisonTable]`:
+      - If `model_scalar is None` → return `None` (hard skip, Decision 14).
+      - Always produces `rows` of length 20; `model`/`gain`/`headroom`
+        None-propagate on unsampled indices.
+      - Identifies `sampled = [i for i, v in enumerate(model_fv_log) if v
+        is not None]`; computes subset grand-mean for raw + gt from the
+        reference linear sums over `sampled`; model scalar passed in
+        as-is (already subset-scoped by `score_vector`).
 - [ ] Add `execute_tools/scoring_helpers.py::render_comparison_table(table)`
-      — pure markdown rendering per §6 template; 4-dp log rounding; "N/A"
-      for None entries.
+      — pure markdown per §6; 4-dp log rounding; "N/A" for None entries;
+      append `_Note: scalars computed over {n} sampled files._` when
+      `aggregate.num_sampled_files < 20`.
 - [ ] Unit test `tests/unit/agent/schemas/test_score_table.py` — Pydantic
-      validation + JSON round-trip.
-- [ ] Unit test `tests/unit/nodes/test_scoring_reference.py` — happy path +
-      missing-file path.
-- [ ] Unit test `tests/unit/execute_tools/test_scoring_helpers.py` —
-      `build_score_table` math + None-propagation; `render_comparison_table`
-      exact markdown output (compare against fixture string).
-- [ ] Real-run test: `python -c "from nodes.scoring_reference import
-      load_reference_scores; print(load_reference_scores())"` — verifies the
-      actual on-disk JSONs load correctly under the Phase 1 artifacts.
+      validation (all-None row, mixed row, aggregate invariants) + JSON
+      round-trip.
+- [ ] Unit test `tests/unit/nodes/test_scoring_reference.py` — happy path
+      (tmp_path fixture with synthesized JSONs), missing raw file path,
+      missing gt file path, missing scalar-anchor file path, cache
+      behavior (second call returns same object).
+- [ ] Unit test `tests/unit/execute_tools/test_scoring_helpers.py`:
+      - `build_score_table` full-20 path (aggregate matches full scalars).
+      - Trial-mode subset (aggregate re-computes; assert vs hand-math).
+      - `model_scalar=None` → returns `None`.
+      - `render_comparison_table` exact markdown output under full-20 and
+        subset cases (fixture string compare); N/A cells correct;
+        subset-footer appears only when <20.
+- [ ] Real-run test: `.venv/bin/python -c "from nodes.scoring_reference
+      import load_reference_scores; r = load_reference_scores();
+      print(r.raw_scalar_full, r.gt_scalar_full, r.s_max)"` — verifies the
+      actual Phase-1 on-disk JSONs load correctly.
 - [ ] Commit: `feat(score_table): add ScoreComparisonTable schema + reference
       loader + renderer`.
 
