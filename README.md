@@ -23,10 +23,11 @@ The current target task is **denoising the TIDMAD SQUID time-series dataset** in
    - [Multi-iteration exploration chain](#b-multi-iteration-exploration-chain)
    - [Dashboard](#c-dashboard)
 5. [Built-in models, losses, and plugins](#built-in-models-losses-and-plugins)
-6. [Configuration files](#configuration-files)
-7. [Testing](#testing)
-8. [Server migration](#server-migration)
-9. [Documentation index](#documentation-index)
+6. [Scoring convention](#scoring-convention)
+7. [Configuration files](#configuration-files)
+8. [Testing](#testing)
+9. [Server migration](#server-migration)
+10. [Documentation index](#documentation-index)
 
 ---
 
@@ -67,6 +68,14 @@ ml_hyperparameter_tune_agent
 
 Stop conditions: `max_iterations` count or `target_score` threshold. Validation failures trigger automatic retry with error feedback. Per-node LLM configuration via `WorkflowLLMConfig` (planner/reflector split for the tuner — see [`docs/break_tuner_agent.md`](docs/break_tuner_agent.md)).
 
+### Guardrails on each iteration
+
+Three reliability mechanisms sit on top of the raw 5-agent loop. They gate what the proposer is allowed to emit, cap what the tuner is allowed to spend, and thread earlier failures forward so successive iterations are monotonically better-informed.
+
+- **Pre-flight resource gating.** Before training starts the proposer estimates per-trial VRAM and wall-time via static formulas (`agent/skills/evaluate_time_skill`, `agent/skills/evaluate_vram_skill`) and must justify itself against the trial/formal budgets (`--trial_time_budget_minutes`, `--trial_vram_budget_gb`, and their formal counterparts). An over-budget proposal gets up to 3 revision rounds before the iteration aborts cleanly. See [`docs/reliable_resource_proposer.md`](docs/reliable_resource_proposer.md) and [`docs/resource_estimator_implement.md`](docs/resource_estimator_implement.md).
+- **Per-round attempt budget.** `--attempts_per_round N` caps retries inside one planner round; `--max_fail_rounds M` caps consecutive failed rounds before **Trigger A** (round budget exhausted) or **Trigger B** (streak of failed rounds) aborts the iteration. Prevents runaway cost from pathological planners.
+- **Cumulative negative feedback.** Architectural patterns that gate-exhausted in earlier iterations are tagged (architectural-pattern tagger) and threaded forward via `disallowed_architectural_patterns` on `GateExhaustionInfo`; the proposer renders them as a `[DISALLOWED PATTERNS]` sub-block so iteration N+1 cannot re-propose the same failure mode. See [`docs/adaptive_new_model_proposer.md`](docs/adaptive_new_model_proposer.md).
+
 ### Key design invariants (must read before contributing)
 
 1. **Pydantic at every boundary**: LLM output → schema → execution. Never pass raw LLM output to a training/inference call.
@@ -74,6 +83,7 @@ Stop conditions: `max_iterations` count or `target_score` threshold. Validation 
 3. **`LLMBridge` is the single API gateway**: every agent goes through it. Direct `OpenAI()` constructors are CI-banned outside `agent/llm_bridge.py`.
 4. **Plugins are pluggable**: agent-generated models extend `MODEL_REGISTRY` at runtime. Core code is read-only to agents.
 5. **Trial vs. formal mode**: tuner rounds can run on a sparse multi-file subsample (`--is_trial`) for fast iteration, then graduate to the full 20-file evaluation. See [`docs/small_sample_trial.md`](docs/small_sample_trial.md).
+6. **One scoring ruler (Option B, global `s_max`)**: model, raw-baseline, and ground-truth ceiling scores are all computed on the global `s_max` from `segment_anchors.json`, using float64-upcast FFTs and the TIDMAD `round(·, 2) + 1e-10` step before `log_{5.27}`. Any file-local or per-run normalization would make scores non-comparable across nodes. See [`docs/align_denoising_score.md`](docs/align_denoising_score.md) and the [Scoring convention](#scoring-convention) section below.
 
 ---
 
@@ -148,6 +158,9 @@ SIDERIUS/
 ├── tuner_advice/                     # Human-written JSON advice files for the tuner
 │   └── *.json                        # Per-experiment guidance (e.g. gated_fno_freq_band_aware_v1.json)
 │
+├── compute_raw_baseline.py           # Raw (undenoised) reference score per file (Option B, global s_max)
+├── compute_ground_truth.py           # Perfect-denoiser ceiling per file + scalar (anchor-only, no HDF5 read)
+│
 ├── tidmad_data_config.yaml           # Machine-specific data paths (edit when migrating)
 ├── dashboard_config.yaml             # Dashboard config (root path, models, port)
 ├── pyproject.toml + uv.lock          # Dependencies (managed by uv)
@@ -155,18 +168,20 @@ SIDERIUS/
 ├── CLAUDE.md                         # ⭐ Coding standards and architectural rules
 ├── README.md                         # This file
 │
-├── docs/
+├── reference_data/                   # In-repo reference artefacts (scoring baselines, signal tables)
+│   ├── raw_and_ground_score.md       # Per-file raw baseline + ceiling table (Option B, global s_max)
+│   └── tidmad_signal_frequencies.txt # 309 injected signal frequencies
+│
+├── docs/                             # Design docs — see "Documentation index" below for the full list
 │   ├── architecture.md               # Full system design
-│   ├── full_loop_5_agents.md         # 5-agent workflow design
-│   ├── small_sample_trial.md         # Multi-fidelity trial/formal tuning
-│   ├── break_tuner_agent.md          # Planner/reflector LLM split design + checklist
-│   ├── refactor_llm_bridge.md        # LLMBridge refactor history
-│   ├── hyperparameter_tuner_features.md  # Tuner prompt features
-│   ├── soft_edge_for_all_nodes.md
-│   ├── learning_from_sota_agents.md
+│   ├── align_denoising_score.md      # Scoring-ruler derivation + legacy-parity proof (Option B)
+│   ├── reliable_resource_proposer.md # Pre-flight cost-check + up-to-3 revision loop
+│   ├── adaptive_new_model_proposer.md # Cumulative negative-feedback design
+│   ├── pseudo_test_infra.md          # Dual-mode pseudo/real test infrastructure
 │   ├── running_chain_test.md         # ⭐ Operational runbook for chain runs (lilab + SDSC)
-│   ├── first_model_proposal_demo_architecture.md
-│   ├── small_sample_trial_dependencies_improve.md
+│   ├── break_tuner_agent.md          # Planner/reflector LLM split
+│   ├── small_sample_trial.md         # Multi-fidelity trial/formal tuning
+│   ├── ... (more below)
 │   └── memories/                     # Per-developer shared memories (gitignored, see README inside)
 │
 ├── tests/
@@ -294,6 +309,10 @@ The `--reflect_model_id` flag routes the tuner's reflection sub-call to a cheape
 
 #### Tuner CLI reference
 
+Grouped by role — the tuner has a lot of knobs, so the full list is split into five sections.
+
+**Core run identity + LLM routing**
+
 | Argument | Default | Description |
 |---|---|---|
 | `--provider` | `gemini` | LLM backend (`gemini` or `openai`) |
@@ -302,16 +321,49 @@ The `--reflect_model_id` flag routes the tuner's reflection sub-call to a cheape
 | `--reflect_model_id` | (planner model) | Optional reflector model ID — defaults to `gemini-2.5-flash` for the gemini provider |
 | `--max_rounds` | `10` | Maximum completed experiment rounds |
 | `--force_model` | `auto` | Lock the architecture or let the agent choose |
+| `--seed_plugin_path` | None | Pre-existing plugin `.py` to resume from (used by the exploration chain) |
 | `--run_name` | `test_run` | Run identifier — scopes all saved files |
 | `--workspace` | from yaml | Root directory for all agent outputs |
-| `--is_trial` | off | Enable trial mode: multi-file sparse sampling |
-| `--trial_strategy` | `snapshot` | Training sampling: `snapshot`, `anchors`, or `target` |
-| `--trial_portion` | `0.1` | Fraction of segments per file for training scope |
-| `--eval_strategy` | `snapshot` | Validation sampling strategy |
-| `--eval_portion` | `0.1` | Fraction of segments per file for validation |
-| `--train_portion` | `0.1` | Per-epoch subsample from training scope |
-| `--human_advice_file` | None | Path to a JSON file with per-agent advice |
-| `--expert_advice` | None | Inline advice string for the planner |
+| `--progress_bar` | off | Stream live tqdm progress bars from training/inference |
+
+**Trial / formal sampling**
+
+| Argument | Default | Description |
+|---|---|---|
+| `--is_trial` | off | Enable trial-explore mode (multi-file sparse sampling) |
+| `--trial_strategy` | `snapshot` | Trial training sampling: `snapshot`, `anchors`, or `target` |
+| `--trial_portion` | `0.1` | Fraction of segments per file for trial training scope |
+| `--eval_strategy` | `snapshot` | Trial validation sampling strategy |
+| `--eval_portion` | `0.1` | Fraction of segments per file for trial validation |
+| `--train_portion` | `0.1` | Per-epoch subsample from the trial training scope |
+| `--formal_strategy` | `snapshot` | Formal-mode training sampling (graduates from trial) |
+| `--formal_portion` | `1.0` | Formal-mode segment fraction per file |
+| `--formal_train_portion` | `1.0` | Formal-mode per-epoch subsample |
+
+**Resource budgets (pre-flight gate)**
+
+| Argument | Default | Description |
+|---|---|---|
+| `--trial_time_budget_minutes` | see `--help` | Wall-time budget for one trial attempt |
+| `--formal_time_budget_minutes` | see `--help` | Wall-time budget for one formal attempt |
+| `--trial_vram_budget_gb` | see `--help` | VRAM budget for trial attempts |
+| `--formal_vram_budget_gb` | see `--help` | VRAM budget for formal attempts |
+| `--data_dir` | from yaml | TIDMAD directory used by the time-budget estimator |
+
+**Per-round attempt budget**
+
+| Argument | Default | Description |
+|---|---|---|
+| `--attempts_per_round` | see `--help` | Max retries inside one planner round before a round-fail |
+| `--attempts_per_formal_round` | see `--help` | Same, for formal-mode rounds |
+| `--max_fail_rounds` | see `--help` | Max consecutive failed rounds before Trigger A/B aborts |
+
+**Advice and cleanup**
+
+| Argument | Default | Description |
+|---|---|---|
+| `--human_advice` | None | Inline string OR path to a JSON file with per-agent advice |
+| `--expert_advice` | None | Inline advice string for the planner (single-agent override) |
 | `--cleanup_denoised` | off | Delete intermediate `.h5` files after scoring |
 
 #### Per-tuner output layout
@@ -442,6 +494,50 @@ The exploration loop writes new models to `agent_generated/models/`. Each plugin
 
 `ml_models/plugin_loader.py` scans `agent_generated/models/` at import time and extends `MODEL_REGISTRY` and `PLUGIN_CONFIG_REGISTRY` in-place. **Core code is never modified by agents.**
 
+Plugins are **run-scoped**: each tuner run stages its validated plugin into `{workspace}/plugins/{run_name}/` and sets `SIDERIUS_PLUGIN_DIRS` so training subprocesses see only that run's plugin. The exploration chain can seed a new iteration from an earlier run's plugin with `--seed_plugin_path`. See [`docs/run_scoped_plugins.md`](docs/run_scoped_plugins.md).
+
+---
+
+## Scoring convention
+
+Every score in SIDERIUS — model output, raw-signal baseline, and perfect-denoiser ceiling — is computed on **one ruler** so they are directly comparable at every file index and in the scalar aggregate. The ruler is **Option B, global `s_max`**:
+
+```
+per_segment[f, i]  = (snr_sg[f, i] / s_max_GLOBAL) · snr_squid[f, i]
+per_file_linear[f] = mean_i(per_segment[f, i])                       # over sampled segments
+per_file_score[f]  = log_{5.27}(round(per_file_linear[f], 2) + 1e-10)
+
+grand_mean         = ( Σ_{f,i} per_segment[f, i] )  /  Σ_f |S_f|     # trial-mode: non-uniform |S_f|
+scalar_score       = log_{5.27}(round(grand_mean, 2) + 1e-10)
+```
+
+- **Option B** means `TS.astype(np.float64)` before `np.fft.rfft` — the FFT runs in complex128, not complex64. This is what keeps the legacy-parity gate at bit-for-bit identity with the TIDMAD reference implementation.
+- **Global `s_max`** is a single constant loaded from `segment_anchors.json` (`s_max = 295_715_680.1425` at the current anchor map). **Never** compute `amax(snr_sg)` over a file list at score time — that creates a per-run ruler and makes scores non-comparable across nodes.
+- **TIDMAD round** (`round(·, 2) + 1e-10` before the log) is part of the ruler, not an optional cosmetic step.
+- **Grand mean, not mean-of-per-file-log-scores.** Under trial-mode non-uniform sampling (`|S_f|` differs per file) the two disagree; only the grand mean is legacy-compatible. See feedback memory `feedback_no_mean_of_perfile_scores.md`.
+
+### Reference artefacts
+
+| Artefact | What | Source |
+|---|---|---|
+| `reference_data/raw_and_ground_score.md` | Per-file raw baseline + perfect-denoiser ceiling table (20 files, current anchor map) | version-controlled |
+| `{SIDERIUS_DATA_DIR}/raw_baseline/raw_baseline_score_file_XXXX.json` | Per-file raw-signal baseline JSON | generated |
+| `{SIDERIUS_DATA_DIR}/ground_truth/ground_truth_score_file_XXXX.json` | Per-file perfect-denoiser ceiling JSON | generated |
+| `{SIDERIUS_DATA_DIR}/ground_truth/ceiling_anchor_normalized.json` | Scalar ceiling (current value: **10.1134**) | generated |
+
+### Regeneration
+
+After the anchor map is built (see Quick start §4), regenerate both reference tables:
+
+```bash
+python compute_raw_baseline.py       # reads raw CH1, writes raw_baseline/raw_baseline_score_file_XXXX.json
+python compute_ground_truth.py       # anchor-only (no HDF5 read), writes ceiling JSONs in milliseconds
+```
+
+Both scripts use the global `s_max` from the anchor map automatically and refuse to overwrite existing JSONs unless `--override` is passed.
+
+Full derivation, legacy-parity proof, and rationale for Option B are in [`docs/align_denoising_score.md`](docs/align_denoising_score.md).
+
 ---
 
 ## Configuration files
@@ -463,11 +559,12 @@ The two `*.yaml` files containing machine-specific paths are gitignored: each de
 
 ## Testing
 
-The test pyramid has four tiers, distinguished by *how many nodes* a test exercises and *whether it hits real LLM APIs*:
+The test pyramid has five tiers, distinguished by *how many nodes* a test exercises and *whether it hits real LLM APIs / real training*:
 
 | Category | Scope | LLM | GPU | Location | When to run |
 |---|---|---|---|---|---|
 | Unit | Single function/class, mocked LLM | mock | no | `tests/unit/` | Every commit |
+| Integration Tier 0 (pseudo-full-loop) | Full node orchestration via predefined LLM + subprocess responses (`@dual_mode`) | pseudo | no | `tests/integration/` | Every commit — runs in ms |
 | Integration Tier 1 | Single node end-to-end, real API | real | depends | `tests/integration/nodes/` | On demand |
 | Integration Tier 2 | One graph edge (source → target), real API | real | depends | `tests/integration/protocols/` | On demand |
 | Integration Tier 3 | Multi-hop workflow, real API + GPU | real | yes | `tests/integration/workflows/` | Before releases |
@@ -475,6 +572,12 @@ The test pyramid has four tiers, distinguished by *how many nodes* a test exerci
 ```bash
 # Unit tests (always pass, no API key needed)
 uv run pytest tests/unit/ -q
+
+# Tier 0 — pseudo-full-loop dual-mode tests (milliseconds, no API key, no GPU)
+uv run pytest tests/integration/ -q
+
+# Tier 0 same tests, real API + real training (opt in via --real-api-call / --real-training)
+uv run pytest tests/integration/ --real-api-call --real-training -v
 
 # Tier 1 — individual node with real LLM
 uv run pytest tests/integration/nodes/ -m real_run -v
@@ -487,6 +590,10 @@ uv run pytest tests/integration/workflows/test_full_exploration_loop.py::TestFul
 ```
 
 `real_run`-marked tests skip automatically when the required API key is absent. They never run in CI.
+
+### Dual-mode (pseudo/real) tests
+
+The `@pytest.mark.dual_mode` decorator lets one test file cover both pseudo-full-loop (Tier 0) and real-LLM behaviour without duplication. By default a dual-mode test runs in **pseudo mode** — `RecordingLLMBridge` replays canned responses from `tests/pseudo_data/` and `RecordingSandbox` replays canned subprocess outputs — so the whole 5-agent loop finishes in milliseconds on CI without any API key or GPU. Flipping `--real-api-call` (real LLM, surrogated training) or `--real-training` (real GPU, surrogated LLM) or both (`-m real_run`) promotes the same test to Tier 1/2/3. New integration tests should be dual-mode by default — see [`docs/pseudo_test_infra.md`](docs/pseudo_test_infra.md) for the full design.
 
 ### Architectural invariant tests
 
@@ -563,11 +670,33 @@ More in [`docs/memories/reference_sdsc_workspace_paths.md`](docs/memories/refere
 - [`docs/hyperparameter_tuner_features.md`](docs/hyperparameter_tuner_features.md) — tuner prompt features
 - [`docs/small_sample_trial.md`](docs/small_sample_trial.md) — multi-fidelity trial/formal mode
 - [`docs/small_sample_trial_dependencies_improve.md`](docs/small_sample_trial_dependencies_improve.md) — schema cleanup notes
+- [`docs/trial_epoch_default.md`](docs/trial_epoch_default.md) — trial-mode epoch default and override path
+
+### Scoring and denoising metric
+- [`docs/align_denoising_score.md`](docs/align_denoising_score.md) — **canonical**: scoring-ruler derivation, Option B global `s_max`, legacy-parity proof
+- [`reference_data/raw_and_ground_score.md`](reference_data/raw_and_ground_score.md) — per-file raw baseline + perfect-denoiser ceiling table (20 files, current anchor map)
+- [`docs/optimize_inference_and_scoring.md`](docs/optimize_inference_and_scoring.md) — host-RAM post-mortem + 5-commit memory optimization (PR 57)
+
+### Proposer reliability and resource gating
+- [`docs/reliable_resource_proposer.md`](docs/reliable_resource_proposer.md) — pre-flight cost-check + architectural blacklist + up-to-3 revision loop (PR 56)
+- [`docs/resource_estimator_implement.md`](docs/resource_estimator_implement.md) — Phases K + L: VRAM budget gate, per-round attempt budget, Trigger A/B fail-round abort (PRs 54, 55)
+- [`docs/adaptive_new_model_proposer.md`](docs/adaptive_new_model_proposer.md) — cumulative negative-feedback design (`disallowed_architectural_patterns`)
+- [`docs/adaptive_new_model_proposer_overall_review.md`](docs/adaptive_new_model_proposer_overall_review.md) — full-arc review
+- [`docs/adaptive_new_model_proposer_phase_C_review.md`](docs/adaptive_new_model_proposer_phase_C_review.md) — Phase C vocab-feedback review
+- [`docs/improving_validation_awareness.md`](docs/improving_validation_awareness.md) — dataset-divisor + schema-violation feedback across proposer/implementor/tuner (PRs 52, 53)
+
+### Test infrastructure
+- [`docs/pseudo_test_infra.md`](docs/pseudo_test_infra.md) — dual-mode pseudo/real tests, `RecordingLLMBridge`, `RecordingSandbox`, surrogation axes
+
+### Plugins and external agents
+- [`docs/run_scoped_plugins.md`](docs/run_scoped_plugins.md) — per-run plugin isolation via `SIDERIUS_PLUGIN_DIRS`; `--seed_plugin_path` for chain runs (PR 53)
+- [`docs/external_agents_for_proposer.md`](docs/external_agents_for_proposer.md) — Phase F receptive-side infra for external agents
 
 ### Operations
 - [`docs/running_chain_test.md`](docs/running_chain_test.md) — runbook for chain runs on lilab and SDSC
 
 ### Reference data
+- [`reference_data/raw_and_ground_score.md`](reference_data/raw_and_ground_score.md) — per-file raw baseline + ceiling table
 - [`reference_data/tidmad_signal_frequencies.txt`](reference_data/tidmad_signal_frequencies.txt) — 309 injected signal frequencies (kHz–MHz), distributed across 20 files
 
 ### Per-developer memories (gitignored)
