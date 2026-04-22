@@ -137,6 +137,39 @@ class TestModelSelection:
         result = select_candidate_models({"model_types": []}, strategy)
         assert result == []
 
+    def test_score_table_passthrough(self):
+        # Phase 5 B: candidate summary exposes "score_table" (raw serialized
+        # ScoreComparisonTable dict) instead of the old "file_vector" key.
+        interp = {
+            "model_types": ["punet"],
+            "per_model_best": {"punet": 1.8},
+            "per_model_worst": {"punet": 1.2},
+            "per_model_score_tables": {
+                "punet": {
+                    "rows": [{"model": 0.5}] * 20,
+                    "aggregate": {"num_sampled_files": 20},
+                    "rendered_markdown": "| test |",
+                }
+            },
+        }
+        result = select_candidate_models(interp, ModelSelectionStrategy(method="all"))
+        assert len(result) == 1
+        summary = result[0]
+        # New key is the raw dict — untouched passthrough.
+        assert summary["score_table"] == interp["per_model_score_tables"]["punet"]
+        # Old key must be gone — guards against silent dual-write drift.
+        assert "file_vector" not in summary
+
+    def test_score_table_none_when_missing(self):
+        # Models without a score_table (e.g. fully failed runs) carry None,
+        # not a synthesized empty list — consumers must handle None explicitly.
+        interp = {
+            "model_types": ["punet"],
+            "per_model_best": {"punet": None},
+        }
+        result = select_candidate_models(interp, ModelSelectionStrategy(method="all"))
+        assert result[0]["score_table"] is None
+
 
 # ---------------------------------------------------------------------------
 # B.16a — Exploration mode resolver

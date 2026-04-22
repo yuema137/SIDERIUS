@@ -40,7 +40,10 @@ def select_candidate_models(
 
     Returns:
         List of per-model summary dicts, each containing model_type,
-        best_score, and any available metadata (file_vector, params, etc.).
+        best_score, and any available metadata (score_table, params, etc.).
+        The ``score_table`` entry carries the serialized
+        ``ScoreComparisonTable`` dict (``rendered_markdown`` + scalars + rows)
+        straight through — downstream stages render from its fields directly.
     """
     model_types = interpretation.get("model_types", [])
     per_best = interpretation.get("per_model_best") or {}
@@ -50,15 +53,6 @@ def select_candidate_models(
     descriptions = interpretation.get("model_descriptions") or {}
     training_segs = interpretation.get("per_model_training_segments") or {}
 
-    def _fv_from_score_table(table):
-        # Synthesize a length-20 file_vector list (of Optional[float]) from
-        # a serialized ScoreComparisonTable dict. Phase 5 will replace the
-        # "file_vector" candidate-summary key with the raw "score_table".
-        if not isinstance(table, dict):
-            return None
-        rows = table.get("rows", [])
-        return [r.get("model") for r in rows] if rows else None
-
     # Build a summary for each model
     all_models = []
     for mt in model_types:
@@ -66,7 +60,7 @@ def select_candidate_models(
             "model_type": mt,
             "best_score": per_best.get(mt),
             "worst_score": per_worst.get(mt),
-            "file_vector": _fv_from_score_table(score_tables.get(mt)),
+            "score_table": score_tables.get(mt),
             "model_params": model_params.get(mt),
             "description": descriptions.get(mt),
             "training_segments": training_segs.get(mt),
