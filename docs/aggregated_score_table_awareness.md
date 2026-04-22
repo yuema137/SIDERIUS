@@ -895,9 +895,9 @@ reference the removed `per_model_file_vectors` key.
       **Result: 226 passed in 178s.** No interpretation, proposal, tuner,
       or llm-bridge regressions from the `per_model_file_vectors` →
       `per_model_score_tables` rename.
-- [ ] Commit: `refactor(graph): replace per_model_file_vectors with
-      per_model_score_tables; wire score_table through protocols`.
-      Includes the design doc check-off.
+- [x] Commit `45bb835`: `refactor(graph): replace per_model_file_vectors
+      with per_model_score_tables; wire score_table through protocols`.
+      11 files, +363/-74. Phase 4 complete.
 
 *Decision 6 scope reminder:* the hard swap applies only to
 `InterpretationOutput.per_model_file_vectors`. `ExperimentRecordSchema.file_vector`,
