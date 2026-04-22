@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.score_table import ScoreComparisonTable
 
 
 # ---------------------------------------------------------------------------
@@ -227,6 +228,17 @@ class ExperimentRecord(BaseModel):
     file_vector: Optional[List[Optional[float]]] = Field(
         default=None,
         description="Length-20 score vector. None for files not included in the run.",
+    )
+    score_table: Optional[ScoreComparisonTable] = Field(
+        default=None,
+        description=(
+            "Per-file comparison table (model vs raw_baseline vs ground_truth) "
+            "with subset-scoped aggregate scalars and the pre-rendered markdown "
+            "that gets substituted into tuner/reflector/interpreter/proposer "
+            "prompts. Populated by build_score_table() after scoring whenever "
+            "denoising_score is not None; None on failed or skipped rounds. "
+            "See docs/aggregated_score_table_awareness.md §7.1."
+        ),
     )
 
     # --- Data volume ---
@@ -1152,6 +1164,26 @@ class HyperparamTuningOutput(BaseModel):
     best_file_vector: Optional[List[Optional[float]]] = Field(
         default=None,
         description="Length-20 score vector from the best experiment. None for files not included.",
+    )
+    best_score_table: Optional[ScoreComparisonTable] = Field(
+        default=None,
+        description=(
+            "Score comparison table from the experiment with the highest "
+            "denoising_score. Enriches best_file_vector with raw_baseline + "
+            "ground_truth anchors and subset-scoped aggregates; the "
+            "rendered_markdown is what the downstream interpreter and "
+            "proposer prompts consume. None when no round succeeded."
+        ),
+    )
+    formal_score_table: Optional[ScoreComparisonTable] = Field(
+        default=None,
+        description=(
+            "Score comparison table from the most recent successful formal "
+            "(full 20-file) round. Distinct from best_score_table because "
+            "cross-architecture comparability only holds at formal scope — "
+            "the interpreter prefers this table when deciding which models "
+            "to promote. None when no formal round succeeded."
+        ),
     )
 
     # --- Full history ---
