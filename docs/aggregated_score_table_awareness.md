@@ -992,11 +992,31 @@ Steps (live checklist):
       Legacy: per-model `rendered_markdown` sections. Three new helpers
       in `nodes/proposal_helpers.py` + 20 new unit tests across 4 classes.
       See "Sub-commit C detailed plan" below.
-- [ ] **D.** Adversarial re-probe incl. truncated `rows` list; harden if
-      crash surfaces.
+- [x] **D.** Adversarial re-probe + genericity tests.
+      `TestProposerRenderAdversarial` (7 cases): below-baseline priority
+      over recovery, recovery=0.0 boundary, non-dict score_table
+      robustness, empty-string fallback for both rendered_markdown and
+      source_code, missing model_type → `<unknown>`, non-dict per-
+      candidate score_table.
+      `TestProposerGenericity` (4 cases): `mystery_model_x` flows through
+      `build_candidate_markdown_block`, `build_score_summary_line` is
+      name-indifferent, full `_render_stage_user_prompt` carries the
+      synthetic name verbatim, empty-candidate fall-through has zero
+      leakage. **Litmus substring scan passes** — no `wavenet`/`punet`/
+      `fcnet` leaks into a `mystery_model_x`-only assembled prompt.
+      No hardening needed; all edge paths already handled. Helpers
+      land green on first pass.
 - [ ] **E.** `@real_run` test + final commit:
       `feat(interp+proposer): render score_table in prompts (candidate
-      full / non-candidate one-liner)`.
+      full / non-candidate one-liner)`. **Token-budget watch (user steer,
+      2026-04-22):** during the real-run smoke, record total prompt
+      tokens for each pipeline stage and compare against the
+      provider-side context limit. If the 10-candidate markdown tables
+      cause truncation, response degradation, or any provider-side
+      `context_length_exceeded`-class error, lower
+      `ModelSelectionStrategy.params["n"]` in the default pipeline
+      config (not a code refactor — a config/policy tune) and re-run.
+      Log the before/after token counts in the closeout note.
 
 #### Sub-commit C detailed plan (LLM-readability refinement, 2026-04-22)
 
@@ -1133,6 +1153,79 @@ two concatenated regions:
   - Other `TestBuildReasoningPromptEnriched` expectations unchanged
     (they do not probe the file_vector text directly).
 
+**Hardened genericity directives (2026-04-22 — post-`e7aec71` follow-up).**
+
+SIDERIUS must support any future architecture proposed via `External
+Advice`. The score-table awareness layer — the "Eyes" of the proposer —
+must therefore be 100% generic at every boundary it owns. Five directives
+govern this, with a one-line audit of the commit-`e7aec71` state
+(✓ compliant, ⚠ gap identified, ✗ out of scope for Phase 5):
+
+1. **No-Names rule — code paths we own (✓).** `build_candidate_markdown_block`,
+   `build_score_summary_line`, `strip_heavy_fields_for_json`, and
+   `_render_stage_user_prompt` carry zero hardcoded model names. Every
+   heading is `### Candidate: {model_type}` with `model_type` pulled from
+   the candidate dict. Audit command:
+   `grep -nE "wavenet|punet|fcnet|diffusion" nodes/proposal_helpers.py nodes/ml_model_proposal_agent.py`
+   returns only the `_BUILTIN_MODELS` set and the `_MODEL_CLASS_MAP`
+   used by `load_model_source` — both are *dispatch tables keyed by
+   `model_type`*, not natural-language strings, and are the one legitimate
+   place names must live. Replacement language in prose should use "the
+   candidate model" / "the current architecture" / "this specific
+   configuration".
+
+2. **Table rendering neutrality (✓).** `execute_tools.scoring_helpers.render_comparison_table`
+   is pure math: raw_baseline / ground_truth / model / gain_vs_raw /
+   headroom_vs_gt columns + "recovery = % of ceiling" one-liner +
+   below-baseline guard. No physics heuristics ("files 15-19 are
+   high-frequency noise"). Physics interpretation stays with the
+   `expert_context` layer + the LLM's real-time reasoning. Any future
+   renderer change must preserve this — audit with
+   `grep -nE "high-freq|low-freq|noise that" execute_tools/scoring_helpers.py agent/schemas/score_table.py`
+   (currently returns 0 hits; keep it that way).
+
+3. **Safe concatenation + deep-safe stripping (✓).**
+   - `build_candidate_markdown_block([])` returns `""` — never a hanging
+     `## Candidate Models —` header with no body. `_render_stage_user_prompt`
+     then falls through to the JSON region alone. Covered by
+     `TestCandidateMarkdownBlock::test_empty_candidates_returns_empty_string`
+     and `TestStageUserPrompt::test_no_candidates_emits_json_only`.
+   - Between candidates, the block emits a `\n---\n\n` separator (one per
+     candidate, trailing separator trimmed on the last entry via
+     `rstrip() + "\n"`).
+   - `strip_heavy_fields_for_json` is a dict-comprehension shallow copy
+     (`{k: v for k, v in candidate.items() if k not in _HEAVY_FIELDS}`) —
+     it never mutates the input list or the per-candidate dict, so the
+     original `accumulated["candidates"]` retains `score_table` /
+     `source_code` for the markdown block. Covered by
+     `TestStripHeavyFieldsForJson::test_does_not_mutate_input`.
+
+4. **Legacy path dynamic iteration (✓).** `_build_reasoning_prompt` in
+   `nodes/ml_model_proposal_agent.py:497-507` iterates
+   `score_tables.items()` — no hardcoded model-name list. Any model the
+   interpreter surfaces renders without a code change.
+
+5. **Genericity test with a synthetic name (⚠ gap to close in D).** Most
+   existing unit tests reuse `wavenet` / `punet` / `fcnet` as stand-ins
+   because they match the production fixtures. A targeted
+   `mystery_model_x` test would make the genericity contract explicit:
+   if the code ever regresses to a name-dependent branch, the test fails.
+   Action: as part of **Sub-commit D** (adversarial re-probe), add
+   `TestCandidateMarkdownBlock::test_renders_unseen_model_name` and
+   `TestStageUserPrompt::test_synthetic_model_name_flows_through` using
+   `model_type="mystery_model_x"` with a minimal `ScoreComparisonTable`
+   dict — assert the heading, the rendered markdown, the source-code
+   fence fallback, and the JSON payload all carry `mystery_model_x`
+   verbatim.
+
+**Known gaps outside Phase 5's scope.** The stage *prompt templates*
+(`agent/prompt_templates/proposal/comparison_stage.md`,
+`causal_reasoning_stage.md`, `comparison_stage_explore.md`) contain
+hardcoded `wavenet` references in *example JSON payloads* that ground
+the LLM's output format. These are LLM-facing few-shot examples, not
+code, and fixing them is an orthogonal prompt-genericity refactor.
+Tracked here for visibility; not a Phase 5 blocker.
+
 **Out of scope for C.**
 
 - `ModelSelectionStrategy.params["n"]` stays at 10 — Decision 7's
@@ -1140,6 +1233,12 @@ two concatenated regions:
 - `agent/prompt_templates/proposal/comparison_stage*.md` natural-language
   references to "file_vector" are LLM-facing guidance, not code. Leave
   for a docs-only follow-up if needed.
+- Stage-template `wavenet` few-shot examples (see gap note above) —
+  separate prompt-genericity refactor. **User-acknowledged weak point
+  (2026-04-22):** LLM bias toward `wavenet` in the proposer's "eyes"
+  persists while these few-shot examples stand. Accepted as a known
+  limitation for the current Phase 5 window; scheduled for a dedicated
+  prompt-genericity refactor post-Phase-7.
 
 ---
 

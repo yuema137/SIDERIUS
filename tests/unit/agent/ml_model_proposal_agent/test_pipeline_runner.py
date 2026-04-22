@@ -976,3 +976,270 @@ class TestStageUserPrompt:
         assert prompt.startswith("## Accumulated context")
         # Non-candidate summary line passes through untouched.
         assert "recovery=10.0%" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 D — proposer render adversarial edges
+#
+# Covers the gap between the happy-path Sub-commit C tests and the
+# ``tests/unit/execute_tools/test_score_table_adversarial.py`` probes (the
+# latter target ``ScoreComparisonTable`` + ``render_comparison_table``, not
+# the proposer-side render helpers). These pin down:
+#
+#   * ``build_score_summary_line``: priority ordering of the below-baseline
+#     guard, boundary recovery values, non-dict/empty-dict robustness.
+#   * ``build_candidate_markdown_block``: empty string vs missing field
+#     semantics for ``rendered_markdown`` and ``source_code``, missing
+#     ``model_type`` fallback, non-dict ``score_table`` robustness.
+# ---------------------------------------------------------------------------
+
+
+class TestProposerRenderAdversarial:
+    """Adversarial probes for the three new proposer-side render helpers
+    introduced in Sub-commit C. Complements the happy-path classes above."""
+
+    def test_below_baseline_takes_priority_over_recovery(self):
+        """If ``model_scalar < raw_baseline_scalar`` the honest one-liner must
+        win even when ``percent_of_ceiling_log`` is populated. This mirrors
+        the render_comparison_table below-baseline relabel guard — a double-
+        negative log ratio can flip ``percent_of_ceiling_log`` back to a
+        positive number, which is exactly why the guard is priority-ordered.
+        """
+        from nodes.proposal_helpers import build_score_summary_line
+        table = {
+            "aggregate": {
+                "model_scalar": -7.5,
+                "raw_baseline_scalar": -2.771,
+                # Non-None — would mis-render as "recovery=270.4%" if the
+                # below-baseline branch didn't take priority.
+                "percent_of_ceiling_log": 2.704,
+                "num_sampled_files": 20,
+            }
+        }
+        line = build_score_summary_line(table)
+        assert line == "log_scalar=-7.50, below raw baseline on 20 files"
+        # Must NOT leak a misleading recovery percentage.
+        assert "recovery" not in line
+        assert "%" not in line
+
+    def test_recovery_zero_renders_percent_not_missing_clause(self):
+        """``recovery=0.0`` is a real datum (ties raw baseline exactly).
+        It must render as ``recovery=0.0%``, not drop into the
+        no-recovery fallback branch reserved for ``recovery is None``.
+        """
+        from nodes.proposal_helpers import build_score_summary_line
+        table = {
+            "aggregate": {
+                "model_scalar": 1.0,
+                "raw_baseline_scalar": 1.0,  # exactly tied — strict "<" stays on normal branch
+                "percent_of_ceiling_log": 0.0,
+                "num_sampled_files": 20,
+            }
+        }
+        line = build_score_summary_line(table)
+        assert line == "log_scalar=1.00, recovery=0.0% on 20 files"
+
+    def test_non_dict_score_table_returns_none(self):
+        """LLM-side or cache-round-trip corruption could replace the
+        score_table with a bare string (e.g. ``"N/A"``). The helper must
+        not crash."""
+        from nodes.proposal_helpers import build_score_summary_line
+        assert build_score_summary_line("N/A") is None
+        assert build_score_summary_line([]) is None
+        assert build_score_summary_line(42) is None
+
+    def test_empty_rendered_markdown_string_falls_back(self):
+        """Explicitly-empty ``rendered_markdown=""`` (falsy) must fall back
+        to the ``_Score table unavailable._`` sentinel — not emit a blank
+        region that the LLM would silently ignore."""
+        from nodes.proposal_helpers import build_candidate_markdown_block
+        candidates = [{
+            "model_type": "a",
+            "score_table": {"rendered_markdown": ""},
+            "source_code": "pass",
+        }]
+        block = build_candidate_markdown_block(candidates)
+        assert "_Score table unavailable._" in block
+
+    def test_empty_source_code_string_falls_back(self):
+        """Same contract on the source-code side: empty string → sentinel
+        rather than an empty python fence."""
+        from nodes.proposal_helpers import build_candidate_markdown_block
+        candidates = [{
+            "model_type": "a",
+            "score_table": {"rendered_markdown": "| t |"},
+            "source_code": "",
+        }]
+        block = build_candidate_markdown_block(candidates)
+        assert "_Source code unavailable._" in block
+        # And the empty python fence MUST NOT leak through.
+        assert "```python\n\n```" not in block
+
+    def test_missing_model_type_renders_unknown_placeholder(self):
+        """If ``model_type`` is missing we fall back to ``<unknown>`` —
+        should never crash the whole render, but should be visible enough
+        that a reader notices the upstream data defect."""
+        from nodes.proposal_helpers import build_candidate_markdown_block
+        candidates = [{
+            "score_table": {"rendered_markdown": "| t |"},
+            "source_code": "pass",
+        }]
+        block = build_candidate_markdown_block(candidates)
+        assert "### Candidate: <unknown>" in block
+
+    def test_non_dict_score_table_on_candidate_falls_back(self):
+        """``score_table`` replaced by a non-dict (string, None, list) must
+        not crash the markdown block — ``isinstance(table, dict)`` guard
+        should catch it and produce the sentinel."""
+        from nodes.proposal_helpers import build_candidate_markdown_block
+        for bad_table in (None, "N/A", [], 42):
+            candidates = [{
+                "model_type": "a",
+                "score_table": bad_table,
+                "source_code": "pass",
+            }]
+            block = build_candidate_markdown_block(candidates)
+            assert "_Score table unavailable._" in block, f"bad_table={bad_table!r}"
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 D — genericity tests (directive #5 from the "Hardened genericity
+# directives" audit in docs/aggregated_score_table_awareness.md).
+#
+# The litmus scan is the key check: after assembling a full stage user
+# prompt with ONLY a synthetic model_type, the resulting string must not
+# contain any of the SIDERIUS baseline model names. A hit would mean the
+# LLM receives a contradictory signal — the dynamic table says
+# ``mystery_model_x`` while some hidden string hardcodes ``wavenet``.
+#
+# Scope is strictly the proposer-side code we own in Sub-commit C
+# (``build_candidate_markdown_block`` + ``_render_stage_user_prompt``).
+# Stage-template few-shot examples that hardcode baseline names are a
+# known gap tracked separately; see the "Hardened genericity directives"
+# subsection for rationale.
+# ---------------------------------------------------------------------------
+
+
+class TestProposerGenericity:
+    """Synthetic-model-name tests to prove no name-dependent branches
+    remain in the code paths Sub-commit C introduced."""
+
+    _BASELINE_NAMES = ("wavenet", "punet", "fcnet")
+
+    def test_candidate_markdown_with_unseen_model_name(self):
+        """A never-before-seen model_type must flow through
+        ``build_candidate_markdown_block`` unchanged — heading, rendered
+        table, and source code all carry the synthetic name."""
+        from nodes.proposal_helpers import build_candidate_markdown_block
+        candidates = [{
+            "model_type": "mystery_model_x",
+            "score_table": {"rendered_markdown": "| mystery_model_x row |"},
+            "source_code": "class MysteryModelX: pass",
+        }]
+        block = build_candidate_markdown_block(candidates)
+        assert "### Candidate: mystery_model_x" in block
+        assert "| mystery_model_x row |" in block
+        assert "class MysteryModelX: pass" in block
+        # No baseline-model leakage — directive #1 (No-Names rule).
+        for name in self._BASELINE_NAMES:
+            assert name not in block, (
+                f"Baseline name '{name}' leaked into a mystery_model_x-only block"
+            )
+
+    def test_score_summary_indifferent_to_model_name(self):
+        """``build_score_summary_line`` is keyed on aggregate scalars, not
+        on the model name — it has no access to ``model_type`` at all.
+        This test pins the contract down: identical aggregates produce
+        identical summaries regardless of which model they describe."""
+        from nodes.proposal_helpers import build_score_summary_line
+        agg = {
+            "model_scalar": 5.5763,
+            "raw_baseline_scalar": -2.771,
+            "percent_of_ceiling_log": 0.823,
+            "num_sampled_files": 20,
+        }
+        line = build_score_summary_line({"aggregate": agg})
+        # No model name appears in the summary — by design, the caller
+        # inserts the name at the non_candidates_overview level.
+        for name in (*self._BASELINE_NAMES, "mystery_model_x"):
+            assert name not in line
+
+    def test_render_stage_user_prompt_with_mystery_model(self):
+        """The full ``_render_stage_user_prompt`` assembly with only
+        ``mystery_model_x`` as the candidate must not leak any baseline
+        model name — the litmus scan for directive #5."""
+        from nodes.ml_model_proposal_agent import _render_stage_user_prompt
+
+        accumulated = {
+            "candidates": [{
+                "model_type": "mystery_model_x",
+                "best_score": 4.2,
+                "worst_score": 2.1,
+                "description": "A generic test architecture",
+                "model_params": 123_456,
+                "training_segments": 200,
+                "source": "proposed",
+                "score_table": {
+                    "rendered_markdown": "| mystery_model_x row |",
+                    "aggregate": {
+                        "model_scalar": 4.2,
+                        "raw_baseline_scalar": -2.771,
+                        "percent_of_ceiling_log": 0.63,
+                        "num_sampled_files": 20,
+                    },
+                },
+                "source_code": "class MysteryModelX: pass",
+                "source_code_lines": 1,
+            }],
+            "non_candidates_overview": [],
+            "interpretation_summary": {
+                "take_home_message": "Explore novel architectures.",
+                "model_types": ["mystery_model_x"],
+            },
+            "existing_model_types": ["mystery_model_x"],
+            "previous_failures": [],
+        }
+        prompt = _render_stage_user_prompt(accumulated)
+
+        # Synthetic name flows through verbatim — every expected anchor.
+        assert "### Candidate: mystery_model_x" in prompt
+        assert "| mystery_model_x row |" in prompt
+        assert "class MysteryModelX: pass" in prompt
+        # The cleaned JSON region must still carry the scalar metadata.
+        payload = extract_accumulated_json(prompt)
+        assert payload["candidates"][0]["model_type"] == "mystery_model_x"
+        assert payload["candidates"][0]["best_score"] == 4.2
+        # Heavy fields stripped from JSON (they live in the markdown block).
+        assert "score_table" not in payload["candidates"][0]
+        assert "source_code" not in payload["candidates"][0]
+
+        # Litmus substring scan — directive #5's hard requirement: ZERO
+        # baseline-model-name hits when the candidate list is synthetic.
+        for name in self._BASELINE_NAMES:
+            assert name not in prompt, (
+                f"Contradictory signal: '{name}' leaked into a mystery_model_x-only "
+                "assembled stage prompt. Trace the source (proposal_helpers, "
+                "_render_stage_user_prompt, or accumulated payload) and genericize "
+                "before closing Sub-commit D."
+            )
+
+    def test_empty_candidate_list_prompt_has_no_leakage(self):
+        """Regression guard: even with an empty candidate list, the fall-
+        through path (JSON region only) must not contain baseline names."""
+        from nodes.ml_model_proposal_agent import _render_stage_user_prompt
+
+        accumulated = {
+            "candidates": [],
+            "non_candidates_overview": [{
+                "model_type": "mystery_model_x",
+                "score_summary": "log_scalar=1.00, recovery=10.0% on 20 files",
+            }],
+            "interpretation_summary": {},
+            "existing_model_types": [],
+            "previous_failures": [],
+        }
+        prompt = _render_stage_user_prompt(accumulated)
+        for name in self._BASELINE_NAMES:
+            assert name not in prompt, (
+                f"Baseline name '{name}' leaked into JSON-only fall-through prompt"
+            )
