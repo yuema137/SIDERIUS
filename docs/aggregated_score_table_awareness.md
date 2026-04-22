@@ -510,8 +510,15 @@ tests) before committing, per `feedback_test_before_commit.md`.
 **Goal:** `{SIDERIUS_DATA_DIR}/raw_baseline/scalar_anchor_normalized.json`
 exists on disk, symmetric with `ground_truth/ceiling_anchor_normalized.json`.
 
-**Status:** implementation + verification complete. All real-data + unit
-tests green. Commit pending user approval.
+**Status:** ✅ complete. Landed on `master` 2026-04-21 as three sibling
+commits:
+
+- `4104463` — `docs(score_table):` design doc for comparison-table awareness
+  (7-phase plan).
+- `f97b613` — `feat(raw_baseline):` emit scalar_anchor_normalized.json
+  (grand-mean, global s_max).
+- `c7e9667` — `docs(reference_data):` raw_and_ground_score.md — fill in raw
+  baseline scalar.
 
 Steps:
 - [x] Edit `compute_raw_baseline.py::_calculate_score` — return changed from
@@ -541,8 +548,12 @@ Steps:
 - [x] Unit test `tests/unit/test_compute_raw_baseline.py` — 9 tests, all
       passing (5 updated for 3-tuple return; 4 new for the aggregator:
       happy path, missing index, legacy-without-fields, weighted grand mean).
-- [ ] Commit: `feat(raw_baseline): emit scalar_anchor_normalized.json
-      (grand-mean, global s_max)`.
+- [x] Commits (3, per `feedback_commits.md` small-commits rule):
+      - `4104463` — design doc
+      - `f97b613` — `feat(raw_baseline): emit scalar_anchor_normalized.json
+        (grand-mean, global s_max)`
+      - `c7e9667` — `docs(reference_data): raw_and_ground_score.md — fill
+        in raw baseline scalar` (reflects the new disk artifact)
 
 ---
 
