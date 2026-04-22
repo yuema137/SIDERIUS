@@ -1,5 +1,6 @@
 # core/sandbox_executor.py
 import os
+import re
 import sys
 import json
 import subprocess
@@ -133,22 +134,34 @@ def _limited_preexec(gb: int) -> Optional[Callable[[], None]]:
     return _apply_limit
 
 
+_MEMORY_ERROR_RE = re.compile(r"\bMemoryError\b")
+
+
 def _is_oom_failure(e: subprocess.CalledProcessError) -> bool:
     """Does ``e`` look like a host-RAM exhaustion in the child?
 
     Two signatures qualify:
-      1. ``MemoryError`` appears in stderr — the RLIMIT_AS ceiling caught
-         the allocation and Python raised a catchable exception. This is
-         the post-Fix-1 happy path.
+      1. Python's built-in ``MemoryError`` appears in stderr — the RLIMIT_AS
+         ceiling caught the allocation and Python raised a catchable
+         exception. This is the post-Fix-1 happy path.
       2. The process was killed by SIGKILL (``returncode == -9``) — the
          kernel OOM-killer intervened, typically because the ceiling was
          disabled or the allocation was too large to be intercepted (e.g.
          a single ``mmap`` bigger than the cap). This is the pre-Fix-1
          failure mode and the case Fix 1 exists to prevent.
+
+    We match ``MemoryError`` with word boundaries to avoid a false positive
+    on ``torch.OutOfMemoryError``, which is a distinct CUDA-side error —
+    the GPU allocator failed to serve a device allocation, and the host
+    RSS/VA are not necessarily exhausted. Tagging a CUDA OOM as
+    ``oom_host_ram`` would send the orchestrator down the wrong recovery
+    path (it would shrink host-facing knobs when the real pressure is on
+    the GPU, or — more importantly pre-role-aware-ceiling — obscure a
+    VA-cap misconfiguration under a generic "host RAM" label).
     """
     if e.returncode == -9:
         return True
-    if e.stderr and "MemoryError" in e.stderr:
+    if e.stderr and _MEMORY_ERROR_RE.search(e.stderr):
         return True
     return False
 

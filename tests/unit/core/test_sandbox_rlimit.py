@@ -193,6 +193,46 @@ class TestIsOomFailure:
         e = _called_process_error(returncode=2)
         assert _is_oom_failure(e) is False
 
+    def test_torch_out_of_memory_error_not_oom(self):
+        """``torch.OutOfMemoryError`` is a CUDA-allocator failure, not a
+        host-RAM exhaustion. A substring match on "MemoryError" would
+        false-positive because "OutOfMemoryError" contains "MemoryError".
+        The word-boundary regex must not match this case — tagging a CUDA
+        OOM as oom_host_ram would hide a VA-cap misconfiguration under a
+        generic "host RAM" label and send the orchestrator down the wrong
+        recovery path.
+        """
+        stderr = (
+            "Traceback (most recent call last):\n"
+            "  File \"train.py\", line 465, in run_experiment_streaming\n"
+            "    loss = criterion(output, target_seq)\n"
+            "torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 314.00 MiB.\n"
+        )
+        e = _called_process_error(returncode=1, stderr=stderr)
+        assert _is_oom_failure(e) is False
+
+    def test_bare_out_of_memory_error_not_oom(self):
+        """Same defence without the `torch.` prefix — some stack frames show
+        the class name unqualified."""
+        e = _called_process_error(returncode=1, stderr="OutOfMemoryError: GPU allocation failed\n")
+        assert _is_oom_failure(e) is False
+
+    def test_qualified_memory_error_still_oom(self):
+        """A fully-qualified ``builtins.MemoryError`` (rare, but possible in
+        some tracebacks) should still register as a host-RAM OOM — the
+        word-boundary regex must match ``.MemoryError`` since ``.`` is a
+        non-word character."""
+        e = _called_process_error(returncode=1, stderr="builtins.MemoryError: Unable to allocate\n")
+        assert _is_oom_failure(e) is True
+
+    def test_memory_error_with_message_is_oom(self):
+        """Real-world MemoryError lines include a message after the colon."""
+        e = _called_process_error(
+            returncode=1,
+            stderr="MemoryError: Unable to allocate 1.5 GiB for an array with shape (...)\n",
+        )
+        assert _is_oom_failure(e) is True
+
 
 # ==========================================
 # _format_subprocess_error — oom_host_ram tag
@@ -216,6 +256,21 @@ class TestFormatSubprocessErrorOomTag:
         e = _called_process_error(returncode=1, stderr="ValueError: bad")
         msg = _format_subprocess_error(e, "Inference")
         assert "[oom_host_ram]" not in msg
+
+    def test_torch_oom_not_tagged_host_ram(self):
+        """Regression: a CUDA allocator failure must not be tagged as
+        oom_host_ram. Before the word-boundary fix, a substring match on
+        "MemoryError" inside "torch.OutOfMemoryError" produced a false
+        positive — the sandbox status bubbled up as oom_host_ram when the
+        real failure was a GPU-side allocation (or a VA-cap misconfiguration
+        on the CUDA subprocess)."""
+        e = _called_process_error(
+            returncode=1,
+            stderr="torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 314 MiB.\n",
+        )
+        msg = _format_subprocess_error(e, "Train")
+        assert "[oom_host_ram]" not in msg
+        assert "OutOfMemoryError" in msg  # the underlying error should still be visible
 
 
 # ==========================================
