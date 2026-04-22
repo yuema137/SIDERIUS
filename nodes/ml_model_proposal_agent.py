@@ -443,13 +443,18 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
     if eff_comp:
         lines += ["### Efficiency Comparison (cross-model)", eff_comp, ""]
 
-    # Per-model file vectors
-    file_vectors = interp.get("per_model_file_vectors")
-    if file_vectors:
+    # Per-model score tables. The carrier is a serialized ScoreComparisonTable
+    # (dict) per model; we synthesize the per-file score list from rows[i].model
+    # so the weak/strong rendering below stays byte-identical. Phase 5 replaces
+    # this block with the pre-rendered table markdown.
+    score_tables = interp.get("per_model_score_tables")
+    if score_tables:
         import math
         lines.append("### Per-model File Vectors (per-file denoising scores)")
         lines.append("File index → frequency (log scale): 0=lowest, 19=highest")
-        for mt, fv in file_vectors.items():
+        for mt, table in score_tables.items():
+            rows = table.get("rows", []) if isinstance(table, dict) else []
+            fv = [r.get("model") for r in rows]
             present = [
                 (i, v) for i, v in enumerate(fv)
                 if v is not None and not (isinstance(v, float) and math.isnan(v))
@@ -784,7 +789,7 @@ class MLModelProposalAgent:
                     "model_types", "total_experiments", "best_denoising_score",
                     "worst_denoising_score", "key_findings", "bottlenecks",
                     "take_home_message", "per_model_best", "per_model_worst",
-                    "per_model_file_vectors",
+                    "per_model_score_tables",
                     # Phase E — prediction track record (surfaced to all stages)
                     "scientific_accuracy", "cumulative_information_gain",
                     "prediction_outcomes_history",

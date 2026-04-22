@@ -45,10 +45,19 @@ def select_candidate_models(
     model_types = interpretation.get("model_types", [])
     per_best = interpretation.get("per_model_best") or {}
     per_worst = interpretation.get("per_model_worst") or {}
-    file_vectors = interpretation.get("per_model_file_vectors") or {}
+    score_tables = interpretation.get("per_model_score_tables") or {}
     model_params = interpretation.get("per_model_params") or {}
     descriptions = interpretation.get("model_descriptions") or {}
     training_segs = interpretation.get("per_model_training_segments") or {}
+
+    def _fv_from_score_table(table):
+        # Synthesize a length-20 file_vector list (of Optional[float]) from
+        # a serialized ScoreComparisonTable dict. Phase 5 will replace the
+        # "file_vector" candidate-summary key with the raw "score_table".
+        if not isinstance(table, dict):
+            return None
+        rows = table.get("rows", [])
+        return [r.get("model") for r in rows] if rows else None
 
     # Build a summary for each model
     all_models = []
@@ -57,7 +66,7 @@ def select_candidate_models(
             "model_type": mt,
             "best_score": per_best.get(mt),
             "worst_score": per_worst.get(mt),
-            "file_vector": file_vectors.get(mt),
+            "file_vector": _fv_from_score_table(score_tables.get(mt)),
             "model_params": model_params.get(mt),
             "description": descriptions.get(mt),
             "training_segments": training_segs.get(mt),

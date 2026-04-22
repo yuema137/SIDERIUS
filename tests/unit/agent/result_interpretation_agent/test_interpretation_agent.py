@@ -18,12 +18,47 @@ from unittest.mock import MagicMock, patch
 from agent.schemas.interpretation import (
     InterpretationInput, InterpretationOutput, ModelRunSummary,
 )
+from agent.schemas.score_table import (
+    AggregateScalars, PerFileRow, ScoreComparisonTable,
+)
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from nodes.result_interpretation_agent import (
     ResultInterpretationAgent,
     _build_per_model_prompt,
     _build_synthesis_prompt,
 )
+
+
+def _make_score_table(fv):
+    """Build a fixture ScoreComparisonTable from a length-20 list of
+    per-file model scores. Reference columns are constant placeholders —
+    tests only exercise the model column (and derived columns)."""
+    rows = [
+        PerFileRow(
+            file_index=i,
+            raw_baseline=0.1,
+            ground_truth=100.0,
+            model=v,
+            gain_vs_raw=(v - 0.1) if v is not None else None,
+            headroom_vs_gt=(100.0 - v) if v is not None else None,
+        )
+        for i, v in enumerate(fv)
+    ]
+    present = [v for v in fv if v is not None]
+    model_scalar = (sum(present) / len(present)) if present else 0.0
+    return ScoreComparisonTable(
+        rows=rows,
+        aggregate=AggregateScalars(
+            raw_baseline_scalar=0.1,
+            ground_truth_scalar=100.0,
+            model_scalar=model_scalar,
+            percent_of_ceiling_log=model_scalar / 100.0,
+            num_sampled_files=len(present) or 1,
+        ),
+        s_max_global=1.0,
+        reference_source="test_fixture",
+        rendered_markdown="| file | raw | gt | model |\n(test fixture)",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -366,6 +401,11 @@ class TestErrorCases:
 # Enriched summaries for prompt builder and output computation tests
 # ---------------------------------------------------------------------------
 
+_ENRICHED_BEST_FV = [0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 5.0, 78.0, 1.5, 2.5,
+                     3.0, 7.0, 1.3, 0.9, 40.0, 21.0, 5.0, 5.0, 3.0, 0.8]
+_ENRICHED_FORMAL_FV = [0.002, 0.02, 0.15, 0.6, 1.1, 2.2, 5.5, 80.0, 1.6, 2.6,
+                       3.1, 7.5, 1.4, 1.0, 41.0, 22.0, 5.2, 5.1, 3.2, 0.9]
+
 ENRICHED_SUMMARY = ModelRunSummary(
     model_type="punet", run_name="v1", status="completed",
     completed_rounds=3,
@@ -374,12 +414,13 @@ ENRICHED_SUMMARY = ModelRunSummary(
     best_config={"model_config": {"depth": 4}, "train_config": {"lr": 1e-4}},
     round_scores=[0.5, 1.2, 1.8],
     round_conclusions=["Baseline.", "Improved.", "Best."],
-    # New fields
-    best_file_vector=[0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 5.0, 78.0, 1.5, 2.5,
-                      3.0, 7.0, 1.3, 0.9, 40.0, 21.0, 5.0, 5.0, 3.0, 0.8],
+    # Per-file performance — raw primitive retained per §7.2 scope note.
+    best_file_vector=_ENRICHED_BEST_FV,
     formal_score=1.6,
-    formal_file_vector=[0.002, 0.02, 0.15, 0.6, 1.1, 2.2, 5.5, 80.0, 1.6, 2.6,
-                        3.1, 7.5, 1.4, 1.0, 41.0, 22.0, 5.2, 5.1, 3.2, 0.9],
+    formal_file_vector=_ENRICHED_FORMAL_FV,
+    # Per-file performance — enriched (Phase 4) — what downstream agents read.
+    best_score_table=_make_score_table(_ENRICHED_BEST_FV),
+    formal_score_table=_make_score_table(_ENRICHED_FORMAL_FV),
     best_model_params=55000,
     training_psd_segments=200,
     eval_psd_segments=200,
@@ -451,7 +492,7 @@ class TestBuildSynthesisPrompt:
             overall_best_score=1.8,
             overall_worst_score=0.5,
             overall_best_config=None,
-            per_model_file_vectors={"punet": ENRICHED_SUMMARY.best_file_vector},
+            per_model_score_tables={"punet": ENRICHED_SUMMARY.best_score_table},
         )
         assert "File Vector Summary" in prompt
         assert "Weak files" in prompt
@@ -596,15 +637,17 @@ class TestFormalScore:
 
 class TestOutputEnrichedFields:
 
-    def test_per_model_file_vectors_populated(self, agent, tmp_path):
+    def test_per_model_score_tables_populated(self, agent, tmp_path):
         inp = InterpretationInput(
             summaries=[ENRICHED_SUMMARY],
             storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
         )
         output = agent.run(inp)
-        assert output.per_model_file_vectors is not None
-        assert "punet" in output.per_model_file_vectors
-        assert len(output.per_model_file_vectors["punet"]) == 20
+        assert output.per_model_score_tables is not None
+        assert "punet" in output.per_model_score_tables
+        table = output.per_model_score_tables["punet"]
+        assert isinstance(table, ScoreComparisonTable)
+        assert len(table.rows) == 20
 
     def test_weak_frequency_files_computed(self, agent, tmp_path):
         inp = InterpretationInput(
@@ -639,13 +682,13 @@ class TestOutputEnrichedFields:
         assert output.per_model_training_segments["punet"] == 200
 
     def test_none_fields_produce_none_output(self, agent, tmp_path):
-        """Old-style summary (no file_vector etc) produces None for enriched fields."""
+        """Old-style summary (no score_table etc) produces None for enriched fields."""
         inp = InterpretationInput(
             summaries=[PUNET_SUMMARY],
             storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
         )
         output = agent.run(inp)
-        assert output.per_model_file_vectors is None
+        assert output.per_model_score_tables is None
         assert output.weak_frequency_files is None
         assert output.per_model_params is None
         assert output.per_model_training_segments is None

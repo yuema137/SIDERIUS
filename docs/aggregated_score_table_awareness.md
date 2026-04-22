@@ -778,29 +778,133 @@ per the 20+16+4 breakdown, landed `cd901f1`); a follow-up regex fix to
 **Goal:** the score_table payload flows end-to-end through the graph;
 `per_model_file_vectors` is removed per Decision 6.
 
-Steps:
-- [ ] Update `agent/schemas/interpretation.py` — add `best_score_table` +
-      `formal_score_table` on `InterpretationInput`; **replace**
-      `per_model_file_vectors` with `per_model_score_tables` on
-      `InterpretationOutput`.
-- [ ] Update `agent/schemas/proposal.py` — add `per_model_score_tables` on
-      proposal input.
-- [ ] Update `agent/schemas/protocols/ml_model_tune_to_ml_result_interp.py`
-      — map `best_score_table` / `formal_score_table`.
-- [ ] Update `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py`
-      — swap `per_model_file_vectors` → `per_model_score_tables`; update
-      docstring at line 72.
-- [ ] Migrate all 7 internal readers of `per_model_file_vectors` found by
-      grep (`nodes/result_interpretation_agent.py` ×3 sites,
-      `nodes/ml_model_proposal_agent.py`, `nodes/proposal_helpers.py`,
-      2 test files) to read `per_model_score_tables`.
-- [ ] Unit + protocol tests updated, including the two test fixtures at
-      `tests/unit/agent/result_interpretation_agent/test_interpretation_agent.py`
-      and `tests/unit/agent/ml_model_proposal_agent/test_proposal_agent.py`.
-- [ ] Real-run test (Tier 2): tune→interp protocol integration test passes
-      with the new field.
+**Status (2026-04-22):** in progress. Decision 6's hard swap removes
+`per_model_file_vectors` from `InterpretationOutput` in the same commit
+that introduces `per_model_score_tables` — so Phase 4 cannot be split
+into separate commits without leaving intermediate state broken. Instead
+we work in two *staged* passes within a single uncommitted worktree,
+then commit the whole bundle when the narrow test suite is green.
+
+Staged plan:
+
+**Stage 1 — contract layer (schemas + protocols).** Uncommitted;
+schemas import-clean but the tree is red because node readers still
+reference the removed `per_model_file_vectors` key.
+
+- [x] Extend `agent/schemas/interpretation.py` — added
+      `best_score_table` + `formal_score_table` on `ModelRunSummary`
+      (alongside the existing `best_file_vector` / `formal_file_vector`).
+      Replaced `InterpretationOutput.per_model_file_vectors` with
+      `per_model_score_tables: Optional[Dict[str, ScoreComparisonTable]]`.
+- [x] Extend `agent/schemas/proposal.py` — added
+      `ProposalInput.per_model_score_tables: Optional[Dict[str, ScoreComparisonTable]]`
+      as a typed mirror of the interpretation dict-carry.
+- [x] `agent/schemas/protocols/ml_model_tune_to_ml_result_interp.py` —
+      docstring now calls out the `best_score_table` / `formal_score_table`
+      threading. Actual population happens inside
+      `tuning_output_to_model_run_summary` (migrated in Stage 2 below).
+- [x] `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py` —
+      docstring renamed `per_model_file_vectors` → `per_model_score_tables`;
+      code explicitly populates `result["per_model_score_tables"]` by
+      dumping the dict of `ScoreComparisonTable` when upstream has tables.
+
+**Stage 2 — consumers (node readers + tests).** Restores a green tree.
+
+- [x] `nodes/result_interpretation_agent.py` — done (uncommitted). All 7
+      call sites migrated:
+      - `tuning_output_to_model_run_summary`: populates `best_score_table`
+        + `formal_score_table` — prefers the tuner's top-level
+        `HyperparamTuningOutput.best_score_table` / `formal_score_table`,
+        with a fallback to `best_rec`/`formal_rec`'s own `score_table`
+        field. Raw `best_file_vector` / `formal_file_vector` still emitted
+        alongside per §7.2 scope note.
+      - `_stats` cache dict in Phase 1: gained
+        `"best_score_table": summary.best_score_table.model_dump()` so the
+        cache round-trips through JSON cleanly; reads validate it back
+        via `ScoreComparisonTable.model_validate`. The legacy
+        `best_file_vector` key is kept for any consumer that still needs
+        a flat list.
+      - `_register_file_vector` renamed to `_register_score_table`;
+        internal var `per_model_file_vectors` renamed to
+        `per_model_score_tables: Dict[str, ScoreComparisonTable]`; the
+        weak-files logic now extracts `r.file_index` from
+        `table.rows` where `r.model < 1.0` — behavior identical.
+      - `_build_synthesis_prompt` call site: kwarg renamed.
+      - `_build_synthesis_prompt` signature + body: param renamed to
+        `per_model_score_tables`; the "File Vector Summary" block now
+        synthesizes `fv = [r.model for r in table.rows]` on the fly so
+        the existing prompt text stays byte-identical. Phase 5 will
+        replace this block with `table.rendered_markdown`.
+      - Prediction-eval block (old line 691): `prev_fv` synthesized from
+        `prev_table.rows[i].model`; the `actual_results["best_file_vector"]`
+        key is unchanged — it's the reflector-side contract consumed by
+        `evaluate_prediction` (reads "mean(file_vector[N:M])",
+        "file_vector[N]" metrics).
+      - Output emission (old line 836): now emits
+        `"per_model_score_tables"`.
+      - *Scope correction from the original plan:* `_build_per_model_prompt`
+        (lines 131/137) is **not** migrated in Phase 4 — `summary.best_file_vector`
+        / `summary.formal_file_vector` stay in that function's rendering.
+        Those fields are still on `ModelRunSummary` per §7.2, so the
+        current code is already green. Phase 5 (interpreter prompt
+        overhaul) swaps this render path to `score_table.rendered_markdown`.
+- [x] `nodes/ml_model_proposal_agent.py` — done (uncommitted). 2 sites
+      migrated:
+      - `_build_synthesis_prompt` render block now reads
+        `interp.get("per_model_score_tables")` and synthesizes the
+        per-file list from each serialized table's `rows[i].model`. The
+        "Per-model File Vectors" heading and weak/strong text stay
+        byte-identical. Phase 5 replaces this block with the
+        pre-rendered table markdown.
+      - Key in the forwarded `interpretation_summary` tuple renamed to
+        `"per_model_score_tables"`.
+- [x] `nodes/proposal_helpers.py` — done (uncommitted). 1 site migrated:
+      `select_candidate_models` reads
+      `interpretation.get("per_model_score_tables")` and synthesizes the
+      candidate-summary `file_vector` list via a small
+      `_fv_from_score_table` helper. The `"file_vector"` candidate key
+      is **intentionally unchanged** — Phase 5 replaces it with a
+      `"score_table"` key once downstream consumers migrate.
+- [x] Test fixtures — done (uncommitted):
+      - `test_interpretation_agent.py`: added a `_make_score_table(fv)`
+        helper at module scope (builds a `ScoreComparisonTable` with
+        constant placeholder reference columns); `ENRICHED_SUMMARY`
+        gained `best_score_table` + `formal_score_table` alongside the
+        existing `best_file_vector` / `formal_file_vector` fields;
+        `test_includes_file_vector_summary` now feeds
+        `per_model_score_tables={"punet": ENRICHED_SUMMARY.best_score_table}`
+        to `_build_synthesis_prompt`; `test_per_model_file_vectors_populated`
+        renamed to `test_per_model_score_tables_populated` and asserts the
+        output is a `ScoreComparisonTable` with 20 rows; the None-fields
+        test now checks `output.per_model_score_tables is None`.
+      - `test_proposal_agent.py`: added `_make_score_table_dict(fv)` — a
+        serialized (`model_dump()`) ScoreComparisonTable matching the
+        shape the interp dict carries through the protocol;
+        `test_includes_file_vectors` feeds
+        `per_model_score_tables={"punet": _make_score_table_dict(fv)}`.
+      - `test_tune_to_interp.py`: rewrote the optional output-check to
+        read `output.per_model_score_tables.get("wavenet")`, synthesize
+        `fv = [r.model for r in table.rows]`, and re-assert the
+        low/high-frequency thresholds. The fixture
+        `_WAVENET_TUNING_OUTPUT` has no `best_score_table` so the block
+        is skipped in pseudo mode — identical behavior to the pre-
+        migration soft check on `per_model_file_vectors`.
+- [x] Run the narrow test scope: the 3 migrated test files plus
+      `tests/unit/agent/tune_ml_hyperparam_agent/test_tuning_agent.py` and
+      `tests/unit/agent/test_llm_bridge.py` as cross-module canaries.
+      **Result: 226 passed in 178s.** No interpretation, proposal, tuner,
+      or llm-bridge regressions from the `per_model_file_vectors` →
+      `per_model_score_tables` rename.
 - [ ] Commit: `refactor(graph): replace per_model_file_vectors with
       per_model_score_tables; wire score_table through protocols`.
+      Includes the design doc check-off.
+
+*Decision 6 scope reminder:* the hard swap applies only to
+`InterpretationOutput.per_model_file_vectors`. `ExperimentRecordSchema.file_vector`,
+`HyperparamTuningOutput.best_file_vector`, and
+`ModelRunSummary.best_file_vector` all stay — `file_vector` is the raw
+primitive, `score_table` is the enriched view built on top of it. See §7.1
+and §7.2 scope note.
 
 ---
 

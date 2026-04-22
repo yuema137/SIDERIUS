@@ -165,12 +165,16 @@ def test_tune_to_interp_protocol_and_node(tmp_path, request):
     assert len(output.bottlenecks) > 0
     assert len(output.take_home_message) > 10
 
-    # File vector propagated to output
-    if output.per_model_file_vectors:
-        fv = output.per_model_file_vectors.get("wavenet")
-        if fv:
-            assert fv[0] < 1.0,  "low-freq file 0 should be weak in output file vector"
-            assert fv[19] > 7.0, "high-freq file 19 should be strong in output file vector"
+    # Score table propagated to output — synthesize the file vector from
+    # rows[i].model so the low/high-frequency assertions still hold.
+    if output.per_model_score_tables:
+        table = output.per_model_score_tables.get("wavenet")
+        if table is not None:
+            fv = [r.model for r in table.rows]
+            assert fv[0] is not None and fv[0] < 1.0, \
+                "low-freq file 0 should be weak in output score table"
+            assert fv[19] is not None and fv[19] > 7.0, \
+                "high-freq file 19 should be strong in output score table"
 
     # Storage: output file written
     assert (tmp_path / "interpretation_tune_to_interp.json").exists()

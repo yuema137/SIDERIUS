@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field, model_validator
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from agent.schemas.hyperparam_tuning import ExpertAdviceInput
 from agent.schemas.proposal import VocabEntry, ProposedVocabLink, FalsifiablePrediction
+from agent.schemas.score_table import ScoreComparisonTable
 
 
 class ModelRunSummary(BaseModel):
@@ -92,6 +93,20 @@ class ModelRunSummary(BaseModel):
     formal_file_vector: Optional[List[Optional[float]]] = Field(
         default=None,
         description="File vector from the formal round. Definitive per-file performance.",
+    )
+
+    # --- Enriched per-file tables (file_vector + baseline + ground truth) ---
+    best_score_table: Optional[ScoreComparisonTable] = Field(
+        default=None,
+        description="ScoreComparisonTable for the best experiment — the enriched "
+                    "view of best_file_vector alongside raw_baseline and "
+                    "ground_truth columns with pre-rendered markdown. "
+                    "Downstream agents prefer this over best_file_vector.",
+    )
+    formal_score_table: Optional[ScoreComparisonTable] = Field(
+        default=None,
+        description="ScoreComparisonTable for the formal (final) round. "
+                    "Definitive enriched per-file view without the trial-subset caveat.",
     )
 
     # --- Model efficiency ---
@@ -312,11 +327,14 @@ class InterpretationOutput(BaseModel):
         description="Single critical insight that directly motivates proposing a new architecture.",
     )
 
-    # --- Frequency analysis (from file_vector) ---
-    per_model_file_vectors: Optional[Dict[str, List[Optional[float]]]] = Field(
+    # --- Frequency analysis (from score_table) ---
+    per_model_score_tables: Optional[Dict[str, ScoreComparisonTable]] = Field(
         default=None,
-        description="model_type → best file_vector. Enables the proposal agent to see "
-                    "which frequency ranges each architecture handles well.",
+        description="model_type → best ScoreComparisonTable. Strict superset of the "
+                    "old per_model_file_vectors (every rows[i].model equals the old "
+                    "fv[i]) plus raw_baseline, ground_truth, gain_vs_raw, "
+                    "headroom_vs_gt columns and pre-rendered markdown. Replaces "
+                    "per_model_file_vectors per Decision 6 (hard swap).",
     )
     weak_frequency_files: Optional[Dict[str, List[int]]] = Field(
         default=None,

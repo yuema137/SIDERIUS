@@ -69,7 +69,9 @@ def local_full_context(
       - model_descriptions   : full markdown descriptions of each architecture
       - per_model_best/worst, best_denoising_score, best_config
       - key_findings, bottlenecks, take_home_message
-      - per_model_file_vectors  : per-file denoising scores per model (frequency analysis)
+      - per_model_score_tables : per-model ScoreComparisonTable (per-file denoising
+                                  scores + raw_baseline + ground_truth + rendered markdown).
+                                  Replaces per_model_file_vectors per §7.3 / Decision 6.
       - weak_frequency_files    : file indices where each model scores poorly
       - per_model_params        : parameter count per model (efficiency)
       - per_model_training_segments : training data volume per model
@@ -138,6 +140,14 @@ def local_full_context(
         "expert_context":       [c.model_dump() for c in merged_context],
         "storage":              storage.model_dump(),
     }
+
+    # Typed mirror of interpretation.per_model_score_tables. Populated only
+    # when upstream has tables — None keeps the ProposalInput default for
+    # back-compat with interpretation outputs from pre-score_table runs.
+    if output.per_model_score_tables:
+        result["per_model_score_tables"] = {
+            mt: st.model_dump() for mt, st in output.per_model_score_tables.items()
+        }
 
     # Prefer runtime_vocab from interpretation output (accumulated memory)
     # over the static seed. Falls back to static seed if interpretation

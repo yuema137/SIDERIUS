@@ -17,8 +17,35 @@ from unittest.mock import MagicMock, patch, call
 
 from agent.schemas.proposal import ProposalInput, ProposalOutput, VocabEntry
 from agent.schemas.hyperparam_tuning import ExpertAdvice
+from agent.schemas.score_table import (
+    AggregateScalars, PerFileRow, ScoreComparisonTable,
+)
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from nodes.ml_model_proposal_agent import MLModelProposalAgent, _build_reasoning_prompt
+
+
+def _make_score_table_dict(fv):
+    """Serialized ScoreComparisonTable fixture matching what the interp dict
+    carries in production (output.model_dump() through the protocol)."""
+    rows = [
+        PerFileRow(
+            file_index=i, raw_baseline=0.1, ground_truth=100.0,
+            model=v,
+            gain_vs_raw=(v - 0.1) if v is not None else None,
+            headroom_vs_gt=(100.0 - v) if v is not None else None,
+        )
+        for i, v in enumerate(fv)
+    ]
+    return ScoreComparisonTable(
+        rows=rows,
+        aggregate=AggregateScalars(
+            raw_baseline_scalar=0.1, ground_truth_scalar=100.0,
+            model_scalar=0.5, percent_of_ceiling_log=0.005,
+            num_sampled_files=len([v for v in fv if v is not None]) or 1,
+        ),
+        s_max_global=1.0, reference_source="test",
+        rendered_markdown="(test)",
+    ).model_dump()
 
 
 # ---------------------------------------------------------------------------
@@ -300,7 +327,7 @@ class TestBuildReasoningPromptEnriched:
     def test_includes_file_vectors(self):
         fv = [0.001, 0.01] + [5.0] * 18
         inp = self._make_enriched_input(
-            per_model_file_vectors={"punet": fv},
+            per_model_score_tables={"punet": _make_score_table_dict(fv)},
         )
         prompt = _build_reasoning_prompt(inp)
         assert "File Vector" in prompt
