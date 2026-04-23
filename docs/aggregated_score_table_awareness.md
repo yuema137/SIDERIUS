@@ -1,6 +1,6 @@
 # Aggregated Score Table Awareness — Design Doc
 
-## Status: **Complete (2026-04-22).** Phases 1–6 landed, integration tier green. Phase 7 (`small_sample_trial_v1` launch gate) unblocked.
+## Status: **Phases 1–6 landed; Phase 6.5 Stage 1 green (2026-04-22).** Phase 6.5 Stage 2 (real-GPU semantic smoke) is the last gate before Phase 7 (`small_sample_trial_v1` launch).
 
 ---
 
@@ -1334,7 +1334,122 @@ Steps (live checklist):
       status line promoted to **Complete (2026-04-22)**.
 
 Shipped shape: A + B + D in one commit (C skipped per directive). Phase 7
-launch gate unblocked.
+launch gate unblocked **in principle** — but see Phase 6.5 below: after
+commit `4cce4d2` we realised Phase 6 proves wires, not semantics, and a
+real-LLM probe is cheap enough to run before risking the Phase 7 launch.
+
+---
+
+### Phase 6.5 — Semantic smoke (two-stage gate, 2026-04-22)
+
+**Why this phase exists.** Phase 6 is a wiring audit: Pydantic contracts
+hold end-to-end and the Phase 5 C markdown signatures physically appear in
+the proposer's stage prompts under a `RecordingLLMBridge`. It does **not**
+prove that a real LLM, given those prompts, actually reads or cites the
+table values. The audit of `4cce4d2` surfaced three gaps the mechanical
+tests cannot close:
+
+1. Does the LLM cite specific numerics from the injected table, or does
+   it ignore the table and hallucinate generic prose?
+2. Does the `runtime_vocab` grow across iterations when fed real
+   interpreter output?
+3. Do the per-round VRAM + wall-time budgets we plan to use at launch
+   (60 s trial / 20 min formal) actually hold on the 5090?
+
+Running the full `small_sample_trial_v1` launch to discover a "no" on
+any of those is expensive. Phase 6.5 answers each cheaply by splitting
+the probe into two stages with a hard gate in between.
+
+#### Stage 1 — "The Brain" (pseudo training + real OpenAI)
+
+**Goal:** prove the LLM reads and uses the score table, without spending
+a single GPU second.
+
+**Mechanism.**
+- Real OpenAI (`gpt-4o-mini`) for both `ResultInterpretationAgent` and
+  `MLModelProposalAgent`.
+- Pseudo training: synthetic `ModelRunSummary` fixtures with
+  distinctive `best_score_table` attached via the Phase 6 B helper.
+  No GPU, no subprocess.
+- 2 iterations:
+  - Iter 1: interp → protocol → 3-stage proposer pipeline.
+    Recording-bridge captures every proposer LLM response (comparison,
+    causal_reasoning, proposing_commit). A regex scanner tallies hits
+    across four signature families: (a) file-index citations (0–19),
+    (b) injected scalar values rendered to 1–2 decimals,
+    (c) recovery-% rounded to int, (d) snake_case column tokens that
+    would not appear in plain English (`model_scalar`, `gain_vs_raw`,
+    `raw_baseline`, `ground_truth`, `percent_of_ceiling`,
+    `log_scalar`, `headroom_vs_gt`).
+  - Iter 2: append a synthetic run of the iter-1 proposal with its own
+    score table, re-run interp with iter-1 `runtime_vocab` carried
+    forward, assert vocab strictly grew.
+
+**Gate criteria.**
+- Iter 1: total numeric hits across all proposer stages **> 0**
+  (scanner calibrated: 0 hits on generic-architecture prose, 13 hits
+  on well-formed citation text).
+- Iter 2: `len(iter2.runtime_vocab) > len(iter1.runtime_vocab)` OR
+  non-empty add/refine diff; zero entries may be dropped.
+
+**File:** `tests/integration/workflows/test_score_table_pseudo_smoke.py`.
+Marked `@pytest.mark.real_run`; skips without `OPENAI_API_KEY`.
+
+**Status:** ✅ Green 2026-04-22. One run (86.4 s, 6 OpenAI calls).
+
+- Iter 1 produced **19 numeric hits** across stages —
+  comparison=13, causal_reasoning=5, proposing_commit=1. The LLM cited
+  exact scalars (`5.58`, `2.35`), file-index ranges (`files 0-4`,
+  `files 5-19`), per-file values (`4.2 to 9.0`, `1.5 to 3.4`,
+  `below 0.2`), and recovery % (`58.7% of ceiling`). The `causal_reasoning`
+  stage's falsifiable prediction was stated directly on
+  `mean(file_vector[0:4])` with `current_value=0.15` — an average
+  computed from the injected low-freq rows. The final committed
+  `ProposalOutput.motivation` compresses this into generic prose
+  (0 hits), which is fine: the decision (propose `wave_specialist`
+  targeting the low-freq blind spot) was already shaped by the
+  numerics at the earlier stages.
+- Iter 2 `runtime_vocab` grew 0 → 3: `specialized_frequency_layers`
+  + `prediction_wave_specialist_confirmed` +
+  `score_wave_specialist_vs_sota`. Interp also computed
+  `mean(file_vector[0:4]) = 1.025` from the injected iter-2 file
+  vector — more evidence the numeric path is live.
+
+The test file is kept committed as the standing semantic-contract
+check; it doubles as the canary if future prompt changes silently
+strip the score-table rendering.
+
+#### Stage 2 — "The Body" (real GPU + real OpenAI)
+
+**Goal:** prove the resource envelope holds for 2 real iterations
+before launching the Phase 7 rerun, which is a longer/wider version of
+the same loop.
+
+**Mechanism.** Real `run_workflow` on `small_sample_trial_v1` seeds,
+OpenAI for every agent in the chain, 2 iterations, budgets:
+
+| Phase | Budget | Justification |
+|---|---:|---|
+| Trial per round | **60 s** | `trial_portion=0.02`, `max_epochs=1` on 5090 is ~20–40 s for seed-scale models. Agent-proposed archs may be heavier; log overruns but don't abort — overruns ARE signal. |
+| Formal per round | **20 min** | Full 20-file × full-segment eval dominates. Seed-scale models fit in 10–15 min; transformer-scale proposals may be tight. Again: treat overrun as signal, not failure. |
+
+Recorded per iteration:
+- Peak VRAM via `torch.cuda.max_memory_allocated()`
+- Wall-time per phase (tune, inference, score)
+- Whether the iter completed without OOM/timeout
+
+**Gate criteria.**
+- Both iterations complete without hitting OOM or the wall-clock timeout.
+- Peak VRAM stays under the 5090's 32 GB envelope.
+- Aggregate wall-time per formal round ≤ 20 min with ≥ 10% headroom
+  (i.e., ≤ 18 min observed average) — below that, Phase 7's 6+
+  iterations are defensible.
+
+**File:** `tests/integration/workflows/test_score_table_real_smoke.py`.
+To be written after Stage 1 is committed. Not part of CI —
+`@pytest.mark.real_run` + requires GPU + `OPENAI_API_KEY`.
+
+**Status:** ⏳ pending (Stage 1 green — proceed to write).
 
 ---
 
@@ -1344,6 +1459,8 @@ launch gate unblocked.
 green.
 
 Steps:
+- [ ] Confirm Phase 6.5 Stage 2 green (resource envelope holds on 2
+      real-GPU iterations with OpenAI + `small_sample_trial_v1` config).
 - [ ] Confirm Phases 1–6 merged; relevant integration tier green.
 - [ ] Verify `run_all_models_trial.sh` has `RUN_NAME="small_sample_trial_v1"`
       (already set) and the seeds in `run_exploration_adaptive.py` still
