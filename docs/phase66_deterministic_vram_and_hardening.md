@@ -439,8 +439,11 @@ Both overall and per-phase. ±10% is acceptable per user directive.
 - [ ] A.10 Update `sandbox_executor.execute_inference` to accept inference batch from the experiment config, not from `inference_defaults`.
 - [ ] A.11 Propagate the skill's `inference_batch` return value into the tuner's experiment config (`nodes/ml_hyperparameter_tune_agent.py` site of `_run_skill("evaluate_vram_skill", ...)`).
 - [ ] A.12 Guardrail tests — `test_no_model_name_branches.py` (5.4) + `test_no_hardcoded_device_literals.py` (5.1). Both must pass.
-- [ ] A.13 Capture ground-truth numbers on lilab (5.2 Step 1). Save raw `nvidia-smi` / `max_memory_allocated` output.
-- [ ] A.14 Evidence Gate verification (5.2 Step 3). Update doc Appendix A with numbers.
+- [x] A.13 Capture ground-truth numbers on lilab (5.2 Step 1). Raw JSON at `docs/phase66_telemetry/stage2_iter_001_telemetry.json`. Training peak 0.8231 GB, inference peak 0.4212 GB, dominant phase = training. See Appendix A.1.
+  - [x] A.13.a Standalone telemetry script drafted: `docs/phase66_telemetry/capture_stage2_vram_telemetry.py` (two-subprocess, replays Stage 2 iter_001 attempt_003 configs + plugin verbatim, uses production `FocalLoss1D`).
+  - [x] A.13.b Device handling hardened: `_resolve_device_index(override)` honors `--device <idx|cuda:N|cuda>` with fallback to `torch.cuda.current_device()` (respects `$CUDA_VISIBLE_DEVICES`); `set_device` + `init` bootstrap the context before `reset_peak_memory_stats`. Fixes the `Invalid device argument` error seen on lilab.
+  - [x] A.13.c Ground-truth capture executed on RTX 5090 (host `ligroup`, torch 2.10.0+cu128, 2026-04-23). Numbers transcribed into Appendix A.1.
+- [ ] A.14 Evidence Gate verification (5.2 Step 3). Measured column filled in Appendix A.2; predicted column + delta must be filled **after** A.2–A.6 land (then gate pass/fail = ±10%).
 - [ ] A.15 Update `docs/resource_estimator_implement.md` — mark affected sections "Superseded by docs/phase66_deterministic_vram_and_hardening.md (2026-04-22)".
 - [ ] A.16 Self-review. Open PR #1.
 
@@ -464,17 +467,51 @@ Both overall and per-phase. ±10% is acceptable per user directive.
 
 ---
 
-## Appendix A — Evidence Gate numbers (to be filled during A.13/A.14)
+## Appendix A — Evidence Gate numbers
 
-| Phase | Measured peak (GB) | Predicted peak (GB) | Delta | Within ±10%? |
-|---|---|---|---|---|
-| Training | TBD | TBD | TBD | TBD |
-| Inference | TBD | TBD | TBD | TBD |
-| End-to-end | TBD | TBD | TBD | TBD |
+### A.1 Ground-truth peaks (captured 2026-04-23, A.13)
 
-Raw log location: TBD.
-Device: lilab NVIDIA RTX 5090 (32 GB).
-Config: Stage 2 iter_001 `dynamic_depth_simple`, seed TBD.
+Captured with `docs/phase66_telemetry/capture_stage2_vram_telemetry.py --phase end_to_end`,
+two fresh subprocesses (one per phase), `torch.cuda.max_memory_allocated` under
+production `FocalLoss1D` on the exact Stage 2 iter_001 attempt_003 configs + plugin.
+
+| Phase      | Peak allocated (GB) | Peak reserved (GB) | Notes                                              |
+|------------|--------------------:|-------------------:|----------------------------------------------------|
+| Training   |              0.8231 |             0.8828 | 5 AdamW steps, batch 8 × T=10000, focal loss.      |
+| Inference  |              0.4212 |             0.4746 | 1 `no_grad` forward, batch 25 × T=10000.           |
+| End-to-end |              0.8231 |             0.8828 | `max` across phases; **training is dominant**.     |
+
+### A.2 Predicted peaks (to be filled during A.14, after the refactor lands)
+
+| Phase      | Measured (GB) | Predicted (GB) | Delta | Within ±10%? |
+|------------|--------------:|---------------:|------:|-------------:|
+| Training   |        0.8231 |            TBD |   TBD |          TBD |
+| Inference  |        0.4212 |            TBD |   TBD |          TBD |
+| End-to-end |        0.8231 |            TBD |   TBD |          TBD |
+
+### A.3 Capture context
+
+- Raw JSON: `docs/phase66_telemetry/stage2_iter_001_telemetry.json`
+- Script:   `docs/phase66_telemetry/capture_stage2_vram_telemetry.py`
+- Device:   NVIDIA GeForce RTX 5090, 31.335 GB total, compute cap 12.0, 170 SMs
+- Host:     ligroup (lilab)
+- PyTorch:  2.10.0+cu128
+- Config:   Stage 2 iter_001 `dynamic_depth_simple` attempt_003 (formal), saved at
+            `/tmp/pytest-of-yuema137/pytest-811/.../attempt_003_dynamic_depth_simple/`
+- Model params: 46,432
+
+### A.4 Sanity notes
+
+- Both peaks land inside the 200 MB – 2 GB a-priori band — physical, not
+  instrumentation noise.
+- Training peak (~823 MB) is driven by FocalLoss1D's `[B, 256, T]` intermediates
+  (`targets_one_hot`, `pt`, `alpha_t`, per-pixel loss — each ~80 MB at B=8, T=10000)
+  plus autograd retention. The model's own activations (embed/conv/gated) are the
+  smaller contributor.
+- Inference peak (~421 MB) is dominated by the `[25, 256, 10000]` logits output
+  (~256 MB) plus one live intermediate at a time (no autograd retention).
+- `peak_reserved - peak_allocated` ≈ 60 MB across both phases — the allocator
+  working-set overhead we must **model**, not ignore, in `overhead.py` (A.3).
 
 ---
 

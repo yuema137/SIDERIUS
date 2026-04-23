@@ -1,0 +1,60 @@
+{
+  "phases": {
+    "training": {
+      "phase": "training",
+      "peak_allocated_bytes": 883782656,
+      "peak_reserved_bytes": 947912704,
+      "peak_allocated_gb": 0.8231,
+      "peak_reserved_gb": 0.8828,
+      "steps": 5,
+      "batch_size": 8,
+      "segmentation_size": 10000,
+      "num_params": 46432,
+      "optimizer": "adamw",
+      "loss": "focal",
+      "device_index": 0,
+      "device_name": "NVIDIA GeForce RTX 5090",
+      "device_total_bytes": 33645723648,
+      "compute_capability": [
+        12,
+        0
+      ],
+      "multiprocessor_count": 170,
+      "torch_version": "2.10.0+cu128",
+      "cuda_runtime_version": "12.8",
+      "hostname": "ligroup",
+      "captured_at_utc": "2026-04-23T05:41:33.223270+00:00"
+    },
+    "inference": {
+      "phase": "inference",
+      "peak_allocated_bytes": 452210176,
+      "peak_reserved_bytes": 509607936,
+      "peak_allocated_gb": 0.4212,
+      "peak_reserved_gb": 0.4746,
+      "inference_batch": 25,
+      "segmentation_size": 10000,
+      "num_params": 46432,
+      "device_index": 0,
+      "device_name": "NVIDIA GeForce RTX 5090",
+      "device_total_bytes": 33645723648,
+      "compute_capability": [
+        12,
+        0
+      ],
+      "multiprocessor_count": 170,
+      "torch_version": "2.10.0+cu128",
+      "cuda_runtime_version": "12.8",
+      "hostname": "ligroup",
+      "captured_at_utc": "2026-04-23T05:41:34.714771+00:00"
+    }
+  },
+  "max_peak_bytes": 883782656,
+  "max_peak_gb": 0.8231,
+  "dominant_phase": "training",
+  "device_name": "NVIDIA GeForce RTX 5090",
+  "device_total_bytes": 33645723648,
+  "device_total_gb": 31.335,
+  "captured_at_utc": "2026-04-23T05:41:35.020031+00:00",
+  "hostname": "ligroup",
+  "source_artefact": "/tmp/pytest-of-yuema137/pytest-811/test_two_iterations_under_budg0/stage2_smoke/stage2_iter_001/iteration_001/attempt_003_dynamic_depth_simple"
+}
