@@ -1088,11 +1088,15 @@ class HyperparamTuningAgent:
                     print(f"\n[Pre-flight 1/2] VRAM check "
                           f"(mode={'trial' if plan.is_trial else 'formal'}, "
                           f"budget={vram_budget_desc})...")
+                    # Phase 6.6 A.11 — pass the per-run hardware manifest (from
+                    # A.1.6's get_or_create) into the skill so the cap is
+                    # physically correct and consistent across the whole run.
                     resource_check = _run_skill(
                         "evaluate_vram_skill",
                         sandbox,
                         **active_params,
                         vram_budget_gb=chosen_vram_budget,
+                        hardware_context=hardware_context,
                     )
                     if resource_check.get("status") == "error":
                         raise RuntimeError(f"Resource check error: {resource_check.get('message')}")
@@ -1203,7 +1207,19 @@ class HyperparamTuningAgent:
                         ExperimentRecord.model_validate(oom_record)
                         sandbox.save_record(oom_record)
                         continue
-    
+
+                    # Phase 6.6 A.11 — capture the batch the VRAM skill picked
+                    # and propagate it through the rest of the attempt. Lands in
+                    # active_params (so _run_skill("inference_skill", ...) forwards
+                    # it to sandbox.execute_inference) and record_params (so the
+                    # saved record reflects what actually ran, not the legacy
+                    # registry default). ``inference_batch`` is always present on
+                    # a feasible resource_check; fall back to None (executor's
+                    # back-compat path) if the wrapper somehow omits it.
+                    chosen_inference_batch = resource_check.get("inference_batch")
+                    active_params["inference_batch"] = chosen_inference_batch
+                    record_params["inference_batch"] = chosen_inference_batch
+
                     # [Pre-flight 2/2] Wall-time gate. Mirrors the VRAM gate above:
                     # error → raise; infeasible → emit skipped_time_risk record
                     # and continue without consuming a round. Skipped entirely
