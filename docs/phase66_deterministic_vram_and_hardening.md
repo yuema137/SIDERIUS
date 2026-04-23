@@ -682,14 +682,14 @@ Both overall and per-phase. ±10% is acceptable per user directive.
 - [ ] A.7 Rewrite `inference_skill/estimator.py::estimate_peak_bytes` to call probe. Wall-time untouched.
 - [x] A.8 Update `wrapper.py`: accept `hardware_context` kwarg, read `usable_cap_bytes` from it, remove direct `torch.cuda.get_device_properties` / `mem_get_info` calls, add new return keys, remove obsolete free-based logic + 4 GB floor + contention log. **Landed `8b6c4ba` on `feat/deterministic-vram` (2026-04-23).** Fat-wrapper composition (no separate estimator layer yet — A.6/A.7 can extract `_compose_training_peak` / `_compose_inference_peak` later): training peak = `saved_bytes + input + output + params + training_overhead + cuda_context + cudnn_backward`; inference peak = `input + max(output_bytes, forward_output_bytes_max) + params + cuda_context`. Ceiling = `ctx.usable_cap_bytes` clamped by `vram_budget_gb` when set. `hardware_context=None` falls back to `discover()` — same primitive `get_or_create` uses — so intermediate-stage tests stay green until A.11 wires the tuner pass-through. Inference resolver VRAM failure re-probes once at `B=1` to give `killer_report` faithful layer attribution (intensity failure skips the re-probe — pure `segmentation_size` problem). Training-phase killer takes precedence when both phases fail. Target-tensor shape branches by `loss_type` (`{smooth_l1, mse, l1} → [B, 256, T] float32`; CE/focal → `[B, T] int64`) so the probe's training-mode forward doesn't crash inside the loss module — matches the FocalLoss footprint discovered in Stage 2. CPU-only short-circuit preserved (`device_available=False` → canonical no-VRAM-constraint success dict, no probe run). Schema-violation path (`pydantic.ValidationError` from plugin config) preserved from Phase D.4. Return-dict contract: adds `inference_batch` (int), `memory_killer` (dict\|None — flattened `MemoryKillerDetails` via `model_dump()` on infeasible, `None` on feasible); removes `inference_batch_uncalibrated`; `status="schema_violation"` on the infeasible path so the tuner's memory writer treats killer-reported configs the same as pydantic-rejected ones ("don't repeat this config"). 122/122 evaluate_vram_skill unit tests pass (18 new contract tests + 104 existing sibling module tests — `test_structural_probe`, `test_overhead`, `test_batch_resolver`, `test_compute_intensity`, `test_killer_report`). New file: `tests/unit/agent/evaluate_vram_skill/test_wrapper_contract.py` — hermetic (primitives patched at the wrapper module surface), covers return-dict shape, removed-key absence, `hardware_context=None` fallback, CPU-only short-circuit, all three training failure modes (VRAM / intensity / combined), both inference-resolver failure modes (re-probe for VRAM, no re-probe for intensity), schema-violation path, and `vram_budget_gb` clamp.
 - [ ] A.9 Delete `_INFERENCE_BATCH_SIZES` + its three accessors from `core/inference_defaults.py`; delete the file if no other content remains.
-- [ ] A.10 Update `sandbox_executor.execute_inference` to accept inference batch from the experiment config, not from `inference_defaults`.
-- [ ] A.11 Propagate the skill's `inference_batch` return value into the tuner's experiment config (`nodes/ml_hyperparameter_tune_agent.py` site of `_run_skill("evaluate_vram_skill", ...)`).
+- [x] A.10 Update `sandbox_executor.execute_inference` to accept inference batch from the experiment config, not from `inference_defaults`. **Landed `da21c05` on `feat/deterministic-vram` (2026-04-23).** Added optional `inference_batch: Optional[int] = None` kwarg; when set, it becomes the `--inference_batch_size` CLI arg; when `None`, falls back to `inference_batch_for(model_type)` (back-compat for the A.7 landing window — removed in A.9 once the estimator rewrite lands). Four new tests in `tests/unit/core/test_sandbox_executor.py::TestExecuteInferenceBatch` assert on the exact CLI token after `--inference_batch_size` so the check is robust to argv reordering: explicit passes through (`B=8`); `None` falls back (`B=25` for fcnet); omitted kwarg matches `None` path (pins the default); explicit beats registry on known type. 4/4 pass in 0.8s.
+- [x] A.11 Propagate the skill's `inference_batch` return value into the tuner's experiment config (`nodes/ml_hyperparameter_tune_agent.py` site of `_run_skill("evaluate_vram_skill", ...)`). **Landed `282d748` on `feat/deterministic-vram` (2026-04-23).** Threads the resolver-chosen batch end-to-end: (a) tuner passes `hardware_context=hardware_context` into every vram-skill call so the cap comes from the per-run manifest, not a re-probed CUDA context; (b) after a successful `resource_check` (post OOM-skip, pre wall-time gate) the tuner captures `resource_check["inference_batch"]` into both `active_params["inference_batch"]` (consumed by the inference-skill dispatch) and `record_params["inference_batch"]` (so saved records reflect what actually ran); (c) `agent/skills/inference_skill/wrapper.py` forwards `inference_batch=kwargs.get("inference_batch")` to `sandbox.execute_inference` — absent/None cleanly hits the A.10 back-compat path. Two new tests inside `tests/unit/agent/tune_ml_hyperparam_agent/test_tuning_agent.py::TestDynamicTrialFormal`: `test_evaluate_vram_skill_receives_hardware_context` (kwarg present + `isinstance HardwareContext`) and `test_inference_skill_receives_inference_batch_from_resource_check` (patches skill to return `inference_batch: 7`, asserts inference dispatch receives 7 AND saved success record's `params` carries 7). 2/2 pass in 5s. Full regression across `tests/unit/core/test_sandbox_executor.py` + `tests/unit/agent/tune_ml_hyperparam_agent/` + `tests/unit/agent/evaluate_vram_skill/` = 511/511 green.
 - [ ] A.12 Guardrail tests — `test_no_model_name_branches.py` (5.4) + `test_no_hardcoded_device_literals.py` (5.1). Both must pass.
 - [x] A.13 Capture ground-truth numbers on lilab (5.2 Step 1). Raw JSON at `docs/phase66_telemetry/stage2_iter_001_telemetry.json`. Training peak 0.8231 GB, inference peak 0.4212 GB, dominant phase = training. See Appendix A.1.
   - [x] A.13.a Standalone telemetry script drafted: `docs/phase66_telemetry/capture_stage2_vram_telemetry.py` (two-subprocess, replays Stage 2 iter_001 attempt_003 configs + plugin verbatim, uses production `FocalLoss1D`).
   - [x] A.13.b Device handling hardened: `_resolve_device_index(override)` honors `--device <idx|cuda:N|cuda>` with fallback to `torch.cuda.current_device()` (respects `$CUDA_VISIBLE_DEVICES`); `set_device` + `init` bootstrap the context before `reset_peak_memory_stats`. Fixes the `Invalid device argument` error seen on lilab.
   - [x] A.13.c Ground-truth capture executed on RTX 5090 (host `ligroup`, torch 2.10.0+cu128, 2026-04-23). Numbers transcribed into Appendix A.1.
-- [ ] A.14 Evidence Gate verification (5.2 Step 3). Measured column filled in Appendix A.2; predicted column + delta must be filled **after** A.2–A.6 land (then gate pass/fail = ±10%).
+- [x] A.14 Evidence Gate verification (5.2 Step 3). **Landed `caf6a12` on `feat/deterministic-vram` (2026-04-23).** Gate **PASS** at ±0.04% training / ±0.01% inference — two orders of magnitude below the ±10% tolerance. New artefact: `docs/phase66_telemetry/evidence_gate_dynamic_depth_simple.py` invokes the composition primitives (`probe_activation_footprint` + `_compose_training_peak` / `_compose_inference_peak`) directly at the exact batch the A.13 capture used (apples-to-apples B=8 training, B=25 inference — isolates composition fidelity from resolver policy) and simultaneously records a full `run_skill` snapshot (resolver-chosen B=64). Raw payload at `docs/phase66_telemetry/evidence_gate_result.json` — every byte of the predicted peak is attributed to a named term (autograd_tape 553.7 MB, output 82 MB, params 0.19 MB, training_overhead 0.56 MB, cuda_context 194 MB, cudnn_backward 52.4 MB for training; input 2 MB, max_output 256 MB, params 0.19 MB, cuda_context 194 MB for inference). Appendix A.2 table filled below.
 - [ ] A.15 Update `docs/resource_estimator_implement.md` — mark affected sections "Superseded by docs/phase66_deterministic_vram_and_hardening.md (2026-04-22)".
 - [ ] A.16 Self-review. Open PR #1.
 
@@ -727,13 +727,37 @@ production `FocalLoss1D` on the exact Stage 2 iter_001 attempt_003 configs + plu
 | Inference  |              0.4212 |             0.4746 | 1 `no_grad` forward, batch 25 × T=10000.           |
 | End-to-end |              0.8231 |             0.8828 | `max` across phases; **training is dominant**.     |
 
-### A.2 Predicted peaks (to be filled during A.14, after the refactor lands)
+### A.2 Predicted peaks (A.14 Evidence Gate — filled 2026-04-23)
 
-| Phase      | Measured (GB) | Predicted (GB) | Delta | Within ±10%? |
-|------------|--------------:|---------------:|------:|-------------:|
-| Training   |        0.8231 |            TBD |   TBD |          TBD |
-| Inference  |        0.4212 |            TBD |   TBD |          TBD |
-| End-to-end |        0.8231 |            TBD |   TBD |          TBD |
+Produced by `docs/phase66_telemetry/evidence_gate_dynamic_depth_simple.py`
+using the new `evaluate_vram_skill` primitives — `structural_probe` +
+`overhead` (`training_overhead_bytes`, `cuda_context_bytes`,
+`cudnn_backward_workspace_bytes`) — composed through `_compose_training_peak`
+and `_compose_inference_peak`. Apples-to-apples: each phase probed at the
+**exact batch** the A.1 telemetry used (training B=8, inference B=25), not
+at the batch the resolver would pick at runtime — isolates composition
+fidelity from the resolver's policy. Raw payload at
+`docs/phase66_telemetry/evidence_gate_result.json`.
+
+| Phase      | Measured (GB) | Predicted (GB) |   Delta | Within ±10%? |
+|------------|--------------:|---------------:|--------:|-------------:|
+| Training   |        0.8231 |         0.8228 |  −0.04% |          Yes |
+| Inference  |        0.4212 |         0.4211 |  −0.01% |          Yes |
+| End-to-end |        0.8231 |         0.8228 |  −0.04% |          Yes |
+
+**Gate: PASS.** Both phases land well inside the ±10% tolerance; training
+dominates end-to-end (as measured), so the overall cap is bound by the
+training composition. Residuals are <0.05% — consistent with the §3.3
+per-phase composition prediction once the Appendix A.5 calibration
+(`_CUDA_CONTEXT_BYTES = 185 MB`, `_CUDNN_BACKWARD_WORKSPACE_BYTES = 50 MB`)
+is baked in.
+
+Skill-path snapshot (full `run_skill` invocation, resolver-chosen batch):
+- `estimated_gb = 0.823` | `dominant_phase = training` | `inference_batch = 64`
+- Training total = 883,437,056 B (B=8); inference total at resolver's B=64 = 854,652,288 B.
+- Training still binds even when the resolver raises inference B to 64 —
+  confirms the per-run cap logic: the skill picks the largest inference
+  batch that fits, then reports the dominant phase's peak as the cap check.
 
 ### A.3 Capture context
 
