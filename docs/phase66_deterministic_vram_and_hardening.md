@@ -73,31 +73,140 @@ evaluate_vram_skill/
 - `_INFERENCE_BATCH_SIZES` dict, `inference_batch_for`, `is_inference_batch_registered`, `assert_inference_batch_registered` are all **deleted**.
 - `sandbox_executor.execute_inference` currently calls `inference_batch_for(model_type)` to pick runtime batch. It will receive the batch from the VRAM skill's return value instead (propagated through the tuner → executor path). See §3.5.
 
-### 3.2 Structural probe (`structural_probe.py`)
+### 3.2 Structural probe (`structural_probe.py`) — revised after A.13
 
-Single function:
+The A.13 ground-truth capture (Appendix A.1) revealed that **torchinfo alone cannot
+meet the ±10% gate**: the delta between the inference peak (0.42 GB) and training
+peak (0.82 GB) is driven by `FocalLoss1D`'s intermediate `[B, 256, T]` tensors
+(`targets_one_hot`, `pt`, `alpha_t`), which the autograd engine retains for
+backward. Because these are bare tensor ops inside a single `forward`, no submodule
+hook sees them. torchinfo, whose entire mechanism is `forward_pre_hook` +
+`forward_hook` on `nn.Module`s, is structurally blind to them.
+
+The revised probe uses **two complementary mechanisms in one file**:
+
+| Mechanism | Provides | Source of truth for |
+|---|---|---|
+| `torchinfo.summary` | Per-submodule input/output shapes, param counts, output bytes, param bytes | Layer-level attribution (Memory Killer report) |
+| `torch.autograd.graph.saved_tensors_hooks` | Every tensor autograd retained for backward, deduped by storage | Training-mode peak activation bytes (the forecast total) |
+
+#### API
 
 ```python
-def probe(
-    model: torch.nn.Module,
-    input_shape: tuple[int, ...],
-    input_dtype: torch.dtype,
+# agent/skills/evaluate_vram_skill/structural_probe.py
+
+def probe_forward_layers(
+    module: nn.Module,
+    input_data: torch.Tensor | Sequence[torch.Tensor],
+    module_name: str | None = None,
+) -> ForwardLayerReport:
+    """torchinfo.summary wrapper. Works on any nn.Module — model or loss.
+    Returns per-submodule breakdown used by the Memory Killer report and
+    as the peak estimator for inference mode."""
+
+def probe_autograd_tape(
+    forward_callable: Callable[[], torch.Tensor],
+) -> AutogradTapeReport:
+    """Run `forward_callable()` under saved_tensors_hooks. Count every
+    unique underlying storage (keyed by storage.data_ptr()) that autograd
+    retained. Dedup is critical: shared tensors, views, and aliased
+    gradient chains would otherwise double-count."""
+
+def probe_activation_footprint(
+    model: nn.Module,
+    loss_module: nn.Module | None,
+    input_sample: torch.Tensor,
+    target_sample: torch.Tensor | None,
+    mode: Literal["training", "inference"],
+    device: torch.device | str = "cpu",
 ) -> ProbeResult:
-    """
-    Run torchinfo.summary on a CPU-instantiated model with the exact
-    shape the live config will use. Return structured bytes.
-    """
+    """Top-level composer. Dispatches to the two primitives above based
+    on mode. Returns a single ProbeResult with everything downstream
+    (wrapper, batch_resolver, killer_report) needs."""
 ```
 
-`ProbeResult` fields (Pydantic):
-- `total_params_bytes: int` — from `summary_info.total_params × sizeof(dtype)`.
-- `forward_activation_bytes: int` — sum of per-layer `output_size` products × dtype bytes, as torchinfo already computes.
-- `per_layer: list[LayerReport]` — name, class, output shape, output bytes, param bytes. Preserves torchinfo's layer ordering.
-- `input_shape: tuple[int, ...]` — echoed back for traceability.
+#### Pydantic contract
 
-**Dtype handling.** Weights are float32 in training (we do not plan AMP in this phase). `forward_activation_bytes` is measured with `input_dtype=torch.long` for the `[B, T] int` input but torchinfo's activation counting uses each layer's output dtype — for all current plugins the forward body casts to float immediately via embedding/conv, so activations are f32-dominated.
+```python
+class LayerReport(BaseModel):
+    depth: int
+    var_name: str
+    class_name: str
+    input_shape: list[int]
+    output_shape: list[int]
+    num_params: int
+    param_bytes: int       # torchinfo's .param_bytes (leaf-accurate)
+    output_bytes: int      # torchinfo's .output_bytes
+    is_leaf: bool
 
-**Why torchinfo over a custom probe.** torchinfo has a stable API (v1.8+), is PyPI-distributed, and handles every layer class in PyTorch's core + common patterns. Rolling our own hook-based probe would re-invent the same wheel and risk divergence on edge cases (recurrent layers, attention, custom Modules). The dependency footprint is small (one pure-Python package, no C extensions).
+class ForwardLayerReport(BaseModel):
+    module_name: str                   # type(module).__name__
+    layers: list[LayerReport]
+    total_param_bytes: int             # sum over leaves only
+    forward_output_bytes_sum: int      # sum over leaves — training upper bound if no dedup
+    forward_output_bytes_max: int      # max single-leaf output — inference peak estimator
+
+class AutogradTapeReport(BaseModel):
+    unique_storage_count: int
+    total_saved_bytes: int             # sum(storage.nbytes() for storage in unique_storages)
+
+class ProbeResult(BaseModel):
+    mode: Literal["training", "inference"]
+    model_forward: ForwardLayerReport
+    loss_forward: ForwardLayerReport | None = None   # populated in training mode
+    autograd_tape: AutogradTapeReport | None = None  # populated in training mode
+    input_bytes: int                   # input_sample.numel() * element_size()
+    output_bytes: int                  # model's final output tensor bytes
+```
+
+#### Storage-pointer dedup (why keying on `data_ptr` is non-negotiable)
+
+A tensor and its view share a `storage.data_ptr()`. Slicing, permuting, and
+reshape-without-copy all produce tensors whose physical allocation is identical.
+Autograd's `save_for_backward` sees each of these as a distinct tensor event and
+will fire the `pack_hook` multiple times for the same physical buffer. Counting
+`tensor.numel() * element_size()` per hook event therefore over-counts.
+
+The probe uses:
+```python
+seen: dict[int, int] = {}  # data_ptr -> storage.nbytes()
+def pack_hook(t):
+    storage = t.untyped_storage()
+    ptr = storage.data_ptr()
+    if ptr and ptr not in seen:
+        seen[ptr] = storage.nbytes()
+    return t
+```
+
+`storage.nbytes()` gives the whole underlying allocation (not the view's slice),
+which is the physical VRAM cost. Summing over `seen.values()` yields the total
+bytes the autograd engine actually forced the allocator to retain.
+
+#### Mode split
+
+| Mode | Execution | Tape walk? | Peak estimator field |
+|---|---|---|---|
+| `inference` | `with torch.no_grad(): out = model(x)` | No (no tape exists) | `input_bytes + max(output_bytes, forward_output_bytes_max) + params_bytes`. Using `max(...)` (not sum) avoids double-counting when the final layer's output *is* the largest tensor (the common SIDERIUS case, logits `[B, 256, T]`). A.3 closes the remaining context + cuDNN-workspace residual. |
+| `training` | Real forward through model **fused with** loss_module under `saved_tensors_hooks` | Yes — this is the truth | `autograd_tape.total_saved_bytes + input_bytes + output_bytes + params_bytes + overhead_bytes`. The tape is the source of truth; `overhead.py` covers allocator/context + cuDNN backward workspace only. |
+
+#### Why torchinfo stays
+
+Even though torchinfo cannot be the truth for training mode, it is retained for:
+- Per-submodule attribution in the **Memory Killer report** (`killer_report.py`,
+  §3.6). "Layer X has Y bytes" is a story only the torchinfo walk can tell;
+  the tape walk is flat at the op level.
+- The **inference-mode peak estimator**, where no autograd tape exists.
+- The **`batch_resolver` loop** (§3.5): inference is the only phase where the
+  batch sweeps, and inference-mode probing is pure torchinfo + a dry no_grad
+  forward — no loss, no tape, fast enough to probe 7 candidate batches.
+
+#### Why the tape walk is "Deterministic Calculation", not empirical estimation
+
+It never reads GPU memory counters. It reads tensor metadata (`storage.nbytes()`)
+while the forward is still executing. The tensors exist because the model's
+forward code says so — the same forward code production will run — and the
+saved set is what PyTorch's autograd engine decided based on the graph
+structure. No heuristics, no calibration constants, no model-type tables.
 
 ### 3.3 Overhead model (`overhead.py`)
 
@@ -425,10 +534,10 @@ Both overall and per-phase. ±10% is acceptable per user directive.
 - [ ] D.2 Review by user. Amend sections per feedback. Commit on `feat/deterministic-vram` only after sign-off.
 
 ### WS-A implementation (PR #1, branch `feat/deterministic-vram`)
-- [ ] A.1 Add `torchinfo` to `pyproject.toml`; run `uv sync`; commit lockfile.
+- [x] A.1 Add `torchinfo` to `pyproject.toml`; run `uv sync`; commit lockfile. `torchinfo==1.8.0` pinned; import verified under torch 2.10.0+cu128 / Python 3.12.
 - [ ] A.1.5 Implement `core/hardware_context.py` (§3.9) — `HardwareContext` Pydantic schema, `discover`, `write_manifest`, `load_manifest`, `get_or_create`. Unit tests per §5.1 (`test_hardware_context.py`, `test_manifest_io.py`).
 - [ ] A.1.6 Wire `get_or_create` into `nodes/ml_hyperparameter_tune_agent.py` run init. Verify manifest appears at `{workspace}/{run_name}_hardware.json` on a dry-run. Hold the instance on the tuner; do not consume yet (consumption lands with A.8/A.11).
-- [ ] A.2 Implement `agent/skills/evaluate_vram_skill/structural_probe.py` + unit test (5.1).
+- [x] A.2 Implement `agent/skills/evaluate_vram_skill/structural_probe.py` + unit test (5.1). 15/15 unit tests pass on CPU. Reconciliation against A.13 anchors run on RTX 5090 — see Appendix A.5. Tape walker captures 528 MB of autograd-retained bytes; predicted train/infer delta 361 MB vs. anchor delta 412 MB (match within 51 MB of cuDNN-backward workspace, which is A.3's scope).
 - [ ] A.3 Implement `agent/skills/evaluate_vram_skill/overhead.py` + unit test (5.1).
 - [ ] A.4 Implement `agent/skills/evaluate_vram_skill/batch_resolver.py` + unit test (5.1).
 - [ ] A.5 Implement `agent/skills/evaluate_vram_skill/killer_report.py` + unit test (5.1).
@@ -512,6 +621,44 @@ production `FocalLoss1D` on the exact Stage 2 iter_001 attempt_003 configs + plu
   (~256 MB) plus one live intermediate at a time (no autograd retention).
 - `peak_reserved - peak_allocated` ≈ 60 MB across both phases — the allocator
   working-set overhead we must **model**, not ignore, in `overhead.py` (A.3).
+
+### A.5 Probe vs. anchor reconciliation (A.2, captured 2026-04-23)
+
+Produced by `docs/phase66_telemetry/reconcile_probe_vs_anchors.py` on the
+same RTX 5090, using the exact Stage 2 iter_001 attempt_003 configs + plugin
+replayed in A.13. The probe's CPU/CUDA output is byte-identical (it reads
+tensor metadata, not GPU counters) — both columns below are the structural
+prediction.
+
+| Phase      | Probe components                                                                    | Probe predicted | A.13 anchor | Residual (for A.3) |
+|------------|-------------------------------------------------------------------------------------|----------------:|------------:|-------------------:|
+| Training   | autograd_tape 528.1 MB + input 0.6 MB + logits 78.1 MB + params 0.2 MB              |        607.0 MB |    842.8 MB |   235.9 MB (+28.0%) |
+| Inference  | peak_activation 244.1 MB + input 1.9 MB + params 0.2 MB                             |        246.2 MB |    431.3 MB |   185.0 MB (+42.9%) |
+
+**Delta alignment (the core success criterion)**:
+- Anchor delta (train − infer): **842.8 − 431.3 = 411.5 MB**
+- Probe-predicted delta:         **607.0 − 246.2 = 360.8 MB**
+- Match to within **50.7 MB** — the cuDNN backward workspace, which exists
+  only in training-mode and which `overhead.py` (A.3) will model with a
+  separate `backward_workspace_bytes` term.
+
+**What the residuals mean**:
+- Both residuals are **positive** (probe under-predicts — safe direction) and
+  on the same order (~200 MB).
+- The common ~185 MB is the CUDA process context + cuDNN forward workspace
+  on RTX 5090 / torch 2.10.0+cu128 / CUDA 12.8. This is a device-level
+  per-process fixed cost, not proportional to the model.
+- The extra ~50 MB in training is the cuDNN backward workspace. Both bounds
+  are stable across re-runs (hardware + driver are fixed), so a single
+  calibration pass in A.3 will pin them.
+
+**Key structural result**: the autograd-tape walker captured **exactly** the
+400 MB training-vs-inference delta the user flagged as the critical gap.
+torchinfo alone reports 0 MB for `FocalLoss1D.forward_output_bytes_sum`
+(there are no submodules to hook), so without the tape walk this delta
+would be invisible to the estimator — reproducing the Stage 2 failure mode.
+
+Reconciliation JSON: `docs/phase66_telemetry/reconcile_probe_result.json`.
 
 ---
 

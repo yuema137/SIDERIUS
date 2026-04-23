@@ -1,0 +1,25 @@
+{
+  "captured_at_utc": "2026-04-23T06:03:47.614593+00:00",
+  "hostname": "ligroup",
+  "device_name": "NVIDIA GeForce RTX 5090",
+  "training": {
+    "probe_predicted_bytes": 636464512,
+    "anchor_bytes": 883782656,
+    "residual_bytes": 247318144,
+    "autograd_tape_bytes": 553718784,
+    "autograd_unique_storages": 15,
+    "input_bytes": 640000,
+    "output_bytes": 81920000,
+    "param_bytes": 185728
+  },
+  "inference": {
+    "probe_predicted_bytes": 258185728,
+    "anchor_bytes": 452210176,
+    "residual_bytes": 194024448,
+    "peak_activation_bytes": 256000000,
+    "forward_output_bytes_max": 256000000,
+    "input_bytes": 2000000,
+    "output_bytes": 256000000,
+    "param_bytes": 185728
+  }
+}
