@@ -1,6 +1,8 @@
 # Phase 6.6 — Deterministic VRAM & Implementor Hardening
 
 **Status:** Approved D.1 revision 2 (sign-off 2026-04-23). Revision 2 adds §3.10 *Compute Intensity Cap* (calibrated `_MAX_BATCH_TIMESTEPS = 800,000` from the Phase 6.5 Stage 2 failure at B=25, T=40000 with 20% margin) and bakes the A.3 overhead decision (analytical weight-proportional + two calibrated constants from Appendix A.5: 185 MB CUDA context + 50 MB cuDNN backward workspace). All prior sign-offs remain valid. Implementation from A.1.5 onward is unblocked.
+
+**WS-A state (2026-04-23): Functionally Complete and Verified.** Evidence Gate **PASS** at **±0.04% training / ±0.01% inference** — two orders of magnitude below the ±10% tolerance (Appendix A.2). New physical VRAM engine (`structural_probe` + `overhead` + `batch_resolver` + `compute_intensity` + `killer_report`) is wired end-to-end through `wrapper.py` → tuner → sandbox executor. Remaining cleanup items (A.6, A.7, A.9, A.15, A.16) are **strategically paused** to prioritise the WS-B transition — we want to observe the new engine's impact on Proposer behaviour before the final estimator rewrites. See §3.0 for the landed/pending table.
 **Author:** SIDERIUS core
 **Date:** 2026-04-22 (initial) · 2026-04-23 (rev 2 approved)
 **Scope:** Phase 6.6 System Hardening (VRAM refactor + Implementor/Proposer hardening).
@@ -53,6 +55,48 @@ The following rules govern all work under this phase:
 
 ## 3. WS-A — Deterministic VRAM Refactor
 
+### 3.0 Implementation status (2026-04-23)
+
+**WS-A is Functionally Complete and Verified.** Evidence Gate **PASS** at
+**±0.04% training / ±0.01% inference** (Appendix A.2 · `caf6a12`) — two
+orders of magnitude below the ±10% tolerance. The deterministic VRAM
+engine replaces the old model-name-keyed analytical formulas described
+in §1.1; every byte of the predicted peak is now attributed to a named
+primitive term (see `docs/phase66_telemetry/evidence_gate_result.json`).
+
+| Item | Status | Landed | Notes |
+|------|--------|--------|-------|
+| A.1 `torchinfo` dep + lockfile | ✅ Landed | prior | `torchinfo==1.8.0` pinned. |
+| A.1.5 `core/hardware_context.py` (§3.9) | ✅ Landed | `f4c33a7` | Pydantic schema + `discover` + `get_or_create`. 21/21 tests. |
+| A.1.6 Tuner wires `get_or_create` at run init | ✅ Landed | `e608940` | Manifest at `{workspace}/{run_name}_hardware.json`. |
+| A.2 `structural_probe.py` (§3.2) | ✅ Landed | prior | torchinfo + autograd-tape walker. 15/15 tests. |
+| A.3 `overhead.py` (§3.3) | ✅ Landed | `5a58534` | Analytical + Appendix A.5 constants. 29/29 tests. |
+| A.4 `batch_resolver.py` (§3.5) | ✅ Landed | `6947b53` | Dual-predicate (VRAM + intensity). 16/16 tests. |
+| A.4.5 `compute_intensity.py` (§3.10) | ✅ Landed | `6947b53` | `_MAX_BATCH_TIMESTEPS = 800_000`. 24/24 tests. |
+| A.5 `killer_report.py` (§3.6) | ✅ Landed | `b76143b` | VRAM / intensity / combined renderers. 20/20 tests. |
+| A.6 Rewrite `training_skill/estimator.py` | ⏸️ Paused | — | Post-WS-B. Guardrail xfails pending. |
+| A.7 Rewrite `inference_skill/estimator.py` | ⏸️ Paused | — | Post-WS-B. Guardrail xfails pending. |
+| A.8 Wrapper composition + `hardware_context` kwarg (§3.7) | ✅ Landed | `8b6c4ba` | 122/122 evaluate_vram_skill tests. |
+| A.9 Delete `core/inference_defaults.py` | ⏸️ Paused | — | Post-WS-B. Back-compat path in A.10 keeps tests green. |
+| A.10 Sandbox accepts `inference_batch` kwarg | ✅ Landed | `da21c05` | 4/4 new tests. |
+| A.11 Tuner threads `inference_batch` + `hardware_context` | ✅ Landed | `282d748` | 2/2 new tests; 511/511 regression green. |
+| A.12 Guardrail tests (§5.1, §5.4) | ✅ Landed | `7480d9f` | 4 scans green + 3 xfail (A.6/A.7/A.9). |
+| A.13 Ground-truth capture on RTX 5090 | ✅ Landed | prior | Appendix A.1. |
+| A.14 Evidence Gate verification | ✅ Landed | `caf6a12` | **±0.04% / ±0.01% PASS.** Appendix A.2. |
+| A.15 Mark `resource_estimator_implement.md` superseded | ⏸️ Paused | — | Post-WS-B. |
+| A.16 Self-review + open PR #1 | ⏸️ Paused | — | After A.6/A.7/A.9/A.15. |
+
+**Rationale for the pause.** The five remaining items (A.6, A.7, A.9,
+A.15, A.16) are cleanup, not function — the estimator rewrites extract
+`_compose_training_peak` / `_compose_inference_peak` out of the wrapper
+into the per-phase estimators (currently fat-wrapper composition in
+`wrapper.py`), A.9 deletes the back-compat registry, A.15 marks the
+older doc superseded, A.16 opens PR #1. None of these change the
+predicted numbers. Deferring them lets us observe the new engine's
+effect on Proposer behaviour under WS-B before finalising the refactor,
+so any estimator-layer design refinements that surface from WS-B (e.g.
+a new named overhead term) can land in one cohesive pass.
+
 ### 3.1 Architecture
 
 ```
@@ -71,8 +115,8 @@ evaluate_vram_skill/
 - `estimate_wall_time_seconds` is **not touched** by this phase. Time estimation keeps its current analytical/calibration-table path. (Separating concerns; time-estimator hardening is its own future phase if we decide to eliminate model-name branches there.)
 
 `core/inference_defaults.py`:
-- `_INFERENCE_BATCH_SIZES` dict, `inference_batch_for`, `is_inference_batch_registered`, `assert_inference_batch_registered` are all **deleted**.
-- `sandbox_executor.execute_inference` currently calls `inference_batch_for(model_type)` to pick runtime batch. It will receive the batch from the VRAM skill's return value instead (propagated through the tuner → executor path). See §3.5.
+- `_INFERENCE_BATCH_SIZES` dict, `inference_batch_for`, `is_inference_batch_registered`, `assert_inference_batch_registered` are scheduled for **deletion in A.9** (paused — see §3.0).
+- `sandbox_executor.execute_inference` **receives the batch from the VRAM skill's return value** as of **A.10 (`da21c05`) + A.11 (`282d748`), 2026-04-23**: the tuner captures `resource_check["inference_batch"]` into `active_params["inference_batch"]`; `inference_skill/wrapper.py` forwards it as the `inference_batch=` kwarg; the executor uses it as `--inference_batch_size`. The `inference_batch_for(model_type)` fallback path is still live **only** as back-compat for the A.9 landing window (it is bypassed whenever the skill returns a batch, which is now the default path in the tuner). See §3.5.
 
 ### 3.2 Structural probe (`structural_probe.py`) — revised after A.13
 
@@ -664,6 +708,8 @@ Both overall and per-phase. ±10% is acceptable per user directive.
 ---
 
 ## 7. Checklist
+
+**WS-A state (2026-04-23): Functionally Complete and Verified. 14/19 items landed** (A.1, A.1.5, A.1.6, A.2, A.3, A.4, A.4.5, A.5, A.8, A.10, A.11, A.12, A.13, A.14). Evidence Gate **PASS** at ±0.04% training / ±0.01% inference (Appendix A.2). Remaining items A.6, A.7, A.9 (training/inference estimator rewrites + `inference_defaults` purge), A.15, A.16 (supersede marker + PR) are **strategically paused** to prioritise the WS-B transition per the B.1→B.8 sequencing directive — none of them change the predicted numbers, and batching them with any WS-B-surfaced design refinements lands the refactor in one cohesive pass.
 
 ### Design phase
 - [x] D.1 Draft design doc (`docs/phase66_deterministic_vram_and_hardening.md`) — **this file**. Revision 1 committed at `d0c7e34` on `feat/deterministic-vram`. Revised in-place post-sign-off: (a) Universal Hardware Awareness addendum (§2 Principle 5 + §3.9 `HardwareContext`), (b) §3.2 rewrite after A.13 exposed torchinfo's blindness to intra-forward intermediates — autograd-tape walker promoted to source-of-truth for training mode.
