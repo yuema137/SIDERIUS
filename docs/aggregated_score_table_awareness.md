@@ -1,6 +1,6 @@
 # Aggregated Score Table Awareness — Design Doc
 
-## Status: Phases 1 + 2 + 3 complete (2026-04-22); Phase 4 (protocol wiring: tune → interp → propose) next. Still blocks `small_sample_trial_v1` rerun.
+## Status: **Complete (2026-04-22).** Phases 1–6 landed, integration tier green. Phase 7 (`small_sample_trial_v1` launch gate) unblocked.
 
 ---
 
@@ -1261,24 +1261,80 @@ Tracked here for visibility; not a Phase 5 blocker.
 **Goal:** the existing dual-mode integration tier exercises the new field
 end-to-end, pseudo mode covered; full suite green.
 
-Steps:
-- [ ] Update pseudo fixtures under
-      `tests/pseudo_data/api_call_outputs/**` that reference
-      `file_vector` / `per_model_file_vectors` to carry a `score_table` or
-      `per_model_score_tables` field.
-- [ ] Update `tests/integration/protocols/test_tune_to_interp.py` assertions
-      from `per_model_file_vectors` to `per_model_score_tables`.
-- [ ] Update `tests/integration/protocols/test_interp_to_propose.py`
-      accordingly.
-- [ ] Update `tests/integration/workflows/test_full_exploration_loop.py` and
-      any other dual-mode workflow test touching the vectors.
-- [ ] Run the relevant test subset (per `feedback_run_relevant_tests_only.md`)
-      — no full-suite regression run unless justified.
-- [ ] Tier 3 real-run spot-check: one adaptive iteration end-to-end with a
-      real LLM; assert the tuner prompt rendered to the LLM contains the
-      three-column table (spot-check one line).
-- [ ] Commit: `test(score_table): update integration + pseudo fixtures for
-      ScoreComparisonTable`.
+#### Post-Phase-5 audit (2026-04-22)
+
+Phase 6 was authored *before* Phases 1–5 landed, so its original checklist
+assumed a batch of stale fixtures and protocol assertions. A state audit
+after `13d450c` (Phase 5 E closeout) found most of the "update X" items
+already satisfied as side effects of Phases 3–5:
+
+| Original checklist item | Actual state after Phase 5 |
+|---|---|
+| Update pseudo fixtures under `tests/pseudo_data/api_call_outputs/**` | No stale **schema keys**. Only 2 LLM-narrative strings still say `file_vector` (non-breaking narrative prose, not structural keys). |
+| Update `test_tune_to_interp.py` — `per_model_file_vectors` → `per_model_score_tables` | Already references `per_model_score_tables` (line 170) but with a **SOFT** `if output.per_model_score_tables:` guard; missing `summary.best_score_table` + `summary.formal_score_table` assertions at the protocol layer. |
+| Update `test_interp_to_propose.py` | `test_interp_to_propose_feedback_loop` (F.5) passes; no assertion yet that the Phase-5-C markdown actually reaches the final stage user prompt. |
+| Update `test_full_exploration_loop.py` | No stale `per_model_file_vectors` refs. Tier 3 real-run only. |
+| Run relevant test subset | 106 unit protocol tests + 2 dual-mode integration tests all green today. |
+| Tier 3 real-run spot-check | **Deferred to Phase 7** — overlaps 1:1 with the launch gate (same GPU + real API requirement). |
+
+So Phase 6's remaining work is **tightening** rather than **migrating**: the
+field migration is done; the regression guards are not yet strict.
+
+#### Sub-commit plan (approved 2026-04-22)
+
+| # | Scope | Primary files |
+|---|-------|---------------|
+| A | Tighten `test_tune_to_interp.py` protocol assertions. Promote the soft `if output.per_model_score_tables:` guard to a **required** assertion. Add assertions for `summary.best_score_table` + `summary.formal_score_table` flow-through at the protocol layer (fields added in Phase 3 but never verified end-to-end in dual mode). | `tests/integration/protocols/test_tune_to_interp.py` |
+| B | Dual-mode proposer-prompt end-to-end render assertion. Capture the final stage user prompt via the dual-mode bridge and assert it contains (1) `## Candidate Models — detailed view`, (2) `### Candidate: <name>`, (3) at least one score_table markdown row. This is the missing end-to-end validation of Phase 5 C through the full interp → `local_full_context` → proposer chain — unit tests cover the rendering path in isolation. | `tests/integration/protocols/test_interp_to_propose.py` (extend F.5 or add sibling) |
+| C | *Optional, low priority.* Polish the 2 LLM-narrative `file_vector` strings in `api_call_outputs/result_interpretation_agent/generate.json` + `api_call_outputs/ml_model_proposal_agent/generate.json` to say `score_table` for consistency. Skip if Phase 7 is urgent. | `tests/pseudo_data/api_call_outputs/**/generate.json` |
+| D | Single commit covering 6A + 6B (+ 6C if included). Mark Phase 6 checkboxes complete. | `docs/aggregated_score_table_awareness.md` + commit |
+
+**Deferred out of Phase 6 (tracked under Phase 7):** Tier 3 real-run
+spot-check of `test_full_exploration_loop.py`. Rationale: the test requires
+CUDA GPU + TIDMAD data + real API key — exactly the setup needed for the
+Phase 7 launch. Running it as a separate Phase 6 step would be pure
+duplication of compute cost. The launch gate itself acts as the Tier 3
+validation.
+
+Steps (live checklist):
+- [x] **A.** Tighten `test_tune_to_interp.py`. Added inline
+      `_make_score_table` helper using the REAL `render_comparison_table`
+      so fixture markdown matches production. Wired
+      `best_score_table` + `formal_score_table` onto `_WAVENET_TUNING_OUTPUT`.
+      Hard assertions added: `summary.best_score_table` + `summary.formal_score_table`
+      non-None with canonical `| file | raw_baseline | ground_truth |` header;
+      `output.per_model_score_tables` required (no soft `if:` guard);
+      `"wavenet" in output.per_model_score_tables`; row-level low/high-freq
+      checks unconditional. Regression-proven: stripping `best_score_table`
+      from the fixture reproduces None on the summary side. 589 tests green
+      (proposal + interp + protocol units + dual-mode integration).
+- [x] **B.** Dual-mode end-to-end proposer-prompt render assertion. Added
+      sibling `test_proposer_prompt_carries_score_tables` (F.6) in
+      `tests/integration/protocols/test_interp_to_propose.py`. Builds a
+      3-model `InterpretationOutput` with full `ScoreComparisonTable`s via the
+      real `render_comparison_table`, applies `local_full_context` with
+      `ModelSelectionStrategy(params={"n": 2})` so fcnet is forced into the
+      non-candidate overview, runs the proposer against
+      `RecordingLLMBridge.for_agent("ml_model_proposal_agent")`, and captures
+      every `generate()` user prompt. Hard-asserts all three Phase 5-C
+      signatures on the captured prompts: (1) `## Candidate Models — detailed
+      view` heading, (2) `| file | raw_baseline | ground_truth |` canonical
+      rendered_markdown header, (3) `score_summary` / `log_scalar=...` +
+      exact `log_scalar=2.50, recovery=26.3% on 20 files` fcnet one-liner
+      from `build_score_summary_line`. Pseudo-only (skips under `--real-llm`
+      — bridge capture is meaningless without `RecordingLLMBridge`). 3/3
+      captured stage prompts carry all signatures; 587 units + 3 dual-mode
+      protocol tests green, no collateral damage.
+- [~] **C.** *Skipped intentionally.* Narrative-prose polish of 2
+      `file_vector` string mentions in pseudo-fixture `generate.json` files is
+      cosmetic only — no structural schema keys are stale. Deferred as
+      non-blocking; can be picked up opportunistically.
+- [x] **D.** Commit `test(score_table): Phase 6 A + B — hard protocol
+      assertions on ScoreComparisonTable flow-through`. Doc checkboxes closed,
+      status line promoted to **Complete (2026-04-22)**.
+
+Shipped shape: A + B + D in one commit (C skipped per directive). Phase 7
+launch gate unblocked.
 
 ---
 

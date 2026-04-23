@@ -23,7 +23,11 @@ from agent.schemas.hyperparam_tuning import (
 )
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.protocols.ml_model_tune_to_ml_result_interp import local_all_records
+from agent.schemas.score_table import (
+    AggregateScalars, PerFileRow, ScoreComparisonTable,
+)
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from execute_tools.scoring_helpers import render_comparison_table
 from nodes.result_interpretation_agent import ResultInterpretationAgent
 
 load_dotenv()
@@ -39,6 +43,46 @@ _WAVENET_BEST_FV = [
     7.1, 7.5, 7.9, 8.2, 8.5, 8.7, 8.9, 9.0, 9.1,  # files 11-19: high-freq
 ]
 
+
+def _make_score_table(model_fv: list[float], model_scalar: float) -> ScoreComparisonTable:
+    """Build a realistic ScoreComparisonTable from a length-20 file vector.
+
+    Produces `rendered_markdown` via the real renderer so downstream
+    signature assertions (Phase 6 B) match production output.
+    """
+    raw_baseline_per_file = [0.2] * 20
+    ground_truth_per_file = [9.5] * 20
+    rows = [
+        PerFileRow(
+            file_index=i,
+            raw_baseline=raw_baseline_per_file[i],
+            ground_truth=ground_truth_per_file[i],
+            model=v,
+            gain_vs_raw=v - raw_baseline_per_file[i],
+            headroom_vs_gt=ground_truth_per_file[i] - v,
+        )
+        for i, v in enumerate(model_fv)
+    ]
+    aggregate = AggregateScalars(
+        raw_baseline_scalar=0.2,
+        ground_truth_scalar=9.5,
+        model_scalar=model_scalar,
+        percent_of_ceiling_log=model_scalar / 9.5,
+        num_sampled_files=20,
+    )
+    table = ScoreComparisonTable(
+        rows=rows,
+        aggregate=aggregate,
+        s_max_global=5.27,
+        reference_source="test_fixture",
+        rendered_markdown="",
+    )
+    return table.model_copy(update={"rendered_markdown": render_comparison_table(table)})
+
+
+_WAVENET_BEST_SCORE_TABLE = _make_score_table(_WAVENET_BEST_FV, model_scalar=5.576)
+_WAVENET_FORMAL_SCORE_TABLE = _make_score_table(_WAVENET_BEST_FV, model_scalar=5.612)
+
 _WAVENET_TUNING_OUTPUT = HyperparamTuningOutput(
     run_name="dual_tune_to_interp",
     model_type="wavenet",
@@ -49,6 +93,8 @@ _WAVENET_TUNING_OUTPUT = HyperparamTuningOutput(
     best_exp_id="wavenet_001_002",
     best_denoising_score=5.576,
     best_file_vector=_WAVENET_BEST_FV,
+    best_score_table=_WAVENET_BEST_SCORE_TABLE,
+    formal_score_table=_WAVENET_FORMAL_SCORE_TABLE,
     best_config={
         "model_config": {"model_type": "wavenet", "segmentation_size": 10000,
                          "residual_channels": 16, "num_blocks": 3},
@@ -150,6 +196,31 @@ def test_tune_to_interp_protocol_and_node(tmp_path, request):
     assert len(summary.round_scores) == 2
     assert len(summary.round_conclusions) == 2
 
+    # Phase 6 A — hard assertion that score tables flow through the protocol.
+    # These fields were added in Phase 3 but only verified in isolation until now.
+    assert summary.best_score_table is not None, (
+        "local_all_records must propagate best_score_table from HyperparamTuningOutput "
+        "to ModelRunSummary — Phase 4 data contract."
+    )
+    assert summary.best_score_table.rendered_markdown, (
+        "summary.best_score_table.rendered_markdown must be non-empty so the "
+        "interpreter / proposer can drop it into prompts verbatim."
+    )
+    assert "| file | raw_baseline | ground_truth |" in summary.best_score_table.rendered_markdown, (
+        "best_score_table.rendered_markdown must carry the canonical three-column "
+        "header emitted by render_comparison_table."
+    )
+    assert summary.best_score_table.aggregate.model_scalar == pytest.approx(5.576, abs=0.001)
+
+    assert summary.formal_score_table is not None, (
+        "local_all_records must propagate formal_score_table (Phase 3 field) "
+        "through to ModelRunSummary."
+    )
+    assert summary.formal_score_table.rendered_markdown, (
+        "summary.formal_score_table.rendered_markdown must be non-empty."
+    )
+    assert "| file | raw_baseline | ground_truth |" in summary.formal_score_table.rendered_markdown
+
     # --- Step 2: run interpretation agent ---
     bridge_factory = make_bridge_factory(request, "result_interpretation_agent")
     agent = ResultInterpretationAgent(bridge_factory=bridge_factory)
@@ -165,16 +236,35 @@ def test_tune_to_interp_protocol_and_node(tmp_path, request):
     assert len(output.bottlenecks) > 0
     assert len(output.take_home_message) > 10
 
-    # Score table propagated to output — synthesize the file vector from
-    # rows[i].model so the low/high-frequency assertions still hold.
-    if output.per_model_score_tables:
-        table = output.per_model_score_tables.get("wavenet")
-        if table is not None:
-            fv = [r.model for r in table.rows]
-            assert fv[0] is not None and fv[0] < 1.0, \
-                "low-freq file 0 should be weak in output score table"
-            assert fv[19] is not None and fv[19] > 7.0, \
-                "high-freq file 19 should be strong in output score table"
+    # Phase 6 A — required (no soft guards). The score_table contract is the
+    # communication channel for Phases 3→5; if the interpreter stops emitting
+    # per_model_score_tables, the proposer's prompt render breaks silently.
+    assert output.per_model_score_tables is not None, (
+        "InterpretationOutput must carry per_model_score_tables — Phase 4 "
+        "hard-swap removed per_model_file_vectors in favor of this field."
+    )
+    assert "wavenet" in output.per_model_score_tables, (
+        "per_model_score_tables must include the model_type seen in input summaries."
+    )
+    table = output.per_model_score_tables["wavenet"]
+    assert table is not None
+    assert table.rendered_markdown, (
+        "per_model_score_tables['wavenet'].rendered_markdown must be non-empty "
+        "so the proposer's stage prompts can embed it verbatim."
+    )
+    assert "| file | raw_baseline | ground_truth |" in table.rendered_markdown, (
+        "Rendered markdown must match the render_comparison_table canonical header."
+    )
+
+    # Low/high-frequency sanity — synthesized from rows[i].model. Now
+    # unconditional because the table itself is required above.
+    fv = [r.model for r in table.rows]
+    assert fv[0] is not None and fv[0] < 1.0, (
+        "low-freq file 0 should be weak in output score table"
+    )
+    assert fv[19] is not None and fv[19] > 7.0, (
+        "high-freq file 19 should be strong in output score table"
+    )
 
     # Storage: output file written
     assert (tmp_path / "interpretation_tune_to_interp.json").exists()
