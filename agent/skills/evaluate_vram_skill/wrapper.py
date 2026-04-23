@@ -38,6 +38,7 @@ Removed:
 """
 from __future__ import annotations
 
+import inspect
 from typing import Optional
 
 import torch
@@ -89,9 +90,15 @@ def _build_model(model_type: str, model_cfg: dict, loss_type: str) -> torch.nn.M
     """
     config_cls = get_config_class(model_type)
     config_obj = config_cls(**model_cfg)
-    if model_type == "fcnet":
-        return MODEL_REGISTRY[model_type](config_obj, loss_type=loss_type)
-    return MODEL_REGISTRY[model_type](config_obj)
+    model_cls  = MODEL_REGISTRY[model_type]
+    # Principle 2: no architecture-family branching. A registered model
+    # class may optionally accept ``loss_type`` (used when the model's
+    # head shape depends on the loss — e.g. AE + smooth_l1 regression).
+    # Introspect the constructor signature to decide, so adding a new
+    # plugin with the same requirement needs no wrapper edit.
+    if "loss_type" in inspect.signature(model_cls.__init__).parameters:
+        return model_cls(config_obj, loss_type=loss_type)
+    return model_cls(config_obj)
 
 
 def _build_probe_tensors(
@@ -316,7 +323,11 @@ def run_skill(sandbox, **kwargs):
                            physically correct but the manifest on disk is
                            not consulted.
     """
-    model_type     = kwargs.get("model_type", "fcnet")
+    # Principle 2: no default architecture. If the caller failed to pass
+    # ``model_type``, a ``KeyError`` is the right signal — silently
+    # defaulting to a specific family would re-introduce exactly the
+    # branching this phase is eliminating.
+    model_type     = kwargs["model_type"]
     model_cfg      = kwargs.get("model_config", {})
     train_cfg      = kwargs.get("train_config", {})
     loss_cfg       = kwargs.get("loss_config", {})
