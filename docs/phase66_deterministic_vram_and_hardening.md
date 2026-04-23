@@ -1,10 +1,10 @@
 # Phase 6.6 — Deterministic VRAM & Implementor Hardening
 
-**Status:** Design draft (D.1, revision 1) — awaiting review of Universal Hardware Awareness addendum (§2 Principle 5, §3.9, §4.1 manifest-rendering, §5, §7, Appendix B).
+**Status:** Approved D.1 revision 2 (sign-off 2026-04-23). Revision 2 adds §3.10 *Compute Intensity Cap* (calibrated `_MAX_BATCH_TIMESTEPS = 800,000` from the Phase 6.5 Stage 2 failure at B=25, T=40000 with 20% margin) and bakes the A.3 overhead decision (analytical weight-proportional + two calibrated constants from Appendix A.5: 185 MB CUDA context + 50 MB cuDNN backward workspace). All prior sign-offs remain valid. Implementation from A.1.5 onward is unblocked.
 **Author:** SIDERIUS core
-**Date:** 2026-04-22
+**Date:** 2026-04-22 (initial) · 2026-04-23 (rev 2 approved)
 **Scope:** Phase 6.6 System Hardening (VRAM refactor + Implementor/Proposer hardening).
-**Out of scope:** `cudaErrorLaunchTimeout` / GPU physical robustness — deferred to Phase 6.8.
+**Out of scope:** Full `cudaErrorLaunchTimeout` recovery — detection during a live run, post-failure host safety, kernel-watchdog interaction — deferred to Phase 6.8. A pre-flight compute-intensity **heuristic** (§3.10) lands in this phase as a cheap guardrail against the most obvious kernel-timeout triggers (`B × T` far above the observed Phase 6.5 failure point). It refuses up-front; it does not handle mid-run hangs.
 **Supersedes (in part):** `docs/resource_estimator_implement.md` §10.5, §10.14 Commit 2/3/5/K.2.5-8 (VRAM analytical formulas and the inference-batch table). Wall-time estimation (§10.14 Commits 2/3/4/6) is NOT touched by this phase.
 
 ---
@@ -58,10 +58,11 @@ The following rules govern all work under this phase:
 ```
 evaluate_vram_skill/
 ├── wrapper.py             ← KEEP contract (same kwargs, same return keys)
-├── structural_probe.py    ← NEW: torchinfo.summary wrapper
-├── overhead.py            ← NEW: optimizer/grad/CUDA-context formulas
-├── batch_resolver.py      ← NEW: torchinfo-driven inference batch selection
-├── killer_report.py       ← NEW: per-layer breakdown renderer
+├── structural_probe.py    ← NEW: torchinfo + autograd-tape walker (§3.2)
+├── overhead.py            ← NEW: optimizer/grad/CUDA-context formulas (§3.3)
+├── batch_resolver.py      ← NEW: torchinfo-driven inference batch selection (§3.5)
+├── compute_intensity.py   ← NEW: B × T kernel-timeout heuristic cap (§3.10)
+├── killer_report.py       ← NEW: per-layer breakdown renderer (§3.6)
 └── skill_config.json      ← update description
 ```
 
@@ -210,24 +211,61 @@ structure. No heuristics, no calibration constants, no model-type tables.
 
 ### 3.3 Overhead model (`overhead.py`)
 
+**Design decision (locked 2026-04-23):** the module is a **hybrid** — analytical
+formulas for the weight-proportional components (optimizer state, gradients)
+and calibrated constants for the fixed per-process residuals (CUDA context,
+cuDNN backward workspace). The rationale is that weight-proportional cost
+scales deterministically with `params_bytes` (no hardware dependence), whereas
+the fixed residuals are a property of the driver + cuDNN build and are
+empirically stable across re-runs on the same host — so a single calibration
+pass (Appendix A.5) captures them permanently.
+
 Pure functions, no I/O:
 
 ```python
+# Calibrated constants — origins documented in Appendix A.5 (2026-04-23,
+# RTX 5090 / torch 2.10.0+cu128 / CUDA 12.8).
+_CUDA_CONTEXT_BYTES:              int = 185 * 1024 ** 2   # 185 MB
+_CUDNN_BACKWARD_WORKSPACE_BYTES:  int = 50  * 1024 ** 2   # 50  MB
+
+# Analytical multipliers — derived from optimizer algebra, not measurement.
+_OPTIMIZER_STATE_MULTIPLIER: dict[str, int] = {
+    "adam":  2,   # first + second moment
+    "adamw": 2,   # first + second moment
+    "sgd":   0,   # plain SGD has no momentum state
+    # "sgd+momentum": 1 — add when we actually support it; do not speculate.
+}
+
 def training_overhead_bytes(params_bytes: int, optimizer: str) -> int:
-    grad_bytes = params_bytes               # ×1 params, same dtype
+    """Analytical: grads + optimizer state. No calibration needed —
+    both scale exactly with params_bytes."""
+    if optimizer not in _OPTIMIZER_STATE_MULTIPLIER:
+        raise ValueError(f"Unknown optimizer: {optimizer!r}. Known: "
+                         f"{sorted(_OPTIMIZER_STATE_MULTIPLIER)}")
+    grad_bytes = params_bytes
     opt_bytes  = _OPTIMIZER_STATE_MULTIPLIER[optimizer] * params_bytes
     return grad_bytes + opt_bytes
 
 def cuda_context_bytes() -> int:
-    return 600 * 1024 ** 2  # 600 MB — see §3.4 for calibration
+    """Calibrated: per-process CUDA context + cuDNN forward workspace.
+    Appears in BOTH training and inference phases."""
+    return _CUDA_CONTEXT_BYTES
+
+def cudnn_backward_workspace_bytes() -> int:
+    """Calibrated: cuDNN backward-algorithm scratch.
+    Appears in training phase ONLY — autograd is what triggers the allocation."""
+    return _CUDNN_BACKWARD_WORKSPACE_BYTES
 ```
 
-`_OPTIMIZER_STATE_MULTIPLIER`:
-- `adam`, `adamw` → 2 (m + v).
-- `sgd` → 0 (no momentum state for plain SGD); 1 if momentum is set.
-- Unknown optimizer → ValueError (no silent fallback; deterministic design refuses guesses).
+**Per-phase composition:**
+- **Inference peak** = `input_bytes + max(output_bytes, forward_output_bytes_max) + params_bytes + cuda_context_bytes()`.
+- **Training peak**  = `autograd_tape.total_saved_bytes + input_bytes + output_bytes + params_bytes + training_overhead_bytes(params_bytes, optimizer) + cuda_context_bytes() + cudnn_backward_workspace_bytes()`.
 
-**Inference-phase overhead = 0** beyond params + activations + CUDA context. No grads, no optimizer state. The inference estimator simply skips `training_overhead_bytes` and keeps `cuda_context_bytes`.
+**No silent fallbacks.** An unknown optimizer raises `ValueError` — the
+deterministic design refuses guesses. A calibration refresh (if the driver
+stack changes enough to invalidate the Appendix A.5 numbers) is a
+version-controlled edit of the two constants plus a regression pass against
+Appendix A.2, not a runtime behavior.
 
 ### 3.4 Device-agnostic cap
 
@@ -264,7 +302,7 @@ def resolve_inference_batch(
     """
 ```
 
-Implementation: for each `B` in descending order, build a probe input of shape `(B, segmentation_size)` and call `structural_probe.probe`. Compute `peak = params_bytes + forward_activation_bytes + cuda_context_bytes()`. Accept the first `B` where `peak <= cap_bytes`.
+Implementation: for each `B` in descending order, build a probe input of shape `(B, segmentation_size)` and call `structural_probe.probe`. Compute `peak = params_bytes + forward_activation_bytes + cuda_context_bytes()`. Accept the first `B` that satisfies **both** `peak <= cap_bytes` **and** `compute_intensity.passes(B, segmentation_size)` (§3.10). If no candidate satisfies both, raise `ValueError` with a diagnostic that names which cap was binding (VRAM vs. compute intensity) — the Memory Killer report uses this distinction to produce the right suggestion.
 
 **Propagation.** The chosen batch flows: `evaluate_vram_skill.run_skill → result dict key "inference_batch" → tuner reads it → passes through the experiment config → sandbox_executor.execute_inference reads from config`. `sandbox_executor` stops calling `inference_batch_for`; the runtime value is whatever the pre-flight skill decided.
 
@@ -383,6 +421,103 @@ The `0.80` safety fraction is defined exactly once, as the body of `usable_cap_b
 - **No driver/SM-version enforcement.** The manifest records values but does not refuse to run on a mismatched CUDA version. That belongs in installation/environment tooling, not in the forecasting layer.
 - **No auto-selection of `0.80`.** The safety fraction is a deliberate design constant, not a tuning knob. If future work wants it tunable, that is an explicit follow-up, not a hidden option.
 
+### 3.10 Compute intensity cap (`compute_intensity.py`)
+
+Phase 6.5 Stage 2 observed a `cudaErrorLaunchTimeout` on the RTX 5090 at a
+batch × segmentation configuration that exceeded the CUDA kernel watchdog
+window. This is a physical failure mode **orthogonal to VRAM**: a config can
+fit in memory and still hang a CUDA kernel long enough to trip the driver's
+timeout, crashing the attempt and — in the worst case — wedging the GPU until
+the host is reset.
+
+Full recovery from a live launch-timeout (detection during training, subprocess
+cleanup, host-safety interlocks) is deferred to Phase 6.8. Phase 6.6 installs
+a **pre-flight heuristic cap** that refuses configs whose `batch × segmentation`
+product is far above the observed failure point, up-front, before the config
+ever touches the GPU.
+
+#### 3.10.1 Module API
+
+```python
+# agent/skills/evaluate_vram_skill/compute_intensity.py
+
+# Calibrated from Phase 6.5 Stage 2: cudaErrorLaunchTimeout observed at
+# (batch_size=25, segmentation_size=40000), product = 1_000_000.
+# Applied 20% safety margin per §3.10.3 → 800_000.
+_MAX_BATCH_TIMESTEPS: int = 800_000
+
+def compute_intensity(batch_size: int, segmentation_size: int) -> int:
+    """Return the raw intensity product — purely arithmetic."""
+    return batch_size * segmentation_size
+
+def passes(batch_size: int, segmentation_size: int) -> bool:
+    """True if the config is below the heuristic cap."""
+    return compute_intensity(batch_size, segmentation_size) <= _MAX_BATCH_TIMESTEPS
+
+def describe_violation(batch_size: int, segmentation_size: int) -> str:
+    """Human-readable message for the Memory Killer report when the cap is
+    exceeded. Names specific dimensions, does not mention any model family."""
+```
+
+Pure functions, no I/O, no state. The module is a constant + three functions.
+
+#### 3.10.2 Integration points
+
+- **`batch_resolver.resolve_inference_batch` (§3.5)** — the acceptance predicate
+  is now *both* caps: `peak <= cap_bytes` AND `compute_intensity.passes(B, T)`.
+  A candidate batch that fits VRAM but violates intensity is rejected; the
+  loop continues to the next smaller batch.
+- **`wrapper.run_skill` (§3.7)** — after the per-phase probe, if the
+  training-phase `(batch_size, segmentation_size)` from the experiment config
+  fails `compute_intensity.passes`, the wrapper returns `status="schema_violation"`
+  with `memory_killer.binding_cap = "compute_intensity"` and a suggestion to
+  reduce `segmentation_size` or `batch_size`. Training-phase B and T come from
+  the Proposer's config, not from a sweep, so this is a one-shot check.
+- **`killer_report.py` (§3.6)** — the rendered verdict distinguishes the two
+  failure modes: *"VRAM over-budget"* vs. *"Compute-intensity over-budget"*.
+  The `suggestion` string names `segmentation_size` / `batch_size`, never a
+  layer — because intensity is a config-shape problem, not an architecture
+  problem.
+
+#### 3.10.3 Calibration of `_MAX_BATCH_TIMESTEPS`
+
+The threshold is a **documented design constant**, not a runtime tuning knob.
+Changing it is a version-controlled edit plus a regression test update.
+
+**Calibration (locked 2026-04-23 per user sign-off):**
+
+| Source                              | Value       |
+|-------------------------------------|-------------|
+| Phase 6.5 Stage 2 failure point     | B=25, T=40000 (product = 1,000,000) |
+| Safety margin (§3.10)               | 20%         |
+| → `_MAX_BATCH_TIMESTEPS`            | **800,000** |
+
+The origin is recorded verbatim in the module-level comment of
+`compute_intensity.py` (see the code block in §3.10.1 above). Any future
+adjustment must follow the same "observed failure → margin → document origin"
+pattern — invented numbers are forbidden.
+
+#### 3.10.4 Why a flat `B × T` product, not a layer-aware estimate
+
+The true kernel runtime depends on op mix (attention quadratic in T; convs
+linear), cuDNN algorithm selection, clock boost state, and concurrent-kernel
+overlap — none of which Phase 6.6 attempts to predict. A flat product is
+intentionally coarse: it is a **refusal threshold**, not a wall-time model.
+Any future wall-time work belongs in the estimator hardening phase explicitly
+excluded from §3 scope (see §3.1 notes about `estimate_wall_time_seconds`).
+
+#### 3.10.5 What this cap does NOT do
+
+- **No in-run watchdog.** Once the kernel launches, Phase 6.6 does nothing.
+  Detection and recovery stay in Phase 6.8.
+- **No per-device calibration.** A single constant applies across all hosts.
+  The watchdog window is a property of the driver, not the GPU model, so
+  a per-`HardwareContext` override is unnecessary until evidence suggests
+  otherwise. If it does, a follow-up can add `ctx.compute_intensity_cap`
+  without touching this module's shape.
+- **No fractional/soft refusal.** A config is either below or above the cap.
+  "Almost-over" warnings add noise without adding safety.
+
 ---
 
 ## 4. WS-B — Implementor / Proposer Hardening
@@ -463,8 +598,9 @@ Location: `tests/unit/agent/evaluate_vram_skill/`.
 
 - `test_structural_probe.py` — hand-built tiny model (Linear → ReLU → Linear); assert `total_params_bytes` matches `sum(p.numel() * 4 for p in model.parameters())`; assert `forward_activation_bytes` matches hand-computed output-tensor bytes; assert `per_layer` length == module count and ordering is preserved.
 - `test_overhead.py` — `training_overhead_bytes(P, "adam")` == `3 * P`; `"sgd"` == `P`; `"unknown"` raises ValueError.
-- `test_batch_resolver.py` — mock `probe` returns a deterministic (params, activations(B)) curve; assert descending search picks the expected batch for several cap scenarios; assert `ValueError` when cap is below batch=1 peak.
-- `test_killer_report.py` — per-layer list with a dominant entry; assert `dominant_fraction` is computed correctly; assert the suggestion string names the dominant layer *by its real name* and does not mention any architecture-family word.
+- `test_batch_resolver.py` — mock `probe` returns a deterministic (params, activations(B)) curve; assert descending search picks the expected batch for several cap scenarios; assert `ValueError` when cap is below batch=1 peak; assert the resolver also skips candidates that fail the intensity cap even when they fit VRAM, and that the raised error names which cap was binding.
+- `test_compute_intensity.py` (§3.10) — `compute_intensity(B, T) == B * T`; `passes(B, T)` is True below `_MAX_BATCH_TIMESTEPS` and False above; `describe_violation` string names `batch_size` and `segmentation_size` verbatim and contains no architecture-family word; boundary cases at exactly `_MAX_BATCH_TIMESTEPS` accept (`<=` not `<`).
+- `test_killer_report.py` — per-layer list with a dominant entry; assert `dominant_fraction` is computed correctly; assert the suggestion string names the dominant layer *by its real name* and does not mention any architecture-family word. For the intensity-cap variant, assert the verdict distinguishes `"VRAM over-budget"` from `"Compute-intensity over-budget"` and that the intensity-mode suggestion references `segmentation_size` / `batch_size`, not any layer.
 - `test_wrapper_contract.py` — full skill invocation with a CPU-instantiable plugin model; assert the return dict has all the pre-existing keys plus `inference_batch` and optionally `memory_killer`; assert removed keys (`inference_batch_uncalibrated`) are absent.
 
 Location: `tests/unit/core/` (for the hardware module — cross-cutting, not VRAM-specific):
@@ -489,7 +625,7 @@ Both overall and per-phase. ±10% is acceptable per user directive.
 
 **Step 4 — Log the calibration.** The raw numbers go into this design doc (appendix, filled in during implementation) so future regressions can be audited.
 
-**What we do if the gate fails.** Inspect the breakdown. Most likely culprits: CUDA context constant too low (bump from 600 MB to measured value), omitted memory factor (cuDNN workspace, kernel scratch — these should be capped under "context" or added as a new term). Fix the formula, not the test tolerance.
+**What we do if the gate fails.** Inspect the breakdown. With the Appendix A.5 calibration baked in (`_CUDA_CONTEXT_BYTES = 185 MB`, `_CUDNN_BACKWARD_WORKSPACE_BYTES = 50 MB`), the expected residual is <1% on both phases (see §3.3 per-phase composition). A gate failure > 10% means one of: (a) the driver stack moved (e.g. torch/cuDNN upgrade on the host) → re-run the A.13 capture and update the two calibrated constants; (b) an unmodeled allocation class appeared (e.g. DDP gradient buckets) → add a new named term to `overhead.py`, do not fold it into an existing constant. Fix the formula, not the test tolerance.
 
 ### 5.3 WS-B tests
 
@@ -538,9 +674,10 @@ Both overall and per-phase. ±10% is acceptable per user directive.
 - [ ] A.1.5 Implement `core/hardware_context.py` (§3.9) — `HardwareContext` Pydantic schema, `discover`, `write_manifest`, `load_manifest`, `get_or_create`. Unit tests per §5.1 (`test_hardware_context.py`, `test_manifest_io.py`).
 - [ ] A.1.6 Wire `get_or_create` into `nodes/ml_hyperparameter_tune_agent.py` run init. Verify manifest appears at `{workspace}/{run_name}_hardware.json` on a dry-run. Hold the instance on the tuner; do not consume yet (consumption lands with A.8/A.11).
 - [x] A.2 Implement `agent/skills/evaluate_vram_skill/structural_probe.py` + unit test (5.1). 15/15 unit tests pass on CPU. Reconciliation against A.13 anchors run on RTX 5090 — see Appendix A.5. Tape walker captures 528 MB of autograd-retained bytes; predicted train/infer delta 361 MB vs. anchor delta 412 MB (match within 51 MB of cuDNN-backward workspace, which is A.3's scope).
-- [ ] A.3 Implement `agent/skills/evaluate_vram_skill/overhead.py` + unit test (5.1).
-- [ ] A.4 Implement `agent/skills/evaluate_vram_skill/batch_resolver.py` + unit test (5.1).
-- [ ] A.5 Implement `agent/skills/evaluate_vram_skill/killer_report.py` + unit test (5.1).
+- [ ] A.3 Implement `agent/skills/evaluate_vram_skill/overhead.py` + unit test (5.1). Hybrid design (§3.3): analytical `training_overhead_bytes` (grads + optimizer state scaled by `params_bytes`) + two calibrated constants from Appendix A.5 (`_CUDA_CONTEXT_BYTES = 185 MB`, `_CUDNN_BACKWARD_WORKSPACE_BYTES = 50 MB`). Document origin of each constant in module-level comments; `ValueError` on unknown optimizer.
+- [ ] A.4 Implement `agent/skills/evaluate_vram_skill/batch_resolver.py` + unit test (5.1). Acceptance predicate consults **both** VRAM cap and compute-intensity cap (§3.5, §3.10).
+- [ ] A.4.5 Implement `agent/skills/evaluate_vram_skill/compute_intensity.py` (§3.10) + unit test (5.1). **Before coding:** extract the Phase 6.5 Stage 2 `cudaErrorLaunchTimeout` (batch, segmentation) pair from the run-log and apply the 20% safety margin per §3.10.3. Record the calibration origin in the module docstring. If the trace cannot be recovered cleanly, block this commit and note the missing evidence — do not invent a number.
+- [ ] A.5 Implement `agent/skills/evaluate_vram_skill/killer_report.py` + unit test (5.1). Verdict/suggestion distinguishes VRAM-over-budget from compute-intensity-over-budget (§3.6, §3.10.2).
 - [ ] A.6 Rewrite `training_skill/estimator.py::estimate_peak_bytes` to call probe+overhead. Wall-time untouched.
 - [ ] A.7 Rewrite `inference_skill/estimator.py::estimate_peak_bytes` to call probe. Wall-time untouched.
 - [ ] A.8 Update `wrapper.py`: accept `hardware_context` kwarg, read `usable_cap_bytes` from it, remove direct `torch.cuda.get_device_properties` / `mem_get_info` calls, add new return keys, remove obsolete free-based logic + 4 GB floor + contention log.
@@ -680,12 +817,14 @@ Reconciliation JSON: `docs/phase66_telemetry/reconcile_probe_result.json`.
 - `agent/skills/evaluate_vram_skill/structural_probe.py`
 - `agent/skills/evaluate_vram_skill/overhead.py`
 - `agent/skills/evaluate_vram_skill/batch_resolver.py`
+- `agent/skills/evaluate_vram_skill/compute_intensity.py`
 - `agent/skills/evaluate_vram_skill/killer_report.py`
 - `tests/unit/core/test_hardware_context.py`
 - `tests/unit/core/test_manifest_io.py`
 - `tests/unit/agent/evaluate_vram_skill/test_structural_probe.py`
 - `tests/unit/agent/evaluate_vram_skill/test_overhead.py`
 - `tests/unit/agent/evaluate_vram_skill/test_batch_resolver.py`
+- `tests/unit/agent/evaluate_vram_skill/test_compute_intensity.py`
 - `tests/unit/agent/evaluate_vram_skill/test_killer_report.py`
 - `tests/unit/agent/evaluate_vram_skill/test_wrapper_contract.py`
 - `tests/unit/guardrails/test_no_model_name_branches.py`
