@@ -530,8 +530,8 @@ Both overall and per-phase. ±10% is acceptable per user directive.
 ## 7. Checklist
 
 ### Design phase
-- [ ] D.1 Draft design doc (`docs/phase66_deterministic_vram_and_hardening.md`) — **this file**.
-- [ ] D.2 Review by user. Amend sections per feedback. Commit on `feat/deterministic-vram` only after sign-off.
+- [x] D.1 Draft design doc (`docs/phase66_deterministic_vram_and_hardening.md`) — **this file**. Revision 1 committed at `d0c7e34` on `feat/deterministic-vram`. Revised in-place post-sign-off: (a) Universal Hardware Awareness addendum (§2 Principle 5 + §3.9 `HardwareContext`), (b) §3.2 rewrite after A.13 exposed torchinfo's blindness to intra-forward intermediates — autograd-tape walker promoted to source-of-truth for training mode.
+- [x] D.2 Review by user. Amend sections per feedback. Commit on `feat/deterministic-vram` only after sign-off. Sign-off received in three passes: (1) initial 5 open questions resolved (torchinfo auto-batch; 0.80× device-agnostic cap; ±10% gate; two-PR shape; doc path), (2) Universal Hardware Awareness directive folded in, (3) A.2 autograd-tape design approved ("Confirmed. …superior engineering approach"). Subsequent commits C1 (`12d05f3`) and C2 (`0b69291`) landed under this sign-off.
 
 ### WS-A implementation (PR #1, branch `feat/deterministic-vram`)
 - [x] A.1 Add `torchinfo` to `pyproject.toml`; run `uv sync`; commit lockfile. `torchinfo==1.8.0` pinned; import verified under torch 2.10.0+cu128 / Python 3.12.
