@@ -23,6 +23,7 @@ from agent.llm_bridge import LLMBridge
 from agent.schemas.interpretation import (
     InterpretationInput, InterpretationOutput, ModelRunSummary,
 )
+from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from ml_models.model_descriptions import get_model_description
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
@@ -120,24 +121,23 @@ def _build_per_model_prompt(
         json.dumps(summary.best_config, indent=2) if summary.best_config else "none",
     ]
 
-    # File vector (per-file performance)
-    import math
+    # Per-file performance — rendered as the full ScoreComparisonTable
+    # markdown (raw_baseline / ground_truth / model columns + subset-scoped
+    # aggregates + Recovery line). Single source of truth lives on the
+    # table.rendered_markdown field, produced by render_comparison_table.
+    if summary.best_score_table is not None:
+        lines += [
+            "",
+            "### Per-file performance (best experiment)",
+            summary.best_score_table.rendered_markdown,
+        ]
 
-    def _fmt_score(v):
-        if v is None or (isinstance(v, float) and math.isnan(v)):
-            return "not evaluated"
-        return f"{v:.4f}"
-
-    if summary.best_file_vector is not None:
-        lines += ["", "### File Vector (per-file denoising scores, best experiment)"]
-        lines.append("File index → frequency (log scale): 0=lowest, 19=highest")
-        for i, v in enumerate(summary.best_file_vector):
-            lines.append(f"  File {i:2d}: {_fmt_score(v)}")
-
-    if summary.formal_file_vector is not None:
-        lines += ["", "### File Vector (formal round — definitive)"]
-        for i, v in enumerate(summary.formal_file_vector):
-            lines.append(f"  File {i:2d}: {_fmt_score(v)}")
+    if summary.formal_score_table is not None:
+        lines += [
+            "",
+            "### Per-file performance (formal round — definitive)",
+            summary.formal_score_table.rendered_markdown,
+        ]
 
     # Score trajectory with per-round trial portions and model params
     lines += ["", "### Score Trajectory (chronological)"]
@@ -235,7 +235,7 @@ def _build_synthesis_prompt(
     overall_best_score: Optional[float],
     overall_worst_score: Optional[float],
     overall_best_config: Optional[Dict],
-    per_model_file_vectors: Optional[Dict[str, List[Optional[float]]]] = None,
+    per_model_score_tables: Optional[Dict[str, ScoreComparisonTable]] = None,
     per_model_params: Optional[Dict[str, int]] = None,
     per_model_training_segments: Optional[Dict[str, int]] = None,
     expert_advice_str: str = "",
@@ -290,10 +290,22 @@ def _build_synthesis_prompt(
             if val:
                 lines += ["", f"### {field.replace('_', ' ').title()}", val]
 
-        # File vector summary
-        if per_model_file_vectors and model_type in per_model_file_vectors:
+        # Per-file performance — the full ScoreComparisonTable markdown
+        # (raw_baseline / ground_truth / model columns + subset-scoped
+        # aggregates + Recovery line) plus an attention-mechanism callout
+        # for weak / strong files. The callout is intentionally kept
+        # alongside the table: it pre-digests the frequency structure the
+        # synthesis agent is expected to reason about, so the LLM doesn't
+        # need to re-derive it from the 20-row grid.
+        if per_model_score_tables and model_type in per_model_score_tables:
             import math
-            fv = per_model_file_vectors[model_type]
+            table = per_model_score_tables[model_type]
+            lines += [
+                "",
+                "### Per-file performance (best experiment)",
+                table.rendered_markdown,
+            ]
+            fv = [r.model for r in table.rows]
             present = [
                 (i, v) for i, v in enumerate(fv)
                 if v is not None and not (isinstance(v, float) and math.isnan(v))
@@ -301,7 +313,7 @@ def _build_synthesis_prompt(
             if present:
                 weak = [(i, v) for i, v in present if v < 1.0]
                 strong = [(i, v) for i, v in present if v >= 10.0]
-                lines += ["", f"### File Vector Summary (best experiment)"]
+                lines += ["", "### Weak Frequency Files (attention cue)"]
                 lines.append(f"  Files evaluated: {len(present)}/20")
                 if weak:
                     lines.append(f"  Weak files (score < 1.0): {[i for i,_ in weak]}")
@@ -564,13 +576,20 @@ class ResultInterpretationAgent:
                 human_advice=inp.human_advice,
             )
             llm_response = self.bridge.generate(PER_MODEL_SYSTEM_PROMPT, per_model_prompt)
-            # Build self-sufficient cache entry: LLM text + numerical _stats
+            # Build self-sufficient cache entry: LLM text + numerical _stats.
+            # best_score_table is stored as a plain dict so model_knowledge_cache
+            # round-trips through JSON serialization cleanly; reads must
+            # re-validate it through ScoreComparisonTable.model_validate.
             model_knowledge_cache[mt] = {
                 **llm_response,
                 "_stats": {
                     "best_denoising_score":  summary.best_denoising_score,
                     "worst_denoising_score": summary.worst_denoising_score,
                     "best_file_vector":      summary.best_file_vector,
+                    "best_score_table":      (
+                        summary.best_score_table.model_dump()
+                        if summary.best_score_table else None
+                    ),
                     "best_model_params":     summary.best_model_params,
                     "completed_rounds":      summary.completed_rounds,
                     "best_config":           summary.best_config,
@@ -584,37 +603,47 @@ class ResultInterpretationAgent:
         # --- Pre-compute enriched fields ---
         # New models: read from inp.summaries.
         # Cached models: read from model_knowledge_cache[mt]["_stats"].
-        per_model_file_vectors: Dict[str, List[Optional[float]]] = {}
+        per_model_score_tables: Dict[str, ScoreComparisonTable] = {}
         weak_frequency_files: Dict[str, List[int]] = {}
         per_model_params: Dict[str, int] = {}
         per_model_training_segments: Dict[str, int] = {}
 
         import math
 
-        def _register_file_vector(mt: str, fv):
-            if fv is not None:
-                per_model_file_vectors[mt] = fv
-                weak = [
-                    i for i, v in enumerate(fv)
-                    if v is not None and not (isinstance(v, float) and math.isnan(v)) and v < 1.0
-                ]
-                if weak:
-                    weak_frequency_files[mt] = weak
+        def _register_score_table(mt: str, table: Optional[ScoreComparisonTable]):
+            if table is None:
+                return
+            per_model_score_tables[mt] = table
+            weak = [
+                r.file_index for r in table.rows
+                if r.model is not None
+                and not (isinstance(r.model, float) and math.isnan(r.model))
+                and r.model < 1.0
+            ]
+            if weak:
+                weak_frequency_files[mt] = weak
 
         for s in inp.summaries:
             mt = s.model_type
-            _register_file_vector(mt, s.best_file_vector)
+            _register_score_table(mt, s.best_score_table)
             if s.best_model_params is not None:
                 per_model_params[mt] = s.best_model_params
             if s.training_psd_segments is not None:
                 per_model_training_segments[mt] = s.training_psd_segments
 
-        # Fill from cache _stats for cached models not in new summaries
+        # Fill from cache _stats for cached models not in new summaries. The
+        # cache stores best_score_table as a plain dict (JSON round-trip safe)
+        # — re-validate it back into a ScoreComparisonTable before registering.
         for mt, entry in inp.model_knowledge_cache.items():
             if mt in per_model_summary_input:
                 continue
             stats = entry.get("_stats", {})
-            _register_file_vector(mt, stats.get("best_file_vector"))
+            cached_table_data = stats.get("best_score_table")
+            cached_table = (
+                ScoreComparisonTable.model_validate(cached_table_data)
+                if cached_table_data is not None else None
+            )
+            _register_score_table(mt, cached_table)
             if stats.get("best_model_params") is not None:
                 per_model_params[mt] = stats["best_model_params"]
 
@@ -653,7 +682,7 @@ class ResultInterpretationAgent:
                 overall_best_score=overall_best_score,
                 overall_worst_score=overall_worst_score,
                 overall_best_config=overall_best_config,
-                per_model_file_vectors=per_model_file_vectors or None,
+                per_model_score_tables=per_model_score_tables or None,
                 per_model_params=per_model_params or None,
                 per_model_training_segments=per_model_training_segments or None,
                 expert_advice_str=expert_advice_str,
@@ -688,7 +717,17 @@ class ResultInterpretationAgent:
             if prev_prediction:
                 # Find the best score for the proposed model
                 prev_best = per_model_best.get(prev_model_type)
-                prev_fv = (per_model_file_vectors or {}).get(prev_model_type)
+                # evaluate_prediction consumes the file_vector as a list of floats
+                # (per its metric-parser contract: "mean(file_vector[N:M])",
+                # "file_vector[N]"). Synthesize that list from rows[i].model so
+                # the reflector-side payload key "best_file_vector" keeps its
+                # existing shape while the upstream dict stores a
+                # ScoreComparisonTable.
+                prev_table = (per_model_score_tables or {}).get(prev_model_type)
+                prev_fv = (
+                    [r.model for r in prev_table.rows]
+                    if prev_table is not None else None
+                )
 
                 actual_results = {
                     "best_denoising_score": prev_best,
@@ -833,7 +872,7 @@ class ResultInterpretationAgent:
             "key_findings":          llm_findings,
             "bottlenecks":           llm_bottlenecks,
             # Enriched fields
-            "per_model_file_vectors":      per_model_file_vectors or None,
+            "per_model_score_tables":      per_model_score_tables or None,
             "weak_frequency_files":        weak_frequency_files or None,
             "per_model_params":            per_model_params or None,
             "per_model_training_segments": per_model_training_segments or None,
@@ -1055,6 +1094,27 @@ def tuning_output_to_model_run_summary(
     valid_scores = [s for s in round_scores if s is not None]
     worst_score = min(valid_scores) if valid_scores else None
 
+    # --- Score tables (Phase 4 — enriched replacement for file_vector) ---
+    # best_score_table prefers the pre-computed top-level field on the tuning
+    # output (populated by the tuner per §7.1). The best_rec's own score_table
+    # is a fallback in case the top-level field is None but the record carries
+    # one. formal_score_table comes from the tuning output's top-level field
+    # directly — it points at the last successful formal round's table.
+    def _as_table(value) -> Optional[ScoreComparisonTable]:
+        if value is None:
+            return None
+        if isinstance(value, ScoreComparisonTable):
+            return value
+        return ScoreComparisonTable.model_validate(value)
+
+    best_score_table = _as_table(output.best_score_table)
+    if best_score_table is None and best_rec is not None:
+        best_score_table = _as_table(best_rec.get("score_table"))
+
+    formal_score_table = _as_table(output.formal_score_table)
+    if formal_score_table is None and formal_rec is not None:
+        formal_score_table = _as_table(formal_rec.get("score_table"))
+
     return ModelRunSummary(
         model_type=output.model_type,
         run_name=output.run_name,
@@ -1065,10 +1125,13 @@ def tuning_output_to_model_run_summary(
         best_config=output.best_config,
         round_scores=round_scores,
         round_conclusions=round_conclusions,
-        # Per-file performance
+        # Per-file performance (raw primitive retained per §7.2 scope note)
         best_file_vector=best_rec.get("file_vector") if best_rec else None,
         formal_score=formal_rec.get("denoising_score") if formal_rec else None,
         formal_file_vector=formal_rec.get("file_vector") if formal_rec else None,
+        # Per-file performance (enriched — Phase 4)
+        best_score_table=best_score_table,
+        formal_score_table=formal_score_table,
         # Efficiency
         best_model_params=best_rec.get("model_params") if best_rec else None,
         # Compute cost

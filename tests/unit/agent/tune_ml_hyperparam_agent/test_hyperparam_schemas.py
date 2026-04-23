@@ -1342,3 +1342,89 @@ class TestPhaseLExperimentMemoryRoundFields:
         record = ExperimentRecord.model_validate(valid_success_record)
         assert record.memory.round_index == 1
         assert record.memory.attempt_in_round == 2
+
+
+# ---------------------------------------------------------------------------
+# score_table fields (Phase 3 of docs/aggregated_score_table_awareness.md)
+# ---------------------------------------------------------------------------
+
+
+def _make_score_table_dict(num_sampled: int = 20):
+    """Build a minimal but schema-valid ScoreComparisonTable dict."""
+    rows = [
+        {
+            "file_index":     i,
+            "raw_baseline":   0.1 * i,
+            "ground_truth":   0.5 * i,
+            "model":          0.3 * i,
+            "gain_vs_raw":    0.2 * i,
+            "headroom_vs_gt": 0.2 * i,
+        }
+        for i in range(20)
+    ]
+    return {
+        "rows": rows,
+        "aggregate": {
+            "raw_baseline_scalar":   1.0,
+            "ground_truth_scalar":   10.0,
+            "model_scalar":          5.0,
+            "percent_of_ceiling_log": 0.5,
+            "num_sampled_files":     num_sampled,
+        },
+        "s_max_global":      2.957e8,
+        "reference_source":  "reference_data/raw_and_ground_score.md",
+        "rendered_markdown": "### stub table\n",
+    }
+
+
+class TestExperimentRecordScoreTable:
+    """score_table on ExperimentRecord — additive, None by default."""
+
+    def test_optional_for_backward_compat(self, valid_success_record):
+        """Pre-Phase-3 records have no score_table."""
+        record = ExperimentRecord.model_validate(valid_success_record)
+        assert record.score_table is None
+
+    def test_populated_score_table_round_trips(self, valid_success_record):
+        valid_success_record["score_table"] = _make_score_table_dict()
+        record = ExperimentRecord.model_validate(valid_success_record)
+        assert record.score_table is not None
+        assert record.score_table.aggregate.num_sampled_files == 20
+        assert len(record.score_table.rows) == 20
+
+    def test_invalid_score_table_rejected(self, valid_success_record):
+        bad = _make_score_table_dict()
+        bad["rows"] = bad["rows"][:19]  # length-19 — schema requires 20
+        valid_success_record["score_table"] = bad
+        with pytest.raises(ValidationError):
+            ExperimentRecord.model_validate(valid_success_record)
+
+
+class TestHyperparamTuningOutputScoreTables:
+    """best_score_table + formal_score_table on HyperparamTuningOutput."""
+
+    def test_both_optional_by_default(self, valid_output_dict):
+        out = HyperparamTuningOutput.model_validate(valid_output_dict)
+        assert out.best_score_table is None
+        assert out.formal_score_table is None
+
+    def test_best_score_table_populated(self, valid_output_dict):
+        valid_output_dict["best_score_table"] = _make_score_table_dict(num_sampled=5)
+        out = HyperparamTuningOutput.model_validate(valid_output_dict)
+        assert out.best_score_table is not None
+        assert out.best_score_table.aggregate.num_sampled_files == 5
+
+    def test_formal_score_table_populated(self, valid_output_dict):
+        valid_output_dict["formal_score_table"] = _make_score_table_dict(num_sampled=20)
+        out = HyperparamTuningOutput.model_validate(valid_output_dict)
+        assert out.formal_score_table is not None
+        assert out.formal_score_table.aggregate.num_sampled_files == 20
+
+    def test_both_tables_independently_populated(self, valid_output_dict):
+        """best_score_table and formal_score_table can differ — e.g. when the
+        best round was trial-mode and a separate formal round also landed."""
+        valid_output_dict["best_score_table"] = _make_score_table_dict(num_sampled=5)
+        valid_output_dict["formal_score_table"] = _make_score_table_dict(num_sampled=20)
+        out = HyperparamTuningOutput.model_validate(valid_output_dict)
+        assert out.best_score_table.aggregate.num_sampled_files == 5
+        assert out.formal_score_table.aggregate.num_sampled_files == 20

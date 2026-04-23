@@ -23,6 +23,8 @@ from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from nodes.proposal_helpers import select_candidate_models, resolve_exploration_mode
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
 
+from ._prompt_utils import extract_accumulated_json
+
 
 # ---------------------------------------------------------------------------
 # Shared test data
@@ -84,9 +86,9 @@ FAKE_INTERPRETATION = {
 class TestModelSelection:
 
     def test_top_n_default(self):
-        strategy = ModelSelectionStrategy()  # default: top_n, n=10
+        strategy = ModelSelectionStrategy()  # default: top_n, n=5
         result = select_candidate_models(FAKE_INTERPRETATION, strategy)
-        # All 4 models fit in top 10
+        # All 4 models fit in top 5
         assert len(result) == 4
         # Sorted by score descending
         assert result[0]["model_type"] == "wavenet"
@@ -136,6 +138,39 @@ class TestModelSelection:
         strategy = ModelSelectionStrategy()
         result = select_candidate_models({"model_types": []}, strategy)
         assert result == []
+
+    def test_score_table_passthrough(self):
+        # Phase 5 B: candidate summary exposes "score_table" (raw serialized
+        # ScoreComparisonTable dict) instead of the old "file_vector" key.
+        interp = {
+            "model_types": ["punet"],
+            "per_model_best": {"punet": 1.8},
+            "per_model_worst": {"punet": 1.2},
+            "per_model_score_tables": {
+                "punet": {
+                    "rows": [{"model": 0.5}] * 20,
+                    "aggregate": {"num_sampled_files": 20},
+                    "rendered_markdown": "| test |",
+                }
+            },
+        }
+        result = select_candidate_models(interp, ModelSelectionStrategy(method="all"))
+        assert len(result) == 1
+        summary = result[0]
+        # New key is the raw dict — untouched passthrough.
+        assert summary["score_table"] == interp["per_model_score_tables"]["punet"]
+        # Old key must be gone — guards against silent dual-write drift.
+        assert "file_vector" not in summary
+
+    def test_score_table_none_when_missing(self):
+        # Models without a score_table (e.g. fully failed runs) carry None,
+        # not a synthesized empty list — consumers must handle None explicitly.
+        interp = {
+            "model_types": ["punet"],
+            "per_model_best": {"punet": None},
+        }
+        result = select_candidate_models(interp, ModelSelectionStrategy(method="all"))
+        assert result[0]["score_table"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -397,7 +432,7 @@ class TestPipelineRunner:
 
         # Stage 1 user prompt is call_args_list[0]
         stage1_prompt = call_args_list[0]
-        stage1_data = json.loads(stage1_prompt.split("\n\n")[0])  # strip appended blocks
+        stage1_data = extract_accumulated_json(stage1_prompt)
 
         non_candidates = stage1_data.get("non_candidates_overview", [])
         non_candidate_types = {e["model_type"] for e in non_candidates}
@@ -437,7 +472,7 @@ class TestPipelineRunner:
 
         agent.run(inp)
 
-        stage1_data = json.loads(call_args_list[0].split("\n\n")[0])
+        stage1_data = extract_accumulated_json(call_args_list[0])
         assert stage1_data.get("non_candidates_overview") == []
 
 
@@ -525,7 +560,7 @@ class TestProposingRetry:
 
         # The 4th call (index 3) is the retry proposing attempt.
         retry_user_prompt = mock_bridge.generate.call_args_list[3][0][1]
-        retry_data = json.loads(retry_user_prompt.split("\n\n")[0])
+        retry_data = extract_accumulated_json(retry_user_prompt)
 
         assert "proposing_stage_errors" in retry_data
         errors = retry_data["proposing_stage_errors"]
@@ -639,7 +674,7 @@ class TestSegmentationSizeRetryIntegration:
 
         # Call index 3 = retry proposing attempt
         retry_user_prompt = mock_bridge.generate.call_args_list[3][0][1]
-        retry_data = json.loads(retry_user_prompt.split("\n\n")[0])
+        retry_data = extract_accumulated_json(retry_user_prompt)
 
         assert "proposing_stage_errors" in retry_data
         errors = retry_data["proposing_stage_errors"]
@@ -662,3 +697,703 @@ class TestSegmentationSizeRetryIntegration:
             self._agent(mock_bridge).run(self._make_pipeline_input(tmp_path))
 
         assert mock_bridge.generate.call_count == 2 + (_MAX_PROPOSING_RETRIES + 1)
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 C — proposer prompt rendering (native markdown + clean JSON)
+#
+# These four classes pin down the three new helpers introduced in
+# ``nodes.proposal_helpers`` and the stage-user-prompt assembler in
+# ``nodes.ml_model_proposal_agent._render_stage_user_prompt``. The split is:
+#
+#   * TestScoreSummaryLine       — non-candidate one-liners
+#   * TestCandidateMarkdownBlock — top-level per-candidate markdown region
+#   * TestStripHeavyFieldsForJson — heavy-field removal for the JSON region
+#   * TestStageUserPrompt        — end-to-end markdown + JSON layout
+#
+# See docs/aggregated_score_table_awareness.md §"Sub-commit C detailed plan".
+# ---------------------------------------------------------------------------
+
+
+class TestScoreSummaryLine:
+    """``build_score_summary_line`` produces the compact one-liner used in
+    ``non_candidates_overview[i]["score_summary"]``. It mirrors the below-
+    baseline guard in ``render_comparison_table`` so non-candidate models
+    never quote a sign-flipped ``% of ceiling``."""
+
+    def test_normal_recovery_formatting(self):
+        from nodes.proposal_helpers import build_score_summary_line
+        table = {
+            "aggregate": {
+                "model_scalar": 5.5763,
+                "raw_baseline_scalar": -2.771,
+                "percent_of_ceiling_log": 0.823,
+                "num_sampled_files": 20,
+            }
+        }
+        line = build_score_summary_line(table)
+        assert line == "log_scalar=5.58, recovery=82.3% on 20 files"
+
+    def test_below_baseline_honest_line(self):
+        from nodes.proposal_helpers import build_score_summary_line
+        # model_scalar (-7.5) < raw_baseline_scalar (-2.771) — the percent-of-
+        # ceiling scalar is mathematically useless (and can even be positive
+        # from a double negative) so we must not surface it.
+        table = {
+            "aggregate": {
+                "model_scalar": -7.5,
+                "raw_baseline_scalar": -2.771,
+                "percent_of_ceiling_log": 2.3,
+                "num_sampled_files": 17,
+            }
+        }
+        line = build_score_summary_line(table)
+        assert line == "log_scalar=-7.50, below raw baseline on 17 files"
+
+    def test_missing_recovery_falls_back_to_no_percent(self):
+        from nodes.proposal_helpers import build_score_summary_line
+        # No percent_of_ceiling_log but model is above baseline — drop the
+        # recovery clause rather than lie.
+        table = {
+            "aggregate": {
+                "model_scalar": 3.2,
+                "raw_baseline_scalar": 1.0,
+                "percent_of_ceiling_log": None,
+                "num_sampled_files": 20,
+            }
+        }
+        line = build_score_summary_line(table)
+        assert line == "log_scalar=3.20 on 20 files"
+
+    def test_none_table_returns_none(self):
+        from nodes.proposal_helpers import build_score_summary_line
+        assert build_score_summary_line(None) is None
+
+    def test_missing_aggregate_returns_none(self):
+        from nodes.proposal_helpers import build_score_summary_line
+        assert build_score_summary_line({"rows": []}) is None
+
+    def test_missing_model_scalar_returns_none(self):
+        from nodes.proposal_helpers import build_score_summary_line
+        assert build_score_summary_line({"aggregate": {"num_sampled_files": 20}}) is None
+
+    def test_missing_num_sampled_files_returns_none(self):
+        from nodes.proposal_helpers import build_score_summary_line
+        assert build_score_summary_line({"aggregate": {"model_scalar": 1.0}}) is None
+
+
+class TestCandidateMarkdownBlock:
+    """``build_candidate_markdown_block`` is the top-level native-markdown
+    region that lifts the heavy rendered tables + source code out of the
+    JSON-escaped candidate dicts."""
+
+    def test_renders_heading_per_candidate(self):
+        from nodes.proposal_helpers import build_candidate_markdown_block
+        candidates = [
+            {"model_type": "wavenet",
+             "score_table": {"rendered_markdown": "| wavenet-table |"},
+             "source_code": "class WaveNet: pass"},
+            {"model_type": "punet",
+             "score_table": {"rendered_markdown": "| punet-table |"},
+             "source_code": "class PUNet: pass"},
+        ]
+        block = build_candidate_markdown_block(candidates)
+        assert "## Candidate Models — detailed view" in block
+        assert "### Candidate: wavenet" in block
+        assert "### Candidate: punet" in block
+        assert "| wavenet-table |" in block
+        assert "| punet-table |" in block
+        # Source code rendered inside a python fence.
+        assert "```python\nclass WaveNet: pass\n```" in block
+        assert "```python\nclass PUNet: pass\n```" in block
+
+    def test_empty_candidates_returns_empty_string(self):
+        from nodes.proposal_helpers import build_candidate_markdown_block
+        assert build_candidate_markdown_block([]) == ""
+
+    def test_missing_score_table_falls_back(self):
+        from nodes.proposal_helpers import build_candidate_markdown_block
+        candidates = [{"model_type": "mystery", "source_code": "pass"}]
+        block = build_candidate_markdown_block(candidates)
+        assert "_Score table unavailable._" in block
+        assert "pass" in block  # source still rendered
+
+    def test_missing_source_code_falls_back(self):
+        from nodes.proposal_helpers import build_candidate_markdown_block
+        candidates = [{"model_type": "mystery",
+                       "score_table": {"rendered_markdown": "| t |"}}]
+        block = build_candidate_markdown_block(candidates)
+        assert "_Source code unavailable._" in block
+        assert "| t |" in block  # table still rendered
+
+    def test_separator_between_candidates(self):
+        from nodes.proposal_helpers import build_candidate_markdown_block
+        candidates = [
+            {"model_type": "a", "score_table": {"rendered_markdown": "A"},
+             "source_code": "a"},
+            {"model_type": "b", "score_table": {"rendered_markdown": "B"},
+             "source_code": "b"},
+        ]
+        block = build_candidate_markdown_block(candidates)
+        # One `---` separator per candidate keeps the LLM from merging sections.
+        assert block.count("\n---\n") == 2
+
+
+class TestStripHeavyFieldsForJson:
+    """``strip_heavy_fields_for_json`` mirrors the candidate-markdown lift:
+    heavy fields are removed from the JSON region because they are already
+    present in the top-level markdown block."""
+
+    def test_drops_score_table_and_source_code(self):
+        from nodes.proposal_helpers import strip_heavy_fields_for_json
+        candidates = [{
+            "model_type": "wavenet",
+            "best_score": 5.5,
+            "model_params": 120_000,
+            "description": "dilated causal conv",
+            "score_table": {"rendered_markdown": "| t |"},
+            "source_code": "class W: pass",
+            "source_code_lines": 1,
+        }]
+        stripped = strip_heavy_fields_for_json(candidates)
+        assert stripped[0] == {
+            "model_type": "wavenet",
+            "best_score": 5.5,
+            "model_params": 120_000,
+            "description": "dilated causal conv",
+        }
+
+    def test_preserves_other_fields(self):
+        from nodes.proposal_helpers import strip_heavy_fields_for_json
+        # Arbitrary scalar/list fields (the pipeline may add new ones) must
+        # survive — the helper is a targeted subtraction, not a whitelist.
+        candidates = [{
+            "model_type": "x",
+            "training_segments": 200,
+            "worst_score": 0.1,
+            "source": "seed",
+            "score_table": {"rendered_markdown": "| t |"},
+        }]
+        stripped = strip_heavy_fields_for_json(candidates)
+        assert stripped[0]["training_segments"] == 200
+        assert stripped[0]["worst_score"] == 0.1
+        assert stripped[0]["source"] == "seed"
+        assert "score_table" not in stripped[0]
+
+    def test_does_not_mutate_input(self):
+        from nodes.proposal_helpers import strip_heavy_fields_for_json
+        candidates = [{
+            "model_type": "x",
+            "score_table": {"rendered_markdown": "| t |"},
+            "source_code": "pass",
+            "source_code_lines": 1,
+        }]
+        strip_heavy_fields_for_json(candidates)
+        # Original dict untouched — downstream consumers (e.g. the markdown
+        # block builder) still see the heavy fields.
+        assert "score_table" in candidates[0]
+        assert "source_code" in candidates[0]
+        assert "source_code_lines" in candidates[0]
+
+    def test_empty_list_returns_empty_list(self):
+        from nodes.proposal_helpers import strip_heavy_fields_for_json
+        assert strip_heavy_fields_for_json([]) == []
+
+
+class TestStageUserPrompt:
+    """End-to-end: ``_render_stage_user_prompt`` wires the markdown block +
+    JSON region together and drops the redundant ``per_model_score_tables``
+    key from ``interpretation_summary`` before dumping."""
+
+    def test_markdown_block_first_then_json_region(self):
+        from nodes.ml_model_proposal_agent import _render_stage_user_prompt
+        accumulated = {
+            "candidates": [{
+                "model_type": "wavenet",
+                "best_score": 5.5,
+                "score_table": {"rendered_markdown": "| wavenet-rendered |"},
+                "source_code": "class W: pass",
+            }],
+            "non_candidates_overview": [],
+            "interpretation_summary": {"take_home_message": "hi"},
+        }
+        prompt = _render_stage_user_prompt(accumulated)
+        # Markdown block comes first (LLMs anchor on leading content).
+        md_idx = prompt.index("## Candidate Models — detailed view")
+        json_idx = prompt.index("## Accumulated context")
+        assert md_idx < json_idx
+
+    def test_json_region_strips_heavy_candidate_fields(self):
+        from nodes.ml_model_proposal_agent import _render_stage_user_prompt
+        accumulated = {
+            "candidates": [{
+                "model_type": "wavenet",
+                "best_score": 5.5,
+                "score_table": {"rendered_markdown": "| wavenet-rendered |"},
+                "source_code": "class W: pass",
+                "source_code_lines": 1,
+            }],
+            "non_candidates_overview": [],
+            "interpretation_summary": {},
+        }
+        prompt = _render_stage_user_prompt(accumulated)
+        payload = extract_accumulated_json(prompt)
+        assert payload["candidates"][0]["best_score"] == 5.5
+        assert "score_table" not in payload["candidates"][0]
+        assert "source_code" not in payload["candidates"][0]
+        assert "source_code_lines" not in payload["candidates"][0]
+        # But the rendered markdown still survives in the top-level block.
+        assert "| wavenet-rendered |" in prompt
+
+    def test_drops_per_model_score_tables_from_interpretation_summary(self):
+        from nodes.ml_model_proposal_agent import _render_stage_user_prompt
+        accumulated = {
+            "candidates": [],
+            "non_candidates_overview": [],
+            "interpretation_summary": {
+                "take_home_message": "stay the course",
+                "per_model_score_tables": {"wavenet": {"rendered_markdown": "| t |"}},
+            },
+        }
+        prompt = _render_stage_user_prompt(accumulated)
+        payload = extract_accumulated_json(prompt)
+        assert "take_home_message" in payload["interpretation_summary"]
+        # per_model_score_tables is redundant with the top-level markdown +
+        # non-candidate score_summary lines, and is a heavy field — drop it.
+        assert "per_model_score_tables" not in payload["interpretation_summary"]
+
+    def test_no_candidates_emits_json_only(self):
+        from nodes.ml_model_proposal_agent import _render_stage_user_prompt
+        accumulated = {
+            "candidates": [],
+            "non_candidates_overview": [{"model_type": "x",
+                                          "score_summary": "log_scalar=1.0, recovery=10.0% on 20 files"}],
+            "interpretation_summary": {},
+        }
+        prompt = _render_stage_user_prompt(accumulated)
+        # Empty candidates → no top-level markdown heading at all.
+        assert "## Candidate Models — detailed view" not in prompt
+        assert prompt.startswith("## Accumulated context")
+        # Non-candidate summary line passes through untouched.
+        assert "recovery=10.0%" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 D — proposer render adversarial edges
+#
+# Covers the gap between the happy-path Sub-commit C tests and the
+# ``tests/unit/execute_tools/test_score_table_adversarial.py`` probes (the
+# latter target ``ScoreComparisonTable`` + ``render_comparison_table``, not
+# the proposer-side render helpers). These pin down:
+#
+#   * ``build_score_summary_line``: priority ordering of the below-baseline
+#     guard, boundary recovery values, non-dict/empty-dict robustness.
+#   * ``build_candidate_markdown_block``: empty string vs missing field
+#     semantics for ``rendered_markdown`` and ``source_code``, missing
+#     ``model_type`` fallback, non-dict ``score_table`` robustness.
+# ---------------------------------------------------------------------------
+
+
+class TestProposerRenderAdversarial:
+    """Adversarial probes for the three new proposer-side render helpers
+    introduced in Sub-commit C. Complements the happy-path classes above."""
+
+    def test_below_baseline_takes_priority_over_recovery(self):
+        """If ``model_scalar < raw_baseline_scalar`` the honest one-liner must
+        win even when ``percent_of_ceiling_log`` is populated. This mirrors
+        the render_comparison_table below-baseline relabel guard — a double-
+        negative log ratio can flip ``percent_of_ceiling_log`` back to a
+        positive number, which is exactly why the guard is priority-ordered.
+        """
+        from nodes.proposal_helpers import build_score_summary_line
+        table = {
+            "aggregate": {
+                "model_scalar": -7.5,
+                "raw_baseline_scalar": -2.771,
+                # Non-None — would mis-render as "recovery=270.4%" if the
+                # below-baseline branch didn't take priority.
+                "percent_of_ceiling_log": 2.704,
+                "num_sampled_files": 20,
+            }
+        }
+        line = build_score_summary_line(table)
+        assert line == "log_scalar=-7.50, below raw baseline on 20 files"
+        # Must NOT leak a misleading recovery percentage.
+        assert "recovery" not in line
+        assert "%" not in line
+
+    def test_recovery_zero_renders_percent_not_missing_clause(self):
+        """``recovery=0.0`` is a real datum (ties raw baseline exactly).
+        It must render as ``recovery=0.0%``, not drop into the
+        no-recovery fallback branch reserved for ``recovery is None``.
+        """
+        from nodes.proposal_helpers import build_score_summary_line
+        table = {
+            "aggregate": {
+                "model_scalar": 1.0,
+                "raw_baseline_scalar": 1.0,  # exactly tied — strict "<" stays on normal branch
+                "percent_of_ceiling_log": 0.0,
+                "num_sampled_files": 20,
+            }
+        }
+        line = build_score_summary_line(table)
+        assert line == "log_scalar=1.00, recovery=0.0% on 20 files"
+
+    def test_non_dict_score_table_returns_none(self):
+        """LLM-side or cache-round-trip corruption could replace the
+        score_table with a bare string (e.g. ``"N/A"``). The helper must
+        not crash."""
+        from nodes.proposal_helpers import build_score_summary_line
+        assert build_score_summary_line("N/A") is None
+        assert build_score_summary_line([]) is None
+        assert build_score_summary_line(42) is None
+
+    def test_empty_rendered_markdown_string_falls_back(self):
+        """Explicitly-empty ``rendered_markdown=""`` (falsy) must fall back
+        to the ``_Score table unavailable._`` sentinel — not emit a blank
+        region that the LLM would silently ignore."""
+        from nodes.proposal_helpers import build_candidate_markdown_block
+        candidates = [{
+            "model_type": "a",
+            "score_table": {"rendered_markdown": ""},
+            "source_code": "pass",
+        }]
+        block = build_candidate_markdown_block(candidates)
+        assert "_Score table unavailable._" in block
+
+    def test_empty_source_code_string_falls_back(self):
+        """Same contract on the source-code side: empty string → sentinel
+        rather than an empty python fence."""
+        from nodes.proposal_helpers import build_candidate_markdown_block
+        candidates = [{
+            "model_type": "a",
+            "score_table": {"rendered_markdown": "| t |"},
+            "source_code": "",
+        }]
+        block = build_candidate_markdown_block(candidates)
+        assert "_Source code unavailable._" in block
+        # And the empty python fence MUST NOT leak through.
+        assert "```python\n\n```" not in block
+
+    def test_missing_model_type_renders_unknown_placeholder(self):
+        """If ``model_type`` is missing we fall back to ``<unknown>`` —
+        should never crash the whole render, but should be visible enough
+        that a reader notices the upstream data defect."""
+        from nodes.proposal_helpers import build_candidate_markdown_block
+        candidates = [{
+            "score_table": {"rendered_markdown": "| t |"},
+            "source_code": "pass",
+        }]
+        block = build_candidate_markdown_block(candidates)
+        assert "### Candidate: <unknown>" in block
+
+    def test_non_dict_score_table_on_candidate_falls_back(self):
+        """``score_table`` replaced by a non-dict (string, None, list) must
+        not crash the markdown block — ``isinstance(table, dict)`` guard
+        should catch it and produce the sentinel."""
+        from nodes.proposal_helpers import build_candidate_markdown_block
+        for bad_table in (None, "N/A", [], 42):
+            candidates = [{
+                "model_type": "a",
+                "score_table": bad_table,
+                "source_code": "pass",
+            }]
+            block = build_candidate_markdown_block(candidates)
+            assert "_Score table unavailable._" in block, f"bad_table={bad_table!r}"
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 D — genericity tests (directive #5 from the "Hardened genericity
+# directives" audit in docs/aggregated_score_table_awareness.md).
+#
+# The litmus scan is the key check: after assembling a full stage user
+# prompt with ONLY a synthetic model_type, the resulting string must not
+# contain any of the SIDERIUS baseline model names. A hit would mean the
+# LLM receives a contradictory signal — the dynamic table says
+# ``mystery_model_x`` while some hidden string hardcodes ``wavenet``.
+#
+# Scope is strictly the proposer-side code we own in Sub-commit C
+# (``build_candidate_markdown_block`` + ``_render_stage_user_prompt``).
+# Stage-template few-shot examples that hardcode baseline names are a
+# known gap tracked separately; see the "Hardened genericity directives"
+# subsection for rationale.
+# ---------------------------------------------------------------------------
+
+
+class TestProposerGenericity:
+    """Synthetic-model-name tests to prove no name-dependent branches
+    remain in the code paths Sub-commit C introduced."""
+
+    _BASELINE_NAMES = ("wavenet", "punet", "fcnet")
+
+    def test_candidate_markdown_with_unseen_model_name(self):
+        """A never-before-seen model_type must flow through
+        ``build_candidate_markdown_block`` unchanged — heading, rendered
+        table, and source code all carry the synthetic name."""
+        from nodes.proposal_helpers import build_candidate_markdown_block
+        candidates = [{
+            "model_type": "mystery_model_x",
+            "score_table": {"rendered_markdown": "| mystery_model_x row |"},
+            "source_code": "class MysteryModelX: pass",
+        }]
+        block = build_candidate_markdown_block(candidates)
+        assert "### Candidate: mystery_model_x" in block
+        assert "| mystery_model_x row |" in block
+        assert "class MysteryModelX: pass" in block
+        # No baseline-model leakage — directive #1 (No-Names rule).
+        for name in self._BASELINE_NAMES:
+            assert name not in block, (
+                f"Baseline name '{name}' leaked into a mystery_model_x-only block"
+            )
+
+    def test_score_summary_indifferent_to_model_name(self):
+        """``build_score_summary_line`` is keyed on aggregate scalars, not
+        on the model name — it has no access to ``model_type`` at all.
+        This test pins the contract down: identical aggregates produce
+        identical summaries regardless of which model they describe."""
+        from nodes.proposal_helpers import build_score_summary_line
+        agg = {
+            "model_scalar": 5.5763,
+            "raw_baseline_scalar": -2.771,
+            "percent_of_ceiling_log": 0.823,
+            "num_sampled_files": 20,
+        }
+        line = build_score_summary_line({"aggregate": agg})
+        # No model name appears in the summary — by design, the caller
+        # inserts the name at the non_candidates_overview level.
+        for name in (*self._BASELINE_NAMES, "mystery_model_x"):
+            assert name not in line
+
+    def test_render_stage_user_prompt_with_mystery_model(self):
+        """The full ``_render_stage_user_prompt`` assembly with only
+        ``mystery_model_x`` as the candidate must not leak any baseline
+        model name — the litmus scan for directive #5."""
+        from nodes.ml_model_proposal_agent import _render_stage_user_prompt
+
+        accumulated = {
+            "candidates": [{
+                "model_type": "mystery_model_x",
+                "best_score": 4.2,
+                "worst_score": 2.1,
+                "description": "A generic test architecture",
+                "model_params": 123_456,
+                "training_segments": 200,
+                "source": "proposed",
+                "score_table": {
+                    "rendered_markdown": "| mystery_model_x row |",
+                    "aggregate": {
+                        "model_scalar": 4.2,
+                        "raw_baseline_scalar": -2.771,
+                        "percent_of_ceiling_log": 0.63,
+                        "num_sampled_files": 20,
+                    },
+                },
+                "source_code": "class MysteryModelX: pass",
+                "source_code_lines": 1,
+            }],
+            "non_candidates_overview": [],
+            "interpretation_summary": {
+                "take_home_message": "Explore novel architectures.",
+                "model_types": ["mystery_model_x"],
+            },
+            "existing_model_types": ["mystery_model_x"],
+            "previous_failures": [],
+        }
+        prompt = _render_stage_user_prompt(accumulated)
+
+        # Synthetic name flows through verbatim — every expected anchor.
+        assert "### Candidate: mystery_model_x" in prompt
+        assert "| mystery_model_x row |" in prompt
+        assert "class MysteryModelX: pass" in prompt
+        # The cleaned JSON region must still carry the scalar metadata.
+        payload = extract_accumulated_json(prompt)
+        assert payload["candidates"][0]["model_type"] == "mystery_model_x"
+        assert payload["candidates"][0]["best_score"] == 4.2
+        # Heavy fields stripped from JSON (they live in the markdown block).
+        assert "score_table" not in payload["candidates"][0]
+        assert "source_code" not in payload["candidates"][0]
+
+        # Litmus substring scan — directive #5's hard requirement: ZERO
+        # baseline-model-name hits when the candidate list is synthetic.
+        for name in self._BASELINE_NAMES:
+            assert name not in prompt, (
+                f"Contradictory signal: '{name}' leaked into a mystery_model_x-only "
+                "assembled stage prompt. Trace the source (proposal_helpers, "
+                "_render_stage_user_prompt, or accumulated payload) and genericize "
+                "before closing Sub-commit D."
+            )
+
+    def test_empty_candidate_list_prompt_has_no_leakage(self):
+        """Regression guard: even with an empty candidate list, the fall-
+        through path (JSON region only) must not contain baseline names."""
+        from nodes.ml_model_proposal_agent import _render_stage_user_prompt
+
+        accumulated = {
+            "candidates": [],
+            "non_candidates_overview": [{
+                "model_type": "mystery_model_x",
+                "score_summary": "log_scalar=1.00, recovery=10.0% on 20 files",
+            }],
+            "interpretation_summary": {},
+            "existing_model_types": [],
+            "previous_failures": [],
+        }
+        prompt = _render_stage_user_prompt(accumulated)
+        for name in self._BASELINE_NAMES:
+            assert name not in prompt, (
+                f"Baseline name '{name}' leaked into JSON-only fall-through prompt"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 E — stage-prompt size budget
+#
+# Regression guard for the token-budget steer: the n=5 default must comfortably
+# fit inside gpt-4o-mini's 128k context window, even with full per-candidate
+# rendered_markdown score tables + ~30-line source-code fences. We use a char-
+# count heuristic (~4 chars/token) because tiktoken is not installed.
+# ---------------------------------------------------------------------------
+
+class TestStagePromptSizeBudget:
+    """Assert the assembled stage user prompt stays well under context limits."""
+
+    _TABLE_ROWS = 20  # matches ScoreComparisonTable's 20-row cap
+
+    def _rendered_markdown(self, model_type: str) -> str:
+        header = (
+            "| file | raw_baseline | ground_truth | model |\n"
+            "|------|--------------|--------------|-------|\n"
+        )
+        rows = "\n".join(
+            f"| seg_{i:03d}_{model_type} | 1.00 | 5.50 | 4.20 |"
+            for i in range(self._TABLE_ROWS)
+        )
+        return header + rows
+
+    def _source_code(self, model_type: str) -> str:
+        # ~30 lines of representative plugin source with realistic width.
+        lines = [
+            f"# {model_type} plugin — representative source for budget test",
+            "import torch",
+            "import torch.nn as nn",
+            "",
+            f"class {model_type.title().replace('_', '')}Config:",
+            "    depth: int = 4",
+            "    width: int = 128",
+            "    dropout: float = 0.1",
+            "    activation: str = 'gelu'",
+            "",
+            f"class {model_type.title().replace('_', '')}Model(nn.Module):",
+            "    def __init__(self, cfg):",
+            "        super().__init__()",
+            "        self.embed = nn.Embedding(256, cfg.width)",
+            "        self.blocks = nn.ModuleList([",
+            "            nn.Sequential(",
+            "                nn.Conv1d(cfg.width, cfg.width, 3, padding=1),",
+            "                nn.GELU(),",
+            "                nn.Dropout(cfg.dropout),",
+            "            ) for _ in range(cfg.depth)",
+            "        ])",
+            "        self.head = nn.Conv1d(cfg.width, 256, 1)",
+            "",
+            "    def forward(self, x):",
+            "        h = self.embed(x).transpose(1, 2)",
+            "        for block in self.blocks:",
+            "            h = block(h) + h",
+            "        return self.head(h)",
+            "",
+            "PLUGIN_MODEL_TYPE = 'placeholder'",
+            f"PLUGIN_CONFIG_CLASS = {model_type.title().replace('_', '')}Config",
+            f"PLUGIN_MODEL_CLASS = {model_type.title().replace('_', '')}Model",
+        ]
+        return "\n".join(lines)
+
+    def _candidate(self, model_type: str, best_score: float) -> dict:
+        return {
+            "model_type": model_type,
+            "description": f"{model_type} — auto-synthesized candidate for budget test.",
+            "best_score": best_score,
+            "model_params": 12_345_678,
+            "source": "agent_generated",
+            "source_code": self._source_code(model_type),
+            "score_table": {
+                "model_type": model_type,
+                "rendered_markdown": self._rendered_markdown(model_type),
+                "rows": [],  # scalar rows elided; stripped from JSON region anyway
+                "aggregate": {"log_scalar": 1.23, "recovery": 0.42},
+            },
+        }
+
+    def _build_accumulated(self, n_candidates: int) -> dict:
+        candidates = [
+            self._candidate(f"candidate_model_{i:02d}", best_score=5.5 - 0.1 * i)
+            for i in range(n_candidates)
+        ]
+        non_candidates = [
+            {
+                "model_type": f"tail_model_{i:02d}",
+                "score_summary": (
+                    f"log_scalar=0.50, recovery=15.0% on 20 files "
+                    f"(below raw_baseline on {i} files)"
+                ),
+            }
+            for i in range(5)
+        ]
+        return {
+            "candidates": candidates,
+            "non_candidates_overview": non_candidates,
+            "interpretation_summary": {
+                "take_home_message": "Budget test synthetic summary.",
+                "key_findings": ["finding " + str(i) for i in range(8)],
+                "bottlenecks": ["bottleneck " + str(i) for i in range(6)],
+            },
+            "existing_model_types": [f"candidate_model_{i:02d}" for i in range(n_candidates)],
+            "previous_failures": [],
+        }
+
+    def test_five_candidate_prompt_fits_budget(self, capsys):
+        """Baseline: n=5 worst-case prompt stays comfortably inside 128k context.
+
+        Reports actual char count so future changes to prompt shape stay
+        observable. Budget: 200_000 chars (~50k tokens at 4 chars/token) —
+        well under gpt-4o-mini's 128_000-token context window.
+        """
+        from nodes.ml_model_proposal_agent import _render_stage_user_prompt
+
+        accumulated = self._build_accumulated(n_candidates=5)
+        prompt = _render_stage_user_prompt(accumulated)
+
+        n_chars = len(prompt)
+        estimated_tokens = n_chars // 4
+        # Emit so future regressions are observable in pytest -s output.
+        print(
+            f"\n[budget] n=5 stage prompt: {n_chars} chars "
+            f"(~{estimated_tokens} tokens at 4 chars/token)"
+        )
+
+        assert n_chars < 200_000, (
+            f"n=5 stage prompt is {n_chars} chars (~{estimated_tokens} tokens). "
+            f"Budget is 200_000 chars — investigate before enlarging the prompt."
+        )
+        # Sanity: the markdown block and JSON region must both be present.
+        assert "## Candidate Models — detailed view" in prompt
+        assert "## Accumulated context" in prompt
+
+    def test_budget_scales_sublinearly_with_n(self):
+        """Smoke-check: doubling n (5→10) must not blow past a 2x bound.
+
+        Guards against accidental quadratic growth (e.g. if every candidate
+        started embedding all other candidates' tables).
+        """
+        from nodes.ml_model_proposal_agent import _render_stage_user_prompt
+
+        small = _render_stage_user_prompt(self._build_accumulated(5))
+        large = _render_stage_user_prompt(self._build_accumulated(10))
+
+        # 10 candidates should be roughly ~2x of 5. Allow a generous 2.5x
+        # ceiling to cover constant overhead + JSON expansion.
+        assert len(large) < len(small) * 2.5, (
+            f"Stage prompt scales super-linearly: "
+            f"5-candidate={len(small)} chars, 10-candidate={len(large)} chars "
+            f"(ratio={len(large) / len(small):.2f}x)."
+        )

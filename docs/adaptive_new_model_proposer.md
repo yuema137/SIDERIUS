@@ -1111,7 +1111,7 @@ The proposal agent receives even more context (comparison stage gets source code
 | Expert context (advice + strategy report) | ~5KB | Fixed |
 | Accumulated pipeline stages (comparison + reasoning) | ~5-10KB | Fixed per pipeline run |
 
-**Total: ~35-45KB per proposal.** The source code is the biggest cost, controlled by the `top_n` pre-filter. If we increase to 10+ models, we should either truncate source code or only include code for the SOTA + the model being modified.
+**Total: ~15-25KB per proposal at the n=5 default** (lowered from n=10 in Phase 5 E of `docs/aggregated_score_table_awareness.md` once full `rendered_markdown` tables started being embedded). Measured baseline: **13 513 chars ≈ 3 378 tokens** for the full 5-candidate pipeline-stage user prompt. The source code + rendered score tables are the biggest costs, both controlled by the `top_n` pre-filter. Experiments that want more history can bump `n_candidates` via `run_workflow` / `_get_reasoning_pipeline` without touching the schema; if we routinely push ≥10 models we should either truncate source code or only include code for the SOTA + the model being modified.
 
 ### Design rules to prevent prompt explosion
 

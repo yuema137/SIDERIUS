@@ -86,7 +86,35 @@ The parent-accumulation term (source A, 15–25 GB) is the largest and least-und
 
 The observed failure mode — `SIGKILL` from the kernel — is silent and irrecoverable: the orchestrator has no opportunity to log, persist partial records, or advance to the next iteration. A bounded-address-space failure that surfaces as `MemoryError` inside a training or inference subprocess can be caught by the subprocess wrapper, logged as a first-class failure record (e.g. `oom_host_ram`), and skipped past without terminating the orchestration.
 
-**Decision**: install `resource.setrlimit(RLIMIT_AS, 24 GB)` in every subprocess spawned by `TidmadSandbox` (training, inference, scoring-subprocess). 24 GB leaves headroom for the parent (~5–8 GB steady-state) plus IDE (~2 GB) plus other tenants (~5 GB) on a 61 GiB host; training workloads observed to date peak well below 16 GB.
+**Decision**: install `resource.setrlimit(RLIMIT_AS, N GB)` in every subprocess spawned by `TidmadSandbox` (training, inference, scoring-subprocess). The original 24 GB calibration left headroom for the parent (~5–8 GB steady-state) plus IDE (~2 GB) plus other tenants (~5 GB) on a 61 GiB host; training workloads observed to date peak well below 16 GB RSS.
+
+---
+
+#### Fix 1 addendum (2026-04-22) — VA vs. RSS calibration for CUDA subprocesses
+
+The initial "24 GB for every subprocess" calibration was made against observed **RSS** (physical RAM), but `RLIMIT_AS` caps **VmSize** (virtual address space). The two coincide closely for CPU-only subprocesses but diverge dramatically under CUDA:
+
+Measured on RTX 5090 with the current NVIDIA driver, via a minimal `/proc/self/status` reproducer (see `core/sandbox_executor.py` VA-vs-RSS note):
+
+| Stage | VmSize (cap-relevant) | VmRSS (physical) |
+|---|---|---|
+| `setrlimit(24 GiB)` | 36 MiB | 11 MiB |
+| `import torch` | **5.8 GiB** | 507 MiB |
+| `torch.cuda.is_available()` + context init | **18.2 GiB** | 525 MiB |
+| First CUDA tensor allocation | 19.5 GiB | 649 MiB |
+| 312-MiB activation + `log_softmax` + `exp` | 20.5 GiB | 717 MiB |
+
+CUDA alone reserves ~12.5 GiB of VA for unified-memory mappings at context init, plus ~5.8 GiB from `import torch`, plus ~1.3 GiB from the first tensor — totalling ~19 GiB of VA baseline with ~0.7 GiB actual RAM. Under a 24 GiB cap, CUDA subprocesses get only ~5 GiB of working VA, which is insufficient for PUNet-scale models plus AdamW optimizer state plus focal-loss intermediates. The 2026-04-22 smoke test for `aggregated_score_table_awareness` Phase 3.C failed 9/9 attempts at this exact bottleneck (CUDA allocation ~314 MiB failed with ~27 GiB of GPU *physical* memory still free).
+
+**Revised decision**: keep the RLIMIT_AS mechanism but differentiate the ceiling by subprocess role, since the VA-to-RSS ratio is workload-dependent, not process-dependent:
+
+| Role | Default ceiling | Rationale |
+|---|---|---|
+| `scoring` | **24 GiB** | CPU-only — VA ≈ RSS. This is also the codepath the 2026-04-20 incident hit, so we hold the line here. |
+| `training` | **40 GiB** | CUDA — derived as `20 (static CUDA+torch VA) + 16 (working VRAM budget, matches the original "peaks below 16 GB" calibration) + 4 (safety margin)`. Chosen over a looser cap like 48 GiB so the host retains ~21 GiB of physical RAM after the cap, preserving the catchable-OOM intent of Fix 1. |
+| `inference` | **40 GiB** | Same 20+16+4 breakdown as training — CUDA context dominates the VA footprint. |
+
+`SIDERIUS_SUBPROCESS_RSS_GB` remains a global env-var override applied uniformly across all roles (backward-compatible with the pre-role contract).
 
 ---
 
@@ -98,7 +126,7 @@ The observed failure mode — `SIGKILL` from the kernel — is silent and irreco
 |---|---|
 | Mechanism | `preexec_fn` passed to `subprocess.run` invoking `resource.setrlimit(resource.RLIMIT_AS, (N, N))` in the child before `exec` |
 | Touchpoints | `execute_training`, `execute_inference`, `execute_scoring` — three `subprocess.run` callsites, consolidated through a `_limited_preexec(gb: int)` helper |
-| Ceiling | **24 GB** by default; configurable via `SIDERIUS_SUBPROCESS_RSS_GB` env var |
+| Ceiling | **Role-aware** — scoring=24 GiB (CPU), training/inference=48 GiB (CUDA). Env-var `SIDERIUS_SUBPROCESS_RSS_GB` overrides globally. See Fix 1 addendum above for the VA-vs-RSS calibration driving the split. |
 | Failure mode | Subprocess raises `MemoryError`; `_format_subprocess_error` extended to recognize OOM-class exit signatures and surface a structured `oom_host_ram` status |
 | Platform note | `RLIMIT_AS` is POSIX; on non-POSIX hosts the helper logs a warning and no-ops |
 

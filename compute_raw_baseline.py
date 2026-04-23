@@ -73,8 +73,8 @@ def _calculate_score(
     coarse: bool,
     parallel: bool,
     num_workers: int,
-) -> float:
-    """Global-s_max per-file score.
+) -> tuple[float, float, int]:
+    """Global-s_max per-file score + aggregation primitives for the scalar.
 
         per_segment  = (snr_sg[i] / s_max_GLOBAL) · snr_squid[i]
         score        = log_{5.27}(round(mean_i(per_segment), 2) + 1e-10)
@@ -88,6 +88,12 @@ def _calculate_score(
     Both fine (n=200) and coarse (n=20, every 10th segment) modes use the
     same ``s_max`` — a coarse run is a sparse sampling of the same
     physical signal, so it must be weighed on the same ruler as a fine run.
+
+    Returns a 3-tuple ``(log_score, linear_sum, n_segments)`` where
+    ``linear_sum = Σ_i per_segment[i]`` is the **unrounded** linear sum (the
+    per-file log-space ``score`` is lossy under ``round(·, 2)``, so the
+    grand-mean scalar must be aggregated from the linear sums — see Decision
+    13 in ``docs/aggregated_score_table_awareness.md``).
     """
     n = _FINE_SEGMENTS if not coarse else _COARSE_SEGMENTS
 
@@ -110,8 +116,87 @@ def _calculate_score(
             snr_squid[i] = s_squid
 
     per_segment = (snr_sg / s_max) * snr_squid
-    linear = float(np.round(float(np.mean(per_segment)), decimals=2)) + 1e-10
-    return float(math.log(linear, 5.27))
+    linear_sum = float(np.sum(per_segment))
+    mean_linear = float(np.round(linear_sum / n, decimals=2)) + 1e-10
+    log_score = float(math.log(mean_linear, 5.27))
+    return log_score, linear_sum, n
+
+
+# ---------------------------------------------------------------------------
+# Anchor-normalized scalar (grand-mean over all fine segments).
+#
+# Symmetric with ``compute_ground_truth._anchor_normalized_ceiling``:
+#
+#     grand_mean  = Σ_f linear_sum[f]  /  Σ_f n_segments[f]
+#     scalar      = log_{5.27}(round(grand_mean, 2) + 1e-10)
+#
+# Only fine files (0–19) contribute — coarse files are a sparse sampling of
+# the same physical signal and would bias the grand mean if mixed in. See
+# Decision 13 in ``docs/aggregated_score_table_awareness.md``.
+# ---------------------------------------------------------------------------
+
+_FINE_INDICES = tuple(range(20))
+
+
+def _maybe_write_anchor_normalized_scalar(
+    output_dir: str,
+    s_max: float,
+    anchor_src: str,
+) -> None:
+    """Scan the 20 fine per-file JSONs and, if complete, write the scalar.
+
+    Non-fatal: prints a warning and returns if any fine JSON is missing or
+    lacks ``linear_sum`` / ``n_segments`` (e.g. a legacy JSON produced before
+    Decision 13). The caller can re-run with ``--override`` to regenerate.
+    """
+    per_file: list[dict] = []
+    missing: list[int] = []
+    lossy: list[int] = []
+
+    for idx in _FINE_INDICES:
+        path = os.path.join(
+            output_dir, f"raw_baseline_score_file_{idx:04d}.json"
+        )
+        if not os.path.exists(path):
+            missing.append(idx)
+            continue
+        with open(path, "r") as f:
+            payload = json.load(f)
+        if "linear_sum" not in payload or "n_segments" not in payload:
+            lossy.append(idx)
+            continue
+        per_file.append(payload)
+
+    if missing or lossy:
+        if missing:
+            print(f"[SCALAR] skipping — missing fine indices: {missing}")
+        if lossy:
+            print(f"[SCALAR] skipping — indices without linear_sum/n_segments "
+                  f"(regenerate with --override): {lossy}")
+        return
+
+    total_linear = sum(p["linear_sum"] for p in per_file)
+    total_n = sum(p["n_segments"] for p in per_file)
+    grand_mean = total_linear / total_n
+    scalar = float(math.log(round(grand_mean, 2) + 1e-10, 5.27))
+
+    # Per-file LINEAR means (mirror of ceiling_anchor_normalized.json.file_vector).
+    file_vector_linear = [p["linear_sum"] / p["n_segments"] for p in per_file]
+
+    out_path = os.path.join(output_dir, "scalar_anchor_normalized.json")
+    result = {
+        "scalar_score": scalar,
+        "file_vector":  file_vector_linear,
+        "formula":      "anchor_normalized_raw_baseline",
+        "s_max":        s_max,
+        "num_files":    len(per_file),
+        "source":       anchor_src,
+        "computed_at":  datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    with open(out_path, "w") as f:
+        json.dump(result, f, indent=2)
+    print(f"\n[SCALAR] anchor-normalized raw-baseline scalar = {scalar:.6f}")
+    print(f"         -> {out_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +297,7 @@ def main():
 
         print(f"[COMPUTE] index={idx:02d}  mode={mode}  file={fname}")
         try:
-            score = _calculate_score(
+            score, linear_sum, n_segments = _calculate_score(
                 data_dir=args.data_dir,
                 fname=fname,
                 s_max=s_max,
@@ -223,6 +308,8 @@ def main():
             result = {
                 "file_index":  idx,
                 "score":       score,
+                "linear_sum":  linear_sum,
+                "n_segments":  n_segments,
                 "mode":        mode,
                 "data_file":   fname,
                 "s_max":       s_max,
@@ -242,6 +329,13 @@ def main():
     if errors:
         print(f"  Failed indices: {errors}")
     print(f"{'='*60}\n")
+
+    # --- Anchor-normalized scalar (fine files only) ---
+    _maybe_write_anchor_normalized_scalar(
+        output_dir=args.output_dir,
+        s_max=s_max,
+        anchor_src=os.path.basename(args.anchor_map),
+    )
 
 
 if __name__ == "__main__":

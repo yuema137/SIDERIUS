@@ -17,6 +17,7 @@ from agent.schemas.hyperparam_tuning import (
     ExpertAdviceInput,
     GateExhaustionInfo,
 )
+from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 
@@ -355,7 +356,7 @@ class ModelSelectionStrategy(BaseModel):
         description="'top_n', 'all', 'feature_match', or 'human_specified'."
     )
     params: Dict[str, Any] = Field(
-        default_factory=lambda: {"n": 10},
+        default_factory=lambda: {"n": 5},
     )
 
 
@@ -485,6 +486,14 @@ class ProposalInput(BaseModel):
         default_factory=list,
         description="Model type keys already registered in MODEL_REGISTRY. "
                     "The proposal agent must not reuse any of these names.",
+    )
+    per_model_score_tables: Optional[Dict[str, ScoreComparisonTable]] = Field(
+        default=None,
+        description="model_type → best ScoreComparisonTable, carried forward from "
+                    "InterpretationOutput.per_model_score_tables. Typed mirror of the "
+                    "`interpretation['per_model_score_tables']` dict-carry payload — "
+                    "consumers may read either. Replaces the old per_model_file_vectors "
+                    "per §7.3 / Decision 6. None when no upstream tables are available.",
     )
     # --- Run-level data + time-budget context (workflow-supplied) ---
     # See docs/resource_estimator_implement.md §2.7.2. These fields originate at the

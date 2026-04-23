@@ -134,7 +134,7 @@ iteration 1 and later iterations are called out explicitly.
 │  │                                                                                │ │
 │  │  Pre-filter: select_candidate_models() splits all known models into two tiers │ │
 │  │                                                                                │ │
-│  │    Tier 1 — candidates (top-N by score, default N=10):                        │ │
+│  │    Tier 1 — candidates (top-N by score, default N=5):                         │ │
 │  │      source_code, description, best_score, file_vector, model_params          │ │
 │  │      → full detail, the LLM can read and borrow from their architecture       │ │
 │  │                                                                                │ │
@@ -657,7 +657,8 @@ verifies it. All listed tests are currently green.
          Test: `TestPipelineRunner::test_non_candidates_included_in_prompt`  [PASS]
 
   ☑ H.3  **When all models fit within top-N, `non_candidates_overview` is empty.**
-         If the total number of models is ≤ N (e.g. 4 models with `top_n=10`), every
+         If the total number of models is ≤ N (e.g. 4 models with the `top_n=5`
+         default, or any `n_candidates` override ≥ total-model-count), every
          model is a candidate and nothing is excluded. `non_candidates_overview = []`.
          Code: `non_candidates_overview` loop — only appends models not in `candidate_names`.
          Test: `TestPipelineRunner::test_non_candidates_empty_when_all_selected`  [PASS]

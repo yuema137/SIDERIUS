@@ -4,7 +4,8 @@ Unit tests for subprocess host-RAM hardening (Fix 1).
 Covers the helpers introduced in ``core/sandbox_executor.py`` for
 docs/optimize_inference_and_scoring.md §3 Fix 1:
 
-  * ``_subprocess_rss_gb()`` — env-var resolution with default 24 GiB.
+  * ``_subprocess_rss_gb(role)`` — role-aware defaults (scoring=24 GiB,
+    training/inference=48 GiB) + env-var override.
   * ``_limited_preexec(gb)`` — returns a callable that caps RLIMIT_AS
     in the child; returns ``None`` when disabled.
   * ``_is_oom_failure(e)`` — recognises SIGKILL and Python ``MemoryError``
@@ -25,7 +26,7 @@ import pytest
 
 from core.sandbox_executor import (
     TidmadSandbox,
-    _DEFAULT_SUBPROCESS_RSS_GB,
+    _ROLE_DEFAULT_RSS_GB,
     _format_subprocess_error,
     _is_oom_failure,
     _limited_preexec,
@@ -69,32 +70,62 @@ def _called_process_error(returncode: int, stderr: str = "", stdout: str = "") -
 
 
 # ==========================================
-# _subprocess_rss_gb — env-var resolution
+# _subprocess_rss_gb — role-aware defaults + env-var resolution
 # ==========================================
 
 class TestSubprocessRssGb:
 
-    def test_default_is_24(self, monkeypatch):
+    def test_scoring_default_is_24(self, monkeypatch):
+        """Scoring (CPU-only) keeps the original 24 GiB ceiling — this is the
+        codepath the 2026-04-20 incident hit, so we don't loosen it."""
         monkeypatch.delenv("SIDERIUS_SUBPROCESS_RSS_GB", raising=False)
-        assert _subprocess_rss_gb() == 24
-        assert _DEFAULT_SUBPROCESS_RSS_GB == 24
+        assert _subprocess_rss_gb("scoring") == 24
+        assert _ROLE_DEFAULT_RSS_GB["scoring"] == 24
 
-    def test_env_override_positive(self, monkeypatch):
+    def test_training_default_is_40(self, monkeypatch):
+        """Training (CUDA) ceiling is 20 GiB (static CUDA+torch VA) + 16 GiB
+        (working VRAM budget) + 4 GiB (safety margin). Keeps ~21 GiB of host
+        RAM free after the cap. See VA-vs-RSS calibration note in
+        sandbox_executor.py."""
+        monkeypatch.delenv("SIDERIUS_SUBPROCESS_RSS_GB", raising=False)
+        assert _subprocess_rss_gb("training") == 40
+        assert _ROLE_DEFAULT_RSS_GB["training"] == 40
+
+    def test_inference_default_is_40(self, monkeypatch):
+        """Inference is also a CUDA subprocess — same 40 GiB ceiling as training."""
+        monkeypatch.delenv("SIDERIUS_SUBPROCESS_RSS_GB", raising=False)
+        assert _subprocess_rss_gb("inference") == 40
+        assert _ROLE_DEFAULT_RSS_GB["inference"] == 40
+
+    def test_unknown_role_raises(self):
+        with pytest.raises(ValueError, match="unknown role"):
+            _subprocess_rss_gb("bogus")
+
+    def test_env_override_wins_for_every_role(self, monkeypatch):
+        """Global env var overrides the role default uniformly. This keeps
+        the pre-existing SIDERIUS_SUBPROCESS_RSS_GB contract — anyone who had
+        it set gets the same value across training/inference/scoring."""
         monkeypatch.setenv("SIDERIUS_SUBPROCESS_RSS_GB", "12")
-        assert _subprocess_rss_gb() == 12
+        assert _subprocess_rss_gb("training") == 12
+        assert _subprocess_rss_gb("inference") == 12
+        assert _subprocess_rss_gb("scoring") == 12
 
-    def test_env_zero_disables(self, monkeypatch):
+    def test_env_zero_disables_for_every_role(self, monkeypatch):
         """Zero is an explicit opt-out — callers get None from _limited_preexec."""
         monkeypatch.setenv("SIDERIUS_SUBPROCESS_RSS_GB", "0")
-        assert _subprocess_rss_gb() == 0
+        assert _subprocess_rss_gb("training") == 0
+        assert _subprocess_rss_gb("inference") == 0
+        assert _subprocess_rss_gb("scoring") == 0
 
-    def test_env_non_numeric_falls_back(self, monkeypatch):
+    def test_env_non_numeric_falls_back_to_role_default(self, monkeypatch):
         monkeypatch.setenv("SIDERIUS_SUBPROCESS_RSS_GB", "not_a_number")
-        assert _subprocess_rss_gb() == _DEFAULT_SUBPROCESS_RSS_GB
+        assert _subprocess_rss_gb("training") == _ROLE_DEFAULT_RSS_GB["training"]
+        assert _subprocess_rss_gb("scoring") == _ROLE_DEFAULT_RSS_GB["scoring"]
 
-    def test_env_negative_falls_back(self, monkeypatch):
+    def test_env_negative_falls_back_to_role_default(self, monkeypatch):
         monkeypatch.setenv("SIDERIUS_SUBPROCESS_RSS_GB", "-5")
-        assert _subprocess_rss_gb() == _DEFAULT_SUBPROCESS_RSS_GB
+        assert _subprocess_rss_gb("training") == _ROLE_DEFAULT_RSS_GB["training"]
+        assert _subprocess_rss_gb("inference") == _ROLE_DEFAULT_RSS_GB["inference"]
 
 
 # ==========================================
@@ -162,6 +193,46 @@ class TestIsOomFailure:
         e = _called_process_error(returncode=2)
         assert _is_oom_failure(e) is False
 
+    def test_torch_out_of_memory_error_not_oom(self):
+        """``torch.OutOfMemoryError`` is a CUDA-allocator failure, not a
+        host-RAM exhaustion. A substring match on "MemoryError" would
+        false-positive because "OutOfMemoryError" contains "MemoryError".
+        The word-boundary regex must not match this case — tagging a CUDA
+        OOM as oom_host_ram would hide a VA-cap misconfiguration under a
+        generic "host RAM" label and send the orchestrator down the wrong
+        recovery path.
+        """
+        stderr = (
+            "Traceback (most recent call last):\n"
+            "  File \"train.py\", line 465, in run_experiment_streaming\n"
+            "    loss = criterion(output, target_seq)\n"
+            "torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 314.00 MiB.\n"
+        )
+        e = _called_process_error(returncode=1, stderr=stderr)
+        assert _is_oom_failure(e) is False
+
+    def test_bare_out_of_memory_error_not_oom(self):
+        """Same defence without the `torch.` prefix — some stack frames show
+        the class name unqualified."""
+        e = _called_process_error(returncode=1, stderr="OutOfMemoryError: GPU allocation failed\n")
+        assert _is_oom_failure(e) is False
+
+    def test_qualified_memory_error_still_oom(self):
+        """A fully-qualified ``builtins.MemoryError`` (rare, but possible in
+        some tracebacks) should still register as a host-RAM OOM — the
+        word-boundary regex must match ``.MemoryError`` since ``.`` is a
+        non-word character."""
+        e = _called_process_error(returncode=1, stderr="builtins.MemoryError: Unable to allocate\n")
+        assert _is_oom_failure(e) is True
+
+    def test_memory_error_with_message_is_oom(self):
+        """Real-world MemoryError lines include a message after the colon."""
+        e = _called_process_error(
+            returncode=1,
+            stderr="MemoryError: Unable to allocate 1.5 GiB for an array with shape (...)\n",
+        )
+        assert _is_oom_failure(e) is True
+
 
 # ==========================================
 # _format_subprocess_error — oom_host_ram tag
@@ -186,13 +257,31 @@ class TestFormatSubprocessErrorOomTag:
         msg = _format_subprocess_error(e, "Inference")
         assert "[oom_host_ram]" not in msg
 
+    def test_torch_oom_not_tagged_host_ram(self):
+        """Regression: a CUDA allocator failure must not be tagged as
+        oom_host_ram. Before the word-boundary fix, a substring match on
+        "MemoryError" inside "torch.OutOfMemoryError" produced a false
+        positive — the sandbox status bubbled up as oom_host_ram when the
+        real failure was a GPU-side allocation (or a VA-cap misconfiguration
+        on the CUDA subprocess)."""
+        e = _called_process_error(
+            returncode=1,
+            stderr="torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 314 MiB.\n",
+        )
+        msg = _format_subprocess_error(e, "Train")
+        assert "[oom_host_ram]" not in msg
+        assert "OutOfMemoryError" in msg  # the underlying error should still be visible
+
 
 # ==========================================
 # TidmadSandbox — preexec_fn threaded through subprocess.run
 # ==========================================
 
 class TestSandboxPreexecWiring:
-    """Every subprocess.run in the sandbox must receive preexec_fn."""
+    """Every subprocess.run in the sandbox must receive preexec_fn, and the
+    role passed to ``_subprocess_rss_gb`` must match the subprocess being
+    launched. The role-wiring assertions patch ``_subprocess_rss_gb`` to
+    capture the role string rather than inspect the opaque preexec closure."""
 
     @patch("core.sandbox_executor.subprocess.run")
     def test_training_passes_preexec_fn(self, mock_run, sandbox, monkeypatch):
@@ -233,6 +322,33 @@ class TestSandboxPreexecWiring:
         sandbox.execute_training(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG)
         _, kwargs = mock_run.call_args
         assert kwargs["preexec_fn"] is None
+
+    @patch("core.sandbox_executor._subprocess_rss_gb")
+    @patch("core.sandbox_executor.subprocess.run")
+    def test_training_uses_training_role(self, mock_run, mock_rss, sandbox):
+        """Training subprocess resolves ceiling via role='training'."""
+        mock_run.return_value = _ok_result()
+        mock_rss.return_value = 40
+        sandbox.execute_training(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG)
+        mock_rss.assert_called_with("training")
+
+    @patch("core.sandbox_executor._subprocess_rss_gb")
+    @patch("core.sandbox_executor.subprocess.run")
+    def test_inference_uses_inference_role(self, mock_run, mock_rss, sandbox):
+        mock_run.return_value = _ok_result()
+        mock_rss.return_value = 40
+        sandbox.execute_inference(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, LOSS_CFG)
+        mock_rss.assert_called_with("inference")
+
+    @patch("core.sandbox_executor._subprocess_rss_gb")
+    @patch("core.sandbox_executor.subprocess.run")
+    def test_scoring_uses_scoring_role(self, mock_run, mock_rss, sandbox):
+        mock_run.return_value = _ok_result()
+        mock_rss.return_value = 24
+        result_dir = os.path.join(sandbox.dirs["records"], RUN_NAME)
+        os.makedirs(result_dir, exist_ok=True)
+        sandbox.execute_scoring(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG)
+        mock_rss.assert_called_with("scoring")
 
 
 # ==========================================

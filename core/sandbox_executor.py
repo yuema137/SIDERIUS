@@ -1,5 +1,6 @@
 # core/sandbox_executor.py
 import os
+import re
 import sys
 import json
 import subprocess
@@ -29,26 +30,79 @@ def _tidmad_data_dir() -> str:
 #
 # The ceiling applies to virtual address space (RLIMIT_AS), not RSS, because
 # RSS is not a POSIX-enforceable limit. VMS is a superset of RSS, so an AS
-# cap transitively caps RSS.
+# cap transitively caps RSS — but the ratio is workload-dependent.
+#
+# VA-vs-RSS calibration (measured 2026-04-22 on RTX 5090, verified via
+# /proc/self/status in an isolated reproducer — see docs §Fix 1 addendum):
+#
+#   * CPU-only subprocess (e.g. scoring): VmSize ≈ RSS + ~1 GiB import
+#     overhead. 24 GiB VA cap gives ~23 GiB of real working memory.
+#   * CUDA subprocess (training / inference): `import torch` alone reserves
+#     ~5.8 GiB VA; `torch.cuda.is_available()` + context init reserves
+#     another ~12.5 GiB VA for unified-memory mappings; a single cached
+#     tensor adds another ~1.3 GiB. Total baseline ≈ 18-20 GiB VA with
+#     ~0.7 GiB RSS. Under a 24 GiB cap, CUDA workloads get only ~4-6 GiB
+#     of working VA — insufficient for PUNet-scale models plus AdamW
+#     state plus focal-loss intermediates.
+#
+# CUDA-role budget is derived as:
+#
+#     40 GiB  =  20 GiB (static CUDA + torch VA overhead, rounded up
+#                        from the 18-20 GiB measured baseline for headroom
+#                        against driver-version drift)
+#             +  16 GiB (target physical VRAM budget for model weights,
+#                        activations, gradients, optimizer state — matches
+#                        the pre-existing "training workloads peak below
+#                        16 GB RSS" calibration)
+#             +   4 GiB (safety margin for DataLoader workers, intermediate
+#                        tensors the caching allocator reserves fresh VA
+#                        for, and h5py read buffers)
+#
+# At 40 GiB the host still has ~21 GiB of physical RAM free after the cap,
+# keeping the original Fix-1 protection intent intact — the point was to
+# catch a runaway before the kernel OOM-killer wakes up, not to minimise
+# absolute VA. Scoring stays at 24 GiB because its VA ≈ RSS on CPU-only
+# code, and that was the exact codepath the 2026-04-20 incident hit.
 
-_DEFAULT_SUBPROCESS_RSS_GB = 24
+_ROLE_DEFAULT_RSS_GB = {
+    "training":  40,   # CUDA — 20 (static) + 16 (working VRAM) + 4 (safety)
+    "inference": 40,   # CUDA — same breakdown as training
+    "scoring":   24,   # CPU-only — kept at original value, protects the 2026-04-20 incident path
+}
 
 
-def _subprocess_rss_gb() -> int:
-    """Host-RAM ceiling (GiB) applied to every sandboxed subprocess.
+def _subprocess_rss_gb(role: str) -> int:
+    """Host-RAM ceiling (GiB) applied to a sandboxed subprocess.
 
-    Configurable via the ``SIDERIUS_SUBPROCESS_RSS_GB`` environment variable.
-    A value of ``0`` disables the ceiling entirely (pre-Fix-1 behaviour).
-    Non-numeric or negative values fall back to the 24 GiB default.
+    Args:
+        role: One of ``"training"``, ``"inference"``, or ``"scoring"``.
+              The default ceiling is chosen per-role because CUDA and
+              CPU-only subprocesses have very different VA footprints
+              (see VA-vs-RSS calibration note above).
+
+    Resolution order:
+        1. ``SIDERIUS_SUBPROCESS_RSS_GB`` (global override — if set, wins
+           for every role; backward-compatible with the pre-role env var).
+        2. Role-specific default from ``_ROLE_DEFAULT_RSS_GB``.
+
+    Special values:
+        * ``0`` — disable the ceiling entirely (pre-Fix-1 behaviour).
+        * Negative / non-numeric env override — ignored, falls back to
+          the role default.
     """
+    if role not in _ROLE_DEFAULT_RSS_GB:
+        raise ValueError(
+            f"_subprocess_rss_gb: unknown role {role!r}; "
+            f"expected one of {sorted(_ROLE_DEFAULT_RSS_GB)}"
+        )
     raw = os.environ.get("SIDERIUS_SUBPROCESS_RSS_GB")
     if raw is None:
-        return _DEFAULT_SUBPROCESS_RSS_GB
+        return _ROLE_DEFAULT_RSS_GB[role]
     try:
         v = int(raw)
     except ValueError:
-        return _DEFAULT_SUBPROCESS_RSS_GB
-    return v if v >= 0 else _DEFAULT_SUBPROCESS_RSS_GB
+        return _ROLE_DEFAULT_RSS_GB[role]
+    return v if v >= 0 else _ROLE_DEFAULT_RSS_GB[role]
 
 
 def _limited_preexec(gb: int) -> Optional[Callable[[], None]]:
@@ -80,22 +134,34 @@ def _limited_preexec(gb: int) -> Optional[Callable[[], None]]:
     return _apply_limit
 
 
+_MEMORY_ERROR_RE = re.compile(r"\bMemoryError\b")
+
+
 def _is_oom_failure(e: subprocess.CalledProcessError) -> bool:
     """Does ``e`` look like a host-RAM exhaustion in the child?
 
     Two signatures qualify:
-      1. ``MemoryError`` appears in stderr — the RLIMIT_AS ceiling caught
-         the allocation and Python raised a catchable exception. This is
-         the post-Fix-1 happy path.
+      1. Python's built-in ``MemoryError`` appears in stderr — the RLIMIT_AS
+         ceiling caught the allocation and Python raised a catchable
+         exception. This is the post-Fix-1 happy path.
       2. The process was killed by SIGKILL (``returncode == -9``) — the
          kernel OOM-killer intervened, typically because the ceiling was
          disabled or the allocation was too large to be intercepted (e.g.
          a single ``mmap`` bigger than the cap). This is the pre-Fix-1
          failure mode and the case Fix 1 exists to prevent.
+
+    We match ``MemoryError`` with word boundaries to avoid a false positive
+    on ``torch.OutOfMemoryError``, which is a distinct CUDA-side error —
+    the GPU allocator failed to serve a device allocation, and the host
+    RSS/VA are not necessarily exhausted. Tagging a CUDA OOM as
+    ``oom_host_ram`` would send the orchestrator down the wrong recovery
+    path (it would shrink host-facing knobs when the real pressure is on
+    the GPU, or — more importantly pre-role-aware-ceiling — obscure a
+    VA-cap misconfiguration under a generic "host RAM" label).
     """
     if e.returncode == -9:
         return True
-    if e.stderr and "MemoryError" in e.stderr:
+    if e.stderr and _MEMORY_ERROR_RE.search(e.stderr):
         return True
     return False
 
@@ -408,7 +474,7 @@ class TidmadSandbox:
                     text=True,
                     cwd=os.getcwd(),
                     env=_subprocess_env(plugin_dir=self.plugin_dir),
-                    preexec_fn=_limited_preexec(_subprocess_rss_gb()),
+                    preexec_fn=_limited_preexec(_subprocess_rss_gb("training")),
                 )
 
             if not self.progress_bar and result.stdout:
@@ -489,7 +555,7 @@ class TidmadSandbox:
                 stderr=subprocess.PIPE,
                 text=True, cwd=os.getcwd(),
                 env=_subprocess_env(plugin_dir=self.plugin_dir),
-                preexec_fn=_limited_preexec(_subprocess_rss_gb()),
+                preexec_fn=_limited_preexec(_subprocess_rss_gb("inference")),
             )
             if not self.progress_bar and result.stdout:
                 print(f"--- Inference Output ---\n{result.stdout}")
@@ -553,7 +619,7 @@ class TidmadSandbox:
                 stderr=subprocess.PIPE,
                 text=True, cwd=os.getcwd(),
                 env=_subprocess_env(plugin_dir=self.plugin_dir),
-                preexec_fn=_limited_preexec(_subprocess_rss_gb()),
+                preexec_fn=_limited_preexec(_subprocess_rss_gb("scoring")),
             )
 
             # Merge training results (loss history) with scoring results

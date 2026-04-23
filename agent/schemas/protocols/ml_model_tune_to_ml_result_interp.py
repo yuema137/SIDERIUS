@@ -36,6 +36,10 @@ def local_all_records(
     Consumes from ml-model-tune (HyperparamTuningOutput):
       - model_type, run_name, status, completed_rounds
       - best_denoising_score, best_config
+      - best_score_table, formal_score_table (enriched per-file view of
+        best_file_vector / formal_file_vector; populated by the tuner per
+        Phase 3-B. Threaded into the ModelRunSummary so downstream agents
+        can read the pre-rendered markdown directly.)
       - all_records (used to extract round_scores and round_conclusions,
         then discarded — raw records are NOT passed to the interpretation agent)
 
