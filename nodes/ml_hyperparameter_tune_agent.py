@@ -17,8 +17,10 @@ import json
 import argparse
 import importlib
 import traceback
+from pathlib import Path
 from typing import Optional, Union
 
+from core.hardware_context import get_or_create
 from core.sandbox_executor import TidmadSandbox
 from agent.llm_bridge import LLMBridge
 from agent.schemas.hyperparam_tuning import (
@@ -621,6 +623,17 @@ class HyperparamTuningAgent:
         # --- Extract frequently used fields ---
         workspace = agent_input.storage.local.workspace
         run_name = agent_input.storage.local.run_name
+
+        # Per-run hardware manifest (Phase 6.6 §3.9) — file IPC with sandbox children.
+        hardware_context = get_or_create(Path(workspace), run_name)
+        print(
+            f"[Tuner] Hardware context: {hardware_context.device_name} "
+            f"| total={hardware_context.total_memory_gb:.1f} GB "
+            f"| cap={hardware_context.usable_cap_gb:.1f} GB "
+            f"| host={hardware_context.hostname} "
+            f"| available={hardware_context.device_available}"
+        )
+
         model_type_setting = agent_input.model_type
         max_rounds = agent_input.max_rounds
         file_index = agent_input.file_index
