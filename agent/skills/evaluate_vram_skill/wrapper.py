@@ -346,16 +346,28 @@ def run_skill(sandbox, **kwargs):
         # 1. Hardware context → cap ──────────────────────────────────────
         if hardware_context is None:
             hardware_context = discover()
-        cap_bytes = hardware_context.usable_cap_bytes
+        physical_cap_bytes = hardware_context.usable_cap_bytes
+        cap_bytes = physical_cap_bytes
         if vram_budget_gb is not None:
             cap_bytes = min(cap_bytes, int(vram_budget_gb * _GB))
         total_memory_bytes = hardware_context.total_memory_bytes
 
+        # Classify which of the three cap regimes is active so the log line
+        # is self-explanatory (the operator should not have to compare
+        # numbers to figure out which cap won).
+        if vram_budget_gb is None:
+            cap_note = (f"PHYSICAL: 80% of "
+                        f"{hardware_context.total_memory_gb:.1f} GB")
+        elif int(vram_budget_gb * _GB) > physical_cap_bytes:
+            cap_note = (f"PHYSICAL VETO: budget {vram_budget_gb:.2f} GB "
+                        f"requested exceeds 80% ceiling")
+        else:
+            cap_note = (f"BUDGET: restricted by operator from "
+                        f"{physical_cap_bytes / _GB:.2f} GB")
+
         print(f"    [Hardware] {hardware_context.device_name} "
               f"({hardware_context.total_memory_gb:.1f} GB total) "
-              f"| cap={cap_bytes / _GB:.2f} GB"
-              + (f" (budget {vram_budget_gb:.2f} GB)"
-                 if vram_budget_gb is not None else ""))
+              f"| cap={cap_bytes / _GB:.2f} GB ({cap_note})")
 
         # 2. Instantiate model (schema validation happens here) ───────────
         try:

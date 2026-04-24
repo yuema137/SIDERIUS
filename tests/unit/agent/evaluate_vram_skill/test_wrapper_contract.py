@@ -444,6 +444,37 @@ def test_vram_budget_gb_further_restricts_cap():
     assert out["memory_killer"]["binding_cap"] == "vram"
 
 
+def test_vram_budget_gb_cannot_exceed_physical_cap():
+    """Veto direction: ``hardware_context.usable_cap_bytes`` (the
+    ``0.80 × total_memory_bytes`` physical ceiling) is **absolute**. An
+    operator-set ``vram_budget_gb`` that is *larger* than the physical
+    ceiling MUST be ignored by ``min()`` — the effective cap stays at
+    the physical limit, never the budget.
+
+    Scenario per directive: 32 GB device → physical cap 25.6 GB. Operator
+    requests 30 GB (> 25.6 GB). ``limit_gb`` must be 25.6, not 30.0.
+    The returned ``vram_budget_gb`` still echoes the operator's request
+    so the record-keeping layer knows what was asked for — but the cap
+    used for the feasibility check is the physical one.
+
+    Pairs with ``test_vram_budget_gb_further_restricts_cap`` (restriction
+    direction): together they pin both halves of the ``min(physical, budget)``
+    contract — restriction when budget < physical, veto when budget > physical.
+    """
+    with _Patches():
+        out = wrapper.run_skill(
+            sandbox=None, hardware_context=_gpu_ctx(32.0),
+            vram_budget_gb=30.0,  # exceeds physical 25.6 GB
+            **_run_kwargs(),
+        )
+    # 32.0 × 0.80 = 25.6. The physical cap MUST win.
+    assert out["limit_gb"] == pytest.approx(25.6, abs=0.01)
+    # Operator's request is preserved in the record but did NOT become the cap.
+    assert out["vram_budget_gb"] == 30.0
+    # Neutral probe fits well inside 25.6 GB, so the config is feasible.
+    assert out["feasible"] is True
+
+
 # ── 10. Killer renderers receive the cap = ctx.usable_cap_bytes ────────────
 
 def test_feasible_verdict_mentions_cap_and_dominant_phase():
