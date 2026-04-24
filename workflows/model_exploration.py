@@ -75,6 +75,7 @@ sys.path.insert(0, os.path.join(SIDERIUS_ROOT, "ml_models"))
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
 from agent.schemas.interpretation import InterpretationInput, ModelRunSummary
+from core.hardware_context import get_or_create as get_or_create_hardware_context
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
 
@@ -476,6 +477,32 @@ def run_workflow(
         print(f"  Target score  : {target_score}")
     print(f"{'='*60}\n")
 
+    # --- Phase 6.6 WS-B (B.1) — hardware context for the Proposer ---
+    # Discover once per workflow run and thread into every ProposalInput
+    # via post-hoc assignment after local_full_context returns (pattern
+    # mirrors previous_failures and mindset below at the propose call site).
+    # The tuner's own HardwareContext.get_or_create call in its run() init
+    # reads the same manifest path — first-caller-writes, later-callers-read.
+    # See docs/phase66_ws_b_proposer_hardening.md §4.1.
+    from pathlib import Path as _Path
+    hardware_ctx = get_or_create_hardware_context(
+        _Path(workspace), run_name,
+    )
+    # Pick the active VRAM budget per WS-B doc §4.2: trial preferred (the
+    # Proposer's baseline is almost always trial-sized), fall back to
+    # formal, else None (→ PHYSICAL regime rendered from the physical cap).
+    active_vram_budget_gb: float | None = (
+        trial_vram_budget_gb
+        if trial_vram_budget_gb is not None
+        else formal_vram_budget_gb
+    )
+    print(
+        f"  Hardware      : {hardware_ctx.device_name} "
+        f"({hardware_ctx.total_memory_gb:.2f} GB total, "
+        f"{hardware_ctx.usable_cap_gb:.2f} GB usable cap), "
+        f"budget={active_vram_budget_gb} GB\n"
+    )
+
     # --- Step 0: Load existing tuning outputs ---
     print("Step 0: Loading existing tuning outputs...")
     if source_paths is not None:
@@ -610,6 +637,11 @@ def run_workflow(
                     propose_input.previous_failures = previous_failures
                 if human_advice_mindset is not None:
                     propose_input.mindset = human_advice_mindset
+                # WS-B B.1 — hardware-context plumb-through. Both fields
+                # always set (None is a valid value for vram_budget_gb);
+                # the Proposer renderer decides whether to emit the block.
+                propose_input.hardware_context = hardware_ctx
+                propose_input.vram_budget_gb = active_vram_budget_gb
 
                 # Phase K.8 debug — dump rendered proposing-stage system
                 # prompt under {run_dir}/debug/ when the flag is on.
