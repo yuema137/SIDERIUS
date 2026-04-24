@@ -504,6 +504,88 @@ class TestDynamicTrialFormal:
         inf_params = inference_calls[0][1]
         assert "eval_sample_set" in inf_params, "eval_sample_set not passed to inference"
 
+    # ── Phase 6.6 A.11 — hardware_context + inference_batch wiring ────────
+
+    def test_evaluate_vram_skill_receives_hardware_context(self, agent_and_mocks, tmp_path):
+        """A.11: the tuner must forward the per-run ``HardwareContext`` (built
+        by A.1.6's ``get_or_create``) into every ``evaluate_vram_skill`` call,
+        so the skill's cap is consistent across the run and does not re-probe
+        ``torch.cuda`` internally."""
+        from core.hardware_context import HardwareContext
+        agent, _, _, _ = agent_and_mocks
+        skill_calls = []
+        original_mock = _mock_run_skill
+
+        def tracking_mock(skill_folder, sandbox, **params):
+            skill_calls.append((skill_folder, params))
+            return original_mock(skill_folder, sandbox, **params)
+
+        with patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=tracking_mock):
+            agent.run(_make_trial_input(tmp_path, max_rounds=1, is_trial=True))
+
+        vram_calls = [p for f, p in skill_calls if f == "evaluate_vram_skill"]
+        assert len(vram_calls) >= 1, "evaluate_vram_skill not called"
+        for params in vram_calls:
+            assert "hardware_context" in params, (
+                "hardware_context kwarg missing from evaluate_vram_skill call"
+            )
+            assert isinstance(params["hardware_context"], HardwareContext)
+
+    def test_inference_skill_receives_inference_batch_from_resource_check(
+        self, tmp_path,
+    ):
+        """A.11: ``resource_check["inference_batch"]`` must flow into
+        ``active_params`` so the inference skill (and through it,
+        ``sandbox.execute_inference``) receives the batch the VRAM skill
+        chose — not the legacy registry default."""
+        skill_calls = []
+
+        def resource_check_with_batch(skill_folder, sandbox, **params):
+            skill_calls.append((skill_folder, params))
+            if skill_folder == "check_config_format_skill":
+                return FAKE_CONFIG_MANUAL
+            if skill_folder == "evaluate_vram_skill":
+                return {**FAKE_RESOURCE_CHECK_OK, "inference_batch": 7}
+            if skill_folder == "training_skill":
+                return FAKE_TRAIN_RESULT
+            if skill_folder == "inference_skill":
+                return FAKE_INFERENCE_RESULT
+            if skill_folder == "denoising_score_skill":
+                return FAKE_SCORE_RESULT
+            return {"status": "error", "message": "unknown skill"}
+
+        with patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge, \
+             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox, \
+             patch("nodes.ml_hyperparameter_tune_agent._run_skill",
+                   side_effect=resource_check_with_batch), \
+             patch("nodes.ml_hyperparameter_tune_agent.load_reference_scores",
+                   return_value=_synth_reference()), \
+             tempfile.TemporaryDirectory() as configs_dir:
+            mock_brain = MockBridge.return_value
+            mock_brain.plan.return_value = FAKE_PLAN_RESPONSE
+            mock_brain.reflect.return_value = FAKE_REFLECT_RESPONSE
+
+            saved_records: list = []
+            mock_sandbox = MockSandbox.return_value
+            mock_sandbox.get_summary.side_effect = lambda: list(saved_records)
+            mock_sandbox.save_record.side_effect = lambda r: saved_records.append(r)
+            mock_sandbox.dirs = {"configs": configs_dir}
+
+            agent = HyperparamTuningAgent()
+            agent.run(_make_input(tmp_path, max_rounds=1))
+
+        inference_calls = [p for f, p in skill_calls if f == "inference_skill"]
+        assert len(inference_calls) >= 1, "inference_skill not called"
+        assert inference_calls[0].get("inference_batch") == 7, (
+            "inference_batch from resource_check did not reach inference_skill call"
+        )
+
+        # And the saved record's params carry the batch too — so post-hoc
+        # analysis sees what actually ran, not the legacy registry default.
+        success_records = [r for r in saved_records if r.get("status") == "success"]
+        assert len(success_records) >= 1
+        assert success_records[0]["params"].get("inference_batch") == 7
+
     def test_formal_round_builds_two_sample_sets(self, agent_and_mocks, tmp_path):
         """Formal round: two build_sample_set calls — one for train, one for eval.
 

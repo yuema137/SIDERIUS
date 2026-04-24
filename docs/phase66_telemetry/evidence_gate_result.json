@@ -1,0 +1,58 @@
+{
+  "phases": {
+    "training": {
+      "batch_size": 8,
+      "segmentation_size": 10000,
+      "measured_peak_bytes": 883782656,
+      "measured_peak_gb": 0.8231,
+      "predicted_peak_bytes": 883437056,
+      "predicted_peak_gb": 0.8228,
+      "relative_delta": -0.0004,
+      "within_10pct": true,
+      "breakdown": {
+        "autograd_tape_bytes": 553718784,
+        "input_bytes": 640000,
+        "output_bytes": 81920000,
+        "param_bytes": 185728,
+        "training_overhead_bytes": 557184,
+        "cuda_context_bytes": 193986560,
+        "cudnn_backward_bytes": 52428800
+      }
+    },
+    "inference": {
+      "inference_batch": 25,
+      "segmentation_size": 10000,
+      "measured_peak_bytes": 452210176,
+      "measured_peak_gb": 0.4212,
+      "predicted_peak_bytes": 452172288,
+      "predicted_peak_gb": 0.4211,
+      "relative_delta": -0.0001,
+      "within_10pct": true,
+      "breakdown": {
+        "input_bytes": 2000000,
+        "max_output_bytes": 256000000,
+        "param_bytes": 185728,
+        "cuda_context_bytes": 193986560
+      }
+    }
+  },
+  "gate_pass": true,
+  "skill_path_snapshot": {
+    "status": "success",
+    "feasible": true,
+    "estimated_gb": 0.823,
+    "dominant_phase": "training",
+    "inference_batch": 64,
+    "phase_breakdown": {
+      "training": {
+        "total_bytes": 883437056
+      },
+      "scoring": {
+        "total_bytes": 0
+      },
+      "inference": {
+        "total_bytes": 854652288
+      }
+    }
+  }
+}

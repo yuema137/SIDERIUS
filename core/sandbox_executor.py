@@ -515,14 +515,23 @@ class TidmadSandbox:
         return validated_m, validated_l
 
     def execute_inference(self, exp_id: str, run_name: str, model_type: str, m_cfg: Dict, l_cfg: Dict,
-                          sample_set: Optional[Dict] = None):
+                          sample_set: Optional[Dict] = None,
+                          inference_batch: Optional[int] = None):
         """Executes the inference physical script.
 
         Args:
-            m_cfg:      Model config dict — validated and written to JSON.
-            l_cfg:      Loss config dict — validated and written to JSON.
-            sample_set: Optional SampleSet dict. When provided, written to JSON
-                        and passed via --sample_set_json.
+            m_cfg:           Model config dict — validated and written to JSON.
+            l_cfg:           Loss config dict — validated and written to JSON.
+            sample_set:      Optional SampleSet dict. When provided, written to JSON
+                             and passed via --sample_set_json.
+            inference_batch: Phase 6.6 A.10 — explicit batch chosen by the
+                             pre-flight ``evaluate_vram_skill``. When provided,
+                             it is the authoritative runtime batch. When ``None``
+                             (legacy path and during the A.6–A.11 landing window),
+                             fall back to ``inference_batch_for(model_type)`` so
+                             callers not yet wired through the tuner keep running.
+                             A.9 will remove the fallback once every caller has
+                             been migrated.
         """
         validated_m, validated_l = self._validate_model_and_loss(model_type, m_cfg, l_cfg)
         m_path = os.path.abspath(os.path.join(self.dirs["configs"], f"model_config_{exp_id}.json"))
@@ -530,7 +539,10 @@ class TidmadSandbox:
         with open(m_path, 'w') as f: json.dump(validated_m, f)
         with open(l_path, 'w') as f: json.dump(validated_l, f)
         model_path = os.path.abspath(os.path.join(self.dirs["models"], f"model_{model_type}_{exp_id}_agent.pth"))
-        inf_bs = str(inference_batch_for(model_type))
+        inf_bs = str(
+            inference_batch if inference_batch is not None
+            else inference_batch_for(model_type)
+        )
 
         cmd = [sys.executable, "execute_tools/inference_single.py", "--mode", "agent", "-m", model_type,
                "--model_cfg", m_path, "--loss_cfg", l_path,

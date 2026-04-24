@@ -141,6 +141,100 @@ class TestExecuteInferenceStdout:
 
 
 # ==========================================
+# execute_inference — Phase 6.6 A.10 inference_batch wiring
+# ==========================================
+
+class TestExecuteInferenceBatch:
+    """A.10: ``execute_inference`` must prefer the explicit ``inference_batch``
+    kwarg over the legacy registry. The plumbing is a single CLI argument
+    (``--inference_batch_size``) whose value becomes the runtime batch size
+    the subprocess uses — so we assert on the exact CLI token the subprocess
+    receives, not on internal state."""
+
+    def _seed_files(self, sandbox):
+        import os, json
+        cfg_dir = sandbox.dirs["configs"]
+        os.makedirs(cfg_dir, exist_ok=True)
+        for name in [f"model_config_{EXP_ID}.json", f"loss_config_{EXP_ID}.json"]:
+            with open(os.path.join(cfg_dir, name), "w") as f:
+                json.dump({}, f)
+        model_path = os.path.join(sandbox.dirs["models"], f"model_fcnet_{EXP_ID}_agent.pth")
+        open(model_path, "w").close()
+
+    def _cli_token_after(self, cmd, flag):
+        """Extract the CLI argument value immediately following ``flag`` in
+        ``cmd``. Asserting on the full cmd list would over-specify the test —
+        this isolates the single token the test cares about."""
+        idx = cmd.index(flag)
+        return cmd[idx + 1]
+
+    @patch("core.sandbox_executor.subprocess.run")
+    def test_explicit_inference_batch_is_used(self, mock_run, sandbox):
+        """When the caller passes ``inference_batch=8``, the CLI must carry
+        ``--inference_batch_size 8`` — not whatever the registry says for
+        ``fcnet`` (which defaults to 25)."""
+        self._seed_files(sandbox)
+        mock_run.return_value = _make_mock_result()
+        sandbox.execute_inference(
+            EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, LOSS_CFG,
+            inference_batch=8,
+        )
+        (cmd,), _ = mock_run.call_args
+        assert self._cli_token_after(cmd, "--inference_batch_size") == "8"
+
+    @patch("core.sandbox_executor.subprocess.run")
+    def test_none_falls_back_to_registry(self, mock_run, sandbox):
+        """Back-compat: callers not yet wired through the tuner (A.6–A.11
+        landing window) pass no batch. The executor falls through to
+        ``inference_batch_for('fcnet')`` which is 25."""
+        self._seed_files(sandbox)
+        mock_run.return_value = _make_mock_result()
+        sandbox.execute_inference(
+            EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, LOSS_CFG,
+            inference_batch=None,
+        )
+        (cmd,), _ = mock_run.call_args
+        assert self._cli_token_after(cmd, "--inference_batch_size") == "25"
+
+    @patch("core.sandbox_executor.subprocess.run")
+    def test_omitted_kwarg_falls_back_to_registry(self, mock_run, sandbox):
+        """Positional call without the kwarg must match the ``None`` path
+        (default value is ``None``) — pins the default so a future refactor
+        can't silently swap it."""
+        self._seed_files(sandbox)
+        mock_run.return_value = _make_mock_result()
+        sandbox.execute_inference(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, LOSS_CFG)
+        (cmd,), _ = mock_run.call_args
+        assert self._cli_token_after(cmd, "--inference_batch_size") == "25"
+
+    @patch("core.sandbox_executor.subprocess.run")
+    def test_explicit_beats_registry_on_known_type(self, mock_run, sandbox):
+        """Even when the model_type HAS a registry entry, the explicit value
+        must still win — this is the whole point of A.10. Registry is no
+        longer the source of truth once the tuner is wired (A.11)."""
+        self._seed_files(sandbox)
+        mock_run.return_value = _make_mock_result()
+        # transformer's registry entry is 1; force-pass 4 instead.
+        import os, json
+        cfg_dir = sandbox.dirs["configs"]
+        for name in [
+            f"model_config_{EXP_ID}.json", f"loss_config_{EXP_ID}.json",
+        ]:
+            with open(os.path.join(cfg_dir, name), "w") as f:
+                json.dump({}, f)
+        model_path = os.path.join(
+            sandbox.dirs["models"], f"model_fcnet_{EXP_ID}_agent.pth",
+        )
+        open(model_path, "w").close()
+        sandbox.execute_inference(
+            EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, LOSS_CFG,
+            inference_batch=4,
+        )
+        (cmd,), _ = mock_run.call_args
+        assert self._cli_token_after(cmd, "--inference_batch_size") == "4"
+
+
+# ==========================================
 # execute_scoring
 # ==========================================
 

@@ -17,8 +17,10 @@ import json
 import argparse
 import importlib
 import traceback
+from pathlib import Path
 from typing import Optional, Union
 
+from core.hardware_context import get_or_create
 from core.sandbox_executor import TidmadSandbox
 from agent.llm_bridge import LLMBridge
 from agent.schemas.hyperparam_tuning import (
@@ -621,6 +623,17 @@ class HyperparamTuningAgent:
         # --- Extract frequently used fields ---
         workspace = agent_input.storage.local.workspace
         run_name = agent_input.storage.local.run_name
+
+        # Per-run hardware manifest (Phase 6.6 §3.9) — file IPC with sandbox children.
+        hardware_context = get_or_create(Path(workspace), run_name)
+        print(
+            f"[Tuner] Hardware context: {hardware_context.device_name} "
+            f"| total={hardware_context.total_memory_gb:.1f} GB "
+            f"| cap={hardware_context.usable_cap_gb:.1f} GB "
+            f"| host={hardware_context.hostname} "
+            f"| available={hardware_context.device_available}"
+        )
+
         model_type_setting = agent_input.model_type
         max_rounds = agent_input.max_rounds
         file_index = agent_input.file_index
@@ -1075,11 +1088,15 @@ class HyperparamTuningAgent:
                     print(f"\n[Pre-flight 1/2] VRAM check "
                           f"(mode={'trial' if plan.is_trial else 'formal'}, "
                           f"budget={vram_budget_desc})...")
+                    # Phase 6.6 A.11 — pass the per-run hardware manifest (from
+                    # A.1.6's get_or_create) into the skill so the cap is
+                    # physically correct and consistent across the whole run.
                     resource_check = _run_skill(
                         "evaluate_vram_skill",
                         sandbox,
                         **active_params,
                         vram_budget_gb=chosen_vram_budget,
+                        hardware_context=hardware_context,
                     )
                     if resource_check.get("status") == "error":
                         raise RuntimeError(f"Resource check error: {resource_check.get('message')}")
@@ -1190,7 +1207,19 @@ class HyperparamTuningAgent:
                         ExperimentRecord.model_validate(oom_record)
                         sandbox.save_record(oom_record)
                         continue
-    
+
+                    # Phase 6.6 A.11 — capture the batch the VRAM skill picked
+                    # and propagate it through the rest of the attempt. Lands in
+                    # active_params (so _run_skill("inference_skill", ...) forwards
+                    # it to sandbox.execute_inference) and record_params (so the
+                    # saved record reflects what actually ran, not the legacy
+                    # registry default). ``inference_batch`` is always present on
+                    # a feasible resource_check; fall back to None (executor's
+                    # back-compat path) if the wrapper somehow omits it.
+                    chosen_inference_batch = resource_check.get("inference_batch")
+                    active_params["inference_batch"] = chosen_inference_batch
+                    record_params["inference_batch"] = chosen_inference_batch
+
                     # [Pre-flight 2/2] Wall-time gate. Mirrors the VRAM gate above:
                     # error → raise; infeasible → emit skipped_time_risk record
                     # and continue without consuming a round. Skipped entirely
