@@ -73,7 +73,7 @@ SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, SIDERIUS_ROOT)
 sys.path.insert(0, os.path.join(SIDERIUS_ROOT, "ml_models"))
 
-from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
+from agent.schemas.hyperparam_tuning import HyperparamTuningOutput, PhysicalRejection
 from agent.schemas.interpretation import InterpretationInput, ModelRunSummary
 from core.hardware_context import get_or_create as get_or_create_hardware_context
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
@@ -258,6 +258,80 @@ def _make_storage(workspace: str, run_name: str) -> StorageConfig:
         backend="local",
         local=LocalStorageConfig(workspace=workspace, run_name=run_name),
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 6.6 WS-B B.3 Hop 4 — worst-offender aggregation + [PHYSICAL
+# REJECTION] renderer. One entry per (prior-iteration tuning output,
+# architecture) group; fed to the next Proposer's previous_failures so
+# the LLM sees per-architecture lessons, not every failed attempt.
+# See docs/phase66_ws_b_proposer_hardening.md §2.4 / §3.2.
+# ---------------------------------------------------------------------------
+
+def _aggregate_worst_offender_rejections(
+    rejections: list[PhysicalRejection],
+) -> list[tuple[PhysicalRejection, int]]:
+    """Group rejections by ``attempt_config["model_type"]``; return one
+    ``(worst_rejection, count_in_group)`` tuple per group.
+
+    Worst = highest ``estimated_gb / budget_gb`` ratio; tie broken by
+    higher ``dominant_fraction``. ``budget_gb == 0`` is treated as +inf
+    ratio — a degenerate signal the orchestrator should still surface.
+
+    Empty input -> empty output (no-op for iterations with zero rejections).
+    """
+    if not rejections:
+        return []
+
+    from collections import defaultdict
+    groups: dict[str, list[PhysicalRejection]] = defaultdict(list)
+    for r in rejections:
+        mt = str(r.attempt_config.get("model_type", "unknown"))
+        groups[mt].append(r)
+
+    out: list[tuple[PhysicalRejection, int]] = []
+    for _mt, rejs in groups.items():
+        def _rank(r: PhysicalRejection) -> tuple[float, float]:
+            ratio = (r.estimated_gb / r.budget_gb) if r.budget_gb > 0 else float("inf")
+            return (ratio, r.dominant_fraction)
+        worst = max(rejs, key=_rank)
+        out.append((worst, len(rejs)))
+    return out
+
+
+def _render_physical_rejection(rej: PhysicalRejection, n_rejections: int) -> str:
+    """Render one aggregated ``[PHYSICAL REJECTION]`` string for the
+    Proposer's ``previous_failures`` list.
+
+    Format (multi-line, leading ``[PHYSICAL REJECTION]`` tag so the
+    downstream prompt's "DO NOT repeat these mistakes" header is
+    unambiguous; the Proposer's existing previous_failures renderer in
+    ``_build_reasoning_prompt`` splices the whole string verbatim):
+
+        [PHYSICAL REJECTION] <model_type>: rejected N attempt(s) by the VRAM gate.
+          Worst offender: estimated X.XX GB > budget Y.YY GB (binding cap: ...).
+          Dominant layer: <name> consumed Z.ZZ GB (PP% of peak).
+          Attempted config: {...}.
+          Suggestion: <verbatim from killer_report>.
+    """
+    model_type = str(rej.attempt_config.get("model_type", "unknown"))
+    plural = "s" if n_rejections != 1 else ""
+    lines = [
+        f"[PHYSICAL REJECTION] {model_type}: rejected {n_rejections} "
+        f"attempt{plural} by the VRAM gate.",
+        f"  Worst offender: estimated {rej.estimated_gb:.2f} GB > "
+        f"budget {rej.budget_gb:.2f} GB (binding cap: {rej.binding_cap}).",
+    ]
+    if rej.dominant_layer:
+        lines.append(
+            f"  Dominant layer: {rej.dominant_layer} consumed "
+            f"{rej.dominant_layer_gb:.2f} GB "
+            f"({rej.dominant_fraction * 100:.0f}% of peak)."
+        )
+    lines.append(f"  Attempted config: {rej.attempt_config}.")
+    if rej.suggestion:
+        lines.append(f"  Suggestion: {rej.suggestion}")
+    return "\n".join(lines)
 
 
 def _register_plugin(impl_output, model_name: str, dest_plugin_dir: str):
@@ -601,6 +675,29 @@ def run_workflow(
         impl_output = None
         validation = None
         previous_failures: list[str] = []
+
+        # Phase 6.6 WS-B B.3 Hop 4 — seed previous_failures with aggregated
+        # [PHYSICAL REJECTION] strings from the PRIOR iteration's tuner so
+        # the Proposer sees per-architecture VRAM lessons. No-op on
+        # iteration 1 (no prior tuner output) and on iterations whose
+        # prior tuner had zero infeasible attempts.
+        # See docs/phase66_ws_b_proposer_hardening.md §4.3 / §6.2.
+        if iteration_results:
+            _prior = iteration_results[-1]
+            _aggregated = _aggregate_worst_offender_rejections(
+                _prior.physical_rejections,
+            )
+            for _worst, _count in _aggregated:
+                previous_failures.append(
+                    _render_physical_rejection(_worst, _count)
+                )
+            if _aggregated:
+                print(
+                    f"  [{iteration}] Seeded {len(_aggregated)} "
+                    f"[PHYSICAL REJECTION] entr"
+                    f"{'y' if len(_aggregated) == 1 else 'ies'} into "
+                    f"previous_failures from iteration {iteration - 1}'s tuner."
+                )
 
         for attempt in range(1, max_proposal_attempts + 1):
             print(f"  [{iteration}.{attempt}] Proposing new model (attempt {attempt}/{max_proposal_attempts})...")
