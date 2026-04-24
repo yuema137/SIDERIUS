@@ -446,9 +446,9 @@ Each is a single commit with its own focused test. Estimated ship: four commits,
   - [ ] **Deferred:** second `<10 GB VRAM` occurrence in `PROPOSAL_COMMIT_PROMPT` (hard-constraint list for baseline_config). Out of scope for B.2 per user directive; will fold into a later cleanup pass or a commit-prompt hardware-aware rewrite.
   - [ ] Tests: §5.1 test 3.
 
-- [ ] **B.4 — Contract Re-Assertion (Golden Paragraph).**
-  - Rewrite the `mathematical_definition` field spec in `PROPOSAL_COMMIT_PROMPT` per §3.3.
-  - Tests: §5.2 rendered-prompt guard.
+- [x] **B.4 — Contract Re-Assertion (Golden Paragraph).** *(landed on `feat/deterministic-vram`; audit dry-run /tmp/ws_b_b4_dryrun.py confirms all 9 marker checks pass)*
+  - [x] Rewrote the `mathematical_definition` field spec in `PROPOSAL_COMMIT_PROMPT` verbatim per §3.3. Three citation markers confirmed present: (1) forward contract (`[B, T] int64` / `[B, 256, T] float32`), (2) segmentation semantics (`segment-local`, `segment-cross`, `causal masking`), (3) fixed-dimension clause (`256 denoising bins` + `contract-fixed`). Existing "Do NOT include concrete layer dimensions" + `belong in baseline_config` guardrails preserved. Field spec length: 777 chars (up from 342).
+  - [ ] Tests: §5.2 rendered-prompt guard — dedicated unit test deferred; audit dry-run is the provisional stand-in.
 
 - [ ] **B.5 — VRAM-Awareness end-to-end test.**
   - Implement `tests/integration/workflows/test_vram_awareness.py` per §5.3.
