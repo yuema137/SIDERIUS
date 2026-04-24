@@ -25,13 +25,14 @@ import argparse
 
 from pydantic import ValidationError
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from agent.llm_bridge import LLMBridge
 from agent.prompts import _format_known_constraints_block
 from agent.schemas.proposal import ProposalInput, ProposalOutput, FalsifiablePrediction
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from agent.schemas.hyperparam_tuning import GateExhaustionInfo, serialize_expert_advice
+from core.hardware_context import HardwareContext
 from agent.utils.architectural_pattern_tagger import ARCHITECTURAL_PATTERNS
 from agent.utils.proposer_preflight import estimate_proposal_time
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
@@ -272,6 +273,75 @@ Output only the JSON object — no preamble, no markdown fences, no commentary."
 # Prompt builders
 # ---------------------------------------------------------------------------
 
+def _render_hardware_context_block(
+    ctx: Optional[HardwareContext],
+    vram_budget_gb: Optional[float],
+) -> str:
+    """Render the ``[HARDWARE CONTEXT]`` prompt block.
+
+    Mirrors the three regimes of ``wrapper.py``'s ``[Hardware]`` log
+    classifier (PHYSICAL / BUDGET / PHYSICAL VETO). See
+    docs/phase66_ws_b_proposer_hardening.md §3.1.
+
+    Returns ``""`` when ``ctx`` is None or ``device_available=False`` —
+    CPU-only runs and legacy callers get no block injected, preserving
+    back-compat with prompts rendered pre-WS-B.
+
+    Regime selection:
+      - ``vram_budget_gb is None``                 → PHYSICAL       (cap = usable_cap_gb)
+      - ``vram_budget_gb <= usable_cap_gb``        → BUDGET         (cap = vram_budget_gb)
+      - ``vram_budget_gb  > usable_cap_gb``        → PHYSICAL VETO  (cap = usable_cap_gb; operator ceiling is above the 80% physical safety floor and therefore ignored)
+    """
+    if ctx is None or not ctx.device_available:
+        return ""
+
+    usable = ctx.usable_cap_gb
+    if vram_budget_gb is None:
+        regime, effective = "PHYSICAL", usable
+    elif vram_budget_gb <= usable:
+        regime, effective = "BUDGET", vram_budget_gb
+    else:
+        regime, effective = "PHYSICAL VETO", usable
+
+    lines = [
+        "[HARDWARE CONTEXT]",
+        f"Device:            {ctx.device_name}",
+        f"Total VRAM:        {ctx.total_memory_gb:.2f} GB",
+        f"Usable cap (80%):  {usable:.2f} GB",
+        f"Host:              {ctx.hostname}",
+    ]
+    if vram_budget_gb is not None:
+        lines.append(f"Operator budget:   {vram_budget_gb:.2f} GB")
+        lines.append(f"Effective cap:     {effective:.2f} GB")
+
+    if regime == "PHYSICAL":
+        lines.append(
+            f"Regime:            PHYSICAL — no operator budget set; cap = {effective:.2f} GB."
+        )
+    elif regime == "BUDGET":
+        lines.append(
+            "Regime:            BUDGET — operator's budget is the binding ceiling."
+        )
+    else:  # PHYSICAL VETO
+        lines.append(
+            "Regime:            PHYSICAL VETO — operator budget exceeds the 80%"
+        )
+        lines.append(
+            "                   physical safety floor; the physical cap wins."
+        )
+
+    lines.append("")
+    lines.append(
+        "Your baseline_config must fit within the **effective cap** shown above. "
+        "The VRAM engine will reject any architecture whose predicted peak exceeds "
+        "this ceiling; a rejection consumes a tuner attempt with no scored round. "
+        "Size your baseline to stay comfortably below the cap (target ≤ 80% of the "
+        "effective cap at baseline) so the tuner has headroom to vary batch_size "
+        "and segmentation_size upward."
+    )
+    return "\n".join(lines)
+
+
 def _format_recent_gate_exhaustions_block(
     entries: List[GateExhaustionInfo],
 ) -> str:
@@ -412,6 +482,15 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
     """Build the user prompt for the reasoning call."""
     interp = inp.interpretation
     lines = []
+
+    # Phase 6.6 WS-B (B.2 bleed-over, landed with B.1 for Level-2 validation):
+    # Render the [HARDWARE CONTEXT] block at the top of the user prompt so the
+    # Proposer sees the effective VRAM ceiling (PHYSICAL / BUDGET / PHYSICAL
+    # VETO regime) before any interpretation data. Empty string on CPU-only /
+    # legacy-caller runs — no visible change for pre-WS-B test fixtures.
+    hw_block = _render_hardware_context_block(inp.hardware_context, inp.vram_budget_gb)
+    if hw_block:
+        lines += [hw_block, ""]
 
     lines += [
         "## Interpretation Summary",

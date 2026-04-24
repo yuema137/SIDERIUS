@@ -440,11 +440,11 @@ Each is a single commit with its own focused test. Estimated ship: four commits,
   - Extend the iter-end block of the orchestrator loop: after the tuner returns, render the aggregated rejections and extend `previous_failures`.
   - Tests: §5.1 tests 1 and 2; §5.3 pseudo-mode smoke.
 
-- [ ] **B.2 — `[HARDWARE CONTEXT]` block + literal removal.**
-  - Implement `_render_hardware_context_block(ctx, vram_budget_gb) -> str` in `nodes/ml_model_proposal_agent.py` (or a shared helper module if cleaner).
-  - Inject the block near the top of `_build_reasoning_prompt`'s user message (before the interpretation dump).
-  - Delete the hardcoded `GPU budget: target <10 GB VRAM and <100M parameters [...]` line at :187.
-  - Tests: §5.1 test 3.
+- [~] **B.2 — `[HARDWARE CONTEXT]` block + literal removal.** *(partial — renderer landed as B.1-validation bleed-over on `feat/deterministic-vram`, uncommitted; Level 2 dry-run confirms BUDGET regime renders end-to-end)*
+  - [x] Implement `_render_hardware_context_block(ctx, vram_budget_gb) -> str` in `nodes/ml_model_proposal_agent.py`. Implementation matches §3.1 regime-selection logic verbatim; companion instruction text appended inline. Uses `ctx.hostname` (actual field name) — §3.1 template literal `Host:` is rendered from `ctx.hostname`.
+  - [x] Inject the block near the top of `_build_reasoning_prompt`'s user message (before the interpretation dump). Level 2 dry-run output: lines 1–10 of user prompt carry the block; 29-line total prompt, 1 occurrence of `[HARDWARE CONTEXT]`, BUDGET regime correctly selected when `vram_budget_gb=20.0 < usable_cap_gb=25.60`.
+  - [ ] Delete the hardcoded `GPU budget: target <10 GB VRAM and <100M parameters [...]` line at `:187`. **Intentionally deferred** from the B.1-validation bleed-over to keep the commit scope minimal; deletion + the `no_hardcoded_device_literals` guardrail re-run lands as a dedicated B.2 commit.
+  - [ ] Tests: §5.1 test 3.
 
 - [ ] **B.4 — Contract Re-Assertion (Golden Paragraph).**
   - Rewrite the `mathematical_definition` field spec in `PROPOSAL_COMMIT_PROMPT` per §3.3.
