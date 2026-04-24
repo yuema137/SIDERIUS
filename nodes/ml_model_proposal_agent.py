@@ -261,7 +261,7 @@ Hard constraints — violating any of these makes the proposal invalid:
 - model_name must NOT be any of the existing model types listed in the context
 - model_name must be snake_case: lowercase letters, digits, and underscores only
 - The forward contract is fixed: input [B, T] int64 → output [B, 256, T] float32
-- baseline_config must be conservative: fits comfortably in <10 GB VRAM
+- baseline_config must be conservative: fits comfortably within the effective cap shown in the [HARDWARE CONTEXT] (the VRAM gate rejects anything above it)
 - expert_advice.constraints must include at least one VRAM limit and one parameter count limit
 - parameter_count_estimate must be a positive integer — your best estimate of the total
   trainable parameter count at the baseline_config. An order-of-magnitude estimate is
