@@ -185,7 +185,9 @@ Background on the task:
 - This is offline denoising — the output at position t may depend on all positions.
   Causal constraints are not required.
 - Loss is cross-entropy or focal loss: per-timestep 256-class classification.
-- GPU budget: target <10 GB VRAM and <100M parameters for initial exploration.
+- The VRAM ceiling is published in the [HARDWARE CONTEXT] block at the top of
+  the user message — treat that block's "Effective cap" as the hard limit,
+  and keep `parameter_count_estimate` under ~100M for initial exploration.
 
 In your reasoning, cover all of the following:
 1. What structural weakness do the bottlenecks and take-home message specifically point to?
