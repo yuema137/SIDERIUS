@@ -758,10 +758,108 @@ async function loadTrialTable() {
   }
 }
 
+// ── Iteration Summary Table ─────────────────────────────────────────────────
+
+async function populateIterationDropdown() {
+  const sel = document.getElementById('iter-run');
+  try {
+    const data = await fetchJSON('/api/exploration/runs');
+    const runs = data.runs || [];
+    if (runs.length === 0) {
+      sel.innerHTML = '<option value="">no exploration runs</option>';
+    } else {
+      sel.innerHTML = runs.map(r => `<option value="${r}">${r}</option>`).join('');
+    }
+  } catch (e) {
+    sel.innerHTML = '<option value="">error</option>';
+  }
+}
+
+async function loadIterationTable() {
+  const run = document.getElementById('iter-run').value;
+  const wrap = document.getElementById('iter-table-wrap');
+
+  if (!run) {
+    wrap.innerHTML = '<p style="color:var(--muted);">Select an exploration run first.</p>';
+    return;
+  }
+
+  wrap.innerHTML = '<p style="color:var(--muted);">Loading…</p>';
+
+  try {
+    const data = await fetchJSON(`/api/exploration/runs/${run}/iteration_table`);
+    const rows = data.rows || [];
+    const maxRounds = data.max_rounds || 0;
+
+    if (rows.length === 0) {
+      wrap.innerHTML = '<p style="color:var(--muted);">No iterations found for this run.</p>';
+      return;
+    }
+
+    const fmt = (v, d=2) => v != null ? Number(v).toFixed(d) : '—';
+
+    // Two-row header: top row spans the static cols + each round-block;
+    // bottom row gives the per-round sub-column labels.
+    let topRow = `<th rowspan="2">Iteration</th>
+                  <th rowspan="2">Model</th>
+                  <th rowspan="2">Status</th>`;
+    let subRow = '';
+    for (let i = 0; i < maxRounds; i++) {
+      topRow += `<th colspan="5" class="round-group">Round ${i + 1}</th>`;
+      subRow += `<th>Mode</th><th>Trial Portion</th><th>Train Portion</th><th>Final Loss</th><th>Score</th>`;
+    }
+    topRow += '<th rowspan="2">Termination</th>';
+
+    let html = `<table class="trial-table iteration-table">
+      <thead>
+        <tr>${topRow}</tr>
+        <tr>${subRow}</tr>
+      </thead><tbody>`;
+
+    for (const r of rows) {
+      const statusClass = r.status === 'completed' ? 'status-ok'
+                       : (r.status ? 'status-fail' : '');
+
+      html += `<tr>
+        <td>${r.iteration}</td>
+        <td>${r.model_name || '—'}</td>
+        <td class="${statusClass}">${r.status || '—'}</td>`;
+
+      const rounds = r.rounds || [];
+      for (let i = 0; i < maxRounds; i++) {
+        const rd = rounds[i];
+        if (!rd) {
+          html += `<td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>`;
+          continue;
+        }
+        const mode = rd.is_trial === true ? 'trial'
+                  : (rd.is_trial === false ? 'formal' : '—');
+        const modeClass = rd.is_trial === true ? 'mode-trial'
+                      : (rd.is_trial === false ? 'mode-formal' : '');
+        html += `<td class="${modeClass}">${mode}</td>
+                 <td>${fmt(rd.trial_portion)}</td>
+                 <td>${fmt(rd.train_portion)}</td>
+                 <td>${fmt(rd.final_loss, 4)}</td>
+                 <td>${fmt(rd.denoising_score, 3)}</td>`;
+      }
+
+      html += `<td>${r.termination_reason || '—'}</td></tr>`;
+    }
+
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+  } catch (e) {
+    wrap.innerHTML = `<p style="color:red;">Error: ${e.message}</p>`;
+  }
+}
+
 // ── Public API (called from HTML) ────────────────────────────────────────────
-window.App = { addSeries, addExplorationSeries, removeSeries, refresh, toggleTheme, setAxisType, applyRange, resetRange, toggleHighlight, setAlpha, loadTrialTable };
+window.App = { addSeries, addExplorationSeries, removeSeries, refresh, toggleTheme, setAxisType, applyRange, resetRange, toggleHighlight, setAlpha, loadTrialTable, loadIterationTable };
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  bootstrap().then(() => populateTrialDropdowns());
+  bootstrap().then(() => {
+    populateTrialDropdowns();
+    populateIterationDropdown();
+  });
 });

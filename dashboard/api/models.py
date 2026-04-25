@@ -190,3 +190,45 @@ class ModelListResponse(BaseModel):
 class RunListResponse(BaseModel):
     model: str
     runs: list[str]
+
+
+# ---------------------------------------------------------------------------
+# Exploration iteration table — one row per explore-loop iteration,
+# summarising the best record found by the hyperparam tuner for that iteration.
+# ---------------------------------------------------------------------------
+
+class IterationRound(BaseModel):
+    """One round-block for the iteration table — corresponds to one
+    actually-executed record in the iteration's ``all_records`` (skipped
+    attempts are filtered out by the endpoint before rounds are emitted).
+    """
+    exp_id: str
+    is_trial: Optional[bool] = None
+    trial_portion: Optional[float] = None
+    train_portion: Optional[float] = None
+    final_loss: Optional[float] = None
+    denoising_score: Optional[float] = None
+
+
+class IterationTableRow(BaseModel):
+    """One row of the exploration iteration-summary table.
+
+    Each row is one new-model-explore iteration. ``rounds`` holds only the
+    records that actually ran (status == ``success``); skipped/error
+    attempts are filtered out before reaching the wire. The frontend pads
+    each row with em-dash blocks up to ``IterationTableResponse.max_rounds``
+    so the columns align across the whole run.
+    """
+    iteration: str                              # "iteration_001" or "iter_001"
+    model_name: Optional[str] = None            # discovered model dir (or attempt fallback)
+    status: Optional[str] = None                # run_output top-level status
+    termination_reason: Optional[str] = None
+    completed_rounds: Optional[int] = None
+    total_attempts: Optional[int] = None
+    rounds: list[IterationRound] = Field(default_factory=list)
+
+
+class IterationTableResponse(BaseModel):
+    run_name: str
+    max_rounds: int                             # widest rounds[] across rows; drives column count
+    rows: list[IterationTableRow]

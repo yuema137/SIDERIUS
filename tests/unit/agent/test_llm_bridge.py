@@ -191,6 +191,40 @@ class TestGenerate:
             with pytest.raises(ValueError, match="not valid JSON"):
                 bridge.generate(SYSTEM_PROMPT, USER_PROMPT)
 
+    def test_extra_json_object_after_valid_one_is_discarded(self):
+        """Direct repro of the explore_novel_v4_0425 crash: the LLM emitted a
+        valid JSON object, then a newline, then a SECOND JSON object. Strict
+        ``json.loads`` raised ``Extra data: line 2 column 1``. The bridge now
+        uses ``raw_decode`` so the first object is accepted and the trailing
+        content is discarded — production runs no longer crash on this."""
+        payload = VALID_JSON_STR + "\n" + '{"second": "ignored"}'
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.chat.completions.create.return_value = _chat_response(payload)
+            bridge = LLMBridge(provider="openai", model_id="gpt-4o")
+            result = bridge.generate(SYSTEM_PROMPT, USER_PROMPT)
+        assert result == VALID_JSON_DICT
+
+    def test_trailing_prose_after_valid_json_is_discarded(self):
+        """Trailing free-form commentary after a valid JSON object must not
+        crash. Same robustness contract as the dual-object case."""
+        payload = VALID_JSON_STR + "\nThat's my answer — let me know if you want changes."
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.chat.completions.create.return_value = _chat_response(payload)
+            bridge = LLMBridge(provider="openai", model_id="gpt-4o")
+            result = bridge.generate(SYSTEM_PROMPT, USER_PROMPT)
+        assert result == VALID_JSON_DICT
+
+    def test_non_dict_or_list_first_token_raises(self):
+        """If the first JSON token is a bare string/number/bool, the response
+        violates the caller contract (which expects a dict/list). The bridge
+        must surface this rather than return a primitive that downstream code
+        would mishandle."""
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value.chat.completions.create.return_value = _chat_response('"just a string"')
+            bridge = LLMBridge(provider="openai", model_id="gpt-4o")
+            with pytest.raises(ValueError, match="expected dict/list"):
+                bridge.generate(SYSTEM_PROMPT, USER_PROMPT)
+
     def test_markdown_fenced_json_is_parsed(self):
         fenced = "```json\n" + VALID_JSON_STR + "\n```"
         with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
