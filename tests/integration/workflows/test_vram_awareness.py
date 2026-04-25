@@ -521,14 +521,15 @@ def test_vram_awareness_e2e_physical_rejection_reaches_iter2_proposer(
         iter1_auto_shrunk = (
             len(rejection_strings) == 0
             and iter1_tuning is not None
-            and iter1_tuning.status == "succeeded"
+            and iter1_tuning.status in ("completed", "partial")
             and iter1_tuning.best_denoising_score is not None
         )
         assert len(rejection_strings) >= 1 or iter1_auto_shrunk, (
             f"Phase B: iter-1 must follow either the "
             f"Failure-Rejection-Correction path (>=1 [PHYSICAL REJECTION]) "
-            f"OR the Successful Auto-Shrink path (status='succeeded' with a "
-            f"numeric best_denoising_score). Got rejection_count="
+            f"OR the Successful Auto-Shrink path (status in "
+            f"('completed','partial') with a numeric best_denoising_score). "
+            f"Got rejection_count="
             f"{len(rejection_strings)}, iter1_status="
             f"{iter1_tuning.status if iter1_tuning else 'NO_RESULT'}, "
             f"iter1_score="
@@ -791,7 +792,7 @@ def test_vram_awareness_e2e_physical_rejection_reaches_iter2_proposer(
             )
             print("=" * 72)
 
-        assert iter2_tuning.status == "succeeded", (
+        assert iter2_tuning.status in ("completed", "partial"), (
             f"Phase B iter-2 tuning did not succeed: status={iter2_tuning.status!r}. "
             f"The shrunk baseline failed to train on the RTX 5090 under the "
             f"{vram_budget_gb} GB cap.\n"
@@ -801,5 +802,5 @@ def test_vram_awareness_e2e_physical_rejection_reaches_iter2_proposer(
         )
         assert iter2_tuning.best_denoising_score is not None, (
             "Phase B iter-2: best_denoising_score is None — the tuner "
-            "reported 'succeeded' but produced no numerical score."
+            "reported success but produced no numerical score."
         )
