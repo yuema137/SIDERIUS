@@ -581,14 +581,34 @@ class LLMBridge:
         text = response.choices[0].message.content.strip()
         text = self._sanitize_json_text(text)
 
+        # Use raw_decode so trailing prose / a second JSON object after the
+        # first valid one doesn't crash the run. We accept the first object
+        # and discard any trailing content. We still hard-fail if the FIRST
+        # object isn't dict/list (caller contract).
         try:
-            return json.loads(text)
+            decoded, end_idx = json.JSONDecoder().raw_decode(text)
         except json.JSONDecodeError:
             print(f"[LLMBridge._chat_json] Failed to parse JSON from model={model_name}: {text[:200]}", flush=True)
             raise ValueError(
                 f"Model response was not valid JSON. Return ONLY a raw JSON object. "
                 f"Your response started with: {text[:200]}"
             )
+
+        if not isinstance(decoded, (dict, list)):
+            raise ValueError(
+                f"Model response decoded to {type(decoded).__name__}, expected dict/list. "
+                f"Response started with: {text[:200]}"
+            )
+
+        trailing = text[end_idx:].strip()
+        if trailing:
+            print(
+                f"[LLMBridge._chat_json] Discarded {len(trailing)} chars of "
+                f"trailing data after valid JSON (model={model_name}).",
+                flush=True,
+            )
+
+        return decoded
 
     def generate(self, system_prompt: str, user_prompt: str) -> Dict:
         """
