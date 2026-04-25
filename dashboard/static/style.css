@@ -250,3 +250,7 @@ button.danger { background: var(--danger); }
 .trial-table .status-ok { color: #81c784; }
 .trial-table .status-fail { color: #e57373; }
 #trial-table-wrap { max-height: 500px; overflow-y: auto; }
+
+/* Iteration summary table — each "Round N" group spans 5 sub-columns */
+.iteration-table th.round-group { text-align: center; border-left: 2px solid var(--border); border-right: 2px solid var(--border); }
+#iter-table-wrap { max-height: 500px; overflow-y: auto; }

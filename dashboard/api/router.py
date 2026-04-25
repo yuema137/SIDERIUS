@@ -17,6 +17,9 @@ from dashboard.api.models import (
     ExperimentRecord,
     FrontendConfig,
     HealthResponse,
+    IterationRound,
+    IterationTableResponse,
+    IterationTableRow,
     LeaderboardResponse,
     ModelListResponse,
     ModelOverview,
@@ -233,7 +236,7 @@ def leaderboard(
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# Exploration run discovery — supports two on-disk layouts:
+# Exploration run discovery — supports three on-disk layouts:
 #
 # 1. **Legacy** (single workflow, multiple iterations under one run dir):
 #       {root}/exploration/{run_name}/iteration_NNN/{model}/summary_{run_name}.json
@@ -242,10 +245,18 @@ def leaderboard(
 #       {root}/{chain_dir}/iter_NNN/iteration_001/{model}/summary_iter_NNN.json
 #       {root}/{chain_dir}/iter_NNN/manifest.json
 #
+# 3. **Wrapper** (per-run wrapper dir at the data root, structurally identical
+#    to legacy once you descend one level):
+#       {root}/exploration_{run_name}/{run_name}/iteration_NNN/{model}/run_output_{run_name}.json
+#
 # A directory is recognized as a chain workspace iff it contains at least
 # one `iter_*/manifest.json`. The chain layout's per-iteration `run_name`
 # is `iter_NNN`, but the dashboard's "run name" identity is the chain
 # workspace dir itself — that's the unit a user wants to browse.
+#
+# The wrapper layout is treated as "legacy" once resolved, because below the
+# wrapper dir the on-disk shape (iteration_NNN/{model}/run_output_*.json) is
+# identical. Only the discovery step differs.
 # ---------------------------------------------------------------------------
 
 def _is_chain_workspace(d: str) -> bool:
@@ -261,6 +272,9 @@ def _resolve_run_dir(root: str, run_name: str) -> Optional[tuple[str, str]]:
     legacy_dir = os.path.join(root, "exploration", run_name)
     if os.path.isdir(legacy_dir):
         return legacy_dir, "legacy"
+    wrapper_dir = os.path.join(root, f"exploration_{run_name}", run_name)
+    if os.path.isdir(wrapper_dir):
+        return wrapper_dir, "legacy"
     chain_dir = os.path.join(root, run_name)
     if os.path.isdir(chain_dir) and _is_chain_workspace(chain_dir):
         return chain_dir, "chain"
@@ -282,11 +296,19 @@ def list_exploration_runs():
         )
 
     # Chain: any top-level dir under root that contains iter_*/manifest.json
+    # Wrapper: any top-level "exploration_<run_name>" dir whose inner <run_name> exists
     if os.path.isdir(ds.root):
         for d in os.listdir(ds.root):
             full = os.path.join(ds.root, d)
-            if os.path.isdir(full) and _is_chain_workspace(full):
+            if not os.path.isdir(full):
+                continue
+            if _is_chain_workspace(full):
                 runs.append(d)
+                continue
+            if d.startswith("exploration_"):
+                candidate = d[len("exploration_"):]
+                if candidate and os.path.isdir(os.path.join(full, candidate)):
+                    runs.append(candidate)
 
     return {"runs": sorted(set(runs))}
 
@@ -373,3 +395,153 @@ def get_exploration_records(
         limit=limit,
         records=parsed,
     )
+
+
+# ---------------------------------------------------------------------------
+# Exploration iteration-summary table
+# ---------------------------------------------------------------------------
+
+def _model_dir_in_iteration(iter_dir: str) -> Optional[str]:
+    """Find the successful (non-attempt) model dir inside an iteration dir.
+
+    Returns the dir name or None. If only `attempt_*` dirs exist, returns
+    None — the caller can fall back to the attempt name for display.
+    """
+    for entry in os.listdir(iter_dir):
+        full = os.path.join(iter_dir, entry)
+        if not os.path.isdir(full):
+            continue
+        if entry.startswith("attempt_") or entry == "__pycache__":
+            continue
+        return entry
+    return None
+
+
+def _attempt_model_name(iter_dir: str) -> Optional[str]:
+    """Recover model name from `attempt_NNN_<modelname>` dirs as a fallback.
+
+    Used when an iteration produced no successful run_output_*.json — the
+    attempt dir name is the only signal of which model was tried.
+    """
+    for entry in sorted(os.listdir(iter_dir)):
+        full = os.path.join(iter_dir, entry)
+        if not os.path.isdir(full) or not entry.startswith("attempt_"):
+            continue
+        # Strip `attempt_NNN_` prefix
+        parts = entry.split("_", 2)
+        if len(parts) == 3:
+            return parts[2]
+    return None
+
+
+def _row_from_run_output(
+    iter_label: str,
+    model_name: Optional[str],
+    run_output: dict,
+) -> IterationTableRow:
+    """Pivot one run_output_*.json into an iteration table row.
+
+    Each ``status == "success"`` record in ``all_records`` becomes one
+    round-block in chronological order (sorted by the numeric suffix of
+    ``exp_id``). Skipped/error attempts are dropped — they carry no signal
+    worth a column.
+    """
+    def _exp_index(exp_id: str) -> int:
+        try:
+            return int(exp_id.rsplit("_", 1)[-1])
+        except (ValueError, AttributeError):
+            return 0
+
+    successful = [
+        r for r in run_output.get("all_records", [])
+        if r.get("status") == "success"
+    ]
+    successful.sort(key=lambda r: _exp_index(r.get("exp_id", "")))
+
+    rounds = [
+        IterationRound(
+            exp_id=r.get("exp_id", ""),
+            is_trial=r.get("is_trial"),
+            trial_portion=r.get("trial_portion"),
+            train_portion=r.get("train_portion"),
+            final_loss=r.get("final_loss"),
+            denoising_score=r.get("denoising_score"),
+        )
+        for r in successful
+    ]
+
+    return IterationTableRow(
+        iteration=iter_label,
+        model_name=model_name,
+        status=run_output.get("status"),
+        termination_reason=run_output.get("termination_reason"),
+        completed_rounds=run_output.get("completed_rounds"),
+        total_attempts=run_output.get("total_attempts"),
+        rounds=rounds,
+    )
+
+
+@router.get(
+    "/exploration/runs/{run_name}/iteration_table",
+    response_model=IterationTableResponse,
+    tags=["exploration"],
+)
+def iteration_table(run_name: str):
+    """One row per explore-loop iteration, summarising the best record.
+
+    Layout-aware:
+      - legacy/wrapper: each `iteration_NNN/` dir produces one row.
+      - chain: each `iter_NNN/` dir produces one row, drawing from its
+        single inner `iteration_*/<model>/run_output_iter_NNN.json`.
+    """
+    ds = get_data_source()
+    resolved = _resolve_run_dir(ds.root, run_name)
+    if resolved is None:
+        raise HTTPException(status_code=404, detail=f"Exploration run '{run_name}' not found.")
+    run_dir, layout = resolved
+
+    rows: list[IterationTableRow] = []
+
+    if layout == "legacy":
+        for iter_dir in sorted(glob.glob(os.path.join(run_dir, "iteration_*"))):
+            iter_label = os.path.basename(iter_dir)
+            model_name = _model_dir_in_iteration(iter_dir)
+            ro_path: Optional[str] = None
+            if model_name:
+                candidate = os.path.join(iter_dir, model_name, f"run_output_{run_name}.json")
+                if os.path.isfile(candidate):
+                    ro_path = candidate
+            if ro_path is None:
+                # No successful run_output. Surface the iteration with attempt-derived model name.
+                rows.append(IterationTableRow(
+                    iteration=iter_label,
+                    model_name=model_name or _attempt_model_name(iter_dir),
+                ))
+                continue
+            with open(ro_path, "r") as f:
+                run_output = json.load(f)
+            rows.append(_row_from_run_output(iter_label, model_name, run_output))
+
+    else:  # chain — each chain-iter dir is one logical iteration
+        for chain_iter_dir in sorted(glob.glob(os.path.join(run_dir, "iter_*"))):
+            iter_label = os.path.basename(chain_iter_dir)  # "iter_001"
+            ro_path: Optional[str] = None
+            model_name: Optional[str] = None
+            for inner in sorted(glob.glob(os.path.join(chain_iter_dir, "iteration_*"))):
+                model_name = _model_dir_in_iteration(inner)
+                if model_name:
+                    candidate = os.path.join(inner, model_name, f"run_output_{iter_label}.json")
+                    if os.path.isfile(candidate):
+                        ro_path = candidate
+                        break
+                if model_name is None:
+                    model_name = _attempt_model_name(inner)
+            if ro_path is None:
+                rows.append(IterationTableRow(iteration=iter_label, model_name=model_name))
+                continue
+            with open(ro_path, "r") as f:
+                run_output = json.load(f)
+            rows.append(_row_from_run_output(iter_label, model_name, run_output))
+
+    max_rounds = max((len(r.rounds) for r in rows), default=0)
+    return IterationTableResponse(run_name=run_name, max_rounds=max_rounds, rows=rows)

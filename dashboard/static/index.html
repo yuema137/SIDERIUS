@@ -172,6 +172,20 @@
     <div id="trial-table-wrap" style="overflow-x:auto; margin-top:12px;"></div>
   </div>
 
+  <!-- Exploration Iteration Summary Table -->
+  <div class="card" id="iteration-panel">
+    <div class="card-title">Exploration Iterations — one row per new-model-explore iteration</div>
+    <div class="add-series-form">
+      <label>Exploration run
+        <select id="iter-run" style="min-width:200px;">
+          <option value="">loading…</option>
+        </select>
+      </label>
+      <button onclick="App.loadIterationTable()" style="align-self:flex-end;">Load</button>
+    </div>
+    <div id="iter-table-wrap" style="overflow-x:auto; margin-top:12px;"></div>
+  </div>
+
 </main>
 
 <!-- Plotly.js from CDN -->
