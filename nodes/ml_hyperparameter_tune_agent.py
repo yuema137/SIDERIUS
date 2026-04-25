@@ -20,6 +20,8 @@ import traceback
 from pathlib import Path
 from typing import Optional, Union
 
+from pydantic import ValidationError
+
 from core.hardware_context import get_or_create
 from core.sandbox_executor import TidmadSandbox
 from agent.llm_bridge import LLMBridge
@@ -30,6 +32,7 @@ from agent.schemas.hyperparam_tuning import (
     ExperimentPlan,
     ExpertAdvice,
     GateExhaustionInfo,
+    PhysicalRejection,
     TrialConfig,
     serialize_expert_advice,
 )
@@ -788,6 +791,11 @@ class HyperparamTuningAgent:
         completed_rounds = 0
         total_attempts = 0
         consecutive_fails = 0
+        # Phase 6.6 WS-B B.3 — per-attempt VRAM-gate rejection buffer.
+        # Appended to on every evaluate_vram_skill feasible=False event.
+        # Flushed to HyperparamTuningOutput.physical_rejections at run exit.
+        # See docs/phase66_ws_b_proposer_hardening.md §2.3 / §2.4.
+        physical_rejections_buffer: list[PhysicalRejection] = []
         attempts_per_round_setting = agent_input.attempts_per_round
         attempts_per_formal_round_setting = agent_input.attempts_per_formal_round
         max_fail_rounds_setting = agent_input.max_fail_rounds
@@ -1160,7 +1168,48 @@ class HyperparamTuningAgent:
                         print(f"Resource check FAILED — this attempt does NOT count as a round.")
                         print(f"   Verdict   : {resource_check.get('verdict', '')}")
                         print(f"   Suggestion: {resource_check.get('suggestion', '')}")
-    
+
+                        # Phase 6.6 WS-B B.3 Hop 2 — capture this rejection
+                        # into the per-run buffer so the orchestrator can
+                        # aggregate and feed it back to the next Proposer
+                        # iteration as a [PHYSICAL REJECTION] string.
+                        # See docs/phase66_ws_b_proposer_hardening.md §2.3.
+                        _killer = resource_check.get("memory_killer") or {}
+                        _binding = _killer.get("binding_cap", "vram")
+                        _dom_bytes = _killer.get("dominant_layer_bytes") or 0
+                        _attempt_snapshot = {
+                            "model_type":        model_type,
+                            "batch_size":        active_params.get("batch_size"),
+                            "segmentation_size": active_params.get("segmentation_size"),
+                        }
+                        # Include architecture knobs if present — the Proposer
+                        # reads these to see which dimension overshot.
+                        for _k in ("depth", "width", "hidden_dim", "n_heads",
+                                   "d_model", "kernel_size", "num_layers"):
+                            if _k in active_params:
+                                _attempt_snapshot[_k] = active_params[_k]
+                        try:
+                            physical_rejections_buffer.append(
+                                PhysicalRejection(
+                                    attempt_config=_attempt_snapshot,
+                                    binding_cap=_binding,
+                                    dominant_layer=_killer.get("dominant_layer") or "",
+                                    dominant_layer_gb=round(
+                                        _dom_bytes / (1024 ** 3), 4
+                                    ),
+                                    dominant_fraction=_killer.get("dominant_fraction") or 0.0,
+                                    budget_gb=float(resource_check.get("limit_gb") or 0.0),
+                                    estimated_gb=float(resource_check.get("estimated_gb") or 0.0),
+                                    suggestion=resource_check.get("suggestion", ""),
+                                )
+                            )
+                        except ValidationError as _rej_err:
+                            # Never let a malformed rejection abort the run;
+                            # log and continue. The feedback-loop contract is
+                            # best-effort — the scored path must survive even
+                            # if the rejection-capture payload is malformed.
+                            print(f"   [B.3] PhysicalRejection capture skipped: {_rej_err}")
+
                         oom_record = {
                             "exp_id":          exp_id,
                             "status":          "skipped_oom_risk",
@@ -1789,6 +1838,11 @@ class HyperparamTuningAgent:
             "started_at":                        started_at,
             "finished_at":                       finished_at,
             "gate_exhaustion":                   gate_exhaustion,
+            # Phase 6.6 WS-B B.3 — flush per-attempt VRAM-gate rejections.
+            # Empty list when every attempt was feasible. Orchestrator
+            # aggregates (worst-offender per architecture) before rendering
+            # into the next Proposer's previous_failures.
+            "physical_rejections":               physical_rejections_buffer,
             # Phase L (§11) — echo budget settings + termination metadata.
             "attempts_per_round":                attempts_per_round_setting,
             "attempts_per_formal_round":         attempts_per_formal_round_setting,

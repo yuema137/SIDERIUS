@@ -1121,6 +1121,81 @@ class GateExhaustionInfo(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Phase 6.6 WS-B (B.1) — per-attempt VRAM-gate rejection feedback
+# See docs/phase66_ws_b_proposer_hardening.md §2.3.
+# ---------------------------------------------------------------------------
+
+class PhysicalRejection(BaseModel):
+    """
+    One VRAM-gate rejection, captured at the moment evaluate_vram_skill
+    returned ``feasible=False``. A run can produce up to
+    ``attempts_per_round + attempts_per_formal_round`` rejections; the
+    orchestrator aggregates them per-architecture (worst offender) before
+    rendering to the Proposer prompt. See WS-B doc §2.4.
+
+    Frozen: the tuner appends fully-constructed rejections to its run-level
+    buffer; no post-append mutation is supported by design.
+    """
+    model_config = ConfigDict(frozen=True)
+
+    attempt_config: Dict[str, Any] = Field(
+        description=(
+            "Compact snapshot of the tuner's active_params at rejection "
+            "time — enough to identify which hyperparameters drove the "
+            "overshoot (architecture-specific dims + batch_size + "
+            "segmentation_size). Not the full active_params dict; the "
+            "orchestrator may prune further before rendering."
+        ),
+    )
+    binding_cap: Literal[
+        "vram", "compute_intensity", "vram+compute_intensity"
+    ] = Field(
+        description=(
+            "Which cap the attempt violated. Mirrors "
+            "MemoryKillerDetails.binding_cap from the VRAM skill — the "
+            "intensity and combined variants produce different "
+            "suggestion phrasing and the Proposer reads them differently."
+        ),
+    )
+    dominant_layer: str = Field(
+        description=(
+            "Name of the layer that consumed the largest share of the "
+            "predicted peak. Empty string on compute_intensity-only "
+            "rejections where no single layer dominates."
+        ),
+    )
+    dominant_layer_gb: float = Field(
+        ge=0.0,
+        description="Dominant layer's contribution in GB.",
+    )
+    dominant_fraction: float = Field(
+        ge=0.0, le=1.0,
+        description=(
+            "Dominant layer's share of the predicted peak (0.0–1.0). "
+            "Feeds the Proposer prompt's percentage rendering "
+            "('consumed 68% of the peak')."
+        ),
+    )
+    budget_gb: float = Field(
+        ge=0.0,
+        description=(
+            "Effective VRAM cap at rejection time — "
+            "min(HardwareContext.usable_cap_gb, operator_budget_gb)."
+        ),
+    )
+    estimated_gb: float = Field(
+        ge=0.0,
+        description="Predicted peak that failed the cap.",
+    )
+    suggestion: str = Field(
+        description=(
+            "Calibrated mitigation suggestion from killer_report "
+            "(rendered verbatim in the [PHYSICAL REJECTION] block)."
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Agent output
 # ---------------------------------------------------------------------------
 
@@ -1204,6 +1279,23 @@ class HyperparamTuningOutput(BaseModel):
             "resource gate. Consumed by the next iteration's proposer via "
             "ProposalInput.prior_iteration_gate_exhaustion. None on healthy "
             "runs (any success) and on all-failure-but-not-budget-related runs."
+        ),
+    )
+
+    # --- Phase 6.6 WS-B (B.1) — per-attempt VRAM-gate rejection log ---
+    # Populated on every round where evaluate_vram_skill returned
+    # feasible=False; empty list on runs with no infeasible attempts.
+    # Consumed by workflows/model_exploration.py which aggregates by
+    # architecture (worst offender) and renders [PHYSICAL REJECTION]
+    # strings into the next iteration's ProposalInput.previous_failures.
+    # See docs/phase66_ws_b_proposer_hardening.md §2.3 / §2.4.
+    physical_rejections: List[PhysicalRejection] = Field(
+        default_factory=list,
+        description=(
+            "One entry per VRAM-gate rejection in this run. Empty list "
+            "on iterations with no infeasible attempts — back-compat "
+            "with pre-WS-B callers. Capture lands in B.3; this B.1 "
+            "commit only introduces the typed channel."
         ),
     )
 

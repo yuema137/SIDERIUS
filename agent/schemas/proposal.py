@@ -20,6 +20,7 @@ from agent.schemas.hyperparam_tuning import (
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
+from core.hardware_context import HardwareContext
 
 
 # ---------------------------------------------------------------------------
@@ -567,6 +568,38 @@ class ProposalInput(BaseModel):
         description="Filesystem path to the TIDMAD data directory. Required by the "
                     "real-dataset warmup inside evaluate_time_skill; when None, the "
                     "skill falls back to its static formula. See §2.6.3.",
+    )
+    # --- Phase 6.6 WS-B (B.1) — hardware awareness ---
+    # The orchestrator threads the live HardwareContext manifest and the
+    # active operator VRAM budget into the Proposer so it can render the
+    # [HARDWARE CONTEXT] block (PHYSICAL / BUDGET / PHYSICAL VETO regimes).
+    # Both Optional so CPU-only tests and legacy callers work unchanged —
+    # when ctx is None or device_available=False, the prompt block is
+    # suppressed. B.1 wires the field only; B.2 adds the renderer.
+    # See docs/phase66_ws_b_proposer_hardening.md §2.3 / §3.1.
+    hardware_context: Optional[HardwareContext] = Field(
+        default=None,
+        description=(
+            "Live hardware manifest from core.hardware_context. "
+            "Populated by the workflow via HardwareContext.get_or_create(). "
+            "None for CPU-only / test stubs and for standalone proposer "
+            "invocations that bypass the workflow. When present and "
+            "device_available=True, the Proposer's [HARDWARE CONTEXT] "
+            "prompt block renders device_name, total_memory_gb, and "
+            "usable_cap_gb."
+        ),
+    )
+    vram_budget_gb: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        description=(
+            "Active operator-defined VRAM ceiling (GB) for the upcoming "
+            "tuning iteration. Workflow picks trial_vram_budget_gb if "
+            "set, else formal_vram_budget_gb, else None. When set and "
+            "below hardware_context.usable_cap_gb, renders as the BUDGET "
+            "regime; when above, renders as PHYSICAL VETO (physical cap "
+            "wins). None + PHYSICAL cap → PHYSICAL regime."
+        ),
     )
     constraints: List[str] = Field(
         default_factory=list,

@@ -25,13 +25,14 @@ import argparse
 
 from pydantic import ValidationError
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from agent.llm_bridge import LLMBridge
 from agent.prompts import _format_known_constraints_block
 from agent.schemas.proposal import ProposalInput, ProposalOutput, FalsifiablePrediction
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from agent.schemas.hyperparam_tuning import GateExhaustionInfo, serialize_expert_advice
+from core.hardware_context import HardwareContext
 from agent.utils.architectural_pattern_tagger import ARCHITECTURAL_PATTERNS
 from agent.utils.proposer_preflight import estimate_proposal_time
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
@@ -184,7 +185,9 @@ Background on the task:
 - This is offline denoising — the output at position t may depend on all positions.
   Causal constraints are not required.
 - Loss is cross-entropy or focal loss: per-timestep 256-class classification.
-- GPU budget: target <10 GB VRAM and <100M parameters for initial exploration.
+- The VRAM ceiling is published in the [HARDWARE CONTEXT] block at the top of
+  the user message — treat that block's "Effective cap" as the hard limit,
+  and keep `parameter_count_estimate` under ~100M for initial exploration.
 
 In your reasoning, cover all of the following:
 1. What structural weakness do the bottlenecks and take-home message specifically point to?
@@ -224,7 +227,7 @@ Output a JSON object with exactly these fields:
 {
   "model_name": "short_snake_case_key",
   "model_description": "One paragraph plain-English description of the architecture and why it is expected to improve on the current best.",
-  "mathematical_definition": "Abstract architectural framework: describe the key computational stages, the mathematical operations at each stage (e.g. convolution, attention, SSM state update), and how data flows through them. Do NOT include concrete layer dimensions, kernel sizes, or channel counts — those belong in baseline_config. Focus on the structural novelty and the mathematical principles that differentiate this architecture from existing ones.",
+  "mathematical_definition": "Must open with a three-sentence 'Golden Paragraph' that cites: (1) the forward contract verbatim — 'Input: [B, T] int64 (per-timestep ADC class indices). Output: [B, 256, T] float32 (per-timestep logits over 256 denoising classes)'; (2) the segmentation semantics — state whether the body is segment-local (no cross-segment state) or segment-cross (e.g. global attention within a segment), and whether causal masking is required; (3) the fixed dimension '256 denoising bins per time step is contract-fixed, not a hyperparameter'. After the Golden Paragraph, describe the architectural framework abstractly: key computational stages, mathematical operations, data flow. Do NOT include concrete layer dimensions, kernel sizes, or channel counts — those belong in baseline_config.",
   "motivation": "Why this specific architecture addresses the bottlenecks from the interpretation. Must reference the take-home message directly and name at least one specific bottleneck.",
   "expert_advice": {
     "focus_areas": ["What to prioritise during hyperparameter tuning for this architecture"],
@@ -258,7 +261,7 @@ Hard constraints — violating any of these makes the proposal invalid:
 - model_name must NOT be any of the existing model types listed in the context
 - model_name must be snake_case: lowercase letters, digits, and underscores only
 - The forward contract is fixed: input [B, T] int64 → output [B, 256, T] float32
-- baseline_config must be conservative: fits comfortably in <10 GB VRAM
+- baseline_config must be conservative: fits comfortably within the effective cap shown in the [HARDWARE CONTEXT] (the VRAM gate rejects anything above it)
 - expert_advice.constraints must include at least one VRAM limit and one parameter count limit
 - parameter_count_estimate must be a positive integer — your best estimate of the total
   trainable parameter count at the baseline_config. An order-of-magnitude estimate is
@@ -271,6 +274,75 @@ Output only the JSON object — no preamble, no markdown fences, no commentary."
 # ---------------------------------------------------------------------------
 # Prompt builders
 # ---------------------------------------------------------------------------
+
+def _render_hardware_context_block(
+    ctx: Optional[HardwareContext],
+    vram_budget_gb: Optional[float],
+) -> str:
+    """Render the ``[HARDWARE CONTEXT]`` prompt block.
+
+    Mirrors the three regimes of ``wrapper.py``'s ``[Hardware]`` log
+    classifier (PHYSICAL / BUDGET / PHYSICAL VETO). See
+    docs/phase66_ws_b_proposer_hardening.md §3.1.
+
+    Returns ``""`` when ``ctx`` is None or ``device_available=False`` —
+    CPU-only runs and legacy callers get no block injected, preserving
+    back-compat with prompts rendered pre-WS-B.
+
+    Regime selection:
+      - ``vram_budget_gb is None``                 → PHYSICAL       (cap = usable_cap_gb)
+      - ``vram_budget_gb <= usable_cap_gb``        → BUDGET         (cap = vram_budget_gb)
+      - ``vram_budget_gb  > usable_cap_gb``        → PHYSICAL VETO  (cap = usable_cap_gb; operator ceiling is above the 80% physical safety floor and therefore ignored)
+    """
+    if ctx is None or not ctx.device_available:
+        return ""
+
+    usable = ctx.usable_cap_gb
+    if vram_budget_gb is None:
+        regime, effective = "PHYSICAL", usable
+    elif vram_budget_gb <= usable:
+        regime, effective = "BUDGET", vram_budget_gb
+    else:
+        regime, effective = "PHYSICAL VETO", usable
+
+    lines = [
+        "[HARDWARE CONTEXT]",
+        f"Device:            {ctx.device_name}",
+        f"Total VRAM:        {ctx.total_memory_gb:.2f} GB",
+        f"Usable cap (80%):  {usable:.2f} GB",
+        f"Host:              {ctx.hostname}",
+    ]
+    if vram_budget_gb is not None:
+        lines.append(f"Operator budget:   {vram_budget_gb:.2f} GB")
+        lines.append(f"Effective cap:     {effective:.2f} GB")
+
+    if regime == "PHYSICAL":
+        lines.append(
+            f"Regime:            PHYSICAL — no operator budget set; cap = {effective:.2f} GB."
+        )
+    elif regime == "BUDGET":
+        lines.append(
+            "Regime:            BUDGET — operator's budget is the binding ceiling."
+        )
+    else:  # PHYSICAL VETO
+        lines.append(
+            "Regime:            PHYSICAL VETO — operator budget exceeds the 80%"
+        )
+        lines.append(
+            "                   physical safety floor; the physical cap wins."
+        )
+
+    lines.append("")
+    lines.append(
+        "Your baseline_config must fit within the **effective cap** shown above. "
+        "The VRAM engine will reject any architecture whose predicted peak exceeds "
+        "this ceiling; a rejection consumes a tuner attempt with no scored round. "
+        "Size your baseline to stay comfortably below the cap (target ≤ 80% of the "
+        "effective cap at baseline) so the tuner has headroom to vary batch_size "
+        "and segmentation_size upward."
+    )
+    return "\n".join(lines)
+
 
 def _format_recent_gate_exhaustions_block(
     entries: List[GateExhaustionInfo],
@@ -412,6 +484,15 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
     """Build the user prompt for the reasoning call."""
     interp = inp.interpretation
     lines = []
+
+    # Phase 6.6 WS-B (B.2 bleed-over, landed with B.1 for Level-2 validation):
+    # Render the [HARDWARE CONTEXT] block at the top of the user prompt so the
+    # Proposer sees the effective VRAM ceiling (PHYSICAL / BUDGET / PHYSICAL
+    # VETO regime) before any interpretation data. Empty string on CPU-only /
+    # legacy-caller runs — no visible change for pre-WS-B test fixtures.
+    hw_block = _render_hardware_context_block(inp.hardware_context, inp.vram_budget_gb)
+    if hw_block:
+        lines += [hw_block, ""]
 
     lines += [
         "## Interpretation Summary",
