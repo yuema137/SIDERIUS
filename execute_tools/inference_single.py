@@ -16,6 +16,21 @@ from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
+
+def _assert_training_sentinel(model_path: str, exp_id: str) -> None:
+    """Raise ``error_training`` if the trainer-side ``_OK_<exp_id>`` sentinel
+    is missing. The orchestrator pattern-matches the ``error_training:``
+    prefix in the exception message to tag the failure category, so a
+    silent training crash never gets misclassified as ``error_inference:
+    FileNotFoundError`` on the .pth path. Phase 6.7 Fix 3.
+    """
+    sentinel_path = os.path.join(os.path.dirname(model_path), f"_OK_{exp_id}")
+    if not os.path.exists(sentinel_path):
+        raise RuntimeError(
+            f"error_training: checkpoint never written: {model_path} "
+            f"(missing sentinel: {sentinel_path})"
+        )
+
 def get_parser():
     """Defines the argument parser for both Fix and Agent modes."""
     parser = argparse.ArgumentParser(description="Inference with Fixed (Baseline) or Agent mode.")
@@ -134,6 +149,11 @@ def main():
         else:
             model = model_class(m_cfg).to(DEVICE)
             
+        # Phase 6.7 Fix 3 — preflight the trainer sentinel. No retry loop:
+        # the spec explicitly drops it because it would mask, not fix, the
+        # silent-crash root cause.
+        _assert_training_sentinel(args.model_path, args.exp_id)
+
         # Load weights from the agent's specific experiment run
         model.load_state_dict(torch.load(args.model_path, map_location=DEVICE))
         input_size = m_cfg.segmentation_size
@@ -198,10 +218,21 @@ def main():
             )
             if os.path.exists(out_name):
                 os.remove(out_name)
+
+            # Phase 6.7 Fix 2 — release the raw + view-aliasing buffers BEFORE
+            # create_abra_file. The audit observed 4/35 trial runs hitting
+            # numpy._ArrayMemoryError inside create_abra_file's flatten/astype
+            # copies because raw_ch1/raw_ch2 (~1.6 GB each on a full file) and
+            # train_loader/target_loader (views over all_input/all_target)
+            # stayed live through the call. Mirrors the proven normal-mode
+            # del set at the bottom of this function.
+            del train_loader, target_loader, all_input, all_target, raw_ch1, raw_ch2
+            gc.collect()
+
             create_abra_file(out_name, denoised.flatten().astype(np.int8), injected.flatten().astype(np.int8), indexed=False)
             print(f"Trial inference saved: {out_name}")
 
-            del raw_ch1, raw_ch2, all_input, all_target, denoised, injected
+            del denoised, injected
             gc.collect()
 
     else:

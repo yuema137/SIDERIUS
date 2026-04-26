@@ -226,17 +226,36 @@ Every fix must justify itself against a **measurable** target. "Vague feelings" 
        * JSON round-trip: `json.loads(json.dumps({"score": float('-inf')}))["score"] == float('-inf')`.
        * **Historical-replay assertion**: synthesize 7 mock per-file linear-sum vectors matching the audit's ghost-score grand-means → assert the new formula produces 7 distinct scalars.
 * **Checklist:**
-    * [ ] All six production sites flipped together — no mixed-precision score_table possible.
-    * [ ] `_LOG_FLOOR` removed from `scoring_helpers.py`; no remaining import or reference.
-    * [ ] Non-positive `grand_mean` returns `float('-inf')`, does **not** raise.
-    * [ ] `_fmt_log(float('-inf'))` branch added; unit test green.
-    * [ ] Every `round(·, 2) + 1e-10` / `round(·, 2) + _ROUND_EPS` literal in the 5 test files is updated or its containing test rewritten/deleted.
-    * [ ] No surviving symbol `_LOG_FLOOR` in tests (it was imported in `test_scoring_helpers.py` line 23 — drop the import).
-    * [ ] Ghost-score-killer regression test passes (100 distinct grand-means → 100 distinct scalars).
-    * [ ] Determinism test passes (`==` not `approx`).
-    * [ ] JSON round-trip test passes for `float('-inf')`.
-    * [ ] Historical-replay assertion passes: 7 audit ghost-score grand-means → 7 distinct scalars.
-    * [ ] Scoped pytest is fully green: `pytest tests/unit/test_compute_raw_baseline.py tests/unit/test_compute_ground_truth.py tests/unit/execute_tools/test_scoring_helpers.py tests/unit/execute_tools/test_scoring_utils.py tests/unit/execute_tools/test_score_table_adversarial.py`.
+    * [x] All six production sites flipped together — no mixed-precision score_table possible.
+    * [x] `_LOG_FLOOR` removed from `scoring_helpers.py`; no remaining import or reference.
+    * [x] Non-positive `grand_mean` returns `float('-inf')`, does **not** raise. Guard hardened to `grand_mean > 0 and math.isfinite(grand_mean)` (blocks NaN, ±inf, subnormals).
+    * [x] `_fmt_log(float('-inf'))` branch added; unit test green.
+    * [x] Every `round(·, 2) + 1e-10` / `round(·, 2) + _ROUND_EPS` literal in the 5 test files is updated or its containing test rewritten/deleted.
+    * [x] No surviving symbol `_LOG_FLOOR` in tests (it was imported in `test_scoring_helpers.py` line 23 — drop the import).
+    * [x] Ghost-score-killer regression test passes (100 distinct grand-means → 100 distinct scalars).
+    * [x] Determinism test passes (`==` not `approx`).
+    * [x] JSON round-trip test passes for `float('-inf')`.
+    * [x] Historical-replay assertion passes: 7 audit ghost-score grand-means → 7 distinct scalars.
+    * [x] Scoped pytest is fully green: `pytest tests/unit/test_compute_raw_baseline.py tests/unit/test_compute_ground_truth.py tests/unit/execute_tools/test_scoring_helpers.py tests/unit/execute_tools/test_scoring_utils.py tests/unit/execute_tools/test_score_table_adversarial.py`.
+
+* **Implementation status (2026-04-25, commit `6c3f736` on `feat/dashboard-iteration-panel`):**
+    * **Verified data — the seven historical ghost records under the new formula:**
+
+      | record | grand_mean | new scalar (float64) |
+      |---|---|---|
+      | spectral_skip_tcn rec_003 | 0.008939 | -2.8382944494645015 |
+      | spectral_skip_tcn rec_004 | 0.008739 | -2.8519090981316575 |
+      | spectral_skip_tcn rec_005 | 0.006588 | -3.021909575075987 |
+      | fused_spectral_gate_tcn rec_009 | 0.005285 | -3.154504741781992 |
+      | hierarchical_cycle_fusion_tcn rec_004 | 0.005398 | -3.1417757954581043 |
+      | dual_rate_gated_causal_cnn rec_010 | 0.005227 | -3.1611442832970242 |
+      | gated_recycle_skip_tcn rec_011 | 0.005091 | -3.1770063429829163 |
+
+      Span 0.339 log-units; **min adjacent gap 0.0066 = 13.3× the 5e-4 noise floor**, visible at `:.4f` render precision. Physically meaningful, not numerical noise.
+    * **Test result:** scoped suite **92/92**; full unit suite **2007 passed, 3 xfailed**.
+    * **Honest divergences from spec:**
+        1. New regression suite lives in standalone `tests/unit/execute_tools/test_phase67_scoring_precision.py` (23 tests across 4 classes) rather than inside `test_scoring_utils.py`. Cleaner organisation; no functional impact.
+        2. JSON-safety helper `coerce_nonfinite_to_none` was added to `execute_tools/scoring_utils.py` and applied at **3 storage boundaries beyond the 6 sites** — `denoising_score_single.py`, `nodes/ml_hyperparameter_tune_agent.py`, `core/sandbox_executor.py` — required by the user's "don't just rely on `allow_nan=True`" directive so the dashboard's RFC-8259 `JSON.parse` never sees `-Infinity`/`NaN` literals.
 
 ### Commit 2 — Inference Memory & Error Classification (Fix 2 + Fix 3 Consumer Side)
 
@@ -247,10 +266,19 @@ Every fix must justify itself against a **measurable** target. "Vague feelings" 
     2. At the inference entry, preflight-check the sentinel `_OK_<exp_id>`. If missing, raise `error_training: checkpoint never written: <path>` and return immediately.
     3. **Drop** the original spec's 30 s retry-with-backoff loop on `torch.load` (it would mask, not fix, the silent-crash root cause).
 * **Checklist:**
-    * [ ] Trial-mode `del` happens **before** `create_abra_file`, not after.
-    * [ ] All view-aliasing buffers (`train_loader`, `target_loader`) included in the `del` list.
-    * [ ] Missing sentinel surfaces as `error_training`, not `error_inference`.
-    * [ ] No retry loop introduced.
+    * [x] Trial-mode `del` happens **before** `create_abra_file`, not after.
+    * [x] All view-aliasing buffers (`train_loader`, `target_loader`) included in the `del` list.
+    * [x] Missing sentinel surfaces as `error_training`, not `error_inference`.
+    * [x] No retry loop introduced.
+
+* **Implementation status (2026-04-25, pre-commit on `feat/dashboard-iteration-panel`):**
+    * **Files touched (2):** `execute_tools/inference_single.py` (production), `tests/unit/execute_tools/test_inference_single.py` (new, 7 tests).
+    * **Sentinel preflight extracted into module-level helper** `_assert_training_sentinel(model_path: str, exp_id: str) -> None` so the contract is testable without mocking `torch` / `MODEL_REGISTRY` / HDF5 I/O. Helper raises `RuntimeError` with the prefix `error_training: checkpoint never written: …` — the orchestrator (Commit 4) will pattern-match that prefix to reclassify the failure category.
+    * **Trial-mode `del` block** placed at the new line 199, immediately before `create_abra_file` at line 207. Canonical 6-name set (`train_loader, target_loader, all_input, all_target, raw_ch1, raw_ch2`) followed by `gc.collect()`. The post-write `del denoised, injected; gc.collect()` is preserved at the end of each iteration so the loop's per-file peak still drops between iterations.
+    * **No retry loop, by construction:** verified by a negative-guard test that scans the helper's exception message for `retry`/`backoff`/`will try again`.
+    * **Test coverage:** AST inspection of `inference_single.py` confirms (a) the canonical 6-name `del` runs before `create_abra_file`, (b) both view-aliasing handles are in the set, (c) `gc.collect()` follows the `del`. Sentinel helper tests cover missing-sentinel raise, sentinel-present pass-through, sibling-path convention (`cached_models/_OK_<exp_id>`), and the no-retry message guard.
+    * **Test result:** scoped `tests/unit/execute_tools/test_inference_single.py` **7/7 passing**; sibling regression `tests/unit/ml_models/test_plugin_loader.py` **22/22 passing**.
+    * **Deferred to other commits (intentional):** the sentinel itself is *written* by Commit 3 (trainer side); the orchestrator *parser* that pattern-matches the `error_training:` prefix to set the record's `error_category` is Commit 4. Commit 2 only produces the right exception shape — the producer + consumer halves of the contract land separately.
 
 ### Commit 3 — Training-Side Sentinel + Steady-State Warmup (Fix 3 Producer + Fix 1)
 
