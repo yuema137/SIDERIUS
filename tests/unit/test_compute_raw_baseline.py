@@ -7,9 +7,12 @@ The PSD/SNR primitives themselves are tested in ``test_scoring_utils.py``;
 this test fixes the *aggregation* formula
 
     per_segment = (snr_sg[i] / s_max_GLOBAL) * snr_squid[i]
-    log_score   = log_{5.27}(round(mean_i(per_segment), 2) + 1e-10)
-    linear_sum  = Σ_i per_segment[i]            (unrounded, for grand-mean)
+    log_score   = log_{5.27}(mean_i(per_segment))    [-inf if mean ≤ 0]
+    linear_sum  = Σ_i per_segment[i]                  (unrounded, for grand-mean)
     n_segments  = n
+
+Phase 6.7 dropped the legacy ``round(·, 2) + 1e-10`` quantization (see
+``docs/phase67_infra_hardening_and_feedback_integrity.md`` Fix 4).
 
 and the fixed segment counts — ``n = 200`` (fine) or ``n = 20`` (coarse,
 every 10th segment). No HDF5 read — ``process_segment`` is the only
@@ -46,8 +49,7 @@ class TestCalculateScoreFine:
 
         per_segment = (2.0 / 4.0) * 3.0 = 1.5  (for every i)
         mean        = 1.5
-        round(1.5, 2) = 1.5
-        log_score   = log_{5.27}(1.5 + 1e-10)
+        log_score   = log_{5.27}(1.5)
         linear_sum  = 1.5 * 200 = 300.0
         n_segments  = 200
         """
@@ -62,21 +64,25 @@ class TestCalculateScoreFine:
                 coarse=False, parallel=False, num_workers=1,
             )
 
-        expected_log = math.log(1.5 + 1e-10, 5.27)
+        expected_log = math.log(1.5, 5.27)
         assert abs(log_score - expected_log) < 1e-12
         assert abs(linear_sum - 300.0) < 1e-9
         assert n_segments == 200
 
-    def test_linear_sum_is_unrounded(self):
-        """The returned ``linear_sum`` must be the *unrounded* Σ per_segment —
-        the grand-mean aggregator relies on pre-round precision to recover
-        weak-signal files where ``round(mean, 2)`` would zero out.
+    def test_weak_signal_log_score_is_distinct_post_phase67(self):
+        """Phase 6.7 ghost-score-killer regression guard.
+
+        Pre-Phase-6.7, ``log_score`` quantized via ``round(mean, 2) + 1e-10``,
+        which collapsed any weak-signal mean below 0.005 to ``log(1e-10) ≈
+        -13.854`` and any mean in ``[0.005, 0.0149]`` to the ghost score
+        ``-2.7708098959837675``. Post-fix, ``log_score = log_{5.27}(mean)``
+        directly and weak signals get distinct, monotone scores.
 
         snr_sg=0.004, snr_squid=0.5, s_max=4.0, n=200.
           per_seg    = (0.004 / 4.0) * 0.5 = 5.0e-4
           mean       = 5.0e-4
-          round(mean, 2) = 0.0  → log_score clipped at -13.854...
-          linear_sum = 5.0e-4 * 200 = 0.1  (precisely recoverable)
+          log_score  = log_{5.27}(5.0e-4) ≈ -4.575     (NOT -13.854, NOT -2.7708)
+          linear_sum = 5.0e-4 * 200 = 0.1              (unrounded, precisely recoverable)
         """
         def _const_process(i, data_dir, fname, coarse):
             return i, 0.004, 0.5
@@ -89,10 +95,13 @@ class TestCalculateScoreFine:
                 coarse=False, parallel=False, num_workers=1,
             )
 
-        # log gets clipped at the 1e-10 floor: log_{5.27}(1e-10)
-        expected_clipped = math.log(1e-10, 5.27)
-        assert abs(log_score - expected_clipped) < 1e-9
-        # linear_sum retains full precision
+        expected_log = math.log(5.0e-4, 5.27)
+        assert abs(log_score - expected_log) < 1e-12
+        # The ghost-score collapse must NOT happen.
+        assert abs(log_score - (-2.7708098959837675)) > 0.5
+        # The synthetic legacy floor must NOT happen.
+        assert abs(log_score - math.log(1e-10, 5.27)) > 0.5
+        # linear_sum retains full precision (unaffected by the formula change).
         assert abs(linear_sum - 0.1) < 1e-12
         assert n_segments == 200
 
@@ -154,8 +163,8 @@ class TestCalculateScoreCoarse:
         (before the TIDMAD round, which we avoid by choosing nice values).
 
         snr_sg=4.0, snr_squid=2.0, 20 segments.
-          s_max=4.0  -> per_seg = 1.0·2.0 = 2.0  -> mean=2.0 -> log(2.0+eps)
-          s_max=8.0  -> per_seg = 0.5·2.0 = 1.0  -> mean=1.0 -> log(1.0+eps)
+          s_max=4.0  -> per_seg = 1.0·2.0 = 2.0  -> mean=2.0 -> log(2.0)
+          s_max=8.0  -> per_seg = 0.5·2.0 = 1.0  -> mean=1.0 -> log(1.0)
         Δ = log(2) / log(5.27) — independent of snr values.
         """
         def _const_process(i, data_dir, fname, coarse):
@@ -174,9 +183,9 @@ class TestCalculateScoreCoarse:
 
         # smaller s_max -> larger per_segment -> larger score
         assert log_small > log_large
-        # Δ should equal log_{5.27}(2) to ~1e-10
+        # Phase 6.7: bit-exact (no epsilon shift).
         expected_delta = math.log(2.0, 5.27)
-        assert abs((log_small - log_large) - expected_delta) < 1e-9
+        assert abs((log_small - log_large) - expected_delta) < 1e-12
 
 
 # =============================================================================
@@ -224,7 +233,7 @@ class TestMaybeWriteAnchorNormalizedScalar:
 
         Uniform per-file linear_sum=100, n_segments=200:
           grand_mean = (100 * 20) / (200 * 20) = 0.5
-          scalar     = log_{5.27}(round(0.5, 2) + 1e-10) = log_{5.27}(0.5 + 1e-10)
+          scalar     = log_{5.27}(0.5)  (Phase 6.7: no rounding, no eps)
         """
         for i in range(20):
             _write_fine_json(str(tmp_path), i, linear_sum=100.0, n_segments=200)
@@ -253,8 +262,8 @@ class TestMaybeWriteAnchorNormalizedScalar:
         # file_vector is linear per-file means (linear_sum / n_segments).
         for v in got["file_vector"]:
             assert abs(v - 0.5) < 1e-12
-        expected_scalar = math.log(round(0.5, 2) + 1e-10, 5.27)
-        assert abs(got["scalar_score"] - expected_scalar) < 1e-9
+        expected_scalar = math.log(0.5, 5.27)
+        assert abs(got["scalar_score"] - expected_scalar) < 1e-12
 
     def test_skip_when_any_fine_index_missing(self, tmp_path, capsys):
         """If any of files 0..19 is missing, the scalar file must NOT be
@@ -302,7 +311,7 @@ class TestMaybeWriteAnchorNormalizedScalar:
           total_linear = 10*10 + 10*90 = 1000
           total_n      = 10*100 + 10*300 = 4000
           grand_mean   = 1000 / 4000 = 0.25
-          scalar       = log_{5.27}(round(0.25, 2) + 1e-10) = log_{5.27}(0.25 + 1e-10)
+          scalar       = log_{5.27}(0.25)  (Phase 6.7: no rounding, no eps)
         """
         for i in range(10):
             _write_fine_json(str(tmp_path), i, linear_sum=10.0, n_segments=100)
@@ -320,8 +329,8 @@ class TestMaybeWriteAnchorNormalizedScalar:
         with open(scalar_path) as f:
             got = json.load(f)
 
-        expected_scalar = math.log(round(0.25, 2) + 1e-10, 5.27)
-        assert abs(got["scalar_score"] - expected_scalar) < 1e-9
+        expected_scalar = math.log(0.25, 5.27)
+        assert abs(got["scalar_score"] - expected_scalar) < 1e-12
 
         # Per-file linear means preserve both groups.
         assert got["file_vector"][:10] == pytest.approx([0.1] * 10, abs=1e-12)

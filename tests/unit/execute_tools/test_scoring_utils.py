@@ -181,10 +181,14 @@ class TestScoreVector:
 
     @patch("execute_tools.scoring_utils.get_snr", side_effect=_mock_get_snr_fixed)
     @patch("execute_tools.scoring_utils.get_one_sec_psd", side_effect=_mock_get_one_sec_psd)
-    def test_scalar_is_log_of_round_grand_mean(self, mock_psd, mock_snr):
-        """``final_scalar = log_{5.27}(round(grand_mean, 2) + 1e-10)``.
+    def test_scalar_is_log_of_grand_mean(self, mock_psd, mock_snr):
+        """``final_scalar = log_{5.27}(grand_mean)`` (no rounding, no eps).
 
-        Single file, single segment ⇒ grand_mean == vector[6].
+        Single file, single segment ⇒ grand_mean == vector[6]. The Phase-67
+        scoring-precision fix dropped the ``round(·, 2) + 1e-10`` quantization
+        because it collapsed all weak-injection grand means in
+        ``[0.005, 0.0149]`` to the ghost score
+        ``log_{5.27}(0.01 + 1e-10) ≈ -2.7708``.
         """
         sample_set: SampleSet = {6: [0]}
         vector, scalar = score_vector(
@@ -195,12 +199,8 @@ class TestScoreVector:
             denoised_filename_fn=self._filename_fn,
             parallel=False,
         )
-        # TIDMAD round: legacy applies ``round(·, 2) + 1e-10`` before log.
-        # Under these mock values the rounded mean is 0.0 and the scalar
-        # collapses to ``log(1e-10, 5.27)``; we still assert the exact
-        # formula holds bit-for-bit.
-        expected = math.log(round(vector[6], 2) + 1e-10, 5.27)
-        assert abs(scalar - expected) < 1e-10
+        expected = math.log(vector[6], 5.27)
+        assert abs(scalar - expected) < 1e-12
 
     @patch("execute_tools.scoring_utils.get_snr", side_effect=_mock_get_snr_fixed)
     @patch("execute_tools.scoring_utils.get_one_sec_psd", side_effect=_mock_get_one_sec_psd)
@@ -220,8 +220,8 @@ class TestScoreVector:
             parallel=False,
         )
         grand_mean = (vector[0] + vector[19]) / 2.0
-        expected = math.log(round(grand_mean, 2) + 1e-10, 5.27)
-        assert abs(scalar - expected) < 1e-10
+        expected = math.log(grand_mean, 5.27)
+        assert abs(scalar - expected) < 1e-12
 
     def test_raises_without_filename_fn(self):
         with pytest.raises(ValueError, match="denoised_filename_fn is required"):
@@ -290,8 +290,7 @@ class TestScoreVector:
         Mocked ``snr_sg = 2.0`` for every segment, so the global-over-
         collected-data s_max is 2.0. For a single segment this yields
         grand_mean = (2/2) * 2 = 2.0 and the scalar becomes
-        ``log_{5.27}(round(2.0, 2) + 1e-10)`` regardless of the anchor map
-        or s_max we pass in.
+        ``log_{5.27}(2.0)`` regardless of the anchor map or s_max we pass in.
 
         This is distinct from the Option B convention (``legacy_mode=False``),
         where ``s_max`` is the global maximum over the anchor map — a fixed
@@ -308,6 +307,6 @@ class TestScoreVector:
             parallel=False,
         )
         # snr_sg=2, snr_squid=2, s_max=np.amax([2.0])=2.0
-        # grand_mean = (2/2) * 2 = 2.0 ; round(2.0, 2) = 2.0
-        expected = math.log(2.0 + 1e-10, 5.27)
-        assert abs(scalar_legacy - expected) < 1e-10
+        # grand_mean = (2/2) * 2 = 2.0
+        expected = math.log(2.0, 5.27)
+        assert abs(scalar_legacy - expected) < 1e-12

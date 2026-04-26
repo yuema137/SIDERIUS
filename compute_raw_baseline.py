@@ -49,7 +49,7 @@ import numpy as np
 from tqdm import tqdm
 
 from execute_tools.build_anchor_map import load_anchor_map
-from execute_tools.scoring_utils import process_segment
+from execute_tools.scoring_utils import coerce_nonfinite_to_none, process_segment
 
 # ---------------------------------------------------------------------------
 # Per-file score under the Option B global-s_max convention.
@@ -117,8 +117,11 @@ def _calculate_score(
 
     per_segment = (snr_sg / s_max) * snr_squid
     linear_sum = float(np.sum(per_segment))
-    mean_linear = float(np.round(linear_sum / n, decimals=2)) + 1e-10
-    log_score = float(math.log(mean_linear, 5.27))
+    mean_linear = linear_sum / n
+    if mean_linear > 0 and math.isfinite(mean_linear):
+        log_score = float(math.log(mean_linear, 5.27))
+    else:
+        log_score = float("-inf")
     return log_score, linear_sum, n
 
 
@@ -128,7 +131,7 @@ def _calculate_score(
 # Symmetric with ``compute_ground_truth._anchor_normalized_ceiling``:
 #
 #     grand_mean  = Σ_f linear_sum[f]  /  Σ_f n_segments[f]
-#     scalar      = log_{5.27}(round(grand_mean, 2) + 1e-10)
+#     scalar      = log_{5.27}(grand_mean)  [or -inf when grand_mean ≤ 0]
 #
 # Only fine files (0–19) contribute — coarse files are a sparse sampling of
 # the same physical signal and would bias the grand mean if mixed in. See
@@ -178,7 +181,10 @@ def _maybe_write_anchor_normalized_scalar(
     total_linear = sum(p["linear_sum"] for p in per_file)
     total_n = sum(p["n_segments"] for p in per_file)
     grand_mean = total_linear / total_n
-    scalar = float(math.log(round(grand_mean, 2) + 1e-10, 5.27))
+    if grand_mean > 0 and math.isfinite(grand_mean):
+        scalar = float(math.log(grand_mean, 5.27))
+    else:
+        scalar = float("-inf")
 
     # Per-file LINEAR means (mirror of ceiling_anchor_normalized.json.file_vector).
     file_vector_linear = [p["linear_sum"] / p["n_segments"] for p in per_file]
@@ -194,7 +200,7 @@ def _maybe_write_anchor_normalized_scalar(
         "computed_at":  datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
     with open(out_path, "w") as f:
-        json.dump(result, f, indent=2)
+        json.dump(coerce_nonfinite_to_none(result), f, indent=2)
     print(f"\n[SCALAR] anchor-normalized raw-baseline scalar = {scalar:.6f}")
     print(f"         -> {out_path}")
 
@@ -317,7 +323,7 @@ def main():
                 "computed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
             with open(out_path, "w") as f:
-                json.dump(result, f, indent=2)
+                json.dump(coerce_nonfinite_to_none(result), f, indent=2)
             print(f"  -> score={score:.6f}  saved to {out_path}")
             computed += 1
         except Exception as e:

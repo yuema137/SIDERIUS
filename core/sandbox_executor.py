@@ -7,7 +7,7 @@ import subprocess
 import datetime
 from typing import Callable, Dict, Any, Optional
 from ml_models.models_format_sandbox import get_config_class, TrainConfig, LossConfig, ExperimentConfig, PLUGIN_CONFIG_REGISTRY
-from execute_tools.scoring_utils import validate_sample_set
+from execute_tools.scoring_utils import coerce_nonfinite_to_none, validate_sample_set
 from execute_tools.data_paths import TIDMAD_DATA_DIR
 from core.inference_defaults import inference_batch_for
 
@@ -269,20 +269,24 @@ class LocalRecorder(BaseRecorder):
 
     def save_record(self, record: Dict[str, Any]):
         exp_id = record["exp_id"]
-        
+
+        # Coerce float('-inf') no-signal sentinels to JSON null so the on-disk
+        # record stays browser-safe (RFC-8259 doesn't allow Infinity / -Infinity).
+        safe_record = coerce_nonfinite_to_none(record)
+
         # every detail json should stay in the run_name folder
         detail_path = os.path.join(self.record_dir, f"{exp_id}.json")
         with open(detail_path, 'w', encoding='utf-8') as f:
-            json.dump(record, f, indent=4, ensure_ascii=False)
-        
+            json.dump(safe_record, f, indent=4, ensure_ascii=False)
+
         summary = self.get_summary()
         existing_idx = next((i for i, item in enumerate(summary) if item.get("exp_id") == exp_id), None)
-        
+
         if existing_idx is not None:
-            summary[existing_idx] = record
+            summary[existing_idx] = safe_record
         else:
-            summary.append(record)
-            
+            summary.append(safe_record)
+
         with open(self.summary_file, 'w', encoding='utf-8') as f:
             json.dump(summary, f, indent=4, ensure_ascii=False)
 

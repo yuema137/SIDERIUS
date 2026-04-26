@@ -32,6 +32,8 @@ different butterfly ordering, and does not produce bit-identical output.
 
 import os
 import gc
+import math
+
 import numpy as np
 import h5py
 
@@ -434,7 +436,6 @@ def score_vector(
         ValueError: If ``denoised_filename_fn`` is None, or if
                     ``legacy_mode=False`` and ``s_max`` is None.
     """
-    import math
     import concurrent.futures
 
     if denoised_filename_fn is None:
@@ -512,7 +513,36 @@ def score_vector(
         return file_vector, float("-inf")
 
     grand_mean = total_weighted / total_count
-    # TIDMAD round — legacy applies ``np.round(·, 2) + 1e-10`` before log.
-    score_linear = round(grand_mean, 2) + 1e-10
-    final_scalar = math.log(score_linear, 5.27)
+    if grand_mean > 0 and math.isfinite(grand_mean):
+        final_scalar = math.log(grand_mean, 5.27)
+    else:
+        final_scalar = float("-inf")
     return file_vector, final_scalar
+
+
+# ---------------------------------------------------------------------------
+# JSON-safety helper
+# ---------------------------------------------------------------------------
+
+def coerce_nonfinite_to_none(obj):
+    """Recursively replace non-finite floats with ``None`` for JSON output.
+
+    JSON RFC 8259 disallows ``Infinity``/``-Infinity``/``NaN``. ``json.dump``
+    will silently emit those tokens when ``allow_nan=True`` (the default),
+    which then breaks the dashboard's ``JSON.parse``. Apply this coercion
+    immediately before ``json.dump`` at every storage boundary that may
+    carry the ``float('-inf')`` "no-signal" sentinel produced by
+    :func:`score_vector` and the grand-mean log helpers.
+
+    Pydantic ``Optional[float]`` fields accept ``None`` on round-trip, so
+    the on-disk representation is browser-safe and Python-safe.
+    """
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: coerce_nonfinite_to_none(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [coerce_nonfinite_to_none(v) for v in obj]
+    if isinstance(obj, tuple):
+        return tuple(coerce_nonfinite_to_none(v) for v in obj)
+    return obj

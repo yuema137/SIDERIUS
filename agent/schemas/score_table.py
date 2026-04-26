@@ -88,12 +88,12 @@ class AggregateScalars(BaseModel):
     raw_baseline_scalar: float = Field(
         ...,
         description="Grand-mean log scalar over sampled indices, computed via "
-                    "log_{5.27}(round(Σ raw_linear_sum / Σ raw_n, 2) + 1e-10).",
+                    "log_{5.27}(Σ raw_linear_sum / Σ raw_n); -inf when ≤ 0.",
     )
     ground_truth_scalar: float = Field(
         ...,
         description="Grand-mean log scalar over sampled indices, computed via "
-                    "log_{5.27}(round(Σ gt_linear_sum / Σ gt_n, 2) + 1e-10).",
+                    "log_{5.27}(Σ gt_linear_sum / Σ gt_n); -inf when ≤ 0.",
     )
     model_scalar: float = Field(
         ...,

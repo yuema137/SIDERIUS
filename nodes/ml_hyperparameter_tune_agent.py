@@ -37,7 +37,7 @@ from agent.schemas.hyperparam_tuning import (
     serialize_expert_advice,
 )
 from execute_tools.sample_set_builder import build_sample_set
-from execute_tools.scoring_utils import SampleSet
+from execute_tools.scoring_utils import SampleSet, coerce_nonfinite_to_none
 from execute_tools.scoring_helpers import build_score_table
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 from execute_tools.build_anchor_map import load_anchor_map
@@ -1852,8 +1852,12 @@ class HyperparamTuningAgent:
         })
 
         output_path = os.path.join(workspace, f"run_output_{run_name}.json")
+        # Coerce float('-inf') no-signal sentinels to JSON null at the storage
+        # boundary — model_dump_json would otherwise emit non-standard
+        # ``-Infinity`` tokens that break the dashboard's ``JSON.parse``.
+        safe_output = coerce_nonfinite_to_none(agent_output.model_dump())
         with open(output_path, "w", encoding="utf-8") as f:
-            f.write(agent_output.model_dump_json(indent=4))
+            json.dump(safe_output, f, indent=4)
         print(f"Output validated and saved -> {output_path}")
 
         if termination_reason == "completed":

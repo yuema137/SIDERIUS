@@ -7,8 +7,10 @@ global ``s_max`` from ``segment_anchors.json``:
 
 * ``_global_per_file_ceiling`` — per-file log score for one file.
 * ``_anchor_normalized_ceiling`` — SIDERIUS grand-mean ceiling across all
-  files, with the TIDMAD ``round(·, 2) + 1e-10`` step applied before
-  ``log_{5.27}`` (see ``docs/align_denoising_score.md`` §C).
+  files. Phase 6.7 dropped the legacy ``round(·, 2) + 1e-10`` quantization
+  in favour of ``log_{5.27}(grand_mean)`` directly (returning
+  ``float('-inf')`` when ``grand_mean ≤ 0`` or non-finite); see
+  ``docs/phase67_infra_hardening_and_feedback_integrity.md`` Fix 4.
 
 These tests drive both helpers on hand-computed inputs so any drift in the
 formula (missing round, wrong aggregation, wrong log base, wrong ruler)
@@ -36,42 +38,49 @@ class TestGlobalPerFileCeiling:
         """Anchors [1, 2, 3, 4], s_max=4:
 
         per_file_linear = (1² + 2² + 3² + 4²) / (4 · 4) = 30/16 = 1.875
-        score_lin       = round(1.875, 2) + 1e-10 = 1.88 + 1e-10
-        return            log_{5.27}(1.88 + 1e-10)
+        return            log_{5.27}(1.875)  (Phase 6.7: no rounding, no eps)
         """
         anchors = [1.0, 2.0, 3.0, 4.0]
-        got = _global_per_file_ceiling(anchors, s_max=4.0)
-        expected = math.log(1.88 + 1e-10, 5.27)
-        assert abs(got - expected) < 1e-12
+        log_score, linear_sum, n = _global_per_file_ceiling(anchors, s_max=4.0)
+        expected = math.log(1.875, 5.27)
+        assert abs(log_score - expected) < 1e-12
+        # The tuple companion fields preserve full precision for the
+        # subset-aware grand-mean aggregator (Decision 13).
+        assert abs(linear_sum - 30.0 / 4.0) < 1e-12
+        assert n == 4
 
-    def test_all_zero_anchors_clips_to_log_of_eps(self):
-        """All-zero anchors → per_file_linear=0 → round(0, 2) + 1e-10 = 1e-10
-        → log_{5.27}(1e-10). (No div-by-zero path: s_max is the GLOBAL max, by
-        construction strictly positive on real data.)"""
-        got = _global_per_file_ceiling([0.0, 0.0, 0.0], s_max=10.0)
-        expected = math.log(1e-10, 5.27)
-        assert abs(got - expected) < 1e-12
+    def test_all_zero_anchors_returns_neg_inf(self):
+        """All-zero anchors → per_file_linear = 0 → -inf sentinel.
+
+        Phase 6.7: under the new no-round formula, anything that would have
+        rounded to 0 now correctly resolves to ``float('-inf')`` (the "no
+        signal" sentinel) instead of the synthetic ``log(1e-10) ≈ -13.854``
+        floor. (No div-by-zero path: s_max is the GLOBAL max, by construction
+        strictly positive on real data.)
+        """
+        log_score, linear_sum, n = _global_per_file_ceiling([0.0, 0.0, 0.0], s_max=10.0)
+        assert log_score == float("-inf")
+        assert linear_sum == 0.0
+        assert n == 3
 
     def test_uses_global_smax_not_local_max(self):
         """Per-file ceiling must divide by the passed-in s_max, NOT by
         max(anchors). Two runs with the same anchors but different s_max must
-        differ by log_{5.27}(ratio) (when ratio keeps both values on the same
-        side of the TIDMAD round).
+        differ by exactly ``log_{5.27}(ratio)`` (Phase 6.7: no rounding, so
+        the delta is now bit-exact, not epsilon-shifted).
 
         Anchors [2, 4], n=2:
-          s_max=4:  per_file_linear = (4+16)/(2·4)  = 2.5 → round=2.5 → log(2.5)
-          s_max=2:  per_file_linear = (4+16)/(2·2)  = 5.0 → round=5.0 → log(5.0)
+          s_max=4:  per_file_linear = (4+16)/(2·4) = 2.5 → log_{5.27}(2.5)
+          s_max=2:  per_file_linear = (4+16)/(2·2) = 5.0 → log_{5.27}(5.0)
         Δ = log_{5.27}(5.0 / 2.5) = log_{5.27}(2).
         """
         anchors = [2.0, 4.0]
-        got_small = _global_per_file_ceiling(anchors, s_max=2.0)  # larger lin
-        got_large = _global_per_file_ceiling(anchors, s_max=4.0)  # smaller lin
+        log_small, _, _ = _global_per_file_ceiling(anchors, s_max=2.0)  # larger lin
+        log_large, _, _ = _global_per_file_ceiling(anchors, s_max=4.0)  # smaller lin
 
-        assert got_small > got_large
+        assert log_small > log_large
         expected_delta = math.log(2.0, 5.27)
-        # Delta is not exactly log_{5.27}(2) because of the +1e-10 offset
-        # inside each log; 1e-9 tolerance is plenty for double precision.
-        assert abs((got_small - got_large) - expected_delta) < 1e-9
+        assert abs((log_small - log_large) - expected_delta) < 1e-12
 
 
 # =============================================================================
@@ -90,7 +99,7 @@ class TestAnchorNormalizedCeiling:
                              file_vector[1] = 6.25/2 = 3.125
         total_weighted = 7.5, total_count = 4
         grand_mean     = 7.5 / 4 = 1.875
-        scalar         = log_{5.27}(round(1.875, 2) + 1e-10) = log_{5.27}(1.88 + 1e-10)
+        scalar         = log_{5.27}(1.875)  (Phase 6.7: no rounding, no eps)
 
         Since |S_f|=2 for both files, the grand mean equals mean_f(file_vector).
         """
@@ -99,7 +108,7 @@ class TestAnchorNormalizedCeiling:
         file_vector, scalar = _anchor_normalized_ceiling(anchors, s_max)
 
         assert file_vector == [0.625, 3.125]
-        expected_scalar = math.log(1.88 + 1e-10, 5.27)
+        expected_scalar = math.log(1.875, 5.27)
         assert abs(scalar - expected_scalar) < 1e-12
 
         # Cross-check: under uniform |S_f|, grand mean == simple mean.
@@ -117,46 +126,54 @@ class TestAnchorNormalizedCeiling:
         total_weighted = 10.4, total_count = 5
         grand_mean     = 10.4 / 5 = 2.08
         simple_mean    = (10.0 + 0.1) / 2 = 5.05   ← would be legacy-INCOMPATIBLE
-        scalar         = log_{5.27}(round(2.08, 2) + 1e-10) = log_{5.27}(2.08 + 1e-10)
+        scalar         = log_{5.27}(2.08)  (Phase 6.7: no rounding, no eps)
         """
         anchors = {"0": [10.0], "1": [1.0, 1.0, 1.0, 1.0]}
         s_max = 10.0
         file_vector, scalar = _anchor_normalized_ceiling(anchors, s_max)
 
         assert file_vector == [10.0, 0.1]
-        expected_scalar = math.log(2.08 + 1e-10, 5.27)
+        expected_scalar = math.log(2.08, 5.27)
         assert abs(scalar - expected_scalar) < 1e-12
 
-    def test_tidmad_round_is_applied(self):
-        """Grand mean that round-to-2dp collapses to 0 → scalar = log(1e-10).
+    def test_weak_signal_is_not_collapsed_to_ghost_score(self):
+        """Phase 6.7 ghost-score-killer regression guard.
 
-        Single file with anchor=0.03, s_max=1:
-            file_sum    = 0.0009
-            grand_mean  = 0.0009
-            round(0.0009, 2) = 0.0
-            score_lin   = 0 + 1e-10 = 1e-10
-            scalar      = log_{5.27}(1e-10)
+        Under the legacy formula, ``grand_mean = 0.0009`` would collapse to
+        ``log_{5.27}(round(0.0009, 2) + 1e-10) = log_{5.27}(1e-10) ≈ -13.854``,
+        and any grand_mean in ``[0.005, 0.0149]`` would all be quantized to
+        ``log_{5.27}(0.01 + 1e-10) ≈ -2.7708098959837675`` — the same ghost
+        score, regardless of true signal strength.
+
+        Under Phase 6.7 we now take ``log_{5.27}(grand_mean)`` directly, so
+        weak signals get distinct, monotone scores. ``grand_mean = 0.0009``
+        gives ``log_{5.27}(0.0009) ≈ -4.219`` (NOT the ghost score).
         """
         anchors = {"0": [0.03]}
         s_max = 1.0
         _, scalar = _anchor_normalized_ceiling(anchors, s_max)
 
-        expected = math.log(1e-10, 5.27)
+        # Direct log, no quantization.
+        expected = math.log(0.0009, 5.27)
         assert abs(scalar - expected) < 1e-12
+
+        # The ghost-score collapse must NOT happen.
+        ghost = -2.7708098959837675
+        assert abs(scalar - ghost) > 0.5
 
     def test_log_base_is_5_27(self):
         """Sanity: the log base is the TIDMAD constant 5.27, not e or 10."""
-        # Construct anchors s.t. grand_mean rounds to exactly 2.0.
+        # Construct anchors s.t. grand_mean is exactly 2.0.
         anchors = {"0": [math.sqrt(2.0)]}
         s_max = 1.0
         _, scalar = _anchor_normalized_ceiling(anchors, s_max)
 
-        # grand_mean = 2.0 / 1 = 2.0; round(2.0, 2) = 2.0
-        expected = math.log(2.0 + 1e-10, 5.27)
+        # grand_mean = 2.0 / 1 = 2.0
+        expected = math.log(2.0, 5.27)
         assert abs(scalar - expected) < 1e-12
         # Sanity guards against accidental base swaps:
-        assert abs(scalar - math.log(2.0 + 1e-10)) > 1e-3     # not ln
-        assert abs(scalar - math.log10(2.0 + 1e-10)) > 1e-3   # not log10
+        assert abs(scalar - math.log(2.0)) > 1e-3     # not ln
+        assert abs(scalar - math.log10(2.0)) > 1e-3   # not log10
 
 
 # =============================================================================
@@ -166,21 +183,18 @@ class TestAnchorNormalizedCeiling:
 
 class TestCrossConsistency:
 
-    def test_per_file_agrees_with_file_vector_under_tidmad_round(self):
+    def test_per_file_agrees_with_file_vector(self):
         """Under the Option B global-s_max convention, the per-file log score
-        is ``log_{5.27}(round(file_vector[f], 2) + 1e-10)``. When all files
-        have the same segment count, this is exactly what the grand-mean
-        helper stores in ``file_vector`` before aggregation.
-
-        Picks values that survive the TIDMAD round cleanly.
+        is ``log_{5.27}(file_vector[f])``. Phase 6.7 dropped the
+        ``round(·, 2) + 1e-10`` quantization, so the equivalence is now
+        bit-exact (no epsilon shift).
         """
         anchors = {"0": [2.0, 4.0], "1": [1.0, 3.0]}
         s_max = 2.0
 
         file_vector, _ = _anchor_normalized_ceiling(anchors, s_max)
 
-        # Apply the TIDMAD round + log that _global_per_file_ceiling applies.
         for f_str, fv in zip(sorted(anchors, key=int), file_vector):
-            direct = _global_per_file_ceiling(anchors[f_str], s_max)
-            via_fv = math.log(round(fv, 2) + 1e-10, 5.27)
-            assert abs(direct - via_fv) < 1e-12
+            direct_log, _, _ = _global_per_file_ceiling(anchors[f_str], s_max)
+            via_fv = math.log(fv, 5.27)
+            assert abs(direct_log - via_fv) < 1e-12

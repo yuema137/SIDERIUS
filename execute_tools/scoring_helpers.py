@@ -31,8 +31,6 @@ from nodes.scoring_reference import ReferenceScores
 
 
 _LOG_BASE = 5.27
-_ROUND_EPS = 1e-10
-_LOG_FLOOR = math.log(_ROUND_EPS, _LOG_BASE)  # ≈ -13.854
 
 
 # ---------------------------------------------------------------------------
@@ -150,10 +148,10 @@ def _aggregate_over_subset(
     raw_scalar = _grand_mean_log_scalar(raw_total_linear, raw_total_n)
     gt_scalar = _grand_mean_log_scalar(gt_total_linear, gt_total_n)
 
-    if gt_scalar == 0.0:
-        # Ceiling at log-zero would make the ratio undefined; clip to a
-        # sentinel 0.0 recovery rather than raising — very-small-injection
-        # edge case only, sits at the log floor for all three.
+    if gt_scalar == 0.0 or not math.isfinite(gt_scalar):
+        # Ratio is undefined when the ceiling is at log(1) or at the -inf
+        # sentinel. Clip to 0.0 — the markdown render guard handles the
+        # below-baseline messaging separately.
         recovery = 0.0
     else:
         recovery = model_scalar / gt_scalar
@@ -168,11 +166,13 @@ def _aggregate_over_subset(
 
 
 def _grand_mean_log_scalar(total_linear: float, total_n: int) -> float:
-    """Identical to the Phase-1 aggregator: round to 2 dp, shift by eps, log_{5.27}."""
+    """Phase-1 aggregator: log_{5.27}(grand_mean). Returns -inf when no signal."""
     if total_n <= 0:
-        return _LOG_FLOOR
+        return float("-inf")
     grand_mean = total_linear / total_n
-    return float(math.log(round(grand_mean, 2) + _ROUND_EPS, _LOG_BASE))
+    if grand_mean > 0 and math.isfinite(grand_mean):
+        return float(math.log(grand_mean, _LOG_BASE))
+    return float("-inf")
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +265,12 @@ def _render_row(row: PerFileRow) -> str:
 def _fmt_log(value: Optional[float]) -> str:
     if value is None:
         return "N/A"
+    if not math.isfinite(value):
+        # math.isnan/isinf — render the sentinel cleanly rather than letting
+        # f-string emit "-inf.0000" garbage.
+        if math.isnan(value):
+            return "NaN"
+        return "\u2212\u221E" if value < 0 else "\u221E"
     # Render negatives with a Unicode minus so columns align with the
     # reference_data/raw_and_ground_score.md table style.
     if value < 0:
