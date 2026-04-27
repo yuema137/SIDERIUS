@@ -12,6 +12,7 @@ Node contract:
 """
 
 import os
+import gc
 import time
 import json
 import argparse
@@ -1785,6 +1786,28 @@ class HyperparamTuningAgent:
                     f"(consecutive_fail_rounds={consecutive_fails}/"
                     f"{max_fail_rounds_setting})."
                 )
+
+            # Phase 6.8 §2 Layer C (Commit 4) — per-round cleanup. Drop
+            # local refs to the largest per-round transients before the
+            # next round's plan() call so inter-round RSS stays flat.
+            # NameError-guarded because early-exit paths (gate skip,
+            # training crash before score) leave some names unbound.
+            # See docs/phase68_task1_memory_diagnostic_20260427.md §2 Commit 4.
+            try: del train_results
+            except NameError: pass
+            try: del score_results
+            except NameError: pass
+            try: del score_table
+            except NameError: pass
+            try: del file_vector
+            except NameError: pass
+            try: del final_scalar
+            except NameError: pass
+            try: del reflect_results
+            except NameError: pass
+            try: del memory_history
+            except NameError: pass
+            gc.collect()
 
         # --- Build, validate, and save the run output ---
         finished_at = time.strftime("%Y-%m-%d %H:%M:%S")

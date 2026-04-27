@@ -14,7 +14,7 @@
 | 1 | `fix(scoring): switch ProcessPoolExecutor to spawn` | `f54d3c3` | LANDED | scoring_utils tests (13) + phase67_scoring_precision (23) + spawn-ctx import sanity |
 | 2 | `feat(memory_probe): formalize post_gc phase` | `a1e2faf` | LANDED | memory_probe tests 12 passed (was 10, +2 new under TestPostGcPhase) |
 | 3 | `fix(workflow): per-iter del + gc.collect with post_gc probe` | (this commit) | LANDED | tests/unit/workflows/ 91 passed; module imports clean; smoke-run row deferred to §3 |
-| 4 | `fix(tuner): per-round del + gc.collect` | _pending_ | NOT STARTED | — |
+| 4 | `fix(tuner): per-round del + gc.collect` | (this commit) | LANDED | tests/unit/agent/tune_ml_hyperparam_agent/ 387 passed; smoke-run flatness deferred to §3 |
 | 5 | 1-iteration exploit smoke run (verification §3) | n/a | NOT STARTED | — |
 
 **Branch**: `feat/dashboard-iteration-panel`. Doc commits + Commits 1 and 2 land on top of the prior Phase 6.7 work.
@@ -150,7 +150,7 @@ with concurrent.futures.ProcessPoolExecutor(
 
 **Site**: `nodes/ml_hyperparameter_tune_agent.py`, at the end of the outer `while` body, immediately after line 1787 (`if not round_succeeded` block) and before the `while` re-evaluates its condition.
 
-**Change**:
+**Change** (as applied in working tree):
 
 ```python
             if not round_succeeded:
@@ -162,39 +162,38 @@ with concurrent.futures.ProcessPoolExecutor(
                     f"{max_fail_rounds_setting})."
                 )
 
-            # Phase 6.8 §2 Layer C — release per-round transients
-            # before the next round's plan(). All names may be unbound
-            # on early-exit paths (gate skip / training crash before
-            # score), so guard each del with NameError.
-            for _ in (None,):  # tiny scope to keep the import local
-                import gc
-                try: del train_results
-                except NameError: pass
-                try: del score_results
-                except NameError: pass
-                try: del score_table
-                except NameError: pass
-                try: del file_vector
-                except NameError: pass
-                try: del final_scalar
-                except NameError: pass
-                try: del reflect_results
-                except NameError: pass
-                try: del memory_history
-                except NameError: pass
-                gc.collect()
+            # Phase 6.8 §2 Layer C (Commit 4) — per-round cleanup.
+            # NameError-guarded because early-exit paths (gate skip,
+            # training crash before score) leave some names unbound.
+            try: del train_results
+            except NameError: pass
+            try: del score_results
+            except NameError: pass
+            try: del score_table
+            except NameError: pass
+            try: del file_vector
+            except NameError: pass
+            try: del final_scalar
+            except NameError: pass
+            try: del reflect_results
+            except NameError: pass
+            try: del memory_history
+            except NameError: pass
+            gc.collect()
 ```
+
+`import gc` is added at the top of `nodes/ml_hyperparameter_tune_agent.py`.
 
 **Variables targeted**: the largest per-round transients identified in the diagnostic — `train_results` (training-loop output dict, can include loss histories), `score_results` (per-file scores + file_vector), `score_table` (rendered markdown table for next round's planner prompt — replaced fresh each round), `file_vector` and `final_scalar` (numpy arrays from scoring), `reflect_results` (concatenation of train+score for the LLM reflector), `memory_history` (whole-record summary returned by `sandbox.get_summary()` — re-fetched at top of next round).
 
 **Why guard each del**: names defined inside the inner attempt `try` block at lines 1463–1613 may not bind if the attempt fails before reaching that line. The outer-while cleanup must tolerate that.
 
-**Checklist**:
+**Checklist** (LANDED — see git log for SHA):
 
-- [ ] `import gc` (or already at top).
-- [ ] All seven `try: del <name>` blocks land in order, at the end of the outer while body.
-- [ ] `gc.collect()` after the dels.
-- [ ] Existing tuner unit tests pass: `pytest tests/unit/agent/tune_ml_hyperparam_agent/ -q`.
+- [x] `import gc` added at module top of `nodes/ml_hyperparameter_tune_agent.py`.
+- [x] All seven `try: del <name>` blocks land in order, at the end of the outer while body, after the `if not round_succeeded` block.
+- [x] `gc.collect()` after the dels.
+- [x] Existing tuner unit tests pass: `pytest tests/unit/agent/tune_ml_hyperparam_agent/ -q` → 387 passed.
 - [ ] In a 1-iteration smoke run, the **per-round tuner-scope `pre_score` rows** are flat (each round's `pre_score` ≈ previous round's `post_score`, ± 0.1 GB) — i.e. inter-round growth has been capped.
 
 ---
