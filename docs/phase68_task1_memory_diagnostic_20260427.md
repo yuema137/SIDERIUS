@@ -13,7 +13,7 @@
 | 0 | `docs(phase68): task 1 implementation plan + audit reports` | `4905b35` | LANDED | doc-only |
 | 1 | `fix(scoring): switch ProcessPoolExecutor to spawn` | `f54d3c3` | LANDED | scoring_utils tests (13) + phase67_scoring_precision (23) + spawn-ctx import sanity |
 | 2 | `feat(memory_probe): formalize post_gc phase` | `a1e2faf` | LANDED | memory_probe tests 12 passed (was 10, +2 new under TestPostGcPhase) |
-| 3 | `fix(workflow): per-iter del + gc.collect with post_gc probe` | _pending_ | STAGED, awaiting approval | tests/unit/workflows/ 91 passed; module imports clean |
+| 3 | `fix(workflow): per-iter del + gc.collect with post_gc probe` | (this commit) | LANDED | tests/unit/workflows/ 91 passed; module imports clean; smoke-run row deferred to §3 |
 | 4 | `fix(tuner): per-round del + gc.collect` | _pending_ | NOT STARTED | — |
 | 5 | 1-iteration exploit smoke run (verification §3) | n/a | NOT STARTED | — |
 
@@ -137,7 +137,7 @@ with concurrent.futures.ProcessPoolExecutor(
 
 **Why try/except del rather than a clean dict-style cleanup**: `locals()` returns a snapshot dict in CPython; mutating it does not affect the frame's actual local namespace. The only way to release a local-by-name is a top-level `del` statement. Names may be unbound on early-exit paths (e.g. proposer fails on attempt 1 → `validation` was never assigned), so each `del` is wrapped.
 
-**Checklist** (STAGED, awaiting approval):
+**Checklist** (LANDED — see git log for SHA):
 
 - [x] `import gc` added at module top of `workflows/model_exploration.py`.
 - [x] All seven `try: del <name>` blocks land in order, between the `phase="end"` probe and the `target_score` check.
