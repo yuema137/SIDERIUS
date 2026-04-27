@@ -92,6 +92,11 @@ _KNOWN_PROVIDERS: Dict[str, Dict[str, Optional[str]]] = {
         "api_key_env": "GEMINI_API_KEY",
         "default_model": "gemini-3.1-flash-lite-preview",
     },
+    "deepseek": {
+        "base_url": "https://api.deepseek.com",
+        "api_key_env": "DEEPSEEK_API_KEY",
+        "default_model": "deepseek-v4-pro",
+    },
     # Claude via Bedrock/Vertex requires non-standard auth (AWS SigV4 / Google
     # OAuth).  Placeholder entry — wire up when a compatible endpoint is available.
     # "claude": {
