@@ -13,8 +13,8 @@
 | 0 | `docs(phase68): task 1 implementation plan + audit reports` | `4905b35` | LANDED | doc-only |
 | 1 | `fix(scoring): switch ProcessPoolExecutor to spawn` | `f54d3c3` | LANDED | scoring_utils tests (13) + phase67_scoring_precision (23) + spawn-ctx import sanity |
 | 2 | `feat(memory_probe): formalize post_gc phase` | `a1e2faf` | LANDED | memory_probe tests 12 passed (was 10, +2 new under TestPostGcPhase) |
-| 3 | `fix(workflow): per-iter del + gc.collect with post_gc probe` | (this commit) | LANDED | tests/unit/workflows/ 91 passed; module imports clean; smoke-run row deferred to §3 |
-| 4 | `fix(tuner): per-round del + gc.collect` | (this commit) | LANDED | tests/unit/agent/tune_ml_hyperparam_agent/ 387 passed; smoke-run flatness deferred to §3 |
+| 3 | `fix(workflow): per-iter del + gc.collect with post_gc probe` | `75f065e` | LANDED | tests/unit/workflows/ 91 passed; module imports clean; smoke-run row deferred to §3 |
+| 4 | `fix(tuner): per-round del + gc.collect` | `38bb595` | LANDED | tests/unit/agent/tune_ml_hyperparam_agent/ 387 passed; smoke-run flatness deferred to §3 |
 | 5 | 1-iteration exploit smoke run (verification §3) | n/a | NOT STARTED | — |
 
 **Branch**: `feat/dashboard-iteration-panel`. Doc commits + Commits 1 and 2 land on top of the prior Phase 6.7 work.
