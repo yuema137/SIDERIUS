@@ -1,8 +1,25 @@
 # Phase 6.8 — Task 1: Memory Hygiene (Diagnostic + Implementation Plan)
 
 **Date**: 2026-04-27
-**Status**: Implementation plan. Diagnostic content ratified by user; Task 2 (resume) is deferred until Task 1 lands and verifies.
+**Status**: Implementation in progress. Diagnostic content ratified by user; Task 2 (resume) is deferred until Task 1 lands and verifies.
 **Driver**: v5 sanity-run host-OOM kill of `explore_novel_v5_0426` (PID 4142820) at 2026-04-27 00:46:42 PDT — kernel reaped at `total-vm:42931108kB, anon-rss:23492968kB` while the agent self-reported `rss=8.11 GB`.
+
+---
+
+## 0. Implementation log
+
+| # | Commit | SHA | Status | Verified by |
+|---|---|---|---|---|
+| 0 | `docs(phase68): task 1 implementation plan + audit reports` | `4905b35` | LANDED | doc-only |
+| 1 | `fix(scoring): switch ProcessPoolExecutor to spawn` | `f54d3c3` | LANDED | scoring_utils tests (13) + phase67_scoring_precision (23) + spawn-ctx import sanity |
+| 2 | `feat(memory_probe): formalize post_gc phase` | `a1e2faf` | LANDED | memory_probe tests 12 passed (was 10, +2 new under TestPostGcPhase) |
+| 3 | `fix(workflow): per-iter del + gc.collect with post_gc probe` | _pending_ | STAGED, awaiting approval | tests/unit/workflows/ 91 passed; module imports clean |
+| 4 | `fix(tuner): per-round del + gc.collect` | _pending_ | NOT STARTED | — |
+| 5 | 1-iteration exploit smoke run (verification §3) | n/a | NOT STARTED | — |
+
+**Branch**: `feat/dashboard-iteration-panel`. Doc commits + Commits 1 and 2 land on top of the prior Phase 6.7 work.
+
+**Doc-sync rule** (per user direction 2026-04-27): every commit in this plan updates this doc's checklists and Implementation log in lock-step. No commit lands without its row above marked LANDED with the actual SHA.
 
 ---
 
@@ -50,13 +67,13 @@ with concurrent.futures.ProcessPoolExecutor(
 
 **Why this is safe**: `_collect_raw_pairs` is module-level (picklable). Workers re-import torch/numpy/h5py from a clean state — no closure-pickling concerns. Per-call wall regression: 1–2 s of worker warmup vs 10–60 s scoring wall (< 5%).
 
-**Checklist**:
+**Checklist** (LANDED `f54d3c3`):
 
-- [ ] `mp` import present at module top of `execute_tools/scoring_utils.py`.
-- [ ] `mp_context=mp.get_context("spawn")` argument visible in the `ProcessPoolExecutor` ctor at line ~471.
-- [ ] No other `ProcessPoolExecutor` exists elsewhere in `execute_tools/` that should also flip (single grep).
-- [ ] `tests/unit/execute_tools/test_scoring_utils*.py` passes (or any nearest scoring-utils unit module — discover via `pytest --collect-only`).
-- [ ] Manual one-shot: `python -c "import multiprocessing as mp; from execute_tools.scoring_utils import score_vector; print(mp.get_start_method(allow_none=True))"` — import does not crash, default start method unchanged at module level.
+- [x] `mp` import present at function-local scope of `score_vector` in `execute_tools/scoring_utils.py` (alongside the existing function-local `concurrent.futures` import — kept local for diff symmetry).
+- [x] `mp_context=mp.get_context("spawn")` argument visible in the `ProcessPoolExecutor` ctor at line ~480.
+- [x] No other `ProcessPoolExecutor` in `execute_tools/scoring_utils.py`. Out-of-scope for this commit but flagged: `execute_tools/build_anchor_map.py:94` and `compute_raw_baseline.py:104` also use the default fork start method; neither is in the OOM hot path.
+- [x] `tests/unit/execute_tools/test_scoring_utils.py` — 13 passed; `tests/unit/execute_tools/test_phase67_scoring_precision.py` — 23 passed.
+- [x] Spawn-ctx import sanity: `python -c "import multiprocessing as mp; ...; print(mp.get_context('spawn').get_start_method())"` → `spawn`.
 - [ ] Smoke test (deferred to Verification §3 below) confirms scoring runtime regression < 10 % on a real call.
 
 ### Commit 2 — `feat(memory_probe): formalize post_gc phase`
@@ -70,34 +87,31 @@ with concurrent.futures.ProcessPoolExecutor(
 1. Update the canonical-values docstring (`core/memory_probe.py:75–78`) to mention `post_gc` alongside `start`/`end`/`pre_score`/`post_score`.
 2. Add a unit test under `tests/unit/core/` (or extend an existing memory-probe test) asserting `probe_memory(iter_idx=1, phase="post_gc", workspace=tmp, scope="workflow")` writes a row with `phase=="post_gc"`.
 
-**Checklist**:
+**Checklist** (LANDED `a1e2faf`):
 
-- [ ] Docstring lists `post_gc` as a canonical workflow-scope phase.
-- [ ] New unit test covers `phase="post_gc"` round-trip (call → JSONL append → parse).
-- [ ] Existing unit tests for `probe_memory` still pass (no behavioural change).
+- [x] Docstring of `core.memory_probe.probe_memory` lists `post_gc` as a canonical workflow-scope phase, with the freed-memory delta formula (`end.rss_gb - post_gc.rss_gb`) called out explicitly.
+- [x] New unit-test class `TestPostGcPhase` in `tests/unit/agent/tune_ml_hyperparam_agent/test_memory_probe.py` covers (a) `phase="post_gc"` round-trip via JSONL, (b) the production `end` → `post_gc` ordering pair.
+- [x] Full memory-probe suite: 12 passed (was 10, +2 new). No regressions.
 
 ### Commit 3 — `fix(workflow): per-iter del + gc.collect with post_gc probe`
 
-**Site**: `workflows/model_exploration.py`, immediately after the existing `probe_memory(phase="end", ...)` call at line 948 and before the early-stop `if target_score is not None ...` check at line 951.
+**Site**: `workflows/model_exploration.py`, immediately after the existing `probe_memory(phase="end", ...)` call at line 948 and before the early-stop `if target_score is not None ...` check.
 
-**Change**:
+**Change** (as applied in working tree):
 
 ```python
         probe_memory(iter_idx=iteration, phase="end",
                      workspace=workspace, scope="workflow")
 
-        # Phase 6.8 §2 Layer B — release per-iter agent state before
-        # starting the next iteration. tune_output is already retained
-        # in iteration_results; the local del just decrements the
-        # local-name refcount. Followed by a forced GC and a probe so
-        # the trace shows how much was actually freed.
-        for _name in ("proposal", "impl_output", "validation",
-                      "interpretation", "interp_input",
-                      "tune_input", "tune_output"):
-            if _name in locals():
-                # CPython locals().pop is a no-op on real frames;
-                # use explicit del with NameError guard.
-                pass
+        # Phase 6.8 §2 Layer B (Commit 3) — per-iteration cleanup. Drop
+        # local refs to per-iter agent outputs, force a GC cycle, then
+        # emit a post_gc probe so the trace consumer can read the
+        # freed-memory delta as ``end.rss_gb - post_gc.rss_gb``.
+        # tune_output is also retained in iteration_results /
+        # recent_tune_outputs (live refs); the local del here just
+        # decrements the local-name refcount. NameError-guarded
+        # because early-exit paths may leave some names unbound.
+        # See docs/phase68_task1_memory_diagnostic_20260427.md §2 Commit 3.
         try: del proposal
         except NameError: pass
         try: del impl_output
@@ -112,23 +126,25 @@ with concurrent.futures.ProcessPoolExecutor(
         except NameError: pass
         try: del tune_output
         except NameError: pass
-        import gc
         gc.collect()
         probe_memory(iter_idx=iteration, phase="post_gc",
                      workspace=workspace, scope="workflow")
 ```
 
+`import gc` is added at the top of `workflows/model_exploration.py` (alongside `os`, `sys`, `json`, …) so the call site stays clean.
+
 **Why this works**: Python's GC reclaims unreferenced cycles only when generational thresholds fire. With long-lived `iteration_results` retaining a reference to each iter's `tune_output`, the cycle detector might not fire often enough on the 1–2 GB / iter scale we're seeing. Explicit `gc.collect()` forces the issue. The new `phase="post_gc"` row in the trace gives us a measurable regression test — diff `end` vs `post_gc` to see how much was actually freed.
 
 **Why try/except del rather than a clean dict-style cleanup**: `locals()` returns a snapshot dict in CPython; mutating it does not affect the frame's actual local namespace. The only way to release a local-by-name is a top-level `del` statement. Names may be unbound on early-exit paths (e.g. proposer fails on attempt 1 → `validation` was never assigned), so each `del` is wrapped.
 
-**Checklist**:
+**Checklist** (STAGED, awaiting approval):
 
-- [ ] `import gc` present (or moved to top of file).
-- [ ] All seven `try: del <name>` blocks land in order, between the `phase="end"` probe and the `target_score` check.
-- [ ] New `probe_memory(phase="post_gc", ...)` call lands immediately after `gc.collect()`.
-- [ ] Existing workflow unit tests pass: `pytest tests/unit/workflows/ -q`.
-- [ ] In a 1-iteration smoke run, `memory_trace.jsonl` contains a `phase: "post_gc"` row whose `rss_gb` is **less than or equal to** the immediately preceding `phase: "end"` row.
+- [x] `import gc` added at module top of `workflows/model_exploration.py`.
+- [x] All seven `try: del <name>` blocks land in order, between the `phase="end"` probe and the `target_score` check.
+- [x] New `probe_memory(phase="post_gc", ...)` call lands immediately after `gc.collect()`.
+- [x] Existing workflow unit tests pass: `pytest tests/unit/workflows/ -q` → 91 passed.
+- [x] Module imports clean: `python -c "from workflows.model_exploration import run_workflow; print('OK')"`.
+- [ ] Smoke run (Verification §3) shows a `phase: "post_gc"` row whose `rss_gb ≤` the immediately preceding `phase: "end"` row.
 
 ### Commit 4 — `fix(tuner): per-round del + gc.collect`
 
