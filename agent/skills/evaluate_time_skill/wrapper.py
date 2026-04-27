@@ -51,6 +51,7 @@ from __future__ import annotations
 import gc
 import math
 import os
+import statistics
 import time
 import traceback
 
@@ -65,6 +66,15 @@ from agent.skills.denoising_score_skill import estimator as _scoring_est
 # Mirrors inference_skill/estimator.py's _INFERENCE_VS_TRAINING_RATIO so the
 # warmup-derived inference ms/step matches the static formula's slope.
 _INFERENCE_VS_TRAINING_RATIO: float = 1.0 / 3.0
+
+# Phase 6.7 Fix 1 — fast-fail short-circuit for DOA models. If a single
+# forward+backward+optimizer step at step 0 already takes ≥ this many ms,
+# the model is hopelessly slow and we abort the warmup rather than burn
+# the full warmup quota plus k_correction × safety on a config that the
+# downstream time gate will reject anyway. The threshold is set high
+# enough that a healthy first-step (cudnn autotune + cudaMalloc) on the
+# largest seed model still completes well under it.
+_WARMUP_FAST_FAIL_MS: float = 5000.0
 
 
 # ── pure helpers (testable without torch) ────────────────────────────────────
@@ -86,6 +96,64 @@ def _suggest_lever(ms_per_step: float, seg_size: int, batch_size: int) -> str:
         "Raise segmentation_size to the next valid divisor of 10,000,000 "
         "so fewer steps cover the same data."
     )
+
+
+def _aggregate_warmup_timings(
+    all_step_times_ms: list[float],
+    n_warmup_batches: int,
+    fast_fail_threshold_ms: float = _WARMUP_FAST_FAIL_MS,
+) -> tuple[float | None, dict]:
+    """Reduce raw per-step warmup timings into a single ms/step estimate.
+
+    Two branches, in priority order:
+
+      * **fast_fail** — step 0 already took ``≥ fast_fail_threshold_ms``.
+        The model is DOA: a healthy first step (even with cudnn autotune
+        + cudaMalloc on a large seed model) finishes well under the
+        threshold, so anything above it is a clear signal the time gate
+        will reject this config. Return that step's elapsed ms with
+        ``aggregator='fast_fail'`` so the caller can short-circuit on a
+        worst-case-conservative number.
+
+      * **median** — discard the first ``n_warmup_batches`` steps
+        (one-off cudnn autotune, cudaMalloc, lazy CUDA-graph capture) and
+        return ``statistics.median`` of the remaining timed steps. Median
+        is robust to a single rogue slow step (e.g. a kernel re-tune
+        triggered by an unusual input shape).
+
+    Returns ``(measured_ms_or_None, breakdown_dict)`` where the breakdown
+    surfaces ``n_warmup_batches`` (the configured warmup count),
+    ``n_timed_batches`` (actual steady-state samples used for the
+    aggregate; 0 in the fast-fail branch), ``timings_ms`` (raw all-step
+    list, copy), and ``aggregator`` ('median' / 'fast_fail' / None).
+    """
+    breakdown: dict = {
+        "n_warmup_batches": n_warmup_batches,
+        "n_timed_batches": 0,
+        "timings_ms": list(all_step_times_ms),
+        "aggregator": None,
+    }
+
+    if not all_step_times_ms:
+        return None, breakdown
+
+    # Fast-fail beats the median branch: a DOA step 0 means we never
+    # collected meaningful steady-state samples, and we want the caller
+    # to see a high ms/step number that will trip the time gate rather
+    # than a tiny median over a near-empty post-warmup list.
+    if all_step_times_ms[0] >= fast_fail_threshold_ms:
+        breakdown["aggregator"] = "fast_fail"
+        return all_step_times_ms[0], breakdown
+
+    timed = all_step_times_ms[n_warmup_batches:]
+    if not timed:
+        # Loop terminated early (StopIteration before any timed step).
+        # No aggregator runs — caller falls back to the static formula.
+        return None, breakdown
+
+    breakdown["n_timed_batches"] = len(timed)
+    breakdown["aggregator"] = "median"
+    return statistics.median(timed), breakdown
 
 
 # ── torch-dependent helpers (warmup infrastructure) ──────────────────────────
@@ -131,29 +199,52 @@ def _measure_ms_per_step(
     loss_config: dict,
     data_dir: str,
     sample_set: dict,
-    n_warmup_batches: int = 1,
-    n_timed_batches: int = 2,
-) -> float | None:
+    n_warmup_batches: int = 3,
+    n_timed_batches: int = 7,
+) -> tuple[float | None, dict]:
     """Measure real ms/step by running a micro training pass on 1+ real PSDs.
 
     Mirrors the training code path in ``execute_tools.train_engine_sandbox`` so
     the measurement captures GPU compute, disk/HDF5 load, DataLoader overhead,
     and the actual model+loss+optimizer combination in one shot.
 
-    Returns ``None`` on any failure (missing CUDA, missing data_dir, model
-    instantiation error, etc.) — caller falls back to the static formula.
+    Phase 6.7 Fix 1 — Steady-state warmup. Defaults moved from 1+2 to 3+7
+    so the first cudnn-autotune step (and any kernel selection rebound on
+    steps 1-2) is excluded from the aggregate, and the steady-state
+    estimate has 7 samples to median over instead of 2 to mean over.
+    Step 0 also gates a fast-fail short-circuit (``_WARMUP_FAST_FAIL_MS``)
+    so a hopelessly slow first step aborts the warmup immediately rather
+    than burning the full quota on a config the time gate will reject.
+
+    Returns ``(measured_ms_or_None, warmup_breakdown)``:
+
+      * ``measured_ms`` is ``None`` on any setup failure (missing CUDA,
+        missing data_dir, build/instantiation error, dataset too small) —
+        caller falls back to the static formula.
+      * ``warmup_breakdown`` is always a dict; surfaces ``aggregator``
+        ('median' / 'fast_fail' / None), ``n_warmup_batches``,
+        ``n_timed_batches`` (actual count after fast-fail / truncation),
+        and the raw ``timings_ms`` list. Empty-ish on early returns so
+        the caller can merge it unconditionally.
     """
+    empty_breakdown: dict = {
+        "n_warmup_batches": n_warmup_batches,
+        "n_timed_batches": 0,
+        "timings_ms": [],
+        "aggregator": None,
+    }
+
     if not data_dir or not os.path.isdir(data_dir):
         print("    [warmup skipped] no data_dir; falling back to static formula.")
-        return None
+        return None, empty_breakdown
 
     try:
         import torch
     except ImportError:
-        return None
+        return None, empty_breakdown
     if not torch.cuda.is_available():
         print("    [warmup skipped] CUDA not available; falling back to static formula.")
-        return None
+        return None, empty_breakdown
 
     try:
         import random
@@ -198,7 +289,7 @@ def _measure_ms_per_step(
                 f"    [warmup skipped] mini dataset too small "
                 f"({len(dataset)} < {required_segs} required); falling back."
             )
-            return None
+            return None, empty_breakdown
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, drop_last=True)
 
         device = torch.device("cuda")
@@ -226,7 +317,7 @@ def _measure_ms_per_step(
             optimizer = torch.optim.SGD(model.parameters(), lr=train_cfg_obj.lr)
 
         model.train()
-        timings_ms = []
+        all_step_times_ms: list[float] = []
         it = iter(loader)
         for step in range(n_warmup_batches + n_timed_batches):
             try:
@@ -253,16 +344,27 @@ def _measure_ms_per_step(
             optimizer.step()
             torch.cuda.synchronize()
             elapsed_ms = (time.perf_counter() - t0) * 1000.0
-            if step >= n_warmup_batches:
-                timings_ms.append(elapsed_ms)
+            all_step_times_ms.append(elapsed_ms)
+
+            # Phase 6.7 Fix 1 fast-fail: a single forward+backward+optimizer
+            # ≥ _WARMUP_FAST_FAIL_MS at step 0 means the model is DOA. Don't
+            # burn the rest of the warmup quota on a config the time gate
+            # will reject anyway. The aggregator returns this same elapsed
+            # ms tagged ``aggregator='fast_fail'`` so the caller short-
+            # circuits on a worst-case-conservative number.
+            if step == 0 and elapsed_ms >= _WARMUP_FAST_FAIL_MS:
+                print(
+                    f"    [warmup fast-fail] step 0 took {elapsed_ms:.0f} ms "
+                    f"(≥ {_WARMUP_FAST_FAIL_MS:.0f} ms threshold). "
+                    f"Aborting warmup — DOA model."
+                )
+                break
 
         del model, optimizer, criterion, dataset, loader
         torch.cuda.empty_cache()
         gc.collect()
 
-        if not timings_ms:
-            return None
-        return sum(timings_ms) / len(timings_ms)
+        return _aggregate_warmup_timings(all_step_times_ms, n_warmup_batches)
 
     except Exception as exc:  # pragma: no cover — defensive
         print(f"    [warmup failed] {exc}\n{traceback.format_exc(limit=3)}")
@@ -272,7 +374,7 @@ def _measure_ms_per_step(
             torch.cuda.empty_cache()
         except Exception:
             pass
-        return None
+        return None, empty_breakdown
 
 
 # ── public entry point ───────────────────────────────────────────────────────
@@ -314,10 +416,19 @@ def run_skill(sandbox, **kwargs) -> dict:
 
         # Real-dataset warmup — only with CUDA + data_dir. Feeds the
         # training estimator directly and the inference estimator after
-        # scaling by _INFERENCE_VS_TRAINING_RATIO.
-        measured = None
+        # scaling by _INFERENCE_VS_TRAINING_RATIO. Phase 6.7 Fix 1: the
+        # warmup also returns a structured breakdown so the audit log
+        # shows whether the estimate came from a steady-state median or
+        # from the step-0 fast-fail short-circuit.
+        measured: float | None = None
+        warmup_breakdown: dict = {
+            "n_warmup_batches": 0,
+            "n_timed_batches": 0,
+            "timings_ms": [],
+            "aggregator": None,
+        }
         if data_dir:
-            measured = _measure_ms_per_step(
+            measured, warmup_breakdown = _measure_ms_per_step(
                 model_type=model_type,
                 model_config=model_config,
                 train_config=train_config,
@@ -384,7 +495,10 @@ def run_skill(sandbox, **kwargs) -> dict:
 
     # Flat breakdown: preserves the pre-K.2.5 contract so
     # nodes/ml_hyperparameter_tune_agent.py can still read `source` +
-    # `gpu_name` to trigger the Phase F EMA update.
+    # `gpu_name` to trigger the Phase F EMA update. Phase 6.7 Fix 1
+    # appends ``warmup_aggregator`` + the per-step timing detail so the
+    # audit log distinguishes a steady-state median from a step-0
+    # fast-fail event without losing the legacy keys.
     tbd = training["breakdown"]
     breakdown = {
         "total_train_steps":  tbd["total_train_steps"],
@@ -395,6 +509,10 @@ def run_skill(sandbox, **kwargs) -> dict:
         "num_params":         num_params,
         "source":             tbd["ms_source"],
         "gpu_name":           tbd["gpu_name"],
+        "warmup_aggregator":      warmup_breakdown.get("aggregator"),
+        "warmup_n_warmup_batches": warmup_breakdown.get("n_warmup_batches", 0),
+        "warmup_n_timed_batches":  warmup_breakdown.get("n_timed_batches", 0),
+        "warmup_timings_ms":       warmup_breakdown.get("timings_ms", []),
     }
 
     verdict = (
