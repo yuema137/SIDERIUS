@@ -484,6 +484,33 @@ class TidmadSandbox:
             if not self.progress_bar and result.stdout:
                 print(f"--- Train Script Output ---\n{result.stdout}")
 
+            # Phase 6.7 Fix 3 — silent-crash detection. The trainer-side
+            # ``_save_with_sentinel`` (Commit 3) writes ``_OK_<exp_id>`` only
+            # after ``torch.save`` returns successfully. If the subprocess
+            # exited 0 but the sentinel is missing, training crashed somewhere
+            # between ``torch.save``'s nominal success and process exit
+            # (kernel OOM-kill on the post-save deallocator, GPU watchdog,
+            # segfault in CUDA shutdown). Surface as ``error_training`` —
+            # the consumer-side preflight in ``inference_single`` would
+            # otherwise raise on the missing .pth and the failure would be
+            # misclassified as ``error_inference``. The ``error_training:``
+            # prefix is the contract the tuner pattern-matches against.
+            sentinel_path = os.path.abspath(os.path.join(
+                self.dirs["models"], f"_OK_{exp_id}",
+            ))
+            if not os.path.exists(sentinel_path):
+                stderr_tail = "\n".join(
+                    (result.stderr or "").splitlines()[-20:]
+                )
+                silent_msg = (
+                    f"error_training: subprocess returned 0 but no _OK_ "
+                    f"sentinel for exp_id={exp_id} "
+                    f"(expected {sentinel_path}).\n"
+                    f"--- stderr tail (last 20 lines) ---\n{stderr_tail}"
+                )
+                print(f"--- Train Silent Crash ---\n{silent_msg}")
+                return {"status": "error", "message": silent_msg}
+
             # Read the training-result JSON written by train_engine_sandbox.py
             # so the caller gets final_loss / loss_history / model_params.
             train_json_path = os.path.abspath(os.path.join(
