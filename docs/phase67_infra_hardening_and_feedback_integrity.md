@@ -290,11 +290,21 @@ Every fix must justify itself against a **measurable** target. "Vague feelings" 
     2. **Steady-state warmup:** in `_measure_ms_per_step`, change defaults to `n_warmup_batches=3, n_timed_batches=7`. Aggregate via **median** (or trimmed mean dropping max) instead of arithmetic mean. Add fast-fail: if step-0 elapsed ≥ 5000 ms, return that value and skip the remaining steps.
     3. Surface `n_warmup_batches`, `n_timed_batches`, raw `timings_ms`, and aggregator label (`median` / `trimmed_mean` / `fast_fail`) in the wrapper's `breakdown` dict for downstream visibility.
 * **Checklist:**
-    * [ ] Sentinel file written **iff** `torch.save` succeeded.
-    * [ ] `n_warmup_batches=3, n_timed_batches=7` defaults in place.
-    * [ ] Median (or trimmed mean) replaces arithmetic mean.
-    * [ ] Fast-fail at step 0 ≥ 5 s; verified on a synthetic slow model in unit test.
-    * [ ] Existing TimeEval unit tests still pass (with monkey-patched `_measure_ms_per_step`).
+    * [x] Sentinel file written **iff** `torch.save` succeeded.
+    * [x] `n_warmup_batches=3, n_timed_batches=7` defaults in place.
+    * [x] Median (or trimmed mean) replaces arithmetic mean.
+    * [x] Fast-fail at step 0 ≥ 5 s; verified on a synthetic slow model in unit test.
+    * [x] Existing TimeEval unit tests still pass (with monkey-patched `_measure_ms_per_step`).
+
+* **Implementation status (2026-04-26, commit `bf307c6` on `feat/dashboard-iteration-panel`):**
+    * **Files touched (4):** `execute_tools/train_engine_sandbox.py` (+26 lines, sentinel writer in both save sites), `agent/skills/evaluate_time_skill/wrapper.py` (+158/-26, warmup overhaul), `tests/unit/agent/skills/test_evaluate_time_skill.py` (+210, 13 new + 4 updated tests), `tests/unit/execute_tools/test_train_sentinel.py` (NEW, +114, 4 sentinel atomicity tests). 4 files, 482 insertions, 26 deletions.
+    * **Sentinel atomicity (`_save_with_sentinel`):** thin wrapper around `torch.save(...)` followed by `Path(sentinel_path).touch()`. Atomicity comes from exception propagation — if `torch.save` raises, control flow never reaches the sentinel write, so a save failure cannot leave an orphan `_OK_` for Commit 4's orchestrator to misinterpret. Called from both `run_experiment` (line 349) and `run_experiment_streaming` (line 485). Sentinel path is `<models_dir>/_OK_<exp_id>` (zero-byte, sibling of the `.pth`).
+    * **Steady-state warmup:** `_measure_ms_per_step` defaults flipped to `n_warmup_batches=3, n_timed_batches=7`; aggregation switched from `sum(...)/len(...)` to `statistics.median(...)`. Pure `_aggregate_warmup_timings(timings_ms, fast_fail_ms_threshold)` helper extracted so the three branches (`median` / `fast_fail` / `None`) are testable without torch. Fast-fail short-circuit: if step-0 elapsed ≥ 5000 ms, the function returns immediately with `aggregator="fast_fail"` instead of running the remaining 9 steps.
+    * **Breakdown propagation:** wrapper now surfaces `warmup_aggregator`, `warmup_n_warmup_batches`, `warmup_n_timed_batches`, and `warmup_timings_ms` in the flat `breakdown` dict so the planner-facing prompt and the audit log distinguish a steady-state estimate from a DOA short-circuit. Free-form keys; no schema change.
+    * **Test result:** scoped suite **41/41 passing** (4 sentinel + 17 evaluate-time-skill new/updated + 20 pre-existing).
+    * **Honest divergences from spec:**
+        1. `_save_with_sentinel` is the *named* helper rather than an inline `Path(...).touch()` after each save call — refactored for symmetry across the two save sites and so the sentinel-write semantics are testable in isolation.
+        2. Aggregator label uses `"median"`, `"fast_fail"`, or `None` (when no timed batches were collected) — `trimmed_mean` was discussed in the spec but not implemented; median already gives the outlier-robustness target without needing a tuning knob.
 
 ### Commit 4 — Orchestrator Subprocess Monitoring (Fix 3 Producer-Side, orchestrator half)
 
@@ -304,9 +314,19 @@ Every fix must justify itself against a **measurable** target. "Vague feelings" 
     2. Non-zero exit → record as `error_training` with the captured tail in `memory.conclusion`. Skip inference for that round.
     3. Zero exit but missing sentinel → record as `error_training: subprocess returned 0 but no _OK_ sentinel; likely silent crash before save`. This catches the genuinely silent class.
 * **Checklist:**
-    * [ ] Non-zero subprocess exits never reach inference.
-    * [ ] Missing sentinel after zero exit is surfaced as `error_training`, not `error_inference`.
-    * [ ] Forced-failure synthetic test confirms the reclassification.
+    * [x] Non-zero subprocess exits never reach inference.
+    * [x] Missing sentinel after zero exit is surfaced as `error_training`, not `error_inference`.
+    * [x] Forced-failure synthetic test confirms the reclassification.
+
+* **Implementation status (2026-04-26, commit `e559fd1` on `feat/dashboard-iteration-panel`):**
+    * **Files touched (5):** `core/sandbox_executor.py` (+27, post-subprocess sentinel check), `nodes/ml_hyperparameter_tune_agent.py` (+42, inference-error re-routing), `tests/unit/core/test_sandbox_executor.py` (+140, helper + 4 silent-crash tests + 5 existing rewired), `tests/unit/core/test_sandbox_rlimit.py` (+21, 3 existing rewired through new helper), `tests/unit/agent/tune_ml_hyperparam_agent/test_silent_train_crash_routing.py` (NEW, +375, 4 routing tests). 5 files, 593 insertions, 12 deletions.
+    * **Producer-side detection (`core/sandbox_executor.execute_training`):** after `subprocess.run(...)` returns with `returncode == 0`, the executor tests for the `_OK_<exp_id>` sentinel that Commit 3's `_save_with_sentinel` writes. If the sentinel is missing, the run is surfaced as `{"status": "error", "message": "error_training: subprocess returned 0 but no _OK_ sentinel for exp_id=… (expected …).\n--- stderr tail (last 20 lines) ---\n…"}`. The 20-line cap is `(result.stderr or "").splitlines()[-20:]` joined with `"\n"`. The non-zero exit branch was already in place from earlier hardening; the missing-sentinel branch is the new contribution.
+    * **Consumer-side routing (`nodes/ml_hyperparameter_tune_agent.run`):** the inference-error branch (around lines 1387–1446) now substring-matches `"error_training:"` in `inf_status["message"]` and re-routes the saved record's `status` from `error_inference` to `error_training`. The record's `memory.conclusion` / `memory.discovery` / `memory.memory_update` text is rewritten to point the planner at the trainer (the words "silently" + "training crashed" appear so the planner's prompt template renders the right narrative). The pre-existing CUDA-OOM disambiguation is preserved — `error_inference_oom` still routes correctly because the substring check is specific to `error_training:` (not just `error_`).
+    * **Test result:** scoped suite **72/72 passing** (`tests/unit/core/test_sandbox_executor.py` 27 + `tests/unit/core/test_sandbox_rlimit.py` 41 + `tests/unit/agent/tune_ml_hyperparam_agent/test_silent_train_crash_routing.py` 4).
+    * **Helper rewires:** introduced `_make_train_success_side_effect` in `test_sandbox_executor.py` and `_train_success_side_effect` in `test_sandbox_rlimit.py` so 8 pre-existing tests now mirror the post-Commit-3 contract (sentinel write occurs *before* subprocess returns). Without this rewire, every existing happy-path test would have started returning `error_training` because the new sentinel check fires unconditionally.
+    * **Honest divergences from spec:**
+        1. The tuner-side routing logic uses **substring match** (`"error_training:" in error_msg`) rather than a structured field on `inf_status`. This was pragmatic — adding a structured field would have required schema work in `inference_skill`'s output contract, and the substring check is precise enough that the routing tests pin all three classes (silent crash → routes; plain inference fail → stays; CUDA OOM → stays). If a future fix needs richer error metadata, it can promote the contract then.
+        2. The new tuner-side routing tests live in a standalone file (`test_silent_train_crash_routing.py`) rather than being appended to an existing test file — pattern follows `test_physical_rejection_capture.py` for the same routing-contract test class. 375 lines, hermetic harness (patches `LLMBridge`, `TidmadSandbox`, `_run_skill`, `load_reference_scores`, `get_or_create`).
 
 ### (Validation) Commit 5 — End-to-End Sanity Run
 
