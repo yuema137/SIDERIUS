@@ -389,6 +389,7 @@ class LLMBridge:
             final_user_prompt += f"\n\n{exploration_checklist}"
         final_user_prompt += manual_context
 
+        print(f"    [PROMPT_SIZE] planner: {len(final_user_prompt)} chars")
         return self.generate(system_prompt, final_user_prompt)
 
     def reflect(self, exp_id: str, hypothesis: str, actual_results: Dict,

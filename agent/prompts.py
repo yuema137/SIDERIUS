@@ -685,6 +685,43 @@ since those knobs are frozen — focus your reasoning on architecture, lr, and l
 """
 
 
+_CONDENSED_KEYS = frozenset({
+    "exp_id", "status", "model_type", "denoising_score", "is_trial",
+})
+_CONDENSED_MEMORY_KEYS = frozenset({
+    "hypothesis", "conclusion", "round_index",
+})
+
+
+def _truncate_memory_history(
+    records: list[dict],
+    full_window: int = 3,
+) -> list[dict]:
+    """Sliding-window truncation for the planner's history context.
+
+    Args:
+        records:     Full experiment record list from sandbox.get_summary().
+        full_window: Number of most-recent records to keep verbatim.
+
+    Returns:
+        New list (non-destructive). Recent records are unchanged; older
+        records are condensed to identity + score + hypothesis/conclusion.
+    """
+    if len(records) <= full_window:
+        return list(records)
+
+    cutoff = len(records) - full_window
+    condensed: list[dict] = []
+    for rec in records[:cutoff]:
+        entry = {k: rec[k] for k in _CONDENSED_KEYS if k in rec}
+        memory = rec.get("memory", {})
+        if memory:
+            entry["memory"] = {k: memory[k] for k in _CONDENSED_MEMORY_KEYS if k in memory}
+        condensed.append(entry)
+
+    return condensed + list(records[cutoff:])
+
+
 def get_planner_user_prompt(
     memory_history,
     expert_advice="None",
@@ -739,7 +776,8 @@ def get_planner_user_prompt(
             means "no prior data" — typically round 1 before any pre-flight
             has run. See §10.3 / §10.11.
     """
-    history_context = json.dumps(memory_history, indent=2) if memory_history else "No previous experiments recorded."
+    windowed = _truncate_memory_history(memory_history) if memory_history else []
+    history_context = json.dumps(windowed, indent=2) if windowed else "No previous experiments recorded."
 
     # Handle the model constraint message + output type / valid losses
     model_constraint = ""

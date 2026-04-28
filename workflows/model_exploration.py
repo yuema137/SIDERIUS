@@ -335,6 +335,32 @@ def _render_physical_rejection(rej: PhysicalRejection, n_rejections: int) -> str
     return "\n".join(lines)
 
 
+def _cap_knowledge_cache(
+    cache: dict,
+    current_model: str,
+    max_entries: int = 5,
+) -> tuple[dict, set[str]]:
+    """Keep top-N models by best_denoising_score + the current iteration's model.
+
+    Returns:
+        (capped_cache, evicted_model_types)
+    """
+    if len(cache) <= max_entries:
+        return cache, set()
+
+    scored = [
+        (mt, entry.get("_stats", {}).get("best_denoising_score"))
+        for mt, entry in cache.items()
+        if mt != current_model
+    ]
+    scored.sort(key=lambda x: x[1] if x[1] is not None else float("-inf"),
+                reverse=True)
+    keep = {current_model} | {mt for mt, _ in scored[:max_entries - 1]}
+    evicted = set(cache) - keep
+    capped = {mt: entry for mt, entry in cache.items() if mt in keep}
+    return capped, evicted
+
+
 def _add_plugin_to_registries(plugin_path: str) -> Optional[str]:
     """Register a single plugin file in every in-process registry surface.
 
@@ -973,6 +999,12 @@ def run_workflow(
         # Update knowledge cache from interpretation output
         if hasattr(interpretation, "model_knowledge_cache") and interpretation.model_knowledge_cache:
             model_knowledge_cache = dict(interpretation.model_knowledge_cache)
+            model_knowledge_cache, evicted = _cap_knowledge_cache(
+                model_knowledge_cache, current_model=proposal.model_name,
+            )
+            if evicted:
+                print(f"  [{iteration}] Cache capped: evicted {sorted(evicted)}, "
+                      f"kept {len(model_knowledge_cache)} entries.")
             print(f"  [{iteration}] Knowledge cache: {len(model_knowledge_cache)} models cached.")
 
         # Update runtime vocab from interpretation output

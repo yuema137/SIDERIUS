@@ -613,26 +613,28 @@ Each commit ships its own design-doc update (per `feedback_plan_doc_sync.md`). C
 **Root cause recap**: Three growth vectors — (1) `memory_history` in tuner planner prompt serializes ALL experiment records with no sliding window (50-100KB at 10 rounds); (2) `model_knowledge_cache` in `InterpretationOutput` grows monotonically (352KB by iter 9 in v4); (3) `model_descriptions` rendered untruncated into proposer prompt (7KB per model). None of these caused OOM in v6's short runs, but they will degrade LLM reasoning quality and cost over 20-iteration chains.
 
 **Sliding window for `memory_history`** (`agent/prompts.py`):
-- [ ] Add a `_truncate_memory_history(records: list[dict], full_window: int = 3) -> list[dict]` helper.
-- [ ] Records within the last `full_window` rounds: kept verbatim (full params, score_table, loss_history, memory block).
-- [ ] Older records: condensed to `{exp_id, round, status, score, hypothesis, conclusion}` — drops `params`, `score_table`, `loss_history`, `file_vector`, `timing`.
-- [ ] Call this helper at `prompts.py:742` before `json.dumps`.
-- [ ] Unit test: 10 records in → 3 full + 7 condensed out. Verify condensed records have exactly the expected keys.
+- [x] Add a `_truncate_memory_history(records: list[dict], full_window: int = 3) -> list[dict]` helper. _Non-destructive — returns a new list; original `memory_history` is never mutated. `build_exploration_checklist` continues to receive the full list._
+- [x] Records within the last `full_window` rounds: kept verbatim (full params, score_table, loss_history, memory block).
+- [x] Older records: condensed to `{exp_id, status, model_type, denoising_score, is_trial}` + `memory: {hypothesis, conclusion, round_index}`. Drops `params`, `score_table`, `loss_history`, `file_vector`, `timing`, and heavy memory keys (`key_factor`, `discovery`, `memory_update`).
+- [x] Called at `get_planner_user_prompt` before `json.dumps`. Only the serialised prompt copy is truncated.
+- [x] Unit tests (8): 10→3+7 split, exact key checks, non-destructive, empty list, missing memory block, JSON size reduction ≥30%. _All in `test_memory_history_truncation.py`._
 
 **Model knowledge cache cap** (`InterpretationOutput` / proposer pipeline):
-- [ ] Cap `model_knowledge_cache` to the top-N models by most recent score (default N=5). Evict entries for models not in the top-N and not in the current iteration's model set.
-- [ ] Apply the cap in `workflows/model_exploration.py` after the interpretation step, before the cache is passed to the proposer.
-- [ ] Unit test: cache with 8 entries, top-5 by score → 5 entries remain.
+- [x] Extracted `_cap_knowledge_cache(cache, current_model, max_entries=5)` helper in `workflows/model_exploration.py`. Returns `(capped_cache, evicted_set)`. Keeps union of (top-N by `_stats.best_denoising_score`) + (current iteration's model). `None` scores rank below all scored models.
+- [x] Applied in the iter loop after `model_knowledge_cache = dict(interpretation.model_knowledge_cache)`, before the cache is passed to the next iteration's proposer. Eviction logged as `[N] Cache capped: evicted [...]`.
+- [x] Unit tests (6): under/exact limit, 8→5 by score, current model survives even if worst, None-scores evicted first, custom max_entries. _All in `test_knowledge_cache_cap.py`._
 
 **Model descriptions truncation** (`nodes/ml_model_proposal_agent.py`):
-- [ ] Add a `_truncate_description(text: str, max_chars: int = 1500) -> str` helper. Keeps the first `max_chars` characters and appends `\n[...truncated]`.
-- [ ] Apply in `_render_model_descriptions` (line 615-619) before injecting into the prompt.
-- [ ] Unit test: 7KB description → 1500 chars + truncation marker.
+- [x] Added `_truncate_description(text: str, max_chars: int = 1500) -> str`. Keeps the first `max_chars` characters and appends `\n[...truncated]`. Short descriptions returned unchanged.
+- [x] Applied in `_build_reasoning_prompt` (line 621) inside the `descriptions` loop, before injecting into the prompt. Disk artifacts and `ModelRunSummary` remain untruncated.
+- [x] Unit tests (5): short unchanged, exact limit unchanged, over-limit truncated with marker, custom limit, 7KB→1500+marker. _All in `test_description_truncation.py`._
 
 **Prompt size diagnostic**:
-- [ ] Add a `_log_prompt_size(prompt: str, label: str)` call at the entry to each LLM call in the tuner planner and proposer pipeline. Logs `[PROMPT_SIZE] {label}: {len(prompt)} chars`. No gating — purely diagnostic.
+- [x] `[PROMPT_SIZE] planner: N chars` logged in `llm_bridge.py:plan()` after assembling the final user prompt (includes history + checklist + plugin source + manual context).
+- [x] `[PROMPT_SIZE] proposer_reasoning: N chars` logged in `ml_model_proposal_agent.py:_run_legacy()` before the reasoning LLM call.
+- [x] `[PROMPT_SIZE] N chars` logged per pipeline stage in `_run_pipeline()` before each LLM call.
 
-- [ ] Regression test: run existing prompt-related unit tests (if any) and the `test_proposer_preflight.py` suite.
+- [x] Regression: planner tests 21/21, proposer suite 396/396, preflight 18/18, workflow 105/105, llm_bridge 61/61. Zero regressions.
 - [ ] Doc-sync: Part 4 §4.3 describes this. Commit message references §4.3.
 
 #### Commit 11 — `feat(chain): unify CLI surface across run_one_iteration.py and run_exploration_adaptive.py`
