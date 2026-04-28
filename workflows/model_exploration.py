@@ -335,6 +335,63 @@ def _render_physical_rejection(rej: PhysicalRejection, n_rejections: int) -> str
     return "\n".join(lines)
 
 
+def _add_plugin_to_registries(plugin_path: str) -> Optional[str]:
+    """Register a single plugin file in every in-process registry surface.
+
+    Updates four surfaces so the tuner's planner (running in the same process
+    as this workflow) can resolve the new model_type for both training and
+    inference without a re-scan:
+
+      1. ``ml_models.models_sandbox.MODEL_REGISTRY``
+         — model_type → model class
+      2. ``ml_models.models_format_sandbox.PLUGIN_CONFIG_REGISTRY``
+         — model_type → config class (packaged identity)
+      3. Bare-name mirror at ``models_format_sandbox.PLUGIN_CONFIG_REGISTRY``
+         — same mapping under the bare module identity used by the training
+         subprocess (``execute_tools/train_engine_sandbox.py``) and inference
+         (``execute_tools/inference_single.py``). When ``ml_models/`` is on
+         ``sys.path``, bare and packaged imports resolve to *distinct* module
+         objects with separate registry dicts; missing this mirror caused
+         silent ``Unknown model_type`` failures pre-Phase-6.8 (see
+         ``ml_models/models_sandbox.py:660-673``).
+      4. ``ml_models.plugin_loader.PLUGIN_OUTPUT_TYPE_REGISTRY``
+         — model_type → "classifier" | "regressor" | "hybrid", driving
+         classifier-vs-regressor routing in scoring + inference.
+
+    The pre-Commit-6 implementation (``workflows/model_exploration.py:381-392``)
+    only updated surfaces 1 and 2, leaving 3 and 4 unset. Regressor plugins
+    were therefore miscategorised as classifiers, and any subprocess that
+    imported via the bare module identity could not find the config class.
+
+    Args:
+        plugin_path: filesystem path to the plugin ``.py`` file.
+
+    Returns:
+        The registered ``model_type`` string on success, or ``None`` if the
+        plugin file failed to load (validation error, missing required
+        attributes, etc — see ``ml_models.plugin_loader._load_plugin``).
+    """
+    from ml_models.models_sandbox import MODEL_REGISTRY
+    from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
+    from ml_models.plugin_loader import _load_plugin, PLUGIN_OUTPUT_TYPE_REGISTRY
+
+    plugin_data = _load_plugin(plugin_path)
+    if plugin_data is None:
+        return None
+
+    model_type = plugin_data["model_type"]
+    MODEL_REGISTRY[model_type] = plugin_data["model_class"]
+    PLUGIN_CONFIG_REGISTRY[model_type] = plugin_data["config_class"]
+    PLUGIN_OUTPUT_TYPE_REGISTRY[model_type] = plugin_data["output_type"]
+
+    bare = sys.modules.get("models_format_sandbox")
+    pkg = sys.modules.get("ml_models.models_format_sandbox")
+    if bare is not None and pkg is not None and bare is not pkg:
+        bare.PLUGIN_CONFIG_REGISTRY[model_type] = plugin_data["config_class"]
+
+    return model_type
+
+
 def _register_plugin(impl_output, model_name: str, dest_plugin_dir: str):
     """
     Copy validated plugin files to ``dest_plugin_dir`` (the tuner's run-scoped
@@ -376,20 +433,14 @@ def _register_plugin(impl_output, model_name: str, dest_plugin_dir: str):
     else:
         print(f"    Warning: description not found at {impl_output.description_file_path}, skipping registration")
 
-    # Extend the already-cached MODEL_REGISTRY so the tuning agent can
-    # find the new model type without re-importing models_sandbox.
+    # Extend the already-cached registries so the tuner's planner (same Python
+    # process as the workflow) can resolve the new model type without a re-scan.
     try:
-        from ml_models.models_sandbox import MODEL_REGISTRY
-        from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
-        from ml_models.plugin_loader import _load_plugin
-
-        plugin_data = _load_plugin(dest_plugin)
-        if plugin_data:
-            MODEL_REGISTRY[plugin_data["model_type"]] = plugin_data["model_class"]
-            PLUGIN_CONFIG_REGISTRY[plugin_data["model_type"]] = plugin_data["config_class"]
-            print(f"    Model '{model_name}' added to MODEL_REGISTRY")
+        registered = _add_plugin_to_registries(dest_plugin)
+        if registered:
+            print(f"    Model '{model_name}' added to registries (model_type='{registered}')")
     except Exception as e:
-        print(f"    Warning: could not extend MODEL_REGISTRY: {e}")
+        print(f"    Warning: could not extend registries: {e}")
 
 
 # ---------------------------------------------------------------------------
