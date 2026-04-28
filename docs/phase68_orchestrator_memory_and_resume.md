@@ -565,14 +565,14 @@ Each commit ships its own design-doc update (per `feedback_plan_doc_sync.md`). C
 
 **Goal**: Top-level Python helper the chain runner calls before `run_workflow`.
 
-- [ ] Create `core/resume.py` with `RestoredState` dataclass and `restore_prior_state(workspace, current_iter, seed_paths)`.
-- [ ] Use `HyperparamTuningOutput.model_validate_json` as commit-fence predicate.
-- [ ] Use `core.sandbox_executor.get_plugin_dir` to compute the plugin path (do NOT hardcode `{workspace}/plugins/...`; reuse the canonical layout helper).
-- [ ] Use `_add_plugin_to_registries` from commit 6.
-- [ ] Refuse on missing manifest, missing run_output, non-completed status, malformed JSON, non-contiguous iters.
-- [ ] Warn (not raise) on missing plugin file; the JSON is the contract.
-- [ ] Unit tests on a synthetic 3-iter workspace: clean run, missing iter_002, corrupt iter_002 JSON, missing plugin file (expect warn + continue), seed-paths-only (current_iter=1, returns seeds verbatim).
-- [ ] Integration test: drive `restore_prior_state` after running a real 2-iter chain (use pseudo-mode if available) → verify `MODEL_REGISTRY` contains both iters' plugin classes.
+- [x] Create `core/resume.py` with `RestoredState` dataclass and `restore_prior_state(workspace, current_iter, seed_paths)`.
+- [x] Use `HyperparamTuningOutput.model_validate_json` as commit-fence predicate.
+- [x] Use `core.sandbox_executor.get_plugin_dir` to compute the plugin path (do NOT hardcode `{workspace}/plugins/...`; reuse the canonical layout helper).
+- [x] Use `_add_plugin_to_registries` from commit 6.
+- [x] Refuse on missing manifest, missing run_output, non-completed status, malformed JSON, non-contiguous iters. _Also raises on workspace not found, missing `output_path`, and Pydantic ValidationError._
+- [x] Warn (not raise) on missing plugin file; the JSON is the contract. _Same path also warns on a `.py` that fails `_load_plugin` validation (broken contract is a higher-tier corruption than missing file)._
+- [x] Unit tests on a synthetic 3-iter workspace: clean run, missing iter_002, corrupt iter_002 JSON, missing plugin file (expect warn + continue), seed-paths-only (current_iter=1, returns seeds verbatim). _24/24 green; see `tests/unit/core/test_resume.py`._
+- [x] Integration test: drive `restore_prior_state` after running a real 2-iter chain (use pseudo-mode if available) → verify `MODEL_REGISTRY` contains both iters' plugin classes. _High-fidelity 2-iter pseudo-integration test in `TestPseudoIntegrationTwoIterChain` uses real plugin .py files, verifies all four registry surfaces incl. bare-name mirror. The full run_workflow→manifest→restore loop is still scheduled for Commit 12._
 - [ ] Doc-sync: §3.3 already describes this. Commit message references §3.3.
 
 #### Commit 8 — `feat(chain): run_one_iteration.py calls restore_prior_state + --start_iteration`
