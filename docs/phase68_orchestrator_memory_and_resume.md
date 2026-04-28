@@ -635,7 +635,7 @@ Each commit ships its own design-doc update (per `feedback_plan_doc_sync.md`). C
 - [x] `[PROMPT_SIZE] N chars` logged per pipeline stage in `_run_pipeline()` before each LLM call.
 
 - [x] Regression: planner tests 21/21, proposer suite 396/396, preflight 18/18, workflow 105/105, llm_bridge 61/61. Zero regressions.
-- [ ] Doc-sync: Part 4 §4.3 describes this. Commit message references §4.3.
+- [x] Doc-sync: Part 4 §4.3 describes this. Commit message references §4.3. _Commit `1b39fb9`._
 
 #### Commit 11 — `feat(chain): unify CLI surface across run_one_iteration.py and run_exploration_adaptive.py`
 
