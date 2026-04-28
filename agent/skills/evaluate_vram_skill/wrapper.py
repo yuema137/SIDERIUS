@@ -38,9 +38,11 @@ Removed:
 """
 from __future__ import annotations
 
+import gc
 import inspect
 from typing import Optional
 
+import psutil
 import torch
 from pydantic import ValidationError
 
@@ -403,6 +405,7 @@ def run_skill(sandbox, **kwargs):
             }
 
         # 3. Training-phase probe ─────────────────────────────────────────
+        rss_before = psutil.Process().memory_info().rss
         x_train, y_train = _build_probe_tensors(batch_size, seg_size, loss_type)
         training_probe   = probe_activation_footprint(
             model=model_for_train, loss_module=loss_module,
@@ -414,6 +417,19 @@ def run_skill(sandbox, **kwargs):
         )
         training_vram_ok      = training_peak <= cap_bytes
         training_intensity_ok = compute_intensity.passes(batch_size, seg_size)
+
+        # Free training-phase objects before building inference models.
+        del model_for_train, loss_module, x_train, y_train
+        gc.collect()
+
+        rss_after = psutil.Process().memory_info().rss
+        rss_delta_gb = (rss_after - rss_before) / _GB
+        if rss_delta_gb > 8.0:
+            print(f"    [PROBE_MEMORY_WARNING] {model_type}: training probe "
+                  f"RSS delta = {rss_delta_gb:.2f} GB "
+                  f"(before={rss_before / _GB:.2f}, after={rss_after / _GB:.2f})")
+        else:
+            print(f"    [Probe RSS] delta={rss_delta_gb:.2f} GB")
 
         # 4. Inference-phase resolution + breakdown probe ────────────────
         #    ``resolve_inference_batch`` probes each candidate B internally
@@ -430,6 +446,9 @@ def run_skill(sandbox, **kwargs):
             inference_batch = resolve_inference_batch(
                 model_for_resolve, segmentation_size=seg_size, cap_bytes=cap_bytes,
             )
+            del model_for_resolve
+            gc.collect()
+
             model_for_bd = _build_model(model_type, model_cfg, loss_type)
             inference_probe = probe_activation_footprint(
                 model=model_for_bd, loss_module=None,
@@ -439,6 +458,9 @@ def run_skill(sandbox, **kwargs):
                 target_sample=None,
                 mode="inference",
             )
+            del model_for_bd
+            gc.collect()
+
             inference_peak, inference_breakdown = _compose_inference_peak(inference_probe)
             inference_breakdown["inference_batch"] = inference_batch
         except ValueError as e:

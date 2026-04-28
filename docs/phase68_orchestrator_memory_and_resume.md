@@ -1,10 +1,10 @@
 # Phase 6.8 — Orchestrator Memory Hygiene & Run Resume
 
-**Status**: Task 1 (memory hygiene) shipped in PR #63. Task 2 (resume) pivoted on 2026-04-27 to a chain-first design — see Part 3.
-**Driver**: v5 sanity-run host-OOM kill of `explore_novel_v5_0426` PID 4142820 at 2026-04-27 00:46:42 (kernel: 23.5 GB anon-RSS, total-vm 41.0 GB).
-**Scope**: Two parallel work streams — (1) understand and stop the parent-process memory growth that produced the OOM; (2) make any run resumable from disk artifacts after `SIGKILL`.
+**Status**: Task 1 (memory hygiene) shipped in PR #63. Task 2 (resume) pivoted on 2026-04-27 to a chain-first design — see Part 3. v6 post-mortem (2026-04-28) identified three additional failure modes — see Part 4.
+**Driver**: v5 sanity-run host-OOM kill of `explore_novel_v5_0426` PID 4142820 at 2026-04-27 00:46:42 (kernel: 23.5 GB anon-RSS, total-vm 41.0 GB). v6 sanity-run host-OOM of `explore_novel_v6_0427` at 2026-04-28 01:54 (35.6 GB RSS — different root cause than v5, see Part 4 §4.1).
+**Scope**: Two parallel work streams — (1) understand and stop the parent-process memory growth that produced the OOM; (2) make any run resumable from disk artifacts after `SIGKILL`. Extended by Part 4 to cover VRAM probe memory safety, time estimation accuracy, and LLM prompt size management.
 
-> **Reading order**: Part 1 (memory hygiene, shipped) → Part 2 (in-process resume design, **superseded**) → Part 3 (chain-first pivot, **active plan**). Part 2 is preserved as design history; the active implementation plan with commit checklists is Part 3.
+> **Reading order**: Part 1 (memory hygiene, shipped) → Part 2 (in-process resume design, **superseded**) → Part 3 (chain-first pivot, **active plan**) → Part 4 (v6 countermeasures, **active plan**). Part 2 is preserved as design history; the active implementation plan with commit checklists is Parts 3 + 4.
 
 ---
 
@@ -547,7 +547,7 @@ Safety rules in the shell driver:
 
 ### 3.5 Commit plan — Task 2
 
-Each commit ships its own design-doc update (per `feedback_plan_doc_sync.md`). Commits 6–8 are gated on Tier-1 / pseudo-mode tests passing locally before push. The chain commits (10–13) don't need to land in one PR — small wave of 3 PRs is fine.
+Each commit ships its own design-doc update (per `feedback_plan_doc_sync.md`). Commits 6–9 are gated on unit tests passing locally before push. The chain commits (11–15) don't need to land in one PR — small wave of 3 PRs is fine. Commits 9–10 are v6 countermeasures (probe safety, LLM context) that can ship independently of the chain work; see Part 4 for the full design rationale.
 
 #### Commit 6 — `refactor(workflow): extract _add_plugin_to_registries helper`
 
@@ -572,34 +572,83 @@ Each commit ships its own design-doc update (per `feedback_plan_doc_sync.md`). C
 - [x] Refuse on missing manifest, missing run_output, non-completed status, malformed JSON, non-contiguous iters. _Also raises on workspace not found, missing `output_path`, and Pydantic ValidationError._
 - [x] Warn (not raise) on missing plugin file; the JSON is the contract. _Same path also warns on a `.py` that fails `_load_plugin` validation (broken contract is a higher-tier corruption than missing file)._
 - [x] Unit tests on a synthetic 3-iter workspace: clean run, missing iter_002, corrupt iter_002 JSON, missing plugin file (expect warn + continue), seed-paths-only (current_iter=1, returns seeds verbatim). _24/24 green; see `tests/unit/core/test_resume.py`._
-- [x] Integration test: drive `restore_prior_state` after running a real 2-iter chain (use pseudo-mode if available) → verify `MODEL_REGISTRY` contains both iters' plugin classes. _High-fidelity 2-iter pseudo-integration test in `TestPseudoIntegrationTwoIterChain` uses real plugin .py files, verifies all four registry surfaces incl. bare-name mirror. The full run_workflow→manifest→restore loop is still scheduled for Commit 12._
+- [x] Integration test: drive `restore_prior_state` after running a real 2-iter chain (use pseudo-mode if available) → verify `MODEL_REGISTRY` contains both iters' plugin classes. _High-fidelity 2-iter pseudo-integration test in `TestPseudoIntegrationTwoIterChain` uses real plugin .py files, verifies all four registry surfaces incl. bare-name mirror. The full run_workflow→manifest→restore loop is still scheduled for Commit 14._
 - [ ] Doc-sync: §3.3 already describes this. Commit message references §3.3.
 
 #### Commit 8 — `feat(chain): run_one_iteration.py calls restore_prior_state + --start_iteration`
 
 **Goal**: Chain runner is correct on iter > 1 even on a fresh run (not just resume). Surface a manual-override flag for operators who bypass the shell auto-detection.
 
-- [x] In `sdsc_submission_scripts/run_one_iteration.py:main()`, replace the bare `resolve_source_paths(args.source_paths)` call with `restore_prior_state(args.workspace, args.start_iteration, seed_paths)`. _Layered: `resolve_source_paths` runs first (back-compat for `@manifest:` strings from the legacy chain shell); its output is passed as `seed_paths` into `restore_prior_state`. New `run_chain.sh` (Commit 11) won't emit `@manifest:` strings, so the back-compat layer becomes a no-op then._
-- [x] **Rename** `--iteration` → `--start_iteration` (positional meaning unchanged: which iter this invocation runs). Keep `--iteration` as a deprecated alias for one release; emit DeprecationWarning when used. The new name is consistent with `run_exploration_adaptive.py` (Commit 9) and with `run_chain.sh --start_iter`. _Implemented via `dest="iteration_legacy"` + post-parse mutex check in `normalize_args`. `test_legacy_iteration_alias_works_with_deprecation_warning` and `test_both_flags_supplied_is_an_error` cover the surface._
+- [x] In `sdsc_submission_scripts/run_one_iteration.py:main()`, replace the bare `resolve_source_paths(args.source_paths)` call with `restore_prior_state(args.workspace, args.start_iteration, seed_paths)`. _Layered: `resolve_source_paths` runs first (back-compat for `@manifest:` strings from the legacy chain shell); its output is passed as `seed_paths` into `restore_prior_state`. New `run_chain.sh` (Commit 13) won't emit `@manifest:` strings, so the back-compat layer becomes a no-op then._
+- [x] **Rename** `--iteration` → `--start_iteration` (positional meaning unchanged: which iter this invocation runs). Keep `--iteration` as a deprecated alias for one release; emit DeprecationWarning when used. The new name is consistent with `run_exploration_adaptive.py` (Commit 11) and with `run_chain.sh --start_iter`. _Implemented via `dest="iteration_legacy"` + post-parse mutex check in `normalize_args`. `test_legacy_iteration_alias_works_with_deprecation_warning` and `test_both_flags_supplied_is_an_error` cover the surface._
 - [x] When `--start_iteration > 1`, restore is triggered automatically — no separate `--resume` flag needed. _`restore_prior_state` is called unconditionally; iter==1 short-circuits to seeds-verbatim, iter>1 walks the chain. No flag check needed in the runner._
 - [x] Pass `state.resolved_source_paths` to `run_workflow`. _`resolved_paths = state.resolved_source_paths` and forwarded into `run_workflow(source_paths=resolved_paths, ...)`. Asserted by `test_start_iteration_2_restores_iter_1_plugin_and_prepends_path`._
 - [x] Print `[CHAIN] Restored N prior plugin(s) from iters [...]` in the startup banner. _Banner only prints when `state.committed_iters` is non-empty (i.e. iter > 1). Asserted by `test_chain_banner_printed_when_priors_restored` (printed) and `test_chain_banner_omitted_for_iter_1` (omitted)._
 - [x] On `--start_iteration == 1`, `restore_prior_state` returns `seed_paths` verbatim; verify no spurious behaviour. _Asserted by `test_start_iteration_1_passes_seeds_through_unchanged` — banner skipped, seeds passed through, no plugin registry mutation._
-- [x] Wiring-level test: verify iter_002 restores iter_001 artifacts correctly (full integration in Commit 12). _Implemented as `test_missing_iter_1_plugin_warns_but_iteration_runs` — materialises iter_1 manifest + run_output without the plugin file, mocks `run_workflow` + `write_manifest`, asserts `UserWarning` emitted AND `runner.run_workflow` is still called with iter_1's output_path in `source_paths`. Full pseudo-mode 2-iter end-to-end run is scheduled for Commit 12 per §3.5._
+- [x] Wiring-level test: verify iter_002 restores iter_001 artifacts correctly (full integration in Commit 14). _Implemented as `test_missing_iter_1_plugin_warns_but_iteration_runs` — materialises iter_1 manifest + run_output without the plugin file, mocks `run_workflow` + `write_manifest`, asserts `UserWarning` emitted AND `runner.run_workflow` is still called with iter_1's output_path in `source_paths`. Full pseudo-mode 2-iter end-to-end run is scheduled for Commit 14 per §3.5._
 - [x] Manual-override test: run `python run_one_iteration.py --workspace W --start_iteration 3 ...` against a workspace with iters 1+2 already on disk; verify it skips auto-detect and runs iter 3 directly. _Implemented as `test_manual_override_start_iteration_3_with_iters_1_and_2_on_disk`. Both prior iters' plugins re-registered into the four registry surfaces; `run_workflow` receives `source_paths = [seed, iter_1_output, iter_2_output]` and `run_name="iter_003"`._
 - [x] Doc-sync: §3.3 already describes this. Commit message references §3.3 and §3.4. _Pending — to be referenced in the combined commit message._
 
-#### Commit 9 — `feat(chain): unify CLI surface across run_one_iteration.py and run_exploration_adaptive.py`
+#### Commit 9 — `fix(probe): memory-safe structural probe with cleanup between passes`
+
+**Goal**: Prevent the 33 GB autograd-tape explosion that killed `explore_novel_v6_0427` iter_002 (`dual_selective_ssm_head`). See Part 4 §4.1 for full root cause analysis and `reports/v6_pr63_20260428.md §8` for the diagnostic data.
+
+**Root cause recap**: `probe_activation_footprint` in `structural_probe.py` runs three consecutive forward passes (autograd tape, torchinfo, shape validation) with **no cleanup** between them. For models with Python-level sequential loops (SSM scan: 320K iterations), the autograd graph alone is ~15-18 GB. The wrapper then builds two more model instances for inference probing, also without freeing the first. Total observed: 35.6 GB RSS at OOM kill.
+
+- [x] **`structural_probe.py:probe_autograd_tape`**: `pack_hook` now returns `None` instead of the original tensor, preventing autograd from retaining the actual tensor data. For 320K-step SSM models, this drops memory from ~15-18 GB (retained tensors) to ~350 MB (graph nodes only). `unpack_hook` raises `RuntimeError` if backward() is called. Explicit `del loss; gc.collect()` after the hooks context exits. _Stronger fix than the original plan — prevents the memory from being allocated, rather than cleaning it up after._
+- [x] **`structural_probe.py:probe_activation_footprint`**: `del _fwd; gc.collect()` after the tape walk frees the closure. The subsequent `probe_forward_layers` and `model(input_sample)` calls are now wrapped in `torch.no_grad()`, preventing autograd graph rebuild during the torchinfo and shape-validation passes.
+- [x] **`wrapper.py` (VRAM skill)**: `del model_for_train, loss_module, x_train, y_train; gc.collect()` after the training probe and before building inference models. `del model_for_resolve; gc.collect()` after batch resolution. `del model_for_bd; gc.collect()` after the inference breakdown probe.
+- [x] **Host-RSS safety check**: `psutil.Process().memory_info().rss` read before and after the training probe. Delta > 8 GB logs `[PROBE_MEMORY_WARNING]`; otherwise logs `[Probe RSS] delta=X.XX GB`. Diagnostic only — not a gate.
+- [x] **`torch.no_grad()` for inference probes**: verified — `probe_activation_footprint(mode="inference")` already runs `model.eval()` + `torch.no_grad()` internally. No change needed.
+- [x] Unit test: `SequentialModel(steps=500)` — `test_sequential_model_training_probe_rss_bounded` asserts RSS delta < 500 MB. _Passes — delta is ~0 MB with the None-returning pack_hook._
+- [x] Unit test: `test_sequential_model_probe_gc_called_between_phases` — mocks `gc.collect` and asserts call count >= 2.
+- [x] Unit tests: `test_pack_hook_returns_none_not_tensor`, `test_probe_autograd_tape_unpack_raises_on_backward`, `test_torchinfo_runs_under_no_grad_in_training_mode`.
+- [x] Regression test: 128/128 tests pass in `tests/unit/agent/evaluate_vram_skill/` (123 original + 5 new).
+- [ ] Doc-sync: Part 4 §4.1 describes this. Commit message references §4.1.
+
+#### Commit 10 — `fix(prompts): sliding-window memory_history + context size caps`
+
+**Goal**: Prevent unbounded LLM prompt growth across rounds and iterations. See Part 4 §4.3 for full design and `reports/v6_pr63_20260428.md §10` for the diagnostic data.
+
+**Root cause recap**: Three growth vectors — (1) `memory_history` in tuner planner prompt serializes ALL experiment records with no sliding window (50-100KB at 10 rounds); (2) `model_knowledge_cache` in `InterpretationOutput` grows monotonically (352KB by iter 9 in v4); (3) `model_descriptions` rendered untruncated into proposer prompt (7KB per model). None of these caused OOM in v6's short runs, but they will degrade LLM reasoning quality and cost over 20-iteration chains.
+
+**Sliding window for `memory_history`** (`agent/prompts.py`):
+- [ ] Add a `_truncate_memory_history(records: list[dict], full_window: int = 3) -> list[dict]` helper.
+- [ ] Records within the last `full_window` rounds: kept verbatim (full params, score_table, loss_history, memory block).
+- [ ] Older records: condensed to `{exp_id, round, status, score, hypothesis, conclusion}` — drops `params`, `score_table`, `loss_history`, `file_vector`, `timing`.
+- [ ] Call this helper at `prompts.py:742` before `json.dumps`.
+- [ ] Unit test: 10 records in → 3 full + 7 condensed out. Verify condensed records have exactly the expected keys.
+
+**Model knowledge cache cap** (`InterpretationOutput` / proposer pipeline):
+- [ ] Cap `model_knowledge_cache` to the top-N models by most recent score (default N=5). Evict entries for models not in the top-N and not in the current iteration's model set.
+- [ ] Apply the cap in `workflows/model_exploration.py` after the interpretation step, before the cache is passed to the proposer.
+- [ ] Unit test: cache with 8 entries, top-5 by score → 5 entries remain.
+
+**Model descriptions truncation** (`nodes/ml_model_proposal_agent.py`):
+- [ ] Add a `_truncate_description(text: str, max_chars: int = 1500) -> str` helper. Keeps the first `max_chars` characters and appends `\n[...truncated]`.
+- [ ] Apply in `_render_model_descriptions` (line 615-619) before injecting into the prompt.
+- [ ] Unit test: 7KB description → 1500 chars + truncation marker.
+
+**Prompt size diagnostic**:
+- [ ] Add a `_log_prompt_size(prompt: str, label: str)` call at the entry to each LLM call in the tuner planner and proposer pipeline. Logs `[PROMPT_SIZE] {label}: {len(prompt)} chars`. No gating — purely diagnostic.
+
+- [ ] Regression test: run existing prompt-related unit tests (if any) and the `test_proposer_preflight.py` suite.
+- [ ] Doc-sync: Part 4 §4.3 describes this. Commit message references §4.3.
+
+#### Commit 11 — `feat(chain): unify CLI surface across run_one_iteration.py and run_exploration_adaptive.py`
 
 **Goal**: Input contract parity per §3.2. Both Python entries accept the same flag set with identical names and defaults. `run_exploration_adaptive.py` gains `--start_iteration N` and converges on the chain workspace layout when N > 1.
 
-**Part A — `run_one_iteration.py` flag widening:**
+**Part A — `run_one_iteration.py` flag widening + time estimation repair:**
 
 - [ ] Add flags listed in §3.2 table that are missing today: `--llm_config`, `--advice`, `--target_files`, `--sampling_seed`, `--exploration_mode`, `--minimum_boldness`, `--debug_dump_prompts`, `--max_impl_attempts`, `--trial_time_budget_minutes`, `--formal_time_budget_minutes`, `--data_dir`, `--trial_vram_budget_gb`, `--formal_vram_budget_gb`, `--attempts_per_round`, `--attempts_per_formal_round`, `--max_fail_rounds`.
 - [ ] Switch `--max_rounds` default from 20 to 3 (sync with adaptive).
 - [ ] When `--llm_config` is provided, build `WorkflowLLMConfig.from_json`. Keep `--llm_model` as deprecated fallback for one release; emit DeprecationWarning if used without `--llm_config`.
 - [ ] Switch `--human_advice_file` schema from 5-key (interpret/propose/implement/validate/tune) to adaptive's 4-key (propose/implement/tune/mindset). Tolerate both schemas during transition (load both; missing keys are None).
 - [ ] Pass every new flag through to `run_workflow(...)`.
+- [ ] **`--data_dir` plumbing (v6 countermeasure — Time Estimation Repair)**: wire `--data_dir` through `run_workflow()` → `HyperparamTuningInput.data_dir` → time skill's `_measure_ms_per_step`. Without this, the warmup path is dead code and every run uses the static formula (5-10x underestimate for novel architectures). See `reports/v6_pr63_20260428.md §9.1`.
+- [ ] **Static formula patch**: in `agent/skills/training_skill/estimator.py`, raise `_STATIC_MS_PER_FLOP` from `6e-10` to `3e-9` and add a minimum ms/step floor of 2.0 ms (CUDA kernel launch + DataLoader overhead). Raise `SAFETY_MULTIPLIER` from `1.1` to `2.0` — the current value was calibrated for warmup variance, not formula error. See `reports/v6_pr63_20260428.md §9.2-§9.3`.
+- [ ] **`_chain_common.sh` plumbing**: add `DATA_DIR` to the shell variable set and pass `--data_dir "${DATA_DIR}"` in `build_app_args`. Default to the canonical path (`/home/klz/Data/TIDMAD/` on lilab, Slurm env-var on SDSC).
 
 **Part B — `run_exploration_adaptive.py` adopts `--start_iteration N` + chain workspace layout:**
 
@@ -618,9 +667,9 @@ This is the **convergence step** that makes the two Python entries truly equival
 - [ ] Unit test: snapshot the kwargs `run_workflow` receives from each Python entry. Construct the same flag set on both (`run_exploration_adaptive.py` and `run_one_iteration.py`) and assert the resulting `run_workflow` call is byte-for-byte identical (modulo `run_name` and `max_iterations`, which are per-iter for the chain-in-process loop).
 - [ ] Unit test: every flag in §3.2 has the same name and default in both entries.
 - [ ] Manual-override test (Part B): run `python run_exploration_adaptive.py --workspace W --start_iteration 3 ...` against a workspace with iters 1+2 in chain layout; verify iter 3 starts in-process with `MODEL_REGISTRY` carrying both prior plugins.
-- [ ] Doc-sync: §3.2, §3.8 already describe this. Commit message references §3.2 (input contract) and §3.8 (consistency).
+- [ ] Doc-sync: §3.2, §3.8 already describe this. Commit message references §3.2 (input contract), §3.8 (consistency), and §4.2 (time estimation repair in Part A).
 
-#### Commit 10 — `feat(inspector): inspect_run_state.py supports chain layout + --next-iter`
+#### Commit 12 — `feat(inspector): inspect_run_state.py supports chain layout + --next-iter`
 
 **Goal**: Single inspector tool serves both layouts and offers a machine-readable mode for the shell driver.
 
@@ -631,7 +680,7 @@ This is the **convergence step** that makes the two Python entries truly equival
 - [ ] Unit test: chain layout with 3 clean iters → `--next-iter` prints `4`. With 2 clean + 1 partial → prints `3`. With 1 + 3 missing 2 → exits non-zero.
 - [ ] Doc-sync: §3.4 already describes this. Commit message references §3.4.
 
-#### Commit 11 — `feat(chain): unified run_chain.sh --mode {lilab,sdsc} with --dry-run and venv detection`
+#### Commit 13 — `feat(chain): unified run_chain.sh --mode {lilab,sdsc} with --dry-run and venv detection`
 
 **Goal**: Single shell entry point replaces `run_iteration_chain.sh` and `run_iteration_chain_lilab.sh`. Operators can preview every command (`--dry-run`) and the lilab path always uses the project virtualenv.
 
@@ -677,7 +726,7 @@ The current `run_iteration_chain_lilab.sh:40–44` ignores `$VIRTUAL_ENV` and pr
 - [ ] Resume smoke test: launch a 3-iter chain, kill mid-iter-2, rerun the same command, verify iter_001 is preserved and iter_002 restarts from scratch.
 - [ ] Doc-sync: §3.4 (auto-resume), §3.8 (consistency) cover the design surface; update `docs/running_chain_test.md` runbook to reference the new entry-point and dry-run + venv-detection behaviours.
 
-#### Commit 12 — `test(chain): full integration test + memory regression assertion`
+#### Commit 14 — `test(chain): full integration test + memory regression assertion`
 
 **Goal**: Lock the contract.
 
@@ -686,7 +735,7 @@ The current `run_iteration_chain_lilab.sh:40–44` ignores `$VIRTUAL_ENV` and pr
 - [ ] Hostile case: pseudo-corrupt iter_001's run_output JSON; verify iter_002 refuses to start with a clear error rather than silently chaining off an incomplete output.
 - [ ] Doc-sync: §3.5 (this section) updated with test results once green.
 
-#### Commit 13 — `docs(chain): update runbook + retire run_exploration_adaptive.py from "primary" status`
+#### Commit 15 — `docs(chain): update runbook + retire run_exploration_adaptive.py from "primary" status`
 
 **Goal**: Operator-facing documentation reflects the new default.
 
@@ -701,24 +750,30 @@ The current `run_iteration_chain_lilab.sh:40–44` ignores `$VIRTUAL_ENV` and pr
 These were present in Part 2's design but are deliberately excluded from Task 2 under the chain-first plan:
 
 - **Mid-iter checkpoint**: still costs up to one full iter on SIGKILL. Address only if a single iter regularly costs > 6 hours.
-- **Variable-by-variable in-memory rebuild** (Part 2 §2.5): `run_exploration_adaptive.py` now achieves resume via the **chain workspace layout** + `restore_prior_state` (see Commit 9 Part B), not via in-process state-pickling. The Part 2 design is preserved as history but no longer planned.
+- **Variable-by-variable in-memory rebuild** (Part 2 §2.5): `run_exploration_adaptive.py` now achieves resume via the **chain workspace layout** + `restore_prior_state` (see Commit 11 Part B), not via in-process state-pickling. The Part 2 design is preserved as history but no longer planned.
 - **Cross-host portability**: hardware_context is host-specific; the plugin Python files might depend on host-specific module paths. Resume is "same host, post-SIGKILL", not "migrate to new host" — same contract as Part 2 §2.8.
 
 ### 3.7 Test strategy summary
 
-| Layer | Test | Tier |
-|---|---|---|
-| Unit | `_add_plugin_to_registries` updates all four registries | unit |
-| Unit | `restore_prior_state` against synthetic 3-iter fixture (clean / partial / corrupt / missing-plugin / non-contiguous) | unit |
-| Unit | `inspect_run_state.py --next-iter` against fixtures | unit |
-| Unit | CLI surface of `run_one_iteration.py` matches `run_exploration_adaptive.py` (snapshot of `run_workflow` kwargs) | unit |
-| Unit | §3.8 consistency contract — every flag has identical name + default in all three entries | unit |
-| Unit | `--dry-run` never touches the workspace and prints the right per-iter command | unit |
-| Unit | venv detection picks `$VIRTUAL_ENV` first, project `.venv` second, `uv` third, `python3` last (with warning) | unit |
-| Pseudo-integration | 2-iter chain end-to-end with mocked LLM responses; verify cross-iter `MODEL_REGISTRY` restoration | integration (pseudo) |
-| Pseudo-integration | `run_exploration_adaptive.py` with `--start_iteration 2` against a workspace where iter_001 is on disk; verify in-process iter_002 enters with `MODEL_REGISTRY` carrying iter_001's plugin | integration (pseudo) |
-| Smoke | 2-iter chain on lilab; manual SIGKILL mid-iter-2; rerun same command; verify iter_001 preserved | smoke |
-| Smoke | 2-iter sbatch chain on SDSC; verify dependency wiring via `squeue` | smoke |
+| Layer | Test | Commit | Tier |
+|---|---|---|---|
+| Unit | `_add_plugin_to_registries` updates all four registries | 6 | unit |
+| Unit | `restore_prior_state` against synthetic 3-iter fixture (clean / partial / corrupt / missing-plugin / non-contiguous) | 7 | unit |
+| Unit | Probe cleanup: mock sequential model, verify RSS delta < 500 MB and `gc.collect` call count ≥ 2 | 9 | unit |
+| Unit | Probe regression: existing `test_evaluate_vram_skill.py` still passes | 9 | unit |
+| Unit | `_truncate_memory_history`: 10 records → 3 full + 7 condensed, correct keys | 10 | unit |
+| Unit | `model_knowledge_cache` cap: 8 entries → top-5 by score | 10 | unit |
+| Unit | `_truncate_description`: 7KB → 1500 chars + marker | 10 | unit |
+| Unit | CLI surface of `run_one_iteration.py` matches `run_exploration_adaptive.py` (snapshot of `run_workflow` kwargs) | 11 | unit |
+| Unit | §3.8 consistency contract — every flag has identical name + default in all three entries | 11 | unit |
+| Unit | `inspect_run_state.py --next-iter` against fixtures | 12 | unit |
+| Unit | `--dry-run` never touches the workspace and prints the right per-iter command | 13 | unit |
+| Unit | venv detection picks `$VIRTUAL_ENV` first, project `.venv` second, `uv` third, `python3` last (with warning) | 13 | unit |
+| Unit | Workspace layout guard: legacy layout detected → clear error with migration hint | 11 | unit |
+| Pseudo-integration | 2-iter chain end-to-end with mocked LLM responses; verify cross-iter `MODEL_REGISTRY` restoration | 14 | integration (pseudo) |
+| Pseudo-integration | `run_exploration_adaptive.py` with `--start_iteration 2` against a workspace where iter_001 is on disk; verify in-process iter_002 enters with `MODEL_REGISTRY` carrying iter_001's plugin | 14 | integration (pseudo) |
+| Smoke | 2-iter chain on lilab; manual SIGKILL mid-iter-2; rerun same command; verify iter_001 preserved | 14 | smoke |
+| Smoke | 2-iter sbatch chain on SDSC; verify dependency wiring via `squeue` | 14 | smoke |
 
 ### 3.8 Consistency contract — flag parity across all three entries
 
@@ -728,7 +783,7 @@ Each flag in §3.2 must have **identical name and default value** across the thr
 2. `sdsc_submission_scripts/run_one_iteration.py` (per-iter Python entry, called by the chain)
 3. `sdsc_submission_scripts/run_chain.sh` (shell entry, passes through to entry 2)
 
-This is a hard test gate — Commit 9's "every flag in §3.2 has the same name and default" unit test enforces it programmatically. Drift introduces silent behaviour differences between operator-equivalent commands and is the single biggest predictable source of "it worked on lilab but not on SDSC" bugs.
+This is a hard test gate — Commit 11's "every flag in §3.2 has the same name and default" unit test enforces it programmatically. Drift introduces silent behaviour differences between operator-equivalent commands and is the single biggest predictable source of "it worked on lilab but not on SDSC" bugs.
 
 #### The contract
 
@@ -745,7 +800,7 @@ The shell entry's `_chain_common.sh::parse_chain_args` does not need to know how
 
 #### Mechanism
 
-The unit test at `tests/unit/scripts/test_chain_consistency.py` (new, Commit 9) does the following:
+The unit test at `tests/unit/scripts/test_chain_consistency.py` (new, Commit 11) does the following:
 
 1. Parses the §3.2 table from this design doc into a list of expected flags.
 2. Imports `run_exploration_adaptive.py:parse_args` and `run_one_iteration.py:main`'s argparse setup; reflects on the resulting `ArgumentParser` to extract `(name, default, type, nargs, required)` per flag.
@@ -776,3 +831,173 @@ The following flags are **layer-specific** and exempt from the consistency contr
 - Slurm-only env paths inside `submit_one_iteration.slurm` — not operator-facing.
 
 The exemption list is canonical: any flag not on it must satisfy the contract.
+
+### 3.9 Workspace layout guard — legacy detection and migration
+
+The chain workspace layout (`{workspace}/iter_NNN/iteration_001/{model}/`) is structurally different from the legacy in-process layout (`{workspace}/{run_name}/iteration_NNN/{model}/`). Both `run_exploration_adaptive.py` (Commit 11 Part B) and `run_chain.sh` (Commit 13) write the chain layout exclusively. A workspace created by v5 or v6 runs (which used `run_exploration_adaptive.py` in single-process mode) has the legacy layout.
+
+**The problem**: if an operator points `--workspace` at a legacy workspace, the chain will create `iter_001/` alongside the existing `{run_name}/iteration_001/`, silently producing a workspace with two incompatible layouts. `restore_prior_state` will not find prior iter data (it looks for `iter_NNN/manifest.json`), and the chain will start from scratch, discarding all prior work.
+
+**The guard**: both Python entries (`run_exploration_adaptive.py`, `run_one_iteration.py`) and the shell entry (`run_chain.sh`) must detect legacy layout and refuse to start.
+
+#### Detection heuristic
+
+A workspace has legacy layout if **any** of these conditions hold:
+
+1. `glob("{workspace}/*/iteration_001/")` matches (a `{run_name}/iteration_001/` subtree exists).
+2. `glob("{workspace}/workflow_*.json")` matches (workflow summary from the in-process runner).
+3. `glob("{workspace}/memory_trace.jsonl")` matches AND no `iter_001/` directory exists.
+
+These patterns do not overlap with chain layout artifacts (`iter_NNN/`, `manifest.json`).
+
+#### Error message
+
+```
+ERROR: Legacy workspace layout detected at {workspace}.
+  Found: {matched_pattern}
+
+This workspace was created by the in-process runner (v5/v6 era).
+The chain runner uses a different layout ({workspace}/iter_NNN/).
+
+To proceed:
+  (a) Use a new --workspace path for the chain run.
+  (b) To resume from legacy results, use the migration tool:
+      python scripts/migrate_workspace.py --from {workspace} --to {new_workspace}
+      (migration tool planned — not yet implemented)
+```
+
+#### Implementation location
+
+- **Python**: `core/resume.py:validate_workspace_layout(workspace)` — called by both `restore_prior_state` (on iter > 1) and directly by the runner entry points (on iter == 1, before any work begins).
+- **Shell**: `run_chain.sh` calls `inspect_run_state.py --layout chain --check-legacy` which delegates to the same Python function.
+
+#### Migration tool (deferred)
+
+`scripts/migrate_workspace.py` is **not** in scope for Task 2. The guard is sufficient: operators either start fresh or wait for the tool. Documenting the planned tool in the error message avoids confusion about whether migration is possible.
+
+---
+
+## Part 4 — v6 Countermeasures (Post-Mortem Findings)
+
+**Trigger**: v6 sanity run report at `reports/v6_pr63_20260428.md` (2026-04-28) identified three failure modes not addressed by Part 1 (memory hygiene, shipped in PR #63) or Part 3 (chain-first resume). These are "physics-level" failures — they would recur in chain mode because the root causes are inside the per-iteration Python, not in the orchestration layer.
+
+**Relationship to Part 1**: Part 1 §1.4–1.5 diagnosed and fixed the **scoring subprocess fork amplification** (v5 OOM root cause). The v6 OOM is a **completely different mechanism**: the parent process itself balloons to 35.6 GB during the VRAM/time probe for a model with sequential Python for-loops. The `spawn` fix from PR #63 is orthogonal.
+
+**Relationship to Part 3**: the chain-first design gives each iteration a fresh process (structural memory floor), which mitigates Part 1's per-iteration leak. It does **not** help with Part 4's failures, which are intra-iteration: the probe OOM happens within a single `run_workflow(max_iterations=1)` call; the time estimation error happens within the same call; and the LLM context growth happens within a single tuner `run()`.
+
+### 4.1 Probe Memory Safety (P0) — Autograd Tape Explosion
+
+**Failure**: `explore_novel_v6_0427` iter_002 (`dual_selective_ssm_head`) killed by Linux OOM at 35.6 GB RSS.
+
+**Mechanism**: The VRAM pre-flight probe (`evaluate_vram_skill/structural_probe.py:probe_activation_footprint`) runs the model in **training mode on CPU** to measure what PyTorch would allocate on GPU. For models with vectorised ops (convolutions, FFTs), this is cheap — hundreds of autograd graph nodes, sub-GB host memory. For models with **Python-level sequential for-loops** (this SSM model scans 40K timesteps × 4 blocks × 2 directions = 320K iterations), every loop iteration creates multiple tensors retained by the autograd engine. The result is ~3.2 million autograd nodes and ~15-18 GB of host-side graph metadata — for a model with only 195K parameters.
+
+The code compounds this by running **three consecutive forward passes** with no cleanup:
+
+```
+structural_probe.py:261  probe_autograd_tape()        ← builds the massive graph
+structural_probe.py:265  probe_forward_layers(model)  ← another full forward, old graph still live
+structural_probe.py:269  model(input_sample)           ← third forward, previous two still live
+```
+
+Then `wrapper.py` builds **two more model instances** (lines 429, 433) for inference-mode probing without freeing the first model. The batch resolver runs up to 7 additional inference probes.
+
+**Why Part 1's `gc.collect()` doesn't help**: the autograd graph is not cyclic garbage — it is live state retained by PyTorch's C++ engine until `backward()` is called or the loss tensor is deleted. `gc.collect()` cannot reclaim it. The fix requires explicit `del` of the loss tensor and `gc.collect()` between passes to release the C++ graph.
+
+**Fix** (Commit 9):
+1. Insert `del` + `gc.collect()` between the three forward passes in `probe_activation_footprint`.
+2. Insert `del model; gc.collect()` in `wrapper.py` before constructing inference-mode model instances.
+3. Add a diagnostic host-RSS delta check (warning, not gate) to catch future sequential-scan models early.
+
+**Expected impact**: peak RSS during the SSM probe drops from ~35 GB to ~18 GB (one forward pass at a time instead of three overlapping). This is still high for a 195K-param model, but survivable on a 64 GB host. A harder gate (e.g., refusing to probe models with > N sequential steps) is deferred — the cleanup fix is sufficient and doesn't require model introspection.
+
+### 4.2 Time Estimation Repair (P0) — Warmup Plumbing + Static Formula Patch
+
+**Failure**: every v6 experiment used the static formula, which underestimates training time by 5-10x for novel architectures. Each exploit iteration took 5-7 hours instead of the expected 1-2 hours.
+
+**Mechanism**: the time estimator has two paths:
+- **Warmup path** (`_measure_ms_per_step`): runs 10 real training steps on GPU, measures actual ms/step. **Accurate to ±10%.**
+- **Static fallback** (`_static_ms_per_step`): `ms/step = params × seg × bs × 6e-10`. **Architecture-blind, no fixed-overhead term, 5-10x wrong.**
+
+The warmup path is gated on `data_dir` being non-None. In production, `data_dir` is never passed:
+
+```
+_chain_common.sh  →  does not pass --data_dir
+run_one_iteration.py  →  does not accept --data_dir
+run_workflow()  →  receives data_dir=None
+time skill  →  logs "no data_dir; falling back to static formula"
+```
+
+The warmup infrastructure exists and works correctly. It was never wired into the production chain.
+
+**Why the static formula is so wrong**:
+
+1. **Architecture-blind**: treats every parameter as costing equal FLOPs. Dilated convolutions with irregular memory access, SSM sequential scans, and multi-rate upsampling all cost far more wall-clock per parameter than dense linear layers.
+2. **No fixed-overhead term**: each training step has ~1-3 ms of fixed cost (CUDA kernel launch, synchronization, DataLoader fetch). At `seg_size=2000`, fixed overhead dominates compute for small models.
+3. **Coefficient too low**: `6e-10` was calibrated on seed models (punet, wavenet) which have efficient GPU utilisation. Novel architectures are 3-5x less efficient per FLOP.
+
+**Fix** (Commit 11 Part A, already integrated):
+1. Wire `--data_dir` through `run_one_iteration.py` → `run_workflow()` → `HyperparamTuningInput` → time skill.
+2. Wire `--data_dir` through `_chain_common.sh` → `build_app_args`.
+3. Raise `_STATIC_MS_PER_FLOP` from `6e-10` to `3e-9`.
+4. Add a minimum ms/step floor of 2.0 ms (fixed overhead).
+5. Raise `SAFETY_MULTIPLIER` from `1.1` to `2.0`.
+
+**The calibration system** (`agent/skills/evaluate_time_skill/calibration.py`) is also dead code in production — `k` correction only applies to warmup-sourced estimates, and the static fallback always uses `k=1.0`. Once `--data_dir` is wired, calibration will activate naturally. No separate fix needed.
+
+**Expected impact**: with warmup active, estimates should be ±10-20% of actual (validated in v4 lilab runs where warmup was triggered manually). The static formula patches are a safety net for environments where `data_dir` is unavailable — they bring the error from 5-10x down to ~2x (still wrong, but survivable with the raised safety multiplier).
+
+### 4.3 LLM Context Windowing (P1) — Prompt Size Management
+
+**Failure mode**: not an OOM — a quality and cost degradation. Three growth vectors in the LLM prompt construction pipeline:
+
+| Growth vector | File | Observed size | Growth rate |
+|---|---|---|---|
+| `memory_history` (tuner planner) | `agent/prompts.py:742` | 50-100KB at 10 rounds | linear in rounds |
+| `model_knowledge_cache` (interpreter → proposer) | `InterpretationOutput` | 352KB by iter 9 (v4) | linear in distinct models |
+| `model_descriptions` (proposer) | `ml_model_proposal_agent.py:615` | 7KB per model | linear in distinct models |
+
+**Why this matters for chain mode**: a 20-iteration chain with 3 rounds/iter will accumulate 60 round records in `memory_history` and 20+ entries in `model_knowledge_cache`. The proposer prompt could exceed 500KB — well past the point where LLM reasoning degrades. Token cost also grows linearly.
+
+**Fix** (Commit 10):
+
+**Sliding window for `memory_history`**:
+- Last 3 round records: kept verbatim (full `params`, `score_table`, `loss_history`, `memory` block).
+- Older records: condensed to `{exp_id, round, status, score, hypothesis, conclusion}`.
+- Rationale: the planner needs recent full context (what was tried, what worked, why) and older summary context (what directions have been explored, rough score landscape). The condensed form retains the planner's ability to avoid repeating old experiments while cutting token count 80-90% for old records.
+
+**Model knowledge cache cap**:
+- Retain top-5 models by most recent score + the current iteration's model.
+- Evict the rest. The knowledge for evicted models is still on disk in the `interpretation_*.json` files — it can be reloaded if the model type reappears in a future iteration.
+- Rationale: 5 models × ~35KB = ~175KB, bounded. Without the cap, 20 iterations could accumulate 700KB+.
+
+**Model descriptions truncation**:
+- Truncate each model description to 1500 characters in the proposer prompt.
+- The full description remains in the markdown file on disk and in the `ModelRunSummary` — only the prompt copy is truncated.
+- Rationale: the proposer needs the architectural concept and key equations, not the full implementation notes. 1500 chars is ~375 tokens — enough for a paragraph of design rationale.
+
+**Prompt size diagnostic**:
+- Log `[PROMPT_SIZE] {label}: {N} chars` at each LLM call entry point.
+- No gating, no automatic truncation beyond the mechanisms above. This gives operators visibility into prompt growth without adding complexity.
+
+### 4.4 v6 Countermeasures — commit map
+
+| Commit | Title | Priority | Fixes |
+|---|---|---|---|
+| 9 | `fix(probe): memory-safe structural probe` | **P0** | §4.1 — autograd tape explosion |
+| 10 | `fix(prompts): sliding-window memory_history + context caps` | **P1** | §4.3 — LLM prompt growth |
+| 11 Part A | `feat(chain): ... + time estimation repair` | **P0** | §4.2 — `--data_dir` plumbing + static formula patch |
+
+Commits 9 and 10 are independent of the chain infrastructure (11-15) and can ship as separate PRs. Commit 11 Part A bundles the time estimation repair with the CLI unification because `--data_dir` is a new CLI flag that must satisfy the §3.8 consistency contract across all three entry points.
+
+### 4.5 Verification plan
+
+After Commits 9-11 land:
+
+1. **v7 sanity run — explore mode**: launch with a model known to produce sequential-scan architectures (use `explore_novel` advice with `minimum_boldness=0.7` to encourage novel proposals). Verify:
+   - No HOST_OOM during VRAM probe (RSS delta logged, < 8 GB).
+   - Time estimates within 2x of actual (warmup active, logged as `ms_source=real_dataset_warmup`).
+   - Prompt sizes logged and bounded.
+2. **v7 sanity run — exploit mode**: launch 3-iter chain with `formal_time_budget_minutes=60`. Verify:
+   - Iterations complete within budget (no 5-7 hour iters).
+   - Memory history stays bounded in tuner prompts (check `[PROMPT_SIZE]` logs).
+3. **Regression check**: all existing unit + pseudo-integration tests green.
