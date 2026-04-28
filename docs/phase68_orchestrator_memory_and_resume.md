@@ -604,7 +604,7 @@ Each commit ships its own design-doc update (per `feedback_plan_doc_sync.md`). C
 - [x] Unit test: `test_sequential_model_probe_gc_called_between_phases` — mocks `gc.collect` and asserts call count >= 2.
 - [x] Unit tests: `test_pack_hook_returns_none_not_tensor`, `test_probe_autograd_tape_unpack_raises_on_backward`, `test_torchinfo_runs_under_no_grad_in_training_mode`.
 - [x] Regression test: 128/128 tests pass in `tests/unit/agent/evaluate_vram_skill/` (123 original + 5 new).
-- [ ] Doc-sync: Part 4 §4.1 describes this. Commit message references §4.1.
+- [x] Doc-sync: Part 4 §4.1 describes this. Commit message references §4.1. _Commit `c0d96de`._
 
 #### Commit 10 — `fix(prompts): sliding-window memory_history + context size caps`
 
