@@ -188,3 +188,37 @@ class TestTwoIterTrace:
         for it in (1, 2):
             phases_for_it = [r["phase"] for r in rows if r["iter"] == it]
             assert phases_for_it == ["start", "pre_score", "post_score", "end"]
+
+
+# ==========================================
+# Phase 6.8 §2 Commit 2 — post_gc phase round-trip
+# ==========================================
+
+class TestPostGcPhase:
+    """The workflow emits ``phase="post_gc"`` immediately after the
+    per-iteration ``del`` + ``gc.collect()`` block. The probe must
+    accept the new phase string and round-trip it through the JSONL.
+    """
+
+    def test_post_gc_round_trip(self, tmp_path):
+        row = probe_memory(
+            iter_idx=1, phase="post_gc",
+            workspace=str(tmp_path), scope="workflow",
+        )
+        assert row["phase"] == "post_gc"
+        assert row["scope"] == "workflow"
+        persisted = json.loads((tmp_path / TRACE_FILENAME).read_text().strip())
+        assert persisted["phase"] == "post_gc"
+
+    def test_end_then_post_gc_pair_writes_two_rows(self, tmp_path):
+        """Mirrors the production sequence: ``end`` then ``post_gc``."""
+        probe_memory(iter_idx=1, phase="end",
+                     workspace=str(tmp_path), scope="workflow")
+        probe_memory(iter_idx=1, phase="post_gc",
+                     workspace=str(tmp_path), scope="workflow")
+        rows = [
+            json.loads(line)
+            for line in (tmp_path / TRACE_FILENAME).read_text().splitlines()
+        ]
+        assert [r["phase"] for r in rows] == ["end", "post_gc"]
+        assert [r["iter"] for r in rows] == [1, 1]

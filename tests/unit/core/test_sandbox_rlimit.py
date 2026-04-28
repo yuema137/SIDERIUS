@@ -62,6 +62,21 @@ def _ok_result(stdout="done\n", stderr=""):
     return m
 
 
+def _train_success_side_effect(sandbox, exp_id=EXP_ID, stdout="done\n", stderr=""):
+    """Build a ``subprocess.run`` side_effect that mirrors a successful
+    training run (Phase 6.7 Commit 4): writes the ``_OK_<exp_id>`` sentinel
+    to ``sandbox.dirs['models']`` before returning. Without this, the
+    executor's silent-crash check rejects the run as ``error_training``
+    even though the mocked subprocess returncode is 0."""
+    def _side_effect(*args, **kwargs):
+        os.makedirs(sandbox.dirs["models"], exist_ok=True)
+        sentinel = os.path.join(sandbox.dirs["models"], f"_OK_{exp_id}")
+        with open(sentinel, "wb"):
+            pass
+        return _ok_result(stdout=stdout, stderr=stderr)
+    return _side_effect
+
+
 def _called_process_error(returncode: int, stderr: str = "", stdout: str = "") -> subprocess.CalledProcessError:
     e = subprocess.CalledProcessError(returncode, ["dummy"])
     e.stderr = stderr
@@ -286,7 +301,7 @@ class TestSandboxPreexecWiring:
     @patch("core.sandbox_executor.subprocess.run")
     def test_training_passes_preexec_fn(self, mock_run, sandbox, monkeypatch):
         monkeypatch.setenv("SIDERIUS_SUBPROCESS_RSS_GB", "16")
-        mock_run.return_value = _ok_result()
+        mock_run.side_effect = _train_success_side_effect(sandbox)
         sandbox.execute_training(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG)
         _, kwargs = mock_run.call_args
         assert "preexec_fn" in kwargs
@@ -318,7 +333,7 @@ class TestSandboxPreexecWiring:
     def test_env_zero_disables_preexec(self, mock_run, sandbox, monkeypatch):
         """SIDERIUS_SUBPROCESS_RSS_GB=0 → preexec_fn is None."""
         monkeypatch.setenv("SIDERIUS_SUBPROCESS_RSS_GB", "0")
-        mock_run.return_value = _ok_result()
+        mock_run.side_effect = _train_success_side_effect(sandbox)
         sandbox.execute_training(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG)
         _, kwargs = mock_run.call_args
         assert kwargs["preexec_fn"] is None
@@ -327,7 +342,7 @@ class TestSandboxPreexecWiring:
     @patch("core.sandbox_executor.subprocess.run")
     def test_training_uses_training_role(self, mock_run, mock_rss, sandbox):
         """Training subprocess resolves ceiling via role='training'."""
-        mock_run.return_value = _ok_result()
+        mock_run.side_effect = _train_success_side_effect(sandbox)
         mock_rss.return_value = 40
         sandbox.execute_training(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG)
         mock_rss.assert_called_with("training")

@@ -7,6 +7,7 @@ in execute_training, execute_inference, and execute_scoring.
 Uses unittest.mock to intercept subprocess.run — no GPU, no real data needed.
 """
 import json
+import os
 import subprocess
 import pytest
 from unittest.mock import patch, MagicMock, mock_open
@@ -49,6 +50,21 @@ def _make_mock_result(returncode=0, stdout="done\n", stderr=""):
     return mock
 
 
+def _make_train_success_side_effect(sandbox, exp_id, stdout="done\n", stderr=""):
+    """Build a ``subprocess.run`` side_effect that mirrors a successful
+    trainer: writes the ``_OK_<exp_id>`` sentinel to ``sandbox.dirs['models']``
+    before returning success. Required for any ``execute_training`` test
+    after Phase 6.7 Commit 4 — without the sentinel, the executor's
+    silent-crash check rejects the run as ``error_training``."""
+    def _side_effect(*args, **kwargs):
+        os.makedirs(sandbox.dirs["models"], exist_ok=True)
+        sentinel = os.path.join(sandbox.dirs["models"], f"_OK_{exp_id}")
+        with open(sentinel, "wb"):
+            pass
+        return _make_mock_result(returncode=0, stdout=stdout, stderr=stderr)
+    return _side_effect
+
+
 # ==========================================
 # TidmadSandbox initialisation
 # ==========================================
@@ -74,28 +90,28 @@ class TestExecuteTrainingStdout:
 
     @patch("core.sandbox_executor.subprocess.run")
     def test_progress_bar_false_captures_stdout(self, mock_run, sandbox):
-        mock_run.return_value = _make_mock_result()
+        mock_run.side_effect = _make_train_success_side_effect(sandbox, EXP_ID)
         sandbox.execute_training(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG)
         _, kwargs = mock_run.call_args
         assert kwargs["stdout"] == subprocess.PIPE
 
     @patch("core.sandbox_executor.subprocess.run")
     def test_progress_bar_true_streams_stdout(self, mock_run, sandbox_progress):
-        mock_run.return_value = _make_mock_result()
+        mock_run.side_effect = _make_train_success_side_effect(sandbox_progress, EXP_ID)
         sandbox_progress.execute_training(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG)
         _, kwargs = mock_run.call_args
         assert kwargs["stdout"] is None
 
     @patch("core.sandbox_executor.subprocess.run")
     def test_stderr_always_captured(self, mock_run, sandbox):
-        mock_run.return_value = _make_mock_result()
+        mock_run.side_effect = _make_train_success_side_effect(sandbox, EXP_ID)
         sandbox.execute_training(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG)
         _, kwargs = mock_run.call_args
         assert kwargs["stderr"] == subprocess.PIPE
 
     @patch("core.sandbox_executor.subprocess.run")
     def test_stderr_always_captured_with_progress(self, mock_run, sandbox_progress):
-        mock_run.return_value = _make_mock_result()
+        mock_run.side_effect = _make_train_success_side_effect(sandbox_progress, EXP_ID)
         sandbox_progress.execute_training(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG)
         _, kwargs = mock_run.call_args
         assert kwargs["stderr"] == subprocess.PIPE
@@ -333,7 +349,7 @@ class TestSandboxPluginDir:
         plugin_dir to the training subprocess via SIDERIUS_PLUGIN_DIRS. If
         this regresses, the subprocess falls back to scanning the legacy
         global dir — the exact pollution Phase 2 is designed to eliminate."""
-        mock_run.return_value = _make_mock_result()
+        mock_run.side_effect = _make_train_success_side_effect(sandbox, EXP_ID)
         sandbox.execute_training(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG)
         _, kwargs = mock_run.call_args
         assert "env" in kwargs
@@ -377,3 +393,117 @@ class TestGetPluginDir:
         a = get_plugin_dir(str(tmp_path), "run_a")
         b = get_plugin_dir(str(tmp_path), "run_b")
         assert a != b
+
+
+# ==========================================
+# execute_training — Phase 6.7 Commit 4 silent-crash detection
+# ==========================================
+
+class TestExecuteTrainingSilentCrash:
+    """Fix 3, producer side. The trainer-side helper writes ``_OK_<exp_id>``
+    only after ``torch.save`` returned successfully. If the subprocess exits
+    0 but the sentinel is missing, training crashed somewhere between save
+    and process exit (post-save segfault, kernel OOM-kill, GPU watchdog).
+    The executor must surface this as ``error_training`` — without the
+    check, the consumer-side preflight in ``inference_single`` would raise
+    on the missing .pth and the failure would be misclassified as
+    ``error_inference``.
+
+    The ``error_training:`` prefix in the message is the contract the
+    tuner pattern-matches against in ``ml_hyperparameter_tune_agent`` to
+    re-route the inference-side error category. Pinning the prefix here
+    keeps producer and consumer in lock-step.
+    """
+
+    @patch("core.sandbox_executor.subprocess.run")
+    def test_returncode_zero_no_sentinel_returns_error_training(
+        self, mock_run, sandbox,
+    ):
+        """The smoking-gun case from the v3/v4 forensic logs: the subprocess
+        exits cleanly but no sentinel was written. Status is ``error`` with
+        an ``error_training:``-prefixed message — not the misleading
+        ``error_inference`` it used to surface as."""
+        mock_run.return_value = _make_mock_result(
+            returncode=0,
+            stdout="Trainer started\nTrainer finished\n",
+            stderr="W0426 12:00:01 cuda_memory_allocator.cc:213] reclaim spike\n",
+        )
+
+        out = sandbox.execute_training(
+            EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG,
+        )
+
+        assert out["status"] == "error"
+        assert out["message"].startswith("error_training:"), (
+            f"missing required prefix; got: {out['message'][:120]!r}"
+        )
+        assert EXP_ID in out["message"]
+
+    @patch("core.sandbox_executor.subprocess.run")
+    def test_silent_crash_message_includes_stderr_tail(
+        self, mock_run, sandbox,
+    ):
+        """The 20-line stderr tail is what the operator (and the tuner's
+        reflector) reads to triage the crash. Pin that it actually makes
+        it into the surfaced message."""
+        # 25 stderr lines — only the LAST 20 should appear in the tail.
+        stderr_lines = [f"line {i}: noisy warning" for i in range(25)]
+        mock_run.return_value = _make_mock_result(
+            returncode=0, stdout="", stderr="\n".join(stderr_lines) + "\n",
+        )
+
+        out = sandbox.execute_training(
+            EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG,
+        )
+
+        assert "--- stderr tail (last 20 lines) ---" in out["message"]
+        # The last line must be present.
+        assert "line 24: noisy warning" in out["message"]
+        # The 6th-to-last (line 19) must be present (line 19 is included).
+        assert "line 19: noisy warning" in out["message"]
+        # The 6th line (line 5) must NOT be present — only the last 20
+        # (lines 5..24 inclusive would be 20 lines, so line 4 is the
+        # first that should be cut).
+        assert "line 4: noisy warning" not in out["message"]
+
+    @patch("core.sandbox_executor.subprocess.run")
+    def test_silent_crash_does_not_read_train_results_json(
+        self, mock_run, sandbox,
+    ):
+        """When the sentinel is missing, the executor must short-circuit
+        BEFORE attempting to read ``experiment_results_*.json`` — that
+        file is also not guaranteed to exist after a silent crash, and
+        opening it would mask the real cause behind a ``FileNotFoundError``
+        / ``JSONDecodeError`` raised inside the executor itself."""
+        mock_run.return_value = _make_mock_result(
+            returncode=0, stdout="", stderr="",
+        )
+
+        # Confirm no result JSON exists at the expected path — proves the
+        # short-circuit isn't accidentally papered over by a prior file.
+        train_json = os.path.join(
+            sandbox.dirs["records"], RUN_NAME,
+            f"experiment_results_fcnet_{EXP_ID}.json",
+        )
+        assert not os.path.exists(train_json)
+
+        out = sandbox.execute_training(
+            EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG,
+        )
+
+        # No ``results`` key — that's only on the success path.
+        assert out["status"] == "error"
+        assert "results" not in out
+
+    @patch("core.sandbox_executor.subprocess.run")
+    def test_sentinel_present_keeps_success_status(self, mock_run, sandbox):
+        """Mirror image of the silent-crash branch: when the sentinel IS
+        present, the executor proceeds to the success path. This is the
+        regression guard that makes sure the silent-crash check doesn't
+        false-positive on healthy runs."""
+        mock_run.side_effect = _make_train_success_side_effect(sandbox, EXP_ID)
+        out = sandbox.execute_training(
+            EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG,
+        )
+        assert out["status"] == "success"
+        assert "error_training:" not in out.get("message", "")

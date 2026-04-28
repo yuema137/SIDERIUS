@@ -46,7 +46,14 @@ import argparse
 import json
 import math
 import os
+import sys
 from datetime import datetime
+
+# Allow ``python compute_ground_truth.py`` from the repo root to import the
+# coercion helper without requiring ``-m``. (compute_raw_baseline does the
+# same.)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from execute_tools.scoring_utils import coerce_nonfinite_to_none  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Core formulas — all use the global s_max from the anchor map.
@@ -78,8 +85,10 @@ def _global_per_file_ceiling(
     n = len(anchors_f)
     linear_sum = sum(v * v for v in anchors_f) / s_max
     per_file_linear = linear_sum / n
-    score_lin = round(per_file_linear, 2) + 1e-10
-    log_score = float(math.log(score_lin, 5.27))
+    if per_file_linear > 0 and math.isfinite(per_file_linear):
+        log_score = float(math.log(per_file_linear, 5.27))
+    else:
+        log_score = float("-inf")
     return log_score, float(linear_sum), n
 
 
@@ -91,14 +100,14 @@ def _anchor_normalized_ceiling(
     Per-segment:   per_segment[f,i] = anchor[f,i]² / s_max
     Per-file:      file_vector[f]   = mean_i(per_segment[f,i])
     Grand mean:    grand            = Σ_{f,i} per_segment  /  Σ_f |S_f|
-    Scalar:        score            = log_{5.27}(round(grand, 2) + 1e-10)
+    Scalar:        score            = log_{5.27}(grand)  [or -inf if grand ≤ 0]
 
-    Same aggregation as ``scoring_utils.score_vector`` (grand mean + TIDMAD
-    round); the only change is that ``snr_squid`` is replaced by ``anchor``
-    (the perfect-denoiser substitution). Using the grand mean makes the
-    scalar legacy-compatible regardless of whether every file has the same
-    segment count; when ``|S_f|`` is uniform (the typical 200-per-file
-    anchor map) it equals ``mean_f(file_vector)``.
+    Same aggregation as ``scoring_utils.score_vector`` (grand mean over
+    log_{5.27}); the only change is that ``snr_squid`` is replaced by
+    ``anchor`` (the perfect-denoiser substitution). Using the grand mean
+    makes the scalar legacy-compatible regardless of whether every file has
+    the same segment count; when ``|S_f|`` is uniform (the typical 200-per-
+    file anchor map) it equals ``mean_f(file_vector)``.
 
     See ``docs/align_denoising_score.md`` §C.2.
 
@@ -115,8 +124,10 @@ def _anchor_normalized_ceiling(
         total_weighted += file_sum
         total_count += len(a)
     grand_mean = total_weighted / total_count
-    # TIDMAD round: legacy applies ``np.round(·, 2) + 1e-10`` before log.
-    scalar = math.log(round(grand_mean, 2) + 1e-10, 5.27)
+    if grand_mean > 0 and math.isfinite(grand_mean):
+        scalar = math.log(grand_mean, 5.27)
+    else:
+        scalar = float("-inf")
     return file_vector, float(scalar)
 
 
@@ -201,7 +212,7 @@ def main():
             "computed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
         with open(out_path, "w") as f:
-            json.dump(result, f, indent=2)
+            json.dump(coerce_nonfinite_to_none(result), f, indent=2)
         print(f"[COMPUTE] index={f_idx:02d}  score={score:.6f}  -> {out_path}")
         computed += 1
 
@@ -218,7 +229,7 @@ def main():
         "computed_at":      datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
     with open(scalar_path, "w") as f:
-        json.dump(scalar_result, f, indent=2)
+        json.dump(coerce_nonfinite_to_none(scalar_result), f, indent=2)
     print(f"\n[COMPUTE] anchor-normalized scalar ceiling = {scalar:.6f}")
     print(f"          -> {scalar_path}")
 

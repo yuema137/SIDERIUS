@@ -58,6 +58,7 @@ Usage:
 
 import os
 import sys
+import gc
 import json
 import glob
 import shutil
@@ -946,6 +947,33 @@ def run_workflow(
         # (placed before the break check) so the last iteration's
         # terminal RSS is always logged.
         probe_memory(iter_idx=iteration, phase="end",
+                     workspace=workspace, scope="workflow")
+
+        # Phase 6.8 §2 Layer B (Commit 3) — per-iteration cleanup. Drop
+        # local refs to per-iter agent outputs, force a GC cycle, then
+        # emit a post_gc probe so the trace consumer can read the
+        # freed-memory delta as ``end.rss_gb - post_gc.rss_gb``.
+        # tune_output is also retained in iteration_results /
+        # recent_tune_outputs (live refs); the local del here just
+        # decrements the local-name refcount. NameError-guarded
+        # because early-exit paths may leave some names unbound.
+        # See docs/phase68_task1_memory_diagnostic_20260427.md §2 Commit 3.
+        try: del proposal
+        except NameError: pass
+        try: del impl_output
+        except NameError: pass
+        try: del validation
+        except NameError: pass
+        try: del interpretation
+        except NameError: pass
+        try: del interp_input
+        except NameError: pass
+        try: del tune_input
+        except NameError: pass
+        try: del tune_output
+        except NameError: pass
+        gc.collect()
+        probe_memory(iter_idx=iteration, phase="post_gc",
                      workspace=workspace, scope="workflow")
 
         if target_score is not None and best_score_overall is not None and best_score_overall >= target_score:

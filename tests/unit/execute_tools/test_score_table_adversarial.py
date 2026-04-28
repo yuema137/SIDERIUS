@@ -34,8 +34,6 @@ from agent.schemas.score_table import (
 )
 from execute_tools.scoring_helpers import (
     _LOG_BASE,
-    _LOG_FLOOR,
-    _ROUND_EPS,
     build_score_table,
     render_comparison_table,
 )
@@ -58,18 +56,18 @@ def _make_reference(
 ) -> ReferenceScores:
     raw_linear_sum = raw_linear_sum or [2.0] * 20
     gt_linear_sum = gt_linear_sum or [20.0] * 20
-    raw_per_file_log = [
-        math.log(round(ls / n_segments, 2) + _ROUND_EPS, _LOG_BASE)
-        for ls in raw_linear_sum
-    ]
-    gt_per_file_log = [
-        math.log(round(ls / n_segments, 2) + _ROUND_EPS, _LOG_BASE)
-        for ls in gt_linear_sum
-    ]
+
+    def _log_or_neg_inf(x: float) -> float:
+        if x > 0 and math.isfinite(x):
+            return math.log(x, _LOG_BASE)
+        return float("-inf")
+
+    raw_per_file_log = [_log_or_neg_inf(ls / n_segments) for ls in raw_linear_sum]
+    gt_per_file_log = [_log_or_neg_inf(ls / n_segments) for ls in gt_linear_sum]
     raw_gm = sum(raw_linear_sum) / (n_segments * 20)
     gt_gm = sum(gt_linear_sum) / (n_segments * 20)
-    raw_scalar_full = math.log(round(raw_gm, 2) + _ROUND_EPS, _LOG_BASE)
-    gt_scalar_full = math.log(round(gt_gm, 2) + _ROUND_EPS, _LOG_BASE)
+    raw_scalar_full = _log_or_neg_inf(raw_gm)
+    gt_scalar_full = _log_or_neg_inf(gt_gm)
     return ReferenceScores(
         raw_per_file_log=raw_per_file_log,
         gt_per_file_log=gt_per_file_log,

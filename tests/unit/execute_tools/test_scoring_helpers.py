@@ -20,8 +20,6 @@ import pytest
 from agent.schemas.score_table import ScoreComparisonTable
 from execute_tools.scoring_helpers import (
     _LOG_BASE,
-    _LOG_FLOOR,
-    _ROUND_EPS,
     build_score_table,
     render_comparison_table,
 )
@@ -42,29 +40,34 @@ def _make_reference(
 ) -> ReferenceScores:
     """A 20-file reference bundle.
 
-    Default: raw per-file linear_sum = 2.0 everywhere (so per-file mean = 0.01
-    → log_{5.27}(0.01 + 1e-10) ≈ -2.771);
-    gt per-file linear_sum = 20.0 everywhere (per-file mean = 0.10 →
-    log ≈ -1.386 on base 5.27).
+    Default: raw per-file linear_sum = 2.0 everywhere (per-file mean = 0.01
+    → log_{5.27}(0.01) ≈ -2.7708);
+    gt per-file linear_sum = 20.0 everywhere (per-file mean = 0.10
+    → log_{5.27}(0.10) ≈ -1.3854 on base 5.27).
+
+    Phase-67 scoring-precision fix: dropped the legacy ``round(·, 2) + 1e-10``
+    quantization (which collapsed any per-file or grand mean in
+    ``[0.005, 0.0149]`` to the ghost score ``-2.7708098959837675``). Now
+    ``log_{5.27}(x)`` is taken directly when ``x > 0`` and ``isfinite(x)``;
+    otherwise the helper returns ``float('-inf')``.
 
     Callers can override either list to hit specific subset-aggregation cases.
     """
     raw_linear_sum = raw_linear_sum or [2.0] * 20
     gt_linear_sum = gt_linear_sum or [20.0] * 20
 
-    raw_per_file_log = [
-        math.log(round(ls / n_segments, 2) + _ROUND_EPS, _LOG_BASE)
-        for ls in raw_linear_sum
-    ]
-    gt_per_file_log = [
-        math.log(round(ls / n_segments, 2) + _ROUND_EPS, _LOG_BASE)
-        for ls in gt_linear_sum
-    ]
+    def _log_or_neg_inf(x: float) -> float:
+        if x > 0 and math.isfinite(x):
+            return math.log(x, _LOG_BASE)
+        return float("-inf")
+
+    raw_per_file_log = [_log_or_neg_inf(ls / n_segments) for ls in raw_linear_sum]
+    gt_per_file_log = [_log_or_neg_inf(ls / n_segments) for ls in gt_linear_sum]
     # Full-20 grand-mean scalars.
     raw_gm = sum(raw_linear_sum) / (n_segments * 20)
     gt_gm = sum(gt_linear_sum) / (n_segments * 20)
-    raw_scalar_full = math.log(round(raw_gm, 2) + _ROUND_EPS, _LOG_BASE)
-    gt_scalar_full = math.log(round(gt_gm, 2) + _ROUND_EPS, _LOG_BASE)
+    raw_scalar_full = _log_or_neg_inf(raw_gm)
+    gt_scalar_full = _log_or_neg_inf(gt_gm)
 
     return ReferenceScores(
         raw_per_file_log=raw_per_file_log,
@@ -150,7 +153,7 @@ class TestBuildScoreTableTrialSubset:
         computed from ΣL[10..14] / ΣN[10..14], NOT the full-20 scalars."""
         raw_ls = [0.0] * 20
         for i in (10, 11, 12, 13, 14):
-            raw_ls[i] = 40.0   # subset mean = 40/200 = 0.20 → round → 0.20
+            raw_ls[i] = 40.0   # subset mean = 40/200 = 0.20
         gt_ls = [0.0] * 20
         for i in (10, 11, 12, 13, 14):
             gt_ls[i] = 400.0   # subset mean = 400/200 = 2.00
@@ -163,8 +166,8 @@ class TestBuildScoreTableTrialSubset:
         tbl = build_score_table(model_fv, model_scalar=2.5, reference=ref)
         assert tbl is not None
 
-        expected_raw = math.log(round(0.20, 2) + _ROUND_EPS, _LOG_BASE)
-        expected_gt = math.log(round(2.00, 2) + _ROUND_EPS, _LOG_BASE)
+        expected_raw = math.log(0.20, _LOG_BASE)
+        expected_gt = math.log(2.00, _LOG_BASE)
         assert tbl.aggregate.raw_baseline_scalar == pytest.approx(
             expected_raw, abs=1e-12,
         )

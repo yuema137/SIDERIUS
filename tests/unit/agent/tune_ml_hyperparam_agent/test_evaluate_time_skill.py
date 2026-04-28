@@ -209,11 +209,24 @@ def test_run_skill_safety_multiplier_surfaced_in_breakdown(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+def _stub_warmup_breakdown(aggregator: str | None = "median") -> dict:
+    """Match the shape of the real warmup breakdown for monkeypatched returns
+    (Phase 6.7 Fix 1: ``_measure_ms_per_step`` now returns a tuple)."""
+    return {
+        "n_warmup_batches": 3,
+        "n_timed_batches": 7,
+        "timings_ms": [3.5] * 10 if aggregator else [],
+        "aggregator": aggregator,
+    }
+
+
 def test_run_skill_uses_warmup_when_data_dir_and_measurement_available(monkeypatch):
     # When data_dir is passed and _measure_ms_per_step returns a positive
     # value, run_skill must use it and flag the source accordingly.
     _patch_count_params(monkeypatch, 100_000)
-    monkeypatch.setattr(ts, "_measure_ms_per_step", lambda **kw: 3.5)
+    monkeypatch.setattr(
+        ts, "_measure_ms_per_step", lambda **kw: (3.5, _stub_warmup_breakdown("median"))
+    )
     result = ts.run_skill(
         FakeSandbox(),
         **_base_kwargs(data_dir="/any/path"),
@@ -227,7 +240,9 @@ def test_run_skill_falls_back_to_static_when_warmup_returns_none(monkeypatch):
     # Training estimator reports ms_source="static_formula"; wrapper surfaces
     # it as breakdown.source.
     _patch_count_params(monkeypatch, 100_000)
-    monkeypatch.setattr(ts, "_measure_ms_per_step", lambda **kw: None)
+    monkeypatch.setattr(
+        ts, "_measure_ms_per_step", lambda **kw: (None, _stub_warmup_breakdown(None))
+    )
     result = ts.run_skill(
         FakeSandbox(),
         **_base_kwargs(data_dir="/any/path"),
@@ -242,7 +257,7 @@ def test_run_skill_skips_warmup_without_data_dir(monkeypatch):
 
     def _should_not_be_called(**kw):
         calls.append(kw)
-        return 99.0
+        return 99.0, _stub_warmup_breakdown("median")
 
     monkeypatch.setattr(ts, "_measure_ms_per_step", _should_not_be_called)
     result = ts.run_skill(FakeSandbox(), **_base_kwargs())
@@ -259,7 +274,9 @@ def test_warmup_scales_inference_ms_by_one_third(monkeypatch):
     # When the training warmup reports M ms/step, the wrapper must hand the
     # inference estimator M/3 as its inference_ms_per_step (no backward pass).
     _patch_count_params(monkeypatch, 100_000)
-    monkeypatch.setattr(ts, "_measure_ms_per_step", lambda **kw: 9.0)
+    monkeypatch.setattr(
+        ts, "_measure_ms_per_step", lambda **kw: (9.0, _stub_warmup_breakdown("median"))
+    )
     result = ts.run_skill(FakeSandbox(), **_base_kwargs(data_dir="/any/path"))
     inf_bd = result["phase_breakdown"]["inference"]["breakdown"]
     assert inf_bd["ms_source"] == "derived_from_training_warmup"
@@ -308,3 +325,188 @@ class TestUnregisteredModelTypeFallback:
         assert result["inference_batch_uncalibrated"] is False
         captured = capsys.readouterr()
         assert "!!! [evaluate_time_skill]" not in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Phase 6.7 Fix 1 — Steady-state warmup aggregator
+#
+# Pure helper tests: no torch, no CUDA, no DataLoader. The aggregator is the
+# decision boundary between (a) reporting a steady-state median, (b) firing
+# the fast-fail short-circuit, and (c) bailing to None. Pin all three branches
+# plus the median's outlier-robustness vs the legacy mean.
+# ---------------------------------------------------------------------------
+
+
+class TestAggregateWarmupTimings:
+
+    def test_empty_list_returns_none_and_aggregator_none(self):
+        ms, bd = ts._aggregate_warmup_timings([], n_warmup_batches=3)
+        assert ms is None
+        assert bd["aggregator"] is None
+        assert bd["n_warmup_batches"] == 3
+        assert bd["n_timed_batches"] == 0
+        assert bd["timings_ms"] == []
+
+    def test_fast_fail_step0_above_threshold_returns_that_step_ms(self):
+        # Step 0 already over the threshold → fast-fail branch wins, returns
+        # that step's ms (worst-case-conservative; trips the time gate).
+        ms, bd = ts._aggregate_warmup_timings(
+            [7000.0, 6000.0, 6000.0],
+            n_warmup_batches=3,
+            fast_fail_threshold_ms=5000.0,
+        )
+        assert ms == 7000.0
+        assert bd["aggregator"] == "fast_fail"
+        # In the fast-fail branch we did NOT collect steady-state samples,
+        # so n_timed_batches is 0 even if the loop completed extra iters.
+        assert bd["n_timed_batches"] == 0
+        # Raw timings are still surfaced so the audit log is complete.
+        assert bd["timings_ms"] == [7000.0, 6000.0, 6000.0]
+
+    def test_fast_fail_uses_default_threshold_constant(self):
+        # The default threshold pulls from the module-level constant. This
+        # pins the contract: changes to _WARMUP_FAST_FAIL_MS automatically
+        # propagate through the aggregator without test churn.
+        ms, bd = ts._aggregate_warmup_timings(
+            [ts._WARMUP_FAST_FAIL_MS + 1.0], n_warmup_batches=1,
+        )
+        assert ms == ts._WARMUP_FAST_FAIL_MS + 1.0
+        assert bd["aggregator"] == "fast_fail"
+
+    def test_median_branch_discards_warmup_then_takes_median(self):
+        # Three warmup steps (high) + four timed steps with a clear median.
+        ms, bd = ts._aggregate_warmup_timings(
+            [50.0, 40.0, 30.0,  # warmup
+             10.0, 12.0, 14.0, 16.0],  # timed → median 13.0
+            n_warmup_batches=3,
+        )
+        assert ms == pytest.approx(13.0)
+        assert bd["aggregator"] == "median"
+        assert bd["n_timed_batches"] == 4
+
+    def test_median_is_robust_to_one_outlier_unlike_mean(self):
+        # The whole point of switching from mean to median: a single rogue
+        # slow step (cudnn re-tune, scheduler hiccup) must NOT inflate the
+        # estimate. Mean of [10, 10, 10, 10, 10, 10, 5000] = 722.86 ms →
+        # would falsely fail the time budget. Median = 10 ms.
+        timed_with_outlier = [10.0] * 6 + [5000.0]
+        ms, bd = ts._aggregate_warmup_timings(
+            [0.0] + timed_with_outlier,  # 1 warmup, 7 timed
+            n_warmup_batches=1,
+            # Raise threshold so the outlier doesn't trip fast-fail (we're
+            # testing the median branch's robustness, not fast-fail).
+            fast_fail_threshold_ms=10000.0,
+        )
+        assert ms == pytest.approx(10.0)
+        # And confirm the legacy mean WOULD have been spoiled — not asserted
+        # against the result, just an in-test sanity check.
+        legacy_mean = sum(timed_with_outlier) / len(timed_with_outlier)
+        assert legacy_mean > 700.0  # would have inflated the estimate
+
+    def test_no_timed_steps_returns_none(self):
+        # Loop terminated after warmup (StopIteration). No steady-state
+        # samples → aggregator returns None and caller falls back to static.
+        ms, bd = ts._aggregate_warmup_timings(
+            [10.0, 10.0, 10.0],  # exactly n_warmup = 3, nothing timed
+            n_warmup_batches=3,
+        )
+        assert ms is None
+        assert bd["aggregator"] is None
+        assert bd["n_timed_batches"] == 0
+
+
+class TestBreakdownSurfacesWarmupAggregator:
+    """The audit log routes off ``breakdown.warmup_aggregator``. Pin the
+    propagation from ``_measure_ms_per_step``'s tuple return through to the
+    final flat breakdown so visibility doesn't silently regress."""
+
+    def test_median_aggregator_surfaces_on_breakdown(self, monkeypatch):
+        _patch_count_params(monkeypatch, 100_000)
+        monkeypatch.setattr(
+            ts, "_measure_ms_per_step",
+            lambda **kw: (3.5, {
+                "n_warmup_batches": 3,
+                "n_timed_batches": 7,
+                "timings_ms": [3.5] * 10,
+                "aggregator": "median",
+            }),
+        )
+        result = ts.run_skill(FakeSandbox(), **_base_kwargs(data_dir="/any/path"))
+        bd = result["breakdown"]
+        assert bd["warmup_aggregator"] == "median"
+        assert bd["warmup_n_warmup_batches"] == 3
+        assert bd["warmup_n_timed_batches"] == 7
+        assert bd["warmup_timings_ms"] == [3.5] * 10
+
+    def test_fast_fail_aggregator_surfaces_on_breakdown(self, monkeypatch):
+        # When step 0 trips the threshold, the breakdown must show
+        # 'fast_fail' so the audit log distinguishes a DOA model from a
+        # genuinely slow-but-finished steady-state estimate.
+        _patch_count_params(monkeypatch, 100_000)
+        monkeypatch.setattr(
+            ts, "_measure_ms_per_step",
+            lambda **kw: (7000.0, {
+                "n_warmup_batches": 3,
+                "n_timed_batches": 0,  # short-circuited before any timed step
+                "timings_ms": [7000.0],
+                "aggregator": "fast_fail",
+            }),
+        )
+        result = ts.run_skill(FakeSandbox(), **_base_kwargs(data_dir="/any/path"))
+        bd = result["breakdown"]
+        assert bd["warmup_aggregator"] == "fast_fail"
+        assert bd["warmup_n_timed_batches"] == 0
+        assert bd["warmup_timings_ms"] == [7000.0]
+
+    def test_no_data_dir_aggregator_is_none(self, monkeypatch):
+        # Without data_dir the warmup never runs, so the aggregator field
+        # must be None — not 'median' from a stale default.
+        _patch_count_params(monkeypatch, 100_000)
+        result = ts.run_skill(FakeSandbox(), **_base_kwargs())  # no data_dir
+        bd = result["breakdown"]
+        assert bd["warmup_aggregator"] is None
+        assert bd["warmup_n_timed_batches"] == 0
+        assert bd["warmup_timings_ms"] == []
+
+    def test_legacy_breakdown_keys_still_present(self, monkeypatch):
+        # Phase F's per-GPU EMA update in nodes/ml_hyperparameter_tune_agent.py
+        # reads breakdown.source + breakdown.gpu_name. The new warmup_*
+        # keys must coexist with these — not replace them.
+        _patch_count_params(monkeypatch, 100_000)
+        monkeypatch.setattr(
+            ts, "_measure_ms_per_step",
+            lambda **kw: (3.5, {
+                "n_warmup_batches": 3, "n_timed_batches": 7,
+                "timings_ms": [3.5] * 10, "aggregator": "median",
+            }),
+        )
+        result = ts.run_skill(FakeSandbox(), **_base_kwargs(data_dir="/any/path"))
+        legacy_keys = {
+            "total_train_steps", "ms_per_step_warmup", "k_correction",
+            "safety_multiplier", "train_minutes", "num_params",
+            "source", "gpu_name",
+        }
+        assert legacy_keys.issubset(set(result["breakdown"].keys()))
+
+
+class TestMeasureMsPerStepDefaults:
+    """The default warmup count moved from 1+2 to 3+7 in Phase 6.7. Pin the
+    signature so a regression toward the legacy 1+2 (which is what the audit
+    blamed for the cudnn-autotune-inflated mean) is loud."""
+
+    def test_defaults_are_3_warmup_7_timed(self):
+        import inspect
+        sig = inspect.signature(ts._measure_ms_per_step)
+        assert sig.parameters["n_warmup_batches"].default == 3
+        assert sig.parameters["n_timed_batches"].default == 7
+
+    def test_return_annotation_is_tuple(self):
+        # The tuple return is the contract Commit 4's orchestrator (and any
+        # future caller) reads against. Pin that the function advertises
+        # ``tuple[float | None, dict]`` rather than the legacy bare scalar.
+        import inspect
+        sig = inspect.signature(ts._measure_ms_per_step)
+        ret = sig.return_annotation
+        # Either as the typing.Tuple form or the PEP 604 ``tuple[...]``.
+        assert "tuple" in str(ret).lower()
+        assert "dict" in str(ret).lower()

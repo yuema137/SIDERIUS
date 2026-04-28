@@ -73,9 +73,13 @@ def probe_memory(
             for ``scope="tuner"`` this is the tuner's ``round_index``.
             Any JSON-serialisable value is accepted (int preferred).
         phase: Free-form phase tag. Canonical values used in-tree:
-            ``start``, ``end`` (workflow scope); ``pre_score``,
-            ``post_score`` (tuner scope). The schema is open — new phases
-            may be added without breaking the log consumer.
+            ``start``, ``end``, ``post_gc`` (workflow scope);
+            ``pre_score``, ``post_score`` (tuner scope). ``post_gc`` is
+            emitted right after the per-iter ``del`` + ``gc.collect()``
+            block in the workflow loop so a trace consumer can compute
+            the freed-memory delta as ``end.rss_gb - post_gc.rss_gb``.
+            The schema is open — new phases may be added without
+            breaking the log consumer.
         workspace: Output directory. When provided, a JSON row is
             appended to ``{workspace}/memory_trace.jsonl``. When ``None``,
             the probe prints only to stdout.

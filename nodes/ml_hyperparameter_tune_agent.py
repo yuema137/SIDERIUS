@@ -12,6 +12,7 @@ Node contract:
 """
 
 import os
+import gc
 import time
 import json
 import argparse
@@ -37,7 +38,7 @@ from agent.schemas.hyperparam_tuning import (
     serialize_expert_advice,
 )
 from execute_tools.sample_set_builder import build_sample_set
-from execute_tools.scoring_utils import SampleSet
+from execute_tools.scoring_utils import SampleSet, coerce_nonfinite_to_none
 from execute_tools.scoring_helpers import build_score_table
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 from execute_tools.build_anchor_map import load_anchor_map
@@ -1387,10 +1388,44 @@ class HyperparamTuningAgent:
                     if inf_status.get("status") == "error":
                         error_msg = inf_status.get("message", "Unknown inference error")
                         is_oom = "CUDA out of memory" in error_msg or "OutOfMemoryError" in error_msg
+
+                        # Phase 6.7 Fix 3 — when the inference subprocess fails
+                        # because the trainer-side sentinel was missing, the
+                        # error message carries the ``error_training:`` prefix
+                        # (raised by ``inference_single._assert_training_sentinel``).
+                        # That is a *training* failure surfaced through the
+                        # inference subprocess, not an inference failure.
+                        # Re-route the category so the planner sees the right
+                        # cause instead of "inference crashed for mysterious
+                        # reasons" — and the executor-side silent-crash check
+                        # in ``execute_training`` already catches the same
+                        # condition upstream when the process exited 0.
+                        is_silent_train_crash = "error_training:" in error_msg
+
                         short_msg = error_msg[-500:] if len(error_msg) > 500 else error_msg
+                        if is_silent_train_crash:
+                            status_tag = "error_training"
+                            conclusion = f"Training crashed silently (detected at inference preflight): {short_msg}"
+                            discovery = f"Training subprocess returned 0 but produced no checkpoint sentinel: {short_msg}"
+                            memory_update = (
+                                "Silent training crash — investigate the trainer logs for a "
+                                "post-save segfault, OOM-kill, or GPU watchdog. Do not retry "
+                                "blindly until the root cause is identified."
+                            )
+                        elif is_oom:
+                            status_tag = "error_inference_oom"
+                            conclusion = f"Inference failed: {short_msg}"
+                            discovery = "CUDA OOM during inference — reduce batch_size or model size."
+                            memory_update = "Inference OOM — the model trained but can't infer. Try smaller batch."
+                        else:
+                            status_tag = "error_inference"
+                            conclusion = f"Inference failed: {short_msg}"
+                            discovery = f"Inference crashed: {short_msg}"
+                            memory_update = "Fix the inference error before retrying."
+
                         error_record = {
                             "exp_id":          exp_id,
-                            "status":          "error_inference_oom" if is_oom else "error_inference",
+                            "status":          status_tag,
                             "model_type":      model_type,
                             "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
                             "file_index":      file_index,
@@ -1399,9 +1434,9 @@ class HyperparamTuningAgent:
                             "memory": {
                                 "expert_advice_followed": expert_advice_str,
                                 "hypothesis":    hypothesis,
-                                "conclusion":    f"Inference failed: {short_msg}",
-                                "discovery":     "CUDA OOM during inference — reduce batch_size or model size." if is_oom else f"Inference crashed: {short_msg}",
-                                "memory_update": "Inference OOM — the model trained but can't infer. Try smaller batch." if is_oom else "Fix the inference error before retrying.",
+                                "conclusion":    conclusion,
+                                "discovery":     discovery,
+                                "memory_update": memory_update,
                             },
                         }
                         error_record["memory"]["round_index"] = round_index
@@ -1752,6 +1787,28 @@ class HyperparamTuningAgent:
                     f"{max_fail_rounds_setting})."
                 )
 
+            # Phase 6.8 §2 Layer C (Commit 4) — per-round cleanup. Drop
+            # local refs to the largest per-round transients before the
+            # next round's plan() call so inter-round RSS stays flat.
+            # NameError-guarded because early-exit paths (gate skip,
+            # training crash before score) leave some names unbound.
+            # See docs/phase68_task1_memory_diagnostic_20260427.md §2 Commit 4.
+            try: del train_results
+            except NameError: pass
+            try: del score_results
+            except NameError: pass
+            try: del score_table
+            except NameError: pass
+            try: del file_vector
+            except NameError: pass
+            try: del final_scalar
+            except NameError: pass
+            try: del reflect_results
+            except NameError: pass
+            try: del memory_history
+            except NameError: pass
+            gc.collect()
+
         # --- Build, validate, and save the run output ---
         finished_at = time.strftime("%Y-%m-%d %H:%M:%S")
         # Phase L (§11) — termination_reason captures *why* the outer
@@ -1852,8 +1909,12 @@ class HyperparamTuningAgent:
         })
 
         output_path = os.path.join(workspace, f"run_output_{run_name}.json")
+        # Coerce float('-inf') no-signal sentinels to JSON null at the storage
+        # boundary — model_dump_json would otherwise emit non-standard
+        # ``-Infinity`` tokens that break the dashboard's ``JSON.parse``.
+        safe_output = coerce_nonfinite_to_none(agent_output.model_dump())
         with open(output_path, "w", encoding="utf-8") as f:
-            f.write(agent_output.model_dump_json(indent=4))
+            json.dump(safe_output, f, indent=4)
         print(f"Output validated and saved -> {output_path}")
 
         if termination_reason == "completed":

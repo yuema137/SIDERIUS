@@ -13,7 +13,7 @@ in-process).
 
     per_segment  = (snr_sg[i] / s_max_GLOBAL) · snr_squid[i]
     grand_mean   = mean_i(per_segment)                # 200 segments / file
-    score        = log_{5.27}(round(grand_mean, 2) + 1e-10)
+    score        = log_{5.27}(grand_mean)  if grand_mean > 0 else -inf
 
 where ``s_max`` is read from ``segment_anchors.json`` (built on the fine
 validation files 0–19). This is the same formula and the same global ruler
@@ -130,7 +130,10 @@ if not os.path.exists(full_path):
 
 from execute_tools.build_anchor_map import load_anchor_map  # noqa: E402
 from execute_tools.dataset_config import SEGMENTS_PER_FILE  # noqa: E402
-from execute_tools.scoring_utils import score_vector  # noqa: E402
+from execute_tools.scoring_utils import (  # noqa: E402
+    coerce_nonfinite_to_none,
+    score_vector,
+)
 
 anchor_data = load_anchor_map(args.anchor_map)
 s_max = float(anchor_data["s_max"])
@@ -169,6 +172,7 @@ if args.output_json and os.path.exists(args.output_json):
     with open(args.output_json, "r") as f:
         data = json.load(f)
     data["denoising_score"] = scalar
+    safe_data = coerce_nonfinite_to_none(data)
     with open(args.output_json, "w") as f:
-        json.dump(data, f, indent=4)
+        json.dump(safe_data, f, indent=4)
     print(f"Updated {args.output_json} with score.")

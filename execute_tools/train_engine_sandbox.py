@@ -277,6 +277,28 @@ class TIDMADEpochDataset(Dataset):
 # 2. Refactored Training Engine
 # ==========================================
 
+
+def _save_with_sentinel(state_dict, save_path: str, exp_id: str) -> None:
+    """Save the state_dict and atomically mark training as complete.
+
+    Writes a zero-byte sibling ``_OK_<exp_id>`` next to ``save_path`` ONLY
+    after ``torch.save`` returns successfully. If ``torch.save`` raises,
+    control flow never reaches the sentinel write, so a save failure
+    cannot leave an orphan sentinel — the contract Commit 4's
+    orchestrator depends on to distinguish silent training crashes from
+    genuine inference-side failures.
+
+    Phase 6.7 Fix 3 (producer side). Consumed by
+    ``execute_tools.inference_single._assert_training_sentinel`` and (in
+    Commit 4) by the post-subprocess sentinel check in
+    ``nodes.ml_hyperparameter_tune_agent``.
+    """
+    torch.save(state_dict, save_path)
+    sentinel_path = os.path.join(os.path.dirname(save_path), f"_OK_{exp_id}")
+    with open(sentinel_path, "wb"):
+        pass  # zero-byte file
+
+
 def run_experiment(model_cfg, train_cfg: TrainConfig, loss_cfg: LossConfig, data_loader: DataLoader, sandbox_dirs: dict, exp_id:str):
     device = torch.device(train_cfg.device if torch.cuda.is_available() else "cpu")
     
@@ -346,7 +368,7 @@ def run_experiment(model_cfg, train_cfg: TrainConfig, loss_cfg: LossConfig, data
     
     # --- KEY FIX: Save to TIDMAD_Sandbox/cached_models ---
     save_path = os.path.join(sandbox_dirs['models'], f"model_{model_cfg.model_type}_{exp_id}_agent.pth")
-    torch.save(model.state_dict(), save_path)
+    _save_with_sentinel(model.state_dict(), save_path, exp_id)
     print(f"Model saved to: {save_path}")
 
     del model, optimizer, criterion
@@ -482,7 +504,7 @@ def run_experiment_streaming(
     }
 
     save_path = os.path.join(sandbox_dirs["models"], f"model_{model_cfg.model_type}_{exp_id}_agent.pth")
-    torch.save(model.state_dict(), save_path)
+    _save_with_sentinel(model.state_dict(), save_path, exp_id)
     print(f"Model saved to: {save_path}")
 
     del model, optimizer, criterion
