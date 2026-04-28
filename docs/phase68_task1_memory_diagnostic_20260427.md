@@ -325,6 +325,26 @@ All five pass criteria are satisfied.
 | Commit 3 — workflow per-iter cleanup | `workflows/model_exploration.py` | **WIRED** (multi-iter quantification deferred) | post_gc probe fires; on a 1-iter run the freed delta is 0 MB — expected because `iteration_results: list` and `recent_tune_outputs: deque(maxlen=3)` still hold strong refs to iter-1 output. The cleanup's quantitative effect manifests at iter 2+, where the deque rolls iter-1 out and the local `del` becomes the last ref. |
 | Commit 4 — tuner per-round cleanup | `nodes/ml_hyperparameter_tune_agent.py` | **WIRED** (multi-round quantification deferred) | unit tests pass (387); per-round flatness trivially holds at max_rounds=1. Tuner-scope `post_score` rss < `pre_score` rss in §3.1 (-14 MB) confirms scoring leaves no residue. |
 
+**Risk / expectation alignment for Commits 3 + 4** (why the WIRED tag, and what a multi-iter run will prove):
+
+*What "wired" means concretely.* The `del` blocks + `gc.collect()` run on every iter / round in production — they are not behind a feature flag, imports are clean, and the unit suites exercise the call sites (workflows: 91 passed, tuner: 387 passed). The `post_gc` probe fires immediately after `gc.collect()` and writes a JSON row to `memory_trace.jsonl`. The plumbing is live.
+
+*Why the 1-iter smoke produced `post_gc.rss_gb == end.rss_gb` to 4 decimals* (i.e. apparent zero release). Two compounding reasons:
+
+1. **`tune_output` is retained elsewhere.** `workflows/model_exploration.py` keeps two long-lived accumulators — `iteration_results: list[HyperparamTuningOutput]` (unbounded) and `recent_tune_outputs: deque(maxlen=3)`. When the cleanup runs `del tune_output`, only the local-name refcount drops; the object survives because both accumulators still hold strong refs to it. On a 1-iter run neither accumulator has yet rolled iter-1 out, so that line of the cleanup is a no-op for memory.
+2. **The other targets are small.** `proposal`, `impl_output`, `validation`, `interpretation`, `interp_input`, `tune_input` are not retained anywhere else — `del` does free them. But they are Pydantic models built from LLM JSON, on the order of kilobytes each. The probe's `rss_gb` precision is 4 decimal places (~0.1 MB), so freeing them rounds to zero in the trace. This is the expected outcome on a small single-iter input, not a bug.
+
+*What a multi-iter run will measure.* The cleanup's real benefit is **cumulative** — preventing N iters' worth of per-iter intermediates from piling up. A run with ≥4 iters lets us compute `start_rss(iter N+1) − start_rss(iter N)` and check that it converges to a small bounded number instead of the v5_0426 "before" baseline of +3.1 GB/iter (explore) or +5.2 GB/iter (exploit).
+
+**Concrete pass/fail thresholds for the next multi-iter sanity run**:
+
+| Commit | Metric | Pass threshold |
+|---|---|---|
+| 3 (workflow) | per-iter Δ`start_rss` | < 0.5 GB by iter 2; trend flattens to ≤ 0.1 GB iter-over-iter by iter 3–4 |
+| 4 (tuner) | per-round Δ`pre_score` | flat (≤ 0.1 GB round-over-round) at `max_rounds ≥ 3` |
+
+*Honest risk we are carrying.* It is possible Commits 3 + 4 free less than hoped — for example if a non-target object (most likely `iteration_results` itself, which is unbounded by design, or LLM client state cached inside agent instances) is the dominant leaker, our cleanup will not touch it. The `memory_trace.jsonl` rows from the next multi-iter run will diagnose this without any further code changes — that is the value of having shipped Commit 2's instrumentation alongside the fixes. If the thresholds above are missed, the next move is to extend the cleanup target set rather than re-instrument.
+
 **Quantitative before / after** (using the original v5_0426 traces as "before" — these were captured under the buggy code that motivated this work; both runs OOM-ed or stalled):
 
 | Phase | v5_0426 explore (before) | v5_0426 exploit (before) | fast-path smoke (after) |
