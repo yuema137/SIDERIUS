@@ -5,22 +5,26 @@ The chain runs the 5-agent loop (interpret → propose → implement → validat
 tune) once per iteration, and feeds each iteration's output back as a seed for
 the next iteration.
 
-## The three entry points
+## The entry points
 
 | # | Entry point | Environment | Mechanism | Use when |
 |---|---|---|---|---|
 | 1 | `tests/integration/workflows/test_full_exploration_loop.py::test_chained_iterations` | lilab | pytest, `tmp_path` workspace, in-process two `run_workflow()` calls | Quick smoke test / regression. Throwaway artifacts. |
-| 2 | `sdsc_submission_scripts/run_iteration_chain_lilab.sh` | lilab | Bash orchestrator → `run_one_iteration.py` as foreground subprocess | **Real lilab run with durable workspace.** Mirrors the SDSC path 1:1. |
-| 3 | `sdsc_submission_scripts/run_iteration_chain.sh` | SDSC Expanse | Bash orchestrator → `sbatch` with `--dependency=afterany` | Real distributed run on the cluster. |
+| 2 | **`sdsc_submission_scripts/run_chain.sh --mode {lilab,sdsc}`** | lilab or SDSC Expanse | Unified Bash orchestrator. `--mode lilab` runs `run_one_iteration.py` as foreground subprocess; `--mode sdsc` submits via `sbatch` with `--dependency=afterany`. | **Canonical chain entry point** for any real durable run on either environment (since Phase 6.8 Commit 13.A). |
+| 3 | ~~`sdsc_submission_scripts/run_iteration_chain_lilab.sh`~~ | lilab | **Deprecated** — delegating stub that calls `run_chain.sh --mode lilab "$@"` and prints a `WARNING:` banner. Removal tracked under Commit 15. | Legacy operator muscle memory only. New work should use entry 2. |
+| 4 | ~~`sdsc_submission_scripts/run_iteration_chain.sh`~~ | SDSC Expanse | **Deprecated** — delegating stub that calls `run_chain.sh --mode sdsc "$@"` and prints a `WARNING:` banner. Removal tracked under Commit 15. | Legacy operator muscle memory only. New work should use entry 2. |
 
-**Entries 2 and 3 share all logic** via `sdsc_submission_scripts/_chain_common.sh`
-(arg parsing, advice file loading, source-path building, APP_ARGS construction,
-per-iteration loop). The only difference is the `submit_iteration` function:
-on lilab it runs `python3 run_one_iteration.py` in the foreground, on SDSC it
-runs `sbatch ... submit_one_iteration.slurm` with a dependency on the previous
-job. **Iterations always hand off via `manifest.json` files**, regardless of
+**Entry 2 is the single source of truth.** It sources
+`sdsc_submission_scripts/_chain_common.sh` for all shared logic (defaults,
+arg parsing, advice file loading, source-path building, APP_ARGS construction,
+per-iteration loop) and dispatches to `submit_iteration_lilab` /
+`submit_iteration_sdsc` based on `--mode`. The two stubs (entries 3 and 4)
+exist solely to keep prior runbooks and shell history working during the
+transition; they `exec` into entry 2 unchanged and add nothing of their own.
+
+**Iterations always hand off via `manifest.json` files**, regardless of
 whether the previous iteration was a Python subprocess or a Slurm job. This
-keeps the two paths identical for debugging.
+keeps the two `--mode`s identical for debugging.
 
 The shared advice file `sdsc_submission_scripts/human_advice_chain_test.json` is the
 single source of truth for human guidance to the 5 agents. **Both lilab and
@@ -58,6 +62,131 @@ format.
    ```
    Five keys, one per agent: `interpret`, `propose`, `implement`, `validate`,
    `tune`. Any key may be empty (`""`) — empty strings are not forwarded.
+
+---
+
+## Unified entry point — `run_chain.sh` (canonical, since 13.A)
+
+`sdsc_submission_scripts/run_chain.sh` is the single user-facing orchestrator
+for chain runs on both lilab and SDSC. The legacy `run_iteration_chain*.sh`
+stubs print a deprecation warning and delegate here unchanged.
+
+### Required flags
+| Flag | Purpose |
+|---|---|
+| `--mode {lilab,sdsc}` | Backend selector. **No default — must be set.** `lilab` runs each iteration as a foreground subprocess; `sdsc` submits each iter as a `sbatch` job with `--dependency=afterany` on the previous iter's job ID. |
+| `--workspace DIR` | Chain workspace root. Iter NNN's artifacts land under `${WORKSPACE}/iter_NNN/`. |
+| `--seed_paths P [P …]` | One or more seed `run_output_*.json` files. Greedy slurp until the next `--flag`. |
+
+### Resume / safety flags (Commit 13.B)
+| Flag | Default | Purpose |
+|---|---|---|
+| `--auto_resume` | **ON** | Query `scripts/inspect_run_state.py --layout chain --next-iter` to pick `START_ITER`. The inspector exits non-zero on legacy-layout detection or non-contiguous chains, and `run_chain.sh` propagates that exit code. |
+| `--no_auto_resume` | — | Force `START_ITER=1` regardless of workspace state. |
+| `--start_iter N` | — | Manual pin; wins over auto-resume when both are present. |
+| `--force_fresh` | OFF | Override the stale-fresh safety guard (which otherwise refuses to start fresh on a non-empty workspace with a clear error). |
+
+If auto-resume returns `START_ITER > NUM_ITERATIONS`, the orchestrator exits 0
+cleanly with `"All N iterations are already complete. Nothing to do."` —
+idempotent rerun is the expected behaviour for cron-driven chains.
+
+### Inspection / safety flags
+| Flag | Default | Purpose |
+|---|---|---|
+| `--dry-run` | OFF | Walk the full chain loop printing the exact command per iter (with `DRYRUN_iter_NNN` placeholders for sdsc dependency wiring) **without touching the workspace, calling python, or submitting jobs**. Side-effect-free; `${WORKSPACE}` is never created. Use for sanity-checking arg parsing + dependency chain before committing to a real run. |
+| `--num_iterations N` | 2 | Total iters to walk. |
+
+### §3.2 flags (full input contract)
+The full set of `--max_rounds`, `--max_proposal_attempts`, `--trial_strategy`,
+`--data_dir`, `--target_files`, etc. is the §3.2 contract; defaults match
+both Python entries (`run_one_iteration.py` and `run_exploration_adaptive.py`)
+and are enforced by `tests/unit/scripts/test_chain_consistency.py` (Gate A
+three-way parity test). See the design doc
+`docs/phase68_orchestrator_memory_and_resume.md` §3.2 for the canonical table.
+
+### Virtualenv auto-detection (`--mode lilab` orchestrator + SDSC submission node)
+The orchestrator resolves the Python interpreter in this priority order
+(set in `resolve_py_cmd` and verified by the version + passthrough guards):
+
+1. `$VIRTUAL_ENV/bin/python` — operator-activated venv. Highest priority so
+   that an explicit `source .venv/bin/activate` always wins.
+2. `${PROJECT_DIR}/.venv/bin/python` — project-local venv (the standard
+   SIDERIUS dev-machine layout per `CLAUDE.md`).
+3. `uv run --project ${PROJECT_DIR} python` — used when neither venv is
+   present and `uv` is on `$PATH`.
+4. `python3` — last-resort fallback. Prints a multi-line warning banner
+   with the exact remediation command (`python3.10 -m venv .venv && .venv/bin/pip install -e .`)
+   because system `python3` on lilab is 3.8 and will fail SIDERIUS's modern
+   syntax.
+
+After resolution, two unconditional guards run:
+
+- **Version guard** (`enforce_py_version_guard`): refuses any interpreter
+  reporting `sys.version_info < (3, 10)` with the exact error
+  `ERROR: SIDERIUS requires Python 3.10+. Current: <version>` plus a
+  diagnostic line naming the resolved interpreter and source label.
+- **Env passthrough** (`setup_py_env_passthrough`): exports
+  `VIRTUAL_ENV=$PY_VENV_ROOT` and idempotently prepends `$PY_VENV_ROOT/bin`
+  to `$PATH` so subprocesses (training workers, plugin sandbox) inherit the
+  same venv as the orchestrator. No-op for the `uv run` and system `python3`
+  paths.
+
+The chain header surfaces the resolved interpreter on lilab:
+`Python: /path/to/python (source: $VIRTUAL_ENV / project venv / uv / python3)`.
+
+For `--mode sdsc`, the iteration jobs themselves use whatever python
+`submit_one_iteration.slurm` configures (it activates `.venv/bin/activate`
+inside the Slurm job). The submission-node interpreter resolved here is
+used only to call the inspector for `--auto_resume`.
+
+### Examples
+
+**Lilab fresh run, 3 iterations:**
+```bash
+bash sdsc_submission_scripts/run_chain.sh \
+    --mode lilab \
+    --workspace /home/klz/Data/SIDEREIS_DATA/lilab_chain_v1 \
+    --num_iterations 3 \
+    --seed_paths /home/klz/Data/SIDEREIS_DATA/punet/.../run_output_*.json \
+                 /home/klz/Data/SIDEREIS_DATA/wavenet/.../run_output_*.json \
+    --max_rounds 2 --max_epochs 1 \
+    --human_advice_file sdsc_submission_scripts/human_advice_chain_test.json
+```
+
+**Lilab dry-run (verify before committing — produces no side effects):**
+```bash
+bash sdsc_submission_scripts/run_chain.sh --mode lilab --dry-run \
+    --workspace /tmp/chain_v1_preview \
+    --num_iterations 3 \
+    --seed_paths /home/klz/Data/SIDEREIS_DATA/punet/.../run_output_*.json
+```
+
+**SDSC submission with explicit Slurm budget:**
+```bash
+bash sdsc_submission_scripts/run_chain.sh --mode sdsc \
+    --workspace /expanse/.../exploration_v1 \
+    --num_iterations 5 \
+    --seed_paths /expanse/.../seed.json \
+    --partition gpu-shared --time 06:00:00 --mem 48G --cpus 8
+```
+
+**Resume after iter 2 crashed (auto-resume picks 3 from on-disk state):**
+```bash
+# Same command as the original launch — auto_resume is ON by default.
+bash sdsc_submission_scripts/run_chain.sh --mode lilab \
+    --workspace /home/klz/Data/SIDEREIS_DATA/lilab_chain_v1 \
+    --num_iterations 5 \
+    --seed_paths ...
+# Header prints: "Start: auto-resume — inspector computed START_ITER=3"
+```
+
+**Manual override (force a specific start iter, e.g. for debugging):**
+```bash
+bash sdsc_submission_scripts/run_chain.sh --mode lilab \
+    --workspace /home/klz/Data/SIDEREIS_DATA/lilab_chain_v1 \
+    --start_iter 2 --num_iterations 5 \
+    --seed_paths ...
+```
 
 ---
 
@@ -110,13 +239,36 @@ uv run pytest -m real_run -v -s \
 
 ---
 
-## Lilab — real durable chain run (entry point 2)
+## Lilab — real durable chain run (legacy entry point 3)
+
+> **DEPRECATED — use `run_chain.sh --mode lilab` instead.** The script
+> referenced below (`run_iteration_chain_lilab.sh`) is now a thin
+> delegating stub that prints a `WARNING:` banner and `exec`s into
+> `run_chain.sh --mode lilab "$@"`. Same flags, same behaviour, same
+> workspace artifacts. Removal of the stub is tracked under Phase 6.8
+> Commit 15. New work — and new operator muscle memory — should target
+> the [Unified entry point](#unified-entry-point--run_chainsh-canonical-since-13a)
+> directly. The section below is preserved for historical context and
+> because existing tmux sessions / shell history may still reference the
+> stub by name.
 
 When you want a *real* lilab run with a fixed, persistent workspace
-(not a pytest throwaway), use `run_iteration_chain_lilab.sh`. It is the
-non-Slurm sibling of `run_iteration_chain.sh` — same flags, same behavior,
-same shared logic — and the **only** legitimate difference is that
-iterations run as foreground Python subprocesses instead of Slurm jobs.
+(not a pytest throwaway), the canonical command is:
+
+```bash
+bash sdsc_submission_scripts/run_chain.sh --mode lilab \
+    --workspace /home/klz/Data/SIDEREIS_DATA/lilab_chain_v1 \
+    --num_iterations 2 \
+    --seed_paths <one or more seed JSONs> \
+    --human_advice_file sdsc_submission_scripts/human_advice_chain_test.json
+```
+
+The legacy invocation below — using `run_iteration_chain_lilab.sh` —
+still works because the stub `exec`s into the unified entry point
+unchanged. It is the non-Slurm sibling of `run_iteration_chain.sh`
+(same flags, same behavior, same shared logic via `_chain_common.sh`)
+and the **only** legitimate difference is that iterations run as
+foreground Python subprocesses instead of Slurm jobs.
 
 ### Submit (validated smoke-test config matching the pytest budget)
 ```bash
@@ -177,8 +329,8 @@ run can confuse manifest resolution on the next attempt.
 | Code path | calls `run_workflow()` directly in-process | calls `run_one_iteration.py` as a subprocess (same as SDSC) |
 | Use when | CI / quick smoke / regression | real exploration, want artifacts to keep |
 
-### Differences vs the SDSC orchestrator (entry point 3)
-| Aspect | SDSC (`run_iteration_chain.sh`) | lilab (`run_iteration_chain_lilab.sh`) |
+### Differences vs the SDSC mode (entry 2 with `--mode sdsc`, or legacy entry 4)
+| Aspect | SDSC mode (`run_chain.sh --mode sdsc` / legacy `run_iteration_chain.sh`) | lilab mode (`run_chain.sh --mode lilab` / legacy `run_iteration_chain_lilab.sh`) |
 |---|---|---|
 | Execution | Each iteration = separate Slurm job | Each iteration = foreground Python subprocess |
 | Concurrency model | Async; orchestrator returns after submission | Sync; orchestrator blocks until chain finishes |
@@ -189,7 +341,20 @@ run can confuse manifest resolution on the next attempt.
 
 ---
 
-## SDSC Expanse — Slurm chain submission (entry point 3)
+## SDSC Expanse — Slurm chain submission (legacy entry point 4)
+
+> **DEPRECATED — use `run_chain.sh --mode sdsc` instead.** The script
+> referenced below (`run_iteration_chain.sh`) is now a thin delegating
+> stub that prints a `WARNING:` banner and `exec`s into
+> `run_chain.sh --mode sdsc "$@"`. Same flags, same `sbatch` dependency
+> wiring (`afterany`, not `afterok` — preserves OOM-tolerant chain
+> survival), same `submit_one_iteration.slurm` per-iter job. Removal of
+> the stub is tracked under Phase 6.8 Commit 15. New work should target
+> the [Unified entry point](#unified-entry-point--run_chainsh-canonical-since-13a)
+> directly. The section below remains as the most complete operator
+> walkthrough for the SDSC submission workflow because it covers SSH
+> sync, Slurm flags, monitoring, and post-mortem mechanics that are
+> identical under either invocation.
 
 The real distributed test. Each iteration is its own Slurm job; iteration N+1
 starts only after iteration N's `manifest.json` is written. Shares all
@@ -408,18 +573,19 @@ Diagnosing iter 1's failure:
 ## Recommended order of operations
 
 1. **Lilab `test_chained_iterations` first** (entry point 1, ~25 min). The
-   pytest exercises exactly the same code path as the bash orchestrators;
+   pytest exercises exactly the same code path as the bash orchestrator;
    it's the cheapest signal that the schema, advice loading, and manifest
    round-trip all work on the latest code.
-2. **(Optional) `run_iteration_chain_lilab.sh` next** (entry point 2,
+2. **(Optional) `run_chain.sh --mode lilab` next** (entry point 2,
    ~25 min). Same scope as the pytest but produces durable artifacts under
    `/home/klz/Data/SIDEREIS_DATA/lilab_chain_v*` so you can inspect manifests
    and per-round outputs after the run. Useful when debugging or when you
-   want to keep results.
-3. **Once lilab is green, submit SDSC** (entry point 3). Watch iter 1
-   closely until you've confirmed `iter_001/manifest.json` is written *and*
-   iter 2 (47913515 in the most recent run) has actually started — that's
-   the moment of truth for the chain plumbing on SDSC.
+   want to keep results. Add `--dry-run` first to walk the loop and
+   eyeball the §3.2 plan-flag header without touching the workspace.
+3. **Once lilab is green, submit SDSC** (entry point 2 with `--mode sdsc`).
+   Watch iter 1 closely until you've confirmed `iter_001/manifest.json` is
+   written *and* iter 2 (47913515 in the most recent run) has actually
+   started — that's the moment of truth for the chain plumbing on SDSC.
 4. **Don't run lilab and other GPU work simultaneously.** The test will
    conflict with anything else using the lilab GPU and may hit CUDA launch
    timeouts (display GPU watchdog kills kernels >2s when GPU is shared).
@@ -470,9 +636,10 @@ not the formal round. If you want a faster chain run, reduce `--max_rounds` or
 
 ## Files referenced
 
-- `sdsc_submission_scripts/_chain_common.sh` — shared logic for both orchestrators (defaults, arg parsing, advice loading, source-path building, APP_ARGS construction, chain loop)
-- `sdsc_submission_scripts/run_iteration_chain.sh` — SDSC orchestrator (sources `_chain_common.sh`, defines `submit_iteration` to call `sbatch` with dependency)
-- `sdsc_submission_scripts/run_iteration_chain_lilab.sh` — lilab orchestrator (sources `_chain_common.sh`, defines `submit_iteration` to call `python3` in foreground)
+- **`sdsc_submission_scripts/run_chain.sh`** — **canonical** unified orchestrator (since Phase 6.8 Commit 13.A). Sources `_chain_common.sh`, dispatches `submit_iteration_lilab` / `submit_iteration_sdsc` based on `--mode`. The single user-facing entry point for all real chain runs.
+- `sdsc_submission_scripts/_chain_common.sh` — shared logic across modes and the legacy stubs (defaults, arg parsing, advice loading, source-path building, APP_ARGS construction, chain loop, `parse_chain_args`, `build_app_args`, `run_chain`)
+- `sdsc_submission_scripts/run_iteration_chain.sh` — **deprecated** legacy SDSC stub. `exec`s into `run_chain.sh --mode sdsc`. Removal tracked under Commit 15.
+- `sdsc_submission_scripts/run_iteration_chain_lilab.sh` — **deprecated** legacy lilab stub. `exec`s into `run_chain.sh --mode lilab`. Removal tracked under Commit 15.
 - `sdsc_submission_scripts/submit_one_iteration.slurm` — Slurm wrapper for one iteration (SDSC only)
 - `sdsc_submission_scripts/run_one_iteration.py` — Python runner: `run_workflow(max_iterations=1)` + manifest write (used by both lilab and SDSC)
 - `sdsc_submission_scripts/human_advice_chain_test.json` — shared advice file (5 keys: interpret/propose/implement/validate/tune)
