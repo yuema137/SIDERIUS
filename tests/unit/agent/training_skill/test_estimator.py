@@ -165,13 +165,12 @@ class TestEstimateWallTimeSeconds:
 
         Matches ``test_evaluate_time_skill.test_run_skill_feasible_tiny_model``
         exactly: num_params=100_000, seg=16000, bs=1, epochs=1, tp=1.0,
-        400 PSDs. The wrapper's ``estimated_minutes`` in that test rounds to
-        ~4.4 min → 264 s. We check seconds to the same precision.
+        400 PSDs.
 
-        Arithmetic:
-          steps        = ceil(400 × (10_000_000 // 16000) × 1.0 / 1) × 1 = 250_000
-          ms/step static = 100_000 × 16000 × 1 × 6e-10                 = 0.96
-          seconds       = 250_000 × 0.96 × 1.0 × 1.1 / 1000            = 264.0
+        Arithmetic (Phase 6.8 §4.2 constants):
+          steps          = ceil(400 × (10_000_000 // 16000) × 1.0 / 1) × 1 = 250_000
+          ms/step static = max(100_000 × 16000 × 1 × 3e-9, 2.0)            = 4.8
+          seconds        = 250_000 × 4.8 × 1.0 × 2.0 / 1000                = 2400.0
         """
         out = est.estimate_wall_time_seconds(
             "tinynet",
@@ -181,7 +180,7 @@ class TestEstimateWallTimeSeconds:
             num_params=100_000,
             ms_per_step=None,
         )
-        assert out["seconds"] == pytest.approx(264.0, rel=1e-3)
+        assert out["seconds"] == pytest.approx(2400.0, rel=1e-3)
         assert out["breakdown"]["total_train_steps"] == 250_000
         assert out["breakdown"]["ms_source"] == "static_formula_phase_b"
         assert out["breakdown"]["k_correction"] == 1.0
@@ -196,8 +195,8 @@ class TestEstimateWallTimeSeconds:
             ms_per_step=5.0,
             gpu_name=None,
         )
-        # steps = 250_000; seconds = 250_000 × 5.0 × 1.0 × 1.1 / 1000 = 1375
-        assert out["seconds"] == pytest.approx(1375.0, rel=1e-3)
+        # steps = 250_000; seconds = 250_000 × 5.0 × 1.0 × 2.0 / 1000 = 2500
+        assert out["seconds"] == pytest.approx(2500.0, rel=1e-3)
         assert out["breakdown"]["ms_source"] == "real_dataset_warmup"
         assert out["breakdown"]["k_correction"] == 1.0
 
@@ -216,8 +215,8 @@ class TestEstimateWallTimeSeconds:
             gpu_name="Test GPU",
         )
         assert out["breakdown"]["k_correction"] == pytest.approx(2.0)
-        # seconds = 250_000 × 5.0 × 2.0 × 1.1 / 1000 = 2750
-        assert out["seconds"] == pytest.approx(2750.0, rel=1e-3)
+        # seconds = 250_000 × 5.0 × 2.0 × 2.0 / 1000 = 5000
+        assert out["seconds"] == pytest.approx(5000.0, rel=1e-3)
 
     def test_static_fallback_invokes_internal_count_params(self, monkeypatch):
         """ms_per_step=None AND num_params=None → estimator calls _count_params."""
@@ -235,9 +234,9 @@ class TestEstimateWallTimeSeconds:
             self._sample_set(),
         )
         assert calls == [("tinynet", "ce")]
-        # ms/step = 50_000 × 16000 × 1 × 6e-10 = 0.48
-        # seconds = 250_000 × 0.48 × 1.0 × 1.1 / 1000 = 132
-        assert out["seconds"] == pytest.approx(132.0, rel=1e-3)
+        # ms/step = max(50_000 × 16000 × 1 × 3e-9, 2.0) = 2.4
+        # seconds = 250_000 × 2.4 × 1.0 × 2.0 / 1000 = 1200
+        assert out["seconds"] == pytest.approx(1200.0, rel=1e-3)
 
     def test_epochs_scales_linearly(self):
         kw = dict(
