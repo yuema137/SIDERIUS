@@ -28,16 +28,34 @@ set -o pipefail
 WORKSPACE=""
 NUM_ITERATIONS=2
 SEED_PATHS=()
-MAX_ROUNDS=5
+MAX_ROUNDS=3
 MAX_EPOCHS=""
 LLM_MODEL="gemini-3.1-pro-preview"
+LLM_CONFIG=""
 REFLECT_PROVIDER=""
 REFLECT_MODEL_ID=""
 TRIAL_PORTION=0.02
 TRAIN_PORTION=1.0
 EVAL_PORTION=0.02
 HUMAN_ADVICE_FILE=""
+ADVICE=""
 PLAN_OVERRIDES=""
+DATA_DIR="/home/klz/Data/TIDMAD/"
+TRIAL_TIME_BUDGET_MINUTES=""
+FORMAL_TIME_BUDGET_MINUTES=""
+TRIAL_VRAM_BUDGET_GB=""
+FORMAL_VRAM_BUDGET_GB=""
+EXPLORATION_MODE="auto"
+MINIMUM_BOLDNESS="0.05"
+
+# --- Unified-orchestrator (run_chain.sh) defaults ---
+# MODE picks the execution backend: lilab (foreground subprocess) or
+# sdsc (sbatch + afterany). Required when invoking run_chain.sh directly;
+# the legacy stubs preset it before calling parse_chain_args.
+MODE=""
+# DRY_RUN=1 makes run_chain print the exact command per iteration without
+# touching the workspace or submitting any jobs. Side-effect-free.
+DRY_RUN=0
 
 # --- Slurm-only defaults (ignored by lilab caller) ---
 PARTITION="gpu-shared"
@@ -67,7 +85,18 @@ parse_chain_args() {
         --train_portion)          TRAIN_PORTION="$2"; shift 2 ;;
         --eval_portion)           EVAL_PORTION="$2"; shift 2 ;;
         --human_advice_file)      HUMAN_ADVICE_FILE="$2"; shift 2 ;;
+        --advice)                 ADVICE="$2"; shift 2 ;;
         --plan_overrides)         PLAN_OVERRIDES="$2"; shift 2 ;;
+        --llm_config)             LLM_CONFIG="$2"; shift 2 ;;
+        --data_dir)               DATA_DIR="$2"; shift 2 ;;
+        --trial_time_budget_minutes) TRIAL_TIME_BUDGET_MINUTES="$2"; shift 2 ;;
+        --formal_time_budget_minutes) FORMAL_TIME_BUDGET_MINUTES="$2"; shift 2 ;;
+        --trial_vram_budget_gb)   TRIAL_VRAM_BUDGET_GB="$2"; shift 2 ;;
+        --formal_vram_budget_gb)  FORMAL_VRAM_BUDGET_GB="$2"; shift 2 ;;
+        --exploration_mode)       EXPLORATION_MODE="$2"; shift 2 ;;
+        --minimum_boldness)       MINIMUM_BOLDNESS="$2"; shift 2 ;;
+        --mode)                   MODE="$2"; shift 2 ;;
+        --dry-run|--dry_run)      DRY_RUN=1; shift ;;
         # Slurm-only flags — silently accepted on lilab too (ignored)
         --partition)              PARTITION="$2"; shift 2 ;;
         --time)                   TIME="$2"; shift 2 ;;
@@ -99,16 +128,11 @@ load_advice_file() {
 }
 
 # Build the source-path list for iteration $1.
-# Populates the SOURCE_PATHS array in the caller's scope.
+# With restore_prior_state (Commit 7) handling prior iters, the shell
+# passes only seeds. The Python-side restore prepends prior outputs.
 build_source_paths() {
     local iter=$1
     SOURCE_PATHS=("${SEED_PATHS[@]}")
-    local prev
-    for prev in $(seq 1 $((iter - 1))); do
-        local prev_iter_dir
-        prev_iter_dir=$(printf "${WORKSPACE}/iter_%03d" "$prev")
-        SOURCE_PATHS+=("@manifest:${prev_iter_dir}/manifest.json")
-    done
 }
 
 # Build the APP_ARGS array (run_one_iteration.py CLI) for iteration $1.
@@ -117,16 +141,21 @@ build_app_args() {
     local iter=$1
     APP_ARGS=(
         --workspace "$WORKSPACE"
-        --iteration "$iter"
-        --source_paths "${SOURCE_PATHS[@]}"
+        --start_iteration "$iter"
+        --seed_paths "${SEED_PATHS[@]}"
         --max_rounds "$MAX_ROUNDS"
         --llm_model "$LLM_MODEL"
         --trial_portion "$TRIAL_PORTION"
         --train_portion "$TRAIN_PORTION"
         --eval_portion "$EVAL_PORTION"
+        --exploration_mode "$EXPLORATION_MODE"
+        --minimum_boldness "$MINIMUM_BOLDNESS"
     )
     if [ -n "$MAX_EPOCHS" ]; then
         APP_ARGS+=(--max_epochs "$MAX_EPOCHS")
+    fi
+    if [ -n "$LLM_CONFIG" ]; then
+        APP_ARGS+=(--llm_config "$LLM_CONFIG")
     fi
     if [ -n "$REFLECT_PROVIDER" ]; then
         APP_ARGS+=(--reflect_provider "$REFLECT_PROVIDER")
@@ -134,16 +163,36 @@ build_app_args() {
     if [ -n "$REFLECT_MODEL_ID" ]; then
         APP_ARGS+=(--reflect_model_id "$REFLECT_MODEL_ID")
     fi
-    if [ -n "$HUMAN_ADVICE_FILE" ]; then
+    if [ -n "$ADVICE" ]; then
+        APP_ARGS+=(--advice "$ADVICE")
+    elif [ -n "$HUMAN_ADVICE_FILE" ]; then
         APP_ARGS+=(--human_advice_file "$HUMAN_ADVICE_FILE")
     fi
     if [ -n "$PLAN_OVERRIDES" ]; then
         APP_ARGS+=(--plan_overrides "$PLAN_OVERRIDES")
     fi
+    if [ -n "$DATA_DIR" ]; then
+        APP_ARGS+=(--data_dir "$DATA_DIR")
+    fi
+    if [ -n "$TRIAL_TIME_BUDGET_MINUTES" ]; then
+        APP_ARGS+=(--trial_time_budget_minutes "$TRIAL_TIME_BUDGET_MINUTES")
+    fi
+    if [ -n "$FORMAL_TIME_BUDGET_MINUTES" ]; then
+        APP_ARGS+=(--formal_time_budget_minutes "$FORMAL_TIME_BUDGET_MINUTES")
+    fi
+    if [ -n "$TRIAL_VRAM_BUDGET_GB" ]; then
+        APP_ARGS+=(--trial_vram_budget_gb "$TRIAL_VRAM_BUDGET_GB")
+    fi
+    if [ -n "$FORMAL_VRAM_BUDGET_GB" ]; then
+        APP_ARGS+=(--formal_vram_budget_gb "$FORMAL_VRAM_BUDGET_GB")
+    fi
 }
 
 print_chain_header() {
     local label=$1
+    if [ "$DRY_RUN" -eq 1 ]; then
+        label="${label} [DRY-RUN]"
+    fi
     echo "############################################################"
     echo "  SIDERIUS Iteration Chain — ${label}"
     echo "  Workspace        : $WORKSPACE"
@@ -156,6 +205,19 @@ print_chain_header() {
     echo "  Max rounds       : $MAX_ROUNDS"
     echo "  Max epochs       : ${MAX_EPOCHS:-(no cap)}"
     echo "  LLM model        : $LLM_MODEL"
+    if [ -n "$MODE" ]; then
+        echo "  Mode             : $MODE"
+    fi
+    if [ "$MODE" = "lilab" ] && [ "${#PY_CMD[@]}" -gt 0 ]; then
+        echo "  Python           : ${PY_CMD[*]}  (source: ${PY_SOURCE:-?})"
+    fi
+    if [ "$MODE" = "sdsc" ]; then
+        echo "  Slurm partition  : $PARTITION"
+        echo "  Slurm time       : $TIME"
+        echo "  Slurm mem        : $MEM"
+        echo "  Slurm gpus       : $GPUS"
+        echo "  Slurm cpus       : $CPUS"
+    fi
     echo "############################################################"
 }
 
@@ -163,7 +225,9 @@ print_chain_header() {
 # function that takes the iteration number and uses the populated
 # SOURCE_PATHS and APP_ARGS arrays.
 run_chain() {
-    mkdir -p "$WORKSPACE"
+    if [ "$DRY_RUN" -ne 1 ]; then
+        mkdir -p "$WORKSPACE"
+    fi
     local ITER
     for ITER in $(seq 1 $NUM_ITERATIONS); do
         build_source_paths "$ITER"

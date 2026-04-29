@@ -772,58 +772,108 @@ _The two deferred items previously listed here — the `run_workflow` kwargs byt
 - [x] **Live verification gate** against `/home/klz/Data/SIDEREIS_DATA/exploration_phase68_commit11_gate/`: human view shows `iter_001 posenc_causal_dilated_stack COMMITTED -3.221148` + `iter_002 spectral_skip_residual_stack COMMITTED 4.524244`; machine view (`--next-iter`) prints exactly `3` and shell-captures cleanly into a 1-char `$NEXT` variable.
 - [x] Doc-sync: §3.4 already describes the contract. Commit message references §3.4.
 
-#### Commit 13 — `feat(chain): unified run_chain.sh --mode {lilab,sdsc} with --dry-run and venv detection`
+#### Commit 13 — `feat(chain): unified run_chain.sh --mode {lilab,sdsc} with auto-resume and dry-run`
 
-**Goal**: Single shell entry point replaces `run_iteration_chain.sh` and `run_iteration_chain_lilab.sh`. Operators can preview every command (`--dry-run`) and the lilab path always uses the project virtualenv.
+**Goal**: One intelligent shell orchestrator that subsumes the legacy `run_iteration_chain.sh` (sdsc) and `run_iteration_chain_lilab.sh` (lilab) scripts, drives the full chain loop on top of the Commit 12 inspector, achieves byte-level flag parity with both Python entries, and lets operators preview every command before any sbatch or python call fires.
 
-**Core unification:**
+The plan below is structured as **6 implementation tasks + 3 verification gates** mirroring the Commit 13 directive. Each `[ ]` becomes an `[x]` only when the corresponding artefact is on disk and verified.
 
-- [ ] Add `sdsc_submission_scripts/run_chain.sh` (or `scripts/run_chain.sh`) sourcing `_chain_common.sh`.
-- [ ] Add `--mode {lilab,sdsc}` (required); switches the body of `submit_iteration` between foreground subprocess and `sbatch + afterany`.
-- [ ] Add all flags from §3.2 to `_chain_common.sh::parse_chain_args` and propagate to `build_app_args` with **identical names and defaults** to both Python entries (see §3.8 consistency contract).
-- [ ] **`--data_dir` plumbing** (relocated from Commit 11 Part A per Final Ruling 5 — Python-side already wired in `a4238de`/`c38837e`): add `DATA_DIR` to the shell variable set, default to the canonical path (`/home/klz/Data/TIDMAD/` on lilab, Slurm env-var on SDSC), and pass `--data_dir "${DATA_DIR}"` in `build_app_args`. Closes the v6 Time-Estimation-Repair countermeasure end-to-end: Python entries already accept and forward the flag; only the shell trampoline still needs to emit it for chain mode.
-- [ ] Add `--auto_resume` (default ON) and `--start_iter N` (manual override) to `_chain_common.sh`.
-- [ ] Add `--force_fresh` to override the "refuse to clobber non-empty workspace" guard.
-- [ ] If `--auto_resume` and `inspect_run_state.py --next-iter` returns N > NUM_ITERATIONS, exit cleanly with a "nothing to do" message.
-- [ ] Mark `run_iteration_chain.sh` and `run_iteration_chain_lilab.sh` as deprecated (one-line stub that delegates to `run_chain.sh --mode ...`); plan removal after the next stable run.
+##### Task 1 — Consolidation (replace the two legacy scripts)
 
-**`--dry-run` flag (new):**
+- [ ] Add `sdsc_submission_scripts/run_chain.sh`, sourcing `sdsc_submission_scripts/_chain_common.sh` for shared parse/build helpers.
+- [ ] Mark `run_iteration_chain.sh` and `run_iteration_chain_lilab.sh` as **deprecated stubs** that delegate to `run_chain.sh --mode sdsc` / `--mode lilab` respectively. Print a one-line `DeprecationWarning` to stderr; do not break operator muscle memory mid-flight. Plan removal after the next stable run (tracked in Commit 15).
+- [ ] Drop dead code in the legacy scripts that has no analogue in the unified entry; do not port quirks forward.
 
-- [ ] Add `--dry-run` to `_chain_common.sh::parse_chain_args` (default OFF).
-- [ ] When `--dry-run` is set, `run_chain.sh` runs through the full `run_chain` loop including `build_source_paths` + `build_app_args` for every iter, but **does not call `submit_iteration`**.
-- [ ] Instead, for each iter it prints the **exact command** it would have launched. For `--mode lilab`, this is `${PY_CMD[@]} ${RUNNER} ${APP_ARGS[@]}` with all elements quoted. For `--mode sdsc`, it is `sbatch ${SBATCH_ARGS[@]} ${SLURM_SCRIPT} ${APP_ARGS[@]}` plus the `--dependency=afterany:$PREV_JOB_ID` line that would have been added (using a placeholder like `$JOB_ID_iterNNN` for the dependency target since real job IDs are unavailable in dry-run).
-- [ ] Print the resolved values of: workspace, start_iter, num_iterations, mode, py interpreter (lilab), partition/time/mem/gpus/cpus (sdsc), every §3.2 flag.
-- [ ] Exit 0 after the loop completes; do not write manifests, do not create iter dirs, do not call sbatch.
-- [ ] Unit test: invoke `run_chain.sh --dry-run --workspace /tmp/dryrun_ws --num_iterations 3 ...` and assert the printed commands include the expected `--start_iteration` value per iter and the right dependency wiring (sdsc).
-- [ ] Behavioural test: a `--dry-run` invocation never creates `${WORKSPACE}/iter_*` directories, never calls `python` or `sbatch`. Verify by running into a fresh `/tmp` dir and asserting it stays empty.
+##### Task 2 — Mode Implementation (`--mode {lilab,sdsc}`, required)
 
-**Active virtualenv detection (lilab mode):**
+- [ ] Add `--mode {lilab,sdsc}` to `_chain_common.sh::parse_chain_args`. No default — operator must declare. Failing fast here is preferable to defaulting to the wrong host.
+- [ ] **`--mode lilab`**: `submit_iteration` runs the resolved Python interpreter as a **foreground subprocess** (`"${PY_CMD[@]}" "${RUNNER}" "${APP_ARGS[@]}"`). Iter N+1 cannot start until iter N's process exits with status 0; on non-zero exit, the chain halts with a clear error.
+- [ ] **`--mode sdsc`**: `submit_iteration` runs `sbatch ${SBATCH_ARGS[@]} ${SLURM_SCRIPT} ${APP_ARGS[@]}` and captures the job ID. Iter N+1's submission adds `--dependency=afterany:${PREV_JOB_ID}` so the second job is queued only after iter N reaches any terminal state — even failure — so that operators can post-mortem on disk rather than have a silent gap.
 
-The current `run_iteration_chain_lilab.sh:40–44` ignores `$VIRTUAL_ENV` and prefers `uv run python` then falls back to `python3` (which on this host is Python 3.8 — too old; `CLAUDE.md` mandates `.venv/bin/python`). The unified `run_chain.sh --mode lilab` must use the active venv if one is set, otherwise fall back to the project venv at `${PROJECT_DIR}/.venv/bin/python`.
+##### Task 3 — Auto-Resume Wiring (this is what Commit 12 was built for)
 
-- [ ] In `run_chain.sh`, detect the Python interpreter for `--mode lilab` in this order:
-    1. `$VIRTUAL_ENV/bin/python` — if `$VIRTUAL_ENV` is set and that path is executable. (Honours an operator-activated venv.)
+- [ ] Add `--auto_resume` (default **ON**) and `--start_iter N` (manual override) to `_chain_common.sh::parse_chain_args`. Manual override wins over auto when both are provided.
+- [ ] When `--auto_resume` is on, compute `START_ITER` via the Commit 12 inspector:
+    ```bash
+    NEXT=$(.venv/bin/python scripts/inspect_run_state.py \
+              --layout chain --workspace "$WORKSPACE" --next-iter)
+    START_ITER=${NEXT:-1}
+    ```
+    The inspector exits non-zero on legacy-layout detection or non-contiguous chains; propagate that exit code (do **not** ploughed through with a stale `START_ITER`).
+- [ ] **Safety guard — refuse stale-fresh start**: if `START_ITER == 1` AND `WORKSPACE` is non-empty (any file or dir at the workspace root), refuse to launch with a clear error: `"workspace not empty — pass --force_fresh to clobber, or --start_iter N to resume."`
+- [ ] Add `--force_fresh` to override the guard above. Mutually exclusive with `--auto_resume` — passing both is an operator-error and exits non-zero.
+- [ ] If `--auto_resume` returns `START_ITER > NUM_ITERATIONS`, exit cleanly with `"all iters already complete — nothing to do"` (exit 0). Idempotent rerun behaviour is critical for cron-driven chains.
+
+##### Task 4 — Flag Parity & Widening (close the §3.8 three-way contract)
+
+- [ ] Add **all** flags from §3.2 to `_chain_common.sh::parse_chain_args` and propagate them through `build_app_args` with **identical names and defaults** to both Python entries. The §3.2 table is the single source of truth.
+- [ ] **`--data_dir` plumbing** (relocated from Commit 11 Part A per Final Ruling 5 — Python-side already wired in `a4238de`/`c38837e`): add `DATA_DIR` to the shell variable set; default to `/home/klz/Data/TIDMAD/` on lilab, the Slurm-host data path on sdsc; emit `--data_dir "${DATA_DIR}"` in `build_app_args`. Closes the v6 Time-Estimation-Repair countermeasure end-to-end (warmup measurement was already wired in Commit 11.2; only the shell trampoline still needed the flag for chain mode).
+- [ ] Top-of-file default block in `_chain_common.sh` declares one default per §3.2 flag. Drift between this block and the Python defaults is what the consistency test below catches.
+
+##### Task 5 — Dry-Run Mode (`--dry-run`, default OFF)
+
+- [ ] Add `--dry-run` to `_chain_common.sh::parse_chain_args`.
+- [ ] When `--dry-run` is set, `run_chain.sh` walks the full `run_chain` loop (including `build_source_paths`, `build_app_args`, dependency wiring) but **does not call `submit_iteration`**. Instead, for each iter it prints the exact command that *would* have launched:
+    - `--mode lilab`: `${PY_CMD[@]} ${RUNNER} ${APP_ARGS[@]}` with every element shell-quoted so a copy-paste reproduces the real launch.
+    - `--mode sdsc`: `sbatch ${SBATCH_ARGS[@]} ${SLURM_SCRIPT} ${APP_ARGS[@]}` plus the `--dependency=afterany:$PREV_JOB_ID` line that *would* have been added (using a placeholder like `$JOB_ID_iterNNN` since real job IDs are unavailable in dry-run).
+- [ ] Print a chain-header block resolving: workspace, start_iter, num_iterations, mode, Python interpreter (lilab) or partition/time/mem/gpus/cpus (sdsc), and every §3.2 flag value.
+- [ ] **Side-effect-free guarantee**: a `--dry-run` invocation never creates `${WORKSPACE}/iter_*` directories, never writes manifests, never invokes `python` or `sbatch`. Exit 0 after the loop completes.
+
+##### Task 6 — Virtualenv Detection (`--mode lilab` only)
+
+The current `run_iteration_chain_lilab.sh:40–44` ignores `$VIRTUAL_ENV` and prefers `uv run python`, then falls back to `python3` (which on this host is Python 3.8 — too old; `CLAUDE.md` mandates `.venv/bin/python`). The unified runner must honour an operator-activated venv first.
+
+- [ ] Detect the Python interpreter for `--mode lilab` in this order:
+    1. `$VIRTUAL_ENV/bin/python` — if `$VIRTUAL_ENV` is set and the path is executable.
     2. `${PROJECT_DIR}/.venv/bin/python` — if it exists. (Project default per `CLAUDE.md`.)
     3. `uv run python` — if `uv` is on `$PATH`.
     4. `python3` — last resort, **with an explicit warning** that this may resolve to system Python 3.8.
-- [ ] Print the resolved interpreter path in the chain header (`Python: /path/to/python (source: VIRTUAL_ENV / project venv / uv / python3)`) so operators can spot mis-resolution before launch.
-- [ ] Refuse to start (exit non-zero) if the resolved interpreter reports a Python version < 3.10 — guards against an operator's stale `python3` symlink. The check is `${PY_CMD[@]} -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)'`.
-- [ ] Pass `$VIRTUAL_ENV` and the resolved `PATH` through to the iteration subprocess so any nested tool the workflow invokes (e.g., training subprocesses) inherits the same environment.
-- [ ] Unit test: with `VIRTUAL_ENV=/some/test/path` set, the chain header prints that path as the resolved interpreter; with it unset and `${PROJECT_DIR}/.venv/bin/python` present, that path is used; with both absent and `uv` on PATH, `uv run python` is used.
-- [ ] Note: `--mode sdsc` keeps its existing pattern — `submit_one_iteration.slurm` activates `.venv/bin/activate` inside the Slurm job, so `$VIRTUAL_ENV` on the submit host is irrelevant. This commit does not change the SDSC env-resolution path.
+- [ ] Print the resolved interpreter in the chain header: `Python: /path/to/python (source: VIRTUAL_ENV / project venv / uv / python3)`.
+- [ ] **Version guard**: refuse to start (exit non-zero) if the resolved interpreter reports `sys.version_info < (3, 10)`. Implementation: `"${PY_CMD[@]}" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'`. Guards against an operator's stale `python3` symlink resolving to 3.8.
+- [ ] Pass `$VIRTUAL_ENV` and the resolved `PATH` through to the iter subprocess so nested tools (training subprocess, plugin sandbox) inherit the same environment.
+- [ ] **`--mode sdsc` is unchanged**: `submit_one_iteration.slurm` activates `.venv/bin/activate` inside the Slurm job, so the submit host's `$VIRTUAL_ENV` is irrelevant. This commit does not change the SDSC env-resolution path.
 
-**Three-way consistency tests (relocated from Commit 11 per Final Ruling 5):**
+---
 
-- [ ] **`run_workflow` kwargs snapshot test** (relocated from Commit 11 "Common — consistency tests"): construct the same flag set on both `run_exploration_adaptive.py` and `run_one_iteration.py` and assert the resulting `run_workflow(...)` call is byte-for-byte identical (modulo `run_name` and `max_iterations`, which are per-iter for the chain-in-process loop). Now that `_chain_common.sh` is widened in this commit, extend the existing `tests/unit/scripts/test_chain_consistency.py` to cover the **three-way** Python ↔ Python ↔ shell parity instead of the current Python ↔ Python only.
-- [ ] Shell-default test: every flag in §3.2 has a default declared at the top of `_chain_common.sh` matching the Python entries' argparse defaults. Drift trips the consistency test.
+##### Verification gate A — Three-Way Consistency (extend `tests/unit/scripts/test_chain_consistency.py`)
 
-**Smoke tests:**
+- [ ] Extend the existing test from Python ↔ Python parity to **three-way Python ↔ Python ↔ shell** parity. The test parses `_chain_common.sh` for the top-of-file default block and the `case` arms of `parse_chain_args`, then asserts that every §3.2 flag has identical name, default, type/nargs, and required-vs-optional across all three sources.
+- [ ] Drift on any single property fails the test with a human-readable diff naming the source of disagreement (Python adaptive / Python one-iter / shell).
 
-- [ ] Smoke test (lilab): 2-iter chain on synthetic data, verify both iters complete and write manifests, and the chain header shows the project `.venv` interpreter.
-- [ ] Smoke test (sdsc): submit a 2-iter chain dry-run (`--time 00:05:00`), verify the second job depends on the first via `squeue -j ... -o '%j %i %E'`.
-- [ ] Resume smoke test: launch a 3-iter chain, kill mid-iter-2, rerun the same command, verify iter_001 is preserved and iter_002 restarts from scratch.
-- [ ] **Manual `--start_iteration 3` chain-layout sanity check** (relocated from Commit 11 "Common — consistency tests"): run `python run_exploration_adaptive.py --workspace W --start_iteration 3 ...` against a workspace pre-populated with iters 1+2 in chain layout; verify iter 3 starts in-process with `MODEL_REGISTRY` carrying both prior plugins and `get_model_description` resolving prior `model_type`s via `${SIDERIUS_CHAIN_WORKSPACE}`. Unit-tested equivalent already lives in `tests/unit/sdsc_submission_scripts/test_run_one_iteration.py::TestRestoreWiring::test_manual_override_start_iteration_3_with_iters_1_and_2_on_disk`; this is the human-in-the-loop counterpart that exercises the new shell entry.
-- [ ] Doc-sync: §3.4 (auto-resume), §3.8 (consistency) cover the design surface; update `docs/running_chain_test.md` runbook to reference the new entry-point and dry-run + venv-detection behaviours.
+##### Verification gate B — Kwargs Snapshot (deferred from Commit 11)
+
+- [ ] Construct the same §3.2 flag set on both `run_exploration_adaptive.py` and `run_one_iteration.py` and assert the resulting `run_workflow(...)` kwargs dict is **byte-for-byte identical**, modulo:
+    - `run_name` (per-iter `iter_{N:03d}` for the chain-in-process loop on adaptive; the same string on one-iter)
+    - `max_iterations` (1 on one-iter; per-iter loop bound on adaptive)
+- [ ] Test lives in `tests/unit/scripts/test_chain_consistency.py` next to the three-way test (Gate A); they share fixture infrastructure.
+
+##### Verification gate C — Dry-Run Smoke
+
+- [ ] Invoke `run_chain.sh --dry-run --mode lilab --workspace /tmp/dryrun_ws --num_iterations 3 ...` and assert:
+    - 3 iter blocks are printed, each with the correct `--start_iteration {1,2,3}` value;
+    - `${WORKSPACE}` (a fresh `/tmp` dir) stays **empty** after the invocation — no `iter_*` dirs, no manifests, no `python` or `sbatch` invocation;
+    - exit code is 0.
+- [ ] Same for `--mode sdsc`: assert each iter past the first carries a `--dependency=afterany:$JOB_ID_iterNNN` placeholder pointing at the prior iter.
+
+##### Live smoke tests (run before commit)
+
+- [ ] **lilab**: 2-iter chain on synthetic data; both iters complete and write manifests; chain header shows the project `.venv` interpreter.
+- [ ] **sdsc**: 2-iter `--dry-run` (`--time 00:05:00`); confirm the second `sbatch` line carries the right dependency placeholder. (A real `sbatch` queue test is operator-driven post-merge.)
+- [ ] **Resume**: 3-iter chain on lilab, kill mid-iter-2, rerun the same command — `--auto_resume` should pick up at iter_002 because iter_001's manifest is COMMITTED while iter_002's is missing/PARTIAL.
+- [ ] **Manual `--start_iteration 3` sanity** (relocated from Commit 11): pre-populate workspace with iters 1+2; run `python run_exploration_adaptive.py --workspace W --start_iteration 3 ...`; verify the in-process `MODEL_REGISTRY` carries both prior plugins and `get_model_description` resolves prior `model_type`s via `${SIDERIUS_CHAIN_WORKSPACE}`. Human-in-the-loop counterpart to the unit test at `tests/unit/sdsc_submission_scripts/test_run_one_iteration.py::TestRestoreWiring::test_manual_override_start_iteration_3_with_iters_1_and_2_on_disk`.
+
+##### Doc-sync (lands in the same commit)
+
+- [ ] §3.4 (auto-resume) and §3.8 (consistency contract) already describe the design — flip `[ ]` boxes above and add the captured live-smoke evidence (header output snippet, dry-run sample, version-guard rejection example).
+- [ ] Update `docs/running_chain_test.md` runbook to reference `run_chain.sh --mode {lilab,sdsc}` as the new operator entry-point and document `--dry-run` + venv detection.
+- [ ] Top-of-doc Status line: bump from "Commits 6 → 12 landed" to "Commits 6 → 13 landed".
+
+##### Out of scope (intentionally not in this commit)
+
+- Removal of the deprecated stubs (`run_iteration_chain.sh`, `run_iteration_chain_lilab.sh`) — Commit 15.
+- The migration tool referenced in the legacy-guard error message (`scripts/migrate_workspace.py`) — separate future commit.
+- V7 pre-flight 5-iter real-LLM run — Commit 14.
+- The default flip of `inspect_run_state.py --layout` from `run` → `chain` — Commit 15.
 
 #### Commit 14 — `test(chain): V7 pre-flight simulation — 5-iter local-host real-LLM run`
 
