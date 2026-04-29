@@ -418,53 +418,79 @@ def _add_plugin_to_registries(plugin_path: str) -> Optional[str]:
     return model_type
 
 
-def _register_plugin(impl_output, model_name: str, dest_plugin_dir: str):
+def _register_plugin(
+    impl_output,
+    model_name: str,
+    dest_plugin_dirs: "list[str] | str",
+):
     """
-    Copy validated plugin files to ``dest_plugin_dir`` (the tuner's run-scoped
-    plugin dir) so the training subprocess discovers them via
-    ``SIDERIUS_PLUGIN_DIRS``.
+    Mirror validated plugin files to one or more destination dirs.
 
-    Copies:
-      - {model_file_path}       → {dest_plugin_dir}/{model_name}.py
-      - {description_file_path} → {dest_plugin_dir}/{model_name}/description.md
+    Two destinations are typical in chain mode:
 
-    Pre-Phase-4 this function copied to the legacy global
-    ``agent_generated/models/``, which the training subprocess no longer
-    scans once ``SIDERIUS_PLUGIN_DIRS`` is set (Phase 2). See
-    docs/run_scoped_plugins.md.
+      * **Tuner-scoped** dir at ``{tuning_dir}/plugins/{run_name}/`` — the
+        training/inference/scoring subprocess discovers plugins here via
+        ``SIDERIUS_PLUGIN_DIRS`` (docs/run_scoped_plugins.md, Phase 4).
+      * **Chain-canonical** dir at ``{workspace}/plugins/{run_name}/`` —
+        ``core.resume.restore_prior_state`` looks here when later iters of
+        the chain re-register prior plugins, and
+        ``ml_models.model_descriptions.get_model_description`` walks
+        ``{workspace}/plugins/iter_*/{model_type}/description.md`` to
+        resolve agent-generated model descriptions on the next iter.
 
-    Also extends the in-process ``MODEL_REGISTRY`` / ``PLUGIN_CONFIG_REGISTRY``
-    so the tuner's planner (same Python process as the workflow) can resolve
-    the new model type without a re-scan.
+    Both dests receive identical files:
 
-    Skips gracefully if source files don't exist (e.g. in unit tests with mocks).
+      - ``{model_file_path}``       → ``{dest}/{model_name}.py``
+      - ``{description_file_path}`` → ``{dest}/{model_name}/description.md``
+
+    The first dest in the list is treated as the primary; its ``.py`` is
+    used to extend the in-process ``MODEL_REGISTRY`` /
+    ``PLUGIN_CONFIG_REGISTRY`` so the tuner's planner (same Python process
+    as the workflow) resolves the new model type without a re-scan.
+
+    Accepts a single string for back-compat with older call sites and tests.
+
+    Skips gracefully if source files don't exist (e.g. unit tests with mocks).
     """
-    # Copy plugin file
-    if os.path.isfile(impl_output.model_file_path):
-        os.makedirs(dest_plugin_dir, exist_ok=True)
-        dest_plugin = os.path.join(dest_plugin_dir, f"{model_name}.py")
-        shutil.copy2(impl_output.model_file_path, dest_plugin)
-        print(f"    Plugin registered → {dest_plugin}")
-    else:
-        print(f"    Warning: plugin file not found at {impl_output.model_file_path}, skipping registration")
+    if isinstance(dest_plugin_dirs, str):
+        dest_plugin_dirs = [dest_plugin_dirs]
+
+    if not os.path.isfile(impl_output.model_file_path):
+        print(
+            f"    Warning: plugin file not found at "
+            f"{impl_output.model_file_path}, skipping registration"
+        )
         return
 
-    # Copy description
-    if os.path.isfile(impl_output.description_file_path):
-        desc_dest_dir = os.path.join(dest_plugin_dir, model_name)
-        os.makedirs(desc_dest_dir, exist_ok=True)
-        dest_desc = os.path.join(desc_dest_dir, "description.md")
-        shutil.copy2(impl_output.description_file_path, dest_desc)
-        print(f"    Description registered → {dest_desc}")
-    else:
-        print(f"    Warning: description not found at {impl_output.description_file_path}, skipping registration")
+    primary_plugin: str | None = None
+    for d in dest_plugin_dirs:
+        os.makedirs(d, exist_ok=True)
+        dest_plugin = os.path.join(d, f"{model_name}.py")
+        shutil.copy2(impl_output.model_file_path, dest_plugin)
+        if primary_plugin is None:
+            primary_plugin = dest_plugin
+        print(f"    Plugin registered → {dest_plugin}")
 
-    # Extend the already-cached registries so the tuner's planner (same Python
-    # process as the workflow) can resolve the new model type without a re-scan.
+    if os.path.isfile(impl_output.description_file_path):
+        for d in dest_plugin_dirs:
+            desc_dest_dir = os.path.join(d, model_name)
+            os.makedirs(desc_dest_dir, exist_ok=True)
+            dest_desc = os.path.join(desc_dest_dir, "description.md")
+            shutil.copy2(impl_output.description_file_path, dest_desc)
+            print(f"    Description registered → {dest_desc}")
+    else:
+        print(
+            f"    Warning: description not found at "
+            f"{impl_output.description_file_path}, skipping registration"
+        )
+
     try:
-        registered = _add_plugin_to_registries(dest_plugin)
+        registered = _add_plugin_to_registries(primary_plugin)
         if registered:
-            print(f"    Model '{model_name}' added to registries (model_type='{registered}')")
+            print(
+                f"    Model '{model_name}' added to registries "
+                f"(model_type='{registered}')"
+            )
     except Exception as e:
         print(f"    Warning: could not extend registries: {e}")
 
@@ -929,16 +955,30 @@ def run_workflow(
         os.makedirs(tuning_dir, exist_ok=True)
         tuning_storage = _make_storage(tuning_dir, run_name)
 
-        # --- Register validated plugin into the tuner's run-scoped dir so
-        #     the training subprocess picks it up via SIDERIUS_PLUGIN_DIRS
-        #     (docs/run_scoped_plugins.md, Phase 4). The tuner's sandbox has
-        #     not been constructed yet, but ``get_plugin_dir`` is the
-        #     single source of truth for the layout, so the workflow can
-        #     write here safely; the sandbox will ``_ensure_dir`` the same
-        #     path moments later without disturbing existing contents.
+        # --- Register validated plugin into TWO dirs:
+        #
+        #     1. Tuner-scoped ``{tuning_dir}/plugins/{run_name}/`` — the
+        #        training subprocess picks it up via SIDERIUS_PLUGIN_DIRS
+        #        (docs/run_scoped_plugins.md, Phase 4). The tuner's sandbox
+        #        has not been constructed yet, but ``get_plugin_dir`` is the
+        #        single source of truth for the layout, so the workflow can
+        #        write here safely; the sandbox will ``_ensure_dir`` the
+        #        same path moments later without disturbing existing
+        #        contents.
+        #     2. Chain-canonical ``{workspace}/plugins/{run_name}/`` —
+        #        ``core.resume.restore_prior_state`` looks here on the next
+        #        iter to re-register the plugin class, and
+        #        ``ml_models.model_descriptions.get_model_description``
+        #        walks this tree to resolve agent-generated descriptions
+        #        across iterations. Phase 6.8 §3.3.
         from core.sandbox_executor import get_plugin_dir
-        dest_plugin_dir = get_plugin_dir(tuning_dir, run_name)
-        _register_plugin(impl_output, proposal.model_name, dest_plugin_dir)
+        tuner_plugin_dir = get_plugin_dir(tuning_dir, run_name)
+        chain_plugin_dir = get_plugin_dir(workspace, run_name)
+        _register_plugin(
+            impl_output,
+            proposal.model_name,
+            [tuner_plugin_dir, chain_plugin_dir],
+        )
 
         print(f"  [{iteration}] Tuning '{proposal.model_name}' for {max_rounds} rounds...")
         tune_llm = llm_config.get("tune")

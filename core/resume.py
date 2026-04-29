@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import warnings
 from dataclasses import dataclass, field
 from typing import List, Sequence
@@ -270,3 +271,58 @@ def restore_prior_state(
         state.committed_iters.append(iter_idx)
 
     return state
+
+
+# ---------------------------------------------------------------------------
+# Workspace layout guard (Phase 6.8 §3.9)
+# ---------------------------------------------------------------------------
+
+def validate_workspace_layout(workspace: str) -> None:
+    """Detect legacy workspace layout and refuse to start.
+
+    The chain layout uses ``{workspace}/iter_NNN/``. The legacy in-process
+    layout uses ``{workspace}/{run_name}/iteration_NNN/``. If a workspace
+    has legacy artifacts, writing chain artifacts alongside them would
+    silently produce an incoherent workspace.
+
+    Raises:
+        ResumeError: when legacy layout patterns are detected.
+    """
+    import glob as _glob
+
+    if not os.path.isdir(workspace):
+        return  # nothing to guard
+
+    # Pattern 1: {workspace}/{non-iter}/iteration_001/  (legacy run_name subtree).
+    # Chain layout also has iteration_001/ but under iter_NNN/ — exclude those.
+    matches = _glob.glob(os.path.join(workspace, "*", "iteration_001", ""))
+    legacy_matches = [
+        m for m in matches
+        if not re.match(r"iter_\d{3}$", os.path.basename(os.path.dirname(os.path.dirname(m))))
+    ]
+    if legacy_matches:
+        _raise_legacy(workspace, legacy_matches[0])
+
+    # Pattern 2: workflow_*.json (workflow summary from in-process runner)
+    matches = _glob.glob(os.path.join(workspace, "workflow_*.json"))
+    if matches:
+        _raise_legacy(workspace, matches[0])
+
+    # Pattern 3: memory_trace.jsonl exists AND no iter_001/ (ambiguous legacy)
+    trace = os.path.join(workspace, "memory_trace.jsonl")
+    if os.path.exists(trace) and not os.path.isdir(os.path.join(workspace, "iter_001")):
+        _raise_legacy(workspace, trace)
+
+
+def _raise_legacy(workspace: str, matched: str) -> None:
+    raise ResumeError(
+        f"Legacy workspace layout detected at {workspace}.\n"
+        f"  Found: {matched}\n\n"
+        f"This workspace was created by the in-process runner (v5/v6 era).\n"
+        f"The chain runner uses a different layout ({{workspace}}/iter_NNN/).\n\n"
+        f"To proceed:\n"
+        f"  (a) Use a new --workspace path for the chain run.\n"
+        f"  (b) To resume from legacy results, use the migration tool:\n"
+        f"      python scripts/migrate_workspace.py --from {workspace} --to <new>\n"
+        f"      (migration tool planned — not yet implemented)"
+    )

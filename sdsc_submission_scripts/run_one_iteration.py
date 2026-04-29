@@ -513,6 +513,13 @@ def main():
     iter_dir = os.path.join(args.workspace, run_name)
     os.makedirs(iter_dir, exist_ok=True)
 
+    # Process-global anchor — ``ml_models.model_descriptions.get_model_description``
+    # reads this to resolve agent-generated plugin descriptions written under
+    # ``{workspace}/plugins/iter_NNN/{model_type}/description.md`` by
+    # ``workflows.model_exploration._register_plugin``. Set as early as
+    # possible so any descendant node call sees it.
+    os.environ["SIDERIUS_CHAIN_WORKSPACE"] = os.path.abspath(args.workspace)
+
     print("=" * 60)
     # --- Resolve reflect provider/model defaults ---
     # The tuner's reflector sub-call does templated extraction (not

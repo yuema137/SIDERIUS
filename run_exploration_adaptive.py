@@ -367,6 +367,13 @@ def main():
         f"/home/klz/Data/SIDEREIS_DATA/exploration_{args.run_name}"
     )
 
+    # Process-global anchor — ``ml_models.model_descriptions.get_model_description``
+    # reads this to resolve agent-generated plugin descriptions written under
+    # ``{workspace}/plugins/iter_NNN/{model_type}/description.md`` by
+    # ``workflows.model_exploration._register_plugin``. Set before any node
+    # initialisation so descendant calls see it.
+    os.environ["SIDERIUS_CHAIN_WORKSPACE"] = os.path.abspath(workspace)
+
     # Workspace layout guard (§3.9)
     try:
         validate_workspace_layout(workspace)
