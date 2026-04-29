@@ -16,6 +16,7 @@ torchinfo only for the human-readable layer breakdown.
 """
 from __future__ import annotations
 
+import gc
 from typing import Callable, Literal, Sequence
 
 import torch
@@ -161,8 +162,14 @@ def probe_autograd_tape(forward_callable: Callable[[], torch.Tensor]) -> Autogra
     autograd retained, deduped by underlying storage.
 
     This is the source of truth for training-mode activations. The returned
-    bytes are the total PyTorch actually forced the allocator to keep live
-    until backward() runs.
+    bytes are the total PyTorch **would** keep live until backward() runs.
+
+    The pack_hook records each tensor's storage size then returns ``None``,
+    preventing autograd from retaining the actual tensor data.  This is safe
+    because we never call ``backward()`` — the probe only measures, it does
+    not compute gradients.  For models with Python-level sequential loops
+    (e.g. SSM scans over 320 K timesteps), this drops host-memory usage
+    from ~15-18 GB (retained tensors) to ~350 MB (graph nodes only).
 
     Storage-pointer dedup is critical: a tensor and its view share a
     `data_ptr()`. save_for_backward fires once per view, but the physical
@@ -174,18 +181,25 @@ def probe_autograd_tape(forward_callable: Callable[[], torch.Tensor]) -> Autogra
     """
     seen: dict[int, int] = {}
 
-    def pack_hook(t: torch.Tensor) -> torch.Tensor:
+    def pack_hook(t: torch.Tensor):
         storage = t.untyped_storage()
         ptr = storage.data_ptr()
         if ptr and ptr not in seen:
             seen[ptr] = storage.nbytes()
-        return t
+        return None
 
-    def unpack_hook(t: torch.Tensor) -> torch.Tensor:
-        return t
+    def unpack_hook(_):
+        raise RuntimeError(
+            "probe_autograd_tape: backward() must not be called — "
+            "the probe discards saved tensors to avoid OOM on "
+            "sequential-scan architectures."
+        )
 
     with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
-        _ = forward_callable()
+        loss = forward_callable()
+
+    del loss
+    gc.collect()
 
     return AutogradTapeReport(
         unique_storage_count=len(seen),
@@ -254,25 +268,31 @@ def probe_activation_footprint(
     model.train()
 
     # Tape walk: one grad-enabled forward through the fused model+loss.
+    # pack_hook returns None so tensors are measured but not retained.
     def _fwd():
         logits = model(input_sample)
         return loss_module(logits, target_sample)
 
     tape_report = probe_autograd_tape(_fwd)
 
-    # Separately run the model once more (no tape) to get its final output
-    # shape for output_bytes, and to give torchinfo a clean forward.
-    model_layers = probe_forward_layers(
-        model, input_sample, module_name=type(model).__name__
-    )
+    # Free the closure — its captured variables (model, etc.) are still
+    # available as local names in this scope, but any autograd graph nodes
+    # that leaked through the closure are released.
+    del _fwd
+    gc.collect()
+
+    # torchinfo and the shape forward don't need autograd — disable it to
+    # prevent rebuilding a massive graph for sequential-scan architectures.
     with torch.no_grad():
+        model_layers = probe_forward_layers(
+            model, input_sample, module_name=type(model).__name__
+        )
         logits_for_shape = model(input_sample)
-    # Probe the loss module with torchinfo for per-layer attribution.
-    loss_layers = probe_forward_layers(
-        loss_module,
-        [logits_for_shape.detach(), target_sample],
-        module_name=type(loss_module).__name__,
-    )
+        loss_layers = probe_forward_layers(
+            loss_module,
+            [logits_for_shape.detach(), target_sample],
+            module_name=type(loss_module).__name__,
+        )
 
     return ProbeResult(
         mode="training",

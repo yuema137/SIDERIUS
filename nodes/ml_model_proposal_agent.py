@@ -480,6 +480,13 @@ def _render_stage_user_prompt(accumulated: Dict[str, Any]) -> str:
     return json_region
 
 
+def _truncate_description(text: str, max_chars: int = 1500) -> str:
+    """Truncate a model description for prompt injection."""
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "\n[...truncated]"
+
+
 def _build_reasoning_prompt(inp: ProposalInput) -> str:
     """Build the user prompt for the reasoning call."""
     interp = inp.interpretation
@@ -616,7 +623,7 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
     if descriptions:
         lines.append("## Existing Architecture Descriptions")
         for mt, desc in descriptions.items():
-            lines += [f"### {mt}", desc, ""]
+            lines += [f"### {mt}", _truncate_description(desc), ""]
 
     best_config = interp.get("best_config")
     if best_config:
@@ -769,6 +776,7 @@ class MLModelProposalAgent:
         immediately (unchanged behavior).
         """
         reasoning_prompt = _build_reasoning_prompt(inp)
+        print(f"    [PROMPT_SIZE] proposer_reasoning: {len(reasoning_prompt)} chars")
         reasoning = self.bridge.generate_text(PROPOSAL_REASONING_PROMPT, reasoning_prompt)
         print(f"   Legacy reasoning complete ({len(reasoning)} chars).")
 
@@ -997,7 +1005,8 @@ class MLModelProposalAgent:
             if vocab_block:
                 user_prompt += f"\n\n{vocab_block}"
 
-            print(f"   Stage '{stage.name}': calling LLM...")
+            print(f"   Stage '{stage.name}': calling LLM... "
+                  f"[PROMPT_SIZE] {len(user_prompt)} chars")
             if stage.output_mode == "text":
                 result = self.bridge.generate_text(system_prompt, user_prompt)
                 accumulated[stage.name] = result

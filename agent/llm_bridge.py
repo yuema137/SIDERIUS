@@ -288,6 +288,7 @@ class LLMBridge:
              current_round: Optional[int] = None,
              max_rounds: Optional[int] = None,
              trial_allowed: bool = True,
+             force_formal_round: bool = True,
              plan_overrides: Optional[Dict] = None,
              max_epochs: Optional[int] = None,
              # --- Phase K (K.6) — [ACTIVE RESOURCE BUDGETS] block inputs ---
@@ -318,6 +319,12 @@ class LLMBridge:
             current_round:    Current round number (1-based). Forwarded to prompt.
             max_rounds:       Total rounds in this run. Forwarded to prompt.
             trial_allowed:    Whether the LLM may choose trial mode. Forwarded to prompt.
+            force_formal_round:
+                              When True (default), the final round is presented
+                              to the LLM as MANDATORY formal mode. When False,
+                              the final round is presented as OPTIONAL formal
+                              and the planner may pick trial mode (testing /
+                              debugging only).
             plan_overrides:   Operator-frozen plan fields. When set, the prompt
                               renders a SYSTEM-FIXED PARAMETERS block so the LLM
                               knows which knobs it does not control.
@@ -366,6 +373,7 @@ class LLMBridge:
             current_round=current_round,
             max_rounds=max_rounds,
             trial_allowed=trial_allowed,
+            force_formal_round=force_formal_round,
             plan_overrides=plan_overrides,
             max_epochs=max_epochs,
             trial_vram_budget_gb=trial_vram_budget_gb,
@@ -389,6 +397,7 @@ class LLMBridge:
             final_user_prompt += f"\n\n{exploration_checklist}"
         final_user_prompt += manual_context
 
+        print(f"    [PROMPT_SIZE] planner: {len(final_user_prompt)} chars")
         return self.generate(system_prompt, final_user_prompt)
 
     def reflect(self, exp_id: str, hypothesis: str, actual_results: Dict,

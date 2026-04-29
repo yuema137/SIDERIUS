@@ -157,7 +157,7 @@ def _proposing_output(
     }
 
 
-FAKE_GOOD_DRAFT = _proposing_output(num_params=500_000, epochs=2)
+FAKE_GOOD_DRAFT = _proposing_output(num_params=50_000, epochs=2)
 FAKE_BAD_DRAFT = _proposing_output(num_params=500_000_000, epochs=10)
 
 
@@ -236,7 +236,7 @@ class TestPipelineSuccessPath:
         ]
         out = _agent(bridge).run(_pipeline_input(tmp_path))
 
-        assert out.parameter_count_estimate == 500_000
+        assert out.parameter_count_estimate == 50_000
         assert out.preflight_factor is not None
         assert out.preflight_factor <= 1.0
 
@@ -488,7 +488,7 @@ class TestLegacyMode:
 
         out = _agent(bridge).run(_legacy_input(tmp_path))
 
-        assert out.parameter_count_estimate == 500_000
+        assert out.parameter_count_estimate == 50_000
         assert out.preflight_factor is not None
         assert out.preflight_factor <= 1.0
         assert bridge.generate_text.call_count == 1

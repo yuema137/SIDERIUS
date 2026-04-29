@@ -59,6 +59,7 @@ from workflows.model_exploration import (
     tuning_outputs_to_summaries,
     run_workflow,
     _register_plugin,
+    _add_plugin_to_registries,
 )
 
 
@@ -947,3 +948,225 @@ class TestRegisterPlugin:
         captured = capsys.readouterr()
         assert "plugin file not found" in captured.out
         assert not (dest / "ghost.py").exists()
+
+
+# ---------------------------------------------------------------------------
+# _add_plugin_to_registries — Phase 6.8 Commit 6
+# ---------------------------------------------------------------------------
+#
+# The pre-Commit-6 _register_plugin only touched MODEL_REGISTRY and the packaged
+# PLUGIN_CONFIG_REGISTRY. The two missing surfaces — PLUGIN_OUTPUT_TYPE_REGISTRY
+# and the bare-name models_format_sandbox.PLUGIN_CONFIG_REGISTRY mirror — caused
+# regressors to be miscategorised as classifiers and the training subprocess to
+# fail with `Unknown model_type` when run via bare imports. These tests pin the
+# fix.
+# ---------------------------------------------------------------------------
+
+import sys as _sys
+import textwrap as _textwrap
+
+
+_REGRESSOR_PLUGIN_SRC = _textwrap.dedent('''\
+    import torch
+    import torch.nn as nn
+    from pydantic import BaseModel, Field
+
+    PLUGIN_MODEL_TYPE = "test_regressor_plugin_c6"
+    PLUGIN_OUTPUT_TYPE = "regressor"
+
+    class TestRegressorConfig(BaseModel):
+        model_type: str = "test_regressor_plugin_c6"
+        segmentation_size: int = Field(default=1000, ge=100)
+        batch_size: int = 1
+
+    class TestRegressorModel(nn.Module):
+        def __init__(self, config):
+            super().__init__()
+            self.proj = nn.Linear(config.segmentation_size, config.segmentation_size)
+
+        def forward(self, x):
+            out = self.proj(x.float())
+            return out.unsqueeze(1)  # [B, 1, T] regressor contract
+
+    PLUGIN_CONFIG_CLASS = TestRegressorConfig
+    PLUGIN_MODEL_CLASS  = TestRegressorModel
+''')
+
+
+_CLASSIFIER_PLUGIN_SRC = _textwrap.dedent('''\
+    import torch
+    import torch.nn as nn
+    from pydantic import BaseModel, Field
+
+    PLUGIN_MODEL_TYPE = "test_classifier_plugin_c6"
+
+    class TestClassifierConfig(BaseModel):
+        model_type: str = "test_classifier_plugin_c6"
+        segmentation_size: int = Field(default=1000, ge=100)
+        batch_size: int = 1
+
+    class TestClassifierModel(nn.Module):
+        def __init__(self, config):
+            super().__init__()
+            self.proj = nn.Linear(config.segmentation_size, config.segmentation_size)
+
+        def forward(self, x):
+            out = self.proj(x.float())
+            return out.unsqueeze(1).expand(-1, 256, -1)
+
+    PLUGIN_CONFIG_CLASS = TestClassifierConfig
+    PLUGIN_MODEL_CLASS  = TestClassifierModel
+''')
+
+
+@pytest.fixture
+def regressor_plugin_file(tmp_path):
+    p = tmp_path / "test_regressor_plugin_c6.py"
+    p.write_text(_REGRESSOR_PLUGIN_SRC)
+    return str(p)
+
+
+@pytest.fixture
+def classifier_plugin_file(tmp_path):
+    p = tmp_path / "test_classifier_plugin_c6.py"
+    p.write_text(_CLASSIFIER_PLUGIN_SRC)
+    return str(p)
+
+
+@pytest.fixture
+def clean_registries():
+    """Snapshot + restore every registry surface so cross-test pollution
+    cannot mask a real bug. Also wipes the test model_types from any
+    leaked sys.modules entries from a prior run."""
+    from ml_models.models_sandbox import MODEL_REGISTRY
+    from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
+    from ml_models.plugin_loader import PLUGIN_OUTPUT_TYPE_REGISTRY
+
+    keys_to_clear = ("test_regressor_plugin_c6", "test_classifier_plugin_c6")
+
+    snap_model = {k: MODEL_REGISTRY.get(k) for k in keys_to_clear}
+    snap_cfg = {k: PLUGIN_CONFIG_REGISTRY.get(k) for k in keys_to_clear}
+    snap_out = {k: PLUGIN_OUTPUT_TYPE_REGISTRY.get(k) for k in keys_to_clear}
+
+    for k in keys_to_clear:
+        MODEL_REGISTRY.pop(k, None)
+        PLUGIN_CONFIG_REGISTRY.pop(k, None)
+        PLUGIN_OUTPUT_TYPE_REGISTRY.pop(k, None)
+
+    # Also clear any stale sys.modules entries from prior loads of these stems.
+    for stem in keys_to_clear:
+        _sys.modules.pop(f"siderius_plugin_{stem}", None)
+
+    yield
+
+    for k, v in snap_model.items():
+        if v is None:
+            MODEL_REGISTRY.pop(k, None)
+        else:
+            MODEL_REGISTRY[k] = v
+    for k, v in snap_cfg.items():
+        if v is None:
+            PLUGIN_CONFIG_REGISTRY.pop(k, None)
+        else:
+            PLUGIN_CONFIG_REGISTRY[k] = v
+    for k, v in snap_out.items():
+        if v is None:
+            PLUGIN_OUTPUT_TYPE_REGISTRY.pop(k, None)
+        else:
+            PLUGIN_OUTPUT_TYPE_REGISTRY[k] = v
+
+
+class TestAddPluginToRegistries:
+    """Pins the four-surface contract for ``_add_plugin_to_registries``."""
+
+    def test_returns_model_type_on_success(self, regressor_plugin_file, clean_registries):
+        result = _add_plugin_to_registries(regressor_plugin_file)
+        assert result == "test_regressor_plugin_c6"
+
+    def test_returns_none_on_invalid_plugin(self, tmp_path, clean_registries):
+        bad = tmp_path / "broken_plugin.py"
+        bad.write_text("# missing required attrs\n")
+        assert _add_plugin_to_registries(str(bad)) is None
+
+    def test_updates_model_registry(self, classifier_plugin_file, clean_registries):
+        from ml_models.models_sandbox import MODEL_REGISTRY
+        _add_plugin_to_registries(classifier_plugin_file)
+        assert "test_classifier_plugin_c6" in MODEL_REGISTRY
+
+    def test_updates_packaged_config_registry(self, classifier_plugin_file, clean_registries):
+        from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
+        _add_plugin_to_registries(classifier_plugin_file)
+        assert "test_classifier_plugin_c6" in PLUGIN_CONFIG_REGISTRY
+
+    def test_regressor_routes_via_get_output_type(self, regressor_plugin_file, clean_registries):
+        """The latent-bug regression test: pre-Commit-6, this returned
+        'classifier' because PLUGIN_OUTPUT_TYPE_REGISTRY was never updated."""
+        from ml_models.plugin_loader import get_output_type
+        _add_plugin_to_registries(regressor_plugin_file)
+        assert get_output_type("test_regressor_plugin_c6") == "regressor"
+
+    def test_classifier_default_routes_correctly(self, classifier_plugin_file, clean_registries):
+        from ml_models.plugin_loader import get_output_type
+        _add_plugin_to_registries(classifier_plugin_file)
+        assert get_output_type("test_classifier_plugin_c6") == "classifier"
+
+    def test_bare_name_mirror_when_both_modules_loaded(self, classifier_plugin_file, clean_registries):
+        """When ``ml_models/`` is on sys.path, bare and packaged imports of
+        ``models_format_sandbox`` resolve to distinct module objects with
+        separate registry dicts. The helper must mirror to both."""
+        # workflows/model_exploration.py adds ml_models/ to sys.path at import
+        # time, so the bare identity is already resolvable. Force the bare
+        # module to load if it hasn't yet, then sanity-check identities differ.
+        import importlib
+        bare = importlib.import_module("models_format_sandbox")
+        pkg = importlib.import_module("ml_models.models_format_sandbox")
+
+        if bare is pkg:
+            pytest.skip(
+                "bare and packaged identities resolved to same module object — "
+                "mirror behaviour is a no-op in this environment"
+            )
+
+        # Wipe the bare side too so we can detect the mirror update.
+        bare.PLUGIN_CONFIG_REGISTRY.pop("test_classifier_plugin_c6", None)
+
+        _add_plugin_to_registries(classifier_plugin_file)
+
+        assert "test_classifier_plugin_c6" in bare.PLUGIN_CONFIG_REGISTRY
+        assert "test_classifier_plugin_c6" in pkg.PLUGIN_CONFIG_REGISTRY
+        # Same class object on both sides.
+        assert bare.PLUGIN_CONFIG_REGISTRY["test_classifier_plugin_c6"] is \
+               pkg.PLUGIN_CONFIG_REGISTRY["test_classifier_plugin_c6"]
+
+
+class TestRegisterPluginUsesHelper:
+    """End-to-end: ``_register_plugin`` (the workflow's caller) must drive
+    all four registry surfaces via the helper."""
+
+    def test_register_plugin_populates_all_four_surfaces(self, tmp_path, clean_registries):
+        impl = ImplementorOutput(
+            model_type="test_regressor_plugin_c6",
+            model_file_path=str(tmp_path / "src_plugin.py"),
+            test_file_path=str(tmp_path / "src_test.py"),
+            description_file_path=str(tmp_path / "src_desc.md"),
+            config_fields={},
+            model_description="x",
+            mathematical_definition="y=f(x)",
+        )
+        # Materialise source files _register_plugin actually copies.
+        (tmp_path / "src_plugin.py").write_text(_REGRESSOR_PLUGIN_SRC)
+        (tmp_path / "src_test.py").write_text("def test_noop(): pass\n")
+        (tmp_path / "src_desc.md").write_text("desc\n")
+
+        dest = tmp_path / "ws" / "plugins" / "run_x"
+        _register_plugin(impl, "test_regressor_plugin_c6", str(dest))
+
+        from ml_models.models_sandbox import MODEL_REGISTRY
+        from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
+        from ml_models.plugin_loader import (
+            PLUGIN_OUTPUT_TYPE_REGISTRY, get_output_type,
+        )
+        assert "test_regressor_plugin_c6" in MODEL_REGISTRY
+        assert "test_regressor_plugin_c6" in PLUGIN_CONFIG_REGISTRY
+        assert PLUGIN_OUTPUT_TYPE_REGISTRY.get("test_regressor_plugin_c6") == "regressor"
+        assert get_output_type("test_regressor_plugin_c6") == "regressor"

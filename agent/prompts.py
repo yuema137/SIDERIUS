@@ -34,7 +34,8 @@ Plan your experiments across rounds, not just one at a time:
   loss_type, and regularization. Goal: maximize score with sufficient data.
 - **Phase 3: Solidification** (last 25% of rounds): Select the best candidate. Increase
   trial_portion to 0.5+ or switch to formal mode for definitive validation.
-  The final round is always forced to formal mode by the system.
+  The final round may be configured to require formal mode — see the
+  ROUND CONTEXT block below for the per-run policy.
 
 ### RESEARCH MEMORY GUIDELINES:
 - You operate based on the **Research Memory**, a log of all past experiments and insights.
@@ -685,6 +686,43 @@ since those knobs are frozen — focus your reasoning on architecture, lr, and l
 """
 
 
+_CONDENSED_KEYS = frozenset({
+    "exp_id", "status", "model_type", "denoising_score", "is_trial",
+})
+_CONDENSED_MEMORY_KEYS = frozenset({
+    "hypothesis", "conclusion", "round_index",
+})
+
+
+def _truncate_memory_history(
+    records: list[dict],
+    full_window: int = 3,
+) -> list[dict]:
+    """Sliding-window truncation for the planner's history context.
+
+    Args:
+        records:     Full experiment record list from sandbox.get_summary().
+        full_window: Number of most-recent records to keep verbatim.
+
+    Returns:
+        New list (non-destructive). Recent records are unchanged; older
+        records are condensed to identity + score + hypothesis/conclusion.
+    """
+    if len(records) <= full_window:
+        return list(records)
+
+    cutoff = len(records) - full_window
+    condensed: list[dict] = []
+    for rec in records[:cutoff]:
+        entry = {k: rec[k] for k in _CONDENSED_KEYS if k in rec}
+        memory = rec.get("memory", {})
+        if memory:
+            entry["memory"] = {k: memory[k] for k in _CONDENSED_MEMORY_KEYS if k in memory}
+        condensed.append(entry)
+
+    return condensed + list(records[cutoff:])
+
+
 def get_planner_user_prompt(
     memory_history,
     expert_advice="None",
@@ -692,6 +730,7 @@ def get_planner_user_prompt(
     current_round=None,
     max_rounds=None,
     trial_allowed=True,
+    force_formal_round=True,
     plan_overrides=None,
     max_epochs=None,
     # --- Phase K (K.6) — [ACTIVE RESOURCE BUDGETS] block inputs ---
@@ -715,6 +754,14 @@ def get_planner_user_prompt(
         max_rounds:     Total rounds in this run. None = omit round context.
         trial_allowed:  Whether the LLM may choose trial mode. When False, the
                         LLM must set is_trial=false.
+        force_formal_round:
+                        When True (default), the final round is presented to
+                        the LLM as MANDATORY formal mode. When False, the
+                        final round is presented as OPTIONAL formal — the
+                        planner may use trial mode for fast verification
+                        (testing/debugging only). The post-LLM override
+                        chain (``_apply_mode_override_chain``) is gated on
+                        the same flag so prompt and override agree.
         plan_overrides: Dict of plan fields the operator has frozen. When set,
                         a SYSTEM-FIXED PARAMETERS block is rendered so the LLM
                         does not waste reasoning on overridden knobs.
@@ -739,7 +786,8 @@ def get_planner_user_prompt(
             means "no prior data" — typically round 1 before any pre-flight
             has run. See §10.3 / §10.11.
     """
-    history_context = json.dumps(memory_history, indent=2) if memory_history else "No previous experiments recorded."
+    windowed = _truncate_memory_history(memory_history) if memory_history else []
+    history_context = json.dumps(windowed, indent=2) if windowed else "No previous experiments recorded."
 
     # Handle the model constraint message + output type / valid losses
     model_constraint = ""
@@ -853,10 +901,16 @@ def get_planner_user_prompt(
             f"({rounds_completed} completed, {rounds_left} remaining after this one)\n"
             f"- Current phase: **{phase}** ({rounds_in_phase_left} rounds left in this phase) — {phase_advice}\n"
         )
-        if is_final:
-            round_context += "- **THIS IS THE FINAL ROUND** — you MUST use formal mode (`is_trial`: false).\n"
+        if is_final and force_formal_round:
+            round_context += "- **THIS IS THE FINAL ROUND** — formal mode is MANDATORY. You MUST set `is_trial`: false.\n"
         elif not trial_allowed:
             round_context += "- Trial mode is DISABLED for this run. Set `is_trial`: false.\n"
+        elif is_final and not force_formal_round:
+            round_context += (
+                "- This is the final round. Formal mode is OPTIONAL — you MAY use trial mode "
+                "for fast verification when appropriate.\n"
+                "- Use trial mode for fast exploration; switch to formal when you want a definitive score.\n"
+            )
         else:
             round_context += (
                 "- You may choose trial or formal mode.\n"

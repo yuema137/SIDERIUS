@@ -707,6 +707,27 @@ class HyperparamTuningInput(BaseModel):
         le=1.0,
         description="Per-epoch iteration fraction from the formal training scope.",
     )
+    force_formal_round: bool = Field(
+        default=True,
+        description=(
+            "When True (default), the last round of every iteration forces "
+            "``plan.is_trial = False`` so it always runs in formal mode "
+            "regardless of what the planner picked — this is the "
+            "'cross-architecture comparable formal score' contract that the "
+            "downstream interpreter/proposer rely on. The planner prompt is "
+            "told formal mode is MANDATORY on the final round. "
+            "Set to False ONLY for testing/debugging where you want the last "
+            "round to honor the planner's mode choice (so trial-mode "
+            "``trial_portion`` / ``train_portion`` / ``eval_portion`` actually "
+            "take effect on the final round). When False, the planner prompt "
+            "is told formal mode is OPTIONAL on the final round and the "
+            "post-LLM override at ``_apply_mode_override_chain`` is skipped, "
+            "so the formal-mode sample-set lock at "
+            "``_resolve_sample_set_cfg(mode='formal')`` is bypassed for the "
+            "last round because ``mode`` is derived from the un-overridden "
+            "``plan.is_trial``."
+        ),
+    )
 
     # --- Reproducibility seeds (optional — auto-generated when not provided) ---
     sampling_seed: Optional[int] = Field(

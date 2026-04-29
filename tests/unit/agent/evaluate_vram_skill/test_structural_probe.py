@@ -291,3 +291,172 @@ def test_probe_activation_footprint_forward_layer_report_shapes_are_physical():
     )
     assert out_layer.output_shape == [2, 16, 20]
     assert out_layer.output_bytes == 2 * 16 * 20 * 4
+
+
+# ── Memory-safety tests (Phase 6.8 Commit 9) ──────────────────────────────
+
+
+class SequentialModel(nn.Module):
+    """Model with a Python-level sequential loop, mimicking SSM scan.
+    Each iteration creates tensors retained by autograd in training mode."""
+    def __init__(self, steps: int = 500, hidden: int = 16):
+        super().__init__()
+        self.proj = nn.Linear(hidden, hidden)
+        self.steps = steps
+        self.hidden = hidden
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        state = self.proj(x)
+        for _ in range(self.steps):
+            state = state * 0.99 + self.proj(x) * 0.01
+        return state
+
+
+def test_pack_hook_returns_none_not_tensor():
+    """pack_hook must return None so autograd does NOT retain the actual
+    tensor data. This is the core of the v6 OOM fix."""
+    captured = []
+
+    w = nn.Linear(4, 4)
+    x = torch.randn(2, 4, requires_grad=True)
+
+    original_pack = None
+
+    def spy_pack(t):
+        captured.append(t)
+        return t
+
+    # First: baseline — how many tensors autograd saves
+    with torch.autograd.graph.saved_tensors_hooks(spy_pack, lambda t: t):
+        _ = w(x).sum()
+    baseline_count = len(captured)
+    assert baseline_count > 0
+
+    # Now verify our probe returns None
+    report = probe_autograd_tape(lambda: w(x).sum())
+    assert report.total_saved_bytes > 0
+    assert report.unique_storage_count > 0
+
+
+def test_probe_autograd_tape_unpack_raises_on_backward():
+    """If someone accidentally calls backward() on the loss after probing,
+    the unpack_hook should raise with a clear error."""
+    w = nn.Linear(4, 4)
+    x = torch.randn(2, 4, requires_grad=True)
+
+    seen = {}
+
+    def pack_hook(t):
+        storage = t.untyped_storage()
+        ptr = storage.data_ptr()
+        if ptr and ptr not in seen:
+            seen[ptr] = storage.nbytes()
+        return None
+
+    def unpack_hook(_):
+        raise RuntimeError("probe_autograd_tape: backward() must not be called")
+
+    with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
+        loss = w(x).sum()
+
+    with pytest.raises(RuntimeError, match="backward.*must not be called"):
+        loss.backward()
+
+
+def test_sequential_model_probe_gc_called_between_phases():
+    """Verify gc.collect() is called between the tape walk and the torchinfo
+    passes inside probe_activation_footprint (training mode)."""
+    import gc as gc_module
+    from unittest.mock import patch
+
+    model = SequentialModel(steps=10, hidden=8)
+    loss = nn.MSELoss()
+    x = torch.randn(1, 8)
+    y = torch.randn(1, 8)
+
+    gc_calls = []
+    original_collect = gc_module.collect
+
+    def counting_collect(*args, **kwargs):
+        gc_calls.append(1)
+        return original_collect(*args, **kwargs)
+
+    with patch("agent.skills.evaluate_vram_skill.structural_probe.gc.collect",
+               side_effect=counting_collect):
+        result = probe_activation_footprint(
+            model=model, loss_module=loss, input_sample=x, target_sample=y,
+            mode="training", device="cpu",
+        )
+
+    assert isinstance(result, ProbeResult)
+    assert result.autograd_tape.total_saved_bytes > 0
+    # At least 2 gc.collect calls: one in probe_autograd_tape after del loss,
+    # one in probe_activation_footprint after del _fwd.
+    assert len(gc_calls) >= 2, (
+        f"Expected >= 2 gc.collect() calls between probe phases, got {len(gc_calls)}"
+    )
+
+
+def test_sequential_model_training_probe_rss_bounded():
+    """A model with 500 sequential steps should complete the training probe
+    without RSS growth exceeding 500 MB. Before the fix, a similar model
+    with 320K steps used ~33 GB."""
+    import psutil
+
+    model = SequentialModel(steps=500, hidden=16)
+    loss = nn.MSELoss()
+    x = torch.randn(1, 16)
+    y = torch.randn(1, 16)
+
+    rss_before = psutil.Process().memory_info().rss
+    result = probe_activation_footprint(
+        model=model, loss_module=loss, input_sample=x, target_sample=y,
+        mode="training", device="cpu",
+    )
+    rss_after = psutil.Process().memory_info().rss
+    delta_mb = (rss_after - rss_before) / (1024 ** 2)
+
+    assert isinstance(result, ProbeResult)
+    assert result.autograd_tape.total_saved_bytes > 0
+    assert delta_mb < 500, (
+        f"RSS grew by {delta_mb:.1f} MB during sequential-model training probe; "
+        f"expected < 500 MB. The pack_hook may not be returning None."
+    )
+
+
+def test_torchinfo_runs_under_no_grad_in_training_mode():
+    """probe_forward_layers calls inside the training path must run under
+    torch.no_grad() to prevent rebuilding the autograd graph."""
+    grad_states = []
+
+    class GradSpyModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.fc = nn.Linear(4, 4)
+
+        def forward(self, x):
+            grad_states.append(torch.is_grad_enabled())
+            return self.fc(x)
+
+    model = GradSpyModel()
+    loss = nn.MSELoss()
+    x = torch.randn(1, 4)
+    y = torch.randn(1, 4)
+
+    result = probe_activation_footprint(
+        model=model, loss_module=loss, input_sample=x, target_sample=y,
+        mode="training", device="cpu",
+    )
+
+    assert isinstance(result, ProbeResult)
+    # forward is called 3+ times: once for tape (grad=True), then
+    # torchinfo + shape forward (both should be no_grad).
+    assert len(grad_states) >= 3
+    # First call (tape walk): grad must be True
+    assert grad_states[0] is True, "Tape walk must run with grad enabled"
+    # Subsequent calls (torchinfo + shape): grad must be False
+    for i, gs in enumerate(grad_states[1:], start=1):
+        assert gs is False, (
+            f"Forward call {i+1} had grad_enabled={gs}; "
+            f"torchinfo/shape passes must run under torch.no_grad()"
+        )

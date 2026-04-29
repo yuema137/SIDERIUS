@@ -46,14 +46,25 @@ from agent.skills.evaluate_time_skill import calibration
 _BYTES_F32 = 4
 _BYTES_I64 = 8
 
-# Safety margin applied on top of ms/step × k. Kept at the wrapper's value so
-# aggregator output is byte-identical to the pre-K.2.5 training-only estimate
-# for training-dominant configs.
-SAFETY_MULTIPLIER: float = 1.1
+# Safety margin applied on top of ms/step × k. Raised from 1.1 to 2.0 for the
+# static fallback path (Phase 6.8 §4.2): the original 1.1 was calibrated for
+# warmup variance (~10%), but the static formula itself is 2-5x wrong for novel
+# architectures, so the multiplier must absorb formula error, not just variance.
+SAFETY_MULTIPLIER: float = 2.0
 
 # Static ms/step fallback used when the aggregator cannot supply a warmup-
 # measured ms_per_step (CPU-only hosts, unit tests, failed warmup).
-_STATIC_MS_PER_FLOP: float = 6e-10
+# Raised from 6e-10 to 3e-9 (Phase 6.8 §4.2): the original coefficient was
+# calibrated on seed models (punet, wavenet) with efficient GPU utilisation;
+# novel architectures (dilated conv, SSM scans, multi-rate upsampling) are
+# 3-5x less efficient per FLOP.
+_STATIC_MS_PER_FLOP: float = 3e-9
+
+# Minimum ms/step floor (Phase 6.8 §4.2): CUDA kernel launch + synchronisation
+# + DataLoader fetch cost ~1-3 ms per step regardless of model size. Without
+# this floor, tiny models get sub-millisecond estimates that undercount the
+# fixed overhead by 10-100x.
+_MIN_MS_PER_STEP: float = 2.0
 
 
 # ── VRAM ─────────────────────────────────────────────────────────────────────
@@ -145,7 +156,7 @@ def _total_train_steps(
 
 def _static_ms_per_step(num_params: int, seg_size: int, batch_size: int) -> float:
     """Coarse static estimate of ms per training step. Order-of-magnitude only."""
-    return num_params * seg_size * batch_size * _STATIC_MS_PER_FLOP
+    return max(num_params * seg_size * batch_size * _STATIC_MS_PER_FLOP, _MIN_MS_PER_STEP)
 
 
 def _count_params(model_type: str, model_config: dict, loss_type: str) -> int:

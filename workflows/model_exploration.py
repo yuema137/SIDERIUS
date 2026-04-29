@@ -335,61 +335,164 @@ def _render_physical_rejection(rej: PhysicalRejection, n_rejections: int) -> str
     return "\n".join(lines)
 
 
-def _register_plugin(impl_output, model_name: str, dest_plugin_dir: str):
+def _cap_knowledge_cache(
+    cache: dict,
+    current_model: str,
+    max_entries: int = 5,
+) -> tuple[dict, set[str]]:
+    """Keep top-N models by best_denoising_score + the current iteration's model.
+
+    Returns:
+        (capped_cache, evicted_model_types)
     """
-    Copy validated plugin files to ``dest_plugin_dir`` (the tuner's run-scoped
-    plugin dir) so the training subprocess discovers them via
-    ``SIDERIUS_PLUGIN_DIRS``.
+    if len(cache) <= max_entries:
+        return cache, set()
 
-    Copies:
-      - {model_file_path}       → {dest_plugin_dir}/{model_name}.py
-      - {description_file_path} → {dest_plugin_dir}/{model_name}/description.md
+    scored = [
+        (mt, entry.get("_stats", {}).get("best_denoising_score"))
+        for mt, entry in cache.items()
+        if mt != current_model
+    ]
+    scored.sort(key=lambda x: x[1] if x[1] is not None else float("-inf"),
+                reverse=True)
+    keep = {current_model} | {mt for mt, _ in scored[:max_entries - 1]}
+    evicted = set(cache) - keep
+    capped = {mt: entry for mt, entry in cache.items() if mt in keep}
+    return capped, evicted
 
-    Pre-Phase-4 this function copied to the legacy global
-    ``agent_generated/models/``, which the training subprocess no longer
-    scans once ``SIDERIUS_PLUGIN_DIRS`` is set (Phase 2). See
-    docs/run_scoped_plugins.md.
 
-    Also extends the in-process ``MODEL_REGISTRY`` / ``PLUGIN_CONFIG_REGISTRY``
-    so the tuner's planner (same Python process as the workflow) can resolve
-    the new model type without a re-scan.
+def _add_plugin_to_registries(plugin_path: str) -> Optional[str]:
+    """Register a single plugin file in every in-process registry surface.
 
-    Skips gracefully if source files don't exist (e.g. in unit tests with mocks).
+    Updates four surfaces so the tuner's planner (running in the same process
+    as this workflow) can resolve the new model_type for both training and
+    inference without a re-scan:
+
+      1. ``ml_models.models_sandbox.MODEL_REGISTRY``
+         — model_type → model class
+      2. ``ml_models.models_format_sandbox.PLUGIN_CONFIG_REGISTRY``
+         — model_type → config class (packaged identity)
+      3. Bare-name mirror at ``models_format_sandbox.PLUGIN_CONFIG_REGISTRY``
+         — same mapping under the bare module identity used by the training
+         subprocess (``execute_tools/train_engine_sandbox.py``) and inference
+         (``execute_tools/inference_single.py``). When ``ml_models/`` is on
+         ``sys.path``, bare and packaged imports resolve to *distinct* module
+         objects with separate registry dicts; missing this mirror caused
+         silent ``Unknown model_type`` failures pre-Phase-6.8 (see
+         ``ml_models/models_sandbox.py:660-673``).
+      4. ``ml_models.plugin_loader.PLUGIN_OUTPUT_TYPE_REGISTRY``
+         — model_type → "classifier" | "regressor" | "hybrid", driving
+         classifier-vs-regressor routing in scoring + inference.
+
+    The pre-Commit-6 implementation (``workflows/model_exploration.py:381-392``)
+    only updated surfaces 1 and 2, leaving 3 and 4 unset. Regressor plugins
+    were therefore miscategorised as classifiers, and any subprocess that
+    imported via the bare module identity could not find the config class.
+
+    Args:
+        plugin_path: filesystem path to the plugin ``.py`` file.
+
+    Returns:
+        The registered ``model_type`` string on success, or ``None`` if the
+        plugin file failed to load (validation error, missing required
+        attributes, etc — see ``ml_models.plugin_loader._load_plugin``).
     """
-    # Copy plugin file
-    if os.path.isfile(impl_output.model_file_path):
-        os.makedirs(dest_plugin_dir, exist_ok=True)
-        dest_plugin = os.path.join(dest_plugin_dir, f"{model_name}.py")
-        shutil.copy2(impl_output.model_file_path, dest_plugin)
-        print(f"    Plugin registered → {dest_plugin}")
-    else:
-        print(f"    Warning: plugin file not found at {impl_output.model_file_path}, skipping registration")
+    from ml_models.models_sandbox import MODEL_REGISTRY
+    from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
+    from ml_models.plugin_loader import _load_plugin, PLUGIN_OUTPUT_TYPE_REGISTRY
+
+    plugin_data = _load_plugin(plugin_path)
+    if plugin_data is None:
+        return None
+
+    model_type = plugin_data["model_type"]
+    MODEL_REGISTRY[model_type] = plugin_data["model_class"]
+    PLUGIN_CONFIG_REGISTRY[model_type] = plugin_data["config_class"]
+    PLUGIN_OUTPUT_TYPE_REGISTRY[model_type] = plugin_data["output_type"]
+
+    bare = sys.modules.get("models_format_sandbox")
+    pkg = sys.modules.get("ml_models.models_format_sandbox")
+    if bare is not None and pkg is not None and bare is not pkg:
+        bare.PLUGIN_CONFIG_REGISTRY[model_type] = plugin_data["config_class"]
+
+    return model_type
+
+
+def _register_plugin(
+    impl_output,
+    model_name: str,
+    dest_plugin_dirs: "list[str] | str",
+):
+    """
+    Mirror validated plugin files to one or more destination dirs.
+
+    Two destinations are typical in chain mode:
+
+      * **Tuner-scoped** dir at ``{tuning_dir}/plugins/{run_name}/`` — the
+        training/inference/scoring subprocess discovers plugins here via
+        ``SIDERIUS_PLUGIN_DIRS`` (docs/run_scoped_plugins.md, Phase 4).
+      * **Chain-canonical** dir at ``{workspace}/plugins/{run_name}/`` —
+        ``core.resume.restore_prior_state`` looks here when later iters of
+        the chain re-register prior plugins, and
+        ``ml_models.model_descriptions.get_model_description`` walks
+        ``{workspace}/plugins/iter_*/{model_type}/description.md`` to
+        resolve agent-generated model descriptions on the next iter.
+
+    Both dests receive identical files:
+
+      - ``{model_file_path}``       → ``{dest}/{model_name}.py``
+      - ``{description_file_path}`` → ``{dest}/{model_name}/description.md``
+
+    The first dest in the list is treated as the primary; its ``.py`` is
+    used to extend the in-process ``MODEL_REGISTRY`` /
+    ``PLUGIN_CONFIG_REGISTRY`` so the tuner's planner (same Python process
+    as the workflow) resolves the new model type without a re-scan.
+
+    Accepts a single string for back-compat with older call sites and tests.
+
+    Skips gracefully if source files don't exist (e.g. unit tests with mocks).
+    """
+    if isinstance(dest_plugin_dirs, str):
+        dest_plugin_dirs = [dest_plugin_dirs]
+
+    if not os.path.isfile(impl_output.model_file_path):
+        print(
+            f"    Warning: plugin file not found at "
+            f"{impl_output.model_file_path}, skipping registration"
+        )
         return
 
-    # Copy description
+    primary_plugin: str | None = None
+    for d in dest_plugin_dirs:
+        os.makedirs(d, exist_ok=True)
+        dest_plugin = os.path.join(d, f"{model_name}.py")
+        shutil.copy2(impl_output.model_file_path, dest_plugin)
+        if primary_plugin is None:
+            primary_plugin = dest_plugin
+        print(f"    Plugin registered → {dest_plugin}")
+
     if os.path.isfile(impl_output.description_file_path):
-        desc_dest_dir = os.path.join(dest_plugin_dir, model_name)
-        os.makedirs(desc_dest_dir, exist_ok=True)
-        dest_desc = os.path.join(desc_dest_dir, "description.md")
-        shutil.copy2(impl_output.description_file_path, dest_desc)
-        print(f"    Description registered → {dest_desc}")
+        for d in dest_plugin_dirs:
+            desc_dest_dir = os.path.join(d, model_name)
+            os.makedirs(desc_dest_dir, exist_ok=True)
+            dest_desc = os.path.join(desc_dest_dir, "description.md")
+            shutil.copy2(impl_output.description_file_path, dest_desc)
+            print(f"    Description registered → {dest_desc}")
     else:
-        print(f"    Warning: description not found at {impl_output.description_file_path}, skipping registration")
+        print(
+            f"    Warning: description not found at "
+            f"{impl_output.description_file_path}, skipping registration"
+        )
 
-    # Extend the already-cached MODEL_REGISTRY so the tuning agent can
-    # find the new model type without re-importing models_sandbox.
     try:
-        from ml_models.models_sandbox import MODEL_REGISTRY
-        from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
-        from ml_models.plugin_loader import _load_plugin
-
-        plugin_data = _load_plugin(dest_plugin)
-        if plugin_data:
-            MODEL_REGISTRY[plugin_data["model_type"]] = plugin_data["model_class"]
-            PLUGIN_CONFIG_REGISTRY[plugin_data["model_type"]] = plugin_data["config_class"]
-            print(f"    Model '{model_name}' added to MODEL_REGISTRY")
+        registered = _add_plugin_to_registries(primary_plugin)
+        if registered:
+            print(
+                f"    Model '{model_name}' added to registries "
+                f"(model_type='{registered}')"
+            )
     except Exception as e:
-        print(f"    Warning: could not extend MODEL_REGISTRY: {e}")
+        print(f"    Warning: could not extend registries: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -444,6 +547,7 @@ def run_workflow(
     formal_strategy: str = "snapshot",
     formal_portion: float = 0.1,
     formal_train_portion: float = 1.0,
+    force_formal_round: bool = True,
     # --- Per-round attempt budget (Phase L, docs/resource_estimator_implement.md §11) ---
     # Tuner-only fan-out (no proposer-side equivalent). Defaults mirror the
     # schema/protocol defaults so omitting them at the workflow surface yields
@@ -851,16 +955,30 @@ def run_workflow(
         os.makedirs(tuning_dir, exist_ok=True)
         tuning_storage = _make_storage(tuning_dir, run_name)
 
-        # --- Register validated plugin into the tuner's run-scoped dir so
-        #     the training subprocess picks it up via SIDERIUS_PLUGIN_DIRS
-        #     (docs/run_scoped_plugins.md, Phase 4). The tuner's sandbox has
-        #     not been constructed yet, but ``get_plugin_dir`` is the
-        #     single source of truth for the layout, so the workflow can
-        #     write here safely; the sandbox will ``_ensure_dir`` the same
-        #     path moments later without disturbing existing contents.
+        # --- Register validated plugin into TWO dirs:
+        #
+        #     1. Tuner-scoped ``{tuning_dir}/plugins/{run_name}/`` — the
+        #        training subprocess picks it up via SIDERIUS_PLUGIN_DIRS
+        #        (docs/run_scoped_plugins.md, Phase 4). The tuner's sandbox
+        #        has not been constructed yet, but ``get_plugin_dir`` is the
+        #        single source of truth for the layout, so the workflow can
+        #        write here safely; the sandbox will ``_ensure_dir`` the
+        #        same path moments later without disturbing existing
+        #        contents.
+        #     2. Chain-canonical ``{workspace}/plugins/{run_name}/`` —
+        #        ``core.resume.restore_prior_state`` looks here on the next
+        #        iter to re-register the plugin class, and
+        #        ``ml_models.model_descriptions.get_model_description``
+        #        walks this tree to resolve agent-generated descriptions
+        #        across iterations. Phase 6.8 §3.3.
         from core.sandbox_executor import get_plugin_dir
-        dest_plugin_dir = get_plugin_dir(tuning_dir, run_name)
-        _register_plugin(impl_output, proposal.model_name, dest_plugin_dir)
+        tuner_plugin_dir = get_plugin_dir(tuning_dir, run_name)
+        chain_plugin_dir = get_plugin_dir(workspace, run_name)
+        _register_plugin(
+            impl_output,
+            proposal.model_name,
+            [tuner_plugin_dir, chain_plugin_dir],
+        )
 
         print(f"  [{iteration}] Tuning '{proposal.model_name}' for {max_rounds} rounds...")
         tune_llm = llm_config.get("tune")
@@ -894,6 +1012,7 @@ def run_workflow(
             formal_strategy=formal_strategy,
             formal_portion=formal_portion,
             formal_train_portion=formal_train_portion,
+            force_formal_round=force_formal_round,
             attempts_per_round=attempts_per_round,
             attempts_per_formal_round=attempts_per_formal_round,
             max_fail_rounds=max_fail_rounds,
@@ -922,6 +1041,12 @@ def run_workflow(
         # Update knowledge cache from interpretation output
         if hasattr(interpretation, "model_knowledge_cache") and interpretation.model_knowledge_cache:
             model_knowledge_cache = dict(interpretation.model_knowledge_cache)
+            model_knowledge_cache, evicted = _cap_knowledge_cache(
+                model_knowledge_cache, current_model=proposal.model_name,
+            )
+            if evicted:
+                print(f"  [{iteration}] Cache capped: evicted {sorted(evicted)}, "
+                      f"kept {len(model_knowledge_cache)} entries.")
             print(f"  [{iteration}] Knowledge cache: {len(model_knowledge_cache)} models cached.")
 
         # Update runtime vocab from interpretation output
