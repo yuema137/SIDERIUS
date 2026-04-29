@@ -219,6 +219,11 @@ build_app_args() {
         --formal_strategy "$FORMAL_STRATEGY"
         --formal_portion "$FORMAL_PORTION"
         --formal_train_portion "$FORMAL_TRAIN_PORTION"
+        # Always-on for chain runs: per-experiment denoised .h5 files
+        # accumulate at ~76 GB / attempt and can fill the data drive
+        # within 3-4 iterations of a 20-iter chain. Mirrors what
+        # submit_one_iteration.slurm hardcodes for SDSC mode.
+        --cleanup_denoised
     )
     if [ "$DEBUG_DUMP_PROMPTS" -eq 1 ]; then
         APP_ARGS+=(--debug_dump_prompts)
