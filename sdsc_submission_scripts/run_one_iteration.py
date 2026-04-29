@@ -107,16 +107,37 @@ def resolve_source_paths(source_paths: list[str]) -> list[str]:
     return resolved
 
 
-def write_manifest(iter_dir: str, run_name: str, results: list) -> dict:
+def write_manifest(
+    iter_dir: str, run_name: str, results: list, *, crashed: bool = False,
+) -> dict:
     """
     Write a manifest.json summarizing this iteration's output.
 
     The manifest is the discoverable handoff between iterations: the next
     iteration's job reads it to find this iteration's tuning output path.
+
+    Status taxonomy (consumed by ``core/resume.py:_read_manifest``):
+      * ``"completed"`` — workflow produced a real best_denoising_score.
+        Resume: consume the run_output and restore the plugin.
+      * ``"no_records"`` — workflow ran cleanly but every tuner round
+        failed/was skipped (gate exhaustion, all-rounds returned None
+        score). The chain MUST keep going so the next iter's LLM can see
+        the skips and adapt. Resume: skip this iter, no plugin to restore.
+      * ``"failed"`` — workflow itself crashed (Python exception, seed-
+        resolution error, restore_prior_state error). The chain halts.
+        Set via ``crashed=True``.
     """
-    if not results:
+    if crashed:
         manifest = {
             "status": "failed",
+            "iteration_dir": iter_dir,
+            "output_path": None,
+            "model_name": None,
+            "best_score": None,
+        }
+    elif not results:
+        manifest = {
+            "status": "no_records",
             "iteration_dir": iter_dir,
             "output_path": None,
             "model_name": None,
@@ -138,16 +159,15 @@ def write_manifest(iter_dir: str, run_name: str, results: list) -> dict:
             )
             if candidates:
                 output_path = candidates[0]
-        # An iteration is only "completed" if it produced a real score.
-        # A None best_denoising_score means every tuner round failed
-        # (e.g. uncaught LLM API error in reflect/plan); treat as failed
-        # so the next iteration's @manifest: resolution refuses to chain
-        # off this output instead of silently inheriting a poison record.
+        # A None best_denoising_score means every tuner round was skipped
+        # or returned no score (gate exhaustion or LLM-level dead-end).
+        # Mark as no_records so the chain continues; resume will see the
+        # null output_path and skip this iter cleanly.
         score = tune_output.best_denoising_score
         manifest = {
-            "status": "completed" if score is not None else "failed",
+            "status": "completed" if score is not None else "no_records",
             "iteration_dir": iter_dir,
-            "output_path": output_path,
+            "output_path": output_path if score is not None else None,
             "model_name": model_name,
             "best_score": score,
             "completed_rounds": tune_output.completed_rounds,
@@ -557,7 +577,7 @@ def main():
         resolved_seeds = resolve_source_paths(args.seed_paths)
     except (FileNotFoundError, ValueError) as e:
         print(f"FAIL: Could not resolve seed source paths: {e}")
-        write_manifest(iter_dir, run_name, results=[])
+        write_manifest(iter_dir, run_name, results=[], crashed=True)
         sys.exit(1)
 
     # Step 2 — soul restoration. For start_iteration > 1, this re-registers
@@ -574,7 +594,7 @@ def main():
         )
     except ResumeError as e:
         print(f"FAIL: restore_prior_state refused to chain: {e}")
-        write_manifest(iter_dir, run_name, results=[])
+        write_manifest(iter_dir, run_name, results=[], crashed=True)
         sys.exit(1)
 
     if state.committed_iters:
@@ -651,23 +671,41 @@ def main():
     except Exception as e:
         print(f"FAIL: Workflow raised exception: {type(e).__name__}: {e}")
         traceback.print_exc()
-        write_manifest(iter_dir, run_name, results=[])
+        write_manifest(iter_dir, run_name, results=[], crashed=True)
         sys.exit(1)
 
     manifest = write_manifest(iter_dir, run_name, results)
 
-    if manifest["status"] != "completed":
-        print(f"FAIL: Iteration did not complete successfully.")
-        sys.exit(1)
+    if manifest["status"] == "completed":
+        print()
+        print("=" * 60)
+        print(f"  ITERATION {args.start_iteration} COMPLETE")
+        print(f"  Model      : {manifest['model_name']}")
+        print(f"  Best score : {manifest['best_score']}")
+        print(f"  Output     : {manifest['output_path']}")
+        print("=" * 60)
+        sys.exit(0)
 
-    print()
-    print("=" * 60)
-    print(f"  ITERATION {args.start_iteration} COMPLETE")
-    print(f"  Model      : {manifest['model_name']}")
-    print(f"  Best score : {manifest['best_score']}")
-    print(f"  Output     : {manifest['output_path']}")
-    print("=" * 60)
-    sys.exit(0)
+    if manifest["status"] == "no_records":
+        # Gate exhaustion or all-rounds-failed without a Python crash.
+        # Exit 0 so run_chain.sh's `set -e` does not halt the chain — the
+        # next iter's LLM will see the skipped attempts via memory_history
+        # restoration and can adapt. See docs/phase68_orchestrator_memory_and_resume.md
+        # §3.3 for the no_records contract.
+        print()
+        print("=" * 60)
+        print(
+            f"[CHAIN] No models passed gates this iteration. "
+            f"Writing manifest and exiting gracefully to allow chain to continue."
+        )
+        print(f"  Iteration  : {args.start_iteration}")
+        print(f"  Manifest   : {os.path.join(iter_dir, 'manifest.json')} (status=no_records)")
+        print("=" * 60)
+        sys.exit(0)
+
+    # Defensive: any other status is unexpected and should halt the chain.
+    print(f"FAIL: Iteration ended with unexpected manifest status={manifest['status']!r}.")
+    sys.exit(1)
 
 
 if __name__ == "__main__":

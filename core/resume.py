@@ -87,8 +87,14 @@ def _iter_run_name(iter_idx: int) -> str:
 def _read_manifest(workspace: str, iter_idx: int) -> dict:
     """Load + minimally validate ``iter_NNN/manifest.json``.
 
+    Returns the manifest dict for either a completed iter or a clean
+    no-records iter. Callers must inspect ``manifest["status"]`` and
+    branch accordingly (``"completed"`` → consume; ``"no_records"`` →
+    skip with no plugin restore).
+
     Raises :class:`ResumeError` for missing file, malformed JSON,
-    ``status != "completed"``, or missing ``output_path``.
+    ``status == "failed"`` (true crash → halt), unknown status, or
+    ``status == "completed"`` with a missing ``output_path``.
     """
     manifest_path = os.path.join(
         workspace, _iter_run_name(iter_idx), "manifest.json"
@@ -110,10 +116,15 @@ def _read_manifest(workspace: str, iter_idx: int) -> dict:
         ) from e
 
     status = manifest.get("status")
+    if status == "no_records":
+        # Clean no-records exit (gate exhaustion or all-rounds-failed).
+        # Caller skips this iter — no output_path, no plugin to restore.
+        return manifest
     if status != "completed":
         raise ResumeError(
             f"iter {iter_idx:03d}: manifest status={status!r}, expected "
-            f"'completed'. Refusing to chain off an incomplete iter."
+            f"'completed' or 'no_records'. Refusing to chain off a "
+            f"failed/unknown iter."
         )
     output_path = manifest.get("output_path")
     if not output_path:
@@ -228,6 +239,18 @@ def restore_prior_state(
     # and so any plugin shadow-warnings happen in the same order.
     for iter_idx in range(1, current_iter):
         manifest = _read_manifest(abs_workspace, iter_idx)
+        if manifest.get("status") == "no_records":
+            # Iter ran cleanly but produced no usable model (gate exhaustion
+            # or all-rounds-failed). Skip output absorption + plugin
+            # restoration entirely. Not appended to committed_iters because
+            # there is nothing to commit; downstream code that reads
+            # memory_history reconstructs the skip context from the
+            # workspace's per-iter logs, not from the in-process state.
+            print(
+                f"[resume] iter {iter_idx:03d}: no_records — skipping "
+                f"output absorption, no plugin to restore"
+            )
+            continue
         output_path = manifest["output_path"]
         parsed = _validate_run_output(output_path, iter_idx)
 
