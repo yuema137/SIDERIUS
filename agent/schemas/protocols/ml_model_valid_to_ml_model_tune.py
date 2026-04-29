@@ -63,6 +63,7 @@ def local_validated_model(
     formal_strategy: Literal["snapshot", "anchors", "target"] = "snapshot",
     formal_portion: float = 0.1,
     formal_train_portion: float = 1.0,
+    force_formal_round: bool = True,
     # --- Per-round attempt budget (Phase L, §11) ---
     # Tuner-only fan-out; no proposer-side equivalent. Defaults mirror the
     # schema defaults so omitting them at the workflow/CLI surface yields
@@ -180,6 +181,7 @@ def local_validated_model(
         formal_strategy=formal_strategy,
         formal_portion=formal_portion,
         formal_train_portion=formal_train_portion,
+        force_formal_round=force_formal_round,
         attempts_per_round=attempts_per_round,
         attempts_per_formal_round=attempts_per_formal_round,
         max_fail_rounds=max_fail_rounds,

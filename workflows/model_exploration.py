@@ -521,6 +521,7 @@ def run_workflow(
     formal_strategy: str = "snapshot",
     formal_portion: float = 0.1,
     formal_train_portion: float = 1.0,
+    force_formal_round: bool = True,
     # --- Per-round attempt budget (Phase L, docs/resource_estimator_implement.md §11) ---
     # Tuner-only fan-out (no proposer-side equivalent). Defaults mirror the
     # schema/protocol defaults so omitting them at the workflow surface yields
@@ -971,6 +972,7 @@ def run_workflow(
             formal_strategy=formal_strategy,
             formal_portion=formal_portion,
             formal_train_portion=formal_train_portion,
+            force_formal_round=force_formal_round,
             attempts_per_round=attempts_per_round,
             attempts_per_formal_round=attempts_per_formal_round,
             max_fail_rounds=max_fail_rounds,

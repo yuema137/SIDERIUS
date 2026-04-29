@@ -21,18 +21,40 @@ import argparse
 import json
 import sys
 import os
+import warnings
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_models"))
 
 from workflows.model_exploration import run_workflow
 from workflows.llm_config import WorkflowLLMConfig
+from core.resume import restore_prior_state, validate_workspace_layout, ResumeError
+from sdsc_submission_scripts.run_one_iteration import write_manifest
 
 # Default source paths (wavenet + punet seed runs)
 DEFAULT_SOURCE_PATHS = [
     "/home/klz/Data/SIDEREIS_DATA/wavenet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json",
     "/home/klz/Data/SIDEREIS_DATA/punet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json",
 ]
+
+
+def _positive_int(s: str) -> int:
+    """argparse type validator: parse a positive integer (>= 1).
+
+    Used by --max_epochs (Phase 6.8 Commit 11): None / 0 / negative are
+    strictly forbidden — every chain run must train for at least one epoch.
+    """
+    try:
+        v = int(s)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError(
+            f"expected a positive integer, got {s!r}"
+        )
+    if v < 1:
+        raise argparse.ArgumentTypeError(
+            f"expected a positive integer (>= 1), got {v}"
+        )
+    return v
 
 
 def parse_args():
@@ -51,7 +73,7 @@ def parse_args():
     )
     parser.add_argument(
         "--advice", type=str, default="tuner_advice/exploration_adaptive_v1.json",
-        help="Path to the JSON advice file (propose/implement/tune keys).",
+        help="Path to the JSON advice file (propose/implement/tune/mindset keys).",
     )
     parser.add_argument(
         "--llm_config", type=str, default=None,
@@ -60,6 +82,11 @@ def parse_args():
             "(e.g. llm_configs/openai_tiered_v1.json). "
             "When omitted, defaults to uniform gemini-3.1-pro-preview."
         ),
+    )
+    parser.add_argument(
+        "--start_iteration", type=int, default=1,
+        help="First iteration to run (1-based). When > 1, restores prior iters "
+             "from disk via restore_prior_state before entering the iter loop.",
     )
     parser.add_argument(
         "--max_iterations", type=int, default=20,
@@ -86,7 +113,7 @@ def parse_args():
         help="Fraction of data used for trial-mode training/eval.",
     )
     parser.add_argument(
-        "--train_portion", type=float, default=1.0,
+        "--train_portion", type=float, default=0.1,
         help="Fraction of trial data used per epoch.",
     )
     parser.add_argument(
@@ -94,8 +121,8 @@ def parse_args():
         help="Fraction of data used for trial-mode evaluation.",
     )
     parser.add_argument(
-        "--max_epochs", type=int, default=1,
-        help="Hard cap on epochs per tuning round.",
+        "--max_epochs", type=_positive_int, default=1,
+        help="Hard cap on epochs per tuning round. Must be >= 1; None forbidden.",
     )
     parser.add_argument(
         "--trial_strategy", type=str, default="snapshot",
@@ -183,6 +210,22 @@ def parse_args():
         "--formal_train_portion", type=float, default=1.0,
         help="Per-epoch iteration fraction from the formal training scope (default 1.0).",
     )
+    parser.add_argument(
+        "--force_formal_round",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "When True (default), the last round of every iteration forces "
+            "formal mode (planner is told 'formal mode is MANDATORY' and the "
+            "post-LLM override flips is_trial=False). This is the production "
+            "contract — produces a cross-architecture comparable formal "
+            "score. Pass --no-force_formal_round to let the planner choose "
+            "trial mode on the last round (planner is told 'formal mode is "
+            "OPTIONAL' and no override fires). Use only for testing / "
+            "debugging where the trial-mode portions need to take effect on "
+            "the final round."
+        ),
+    )
     # --- Per-round attempt budget (Phase L, docs/resource_estimator_implement.md §11) ---
     parser.add_argument(
         "--attempts_per_round", type=int, default=3,
@@ -215,9 +258,18 @@ def parse_args():
             "shared attempt pool which could starve the formal round."
         ),
     )
+    # Phase 6.8 Commit 11 — canonical name --seed_paths; --source_paths kept
+    # as a deprecated alias for one release. See §3.5 Commit 11.
+    parser.add_argument(
+        "--seed_paths", type=str, nargs="+", default=None,
+        help="Seed run output JSON paths. Defaults to wavenet + punet trial runs. "
+             "Mutually exclusive with the deprecated --source_paths alias.",
+    )
     parser.add_argument(
         "--source_paths", type=str, nargs="+", default=None,
-        help="Seed run output JSON paths. Defaults to wavenet + punet trial runs.",
+        dest="source_paths_legacy",
+        help="DEPRECATED — alias for --seed_paths. Will be removed after "
+             "the next stable run. Use --seed_paths instead.",
     )
     parser.add_argument(
         "--exploration_mode", type=str, default="auto",
@@ -251,6 +303,62 @@ def parse_args():
     return parser.parse_args()
 
 
+def _run_one_iter(args, workspace, llm_config, advice, source_paths, iteration):
+    """Run a single iteration in the chain-in-one-process loop."""
+    run_name = f"iter_{iteration:03d}"
+    iter_dir = os.path.join(workspace, run_name)
+    os.makedirs(iter_dir, exist_ok=True)
+
+    results = run_workflow(
+        source_paths=source_paths,
+        workspace=workspace,
+        run_name=run_name,
+        max_iterations=1,
+        max_rounds=args.max_rounds,
+        max_proposal_attempts=args.max_proposal_attempts,
+        llm_config=llm_config,
+        is_trial=True,
+        trial_strategy=args.trial_strategy,
+        trial_portion=args.trial_portion,
+        target_files=args.target_files,
+        train_portion=args.train_portion,
+        eval_strategy=args.trial_strategy,
+        eval_portion=args.eval_portion,
+        sampling_seed=args.sampling_seed,
+        max_epochs=args.max_epochs,
+        plan_overrides={
+            "is_trial": True,
+            "trial_portion": args.trial_portion,
+            "train_portion": args.train_portion,
+            "eval_portion": args.eval_portion,
+        },
+        trial_time_budget_minutes=args.trial_time_budget_minutes,
+        formal_time_budget_minutes=args.formal_time_budget_minutes,
+        data_dir=args.data_dir,
+        trial_vram_budget_gb=args.trial_vram_budget_gb,
+        formal_vram_budget_gb=args.formal_vram_budget_gb,
+        formal_strategy=args.formal_strategy,
+        formal_portion=args.formal_portion,
+        formal_train_portion=args.formal_train_portion,
+        force_formal_round=args.force_formal_round,
+        attempts_per_round=args.attempts_per_round,
+        attempts_per_formal_round=args.attempts_per_formal_round,
+        max_fail_rounds=args.max_fail_rounds,
+        human_advice_propose=advice.get("propose"),
+        human_advice_implement=advice.get("implement"),
+        human_advice_tune=advice.get("tune"),
+        human_advice_mindset=advice.get("mindset"),
+        cleanup_denoised=True,
+        exploration_mode=args.exploration_mode,
+        minimum_boldness=args.minimum_boldness,
+        max_impl_attempts=args.max_impl_attempts,
+        debug_dump_prompts=args.debug_dump_prompts,
+    )
+
+    manifest = write_manifest(iter_dir, run_name, results)
+    return manifest
+
+
 def main():
     args = parse_args()
 
@@ -259,8 +367,31 @@ def main():
         f"/home/klz/Data/SIDEREIS_DATA/exploration_{args.run_name}"
     )
 
+    # Workspace layout guard (§3.9)
+    try:
+        validate_workspace_layout(workspace)
+    except ResumeError as e:
+        print(f"ERROR: {e}")
+        sys.exit(1)
+
+    # --seed_paths / --source_paths alias collapse (Phase 6.8 Commit 11).
+    seed_legacy = getattr(args, "source_paths_legacy", None)
+    seed_canonical = args.seed_paths
+    if seed_legacy is not None and seed_canonical is not None:
+        print("ERROR: --seed_paths and --source_paths are mutually exclusive. "
+              "--source_paths is the deprecated alias; use --seed_paths only.")
+        sys.exit(1)
+    if seed_legacy is not None:
+        warnings.warn(
+            "--source_paths is deprecated; use --seed_paths instead. "
+            "The deprecated alias will be removed after the next stable run.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        args.seed_paths = seed_legacy
+
     # Resolve source paths
-    source_paths = args.source_paths or DEFAULT_SOURCE_PATHS
+    source_paths = args.seed_paths or DEFAULT_SOURCE_PATHS
     for p in source_paths:
         if not os.path.exists(p):
             print(f"ERROR: Source path not found: {p}")
@@ -272,9 +403,6 @@ def main():
         sys.exit(1)
     with open(args.advice) as f:
         advice = json.load(f)
-    # Allow advice values to be either a string or a list of lines (joined with
-    # "\n" before consumption). The list form keeps long prose readable in the
-    # JSON file without changing what the LLM ultimately sees.
     advice = {k: ("\n".join(v) if isinstance(v, list) else v)
               for k, v in advice.items()}
 
@@ -292,12 +420,14 @@ def main():
         print("ERROR: --trial_strategy=target requires --target_files (one or more file indices)")
         sys.exit(1)
 
+    start_iter = args.start_iteration
+
     # Print summary
     print("=" * 60)
-    print("  SIDERIUS Adaptive Exploration")
+    print("  SIDERIUS Adaptive Exploration (chain-in-one-process)")
     print(f"  Run name  : {args.run_name}")
     print(f"  Workspace : {workspace}")
-    print(f"  Iterations: {args.max_iterations}")
+    print(f"  Iterations: {start_iter}..{args.max_iterations}")
     print(f"  Rounds/iter: {args.max_rounds}  |  Max epochs: {args.max_epochs}")
     print(f"  Trial strategy: {args.trial_strategy}"
           + (f"  |  Target files: {args.target_files}" if args.trial_strategy == "target" else ""))
@@ -318,6 +448,7 @@ def main():
                        else "disabled (free×0.8)")
     print(f"  VRAM budget   : trial={trial_vram_str}  |  formal={formal_vram_str}")
     print(f"  Formal train  : strategy={args.formal_strategy}  portion={args.formal_portion}  train_portion={args.formal_train_portion}")
+    print(f"  Last round    : force_formal={args.force_formal_round} (False ⇒ honour planner — testing only)")
     print(f"  Formal eval   : LOCKED to snapshot + eval_portion=1.0 (Phase M)")
     print(f"  Attempt budget: trial={args.attempts_per_round}/round  formal={args.attempts_per_formal_round}/round  fail-brake={args.max_fail_rounds} (Phase L)")
     print(f"  Data dir      : {args.data_dir or 'unset (skill uses static formula)'}")
@@ -328,60 +459,37 @@ def main():
     print(f"  Min boldness     : {args.minimum_boldness}")
     print("=" * 60)
 
-    run_workflow(
-        source_paths=source_paths,
-        workspace=workspace,
-        run_name=args.run_name,
-        max_iterations=args.max_iterations,
-        max_rounds=args.max_rounds,
-        max_proposal_attempts=args.max_proposal_attempts,
-        llm_config=llm_config,
-        # Trial mode
-        is_trial=True,
-        trial_strategy=args.trial_strategy,
-        trial_portion=args.trial_portion,
-        target_files=args.target_files,
-        train_portion=args.train_portion,
-        eval_portion=args.eval_portion,
-        sampling_seed=args.sampling_seed,
-        max_epochs=args.max_epochs,
-        plan_overrides={
-            "is_trial": True,
-            "trial_portion": args.trial_portion,
-            "train_portion": args.train_portion,
-            "eval_portion": args.eval_portion,
-        },
-        # Time-budget gate (Phase I two-budget split — fans out to both proposer and tuner)
-        trial_time_budget_minutes=args.trial_time_budget_minutes,
-        formal_time_budget_minutes=args.formal_time_budget_minutes,
-        data_dir=args.data_dir,
-        # VRAM-budget gate (Phase K two-budget split — fans out to the tuner only;
-        # no proposer-side gate per §10.17 / §10.9).
-        trial_vram_budget_gb=args.trial_vram_budget_gb,
-        formal_vram_budget_gb=args.formal_vram_budget_gb,
-        # Formal-mode training levers (Phase M — eval side is LOCKED in tuner)
-        formal_strategy=args.formal_strategy,
-        formal_portion=args.formal_portion,
-        formal_train_portion=args.formal_train_portion,
-        # Per-round attempt budget (Phase L, §11 — tuner-only fan-out)
-        attempts_per_round=args.attempts_per_round,
-        attempts_per_formal_round=args.attempts_per_formal_round,
-        max_fail_rounds=args.max_fail_rounds,
-        # Advice
-        human_advice_propose=advice.get("propose"),
-        human_advice_implement=advice.get("implement"),
-        human_advice_tune=advice.get("tune"),
-        human_advice_mindset=advice.get("mindset"),
-        # Cleanup denoised files to save disk
-        cleanup_denoised=True,
-        # Reasoning pipeline
-        exploration_mode=args.exploration_mode,
-        minimum_boldness=args.minimum_boldness,
-        # Implementation retry
-        max_impl_attempts=args.max_impl_attempts,
-        # Phase K.8 debug instrumentation
-        debug_dump_prompts=args.debug_dump_prompts,
-    )
+    # Restore prior state when resuming from a higher iteration
+    if start_iter > 1:
+        try:
+            state = restore_prior_state(
+                workspace=workspace,
+                current_iter=start_iter,
+                seed_paths=source_paths,
+            )
+        except ResumeError as e:
+            print(f"ERROR: restore_prior_state refused: {e}")
+            sys.exit(1)
+        source_paths = state.resolved_source_paths
+        print(f"[CHAIN] Restored {len(state.restored_plugins)} prior plugin(s) "
+              f"from iters {state.committed_iters}")
+
+    # Chain-in-one-process loop: each iter is run_workflow(max_iterations=1)
+    for iteration in range(start_iter, args.max_iterations + 1):
+        print(f"\n{'='*60}")
+        print(f"  IN-PROCESS CHAIN — ITERATION {iteration}/{args.max_iterations}")
+        print(f"{'='*60}")
+
+        manifest = _run_one_iter(
+            args, workspace, llm_config, advice, source_paths, iteration,
+        )
+
+        if manifest["status"] == "completed" and manifest.get("output_path"):
+            source_paths = list(source_paths) + [manifest["output_path"]]
+            print(f"  Iteration {iteration} completed: score={manifest['best_score']}")
+        else:
+            print(f"  Iteration {iteration} failed — stopping chain.")
+            sys.exit(1)
 
 
 if __name__ == "__main__":
