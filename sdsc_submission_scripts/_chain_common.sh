@@ -56,6 +56,17 @@ MINIMUM_BOLDNESS="0.05"             # §3.2: matches Python default
 ATTEMPTS_PER_ROUND=3                # inner attempt budget for trial rounds
 ATTEMPTS_PER_FORMAL_ROUND=5         # inner attempt budget for formal-promotion round
 MAX_FAIL_ROUNDS=3                   # consecutive-failure brake for outer loop
+# §3.2 — Propose→Implement retry brakes (13.C-bis)
+MAX_PROPOSAL_ATTEMPTS=3             # retry budget for propose→implement→validate
+MAX_IMPL_ATTEMPTS=3                 # implementation retries per proposal
+# §3.2 — Trial / formal strategy + formal-scope (13.C-bis)
+TRIAL_STRATEGY="snapshot"           # choices: snapshot|anchors|target
+FORMAL_STRATEGY="snapshot"          # choices: snapshot|anchors|target
+FORMAL_PORTION=0.1                  # segments per file for formal training scope
+FORMAL_TRAIN_PORTION=1.0            # per-epoch iteration fraction for formal training
+# §3.2 — Data slicing / reproducibility (13.C-bis; None-default → omit when empty)
+TARGET_FILES=()                     # int list; passed only when non-empty
+SAMPLING_SEED=""                    # empty == omit == Python None
 # §3.2 — Debugging (action=store_true; 1 emits the flag)
 DEBUG_DUMP_PROMPTS=0
 
@@ -125,6 +136,24 @@ parse_chain_args() {
         --attempts_per_round)        ATTEMPTS_PER_ROUND="$2"; shift 2 ;;
         --attempts_per_formal_round) ATTEMPTS_PER_FORMAL_ROUND="$2"; shift 2 ;;
         --max_fail_rounds)           MAX_FAIL_ROUNDS="$2"; shift 2 ;;
+        # §3.2 — Propose→Implement retry brakes (13.C-bis)
+        --max_proposal_attempts)     MAX_PROPOSAL_ATTEMPTS="$2"; shift 2 ;;
+        --max_impl_attempts)         MAX_IMPL_ATTEMPTS="$2"; shift 2 ;;
+        # §3.2 — Trial / formal strategy + formal-scope (13.C-bis)
+        --trial_strategy)            TRIAL_STRATEGY="$2"; shift 2 ;;
+        --formal_strategy)           FORMAL_STRATEGY="$2"; shift 2 ;;
+        --formal_portion)            FORMAL_PORTION="$2"; shift 2 ;;
+        --formal_train_portion)      FORMAL_TRAIN_PORTION="$2"; shift 2 ;;
+        # §3.2 — Data slicing / reproducibility (13.C-bis)
+        --target_files)
+          # Mirrors --seed_paths: greedy slurp of positional ints until next --flag.
+          shift
+          while [[ $# -gt 0 && ! "$1" =~ ^-- ]]; do
+            TARGET_FILES+=("$1")
+            shift
+          done
+          ;;
+        --sampling_seed)             SAMPLING_SEED="$2"; shift 2 ;;
         # §3.2 — Debugging
         --debug_dump_prompts)        DEBUG_DUMP_PROMPTS=1; shift ;;
         # Slurm-only flags — silently accepted on lilab too (ignored)
@@ -184,9 +213,21 @@ build_app_args() {
         --attempts_per_round "$ATTEMPTS_PER_ROUND"
         --attempts_per_formal_round "$ATTEMPTS_PER_FORMAL_ROUND"
         --max_fail_rounds "$MAX_FAIL_ROUNDS"
+        --max_proposal_attempts "$MAX_PROPOSAL_ATTEMPTS"
+        --max_impl_attempts "$MAX_IMPL_ATTEMPTS"
+        --trial_strategy "$TRIAL_STRATEGY"
+        --formal_strategy "$FORMAL_STRATEGY"
+        --formal_portion "$FORMAL_PORTION"
+        --formal_train_portion "$FORMAL_TRAIN_PORTION"
     )
     if [ "$DEBUG_DUMP_PROMPTS" -eq 1 ]; then
         APP_ARGS+=(--debug_dump_prompts)
+    fi
+    if [ ${#TARGET_FILES[@]} -gt 0 ]; then
+        APP_ARGS+=(--target_files "${TARGET_FILES[@]}")
+    fi
+    if [ -n "$SAMPLING_SEED" ]; then
+        APP_ARGS+=(--sampling_seed "$SAMPLING_SEED")
     fi
     if [ -n "$LLM_CONFIG" ]; then
         APP_ARGS+=(--llm_config "$LLM_CONFIG")
@@ -256,6 +297,15 @@ print_chain_header() {
     echo "    Eval portion   : $EVAL_PORTION"
     echo "    Exploration    : $EXPLORATION_MODE  (boldness>=$MINIMUM_BOLDNESS)"
     echo "    Round attempts : trial=$ATTEMPTS_PER_ROUND, formal=$ATTEMPTS_PER_FORMAL_ROUND, max_fail_rounds=$MAX_FAIL_ROUNDS"
+    echo "    Propose retry  : max_proposal_attempts=$MAX_PROPOSAL_ATTEMPTS, max_impl_attempts=$MAX_IMPL_ATTEMPTS"
+    echo "    Trial strategy : $TRIAL_STRATEGY"
+    echo "    Formal scope   : strategy=$FORMAL_STRATEGY, portion=$FORMAL_PORTION, train_portion=$FORMAL_TRAIN_PORTION"
+    if [ ${#TARGET_FILES[@]} -gt 0 ]; then
+        echo "    Target files   : ${TARGET_FILES[*]}"
+    fi
+    if [ -n "$SAMPLING_SEED" ]; then
+        echo "    Sampling seed  : $SAMPLING_SEED"
+    fi
     if [ "$DEBUG_DUMP_PROMPTS" -eq 1 ]; then
         echo "    Debug dump     : ON (--debug_dump_prompts)"
     else
