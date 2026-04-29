@@ -133,7 +133,7 @@ class TestArgparseSurface:
     def _minimal_argv(self, *extra):
         return [
             "--workspace", "/tmp/ws",
-            "--source_paths", "/tmp/seed.json",
+            "--seed_paths", "/tmp/seed.json",
             *extra,
         ]
 
@@ -182,13 +182,58 @@ class TestArgparseSurface:
     def test_workspace_is_required(self, capsys):
         with pytest.raises(SystemExit):
             runner.build_parser().parse_args(
-                ["--start_iteration", "1", "--source_paths", "/tmp/seed.json"])
+                ["--start_iteration", "1", "--seed_paths", "/tmp/seed.json"])
         # argparse writes its own message to stderr.
 
-    def test_source_paths_is_required(self, capsys):
+    def test_seed_paths_is_required(self, capsys):
+        """Omitting BOTH --seed_paths and --source_paths is an error."""
+        args = runner.build_parser().parse_args(
+            ["--workspace", "/tmp/ws", "--start_iteration", "1"])
+        with pytest.raises(SystemExit):
+            runner.normalize_args(args)
+        err = capsys.readouterr().err
+        assert "one of --seed_paths / --source_paths is required" in err
+
+    def test_legacy_source_paths_alias_works_with_deprecation_warning(self):
+        """--source_paths still resolves to args.seed_paths and emits one DeprecationWarning."""
+        args = runner.build_parser().parse_args([
+            "--workspace", "/tmp/ws",
+            "--start_iteration", "1",
+            "--source_paths", "/tmp/seed.json",
+        ])
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            normalized = runner.normalize_args(args)
+        assert normalized.seed_paths == ["/tmp/seed.json"]
+        assert not hasattr(normalized, "source_paths_legacy")
+        depr = [w for w in caught if issubclass(w.category, DeprecationWarning)
+                and "--source_paths is deprecated" in str(w.message)]
+        assert len(depr) == 1
+
+    def test_seed_paths_and_source_paths_both_supplied_is_an_error(self, capsys):
+        args = runner.build_parser().parse_args([
+            "--workspace", "/tmp/ws",
+            "--start_iteration", "1",
+            "--seed_paths", "/tmp/a.json",
+            "--source_paths", "/tmp/b.json",
+        ])
+        with pytest.raises(SystemExit):
+            runner.normalize_args(args)
+        err = capsys.readouterr().err
+        assert "mutually exclusive" in err
+
+    def test_max_epochs_zero_is_rejected(self, capsys):
+        """--max_epochs must be >= 1 (Phase 6.8 Commit 11 ruling)."""
         with pytest.raises(SystemExit):
             runner.build_parser().parse_args(
-                ["--workspace", "/tmp/ws", "--start_iteration", "1"])
+                self._minimal_argv("--start_iteration", "1", "--max_epochs", "0"))
+        err = capsys.readouterr().err
+        assert ">= 1" in err or "positive integer" in err
+
+    def test_max_epochs_negative_is_rejected(self, capsys):
+        with pytest.raises(SystemExit):
+            runner.build_parser().parse_args(
+                self._minimal_argv("--start_iteration", "1", "--max_epochs", "-1"))
 
     def test_plan_overrides_json_string_becomes_dict(self):
         args = runner.build_parser().parse_args(
@@ -285,7 +330,7 @@ class TestRestoreWiring:
                 code = _run_main([
                     "--workspace", str(tmp_path),
                     "--start_iteration", "1",
-                    "--source_paths", str(seed_file),
+                    "--seed_paths", str(seed_file),
                 ])
         assert code == 0
         # The workflow received the seed list verbatim — no extra prior iters.
@@ -323,7 +368,7 @@ class TestRestoreWiring:
             code = _run_main([
                 "--workspace", str(tmp_path),
                 "--start_iteration", "2",
-                "--source_paths", str(seed_file),
+                "--seed_paths", str(seed_file),
             ])
 
         assert code == 0
@@ -352,7 +397,7 @@ class TestRestoreWiring:
             _run_main([
                 "--workspace", str(tmp_path),
                 "--start_iteration", "2",
-                "--source_paths", str(seed),
+                "--seed_paths", str(seed),
             ])
 
         out = capsys.readouterr().out
@@ -375,7 +420,7 @@ class TestRestoreWiring:
             _run_main([
                 "--workspace", str(tmp_path),
                 "--start_iteration", "1",
-                "--source_paths", str(seed),
+                "--seed_paths", str(seed),
             ])
 
         out = capsys.readouterr().out
@@ -405,7 +450,7 @@ class TestRestoreWiring:
             code = _run_main([
                 "--workspace", str(tmp_path),
                 "--start_iteration", "2",
-                "--source_paths", str(seed),
+                "--seed_paths", str(seed),
             ])
 
         assert code == 0
@@ -444,7 +489,7 @@ class TestRestoreWiring:
             code = _run_main([
                 "--workspace", str(tmp_path),
                 "--start_iteration", "3",
-                "--source_paths", str(seed),
+                "--seed_paths", str(seed),
             ])
 
         assert code == 0
@@ -472,7 +517,7 @@ class TestRestoreWiring:
             code = _run_main([
                 "--workspace", str(tmp_path),
                 "--start_iteration", "2",
-                "--source_paths", str(seed),
+                "--seed_paths", str(seed),
             ])
 
         assert code == 1, "runner should exit non-zero on corrupt prior"
@@ -504,7 +549,7 @@ class TestRestoreWiring:
             code = _run_main([
                 "--workspace", str(tmp_path),
                 "--iteration", "2",  # deprecated alias
-                "--source_paths", str(seed),
+                "--seed_paths", str(seed),
             ])
 
         assert code == 0
