@@ -19,7 +19,7 @@ import argparse
 import importlib
 import traceback
 from pathlib import Path
-from typing import Optional, Union
+from typing import List, Optional, Tuple, Union
 
 from pydantic import ValidationError
 
@@ -105,8 +105,9 @@ def _best_trial_winner(memory_history: list) -> Optional[dict]:
     formal round, and never from a gate-rejected attempt that never
     produced a usable score).
 
-    Used by the forced-formal-round hyperparameter inheritance in
-    :func:`_apply_mode_override_chain`.
+    Used by both the forced-formal-round hyperparameter inheritance in
+    :func:`_apply_mode_override_chain` and the post-scoring mode-collapse
+    sanity check in :func:`_check_zero_output_collapse`.
     """
     candidates = [
         r for r in memory_history
@@ -179,6 +180,64 @@ def _apply_mode_override_chain(
                 "loss_config and lr unchanged. Score may be unreliable."
             )
     return plan
+
+
+def _check_zero_output_collapse(
+    *,
+    file_vector: Optional[List[float]],
+    memory_history: list,
+    is_formal_mode: bool,
+    threshold_ratio: float = 0.01,
+) -> Tuple[bool, Optional[str]]:
+    """Detect mode collapse on a formal round by comparing PSD output
+    magnitude against the trial winner's.
+
+    Returns ``(is_collapsed, log_message)``. The check is a no-op
+    (returns ``(False, None)``) when:
+
+    - This round is not formal mode (``is_formal_mode=False``).
+    - ``file_vector`` is empty / None.
+    - No trial winner exists in ``memory_history`` (e.g. all-formal run
+      via ``trial_allowed=False``, or all trial rounds errored).
+    - The trial winner has no usable ``file_vector`` or its mean
+      magnitude is non-positive (defensive).
+
+    A "collapse" is declared when ``mean(|file_vector|) <
+    threshold_ratio * mean(|winner.file_vector|)``. Default 1% threshold
+    catches the explore_novel_v7 pattern where the formal round's mean
+    PSD output was ~0.005 vs the trial winner's ~10,000 (a 2,000,000×
+    magnitude gap).
+
+    Caller is responsible for acting on a True signal — typically by
+    nulling out ``denoising_score`` and changing the record status to a
+    failure state so the collapsed config does not pollute the "best
+    score" comparisons in subsequent rounds.
+    """
+    if not is_formal_mode:
+        return (False, None)
+    if not file_vector:
+        return (False, None)
+    winner = _best_trial_winner(memory_history)
+    if winner is None:
+        return (False, None)
+    winner_fv = winner.get("file_vector") or []
+    if not winner_fv:
+        return (False, None)
+    current_mag = sum(abs(x) for x in file_vector) / len(file_vector)
+    winner_mag = sum(abs(x) for x in winner_fv) / len(winner_fv)
+    if winner_mag <= 0:
+        return (False, None)
+    ratio = current_mag / winner_mag
+    if ratio < threshold_ratio:
+        msg = (
+            f"  [SANITY CHECK] mode collapse detected: formal round "
+            f"mean|file_vector|={current_mag:.4g} is {ratio*100:.3f}% "
+            f"of trial winner {winner['exp_id']!r} "
+            f"mean|file_vector|={winner_mag:.4g} "
+            f"(threshold={threshold_ratio*100:.0f}%). Marking as failure."
+        )
+        return (True, msg)
+    return (False, None)
 
 
 def _resolve_sample_set_cfg(
@@ -1574,6 +1633,22 @@ class HyperparamTuningAgent:
                     train_results = train_status.get("results", {})
                     score_results = score_res.get("results", {})
 
+                    # Sanity check: detect mode collapse on a formal round.
+                    # When the formal-round override fires AND a trial winner
+                    # exists, require the formal output magnitude to be ≥1%
+                    # of the trial winner's mean|file_vector|. Anything less
+                    # is a degenerate (near-zero PSD output) model and its
+                    # score must not pollute the iteration's "best" tracking.
+                    # See _check_zero_output_collapse for predicate details.
+                    mode_collapse_detected, _collapse_msg = _check_zero_output_collapse(
+                        file_vector=score_results.get("file_vector"),
+                        memory_history=memory_history,
+                        is_formal_mode=(not plan.is_trial),
+                    )
+                    if mode_collapse_detected:
+                        print(_collapse_msg)
+                        score_results["denoising_score"] = None
+
                     # Build the per-file score-comparison table (model vs
                     # raw_baseline vs ground_truth) with subset-scoped
                     # aggregates. Defensive try/except — the 15-hour tuning
@@ -1722,7 +1797,7 @@ class HyperparamTuningAgent:
                     # E. COMMIT: Build, validate, and save the finalized record
                     final_record = {
                         "exp_id":     exp_id,
-                        "status":     "success",
+                        "status":     "failed_mode_collapse" if mode_collapse_detected else "success",
                         "model_type": model_type,
                         "timestamp":  time.strftime("%Y-%m-%d %H:%M:%S"),
                         "file_index": file_index,
