@@ -226,6 +226,20 @@ def parse_args():
             "the final round."
         ),
     )
+    parser.add_argument(
+        "--formal_round_strategy",
+        type=str,
+        choices=["inherit_best_trial", "llm_propose"],
+        default="inherit_best_trial",
+        help=(
+            "Orchestration policy for the forced formal round. "
+            "'inherit_best_trial' (default): inherit loss_config + lr from "
+            "the highest-scoring trial-mode success in the iteration; "
+            "model_config, epochs, and batch_size remain LLM-controlled. "
+            "'llm_propose': planner's choices are honored verbatim. "
+            "Has no effect when --no-force_formal_round is set."
+        ),
+    )
     # --- Per-round attempt budget (Phase L, docs/resource_estimator_implement.md §11) ---
     parser.add_argument(
         "--attempts_per_round", type=int, default=3,
@@ -341,6 +355,7 @@ def _run_one_iter(args, workspace, llm_config, advice, source_paths, iteration):
         formal_portion=args.formal_portion,
         formal_train_portion=args.formal_train_portion,
         force_formal_round=args.force_formal_round,
+        formal_round_strategy=args.formal_round_strategy,
         attempts_per_round=args.attempts_per_round,
         attempts_per_formal_round=args.attempts_per_formal_round,
         max_fail_rounds=args.max_fail_rounds,

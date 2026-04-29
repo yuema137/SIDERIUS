@@ -126,6 +126,7 @@ def _apply_mode_override_chain(
     trial_allowed: bool,
     is_formal_round: bool,
     force_formal_round: bool,
+    formal_round_strategy: str = "inherit_best_trial",
     memory_history: Optional[list] = None,
 ) -> ExperimentPlan:
     """Apply the run-level + last-round overrides to ``plan``.
@@ -138,22 +139,28 @@ def _apply_mode_override_chain(
        every iteration normally forces ``plan.is_trial = False`` so the
        run produces a cross-architecture comparable score. Operators can
        disable this override by passing ``--no-force_formal_round``.
-    3. **Hyperparameter inheritance (post-PR-64 fix)**: when (2) fires
-       AND ``memory_history`` contains at least one successful trial
-       round, ``plan.loss_cfg`` and ``plan.train_cfg["lr"]`` are
-       overwritten with the highest-scoring trial round's values.
-       ``model_cfg``, ``epochs``, and ``batch_size`` are left untouched —
-       the LLM may legitimately scale those for the formal pass.
-       If no trial winner exists, the planner's choices survive and a
-       warning is logged (resilient: a messy trial stage shouldn't kill
-       the chain).
+    3. **Hyperparameter inheritance**, gated on
+       ``formal_round_strategy``:
 
-       Why: in iter_001/iter_002 of explore_novel_v7 the LLM picked an
-       untested ``focal_cw`` loss for the formal round despite all trial
-       rounds using ``focal``; the resulting model collapsed to ~0 PSD
-       output (denoising_score = -3.16). The formal round must be a
-       longer training of the winning trial config, not a sandbox for
-       new loss functions.
+       * ``"inherit_best_trial"`` (default) — when (2) fires AND
+         ``memory_history`` contains at least one successful trial
+         round, ``plan.loss_cfg`` and ``plan.train_cfg["lr"]`` are
+         overwritten with the highest-scoring trial round's values.
+         ``model_cfg``, ``epochs``, and ``batch_size`` are left
+         untouched — the LLM may legitimately scale those for the
+         formal pass. If no trial winner exists, the planner's choices
+         survive and a warning is logged (resilient: a messy trial
+         stage shouldn't kill the chain).
+       * ``"llm_propose"`` — inheritance is skipped; the planner's
+         loss + lr survive verbatim. ``plan.is_trial`` is still flipped
+         to False so the round runs as formal.
+
+       Why the inheritance default exists: in iter_001/iter_002 of
+       explore_novel_v7 the LLM picked an untested ``focal_cw`` loss
+       for the formal round despite all trial rounds using ``focal``;
+       the resulting model collapsed to ~0 PSD output. The default
+       policy mandates the formal round be a longer training of the
+       winning trial config, not a sandbox for new loss functions.
 
     Mutates ``plan`` in place and returns it for caller-chaining.
     """
@@ -161,23 +168,30 @@ def _apply_mode_override_chain(
         plan.is_trial = False
     if is_formal_round and force_formal_round:
         plan.is_trial = False
-        winner = _best_trial_winner(memory_history or [])
-        if winner is not None:
-            winner_loss = winner["params"]["loss_config"]
-            winner_lr = winner["params"]["train_config"]["lr"]
-            plan.loss_cfg = dict(winner_loss)  # copy to avoid aliasing
-            plan.train_cfg["lr"] = winner_lr
-            print(
-                f"  [FORMAL OVERRIDE] inheriting loss="
-                f"{winner_loss.get('loss_type')!r} lr={winner_lr} "
-                f"from best trial round {winner['exp_id']!r} "
-                f"(score={winner['denoising_score']:.4f})"
-            )
+        if formal_round_strategy == "inherit_best_trial":
+            winner = _best_trial_winner(memory_history or [])
+            if winner is not None:
+                winner_loss = winner["params"]["loss_config"]
+                winner_lr = winner["params"]["train_config"]["lr"]
+                plan.loss_cfg = dict(winner_loss)  # copy to avoid aliasing
+                plan.train_cfg["lr"] = winner_lr
+                print(
+                    f"  [FORMAL OVERRIDE] inheriting loss="
+                    f"{winner_loss.get('loss_type')!r} lr={winner_lr} "
+                    f"from best trial round {winner['exp_id']!r} "
+                    f"(score={winner['denoising_score']:.4f})"
+                )
+            else:
+                print(
+                    "  [FORMAL OVERRIDE] WARNING: no successful trial round "
+                    "in this iteration — formal round will use the planner's "
+                    "loss_config and lr unchanged. Score may be unreliable."
+                )
         else:
+            # llm_propose — explicit opt-out from inheritance.
             print(
-                "  [FORMAL OVERRIDE] WARNING: no successful trial round "
-                "in this iteration — formal round will use the planner's "
-                "loss_config and lr unchanged. Score may be unreliable."
+                f"  [FORMAL OVERRIDE] strategy={formal_round_strategy!r} — "
+                "planner's loss_config and lr honored verbatim."
             )
     return plan
 
@@ -1074,13 +1088,14 @@ class HyperparamTuningAgent:
                                       f"using LLM plan as-is")
     
                     # Override chain: trial-allowed lockout + last-round override
-                    # + forced-formal hyperparameter inheritance from best trial.
-                    # See _apply_mode_override_chain for semantics.
+                    # + forced-formal hyperparameter inheritance gated on
+                    # formal_round_strategy. See _apply_mode_override_chain.
                     plan = _apply_mode_override_chain(
                         plan,
                         trial_allowed=trial_allowed,
                         is_formal_round=is_formal_round,
                         force_formal_round=agent_input.force_formal_round,
+                        formal_round_strategy=agent_input.formal_round_strategy,
                         memory_history=memory_history,
                     )
     

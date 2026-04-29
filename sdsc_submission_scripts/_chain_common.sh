@@ -64,6 +64,7 @@ TRIAL_STRATEGY="snapshot"           # choices: snapshot|anchors|target
 FORMAL_STRATEGY="snapshot"          # choices: snapshot|anchors|target
 FORMAL_PORTION=0.1                  # segments per file for formal training scope
 FORMAL_TRAIN_PORTION=1.0            # per-epoch iteration fraction for formal training
+FORMAL_ROUND_STRATEGY="inherit_best_trial"  # choices: inherit_best_trial|llm_propose
 # §3.2 — Data slicing / reproducibility (13.C-bis; None-default → omit when empty)
 TARGET_FILES=()                     # int list; passed only when non-empty
 SAMPLING_SEED=""                    # empty == omit == Python None
@@ -144,6 +145,7 @@ parse_chain_args() {
         --formal_strategy)           FORMAL_STRATEGY="$2"; shift 2 ;;
         --formal_portion)            FORMAL_PORTION="$2"; shift 2 ;;
         --formal_train_portion)      FORMAL_TRAIN_PORTION="$2"; shift 2 ;;
+        --formal_round_strategy)     FORMAL_ROUND_STRATEGY="$2"; shift 2 ;;
         # §3.2 — Data slicing / reproducibility (13.C-bis)
         --target_files)
           # Mirrors --seed_paths: greedy slurp of positional ints until next --flag.
@@ -219,6 +221,7 @@ build_app_args() {
         --formal_strategy "$FORMAL_STRATEGY"
         --formal_portion "$FORMAL_PORTION"
         --formal_train_portion "$FORMAL_TRAIN_PORTION"
+        --formal_round_strategy "$FORMAL_ROUND_STRATEGY"
         # Always-on for chain runs: per-experiment denoised .h5 files
         # accumulate at ~76 GB / attempt and can fill the data drive
         # within 3-4 iterations of a 20-iter chain. Mirrors what
@@ -305,6 +308,7 @@ print_chain_header() {
     echo "    Propose retry  : max_proposal_attempts=$MAX_PROPOSAL_ATTEMPTS, max_impl_attempts=$MAX_IMPL_ATTEMPTS"
     echo "    Trial strategy : $TRIAL_STRATEGY"
     echo "    Formal scope   : strategy=$FORMAL_STRATEGY, portion=$FORMAL_PORTION, train_portion=$FORMAL_TRAIN_PORTION"
+    echo "    Formal round   : policy=$FORMAL_ROUND_STRATEGY"
     if [ ${#TARGET_FILES[@]} -gt 0 ]; then
         echo "    Target files   : ${TARGET_FILES[*]}"
     fi

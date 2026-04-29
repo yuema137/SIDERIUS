@@ -128,6 +128,29 @@ def test_accepts_true_explicit():
     assert inp.force_formal_round is True
 
 
+def test_strategy_default_is_inherit_best_trial():
+    """The default policy mandates the 'safe' inheritance behaviour
+    out-of-the-box."""
+    inp = _make_input()
+    assert inp.formal_round_strategy == "inherit_best_trial"
+
+
+def test_strategy_accepts_llm_propose():
+    inp = _make_input(formal_round_strategy="llm_propose")
+    assert inp.formal_round_strategy == "llm_propose"
+
+
+def test_strategy_rejects_unknown_value():
+    """Schema must reject anything outside the Literal — opt-in policies
+    are added explicitly."""
+    import pydantic
+    try:
+        _make_input(formal_round_strategy="freestyle")
+    except pydantic.ValidationError:
+        return
+    raise AssertionError("ValidationError expected for unknown strategy")
+
+
 # ---------------------------------------------------------------------------
 # 2. Override helper — the four-corner truth table
 # ---------------------------------------------------------------------------
@@ -347,7 +370,8 @@ def test_best_trial_winner_returns_none_on_empty():
 
 def test_force_formal_inherits_loss_and_lr_from_best_trial():
     """The exact bug we're fixing: LLM picked a different (untested) loss
-    for the formal round; override copies the trial winner's loss + lr."""
+    for the formal round; override copies the trial winner's loss + lr.
+    Default strategy ('inherit_best_trial') applied implicitly."""
     plan = _make_plan(is_trial=True)
     plan.loss_cfg = {"loss_type": "focal_cw", "use_class_weights": True}  # bad LLM choice
     plan.train_cfg = {"lr": 1e-3, "epochs": 1, "batch_size": 4}
@@ -455,6 +479,46 @@ def test_inheritance_logs_winner_identity(capsys):
     assert "r2" in out
     assert "focal" in out
     assert "5e-05" in out or "5.0e-05" in out or "5e-5" in out
+
+
+def test_strategy_llm_propose_keeps_planner_choices(capsys):
+    """The escape hatch: with strategy='llm_propose', the planner's
+    loss_config and lr survive verbatim even when a perfectly good
+    trial winner exists. ``is_trial`` is still flipped to False because
+    the formal-round mode flip is independent of the inheritance policy."""
+    plan = _make_plan(is_trial=True)
+    plan.loss_cfg = {"loss_type": "focal_cw", "experimental_flag": True}
+    plan.train_cfg = {"lr": 1e-3, "epochs": 1, "batch_size": 4}
+    history = [_make_trial_record("r2", score=5.45, loss_type="focal", lr=5e-5)]
+    _apply_mode_override_chain(
+        plan, trial_allowed=True, is_formal_round=True, force_formal_round=True,
+        formal_round_strategy="llm_propose",
+        memory_history=history,
+    )
+    assert plan.is_trial is False  # mode still flipped
+    # Planner's choices preserved
+    assert plan.loss_cfg["loss_type"] == "focal_cw"
+    assert plan.loss_cfg["experimental_flag"] is True
+    assert plan.train_cfg["lr"] == 1e-3
+    out = capsys.readouterr().out
+    assert "llm_propose" in out
+    assert "honored verbatim" in out
+
+
+def test_strategy_llm_propose_no_warning_without_winner(capsys):
+    """With strategy='llm_propose', missing trial winner is not a
+    warning condition — the policy explicitly disclaims inheritance."""
+    plan = _make_plan(is_trial=True)
+    plan.loss_cfg = {"loss_type": "focal_cw"}
+    plan.train_cfg = {"lr": 1e-3, "epochs": 1}
+    _apply_mode_override_chain(
+        plan, trial_allowed=True, is_formal_round=True, force_formal_round=True,
+        formal_round_strategy="llm_propose",
+        memory_history=[],
+    )
+    out = capsys.readouterr().out
+    assert "WARNING" not in out
+    assert "no successful trial" not in out.lower()
 
 
 # ---------------------------------------------------------------------------

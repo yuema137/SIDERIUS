@@ -728,6 +728,24 @@ class HyperparamTuningInput(BaseModel):
             "``plan.is_trial``."
         ),
     )
+    formal_round_strategy: Literal["inherit_best_trial", "llm_propose"] = Field(
+        default="inherit_best_trial",
+        description=(
+            "Orchestration policy for the forced formal round. Two values:\n"
+            "* ``inherit_best_trial`` (default) — the formal round inherits "
+            "  ``loss_config`` and ``train_config.lr`` from the highest-scoring "
+            "  trial-mode success record in the current iteration. "
+            "  ``model_config``, ``epochs``, and ``batch_size`` are left for the "
+            "  planner. If no successful trial round exists, the planner's "
+            "  choices survive and a WARNING is logged.\n"
+            "* ``llm_propose`` — the planner's choices for the formal round are "
+            "  honored verbatim. Use only when the formal round is meant to be "
+            "  a sandbox for new hyperparameters.\n"
+            "Has no effect when ``force_formal_round=False`` or on non-last "
+            "rounds. Generic across tasks — the predicate ``time_mode == 'trial' "
+            "AND status == 'success'`` is task-agnostic."
+        ),
+    )
 
     # --- Reproducibility seeds (optional — auto-generated when not provided) ---
     sampling_seed: Optional[int] = Field(

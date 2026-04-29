@@ -314,6 +314,20 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--formal_round_strategy",
+        type=str,
+        choices=["inherit_best_trial", "llm_propose"],
+        default="inherit_best_trial",
+        help=(
+            "Orchestration policy for the forced formal round. "
+            "'inherit_best_trial' (default): inherit loss_config + lr from "
+            "the highest-scoring trial-mode success in the iteration; "
+            "model_config, epochs, and batch_size remain LLM-controlled. "
+            "'llm_propose': planner's choices are honored verbatim. "
+            "Has no effect when --no-force_formal_round is set."
+        ),
+    )
+    parser.add_argument(
         "--cleanup_denoised", action="store_true",
         help="Delete denoised H5 files after scoring (recommended for production)."
     )
@@ -642,6 +656,7 @@ def main():
             formal_portion=args.formal_portion,
             formal_train_portion=args.formal_train_portion,
             force_formal_round=args.force_formal_round,
+            formal_round_strategy=args.formal_round_strategy,
             cleanup_denoised=args.cleanup_denoised,
             max_epochs=args.max_epochs,
             # Time/VRAM budget gates
