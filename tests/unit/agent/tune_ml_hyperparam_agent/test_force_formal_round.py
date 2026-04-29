@@ -26,7 +26,6 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_hyperparameter_tune_agent import (
     _apply_mode_override_chain,
     _best_trial_winner,
-    _check_zero_output_collapse,
 )
 
 
@@ -522,112 +521,11 @@ def test_strategy_llm_propose_no_warning_without_winner(capsys):
 
 
 # ---------------------------------------------------------------------------
-# 6. Zero-output sanity check (mode-collapse detection)
+# 6. Zero-output sanity check — REMOVED.
+# The legacy `_check_zero_output_collapse` predicate has been replaced by
+# the in-process check inside `execute_tools.scoring_utils.score_vector`
+# (commits b1+b2) plus the agent-side `_apply_degeneracy_reaction` policy
+# helper (commit c2). Coverage now lives in:
+#   - tests/unit/execute_tools/test_squid_health_checks.py
+#   - tests/unit/agent/tune_ml_hyperparam_agent/test_degeneracy_handling.py
 # ---------------------------------------------------------------------------
-
-
-def test_sanity_check_detects_collapse_at_explore_v7_magnitude():
-    """The exact pattern we observed: trial winner mean|fv|≈10000, formal
-    round mean|fv|≈0.005 → 5e-7 ratio, way under 1% threshold."""
-    history = [
-        _make_trial_record("r2", score=5.45, file_vector=[10000.0] * 20),
-    ]
-    collapsed, msg = _check_zero_output_collapse(
-        file_vector=[0.005] * 20,
-        memory_history=history,
-        is_formal_mode=True,
-    )
-    assert collapsed is True
-    assert msg is not None
-    assert "mode collapse" in msg.lower()
-    assert "r2" in msg
-
-
-def test_sanity_check_passes_normal_output():
-    """Formal output 50% of trial winner is well above 1% threshold."""
-    history = [_make_trial_record("r2", score=5.45, file_vector=[10000.0] * 20)]
-    collapsed, msg = _check_zero_output_collapse(
-        file_vector=[5000.0] * 20,
-        memory_history=history,
-        is_formal_mode=True,
-    )
-    assert collapsed is False
-    assert msg is None
-
-
-def test_sanity_check_threshold_boundary():
-    """Exactly at 1% should NOT collapse (strict less-than)."""
-    history = [_make_trial_record("r2", score=5.45, file_vector=[1000.0] * 20)]
-    collapsed_at, _ = _check_zero_output_collapse(
-        file_vector=[10.0] * 20,  # exactly 1%
-        memory_history=history,
-        is_formal_mode=True,
-    )
-    assert collapsed_at is False
-    collapsed_below, _ = _check_zero_output_collapse(
-        file_vector=[9.9] * 20,  # just under 1%
-        memory_history=history,
-        is_formal_mode=True,
-    )
-    assert collapsed_below is True
-
-
-def test_sanity_check_skips_when_round_is_trial():
-    """Trial rounds never get the collapse check applied — the check is
-    formal-only because we only have a benchmark on formal rounds."""
-    history = [_make_trial_record("r1", score=5.45, file_vector=[10000.0] * 20)]
-    collapsed, msg = _check_zero_output_collapse(
-        file_vector=[0.005] * 20,
-        memory_history=history,
-        is_formal_mode=False,
-    )
-    assert collapsed is False
-    assert msg is None
-
-
-def test_sanity_check_skips_when_no_trial_winner():
-    """No trial winner in history (e.g. trial_allowed=False run) → check
-    cannot fire because there's no benchmark."""
-    history = [
-        _make_trial_record("formal_only", score=4.0,
-                           time_mode="formal", file_vector=[10000.0] * 20),
-    ]
-    collapsed, msg = _check_zero_output_collapse(
-        file_vector=[0.005] * 20,
-        memory_history=history,
-        is_formal_mode=True,
-    )
-    assert collapsed is False
-    assert msg is None
-
-
-def test_sanity_check_handles_empty_file_vector():
-    """Defensive: empty / None file_vector returns False without crashing."""
-    history = [_make_trial_record("r1", score=5.45, file_vector=[10000.0] * 20)]
-    for fv in (None, [], [0.0] * 20):
-        collapsed, _ = _check_zero_output_collapse(
-            file_vector=fv,
-            memory_history=history,
-            is_formal_mode=True,
-        )
-        # None / [] → no comparison possible; all-zero → ratio is 0 which
-        # is < 1% threshold so collapse fires.
-        if fv is None or fv == []:
-            assert collapsed is False
-        else:
-            assert collapsed is True
-
-
-def test_sanity_check_custom_threshold():
-    """Threshold is parameterized — caller can tighten or loosen."""
-    history = [_make_trial_record("r1", score=5.45, file_vector=[100.0] * 20)]
-    # 30% of winner — passes default 1% but fails a 50% threshold
-    collapsed_loose, _ = _check_zero_output_collapse(
-        file_vector=[30.0] * 20, memory_history=history, is_formal_mode=True,
-    )
-    assert collapsed_loose is False
-    collapsed_strict, _ = _check_zero_output_collapse(
-        file_vector=[30.0] * 20, memory_history=history,
-        is_formal_mode=True, threshold_ratio=0.5,
-    )
-    assert collapsed_strict is True

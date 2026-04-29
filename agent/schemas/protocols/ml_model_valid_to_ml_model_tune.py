@@ -65,6 +65,8 @@ def local_validated_model(
     formal_train_portion: float = 1.0,
     force_formal_round: bool = True,
     formal_round_strategy: Literal["inherit_best_trial", "llm_propose"] = "inherit_best_trial",
+    # --- Degenerate-output reaction (paired with execute_tools.squid_health_checks) ---
+    degenerate_penalty_score: Optional[float] = None,
     # --- Per-round attempt budget (Phase L, §11) ---
     # Tuner-only fan-out; no proposer-side equivalent. Defaults mirror the
     # schema defaults so omitting them at the workflow/CLI surface yields
@@ -123,6 +125,17 @@ def local_validated_model(
         inside the tuner — intentionally NOT operator-configurable, so
         formal scores are architecturally comparable across architectures.
         See docs/resource_estimator_implement.md §12.
+      - degenerate_penalty_score :
+        Operator policy for the agent's reaction when score_vector's
+        task-specific health check flags a degenerate formal-round output
+        (``is_degenerate=True`` AND ``not plan.is_trial``). ``None``
+        (default) nulls the ``denoising_score`` so the round can never be
+        picked as 'best'; a float value (typically large-negative) is used
+        as the score so the planner can still rank-order the failure. In
+        both cases the record is tagged ``status='failed_mode_collapse'``
+        with the predicate's ``failure_reason`` preserved verbatim. Trial
+        rounds are immune (no magnitude benchmark exists). Paired with
+        ``execute_tools.squid_health_checks.check_amplitude_collapse``.
       - attempts_per_round / attempts_per_formal_round / max_fail_rounds :
         Phase L per-round attempt budget + consecutive-failure brake
         (defaults 3 / 5 / 3). Trial rounds get ``attempts_per_round`` inner
@@ -184,6 +197,7 @@ def local_validated_model(
         formal_train_portion=formal_train_portion,
         force_formal_round=force_formal_round,
         formal_round_strategy=formal_round_strategy,
+        degenerate_penalty_score=degenerate_penalty_score,
         attempts_per_round=attempts_per_round,
         attempts_per_formal_round=attempts_per_formal_round,
         max_fail_rounds=max_fail_rounds,

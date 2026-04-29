@@ -328,6 +328,20 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--degenerate_penalty_score",
+        type=float,
+        default=None,
+        help=(
+            "Operator policy for the agent's reaction when score_vector's "
+            "task-specific health check flags a degenerate formal-round output. "
+            "Default None nulls the denoising_score (the round can never be "
+            "picked as 'best'). A float (typically large-negative, e.g. -5.0) "
+            "is used as the round's score, letting the planner rank the "
+            "failure below any healthy success. In both cases status is set "
+            "to 'failed_mode_collapse' and failure_reason is preserved."
+        ),
+    )
+    parser.add_argument(
         "--cleanup_denoised", action="store_true",
         help="Delete denoised H5 files after scoring (recommended for production)."
     )
@@ -657,6 +671,7 @@ def main():
             formal_train_portion=args.formal_train_portion,
             force_formal_round=args.force_formal_round,
             formal_round_strategy=args.formal_round_strategy,
+            degenerate_penalty_score=args.degenerate_penalty_score,
             cleanup_denoised=args.cleanup_denoised,
             max_epochs=args.max_epochs,
             # Time/VRAM budget gates

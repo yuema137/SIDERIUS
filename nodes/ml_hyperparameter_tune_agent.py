@@ -106,8 +106,11 @@ def _best_trial_winner(memory_history: list) -> Optional[dict]:
     produced a usable score).
 
     Used by both the forced-formal-round hyperparameter inheritance in
-    :func:`_apply_mode_override_chain` and the post-scoring mode-collapse
-    sanity check in :func:`_check_zero_output_collapse`.
+    :func:`_apply_mode_override_chain` and the per-round
+    ``reference_file_vector`` plumbed into ``sandbox.score_vector`` so the
+    task-specific health check inside scoring (e.g.
+    ``execute_tools.squid_health_checks.check_amplitude_collapse``) has a
+    benchmark on formal rounds.
     """
     candidates = [
         r for r in memory_history
@@ -196,62 +199,60 @@ def _apply_mode_override_chain(
     return plan
 
 
-def _check_zero_output_collapse(
-    *,
-    file_vector: Optional[List[float]],
-    memory_history: list,
-    is_formal_mode: bool,
-    threshold_ratio: float = 0.01,
+def _apply_degeneracy_reaction(
+    score_results: dict,
+    plan: ExperimentPlan,
+    penalty_score: Optional[float],
 ) -> Tuple[bool, Optional[str]]:
-    """Detect mode collapse on a formal round by comparing PSD output
-    magnitude against the trial winner's.
+    """Generic policy reaction to score_vector's task-specific health-check
+    signal.
 
-    Returns ``(is_collapsed, log_message)``. The check is a no-op
-    (returns ``(False, None)``) when:
+    The task-specific predicate (e.g. amplitude collapse for SQUID
+    denoising) lives in ``execute_tools.squid_health_checks`` and is
+    invoked from inside ``execute_tools.scoring_utils.score_vector``.
+    By the time this helper runs, ``score_results`` already carries the
+    ``is_degenerate`` and ``failure_reason`` keys.
 
-    - This round is not formal mode (``is_formal_mode=False``).
-    - ``file_vector`` is empty / None.
-    - No trial winner exists in ``memory_history`` (e.g. all-formal run
-      via ``trial_allowed=False``, or all trial rounds errored).
-    - The trial winner has no usable ``file_vector`` or its mean
-      magnitude is non-positive (defensive).
+    The agent's role here is purely **policy** — translate the task-side
+    health signal into the right tuner-level reaction:
 
-    A "collapse" is declared when ``mean(|file_vector|) <
-    threshold_ratio * mean(|winner.file_vector|)``. Default 1% threshold
-    catches the explore_novel_v7 pattern where the formal round's mean
-    PSD output was ~0.005 vs the trial winner's ~10,000 (a 2,000,000×
-    magnitude gap).
+    * Trial rounds are immune (no magnitude benchmark exists), so the
+      reaction never fires when ``plan.is_trial`` is True.
+    * On a degenerate **formal** round:
 
-    Caller is responsible for acting on a True signal — typically by
-    nulling out ``denoising_score`` and changing the record status to a
-    failure state so the collapsed config does not pollute the "best
-    score" comparisons in subsequent rounds.
+      - ``penalty_score is None`` → null ``denoising_score`` so the round
+        cannot be picked as 'best' by the planner's max-score logic.
+      - ``penalty_score`` is a float → use it as ``denoising_score`` so
+        the planner's rank-ordering still includes the failure but
+        strictly below any healthy success.
+
+      In both cases the caller wraps the record with
+      ``status='failed_mode_collapse'`` and preserves ``failure_reason``
+      verbatim for the next iteration's planner.
+
+    Args:
+        score_results: Mutable dict — the ``score_res["results"]`` block
+            written by the scoring branch. Must contain ``is_degenerate``
+            and ``failure_reason`` keys (defensive defaults applied if
+            absent). ``denoising_score`` is mutated in place when the
+            reaction fires.
+        plan: The current round's validated ``ExperimentPlan``. Only
+            ``plan.is_trial`` is read.
+        penalty_score: The operator-supplied
+            ``HyperparamTuningInput.degenerate_penalty_score``.
+
+    Returns:
+        ``(is_degenerate, failure_reason)`` — the unmutated original
+        signal so the caller can populate ``ExperimentRecord.status`` and
+        ``ExperimentRecord.failure_reason`` independently of any score
+        mutation.
     """
-    if not is_formal_mode:
-        return (False, None)
-    if not file_vector:
-        return (False, None)
-    winner = _best_trial_winner(memory_history)
-    if winner is None:
-        return (False, None)
-    winner_fv = winner.get("file_vector") or []
-    if not winner_fv:
-        return (False, None)
-    current_mag = sum(abs(x) for x in file_vector) / len(file_vector)
-    winner_mag = sum(abs(x) for x in winner_fv) / len(winner_fv)
-    if winner_mag <= 0:
-        return (False, None)
-    ratio = current_mag / winner_mag
-    if ratio < threshold_ratio:
-        msg = (
-            f"  [SANITY CHECK] mode collapse detected: formal round "
-            f"mean|file_vector|={current_mag:.4g} is {ratio*100:.3f}% "
-            f"of trial winner {winner['exp_id']!r} "
-            f"mean|file_vector|={winner_mag:.4g} "
-            f"(threshold={threshold_ratio*100:.0f}%). Marking as failure."
-        )
-        return (True, msg)
-    return (False, None)
+    is_degenerate = score_results.get("is_degenerate", False)
+    failure_reason = score_results.get("failure_reason")
+    if is_degenerate and not plan.is_trial:
+        print(f"  [HEALTH CHECK] {failure_reason}")
+        score_results["denoising_score"] = penalty_score
+    return is_degenerate, failure_reason
 
 
 def _resolve_sample_set_cfg(
@@ -1624,11 +1625,23 @@ class HyperparamTuningAgent:
                         # Trial: sparse SampleSet. Formal: full SampleSet (all 20 × 200).
                         def _denoised_fn(fi):
                             return f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_{fi:04d}.h5"
+                        # Reference vector for the task-specific health check
+                        # inside score_vector (commits b1+b2). Only meaningful
+                        # on a formal round AND when a trial winner exists in
+                        # this iteration's memory_history. None on trial rounds
+                        # (no benchmark) or on all-formal runs (trial_allowed
+                        # =False) → score_vector skips the predicate gracefully.
+                        _ref_fv = None
+                        if not plan.is_trial:
+                            _winner = _best_trial_winner(memory_history)
+                            if _winner is not None:
+                                _ref_fv = _winner.get("file_vector")
                         file_vector, final_scalar, is_degenerate, failure_reason = sandbox.score_vector(
                             sample_set=eval_sample_set,
                             anchor_map=anchor_map_data["anchors"],
                             s_max=anchor_map_data["s_max"],
                             denoised_filename_fn=_denoised_fn,
+                            reference_file_vector=_ref_fv,
                         )
                         score_res = {
                             "status": "success",
@@ -1650,21 +1663,19 @@ class HyperparamTuningAgent:
                     train_results = train_status.get("results", {})
                     score_results = score_res.get("results", {})
 
-                    # Sanity check: detect mode collapse on a formal round.
-                    # When the formal-round override fires AND a trial winner
-                    # exists, require the formal output magnitude to be ≥1%
-                    # of the trial winner's mean|file_vector|. Anything less
-                    # is a degenerate (near-zero PSD output) model and its
-                    # score must not pollute the iteration's "best" tracking.
-                    # See _check_zero_output_collapse for predicate details.
-                    mode_collapse_detected, _collapse_msg = _check_zero_output_collapse(
-                        file_vector=score_results.get("file_vector"),
-                        memory_history=memory_history,
-                        is_formal_mode=(not plan.is_trial),
+                    # Generic degeneracy reaction. The task-specific predicate
+                    # already ran inside score_vector (execute_tools.squid_health_checks)
+                    # and produced is_degenerate / failure_reason on score_results.
+                    # Here we only translate that signal into the tuner-level
+                    # policy: penalize the formal score so the round can't be
+                    # picked as 'best', and surface failure_reason on the record.
+                    # See _apply_degeneracy_reaction for predicate details.
+                    is_degenerate, failure_reason = _apply_degeneracy_reaction(
+                        score_results,
+                        plan,
+                        agent_input.degenerate_penalty_score,
                     )
-                    if mode_collapse_detected:
-                        print(_collapse_msg)
-                        score_results["denoising_score"] = None
+                    _is_degenerate_formal = is_degenerate and not plan.is_trial
 
                     # Build the per-file score-comparison table (model vs
                     # raw_baseline vs ground_truth) with subset-scoped
@@ -1672,10 +1683,14 @@ class HyperparamTuningAgent:
                     # loop must not crash on a rendering bug; a None
                     # score_table simply skips the enriched prompt block in
                     # the next round. See docs/aggregated_score_table_awareness.md §7.1.
+                    # Skipped on degenerate-formal rounds even when a non-None
+                    # penalty leaves the scalar populated — rendering the
+                    # penalty into the markdown 'model' column would mislead
+                    # the next planner. failure_reason carries the signal.
                     score_table: Optional[ScoreComparisonTable] = None
                     _sc_fv = score_results.get("file_vector")
                     _sc_scalar = score_results.get("denoising_score")
-                    if _sc_fv is not None and _sc_scalar is not None:
+                    if _sc_fv is not None and _sc_scalar is not None and not _is_degenerate_formal:
                         try:
                             score_table = build_score_table(
                                 model_fv_log=_sc_fv,
@@ -1814,7 +1829,7 @@ class HyperparamTuningAgent:
                     # E. COMMIT: Build, validate, and save the finalized record
                     final_record = {
                         "exp_id":     exp_id,
-                        "status":     "failed_mode_collapse" if mode_collapse_detected else "success",
+                        "status":     "failed_mode_collapse" if _is_degenerate_formal else "success",
                         "model_type": model_type,
                         "timestamp":  time.strftime("%Y-%m-%d %H:%M:%S"),
                         "file_index": file_index,
@@ -1831,6 +1846,12 @@ class HyperparamTuningAgent:
                         # coerces it back to ScoreComparisonTable below). None
                         # when scoring failed or no scalar was produced.
                         "score_table":     score_table.model_dump() if score_table else None,
+                        # Health-check failure reason. None on healthy rounds
+                        # and on trial rounds; populated when the task-specific
+                        # predicate inside score_vector fired. Surfaced to the
+                        # next planner via memory_history (verbatim in the
+                        # recent window, key-projected in the condensed tail).
+                        "failure_reason": failure_reason if _is_degenerate_formal else None,
                         # Data volume
                         "training_psd_segments": train_psd_segments,
                         "eval_psd_segments":    eval_psd_segments,

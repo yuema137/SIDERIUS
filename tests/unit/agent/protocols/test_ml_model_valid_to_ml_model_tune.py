@@ -475,6 +475,32 @@ class TestFormalRoundStrategyFanOut:
         assert result.formal_round_strategy == "llm_propose"
 
 
+# ---------------------------------------------------------------------------
+# degenerate_penalty_score fan-out
+#
+# Operator policy for the agent's reaction when score_vector flags a
+# degenerate formal-round output. None (default) → null score; float →
+# use as penalty. The protocol must surface caller overrides to
+# HyperparamTuningInput and otherwise leave the schema default (None).
+# ---------------------------------------------------------------------------
+
+
+class TestDegeneratePenaltyScoreFanOut:
+
+    def test_default_when_omitted(self, validator_output, proposal_output, storage):
+        result = local_validated_model(validator_output, proposal_output, storage)
+        assert result.degenerate_penalty_score is None
+
+    def test_float_penalty_passed_through(
+        self, validator_output, proposal_output, storage
+    ):
+        result = local_validated_model(
+            validator_output, proposal_output, storage,
+            degenerate_penalty_score=-2.5,
+        )
+        assert result.degenerate_penalty_score == -2.5
+
+
 class TestDatabaseValidatedModel:
 
     def test_raises_not_implemented(self, validator_output, storage):

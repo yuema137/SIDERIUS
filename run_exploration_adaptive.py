@@ -240,6 +240,20 @@ def parse_args():
             "Has no effect when --no-force_formal_round is set."
         ),
     )
+    parser.add_argument(
+        "--degenerate_penalty_score",
+        type=float,
+        default=None,
+        help=(
+            "Operator policy for the agent's reaction when score_vector's "
+            "task-specific health check flags a degenerate formal-round output. "
+            "Default None nulls the denoising_score (the round can never be "
+            "picked as 'best'). A float (typically large-negative, e.g. -5.0) "
+            "is used as the round's score, letting the planner rank the "
+            "failure below any healthy success. In both cases status is set "
+            "to 'failed_mode_collapse' and failure_reason is preserved."
+        ),
+    )
     # --- Per-round attempt budget (Phase L, docs/resource_estimator_implement.md §11) ---
     parser.add_argument(
         "--attempts_per_round", type=int, default=3,
@@ -356,6 +370,7 @@ def _run_one_iter(args, workspace, llm_config, advice, source_paths, iteration):
         formal_train_portion=args.formal_train_portion,
         force_formal_round=args.force_formal_round,
         formal_round_strategy=args.formal_round_strategy,
+        degenerate_penalty_score=args.degenerate_penalty_score,
         attempts_per_round=args.attempts_per_round,
         attempts_per_formal_round=args.attempts_per_formal_round,
         max_fail_rounds=args.max_fail_rounds,

@@ -1229,3 +1229,24 @@ class TestOrchestrationParamForwarding:
             formal_round_strategy="llm_propose",
         )
         assert tune_input.formal_round_strategy == "llm_propose"
+
+    def test_signature_accepts_degenerate_penalty_score(self):
+        import inspect
+        sig = inspect.signature(run_workflow)
+        assert "degenerate_penalty_score" in sig.parameters
+        assert sig.parameters["degenerate_penalty_score"].default is None
+
+    def test_degenerate_penalty_score_default_is_none(
+        self, workflow_env, tmp_path
+    ):
+        tune_input = _tune_input_from_workflow(workflow_env, tmp_path)
+        assert tune_input.degenerate_penalty_score is None
+
+    def test_degenerate_penalty_score_float_reaches_tuning_input(
+        self, workflow_env, tmp_path
+    ):
+        tune_input = _tune_input_from_workflow(
+            workflow_env, tmp_path,
+            degenerate_penalty_score=-2.5,
+        )
+        assert tune_input.degenerate_penalty_score == -2.5
