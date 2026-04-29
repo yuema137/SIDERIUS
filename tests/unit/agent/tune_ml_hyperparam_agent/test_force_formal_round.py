@@ -23,7 +23,10 @@ from agent.schemas.hyperparam_tuning import (
     HyperparamTuningInput,
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
-from nodes.ml_hyperparameter_tune_agent import _apply_mode_override_chain
+from nodes.ml_hyperparameter_tune_agent import (
+    _apply_mode_override_chain,
+    _best_trial_winner,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -47,6 +50,46 @@ def _make_plan(is_trial: bool = True) -> ExperimentPlan:
         eval_strategy="snapshot",
         eval_portion=0.1,
     )
+
+
+def _make_trial_record(
+    exp_id: str,
+    *,
+    score,
+    loss_type: str = "focal",
+    lr: float = 1e-4,
+    time_mode: str = "trial",
+    status: str = "success",
+    file_vector=None,
+):
+    """Memory-history record with the fields ``_best_trial_winner``
+    actually reads.
+
+    Defaults match the v7 trial-success shape (score≠None, time_mode=trial,
+    success status, ~10000-magnitude file_vector). Override per-test for
+    edge cases (failure status, missing time_mode, formal mode, etc.).
+    """
+    return {
+        "exp_id": exp_id,
+        "status": status,
+        "denoising_score": score,
+        "params": {
+            "loss_config": {
+                "loss_type": loss_type,
+                "alpha": 0.5,
+                "gamma": 2.0,
+                "reduction": "mean",
+            },
+            "train_config": {
+                "lr": lr,
+                "epochs": 1,
+                "batch_size": 1,
+                "device": "cuda",
+            },
+        },
+        "file_vector": file_vector if file_vector is not None else [10000.0] * 20,
+        "memory": {"time_mode": time_mode},
+    }
 
 
 def _make_input(**overrides) -> HyperparamTuningInput:
@@ -240,3 +283,174 @@ def test_prompt_trial_disabled_directs_formal():
     assert "Trial mode is DISABLED" in prompt_f, (
         "flag=False did not surface the trial_allowed=False lockout message"
     )
+
+
+# ---------------------------------------------------------------------------
+# 4. _best_trial_winner — eligibility predicate
+# ---------------------------------------------------------------------------
+
+
+def test_best_trial_winner_picks_max_score():
+    history = [
+        _make_trial_record("r1", score=5.15),
+        _make_trial_record("r2", score=5.45),  # winner
+        _make_trial_record("r3", score=4.90),
+    ]
+    winner = _best_trial_winner(history)
+    assert winner is not None
+    assert winner["exp_id"] == "r2"
+
+
+def test_best_trial_winner_excludes_formal_mode():
+    """Records with memory.time_mode=='formal' are NOT eligible — even
+    if their score is higher than any trial-mode record."""
+    history = [
+        _make_trial_record("formal_high", score=99.0, time_mode="formal"),
+        _make_trial_record("trial_low", score=5.45, time_mode="trial"),
+    ]
+    winner = _best_trial_winner(history)
+    assert winner is not None
+    assert winner["exp_id"] == "trial_low"
+
+
+def test_best_trial_winner_excludes_non_success():
+    """Gate-rejected / errored records never qualify as a winner even
+    when time_mode is set."""
+    history = [
+        _make_trial_record("bad", score=None, status="error_inference"),
+        _make_trial_record("skipped", score=None, status="skipped_time_risk"),
+        _make_trial_record("good", score=5.45),
+    ]
+    winner = _best_trial_winner(history)
+    assert winner is not None
+    assert winner["exp_id"] == "good"
+
+
+def test_best_trial_winner_excludes_missing_time_mode():
+    """Records without memory.time_mode are excluded — we cannot prove
+    they were a real trial run."""
+    rec = _make_trial_record("no_mode", score=5.45)
+    rec["memory"].pop("time_mode")
+    winner = _best_trial_winner([rec])
+    assert winner is None
+
+
+def test_best_trial_winner_returns_none_on_empty():
+    assert _best_trial_winner([]) is None
+
+
+# ---------------------------------------------------------------------------
+# 5. Forced-formal hyperparameter inheritance
+# ---------------------------------------------------------------------------
+
+
+def test_force_formal_inherits_loss_and_lr_from_best_trial():
+    """The exact bug we're fixing: LLM picked a different (untested) loss
+    for the formal round; override copies the trial winner's loss + lr."""
+    plan = _make_plan(is_trial=True)
+    plan.loss_cfg = {"loss_type": "focal_cw", "use_class_weights": True}  # bad LLM choice
+    plan.train_cfg = {"lr": 1e-3, "epochs": 1, "batch_size": 4}
+    history = [
+        _make_trial_record("r1", score=5.15, loss_type="focal", lr=1e-4),
+        _make_trial_record("r2", score=5.45, loss_type="focal", lr=5e-5),  # winner
+        _make_trial_record("r3", score=None, loss_type="ce", lr=5e-5,
+                           status="error_inference"),
+    ]
+    _apply_mode_override_chain(
+        plan, trial_allowed=True, is_formal_round=True, force_formal_round=True,
+        memory_history=history,
+    )
+    assert plan.is_trial is False
+    assert plan.loss_cfg["loss_type"] == "focal"
+    assert plan.loss_cfg.get("use_class_weights") is None  # bad field gone
+    assert plan.train_cfg["lr"] == 5e-5
+    # Untouched: epochs, batch_size, model_cfg
+    assert plan.train_cfg["epochs"] == 1
+    assert plan.train_cfg["batch_size"] == 4
+
+
+def test_no_trial_winner_falls_back_to_planner_with_warning(capsys):
+    """No successful trial in history → planner's loss_cfg + lr survive,
+    a WARNING is logged, and is_trial is still flipped to False."""
+    plan = _make_plan(is_trial=True)
+    plan.loss_cfg = {"loss_type": "focal_cw"}
+    plan.train_cfg = {"lr": 1e-3, "epochs": 1}
+    history = [
+        _make_trial_record("r1", score=None, status="error_training"),
+    ]
+    _apply_mode_override_chain(
+        plan, trial_allowed=True, is_formal_round=True, force_formal_round=True,
+        memory_history=history,
+    )
+    assert plan.is_trial is False
+    assert plan.loss_cfg["loss_type"] == "focal_cw"
+    assert plan.train_cfg["lr"] == 1e-3
+    out = capsys.readouterr().out
+    assert "WARNING" in out
+    assert "no successful trial" in out.lower()
+
+
+def test_inheritance_skipped_when_force_formal_off():
+    """force_formal_round=False on the last round → no flip, no inheritance,
+    even with a perfectly good trial winner sitting in history."""
+    plan = _make_plan(is_trial=True)
+    plan.loss_cfg = {"loss_type": "focal_cw"}
+    plan.train_cfg = {"lr": 1e-3, "epochs": 1}
+    history = [_make_trial_record("r1", score=5.45, loss_type="focal", lr=5e-5)]
+    _apply_mode_override_chain(
+        plan, trial_allowed=True, is_formal_round=True, force_formal_round=False,
+        memory_history=history,
+    )
+    assert plan.is_trial is True
+    assert plan.loss_cfg["loss_type"] == "focal_cw"
+    assert plan.train_cfg["lr"] == 1e-3
+
+
+def test_inheritance_skipped_on_non_last_rounds():
+    """Even with force_formal_round=True, mid-iteration rounds don't get
+    inheritance applied because is_formal_round=False."""
+    plan = _make_plan(is_trial=True)
+    plan.loss_cfg = {"loss_type": "focal_cw"}
+    plan.train_cfg = {"lr": 1e-3, "epochs": 1}
+    history = [_make_trial_record("r1", score=5.45, loss_type="focal", lr=5e-5)]
+    _apply_mode_override_chain(
+        plan, trial_allowed=True, is_formal_round=False, force_formal_round=True,
+        memory_history=history,
+    )
+    assert plan.is_trial is True
+    assert plan.loss_cfg["loss_type"] == "focal_cw"
+    assert plan.train_cfg["lr"] == 1e-3
+
+
+def test_inheritance_default_memory_history_none():
+    """memory_history defaults to None — older callers shouldn't break.
+    With None, no inheritance fires (treated as empty history)."""
+    plan = _make_plan(is_trial=True)
+    plan.loss_cfg = {"loss_type": "focal_cw"}
+    plan.train_cfg = {"lr": 1e-3, "epochs": 1}
+    _apply_mode_override_chain(
+        plan, trial_allowed=True, is_formal_round=True, force_formal_round=True,
+        # memory_history omitted on purpose
+    )
+    assert plan.is_trial is False
+    # No winner → loss/lr untouched
+    assert plan.loss_cfg["loss_type"] == "focal_cw"
+    assert plan.train_cfg["lr"] == 1e-3
+
+
+def test_inheritance_logs_winner_identity(capsys):
+    """The success-path log line must surface enough context that an
+    operator can audit the inheritance after the fact."""
+    plan = _make_plan(is_trial=True)
+    plan.loss_cfg = {"loss_type": "focal_cw"}
+    plan.train_cfg = {"lr": 1e-3, "epochs": 1}
+    history = [_make_trial_record("r2", score=5.4523, loss_type="focal", lr=5e-5)]
+    _apply_mode_override_chain(
+        plan, trial_allowed=True, is_formal_round=True, force_formal_round=True,
+        memory_history=history,
+    )
+    out = capsys.readouterr().out
+    assert "FORMAL OVERRIDE" in out
+    assert "r2" in out
+    assert "focal" in out
+    assert "5e-05" in out or "5.0e-05" in out or "5e-5" in out

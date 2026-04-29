@@ -95,26 +95,64 @@ def _validate_data_config(
             )
 
 
+def _best_trial_winner(memory_history: list) -> Optional[dict]:
+    """Highest-scoring trial-mode success record from ``memory_history``,
+    or ``None`` if no eligible record exists.
+
+    Eligibility predicate: ``status == "success"`` AND
+    ``denoising_score is not None`` AND
+    ``memory.time_mode == "trial"`` (so we never inherit from a previous
+    formal round, and never from a gate-rejected attempt that never
+    produced a usable score).
+
+    Used by the forced-formal-round hyperparameter inheritance in
+    :func:`_apply_mode_override_chain`.
+    """
+    candidates = [
+        r for r in memory_history
+        if r.get("status") == "success"
+        and r.get("denoising_score") is not None
+        and (r.get("memory") or {}).get("time_mode") == "trial"
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda r: r["denoising_score"])
+
+
 def _apply_mode_override_chain(
     plan: ExperimentPlan,
     *,
     trial_allowed: bool,
     is_formal_round: bool,
     force_formal_round: bool,
+    memory_history: Optional[list] = None,
 ) -> ExperimentPlan:
-    """Apply the run-level + last-round overrides to ``plan.is_trial``.
+    """Apply the run-level + last-round overrides to ``plan``.
 
-    Two independent gates can force ``plan.is_trial = False``:
+    Three independent mutations can fire:
 
-    * ``trial_allowed=False`` — the run was launched without trial mode
-      enabled, so every round runs formal regardless of what the planner
-      picked.
-    * ``is_formal_round and force_formal_round`` — the last round of every
-      iteration normally forces formal so the run produces a
-      cross-architecture comparable score. Operators can disable this
-      override by passing ``--no-force_formal_round`` for testing /
-      debugging where the trial-mode portions need to take effect on the
-      final round.
+    1. ``trial_allowed=False`` — the run was launched without trial mode
+       enabled, so every round forces ``plan.is_trial = False``.
+    2. ``is_formal_round and force_formal_round`` — the last round of
+       every iteration normally forces ``plan.is_trial = False`` so the
+       run produces a cross-architecture comparable score. Operators can
+       disable this override by passing ``--no-force_formal_round``.
+    3. **Hyperparameter inheritance (post-PR-64 fix)**: when (2) fires
+       AND ``memory_history`` contains at least one successful trial
+       round, ``plan.loss_cfg`` and ``plan.train_cfg["lr"]`` are
+       overwritten with the highest-scoring trial round's values.
+       ``model_cfg``, ``epochs``, and ``batch_size`` are left untouched —
+       the LLM may legitimately scale those for the formal pass.
+       If no trial winner exists, the planner's choices survive and a
+       warning is logged (resilient: a messy trial stage shouldn't kill
+       the chain).
+
+       Why: in iter_001/iter_002 of explore_novel_v7 the LLM picked an
+       untested ``focal_cw`` loss for the formal round despite all trial
+       rounds using ``focal``; the resulting model collapsed to ~0 PSD
+       output (denoising_score = -3.16). The formal round must be a
+       longer training of the winning trial config, not a sandbox for
+       new loss functions.
 
     Mutates ``plan`` in place and returns it for caller-chaining.
     """
@@ -122,6 +160,24 @@ def _apply_mode_override_chain(
         plan.is_trial = False
     if is_formal_round and force_formal_round:
         plan.is_trial = False
+        winner = _best_trial_winner(memory_history or [])
+        if winner is not None:
+            winner_loss = winner["params"]["loss_config"]
+            winner_lr = winner["params"]["train_config"]["lr"]
+            plan.loss_cfg = dict(winner_loss)  # copy to avoid aliasing
+            plan.train_cfg["lr"] = winner_lr
+            print(
+                f"  [FORMAL OVERRIDE] inheriting loss="
+                f"{winner_loss.get('loss_type')!r} lr={winner_lr} "
+                f"from best trial round {winner['exp_id']!r} "
+                f"(score={winner['denoising_score']:.4f})"
+            )
+        else:
+            print(
+                "  [FORMAL OVERRIDE] WARNING: no successful trial round "
+                "in this iteration — formal round will use the planner's "
+                "loss_config and lr unchanged. Score may be unreliable."
+            )
     return plan
 
 
@@ -958,13 +1014,15 @@ class HyperparamTuningAgent:
                                 print(f"  [WARN] plan_overrides validation failed ({e}); "
                                       f"using LLM plan as-is")
     
-                    # Override chain: trial-allowed lockout + last-round override.
+                    # Override chain: trial-allowed lockout + last-round override
+                    # + forced-formal hyperparameter inheritance from best trial.
                     # See _apply_mode_override_chain for semantics.
                     plan = _apply_mode_override_chain(
                         plan,
                         trial_allowed=trial_allowed,
                         is_formal_round=is_formal_round,
                         force_formal_round=agent_input.force_formal_round,
+                        memory_history=memory_history,
                     )
     
                     # Enforce max_epochs hard cap (prevents LLM from choosing excessively long training)
