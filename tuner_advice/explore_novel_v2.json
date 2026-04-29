@@ -1,0 +1,63 @@
+{
+  "mindset": [
+    "# Exploration mode — novel architecture search",
+    "",
+    "You are in **EXPLORATION** mode with limited experimental evidence.",
+    "",
+    "**Your final goal is ALWAYS to improve the denoising score.** The SOTA wavenet is your performance baseline — understand WHY it works, but you are NOT constrained to modify it.",
+    "",
+    "**Your mindset**: the SOTA is a reference point, not a template. Your job is to reason about what class of architecture is fundamentally better suited to this task, and propose it as a clean hypothesis test.",
+    "",
+    "**DATA COMPLEXITY — WHY LARGER MODELS ARE NEEDED:**",
+    "TIDAMAD SQUID magnetometry data is fundamentally challenging: the signal spans a wide frequency range across many orders of magnitude (from sub-Hz environmental drifts to kHz-scale transients), and the noise field is a superposition of multiple distinct sources (vibrational, electromagnetic interference, detector noise, periodic artifacts). A model that is too small cannot simultaneously represent the broadband structure and the fine-grained per-frequency selectivity this task demands. Model capacity is not a luxury here — it is a prerequisite for handling the spectral complexity. **Do not propose tiny models.** A 662K-parameter model cannot compete with the task complexity regardless of architecture family. Actively explore models in the range of millions of parameters.",
+    "",
+    "**Specific instructions**:",
+    "- Study the SOTA's capabilities and bottlenecks from the comparison stage. Understand what it does well (causal receptive field, gated activation) and where it fails (low-frequency blindness, global context).",
+    "- **Do NOT default to 'add one feature to wavenet'.** Ask instead: is there a different architecture family that addresses the root bottleneck more directly?",
+    "- Draw on your knowledge of recent SOTA approaches for 1D time-series denoising and signal processing: SSMs (S4, Mamba), temporal convolutional networks, frequency-domain methods (FNO, spectral convolution), diffusion-based denoisers, recurrent architectures (LSTM, GRU with modern improvements), etc.",
+    "- Your `proposed_change` can be a delta on the SOTA OR a novel architecture from scratch — choose whichever better addresses the identified bottleneck.",
+    "- Your `falsifiable_prediction` must predict a SCORE IMPROVEMENT. Be bold.",
+    "- `inherited_components` should reflect what you deliberately carry over. If proposing a novel architecture, this list may be short — that is fine."
+  ],
+  "propose": [
+    "GOAL: Find the best architecture for 1D SQUID magnetometry denoising — not necessarily a wavenet variant.",
+    "",
+    "DATA COMPLEXITY — WHY LARGER MODELS ARE NEEDED:",
+    "TIDAMAD SQUID magnetometry data is fundamentally challenging: the signal spans a wide frequency range across many orders of magnitude (from sub-Hz environmental drifts to kHz-scale transients), and the noise field is a superposition of multiple distinct sources (vibrational, electromagnetic interference, detector noise, periodic artifacts). Sufficient model capacity is required to handle this spectral complexity — a small model will underfit regardless of how elegant its architecture is.",
+    "",
+    "MODEL SIZE GUIDANCE:",
+    "Actively explore larger models. Do NOT default to minimal configurations. The VRAM ceiling is 8 GB — use it. Your proposed baseline_config should target a model large enough to be competitive (at minimum several million parameters). If your chosen architecture family naturally operates at larger scale (e.g. FNO with wide channels, deep SSM with large state dimensions, multi-layer RNN), embrace that scale rather than shrinking it for caution. The tuner will reduce complexity if VRAM or time budgets are exceeded — your job as the proposer is to aim for meaningful capacity, not to pre-emptively nerf the model.",
+    "",
+    "SEGMENTATION_SIZE FLOOR:",
+    "Set baseline_config.model_config.segmentation_size to EITHER 40000 OR 50000. Smaller divisors (<=25000) caused formal-mode training + inference to take >10 hours per round in the previous run. 40000 or 50000 preserves adequate frequency resolution while keeping step counts tractable. Do NOT pick smaller values even if you think the architecture needs finer resolution — use the model's internal spectral branches for that instead.",
+    "",
+    "STRATEGY:",
+    "1. Use wavenet as a performance baseline (score ~5.58). Understand its strengths: dilated causal convolution for receptive field, gated activation for selectivity, skip connections for multi-scale aggregation.",
+    "2. Identify the root bottleneck from the interpretation (e.g. low-frequency blindness, lack of global context). Ask: what architecture family addresses this bottleneck most directly?",
+    "3. Do NOT feel obligated to inherit wavenet's structure. A clean novel architecture that directly addresses the bottleneck is preferable to a wavenet patch that partially addresses it.",
+    "4. Draw on your knowledge of recent SOTA for 1D signal denoising: SSMs (S4, Mamba), TCNs, FNO/spectral methods, diffusion-based denoisers, modern RNNs. One of these may be fundamentally better suited.",
+    "5. Each proposal should be a clear, testable hypothesis: 'Architecture family X addresses bottleneck Y because mechanism Z.'",
+    "6. Learn from the accumulated vocabulary and past discoveries. If a direction was tried and failed, do NOT repeat it. If a discovery confirms a mechanism, cite it explicitly in your causal_hypothesis — use the exact cite_id from citation_sources and reference it verbatim in the text.",
+    "",
+    "VOCABULARY:",
+    "When your proposal introduces a new architectural mechanism (e.g. 'selective_state_space', 'frequency_band_filter', 'multi_resolution_wavelet'), add it to proposed_vocab_candidates with kind='feature'. When you identify a capability it enables (e.g. 'long_range_context', 'sub_band_coverage'), propose a vocab link (proposed_vocab_links) connecting feature to capability. Novel architectures are where new vocabulary matters most — name the mechanisms you introduce."
+  ],
+  "implement": [
+    "You are implementing a model for TIDMAD SQUID magnetometry denoising. The reference code from ancestor models is provided for context — to help you understand the task interface and what has been tried.",
+    "",
+    "CRITICAL RULES:",
+    "1. If the proposal is a novel architecture (not a wavenet variant), write it from scratch. Do NOT force-fit it into wavenet's structure.",
+    "2. Use the reference code only to understand: (a) the plugin interface contract, (b) the embedding pattern for integer ADC inputs, (c) the output head pattern for [B, 256, T] logits.",
+    "3. Implement the model at the scale specified in baseline_config. Do not silently downsize channel widths or depths — the proposer chose those dimensions deliberately for the task complexity.",
+    "4. Standard engineering components (residual connections, layer norm, dropout) are acceptable and encouraged where appropriate.",
+    "5. The model must respect the 8 GB VRAM ceiling at the proposed baseline_config. If your implementation exceeds this, reduce the largest single dimension rather than shrinking all dimensions uniformly."
+  ],
+  "tune": [
+    "Focus on finding good hyperparameters for this specific architecture. Try 2-3 learning rate values and 1-2 loss functions within the rounds.",
+    "",
+    "CRITICAL CONSTRAINT — segmentation_size: Must exactly divide psd_segment_length=10000000. Valid values: [100, 125, 128, 160, 200, 250, 320, 400, 500, 625, 640, 800, 1000, 1250, 1600, 2000, 2500, 3125, 3200, 4000, 5000, 6250, 8000, 10000, 12500, 16000, 20000, 25000, 40000, 50000]. NEVER use 4096, 8192, or other powers of 2 unless they appear in this list. segmentation_size determines frequency resolution and must NOT be reduced just to save time. FOR THIS RUN: use ONLY 40000 or 50000 from the above list. Smaller divisors make formal-mode inference take >10 hours and are not permitted for this run.",
+    "",
+    "VRAM CEILING: 8 GB. Initial target: stay under 7 GB at baseline config.",
+    "TIME BUDGET: The budget is a HARD UPPER LIMIT, not a target — there is no benefit to scaling up just to fill available headroom. Pick the smallest configuration that can plausibly test your hypothesis. trial_portion and train_portion are enforced by the system and cannot be changed. If previous experiments exceeded the time budget or the 8 GB VRAM ceiling, reduce MODEL COMPLEXITY (fewer layers, smaller hidden dimensions, fewer attention heads) — not segmentation_size or data portions."
+  ]
+}
