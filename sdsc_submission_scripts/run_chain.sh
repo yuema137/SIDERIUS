@@ -47,31 +47,78 @@ SLURM_SCRIPT="${SCRIPT_DIR}/submit_one_iteration.slurm"
 
 source "${SCRIPT_DIR}/_chain_common.sh"
 
-# Resolve the lilab Python interpreter. Priority:
-#   1. activated venv ($VIRTUAL_ENV)
-#   2. project-local .venv (the canonical SIDERIUS dev setup)
-#   3. uv run python (lilab fallback when no .venv exists)
-#   4. system python3 (warns; reproducibility-hostile)
-# Full version-guard hardening lives in 13.D; this slice is what the
-# dry-run header needs to print a sensible "Python:" line.
+# Resolve the Python interpreter. Priority (canonical SIDERIUS dev setup
+# hardened in 13.D):
+#   1. activated venv ($VIRTUAL_ENV)         — operator-asserted env
+#   2. project-local ${PROJECT_DIR}/.venv    — the standard repo layout
+#   3. uv run python                          — lilab fallback when no .venv
+#   4. system python3                         — last resort, prominent warn
+# After resolution, two guards run unconditionally:
+#   - enforce_py_version_guard: SIDERIUS requires Python 3.10+
+#   - setup_py_env_passthrough: ensure subprocesses inherit the same venv
+# Sets PY_CMD (array) + PY_SOURCE (label) + PY_VENV_ROOT (path or empty).
+# PY_VENV_ROOT empty means "no venv to passthrough" (uv or system python3).
 resolve_py_cmd() {
+    PY_VENV_ROOT=""
     if [ -n "${VIRTUAL_ENV:-}" ] && [ -x "$VIRTUAL_ENV/bin/python" ]; then
         PY_CMD=("$VIRTUAL_ENV/bin/python")
         PY_SOURCE="\$VIRTUAL_ENV ($VIRTUAL_ENV)"
+        PY_VENV_ROOT="$VIRTUAL_ENV"
     elif [ -x "${PROJECT_DIR}/.venv/bin/python" ]; then
         PY_CMD=("${PROJECT_DIR}/.venv/bin/python")
         PY_SOURCE="${PROJECT_DIR}/.venv"
+        PY_VENV_ROOT="${PROJECT_DIR}/.venv"
     elif command -v uv >/dev/null 2>&1; then
         PY_CMD=(uv run --project "$PROJECT_DIR" python)
         PY_SOURCE="uv run"
+        # uv injects its own env per invocation; we leave PY_VENV_ROOT empty.
     elif command -v python3 >/dev/null 2>&1; then
         PY_CMD=(python3)
         PY_SOURCE="system python3 (NO venv detected — reproducibility risk)"
-        echo "WARNING: no .venv and no uv detected; falling back to system python3" >&2
+        echo "############################################################" >&2
+        echo "WARNING: falling back to SYSTEM python3" >&2
+        echo "  No \$VIRTUAL_ENV, no ${PROJECT_DIR}/.venv, no 'uv' available." >&2
+        echo "  System python may be stale or missing required packages." >&2
+        echo "  This path is reproducibility-hostile — fix by:" >&2
+        echo "    cd ${PROJECT_DIR} && python3.10 -m venv .venv" >&2
+        echo "    .venv/bin/pip install -e ." >&2
+        echo "############################################################" >&2
     else
         echo "ERROR: no python interpreter found (no \$VIRTUAL_ENV, no .venv, no uv, no python3)" >&2
         exit 1
     fi
+}
+
+# Enforce SIDERIUS's Python ≥ 3.10 floor. Runs the resolved interpreter
+# itself (not the parent shell's python) so this catches all four
+# resolution paths, including uv-managed interpreters.
+enforce_py_version_guard() {
+    if "${PY_CMD[@]}" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+        return 0
+    fi
+    local version
+    version=$("${PY_CMD[@]}" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")' 2>/dev/null) \
+        || version="unknown"
+    echo "ERROR: SIDERIUS requires Python 3.10+. Current: $version" >&2
+    echo "  Resolved interpreter: ${PY_CMD[*]}  (source: $PY_SOURCE)" >&2
+    exit 1
+}
+
+# Make sure subprocesses spawned by run_one_iteration.py (training workers,
+# torch DataLoader workers, plugin imports) inherit the same Python
+# environment as the orchestrator. When we resolved to a venv but the
+# parent shell never activated it, VIRTUAL_ENV is unset and PATH won't
+# have .venv/bin first — fix that here.
+setup_py_env_passthrough() {
+    if [ -z "$PY_VENV_ROOT" ]; then
+        # uv-run or system python3 paths — nothing to passthrough.
+        return 0
+    fi
+    export VIRTUAL_ENV="$PY_VENV_ROOT"
+    case ":$PATH:" in
+        *":$PY_VENV_ROOT/bin:"*) ;;  # already first or present; idempotent
+        *) export PATH="$PY_VENV_ROOT/bin:$PATH" ;;
+    esac
 }
 
 submit_iteration_lilab() {
@@ -164,6 +211,10 @@ esac
 # to run scripts/inspect_run_state.py for auto-resume. The SDSC iteration
 # jobs themselves use whatever python is configured inside submit_one_iteration.slurm.
 resolve_py_cmd
+# 13.D — version + env-passthrough guards. Both run unconditionally so
+# the SDSC submission node and lilab orchestrator agree on the contract.
+enforce_py_version_guard
+setup_py_env_passthrough
 
 # --- 13.B: Auto-resume + safety guard + idempotency ---
 
