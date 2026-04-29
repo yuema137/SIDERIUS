@@ -101,10 +101,18 @@ class RecordingSandbox:
     def score_vector(self, sample_set, anchor_map: dict, s_max: float,
                      denoised_filename_fn, **kwargs):
         """Mirror of :meth:`TidmadSandbox.score_vector`. Returns
-        ``(file_vector, scalar)`` from the next predefined result."""
+        ``(file_vector, scalar, is_degenerate, failure_reason)`` from the
+        next predefined result. The trailing two fields default to
+        ``(False, None)`` when omitted from the pseudo-data JSON, so
+        existing fixtures keep working."""
         self.calls.append(("score_vector",))
         result = self._pop("score_vector")
-        return result["file_vector"], result["scalar"]
+        return (
+            result["file_vector"],
+            result["scalar"],
+            result.get("is_degenerate", False),
+            result.get("failure_reason", None),
+        )
 
     def execute_training(
         self,

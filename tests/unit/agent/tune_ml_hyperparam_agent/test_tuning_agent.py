@@ -403,7 +403,7 @@ def _make_trial_input(tmp_path, max_rounds=1, is_trial=True):
     )
 
 
-FAKE_SCORE_VECTOR_RESULT = ([float("nan")] * 20, 1.5)
+FAKE_SCORE_VECTOR_RESULT = ([float("nan")] * 20, 1.5, False, None)
 
 
 class TestDynamicTrialFormal:
@@ -1461,7 +1461,7 @@ class TestCopySeedPlugin:
 # Trial-mode score_vector stub with real values (not NaN) so build_score_table
 # produces a valid table end-to-end. All 20 files sampled → the subset-scoped
 # aggregate will equal the full-20 scalars from _synth_reference() (Decision 14).
-FAKE_SCORE_VECTOR_FULL = ([1.0] * 20, 2.5)
+FAKE_SCORE_VECTOR_FULL = ([1.0] * 20, 2.5, False, None)
 
 
 class TestScoreTablePropagation:

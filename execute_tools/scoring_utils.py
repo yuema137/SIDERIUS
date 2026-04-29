@@ -373,7 +373,9 @@ def score_vector(
     parallel: bool = True,
     num_workers: int = 8,
     legacy_mode: bool = False,
-) -> tuple[list[float | None], float]:
+    reference_file_vector: list[float | None] | None = None,
+    degeneracy_threshold_ratio: float = 0.01,
+) -> tuple[list[float | None], float, bool, str | None]:
     """
     Score multiple files and return the length-``NUM_FILES`` per-file vector
     plus a scalar score aligned with the legacy TIDMAD formula.
@@ -418,9 +420,24 @@ def score_vector(
                                ``snr_sg`` values, mirroring legacy's
                                file-list-local maximum. No anchor map is
                                consulted.
+        reference_file_vector: Optional per-file PSD output magnitudes
+                               from a reference run (typically the
+                               highest-scoring trial-mode success in the
+                               same iteration). When provided, the
+                               task-specific health check
+                               ``execute_tools.squid_health_checks
+                               .check_amplitude_collapse`` runs on the
+                               freshly computed ``file_vector`` against
+                               this reference. When ``None``, the health
+                               check is skipped and ``is_degenerate``
+                               always returns ``False``.
+        degeneracy_threshold_ratio:
+                               Forwarded to ``check_amplitude_collapse``.
+                               Default 0.01 (1%) — the V7 collapse
+                               (~0.005 / ~8.6 ≈ 0.06%) trips this.
 
     Returns:
-        (file_vector, final_scalar):
+        (file_vector, final_scalar, is_degenerate, failure_reason):
         - ``file_vector``: length-``NUM_FILES`` list. Entry ``f`` is the
           per-file weighted mean
           ``mean_i( snr_sg[f][i] / s_max_used * snr_squid[f][i] )`` for
@@ -431,6 +448,17 @@ def score_vector(
           / Σ_f |S_f|``. For uniform ``|S_f|`` this equals the mean
           of ``file_vector`` entries; for non-uniform sampling the grand
           mean is the legacy-compatible aggregation.
+        - ``is_degenerate``: ``True`` when the task-specific health
+          check declared the output collapsed against the reference;
+          ``False`` when no reference was provided or the output
+          passed. The agent's generic handling layer decides what to
+          do with this signal — ``score_vector`` itself does not
+          modify the score.
+        - ``failure_reason``: human-readable explanation when
+          ``is_degenerate`` is ``True``, otherwise ``None``. Includes
+          actual vs reference magnitudes and the ratio so the LLM
+          planner has concrete numbers to reason about in subsequent
+          rounds' memory_history.
 
     Raises:
         ValueError: If ``denoised_filename_fn`` is None, or if
@@ -466,7 +494,7 @@ def score_vector(
 
     raw_pairs: dict[int, list[tuple[float, float]]] = {}
     if not tasks:
-        return file_vector, float("-inf")
+        return file_vector, float("-inf"), False, None
 
     if parallel and len(tasks) > 1:
         # Phase 6.8 §2 Layer A — force ``spawn`` start method so worker
@@ -493,7 +521,7 @@ def score_vector(
     if legacy_mode:
         all_snr_sg = [sg for pairs in raw_pairs.values() for (sg, _) in pairs]
         if not all_snr_sg:
-            return file_vector, float("-inf")
+            return file_vector, float("-inf"), False, None
         # Legacy uses ``np.amax(snr_sg)`` as the normalizer. We cast to
         # a float array and take ``np.amax`` to match the legacy call
         # shape exactly (same op as ``snr_sg/np.amax(snr_sg)``).
@@ -519,14 +547,32 @@ def score_vector(
         total_count += len(pairs)
 
     if total_count == 0:
-        return file_vector, float("-inf")
+        return file_vector, float("-inf"), False, None
 
     grand_mean = total_weighted / total_count
     if grand_mean > 0 and math.isfinite(grand_mean):
         final_scalar = math.log(grand_mean, 5.27)
     else:
         final_scalar = float("-inf")
-    return file_vector, final_scalar
+
+    # ------------------------------------------------------------------
+    # Phase 3 — task-specific health check (optional)
+    # ------------------------------------------------------------------
+    # Decoupled from this module: ``check_amplitude_collapse`` lives in
+    # ``execute_tools.squid_health_checks`` and owns the SQUID 1%
+    # amplitude-collapse predicate. ``score_vector`` only knows the
+    # generic contract ``(file_vector, reference) -> (bool, str|None)``.
+    is_degenerate = False
+    failure_reason: str | None = None
+    if reference_file_vector is not None:
+        from execute_tools.squid_health_checks import check_amplitude_collapse
+        is_degenerate, failure_reason = check_amplitude_collapse(
+            file_vector=file_vector,
+            reference_file_vector=reference_file_vector,
+            threshold_ratio=degeneracy_threshold_ratio,
+        )
+
+    return file_vector, final_scalar, is_degenerate, failure_reason
 
 
 # ---------------------------------------------------------------------------

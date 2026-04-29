@@ -1624,7 +1624,7 @@ class HyperparamTuningAgent:
                         # Trial: sparse SampleSet. Formal: full SampleSet (all 20 × 200).
                         def _denoised_fn(fi):
                             return f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_{fi:04d}.h5"
-                        file_vector, final_scalar = sandbox.score_vector(
+                        file_vector, final_scalar, is_degenerate, failure_reason = sandbox.score_vector(
                             sample_set=eval_sample_set,
                             anchor_map=anchor_map_data["anchors"],
                             s_max=anchor_map_data["s_max"],
@@ -1635,6 +1635,8 @@ class HyperparamTuningAgent:
                             "results": {
                                 "denoising_score": final_scalar,
                                 "file_vector": file_vector,
+                                "is_degenerate": is_degenerate,
+                                "failure_reason": failure_reason,
                             },
                         }
                     else:
