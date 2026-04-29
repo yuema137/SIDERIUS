@@ -28,25 +28,36 @@ set -o pipefail
 WORKSPACE=""
 NUM_ITERATIONS=2
 SEED_PATHS=()
-MAX_ROUNDS=3
-MAX_EPOCHS=""
-LLM_MODEL="gemini-3.1-pro-preview"
+MAX_ROUNDS=3                        # §3.2: matches run_one_iteration.py default 3
+MAX_EPOCHS=1                        # §3.2: matches run_one_iteration.py default 1
+LLM_MODEL="gemini-3.1-pro-preview"  # §3.2: matches run_one_iteration.py default
 LLM_CONFIG=""
 REFLECT_PROVIDER=""
 REFLECT_MODEL_ID=""
-TRIAL_PORTION=0.02
-TRAIN_PORTION=1.0
-EVAL_PORTION=0.02
+TRIAL_PORTION=0.1                   # §3.2: synced to Python default 0.1 (was 0.02)
+TRAIN_PORTION=0.1                   # §3.2: synced to Python default 0.1 (was 1.0)
+EVAL_PORTION=0.1                    # §3.2: synced to Python default 0.1 (was 0.02)
 HUMAN_ADVICE_FILE=""
 ADVICE=""
 PLAN_OVERRIDES=""
+# DATA_DIR: lilab environment default per 13.C directive. Python argparse
+# default is None; the shell pre-fills the canonical lilab data path so the
+# chain runbook works without an explicit --data_dir flag on lilab. SDSC
+# operators must override via --data_dir to point at the cluster's
+# scratch path.
 DATA_DIR="/home/klz/Data/TIDMAD/"
-TRIAL_TIME_BUDGET_MINUTES=""
-FORMAL_TIME_BUDGET_MINUTES=""
-TRIAL_VRAM_BUDGET_GB=""
-FORMAL_VRAM_BUDGET_GB=""
-EXPLORATION_MODE="auto"
-MINIMUM_BOLDNESS="0.05"
+TRIAL_TIME_BUDGET_MINUTES=""        # §3.2: empty == omit == Python None
+FORMAL_TIME_BUDGET_MINUTES=""       # §3.2: empty == omit == Python None
+TRIAL_VRAM_BUDGET_GB=""             # §3.2: empty == omit == Python None
+FORMAL_VRAM_BUDGET_GB=""            # §3.2: empty == omit == Python None
+EXPLORATION_MODE="auto"             # §3.2: matches Python default
+MINIMUM_BOLDNESS="0.05"             # §3.2: matches Python default
+# §3.2 — Adaptive-tuning brakes (default-synced to run_one_iteration.py)
+ATTEMPTS_PER_ROUND=3                # inner attempt budget for trial rounds
+ATTEMPTS_PER_FORMAL_ROUND=5         # inner attempt budget for formal-promotion round
+MAX_FAIL_ROUNDS=3                   # consecutive-failure brake for outer loop
+# §3.2 — Debugging (action=store_true; 1 emits the flag)
+DEBUG_DUMP_PROMPTS=0
 
 # --- Unified-orchestrator (run_chain.sh) defaults ---
 # MODE picks the execution backend: lilab (foreground subprocess) or
@@ -110,6 +121,12 @@ parse_chain_args() {
         --no_auto_resume)         AUTO_RESUME=0; shift ;;
         --force_fresh)            FORCE_FRESH=1; shift ;;
         --start_iter)             START_ITER="$2"; shift 2 ;;
+        # §3.2 — Adaptive-tuning brakes
+        --attempts_per_round)        ATTEMPTS_PER_ROUND="$2"; shift 2 ;;
+        --attempts_per_formal_round) ATTEMPTS_PER_FORMAL_ROUND="$2"; shift 2 ;;
+        --max_fail_rounds)           MAX_FAIL_ROUNDS="$2"; shift 2 ;;
+        # §3.2 — Debugging
+        --debug_dump_prompts)        DEBUG_DUMP_PROMPTS=1; shift ;;
         # Slurm-only flags — silently accepted on lilab too (ignored)
         --partition)              PARTITION="$2"; shift 2 ;;
         --time)                   TIME="$2"; shift 2 ;;
@@ -157,15 +174,19 @@ build_app_args() {
         --start_iteration "$iter"
         --seed_paths "${SEED_PATHS[@]}"
         --max_rounds "$MAX_ROUNDS"
+        --max_epochs "$MAX_EPOCHS"
         --llm_model "$LLM_MODEL"
         --trial_portion "$TRIAL_PORTION"
         --train_portion "$TRAIN_PORTION"
         --eval_portion "$EVAL_PORTION"
         --exploration_mode "$EXPLORATION_MODE"
         --minimum_boldness "$MINIMUM_BOLDNESS"
+        --attempts_per_round "$ATTEMPTS_PER_ROUND"
+        --attempts_per_formal_round "$ATTEMPTS_PER_FORMAL_ROUND"
+        --max_fail_rounds "$MAX_FAIL_ROUNDS"
     )
-    if [ -n "$MAX_EPOCHS" ]; then
-        APP_ARGS+=(--max_epochs "$MAX_EPOCHS")
+    if [ "$DEBUG_DUMP_PROMPTS" -eq 1 ]; then
+        APP_ARGS+=(--debug_dump_prompts)
     fi
     if [ -n "$LLM_CONFIG" ]; then
         APP_ARGS+=(--llm_config "$LLM_CONFIG")
@@ -216,13 +237,40 @@ print_chain_header() {
         echo "    - $p"
     done
     echo "  Max rounds       : $MAX_ROUNDS"
-    echo "  Max epochs       : ${MAX_EPOCHS:-(no cap)}"
+    echo "  Max epochs       : $MAX_EPOCHS"
     echo "  LLM model        : $LLM_MODEL"
+    if [ -n "$LLM_CONFIG" ]; then
+        echo "  LLM config       : $LLM_CONFIG"
+    fi
     if [ -n "$MODE" ]; then
         echo "  Mode             : $MODE"
     fi
     if [ -n "${START_ITER:-}" ]; then
         echo "  Start iter       : $START_ITER  (auto_resume=$AUTO_RESUME, force_fresh=$FORCE_FRESH)"
+    fi
+    # --- §3.2 plan flags (input contract) ---
+    echo "  §3.2 plan flags:"
+    echo "    Data dir       : $DATA_DIR"
+    echo "    Trial portion  : $TRIAL_PORTION"
+    echo "    Train portion  : $TRAIN_PORTION"
+    echo "    Eval portion   : $EVAL_PORTION"
+    echo "    Exploration    : $EXPLORATION_MODE  (boldness>=$MINIMUM_BOLDNESS)"
+    echo "    Round attempts : trial=$ATTEMPTS_PER_ROUND, formal=$ATTEMPTS_PER_FORMAL_ROUND, max_fail_rounds=$MAX_FAIL_ROUNDS"
+    if [ "$DEBUG_DUMP_PROMPTS" -eq 1 ]; then
+        echo "    Debug dump     : ON (--debug_dump_prompts)"
+    else
+        echo "    Debug dump     : off"
+    fi
+    if [ -n "$TRIAL_TIME_BUDGET_MINUTES" ] || [ -n "$FORMAL_TIME_BUDGET_MINUTES" ]; then
+        echo "    Time budgets   : trial=${TRIAL_TIME_BUDGET_MINUTES:-(none)}min, formal=${FORMAL_TIME_BUDGET_MINUTES:-(none)}min"
+    fi
+    if [ -n "$TRIAL_VRAM_BUDGET_GB" ] || [ -n "$FORMAL_VRAM_BUDGET_GB" ]; then
+        echo "    VRAM budgets   : trial=${TRIAL_VRAM_BUDGET_GB:-(auto)}GB, formal=${FORMAL_VRAM_BUDGET_GB:-(auto)}GB"
+    fi
+    if [ -n "$ADVICE" ]; then
+        echo "    Advice file    : $ADVICE"
+    elif [ -n "$HUMAN_ADVICE_FILE" ]; then
+        echo "    Advice file    : $HUMAN_ADVICE_FILE  (legacy --human_advice_file)"
     fi
     if [ "$MODE" = "lilab" ] && [ "${#PY_CMD[@]}" -gt 0 ]; then
         echo "  Python           : ${PY_CMD[*]}  (source: ${PY_SOURCE:-?})"
