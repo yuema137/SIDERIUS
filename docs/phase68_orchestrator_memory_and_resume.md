@@ -1,6 +1,6 @@
 # Phase 6.8 — Orchestrator Memory Hygiene & Run Resume
 
-**Status**: Task 1 (memory hygiene) shipped in PR #63. Task 2 (resume) pivoted on 2026-04-27 to a chain-first design — see Part 3. v6 post-mortem (2026-04-28) identified three additional failure modes — see Part 4. Commits 6 → 11 landed on `feat/phase68-task2-chain-resume` (Commit 11 split into atomic sub-commits 11.1–11.4 + doc-syncs, all green; verification gate produced `best_score=4.524` from a chain-restored handoff). Next up: Commit 12 (`inspect_run_state.py` chain layout + `--next-iter`) and Commit 13 (unified `run_chain.sh` + `_chain_common.sh` widening, including the deferred shell-side `--data_dir` plumbing).
+**Status**: Task 1 (memory hygiene) shipped in PR #63. Task 2 (resume) pivoted on 2026-04-27 to a chain-first design — see Part 3. v6 post-mortem (2026-04-28) identified three additional failure modes — see Part 4. Commits 6 → 12 landed on `feat/phase68-task2-chain-resume` (Commit 11 split into atomic sub-commits 11.1–11.4 + doc-syncs; Commit 12 lands the chain-aware `inspect_run_state.py` with `--layout chain`, `--next-iter`, legacy guard, and 11 unit tests, verified live against the iter-1+iter-2 gate workspace). Next up: Commit 13 (unified `run_chain.sh` + `_chain_common.sh` widening, including the deferred shell-side `--data_dir` plumbing and the relocated three-way consistency tests).
 **Driver**: v5 sanity-run host-OOM kill of `explore_novel_v5_0426` PID 4142820 at 2026-04-27 00:46:42 (kernel: 23.5 GB anon-RSS, total-vm 41.0 GB). v6 sanity-run host-OOM of `explore_novel_v6_0427` at 2026-04-28 01:54 (35.6 GB RSS — different root cause than v5, see Part 4 §4.1).
 **Scope**: Two parallel work streams — (1) understand and stop the parent-process memory growth that produced the OOM; (2) make any run resumable from disk artifacts after `SIGKILL`. Extended by Part 4 to cover VRAM probe memory safety, time estimation accuracy, and LLM prompt size management.
 
@@ -762,12 +762,15 @@ _The two deferred items previously listed here — the `run_workflow` kwargs byt
 
 **Goal**: Single inspector tool serves both layouts and offers a machine-readable mode for the shell driver.
 
-- [ ] Add `--layout {run,chain}` flag (default `run` for back-compat).
-- [ ] Under `--layout chain`, walk `{workspace}/iter_NNN/iteration_001/{model}/run_output_iter_NNN.json` (run_name varies per iter as `iter_{N:03d}`).
-- [ ] Add `--next-iter` flag: prints only the integer index of the first non-COMMITTED iteration to stdout (1 if no committed iters); exit 0; no other output.
-- [ ] Detect non-contiguous iters (1 + 3 with no 2) and exit non-zero with a clear error to stderr.
-- [ ] Unit test: chain layout with 3 clean iters → `--next-iter` prints `4`. With 2 clean + 1 partial → prints `3`. With 1 + 3 missing 2 → exits non-zero.
-- [ ] Doc-sync: §3.4 already describes this. Commit message references §3.4.
+- [x] Add `--layout {run,chain}` flag (default `run` for back-compat — flips to `chain` in Commit 15).
+- [x] Under `--layout chain`, walk `{workspace}/iter_NNN/manifest.json` and validate the referenced `output_path` against `HyperparamTuningOutput`. The {COMMITTED, PARTIAL, CORRUPT, MISSING} predicate matches `core.resume._read_manifest` + `_validate_run_output` (single source of truth — auto-resume in Commit 13 depends on this agreement).
+- [x] Add `--next-iter` flag (chain mode only): prints **only** the integer index of the first non-COMMITTED iteration to stdout (1 if empty workspace; `max_seen + 1` if all clean); exit 0; no banner, no table, errors to stderr — suitable for `NEXT=$(...)` shell capture by `run_chain.sh --auto_resume`.
+- [x] Detect non-contiguous iters (1 + 3 with no 2) → exit non-zero with stderr message naming the gap. Stdout stays empty in `--next-iter` mode so a stale shell capture cannot accidentally proceed.
+- [x] Legacy-layout guard: chain mode calls `core.resume.validate_workspace_layout(workspace)` before walking. Reuses the same helper Phase 6.8 §3.9 wired into `run_exploration_adaptive.py`.
+- [x] Enriched human-view table: chain layout populates Model + Best Score columns from the parsed run_output (same shape as the legacy-layout table).
+- [x] Unit tests (`tests/unit/scripts/test_inspect_run_state.py`, **11 cases passing**): 3 clean iters → `4`; 2 clean + missing manifest → `3`; 1 clean + failed-status manifest → `2`; 1 clean + malformed-JSON manifest → `2`; empty workspace → `1`; iter_001 + iter_003 gap → non-zero exit + stderr names `iter_002`; legacy `workflow_*.json` triggers guard → non-zero; `--layout run` back-compat regression; default layout resolves to `run`; chain table contains both model_type strings + both best_score values; argparse-level rejection of invalid flag combinations.
+- [x] **Live verification gate** against `/home/klz/Data/SIDEREIS_DATA/exploration_phase68_commit11_gate/`: human view shows `iter_001 posenc_causal_dilated_stack COMMITTED -3.221148` + `iter_002 spectral_skip_residual_stack COMMITTED 4.524244`; machine view (`--next-iter`) prints exactly `3` and shell-captures cleanly into a 1-char `$NEXT` variable.
+- [x] Doc-sync: §3.4 already describes the contract. Commit message references §3.4.
 
 #### Commit 13 — `feat(chain): unified run_chain.sh --mode {lilab,sdsc} with --dry-run and venv detection`
 
