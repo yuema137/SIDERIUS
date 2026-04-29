@@ -1,6 +1,6 @@
 # Phase 6.8 — Orchestrator Memory Hygiene & Run Resume
 
-**Status**: Task 1 (memory hygiene) shipped in PR #63. Task 2 (resume) pivoted on 2026-04-27 to a chain-first design — see Part 3. v6 post-mortem (2026-04-28) identified three additional failure modes — see Part 4.
+**Status**: Task 1 (memory hygiene) shipped in PR #63. Task 2 (resume) pivoted on 2026-04-27 to a chain-first design — see Part 3. v6 post-mortem (2026-04-28) identified three additional failure modes — see Part 4. Commits 6 → 11 landed on `feat/phase68-task2-chain-resume` (Commit 11 split into atomic sub-commits 11.1–11.4 + doc-syncs, all green; verification gate produced `best_score=4.524` from a chain-restored handoff). Next up: Commit 12 (`inspect_run_state.py` chain layout + `--next-iter`) and Commit 13 (unified `run_chain.sh` + `_chain_common.sh` widening, including the deferred shell-side `--data_dir` plumbing).
 **Driver**: v5 sanity-run host-OOM kill of `explore_novel_v5_0426` PID 4142820 at 2026-04-27 00:46:42 (kernel: 23.5 GB anon-RSS, total-vm 41.0 GB). v6 sanity-run host-OOM of `explore_novel_v6_0427` at 2026-04-28 01:54 (35.6 GB RSS — different root cause than v5, see Part 4 §4.1).
 **Scope**: Two parallel work streams — (1) understand and stop the parent-process memory growth that produced the OOM; (2) make any run resumable from disk artifacts after `SIGKILL`. Extended by Part 4 to cover VRAM probe memory safety, time estimation accuracy, and LLM prompt size management.
 
@@ -695,7 +695,6 @@ The Part A/B/C block below remains the canonical engineering reference; sub-comm
 - [x] Pass every new flag through to `run_workflow(...)`.
 - [x] **`--data_dir` plumbing (v6 countermeasure — Time Estimation Repair)**: wire `--data_dir` through `run_workflow()` → `HyperparamTuningInput.data_dir` → time skill's `_measure_ms_per_step`. Without this, the warmup path is dead code and every run uses the static formula (5-10x underestimate for novel architectures). See `reports/v6_pr63_20260428.md §9.1`.
 - [x] **Static formula patch**: in `agent/skills/training_skill/estimator.py`, raise `_STATIC_MS_PER_FLOP` from `6e-10` to `3e-9` and add a minimum ms/step floor of 2.0 ms (CUDA kernel launch + DataLoader overhead). Raise `SAFETY_MULTIPLIER` from `1.1` to `2.0` — the current value was calibrated for warmup variance, not formula error. See `reports/v6_pr63_20260428.md §9.2-§9.3`.
-- [ ] **`_chain_common.sh` plumbing** (deferred to Commit 13 per Final Ruling 5): add `DATA_DIR` to the shell variable set and pass `--data_dir "${DATA_DIR}"` in `build_app_args`. Default to the canonical path (`/home/klz/Data/TIDMAD/` on lilab, Slurm env-var on SDSC). The Python entry side is wired (`--data_dir` argparse + passthrough on both `run_one_iteration.py` and `run_exploration_adaptive.py`); only the shell trampoline still needs the flag for chain mode via `run_chain.sh`. Bundled with the rest of `_chain_common.sh::parse_chain_args` widening in Commit 13.
 - [x] **`--train_portion` ruling**: set default to 0.1 on both Python entries (correcting the existing 1.0 in `run_exploration_adaptive.py`). Per Final Ruling 1 — 0.1 is the standard for trial rounds.
 - [x] **`--max_epochs` ruling**: set default to 1 on both Python entries; install a `_positive_int` argparse validator that rejects 0/negative/None. Per Final Ruling 1.
 - [x] **`--seed_paths` canonical / `--source_paths` deprecated alias**: Per Final Ruling 3, `--seed_paths` is the canonical name on both Python entries. `--source_paths` is kept as a deprecated alias (`dest="source_paths_legacy"`) that emits a `DeprecationWarning` and is mutually exclusive with the canonical name. Same pattern as the `--start_iteration` / `--iteration` alias from Commit 8.
@@ -754,10 +753,10 @@ Run executed against `/home/klz/Data/SIDEREIS_DATA/exploration_phase68_commit11_
 **Common — consistency tests (gate for both Parts A and B):**
 
 - [x] Unit test: every flag in §3.2 has the same name and default in both entries (`tests/unit/scripts/test_chain_consistency.py`).
-- [x] Per Final Ruling 5 — for this commit, `test_chain_consistency.py` covers Python-to-Python parser parity. Shell-side widening of `_chain_common.sh::parse_chain_args` and matching shell-default tests are deferred to Commit 13.
+- [x] Per Final Ruling 5 — for this commit, `test_chain_consistency.py` covers **Python-to-Python parser parity only**. Shell-side widening of `_chain_common.sh::parse_chain_args`, the shell-default tests, and three-way (Python ↔ Python ↔ shell) parity assertion are tracked under Commit 13.
 - [x] Doc-sync: §3.2, §3.8 already describe this. Commit message references §3.2 (input contract), §3.8 (consistency), and §4.2 (time estimation repair in Part A).
-- [ ] (Deferred to Commit 13 per Final Ruling 5) Snapshot the kwargs `run_workflow` receives from each Python entry. Construct the same flag set on both (`run_exploration_adaptive.py` and `run_one_iteration.py`) and assert the resulting `run_workflow` call is byte-for-byte identical (modulo `run_name` and `max_iterations`, which are per-iter for the chain-in-process loop).
-- [ ] (Deferred — exercised manually post-commit) Run `python run_exploration_adaptive.py --workspace W --start_iteration 3 ...` against a workspace with iters 1+2 in chain layout; verify iter 3 starts in-process with `MODEL_REGISTRY` carrying both prior plugins. Unit-tested equivalent already lives in `tests/unit/sdsc_submission_scripts/test_run_one_iteration.py::TestRestoreWiring::test_manual_override_start_iteration_3_with_iters_1_and_2_on_disk`.
+
+_The two deferred items previously listed here — the `run_workflow` kwargs byte-for-byte snapshot test and the manual `--start_iteration 3` chain-layout sanity check — have been **relocated** to Commit 13 (test checklist) and Commit 13 (smoke tests) respectively, since both depend on the unified `run_chain.sh` runner whose flag-passing they validate. Tracked there._
 
 #### Commit 12 — `feat(inspector): inspect_run_state.py supports chain layout + --next-iter`
 
@@ -779,6 +778,7 @@ Run executed against `/home/klz/Data/SIDEREIS_DATA/exploration_phase68_commit11_
 - [ ] Add `sdsc_submission_scripts/run_chain.sh` (or `scripts/run_chain.sh`) sourcing `_chain_common.sh`.
 - [ ] Add `--mode {lilab,sdsc}` (required); switches the body of `submit_iteration` between foreground subprocess and `sbatch + afterany`.
 - [ ] Add all flags from §3.2 to `_chain_common.sh::parse_chain_args` and propagate to `build_app_args` with **identical names and defaults** to both Python entries (see §3.8 consistency contract).
+- [ ] **`--data_dir` plumbing** (relocated from Commit 11 Part A per Final Ruling 5 — Python-side already wired in `a4238de`/`c38837e`): add `DATA_DIR` to the shell variable set, default to the canonical path (`/home/klz/Data/TIDMAD/` on lilab, Slurm env-var on SDSC), and pass `--data_dir "${DATA_DIR}"` in `build_app_args`. Closes the v6 Time-Estimation-Repair countermeasure end-to-end: Python entries already accept and forward the flag; only the shell trampoline still needs to emit it for chain mode.
 - [ ] Add `--auto_resume` (default ON) and `--start_iter N` (manual override) to `_chain_common.sh`.
 - [ ] Add `--force_fresh` to override the "refuse to clobber non-empty workspace" guard.
 - [ ] If `--auto_resume` and `inspect_run_state.py --next-iter` returns N > NUM_ITERATIONS, exit cleanly with a "nothing to do" message.
@@ -809,11 +809,17 @@ The current `run_iteration_chain_lilab.sh:40–44` ignores `$VIRTUAL_ENV` and pr
 - [ ] Unit test: with `VIRTUAL_ENV=/some/test/path` set, the chain header prints that path as the resolved interpreter; with it unset and `${PROJECT_DIR}/.venv/bin/python` present, that path is used; with both absent and `uv` on PATH, `uv run python` is used.
 - [ ] Note: `--mode sdsc` keeps its existing pattern — `submit_one_iteration.slurm` activates `.venv/bin/activate` inside the Slurm job, so `$VIRTUAL_ENV` on the submit host is irrelevant. This commit does not change the SDSC env-resolution path.
 
+**Three-way consistency tests (relocated from Commit 11 per Final Ruling 5):**
+
+- [ ] **`run_workflow` kwargs snapshot test** (relocated from Commit 11 "Common — consistency tests"): construct the same flag set on both `run_exploration_adaptive.py` and `run_one_iteration.py` and assert the resulting `run_workflow(...)` call is byte-for-byte identical (modulo `run_name` and `max_iterations`, which are per-iter for the chain-in-process loop). Now that `_chain_common.sh` is widened in this commit, extend the existing `tests/unit/scripts/test_chain_consistency.py` to cover the **three-way** Python ↔ Python ↔ shell parity instead of the current Python ↔ Python only.
+- [ ] Shell-default test: every flag in §3.2 has a default declared at the top of `_chain_common.sh` matching the Python entries' argparse defaults. Drift trips the consistency test.
+
 **Smoke tests:**
 
 - [ ] Smoke test (lilab): 2-iter chain on synthetic data, verify both iters complete and write manifests, and the chain header shows the project `.venv` interpreter.
 - [ ] Smoke test (sdsc): submit a 2-iter chain dry-run (`--time 00:05:00`), verify the second job depends on the first via `squeue -j ... -o '%j %i %E'`.
 - [ ] Resume smoke test: launch a 3-iter chain, kill mid-iter-2, rerun the same command, verify iter_001 is preserved and iter_002 restarts from scratch.
+- [ ] **Manual `--start_iteration 3` chain-layout sanity check** (relocated from Commit 11 "Common — consistency tests"): run `python run_exploration_adaptive.py --workspace W --start_iteration 3 ...` against a workspace pre-populated with iters 1+2 in chain layout; verify iter 3 starts in-process with `MODEL_REGISTRY` carrying both prior plugins and `get_model_description` resolving prior `model_type`s via `${SIDERIUS_CHAIN_WORKSPACE}`. Unit-tested equivalent already lives in `tests/unit/sdsc_submission_scripts/test_run_one_iteration.py::TestRestoreWiring::test_manual_override_start_iteration_3_with_iters_1_and_2_on_disk`; this is the human-in-the-loop counterpart that exercises the new shell entry.
 - [ ] Doc-sync: §3.4 (auto-resume), §3.8 (consistency) cover the design surface; update `docs/running_chain_test.md` runbook to reference the new entry-point and dry-run + venv-detection behaviours.
 
 #### Commit 14 — `test(chain): V7 pre-flight simulation — 5-iter local-host real-LLM run`
@@ -913,8 +919,9 @@ These were present in Part 2's design but are deliberately excluded from Task 2 
 | Unit | `_truncate_memory_history`: 10 records → 3 full + 7 condensed, correct keys | 10 | unit |
 | Unit | `model_knowledge_cache` cap: 8 entries → top-5 by score | 10 | unit |
 | Unit | `_truncate_description`: 7KB → 1500 chars + marker | 10 | unit |
-| Unit | CLI surface of `run_one_iteration.py` matches `run_exploration_adaptive.py` (snapshot of `run_workflow` kwargs) | 11 | unit |
-| Unit | §3.8 consistency contract — every flag has identical name + default in all three entries | 11 | unit |
+| Unit | §3.8 consistency contract — every flag has identical name + default across both Python entries (`tests/unit/scripts/test_chain_consistency.py`, Python-to-Python parity) | 11 | unit |
+| Unit | CLI surface of `run_one_iteration.py` matches `run_exploration_adaptive.py` — snapshot of `run_workflow` kwargs is byte-for-byte identical (modulo `run_name`/`max_iterations`) | 13 | unit |
+| Unit | §3.8 consistency contract extended to three-way (Python ↔ Python ↔ `_chain_common.sh`) once shell entry widened | 13 | unit |
 | Unit | `inspect_run_state.py --next-iter` against fixtures | 12 | unit |
 | Unit | `--dry-run` never touches the workspace and prints the right per-iter command | 13 | unit |
 | Unit | venv detection picks `$VIRTUAL_ENV` first, project `.venv` second, `uv` third, `python3` last (with warning) | 13 | unit |
