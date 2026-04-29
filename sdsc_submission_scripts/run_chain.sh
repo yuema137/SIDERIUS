@@ -159,9 +159,73 @@ case "$MODE" in
     *) echo "Invalid --mode '$MODE' (must be 'lilab' or 'sdsc')" >&2; exit 1 ;;
 esac
 
-if [ "$MODE" = "lilab" ]; then
-    resolve_py_cmd
-fi
+# Resolve the Python interpreter for both modes. Lilab uses it to run
+# run_one_iteration.py directly; SDSC only uses it on the submission node
+# to run scripts/inspect_run_state.py for auto-resume. The SDSC iteration
+# jobs themselves use whatever python is configured inside submit_one_iteration.slurm.
+resolve_py_cmd
+
+# --- 13.B: Auto-resume + safety guard + idempotency ---
+
+resolve_start_iter() {
+    if [ -n "$START_ITER" ]; then
+        echo "Start: --start_iter manually pinned to $START_ITER"
+        return 0
+    fi
+    if [ "$AUTO_RESUME" -ne 1 ]; then
+        START_ITER=1
+        echo "Start: auto-resume disabled — defaulting to 1"
+        return 0
+    fi
+    if [ ! -d "$WORKSPACE" ]; then
+        START_ITER=1
+        echo "Start: workspace does not exist yet — fresh chain at 1"
+        return 0
+    fi
+    # Inspector emits a single integer on stdout when successful, or a
+    # human-readable error on stderr with non-zero exit (legacy layout,
+    # non-contiguous gap, ...). We let stderr flow through naturally and
+    # halt with a wrapper-level message so operators see both signals.
+    if ! START_ITER=$("${PY_CMD[@]}" "${PROJECT_DIR}/scripts/inspect_run_state.py" \
+            --layout chain --workspace "$WORKSPACE" --next-iter); then
+        echo "ERROR: inspector refused to compute --next-iter for workspace $WORKSPACE (see error above)" >&2
+        exit 1
+    fi
+    echo "Start: auto-resume — inspector computed START_ITER=$START_ITER"
+}
+
+check_idempotency() {
+    if [ "$START_ITER" -gt "$NUM_ITERATIONS" ]; then
+        echo "All ${NUM_ITERATIONS} iterations are already complete. Nothing to do."
+        exit 0
+    fi
+}
+
+# Refuses to start a fresh chain (START_ITER==1) on a non-empty workspace
+# unless --force_fresh is set. This is the stale-fresh safety guard: it
+# catches the common accident of pointing the chain at the wrong workspace
+# and silently overwriting unrelated work.
+check_stale_fresh_guard() {
+    if [ "$START_ITER" -ne 1 ]; then
+        return 0
+    fi
+    if [ ! -d "$WORKSPACE" ]; then
+        return 0
+    fi
+    if [ -z "$(ls -A "$WORKSPACE" 2>/dev/null)" ]; then
+        return 0
+    fi
+    if [ "$FORCE_FRESH" -eq 1 ]; then
+        echo "WARNING: --force_fresh set — proceeding from iter 1 in non-empty workspace $WORKSPACE"
+        return 0
+    fi
+    echo "ERROR: Workspace at $WORKSPACE is not empty. Use --force_fresh to clobber existing data, or specify --start_iter N to resume from a specific point." >&2
+    exit 1
+}
+
+resolve_start_iter
+check_idempotency
+check_stale_fresh_guard
 
 case "$MODE" in
     lilab) HEADER_LABEL="LILAB (foreground)" ;;

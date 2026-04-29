@@ -56,6 +56,15 @@ MODE=""
 # DRY_RUN=1 makes run_chain print the exact command per iteration without
 # touching the workspace or submitting any jobs. Side-effect-free.
 DRY_RUN=0
+# Auto-resume control (Phase 6.8 Commit 13.B). AUTO_RESUME=1 means the
+# orchestrator queries scripts/inspect_run_state.py --next-iter to pick up
+# where a partially-run chain left off. --no_auto_resume forces 1.
+# --start_iter N overrides everything (manual pin). --force_fresh bypasses
+# the stale-fresh safety guard that otherwise refuses to clobber a
+# non-empty workspace from iter 1.
+AUTO_RESUME=1
+FORCE_FRESH=0
+START_ITER=""
 
 # --- Slurm-only defaults (ignored by lilab caller) ---
 PARTITION="gpu-shared"
@@ -97,6 +106,10 @@ parse_chain_args() {
         --minimum_boldness)       MINIMUM_BOLDNESS="$2"; shift 2 ;;
         --mode)                   MODE="$2"; shift 2 ;;
         --dry-run|--dry_run)      DRY_RUN=1; shift ;;
+        --auto_resume)            AUTO_RESUME=1; shift ;;
+        --no_auto_resume)         AUTO_RESUME=0; shift ;;
+        --force_fresh)            FORCE_FRESH=1; shift ;;
+        --start_iter)             START_ITER="$2"; shift 2 ;;
         # Slurm-only flags — silently accepted on lilab too (ignored)
         --partition)              PARTITION="$2"; shift 2 ;;
         --time)                   TIME="$2"; shift 2 ;;
@@ -208,6 +221,9 @@ print_chain_header() {
     if [ -n "$MODE" ]; then
         echo "  Mode             : $MODE"
     fi
+    if [ -n "${START_ITER:-}" ]; then
+        echo "  Start iter       : $START_ITER  (auto_resume=$AUTO_RESUME, force_fresh=$FORCE_FRESH)"
+    fi
     if [ "$MODE" = "lilab" ] && [ "${#PY_CMD[@]}" -gt 0 ]; then
         echo "  Python           : ${PY_CMD[*]}  (source: ${PY_SOURCE:-?})"
     fi
@@ -229,7 +245,8 @@ run_chain() {
         mkdir -p "$WORKSPACE"
     fi
     local ITER
-    for ITER in $(seq 1 $NUM_ITERATIONS); do
+    local first="${START_ITER:-1}"
+    for ITER in $(seq "$first" "$NUM_ITERATIONS"); do
         build_source_paths "$ITER"
         build_app_args "$ITER"
 
