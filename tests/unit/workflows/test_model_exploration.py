@@ -1170,3 +1170,62 @@ class TestRegisterPluginUsesHelper:
         assert "test_regressor_plugin_c6" in PLUGIN_CONFIG_REGISTRY
         assert PLUGIN_OUTPUT_TYPE_REGISTRY.get("test_regressor_plugin_c6") == "regressor"
         assert get_output_type("test_regressor_plugin_c6") == "regressor"
+
+
+# ---------------------------------------------------------------------------
+# Workflow-surface signature drift regression
+#
+# Catches the class of bug from commit 02eed58, where run_one_iteration.py
+# forwarded ``formal_round_strategy=args.formal_round_strategy`` into
+# run_workflow but the workflow's signature was never updated to accept
+# the kwarg — every chain run would have crashed with TypeError on
+# iteration 1. argparse-parity tests don't catch this because they never
+# invoke the workflow.
+#
+# Two-layer check per orchestration kwarg:
+#   1. ``inspect.signature(run_workflow)`` exposes the parameter (cheap,
+#      catches the (a)-style TypeError before any test setup).
+#   2. The value reaches ``HyperparamTuningInput`` unchanged via the
+#      validator->tune protocol (catches a kwarg that's accepted but
+#      silently dropped between workflow surface and tuner input).
+# ---------------------------------------------------------------------------
+
+
+def _tune_input_from_workflow(workflow_env, tmp_path, **workflow_kwargs):
+    """Run the workflow with a single source path and return the
+    HyperparamTuningInput that reached HyperparamTuningAgent.run()."""
+    path = str(tmp_path / "data" / "punet" / "v1" / "agent" / "run_output_v1_agent.json")
+    run_workflow(
+        source_paths=[path],
+        workspace=workflow_env["workspace"],
+        run_name="test_run",
+        **workflow_kwargs,
+    )
+    mock_tune_run = workflow_env["tune"].return_value.run
+    assert mock_tune_run.called, "tuning agent was never invoked"
+    tune_input = mock_tune_run.call_args[0][0]
+    assert isinstance(tune_input, HyperparamTuningInput)
+    return tune_input
+
+
+class TestOrchestrationParamForwarding:
+
+    def test_signature_accepts_formal_round_strategy(self):
+        import inspect
+        sig = inspect.signature(run_workflow)
+        assert "formal_round_strategy" in sig.parameters
+
+    def test_formal_round_strategy_default_inherit_best_trial(
+        self, workflow_env, tmp_path
+    ):
+        tune_input = _tune_input_from_workflow(workflow_env, tmp_path)
+        assert tune_input.formal_round_strategy == "inherit_best_trial"
+
+    def test_formal_round_strategy_llm_propose_reaches_tuning_input(
+        self, workflow_env, tmp_path
+    ):
+        tune_input = _tune_input_from_workflow(
+            workflow_env, tmp_path,
+            formal_round_strategy="llm_propose",
+        )
+        assert tune_input.formal_round_strategy == "llm_propose"

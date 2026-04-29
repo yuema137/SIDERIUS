@@ -450,6 +450,31 @@ class TestAttemptBudgetFanOut:
         assert result.max_fail_rounds == 3
 
 
+# ---------------------------------------------------------------------------
+# formal_round_strategy fan-out
+#
+# Orchestration policy for the forced formal round. The protocol must
+# surface caller overrides to HyperparamTuningInput and otherwise leave
+# the schema default ('inherit_best_trial').
+# ---------------------------------------------------------------------------
+
+
+class TestFormalRoundStrategyFanOut:
+
+    def test_default_when_omitted(self, validator_output, proposal_output, storage):
+        result = local_validated_model(validator_output, proposal_output, storage)
+        assert result.formal_round_strategy == "inherit_best_trial"
+
+    def test_llm_propose_passed_through(
+        self, validator_output, proposal_output, storage
+    ):
+        result = local_validated_model(
+            validator_output, proposal_output, storage,
+            formal_round_strategy="llm_propose",
+        )
+        assert result.formal_round_strategy == "llm_propose"
+
+
 class TestDatabaseValidatedModel:
 
     def test_raises_not_implemented(self, validator_output, storage):
