@@ -671,17 +671,20 @@ Each commit ships its own design-doc update (per `feedback_plan_doc_sync.md`). C
 
 **Goal**: Input contract parity per §3.2. Both Python entries accept the same flag set with identical names and defaults. `run_exploration_adaptive.py` gains `--start_iteration N` and converges on the chain workspace layout when N > 1.
 
-**Atomic decomposition (sub-commits)** — landed progressively to keep history bisectable. The original "Parts A/B/C" framing below describes the engineering surface; the **landing order** is 11.1 → 11.2 → 11.3 → 11.4 + a final doc-sync. Each sub-commit verifies independently before the next is touched.
+**Atomic decomposition (sub-commits)** — landed progressively to keep history bisectable. The original "Parts A/B/C" framing below describes the engineering surface; the **landing order** was 11.1 → 11.2 → 11.3 → 11.4 + a final doc-sync. Each sub-commit verified independently before the next was touched.
 
 | Sub-commit | Subject | Status | SHA |
 |------------|---------|--------|-----|
 | 11.1 | `test(cli): cover force_formal_round flag + catch up to seed_paths/start_iteration renames` — test-side catch-up to runtime renames already in HEAD (`a4238de`, `c38837e`); 45/45 unit tests green. | **Landed** | `a95eb92` |
 | 11.2 | `fix(estimator): recalibrate static ms/step formula + add 2.0 ms floor (Phase 6.8 §4.2)` — `_STATIC_MS_PER_FLOP` 6e-10→3e-9, new `_MIN_MS_PER_STEP=2.0` floor, `SAFETY_MULTIPLIER` 1.1→2.0; preflight fixture rebalanced (50k params); 58/58 unit tests green. | **Landed** | `2d2a196` |
-| 11.3 | `fix(prompts): generic conditional prompt for formal rounds` — dynamic `if force_formal_round` gating in `agent/prompts.py`, threaded through `agent/llm_bridge.py` and `nodes/ml_hyperparameter_tune_agent.py`. | Pending | — |
-| 11.4 | `fix(handoff): workspace anchoring + producer-mirroring (Body-Soul Alignment)` — `SIDERIUS_CHAIN_WORKSPACE` env-var anchor, `_register_plugin` dual-write, workspace-aware `get_model_description`. Verified end-to-end against the iter 1 + iter 2 chain run that produced `best_score=4.524`. | Pending | — |
-| Doc-sync | `docs(phase68): mark Commit 11 Parts A/B/C complete` — flip remaining `[ ]` boxes once 11.3 + 11.4 land. | Pending | — |
+| 11.3 | `fix(prompts): implement generic conditional formal-round logic (conscious-physical alignment)` — `force_formal_round` plumbed through `LLMBridge.plan` → `get_planner_user_prompt`; final-round prompt renders MANDATORY when True / OPTIONAL when False; `_apply_mode_override_chain` helper extracted in tuner agent so prompt-side and override-side share a single flag; 40/40 unit tests green; prompt-diff inspection confirms toggle. | **Landed** | `6a03277` |
+| 11.4 | `fix(handoff): implement producer-mirroring and workspace-anchored description loading` — `SIDERIUS_CHAIN_WORKSPACE` env-var anchor on both Python entries; `_register_plugin` accepts `dest_plugin_dirs: list[str] \| str` and run_workflow passes both tuner-scoped + chain-canonical dirs; `get_model_description` walks `${SIDERIUS_CHAIN_WORKSPACE}/plugins/iter_NNN/` newest-first; new `validate_workspace_layout` guard refuses legacy v5/v6 layouts on `run_exploration_adaptive.py`; 211/211 unit tests green. | **Landed** | `6c8130b` |
+| Interim doc-sync | `docs(phase68): record Commit 11 atomic decomposition + Part A/B/C status to date` — added the table above, flipped Part A/B items to `[x]`, demoted `_chain_common.sh` plumbing to deferred-Commit-13. | **Landed** | `855117b` |
+| Final doc-sync | This update — confirms 11.3 + 11.4 landed, captures end-to-end log gold, total test counts. | **Landed** | (this commit) |
 
 The Part A/B/C block below remains the canonical engineering reference; sub-commits map onto it as: **11.2 ↔ Part A "Time Estimation Repair" sub-bullet + estimator constants** (the only Part A items still open at decomposition time, since flag-widening landed earlier in `a4238de`/`c38837e`); **11.4 ↔ Part C in full**; **11.3 ↔ a generic conditional that complements `force_formal_round` from Part A** (originally folded under the Generic Prompt Patch, now its own commit). Part B already landed earlier under Commit 8 (`c38837e`) plus the `--start_iteration` work; nothing pending in Part B at the time of decomposition.
+
+**Cumulative test pass-count across the four sub-commits**: 45 (11.1) + 58 (11.2) + 40 (11.3) + 211 (11.4) = **354 unit tests** verifying the decomposition, plus the broader 925/925 sweep recorded under Part C and the end-to-end iter 1 + iter 2 chain run in `exploration_phase68_commit11_gate/` that produced `best_score=4.524` from a chain-restored handoff.
 
 **Part A — `run_one_iteration.py` flag widening + time estimation repair:**
 
