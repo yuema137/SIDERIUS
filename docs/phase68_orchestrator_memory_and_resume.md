@@ -515,6 +515,36 @@ Takes a plugin .py path on disk and:
 
 `_register_plugin` is refactored to call this helper after its `shutil.copy2`. Single source of truth, zero behavioural drift.
 
+#### Producer must mirror to chain-canonical path
+
+`_register_plugin` historically wrote only to the tuner-scoped `get_plugin_dir(tuning_dir, run_name)` — that is what the training subprocess discovers via `SIDERIUS_PLUGIN_DIRS` (docs/run_scoped_plugins.md, Phase 4). But `restore_prior_state` reads from the **chain-canonical** `get_plugin_dir(workspace, run_name)`. Both paths are needed: one for sandbox isolation, the other for cross-iter handoff. The producer mirrors to both:
+
+```python
+from core.sandbox_executor import get_plugin_dir
+_register_plugin(
+    impl_output,
+    proposal.model_name,
+    [
+        get_plugin_dir(tuning_dir, run_name),  # tuner-scoped — sandbox SIDERIUS_PLUGIN_DIRS
+        get_plugin_dir(workspace,  run_name),  # chain-canonical — restore_prior_state
+    ],
+)
+```
+
+`_register_plugin` accepts `dest_plugin_dirs: list[str] | str` and copies both the `.py` and `description.md` to every dest. The first dest is the primary — its `.py` is fed to `_add_plugin_to_registries` (the in-process planner sees the new model type without a re-scan). A bare `str` is still accepted for back-compat with older call sites and unit tests.
+
+#### Description loader anchored on the chain workspace
+
+`ml_models.model_descriptions.get_model_description` is the second consumer of the chain-canonical plugin tree. The interpreter and proposer call it on every iter with the model_type they read from a prior iter's manifest; on iter > 1 the model_type is agent-generated and has no built-in description.md. To resolve it without threading workspace through every node schema, the entry scripts publish the workspace as a process-global env var:
+
+- `sdsc_submission_scripts/run_one_iteration.py` and `run_exploration_adaptive.py` set `os.environ["SIDERIUS_CHAIN_WORKSPACE"] = os.path.abspath(workspace)` before any node init.
+- `get_model_description(model_type)` searches in priority order:
+  1. `ml_models/{model_type}/description.md` (built-in)
+  2. `agent_generated/models/{model_type}/description.md` (legacy plugin global)
+  3. `${SIDERIUS_CHAIN_WORKSPACE}/plugins/iter_NNN/{model_type}/description.md` — walked in descending iter order so the latest registration of a model_type wins.
+
+This mirrors the existing `SIDERIUS_PLUGIN_DIRS` idiom (docs/run_scoped_plugins.md, Phase 2): each chain process has exactly one chain workspace, so a process-global value is the right shape. Schemas stay clean; only the entry scripts know about the env var; descendant calls read it transparently.
+
 #### `restore_prior_state(workspace, current_iter, seed_paths)` — top-level
 
 For each prior iter NNN in 1..current_iter-1:
@@ -641,35 +671,90 @@ Each commit ships its own design-doc update (per `feedback_plan_doc_sync.md`). C
 
 **Goal**: Input contract parity per §3.2. Both Python entries accept the same flag set with identical names and defaults. `run_exploration_adaptive.py` gains `--start_iteration N` and converges on the chain workspace layout when N > 1.
 
+**Atomic decomposition (sub-commits)** — landed progressively to keep history bisectable. The original "Parts A/B/C" framing below describes the engineering surface; the **landing order** is 11.1 → 11.2 → 11.3 → 11.4 + a final doc-sync. Each sub-commit verifies independently before the next is touched.
+
+| Sub-commit | Subject | Status | SHA |
+|------------|---------|--------|-----|
+| 11.1 | `test(cli): cover force_formal_round flag + catch up to seed_paths/start_iteration renames` — test-side catch-up to runtime renames already in HEAD (`a4238de`, `c38837e`); 45/45 unit tests green. | **Landed** | `a95eb92` |
+| 11.2 | `fix(estimator): recalibrate static ms/step formula + add 2.0 ms floor (Phase 6.8 §4.2)` — `_STATIC_MS_PER_FLOP` 6e-10→3e-9, new `_MIN_MS_PER_STEP=2.0` floor, `SAFETY_MULTIPLIER` 1.1→2.0; preflight fixture rebalanced (50k params); 58/58 unit tests green. | **Landed** | `2d2a196` |
+| 11.3 | `fix(prompts): generic conditional prompt for formal rounds` — dynamic `if force_formal_round` gating in `agent/prompts.py`, threaded through `agent/llm_bridge.py` and `nodes/ml_hyperparameter_tune_agent.py`. | Pending | — |
+| 11.4 | `fix(handoff): workspace anchoring + producer-mirroring (Body-Soul Alignment)` — `SIDERIUS_CHAIN_WORKSPACE` env-var anchor, `_register_plugin` dual-write, workspace-aware `get_model_description`. Verified end-to-end against the iter 1 + iter 2 chain run that produced `best_score=4.524`. | Pending | — |
+| Doc-sync | `docs(phase68): mark Commit 11 Parts A/B/C complete` — flip remaining `[ ]` boxes once 11.3 + 11.4 land. | Pending | — |
+
+The Part A/B/C block below remains the canonical engineering reference; sub-commits map onto it as: **11.2 ↔ Part A "Time Estimation Repair" sub-bullet + estimator constants** (the only Part A items still open at decomposition time, since flag-widening landed earlier in `a4238de`/`c38837e`); **11.4 ↔ Part C in full**; **11.3 ↔ a generic conditional that complements `force_formal_round` from Part A** (originally folded under the Generic Prompt Patch, now its own commit). Part B already landed earlier under Commit 8 (`c38837e`) plus the `--start_iteration` work; nothing pending in Part B at the time of decomposition.
+
 **Part A — `run_one_iteration.py` flag widening + time estimation repair:**
 
-- [ ] Add flags listed in §3.2 table that are missing today: `--llm_config`, `--advice`, `--target_files`, `--sampling_seed`, `--exploration_mode`, `--minimum_boldness`, `--debug_dump_prompts`, `--max_impl_attempts`, `--trial_time_budget_minutes`, `--formal_time_budget_minutes`, `--data_dir`, `--trial_vram_budget_gb`, `--formal_vram_budget_gb`, `--attempts_per_round`, `--attempts_per_formal_round`, `--max_fail_rounds`.
-- [ ] Switch `--max_rounds` default from 20 to 3 (sync with adaptive).
-- [ ] When `--llm_config` is provided, build `WorkflowLLMConfig.from_json`. Keep `--llm_model` as deprecated fallback for one release; emit DeprecationWarning if used without `--llm_config`.
-- [ ] Switch `--human_advice_file` schema from 5-key (interpret/propose/implement/validate/tune) to adaptive's 4-key (propose/implement/tune/mindset). Tolerate both schemas during transition (load both; missing keys are None).
-- [ ] Pass every new flag through to `run_workflow(...)`.
-- [ ] **`--data_dir` plumbing (v6 countermeasure — Time Estimation Repair)**: wire `--data_dir` through `run_workflow()` → `HyperparamTuningInput.data_dir` → time skill's `_measure_ms_per_step`. Without this, the warmup path is dead code and every run uses the static formula (5-10x underestimate for novel architectures). See `reports/v6_pr63_20260428.md §9.1`.
-- [ ] **Static formula patch**: in `agent/skills/training_skill/estimator.py`, raise `_STATIC_MS_PER_FLOP` from `6e-10` to `3e-9` and add a minimum ms/step floor of 2.0 ms (CUDA kernel launch + DataLoader overhead). Raise `SAFETY_MULTIPLIER` from `1.1` to `2.0` — the current value was calibrated for warmup variance, not formula error. See `reports/v6_pr63_20260428.md §9.2-§9.3`.
-- [ ] **`_chain_common.sh` plumbing**: add `DATA_DIR` to the shell variable set and pass `--data_dir "${DATA_DIR}"` in `build_app_args`. Default to the canonical path (`/home/klz/Data/TIDMAD/` on lilab, Slurm env-var on SDSC).
+- [x] Add flags listed in §3.2 table that are missing today: `--llm_config`, `--advice`, `--target_files`, `--sampling_seed`, `--exploration_mode`, `--minimum_boldness`, `--debug_dump_prompts`, `--max_impl_attempts`, `--trial_time_budget_minutes`, `--formal_time_budget_minutes`, `--data_dir`, `--trial_vram_budget_gb`, `--formal_vram_budget_gb`, `--attempts_per_round`, `--attempts_per_formal_round`, `--max_fail_rounds`.
+- [x] Switch `--max_rounds` default from 20 to 3 (sync with adaptive).
+- [x] When `--llm_config` is provided, build `WorkflowLLMConfig.from_json`. Keep `--llm_model` as deprecated fallback for one release; emit DeprecationWarning if used without `--llm_config`.
+- [x] Switch `--human_advice_file` schema from 5-key (interpret/propose/implement/validate/tune) to adaptive's 4-key (propose/implement/tune/mindset). Tolerate both schemas during transition (load both; missing keys are None).
+- [x] Pass every new flag through to `run_workflow(...)`.
+- [x] **`--data_dir` plumbing (v6 countermeasure — Time Estimation Repair)**: wire `--data_dir` through `run_workflow()` → `HyperparamTuningInput.data_dir` → time skill's `_measure_ms_per_step`. Without this, the warmup path is dead code and every run uses the static formula (5-10x underestimate for novel architectures). See `reports/v6_pr63_20260428.md §9.1`.
+- [x] **Static formula patch**: in `agent/skills/training_skill/estimator.py`, raise `_STATIC_MS_PER_FLOP` from `6e-10` to `3e-9` and add a minimum ms/step floor of 2.0 ms (CUDA kernel launch + DataLoader overhead). Raise `SAFETY_MULTIPLIER` from `1.1` to `2.0` — the current value was calibrated for warmup variance, not formula error. See `reports/v6_pr63_20260428.md §9.2-§9.3`.
+- [ ] **`_chain_common.sh` plumbing** (deferred to Commit 13 per Final Ruling 5): add `DATA_DIR` to the shell variable set and pass `--data_dir "${DATA_DIR}"` in `build_app_args`. Default to the canonical path (`/home/klz/Data/TIDMAD/` on lilab, Slurm env-var on SDSC). The Python entry side is wired (`--data_dir` argparse + passthrough on both `run_one_iteration.py` and `run_exploration_adaptive.py`); only the shell trampoline still needs the flag for chain mode via `run_chain.sh`. Bundled with the rest of `_chain_common.sh::parse_chain_args` widening in Commit 13.
+- [x] **`--train_portion` ruling**: set default to 0.1 on both Python entries (correcting the existing 1.0 in `run_exploration_adaptive.py`). Per Final Ruling 1 — 0.1 is the standard for trial rounds.
+- [x] **`--max_epochs` ruling**: set default to 1 on both Python entries; install a `_positive_int` argparse validator that rejects 0/negative/None. Per Final Ruling 1.
+- [x] **`--seed_paths` canonical / `--source_paths` deprecated alias**: Per Final Ruling 3, `--seed_paths` is the canonical name on both Python entries. `--source_paths` is kept as a deprecated alias (`dest="source_paths_legacy"`) that emits a `DeprecationWarning` and is mutually exclusive with the canonical name. Same pattern as the `--start_iteration` / `--iteration` alias from Commit 8.
+- [x] **`--advice` 4-key help text**: adaptive's help string updated from "(propose/implement/tune keys)" to "(propose/implement/tune/mindset keys)" to match the actual schema.
 
 **Part B — `run_exploration_adaptive.py` adopts `--start_iteration N` + chain workspace layout:**
 
 This is the **convergence step** that makes the two Python entries truly equivalent. After this commit, `run_exploration_adaptive.py` is a "chain-in-one-process" runner: it loops over `run_workflow(max_iterations=1, run_name=f"iter_{N:03d}", ...)` calls, writing each iter to the chain workspace layout (`{workspace}/iter_NNN/`), exactly like the SDSC/lilab chain — minus the per-iter subprocess fork.
 
-- [ ] Add `--start_iteration N` (default 1).
-- [ ] When `N > 1`, call `restore_prior_state(workspace, N, seed_paths)` before entering the iter loop. Same trigger semantics as `run_one_iteration.py`.
-- [ ] Refactor the in-process iter loop: replace the single `run_workflow(max_iterations=20, ...)` call with `for ITER in range(start_iter, max_iterations + 1): run_workflow(max_iterations=1, run_name=f"iter_{ITER:03d}", ...)`.
-- [ ] Each iter call uses `source_paths=state.resolved_source_paths` (initially seeds + restored prior outputs); after each iter completes, append the new manifest's output_path to the list for the next iter (mirrors what the shell chain does between sbatch jobs).
-- [ ] Write `manifest.json` per iter (same format as `run_one_iteration.py:write_manifest`) so a workspace produced by `run_exploration_adaptive.py` is interoperable with `run_chain.sh`'s auto-resume.
-- [ ] **Behaviour change to flag in commit message**: workspace layout for `run_exploration_adaptive.py` now matches the chain (`{workspace}/iter_NNN/iteration_001/{model}/`) instead of the legacy `{run_dir}/{run_name}/iteration_NNN/{model}/`. Old workspaces from prior runs are not migrated automatically; operators rerun fresh or use the chain runner directly.
-- [ ] Workspace-layout guard: if `--workspace` already contains a legacy-layout directory (`{run_name}/iteration_NNN/...` siblings), exit with an error pointing operators at the migration note above.
+- [x] Add `--start_iteration N` (default 1).
+- [x] When `N > 1`, call `restore_prior_state(workspace, N, seed_paths)` before entering the iter loop. Same trigger semantics as `run_one_iteration.py`.
+- [x] Refactor the in-process iter loop: replace the single `run_workflow(max_iterations=20, ...)` call with `for ITER in range(start_iter, max_iterations + 1): run_workflow(max_iterations=1, run_name=f"iter_{ITER:03d}", ...)`.
+- [x] Each iter call uses `source_paths=state.resolved_source_paths` (initially seeds + restored prior outputs); after each iter completes, append the new manifest's output_path to the list for the next iter (mirrors what the shell chain does between sbatch jobs).
+- [x] Write `manifest.json` per iter (same format as `run_one_iteration.py:write_manifest`) so a workspace produced by `run_exploration_adaptive.py` is interoperable with `run_chain.sh`'s auto-resume.
+- [x] **Behaviour change to flag in commit message**: workspace layout for `run_exploration_adaptive.py` now matches the chain (`{workspace}/iter_NNN/iteration_001/{model}/`) instead of the legacy `{run_dir}/{run_name}/iteration_NNN/{model}/`. Old workspaces from prior runs are not migrated automatically; operators rerun fresh or use the chain runner directly.
+- [x] Workspace-layout guard: if `--workspace` already contains a legacy-layout directory (`{run_name}/iteration_NNN/...` siblings), exit with an error pointing operators at the migration note above.
+
+**Part C — Body-Soul Alignment via Workspace Anchoring (chain-handoff fix):**
+
+Added during the Commit 11 verification gate. Iter 2 crashed because the producer (`workflows/model_exploration.py:_register_plugin`) and the consumers (`core/resume.py:restore_prior_state`, `ml_models/model_descriptions.py:get_model_description`) had drifted on path conventions:
+
+- **Bug 1 — chain restoration finds the JSON but not the plugin .py.** `restore_prior_state` reads from `{workspace}/plugins/iter_NNN/{model_type}.py`, but `_register_plugin` was writing only to the tuner-scoped `{tuning_dir}/plugins/{run_name}/{model_type}.py`. Iter 2 logged `[CHAIN] Restored 0 prior plugin(s)` even though iter 1's manifest existed.
+- **Bug 2 — interpreter has no description.md fallback for agent-generated models.** `get_model_description` searched `ml_models/{type}/description.md` and `agent_generated/models/{type}/description.md` only — no workspace awareness. Iter 2's interpreter step crashed with `FileNotFoundError` for `wavenet_input_pe`.
+
+**Fix — three coordinated changes** (see §3.3 for the architectural framing):
+
+- [x] **Producer mirrors to chain-canonical path** (`workflows/model_exploration.py`). `_register_plugin` accepts `dest_plugin_dirs: list[str] | str` and writes the `.py` + `description.md` to every dest. Call site at `run_workflow` passes both `get_plugin_dir(tuning_dir, run_name)` (tuner-scoped, for `SIDERIUS_PLUGIN_DIRS` sandbox isolation) and `get_plugin_dir(workspace, run_name)` (chain-canonical, for `restore_prior_state` + description lookup). A bare `str` is still accepted for back-compat with older call sites and unit tests.
+- [x] **Workspace-aware description loader** (`ml_models/model_descriptions.py`). Adds a third candidate to the search order: `${SIDERIUS_CHAIN_WORKSPACE}/plugins/iter_NNN/{model_type}/description.md`, walked in descending iter order so the latest registration of a model_type wins. Built-in and legacy global candidates are unchanged.
+- [x] **Process-global anchor** (`sdsc_submission_scripts/run_one_iteration.py`, `run_exploration_adaptive.py`). Both entry scripts set `os.environ["SIDERIUS_CHAIN_WORKSPACE"] = os.path.abspath(workspace)` before any node init. Mirrors the existing `SIDERIUS_PLUGIN_DIRS` idiom (docs/run_scoped_plugins.md, Phase 2).
+
+**Why env var instead of threading workspace through schemas**: each chain process has exactly one chain workspace. Threading it through `InterpretationInput`, `HyperparamTuningInput`, plus their protocols and tests would touch ~6 files for a process-global value. The env var keeps schemas clean; only the entry scripts know about it; descendant calls (`get_model_description` and any future workspace-scoped consumer) read it transparently.
+
+**Verification gate** (must hold before landing Commit 11): **ALL GREEN** ✅
+
+Run executed against `/home/klz/Data/SIDEREIS_DATA/exploration_phase68_commit11_gate/` (wiped fresh, iter 1 + iter 2 both `status="completed"`; iter 2 wall-clock 55:49). Models proposed by the chain: iter 1 → `posenc_causal_dilated_stack` (best_score = -3.22), iter 2 → `spectral_skip_residual_stack` (best_score = +4.524).
+
+- [x] Wipe `/home/klz/Data/SIDEREIS_DATA/exploration_phase68_commit11_gate`.
+- [x] Iter 1 with `--no-force_formal_round`: dual-path artifacts confirmed —
+    - `{tuning_dir}/plugins/iter_001/posenc_causal_dilated_stack.py` (tuner-scoped) ✅
+    - `{workspace}/plugins/iter_001/posenc_causal_dilated_stack.py` (chain-canonical) ✅
+    - `description.md` mirrored in both `posenc_causal_dilated_stack/` subdirs ✅
+    - Producer dual-write log lines: `/tmp/phase68_commit11_iter1.log` lines 84–87.
+- [x] Iter 2: log gold —
+    - `[CHAIN] Restored 1 prior plugin(s) from iters [1]` ✅ (`/tmp/phase68_commit11_iter2.log` line 44 — Bug 1 fixed; was `Restored 0` before).
+    - Interpreter Step 1 resolves `posenc_causal_dilated_stack` description without crashing ✅ — Phase 1 returned 5 findings, 4 bottlenecks; Proposer prompt assembled cleanly with `Candidates: ['wavenet', 'punet', 'posenc_causal_dilated_stack']` (Bug 2 fixed).
+    - `[PROMPT_SIZE]` telemetry visible ✅ at lines 99/101/158 of iter 2 log: planner 21,153 chars; comparison 36,123 chars; causal_reasoning 49,230 chars (Gate 4 evidence).
+    - Iter 2 producer dual-write of `spectral_skip_residual_stack.py` + `description.md` — log lines 121–124.
+- [x] End-to-end manifest: `iter_002/manifest.json` carries `status="completed"` with non-null `best_denoising_score` (4.524) — chain-restored handoff produces a real positive score.
+
+**Unit test sweep results** (run before commit landing):
+
+- `tests/unit/workflows/`, `tests/unit/core/test_resume.py`, `tests/unit/sdsc_submission_scripts/`, `tests/unit/scripts/test_chain_consistency.py`, `tests/unit/agent/ml_model_proposal_agent/test_force_formal_round*` — **116/116 passed**.
+- Broader sweep `tests/unit/agent/test_llm_bridge_singleton.py + tests/unit/agent/ml_model_proposal_agent/ + tests/unit/ml_models/ + tests/unit/agent/tune_ml_hyperparam_agent/` — **925/925 passed in 221.70s**.
+- One fixture had to be rebalanced for the new estimator calibration (Part A v6): `tests/unit/agent/ml_model_proposal_agent/test_preflight_revision_loop.py` — `FAKE_GOOD_DRAFT.num_params` reduced from `500_000` → `50_000` so the new tighter formula (`SAFETY_MULTIPLIER=2.0`, `_STATIC_MS_PER_FLOP=3e-9`, `_MIN_MS_PER_STEP=2.0`) yields the same "safely under-budget" preflight factor (~12 ms/step, factor ≤ 1.0) the fixture originally encoded under the old formula (~13.2 ms/step under `1.1 × 6e-10`). Two corresponding `assert out.parameter_count_estimate == 500_000` assertions updated to `== 50_000`. Math preserves the original semantics; the fixture is no longer over-budget under the new calibration.
 
 **Common — consistency tests (gate for both Parts A and B):**
 
-- [ ] Unit test: snapshot the kwargs `run_workflow` receives from each Python entry. Construct the same flag set on both (`run_exploration_adaptive.py` and `run_one_iteration.py`) and assert the resulting `run_workflow` call is byte-for-byte identical (modulo `run_name` and `max_iterations`, which are per-iter for the chain-in-process loop).
-- [ ] Unit test: every flag in §3.2 has the same name and default in both entries.
-- [ ] Manual-override test (Part B): run `python run_exploration_adaptive.py --workspace W --start_iteration 3 ...` against a workspace with iters 1+2 in chain layout; verify iter 3 starts in-process with `MODEL_REGISTRY` carrying both prior plugins.
-- [ ] Doc-sync: §3.2, §3.8 already describe this. Commit message references §3.2 (input contract), §3.8 (consistency), and §4.2 (time estimation repair in Part A).
+- [x] Unit test: every flag in §3.2 has the same name and default in both entries (`tests/unit/scripts/test_chain_consistency.py`).
+- [x] Per Final Ruling 5 — for this commit, `test_chain_consistency.py` covers Python-to-Python parser parity. Shell-side widening of `_chain_common.sh::parse_chain_args` and matching shell-default tests are deferred to Commit 13.
+- [x] Doc-sync: §3.2, §3.8 already describe this. Commit message references §3.2 (input contract), §3.8 (consistency), and §4.2 (time estimation repair in Part A).
+- [ ] (Deferred to Commit 13 per Final Ruling 5) Snapshot the kwargs `run_workflow` receives from each Python entry. Construct the same flag set on both (`run_exploration_adaptive.py` and `run_one_iteration.py`) and assert the resulting `run_workflow` call is byte-for-byte identical (modulo `run_name` and `max_iterations`, which are per-iter for the chain-in-process loop).
+- [ ] (Deferred — exercised manually post-commit) Run `python run_exploration_adaptive.py --workspace W --start_iteration 3 ...` against a workspace with iters 1+2 in chain layout; verify iter 3 starts in-process with `MODEL_REGISTRY` carrying both prior plugins. Unit-tested equivalent already lives in `tests/unit/sdsc_submission_scripts/test_run_one_iteration.py::TestRestoreWiring::test_manual_override_start_iteration_3_with_iters_1_and_2_on_disk`.
 
 #### Commit 12 — `feat(inspector): inspect_run_state.py supports chain layout + --next-iter`
 
@@ -728,14 +813,73 @@ The current `run_iteration_chain_lilab.sh:40–44` ignores `$VIRTUAL_ENV` and pr
 - [ ] Resume smoke test: launch a 3-iter chain, kill mid-iter-2, rerun the same command, verify iter_001 is preserved and iter_002 restarts from scratch.
 - [ ] Doc-sync: §3.4 (auto-resume), §3.8 (consistency) cover the design surface; update `docs/running_chain_test.md` runbook to reference the new entry-point and dry-run + venv-detection behaviours.
 
-#### Commit 14 — `test(chain): full integration test + memory regression assertion`
+#### Commit 14 — `test(chain): V7 pre-flight simulation — 5-iter local-host real-LLM run`
 
-**Goal**: Lock the contract.
+**Goal**: High-fidelity end-to-end validation that the chain's memory / context / continuity
+contracts hold under a real multi-iteration workload before the V7 production launch.
+Pseudo-mode tests (Commits 7, 8, 11) prove the wiring; this commit proves the *system
+behaviour* — the contract that wiring is supposed to enforce — under real LLM reasoning.
 
-- [ ] Pseudo-mode integration test: 2-iter chain end-to-end (synthetic seed, mocked LLM responses), verify both manifests written with status=completed and the iter_002 process's `MODEL_REGISTRY` contained iter_001's plugin at the time `run_workflow` was entered.
-- [ ] Memory regression check: assert iter_001 process RSS-at-end is within 200 MB of iter_002 process RSS-at-start (process boundary as memory floor).
-- [ ] Hostile case: pseudo-corrupt iter_001's run_output JSON; verify iter_002 refuses to start with a clear error rather than silently chaining off an incomplete output.
-- [ ] Doc-sync: §3.5 (this section) updated with test results once green.
+**Scenario**: Run `run_exploration_adaptive.py` for **5 iterations** on the local host with
+real OpenAI calls and minimal compute, completing in **30–45 minutes** wall-time.
+
+**Launch parameters** (run name `phase68_v7_preflight_<YYYYMMDD>`):
+
+- `--max_iterations 5 --max_rounds 1 --max_proposal_attempts 1 --max_impl_attempts 1`
+- `--is_trial --trial_strategy snapshot`
+- `--no-force_formal_round` — last round honours the planner so the 0.01 portions actually
+  take effect on the final round. The planner prompt also tells the LLM that formal mode is
+  OPTIONAL on the last round. Without this flag, the production contract forces formal mode
+  at portion=0.1 / train_portion=1.0 (planner is told formal is MANDATORY *and* the post-LLM
+  override flips ``is_trial=False``) and the run cannot finish in 30–45 min.
+- `--trial_portion 0.01 --train_portion 0.01 --eval_portion 0.01`
+- `--max_epochs 1`
+- `--trial_time_budget_minutes 15 --formal_time_budget_minutes 15` — headroom for sandbox
+  compile + scoring; the Commit 11 gate test that produced this design used 5 min and
+  exhausted all attempts on the time gate.
+- `--trial_vram_budget_gb 8 --formal_vram_budget_gb 8`
+- `--llm_config llm_configs/openai_tiered_v1.json` — real OpenAI calls (gpt-5.4 tiered).
+- `--advice tuner_advice/exploration_adaptive_v1.json`
+
+**Success criteria** (all three must hold):
+
+- [ ] **Memory continuity** — `psutil` RSS sampled at the start of every iter via the
+  existing `[MEM] scope=workflow iter=N phase=start` log line; assert
+  `RSS(iter_5_start) ≤ 1.1 × RSS(iter_1_start)`. Validates that `del + gc.collect` in
+  §2.3 / Commit 9 actually clears across the long span; a regression here means workspace
+  state has accumulated tensors / module state across iters.
+- [ ] **Context stability** — `[PROMPT_SIZE] planner: N chars` logged at every round; the
+  sequence `planner@iter_1 … planner@iter_5` must show the bounded-growth signature: the
+  delta from iter_4 → iter_5 must be within ±5 % of the iter_3 → iter_4 delta (growth has
+  flattened). Validates the `_truncate_memory_history` sliding window from §2.4 / Commit 10
+  is effective once the buffer is full.
+- [ ] **Reasoning continuity** — the iter_5 proposer's `causal_reasoning` LLM output must
+  reference at least one concrete discovery from iter_1 or iter_2 (architecture name,
+  hyperparameter range, or specific bottleneck). Validates that the truncated memory_history
+  still preserves long-range signal through the condensation pass — i.e. the sliding window
+  is bounded but not amnesic.
+
+**Artefacts**:
+
+- `tests/integration/workflows/test_v7_preflight_chain.py` — `@real_run`-marked Tier 3
+  driver that launches the run, parses logs and manifests, and asserts the three criteria.
+  Skips by default when `OPENAI_API_KEY` is unset; opt-in via
+  `pytest -m real_run tests/integration/workflows/`.
+- A captured workspace lives at
+  `/home/klz/Data/SIDEREIS_DATA/exploration_phase68_v7_preflight_<YYYYMMDD>/`. The test
+  reads this workspace's logs and manifests rather than re-launching the chain on every
+  pytest invocation (the run is expensive); re-recording is a manual step documented in
+  the test docstring.
+
+**Hostile-case sanity** (cheap, runs every CI):
+
+- [ ] Pseudo-corrupt iter_001's `run_output_iter_001.json` in a fixture workspace; verify
+  iter_002 refuses to start with a clear error rather than silently chaining off an
+  incomplete output. _Unit-style, no LLM calls._
+
+**Doc-sync**: §3.5 (this section) updated with the captured run's path, wall-time, and the
+three measured numbers (Δ-RSS %, planner prompt-size series by iter, proposer continuity
+excerpt) once green.
 
 #### Commit 15 — `docs(chain): update runbook + retire run_exploration_adaptive.py from "primary" status`
 
@@ -772,8 +916,8 @@ These were present in Part 2's design but are deliberately excluded from Task 2 
 | Unit | `--dry-run` never touches the workspace and prints the right per-iter command | 13 | unit |
 | Unit | venv detection picks `$VIRTUAL_ENV` first, project `.venv` second, `uv` third, `python3` last (with warning) | 13 | unit |
 | Unit | Workspace layout guard: legacy layout detected → clear error with migration hint | 11 | unit |
-| Pseudo-integration | 2-iter chain end-to-end with mocked LLM responses; verify cross-iter `MODEL_REGISTRY` restoration | 14 | integration (pseudo) |
-| Pseudo-integration | `run_exploration_adaptive.py` with `--start_iteration 2` against a workspace where iter_001 is on disk; verify in-process iter_002 enters with `MODEL_REGISTRY` carrying iter_001's plugin | 14 | integration (pseudo) |
+| Tier 3 (`@real_run`) | V7 pre-flight: 5-iter local-host real-LLM chain; assert `RSS(iter_5) ≤ 1.1 × RSS(iter_1)`, planner `[PROMPT_SIZE]` flattens by iter_4, iter_5 proposer references iter_1–2 discoveries | 14 | integration (real) |
+| Unit | Pseudo-corrupt iter_001 `run_output_iter_001.json` → iter_002 refuses to start with a clear error | 14 | unit |
 | Smoke | 2-iter chain on lilab; manual SIGKILL mid-iter-2; rerun same command; verify iter_001 preserved | 14 | smoke |
 | Smoke | 2-iter sbatch chain on SDSC; verify dependency wiring via `squeue` | 14 | smoke |
 
@@ -831,6 +975,10 @@ The following flags are **layer-specific** and exempt from the consistency contr
 - `--partition`, `--time`, `--mem`, `--gpus`, `--cpus` — Slurm-only, accepted but ignored under `--mode lilab`.
 - `--dry-run`, `--auto_resume`, `--force_fresh`, `--num_iterations`, `--start_iter` — shell-orchestration flags. The Python `--start_iteration` (per-invocation) and the shell `--start_iter` (chain-level start point) serve different scopes; the unit test must permit the asymmetry but verify the spelling difference is intentional.
 - Slurm-only env paths inside `submit_one_iteration.slurm` — not operator-facing.
+- **`--run_name`** (Commit 11, Option β) — required on `run_exploration_adaptive.py` only. Used for the launch banner label and for deriving the default `--workspace` path (`/home/klz/Data/SIDEREIS_DATA/exploration_{run_name}`). In chain mode (`run_one_iteration.py` and `run_chain.sh`), per-iter identity is mechanically synthesised as `iter_{N:03d}` from the iteration index, so a run-level name carries no information for the runner and is omitted.
+- **`--workspace`** (Commit 11, Option β) — required on `run_one_iteration.py` (chain) because there is no `--run_name` from which a default could be derived. Optional on `run_exploration_adaptive.py`, where it is derived from `--run_name` when omitted. The same workspace value is shared across every iter of a chain.
+- **`--source_paths`** (Commit 11) — deprecated alias of `--seed_paths` on both Python entries. Parses to `dest="source_paths_legacy"` and is collapsed onto `args.seed_paths` after parsing with a `DeprecationWarning`. The canonical name `--seed_paths` is the one enforced by the consistency contract; the legacy alias is exempt because it exists solely for one-release back-compat.
+- **`--iteration`** (Commit 8) — deprecated alias of `--start_iteration` on `run_one_iteration.py`. Same dest-rename + post-parse collapse pattern as `--source_paths` above; will be removed in a future commit.
 
 The exemption list is canonical: any flag not on it must satisfy the contract.
 
