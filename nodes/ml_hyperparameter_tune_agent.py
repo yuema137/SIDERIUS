@@ -95,6 +95,36 @@ def _validate_data_config(
             )
 
 
+def _apply_mode_override_chain(
+    plan: ExperimentPlan,
+    *,
+    trial_allowed: bool,
+    is_formal_round: bool,
+    force_formal_round: bool,
+) -> ExperimentPlan:
+    """Apply the run-level + last-round overrides to ``plan.is_trial``.
+
+    Two independent gates can force ``plan.is_trial = False``:
+
+    * ``trial_allowed=False`` — the run was launched without trial mode
+      enabled, so every round runs formal regardless of what the planner
+      picked.
+    * ``is_formal_round and force_formal_round`` — the last round of every
+      iteration normally forces formal so the run produces a
+      cross-architecture comparable score. Operators can disable this
+      override by passing ``--no-force_formal_round`` for testing /
+      debugging where the trial-mode portions need to take effect on the
+      final round.
+
+    Mutates ``plan`` in place and returns it for caller-chaining.
+    """
+    if not trial_allowed:
+        plan.is_trial = False
+    if is_formal_round and force_formal_round:
+        plan.is_trial = False
+    return plan
+
+
 def _resolve_sample_set_cfg(
     mode: str,
     agent_input: HyperparamTuningInput,
@@ -893,6 +923,7 @@ class HyperparamTuningAgent:
                         current_round=iteration,
                         max_rounds=max_rounds,
                         trial_allowed=trial_allowed,
+                        force_formal_round=agent_input.force_formal_round,
                         plan_overrides=agent_input.plan_overrides,
                         max_epochs=agent_input.max_epochs,
                         trial_vram_budget_gb=trial_vram_budget,
@@ -927,14 +958,14 @@ class HyperparamTuningAgent:
                                 print(f"  [WARN] plan_overrides validation failed ({e}); "
                                       f"using LLM plan as-is")
     
-                    # Override chain: expert constraint → formal-round constraint → hard caps.
-                    # Phase L: is_formal_round is set in the outer loop (the round that
-                    # would push completed_rounds to max_rounds). Every attempt in that
-                    # round runs in formal mode, regardless of what the planner chose.
-                    if not trial_allowed:
-                        plan.is_trial = False
-                    if is_formal_round:
-                        plan.is_trial = False
+                    # Override chain: trial-allowed lockout + last-round override.
+                    # See _apply_mode_override_chain for semantics.
+                    plan = _apply_mode_override_chain(
+                        plan,
+                        trial_allowed=trial_allowed,
+                        is_formal_round=is_formal_round,
+                        force_formal_round=agent_input.force_formal_round,
+                    )
     
                     # Enforce max_epochs hard cap (prevents LLM from choosing excessively long training)
                     if agent_input.max_epochs is not None:
