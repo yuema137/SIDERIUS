@@ -46,7 +46,7 @@ class NodeLLMConfig(BaseModel):
     gemini, reflector on openai) — the underlying LLMBridge supports this.
     """
 
-    provider: Literal["gemini", "openai"] = Field(
+    provider: Literal["gemini", "openai", "deepseek"] = Field(
         default="gemini",
         description="LLM provider.",
     )

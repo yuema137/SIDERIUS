@@ -75,7 +75,7 @@ class ValidatorInput(BaseModel):
         description="Precise mathematical/architectural specification from the proposal. "
                     "Passed to the LLM reviewer to verify the implementation matches the spec.",
     )
-    llm_provider: Literal["gemini", "openai"] = Field(
+    llm_provider: Literal["gemini", "openai", "deepseek"] = Field(
         default="gemini",
         description="LLM provider for the code review step.",
     )

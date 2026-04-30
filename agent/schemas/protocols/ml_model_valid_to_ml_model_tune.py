@@ -35,7 +35,7 @@ def local_validated_model(
     file_index: int = 6,
     llm_provider: str = "gemini",
     llm_model_id: str = "gemini-3.1-flash-lite-preview",
-    reflect_provider: Optional[Literal["gemini", "openai"]] = None,
+    reflect_provider: Optional[Literal["gemini", "openai", "deepseek"]] = None,
     reflect_model_id: Optional[str] = None,
     # --- Trial mode (optional — all defaults preserve normal single-file behavior) ---
     is_trial: bool = False,

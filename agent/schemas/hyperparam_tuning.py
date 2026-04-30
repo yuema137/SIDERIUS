@@ -988,7 +988,7 @@ class HyperparamTuningInput(BaseModel):
     )
 
     # --- LLM (planner) ---
-    llm_provider: Literal["gemini", "openai"] = Field(
+    llm_provider: Literal["gemini", "openai", "deepseek"] = Field(
         default="gemini",
         description=(
             "LLM provider for the planner sub-call (and the default for the "
@@ -1010,7 +1010,7 @@ class HyperparamTuningInput(BaseModel):
     # a different model than the planner — see docs/break_tuner_agent.md.
     # When both reflect_* fields are None (default), the reflector uses the
     # planner's provider and model (legacy behavior).
-    reflect_provider: Optional[Literal["gemini", "openai"]] = Field(
+    reflect_provider: Optional[Literal["gemini", "openai", "deepseek"]] = Field(
         default=None,
         description=(
             "Optional separate provider for the reflector sub-call. "
