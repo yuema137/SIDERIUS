@@ -697,6 +697,12 @@ def main():
             minimum_boldness=args.minimum_boldness,
             max_impl_attempts=args.max_impl_attempts,
             debug_dump_prompts=args.debug_dump_prompts,
+            # Cross-iter knowledge carry-over (docs/Consistent_growing_vocab_list.md)
+            restored_runtime_vocab=state.runtime_vocab,
+            accumulated_key_findings=state.accumulated_key_findings,
+            # Cross-iter negative-feedback carry-over (docs/V8_Gap_Report.md Domain 1)
+            accumulated_physical_rejections=state.accumulated_physical_rejections,
+            accumulated_gate_exhaustions=state.accumulated_gate_exhaustions,
         )
     except Exception as e:
         print(f"FAIL: Workflow raised exception: {type(e).__name__}: {e}")

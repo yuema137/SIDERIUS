@@ -74,7 +74,11 @@ SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, SIDERIUS_ROOT)
 sys.path.insert(0, os.path.join(SIDERIUS_ROOT, "ml_models"))
 
-from agent.schemas.hyperparam_tuning import HyperparamTuningOutput, PhysicalRejection
+from agent.schemas.hyperparam_tuning import (
+    GateExhaustionInfo,
+    HyperparamTuningOutput,
+    PhysicalRejection,
+)
 from agent.schemas.interpretation import InterpretationInput, ModelRunSummary
 from core.hardware_context import get_or_create as get_or_create_hardware_context
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
@@ -90,7 +94,7 @@ from nodes.ml_model_proposal_agent import MLModelProposalAgent
 from nodes.ml_model_implementor import MLModelImplementor
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
-from agent.schemas.proposal import VocabEntry
+from agent.schemas.proposal import ExpertContextItem, VocabEntry
 from workflows.llm_config import WorkflowLLMConfig, ProposalLLMConfig, NodeLLMConfig
 
 
@@ -298,6 +302,33 @@ def _aggregate_worst_offender_rejections(
         worst = max(rejs, key=_rank)
         out.append((worst, len(rejs)))
     return out
+
+
+def _synthetic_prior_iter_tune_output(
+    ge: GateExhaustionInfo,
+) -> HyperparamTuningOutput:
+    """Wrap a prior-chain-iter ``GateExhaustionInfo`` as a minimal
+    ``HyperparamTuningOutput`` for the ``recent_tune_outputs`` deque.
+
+    The interp→propose protocol's only read of each deque entry is
+    ``tune_out.gate_exhaustion``; every other required field is just a
+    placeholder. Used by chain-mode workflow entry to surface cross-iter
+    gate aborts (loaded from RestoredState) to the proposer's
+    ``[RECENT GATE EXHAUSTIONS]`` prompt block. See docs/V8_Gap_Report.md
+    Domain 1.
+    """
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    return HyperparamTuningOutput(
+        run_name="prior_iter",
+        model_type="(prior_iter)",
+        file_index=-1,
+        status="completed",
+        completed_rounds=0,
+        total_attempts=0,
+        gate_exhaustion=ge,
+        started_at=now,
+        finished_at=now,
+    )
 
 
 def _render_physical_rejection(rej: PhysicalRejection, n_rejections: int) -> str:
@@ -566,6 +597,20 @@ def run_workflow(
     max_impl_attempts: int = 3,
     # --- Phase K.8 debug instrumentation ---
     debug_dump_prompts: bool = False,
+    # --- Cross-iter knowledge carry-over (forwarded by chain runner) ---
+    # Default None preserves the legacy in-process / first-iter behaviour
+    # (static seed init, no accumulated findings). The chain runner
+    # (sdsc_submission_scripts/run_one_iteration.py) populates both from
+    # RestoredState. See docs/Consistent_growing_vocab_list.md.
+    restored_runtime_vocab: list | None = None,
+    accumulated_key_findings: list[str] | None = None,
+    # --- Cross-iter negative-feedback carry-over (V8 hardening Domain 1) ---
+    # Same shape as the knowledge carry-over above: chain runner populates
+    # both from RestoredState; in-process / first-iter callers leave both at
+    # None. The lists are already capped (K=10 each) by core.resume.
+    # See docs/V8_Gap_Report.md Domain 1.
+    accumulated_physical_rejections: list | None = None,
+    accumulated_gate_exhaustions: list | None = None,
 ) -> list[HyperparamTuningOutput]:
     """
     Execute the model exploration workflow for one or more iterations.
@@ -725,7 +770,24 @@ def run_workflow(
 
     # Long-term memory: variables carried forward across iterations
     previous_proposal_data: dict | None = None  # serialized ProposalOutput from iter N-1
-    current_runtime_vocab = list(vocab_seed)     # starts with seed, grows with discoveries
+    # Priority: chain-restored runtime_vocab > static seed. The static seed
+    # is the first-iter bootstrap; once any iter has run, the latest
+    # committed iter's runtime_vocab is the source of truth (already merged
+    # with the seed via build_runtime_vocab on each prior iter). Without
+    # this priority check, every chain iter resets to the 21-entry seed —
+    # see docs/Consistent_growing_vocab_list.md §1.2 for the empirical bug.
+    if restored_runtime_vocab:
+        current_runtime_vocab = [
+            v if hasattr(v, "name") else VocabEntry.model_validate(v)
+            for v in restored_runtime_vocab
+        ]
+        print(
+            f"  Vocab restored from prior chain iters: "
+            f"{len(current_runtime_vocab)} entries "
+            f"({sum(1 for v in current_runtime_vocab if v.kind == 'discovery')} discoveries)"
+        )
+    else:
+        current_runtime_vocab = list(vocab_seed)  # first iter or in-process run
     model_knowledge_cache: dict = {}             # per-model Phase 1 cache (grows once per model)
     latest_new_summary = None                    # ModelRunSummary from the most recent tune
     # Phase N (§14.N) — bounded FIFO of the last 3 tuner outputs so the
@@ -734,6 +796,23 @@ def run_workflow(
     # [RECENT GATE EXHAUSTIONS] block. Empty on iteration 1; each iter-end
     # append auto-evicts the oldest when len > 3.
     recent_tune_outputs: deque[HyperparamTuningOutput] = deque(maxlen=3)
+
+    # V8 Domain 1 — pre-populate the deque with synthetic HyperparamTuningOutput
+    # wrappers carrying ONLY the prior chain iters' gate_exhaustions. Without
+    # this, every chain-mode subprocess starts with an empty deque (max_iterations=1
+    # means the in-process append at iter-end never feeds the same-subprocess
+    # proposer). The protocol reads only `.gate_exhaustion` from each entry,
+    # so placeholder values for the other required fields are safe.
+    # See docs/V8_Gap_Report.md Domain 1.
+    if accumulated_gate_exhaustions:
+        for _ge in accumulated_gate_exhaustions:
+            recent_tune_outputs.append(_synthetic_prior_iter_tune_output(_ge))
+        print(
+            f"  [chain] Pre-seeded recent_tune_outputs with "
+            f"{len(recent_tune_outputs)} cross-iter gate-exhaustion summary"
+            f"{'y' if len(recent_tune_outputs) == 1 else 'ies'} "
+            f"(deque maxlen=3 keeps the latest)."
+        )
 
     # --- Iteration loop ---
     from core.memory_probe import probe_memory
@@ -784,6 +863,35 @@ def run_workflow(
         validation = None
         previous_failures: list[str] = []
 
+        # V8 Domain 1 — seed previous_failures with cross-iter accumulated
+        # [PHYSICAL REJECTION] strings from EVERY committed prior chain iter
+        # (not just the immediately-preceding one), capped to K=10 by
+        # core.resume. Without this, chain-mode subprocesses run with
+        # max_iterations=1 → iteration_results is empty on the first
+        # in-subprocess iter → the Hop-4 seed below never fires → the
+        # proposer is blind to iter N-2 and earlier rejections.
+        # Runs only on the first in-subprocess iter so it doesn't double-
+        # count when max_iterations > 1 (in-process mode). The Hop-4 block
+        # below already covers that path via iteration_results[-1].
+        # See docs/V8_Gap_Report.md Domain 1.
+        if iteration == 1 and accumulated_physical_rejections:
+            _cross_iter_aggregated = _aggregate_worst_offender_rejections(
+                list(accumulated_physical_rejections)
+            )
+            for _worst, _count in _cross_iter_aggregated:
+                previous_failures.append(
+                    _render_physical_rejection(_worst, _count)
+                )
+            if _cross_iter_aggregated:
+                print(
+                    f"  [{iteration}] Seeded {len(_cross_iter_aggregated)} "
+                    f"cross-iter [PHYSICAL REJECTION] entr"
+                    f"{'y' if len(_cross_iter_aggregated) == 1 else 'ies'} "
+                    f"into previous_failures from "
+                    f"{len(accumulated_physical_rejections)} accumulated rejection(s) "
+                    f"across prior chain iters."
+                )
+
         # Phase 6.6 WS-B B.3 Hop 4 — seed previous_failures with aggregated
         # [PHYSICAL REJECTION] strings from the PRIOR iteration's tuner so
         # the Proposer sees per-architecture VRAM lessons. No-op on
@@ -815,6 +923,31 @@ def run_workflow(
             os.makedirs(attempt_dir, exist_ok=True)
             attempt_storage = _make_storage(attempt_dir, run_name)
 
+            # Surface ALL prior iters' key_findings to the proposer as a
+            # single ExpertContextItem. Without this, the proposer sees only
+            # the current iter's interpretation.key_findings; chain-mode
+            # amnesia drops everything before iter N-1. The accumulated
+            # union is built once by core.resume.load_latest_knowledge and
+            # forwarded by the chain runner. See
+            # docs/Consistent_growing_vocab_list.md §3.3.4.
+            expert_context_for_propose: list[ExpertContextItem] = []
+            if accumulated_key_findings:
+                bullet_block = "\n".join(
+                    f"- {kf}" for kf in accumulated_key_findings
+                )
+                expert_context_for_propose.append(
+                    ExpertContextItem(
+                        source="prior_iters",
+                        kind="findings",
+                        content=(
+                            f"Accumulated key findings from "
+                            f"{len(accumulated_key_findings)} prior iter(s):\n"
+                            f"{bullet_block}"
+                        ),
+                        cite_id="prior_iters_key_findings",
+                    )
+                )
+
             try:
                 # --- Propose ---
                 # Forward the trial-mode mirror + budget set so the proposer's
@@ -823,6 +956,7 @@ def run_workflow(
                 propose_input = local_full_context(
                     interpretation,
                     attempt_storage,
+                    expert_context=expert_context_for_propose,
                     vocab_seed=vocab_seed,
                     reasoning_pipeline=reasoning_pipeline,
                     human_advice=human_advice_propose,
