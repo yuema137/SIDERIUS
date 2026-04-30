@@ -200,6 +200,7 @@ class ExperimentRecord(BaseModel):
         "error_training_oom",
         "error_inference",
         "error_inference_oom",
+        "error_scoring",
         "failed_mode_collapse",
     ]
     model_type: str
