@@ -456,6 +456,16 @@ class LLMBridge:
     _RETRY_INITIAL_WAIT = 2.5
     _RETRY_MAX_WAIT = 60.0
 
+    # Content-level retry policy for _chat_json. Distinct from the HTTP-level
+    # _call_with_retry budget above. Triggers when the API returns a successful
+    # HTTP response whose body is empty, non-JSON, or decodes to a non-dict/list
+    # — the failure mode observed with deepseek-v4-pro on long structured
+    # prompts (HTTP 200 + empty content). Bounded so a genuinely malformed
+    # contract still surfaces promptly.
+    _CONTENT_RETRY_BUDGET = 3
+    _CONTENT_RETRY_INITIAL_WAIT = 2.0
+    _CONTENT_RETRY_MAX_WAIT = 16.0
+
     @staticmethod
     def _parse_retry_delay(exc) -> Optional[float]:
         """Extract retryDelay seconds from a Google API 429 error body, if present.
@@ -581,48 +591,82 @@ class LLMBridge:
         is fully decoupled from any per-method state — easy to mock and easy
         to extend with future per-method routing.
         """
-        response = self._call_with_retry(
-            lambda: client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                response_format={"type": "json_object"},
-            ),
-            label="_chat_json",
+        # Content-level retry loop. HTTP-level transients (429/5xx/connection/
+        # timeout) are handled inside _call_with_retry. This outer loop handles
+        # the orthogonal failure mode where the API returns HTTP 200 but the
+        # body is empty / non-JSON / wrong top-level type — observed with
+        # deepseek-v4-pro on long structured prompts. Bounded so genuinely
+        # malformed contracts surface promptly.
+        last_text = ""
+        last_err_label = ""
+        wait = self._CONTENT_RETRY_INITIAL_WAIT
+        for attempt in range(self._CONTENT_RETRY_BUDGET + 1):
+            response = self._call_with_retry(
+                lambda: client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    response_format={"type": "json_object"},
+                ),
+                label="_chat_json",
+            )
+            raw = response.choices[0].message.content or ""
+            text = self._sanitize_json_text(raw.strip())
+            last_text = text
+
+            if not text:
+                last_err_label = "empty_content"
+            else:
+                # Use raw_decode so trailing prose / a second JSON object after
+                # the first valid one doesn't crash the run. We accept the first
+                # object and discard any trailing content. Wrong top-level type
+                # (e.g. a JSON string) is still a contract violation.
+                try:
+                    decoded, end_idx = json.JSONDecoder().raw_decode(text)
+                except json.JSONDecodeError as e:
+                    last_err_label = f"json_decode_error: {e.msg}"
+                else:
+                    if not isinstance(decoded, (dict, list)):
+                        last_err_label = (
+                            f"wrong_type: decoded to {type(decoded).__name__}"
+                        )
+                    else:
+                        # Success path
+                        trailing = text[end_idx:].strip()
+                        if trailing:
+                            print(
+                                f"[LLMBridge._chat_json] Discarded {len(trailing)} chars of "
+                                f"trailing data after valid JSON (model={model_name}).",
+                                flush=True,
+                            )
+                        return decoded
+
+            # Content-level failure — retry if budget remains.
+            if attempt < self._CONTENT_RETRY_BUDGET:
+                print(
+                    f"[LLMBridge._chat_json] Content-level retry "
+                    f"{attempt + 1}/{self._CONTENT_RETRY_BUDGET} (model={model_name}, "
+                    f"err={last_err_label}, body_preview={last_text[:80]!r}); "
+                    f"sleeping {wait}s.",
+                    flush=True,
+                )
+                time.sleep(wait)
+                wait = min(wait * 2, self._CONTENT_RETRY_MAX_WAIT)
+
+        # Budget exhausted — raise the same ValueError shape callers expect.
+        print(
+            f"[LLMBridge._chat_json] Failed to parse JSON from model={model_name} "
+            f"after {self._CONTENT_RETRY_BUDGET + 1} attempts (last_err={last_err_label}): "
+            f"{last_text[:200]}",
+            flush=True,
         )
-        text = response.choices[0].message.content.strip()
-        text = self._sanitize_json_text(text)
-
-        # Use raw_decode so trailing prose / a second JSON object after the
-        # first valid one doesn't crash the run. We accept the first object
-        # and discard any trailing content. We still hard-fail if the FIRST
-        # object isn't dict/list (caller contract).
-        try:
-            decoded, end_idx = json.JSONDecoder().raw_decode(text)
-        except json.JSONDecodeError:
-            print(f"[LLMBridge._chat_json] Failed to parse JSON from model={model_name}: {text[:200]}", flush=True)
-            raise ValueError(
-                f"Model response was not valid JSON. Return ONLY a raw JSON object. "
-                f"Your response started with: {text[:200]}"
-            )
-
-        if not isinstance(decoded, (dict, list)):
-            raise ValueError(
-                f"Model response decoded to {type(decoded).__name__}, expected dict/list. "
-                f"Response started with: {text[:200]}"
-            )
-
-        trailing = text[end_idx:].strip()
-        if trailing:
-            print(
-                f"[LLMBridge._chat_json] Discarded {len(trailing)} chars of "
-                f"trailing data after valid JSON (model={model_name}).",
-                flush=True,
-            )
-
-        return decoded
+        raise ValueError(
+            f"Model response was not valid JSON after "
+            f"{self._CONTENT_RETRY_BUDGET + 1} attempts. Return ONLY a raw JSON object. "
+            f"Last response started with: {last_text[:200]}"
+        )
 
     def generate(self, system_prompt: str, user_prompt: str) -> Dict:
         """

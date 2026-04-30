@@ -184,12 +184,17 @@ class TestGenerate:
             assert messages[1] == {"role": "user", "content": USER_PROMPT}
 
     def test_malformed_json_raises_value_error(self):
-        """_chat_json raises ValueError on unparseable JSON (does not silently return {})."""
-        with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
-            MockOpenAI.return_value.chat.completions.create.return_value = _chat_response("not valid json {{")
+        """_chat_json retries on unparseable JSON and surfaces ValueError after
+        the bounded budget is exhausted (does not silently return {})."""
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI, \
+             patch("agent.llm_bridge.time.sleep"):
+            mock_create = MockOpenAI.return_value.chat.completions.create
+            mock_create.return_value = _chat_response("not valid json {{")
             bridge = LLMBridge(provider="gemini", model_id="test-model")
             with pytest.raises(ValueError, match="not valid JSON"):
                 bridge.generate(SYSTEM_PROMPT, USER_PROMPT)
+            # 1 initial + _CONTENT_RETRY_BUDGET retries = 4 calls
+            assert mock_create.call_count == bridge._CONTENT_RETRY_BUDGET + 1
 
     def test_extra_json_object_after_valid_one_is_discarded(self):
         """Direct repro of the explore_novel_v4_0425 crash: the LLM emitted a
@@ -217,13 +222,48 @@ class TestGenerate:
     def test_non_dict_or_list_first_token_raises(self):
         """If the first JSON token is a bare string/number/bool, the response
         violates the caller contract (which expects a dict/list). The bridge
-        must surface this rather than return a primitive that downstream code
-        would mishandle."""
-        with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
-            MockOpenAI.return_value.chat.completions.create.return_value = _chat_response('"just a string"')
+        retries the bounded budget and then surfaces ValueError so downstream
+        code never receives a primitive."""
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI, \
+             patch("agent.llm_bridge.time.sleep"):
+            mock_create = MockOpenAI.return_value.chat.completions.create
+            mock_create.return_value = _chat_response('"just a string"')
             bridge = LLMBridge(provider="openai", model_id="gpt-4o")
-            with pytest.raises(ValueError, match="expected dict/list"):
+            with pytest.raises(ValueError, match="not valid JSON"):
                 bridge.generate(SYSTEM_PROMPT, USER_PROMPT)
+            assert mock_create.call_count == bridge._CONTENT_RETRY_BUDGET + 1
+
+    def test_empty_content_retried_then_succeeds(self):
+        """Reproduces the deepseek-v4-pro failure mode: HTTP 200 with empty
+        content body. The bridge must retry and eventually surface the valid
+        response on a later attempt rather than crash the whole chain."""
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI, \
+             patch("agent.llm_bridge.time.sleep"):
+            mock_create = MockOpenAI.return_value.chat.completions.create
+            # First two calls return empty, third returns valid JSON.
+            mock_create.side_effect = [
+                _chat_response(""),
+                _chat_response(""),
+                _chat_response(VALID_JSON_STR),
+            ]
+            bridge = LLMBridge(provider="deepseek", model_id="deepseek-v4-pro")
+            result = bridge.generate(SYSTEM_PROMPT, USER_PROMPT)
+        assert result == VALID_JSON_DICT
+        assert mock_create.call_count == 3
+
+    def test_malformed_then_valid_succeeds(self):
+        """Transient JSON-decode failure on the first call recovers via retry."""
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI, \
+             patch("agent.llm_bridge.time.sleep"):
+            mock_create = MockOpenAI.return_value.chat.completions.create
+            mock_create.side_effect = [
+                _chat_response("garbage {{"),
+                _chat_response(VALID_JSON_STR),
+            ]
+            bridge = LLMBridge(provider="openai", model_id="gpt-4o")
+            result = bridge.generate(SYSTEM_PROMPT, USER_PROMPT)
+        assert result == VALID_JSON_DICT
+        assert mock_create.call_count == 2
 
     def test_markdown_fenced_json_is_parsed(self):
         fenced = "```json\n" + VALID_JSON_STR + "\n```"
