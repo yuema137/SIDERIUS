@@ -315,6 +315,75 @@ class TestCorruptManifest:
         with pytest.raises(ResumeError, match="status='partial'"):
             restore_prior_state(str(tmp_path), 2, [])
 
+    def test_status_no_records_skips_cleanly(self, tmp_path, isolated_registries):
+        """A no-records iter (gate-exhaustion or all-rounds-failed without
+        crash) must be skipped silently — no plugin restored, output_path
+        not appended, no error. This is the chain-fragility fix that lets
+        a single dead-end iter not take out the rest of the chain."""
+        # Materialise iter_001 with manifest.status="no_records" and no
+        # run_output / no plugin file (matches what write_manifest emits
+        # for empty results).
+        run_name = _iter_run_name(1)
+        iter_dir = tmp_path / run_name
+        iter_dir.mkdir()
+        (iter_dir / "manifest.json").write_text(json.dumps({
+            "status": "no_records",
+            "iteration_dir": str(iter_dir),
+            "output_path": None,
+            "model_name": None,
+            "best_score": None,
+        }))
+
+        # iter_002 also no-records — verify multiple consecutive skips.
+        run_name_2 = _iter_run_name(2)
+        iter_dir_2 = tmp_path / run_name_2
+        iter_dir_2.mkdir()
+        (iter_dir_2 / "manifest.json").write_text(json.dumps({
+            "status": "no_records",
+            "iteration_dir": str(iter_dir_2),
+            "output_path": None,
+            "model_name": None,
+            "best_score": None,
+        }))
+
+        seeds = ["/seed/punet.json", "/seed/wavenet.json"]
+        state = restore_prior_state(str(tmp_path), 3, seeds)
+
+        # No plugin restored, no iter committed, only seeds in resolved paths.
+        assert state.committed_iters == []
+        assert state.restored_plugins == []
+        assert state.resolved_source_paths == seeds
+
+    def test_status_no_records_interleaved_with_completed(
+        self, tmp_path, isolated_registries,
+    ):
+        """no_records iter sandwiched between two completed iters: the
+        completed iters are absorbed normally, the middle iter is skipped."""
+        _materialise_iter(tmp_path, 1, "resume_test_arch_a", 0.71)
+        # iter_002 is no_records.
+        run_name_2 = _iter_run_name(2)
+        iter_dir_2 = tmp_path / run_name_2
+        iter_dir_2.mkdir()
+        (iter_dir_2 / "manifest.json").write_text(json.dumps({
+            "status": "no_records",
+            "iteration_dir": str(iter_dir_2),
+            "output_path": None,
+            "model_name": None,
+            "best_score": None,
+        }))
+        _materialise_iter(tmp_path, 3, "resume_test_arch_c", 0.82)
+
+        state = restore_prior_state(str(tmp_path), 4, ["/seed/punet.json"])
+
+        # iters 1 and 3 committed, iter 2 skipped.
+        assert state.committed_iters == [1, 3]
+        assert state.restored_plugins == ["resume_test_arch_a", "resume_test_arch_c"]
+        # Resolved paths: seed, iter_001 output, iter_003 output (no iter_002).
+        assert len(state.resolved_source_paths) == 3
+        assert state.resolved_source_paths[0] == "/seed/punet.json"
+        assert "iter_001" in state.resolved_source_paths[1]
+        assert "iter_003" in state.resolved_source_paths[2]
+
     def test_manifest_without_output_path_raises(self, tmp_path, isolated_registries):
         _materialise_iter(tmp_path, 1, "resume_test_arch_a")
         manifest_path = tmp_path / "iter_001" / "manifest.json"

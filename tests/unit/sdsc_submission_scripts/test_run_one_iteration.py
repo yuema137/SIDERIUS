@@ -557,3 +557,131 @@ class TestRestoreWiring:
         # DeprecationWarning was emitted.
         depr = [w for w in caught if issubclass(w.category, DeprecationWarning)]
         assert len(depr) >= 1
+
+
+# ===========================================================================
+# no_records contract — chain-fragility fix
+# ===========================================================================
+
+class TestNoRecordsExit:
+    """A clean no-records iter (gate exhaustion or all-rounds-failed without
+    a Python crash) must exit 0 with manifest.status='no_records', so the
+    next iter can run and the LLM can adapt to the skip.
+
+    True crashes (workflow exception, seed-resolution error, restore_prior_state
+    error) must keep exit 1 with manifest.status='failed' so the chain halts.
+    """
+
+    def _seed_file(self, tmp_path):
+        seed = tmp_path / "seed.json"
+        seed.write_text(json.dumps({
+            "run_name": "seed", "model_type": "punet", "file_index": 6,
+            "status": "completed", "completed_rounds": 1, "total_attempts": 1,
+            "started_at": "x", "finished_at": "y",
+        }))
+        return seed
+
+    def test_write_manifest_empty_results_emits_no_records(self, tmp_path):
+        manifest = runner.write_manifest(str(tmp_path), "iter_001", results=[])
+        assert manifest["status"] == "no_records"
+        assert manifest["output_path"] is None
+        assert manifest["best_score"] is None
+
+    def test_write_manifest_results_with_none_score_emits_no_records(self, tmp_path):
+        # Workflow returned a result object but every round failed → score is None.
+        results = [_StubResult("c8_test_arch_a", score=None)]
+        manifest = runner.write_manifest(str(tmp_path), "iter_001", results)
+        assert manifest["status"] == "no_records"
+        assert manifest["output_path"] is None
+        assert manifest["best_score"] is None
+
+    def test_write_manifest_completed_path_unchanged(self, tmp_path):
+        results = [_StubResult("c8_test_arch_a", score=0.71)]
+        manifest = runner.write_manifest(str(tmp_path), "iter_001", results)
+        assert manifest["status"] == "completed"
+        assert manifest["best_score"] == 0.71
+
+    def test_write_manifest_crashed_forces_failed_regardless_of_results(self, tmp_path):
+        # Crash path: even if results is non-empty, crashed=True forces failed.
+        results = [_StubResult("c8_test_arch_a", score=0.71)]
+        manifest = runner.write_manifest(
+            str(tmp_path), "iter_001", results, crashed=True,
+        )
+        assert manifest["status"] == "failed"
+        assert manifest["output_path"] is None
+        assert manifest["best_score"] is None
+
+    def test_main_empty_results_exits_zero_and_writes_no_records(
+        self, tmp_path, isolated_registries, capsys,
+    ):
+        seed = self._seed_file(tmp_path)
+        with patch.object(runner, "run_workflow", return_value=[]):
+            code = _run_main([
+                "--workspace", str(tmp_path),
+                "--start_iteration", "1",
+                "--seed_paths", str(seed),
+            ])
+
+        assert code == 0, "no_records exit must be 0 so set -e doesn't halt the chain"
+        # Manifest on disk shows no_records.
+        manifest_path = tmp_path / "iter_001" / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        assert manifest["status"] == "no_records"
+        assert manifest["output_path"] is None
+        # Operator-facing CHAIN message printed.
+        out = capsys.readouterr().out
+        assert "[CHAIN] No models passed gates" in out
+
+    def test_main_workflow_exception_still_exits_one(
+        self, tmp_path, isolated_registries, capsys,
+    ):
+        seed = self._seed_file(tmp_path)
+        with patch.object(
+            runner, "run_workflow",
+            side_effect=RuntimeError("simulated workflow crash"),
+        ):
+            code = _run_main([
+                "--workspace", str(tmp_path),
+                "--start_iteration", "1",
+                "--seed_paths", str(seed),
+            ])
+
+        assert code == 1, "true crashes must still halt the chain"
+        # Manifest on disk shows failed.
+        manifest_path = tmp_path / "iter_001" / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        assert manifest["status"] == "failed"
+
+    def test_chain_continues_past_no_records_iter(
+        self, tmp_path, isolated_registries,
+    ):
+        """End-to-end wiring: an iter_001 with status='no_records' on disk
+        must let restore_prior_state in iter_002 skip cleanly and reach
+        run_workflow (no ResumeError raised)."""
+        # Materialise iter_001 as no_records (no run_output, no plugin file).
+        iter1_dir = tmp_path / "iter_001"
+        iter1_dir.mkdir()
+        (iter1_dir / "manifest.json").write_text(json.dumps({
+            "status": "no_records",
+            "iteration_dir": str(iter1_dir),
+            "output_path": None,
+            "model_name": None,
+            "best_score": None,
+        }))
+
+        seed = self._seed_file(tmp_path)
+        with patch.object(runner, "run_workflow") as mock_wf:
+            mock_wf.return_value = [_StubResult("c8_test_arch_b", score=0.78)]
+            code = _run_main([
+                "--workspace", str(tmp_path),
+                "--start_iteration", "2",
+                "--seed_paths", str(seed),
+            ])
+
+        assert code == 0
+        # run_workflow was actually invoked — restore did not raise on no_records.
+        mock_wf.assert_called_once()
+        kwargs = mock_wf.call_args.kwargs
+        # source_paths = seeds only (no iter_001 output to absorb).
+        assert kwargs["source_paths"] == [str(seed)]
+        assert kwargs["run_name"] == "iter_002"

@@ -260,8 +260,16 @@ def leaderboard(
 # ---------------------------------------------------------------------------
 
 def _is_chain_workspace(d: str) -> bool:
-    """A dir is a chain workspace if it has at least one iter_*/manifest.json."""
-    return bool(glob.glob(os.path.join(d, "iter_*", "manifest.json")))
+    """A dir is a chain workspace if it has at least one iter_NNN/ subdir.
+
+    Earlier versions required iter_*/manifest.json — but the manifest is
+    only written at iter completion, so an in-flight chain (iter_001 still
+    training) was invisible to the dashboard. Now any iter_NNN/ subdirectory
+    matching the 3-digit chain naming convention counts, so live chains
+    surface immediately. Iter rows whose run_output isn't ready yet fall
+    through to the partial-row path in iteration_table().
+    """
+    return bool(glob.glob(os.path.join(d, "iter_[0-9][0-9][0-9]")))
 
 
 def _resolve_run_dir(root: str, run_name: str) -> Optional[tuple[str, str]]:
@@ -518,12 +526,24 @@ def iteration_table(run_name: str):
                     model_name=model_name or _attempt_model_name(iter_dir),
                 ))
                 continue
-            with open(ro_path, "r") as f:
-                run_output = json.load(f)
+            try:
+                with open(ro_path, "r") as f:
+                    run_output = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                # Partial / corrupt run_output (common after disk-full or
+                # mid-write crash). Don't let one bad file 500 the table —
+                # surface the row with a placeholder so the rest still loads.
+                rows.append(IterationTableRow(
+                    iteration=iter_label,
+                    model_name=model_name or _attempt_model_name(iter_dir),
+                ))
+                continue
             rows.append(_row_from_run_output(iter_label, model_name, run_output))
 
     else:  # chain — each chain-iter dir is one logical iteration
-        for chain_iter_dir in sorted(glob.glob(os.path.join(run_dir, "iter_*"))):
+        # Match exactly the 3-digit chain naming (iter_NNN) so we skip
+        # sibling files like iter_NNN_hardware.json that share the prefix.
+        for chain_iter_dir in sorted(glob.glob(os.path.join(run_dir, "iter_[0-9][0-9][0-9]"))):
             iter_label = os.path.basename(chain_iter_dir)  # "iter_001"
             ro_path: Optional[str] = None
             model_name: Optional[str] = None
@@ -539,8 +559,15 @@ def iteration_table(run_name: str):
             if ro_path is None:
                 rows.append(IterationTableRow(iteration=iter_label, model_name=model_name))
                 continue
-            with open(ro_path, "r") as f:
-                run_output = json.load(f)
+            try:
+                with open(ro_path, "r") as f:
+                    run_output = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                # Partial / corrupt run_output (common after disk-full or
+                # mid-write crash). Don't let one bad file 500 the table —
+                # surface the row with a placeholder so the rest still loads.
+                rows.append(IterationTableRow(iteration=iter_label, model_name=model_name))
+                continue
             rows.append(_row_from_run_output(iter_label, model_name, run_output))
 
     max_rounds = max((len(r.rounds) for r in rows), default=0)

@@ -688,6 +688,12 @@ since those knobs are frozen — focus your reasoning on architecture, lr, and l
 
 _CONDENSED_KEYS = frozenset({
     "exp_id", "status", "model_type", "denoising_score", "is_trial",
+    # Surface the task-specific health-check message even after a record
+    # falls out of the verbatim window — failure_reason is the primary
+    # learning signal for the planner when a previous formal round
+    # collapsed (e.g. amplitude collapse on SQUID denoising). Defensively
+    # absent on healthy rounds; the comprehension below tolerates it.
+    "failure_reason",
 })
 _CONDENSED_MEMORY_KEYS = frozenset({
     "hypothesis", "conclusion", "round_index",

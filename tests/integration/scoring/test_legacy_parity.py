@@ -126,7 +126,7 @@ class TestLegacyParity:
         """
         from execute_tools.scoring_utils import score_vector
         data_dir, fname = data_paths
-        _, score_new = score_vector(
+        _, score_new, _, _ = score_vector(
             data_dir=data_dir,
             sample_set={0: list(range(200))},
             anchor_map=None,

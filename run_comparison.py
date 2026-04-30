@@ -271,7 +271,7 @@ def run_baseline_trial(model_type: str, baseline_workspace: str,
     def _denoised_fn(fi):
         return f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_{fi:04d}.h5"
 
-    file_vector, final_scalar = score_vector(
+    file_vector, final_scalar, _, _ = score_vector(
         data_dir=baseline_workspace,
         sample_set=eval_sample_set,
         anchor_map=anchor_data["anchors"],

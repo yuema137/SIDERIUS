@@ -200,6 +200,7 @@ class ExperimentRecord(BaseModel):
         "error_training_oom",
         "error_inference",
         "error_inference_oom",
+        "failed_mode_collapse",
     ]
     model_type: str
     timestamp: str
@@ -238,6 +239,18 @@ class ExperimentRecord(BaseModel):
             "prompts. Populated by build_score_table() after scoring whenever "
             "denoising_score is not None; None on failed or skipped rounds. "
             "See docs/aggregated_score_table_awareness.md §7.1."
+        ),
+    )
+    failure_reason: Optional[str] = Field(
+        default=None,
+        description=(
+            "Human-readable health-check failure message when the task-specific "
+            "predicate inside ``execute_tools.scoring_utils.score_vector`` "
+            "flagged a degenerate output (e.g. amplitude collapse on a formal "
+            "round). Populated together with ``status='failed_mode_collapse'``; "
+            "None on healthy rounds and on trial rounds (which are immune to "
+            "the magnitude check). Surfaced verbatim to the next planner "
+            "iteration via memory_history so the LLM gets a learning signal."
         ),
     )
 
@@ -728,6 +741,43 @@ class HyperparamTuningInput(BaseModel):
             "``plan.is_trial``."
         ),
     )
+    formal_round_strategy: Literal["inherit_best_trial", "llm_propose"] = Field(
+        default="inherit_best_trial",
+        description=(
+            "Orchestration policy for the forced formal round. Two values:\n"
+            "* ``inherit_best_trial`` (default) — the formal round inherits "
+            "  ``loss_config`` and ``train_config.lr`` from the highest-scoring "
+            "  trial-mode success record in the current iteration. "
+            "  ``model_config``, ``epochs``, and ``batch_size`` are left for the "
+            "  planner. If no successful trial round exists, the planner's "
+            "  choices survive and a WARNING is logged.\n"
+            "* ``llm_propose`` — the planner's choices for the formal round are "
+            "  honored verbatim. Use only when the formal round is meant to be "
+            "  a sandbox for new hyperparameters.\n"
+            "Has no effect when ``force_formal_round=False`` or on non-last "
+            "rounds. Generic across tasks — the predicate ``time_mode == 'trial' "
+            "AND status == 'success'`` is task-agnostic."
+        ),
+    )
+    degenerate_penalty_score: Optional[float] = Field(
+        default=None,
+        description=(
+            "Operator policy for the agent's reaction when "
+            "``execute_tools.scoring_utils.score_vector`` flags a degenerate "
+            "output on a formal round (``is_degenerate=True`` AND "
+            "``not plan.is_trial``).\n"
+            "* ``None`` (default) — null the ``denoising_score`` so the round "
+            "  cannot be picked as 'best'. Conservative; preserves prior "
+            "  behaviour from the legacy zero-output sanity check.\n"
+            "* float (typically large negative, e.g. ``-5.0``) — use the value "
+            "  as the round's ``denoising_score``. Lets the planner's "
+            "  best-tracking still rank the round, but pushes it strictly below "
+            "  any healthy success.\n"
+            "In both cases ``status`` is set to ``'failed_mode_collapse'`` and "
+            "``failure_reason`` is populated from the health-check message. "
+            "Trial rounds are immune (no benchmark to compare against)."
+        ),
+    )
 
     # --- Reproducibility seeds (optional — auto-generated when not provided) ---
     sampling_seed: Optional[int] = Field(
@@ -938,7 +988,7 @@ class HyperparamTuningInput(BaseModel):
     )
 
     # --- LLM (planner) ---
-    llm_provider: Literal["gemini", "openai"] = Field(
+    llm_provider: Literal["gemini", "openai", "deepseek"] = Field(
         default="gemini",
         description=(
             "LLM provider for the planner sub-call (and the default for the "
@@ -960,7 +1010,7 @@ class HyperparamTuningInput(BaseModel):
     # a different model than the planner — see docs/break_tuner_agent.md.
     # When both reflect_* fields are None (default), the reflector uses the
     # planner's provider and model (legacy behavior).
-    reflect_provider: Optional[Literal["gemini", "openai"]] = Field(
+    reflect_provider: Optional[Literal["gemini", "openai", "deepseek"]] = Field(
         default=None,
         description=(
             "Optional separate provider for the reflector sub-call. "
