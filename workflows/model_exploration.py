@@ -847,6 +847,7 @@ def run_workflow(
             runtime_vocab=current_runtime_vocab,
             previous_proposal=previous_proposal_data,
             storage=interp_storage,
+            iteration=iteration,
         )
 
         print(f"  [{iteration}] Interpreting experiment results...")

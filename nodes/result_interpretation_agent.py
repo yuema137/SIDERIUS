@@ -427,6 +427,76 @@ def _build_dedup_prompt(entry: "VocabEntry", existing_canonicals: List) -> str:
 
 
 # ---------------------------------------------------------------------------
+# V8 hardening Domain 3 — Evolution observability
+# ---------------------------------------------------------------------------
+
+def _resolve_evolution_log_root(agent_workspace: str) -> str:
+    """Resolve the chain-root directory where evolution_log.jsonl lives.
+
+    In chain mode, run_one_iteration.py sets SIDERIUS_CHAIN_WORKSPACE to the
+    chain root (one level above the per-iter dir given to the agent), so the
+    log accumulates across iters at a single tail-able path. In single-process
+    mode the env var is unset and we fall back to the agent's own workspace.
+    """
+    return os.environ.get("SIDERIUS_CHAIN_WORKSPACE", agent_workspace)
+
+
+def _compute_evolution_stats(
+    runtime_vocab: List[Any],
+    promoted_this_iter: int,
+    is_degraded: bool,
+) -> Dict[str, int | bool]:
+    """Snapshot vocab counts + promotion + degraded flag.
+
+    `promoted_this_iter` is the count returned by promote_candidates() this
+    iter — entries that crossed the Tested-only threshold (seen_in_runs >= 3
+    distinct actually-tried runs). It excludes any vocab additions from
+    new_discoveries or proposed_candidates that are still in the candidate
+    tier.
+    """
+    canonical = sum(
+        1 for v in runtime_vocab
+        if (v.tier if hasattr(v, "tier") else v.get("tier")) == "canonical"
+    )
+    candidate = sum(
+        1 for v in runtime_vocab
+        if (v.tier if hasattr(v, "tier") else v.get("tier")) == "candidate"
+    )
+    return {
+        "vocab_total":         len(runtime_vocab),
+        "vocab_canonical":     canonical,
+        "vocab_candidate":     candidate,
+        "promoted_this_iter":  promoted_this_iter,
+        "is_degraded":         is_degraded,
+    }
+
+
+def _append_evolution_log(workspace_root: str, payload: Dict[str, Any]) -> None:
+    """Append one JSON line to {workspace_root}/evolution_log.jsonl.
+
+    Append-only: the file is created on first call (iteration 1 of a new
+    workspace) and grown on subsequent iters. Each line is a self-contained
+    JSON object so `tail -f` shows complete rows. Any IO error is logged but
+    swallowed — observability must never break the pipeline.
+    """
+    import datetime
+    log_path = os.path.join(workspace_root, "evolution_log.jsonl")
+    line = {
+        "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
+        **payload,
+    }
+    try:
+        os.makedirs(workspace_root, exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(line, default=str) + "\n")
+    except Exception as e:
+        print(
+            f"  [evolution_log] WARN: failed to append to {log_path}: "
+            f"{type(e).__name__}: {e}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Node
 # ---------------------------------------------------------------------------
 
@@ -868,6 +938,17 @@ class ResultInterpretationAgent:
             print(f"  Vocab diversity ratio: {vocab_diversity_ratio:.3f} "
                   f"(cumulative info gain: {cumulative_information_gain:.4f})")
 
+            # --- V8 Domain 3 — evolution stats (healthy path) ---
+            # Snapshot vocab counts + promotion count + degraded flag now,
+            # after promote_candidates + dedup have settled. promoted_names
+            # carries the count from promote_candidates this iter (Tested-only
+            # threshold). is_degraded=False on the healthy return.
+            evolution_stats = _compute_evolution_stats(
+                runtime_vocab=runtime_vocab,
+                promoted_this_iter=len(promoted_names),
+                is_degraded=False,
+            )
+
             # --- Build and validate output ---
             output = InterpretationOutput.model_validate({
                 "model_types":           effective_types,
@@ -899,6 +980,8 @@ class ResultInterpretationAgent:
                 "scientific_accuracy":           scientific_accuracy,
                 "prediction_outcomes_history":   new_outcomes_history,
                 "vocab_link_confirmations":      link_confirmations,
+                # V8 Domain 3 — evolution observability
+                "evolution_stats":               evolution_stats,
             })
 
             # --- Persist ---
@@ -911,6 +994,20 @@ class ResultInterpretationAgent:
                     f.write(output.model_dump_json(indent=4))
                 print(f"Interpretation saved -> {out_path}")
 
+                # V8 Domain 3 — append per-iter row to chain-root evolution log.
+                # Resolved via SIDERIUS_CHAIN_WORKSPACE in chain mode (one level
+                # above the per-iter agent workspace) so all iters share one
+                # tail-able file. Falls back to the agent workspace otherwise.
+                _append_evolution_log(
+                    workspace_root=_resolve_evolution_log_root(workspace),
+                    payload={
+                        "iteration":          inp.iteration,
+                        "evolution_stats":    evolution_stats,
+                        "best_score_so_far":  output.best_denoising_score,
+                        "take_home_message":  output.take_home_message,
+                    },
+                )
+
             return output
         except Exception as e:
             print(
@@ -921,6 +1018,15 @@ class ResultInterpretationAgent:
                 f"  [DEGRADED] Carrying forward incoming runtime_vocab "
                 f"({len(inp.runtime_vocab)} entries) unchanged. "
                 f"Writing digest with is_degraded=True."
+            )
+            # V8 Domain 3 — evolution stats (degraded path).
+            # No promotions ran; vocab is the incoming list verbatim. Still
+            # emit a row so tail -f sees the iter and the dashboard can flag
+            # is_degraded=True visually.
+            degraded_stats = _compute_evolution_stats(
+                runtime_vocab=list(inp.runtime_vocab),
+                promoted_this_iter=0,
+                is_degraded=True,
             )
             output = InterpretationOutput.model_validate({
                 "model_types":           effective_types,
@@ -948,6 +1054,7 @@ class ResultInterpretationAgent:
                 "vocab_link_confirmations":     dict(inp.vocab_link_confirmations),
                 "cumulative_information_gain":  inp.cumulative_information_gain,
                 "is_degraded":                  True,
+                "evolution_stats":              degraded_stats,
             })
             if inp.storage.backend == "local" and inp.storage.local:
                 workspace = inp.storage.local.workspace
@@ -959,6 +1066,16 @@ class ResultInterpretationAgent:
                 with open(out_path, "w", encoding="utf-8") as f:
                     f.write(output.model_dump_json(indent=4))
                 print(f"  [DEGRADED] Interpretation saved -> {out_path}")
+
+                _append_evolution_log(
+                    workspace_root=_resolve_evolution_log_root(workspace),
+                    payload={
+                        "iteration":          inp.iteration,
+                        "evolution_stats":    degraded_stats,
+                        "best_score_so_far":  output.best_denoising_score,
+                        "take_home_message":  output.take_home_message,
+                    },
+                )
             return output
 
 

@@ -237,6 +237,18 @@ class InterpretationInput(BaseModel):
         description="Where this node reads its inputs and writes its interpretation output.",
     )
 
+    # --- Iteration index (V8 Domain 3 — evolution observability) ---
+    iteration: int = Field(
+        default=1,
+        ge=1,
+        description="1-based iteration index within the current chain or workflow "
+                    "run. Stamped into the per-iter row appended to "
+                    "{workspace}/evolution_log.jsonl by the interpretation agent. "
+                    "Populated by the workflow (model_exploration.run_workflow) "
+                    "from its loop variable. Defaults to 1 for ad-hoc / single-iter "
+                    "callers. See docs/V8_Gap_Report.md Domain 3.",
+    )
+
     @model_validator(mode="after")
     def require_at_least_one_model(self) -> "InterpretationInput":
         if self.model_types is not None and len(self.model_types) == 0:
@@ -440,4 +452,17 @@ class InterpretationOutput(BaseModel):
                     "load_latest_knowledge skipped the affected iter — "
                     "causing a 2-iter vocab regression. See "
                     "docs/V8_Gap_Report.md Domain 2b.",
+    )
+
+    # --- Per-iteration evolution metrics (V8 hardening Domain 3) ---
+    evolution_stats: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Per-iteration vocabulary evolution metrics, snapshotted at "
+                    "the end of result_interpretation_agent.run(). Populated keys: "
+                    "vocab_total (int), vocab_canonical (int), vocab_candidate "
+                    "(int), promoted_this_iter (int — count from "
+                    "promote_candidates() this iter, reflects the Tested-only "
+                    "threshold), is_degraded (bool — mirrors the field above). "
+                    "Also appended as one row to {workspace}/evolution_log.jsonl "
+                    "for tail -f monitoring. See docs/V8_Gap_Report.md Domain 3.",
     )
