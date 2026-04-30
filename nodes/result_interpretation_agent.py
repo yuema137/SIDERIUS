@@ -545,363 +545,422 @@ class ResultInterpretationAgent:
               f"{len(effective_types)} model(s): {effective_types} "
               f"(overall best: {overall_best_score})")
 
-        # --- Phase 1: Per-model summarization (cache-first) ---
-        # Cache hit  → reuse entry from inp.model_knowledge_cache, zero LLM calls.
-        # Cache miss → call LLM, build self-sufficient entry (LLM text + _stats).
-        model_knowledge_cache: Dict[str, Dict] = {}
-        for mt in effective_types:
-            if mt in inp.model_knowledge_cache:
-                # Cache hit: model was summarized in a previous iteration
-                model_knowledge_cache[mt] = inp.model_knowledge_cache[mt]
-                print(f"  Phase 1: {mt} — cache hit, skipping LLM call.")
-                continue
+        # --- LLM-dependent flow ---
+        # V8 hardening Domain 2b: the LLM-dependent portion of run() is
+        # wrapped in a try/except. If any bridge.generate() call raises
+        # past the Bridge's 3-retry envelope (genuinely persistent failure),
+        # we still write a digest carrying the incoming runtime_vocab forward
+        # unchanged with is_degraded=True. Without this, an interp LLM
+        # failure left no digest on disk and the next iter's
+        # load_latest_knowledge() skipped the affected iter — causing a
+        # 2-iter vocab regression. See docs/V8_Gap_Report.md Domain 2b.
+        try:
+            # --- Phase 1: Per-model summarization (cache-first) ---
+            # Cache hit  → reuse entry from inp.model_knowledge_cache, zero LLM calls.
+            # Cache miss → call LLM, build self-sufficient entry (LLM text + _stats).
+            model_knowledge_cache: Dict[str, Dict] = {}
+            for mt in effective_types:
+                if mt in inp.model_knowledge_cache:
+                    # Cache hit: model was summarized in a previous iteration
+                    model_knowledge_cache[mt] = inp.model_knowledge_cache[mt]
+                    print(f"  Phase 1: {mt} — cache hit, skipping LLM call.")
+                    continue
 
-            if mt not in per_model_summary_input:
-                # No tuning data and no cache: placeholder (shouldn't happen in normal flow)
+                if mt not in per_model_summary_input:
+                    # No tuning data and no cache: placeholder (shouldn't happen in normal flow)
+                    model_knowledge_cache[mt] = {
+                        "key_findings": ["No tuning run available for this model."],
+                        "bottlenecks": [],
+                        "best_config_analysis": "N/A",
+                        "score_trend": "N/A",
+                        "_stats": {},
+                    }
+                    continue
+
+                summary = per_model_summary_input[mt]
+                print(f"  Phase 1: Summarizing {mt} ({summary.completed_rounds} rounds) — LLM call...")
+                per_model_prompt = _build_per_model_prompt(
+                    summary=summary,
+                    description=model_descriptions[mt],
+                    expert_advice_str=expert_advice_str,
+                    human_advice=inp.human_advice,
+                )
+                llm_response = self.bridge.generate(PER_MODEL_SYSTEM_PROMPT, per_model_prompt)
+                # Build self-sufficient cache entry: LLM text + numerical _stats.
+                # best_score_table is stored as a plain dict so model_knowledge_cache
+                # round-trips through JSON serialization cleanly; reads must
+                # re-validate it through ScoreComparisonTable.model_validate.
                 model_knowledge_cache[mt] = {
-                    "key_findings": ["No tuning run available for this model."],
-                    "bottlenecks": [],
-                    "best_config_analysis": "N/A",
-                    "score_trend": "N/A",
-                    "_stats": {},
+                    **llm_response,
+                    "_stats": {
+                        "best_denoising_score":  summary.best_denoising_score,
+                        "worst_denoising_score": summary.worst_denoising_score,
+                        "best_file_vector":      summary.best_file_vector,
+                        "best_score_table":      (
+                            summary.best_score_table.model_dump()
+                            if summary.best_score_table else None
+                        ),
+                        "best_model_params":     summary.best_model_params,
+                        "completed_rounds":      summary.completed_rounds,
+                        "best_config":           summary.best_config,
+                        "formal_score":          summary.formal_score,
+                        "model_description":     model_descriptions.get(mt),
+                    },
                 }
-                continue
+                print(f"    {mt}: {len(llm_response.get('key_findings', []))} findings, "
+                      f"{len(llm_response.get('bottlenecks', []))} bottlenecks")
 
-            summary = per_model_summary_input[mt]
-            print(f"  Phase 1: Summarizing {mt} ({summary.completed_rounds} rounds) — LLM call...")
-            per_model_prompt = _build_per_model_prompt(
-                summary=summary,
-                description=model_descriptions[mt],
-                expert_advice_str=expert_advice_str,
-                human_advice=inp.human_advice,
-            )
-            llm_response = self.bridge.generate(PER_MODEL_SYSTEM_PROMPT, per_model_prompt)
-            # Build self-sufficient cache entry: LLM text + numerical _stats.
-            # best_score_table is stored as a plain dict so model_knowledge_cache
-            # round-trips through JSON serialization cleanly; reads must
-            # re-validate it through ScoreComparisonTable.model_validate.
-            model_knowledge_cache[mt] = {
-                **llm_response,
-                "_stats": {
-                    "best_denoising_score":  summary.best_denoising_score,
-                    "worst_denoising_score": summary.worst_denoising_score,
-                    "best_file_vector":      summary.best_file_vector,
-                    "best_score_table":      (
-                        summary.best_score_table.model_dump()
-                        if summary.best_score_table else None
-                    ),
-                    "best_model_params":     summary.best_model_params,
-                    "completed_rounds":      summary.completed_rounds,
-                    "best_config":           summary.best_config,
-                    "formal_score":          summary.formal_score,
-                    "model_description":     model_descriptions.get(mt),
-                },
+            # --- Pre-compute enriched fields ---
+            # New models: read from inp.summaries.
+            # Cached models: read from model_knowledge_cache[mt]["_stats"].
+            per_model_score_tables: Dict[str, ScoreComparisonTable] = {}
+            weak_frequency_files: Dict[str, List[int]] = {}
+            per_model_params: Dict[str, int] = {}
+            per_model_training_segments: Dict[str, int] = {}
+
+            import math
+
+            def _register_score_table(mt: str, table: Optional[ScoreComparisonTable]):
+                if table is None:
+                    return
+                per_model_score_tables[mt] = table
+                weak = [
+                    r.file_index for r in table.rows
+                    if r.model is not None
+                    and not (isinstance(r.model, float) and math.isnan(r.model))
+                    and r.model < 1.0
+                ]
+                if weak:
+                    weak_frequency_files[mt] = weak
+
+            for s in inp.summaries:
+                mt = s.model_type
+                _register_score_table(mt, s.best_score_table)
+                if s.best_model_params is not None:
+                    per_model_params[mt] = s.best_model_params
+                if s.training_psd_segments is not None:
+                    per_model_training_segments[mt] = s.training_psd_segments
+
+            # Fill from cache _stats for cached models not in new summaries. The
+            # cache stores best_score_table as a plain dict (JSON round-trip safe)
+            # — re-validate it back into a ScoreComparisonTable before registering.
+            for mt, entry in inp.model_knowledge_cache.items():
+                if mt in per_model_summary_input:
+                    continue
+                stats = entry.get("_stats", {})
+                cached_table_data = stats.get("best_score_table")
+                cached_table = (
+                    ScoreComparisonTable.model_validate(cached_table_data)
+                    if cached_table_data is not None else None
+                )
+                _register_score_table(mt, cached_table)
+                if stats.get("best_model_params") is not None:
+                    per_model_params[mt] = stats["best_model_params"]
+
+            # --- Phase 2: Cross-model synthesis ---
+            # Strip _stats from model_knowledge_cache entries before passing to synthesis
+            # (synthesis prompt receives the LLM text fields only, stats are shown separately)
+            per_model_summaries_for_prompt = {
+                mt: {k: v for k, v in entry.items() if k != "_stats"}
+                for mt, entry in model_knowledge_cache.items()
             }
-            print(f"    {mt}: {len(llm_response.get('key_findings', []))} findings, "
-                  f"{len(llm_response.get('bottlenecks', []))} bottlenecks")
 
-        # --- Pre-compute enriched fields ---
-        # New models: read from inp.summaries.
-        # Cached models: read from model_knowledge_cache[mt]["_stats"].
-        per_model_score_tables: Dict[str, ScoreComparisonTable] = {}
-        weak_frequency_files: Dict[str, List[int]] = {}
-        per_model_params: Dict[str, int] = {}
-        per_model_training_segments: Dict[str, int] = {}
+            # Compute prior-state health metrics from the *incoming* vocab and cumulative
+            # before Phase 2 synthesis so the LLM can see the research trajectory so far.
+            # The updated metrics (post-Phase-C) are computed after vocab is rebuilt below.
+            from nodes.interpretation_helpers import compute_vocab_diversity_ratio as _cvdr
+            prior_vocab_diversity_ratio = _cvdr(list(inp.runtime_vocab))
+            prior_cumulative_info_gain = inp.cumulative_information_gain
 
-        import math
+            if len(effective_types) == 1:
+                single_mt = effective_types[0]
+                summary = model_knowledge_cache[single_mt]
+                llm_findings = summary.get("key_findings", [])
+                llm_bottlenecks = summary.get("bottlenecks", [])
+                llm_take_home = (
+                    f"The {single_mt} model shows: "
+                    + summary.get("score_trend", "unclear trend")
+                    + ". " + (summary.get("best_config_analysis", "") or "")
+                )
+                print(f"  Phase 2: Single model — skipping synthesis.")
+            else:
+                print(f"  Phase 2: Synthesizing across {len(effective_types)} models...")
+                synthesis_prompt = _build_synthesis_prompt(
+                    per_model_summaries=per_model_summaries_for_prompt,
+                    per_model_best=per_model_best,
+                    per_model_worst=per_model_worst,
+                    overall_best_score=overall_best_score,
+                    overall_worst_score=overall_worst_score,
+                    overall_best_config=overall_best_config,
+                    per_model_score_tables=per_model_score_tables or None,
+                    per_model_params=per_model_params or None,
+                    per_model_training_segments=per_model_training_segments or None,
+                    expert_advice_str=expert_advice_str,
+                    human_advice=inp.human_advice,
+                    runtime_vocab=list(inp.runtime_vocab) if inp.runtime_vocab else None,
+                    per_model_formal=per_model_formal or None,
+                    vocab_diversity_ratio=prior_vocab_diversity_ratio,
+                    cumulative_information_gain=prior_cumulative_info_gain,
+                )
+                synthesis_response = self.bridge.generate(SYNTHESIS_SYSTEM_PROMPT, synthesis_prompt)
+                llm_findings = synthesis_response.get("key_findings", [])
+                llm_bottlenecks = synthesis_response.get("bottlenecks", [])
+                llm_take_home = synthesis_response.get("take_home_message", "")
 
-        def _register_score_table(mt: str, table: Optional[ScoreComparisonTable]):
-            if table is None:
-                return
-            per_model_score_tables[mt] = table
-            weak = [
-                r.file_index for r in table.rows
-                if r.model is not None
-                and not (isinstance(r.model, float) and math.isnan(r.model))
-                and r.model < 1.0
+            # --- Phase C: Vocabulary feedback loop ---
+            from nodes.interpretation_helpers import (
+                evaluate_prediction, generate_discoveries, build_runtime_vocab,
+                promote_candidates, update_vocab_link_confirmations,
+            )
+
+            prediction_evaluation = None
+            new_discoveries = []
+            prev_model_type = ""
+
+            if inp.previous_proposal:
+                prev_prediction = inp.previous_proposal.get("falsifiable_prediction")
+                prev_model_type = inp.previous_proposal.get("model_name", "unknown")
+                prev_inherited = inp.previous_proposal.get("inherited_components", [])
+                prev_vocab_links = inp.previous_proposal.get("proposed_vocab_links", [])
+
+                # Evaluate the prediction against actual results
+                if prev_prediction:
+                    # Find the best score for the proposed model
+                    prev_best = per_model_best.get(prev_model_type)
+                    # evaluate_prediction consumes the file_vector as a list of floats
+                    # (per its metric-parser contract: "mean(file_vector[N:M])",
+                    # "file_vector[N]"). Synthesize that list from rows[i].model so
+                    # the reflector-side payload key "best_file_vector" keeps its
+                    # existing shape while the upstream dict stores a
+                    # ScoreComparisonTable.
+                    prev_table = (per_model_score_tables or {}).get(prev_model_type)
+                    prev_fv = (
+                        [r.model for r in prev_table.rows]
+                        if prev_table is not None else None
+                    )
+
+                    actual_results = {
+                        "best_denoising_score": prev_best,
+                        "best_file_vector": prev_fv,
+                    }
+                    # current_sota = SOTA at proposal time (FalsifiablePrediction.current_value).
+                    # The workflow may pass a fresher value via overall_best_score if needed,
+                    # but the proposal-time baseline is the fairest comparison for evaluation.
+                    sota_at_proposal = prev_prediction.get("current_value")
+                    prediction_evaluation = evaluate_prediction(
+                        prev_prediction,
+                        actual_results,
+                        current_sota=sota_at_proposal,
+                    )
+                    print(f"  Prediction evaluation: {prediction_evaluation.get('outcome', '?')} "
+                          f"(delta_from_sota={prediction_evaluation.get('delta_from_sota')}, "
+                          f"actual={prediction_evaluation.get('actual_value')})")
+
+                # Generate discoveries from the evaluation
+                prev_summary = per_model_summary_input.get(prev_model_type)
+                prev_timing = prev_summary.best_timing if prev_summary else None
+                new_discoveries = generate_discoveries(
+                    prediction_eval=prediction_evaluation,
+                    model_type=prev_model_type,
+                    best_score=per_model_best.get(prev_model_type),
+                    inherited_components=prev_inherited,
+                    proposed_vocab_links=prev_vocab_links,
+                    timing=prev_timing,
+                    overall_best_score=overall_best_score,
+                )
+                if new_discoveries:
+                    print(f"  New discoveries: {len(new_discoveries)}")
+                    for d in new_discoveries:
+                        print(f"    - {d.description[:100]}...")
+
+            # Build updated runtime vocabulary
+            # Feature/capability candidates come from proposed_vocab_candidates (C.5-2).
+            # Discovery entries are generated separately above and passed as new_discoveries.
+            # Inject proposed_by_run from the proposal's model_name so build_runtime_vocab
+            # can populate seen_in_runs — the LLM never produces this key itself.
+            proposed_candidates = []
+            if inp.previous_proposal:
+                model_name = inp.previous_proposal.get("model_name", "")
+                raw_candidates = inp.previous_proposal.get("proposed_vocab_candidates", [])
+                proposed_candidates = [
+                    {**c, "proposed_by_run": model_name} if not c.get("proposed_by_run") else c
+                    for c in raw_candidates
+                ]
+            runtime_vocab = build_runtime_vocab(
+                incoming_vocab=list(inp.runtime_vocab),
+                new_discoveries=new_discoveries,
+                proposed_candidates=proposed_candidates,
+            )
+
+            # Structural promotion: candidates seen in >= 3 runs → canonical
+            runtime_vocab, promoted_names = promote_candidates(runtime_vocab)
+            # Log promotions before dedup (promoted entries may be removed by dedup)
+            vocab_changes = [
+                f"Promoted '{name}' to canonical (seen in "
+                f"{next(len(e.seen_in_runs) for e in runtime_vocab if e.name == name)} runs)."
+                for name in promoted_names
             ]
-            if weak:
-                weak_frequency_files[mt] = weak
+            if promoted_names:
+                print(f"  Vocab promotions ({len(promoted_names)}): {promoted_names}")
 
-        for s in inp.summaries:
-            mt = s.model_type
-            _register_score_table(mt, s.best_score_table)
-            if s.best_model_params is not None:
-                per_model_params[mt] = s.best_model_params
-            if s.training_psd_segments is not None:
-                per_model_training_segments[mt] = s.training_psd_segments
+            # Semantic dedup: check newly promoted entries against existing canonicals
+            if promoted_names:
+                print(f"  Dedup: checking {len(promoted_names)} newly promoted entries...")
+                runtime_vocab, merge_changes = self._dedup_promoted(promoted_names, runtime_vocab)
+                vocab_changes.extend(merge_changes)
 
-        # Fill from cache _stats for cached models not in new summaries. The
-        # cache stores best_score_table as a plain dict (JSON round-trip safe)
-        # — re-validate it back into a ScoreComparisonTable before registering.
-        for mt, entry in inp.model_knowledge_cache.items():
-            if mt in per_model_summary_input:
-                continue
-            stats = entry.get("_stats", {})
-            cached_table_data = stats.get("best_score_table")
-            cached_table = (
-                ScoreComparisonTable.model_validate(cached_table_data)
-                if cached_table_data is not None else None
+            print(f"  Runtime vocab: {len(runtime_vocab)} entries "
+                  f"({sum(1 for v in runtime_vocab if (v.kind if hasattr(v, 'kind') else v.get('kind')) == 'discovery')} discoveries, "
+                  f"{sum(1 for v in runtime_vocab if (v.tier if hasattr(v, 'tier') else v.get('tier')) == 'canonical')} canonical)")
+
+            # --- Phase E.7: Update ProposedVocabLink confirmation tracking ---
+            # When prediction is confirmed, each proposed link from the previous run
+            # gains one confirmation. Links confirmed in >= min_runs distinct runs
+            # are promoted to VocabEntry.related_to (feature gains capability as established fact).
+            prev_vocab_links: List[Dict[str, Any]] = (
+                inp.previous_proposal.get("proposed_vocab_links", [])
+                if inp.previous_proposal else []
             )
-            _register_score_table(mt, cached_table)
-            if stats.get("best_model_params") is not None:
-                per_model_params[mt] = stats["best_model_params"]
-
-        # --- Phase 2: Cross-model synthesis ---
-        # Strip _stats from model_knowledge_cache entries before passing to synthesis
-        # (synthesis prompt receives the LLM text fields only, stats are shown separately)
-        per_model_summaries_for_prompt = {
-            mt: {k: v for k, v in entry.items() if k != "_stats"}
-            for mt, entry in model_knowledge_cache.items()
-        }
-
-        # Compute prior-state health metrics from the *incoming* vocab and cumulative
-        # before Phase 2 synthesis so the LLM can see the research trajectory so far.
-        # The updated metrics (post-Phase-C) are computed after vocab is rebuilt below.
-        from nodes.interpretation_helpers import compute_vocab_diversity_ratio as _cvdr
-        prior_vocab_diversity_ratio = _cvdr(list(inp.runtime_vocab))
-        prior_cumulative_info_gain = inp.cumulative_information_gain
-
-        if len(effective_types) == 1:
-            single_mt = effective_types[0]
-            summary = model_knowledge_cache[single_mt]
-            llm_findings = summary.get("key_findings", [])
-            llm_bottlenecks = summary.get("bottlenecks", [])
-            llm_take_home = (
-                f"The {single_mt} model shows: "
-                + summary.get("score_trend", "unclear trend")
-                + ". " + (summary.get("best_config_analysis", "") or "")
+            link_confirmations, runtime_vocab, promoted_link_pairs = update_vocab_link_confirmations(
+                prev_vocab_links=prev_vocab_links,
+                prediction_outcome=(
+                    prediction_evaluation.get("outcome") if prediction_evaluation else None
+                ),
+                run_name=prev_model_type if inp.previous_proposal else "",
+                existing_confirmations=inp.vocab_link_confirmations,
+                runtime_vocab=runtime_vocab,
+                min_runs=3,
             )
-            print(f"  Phase 2: Single model — skipping synthesis.")
-        else:
-            print(f"  Phase 2: Synthesizing across {len(effective_types)} models...")
-            synthesis_prompt = _build_synthesis_prompt(
-                per_model_summaries=per_model_summaries_for_prompt,
-                per_model_best=per_model_best,
-                per_model_worst=per_model_worst,
-                overall_best_score=overall_best_score,
-                overall_worst_score=overall_worst_score,
-                overall_best_config=overall_best_config,
-                per_model_score_tables=per_model_score_tables or None,
-                per_model_params=per_model_params or None,
-                per_model_training_segments=per_model_training_segments or None,
-                expert_advice_str=expert_advice_str,
-                human_advice=inp.human_advice,
-                runtime_vocab=list(inp.runtime_vocab) if inp.runtime_vocab else None,
-                per_model_formal=per_model_formal or None,
-                vocab_diversity_ratio=prior_vocab_diversity_ratio,
-                cumulative_information_gain=prior_cumulative_info_gain,
+            if promoted_link_pairs:
+                print(f"  Vocab link promotions ({len(promoted_link_pairs)}): {promoted_link_pairs}")
+                for pair in promoted_link_pairs:
+                    feature, _, capability = pair.partition(":")
+                    vocab_changes.append(
+                        f"Link '{feature} → {capability}' confirmed in ≥3 runs; "
+                        f"added '{capability}' to {feature}.related_to."
+                    )
+
+            # --- Phase E.4: Scientific accuracy tracking ---
+            # Accumulate outcome counts and compute hit-rate fractions.
+            new_outcomes_history = dict(inp.prediction_outcomes_history)
+            if prediction_evaluation:
+                outcome_label = prediction_evaluation.get("outcome")
+                if outcome_label in ("confirmed", "partial", "refuted"):
+                    new_outcomes_history[outcome_label] = (
+                        new_outcomes_history.get(outcome_label, 0) + 1
+                    )
+            total_preds = sum(new_outcomes_history.values())
+            scientific_accuracy: Optional[Dict[str, float]] = (
+                {k: round(v / total_preds, 4) for k, v in new_outcomes_history.items()}
+                if total_preds > 0 else None
             )
-            synthesis_response = self.bridge.generate(SYNTHESIS_SYSTEM_PROMPT, synthesis_prompt)
-            llm_findings = synthesis_response.get("key_findings", [])
-            llm_bottlenecks = synthesis_response.get("bottlenecks", [])
-            llm_take_home = synthesis_response.get("take_home_message", "")
+            if scientific_accuracy:
+                print(f"  Scientific accuracy: {scientific_accuracy} "
+                      f"(n={total_preds})")
 
-        # --- Phase C: Vocabulary feedback loop ---
-        from nodes.interpretation_helpers import (
-            evaluate_prediction, generate_discoveries, build_runtime_vocab,
-            promote_candidates, update_vocab_link_confirmations,
-        )
-
-        prediction_evaluation = None
-        new_discoveries = []
-        prev_model_type = ""
-
-        if inp.previous_proposal:
-            prev_prediction = inp.previous_proposal.get("falsifiable_prediction")
-            prev_model_type = inp.previous_proposal.get("model_name", "unknown")
-            prev_inherited = inp.previous_proposal.get("inherited_components", [])
-            prev_vocab_links = inp.previous_proposal.get("proposed_vocab_links", [])
-
-            # Evaluate the prediction against actual results
-            if prev_prediction:
-                # Find the best score for the proposed model
-                prev_best = per_model_best.get(prev_model_type)
-                # evaluate_prediction consumes the file_vector as a list of floats
-                # (per its metric-parser contract: "mean(file_vector[N:M])",
-                # "file_vector[N]"). Synthesize that list from rows[i].model so
-                # the reflector-side payload key "best_file_vector" keeps its
-                # existing shape while the upstream dict stores a
-                # ScoreComparisonTable.
-                prev_table = (per_model_score_tables or {}).get(prev_model_type)
-                prev_fv = (
-                    [r.model for r in prev_table.rows]
-                    if prev_table is not None else None
-                )
-
-                actual_results = {
-                    "best_denoising_score": prev_best,
-                    "best_file_vector": prev_fv,
-                }
-                # current_sota = SOTA at proposal time (FalsifiablePrediction.current_value).
-                # The workflow may pass a fresher value via overall_best_score if needed,
-                # but the proposal-time baseline is the fairest comparison for evaluation.
-                sota_at_proposal = prev_prediction.get("current_value")
-                prediction_evaluation = evaluate_prediction(
-                    prev_prediction,
-                    actual_results,
-                    current_sota=sota_at_proposal,
-                )
-                print(f"  Prediction evaluation: {prediction_evaluation.get('outcome', '?')} "
-                      f"(delta_from_sota={prediction_evaluation.get('delta_from_sota')}, "
-                      f"actual={prediction_evaluation.get('actual_value')})")
-
-            # Generate discoveries from the evaluation
-            prev_summary = per_model_summary_input.get(prev_model_type)
-            prev_timing = prev_summary.best_timing if prev_summary else None
-            new_discoveries = generate_discoveries(
-                prediction_eval=prediction_evaluation,
-                model_type=prev_model_type,
-                best_score=per_model_best.get(prev_model_type),
-                inherited_components=prev_inherited,
-                proposed_vocab_links=prev_vocab_links,
-                timing=prev_timing,
-                overall_best_score=overall_best_score,
+            # --- Centrifugal health metrics (post-Phase-C, on the updated vocab) ---
+            vocab_diversity_ratio = _cvdr(runtime_vocab)
+            this_info_gain = (
+                prediction_evaluation.get("information_gain", 0.0)
+                if prediction_evaluation else 0.0
             )
-            if new_discoveries:
-                print(f"  New discoveries: {len(new_discoveries)}")
-                for d in new_discoveries:
-                    print(f"    - {d.description[:100]}...")
+            cumulative_information_gain = inp.cumulative_information_gain + this_info_gain
+            print(f"  Vocab diversity ratio: {vocab_diversity_ratio:.3f} "
+                  f"(cumulative info gain: {cumulative_information_gain:.4f})")
 
-        # Build updated runtime vocabulary
-        # Feature/capability candidates come from proposed_vocab_candidates (C.5-2).
-        # Discovery entries are generated separately above and passed as new_discoveries.
-        # Inject proposed_by_run from the proposal's model_name so build_runtime_vocab
-        # can populate seen_in_runs — the LLM never produces this key itself.
-        proposed_candidates = []
-        if inp.previous_proposal:
-            model_name = inp.previous_proposal.get("model_name", "")
-            raw_candidates = inp.previous_proposal.get("proposed_vocab_candidates", [])
-            proposed_candidates = [
-                {**c, "proposed_by_run": model_name} if not c.get("proposed_by_run") else c
-                for c in raw_candidates
-            ]
-        runtime_vocab = build_runtime_vocab(
-            incoming_vocab=list(inp.runtime_vocab),
-            new_discoveries=new_discoveries,
-            proposed_candidates=proposed_candidates,
-        )
+            # --- Build and validate output ---
+            output = InterpretationOutput.model_validate({
+                "model_types":           effective_types,
+                "model_descriptions":    model_descriptions,
+                "total_experiments":     total_experiments,
+                "per_model_best":        per_model_best,
+                "per_model_worst":       per_model_worst,
+                "best_denoising_score":  overall_best_score,
+                "worst_denoising_score": overall_worst_score,
+                "best_config":           overall_best_config,
+                "model_knowledge_cache":  model_knowledge_cache,
+                "key_findings":          llm_findings,
+                "bottlenecks":           llm_bottlenecks,
+                # Enriched fields
+                "per_model_score_tables":      per_model_score_tables or None,
+                "weak_frequency_files":        weak_frequency_files or None,
+                "per_model_params":            per_model_params or None,
+                "per_model_training_segments": per_model_training_segments or None,
+                "take_home_message":     llm_take_home,
+                # Phase C: vocabulary feedback
+                "runtime_vocab":         [v.model_dump() if hasattr(v, "model_dump") else v for v in runtime_vocab],
+                "prediction_evaluation": prediction_evaluation,
+                "new_discoveries":       [d.model_dump() for d in new_discoveries],
+                "vocab_changes":         vocab_changes,
+                # Centrifugal health metrics
+                "vocab_diversity_ratio":        vocab_diversity_ratio,
+                "cumulative_information_gain":  cumulative_information_gain,
+                # Phase E: scientific accuracy + vocab link promotion
+                "scientific_accuracy":           scientific_accuracy,
+                "prediction_outcomes_history":   new_outcomes_history,
+                "vocab_link_confirmations":      link_confirmations,
+            })
 
-        # Structural promotion: candidates seen in >= 3 runs → canonical
-        runtime_vocab, promoted_names = promote_candidates(runtime_vocab)
-        # Log promotions before dedup (promoted entries may be removed by dedup)
-        vocab_changes = [
-            f"Promoted '{name}' to canonical (seen in "
-            f"{next(len(e.seen_in_runs) for e in runtime_vocab if e.name == name)} runs)."
-            for name in promoted_names
-        ]
-        if promoted_names:
-            print(f"  Vocab promotions ({len(promoted_names)}): {promoted_names}")
+            # --- Persist ---
+            if inp.storage.backend == "local" and inp.storage.local:
+                workspace = inp.storage.local.workspace
+                run_name  = inp.storage.local.run_name
+                os.makedirs(workspace, exist_ok=True)
+                out_path = os.path.join(workspace, f"interpretation_{run_name}.json")
+                with open(out_path, "w", encoding="utf-8") as f:
+                    f.write(output.model_dump_json(indent=4))
+                print(f"Interpretation saved -> {out_path}")
 
-        # Semantic dedup: check newly promoted entries against existing canonicals
-        if promoted_names:
-            print(f"  Dedup: checking {len(promoted_names)} newly promoted entries...")
-            runtime_vocab, merge_changes = self._dedup_promoted(promoted_names, runtime_vocab)
-            vocab_changes.extend(merge_changes)
-
-        print(f"  Runtime vocab: {len(runtime_vocab)} entries "
-              f"({sum(1 for v in runtime_vocab if (v.kind if hasattr(v, 'kind') else v.get('kind')) == 'discovery')} discoveries, "
-              f"{sum(1 for v in runtime_vocab if (v.tier if hasattr(v, 'tier') else v.get('tier')) == 'canonical')} canonical)")
-
-        # --- Phase E.7: Update ProposedVocabLink confirmation tracking ---
-        # When prediction is confirmed, each proposed link from the previous run
-        # gains one confirmation. Links confirmed in >= min_runs distinct runs
-        # are promoted to VocabEntry.related_to (feature gains capability as established fact).
-        prev_vocab_links: List[Dict[str, Any]] = (
-            inp.previous_proposal.get("proposed_vocab_links", [])
-            if inp.previous_proposal else []
-        )
-        link_confirmations, runtime_vocab, promoted_link_pairs = update_vocab_link_confirmations(
-            prev_vocab_links=prev_vocab_links,
-            prediction_outcome=(
-                prediction_evaluation.get("outcome") if prediction_evaluation else None
-            ),
-            run_name=prev_model_type if inp.previous_proposal else "",
-            existing_confirmations=inp.vocab_link_confirmations,
-            runtime_vocab=runtime_vocab,
-            min_runs=3,
-        )
-        if promoted_link_pairs:
-            print(f"  Vocab link promotions ({len(promoted_link_pairs)}): {promoted_link_pairs}")
-            for pair in promoted_link_pairs:
-                feature, _, capability = pair.partition(":")
-                vocab_changes.append(
-                    f"Link '{feature} → {capability}' confirmed in ≥3 runs; "
-                    f"added '{capability}' to {feature}.related_to."
+            return output
+        except Exception as e:
+            print(
+                f"  [DEGRADED] Interpretation LLM flow failed: "
+                f"{type(e).__name__}: {e}"
+            )
+            print(
+                f"  [DEGRADED] Carrying forward incoming runtime_vocab "
+                f"({len(inp.runtime_vocab)} entries) unchanged. "
+                f"Writing digest with is_degraded=True."
+            )
+            output = InterpretationOutput.model_validate({
+                "model_types":           effective_types,
+                "model_descriptions":    model_descriptions,
+                "total_experiments":     total_experiments,
+                "per_model_best":        per_model_best,
+                "per_model_worst":       per_model_worst,
+                "best_denoising_score":  overall_best_score,
+                "worst_denoising_score": overall_worst_score,
+                "best_config":           overall_best_config,
+                "model_knowledge_cache": dict(inp.model_knowledge_cache),
+                "key_findings":          [],
+                "bottlenecks":           [],
+                "take_home_message": (
+                    f"DEGRADED: interpreter LLM failed "
+                    f"({type(e).__name__}). Vocab carried forward unchanged."
+                ),
+                "runtime_vocab": [
+                    v.model_dump() if hasattr(v, "model_dump") else v
+                    for v in inp.runtime_vocab
+                ],
+                "new_discoveries":              [],
+                "vocab_changes":                [],
+                "prediction_outcomes_history":  dict(inp.prediction_outcomes_history),
+                "vocab_link_confirmations":     dict(inp.vocab_link_confirmations),
+                "cumulative_information_gain":  inp.cumulative_information_gain,
+                "is_degraded":                  True,
+            })
+            if inp.storage.backend == "local" and inp.storage.local:
+                workspace = inp.storage.local.workspace
+                run_name  = inp.storage.local.run_name
+                os.makedirs(workspace, exist_ok=True)
+                out_path = os.path.join(
+                    workspace, f"interpretation_{run_name}.json"
                 )
+                with open(out_path, "w", encoding="utf-8") as f:
+                    f.write(output.model_dump_json(indent=4))
+                print(f"  [DEGRADED] Interpretation saved -> {out_path}")
+            return output
 
-        # --- Phase E.4: Scientific accuracy tracking ---
-        # Accumulate outcome counts and compute hit-rate fractions.
-        new_outcomes_history = dict(inp.prediction_outcomes_history)
-        if prediction_evaluation:
-            outcome_label = prediction_evaluation.get("outcome")
-            if outcome_label in ("confirmed", "partial", "refuted"):
-                new_outcomes_history[outcome_label] = (
-                    new_outcomes_history.get(outcome_label, 0) + 1
-                )
-        total_preds = sum(new_outcomes_history.values())
-        scientific_accuracy: Optional[Dict[str, float]] = (
-            {k: round(v / total_preds, 4) for k, v in new_outcomes_history.items()}
-            if total_preds > 0 else None
-        )
-        if scientific_accuracy:
-            print(f"  Scientific accuracy: {scientific_accuracy} "
-                  f"(n={total_preds})")
-
-        # --- Centrifugal health metrics (post-Phase-C, on the updated vocab) ---
-        vocab_diversity_ratio = _cvdr(runtime_vocab)
-        this_info_gain = (
-            prediction_evaluation.get("information_gain", 0.0)
-            if prediction_evaluation else 0.0
-        )
-        cumulative_information_gain = inp.cumulative_information_gain + this_info_gain
-        print(f"  Vocab diversity ratio: {vocab_diversity_ratio:.3f} "
-              f"(cumulative info gain: {cumulative_information_gain:.4f})")
-
-        # --- Build and validate output ---
-        output = InterpretationOutput.model_validate({
-            "model_types":           effective_types,
-            "model_descriptions":    model_descriptions,
-            "total_experiments":     total_experiments,
-            "per_model_best":        per_model_best,
-            "per_model_worst":       per_model_worst,
-            "best_denoising_score":  overall_best_score,
-            "worst_denoising_score": overall_worst_score,
-            "best_config":           overall_best_config,
-            "model_knowledge_cache":  model_knowledge_cache,
-            "key_findings":          llm_findings,
-            "bottlenecks":           llm_bottlenecks,
-            # Enriched fields
-            "per_model_score_tables":      per_model_score_tables or None,
-            "weak_frequency_files":        weak_frequency_files or None,
-            "per_model_params":            per_model_params or None,
-            "per_model_training_segments": per_model_training_segments or None,
-            "take_home_message":     llm_take_home,
-            # Phase C: vocabulary feedback
-            "runtime_vocab":         [v.model_dump() if hasattr(v, "model_dump") else v for v in runtime_vocab],
-            "prediction_evaluation": prediction_evaluation,
-            "new_discoveries":       [d.model_dump() for d in new_discoveries],
-            "vocab_changes":         vocab_changes,
-            # Centrifugal health metrics
-            "vocab_diversity_ratio":        vocab_diversity_ratio,
-            "cumulative_information_gain":  cumulative_information_gain,
-            # Phase E: scientific accuracy + vocab link promotion
-            "scientific_accuracy":           scientific_accuracy,
-            "prediction_outcomes_history":   new_outcomes_history,
-            "vocab_link_confirmations":      link_confirmations,
-        })
-
-        # --- Persist ---
-        if inp.storage.backend == "local" and inp.storage.local:
-            workspace = inp.storage.local.workspace
-            run_name  = inp.storage.local.run_name
-            os.makedirs(workspace, exist_ok=True)
-            out_path = os.path.join(workspace, f"interpretation_{run_name}.json")
-            with open(out_path, "w", encoding="utf-8") as f:
-                f.write(output.model_dump_json(indent=4))
-            print(f"Interpretation saved -> {out_path}")
-
-        return output
 
     def _dedup_promoted(
         self,

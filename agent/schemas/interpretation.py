@@ -425,3 +425,19 @@ class InterpretationOutput(BaseModel):
                     "Carry forward as InterpretationInput.vocab_link_confirmations "
                     "in the next iteration.",
     )
+
+    # --- Degraded-mode flag (V8 hardening Domain 2b) ---
+    is_degraded: bool = Field(
+        default=False,
+        description="True when the interpreter produced this digest via the "
+                    "fallback path (LLM call failed after the Bridge's 3-retry "
+                    "envelope). Degraded outputs preserve the incoming "
+                    "runtime_vocab verbatim (no growth this iter), have empty "
+                    "key_findings/bottlenecks/new_discoveries, and are still "
+                    "written to disk so the chain's load_latest_knowledge() "
+                    "step finds a digest. Without this flag, an interp LLM "
+                    "failure left no digest on disk and the next iter's "
+                    "load_latest_knowledge skipped the affected iter — "
+                    "causing a 2-iter vocab regression. See "
+                    "docs/V8_Gap_Report.md Domain 2b.",
+    )

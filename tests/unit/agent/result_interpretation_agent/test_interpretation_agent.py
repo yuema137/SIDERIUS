@@ -950,3 +950,124 @@ class TestProposedByRunInjection:
         # No candidates from proposal — only seed/discovery entries possible
         candidate_names = {e.name for e in output.runtime_vocab if e.tier == "candidate"}
         assert "log_fno_gates" not in candidate_names
+
+
+# ---------------------------------------------------------------------------
+# V8 hardening Domain 2b — Degraded interpreter path
+# ---------------------------------------------------------------------------
+
+class TestDegradedInterpreterPath:
+    """When bridge.generate() raises past the 3-retry envelope, the agent
+    must still emit a digest with is_degraded=True so the chain's
+    load_latest_knowledge() does not skip the iter and regress the vocab.
+    """
+
+    INCOMING_VOCAB = [
+        {
+            "name": "dilated_causal_conv",
+            "kind": "feature",
+            "description": "1-D dilated causal convolution.",
+            "tier": "canonical",
+            "seen_in_runs": ["seed"],
+        },
+        {
+            "name": "receptive_field",
+            "kind": "capability",
+            "description": "Effective temporal context window.",
+            "tier": "canonical",
+            "seen_in_runs": ["seed"],
+        },
+    ]
+
+    def _make_input(self, tmp_path, run_name="degraded_r1"):
+        return InterpretationInput(
+            summaries=[PUNET_SUMMARY],
+            storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": run_name}},
+            runtime_vocab=self.INCOMING_VOCAB,
+            cumulative_information_gain=2.5,
+            prediction_outcomes_history={"confirmed": 3, "partial": 1, "refuted": 2},
+            vocab_link_confirmations={"dilated_causal_conv:receptive_field": ["run_a", "run_b"]},
+        )
+
+    def _make_failing_agent(self):
+        """Build an agent whose bridge.generate always raises — simulates a
+        persistent LLM failure after the Bridge's internal 3-retry envelope."""
+        with patch("nodes.result_interpretation_agent.LLMBridge") as MockBridge:
+            MockBridge.return_value.generate.side_effect = RuntimeError(
+                "LLM unreachable after 3 retries"
+            )
+            a = ResultInterpretationAgent(provider="gemini", model_id="test-model")
+            a.bridge = MockBridge.return_value
+            return a
+
+    def test_returns_output_instead_of_raising(self, tmp_path):
+        """Agent must NOT propagate the LLM exception — it must catch and
+        return a degraded InterpretationOutput so the chain keeps going."""
+        agent = self._make_failing_agent()
+        inp = self._make_input(tmp_path)
+        output = agent.run(inp)
+        assert isinstance(output, InterpretationOutput)
+
+    def test_is_degraded_flag_true(self, tmp_path):
+        agent = self._make_failing_agent()
+        inp = self._make_input(tmp_path)
+        output = agent.run(inp)
+        assert output.is_degraded is True
+
+    def test_runtime_vocab_carried_forward_unchanged(self, tmp_path):
+        """Degraded output must preserve the incoming runtime_vocab verbatim
+        (no growth, no shrinkage) so the next iter's load_latest_knowledge()
+        still sees a complete vocab."""
+        agent = self._make_failing_agent()
+        inp = self._make_input(tmp_path)
+        output = agent.run(inp)
+        out_names = sorted(e.name for e in output.runtime_vocab)
+        in_names = sorted(e["name"] for e in self.INCOMING_VOCAB)
+        assert out_names == in_names
+
+    def test_key_findings_and_bottlenecks_empty(self, tmp_path):
+        """Degraded digest must not invent findings — the LLM never returned."""
+        agent = self._make_failing_agent()
+        inp = self._make_input(tmp_path)
+        output = agent.run(inp)
+        assert output.key_findings == []
+        assert output.bottlenecks == []
+        assert output.new_discoveries == []
+
+    def test_take_home_message_marks_degraded(self, tmp_path):
+        agent = self._make_failing_agent()
+        inp = self._make_input(tmp_path)
+        output = agent.run(inp)
+        assert "DEGRADED" in output.take_home_message
+
+    def test_digest_persisted_to_disk(self, tmp_path):
+        """The whole point of the fallback is that the digest file exists —
+        without it, load_latest_knowledge() skips the iter."""
+        agent = self._make_failing_agent()
+        inp = self._make_input(tmp_path, run_name="degraded_persist")
+        agent.run(inp)
+        out_path = tmp_path / "interpretation_degraded_persist.json"
+        assert out_path.exists()
+        data = json.loads(out_path.read_text())
+        assert data["is_degraded"] is True
+        assert {v["name"] for v in data["runtime_vocab"]} == {
+            "dilated_causal_conv", "receptive_field",
+        }
+
+    def test_carry_forward_metrics_preserved(self, tmp_path):
+        """Cumulative metrics must pass through unchanged so chain accounting
+        does not silently zero out on a degraded iter."""
+        agent = self._make_failing_agent()
+        inp = self._make_input(tmp_path)
+        output = agent.run(inp)
+        assert output.cumulative_information_gain == 2.5
+        assert output.prediction_outcomes_history == {"confirmed": 3, "partial": 1, "refuted": 2}
+        assert output.vocab_link_confirmations == {
+            "dilated_causal_conv:receptive_field": ["run_a", "run_b"]
+        }
+
+    def test_healthy_path_default_is_not_degraded(self, agent, tmp_path):
+        """Sanity: when the LLM works, is_degraded must default to False."""
+        inp = make_input(PUNET_SUMMARY, workspace=str(tmp_path))
+        output = agent.run(inp)
+        assert output.is_degraded is False

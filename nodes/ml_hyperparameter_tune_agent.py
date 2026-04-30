@@ -1620,41 +1620,91 @@ class HyperparamTuningAgent:
                     probe_memory(iter_idx=round_index, phase="pre_score",
                                  workspace=workspace, scope="tuner")
                     t0 = time.time()
-                    if anchor_map_data is not None:
-                        # Anchor-normalized scoring (both trial and formal modes).
-                        # Trial: sparse SampleSet. Formal: full SampleSet (all 20 × 200).
-                        def _denoised_fn(fi):
-                            return f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_{fi:04d}.h5"
-                        # Reference vector for the task-specific health check
-                        # inside score_vector (commits b1+b2). Only meaningful
-                        # on a formal round AND when a trial winner exists in
-                        # this iteration's memory_history. None on trial rounds
-                        # (no benchmark) or on all-formal runs (trial_allowed
-                        # =False) → score_vector skips the predicate gracefully.
-                        _ref_fv = None
-                        if not plan.is_trial:
-                            _winner = _best_trial_winner(memory_history)
-                            if _winner is not None:
-                                _ref_fv = _winner.get("file_vector")
-                        file_vector, final_scalar, is_degenerate, failure_reason = sandbox.score_vector(
-                            sample_set=eval_sample_set,
-                            anchor_map=anchor_map_data["anchors"],
-                            s_max=anchor_map_data["s_max"],
-                            denoised_filename_fn=_denoised_fn,
-                            reference_file_vector=_ref_fv,
-                        )
-                        score_res = {
-                            "status": "success",
-                            "results": {
-                                "denoising_score": final_scalar,
-                                "file_vector": file_vector,
-                                "is_degenerate": is_degenerate,
-                                "failure_reason": failure_reason,
+                    # V8 hardening Domain 2a — wrap the entire scoring block.
+                    # Pre-V8, an exception in score_vector / denoising_score_skill
+                    # bubbled past the loop without writing a record, so the
+                    # tuner's iteration silently lost evidence (training
+                    # checkpoint preserved on disk but no entry in
+                    # memory_history). Now we catch, write an error_scoring
+                    # record (matches the error_training/inference pattern
+                    # above), and continue. See docs/V8_Gap_Report.md Domain 2a.
+                    try:
+                        if anchor_map_data is not None:
+                            # Anchor-normalized scoring (both trial and formal modes).
+                            # Trial: sparse SampleSet. Formal: full SampleSet (all 20 × 200).
+                            def _denoised_fn(fi):
+                                return f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_{fi:04d}.h5"
+                            # Reference vector for the task-specific health check
+                            # inside score_vector (commits b1+b2). Only meaningful
+                            # on a formal round AND when a trial winner exists in
+                            # this iteration's memory_history. None on trial rounds
+                            # (no benchmark) or on all-formal runs (trial_allowed
+                            # =False) → score_vector skips the predicate gracefully.
+                            _ref_fv = None
+                            if not plan.is_trial:
+                                _winner = _best_trial_winner(memory_history)
+                                if _winner is not None:
+                                    _ref_fv = _winner.get("file_vector")
+                            file_vector, final_scalar, is_degenerate, failure_reason = sandbox.score_vector(
+                                sample_set=eval_sample_set,
+                                anchor_map=anchor_map_data["anchors"],
+                                s_max=anchor_map_data["s_max"],
+                                denoised_filename_fn=_denoised_fn,
+                                reference_file_vector=_ref_fv,
+                            )
+                            score_res = {
+                                "status": "success",
+                                "results": {
+                                    "denoising_score": final_scalar,
+                                    "file_vector": file_vector,
+                                    "is_degenerate": is_degenerate,
+                                    "failure_reason": failure_reason,
+                                },
+                            }
+                        else:
+                            # Legacy single-file mode (trial_allowed=False, no anchor map)
+                            score_res = _run_skill("denoising_score_skill", sandbox, **active_params)
+                    except Exception as e:
+                        scoring_time = round(time.time() - t0, 1)
+                        probe_memory(iter_idx=round_index, phase="post_score",
+                                     workspace=workspace, scope="tuner")
+                        error_msg = f"{type(e).__name__}: {e}"
+                        short_msg = error_msg[-500:] if len(error_msg) > 500 else error_msg
+                        error_record = {
+                            "exp_id":          exp_id,
+                            "status":          "error_scoring",
+                            "model_type":      model_type,
+                            "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "file_index":      file_index,
+                            "params":          record_params,
+                            "denoising_score": None,
+                            "timing": {
+                                "train_time_s":     train_time,
+                                "inference_time_s": inference_time,
+                                "scoring_time_s":   scoring_time,
+                            },
+                            "memory": {
+                                "expert_advice_followed": expert_advice_str,
+                                "hypothesis":    hypothesis,
+                                "conclusion":    f"Scoring crashed: {short_msg}",
+                                "discovery":     (
+                                    f"Training and inference completed but scoring "
+                                    f"raised {type(e).__name__}: {short_msg}"
+                                ),
+                                "memory_update": (
+                                    "Scoring crash — training succeeded so the "
+                                    "checkpoint may be reusable. Investigate the "
+                                    "scoring path (anchor map, sample_set, file "
+                                    "vector shape) before retrying this config."
+                                ),
                             },
                         }
-                    else:
-                        # Legacy single-file mode (trial_allowed=False, no anchor map)
-                        score_res = _run_skill("denoising_score_skill", sandbox, **active_params)
+                        error_record["memory"]["round_index"] = round_index
+                        error_record["memory"]["attempt_in_round"] = attempt_in_round
+                        ExperimentRecord.model_validate(error_record)
+                        sandbox.save_record(error_record)
+                        print(f"  Saved error record: {error_record['status']}")
+                        continue
                     scoring_time = round(time.time() - t0, 1)
                     probe_memory(iter_idx=round_index, phase="post_score",
                                  workspace=workspace, scope="tuner")
@@ -2080,7 +2130,7 @@ class HyperparamTuningAgent:
                 f"Surfacing to next proposer."
             )
 
-        agent_output = HyperparamTuningOutput.model_validate({
+        agent_output_dict = {
             "run_name":                          run_name,
             "model_type":                        model_type_setting,
             "file_index":                        file_index,
@@ -2108,16 +2158,52 @@ class HyperparamTuningAgent:
             "max_fail_rounds":                   max_fail_rounds_setting,
             "consecutive_fail_rounds_at_exit":   consecutive_fails,
             "termination_reason":                termination_reason,
-        })
+        }
 
         output_path = os.path.join(workspace, f"run_output_{run_name}.json")
-        # Coerce float('-inf') no-signal sentinels to JSON null at the storage
-        # boundary — model_dump_json would otherwise emit non-standard
-        # ``-Infinity`` tokens that break the dashboard's ``JSON.parse``.
-        safe_output = coerce_nonfinite_to_none(agent_output.model_dump())
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(safe_output, f, indent=4)
-        print(f"Output validated and saved -> {output_path}")
+        # V8 hardening Domain 2c — wrap final output validation + write so
+        # a partial file lands on disk even if Pydantic validation or JSON
+        # serialization raises. Without this, a malformed all_records entry
+        # left no run_output_*.json at all, and core.resume.restore_prior_state
+        # halted the entire chain on "run_output file missing". The fallback
+        # writes a minimal status="failed" record carrying just the chain-
+        # restoration essentials so the next iter can keep going.
+        # See docs/V8_Gap_Report.md Domain 2c.
+        try:
+            agent_output = HyperparamTuningOutput.model_validate(agent_output_dict)
+            # Coerce float('-inf') no-signal sentinels to JSON null at the
+            # storage boundary — model_dump_json would otherwise emit
+            # non-standard ``-Infinity`` tokens that break the dashboard's
+            # ``JSON.parse``.
+            safe_output = coerce_nonfinite_to_none(agent_output.model_dump())
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(safe_output, f, indent=4)
+            print(f"Output validated and saved -> {output_path}")
+        except Exception as e:
+            print(
+                f"  [DEGRADED] HyperparamTuningOutput serialization failed: "
+                f"{type(e).__name__}: {e}. Writing best-effort partial output."
+            )
+            partial_dict = {
+                "run_name":         run_name,
+                "model_type":       model_type_setting,
+                "file_index":       file_index,
+                "status":           "failed",
+                "completed_rounds": completed_rounds,
+                "total_attempts":   total_attempts,
+                "started_at":       started_at,
+                "finished_at":      finished_at,
+                "termination_reason": termination_reason,
+                "_partial_reason":  f"{type(e).__name__}: {e}",
+            }
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(partial_dict, f, indent=4, default=str)
+            print(f"  [DEGRADED] Partial output written -> {output_path}")
+            # Also build a minimal-but-valid in-memory output so callers
+            # downstream (run_one_iteration manifest writer) don't crash on
+            # a None reference. This second validate is on a strictly
+            # smaller payload — re-raising here means a true bug.
+            agent_output = HyperparamTuningOutput.model_validate(partial_dict)
 
         if termination_reason == "completed":
             print(f"\nCompleted {completed_rounds} research rounds. Loop terminated.")
