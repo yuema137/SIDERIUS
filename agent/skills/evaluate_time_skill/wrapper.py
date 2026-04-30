@@ -62,11 +62,6 @@ from agent.skills.inference_skill       import estimator as _inference_est
 from agent.skills.denoising_score_skill import estimator as _scoring_est
 
 
-# Inference has no backward pass; training ms/step includes bwd+optimizer+loss.
-# Mirrors inference_skill/estimator.py's _INFERENCE_VS_TRAINING_RATIO so the
-# warmup-derived inference ms/step matches the static formula's slope.
-_INFERENCE_VS_TRAINING_RATIO: float = 1.0 / 3.0
-
 # Phase 6.7 Fix 1 — fast-fail short-circuit for DOA models. If a single
 # forward+backward+optimizer step at step 0 already takes ≥ this many ms,
 # the model is hopelessly slow and we abort the warmup rather than burn
@@ -397,6 +392,12 @@ def run_skill(sandbox, **kwargs) -> dict:
     train_config = kwargs.get("train_config", {})
     loss_config  = kwargs.get("loss_config", {})
     sample_set   = kwargs.get("sample_set", {})
+    # eval_sample_set drives inference + scoring projections. Falls back to
+    # sample_set for back-compat with callers that haven't been updated to
+    # pass both. The bug this guards against: in formal mode train data is
+    # ~10% (formal_portion=0.1) but eval data is 100% (locked eval_portion=1.0),
+    # so using sample_set for inf/score under-projects by ~10×.
+    eval_sample_set = kwargs.get("eval_sample_set", sample_set)
     train_portion = float(kwargs.get("train_portion", 1.0))
     budget_min   = float(kwargs.get("time_budget_minutes", 0.0))
     data_dir     = kwargs.get("data_dir")
@@ -447,18 +448,22 @@ def run_skill(sandbox, **kwargs) -> dict:
             loss_type=loss_type,
         )
 
+        # Single source of truth lives on the inference estimator. The wrapper
+        # used to mirror the constant locally (1/3) but drifted from the
+        # estimator's value during the 2026-04-30 spectral-TCN recalibration —
+        # use the module attribute directly so any future retune is one edit.
         inference_ms = (
-            measured * _INFERENCE_VS_TRAINING_RATIO
+            measured * _inference_est._INFERENCE_VS_TRAINING_RATIO
             if (measured is not None and measured > 0)
             else None
         )
         inference = _inference_est.estimate_wall_time_seconds(
-            model_type, model_config, sample_set,
+            model_type, model_config, eval_sample_set,
             inference_ms_per_step=inference_ms,
             num_params=num_params,
         )
 
-        scoring = _scoring_est.estimate_wall_time_seconds(sample_set)
+        scoring = _scoring_est.estimate_wall_time_seconds(eval_sample_set)
 
     except Exception as e:
         msg = f"TimeEval error: {e}\n{traceback.format_exc()}"

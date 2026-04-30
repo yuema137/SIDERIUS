@@ -30,14 +30,18 @@ class TestGetServerConfig:
         assert cfg.hostname == "ligroup"
         # The exact measured value; if the constant is retuned this
         # assertion is intentionally noisy.
-        assert cfg.per_psd_segment_seconds == pytest.approx(0.613)
+        # Recalibrated 2026-04-30 from V7 formal-round end-to-end timings
+        # (was 0.613 from a single-file warm-cache micro-benchmark on 2026-04-18).
+        assert cfg.per_psd_segment_seconds == pytest.approx(2.21)
 
     def test_unknown_host_falls_back_to_ligroup(self, monkeypatch):
         monkeypatch.setattr(sc, "_WARNED_HOSTS", set())
         with pytest.warns(UserWarning, match="No server config for hostname 'nonsense-host'"):
             cfg = get_server_config("nonsense-host")
         assert cfg.hostname == "ligroup"
-        assert cfg.per_psd_segment_seconds == pytest.approx(0.613)
+        # Recalibrated 2026-04-30 from V7 formal-round end-to-end timings
+        # (was 0.613 from a single-file warm-cache micro-benchmark on 2026-04-18).
+        assert cfg.per_psd_segment_seconds == pytest.approx(2.21)
 
     def test_unknown_host_warns_only_once(self, monkeypatch):
         monkeypatch.setattr(sc, "_WARNED_HOSTS", set())
