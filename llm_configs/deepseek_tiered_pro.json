@@ -1,0 +1,38 @@
+{
+  "interpret": {
+    "provider": "deepseek",
+    "model_id": "deepseek-v4-pro"
+  },
+  "propose": {
+    "comparison": {
+      "provider": "deepseek",
+      "model_id": "deepseek-v4-pro"
+    },
+    "reasoning": {
+      "provider": "deepseek",
+      "model_id": "deepseek-v4-pro"
+    },
+    "proposing": {
+      "provider": "deepseek",
+      "model_id": "deepseek-v4-pro"
+    }
+  },
+  "implement": {
+    "provider": "deepseek",
+    "model_id": "deepseek-v4-pro"
+  },
+  "validate": {
+    "provider": "deepseek",
+    "model_id": "deepseek-v4-pro"
+  },
+  "tune": {
+    "planner": {
+      "provider": "deepseek",
+      "model_id": "deepseek-v4-pro"
+    },
+    "reflector": {
+      "provider": "deepseek",
+      "model_id": "deepseek-v4-pro"
+    }
+  }
+}
