@@ -303,6 +303,80 @@ def test_chain_human_view_includes_model_and_best_score(tmp_path: Path) -> None:
     assert "Last committed iter: iter_002" in stdout
 
 
+# ---------------------------------------------------------------------------
+# Regression: partial iter sandwiched between committed iters
+# ---------------------------------------------------------------------------
+
+def test_chain_partial_below_committed_advances_past_max_committed(
+    tmp_path: Path,
+) -> None:
+    """[1c, 2c, 3c, 4-failed, 5c] → next-iter prints 6, NOT 4.
+
+    Reproduces the V7 explore workspace state on 2026-04-30 (iter_005
+    was a successful gated_context_dualpath_tcn round; iter_004 had been
+    a partial broken iter). Old logic returned 4 (first non-COMMITTED),
+    which would have caused the chain to overwrite iter_005's records
+    when it advanced. New rule: any committed history → advance past
+    max(committed); leave dangling broken iters alone.
+    """
+    _write_clean_chain_iter(tmp_path, 1)
+    _write_clean_chain_iter(tmp_path, 2)
+    _write_clean_chain_iter(tmp_path, 3)
+    _write_chain_iter_failed_manifest(tmp_path, 4)
+    _write_clean_chain_iter(tmp_path, 5, best_score=5.560566)
+
+    rc, stdout, stderr = _run_main([
+        "--layout", "chain", "--workspace", str(tmp_path), "--next-iter",
+    ])
+
+    assert rc == 0
+    assert stdout.strip() == "6"
+    # Dangling-broken warning surfaces iter_004 to stderr; stdout stays
+    # clean for shell capture.
+    assert "iter_004" in stderr
+    assert "dangling" in stderr.lower()
+
+
+def test_chain_dangling_warning_in_human_view(tmp_path: Path) -> None:
+    """Human-view (no --next-iter) also prints the dangling warning to
+    stderr while the table + summary go to stdout."""
+    _write_clean_chain_iter(tmp_path, 1)
+    _write_chain_iter_failed_manifest(tmp_path, 2)
+    _write_clean_chain_iter(tmp_path, 3)
+
+    rc, stdout, stderr = _run_main([
+        "--layout", "chain", "--workspace", str(tmp_path),
+    ])
+
+    assert rc == 0
+    assert "Last committed iter: iter_003" in stdout
+    assert "launch iter_004 next" in stdout
+    assert "iter_002" in stderr
+    assert "dangling" in stderr.lower()
+
+
+def test_chain_no_dangling_warning_when_partial_is_at_top(
+    tmp_path: Path,
+) -> None:
+    """[1c, 2c, 3-failed] → no dangling warning (the partial IS the top).
+
+    The partial isn't "dangling below a committed iter" — it's the
+    natural retry frontier. Auto-resume returns 3 (committed=[1,2],
+    max+1=3); no warning needed.
+    """
+    _write_clean_chain_iter(tmp_path, 1)
+    _write_clean_chain_iter(tmp_path, 2)
+    _write_chain_iter_failed_manifest(tmp_path, 3)
+
+    rc, stdout, stderr = _run_main([
+        "--layout", "chain", "--workspace", str(tmp_path), "--next-iter",
+    ])
+
+    assert rc == 0
+    assert stdout.strip() == "3"
+    assert "dangling" not in stderr.lower()
+
+
 def test_chain_invalid_arg_combinations_rejected(tmp_path: Path) -> None:
     """argparse-level validation: layout mode policing.
 
