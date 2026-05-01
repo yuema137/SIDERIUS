@@ -64,7 +64,10 @@ class TestCalculateScoreFine:
                 coarse=False, parallel=False, num_workers=1,
             )
 
-        expected_log = math.log(1.5, 5.27)
+        # ``+ 1e-10`` mirrors the production soft-floor offset
+        # (compute_raw_baseline._calculate_score :131) — kept by Path-A
+        # regen (commit 8947511); only the round(·,2) was dropped.
+        expected_log = math.log(1.5 + 1e-10, 5.27)
         assert abs(log_score - expected_log) < 1e-12
         assert abs(linear_sum - 300.0) < 1e-9
         assert n_segments == 200
@@ -95,7 +98,9 @@ class TestCalculateScoreFine:
                 coarse=False, parallel=False, num_workers=1,
             )
 
-        expected_log = math.log(5.0e-4, 5.27)
+        # ``+ 1e-10`` soft floor (see :131) — at mean=5e-4 it shifts the
+        # log by ~1.2e-7, well above the 1e-12 tolerance.
+        expected_log = math.log(5.0e-4 + 1e-10, 5.27)
         assert abs(log_score - expected_log) < 1e-12
         # The ghost-score collapse must NOT happen.
         assert abs(log_score - (-2.7708098959837675)) > 0.5
@@ -183,8 +188,12 @@ class TestCalculateScoreCoarse:
 
         # smaller s_max -> larger per_segment -> larger score
         assert log_small > log_large
-        # Phase 6.7: bit-exact (no epsilon shift).
-        expected_delta = math.log(2.0, 5.27)
+        # Both sides carry the production soft-floor offset (+1e-10);
+        # the offset does not cancel exactly because
+        # log(a+ε) − log(b+ε) ≠ log(a/b) when ε > 0.
+        expected_delta = (
+            math.log(2.0 + 1e-10, 5.27) - math.log(1.0 + 1e-10, 5.27)
+        )
         assert abs((log_small - log_large) - expected_delta) < 1e-12
 
 
@@ -262,7 +271,9 @@ class TestMaybeWriteAnchorNormalizedScalar:
         # file_vector is linear per-file means (linear_sum / n_segments).
         for v in got["file_vector"]:
             assert abs(v - 0.5) < 1e-12
-        expected_scalar = math.log(0.5, 5.27)
+        # ``+ 1e-10`` soft-floor offset on the grand mean
+        # (compute_raw_baseline._maybe_write_anchor_normalized_scalar :199).
+        expected_scalar = math.log(0.5 + 1e-10, 5.27)
         assert abs(got["scalar_score"] - expected_scalar) < 1e-12
 
     def test_skip_when_any_fine_index_missing(self, tmp_path, capsys):
@@ -311,7 +322,8 @@ class TestMaybeWriteAnchorNormalizedScalar:
           total_linear = 10*10 + 10*90 = 1000
           total_n      = 10*100 + 10*300 = 4000
           grand_mean   = 1000 / 4000 = 0.25
-          scalar       = log_{5.27}(0.25)  (Phase 6.7: no rounding, no eps)
+          scalar       = log_{5.27}(0.25 + 1e-10)
+                         (Path-A regen: rounding dropped, soft-floor +1e-10 kept.)
         """
         for i in range(10):
             _write_fine_json(str(tmp_path), i, linear_sum=10.0, n_segments=100)
@@ -329,7 +341,9 @@ class TestMaybeWriteAnchorNormalizedScalar:
         with open(scalar_path) as f:
             got = json.load(f)
 
-        expected_scalar = math.log(0.25, 5.27)
+        # ``+ 1e-10`` soft-floor offset (see production formula at
+        # compute_raw_baseline._maybe_write_anchor_normalized_scalar :199).
+        expected_scalar = math.log(0.25 + 1e-10, 5.27)
         assert abs(got["scalar_score"] - expected_scalar) < 1e-12
 
         # Per-file linear means preserve both groups.
