@@ -1777,7 +1777,7 @@ class HyperparamTuningAgent:
                             workspace=workspace,
                             score_table=score_table,
                             metadata={
-                                "run_name": agent_input.run_name,
+                                "run_name": run_name,
                                 "model_type": agent_input.model_type,
                                 "exp_id": exp_id,
                                 "round_index": round_index,
