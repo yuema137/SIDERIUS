@@ -2245,8 +2245,15 @@ is replaced wholesale by the zero-hardcoding version.
       Verification: `tests/unit/workflows/test_model_exploration.py`
       56/56 green; new `TestRunWorkflowStartIteration` class covers
       default, single-iter offset, and multi-iter offset cases.
-- [ ] **4-zh.** P4-Impact behavioural test — fixture must shift the lever
-      file across iters; calibrate against pre-rewrite prompt → must fail.
+- [ ] **4-zh.** P4-Impact behavioural test
+      (`tests/integration/workflows/test_cognitive_alignment_smoke.py`).
+      Realises the §12.5 Gate 1 acceptance contract: 5 property-based
+      assertions (dynamic lever identification across iters; no
+      permanent-irrelevance phrasing; relative-saturation declaration on
+      the saturated iter; Jaccard < 0.7 echo-chamber guard;
+      `Impact_Score` + `Linear_Weight` columns present in the captured
+      synthesis prompt). Calibrate against pre-2-zh prompt
+      (`3ea439e^`) → metrics 1/2/3 must fail.
 - [ ] V9 launch — only after **1-zh + 2-zh + 3** are committed *and* **4-zh**
       is green.
 
@@ -2430,31 +2437,74 @@ diagnoses. Both must pass.
 
 ### Gate 1 — Pseudo-Cognitive Probe (Mental Model Check)
 
-**Goal:** confirm the rewritten interpreter prompt + headroom-aware partition
-make the LLM read the table the way Phase 8 intends.
+**Goal:** confirm the rewritten interpreter prompt (post-1-zh / 2-zh) makes the
+LLM read the table through the **Log-of-Mean trap** lens — ranking opportunity
+by `Impact_Score` and reading saturation as a *relative* judgment against the
+`model_scalar`, with no fixed-index or fixed-threshold reasoning.
+
+This Gate is realised by the 4-zh integration test
+(`tests/integration/workflows/test_cognitive_alignment_smoke.py`); the
+assertions below are its acceptance contract. The Gate references file
+indices only as opaque identifiers in the captured fixture — never as
+classifications baked into the success criteria.
 
 **Setup:**
 - 3 iterations of pseudo-training. Each iter feeds a synthetic
-  `ModelRunSummary` fixture with a known per-file shape (e.g. dead-zone files
-  0–3 at the floor, mid-band files 4–10 with substantial `headroom_vs_gt`,
-  high-band files 11–19 close to the ceiling).
-- LLM provider: real OpenAI API (no mocks at the synthesis step). Other
-  subsystems (training, scoring, VRAM probe) stay pseudo.
+  `ModelRunSummary` fixture with a per-file shape that **shifts the largest
+  `Impact_Score` lever between iters** (e.g. iter_1's top-`Impact_Score` file
+  is recovered to its ceiling by iter_2's `model` column, so iter_2's lever
+  is a different file; iter_3 is shaped so all `Impact_Score` entries are
+  small relative to `model_scalar`, simulating chain saturation). Specific
+  file indices used in the fixture are arbitrary — the property is the
+  *shape*, not the indices.
+- LLM provider: real OpenAI API at the synthesis + proposer stages (no mocks
+  on the cognitive path). Other subsystems (training, scoring, VRAM probe)
+  stay pseudo. `RecordingLLMBridge` captures every stage prompt and response.
 
-**Success metrics (all three required):**
-1. **Dead-zone elision.** Across the 3 `take_home_message`s, files 0–3 are not
-   cited as a deficiency. The interpreter must have absorbed the gt-at-floor
-   signal and treated those files as out-of-scope.
-2. **Headroom citation.** At least one `take_home_message` per iter explicitly
-   references `headroom_vs_gt` (or paraphrases it — "remaining room to grow",
-   "ceiling distance") for an active-band file.
-3. **Diagnostic diversity.** Pairwise Jaccard similarity over the 3
-   `take_home_message`s (token-level, lower-cased, stop-words removed) is
-   `< 0.7`. Higher than that means the LLM is still pattern-matching to one
-   canned diagnosis the way V8 did.
+**Success metrics (all five required, all property-based — no fixed-index
+expectations):**
+1. **Dynamic lever identification.** For iter_1 and iter_2, the
+   `take_home_message` cites the file with the largest `Impact_Score`
+   *that iter* (read from the fixture, not hardcoded into the assertion).
+   The cited file must change between iter_1 and iter_2 — proves the agent
+   re-reads the column each iter rather than memorising a one-iter
+   classification.
+2. **No permanent-irrelevance claim.** Across all 3 `take_home_message`s,
+   forbidden phrasings that would assert any file is permanently
+   out-of-scope: `"permanently irrelevant"`, `"always at the floor"`,
+   `"ignore files"`, `"can never improve"`, fixed-index "files X-Y are
+   the bottleneck" framings. Zero matches required. The agent is
+   permitted to note that a file is *currently* at its ceiling
+   (`Impact_Score ≈ 0` this iter) — that is a reading of the data, not a
+   classification.
+3. **Relative-saturation declaration.** When iter_3's fixture is shaped
+   so the entire `Impact_Score` column is small relative to
+   `model_scalar` and to per-iter chain gains, iter_3's
+   `take_home_message` declares the chain saturated (cues:
+   `"saturated"`, `"ceiling reached"`, `"no remaining lever"`,
+   `"dataset-limited"` referring to the *chain's* progress). The
+   declaration must be grounded in the column distribution, not in any
+   fixed cutoff.
+4. **Echo-chamber guard.** Pairwise Jaccard similarity over the 3
+   lower-cased token sets of the `take_home_message`s is `< 0.7`. A
+   higher overlap means the LLM is still emitting one canned diagnosis
+   regardless of the per-iter data — the V8 echo-chamber pattern.
+5. **Prompt-column presence.** The captured synthesis-stage prompt for
+   each iter contains both the `Impact_Score` and `Linear_Weight`
+   columns (string-level assertion against
+   `RecordingLLMBridge`-captured text). Carries forward the Phase 6.5
+   Stage 1 numeric-citation continuity guard while updating it for
+   the post-2-zh column names.
 
-A failure on any metric blocks V9 launch and routes back to the prompt /
-partition layer.
+**Calibration before promotion to gating.** Run the same fixture against the
+**pre-2-zh prompt** (recover `3ea439e^` for the four prompt files):
+metrics 1, 2, and 3 must fail (the old prompt's "Weak Frequency Files"
+block + fixed-index examples force the LLM into permanent-irrelevance and
+fixed-lever phrasings). If they pass on the V8-style prompt, the
+assertions are too weak.
+
+A failure on any metric post-rewrite blocks V9 launch and routes back to
+the prompt layer.
 
 ### Gate 2 — Lightweight End-to-End Stress Test (System Logic Check)
 
