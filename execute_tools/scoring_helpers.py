@@ -27,6 +27,7 @@ from agent.schemas.score_table import (
     PerFileRow,
     ScoreComparisonTable,
 )
+from execute_tools.dataset_config import NUM_FILES
 from nodes.scoring_reference import ReferenceScores
 
 
@@ -164,7 +165,7 @@ def _build_rows(
     reference: ReferenceScores,
 ) -> List[PerFileRow]:
     rows: List[PerFileRow] = []
-    for i in range(20):
+    for i in range(NUM_FILES):
         raw = reference.raw_per_file_log[i]
         gt = reference.gt_per_file_log[i]
         m = model_fv_log[i]

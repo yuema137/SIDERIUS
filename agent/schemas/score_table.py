@@ -21,6 +21,8 @@ from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from execute_tools.dataset_config import NUM_FILES
+
 
 # ---------------------------------------------------------------------------
 # Per-file row
@@ -40,8 +42,8 @@ class PerFileRow(BaseModel):
     file_index: int = Field(
         ...,
         ge=0,
-        le=19,
-        description="Validation file index (0..19).",
+        le=NUM_FILES - 1,
+        description=f"Validation file index (0..{NUM_FILES - 1}).",
     )
     raw_baseline: Optional[float] = Field(
         ...,
@@ -119,8 +121,9 @@ class AggregateScalars(BaseModel):
     num_sampled_files: int = Field(
         ...,
         ge=1,
-        le=20,
-        description="|sampled_indices|. 20 for a formal run, <20 for trial.",
+        le=NUM_FILES,
+        description=f"|sampled_indices|. {NUM_FILES} for a formal run, "
+                    f"<{NUM_FILES} for trial.",
     )
 
 
@@ -140,10 +143,10 @@ class ScoreComparisonTable(BaseModel):
 
     rows: List[PerFileRow] = Field(
         ...,
-        min_length=20,
-        max_length=20,
-        description="Always exactly 20 rows (one per validation file). "
-                    "Unsampled files carry model/gain/headroom as None.",
+        min_length=NUM_FILES,
+        max_length=NUM_FILES,
+        description=f"Always exactly {NUM_FILES} rows (one per validation "
+                    "file). Unsampled files carry model/gain/headroom as None.",
     )
     aggregate: AggregateScalars = Field(
         ...,

@@ -49,6 +49,7 @@ import numpy as np
 from tqdm import tqdm
 
 from execute_tools.build_anchor_map import load_anchor_map
+from execute_tools.dataset_config import NUM_FILES
 from execute_tools.scoring_utils import coerce_nonfinite_to_none, process_segment
 
 # ---------------------------------------------------------------------------
@@ -151,7 +152,7 @@ def _calculate_score(
 # Decision 13 in ``docs/aggregated_score_table_awareness.md``.
 # ---------------------------------------------------------------------------
 
-_FINE_INDICES = tuple(range(20))
+_FINE_INDICES = tuple(range(NUM_FILES))
 
 
 def _maybe_write_anchor_normalized_scalar(
