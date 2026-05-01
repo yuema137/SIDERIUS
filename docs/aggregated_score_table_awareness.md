@@ -1482,7 +1482,7 @@ the core hypothesis of this design. v1 waits for full-graph awareness.
 
 ### Phase 8 — Cognitive Alignment (V9 launch gate, 2026-05-01)
 
-**Status:** ⏳ in progress — foundation commits 1–3 landed; commit 4 (this doc) is the only one still in flight. After it lands, the foundation is closed and the next track is P3 (chain plumbing) → P1-Impact (zero-hardcoding refinement) → P2-Impact (prompt rewrite) → P4-Impact (cognitive-alignment behavioural test).
+**Status:** ⏳ Foundation closed; P3 + 1-zh landed; 2-zh in flight; 4-zh + V9 pending.
 
 #### Foundation commits (prerequisite to P1-Impact / P2-Impact / P3 / P4)
 
@@ -1691,12 +1691,7 @@ pass on the V8-style prompt, the assertions are too weak.
 
 #### Live checklist
 
-- [ ] **1.** P1 headroom-aware callout
-- [ ] **2.** P2 neutralize synthesis prompt
-- [ ] **3.** P3 chain `iteration` field fix
-- [ ] **4.** P4 cognitive-alignment behavioral test (calibrated against
-      old prompt → fails; passes against new prompt)
-- [ ] V9 launch — only after 1 + 2 + 3 are committed *and* 4 is green
+**Superseded:** This checklist is superseded by the Refinement live checklist (Line 1972) to align with the Zero-Hardcoding Impact-Aware architecture.
 
 #### Phase 8 Refinement — Impact-Aware Interpretation (Zero-Hardcoding, 2026-05-01)
 
@@ -1971,11 +1966,12 @@ is replaced wholesale by the zero-hardcoding version.
 
 ##### 8. Live checklist
 
-- [~] **1-zh.** P1-Impact: schema columns (`linear_weight`, `impact_score`,
+- [x] **1-zh.** P1-Impact: schema columns (`linear_weight`, `impact_score`,
       `linear_weight_total`) + `build_score_table` body + renderer columns
       and re-sorted secondary block. **No threshold constants.**
-      *Implementation landed on working tree (uncommitted, awaiting user
-      approval after audit) — 4 production files + 3 test files modified:*
+      *Landed `5c8f76c` (2026-05-01). 129/129 tests green. Audit verified
+      real reference consistency. — 4 production files + 3 test files
+      modified:*
       - `agent/schemas/score_table.py`: `PerFileRow` gains `linear_weight:
         Optional[float] = Field(default=None, ge=0.0, le=1.0)` and
         `impact_score: Optional[float] = Field(default=None, ge=0.0)`;
