@@ -31,6 +31,63 @@ from nodes.scoring_reference import ReferenceScores
 
 
 _LOG_BASE = 5.27
+_LOG_OFFSET = 1e-10
+
+
+# ---------------------------------------------------------------------------
+# file_vector_to_log_space
+# ---------------------------------------------------------------------------
+
+def file_vector_to_log_space(
+    file_vector_linear: List[Optional[float]],
+    *,
+    base: float = _LOG_BASE,
+    offset: float = _LOG_OFFSET,
+) -> List[Optional[float]]:
+    """Convert a linear-space per-file vector to log-space.
+
+    ``execute_tools.scoring_utils.score_vector`` returns the per-file
+    vector in *linear* units (``file_sum / n_segments`` of the normalised
+    score). The reference per-file columns
+    (``ReferenceScores.raw_per_file_log`` and ``gt_per_file_log``) are
+    in *log* units (``math.log(mean_linear, 5.27)`` — see
+    ``compute_raw_baseline._per_file_log_score``). ``build_score_table``
+    expects the model column in the same log-space units so the rendered
+    markdown is unit-consistent across all three columns.
+
+    The conversion mirrors the reference convention with one robustness
+    knob: an additive ``offset`` (default ``1e-10``) keeps ``log(0)``
+    finite. At base 5.27 this places the soft floor at
+    ``log_5.27(1e-10) ≈ -13.854``, matching the floor visible in the
+    reference per-file log columns for files with no signal.
+
+    Parameters
+    ----------
+    file_vector_linear
+        Length-``NUM_FILES`` list of per-file linear scalars from
+        ``score_vector``. ``None`` entries (un-sampled files in trial
+        mode) pass through unchanged.
+    base
+        Logarithm base. Default ``5.27`` (the project-wide convention).
+    offset
+        Additive offset applied before the log to keep ``log(0)`` finite.
+        Default ``1e-10``.
+
+    Returns
+    -------
+    Same-length list with each non-``None`` entry mapped to
+    ``log_{base}(max(v, 0) + offset)``. Negative inputs (which are not
+    expected from the score formula but are clipped defensively) are
+    treated as zero before applying the offset.
+    """
+    out: List[Optional[float]] = []
+    for v in file_vector_linear:
+        if v is None:
+            out.append(None)
+            continue
+        clamped = max(float(v), 0.0)
+        out.append(float(math.log(clamped + offset, base)))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +169,16 @@ def _build_rows(
         gt = reference.gt_per_file_log[i]
         m = model_fv_log[i]
         gain = (m - raw) if (m is not None) else None
-        headroom = (gt - m) if (m is not None) else None
+        # Phase 8: ``headroom_vs_gt`` is "remaining room to grow toward the
+        # ceiling" — by definition non-negative. A raw ``gt - model``
+        # difference can come out negative on dead-zone files (gt at floor,
+        # model slightly above floor due to noise output) or in rare
+        # numerical-overshoot cases on real-signal files; in neither case
+        # is "negative headroom" a meaningful improvement target. Clip at
+        # zero so the column means exactly one thing the LLM can act on.
+        # The "ceiling reached / dead zone" diagnostic is conveyed
+        # separately by P1 (gt-at-floor partition), not by this column.
+        headroom = max(gt - m, 0.0) if (m is not None) else None
         rows.append(
             PerFileRow(
                 file_index=i,

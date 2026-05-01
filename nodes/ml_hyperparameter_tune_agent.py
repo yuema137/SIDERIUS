@@ -39,7 +39,10 @@ from agent.schemas.hyperparam_tuning import (
 )
 from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_utils import SampleSet, coerce_nonfinite_to_none
-from execute_tools.scoring_helpers import build_score_table
+from execute_tools.scoring_helpers import (
+    build_score_table,
+    file_vector_to_log_space,
+)
 from nodes.agent_data_stream import log_score_table
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 from execute_tools.build_anchor_map import load_anchor_map
@@ -1738,13 +1741,21 @@ class HyperparamTuningAgent:
                     # penalty leaves the scalar populated — rendering the
                     # penalty into the markdown 'model' column would mislead
                     # the next planner. failure_reason carries the signal.
+                    # Phase 8 / P0 (docs/aggregated_score_table_awareness.md):
+                    # ``score_vector`` returns ``file_vector`` in LINEAR space
+                    # (per-file mean of the normalised score), but
+                    # ``build_score_table`` expects the model column in LOG
+                    # space so it is unit-consistent with the log-space
+                    # reference columns. Convert via the project-standard
+                    # log_{5.27}(v + 1e-10) helper before handing off.
                     score_table: Optional[ScoreComparisonTable] = None
                     _sc_fv = score_results.get("file_vector")
                     _sc_scalar = score_results.get("denoising_score")
                     if _sc_fv is not None and _sc_scalar is not None and not _is_degenerate_formal:
                         try:
+                            _sc_fv_log = file_vector_to_log_space(_sc_fv)
                             score_table = build_score_table(
-                                model_fv_log=_sc_fv,
+                                model_fv_log=_sc_fv_log,
                                 model_scalar=_sc_scalar,
                                 reference=reference_scores,
                             )

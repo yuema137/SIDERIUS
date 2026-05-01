@@ -66,7 +66,18 @@ class PerFileRow(BaseModel):
     )
     headroom_vs_gt: Optional[float] = Field(
         ...,
-        description="ground_truth - model. None if either input is None.",
+        ge=0.0,
+        description="Remaining room to grow toward the ceiling — clipped at "
+                    "zero. Computed as max(ground_truth - model, 0). The "
+                    "raw difference can come out negative on dead-zone "
+                    "files (gt at floor, model slightly above floor due to "
+                    "noise output) or in rare numerical-overshoot cases, "
+                    "but 'negative headroom' is not a meaningful target — "
+                    "the field communicates one thing only: improvement "
+                    "potential. Dead-zone vs active-search-space "
+                    "partitioning is conveyed separately by the "
+                    "interpretation prompt's gt-at-floor signal. None if "
+                    "model is None.",
     )
 
 

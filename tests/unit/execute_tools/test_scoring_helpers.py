@@ -20,7 +20,9 @@ import pytest
 from agent.schemas.score_table import ScoreComparisonTable
 from execute_tools.scoring_helpers import (
     _LOG_BASE,
+    _LOG_OFFSET,
     build_score_table,
+    file_vector_to_log_space,
     render_comparison_table,
 )
 from nodes.scoring_reference import ReferenceScores
@@ -123,8 +125,12 @@ class TestBuildScoreTableFullRun:
             assert row.gain_vs_raw == pytest.approx(
                 model_fv[i] - ref.raw_per_file_log[i],
             )
+            # ``headroom_vs_gt`` is clipped at zero — files where the model
+            # exceeds the ceiling (numerical overshoot or dead-zone noise)
+            # render as 0.0, not a negative value. The schema enforces this
+            # invariant via ``ge=0.0``.
             assert row.headroom_vs_gt == pytest.approx(
-                ref.gt_per_file_log[i] - model_fv[i],
+                max(ref.gt_per_file_log[i] - model_fv[i], 0.0),
             )
 
     def test_rendered_markdown_attached(self):
@@ -305,3 +311,98 @@ class TestRenderComparisonTable:
         row0 = next(ln for ln in md.splitlines() if ln.startswith("|    0 "))
         # Unicode minus, not ASCII hyphen-minus.
         assert "\u221213.8540" in row0
+
+
+# =============================================================================
+# file_vector_to_log_space — P0 unit-fix helper
+# =============================================================================
+
+class TestFileVectorToLogSpace:
+    """Tests for the linear→log conversion that closes the unit-mismatch bug.
+
+    ``score_vector`` returns the per-file vector in linear units; the
+    reference ``raw_per_file_log`` / ``gt_per_file_log`` columns and the
+    aggregate scalar are in log_{5.27}-space. ``file_vector_to_log_space``
+    is the helper that puts the model column on the same ruler before
+    ``build_score_table`` consumes it. Formula:
+    ``log_{5.27}(max(v, 0) + 1e-10)``.
+    """
+
+    def test_typical_linear_values_map_correctly(self):
+        # Hand-computed expected values under the production formula.
+        fv_lin = [0.01, 1.0, 1e6]
+        out = file_vector_to_log_space(fv_lin)
+        expected = [math.log(v + _LOG_OFFSET, _LOG_BASE) for v in fv_lin]
+        assert out == pytest.approx(expected, rel=1e-12)
+
+    def test_none_passes_through_for_unsampled_files(self):
+        # Trial-mode subset: unsampled positions stay None — the conversion
+        # must not coerce them to the soft floor.
+        fv = [0.01, None, 1e3, None]
+        out = file_vector_to_log_space(fv)
+        assert out[0] == pytest.approx(math.log(0.01 + _LOG_OFFSET, _LOG_BASE), rel=1e-12)
+        assert out[1] is None
+        assert out[2] == pytest.approx(math.log(1e3 + _LOG_OFFSET, _LOG_BASE), rel=1e-12)
+        assert out[3] is None
+
+    def test_zero_maps_to_soft_floor(self):
+        # Soft floor at log_{5.27}(1e-10) ≈ -13.854 — files with no signal
+        # render as a finite floor, not -inf, matching reference convention.
+        out = file_vector_to_log_space([0.0])
+        expected_floor = math.log(_LOG_OFFSET, _LOG_BASE)
+        assert out[0] == pytest.approx(expected_floor, rel=1e-12)
+        assert out[0] == pytest.approx(-13.854049, abs=1e-4)
+        assert math.isfinite(out[0])
+
+    def test_negative_input_clamped_then_offset_applied(self):
+        # Defensive clip: negative linear means are not expected from the
+        # score formula but must not crash the log. They map to the same
+        # soft floor as zero.
+        out = file_vector_to_log_space([-0.5, -1e-12])
+        floor = math.log(_LOG_OFFSET, _LOG_BASE)
+        assert out[0] == pytest.approx(floor, rel=1e-12)
+        assert out[1] == pytest.approx(floor, rel=1e-12)
+
+    def test_length_preserved(self):
+        fv = [0.0, None, 1.0, 1e3, None, 1e-9]
+        out = file_vector_to_log_space(fv)
+        assert len(out) == len(fv)
+
+    def test_custom_base_and_offset_kwargs(self):
+        # Both knobs work; default base is 5.27, default offset 1e-10.
+        out_default = file_vector_to_log_space([1.0])
+        out_base_e = file_vector_to_log_space([1.0], base=math.e)
+        out_no_offset_at_pos = file_vector_to_log_space([1.0], offset=0.0)
+
+        assert out_default[0] == pytest.approx(math.log(1.0 + 1e-10, 5.27), rel=1e-12)
+        assert out_base_e[0] == pytest.approx(math.log(1.0 + 1e-10, math.e), rel=1e-12)
+        assert out_no_offset_at_pos[0] == pytest.approx(0.0, abs=1e-9)
+
+    def test_post_path_a_reference_consistency(self):
+        # Load-bearing test: the helper applied to a ground_truth linear
+        # file_vector reproduces the on-disk ground_truth per_file_log
+        # values produced by ``compute_ground_truth.py`` after the Path-A
+        # regen. If the production formula and the helper drift apart, the
+        # model column will end up on a different ruler than the reference
+        # columns — exactly the bug P0 was introduced to fix.
+        import json
+        import os
+
+        gt_path = "/home/klz/Data/SIDEREIS_DATA/ground_truth/ceiling_anchor_normalized.json"
+        if not os.path.exists(gt_path):
+            pytest.skip("Path-A reference data not available in this environment")
+        ceiling = json.load(open(gt_path))
+        gt_linear_fv = ceiling["file_vector"]
+
+        # Hand-compute expected per-file log values via the helper, then
+        # compare to the on-disk per-file ground_truth scores.
+        helper_out = file_vector_to_log_space(gt_linear_fv)
+        for i, expected_log in enumerate(helper_out):
+            per_file = json.load(
+                open(f"/home/klz/Data/SIDEREIS_DATA/ground_truth/ground_truth_score_file_{i:04d}.json")
+            )
+            assert per_file["score"] == pytest.approx(expected_log, rel=1e-9), (
+                f"helper output for file {i} ({expected_log:.6f}) disagrees "
+                f"with on-disk ground_truth score ({per_file['score']:.6f}) "
+                "— production formula and helper have drifted apart."
+            )

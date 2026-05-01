@@ -86,6 +86,42 @@ class TestPerFileRow:
         restored = PerFileRow.model_validate_json(row.model_dump_json())
         assert restored == row
 
+    def test_headroom_negative_rejected(self):
+        # The schema enforces ``headroom_vs_gt >= 0``. ``_build_rows`` clips at
+        # zero before construction; this test guards that contract at the
+        # schema layer so any caller that forgets to clip is caught.
+        with pytest.raises(ValidationError):
+            PerFileRow(
+                file_index=0,
+                raw_baseline=-11.43,
+                ground_truth=-8.26,
+                model=-13.27,
+                gain_vs_raw=-1.84,
+                headroom_vs_gt=-5.0,
+            )
+
+    def test_headroom_zero_accepted(self):
+        row = PerFileRow(
+            file_index=0,
+            raw_baseline=-11.43,
+            ground_truth=-8.26,
+            model=-8.26,
+            gain_vs_raw=3.17,
+            headroom_vs_gt=0.0,
+        )
+        assert row.headroom_vs_gt == 0.0
+
+    def test_headroom_none_accepted_for_unsampled_file(self):
+        row = PerFileRow(
+            file_index=5,
+            raw_baseline=-1.87,
+            ground_truth=7.46,
+            model=None,
+            gain_vs_raw=None,
+            headroom_vs_gt=None,
+        )
+        assert row.headroom_vs_gt is None
+
 
 # =============================================================================
 # AggregateScalars
@@ -142,13 +178,15 @@ class TestAggregateScalars:
 
 
 def _row(i: int, model: float | None = None) -> PerFileRow:
+    # ``headroom_vs_gt`` is clipped at zero (schema invariant ``ge=0.0``);
+    # mirror the same clip ``_build_rows`` applies in production.
     return PerFileRow(
         file_index=i,
         raw_baseline=0.1 * i,
         ground_truth=0.5 * i,
         model=model,
         gain_vs_raw=(model - 0.1 * i) if model is not None else None,
-        headroom_vs_gt=(0.5 * i - model) if model is not None else None,
+        headroom_vs_gt=max(0.5 * i - model, 0.0) if model is not None else None,
     )
 
 
