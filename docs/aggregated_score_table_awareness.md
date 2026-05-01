@@ -1482,7 +1482,7 @@ the core hypothesis of this design. v1 waits for full-graph awareness.
 
 ### Phase 8 — Cognitive Alignment (V9 launch gate, 2026-05-01)
 
-**Status:** ⏳ Foundation closed; P3 + 1-zh landed; 2-zh in flight; 4-zh + V9 pending.
+**Status:** ⏳ Foundation closed; P3 + 1-zh + 2-zh landed; 4-zh + V9 pending.
 
 #### Foundation commits (prerequisite to P1-Impact / P2-Impact / P3 / P4)
 
@@ -2042,8 +2042,197 @@ is replaced wholesale by the zero-hardcoding version.
          used by `/tmp/render_iter_001_real.py`: manual `+0.0253` ==
          helper `+0.0253` exactly. The math is correct; only the choice of
          demonstration input data was wrong in the first walkthrough.
-- [ ] **2-zh.** P2-Impact: rewrite `SYNTHESIS_SYSTEM_PROMPT` per §4
+- [x] **2-zh.** P2-Impact: rewrite `SYNTHESIS_SYSTEM_PROMPT` per §4
       (`Impact_Score` ranking, relative saturation, no IGNORE, no labels).
+      *Landed `3ea439e` (2026-05-01) — full Phase A → F surgery complete;
+      A4 grep returned ZERO HITS for all 11 banned tokens; regression-guard
+      test `test_prompt_banned_vocabulary.py` 59/59 green; targeted test
+      suites 1151/1153 green (2 pre-existing unrelated failures — see
+      1-zh notes for context). 14 files changed, 286 insertions(+), 162
+      deletions(-) including 1 new regression-guard test file.*
+
+      **Phase A — schema + protocol (DONE on working tree):**
+      - `agent/schemas/interpretation.py`:
+        * `ModelRunSummary.best_file_vector` description rewritten to drop
+          the "Length-20", "frequency, log scale: 0=lowest, 19=highest"
+          framing — now states per-file semantics are dataset-defined and
+          opportunity is read from `Impact_Score`, not from fixed
+          file-index labels.
+        * `InterpretationOutput.per_model_runs` cache description renames
+          the cached field name `frequency_analysis` → `per_file_analysis`.
+        * Section header `# --- Frequency analysis (from score_table) ---`
+          → `# --- Per-file analysis (from score_table) ---`.
+        * `per_model_score_tables` description expanded to list the
+          `linear_weight` and `impact_score` columns and to declare
+          `Impact_Score` the canonical per-file opportunity ranking
+          (downstream consumers read from the table, not from a separate
+          threshold-derived index list).
+        * **`weak_frequency_files: Optional[Dict[str, List[int]]]` field
+          deleted in full** (Option a, no migration shim — `extra="ignore"`
+          covers re-reads of any stale persisted JSON).
+      - `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py`:
+        * `local_full_context` docstring: `per_model_score_tables` block
+          rewritten to mention `linear_weight + impact_score` columns and
+          declare `Impact_Score` the canonical opportunity ranking; the
+          `weak_frequency_files` line removed.
+      - Smoke check: `from agent.schemas.interpretation import
+        InterpretationOutput; from
+        agent.schemas.protocols.ml_result_interp_to_ml_model_propose import
+        local_full_context` imports cleanly post-edit.
+
+      **Phase B — interpretation-agent prompts (DONE on working tree):**
+      - `nodes/result_interpretation_agent.py:37–116` (`PER_MODEL_SYSTEM_PROMPT`):
+        * Header line "frequency response" → "per-file behaviour".
+        * "File vector: …(20 files, frequency increases with index on log
+          scale)" replaced with a per-file score table description listing
+          the `raw_baseline / ground_truth / model / gain_vs_raw /
+          headroom_vs_gt / Linear_Weight / Impact_Score` columns and the
+          re-ranked secondary block.
+        * **New section "Reading the per-file score table — the Log-of-Mean
+          trap"** inserted verbatim from §4: defines `Linear_Weight` and
+          `Impact_Score`, then 4 cognitive rules (rank by `Impact_Score`
+          descending; read `Linear_Weight` for context only; relative
+          saturation; no permanent irrelevance).
+        * JSON output field `frequency_analysis` → `per_file_analysis`;
+          new prompt text directs agent to "Read the per-file table by
+          Impact_Score descending. Cite specific files only by their
+          Impact_Score and Linear_Weight values for this iter."
+        * Bottlenecks rule example updated: `'low-frequency blindness'` →
+          `'all sampled files saturated against their ground_truth ceiling'`.
+        * Trailing rule for `per_file_analysis`: "rank by Impact_Score;
+          cite Linear_Weight as context, not as a ranking metric on its
+          own; never use fixed cutoffs".
+      - `nodes/result_interpretation_agent.py:228–301` (`SYNTHESIS_SYSTEM_PROMPT`):
+        * "frequency analysis" → "per-file analysis" in the per-model
+          summary input list.
+        * "Per-model file vectors (per-file performance across 20 frequency
+          bands)" replaced with per-model score tables description listing
+          all log-space columns plus `Linear_Weight` (share of the linear
+          denominator) and `Impact_Score` (log-scalar gain to ground_truth).
+        * **Same Log-of-Mean trap section** mirrored in: definitions of the
+          two columns, then 4 cognitive rules (cross-model `Impact_Score`
+          ranking; `Linear_Weight` is not a ranking metric on its own;
+          relative saturation declared explicitly when the column is small
+          relative to `model_scalar` / per-iter gains; no permanent
+          irrelevance — re-read each iter).
+        * JSON output field `frequency_comparison` → `per_file_comparison`;
+          prompt text rewritten to require ranking by `Impact_Score`
+          descending across models, citing `Linear_Weight` as context,
+          and to forbid claiming a file is universally weak from headroom
+          alone.
+        * `take_home_message` rule extended: "If the Impact_Score
+          distribution across all candidate models is small relative to
+          `model_scalar`, declare ceiling reached rather than manufacture
+          an architectural deficiency." Trailing rule rewritten:
+          "exactly one sentence, grounded in the Impact_Score distribution".
+      - **Body cleanup also landed:** field iterator at
+        `_build_synthesis_prompt` now reads `per_file_analysis`; the
+        threshold-based "Weak Frequency Files (attention cue)" block is
+        deleted (the rendered table already carries the impact-aware
+        secondary block); the `weak_frequency_files` compute branch in
+        `_register_score_table` is deleted alongside its initialiser; the
+        output dict no longer constructs the field.
+
+      **Phase C — tuner & reflector prompts (`agent/prompts.py`, DONE):**
+      - `PLANNER_PROMPT` "TRIAL vs FORMAL MODE" block: stripped "ALL 20
+        files", per-file segment counts, "files 0, 10, 19 only (lowest,
+        mid, highest frequency)", and the "if files 0-3 score < 1.0…
+        low-frequency denoising" target-strategy example. Replaced with
+        generic snapshot/anchors/target descriptions that route through
+        `Impact_Score` ranking instead of fixed indices/thresholds.
+      - `PLANNER_PROMPT` "PER-FILE PERFORMANCE TABLE" block: kept the
+        `raw_baseline / ground_truth / model / gain_vs_raw / headroom_vs_gt`
+        legend; added `Linear_Weight` and `Impact_Score` definitions and
+        a four-line cognitive instruction (rank by `Impact_Score`,
+        `Linear_Weight` is context only, ceiling check, no permanent
+        irrelevance).
+      - `REFLECTOR_PROMPT` "PER-FILE COMPARISON" block: header renamed
+        from "(frequency-band awareness)" to "(Impact-Aware)"; example
+        rewritten from "files 15-19 but regressed on files 0-3" to
+        "recovered most of the high-Impact rows but left rows with the
+        largest remaining Impact untouched"; added explicit instruction
+        not to assert permanent file weakness from `headroom_vs_gt` alone.
+
+      **Phase D — proposer (`nodes/ml_model_proposal_agent.py`, DONE):**
+      - `PROPOSAL_REASONING_PROMPT` step 6 rewritten from "Frequency
+        analysis and trial strategy guidance" + "If low-frequency files
+        (0-4) score near zero" to "Per-file analysis and trial strategy
+        guidance" + Impact_Score-descending ranking instructions; the
+        `target` strategy explanation now reads "concentrate on the
+        highest-Impact_Score files" instead of "weak files only".
+      - `PROPOSAL_COMMIT_PROMPT` `expert_advice.suggested_directions`
+        list: "snapshot/target/anchors strategy based on frequency
+        weaknesses" → "based on the Impact_Score distribution"; "Which
+        frequency bands (file indices) to focus on" → "Which files (by
+        Impact_Score ranking, not by fixed indices)"; rationale field
+        rewritten in Impact_Score terms.
+      - `_build_reasoning_prompt` render block: `interp.get("frequency_
+        comparison")` reader renamed to `per_file_comparison`; section
+        header "Frequency Comparison (cross-model)" → "Per-File
+        Comparison (cross-model)"; the entire "Weak Frequency Bands
+        (score < 1.0 = no denoising effect)" rendered block deleted —
+        the impact-ranked secondary block in `table.rendered_markdown`
+        supplants it.
+
+      **Phase E — fixtures + regression-guard tests (DONE):**
+      - 5 pseudo-data fixtures (`result_interpretation_agent`,
+        `result_interpretation_agent_iter2`, `…_promo_iter1/2/3`):
+        all `"frequency_analysis"` keys renamed to `"per_file_analysis"`,
+        all `"frequency_comparison"` keys to `"per_file_comparison"`.
+        Top-level fixture in `result_interpretation_agent/generate.json`
+        also had its body strings rewritten to the Impact_Score /
+        Linear_Weight idiom; the four chain-history fixtures retain
+        their narrative content (LLM responses simulating prior iters'
+        free-text reasoning — out of scope for the prompt-only A4 guard).
+      - `test_weak_frequency_files_computed` (interp tests, ~L721)
+        deleted along with the `assert output.weak_frequency_files is
+        None` assertion in `test_none_fields_produce_none_output`
+        (~L761).
+      - `test_includes_weak_frequency_files` (proposal tests, ~L342)
+        deleted; `test_includes_frequency_comparison` (~L366) renamed
+        to `test_includes_per_file_comparison`, body updated to assert
+        "Per-File Comparison" + "Impact_Score" appear when the renamed
+        field is supplied.
+      - Existing `TestBuildSynthesisPrompt::test_includes_score_table_
+        and_weak_callout` updated: renamed to `test_includes_score_table`,
+        now asserts `"Weak Frequency" not in prompt` (regression guard
+        for the deleted block).
+      - **New file** `tests/unit/agent/test_prompt_banned_vocabulary.py`:
+        parametrises 11 banned tokens × 5 production prompt strings
+        (`PLANNER_PROMPT`, `REFLECTOR_PROMPT`, `PER_MODEL_SYSTEM_PROMPT`,
+        `SYNTHESIS_SYSTEM_PROMPT`, `PROPOSAL_REASONING_PROMPT`) for 55
+        absence assertions, plus a positive-presence guard that the two
+        interpretation prompts carry the `Impact_Score` / `Linear_Weight`
+        / `Log-of-Mean` framing, plus per-prompt assertions that the
+        planner table block and proposer reasoning step both reference
+        `Impact_Score`.
+      - **Out-of-scope sweep also landed:** four `vocab_seed.json`
+        capability descriptions (`receptive_field`, `frequency_resolution`,
+        `selective_frequency_processing`, `long_range_dependency`)
+        carried "low-frequency" / "frequency bands" phrasing — reworded
+        to "long-timescale", "spectral components", "slowly-varying
+        signal structure" preserving meaning while clearing A4.
+
+      **Phase F — A4 grep + tests (DONE):**
+      - **A4 grep across `agent/`, `nodes/`, `workflows/` returned ZERO
+        HITS** for every banned token: `frequency_analysis`,
+        `frequency_comparison`, `weak_frequency_files`, `frequency_band`,
+        `frequency band`, `low-frequency`, `mid-frequency`,
+        `high-frequency`, `Weak Frequency`, `HEADROOM_EPSILON`,
+        `Inconsequential`. Stale `__pycache__` directories under those
+        roots were purged so the grep reads source-of-truth only.
+      - **Targeted test suites: 1151 / 1153 green** in 220 s (`tests/
+        unit/agent/test_prompt_banned_vocabulary.py`, `…/result_
+        interpretation_agent/`, `…/ml_model_proposal_agent/`,
+        `…/protocols/`, `…/tune_ml_hyperparam_agent/`). The 2 failures
+        are `test_safety_multiplier_raised` and `test_static_formula_
+        uses_patched_constants` — both assert `SAFETY_MULTIPLIER == 2.0`
+        but `5ac6a53` lowered it to `1.3` (Phase 6.8 estimator
+        territory, predates this branch; same two failures noted under
+        1-zh's test results).
+      - **Final commit message:** `refactor(prompts): total generic
+        rewrite stripping denoise-bias and enforcing Impact-Aware
+        reasoning`.
 - [x] **3.** P3 chain `start_iteration` plumbing landed `cc198ad`
       (2026-05-01). `run_workflow` accepts `start_iteration: int = 1`,
       loop runs `range(start_iteration, start_iteration + max_iterations)`,
@@ -2198,12 +2387,18 @@ Two work items, sequenced so the cognitive-alignment commits stay clean:
       → `per_file_comparison`), and the expanded forbidden-string set
       (`low-frequency`, `mid-frequency`, `high-frequency`,
       `frequency_analysis`, `frequency_comparison`).
-- [ ] **A4.** Post-2-zh regression-guard: grep for the banned vocabulary
-      across `agent/`, `nodes/`, `workflows/` — `frequency_analysis`,
-      `frequency_comparison`, `frequency_band`, `low-frequency`,
-      `mid-frequency`, `high-frequency`, `denoising` (in prompts only —
-      the runtime `denoising_score` field stays). All hits must live in
-      task-config / docstring contexts, not in LLM-facing prompts.
+- [x] **A4.** Post-2-zh regression-guard: ZERO HITS across `agent/`,
+      `nodes/`, `workflows/` for all 11 banned tokens (`frequency_analysis`,
+      `frequency_comparison`, `weak_frequency_files`, `frequency_band`,
+      `frequency band`, `low-frequency`, `mid-frequency`, `high-frequency`,
+      `Weak Frequency`, `HEADROOM_EPSILON`, `Inconsequential`). Stale
+      `__pycache__` directories under those roots were purged so the
+      grep reads source-of-truth only. The runtime `denoising_score`
+      field stays — it's not banned because `denoising` is the project's
+      task name, not a cognitive bias. Codified in
+      `tests/unit/agent/test_prompt_banned_vocabulary.py` (55
+      parametrised absence assertions × 5 production prompts) so this
+      regression-guard runs in CI from now on.
 
 #### Out of scope (tracked separately)
 
