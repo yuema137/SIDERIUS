@@ -1976,7 +1976,18 @@ is replaced wholesale by the zero-hardcoding version.
       and re-sorted secondary block. **No threshold constants.**
 - [ ] **2-zh.** P2-Impact: rewrite `SYNTHESIS_SYSTEM_PROMPT` per §4
       (`Impact_Score` ranking, relative saturation, no IGNORE, no labels).
-- [ ] **3.** P3 chain `start_iteration` plumbing (unchanged).
+- [x] **3.** P3 chain `start_iteration` plumbing landed `cc198ad`
+      (2026-05-01). `run_workflow` accepts `start_iteration: int = 1`,
+      loop runs `range(start_iteration, start_iteration + max_iterations)`,
+      and `run_one_iteration.py` threads `args.start_iteration` into the
+      call. Two `iteration == 1` predicates that gated "first iter in this
+      subprocess" semantics switched to `iteration == start_iteration` so
+      seed-summary forwarding and physical-rejection seeding still fire on
+      the subprocess's first loop pass — chain mode now stamps every
+      `evolution_log.jsonl` row with the absolute chain-wide index.
+      Verification: `tests/unit/workflows/test_model_exploration.py`
+      56/56 green; new `TestRunWorkflowStartIteration` class covers
+      default, single-iter offset, and multi-iter offset cases.
 - [ ] **4-zh.** P4-Impact behavioural test — fixture must shift the lever
       file across iters; calibrate against pre-rewrite prompt → must fail.
 - [ ] V9 launch — only after **1-zh + 2-zh + 3** are committed *and* **4-zh**
