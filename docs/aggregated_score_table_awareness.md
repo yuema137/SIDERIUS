@@ -1497,7 +1497,9 @@ matched the regenerated JSONs).
 | 2 | `feat(observability): persistent audit stream for score tables` | ✅ landed `b222a16` (2026-05-01) | New `nodes/agent_data_stream.py` (best-effort JSONL appender at `{workspace}/logs/agent_data_stream.jsonl`) + audit-logging block in `nodes/ml_hyperparameter_tune_agent.py` only. Tune-agent imports cleanly; end-to-end exercise lands via Gate 2 in §12.5. |
 | 3 | `fix(scoring): harmonize model column to log-space + clip headroom at 0` | ✅ landed `564e0ac` (2026-05-01) | `file_vector_to_log_space()` helper + `_LOG_OFFSET = 1e-10`; `PerFileRow.headroom_vs_gt` Pydantic `ge=0.0`; `_build_rows` clips negative headroom; tune-agent call site converts `score_vector`'s linear file_vector before `build_score_table`. **39/39** in the two relevant test files green pre-commit; 2 pre-existing tests updated to match the clip contract. |
 | 4 | `docs(phase8): cognitive-alignment + zero-hardcoding refinement with impact-aware reasoning` | ✅ landed `92cd0e6` (2026-05-01) | This document — Phase 8 (problem + solution + commit plan), §12.5 V9 launch gates, Phase 8 Refinement rewritten under the **Zero-Hardcoding** principle (no fixed weight thresholds, no static "Inconsequential / IGNORE" partition; agent ranks dynamically by `Impact_Score`). +615 lines. Foundation tracker self-marked as landed. |
-| 5 | `refactor(infra): replace range(20) with NUM_FILES; parameterise schema bounds` | ⏳ queued (Total Genericity Audit Tier 2 + 2.5) | Mechanical: `execute_tools/scoring_helpers.py:167`, `nodes/scoring_reference.py:27`, `compute_raw_baseline.py:154` — `range(20)` → `range(NUM_FILES)`. `agent/schemas/score_table.py` — `PerFileRow.file_index`, `AggregateScalars.num_sampled_files`, `ScoreComparisonTable.rows` length all reference `NUM_FILES` from `execute_tools/dataset_config`. Strips fixed-shape assumptions ahead of P1-Impact so the cognitive-alignment commits stay clean. |
+| 5 | `refactor(infra): replace range(20) with NUM_FILES; parameterise schema bounds` | ✅ landed `6f82aac` (2026-05-01) | Mechanical: `execute_tools/scoring_helpers.py:167`, `nodes/scoring_reference.py:27`, `compute_raw_baseline.py:154` — `range(20)` → `range(NUM_FILES)`. `agent/schemas/score_table.py` — `PerFileRow.file_index`, `AggregateScalars.num_sampled_files`, `ScoreComparisonTable.rows` length all reference `NUM_FILES` from `execute_tools/dataset_config`. Verification: 72/72 affected unit tests green (schemas, scoring_helpers, score_table_adversarial, compute_raw_baseline). |
+| 5a | `fix(test): align compute_raw_baseline expectations with +1e-10 soft floor` | ✅ landed `0792f05` (2026-05-01) | Pre-existing failures surfaced during Commit 5 verification: 5 sites in `tests/unit/test_compute_raw_baseline.py` had baked `expected = math.log(v, 5.27)` without the production soft-floor offset (Path-A regen `8947511` only dropped the `round(·, 2)` quantization, not the `+1e-10`). Drift ≈ `1e-10 / (mean × ln(5.27))`, above the 1e-12 tolerance. Fix: add `+ 1e-10` inside each `expected_*` formula. 9/9 green standalone. |
+| 5b | `fix(tuner): use local run_name for score_table audit metadata` | ✅ landed `7755556` (2026-05-01) | Regression introduced with Foundation Commit 2 (`b222a16`, P-Alpha audit stream): the metadata block at `nodes/ml_hyperparameter_tune_agent.py:1780` accessed `agent_input.run_name` — no such top-level attribute on `HyperparamTuningInput`; `run_name` lives at `agent_input.storage.local.run_name` (extracted to a local variable at line 793). Bug only fired when `score_table is not None`, taking down 5 of the 7 `TestScoreTablePropagation` tests. Fix: use the local `run_name` to match surrounding metadata sites (lines 912, 1231, 1245). 7/7 green post-fix. |
 
 **Audit decision (2026-05-01)**: during the commit-3 pause we audited the doc
 for hardcoded classification logic. The committed and staged code carries
@@ -2075,9 +2077,40 @@ Two work items, sequenced so the cognitive-alignment commits stay clean:
 
 - [x] **A1.** Audit executed: T1 prompts + T2 code + T2.5 schemas + T3
       tests catalogued; delta plan recorded above.
-- [ ] **A2.** Foundation Commit 5 — Tier 2 + Tier 2.5 mechanical commit
-      (`range(NUM_FILES)` + schema-bound parameterisation). All affected
-      unit tests green pre-commit.
+- [x] **A2.** Foundation Commit 5 landed `6f82aac` — Tier 2 + Tier 2.5
+      mechanical: `range(20)` → `range(NUM_FILES)` in
+      `compute_raw_baseline.py`, `nodes/scoring_reference.py`,
+      `execute_tools/scoring_helpers.py`; schema bounds
+      (`PerFileRow.file_index.le`, `AggregateScalars.num_sampled_files.le`,
+      `ScoreComparisonTable.rows.{min,max}_length`) parameterised via
+      `NUM_FILES` import in `agent/schemas/score_table.py`. Verification:
+      72/72 affected unit tests green
+      (`tests/unit/agent/schemas/test_score_table.py`,
+      `tests/unit/execute_tools/test_scoring_helpers.py`,
+      `tests/unit/execute_tools/test_score_table_adversarial.py`,
+      `tests/unit/test_compute_raw_baseline.py`); schema bounds correctly
+      reject `NUM_FILES + 1` inputs.
+      Two pre-existing failures surfaced during verification and were
+      fixed as separate atomic commits ahead of A2:
+      * `0792f05` `fix(test): align compute_raw_baseline expectations
+        with +1e-10 soft floor` — five test sites in
+        `test_compute_raw_baseline.py` had baked
+        `expected = math.log(v, 5.27)` with no offset; production has
+        always applied `+1e-10` (Path-A regen `8947511` only dropped
+        `round(·, 2)`, not the soft floor). Drift was ~`1e-10 / (mean ×
+        ln(5.27))` — above the 1e-12 tolerance. Fix: add `+ 1e-10`
+        inside each `expected_*` formula. 9/9 tests green standalone.
+      * `7755556` `fix(tuner): use local run_name for score_table audit
+        metadata` — `nodes/ml_hyperparameter_tune_agent.py:1780` was
+        reading `agent_input.run_name` (no such top-level attribute on
+        `HyperparamTuningInput`; `run_name` lives at
+        `agent_input.storage.local.run_name`, already extracted to a
+        local at line 793). The bug was a regression introduced with the
+        P-Alpha audit-stream commit and only triggered when
+        `score_table is not None`, which was every path the
+        `TestScoreTablePropagation` suite exercises (5/7 failures).
+        Fix: use the local `run_name` to match the surrounding metadata
+        sites (e.g. lines 912, 1231, 1245). 7/7 green post-fix.
 - [x] **A3.** Tier 1 prompt rewrites folded into 2-zh's scope. The §6
       2-zh row above now lists the expanded surface (`agent/prompts.py`,
       `result_interpretation_agent.py` per-model + synthesis,
