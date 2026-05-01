@@ -1496,7 +1496,8 @@ matched the regenerated JSONs).
 | 1 | `feat(scoring): drop round-2dp from compute_*.py + regen reference` | ✅ landed `8947511` (2026-05-01) | `compute_raw_baseline.py` + `compute_ground_truth.py` + `reference_data/raw_and_ground_score.md`. All 20 fine-file JSONs regenerated under `/home/klz/Data/SIDEREIS_DATA/{raw_baseline,ground_truth}/` with `*.bak_20260501_110716` backups. Scalars now read raw `1.0007` / gt `10.1134`. |
 | 2 | `feat(observability): persistent audit stream for score tables` | ✅ landed `b222a16` (2026-05-01) | New `nodes/agent_data_stream.py` (best-effort JSONL appender at `{workspace}/logs/agent_data_stream.jsonl`) + audit-logging block in `nodes/ml_hyperparameter_tune_agent.py` only. Tune-agent imports cleanly; end-to-end exercise lands via Gate 2 in §12.5. |
 | 3 | `fix(scoring): harmonize model column to log-space + clip headroom at 0` | ✅ landed `564e0ac` (2026-05-01) | `file_vector_to_log_space()` helper + `_LOG_OFFSET = 1e-10`; `PerFileRow.headroom_vs_gt` Pydantic `ge=0.0`; `_build_rows` clips negative headroom; tune-agent call site converts `score_vector`'s linear file_vector before `build_score_table`. **39/39** in the two relevant test files green pre-commit; 2 pre-existing tests updated to match the clip contract. |
-| 4 | `docs(phase8): cognitive-alignment + zero-hardcoding refinement` | ⏳ in flight (this commit) | This document — Phase 8 (problem + solution + commit plan), §12.5 V9 launch gates, Phase 8 Refinement rewritten under the **Zero-Hardcoding** principle (no fixed weight thresholds, no static "Inconsequential / IGNORE" partition; agent ranks dynamically by `Impact_Score`). Foundation tracker self-marks as landed. |
+| 4 | `docs(phase8): cognitive-alignment + zero-hardcoding refinement with impact-aware reasoning` | ✅ landed `92cd0e6` (2026-05-01) | This document — Phase 8 (problem + solution + commit plan), §12.5 V9 launch gates, Phase 8 Refinement rewritten under the **Zero-Hardcoding** principle (no fixed weight thresholds, no static "Inconsequential / IGNORE" partition; agent ranks dynamically by `Impact_Score`). +615 lines. Foundation tracker self-marked as landed. |
+| 5 | `refactor(infra): replace range(20) with NUM_FILES; parameterise schema bounds` | ⏳ queued (Total Genericity Audit Tier 2 + 2.5) | Mechanical: `execute_tools/scoring_helpers.py:167`, `nodes/scoring_reference.py:27`, `compute_raw_baseline.py:154` — `range(20)` → `range(NUM_FILES)`. `agent/schemas/score_table.py` — `PerFileRow.file_index`, `AggregateScalars.num_sampled_files`, `ScoreComparisonTable.rows` length all reference `NUM_FILES` from `execute_tools/dataset_config`. Strips fixed-shape assumptions ahead of P1-Impact so the cognitive-alignment commits stay clean. |
 
 **Audit decision (2026-05-01)**: during the commit-3 pause we audited the doc
 for hardcoded classification logic. The committed and staged code carries
@@ -1935,7 +1936,7 @@ also supersede the prior "linear-weight partition" version of this section.
 | # | Scope | Files |
 |---|-------|-------|
 | 1-zh | **P1-Impact (zero-hardcoding).** Add `linear_weight: Optional[float]` (`ge=0, le=1`) + `impact_score: Optional[float]` (`ge=0`) to `PerFileRow`. Add `linear_weight_total` invariant to `ScoreComparisonTable` with `model_validator` (≈ 1.0 over sampled rows). Modify `build_score_table` signature + body to accept linear fv and compute `Linear_Weight` + `Impact_Score` per row. Update `render_comparison_table`: add `Weight %` and `Impact` columns to the main table; render a secondary "re-sorted by Impact_Score descending" block under the main table (no partition labels, no threshold-driven list). **Remove** any `_build_synthesis_prompt:313-321` callout that classifies files by absolute thresholds. **No threshold constants are introduced.** Property-based unit tests (no fixed-index assertions): (a) `Σ Linear_Weight ≈ 1` over sampled rows; (b) `Impact_Score = 0` iff `model_linear ≥ gt_linear`; (c) `Impact_Score > 0` when `model < gt`; (d) ranking by `Impact_Score` is invariant under permutation of input order; (e) trial subset (only a strict subset sampled) — unsampled rows carry `None`, weights re-normalise over sampled subset; (f) `linear_weight_total` validator catches out-of-bounds. | `agent/schemas/score_table.py` · `execute_tools/scoring_helpers.py` · `nodes/result_interpretation_agent.py` · `tests/unit/agent/schemas/test_score_table.py` · `tests/unit/execute_tools/test_scoring_helpers.py` · `tests/unit/agent/result_interpretation_agent/test_interpretation_agent.py` |
-| 2-zh | **P2-Impact (zero-hardcoding).** Rewrite `SYNTHESIS_SYSTEM_PROMPT`: drop the architecture-bias rule; insert the new "Reading the score table — the Log-of-Mean trap" section verbatim per §4 above (which contains zero file-class labels, zero numeric thresholds, zero IGNORE verbiage); rewrite `frequency_comparison` field-instruction per §4. Property unit tests: (a) prompt contains the exact `Impact_Score` ranking instruction; (b) prompt does **not** contain any of `{"Inconsequential", "IGNORE", "0.001", "1e-3", "0.90", "HEADROOM_EPSILON"}` — guards against regressions back to threshold-based phrasing; (c) prompt contains the relative-saturation framing substring. | `nodes/result_interpretation_agent.py` · `tests/unit/agent/result_interpretation_agent/test_interpretation_agent.py` |
+| 2-zh | **P2-Impact (zero-hardcoding) — expanded by Total Genericity Audit.** Rewrite `SYNTHESIS_SYSTEM_PROMPT`: drop the architecture-bias rule; insert the new "Reading the score table — the Log-of-Mean trap" section verbatim per §4 above (which contains zero file-class labels, zero numeric thresholds, zero IGNORE verbiage); rewrite the synthesis output field per §4. **Audit-expanded surface:** also rewrite `agent/prompts.py` (tuner system prompt L89–106 + REFLECTOR_PROMPT L193–198), `nodes/result_interpretation_agent.py` per-model prompt (L52–80, including the JSON output field `frequency_analysis` → `per_file_analysis`), and `nodes/ml_model_proposal_agent.py` (proposer reasoning step L207–210 + L241, plus the rendered "Weak Frequency Bands" block L600 — replace with a dynamic top-Impact-Score block, no `< 1.0` threshold). Strip "frequency band" / "low-frequency" / "frequency range" / fixed-index examples ("files 0-3", "files 15-19") throughout. Rename the synthesis output field `frequency_comparison` → `per_file_comparison`; protocol consumers update in lockstep. Property unit tests: (a) prompt contains the exact `Impact_Score` ranking instruction; (b) prompt does **not** contain any of `{"Inconsequential", "IGNORE", "0.001", "1e-3", "0.90", "HEADROOM_EPSILON", "frequency_analysis", "frequency_comparison", "low-frequency", "mid-frequency", "high-frequency"}` — guards against regressions back to threshold-based or denoise-specific phrasing; (c) prompt contains the relative-saturation framing substring. | `agent/prompts.py` · `nodes/result_interpretation_agent.py` · `nodes/ml_model_proposal_agent.py` · `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py` (field rename) · `tests/unit/agent/result_interpretation_agent/test_interpretation_agent.py` · `tests/unit/agent/ml_model_proposal_agent/test_*.py` |
 | 3 | **P3** — chain `start_iteration` plumbing. Unchanged from the original Phase 8 P3 (line 1598). | `workflows/model_exploration.py` · `sdsc_submission_scripts/run_one_iteration.py` · `tests/unit/workflows/test_model_exploration.py` |
 | 4-zh | **P4-Impact (zero-hardcoding) — `tests/integration/workflows/test_cognitive_alignment_smoke.py`.** Pseudo-training fixture varies the per-file shape across 3 iters so that the "lever" file *moves* between iters (e.g. iter_1 lever is one file, iter_3's largest `Impact_Score` is a different file because the iter_1 lever has been recovered). Assertions (all property-based, no fixed-index expectations): (i) take_home cites the file with the largest `Impact_Score` *that iter*; (ii) take_home does **not** assert any file is permanently irrelevant; (iii) when the fixture is shaped so all `Impact_Score`s are small relative to `model_scalar`, take_home declares saturation (relative reading); (iv) Jaccard < 0.7 across the 3 take_homes (echo-chamber guard from the original P4 carries over); (v) the captured synthesis prompt contains both `Impact_Score` and `Linear_Weight` columns. | `tests/integration/workflows/test_cognitive_alignment_smoke.py` |
 
@@ -1982,17 +1983,115 @@ is replaced wholesale by the zero-hardcoding version.
 The original P1/P2 entries in the live checklist (line 1666) are superseded
 by **1-zh** / **2-zh**.
 
-#### Total Genericity Audit (queued for after Commit 4 lands)
+#### Total Genericity Audit (executed 2026-05-01, post-Commit 4)
 
-Before P1-Impact starts, sweep the infra and system prompts for residual
-denoise-specific assumptions. In scope: hardcoded frequency-band logic
-(`low/mid/high band`, `1 Hz`, `100 kHz`, etc.), domain-specific framing in
-LLM system prompts that hardcodes the task as denoising rather than as
-"this iter's metric → next-iter improvement"), any reference to the
-20-file dataset structure that should be parameterised, any docstring that
-implies the metric is loss-specific. Output: a delta list applied at the
-front of P1-Impact — or, if the audit is large, its own pre-commit. To be
-expanded once Commit 4 is on `master`.
+**Audit goal.** With the *soul* of V9 documented (Commit 4), sweep the *body*
+(infra + system prompts) for residual denoise-specific assumptions and
+hardcoded shapes that bake `num_files=20` and "frequency band" framing into
+the LLM's mental model. The cognitive-alignment commits (1-zh / 2-zh /
+4-zh) should not have to relitigate dataset cardinality or task-specific
+vocabulary along the way.
+
+**Scope.** Three categories: (T1) production prompts that bake denoise
+framing into LLM-facing text; (T2) production code that hardcodes the
+20-file shape when `NUM_FILES` is already exported by
+`execute_tools/dataset_config.py:84`; (T2.5) Pydantic schema bounds that
+hardcode `file_index ≤ 19` / `num_sampled_files ≤ 20`; (T3) test fixtures —
+deferred unless a corresponding production change forces a fixture
+rewrite.
+
+##### Tier 1 — Production prompts (LLM-facing)
+
+Highest priority because they shape the LLM's mental model directly. These
+hits all teach the model that the task is *denoising 20 frequency bands*
+rather than *improving where the largest opportunity sits this iter*.
+
+| File | Lines | Hardcoded leak | Why it matters |
+|------|-------|----------------|----------------|
+| `agent/prompts.py` | 89–97 | "ALL 20 files", "20 files × 200 segments = ~2000 segments total" | Bakes `NUM_FILES=20` into the LLM's scope; if a future task adds files (or a different dataset replaces TIDMAD), the prompt lies. |
+| `agent/prompts.py` | 98 | `anchors`: "files 0, 10, 19 only (lowest, mid, highest **frequency**)" | Fixed indices + frequency framing. The strategy itself ("sparse extrema sampling") is task-agnostic; the labels aren't. |
+| `agent/prompts.py` | 104–106 | "specific weak **frequency bands** … if files 0-3 score < 1.0, use `target_files: [0, 1, 2, 3]` to dedicate all training data to improving **low-frequency denoising**" | Fixed indices, hardcoded `1.0` threshold, and explicit denoise terminology in a single block. |
+| `agent/prompts.py` | 193–198 | REFLECTOR "PER-FILE COMPARISON (frequency-band awareness)" + example "files 15-19 but regressed on files 0-3" | Trains the reflector to think in band labels rather than per-file dimensions. |
+| `nodes/result_interpretation_agent.py` | 65, 73, 76 | per-model JSON field `frequency_analysis`; example bottleneck `'low-frequency blindness'` | Schema-level field name is task-bound; the LLM is forced to fill a frequency slot even when the right diagnostic is dimension-agnostic. |
+| `nodes/result_interpretation_agent.py` | 198 | "Per-model file vectors (per-file performance across **20 frequency bands**)" | NUM_FILES + frequency framing both hardcoded in the synthesis input description. |
+| `nodes/result_interpretation_agent.py` | 215, 223 | synthesis JSON output field `frequency_comparison` | Same problem at the output schema layer — the LLM emits a frequency-named diagnosis by construction. |
+| `nodes/ml_model_proposal_agent.py` | 207–210 | "**Frequency analysis** and trial strategy guidance: … if **low-frequency files (0-4)** score near zero across all models, the new architecture should specifically address **low-frequency signal recovery**" | Hardcoded indices + denoise objective in the proposer's reasoning template. |
+| `nodes/ml_model_proposal_agent.py` | 241 | "Which **frequency bands** (file indices) to focus on if using target strategy" | Reinforces the band framing into the proposer's `expert_advice.suggested_directions`. |
+| `nodes/ml_model_proposal_agent.py` | 600 | `"### Weak Frequency Bands (score < 1.0 = no denoising effect)"` | Hardcoded `1.0` threshold + frequency framing + denoise objective; rendered into the proposer prompt every iter. |
+
+##### Tier 2 — Production code with `NUM_FILES` already exported
+
+`execute_tools/dataset_config.py:84` already exports `NUM_FILES = TIDMAD.num_files`. The fix is mechanical — replace `range(20)` with `range(NUM_FILES)`.
+
+| File | Line | Current | Fix |
+|------|------|---------|-----|
+| `execute_tools/scoring_helpers.py` | 167 | `for i in range(20):` | `for i in range(NUM_FILES):` |
+| `nodes/scoring_reference.py` | 27 | `_FINE_INDICES = tuple(range(20))` | `_FINE_INDICES = tuple(range(NUM_FILES))` |
+| `compute_raw_baseline.py` | 154 | `_FINE_INDICES = tuple(range(20))` | `_FINE_INDICES = tuple(range(NUM_FILES))` |
+
+`compute_ground_truth.py` already imports and uses `NUM_FILES` (post-Path-A
+regen, Commit 1) — no change needed.
+
+##### Tier 2.5 — Pydantic schema bounds
+
+`agent/schemas/score_table.py` carries three hardcoded bounds:
+
+- `PerFileRow.file_index: int = Field(..., ge=0, le=19)` — the `19` is `NUM_FILES − 1`.
+- `AggregateScalars.num_sampled_files: int = Field(..., ge=1, le=20)` — the `20` is `NUM_FILES`.
+- `ScoreComparisonTable.rows: list[PerFileRow] = Field(..., min_length=20, max_length=20)` — the `20` is `NUM_FILES`.
+
+Fix: import `NUM_FILES` from `execute_tools.dataset_config` and reference
+it directly in the `Field(..., le=NUM_FILES − 1, ...)` etc. calls. This
+also eliminates a subtle drift hazard: today the schema's upper bound
+silently disagrees with `NUM_FILES` if a future dataset config redefines
+`num_files`.
+
+The two existing tests in `tests/unit/agent/schemas/test_score_table.py`
+(line 53–54 asserting `file_index=20` is rejected; line 165 asserting
+`num_sampled_files=21` is rejected) keep working with no change because
+they probe `NUM_FILES + 1` and `NUM_FILES + 2`, which remain out of bounds
+under the parameterised version.
+
+##### Tier 3 — Test fixtures (deferred)
+
+`range(20)` appears in ~6 test files (`test_scoring_helpers.py:117`,
+`test_estimator.py:145`, `test_compute_raw_baseline.py:157`, etc.).
+Touching them requires no production behaviour change; they will be
+swept up only when 2-zh's prompt rewrite or 4-zh's behavioural fixture
+forces a fixture rewrite. Deferring keeps the diff small and avoids
+churning tests that already work.
+
+##### Audit delta plan
+
+Two work items, sequenced so the cognitive-alignment commits stay clean:
+
+| # | When | Scope |
+|---|------|-------|
+| **Foundation Commit 5** | Pre-P1-Impact, mechanical | Tier 2 + Tier 2.5. One commit. Replaces `range(20)` with `range(NUM_FILES)` in the three production files; parameterises the three schema bounds via `NUM_FILES` import. Existing schema tests stay green by construction (they probe `NUM_FILES ± 1`, not literal `20`). |
+| **Folded into 2-zh** | Cognitive alignment, prompt rewrite | Tier 1. The 2-zh row in §6 already rewrites `SYNTHESIS_SYSTEM_PROMPT`; expand its scope to also strip frequency-band / low-frequency / denoise-specific framing from `agent/prompts.py` (tuner + reflector), `nodes/result_interpretation_agent.py` (per-model + synthesis), and `nodes/ml_model_proposal_agent.py` (proposer + render). Replace with task-agnostic *per-file dimension* language anchored to dynamic `Impact_Score` ranking — no fixed indices, no `< 1.0` thresholds, no "low-frequency" labels. The `frequency_analysis` and `frequency_comparison` JSON fields rename to `per_file_analysis` and `per_file_comparison` respectively (rename is part of the same prompt commit; protocols using these fields update in lockstep). |
+| Tier 3 | Deferred | Test fixtures. Sweep only when a 2-zh / 4-zh change forces a fixture rewrite. |
+
+##### Audit checklist
+
+- [x] **A1.** Audit executed: T1 prompts + T2 code + T2.5 schemas + T3
+      tests catalogued; delta plan recorded above.
+- [ ] **A2.** Foundation Commit 5 — Tier 2 + Tier 2.5 mechanical commit
+      (`range(NUM_FILES)` + schema-bound parameterisation). All affected
+      unit tests green pre-commit.
+- [x] **A3.** Tier 1 prompt rewrites folded into 2-zh's scope. The §6
+      2-zh row above now lists the expanded surface (`agent/prompts.py`,
+      `result_interpretation_agent.py` per-model + synthesis,
+      `ml_model_proposal_agent.py`), the field renames
+      (`frequency_analysis` → `per_file_analysis`, `frequency_comparison`
+      → `per_file_comparison`), and the expanded forbidden-string set
+      (`low-frequency`, `mid-frequency`, `high-frequency`,
+      `frequency_analysis`, `frequency_comparison`).
+- [ ] **A4.** Post-2-zh regression-guard: grep for the banned vocabulary
+      across `agent/`, `nodes/`, `workflows/` — `frequency_analysis`,
+      `frequency_comparison`, `frequency_band`, `low-frequency`,
+      `mid-frequency`, `high-frequency`, `denoising` (in prompts only —
+      the runtime `denoising_score` field stays). All hits must live in
+      task-config / docstring contexts, not in LLM-facing prompts.
 
 #### Out of scope (tracked separately)
 
