@@ -1971,9 +1971,81 @@ is replaced wholesale by the zero-hardcoding version.
 
 ##### 8. Live checklist
 
-- [ ] **1-zh.** P1-Impact: schema columns (`linear_weight`, `impact_score`,
+- [~] **1-zh.** P1-Impact: schema columns (`linear_weight`, `impact_score`,
       `linear_weight_total`) + `build_score_table` body + renderer columns
       and re-sorted secondary block. **No threshold constants.**
+      *Implementation landed on working tree (uncommitted, awaiting user
+      approval after audit) — 4 production files + 3 test files modified:*
+      - `agent/schemas/score_table.py`: `PerFileRow` gains `linear_weight:
+        Optional[float] = Field(default=None, ge=0.0, le=1.0)` and
+        `impact_score: Optional[float] = Field(default=None, ge=0.0)`;
+        `ScoreComparisonTable` gains `linear_weight_total: float =
+        Field(default=0.0, ge=0.0)` and a `model_validator(mode="after")`
+        `_validate_weight_total` that skips when no sampled rows carry a
+        weight, otherwise enforces both `Σ(row.linear_weight) ≈ 1.0` and
+        `linear_weight_total ≈ 1.0` within `1e-9`.
+      - `execute_tools/scoring_helpers.py`: `build_score_table` signature
+        gains `model_fv_linear: Optional[List[Optional[float]]] = None`
+        (keyword-only, derived from `model_fv_log` via `_LOG_BASE**v -
+        _LOG_OFFSET` when omitted); new private `_compute_weight_and_impact`
+        carries the per-row math with a `[0, 1]` numerical clamp on weights
+        plus an inline comment marking the **n_segments invariant** (helper
+        assumes model and reference share per-file `n_segments`); `_HEADER`
+        gains `Weight %` and `Impact` columns; new `_SECONDARY_HEADER`,
+        `_render_secondary_row`, and `_fmt_pct` helpers render the
+        impact-ranked block when at least one row has `impact_score`.
+      - `nodes/ml_hyperparameter_tune_agent.py:~1757`: call site now passes
+        `model_fv_linear=_sc_fv` alongside the existing `model_fv_log` so
+        the helper computes weights from the same linear vector that
+        produced the log column (no log↔linear roundtrip drift).
+      - `tests/unit/agent/schemas/test_score_table.py`: +11 cases —
+        `TestPerFileRowImpactFields` (6) covers field bounds + default-None,
+        `TestLinearWeightTotalInvariant` (5) covers off-sum rejection,
+        stored-total mismatch, skip-when-no-sampled, and float-round-off
+        tolerance.
+      - `tests/unit/execute_tools/test_scoring_helpers.py`: +8 property
+        tests — `TestLinearWeightProperty` (full-subset + trial-subset sum),
+        `TestImpactScoreProperty` (zero-iff-saturated, strictly-positive
+        when below, permutation invariance), `TestSecondaryBlock`
+        (sort-desc, omit-when-no-data); 3 existing tests updated for the
+        two new columns and the now-larger `N/A` cell count.
+      - `tests/unit/agent/result_interpretation_agent/test_interpretation_agent.py`:
+        +1 case — `test_synthesis_prompt_renders_weight_and_impact_columns`
+        builds a real impact-aware table via `build_score_table` and
+        verifies "Weight %", "Impact", and the secondary-block header
+        appear in the synthesis prompt.
+
+      **Test results (2026-05-01):** `pytest` on the three touched test
+      files → 129/129 green in 0.98s. Broader tuner suite has 2 unrelated
+      pre-existing failures in `test_estimator_static_patch.py` and
+      `test_warmup_activation.py` (both assert `SAFETY_MULTIPLIER == 2.0`,
+      but `5ac6a53` lowered it to `1.3` — Phase 6.8 estimator territory,
+      no relationship to score_table).
+
+      **Synthetic iter_001 audit (`/tmp/audit_numbers.py`, 2026-05-01):**
+      walkthrough of the helper against the *real* on-disk reference
+      (`load_reference_scores()`):
+      1. Source of the earlier "wrong numbers" identified: my standalone
+         `/tmp/render_iter_001.py` walkthrough script had hand-copied the
+         **synthetic** unit-test fixture (`raw_linear_sum=[2.0]*20`,
+         `gt_linear_sum=[20.0]*20`, `n_segments=200`) from
+         `tests/unit/execute_tools/test_scoring_helpers.py:42` /
+         `test_score_table_adversarial.py:50`. Those fixtures exist for
+         hand-computable round-number assertions (`2/200 = 0.01`,
+         `log_5.27(0.01) ≈ -2.7708`); they are **not** real reference data
+         and **no production path consumed them** — they only appeared in
+         the standalone render script.
+      2. Real reference internal consistency verified: per-file `raw` and
+         `gt` log values from `load_reference_scores()` match
+         `reference_data/raw_and_ground_score.md` to 4 decimals on every
+         spot-checked file (0, 1, 3, 7, 12, 17, 19); `raw_scalar_full =
+         +1.0007` and `gt_scalar_full = +10.1134` match the doc;
+         `log_5.27(linear_sum[i]/n_segments[i]) == per_file_log[i]` to
+         `< 1e-6` on every spot-check.
+      3. Hand-derived Impact_Score for file 17 in the 5-file trial fixture
+         used by `/tmp/render_iter_001_real.py`: manual `+0.0253` ==
+         helper `+0.0253` exactly. The math is correct; only the choice of
+         demonstration input data was wrong in the first walkthrough.
 - [ ] **2-zh.** P2-Impact: rewrite `SYNTHESIS_SYSTEM_PROMPT` per §4
       (`Impact_Score` ranking, relative saturation, no IGNORE, no labels).
 - [x] **3.** P3 chain `start_iteration` plumbing landed `cc198ad`

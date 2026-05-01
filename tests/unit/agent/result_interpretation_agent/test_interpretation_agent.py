@@ -505,6 +505,67 @@ class TestBuildSynthesisPrompt:
         assert "Weak Frequency Files (attention cue)" in prompt
         assert "Weak files" in prompt
 
+    def test_synthesis_prompt_renders_weight_and_impact_columns(self):
+        # P1-Impact: the impact-aware ScoreComparisonTable's pre-rendered
+        # markdown must drop into the synthesis prompt verbatim — the LLM
+        # must see the new Weight % and Impact columns plus the secondary
+        # block. We construct a real impact-aware table via build_score_table
+        # so the rendered_markdown is the production output, not a fixture
+        # placeholder.
+        import math
+        from execute_tools.scoring_helpers import (
+            _LOG_BASE,
+            _LOG_OFFSET,
+            build_score_table,
+        )
+        from nodes.scoring_reference import ReferenceScores
+
+        n_segments = 200
+        gt_linear_sum = [20.0] * 20  # gt mean = 0.10 per file
+        raw_linear_sum = [2.0] * 20
+        ref = ReferenceScores(
+            raw_per_file_log=[
+                math.log(s / n_segments, _LOG_BASE) for s in raw_linear_sum
+            ],
+            gt_per_file_log=[
+                math.log(s / n_segments, _LOG_BASE) for s in gt_linear_sum
+            ],
+            raw_per_file_linear_sum=raw_linear_sum,
+            raw_per_file_n_segments=[n_segments] * 20,
+            gt_per_file_linear_sum=gt_linear_sum,
+            gt_per_file_n_segments=[n_segments] * 20,
+            raw_scalar_full=math.log(0.01, _LOG_BASE),
+            gt_scalar_full=math.log(0.10, _LOG_BASE),
+            s_max=1.0,
+        )
+        # Heterogeneous fv → impacts span a range so the secondary block is
+        # meaningfully sorted.
+        fv_linear = [0.005 * (i + 1) for i in range(20)]
+        fv_log = [math.log(v + _LOG_OFFSET, _LOG_BASE) for v in fv_linear]
+        impact_table = build_score_table(
+            fv_log,
+            model_scalar=fv_log[0],
+            reference=ref,
+            model_fv_linear=fv_linear,
+        )
+        assert impact_table is not None
+        assert any(
+            r.linear_weight is not None for r in impact_table.rows
+        ), "fixture must carry linear_weight on sampled rows"
+
+        prompt = _build_synthesis_prompt(
+            per_model_summaries={"punet": FAKE_PER_MODEL_RESPONSE},
+            per_model_best={"punet": 1.8},
+            per_model_worst={"punet": 0.5},
+            overall_best_score=1.8,
+            overall_worst_score=0.5,
+            overall_best_config=None,
+            per_model_score_tables={"punet": impact_table},
+        )
+        assert "Weight %" in prompt
+        assert "Impact" in prompt
+        assert "Sampled files re-ranked by Impact_Score" in prompt
+
     def test_includes_params(self):
         prompt = _build_synthesis_prompt(
             per_model_summaries={"punet": FAKE_PER_MODEL_RESPONSE},

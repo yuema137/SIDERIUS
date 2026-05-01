@@ -8,10 +8,14 @@ Zero I/O, zero side effects — the "atomic tool" half of the Phase 2 split
 
 Two entry points:
 
-* ``build_score_table(model_fv_log, model_scalar, reference)`` — produces a
-  ``ScoreComparisonTable`` (or ``None`` when the model has no scalar, i.e. a
-  fully failed run). Aggregates are re-computed over the sampled subset; see
-  Decision 14.
+* ``build_score_table(model_fv_log, model_scalar, reference, *,
+  model_fv_linear=...)`` — produces a ``ScoreComparisonTable`` (or ``None``
+  when the model has no scalar, i.e. a fully failed run). Aggregates are
+  re-computed over the sampled subset; see Decision 14. When
+  ``model_fv_linear`` is supplied, each sampled row also carries a
+  ``linear_weight`` (fractional contribution to the scalar denominator)
+  and an ``impact_score`` (log-scalar gain if the file were lifted to its
+  ground-truth ceiling). See P1-Impact (1-zh) in the design doc.
 * ``render_comparison_table(table)`` — the one authoritative markdown
   renderer. The produced string lives on ``table.rendered_markdown`` and is
   substituted verbatim into LLM prompts.
@@ -100,6 +104,7 @@ def build_score_table(
     model_scalar: Optional[float],
     reference: ReferenceScores,
     *,
+    model_fv_linear: Optional[List[Optional[float]]] = None,
     reference_source: str = "reference_data/raw_and_ground_score.md",
 ) -> Optional[ScoreComparisonTable]:
     """Assemble a ``ScoreComparisonTable`` for one run's file_vector.
@@ -115,6 +120,13 @@ def build_score_table(
     reference
         Frozen ``ReferenceScores`` bundle from
         ``nodes.scoring_reference.load_reference_scores``.
+    model_fv_linear
+        Length-20 linear-space per-file vector (the raw output of
+        ``score_vector``). Optional: when omitted, the helper derives a
+        linear approximation from ``model_fv_log`` via the inverse of
+        ``file_vector_to_log_space`` so legacy callers still get the
+        impact columns. Production callers should pass the unconverted
+        linear vector for numerical fidelity.
     reference_source
         Human-readable pointer recorded on the table. Default is the canonical
         markdown reference file.
@@ -131,6 +143,10 @@ def build_score_table(
         raise ValueError(
             f"model_fv_log must have length 20, got {len(model_fv_log)}."
         )
+    if model_fv_linear is not None and len(model_fv_linear) != 20:
+        raise ValueError(
+            f"model_fv_linear must have length 20, got {len(model_fv_linear)}."
+        )
 
     sampled_indices = [i for i, v in enumerate(model_fv_log) if v is not None]
     if not sampled_indices:
@@ -141,12 +157,29 @@ def build_score_table(
             "inconsistent: score_vector requires at least one sampled file."
         )
 
-    rows = _build_rows(model_fv_log, reference)
+    # Derive a linear vector from the log vector when the caller did not
+    # supply one — keeps backward-compat with legacy call sites + tests
+    # that only thread the log column through. The inverse formula mirrors
+    # ``file_vector_to_log_space``: ``v_linear = base**v_log - offset``.
+    if model_fv_linear is None:
+        model_fv_linear = [
+            (float(_LOG_BASE) ** v - _LOG_OFFSET) if v is not None else None
+            for v in model_fv_log
+        ]
+
+    weights, impacts = _compute_weight_and_impact(
+        sampled_indices=sampled_indices,
+        model_fv_linear=model_fv_linear,
+        reference=reference,
+    )
+
+    rows = _build_rows(model_fv_log, reference, weights=weights, impacts=impacts)
     aggregate = _aggregate_over_subset(
         sampled_indices=sampled_indices,
         model_scalar=model_scalar,
         reference=reference,
     )
+    weight_total = sum(w for w in weights if w is not None)
 
     table = ScoreComparisonTable(
         rows=rows,
@@ -154,6 +187,7 @@ def build_score_table(
         s_max_global=reference.s_max,
         reference_source=reference_source,
         rendered_markdown="",  # filled below
+        linear_weight_total=weight_total,
     )
     # Render once, store on the model — single source of truth (Decision 3).
     table = table.model_copy(update={"rendered_markdown": render_comparison_table(table)})
@@ -163,13 +197,22 @@ def build_score_table(
 def _build_rows(
     model_fv_log: List[Optional[float]],
     reference: ReferenceScores,
+    *,
+    weights: Optional[List[Optional[float]]] = None,
+    impacts: Optional[List[Optional[float]]] = None,
 ) -> List[PerFileRow]:
     rows: List[PerFileRow] = []
     for i in range(NUM_FILES):
         raw = reference.raw_per_file_log[i]
         gt = reference.gt_per_file_log[i]
         m = model_fv_log[i]
-        gain = (m - raw) if (m is not None) else None
+        # ``raw`` and ``gt`` are typed as ``list[float]`` on the dataclass
+        # but defensively tolerate a missing reference entry (None) — the
+        # PerFileRow schema accepts Optional[float] for both columns. If a
+        # reference column is missing, the dependent ``gain_vs_raw`` /
+        # ``headroom_vs_gt`` collapse to None (we cannot compute either
+        # without both inputs).
+        gain = (m - raw) if (m is not None and raw is not None) else None
         # Phase 8: ``headroom_vs_gt`` is "remaining room to grow toward the
         # ceiling" — by definition non-negative. A raw ``gt - model``
         # difference can come out negative on dead-zone files (gt at floor,
@@ -179,7 +222,9 @@ def _build_rows(
         # zero so the column means exactly one thing the LLM can act on.
         # The "ceiling reached / dead zone" diagnostic is conveyed
         # separately by P1 (gt-at-floor partition), not by this column.
-        headroom = max(gt - m, 0.0) if (m is not None) else None
+        headroom = (
+            max(gt - m, 0.0) if (m is not None and gt is not None) else None
+        )
         rows.append(
             PerFileRow(
                 file_index=i,
@@ -188,9 +233,106 @@ def _build_rows(
                 model=m,
                 gain_vs_raw=gain,
                 headroom_vs_gt=headroom,
+                linear_weight=(weights[i] if weights is not None else None),
+                impact_score=(impacts[i] if impacts is not None else None),
             )
         )
     return rows
+
+
+def _compute_weight_and_impact(
+    *,
+    sampled_indices: List[int],
+    model_fv_linear: List[Optional[float]],
+    reference: ReferenceScores,
+) -> tuple[List[Optional[float]], List[Optional[float]]]:
+    """Per-file Linear_Weight and Impact_Score over the sampled subset.
+
+    Returns two length-NUM_FILES lists (``weights``, ``impacts``) with
+    ``None`` at every unsampled index. When the sampled subset is degenerate
+    (zero or non-finite linear mass, or any sampled file has missing
+    reference data), both columns return all-None — the table still
+    constructs cleanly, just without the impact block.
+
+    Linear_Weight is computed from the per-file linear *means* (the same
+    quantity the agent sees in the rendered ``model`` column once log-
+    converted). Impact_Score is computed in linear-sum space (where the
+    grand-mean lives), then converted to log_5.27 once.
+
+    NOTE on the n_segments invariant: this helper reconstructs each file's
+    model linear_sum as ``model_fv_linear[i] * reference.gt_per_file_n_
+    segments[i]``. That holds today because the model and reference share
+    a single fixed dataloader (same ``n_segments`` per file). If the
+    project ever supports per-run-variable file shapes, the model's own
+    n_segments must be threaded in instead.
+    """
+    weights: List[Optional[float]] = [None] * NUM_FILES
+    impacts: List[Optional[float]] = [None] * NUM_FILES
+
+    if not sampled_indices:
+        return weights, impacts
+
+    # Defensive precondition: every sampled index needs complete data
+    # (model linear mean + reference n_segments + reference gt linear sum).
+    # Path-A always fills the reference, so this guard exists only for
+    # malformed test fixtures or partially-loaded reference bundles.
+    means: List[float] = []
+    for i in sampled_indices:
+        m = model_fv_linear[i]
+        n = reference.gt_per_file_n_segments[i]
+        gt_sum = reference.gt_per_file_linear_sum[i]
+        if m is None or n is None or gt_sum is None:
+            return weights, impacts
+        means.append(float(m))
+
+    sigma = sum(means)
+    if sigma <= 0 or not math.isfinite(sigma):
+        return weights, impacts
+
+    # Linear_Weight: fractional contribution of each sampled file to the
+    # subset linear mean. Sums to 1 over the sampled subset.
+    for i in sampled_indices:
+        m = float(model_fv_linear[i])
+        # Numerical clamp to [0, 1] — under exact arithmetic m/sigma is in
+        # [0, 1] by construction, but float round-off can place the result
+        # at 1.0 + epsilon, which would then trip the schema's le=1 bound.
+        w = m / sigma
+        if w < 0.0:
+            w = 0.0
+        elif w > 1.0:
+            w = 1.0
+        weights[i] = w
+
+    # Impact_Score: log-space gain if file f were lifted to its gt ceiling,
+    # holding the other sampled files fixed. Computed in linear-sum space
+    # to match _aggregate_over_subset's grand-mean denominator.
+    n_per_file_n: List[int] = [0] * NUM_FILES
+    n_per_file_linear_sum: List[float] = [0.0] * NUM_FILES
+    for i in sampled_indices:
+        n_per_file_n[i] = int(reference.gt_per_file_n_segments[i])
+        n_per_file_linear_sum[i] = float(model_fv_linear[i]) * n_per_file_n[i]
+
+    total_n = sum(n_per_file_n[i] for i in sampled_indices)
+    total_linear = sum(n_per_file_linear_sum[i] for i in sampled_indices)
+    if total_n <= 0:
+        return weights, impacts
+
+    grand_mean_current = total_linear / total_n
+    log_current = math.log(
+        max(grand_mean_current, 0.0) + _LOG_OFFSET, _LOG_BASE,
+    )
+
+    for i in sampled_indices:
+        gt_sum = float(reference.gt_per_file_linear_sum[i])
+        # Replace this file's linear contribution with its ceiling.
+        swapped = total_linear - n_per_file_linear_sum[i] + gt_sum
+        gm_after = swapped / total_n
+        log_after = math.log(
+            max(gm_after, 0.0) + _LOG_OFFSET, _LOG_BASE,
+        )
+        impacts[i] = max(log_after - log_current, 0.0)
+
+    return weights, impacts
 
 
 def _aggregate_over_subset(
@@ -249,8 +391,10 @@ def _grand_mean_log_scalar(total_linear: float, total_n: int) -> float:
 _HEADER = (
     "### Per-file performance (log-space, all three columns on global s_max)\n"
     "\n"
-    "| file | raw_baseline | ground_truth | **model** | gain vs raw | headroom vs gt |\n"
-    "|-----:|-------------:|-------------:|----------:|------------:|---------------:|"
+    "| file | raw_baseline | ground_truth | **model** | gain vs raw | "
+    "headroom vs gt | Weight % | Impact |\n"
+    "|-----:|-------------:|-------------:|----------:|------------:|"
+    "---------------:|---------:|-------:|"
 )
 
 _AGG_HEADER = (
@@ -261,6 +405,17 @@ _AGG_HEADER = (
     "\n"
     "| metric               | log scalar |\n"
     "|----------------------|-----------:|"
+)
+
+_SECONDARY_HEADER = (
+    "### Sampled files re-ranked by Impact_Score (descending)\n"
+    "\n"
+    "Highest-impact rows first — the marginal log-scalar gain available if "
+    "each file were lifted to its ground-truth ceiling. Use this column to "
+    "pick the next-iteration lever.\n"
+    "\n"
+    "| file | Impact | Weight % | headroom vs gt | model |\n"
+    "|-----:|-------:|---------:|---------------:|------:|"
 )
 
 
@@ -301,6 +456,19 @@ def render_comparison_table(table: ScoreComparisonTable) -> str:
             f"(model_scalar / ground_truth_scalar)."
         )
 
+    # Secondary impact-ranked block — present only when at least one
+    # sampled row carries an impact_score. Skipped on legacy / direct-dict
+    # tables where the impact columns are all None.
+    impact_rows = [r for r in table.rows if r.impact_score is not None]
+    if impact_rows:
+        lines.append("")
+        lines.append(_SECONDARY_HEADER)
+        for row in sorted(
+            impact_rows,
+            key=lambda r: (r.impact_score is None, -(r.impact_score or 0.0)),
+        ):
+            lines.append(_render_secondary_row(row))
+
     if agg.num_sampled_files < 20:
         lines.append("")
         lines.append(
@@ -318,6 +486,8 @@ def _render_row(row: PerFileRow) -> str:
         _fmt_log(row.model),
         _fmt_log(row.gain_vs_raw),
         _fmt_log(row.headroom_vs_gt),
+        _fmt_pct(row.linear_weight),
+        _fmt_log(row.impact_score),
     ]
     return (
         f"| {cells[0]} "
@@ -325,8 +495,38 @@ def _render_row(row: PerFileRow) -> str:
         f"| {cells[2]:>12} "
         f"| {cells[3]:>9} "
         f"| {cells[4]:>11} "
-        f"| {cells[5]:>14} |"
+        f"| {cells[5]:>14} "
+        f"| {cells[6]:>8} "
+        f"| {cells[7]:>6} |"
     )
+
+
+def _render_secondary_row(row: PerFileRow) -> str:
+    cells = [
+        f"{row.file_index:>4}",
+        _fmt_log(row.impact_score),
+        _fmt_pct(row.linear_weight),
+        _fmt_log(row.headroom_vs_gt),
+        _fmt_log(row.model),
+    ]
+    return (
+        f"| {cells[0]} "
+        f"| {cells[1]:>6} "
+        f"| {cells[2]:>8} "
+        f"| {cells[3]:>14} "
+        f"| {cells[4]:>6} |"
+    )
+
+
+def _fmt_pct(value: Optional[float]) -> str:
+    """Render a fraction in [0, 1] as a percent string with one decimal."""
+    if value is None:
+        return "N/A"
+    if not math.isfinite(value):
+        return "NaN" if math.isnan(value) else (
+            "\u2212\u221E" if value < 0 else "\u221E"
+        )
+    return f"{value * 100:.1f}%"
 
 
 def _fmt_log(value: Optional[float]) -> str:

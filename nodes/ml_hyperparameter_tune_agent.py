@@ -1756,6 +1756,7 @@ class HyperparamTuningAgent:
                             _sc_fv_log = file_vector_to_log_space(_sc_fv)
                             score_table = build_score_table(
                                 model_fv_log=_sc_fv_log,
+                                model_fv_linear=_sc_fv,
                                 model_scalar=_sc_scalar,
                                 reference=reference_scores,
                             )

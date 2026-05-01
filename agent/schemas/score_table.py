@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from execute_tools.dataset_config import NUM_FILES
 
@@ -80,6 +80,28 @@ class PerFileRow(BaseModel):
                     "partitioning is conveyed separately by the "
                     "interpretation prompt's gt-at-floor signal. None if "
                     "model is None.",
+    )
+    linear_weight: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Fractional contribution of this file's linear mean to "
+                    "the scalar's denominator over the sampled subset. Sums "
+                    "to ~1 across sampled rows. Context only — *not* the "
+                    "primary opportunity metric (use impact_score). None "
+                    "when the file was outside the sampled set.",
+    )
+    impact_score: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        description="Marginal log-scalar gain (log_5.27 units, same ruler "
+                    "as model_scalar) the agent would obtain by lifting "
+                    "this file's model_linear up to its gt_linear, holding "
+                    "the other sampled files at their current values. "
+                    "Clipped at 0 (saturated files contribute no remaining "
+                    "lever). Primary opportunity metric — rank by this "
+                    "descending to identify the next-iter lever. None when "
+                    "the file was outside the sampled set.",
     )
 
 
@@ -169,3 +191,41 @@ class ScoreComparisonTable(BaseModel):
                     "design doc). Substituted verbatim at the "
                     "{SCORE_COMPARISON_TABLE} token in agent prompts.",
     )
+    linear_weight_total: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Σ linear_weight over sampled rows. Stored on the "
+                    "table as an invariant probe — must round-trip to ~1.0 "
+                    "(within 1e-9) when any sampled row carries a "
+                    "linear_weight value. Defaults to 0.0 for tables built "
+                    "without per-file impact data (legacy / direct dict "
+                    "construction).",
+    )
+
+    @model_validator(mode="after")
+    def _validate_weight_total(self) -> "ScoreComparisonTable":
+        """Guard the Σ linear_weight ≈ 1 invariant over the sampled subset.
+
+        Skipped when no sampled row carries a ``linear_weight`` (legacy
+        tables / direct dict construction). When weights are present, both
+        the row-level sum and the stored ``linear_weight_total`` must round-
+        trip to 1.0 within 1e-9.
+        """
+        sampled_weights = [
+            r.linear_weight for r in self.rows if r.linear_weight is not None
+        ]
+        if not sampled_weights:
+            return self
+        row_sum = sum(sampled_weights)
+        if abs(row_sum - 1.0) > 1e-9:
+            raise ValueError(
+                f"linear_weight values across sampled rows sum to {row_sum} "
+                f"— expected 1.0 within 1e-9. linear_weight_total stored: "
+                f"{self.linear_weight_total}."
+            )
+        if abs(self.linear_weight_total - 1.0) > 1e-9:
+            raise ValueError(
+                f"linear_weight_total={self.linear_weight_total} expected "
+                f"1.0 within 1e-9 over sampled rows."
+            )
+        return self
