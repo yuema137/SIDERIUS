@@ -2245,15 +2245,34 @@ is replaced wholesale by the zero-hardcoding version.
       Verification: `tests/unit/workflows/test_model_exploration.py`
       56/56 green; new `TestRunWorkflowStartIteration` class covers
       default, single-iter offset, and multi-iter offset cases.
-- [ ] **4-zh.** P4-Impact behavioural test
-      (`tests/integration/workflows/test_cognitive_alignment_smoke.py`).
-      Realises the §12.5 Gate 1 acceptance contract: 5 property-based
-      assertions (dynamic lever identification across iters; no
-      permanent-irrelevance phrasing; relative-saturation declaration on
-      the saturated iter; Jaccard < 0.7 echo-chamber guard;
-      `Impact_Score` + `Linear_Weight` columns present in the captured
-      synthesis prompt). Calibrate against pre-2-zh prompt
-      (`3ea439e^`) → metrics 1/2/3 must fail.
+- [~] **4-zh.** P4-Impact behavioural test
+      (`tests/integration/workflows/test_cognitive_alignment_smoke.py`)
+      — *in progress*. Realises the §12.5 Gate 1 acceptance contract: 6
+      property-based assertions:
+      1. **Dynamic lever ID** — top-`Impact_Score` file cited in
+         `take_home_message` shifts between iter_1 and iter_2.
+      2. **No permanent-irrelevance** — forbidden phrasings absent.
+      3. **Relative saturation** — iter_3's flat `Impact_Score` column
+         triggers a chain-ceiling declaration (no fixed cutoff).
+      4. **Jaccard < 0.7** — pairwise echo-chamber guard.
+      5. **Prompt columns** — `Impact_Score` + `Linear_Weight` visible
+         in `RecordingOpenAIBridge`-captured synthesis prompts.
+      6. **Vocab evolution** — `runtime_vocab` grows or refines across
+         iters; no entries dropped.
+
+      **Implementation specifics:**
+      - Real OpenAI (gpt-4o-mini) at synthesis + proposer; pseudo
+        training. `RecordingOpenAIBridge` captures every stage prompt.
+      - Fixture uses real `load_reference_scores()` data; constructs
+        `model_fv_linear` per-iter so `build_score_table` produces
+        Impact_Score columns where iter_1's top-Impact file ≠ iter_2's
+        top-Impact file ≠ saturation in iter_3 (all entries small
+        relative to `model_scalar`).
+      - `_vocab_diff` helper from `test_score_table_pseudo_smoke.py` is
+        reused for metric 6's added/refined/removed bookkeeping.
+      - Calibration step: rerun against `3ea439e^` (pre-2-zh prompt) →
+        metrics 1/2/3 must fail. Document expected calibration in the
+        test docstring.
 - [ ] V9 launch — only after **1-zh + 2-zh + 3** are committed *and* **4-zh**
       is green.
 
@@ -2461,7 +2480,7 @@ classifications baked into the success criteria.
   on the cognitive path). Other subsystems (training, scoring, VRAM probe)
   stay pseudo. `RecordingLLMBridge` captures every stage prompt and response.
 
-**Success metrics (all five required, all property-based — no fixed-index
+**Success metrics (all six required, all property-based — no fixed-index
 expectations):**
 1. **Dynamic lever identification.** For iter_1 and iter_2, the
    `take_home_message` cites the file with the largest `Impact_Score`
@@ -2495,6 +2514,16 @@ expectations):**
    `RecordingLLMBridge`-captured text). Carries forward the Phase 6.5
    Stage 1 numeric-citation continuity guard while updating it for
    the post-2-zh column names.
+6. **Vocab evolution.** The interpreter's `runtime_vocab` either grows
+   (`len(iter_3.runtime_vocab) > len(iter_1.runtime_vocab)`) *or*
+   refines (existing entries change description / `status` /
+   `seen_in_runs`) across the 3 iters. `runtime_vocab` is the agent's
+   only persisted lesson-learning channel; if the data shifts the
+   lever between iters but no vocab change registers, the chain is
+   reading the column but not accumulating insight from it. Removed
+   entries are a hard fail — `build_runtime_vocab` must preserve
+   carry-forward entries (carries the H.1 monotonicity guarantee from
+   `test_vocab_accumulation.py`).
 
 **Calibration before promotion to gating.** Run the same fixture against the
 **pre-2-zh prompt** (recover `3ea439e^` for the four prompt files):
