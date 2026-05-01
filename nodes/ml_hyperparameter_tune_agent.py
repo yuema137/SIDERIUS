@@ -40,6 +40,7 @@ from agent.schemas.hyperparam_tuning import (
 from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_utils import SampleSet, coerce_nonfinite_to_none
 from execute_tools.scoring_helpers import build_score_table
+from nodes.agent_data_stream import log_score_table
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 from execute_tools.build_anchor_map import load_anchor_map
 from nodes.scoring_reference import load_reference_scores
@@ -1754,6 +1755,26 @@ class HyperparamTuningAgent:
                                 f"score_table=None."
                             )
                             score_table = None
+
+                    # Phase 8 / P-Alpha: append every successfully-built
+                    # score_table to the workspace audit stream so we have
+                    # a queryable record of exactly what was rendered for
+                    # the next agent. Best-effort — failures are logged
+                    # inside ``log_score_table`` and never raised.
+                    if score_table is not None:
+                        log_score_table(
+                            workspace=workspace,
+                            score_table=score_table,
+                            metadata={
+                                "run_name": agent_input.run_name,
+                                "model_type": agent_input.model_type,
+                                "exp_id": exp_id,
+                                "round_index": round_index,
+                                "attempt_in_round": attempt_in_round,
+                                "is_trial": plan.is_trial,
+                                "table_kind": "trial" if plan.is_trial else "formal",
+                            },
+                        )
 
                     # Cleanup denoised files to save disk space
                     if agent_input.cleanup_denoised:
