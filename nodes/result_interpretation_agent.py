@@ -37,7 +37,7 @@ PER_MODEL_SYSTEM_PROMPT = """\
 You are a senior ML research analyst specialising in deep learning for signal denoising.
 
 Your task: analyse the tuning run summary for ONE model architecture and produce a
-structured analysis covering performance, frequency response, data sensitivity,
+structured analysis covering performance, per-file behaviour, data sensitivity,
 training dynamics, efficiency, and strategy assessment.
 
 You will receive:
@@ -46,8 +46,43 @@ You will receive:
 - Best configuration
 - Score trajectory across rounds (with trial portions and model sizes)
 - Per-round conclusions from the tuning agent's reflections
-- File vector: per-file denoising scores (20 files, frequency increases with index on log scale)
+- A per-file score table: one row per validation file with raw_baseline,
+  ground_truth, model, gain_vs_raw, headroom_vs_gt, Linear_Weight, and Impact_Score
+  columns, followed by a secondary block re-ranking the sampled rows by
+  Impact_Score descending
 - Data volume: how many PSD segments were used for training vs baseline
+
+### Reading the per-file score table — the Log-of-Mean trap
+
+The aggregate denoising scalar is the log of a *sum* of per-segment linear
+energies, not a mean of per-file log scores. Two columns describe each file's
+contribution to the next-iter improvement budget:
+
+- **`Linear_Weight`** — the file's current share of the scalar's linear
+  denominator. Tells you *where the scalar lives now*. Sums to 1 across
+  sampled files.
+- **`Impact_Score`** — the log-scalar gain you would obtain by lifting this
+  file's `model` to its `ground_truth`. Tells you *where the next-iter lever
+  is*. A high `Impact_Score` means a file with both meaningful weight and
+  remaining headroom; a near-zero `Impact_Score` means the file is either
+  already at its ceiling or its weight is too small for any improvement to
+  register.
+
+When you analyse bottlenecks for this model:
+
+1. Rank the files by `Impact_Score` descending — that is the per-iter
+   opportunity ranking. A multi-log-unit `headroom_vs_gt` does not by itself
+   indicate opportunity; only `Impact_Score` does.
+2. Read `Linear_Weight` for context. A high-weight file at its ceiling has
+   zero `Impact_Score` and is not actionable.
+3. Saturation is a relative reading. If the entire `Impact_Score` column is
+   small in magnitude relative to `model_scalar` and to the gains your
+   chain has been making per iter, this model has reached the dataset
+   ceiling — say so.
+4. No file is permanently irrelevant. A near-zero `Impact_Score` today may
+   rise next iter once higher-`Impact_Score` files are recovered. Do not
+   memorise file-index labels across iterations — re-read the column each
+   iter.
 
 Produce a JSON object with exactly these fields:
 
@@ -62,7 +97,7 @@ Produce a JSON object with exactly these fields:
   ],
   "best_config_analysis": "Why the best config worked — what made it better than others",
   "score_trend": "How scores evolved across rounds — improving, plateauing, or erratic",
-  "frequency_analysis": "Which frequency bands (file indices) the model handles well vs poorly. Identify blind spots (near-zero scores) and strong ranges.",
+  "per_file_analysis": "Read the per-file table by Impact_Score descending. Cite specific files only by their Impact_Score and Linear_Weight values for this iter. Identify which files carry the largest remaining lever and which are already saturated. Do not assert a file is permanently weak from a single iter's reading.",
   "data_sensitivity": "How sensitive the model is to data volume. Did scores improve when trial_portion increased? How large is the trial-vs-formal gap?",
   "efficiency_assessment": "Model parameter count vs performance. Is there a simpler config with similar score? Cost-performance tradeoff.",
   "strategy_assessment": "Did the agent explore effectively? Did it increase data when needed? Did it follow screening→refinement→solidification phases?"
@@ -70,10 +105,10 @@ Produce a JSON object with exactly these fields:
 
 Rules:
 - key_findings: ranked by importance, evidence-based, reference actual values
-- bottlenecks: root causes (e.g. 'architecture capacity ceiling', 'low-frequency blindness'), not symptoms
+- bottlenecks: root causes (e.g. 'architecture capacity ceiling', 'all sampled files saturated against their ground_truth ceiling'), not symptoms
 - best_config_analysis: be specific about which hyperparameters mattered most
 - score_trend: identify whether the model has saturated or still has room to improve
-- frequency_analysis: reference specific file indices and score values from the file_vector
+- per_file_analysis: rank by Impact_Score; cite Linear_Weight as context, not as a ranking metric on its own; never use fixed cutoffs
 - data_sensitivity: reference training_psd_segments, trial_portion changes across rounds
 - efficiency_assessment: reference model_params and training times if available
 - strategy_assessment: comment on whether the agent's exploration strategy was effective
@@ -193,13 +228,52 @@ motivates the next step.
 
 You will receive:
 - Per-model summaries (key findings, bottlenecks, config analysis, score trends,
-  frequency analysis, data sensitivity, efficiency, strategy assessment)
+  per-file analysis, data sensitivity, efficiency, strategy assessment)
 - Per-model best and worst scores
-- Per-model file vectors (per-file performance across 20 frequency bands)
+- Per-model score tables — per-file `raw_baseline` / `ground_truth` / `model`
+  in log-space, alongside `Linear_Weight` (each file's share of the linear
+  denominator behind the aggregate scalar) and `Impact_Score` (the log-scalar
+  gain available if that file's `model` were lifted to its `ground_truth`)
 - Per-model parameter counts and training data volumes
 - Overall best score and the config that produced it
 - Established discoveries from previous iterations (if any) — empirical findings
   already confirmed by past experiments. Build on these, confirm or contradict them.
+
+### Reading the score table — the Log-of-Mean trap
+
+The aggregate denoising scalar is the log of a *sum* of per-segment linear
+energies, not a mean of per-file log scores. Two columns describe each file's
+contribution to the next-iter improvement budget:
+
+- **`Linear_Weight`** — the file's current share of the scalar's linear
+  denominator. Tells you *where the scalar lives now*. Sums to 1 across
+  sampled files.
+- **`Impact_Score`** — the log-scalar gain you would obtain by lifting this
+  file's `model` to its `ground_truth`. Tells you *where the next-iter lever
+  is*. A high `Impact_Score` means a file with both meaningful weight and
+  remaining headroom; a near-zero `Impact_Score` means the file is either
+  already at its ceiling or its weight is too small for any improvement to
+  register.
+
+When you analyse bottlenecks across the candidate models:
+
+1. **Rank by `Impact_Score` descending** to identify each model's largest
+   remaining levers, then look across models for files that share a high
+   Impact_Score — those are the cross-model opportunities. A multi-log-unit
+   `headroom_vs_gt` does not by itself indicate opportunity; only
+   `Impact_Score` does.
+2. **Read `Linear_Weight` for context.** It is *not* a ranking metric on its
+   own — a high-weight file at its ceiling has zero `Impact_Score` and is
+   not actionable.
+3. **Saturation is a relative reading.** If the entire `Impact_Score` column
+   is small in magnitude relative to the current `model_scalar` and to the
+   per-iter gains the chain has been making, the chain has reached the
+   dataset ceiling on that model — declare it explicitly. There is no fixed
+   cutoff; you compare the distribution against the scale of progress.
+4. **No file is permanently irrelevant.** Today's near-zero `Impact_Score`
+   may rise next iter once higher-`Impact_Score` files are fully recovered.
+   Re-read the column each iter; do not memorise file-index labels across
+   iterations.
 
 Produce a JSON object with exactly these fields:
 
@@ -212,17 +286,17 @@ Produce a JSON object with exactly these fields:
     "Cross-model root cause #1 — what is fundamentally limiting ALL current models",
     ...
   ],
-  "frequency_comparison": "Which frequency ranges are well-handled by all models vs which are universally weak. Identify if there are frequency bands where no model succeeds.",
+  "per_file_comparison": "Cite Impact_Score, Linear_Weight, and gain_vs_raw together when discussing per-file bottlenecks. Rank candidates for the next iter's improvement by Impact_Score descending across models. Do not assert a file is universally weak from headroom alone — a large headroom on a low-weight file implies a near-zero Impact_Score and is not actionable.",
   "efficiency_comparison": "Compare model sizes (parameter counts) against scores. Identify the best score-per-parameter architecture.",
-  "take_home_message": "One sentence: the single most critical insight that motivates designing a new architecture."
+  "take_home_message": "One sentence: the single most critical insight that motivates the next step. If the Impact_Score distribution across all candidate models is small relative to model_scalar, declare ceiling reached rather than manufacture an architectural deficiency."
 }
 
 Rules:
 - key_findings: ranked by importance, MUST compare across models, reference actual scores
 - bottlenecks: focus on fundamental limitations shared across architectures, not per-model issues
-- frequency_comparison: reference specific file indices and per-model file_vector values
+- per_file_comparison: rank by Impact_Score descending; cite Linear_Weight as context, not as a ranking metric on its own; do not use fixed cutoffs or fixed file-index labels
 - efficiency_comparison: reference actual parameter counts and scores
-- take_home_message: exactly one sentence, must directly motivate why a new architecture is needed
+- take_home_message: exactly one sentence, grounded in the Impact_Score distribution
 - Do not repeat per-model findings verbatim — synthesise and draw cross-model conclusions
 - Output only the JSON object — no preamble, no commentary, no markdown
 """
@@ -285,40 +359,22 @@ def _build_synthesis_prompt(
             summary.get("score_trend", "N/A"),
         ]
         # New per-model analysis fields
-        for field in ["frequency_analysis", "data_sensitivity", "efficiency_assessment", "strategy_assessment"]:
+        for field in ["per_file_analysis", "data_sensitivity", "efficiency_assessment", "strategy_assessment"]:
             val = summary.get(field)
             if val:
                 lines += ["", f"### {field.replace('_', ' ').title()}", val]
 
-        # Per-file performance — the full ScoreComparisonTable markdown
-        # (raw_baseline / ground_truth / model columns + subset-scoped
-        # aggregates + Recovery line) plus an attention-mechanism callout
-        # for weak / strong files. The callout is intentionally kept
-        # alongside the table: it pre-digests the frequency structure the
-        # synthesis agent is expected to reason about, so the LLM doesn't
-        # need to re-derive it from the 20-row grid.
+        # Per-file performance — the full ScoreComparisonTable markdown,
+        # which already includes the Impact_Score-ranked secondary block.
+        # No threshold-based attention cue: opportunity is read from the
+        # Impact_Score column directly.
         if per_model_score_tables and model_type in per_model_score_tables:
-            import math
             table = per_model_score_tables[model_type]
             lines += [
                 "",
                 "### Per-file performance (best experiment)",
                 table.rendered_markdown,
             ]
-            fv = [r.model for r in table.rows]
-            present = [
-                (i, v) for i, v in enumerate(fv)
-                if v is not None and not (isinstance(v, float) and math.isnan(v))
-            ]
-            if present:
-                weak = [(i, v) for i, v in present if v < 1.0]
-                strong = [(i, v) for i, v in present if v >= 10.0]
-                lines += ["", "### Weak Frequency Files (attention cue)"]
-                lines.append(f"  Files evaluated: {len(present)}/20")
-                if weak:
-                    lines.append(f"  Weak files (score < 1.0): {[i for i,_ in weak]}")
-                if strong:
-                    lines.append(f"  Strong files (score >= 10): {[i for i,_ in strong]}")
 
         lines.append("")
 
@@ -684,24 +740,13 @@ class ResultInterpretationAgent:
             # New models: read from inp.summaries.
             # Cached models: read from model_knowledge_cache[mt]["_stats"].
             per_model_score_tables: Dict[str, ScoreComparisonTable] = {}
-            weak_frequency_files: Dict[str, List[int]] = {}
             per_model_params: Dict[str, int] = {}
             per_model_training_segments: Dict[str, int] = {}
-
-            import math
 
             def _register_score_table(mt: str, table: Optional[ScoreComparisonTable]):
                 if table is None:
                     return
                 per_model_score_tables[mt] = table
-                weak = [
-                    r.file_index for r in table.rows
-                    if r.model is not None
-                    and not (isinstance(r.model, float) and math.isnan(r.model))
-                    and r.model < 1.0
-                ]
-                if weak:
-                    weak_frequency_files[mt] = weak
 
             for s in inp.summaries:
                 mt = s.model_type
@@ -964,7 +1009,6 @@ class ResultInterpretationAgent:
                 "bottlenecks":           llm_bottlenecks,
                 # Enriched fields
                 "per_model_score_tables":      per_model_score_tables or None,
-                "weak_frequency_files":        weak_frequency_files or None,
                 "per_model_params":            per_model_params or None,
                 "per_model_training_segments": per_model_training_segments or None,
                 "take_home_message":     llm_take_home,

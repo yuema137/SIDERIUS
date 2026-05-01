@@ -339,14 +339,6 @@ class TestBuildReasoningPromptEnriched:
         # sentinel must make it through the legacy renderer verbatim.
         assert "(test)" in prompt
 
-    def test_includes_weak_frequency_files(self):
-        inp = self._make_enriched_input(
-            weak_frequency_files={"punet": [0, 1, 2, 3]},
-        )
-        prompt = _build_reasoning_prompt(inp)
-        assert "Weak Frequency" in prompt
-        assert "[0, 1, 2, 3]" in prompt
-
     def test_includes_model_params(self):
         inp = self._make_enriched_input(
             per_model_params={"punet": 55000},
@@ -363,13 +355,13 @@ class TestBuildReasoningPromptEnriched:
         assert "200" in prompt
         assert "Training Data Volume" in prompt
 
-    def test_includes_frequency_comparison(self):
+    def test_includes_per_file_comparison(self):
         inp = self._make_enriched_input(
-            frequency_comparison="All models struggle with files 0-3.",
+            per_file_comparison="Cross-model Impact_Score concentrates on the highest-index rows.",
         )
         prompt = _build_reasoning_prompt(inp)
-        assert "Frequency Comparison" in prompt
-        assert "files 0-3" in prompt
+        assert "Per-File Comparison" in prompt
+        assert "Impact_Score" in prompt
 
     def test_includes_efficiency_comparison(self):
         inp = self._make_enriched_input(

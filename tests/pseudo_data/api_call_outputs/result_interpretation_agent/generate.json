@@ -11,7 +11,7 @@
     ],
     "best_config_analysis": "The best config still achieved a negative score, suggesting no hyperparameter setting tested could overcome the architectural conflict.",
     "score_trend": "Scores improved from -2.38 (round 1) to -1.51 (round 3) but remained firmly negative. No convergence to positive territory observed.",
-    "frequency_analysis": "All 20 files scored below 0.5. Low-frequency files (0-4) scored near -2.0. High-frequency files (15-19) scored around -0.5. The architecture uniformly underperforms.",
+    "per_file_analysis": "All sampled files saturated below scalar 0.5. The lowest-index files concentrate near -2.0, the highest-index near -0.5. Impact_Score is uniformly small relative to model_scalar — no single file carries a dominant lever.",
     "data_sensitivity": "Score improved 0.87 points when trial_portion increased from 0.05 to 0.1, suggesting strong data sensitivity. Model is far from data-saturated.",
     "efficiency_assessment": "Model has more parameters than the wavenet seed but scores 7 points lower. Significantly worse efficiency trade-off.",
     "strategy_assessment": "Agent correctly increased trial_portion after poor round 1 and explored two loss functions. Did not try removing the problematic mechanism."
@@ -28,7 +28,7 @@
     ],
     "best_config_analysis": "depth=4, multi=16, focal gamma=2 is the best config — deeper architecture with class-imbalance-aware loss. Further depth increases yield near-zero marginal gains.",
     "score_trend": "Scores improved from 1.20 (round 1) to 1.57 (round 4) then plateaued. Architecture has saturated at this parameter scale.",
-    "frequency_analysis": "Mid-frequency files (5-14) score around 1.5-2.0. Low-frequency (0-4) near zero. High-frequency (15-19) near 1.0. Moderate across-the-board performance.",
+    "per_file_analysis": "Mid-index files score around 1.5-2.0. Low-index files near zero. High-index files near 1.0. Moderate per-file lever distribution; Impact_Score is roughly uniform across the sampled rows.",
     "data_sensitivity": "Small data sensitivity: +0.1 score gain when doubling training data. Architecture is data-saturated at this scale.",
     "efficiency_assessment": "12.3M parameters at 1.57 score. Wavenet achieves 5.57 with 4.1M parameters — punet is larger and worse.",
     "strategy_assessment": "Agent systematically explored focal vs CE and depth variants. Correct decision to stop after plateau detection."
@@ -45,7 +45,7 @@
     ],
     "best_config_analysis": "num_layers=6, dilation_channels=16, skip_channels=16, focal loss — the dilated stack provides a large effective receptive field while gated activation enables selective denoising.",
     "score_trend": "Scores were stable across rounds (5.52 → 5.57 → 5.58). Model converged quickly; marginal improvement from tuning only.",
-    "frequency_analysis": "Files 5-19 score 6-9. Files 0-4 score near zero — consistent low-frequency blind spot. High-frequency performance is the architecture's clear strength.",
+    "per_file_analysis": "High-index files score 6-9. The lowest-index files score near zero — those rows carry the largest remaining Impact_Score for this model.",
     "data_sensitivity": "Minimal data sensitivity — model converges with standard training data. Well-suited to the current data volume.",
     "efficiency_assessment": "4.1M parameters at 5.576 score. Best score-per-parameter ratio of all tested architectures. Computationally efficient.",
     "strategy_assessment": "Agent focused correctly on focal loss and dilation depth. Appropriate exploration given rapid convergence."
@@ -60,7 +60,7 @@
       "Universal low-frequency blindness: no model yet addresses files 0-4. This is the primary unsolved bottleneck across all architectures.",
       "Novel mechanisms (attention, recurrence) consistently destabilise the dilated causal convolution backbone when added naively."
     ],
-    "frequency_comparison": "Files 0-4 score near zero across ALL models — this is a structural gap, not a per-model issue. Files 10-19 score 6-9 for wavenet but near zero for proposed models. No model achieves score > 1.0 on low-frequency files.",
+    "per_file_comparison": "The lowest-index rows carry the largest cross-model Impact_Score — every architecture has near-zero model values there. Higher-index rows carry meaningful Impact_Score only for the SOTA seed; on the proposed models those rows are also near zero. No model has captured the lever on the highest-Impact_Score rows.",
     "efficiency_comparison": "Wavenet (5.576, 4.1M params) is Pareto-dominant: highest score at lowest parameter count. All proposed models are larger and worse. The added complexity has not translated to performance gains.",
     "take_home_message": "Naively adding attention or recurrence to wavenet destroys performance — a fundamentally different approach to low-frequency context (e.g. multi-rate or frequency-domain) is required."
   }

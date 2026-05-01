@@ -486,11 +486,12 @@ class TestBuildPerModelPrompt:
 
 class TestBuildSynthesisPrompt:
 
-    def test_includes_score_table_and_weak_callout(self):
-        # Phase 5 A: synthesis prompt renders the full ScoreComparisonTable
-        # markdown AND the explicit "Weak Frequency Files" attention-cue
-        # block. The callout stays because it pre-digests the frequency
-        # structure the LLM is expected to reason about.
+    def test_includes_score_table(self):
+        # 2-zh: synthesis prompt renders the full ScoreComparisonTable
+        # markdown. The pre-V9 threshold-based "Weak Frequency Files
+        # (attention cue)" block has been deleted — opportunity ranking is
+        # now read directly from the table's Impact_Score column (rendered
+        # as a secondary block by build_score_table).
         prompt = _build_synthesis_prompt(
             per_model_summaries={"punet": FAKE_PER_MODEL_RESPONSE},
             per_model_best={"punet": 1.8},
@@ -502,8 +503,7 @@ class TestBuildSynthesisPrompt:
         )
         assert "Per-file performance (best experiment)" in prompt
         assert "(test fixture)" in prompt
-        assert "Weak Frequency Files (attention cue)" in prompt
-        assert "Weak files" in prompt
+        assert "Weak Frequency" not in prompt
 
     def test_synthesis_prompt_renders_weight_and_impact_columns(self):
         # P1-Impact: the impact-aware ScoreComparisonTable's pre-rendered
@@ -718,20 +718,6 @@ class TestOutputEnrichedFields:
         assert isinstance(table, ScoreComparisonTable)
         assert len(table.rows) == 20
 
-    def test_weak_frequency_files_computed(self, agent, tmp_path):
-        inp = InterpretationInput(
-            summaries=[ENRICHED_SUMMARY],
-            storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
-        )
-        output = agent.run(inp)
-        assert output.weak_frequency_files is not None
-        assert "punet" in output.weak_frequency_files
-        # Files 0-3 and 13,19 have scores < 1.0
-        weak = output.weak_frequency_files["punet"]
-        assert 0 in weak  # score 0.001
-        assert 1 in weak  # score 0.01
-        assert 7 not in weak  # score 78.0
-
     def test_per_model_params_populated(self, agent, tmp_path):
         inp = InterpretationInput(
             summaries=[ENRICHED_SUMMARY],
@@ -758,7 +744,6 @@ class TestOutputEnrichedFields:
         )
         output = agent.run(inp)
         assert output.per_model_score_tables is None
-        assert output.weak_frequency_files is None
         assert output.per_model_params is None
         assert output.per_model_training_segments is None
 

@@ -204,18 +204,25 @@ In your reasoning, cover all of the following:
    Concrete dimensions belong only in baseline_config.
 5. What are the likely failure modes of this architecture?
    What should the hyperparameter tuning agent watch out for?
-6. Frequency analysis and trial strategy guidance:
-   - Review the per-model file vectors to identify which frequency bands are weak.
-     If low-frequency files (0-4) score near zero across all models, the new architecture
-     should specifically address low-frequency signal recovery.
+6. Per-file analysis and trial strategy guidance:
+   - Read each model's per-file score table by `Impact_Score` descending — that is
+     the per-iter opportunity ranking. Cite `Linear_Weight` as context, not as a
+     ranking metric on its own. Identify whether the largest remaining
+     `Impact_Score` levers concentrate on a small subset of files or are
+     distributed broadly, and whether the same files dominate across models —
+     those are the cross-model opportunities the new architecture should target.
+     Do not assert that any file is universally weak from `headroom_vs_gt` alone
+     or from a fixed file-index label.
    - Recommend a trial strategy for the hyperparameter tuner:
      * What trial_portion to start with (based on model complexity — larger models need more data)
      * How many epochs for initial screening vs refinement
-     * Whether to use "snapshot" (all files), "target" (weak files only), or "anchors" (extrema)
+     * Whether to use "snapshot" (broad coverage), "target" (concentrate on the
+       highest-Impact_Score files), or "anchors" (small fixed subset)
      * Whether the architecture is data-hungry (needs high trial_portion) or data-efficient
 
-Think step by step. Be specific. Reference actual scores, model names, and file vector
-patterns from the interpretation. Do not produce JSON — that is the next step."""
+Think step by step. Be specific. Reference actual scores, model names, and the
+`Impact_Score` / `Linear_Weight` columns of the per-file score table. Do not
+produce JSON — that is the next step."""
 
 
 PROPOSAL_COMMIT_PROMPT = """\
@@ -237,10 +244,10 @@ Output a JSON object with exactly these fields:
       "Concrete first experiments to try, e.g. 'start with depth=2, lr=1e-4'",
       "Trial strategy guidance: recommended trial_portion (e.g. 0.1 for data-hungry models)",
       "Recommended epochs for screening (1-3) vs refinement (5-10)",
-      "Whether to use snapshot/target/anchors strategy based on frequency weaknesses",
-      "Which frequency bands (file indices) to focus on if using target strategy"
+      "Whether to use snapshot/target/anchors strategy based on the Impact_Score distribution",
+      "Which files (by Impact_Score ranking, not by fixed indices) to focus on if using target strategy"
     ],
-    "rationale": "Why this guidance is appropriate for this specific architecture. Include reasoning about data volume needs and frequency-specific training."
+    "rationale": "Why this guidance is appropriate for this specific architecture. Include reasoning about data volume needs and per-file lever distribution from the Impact_Score column."
   },
   "baseline_config": {
     "model_config": { ... architecture-specific hyperparameter fields ... },
@@ -569,10 +576,10 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
             "",
         ]
 
-    # Frequency analysis (from enriched interpretation)
-    freq_comp = interp.get("frequency_comparison")
-    if freq_comp:
-        lines += ["### Frequency Comparison (cross-model)", freq_comp, ""]
+    # Per-file analysis (from enriched interpretation)
+    per_file_comp = interp.get("per_file_comparison")
+    if per_file_comp:
+        lines += ["### Per-File Comparison (cross-model)", per_file_comp, ""]
 
     eff_comp = interp.get("efficiency_comparison")
     if eff_comp:
@@ -593,14 +600,6 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
             lines.append(f"#### {mt}")
             lines.append(rendered)
             lines.append("")
-
-    # Weak frequency files
-    weak_files = interp.get("weak_frequency_files")
-    if weak_files:
-        lines.append("### Weak Frequency Bands (score < 1.0 = no denoising effect)")
-        for mt, files in weak_files.items():
-            lines.append(f"  {mt}: files {files}")
-        lines.append("")
 
     # Per-model efficiency
     model_params = interp.get("per_model_params")

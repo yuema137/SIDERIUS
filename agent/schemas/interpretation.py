@@ -81,9 +81,10 @@ class ModelRunSummary(BaseModel):
     # --- Per-file performance (from file_vector) ---
     best_file_vector: Optional[List[Optional[float]]] = Field(
         default=None,
-        description="Length-20 score vector from the best experiment. Each index = one "
-                    "validation file (frequency, log scale: 0=lowest, 19=highest). "
-                    "None for files not evaluated. Reveals frequency-dependent weaknesses.",
+        description="Score vector from the best experiment, one entry per validation "
+                    "file. None for files not evaluated. Per-file semantics are defined "
+                    "by the dataset configuration; the agent reads opportunity from the "
+                    "Impact_Score column rather than fixed file-index labels.",
     )
     formal_score: Optional[float] = Field(
         default=None,
@@ -320,7 +321,7 @@ class InterpretationOutput(BaseModel):
         default_factory=dict,
         description="model_type → self-sufficient cache entry produced by Phase 1. "
                     "Each entry contains: Phase 1 LLM text (key_findings, bottlenecks, "
-                    "best_config_analysis, score_trend, frequency_analysis, data_sensitivity, "
+                    "best_config_analysis, score_trend, per_file_analysis, data_sensitivity, "
                     "efficiency_assessment, strategy_assessment) plus a '_stats' sub-dict "
                     "(best_denoising_score, worst_denoising_score, best_file_vector, "
                     "best_model_params, completed_rounds). Carry this forward as "
@@ -339,19 +340,17 @@ class InterpretationOutput(BaseModel):
         description="Single critical insight that directly motivates proposing a new architecture.",
     )
 
-    # --- Frequency analysis (from score_table) ---
+    # --- Per-file analysis (from score_table) ---
     per_model_score_tables: Optional[Dict[str, ScoreComparisonTable]] = Field(
         default=None,
         description="model_type → best ScoreComparisonTable. Strict superset of the "
                     "old per_model_file_vectors (every rows[i].model equals the old "
                     "fv[i]) plus raw_baseline, ground_truth, gain_vs_raw, "
-                    "headroom_vs_gt columns and pre-rendered markdown. Replaces "
-                    "per_model_file_vectors per Decision 6 (hard swap).",
-    )
-    weak_frequency_files: Optional[Dict[str, List[int]]] = Field(
-        default=None,
-        description="model_type → list of file indices where the model scores poorly. "
-                    "Computed from file_vector analysis (scores below threshold).",
+                    "headroom_vs_gt, linear_weight, and impact_score columns plus "
+                    "pre-rendered markdown. The Impact_Score column is the canonical "
+                    "per-file opportunity ranking — downstream consumers read levers "
+                    "from the table directly rather than relying on a separate "
+                    "threshold-derived index list.",
     )
 
     # --- Efficiency context ---
