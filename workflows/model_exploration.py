@@ -539,6 +539,7 @@ def run_workflow(
     model_types: list[str] | None = None,
     source_run_name: str | None = None,
     max_iterations: int = 1,
+    start_iteration: int = 1,
     max_rounds: int = 10,
     max_proposal_attempts: int = 3,
     target_score: float | None = None,
@@ -697,7 +698,7 @@ def run_workflow(
     print(f"  Workspace     : {workspace}")
     print(f"  Run name      : {run_name}")
     print(f"  LLM config    : {llm_config.model_dump(exclude_none=True)}")
-    print(f"  Iterations    : {max_iterations}")
+    print(f"  Iterations    : {max_iterations} (starting at {start_iteration})")
     print(f"  Tune rounds   : {max_rounds} per iteration")
     print(f"  Proposal tries: {max_proposal_attempts} per iteration")
     if target_score is not None:
@@ -817,12 +818,19 @@ def run_workflow(
     # --- Iteration loop ---
     from core.memory_probe import probe_memory
 
-    for iteration in range(1, max_iterations + 1):
+    # Chain mode runs each iter as its own subprocess with max_iterations=1 and
+    # an externally-supplied start_iteration. The loop variable becomes the
+    # canonical chain-wide iteration index — it is what the InterpretationInput
+    # carries (line below) and therefore what the evolution_log.jsonl writer
+    # in nodes.result_interpretation_agent stamps on every row. Without this
+    # offset, every chain iter would log iteration=1 (V8 Domain 3 bug).
+    for iteration in range(start_iteration, start_iteration + max_iterations):
         iter_dir = os.path.join(run_dir, f"iteration_{iteration:03d}")
         os.makedirs(iter_dir, exist_ok=True)
 
+        loop_pos = iteration - start_iteration + 1
         print(f"\n{'='*60}")
-        print(f"  ITERATION {iteration}/{max_iterations}")
+        print(f"  ITERATION {iteration} ({loop_pos}/{max_iterations})")
         print(f"  Directory: {iter_dir}")
         print(f"{'='*60}\n")
 
@@ -832,9 +840,13 @@ def run_workflow(
                      workspace=workspace, scope="workflow")
 
         # --- Interpret (once per iteration) ---
-        # Iteration 1: all seeds are new (cache is empty).
-        # Iteration 2+: only the model tuned in the previous iteration is new.
-        if iteration == 1:
+        # First iter in this subprocess: all seeds are new (cache is empty).
+        # Subsequent iters: only the model tuned in the previous iteration is
+        # new. ``iteration == start_iteration`` is the chain-aware predicate
+        # — chain-mode subprocesses run with ``start_iteration > 1``, but the
+        # local "first iter in this subprocess" semantics still hold because
+        # the seeds are loaded fresh per subprocess.
+        if iteration == start_iteration:
             new_summaries = seed_summaries
         else:
             new_summaries = [latest_new_summary] if latest_new_summary is not None else []
@@ -875,7 +887,7 @@ def run_workflow(
         # count when max_iterations > 1 (in-process mode). The Hop-4 block
         # below already covers that path via iteration_results[-1].
         # See docs/V8_Gap_Report.md Domain 1.
-        if iteration == 1 and accumulated_physical_rejections:
+        if iteration == start_iteration and accumulated_physical_rejections:
             _cross_iter_aggregated = _aggregate_worst_offender_rejections(
                 list(accumulated_physical_rejections)
             )

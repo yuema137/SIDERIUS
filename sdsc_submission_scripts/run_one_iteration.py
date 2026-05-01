@@ -655,6 +655,7 @@ def main():
             run_name=run_name,
             llm_config=llm_config,
             max_iterations=1,
+            start_iteration=args.start_iteration,
             max_rounds=args.max_rounds,
             max_proposal_attempts=args.max_proposal_attempts,
             is_trial=args.is_trial or True,  # default to trial mode
