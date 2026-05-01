@@ -188,7 +188,7 @@ class TestExpertContextItem:
         assert eci.produced_at is None
 
     def test_all_kinds_accepted(self):
-        for kind in ["empirical", "theoretical", "literature", "human", "narrative"]:
+        for kind in ["empirical", "theoretical", "literature", "human", "narrative", "findings"]:
             eci = ExpertContextItem.model_validate({
                 "source": "test",
                 "kind": kind,
