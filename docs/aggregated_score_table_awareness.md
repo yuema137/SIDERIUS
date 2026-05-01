@@ -1691,7 +1691,7 @@ pass on the V8-style prompt, the assertions are too weak.
 
 #### Live checklist
 
-**Superseded:** This checklist is superseded by the Refinement live checklist (Line 1972) to align with the Zero-Hardcoding Impact-Aware architecture.
+**Superseded:** This checklist is superseded by the Refinement live checklist (see §8. Live checklist in Phase 8 Refinement below) to align with the Zero-Hardcoding Impact-Aware architecture.
 
 #### Phase 8 Refinement — Impact-Aware Interpretation (Zero-Hardcoding, 2026-05-01)
 
