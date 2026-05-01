@@ -1478,6 +1478,621 @@ Phase 3 would give the tuner score_tables but leave the downstream agents on
 the old file_vector, which produces incomplete data and prevents validating
 the core hypothesis of this design. v1 waits for full-graph awareness.
 
+---
+
+### Phase 8 — Cognitive Alignment (V9 launch gate, 2026-05-01)
+
+**Status:** ⏳ in progress — foundation commits 1–3 landed; commit 4 (this doc) is the only one still in flight. After it lands, the foundation is closed and the next track is P3 (chain plumbing) → P1-Impact (zero-hardcoding refinement) → P2-Impact (prompt rewrite) → P4-Impact (cognitive-alignment behavioural test).
+
+#### Foundation commits (prerequisite to P1-Impact / P2-Impact / P3 / P4)
+
+These four commits land the data-correctness + observability bedrock that the
+downstream cognitive-alignment work assumes. They were approved on 2026-05-01
+after the Path-A regen verification (File 0 / File 18 hand-computed values
+matched the regenerated JSONs).
+
+| # | Title | Status | Notes |
+|---|-------|--------|-------|
+| 1 | `feat(scoring): drop round-2dp from compute_*.py + regen reference` | ✅ landed `8947511` (2026-05-01) | `compute_raw_baseline.py` + `compute_ground_truth.py` + `reference_data/raw_and_ground_score.md`. All 20 fine-file JSONs regenerated under `/home/klz/Data/SIDEREIS_DATA/{raw_baseline,ground_truth}/` with `*.bak_20260501_110716` backups. Scalars now read raw `1.0007` / gt `10.1134`. |
+| 2 | `feat(observability): persistent audit stream for score tables` | ✅ landed `b222a16` (2026-05-01) | New `nodes/agent_data_stream.py` (best-effort JSONL appender at `{workspace}/logs/agent_data_stream.jsonl`) + audit-logging block in `nodes/ml_hyperparameter_tune_agent.py` only. Tune-agent imports cleanly; end-to-end exercise lands via Gate 2 in §12.5. |
+| 3 | `fix(scoring): harmonize model column to log-space + clip headroom at 0` | ✅ landed `564e0ac` (2026-05-01) | `file_vector_to_log_space()` helper + `_LOG_OFFSET = 1e-10`; `PerFileRow.headroom_vs_gt` Pydantic `ge=0.0`; `_build_rows` clips negative headroom; tune-agent call site converts `score_vector`'s linear file_vector before `build_score_table`. **39/39** in the two relevant test files green pre-commit; 2 pre-existing tests updated to match the clip contract. |
+| 4 | `docs(phase8): cognitive-alignment + zero-hardcoding refinement` | ⏳ in flight (this commit) | This document — Phase 8 (problem + solution + commit plan), §12.5 V9 launch gates, Phase 8 Refinement rewritten under the **Zero-Hardcoding** principle (no fixed weight thresholds, no static "Inconsequential / IGNORE" partition; agent ranks dynamically by `Impact_Score`). Foundation tracker self-marks as landed. |
+
+**Audit decision (2026-05-01)**: during the commit-3 pause we audited the doc
+for hardcoded classification logic. The committed and staged code carries
+**no** static partition or threshold — schemas store raw numbers, helpers
+clip headroom only as a unit invariant (a header comment explains "dead-zone
+files" purely as background; the diagnostic itself is conveyed elsewhere).
+The hard-coding lived entirely in the doc (original `HEADROOM_EPSILON = 0.5`
+plan and the linear-weight refinement's `HIGH_IMPACT_CUMULATIVE_THRESHOLD =
+0.90` / `INCONSEQUENTIAL_WEIGHT_THRESHOLD = 1e-3` plus an "IGNORE these
+files" prompt block). That logic is being replaced in commit 4 — see the
+revised **Phase 8 Refinement** section below.
+
+#### Problem statement
+
+V8 ran 6 chain iters (4 with valid formal scores) and produced 6
+nearly-identical `take_home_message`s converging on a fictitious diagnosis:
+*"low-frequency failure plus high-frequency over-amplification, need a
+broadband-calibrated denoiser."* Each iter's proposer dutifully proposed a
+"calibrated multiband" model targeting that same fiction. Best score
+plateaued at 5.632 from iter_2 onward. SSM iters (3 and 5) were killed by
+the time-risk gate, so 4 of 6 iters were uninformative on top of this.
+
+Audit of the V8 records confirmed `best_score_table` was populated and
+threaded correctly through the protocol layer — the data was honest. The
+**framing around the data was potential-blind** in three concrete places:
+
+1. **Interpreter pre-digests the table through an absolute threshold.**
+   `nodes/result_interpretation_agent.py:313-321` (in `_build_synthesis_prompt`)
+   flags `model < 1.0` as "Weak Frequency Files" and `model >= 10.0` as
+   "Strong" — without consulting `headroom_vs_gt`. Files 0–3 have
+   `ground_truth` intrinsically at the −13.854 clip floor (zero recoverable
+   signal), so any model is structurally guaranteed to score below 1.0
+   there. The "Weak Frequency Files (attention cue)" section, rendered
+   immediately next to the table in the synthesis prompt every iteration,
+   teaches the LLM that the dataset's lower limit is a model deficiency.
+
+2. **Synthesis system prompt has no potential-aware framing.**
+   `SYNTHESIS_SYSTEM_PROMPT` (lines 187–228) instructs *"Which frequency
+   ranges are well-handled vs universally weak"* — absolute concepts. No
+   reference to `gain_vs_raw` or `headroom_vs_gt` columns. No instruction
+   to ignore files where headroom is structurally zero. The take_home
+   instruction is leading: *"the single most critical insight that
+   motivates designing a new architecture"* — pre-supposes the answer.
+   Even when the right answer is "current architecture is at the dataset
+   ceiling on the high-headroom files", the LLM is forced to manufacture a
+   reason to change architecture.
+
+3. **Chain instrumentation stamps every iter as `iteration=1`.**
+   `workflows/model_exploration.py:820` always loops
+   `for iteration in range(1, max_iterations + 1)`. Chain mode runs
+   `max_iterations=1`, so each chain subprocess writes `iteration=1` into
+   `evolution_log.jsonl`. The chain runner
+   (`sdsc_submission_scripts/run_one_iteration.py:620`) consumes
+   `--start_iteration` for plugin restoration but never threads it into
+   `run_workflow`'s loop variable. Post-mortem reads of the evolution log
+   cannot tell which chain iter wrote which line.
+
+4. **Phase 6.5 Stage 1 semantic smoke test missed all of the above.** It
+   asserted *"the LLM cites numbers from the table"* (19 numeric hits
+   passed). It never asserted *"the LLM reasons in terms of headroom
+   rather than absolutes"*. A run that cites *"files 0–3 score below 0.2"*
+   passes the smoke test while making the exact wrong inference. The
+   smoke test calibrated for "is the data being read?" not "is the data
+   being interpreted correctly?"
+
+#### Solution
+
+Three priority-ordered fixes plus a new behavioral test that closes the
+Phase 6.5 evaluation gap and acts as the V9 launch gate.
+
+**P1 — Headroom-aware partitioning in the interpreter prompt.**
+Replace the absolute-threshold callout with two lists computed from
+`PerFileRow.headroom_vs_gt`:
+
+- **Active Search Space** — files where `|headroom_vs_gt| > ε`. These
+  are the only files where model improvements can move the score. Render
+  with file indices and remaining headroom per file.
+- **Information Dead Zone** — files where `|headroom_vs_gt| < ε`.
+  Explicitly prefixed: *"IGNORE these files. They are dataset-limited.
+  Any low score here is NOT the model's fault."*
+
+`ε` is a small log-space constant (proposed default: `0.5` log-space units
+on the global `s_max` — large enough to cover float noise on clip-floor
+files, small enough to not exclude files with genuine recovery
+opportunity). Calibrated against the on-disk reference scalars; covered
+by a unit test that asserts files 0–3 land in the dead zone for every
+realistic ground_truth profile.
+
+**P2 — Neutralize the synthesis system prompt.**
+Remove the leading instruction *"the single most critical insight that
+motivates designing a new architecture"*. Replace with:
+
+> *"Assess whether the current architecture has saturated the available
+> headroom in the Active Search Space. If yes, state that the chain has
+> reached the dataset ceiling — do not invent a fictitious deficiency.
+> If no, identify which high-headroom bands are failing and suggest
+> specific modular changes targeted at those bands. Files in the
+> Information Dead Zone are dataset-limited; do not propose model changes
+> aimed at improving them."*
+
+Also rename the `frequency_comparison` field-instruction from *"well-handled
+vs universally weak"* to *"reference `gain_vs_raw` and `headroom_vs_gt`
+columns; bands with `|headroom_vs_gt| < ε` are dataset-limited and not
+model-attributable."*
+
+**P3 — Fix chain instrumentation.**
+Add `start_iteration: int = 1` parameter to `run_workflow`. Change the
+loop from `range(1, max_iterations + 1)` to
+`range(start_iteration, start_iteration + max_iterations)`. Thread
+`start_iteration=args.start_iteration` from `run_one_iteration.py`'s
+`run_workflow(...)` call.
+
+**P4 — New behavioral test: `test_cognitive_alignment_smoke.py`.**
+Multi-iter pseudo-training + real OpenAI probe that asserts the LLM's
+reasoning is headroom-aware, not just that it cites numbers. This is the
+test V8 would have failed; it gates the V9 launch.
+
+#### Detailed commit plan
+
+| # | Scope | Files |
+|---|-------|-------|
+| 1 | **P1** — Headroom-aware callout. Replace `_build_synthesis_prompt:313-321` (and `_build_per_model_prompt` if the same `<1.0` heuristic exists there). Define `HEADROOM_EPSILON = 0.5` constant. Render *Active Search Space* + *Information Dead Zone* lists with explicit "IGNORE" prefix on the dead-zone block. Drop the absolute `<1.0` / `>=10.0` callout entirely. Unit tests (4 cases): files 0–3 at floor → dead zone; file 19 high recovery → active; all-zero-headroom → entire active list empty + ceiling-state cue; epsilon boundary. | `nodes/result_interpretation_agent.py` · `tests/unit/agent/result_interpretation_agent/test_interpretation_agent.py` |
+| 2 | **P2** — Rewrite `SYNTHESIS_SYSTEM_PROMPT`. Drop the architecture-bias rule. Add headroom-aware framing per spec above. Add explicit "saturated → declare ceiling" branch. Rename `frequency_comparison` field-instruction to cite `gain_vs_raw` / `headroom_vs_gt`. Unit tests (2 cases): prompt string contains the ceiling branch substring; prompt string contains the high-headroom-bands branch substring. | `nodes/result_interpretation_agent.py` · `tests/unit/agent/result_interpretation_agent/test_interpretation_agent.py` |
+| 3 | **P3** — Add `start_iteration: int = 1` arg to `run_workflow`. Change the loop. Thread from `run_one_iteration.py`. Update `evolution_log.jsonl` writer site to use the loop's `iteration` variable (already does — the bug is upstream of the writer). Unit tests (2 cases): `start_iteration=1` unchanged behavior; `start_iteration=5, max_iterations=1` writes a single iter row stamped `iteration=5`. | `workflows/model_exploration.py` · `sdsc_submission_scripts/run_one_iteration.py` · `tests/unit/workflows/test_model_exploration.py` |
+| 4 | **P4** — `tests/integration/workflows/test_cognitive_alignment_smoke.py`. New file. `@pytest.mark.real_run`, skips without `OPENAI_API_KEY`. 3-iter pseudo-training loop with hand-crafted `ModelRunSummary` fixtures — files 0–3 at clip floor (dead zone), files 11/15 at moderate recovery, file 19 at high headroom. Real OpenAI for `ResultInterpretationAgent` and `MLModelProposalAgent`. `RecordingLLMBridge` captures every stage prompt and response. Assertions detailed below. This is the V9 launch gate. | `tests/integration/workflows/test_cognitive_alignment_smoke.py` |
+
+#### P4 test design — the V9 gate
+
+Pseudo training inputs (per iter): a synthetic `ModelRunSummary` with a
+populated `best_score_table` shaped to the V8 dataset structure:
+
+| File range | `raw_baseline` | `ground_truth` | `model` | classification |
+|---|---|---|---|---|
+| 0–3 | clip floor (≈ −13.85) | clip floor (≈ −13.85) | clip floor | dead zone |
+| 4–10 | moderate | moderate | within ε of ground_truth | low headroom |
+| 11–15 | moderate | high | partial recovery (≈ 50–70% of ceiling) | active — opportunity |
+| 16–18 | low | high | high recovery (≈ 80–90% of ceiling) | active — near ceiling |
+| 19 | low | very high | low recovery (≈ 30%) | active — biggest opportunity |
+
+Across 3 iters, vary the `model` column slightly so the chain has
+genuine signal to react to (iter_2 model improves on file 19 by 0.5;
+iter_3 plateaus). The dead zone is invariant across iters.
+
+**Assertions (all must pass for the test to gate V9):**
+
+1. **Negative assertion (no false-positive dead-zone targeting).** Across
+   all 3 iters' `take_home_message`s, scan for forbidden phrasings:
+   `"low-frequency failure"`, `"low-band suppression"`, `"files 0-3 ..."`
+   when used as a problem-to-fix. Permitted: dead-zone references with
+   neutral framing (`"dataset-limited"`, `"ignored"`, `"clip floor"`,
+   `"no headroom"`). At most 0 forbidden matches across all 3 iters.
+
+2. **Positive assertion (correct reasoning surfaces).** Each iter's
+   `take_home_message` must contain at least one of:
+   - a "ceiling-reached" cue (`"saturated"`, `"ceiling"`, `"no further
+     headroom"`, `"dataset-limited"` applied to the chain's progress), OR
+   - a specific high-headroom file reference (`"file 19"`, `"files
+     16-19"`, etc.) framed as the target for next-round work.
+
+3. **Echo-chamber regression guard.** Compute pairwise normalised token
+   overlap (Jaccard on lowercased word tokens) across the 3 take_homes.
+   If all 3 pairs exceed 0.7, the test fails — this is the V8 echo
+   chamber pattern. Acceptable patterns: (a) all 3 converge on "ceiling
+   reached" with low pairwise overlap, OR (b) take_homes diverge across
+   iters as the model evolves.
+
+4. **Proposer dead-zone neutrality.** Capture the final
+   `proposing_commit` stage prompt for each iter via `RecordingLLMBridge`.
+   Assert it references files 0–3 only with neutral language; assert the
+   proposed model description (free text) does not name files 0–3 as
+   improvement targets.
+
+5. **Numeric-citation continuity (Phase 6.5 Stage 1 carryover).** The
+   per-iter scanner from `test_score_table_pseudo_smoke.py` still applies:
+   total numeric hits across proposer stages > 0 per iter. Ensures the
+   table is still being read, not just framed correctly.
+
+**Calibration**: before promoting to gating, run the test against the
+**existing (broken)** prompt to confirm assertions 1 and 3 fail — if they
+pass on the V8-style prompt, the assertions are too weak.
+
+#### Test plan summary
+
+- **Unit (per commit, run before commit per `feedback_test_before_commit.md`):**
+  Commit 1: 4 cases. Commit 2: 2 cases. Commit 3: 2 cases.
+- **Integration (commit 4 only, `@real_run` + OpenAI):**
+  3 iters × 2 LLM agents ≈ 6–10 calls, ~90 s wall time. Pseudo training
+  only — no GPU dependency. Run before V9 launch.
+
+#### Live checklist
+
+- [ ] **1.** P1 headroom-aware callout
+- [ ] **2.** P2 neutralize synthesis prompt
+- [ ] **3.** P3 chain `iteration` field fix
+- [ ] **4.** P4 cognitive-alignment behavioral test (calibrated against
+      old prompt → fails; passes against new prompt)
+- [ ] V9 launch — only after 1 + 2 + 3 are committed *and* 4 is green
+
+#### Phase 8 Refinement — Impact-Aware Interpretation (Zero-Hardcoding, 2026-05-01)
+
+**Status:** ⏳ supersedes both the original P1 (`HEADROOM_EPSILON = 0.5`
+log-space partition) and the earlier "Linear-weight" version of this section
+(`HIGH_IMPACT_CUMULATIVE_THRESHOLD = 0.90` / `INCONSEQUENTIAL_WEIGHT_THRESHOLD
+= 1e-3`, "IGNORE these files" prompt). Both contained **static thresholds and
+fixed file-class labels** — exactly the kind of hardcoding that prevents the
+agent from learning where the next-iter opportunity actually lies. P3 + P4
+are unchanged in spirit but their assertions are rewritten below.
+
+##### Guiding principle — Zero-Hardcoding
+
+The agent must read opportunity dynamically from the data each iteration.
+Concretely:
+
+- **No threshold constants** in code or prompts (no `0.90`, no `1e-3`, no
+  `ε=0.5`). The schema stores raw numbers; the partition decision is *not*
+  encoded.
+- **No file-class labels** ("Inconsequential", "Dead Zone", "Active Search
+  Space") and no instructions to **IGNORE** any subset of indices. A file
+  that has near-zero linear weight today may become the only available lever
+  later if higher-weight files saturate.
+- **No baked-in outcome lists** in tests (no "files 0–3 land in the dead
+  zone"). Tests assert *properties* (weights sum to 1, `Impact_Score = 0`
+  iff `model = gt`, ranking is monotone in `Impact_Score`), not specific
+  index identities.
+- **Saturation is a relative reading**, not a threshold check. The LLM
+  judges saturation from the shape of the `Impact_Score` distribution
+  alongside the current `model_scalar` — both live on the same log-space
+  ruler, so "is the largest remaining opportunity small?" is a comparison
+  the LLM can make without any code-side cutoff.
+
+The schema additions (`linear_weight`, `impact_score`) are **raw data**, not
+classifiers. The agent ranks them at read time.
+
+##### 1. Motivation — the "log-of-mean trap"
+
+The production scalar is
+
+```
+final_scalar = log_{5.27}(  Σ_{f,i} per_segment[f,i]  /  Σ_f |S_f|  +  1e-10 )
+```
+
+— a **log of a sum**, not a mean of logs. Files contribute to the inner sum
+proportionally to their **linear** per-segment energy. A multi-log-unit
+improvement on a tiny-linear-energy file barely moves the sum; a fractional
+log-unit improvement on a dominant-linear-energy file moves it
+substantially.
+
+Numerically, on the post-Path-A `gt` ceiling distribution today, file 17
+alone carries ~31.5% of `Σ`; the top 6 files (14–19) carry ~91%; files 0–8
+collectively carry <0.1%. **These are observations about today's dataset,
+not classifications.** The agent reads them live each iter from the
+`Linear_Weight` column. As the model improves and the contribution shape
+shifts (e.g. once file 17 is fully recovered, its remaining `Impact_Score`
+drops to zero and the lever moves elsewhere), the ranking that matters is
+the live `Impact_Score` ranking — not yesterday's "high-impact list".
+
+The "log-of-mean trap" is not "files 0–8 are inconsequential". It is the
+geometric fact that **a log-space gap is not a linear-space contribution**.
+The cure is to render both `Linear_Weight` (where the scalar lives now) and
+`Impact_Score` (where the next-iter lever is) as columns and let the agent
+rank them.
+
+##### 2. The two metrics — Impact_Score (primary) and Linear_Weight (context)
+
+Define, per-iteration, over the model-sampled file set $S$:
+
+- **`Linear_Mean_f`** — the per-file linear value already on `PerFileRow`
+  upstream (the linear `file_vector` entry, before the log conversion).
+- **`Σ = Σ_{f∈S} Linear_Mean_f`** — the same denominator the scalar uses,
+  restricted to the sampled subset.
+
+**`Linear_Weight_f = Linear_Mean_f / Σ`** — fractional contribution of file
+$f$ to the scalar **right now**. Sums to 1 over the sampled set. This is a
+*context* metric: it tells the agent where the scalar's mass currently
+sits, which by itself does not say where the next opportunity is. A file
+can have high `Linear_Weight` and zero remaining headroom (already at the
+ceiling); a file can have low `Linear_Weight` and large headroom (small
+mass, but if higher-mass files saturate, this becomes the lever).
+
+**`Impact_Score_f`** — the marginal log-scalar gain a file would induce if
+its `model_linear` were lifted to its `gt_linear`:
+
+```
+Impact_Score_f =
+  log_{5.27}(grand_mean_with_file_f_at_ceiling + 1e-10)
+  − log_{5.27}(grand_mean_current + 1e-10)
+```
+
+Computed cheaply from cached `linear_sum`s. Properties:
+
+- Non-negative (negative values clip to zero, mirroring `headroom_vs_gt`).
+- Equals zero iff `model_linear ≥ gt_linear` (file already at or above
+  ceiling).
+- Folds in *both* "where the scalar lives now" (via `Σ`) *and* "how much
+  room is left on this file" (via `gt_linear − model_linear`). A
+  high-`Linear_Weight` file that is already saturated has
+  `Impact_Score → 0` even though its weight stayed unchanged.
+
+**`Impact_Score` is the primary opportunity metric**; the agent ranks by
+it. `Linear_Weight` is rendered alongside as context only.
+
+##### 3. Adaptive interpretation — no partitions, no thresholds, no IGNORE
+
+The interpreter prompt **does not partition** files into named classes.
+There is no "High-Impact / Mid-Impact / Inconsequential" block, no
+`HIGH_IMPACT_CUMULATIVE_THRESHOLD`, no `INCONSEQUENTIAL_WEIGHT_THRESHOLD`,
+no instruction to ignore any index.
+
+Instead, the agent is given two columns and a reasoning frame:
+
+- The 20-row table is rendered in file-index order (preserves spatial
+  intuition the proposer relies on for frequency-band reasoning).
+- A **secondary block** lists files re-sorted by `Impact_Score` descending,
+  with their `Linear_Weight` and `headroom_vs_gt` shown alongside. This is
+  the "where can the next iter push?" view.
+- The prompt frame (§4 below) tells the agent how to read these — relative
+  comparisons across the iter, not against fixed cutoffs.
+
+**Adaptive saturation.** The agent declares the chain saturated when the
+`Impact_Score` column shows that no remaining lever is large enough to
+matter — a *relative* judgment the agent makes by comparing entries within
+the column and against the magnitude of `model_scalar` itself (both live on
+the same `log_{5.27}` ruler). There is no fixed `ε`; "small enough to call
+the chain done" is the agent's reading. The audit stream
+(`agent_data_stream.jsonl`) preserves the column values across iters so
+post-hoc analysis can verify the call was reasonable, but the runtime path
+carries no threshold.
+
+This fully decouples the partition decision from the code: the *only* way
+the agent's classification of a file changes is by reading a different
+`Impact_Score` value next iter.
+
+##### 4. Prompt engineering — Impact_Score-aware reasoning
+
+Replace the existing `SYNTHESIS_SYSTEM_PROMPT` field-instructions for table
+reading with the section below. Note: zero file-class labels, zero numeric
+cutoffs, zero "IGNORE" verbiage.
+
+> ### Reading the score table — the Log-of-Mean trap
+>
+> The aggregate scalar is `log_{5.27}` of a **sum** of per-segment linear
+> energies, not a mean of per-file log scores. A file's contribution to
+> the next-iter improvement budget is captured by **two** columns:
+>
+> - **`Linear_Weight`** — the file's current share of the scalar's linear
+>   denominator. Tells you *where the scalar lives now*. Sums to 1 across
+>   sampled files.
+> - **`Impact_Score`** — the log-scalar gain you would obtain by lifting
+>   this file's `model` to its `ground_truth`. Tells you *where the
+>   next-iter lever is*. A high `Impact_Score` means a file with both
+>   meaningful weight and remaining headroom; a near-zero `Impact_Score`
+>   means either the file is already at its ceiling or its weight is too
+>   small for any improvement to register.
+>
+> When you analyse bottlenecks:
+>
+> 1. **Rank by `Impact_Score` descending** to identify this iter's
+>    largest available levers. A multi-log-unit `headroom_vs_gt` does not
+>    by itself indicate opportunity — only `Impact_Score` does.
+> 2. **Read `Linear_Weight` for context.** It is *not* a ranking metric on
+>    its own — a high-weight file at its ceiling has zero `Impact_Score`
+>    and is not actionable.
+> 3. **Saturation is a relative reading.** If the entire `Impact_Score`
+>    column is small in magnitude relative to the current `model_scalar`
+>    and to the gains your chain has been making per iter, the chain has
+>    reached the dataset ceiling — declare it explicitly. There is no
+>    fixed cutoff; you compare the distribution against the scale of
+>    progress.
+> 4. **No file is permanently irrelevant.** Today's near-zero
+>    `Impact_Score` may rise next iter if higher-`Impact_Score` files get
+>    fully recovered. Re-read the column each iter; do not memorise
+>    file-class labels across iterations.
+
+Rewrite the `frequency_comparison` field-instruction to:
+
+> *"Cite `Impact_Score`, `Linear_Weight`, and `gain_vs_raw` together when
+> discussing bottlenecks. Rank candidates for the next iter's improvement
+> by `Impact_Score` descending. Do not assert frequency-band failures
+> based on `headroom_vs_gt` alone — a large headroom on a low-weight file
+> implies a near-zero `Impact_Score` and is not actionable."*
+
+##### 5. Schema + table presentation
+
+`agent/schemas/score_table.py`:
+
+- Add two columns to `PerFileRow`:
+  - `linear_weight: Optional[float]` — `None` when the file is unsampled;
+    otherwise in `[0, 1]`. Pydantic `ge=0.0, le=1.0`.
+  - `impact_score: Optional[float]` — non-negative log-space marginal
+    scalar gain. `None` when unsampled or when `ground_truth` is missing.
+    Pydantic `ge=0.0`.
+- Add **one** computed-once invariant field to `ScoreComparisonTable`:
+  - `linear_weight_total: float` — must equal `1.0 ± float-eps` over
+    sampled rows; asserted by a Pydantic `model_validator`. This is a
+    *correctness invariant*, not a classification.
+- **Do not add** `high_impact_files` / `mid_impact_files` /
+  `inconsequential_files` index lists. The schema stores raw values; the
+  ranking is the consumer's job.
+
+`execute_tools/scoring_helpers.py`:
+
+- Modify `build_score_table` to accept the linear file_vector alongside the
+  log file_vector (today only the log version is threaded through; the
+  linear vector is the unconverted output of `score_vector`, already
+  available at the call site). Compute `Linear_Weight` and `Impact_Score`
+  per row from it.
+- `render_comparison_table` gains two columns in the per-file table
+  (`Weight %` and `Impact`) and a **secondary block** rendered immediately
+  after the main table that re-orders the *sampled* rows by `Impact_Score`
+  descending. No partition labels appear in the secondary block; it is
+  just a re-sorted projection.
+
+Markdown sketch (no canonical file indices baked in — these are
+placeholders the renderer fills from whatever the iter actually sampled):
+
+```
+| file | raw_baseline | ground_truth | model | gain_vs_raw | headroom_vs_gt | Weight % | Impact |
+|-----:|-------------:|-------------:|------:|------------:|---------------:|---------:|-------:|
+|    0 |          ... |          ... |  ...  |        ...  |           ...  |    ...  |   ...  |
+|    1 |          ... |          ... |  ...  |        ...  |           ...  |    ...  |   ...  |
+|  ... |          ... |          ... |  ...  |        ...  |           ...  |    ...  |   ...  |
+
+### Sampled files re-ranked by Impact_Score (descending)
+| file | Impact | Weight % | headroom_vs_gt | model |
+|-----:|-------:|---------:|---------------:|------:|
+| ⟨largest-impact-this-iter⟩ |  ... |  ... |  ... |  ... |
+| ⟨next⟩                     |  ... |  ... |  ... |  ... |
+| ...                         |  ... |  ... |  ... |  ... |
+```
+
+##### 6. Revised commit plan (zero-hardcoding)
+
+These rows replace the original Phase 8 P1/P2/P3/P4 entries (line 1596) and
+also supersede the prior "linear-weight partition" version of this section.
+
+| # | Scope | Files |
+|---|-------|-------|
+| 1-zh | **P1-Impact (zero-hardcoding).** Add `linear_weight: Optional[float]` (`ge=0, le=1`) + `impact_score: Optional[float]` (`ge=0`) to `PerFileRow`. Add `linear_weight_total` invariant to `ScoreComparisonTable` with `model_validator` (≈ 1.0 over sampled rows). Modify `build_score_table` signature + body to accept linear fv and compute `Linear_Weight` + `Impact_Score` per row. Update `render_comparison_table`: add `Weight %` and `Impact` columns to the main table; render a secondary "re-sorted by Impact_Score descending" block under the main table (no partition labels, no threshold-driven list). **Remove** any `_build_synthesis_prompt:313-321` callout that classifies files by absolute thresholds. **No threshold constants are introduced.** Property-based unit tests (no fixed-index assertions): (a) `Σ Linear_Weight ≈ 1` over sampled rows; (b) `Impact_Score = 0` iff `model_linear ≥ gt_linear`; (c) `Impact_Score > 0` when `model < gt`; (d) ranking by `Impact_Score` is invariant under permutation of input order; (e) trial subset (only a strict subset sampled) — unsampled rows carry `None`, weights re-normalise over sampled subset; (f) `linear_weight_total` validator catches out-of-bounds. | `agent/schemas/score_table.py` · `execute_tools/scoring_helpers.py` · `nodes/result_interpretation_agent.py` · `tests/unit/agent/schemas/test_score_table.py` · `tests/unit/execute_tools/test_scoring_helpers.py` · `tests/unit/agent/result_interpretation_agent/test_interpretation_agent.py` |
+| 2-zh | **P2-Impact (zero-hardcoding).** Rewrite `SYNTHESIS_SYSTEM_PROMPT`: drop the architecture-bias rule; insert the new "Reading the score table — the Log-of-Mean trap" section verbatim per §4 above (which contains zero file-class labels, zero numeric thresholds, zero IGNORE verbiage); rewrite `frequency_comparison` field-instruction per §4. Property unit tests: (a) prompt contains the exact `Impact_Score` ranking instruction; (b) prompt does **not** contain any of `{"Inconsequential", "IGNORE", "0.001", "1e-3", "0.90", "HEADROOM_EPSILON"}` — guards against regressions back to threshold-based phrasing; (c) prompt contains the relative-saturation framing substring. | `nodes/result_interpretation_agent.py` · `tests/unit/agent/result_interpretation_agent/test_interpretation_agent.py` |
+| 3 | **P3** — chain `start_iteration` plumbing. Unchanged from the original Phase 8 P3 (line 1598). | `workflows/model_exploration.py` · `sdsc_submission_scripts/run_one_iteration.py` · `tests/unit/workflows/test_model_exploration.py` |
+| 4-zh | **P4-Impact (zero-hardcoding) — `tests/integration/workflows/test_cognitive_alignment_smoke.py`.** Pseudo-training fixture varies the per-file shape across 3 iters so that the "lever" file *moves* between iters (e.g. iter_1 lever is one file, iter_3's largest `Impact_Score` is a different file because the iter_1 lever has been recovered). Assertions (all property-based, no fixed-index expectations): (i) take_home cites the file with the largest `Impact_Score` *that iter*; (ii) take_home does **not** assert any file is permanently irrelevant; (iii) when the fixture is shaped so all `Impact_Score`s are small relative to `model_scalar`, take_home declares saturation (relative reading); (iv) Jaccard < 0.7 across the 3 take_homes (echo-chamber guard from the original P4 carries over); (v) the captured synthesis prompt contains both `Impact_Score` and `Linear_Weight` columns. | `tests/integration/workflows/test_cognitive_alignment_smoke.py` |
+
+Net effect: 1-zh and 2-zh are smaller in code (no constants, no partition
+helpers, no index lists) and stricter in tests (regression-guard tests that
+explicitly forbid the dropped vocabulary). Commit 3 is unchanged. 4-zh's
+fixture is *more* dynamic — the lever has to *move* across iters, so the
+test catches an agent that learns a one-iter classification and reuses it.
+
+##### 7. What we're explicitly removing
+
+The following items appeared in earlier drafts of this section and are
+**not** part of the zero-hardcoding plan:
+
+- `INCONSEQUENTIAL_WEIGHT_THRESHOLD = 1e-3` (and any equivalent constant).
+- `HIGH_IMPACT_CUMULATIVE_THRESHOLD = 0.90` (and any equivalent constant).
+- `HEADROOM_EPSILON = 0.5` (the original P1's log-space partition cutoff).
+- `high_impact_files` / `mid_impact_files` / `inconsequential_files` index
+  lists on `ScoreComparisonTable`.
+- The named partition labels "High-Impact" / "Mid-Impact" /
+  "Inconsequential" in any prompt or rendered markdown.
+- Any prompt instruction telling the agent to "IGNORE" a class of files or
+  to refuse to "propose architecture changes targeted at" any subset.
+- Unit tests that assert specific file indices land in specific classes
+  (e.g. "files 0–3 → dead zone").
+
+The original P1 (`HEADROOM_EPSILON`) was never merged. The earlier
+linear-weight partition draft of this Refinement was never committed; it
+is replaced wholesale by the zero-hardcoding version.
+
+##### 8. Live checklist
+
+- [ ] **1-zh.** P1-Impact: schema columns (`linear_weight`, `impact_score`,
+      `linear_weight_total`) + `build_score_table` body + renderer columns
+      and re-sorted secondary block. **No threshold constants.**
+- [ ] **2-zh.** P2-Impact: rewrite `SYNTHESIS_SYSTEM_PROMPT` per §4
+      (`Impact_Score` ranking, relative saturation, no IGNORE, no labels).
+- [ ] **3.** P3 chain `start_iteration` plumbing (unchanged).
+- [ ] **4-zh.** P4-Impact behavioural test — fixture must shift the lever
+      file across iters; calibrate against pre-rewrite prompt → must fail.
+- [ ] V9 launch — only after **1-zh + 2-zh + 3** are committed *and* **4-zh**
+      is green.
+
+The original P1/P2 entries in the live checklist (line 1666) are superseded
+by **1-zh** / **2-zh**.
+
+#### Total Genericity Audit (queued for after Commit 4 lands)
+
+Before P1-Impact starts, sweep the infra and system prompts for residual
+denoise-specific assumptions. In scope: hardcoded frequency-band logic
+(`low/mid/high band`, `1 Hz`, `100 kHz`, etc.), domain-specific framing in
+LLM system prompts that hardcodes the task as denoising rather than as
+"this iter's metric → next-iter improvement"), any reference to the
+20-file dataset structure that should be parameterised, any docstring that
+implies the metric is loss-specific. Output: a delta list applied at the
+front of P1-Impact — or, if the audit is large, its own pre-commit. To be
+expanded once Commit 4 is on `master`.
+
+#### Out of scope (tracked separately)
+
+- **Vocab freeze** (`vocab_total=21, candidate=0, promoted=0` across all 6
+  V8 chain iters). Distinct from cognitive alignment — likely an
+  interaction between chain-mode runtime_vocab persistence and the
+  centrifugal-force gate. Investigate as a follow-up phase.
+- **`PerFileRow.model` units** (V8 records show `model` and
+  `gain_vs_raw` in linear units, but `aggregate.model_scalar` is
+  log-space; doc §6 says all three columns are log-space). Verify
+  against `build_score_table` after the headroom fix lands. If linear,
+  either fix the renderer or correct the doc — but do not gate Phase 8
+  on this.
+- **SSM time-estimator miscalibration** (V8 iters 3 + 5 killed by the
+  time-risk gate at 524× / 446× over budget). Tracked under the
+  inference-defaults follow-up.
+
+---
+
+## 12.5 V9 Launch Certification Gates
+
+Before kicking V9 chains in formal workspaces, two gates must turn green. They
+are intentionally cheap and cover orthogonal failure modes — Gate 1 stresses the
+agent's *mental model* of the score table; Gate 2 stresses the *system's
+data-flow* under real training. A green Gate 1 with a red Gate 2 means the
+prompt rewrite worked but plumbing is still broken; a green Gate 2 with a red
+Gate 1 means the data is unit-consistent but the LLM is still generating fake
+diagnoses. Both must pass.
+
+### Gate 1 — Pseudo-Cognitive Probe (Mental Model Check)
+
+**Goal:** confirm the rewritten interpreter prompt + headroom-aware partition
+make the LLM read the table the way Phase 8 intends.
+
+**Setup:**
+- 3 iterations of pseudo-training. Each iter feeds a synthetic
+  `ModelRunSummary` fixture with a known per-file shape (e.g. dead-zone files
+  0–3 at the floor, mid-band files 4–10 with substantial `headroom_vs_gt`,
+  high-band files 11–19 close to the ceiling).
+- LLM provider: real OpenAI API (no mocks at the synthesis step). Other
+  subsystems (training, scoring, VRAM probe) stay pseudo.
+
+**Success metrics (all three required):**
+1. **Dead-zone elision.** Across the 3 `take_home_message`s, files 0–3 are not
+   cited as a deficiency. The interpreter must have absorbed the gt-at-floor
+   signal and treated those files as out-of-scope.
+2. **Headroom citation.** At least one `take_home_message` per iter explicitly
+   references `headroom_vs_gt` (or paraphrases it — "remaining room to grow",
+   "ceiling distance") for an active-band file.
+3. **Diagnostic diversity.** Pairwise Jaccard similarity over the 3
+   `take_home_message`s (token-level, lower-cased, stop-words removed) is
+   `< 0.7`. Higher than that means the LLM is still pattern-matching to one
+   canned diagnosis the way V8 did.
+
+A failure on any metric blocks V9 launch and routes back to the prompt /
+partition layer.
+
+### Gate 2 — Lightweight End-to-End Stress Test (System Logic Check)
+
+**Goal:** confirm the post-Path-A reference data + P0 unit fix flow correctly
+through real training, scoring, table assembly, and audit logging.
+
+**Setup:**
+- 3 iterations of real training + scoring on the 5090 (no pseudo subsystems).
+- `trial_portion: 0.02`, `train_portion: 1.0`, `eval_portion: 0.02`.
+- Hyperparameters held identical across the 3 iters — this is a logic /
+  data-flow check, not a tuning experiment.
+
+**Execution strategy:**
+- Run with `--no-force_formal_round`. The final round respects the 0.02
+  sampling portions instead of forcing a 20-file formal eval, so the gate
+  fits inside a ~5-minute time budget. Forcing a formal round here would
+  trade the cheap signal we want for an expensive one we don't need.
+
+**Parameter policy:**
+- Do **not** override formal parameters. Keep hyperparameters frozen across
+  iters so any divergence in `agent_data_stream.jsonl` traces to a
+  data-flow defect, not to a hyperparameter choice.
+
+**Success metrics:**
+1. **Unit consistency.** `{workspace}/logs/agent_data_stream.jsonl` shows the
+   per-file table for every iter with `raw_baseline`, `ground_truth`, and
+   `model` columns all in log-space (no linear-space outliers like 78441.83
+   appearing next to −13.85 reference values). Spot-check at least file 0
+   and file 18.
+2. **Subset-scope footnote correctness.** The rendered markdown's footnote
+   reads `_Note: scalars computed over N sampled files._` with `N`
+   matching the actual subset size produced by `trial_portion = 0.02`
+   (1 file in this config). Or, if a formal round was forced despite the
+   `--no-force_formal_round` intent, `N = 20` and the footnote is absent
+   — either form is valid as long as `N` matches the realised sample.
+3. **Logging completeness.** Every iter that produced a non-None
+   `model_scalar` produced exactly one `agent_data_stream.jsonl` entry.
+   No silent drops, no double-logs.
+
+A failure here means the unit-mismatch / observability fix did not actually
+land in the live path, and V9 is not safe to launch.
+
+---
+
 ## 13. Test plan
 
 Unit:
