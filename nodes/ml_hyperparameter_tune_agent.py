@@ -151,23 +151,31 @@ def _apply_mode_override_chain(
 
        * ``"inherit_best_trial"`` (default) — when (2) fires AND
          ``memory_history`` contains at least one successful trial
-         round, ``plan.loss_cfg`` and ``plan.train_cfg["lr"]`` are
-         overwritten with the highest-scoring trial round's values.
-         ``model_cfg``, ``epochs``, and ``batch_size`` are left
-         untouched — the LLM may legitimately scale those for the
-         formal pass. If no trial winner exists, the planner's choices
-         survive and a warning is logged (resilient: a messy trial
-         stage shouldn't kill the chain).
+         round, the highest-scoring trial round's ``model_config``,
+         ``loss_config``, and the ``lr``/``epochs``/``batch_size``
+         keys of its ``train_config`` are copied into ``plan``,
+         overwriting whatever the planner emitted. The formal round
+         is by definition a longer training of the trial winner with
+         full eval — not a sandbox for new architectures, losses, or
+         hyperparameters. If no trial winner exists, the planner's
+         choices survive and a warning is logged (resilient: a messy
+         trial stage shouldn't kill the chain).
        * ``"llm_propose"`` — inheritance is skipped; the planner's
-         loss + lr survive verbatim. ``plan.is_trial`` is still flipped
-         to False so the round runs as formal.
+         model_config, loss_config, and train_config survive verbatim.
+         ``plan.is_trial`` is still flipped to False so the round
+         runs as formal.
 
-       Why the inheritance default exists: in iter_001/iter_002 of
-       explore_novel_v7 the LLM picked an untested ``focal_cw`` loss
-       for the formal round despite all trial rounds using ``focal``;
-       the resulting model collapsed to ~0 PSD output. The default
-       policy mandates the formal round be a longer training of the
-       winning trial config, not a sandbox for new loss functions.
+       Why the inheritance default exists: V7 iter_001/iter_002 of
+       explore_novel showed the LLM picking an untested ``focal_cw``
+       loss for the formal round despite all trial rounds using
+       ``focal``; the resulting model collapsed to ~0 PSD output. V9
+       audit §7 found the same pattern at the architecture level —
+       formal rounds emitting ``kernel_size=2``/``use_same_padding=False``
+       when both trial rounds used ``kernel_size=3``/``use_same_padding=True``.
+       Inheriting ``model_cfg`` is also a hard prerequisite for the
+       trial→formal inference-time measurement reuse landed in commits
+       B–D of this branch — without it, the timing measurement is
+       for a different architecture than the formal round runs.
 
     Mutates ``plan`` in place and returns it for caller-chaining.
     """
@@ -179,26 +187,44 @@ def _apply_mode_override_chain(
             winner = _best_trial_winner(memory_history or [])
             if winner is not None:
                 winner_loss = winner["params"]["loss_config"]
-                winner_lr = winner["params"]["train_config"]["lr"]
+                winner_train = winner["params"]["train_config"]
+                winner_model = winner["params"].get("model_config") or {}
                 plan.loss_cfg = dict(winner_loss)  # copy to avoid aliasing
-                plan.train_cfg["lr"] = winner_lr
+                plan.model_cfg = dict(winner_model)
+                # Defensive .get() for train_cfg keys: in production records the
+                # planner's TrainConfig may omit fields that defaulted at
+                # validation time (e.g. ``batch_size`` lives in ``model_cfg``
+                # for some legacy plans). When a key is missing, the planner's
+                # value survives — the alternative is crashing the chain on a
+                # KeyError, which defeats the point of resilient inheritance.
+                plan.train_cfg["lr"] = winner_train["lr"]
+                inherited_epochs = winner_train.get("epochs")
+                inherited_bs = winner_train.get("batch_size")
+                if inherited_epochs is not None:
+                    plan.train_cfg["epochs"] = inherited_epochs
+                if inherited_bs is not None:
+                    plan.train_cfg["batch_size"] = inherited_bs
                 print(
-                    f"  [FORMAL OVERRIDE] inheriting loss="
-                    f"{winner_loss.get('loss_type')!r} lr={winner_lr} "
-                    f"from best trial round {winner['exp_id']!r} "
-                    f"(score={winner['denoising_score']:.4f})"
+                    f"  [FORMAL OVERRIDE] inheriting from best trial round "
+                    f"{winner['exp_id']!r} (score={winner['denoising_score']:.4f}): "
+                    f"loss={winner_loss.get('loss_type')!r} "
+                    f"lr={winner_train['lr']} "
+                    f"epochs={inherited_epochs if inherited_epochs is not None else '(planner)'} "
+                    f"batch_size={inherited_bs if inherited_bs is not None else '(planner)'} "
+                    f"model_cfg_keys={sorted(winner_model.keys())}"
                 )
             else:
                 print(
                     "  [FORMAL OVERRIDE] WARNING: no successful trial round "
                     "in this iteration — formal round will use the planner's "
-                    "loss_config and lr unchanged. Score may be unreliable."
+                    "model_config, loss_config, and train_config unchanged. "
+                    "Score may be unreliable."
                 )
         else:
             # llm_propose — explicit opt-out from inheritance.
             print(
                 f"  [FORMAL OVERRIDE] strategy={formal_round_strategy!r} — "
-                "planner's loss_config and lr honored verbatim."
+                "planner's model_config, loss_config, and train_config honored verbatim."
             )
     return plan
 

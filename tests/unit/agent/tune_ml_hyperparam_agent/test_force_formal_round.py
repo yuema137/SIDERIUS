@@ -58,22 +58,34 @@ def _make_trial_record(
     score,
     loss_type: str = "focal",
     lr: float = 1e-4,
+    epochs: int = 1,
+    batch_size: int = 1,
+    model_config: dict | None = None,
     time_mode: str = "trial",
     status: str = "success",
     file_vector=None,
 ):
     """Memory-history record with the fields ``_best_trial_winner`` /
-    ``_check_zero_output_collapse`` actually read.
+    ``_check_zero_output_collapse`` / ``_apply_mode_override_chain``
+    actually read.
 
-    Defaults match the v7 trial-success shape (score≠None, time_mode=trial,
+    Defaults match the v7+ trial-success shape (score≠None, time_mode=trial,
     success status, ~10000-magnitude file_vector). Override per-test for
     edge cases (failure status, missing time_mode, formal mode, etc.).
     """
+    if model_config is None:
+        model_config = {
+            "segmentation_size": 1000,
+            "kernel_size": 3,
+            "use_same_padding": True,
+            "num_blocks": 4,
+        }
     return {
         "exp_id": exp_id,
         "status": status,
         "denoising_score": score,
         "params": {
+            "model_config": dict(model_config),
             "loss_config": {
                 "loss_type": loss_type,
                 "alpha": 0.5,
@@ -82,8 +94,8 @@ def _make_trial_record(
             },
             "train_config": {
                 "lr": lr,
-                "epochs": 1,
-                "batch_size": 1,
+                "epochs": epochs,
+                "batch_size": batch_size,
                 "device": "cuda",
             },
         },
@@ -367,16 +379,22 @@ def test_best_trial_winner_returns_none_on_empty():
 # ---------------------------------------------------------------------------
 
 
-def test_force_formal_inherits_loss_and_lr_from_best_trial():
+def test_force_formal_inherits_full_winner_config():
     """The exact bug we're fixing: LLM picked a different (untested) loss
-    for the formal round; override copies the trial winner's loss + lr.
-    Default strategy ('inherit_best_trial') applied implicitly."""
+    AND architecture for the formal round; override copies the trial
+    winner's model_config, loss_config, and the lr/epochs/batch_size of
+    its train_config. Default strategy ('inherit_best_trial') applied
+    implicitly."""
     plan = _make_plan(is_trial=True)
     plan.loss_cfg = {"loss_type": "focal_cw", "use_class_weights": True}  # bad LLM choice
-    plan.train_cfg = {"lr": 1e-3, "epochs": 1, "batch_size": 4}
+    plan.train_cfg = {"lr": 1e-3, "epochs": 4, "batch_size": 16}
+    plan.model_cfg = {"kernel_size": 2, "use_same_padding": False}  # bad LLM choice (V9 §7)
+    winner_model = {"segmentation_size": 1000, "kernel_size": 3,
+                    "use_same_padding": True, "num_blocks": 4}
     history = [
         _make_trial_record("r1", score=5.15, loss_type="focal", lr=1e-4),
-        _make_trial_record("r2", score=5.45, loss_type="focal", lr=5e-5),  # winner
+        _make_trial_record("r2", score=5.45, loss_type="focal", lr=5e-5,
+                           epochs=1, batch_size=1, model_config=winner_model),  # winner
         _make_trial_record("r3", score=None, loss_type="ce", lr=5e-5,
                            status="error_inference"),
     ]
@@ -385,12 +403,59 @@ def test_force_formal_inherits_loss_and_lr_from_best_trial():
         memory_history=history,
     )
     assert plan.is_trial is False
+    # Loss inherited
     assert plan.loss_cfg["loss_type"] == "focal"
     assert plan.loss_cfg.get("use_class_weights") is None  # bad field gone
+    # lr / epochs / batch_size inherited (V9 §7 fix)
     assert plan.train_cfg["lr"] == 5e-5
-    # Untouched: epochs, batch_size, model_cfg
     assert plan.train_cfg["epochs"] == 1
-    assert plan.train_cfg["batch_size"] == 4
+    assert plan.train_cfg["batch_size"] == 1
+    # model_cfg inherited (V9 §7 fix — required for trial→formal timing reuse)
+    assert plan.model_cfg == winner_model
+    assert plan.model_cfg["kernel_size"] == 3
+    assert plan.model_cfg["use_same_padding"] is True
+
+
+def test_force_formal_inheritance_resilient_to_missing_train_keys():
+    """Production records sometimes omit `batch_size` or `epochs` from
+    `train_config` (e.g. legacy fixtures with batch_size in model_config).
+    The override must not crash on a missing key — it should keep the
+    planner's value for that key and continue. lr remains required."""
+    plan = _make_plan(is_trial=True)
+    plan.loss_cfg = {"loss_type": "focal_cw"}
+    plan.train_cfg = {"lr": 1e-3, "epochs": 5, "batch_size": 16}
+    history = [_make_trial_record("r1", score=5.45, lr=5e-5)]
+    # Strip batch_size + epochs to simulate a legacy/sparse record
+    history[0]["params"]["train_config"].pop("batch_size", None)
+    history[0]["params"]["train_config"].pop("epochs", None)
+    _apply_mode_override_chain(
+        plan, trial_allowed=True, is_formal_round=True, force_formal_round=True,
+        memory_history=history,
+    )
+    assert plan.is_trial is False
+    # lr inherited (always present in winner)
+    assert plan.train_cfg["lr"] == 5e-5
+    # Missing keys → planner's values preserved
+    assert plan.train_cfg["epochs"] == 5
+    assert plan.train_cfg["batch_size"] == 16
+
+
+def test_force_formal_model_cfg_inheritance_isolated_from_winner():
+    """Mutating plan.model_cfg post-override must NOT mutate the winner's
+    record (defensive copy)."""
+    plan = _make_plan(is_trial=True)
+    winner_model = {"segmentation_size": 1000, "kernel_size": 3}
+    history = [
+        _make_trial_record("r1", score=5.45, model_config=winner_model),
+    ]
+    _apply_mode_override_chain(
+        plan, trial_allowed=True, is_formal_round=True, force_formal_round=True,
+        memory_history=history,
+    )
+    plan.model_cfg["kernel_size"] = 99
+    assert history[0]["params"]["model_config"]["kernel_size"] == 3, (
+        "model_cfg copy aliased the winner record"
+    )
 
 
 def test_no_trial_winner_falls_back_to_planner_with_warning(capsys):
@@ -468,7 +533,8 @@ def test_inheritance_logs_winner_identity(capsys):
     plan = _make_plan(is_trial=True)
     plan.loss_cfg = {"loss_type": "focal_cw"}
     plan.train_cfg = {"lr": 1e-3, "epochs": 1}
-    history = [_make_trial_record("r2", score=5.4523, loss_type="focal", lr=5e-5)]
+    history = [_make_trial_record("r2", score=5.4523, loss_type="focal", lr=5e-5,
+                                   epochs=2, batch_size=8)]
     _apply_mode_override_chain(
         plan, trial_allowed=True, is_formal_round=True, force_formal_round=True,
         memory_history=history,
@@ -478,27 +544,38 @@ def test_inheritance_logs_winner_identity(capsys):
     assert "r2" in out
     assert "focal" in out
     assert "5e-05" in out or "5.0e-05" in out or "5e-5" in out
+    # V9 §7 fix — print must surface the inherited training + model_cfg fields
+    assert "epochs=2" in out
+    assert "batch_size=8" in out
+    assert "model_cfg_keys=" in out
 
 
 def test_strategy_llm_propose_keeps_planner_choices(capsys):
     """The escape hatch: with strategy='llm_propose', the planner's
-    loss_config and lr survive verbatim even when a perfectly good
-    trial winner exists. ``is_trial`` is still flipped to False because
-    the formal-round mode flip is independent of the inheritance policy."""
+    model_config, loss_config, and train_config survive verbatim even
+    when a perfectly good trial winner exists. ``is_trial`` is still
+    flipped to False because the formal-round mode flip is independent
+    of the inheritance policy."""
     plan = _make_plan(is_trial=True)
     plan.loss_cfg = {"loss_type": "focal_cw", "experimental_flag": True}
-    plan.train_cfg = {"lr": 1e-3, "epochs": 1, "batch_size": 4}
-    history = [_make_trial_record("r2", score=5.45, loss_type="focal", lr=5e-5)]
+    plan.train_cfg = {"lr": 1e-3, "epochs": 4, "batch_size": 16}
+    plan.model_cfg = {"kernel_size": 2, "use_same_padding": False}  # planner's choice
+    history = [_make_trial_record("r2", score=5.45, loss_type="focal", lr=5e-5,
+                                   epochs=1, batch_size=1)]
     _apply_mode_override_chain(
         plan, trial_allowed=True, is_formal_round=True, force_formal_round=True,
         formal_round_strategy="llm_propose",
         memory_history=history,
     )
     assert plan.is_trial is False  # mode still flipped
-    # Planner's choices preserved
+    # Planner's choices preserved across all three configs
     assert plan.loss_cfg["loss_type"] == "focal_cw"
     assert plan.loss_cfg["experimental_flag"] is True
     assert plan.train_cfg["lr"] == 1e-3
+    assert plan.train_cfg["epochs"] == 4
+    assert plan.train_cfg["batch_size"] == 16
+    assert plan.model_cfg["kernel_size"] == 2
+    assert plan.model_cfg["use_same_padding"] is False
     out = capsys.readouterr().out
     assert "llm_propose" in out
     assert "honored verbatim" in out
