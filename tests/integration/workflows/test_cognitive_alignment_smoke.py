@@ -17,7 +17,10 @@ Setup
   ``Impact_Score`` lever between iters: iter_1 suppresses file ``17``;
   iter_2 recovers file ``17`` and suppresses file ``14``; iter_3 has all
   files near ceiling.
-* Real OpenAI ``gpt-4o-mini`` at synthesis (interpreter) + proposer.
+* Real OpenAI at synthesis (interpreter) + proposer — model IDs pulled
+  from the production tier config (``llm_configs/openai_tiered_v1.json``)
+  via ``_load_tier_models``, so the cognitive contract is exercised
+  against the same models V9 chains use.
 * ``RecordingOpenAIBridge`` captures every prompt + response — needed
   for Metric 5's prompt-column presence check.
 * Manual carry-forward of ``runtime_vocab`` and ``previous_proposal``
@@ -103,7 +106,31 @@ pytestmark = pytest.mark.real_run
 # Constants
 # ---------------------------------------------------------------------------
 
-_OPENAI_MODEL = "gpt-4o-mini"
+def _load_tier_models() -> Tuple[str, str]:
+    """Pull the production-tier model IDs for the two slots Gate 1 exercises.
+
+    Gate 1 used to pin the recording bridge to ``gpt-4o-mini`` so the test
+    was cheap to run, but that meant the cognitive contract was being
+    enforced against a strictly weaker model than production V8/V9 chains
+    actually use. Aligning here mirrors the Gate 2 patch (test_score_table
+    _real_smoke.py) which now loads ``llm_configs/openai_tiered_v1.json``.
+
+    The two slots Gate 1 calls into are the interpreter (synthesis stage)
+    and the proposer's third stage (the structured-JSON ``proposing``
+    sub-agent). In the current tier config both happen to be the same
+    frontier model, but we resolve them separately so any future tier
+    re-routing is picked up automatically.
+    """
+    from pathlib import Path
+    from workflows.llm_config import WorkflowLLMConfig
+    repo_root = Path(__file__).resolve().parents[3]
+    cfg = WorkflowLLMConfig.from_json(
+        str(repo_root / "llm_configs" / "openai_tiered_v1.json")
+    )
+    return cfg.interpret.model_id, cfg.propose.proposing.model_id
+
+
+_INTERP_MODEL, _PROPOSER_MODEL = _load_tier_models()
 
 # Per-file recovery fractions used to shape model_fv_linear. Files 14-19
 # carry ~91% of the GT linear mass (the post-Path-A reference), so
@@ -171,13 +198,18 @@ class RecordingOpenAIBridge(LLMBridge):
         return resp
 
 
-def _make_recording_factory() -> Tuple[list, "callable"]:
-    """Return (shared-call-log, bridge-factory-that-appends-to-it)."""
+def _make_recording_factory(model_id: str) -> Tuple[list, "callable"]:
+    """Return (shared-call-log, bridge-factory-that-appends-to-it).
+
+    ``model_id`` is read from the production tier config — see
+    ``_load_tier_models`` — so the recording bridge speaks to the same
+    OpenAI model the corresponding agent slot uses in V9 chains.
+    """
     shared: list = []
 
     def factory(**ignored) -> RecordingOpenAIBridge:
         bridge = RecordingOpenAIBridge(
-            provider="openai", model_id=_OPENAI_MODEL, max_retries=3,
+            provider="openai", model_id=model_id, max_retries=3,
         )
         bridge.calls = shared
         return bridge
@@ -499,14 +531,14 @@ def test_cognitive_alignment_gate_one(tmp_path, capsys):
             ),
         )
 
-        interp_calls, interp_factory = _make_recording_factory()
+        interp_calls, interp_factory = _make_recording_factory(_INTERP_MODEL)
         interp_call_logs.append(interp_calls)
 
         interp_inp = InterpretationInput(
             # Two model types every iter so the synthesis branch fires —
             # candidate carries the per-iter lever shape, baseline is
             # constant. Empty model_knowledge_cache forces fresh Phase 1
-            # for both models each iter (cheap on gpt-4o-mini).
+            # for both models each iter.
             summaries=[cand_summary, base_summary],
             runtime_vocab=prev_runtime_vocab,
             previous_proposal=prev_proposal_dict,
@@ -524,7 +556,7 @@ def test_cognitive_alignment_gate_one(tmp_path, capsys):
         # (vocab carry-forward via proposed_vocab_candidates). Metrics
         # 1-6 read from interp output / interp prompts only; the proposer
         # contributes via build_runtime_vocab in the NEXT iter's interp.
-        _, proposer_factory = _make_recording_factory()
+        _, proposer_factory = _make_recording_factory(_PROPOSER_MODEL)
         proposer_inp = local_full_context(
             interp_out, storage, reasoning_pipeline=pipeline,
         )

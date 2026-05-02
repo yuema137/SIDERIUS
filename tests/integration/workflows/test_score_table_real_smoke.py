@@ -243,23 +243,27 @@ def _print_report_table(reports: list[IterReport]) -> None:
 
 def _build_llm_config():
     """
-    Build the OpenAI routing config per feedback_prefer_openai_for_smoke.md:
-      - tuner planner    = gpt-5-mini (reasoning-heavy)
-      - tuner reflector  = gpt-4o-mini
-      - interp/propose/implement/validate = gpt-4o-mini
+    Load the production tiered LLM config — the same JSON used by the
+    V8/V9 chain runs (``llm_configs/openai_tiered_v1.json``).
+
+    Earlier versions of this test pinned everything except the tuner
+    planner to ``gpt-4o-mini``. Gate 2 run-3 showed that mini-class
+    models cannot reliably do shape arithmetic for dilated/causal
+    convolutions: the implementor failed 9/9 attempts in iter 1, all
+    on off-by-(k-1) padding/trim mistakes. Production runs use the
+    tiered config, which routes the reasoning-heavy slots (interpret,
+    propose.reasoning, propose.proposing, implement, tune.planner) to
+    a frontier model and keeps cheaper models only for templated
+    extraction (validate, propose.comparison, tune.reflector). Testing
+    with a strictly weaker model than production was producing
+    failures that could never reproduce in real chains.
     """
-    from workflows.llm_config import (
-        NodeLLMConfig, ProposalLLMConfig, TunerLLMConfig, WorkflowLLMConfig,
-    )
-    mini = NodeLLMConfig(provider="openai", model_id="gpt-4o-mini")
-    gpt5_mini = NodeLLMConfig(provider="openai", model_id="gpt-5-mini")
-    return WorkflowLLMConfig(
-        interpret=mini,
-        propose=ProposalLLMConfig(comparison=mini, reasoning=mini, proposing=mini),
-        implement=mini,
-        validate_model=mini,
-        tune=TunerLLMConfig(planner=gpt5_mini, reflector=mini),
-    )
+    from pathlib import Path
+    from workflows.llm_config import WorkflowLLMConfig
+
+    repo_root = Path(__file__).resolve().parents[3]
+    cfg_path = repo_root / "llm_configs" / "openai_tiered_v1.json"
+    return WorkflowLLMConfig.from_json(str(cfg_path))
 
 
 def _load_shared_advice() -> dict:
@@ -309,7 +313,7 @@ class TestScoreTableRealSmoke:
         print(f"\n{'='*72}")
         print("  PHASE 6.5 STAGE 2 — REAL-TRAINING SMOKE")
         print(f"  Workspace: {workspace}")
-        print(f"  LLM: OpenAI (tuner.planner=gpt-5-mini, rest=gpt-4o-mini)")
+        print(f"  LLM: OpenAI tiered (llm_configs/openai_tiered_v1.json — production config)")
         print(f"  Trial budget: {TRIAL_BUDGET_MIN*60:.0f}s | "
               f"Formal budget: {FORMAL_BUDGET_MIN*60:.0f}s")
         print(f"  VRAM warn>{VRAM_WARN_GB}GB, fail>{VRAM_FAIL_GB}GB")
