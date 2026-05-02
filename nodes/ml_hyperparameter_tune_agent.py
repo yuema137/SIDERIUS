@@ -130,6 +130,39 @@ def _best_trial_winner(memory_history: list) -> Optional[dict]:
     return max(candidates, key=lambda r: r["denoising_score"])
 
 
+def _latest_trial_inference_marginal(memory_history: list) -> Optional[float]:
+    """Return the most recent successful trial round's measured per-PSD-segment
+    inference cost in ms, or ``None`` if no qualifying record exists.
+
+    refine_inference_time_estimator.md Commit D — feeds the formal round's
+    time gate as ``inference_per_psd_seg_ms_hint`` so the gate uses the
+    measured marginal instead of the legacy ``× 2.7`` ratio.
+
+    Looks within the *current iteration's* memory history only — under the
+    Commit A (Step 0) ``model_cfg`` inheritance rule, formal rounds within
+    an iteration always run the trial-winner architecture, so a measurement
+    from an earlier iter is for a different arch and must not be reused.
+    The chain runner already partitions ``memory_history`` per iteration,
+    so the caller passes whatever in-iter record list it already has.
+
+    Eligibility predicate: ``status == "success"`` AND
+    ``memory.time_mode == "trial"`` AND
+    ``memory.inference_per_psd_seg_ms_measured`` is a positive float. We
+    walk in reverse so an OOM-killed retry between two successful trials
+    doesn't displace the most recent useful measurement.
+    """
+    for r in reversed(memory_history):
+        if r.get("status") != "success":
+            continue
+        mem = r.get("memory") or {}
+        if mem.get("time_mode") != "trial":
+            continue
+        v = mem.get("inference_per_psd_seg_ms_measured")
+        if v is not None and v > 0:
+            return float(v)
+    return None
+
+
 def _apply_mode_override_chain(
     plan: ExperimentPlan,
     *,
@@ -1484,15 +1517,32 @@ class HyperparamTuningAgent:
                                           else formal_time_budget)
                     time_check = None
                     if chosen_time_budget is not None:
+                        # refine_inference_time_estimator.md Commit D — pull
+                        # the most recent successful trial round's measured
+                        # per-PSD-segment inference cost out of this iter's
+                        # memory_history (Commit C populated the field) and
+                        # pass it as a hint. The wrapper prefers it over the
+                        # legacy × 2.7 ratio when present and >0; absent or
+                        # zero falls through to the existing fallback
+                        # branches. ``memory_history`` is fetched from
+                        # ``sandbox.get_summary()`` earlier in this attempt
+                        # and is iter-scoped under the chain runner.
+                        inference_hint = _latest_trial_inference_marginal(
+                            memory_history
+                        )
                         print(f"\n[Pre-flight 2/2] Time check "
                               f"(mode={'trial' if plan.is_trial else 'formal'}, "
-                              f"budget={chosen_time_budget} min)...")
+                              f"budget={chosen_time_budget} min, "
+                              f"inf_hint="
+                              f"{f'{inference_hint:.2f} ms/psd_seg' if inference_hint else 'none'}"
+                              f")...")
                         time_check = _run_skill(
                             "evaluate_time_skill",
                             sandbox,
                             **active_params,
                             time_budget_minutes=chosen_time_budget,
                             data_dir=time_data_dir,
+                            inference_per_psd_seg_ms_hint=inference_hint,
                         )
                         if time_check.get("status") == "error":
                             raise RuntimeError(
@@ -1532,6 +1582,15 @@ class HyperparamTuningAgent:
                                     "time_estimate_minutes": time_check.get("estimated_minutes"),
                                     "time_budget_minutes":   time_check.get("limit_minutes"),
                                     "time_mode":             "trial" if plan.is_trial else "formal",
+                                    # refine_inference_time_estimator.md Commit D —
+                                    # surface the inference-ms branch on skipped
+                                    # records too so a verdict that says "skipped"
+                                    # under the measured path is distinguishable
+                                    # from one under the legacy × 2.7 ratio.
+                                    "inference_ms_source": (
+                                        (time_check.get("breakdown") or {})
+                                        .get("inference_ms_source")
+                                    ),
                                 },
                             }
                             # K.2.5-8 — propagate inference soft-fallback flag.
@@ -1996,6 +2055,16 @@ class HyperparamTuningAgent:
                         )
                         final_record["memory"]["time_mode"] = (
                             "trial" if plan.is_trial else "formal"
+                        )
+                        # refine_inference_time_estimator.md Commit D — record
+                        # which branch of the 3-way inference-ms derivation
+                        # the gate took. Audit logs distinguish a measured
+                        # ``trial_inference_warmup`` verdict from the legacy
+                        # ``training_warmup_x2.7_fallback`` and the
+                        # ``static_formula`` paths. Source is None on records
+                        # where the breakdown didn't carry it (defensive).
+                        final_record["memory"]["inference_ms_source"] = (
+                            (time_check.get("breakdown") or {}).get("inference_ms_source")
                         )
                     # Phase K — surface pre-flight VRAM-estimator context to the
                     # planner the same way Phase J surfaces time context. Only

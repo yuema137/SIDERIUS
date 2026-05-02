@@ -122,8 +122,22 @@ The estimator converts back to per-step cost downstream:
 
 ```
 ml_per_psd = PSD_SEGMENT_LENGTH // seg_size
-inference_ms_per_step = per_psd_seg_ms * ml_per_psd / inf_batch
+inference_ms_per_step = per_psd_seg_ms * inf_batch / ml_per_psd
 ```
+
+> **Correction (2026-05-02, during Commit D implementation)**: an earlier
+> revision of this section had the factor inverted as
+> `per_psd_seg_ms * ml_per_psd / inf_batch`, which would over-predict
+> ms/step by `(ml_per_psd / inf_batch)²` — for typical values
+> (`seg_size=1000` → `ml_per_psd=100`, `inf_batch=25`) that's a 16×
+> over-prediction, exactly re-introducing the V9 §8 problem this commit
+> set out to fix. Derivation from the existing inference estimator
+> (`agent/skills/inference_skill/estimator.py:154-163`):
+> `total_steps = ceil(n_psd × ml_per_psd / inf_batch)` and
+> `seconds = total_steps × ms_per_step / 1000`, so cost-per-PSD-segment
+> = `(ml_per_psd / inf_batch) × ms_per_step` ⇒ `ms_per_step =
+> per_psd_seg_ms × inf_batch / ml_per_psd`. The unit test enforces this
+> direction so the inversion can't silently come back.
 
 ### 3.6 Estimator hint path
 
@@ -334,7 +348,7 @@ inf_batch = _inference_est.inference_batch_for(model_type)
 ml_per_psd = PSD_SEGMENT_LENGTH // seg_size
 
 if inference_per_psd_seg_ms_hint is not None and inference_per_psd_seg_ms_hint > 0:
-    inference_ms = inference_per_psd_seg_ms_hint * ml_per_psd / max(inf_batch, 1)
+    inference_ms = inference_per_psd_seg_ms_hint * inf_batch / max(ml_per_psd, 1)
     inference_ms_source = "trial_inference_warmup"
 elif measured is not None and measured > 0:
     inference_ms = measured * _inference_est._INFERENCE_VS_TRAINING_RATIO
@@ -558,24 +572,27 @@ Four sequential commits. Each commit ships a self-contained slice and leaves the
 
 ### Commit D — estimator hint path + 10% slack + tuner plumbing
 
-- [ ] Read `evaluate_time_skill/wrapper.py::run_skill` (line 378-557), focus on lines 455-464
-- [ ] Replace `inference_ms` derivation with 3-branch hint/training-fallback/static logic
-- [ ] Compute `inf_batch` and `ml_per_psd` correctly (import `inference_batch_for`, `PSD_SEGMENT_LENGTH`)
-- [ ] Surface `inference_ms_source` in returned `breakdown` dict
-- [ ] Add 10% slack rule (Step 6.5): `effective_budget = budget × 1.10` if `inference_ms_source == "trial_inference_warmup"`, else `effective_budget = budget`; surface `slack_applied` and `effective_budget_minutes` in breakdown
-- [ ] Update verdict string to mention slack when active
-- [ ] Read `nodes/ml_hyperparameter_tune_agent.py` `_best_trial_winner` region (line 110-127)
-- [ ] Add `_latest_trial_inference_marginal(memory_history) -> Optional[float]` helper
-- [ ] Locate `evaluate_time_skill` invocation (line 1461-1467)
-- [ ] Compute `inference_hint = _latest_trial_inference_marginal(round_memory_history)` (verify variable name)
-- [ ] Pass `inference_per_psd_seg_ms_hint=inference_hint` kwarg
-- [ ] Verify the time_record / success_record memory write also stores `inference_ms_source` from `time_check["breakdown"]`
-- [ ] Create `tests/unit/agent/evaluate_time_skill/test_inference_hint_path.py`
-- [ ] Test: hint present → `source == "trial_inference_warmup"`, value matches formula
-- [ ] Test: hint absent + training measured → `source == "training_warmup_x2.7_fallback"`
-- [ ] Test: both absent → `source == "static_formula"`
+- [x] Read `evaluate_time_skill/wrapper.py::run_skill` — relevant region was lines 451-630 on this branch (run_skill plus the breakdown/verdict block).
+- [x] Replaced `inference_ms` derivation with 3-branch hint/training-fallback/static logic (wrapper.py ~line 524). Branches set `inference_ms_source` to `"trial_inference_warmup"` / `"training_warmup_x2.7_fallback"` / `"static_formula"` respectively.
+- [x] Computed `inf_batch = _inference_est.inference_batch_for(model_type)` and `ml_per_psd = max(PSD_SEGMENT_LENGTH // max(seg_size, 1), 1)`. The double-`max` floor protects against `seg_size=0` (would `ZeroDivisionError`) and `PSD_SEGMENT_LENGTH < seg_size` (would yield 0 and divide by zero downstream).
+- [x] Used the **corrected** formula `inference_ms = hint × inf_batch / ml_per_psd` — see §3.5 correction note. The earlier doc revision had the factors inverted; left as-is would have over-predicted by `(ml_per_psd / inf_batch)²` ≈ 16× for typical archs.
+- [x] Surfaced `inference_ms_source`, `slack_applied`, `effective_budget_minutes` in the returned `breakdown` dict.
+- [x] Added 10% slack rule (Step 6.5): `effective_budget = budget × 1.10` only when `inference_ms_source == "trial_inference_warmup"`. Fallback paths keep the strict `<=` because their uncertainty bands are wider. Constant `SLACK_FRACTION_WHEN_MEASURED = 0.10` defined inline at the call site.
+- [x] Updated verdict string to append ` (within +10% slack on measured inference)` when slack actually saved the verdict (`slack_applied AND feasible AND total_min > budget_min`). When `total_min ≤ budget_min` even without slack, no note — slack didn't change the outcome.
+- [x] Read `nodes/ml_hyperparameter_tune_agent.py` `_best_trial_winner` region (line 105-130).
+- [x] Added `_latest_trial_inference_marginal(memory_history) -> Optional[float]` helper immediately after `_best_trial_winner` (line 133+). Reverse-walks history, filters `status == "success" AND time_mode == "trial" AND inference_per_psd_seg_ms_measured > 0`. Returns the most recent qualifying value, or `None`. Docstring explains the iter-scoping rationale (Commit A `model_cfg` inheritance rule means cross-iter measurements are arch-mismatched).
+- [x] Located `evaluate_time_skill` invocation (now line ~1523) — used the existing `memory_history = sandbox.get_summary()` already in scope from line ~1016 (no new fetch needed; the chain runner already iter-scopes the sandbox).
+- [x] Computed `inference_hint = _latest_trial_inference_marginal(memory_history)` and passed it as `inference_per_psd_seg_ms_hint=inference_hint`. The pre-flight print line shows the hint value (formatted as `inf_hint=<X> ms/psd_seg` or `inf_hint=none`) so audit logs distinguish hint-driven vs fallback verdicts at a glance.
+- [x] Persisted `inference_ms_source` from `time_check["breakdown"]` into both the success-path record memory (line ~2050+) and the `skipped_time_risk` record memory (line ~1584+). Schema accepts None on either when the gate didn't run or the breakdown didn't carry it.
+- [x] Created `tests/unit/agent/tune_ml_hyperparam_agent/test_inference_hint_path.py` (per-agent dir convention — same reasoning as Commit C's aggregator-test placement). 21 tests, all green in 1.0s.
+- [x] Test: hint present → `source == "trial_inference_warmup"`, value matches the corrected formula `hint × inf_batch / ml_per_psd` (regression guard against the inverted form). Also: hint=0 falls through; hint<0 falls through.
+- [x] Test: hint absent + training warmup measured → `source == "training_warmup_x2.7_fallback"`.
+- [x] Test: both absent (and no `data_dir` → no warmup probe) → `source == "static_formula"` and `inference_ms is None`.
+- [x] Test: 10% slack rule. Five sub-cases — within-slack window flips infeasible→feasible (slack_applied=true, verdict carries the slack note); beyond-slack stays infeasible (slack_applied=false); strict-pass under budget never sets the slack note even when hint path is active; static-formula path never gets slack; x2.7 fallback never gets slack.
+- [x] Test: every gate result carries `inference_ms_source`, `slack_applied`, `effective_budget_minutes` keys in the breakdown — parametrized over all three branches so the tuner / audit log can record them uniformly.
+- [x] Test for the tuner helper `_latest_trial_inference_marginal`: 8 cases — most recent successful trial wins, skips formal records, skips failed records, None on empty, None when no qualifying record (failed/formal/None-measured/zero-measured), tolerates `memory=None`, skips records with missing `time_mode` key, OOM between two trials does not displace the most recent success.
 - [ ] Extend a dual-mode integration test to assert formal record's `inference_ms_source == "trial_inference_warmup"` after a successful trial
-- [ ] Run full `tests/unit/agent/` — green
+- [x] Run full `tests/unit/agent/tune_ml_hyperparam_agent/` — **487 passed, 2 failed in 222.72s**. The 2 failures (`test_estimator_static_patch::test_safety_multiplier_raised`, `test_warmup_activation::test_static_formula_uses_patched_constants`) are **pre-existing** and **not caused by Commit D** — confirmed by `git stash`-ing all working-tree changes and re-running just those two files: same 2 failures on a clean tree. Both test files still assert `SAFETY_MULTIPLIER == 2.0` but the constant was recalibrated to `1.3` in commit `5ac6a53` (2026-04-30 V7-empirical alignment) and the test files were never updated to match. Fixing those is out of scope for Commit D — to be tracked separately.
 - [ ] Run targeted dual-mode integration test — green
 - [ ] Show diff to user
 - [ ] Commit

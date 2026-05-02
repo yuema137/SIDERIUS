@@ -521,15 +521,46 @@ def run_skill(sandbox, **kwargs) -> dict:
             loss_type=loss_type,
         )
 
-        # Single source of truth lives on the inference estimator. The wrapper
-        # used to mirror the constant locally (1/3) but drifted from the
-        # estimator's value during the 2026-04-30 spectral-TCN recalibration —
-        # use the module attribute directly so any future retune is one edit.
-        inference_ms = (
-            measured * _inference_est._INFERENCE_VS_TRAINING_RATIO
-            if (measured is not None and measured > 0)
-            else None
-        )
+        # refine_inference_time_estimator.md Commit D — three-branch
+        # inference-ms derivation, in priority order:
+        #   1. ``trial_inference_warmup``: the tuner passed a measured
+        #      per-PSD-segment cost via ``inference_per_psd_seg_ms_hint``
+        #      (Commit C aggregator output, captured during the trial
+        #      round and now consumed by the formal round). This is the
+        #      most accurate path — convert per-PSD-seg cost back to
+        #      per-step cost by inverting the estimator's
+        #      ``total_steps = ceil(n_psd × ml_per_psd / inf_batch)``
+        #      identity. See the design doc §3.5 correction note for
+        #      the derivation.
+        #   2. ``training_warmup_x2.7_fallback``: the legacy path —
+        #      training warmup measured ms/step, scale by the
+        #      hand-calibrated ``_INFERENCE_VS_TRAINING_RATIO`` constant.
+        #      Used when no trial measurement is available (first iter,
+        #      OOM-killed trial, CPU-only host).
+        #   3. ``static_formula``: nothing measured. The inference
+        #      estimator's internal static fallback fires because
+        #      ``inference_ms_per_step`` is None. Source tag is set
+        #      explicitly here so audit logs distinguish "we passed
+        #      None" from a measured path.
+        inference_per_psd_seg_ms_hint = kwargs.get("inference_per_psd_seg_ms_hint")
+        inf_batch = _inference_est.inference_batch_for(model_type)
+        ml_per_psd = max(PSD_SEGMENT_LENGTH // max(seg_size, 1), 1)
+        if (inference_per_psd_seg_ms_hint is not None
+                and inference_per_psd_seg_ms_hint > 0):
+            inference_ms = (
+                float(inference_per_psd_seg_ms_hint)
+                * inf_batch / ml_per_psd
+            )
+            inference_ms_source = "trial_inference_warmup"
+        elif measured is not None and measured > 0:
+            inference_ms = (
+                measured * _inference_est._INFERENCE_VS_TRAINING_RATIO
+            )
+            inference_ms_source = "training_warmup_x2.7_fallback"
+        else:
+            inference_ms = None
+            inference_ms_source = "static_formula"
+
         inference = _inference_est.estimate_wall_time_seconds(
             model_type, model_config, eval_sample_set,
             inference_ms_per_step=inference_ms,
@@ -569,14 +600,34 @@ def run_skill(sandbox, **kwargs) -> dict:
             f"novel architecture. Treat verdict as best-effort."
         )
 
-    feasible = total_min <= budget_min
+    # refine_inference_time_estimator.md Commit D / Step 6.5 — measurement-
+    # aware feasibility check. When the inference path was the measured
+    # ``trial_inference_warmup`` branch, the estimate is precise to ±10%
+    # in practice (median over n≥4 post-warmup files), so a config that
+    # lands at e.g. 102% of budget is throwing away signal if we reject it
+    # on the strict ``<=``. Soften by 10%. The fallback paths
+    # (``training_warmup_x2.7_fallback``, ``static_formula``) keep the
+    # strict check because their uncertainty bands are much wider — a 10%
+    # slack would let configs that genuinely overrun budget by 30% slip
+    # through.
+    SLACK_FRACTION_WHEN_MEASURED = 0.10
+    if inference_ms_source == "trial_inference_warmup":
+        effective_budget_min = budget_min * (1.0 + SLACK_FRACTION_WHEN_MEASURED)
+        slack_applied = True
+    else:
+        effective_budget_min = budget_min
+        slack_applied = False
+    feasible = total_min <= effective_budget_min
 
     # Flat breakdown: preserves the pre-K.2.5 contract so
     # nodes/ml_hyperparameter_tune_agent.py can still read `source` +
     # `gpu_name` to trigger the Phase F EMA update. Phase 6.7 Fix 1
     # appends ``warmup_aggregator`` + the per-step timing detail so the
     # audit log distinguishes a steady-state median from a step-0
-    # fast-fail event without losing the legacy keys.
+    # fast-fail event without losing the legacy keys. Commit D appends
+    # ``inference_ms_source`` + slack-rule fields so the tuner can record
+    # which branch produced the inference-ms estimate and whether the
+    # 10% slack softened the verdict.
     tbd = training["breakdown"]
     breakdown = {
         "total_train_steps":  tbd["total_train_steps"],
@@ -591,13 +642,23 @@ def run_skill(sandbox, **kwargs) -> dict:
         "warmup_n_warmup_batches": warmup_breakdown.get("n_warmup_batches", 0),
         "warmup_n_timed_batches":  warmup_breakdown.get("n_timed_batches", 0),
         "warmup_timings_ms":       warmup_breakdown.get("timings_ms", []),
+        "inference_ms_source":     inference_ms_source,
+        "slack_applied":           slack_applied,
+        "effective_budget_minutes": round(effective_budget_min, 2),
     }
 
+    slack_note = (
+        f" (within +{int(SLACK_FRACTION_WHEN_MEASURED * 100)}% slack on "
+        f"measured inference)"
+        if slack_applied and feasible and total_min > budget_min
+        else ""
+    )
     verdict = (
         f"{'✅ FITS' if feasible else '❌ OVER BUDGET'} — "
         f"Est {total_min:.1f} min vs budget {budget_min:.1f} min "
         f"(train {training['seconds']:.1f}s + inf {inference['seconds']:.1f}s "
         f"+ score {scoring['seconds']:.1f}s). Dominant phase: {dominant}."
+        f"{slack_note}"
     )
     suggestion = "" if feasible else _suggest_lever(
         tbd["ms_per_step"], seg_size, batch_size
