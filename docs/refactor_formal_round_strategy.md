@@ -295,7 +295,7 @@ shim when the registry replaces the `if/elif`.
 - [x] Updated `agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py:67` Literal to mirror the 4-value union + default to `full_clone`.
 - [x] Added unit tests covering (a)-(f) as planned. Specifically: `test_strategy_default_is_full_clone`, `test_strategy_accepts_canonical_full_clone`, `test_strategy_accepts_canonical_independent`, `test_strategy_legacy_inherit_best_trial_aliases_to_full_clone`, `test_strategy_legacy_llm_propose_aliases_to_independent`, `test_strategy_hybrid_params_rejected_in_phase_1` (regression guard), and three shim tests (`test_shim_canonical_full_clone_inherits_like_legacy`, `test_shim_canonical_independent_skips_inheritance`, `test_shim_legacy_inherit_best_trial_still_works`). Also updated existing protocol-fan-out and workflow-forwarding tests to assert the canonicalised default.
 - [x] **Verify**: targeted suite `tests/unit/agent/tune_ml_hyperparam_agent/test_force_formal_round.py + test_hyperparam_schemas.py + tests/unit/agent/protocols/test_ml_model_valid_to_ml_model_tune.py + tests/unit/workflows/test_model_exploration.py` → **272 passed in 3.23s**. Wider scope (`tests/unit/agent/tune_ml_hyperparam_agent/ + tests/unit/agent/protocols/ + tests/unit/workflows/ + tests/unit/scripts/`) → **754 passed, 3 failed in 225.10s**. All 3 failures are pre-existing on a clean tree (verified via `git stash`): 2 are the `SAFETY_MULTIPLIER==2.0` stale-constant assertions inherited from commit `5ac6a53` (V7 recalibration), 1 is a chain-resume kwargs drift in `test_chain_consistency::test_kwargs_match_modulo_documented_exemptions` between `run_exploration_adaptive.py` and `sdsc_submission_scripts/run_one_iteration.py` — unrelated to `formal_round_strategy`.
-- [ ] **Commit**: `refactor(schema): formal_round_strategy accepts canonical names + aliases legacy {inherit_best_trial, llm_propose}`.
+- [x] **Commit**: `refactor(schema): formal_round_strategy accepts canonical names + aliases legacy {inherit_best_trial, llm_propose}` → `7bc2ea8`.
 
 ### Phase 2 — Strategy registry + logic refactor + hybrid_params introduction
 
@@ -328,7 +328,7 @@ shim when the registry replaces the `if/elif`.
   - `test_formal_round_strategy_canonical_hybrid_params_reaches_tuning_input` (Phase 2's new mode).
   - `test_formal_round_strategy_legacy_inherit_best_trial_canonicalised` (legacy alias → `full_clone`).
 - [x] **Verify**: targeted suite `.venv/bin/python -m pytest tests/unit/workflows/test_model_exploration.py tests/unit/scripts/test_chain_consistency.py -q` → **79 passed in 3.54s**. Smoke checks: `--help` text on both CLIs shows the 5-value union and the rewritten help block; `bash -n sdsc_submission_scripts/_chain_common.sh` passes (shell syntax clean).
-- [ ] **Commit**: `refactor(cli): formal_round_strategy canonical names plumbed through CLI + chain wrapper + workflow`.
+- [x] **Commit**: `refactor(cli): formal_round_strategy canonical names plumbed through CLI + chain wrapper + workflow` → `934ddb9`.
 
 ### Phase 4 — Documentation + memory + smoke
 
@@ -340,7 +340,7 @@ shim when the registry replaces the `if/elif`.
   - `bash -n sdsc_submission_scripts/_chain_common.sh` syntax check clean (verified in Phase 3 verify).
   - One short trial-mode dry run with each of the 3 strategies: the equivalent contract is already covered by `tests/unit/agent/tune_ml_hyperparam_agent/test_force_formal_round.py` — `TestFullCloneStrategy`, `TestHybridParamsStrategy`, `TestIndependentStrategy`, and `TestAliasResolution::test_alias_log_line_emitted` collectively assert the `[STRATEGY]` line content for all 3 canonical strategies + 2 aliases without burning LLM/GPU time. Live dry-run skipped as redundant.
 - [x] **Verify**: `.venv/bin/python -m pytest tests/unit/agent/ -q` → **1730 passed, 6 failed in 229.94s**. The 6 failures are pre-existing on a clean tree (verified via `git stash` → same 6 fail in `test_estimator.py`, `test_proposer_preflight.py`, `test_estimator_static_patch.py`, `test_warmup_activation.py`). All 6 are estimator-constant drift unrelated to this refactor: 2 are the `SAFETY_MULTIPLIER==2.0` stale assertions documented from Phase 1+2, 2 are `_ligroup` ms_per_step / unknown-host fallback assertions hardcoded against an older calibration, and 2 are `proposer_preflight` feasibility verdicts that flip due to the same recalibrated coefficients. None touch `formal_round_strategy` or its dispatch surface.
-- [ ] **Commit**: `docs(formal-round): record canonical strategy names + alias mapping`.
+- [x] **Commit**: `docs(formal-round): record canonical strategy names + alias mapping` → `26da0fa`.
 
 ---
 
