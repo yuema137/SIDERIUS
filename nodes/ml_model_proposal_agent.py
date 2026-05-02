@@ -125,6 +125,7 @@ def _run_preflight_check(
         num_params=num_params,
         time_budget_minutes=budget,
         train_portion=inp.train_portion,
+        trial_portion=inp.trial_portion,
     )
     output.preflight_estimated_minutes = verdict["estimated_minutes"]
     output.preflight_factor = verdict["factor"]
