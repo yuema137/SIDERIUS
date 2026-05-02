@@ -7,6 +7,7 @@ from tqdm import tqdm
 import gc
 import os
 import json
+import time
 
 # Import your sandboxed components for Agent Mode
 from models_sandbox import MODEL_REGISTRY, PositionalUNet, AE
@@ -52,6 +53,9 @@ def get_parser():
                         help="Number of segments per GPU forward pass. Per-model defaults set in sandbox_executor.py (punet/wavenet/fcnet=25, rnn=10, transformer=1).")
     parser.add_argument('--sample_set_json', type=str, default=None,
                         help="Path to SampleSet JSON for trial mode. Overrides --file_index.")
+    parser.add_argument('--timing_out_json', type=str, default=None,
+                        help="If set, write per-file inference timings to this JSON path. "
+                             "Trial-mode only; ignored in --mode fix or normal single-file mode.")
     return parser
 
 def process_batch(index, inputarr, targetarr, model, args, current_loss_type):
@@ -171,6 +175,7 @@ def main():
     if sample_set is not None:
         # --- TRIAL MODE: denoise specific segments from multiple files ---
         out_dir = args.output_dir if args.output_dir else args.data_dir
+        per_file_timings_ms: list[dict] = []
         for file_index_str, psd_segment_indices in sorted(sample_set.items()):
             file_index = int(file_index_str)
             fname = f"abra_validation_{file_index:04d}.h5"
@@ -179,6 +184,8 @@ def main():
             if not os.path.exists(fpath):
                 print(f"Warning: {fpath} not found, skipping.")
                 continue
+
+            t_file_start = time.perf_counter()
 
             with h5py.File(fpath, 'r') as ABRAfile:
                 raw_ch1 = np.array(ABRAfile['timeseries']['channel0001']['timeseries'])
@@ -234,6 +241,17 @@ def main():
 
             del denoised, injected
             gc.collect()
+
+            elapsed_ms = (time.perf_counter() - t_file_start) * 1000.0
+            per_file_timings_ms.append({
+                "file_index": file_index,
+                "n_psd_segs": len(psd_segment_indices),
+                "elapsed_ms": elapsed_ms,
+            })
+
+        if args.timing_out_json:
+            with open(args.timing_out_json, "w") as f:
+                json.dump(per_file_timings_ms, f)
 
     else:
         # --- NORMAL MODE: denoise all segments of a single file ---

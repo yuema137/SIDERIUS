@@ -504,26 +504,36 @@ Four sequential commits. Each commit ships a self-contained slice and leaves the
 
 ### Commit B — sidecar emit + parent capture
 
-- [ ] Read `execute_tools/inference_single.py` trial-mode loop (lines 174-236)
-- [ ] Add `import time` at top (verify not already present)
-- [ ] Initialise `per_file_timings_ms: list[dict] = []` before the loop
-- [ ] Wrap loop body with `t_file_start = time.perf_counter()` / `elapsed_ms = ...`
-- [ ] Append `{"file_index", "n_psd_segs", "elapsed_ms"}` per iteration
-- [ ] Add `--timing_out_json` to `get_parser()` (line 34-55)
-- [ ] After loop: write JSON if flag set
-- [ ] Read `core/sandbox_executor.py::execute_inference` (line 548)
-- [ ] Compute `timing_out` path using `self.dirs["configs"]` + `exp_id`
-- [ ] Append `--timing_out_json` to `cmd`
-- [ ] Wrap `subprocess.run` with parent-side `t_subprocess_start` / `subprocess_wall_ms`
-- [ ] After success: parse sidecar, compute `process_startup_ms = max(0, wall - sum)`
-- [ ] Extend return dict with `per_file_timings_ms`, `process_startup_ms`, `subprocess_wall_ms`
-- [ ] Verify failure path (`CalledProcessError`) still returns `status="error"` without crashing
-- [ ] Create `tests/unit/execute_tools/test_inference_timing_emit.py`
-- [ ] Test: subprocess writes sidecar; entries match `sample_set` count; all `elapsed_ms > 0`
-- [ ] Test: subprocess without flag writes nothing (back-compat)
-- [ ] Run new test + relevant existing tests under `tests/unit/execute_tools/` and `tests/unit/core/`
-- [ ] Show diff to user
-- [ ] Commit
+- [x] Read `execute_tools/inference_single.py` trial-mode loop (lines 174-236)
+- [x] Add `import time` at top (was not present; added on line 10)
+- [x] Initialise `per_file_timings_ms: list[dict] = []` before the loop
+- [x] Wrap loop body with `t_file_start = time.perf_counter()` / `elapsed_ms = ...` (start placed AFTER `if not os.path.exists(fpath): continue` so skipped files don't pollute the median; end placed AFTER the second `del denoised, injected; gc.collect()` so the AST adjacency tests for the canonical 6-name del block still pass)
+- [x] Append `{"file_index", "n_psd_segs", "elapsed_ms"}` per iteration
+- [x] Add `--timing_out_json` to `get_parser()` (line 34-55)
+- [x] After loop: write JSON if flag set
+- [x] Read `core/sandbox_executor.py::execute_inference` (line 548)
+- [x] Compute `timing_out` path using `self.dirs["configs"]` + `exp_id`
+- [x] Append `--timing_out_json` to `cmd` — **only when `sample_set is not None`** (trial mode), so baseline / single-file mode keeps a clean cmd and never writes a stray sidecar
+- [x] Wrap `subprocess.run` with parent-side `t_subprocess_start` / `subprocess_wall_ms`
+- [x] After success: parse sidecar, compute `process_startup_ms = max(0, wall - sum)`
+- [x] Extend return dict with `per_file_timings_ms`, `process_startup_ms`, `subprocess_wall_ms`
+- [x] Failure path (`CalledProcessError`) extended to return the same new keys with empty/`None` values, so consumers can read the dict uniformly without `KeyError` on OOM/error
+- [x] Tests landed in two existing files instead of a new `test_inference_timing_emit.py` (lighter split, per discussion 2026-05-02 — avoids spinning up real torch + h5py in unit tests, aligns with `feedback_unit_tests_are_flow_only`):
+  - `tests/unit/execute_tools/test_inference_single.py` — new `TestTimingFlagAndInstrumentation` class, 4 AST tests:
+    - `test_timing_out_json_flag_registered` — `get_parser` exposes `--timing_out_json`
+    - `test_trial_loop_brackets_each_iteration_with_perf_counter` — ≥2 `time.perf_counter()` calls inside the trial loop (start + end)
+    - `test_per_file_timings_list_appended` — append payload contains `file_index`, `n_psd_segs`, `elapsed_ms`
+    - `test_sidecar_written_when_flag_set` — `if args.timing_out_json: ... json.dump(per_file_timings_ms, ...)` block exists in `main()`
+  - `tests/unit/core/test_sandbox_executor.py` — new `TestExecuteInferenceTimingSidecar` class, 5 mock-subprocess tests:
+    - `test_trial_mode_appends_timing_flag` — `--timing_out_json {path}` is in cmd when sample_set given
+    - `test_normal_mode_omits_timing_flag` — flag absent in baseline / single-file mode
+    - `test_success_returns_per_file_timings_and_decomposed_wall` — sidecar parsed back, return dict carries the 3 new keys, `process_startup_ms = max(0, wall − sum)`
+    - `test_success_with_missing_sidecar_returns_empty_timings` — graceful no-sidecar path → empty list + None startup
+    - `test_failure_path_returns_uniform_keys` — `CalledProcessError` returns the new keys with empty/None
+- [x] Run new tests + existing tests in `tests/unit/execute_tools/test_inference_single.py` and `tests/unit/core/test_sandbox_executor.py` — **47/47 green** (38 existing + 9 new); no regressions to the canonical-del AST tests
+- [x] Broader sanity: `test_tuning_agent.py + test_sandbox_rlimit.py` — 101/101 green (caller paths still happy with the new return-dict shape)
+- [x] Show diff to user
+- [x] Commit (this commit — see git log)
 
 ### Commit C — aggregator + memory persistence + schema
 

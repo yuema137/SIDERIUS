@@ -251,6 +251,145 @@ class TestExecuteInferenceBatch:
 
 
 # ==========================================
+# execute_inference — Commit B: trial-mode timing sidecar
+# ==========================================
+
+class TestExecuteInferenceTimingSidecar:
+    """Commit B contract: in trial mode, the parent appends ``--timing_out_json``
+    to the subprocess cmd, then reads the sidecar back and returns a dict
+    enriched with ``per_file_timings_ms``, ``subprocess_wall_ms``, and
+    ``process_startup_ms = max(0, wall - sum)``. Outside trial mode (no
+    ``sample_set``), the flag is omitted so baseline runs are unaffected."""
+
+    def _seed_files(self, sandbox):
+        cfg_dir = sandbox.dirs["configs"]
+        os.makedirs(cfg_dir, exist_ok=True)
+        for name in [f"model_config_{EXP_ID}.json", f"loss_config_{EXP_ID}.json"]:
+            with open(os.path.join(cfg_dir, name), "w") as f:
+                json.dump({}, f)
+        model_path = os.path.join(sandbox.dirs["models"], f"model_fcnet_{EXP_ID}_agent.pth")
+        open(model_path, "w").close()
+
+    def _expected_timing_path(self, sandbox):
+        return os.path.abspath(
+            os.path.join(sandbox.dirs["configs"], f"inference_timing_{EXP_ID}.json")
+        )
+
+    def _make_subprocess_writes_sidecar(self, sandbox, payload):
+        """Build a side_effect that writes ``payload`` to the timing sidecar
+        path before returning success — mirrors what the real subprocess does."""
+        timing_path = self._expected_timing_path(sandbox)
+        def _side_effect(*args, **kwargs):
+            with open(timing_path, "w") as f:
+                json.dump(payload, f)
+            return _make_mock_result()
+        return _side_effect
+
+    @patch("core.sandbox_executor.subprocess.run")
+    def test_trial_mode_appends_timing_flag(self, mock_run, sandbox):
+        """When ``sample_set`` is provided, ``--timing_out_json {path}`` must
+        appear in the cmd so the subprocess knows where to write the
+        sidecar."""
+        self._seed_files(sandbox)
+        sample_set = {"0": [0, 1], "1": [0]}
+        mock_run.return_value = _make_mock_result()
+        sandbox.execute_inference(
+            EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, LOSS_CFG,
+            sample_set=sample_set,
+        )
+        (cmd,), _ = mock_run.call_args
+        assert "--timing_out_json" in cmd, f"--timing_out_json missing from cmd: {cmd}"
+        idx = cmd.index("--timing_out_json")
+        assert cmd[idx + 1] == self._expected_timing_path(sandbox)
+
+    @patch("core.sandbox_executor.subprocess.run")
+    def test_normal_mode_omits_timing_flag(self, mock_run, sandbox):
+        """Baseline / single-file mode (no sample_set) must not include the
+        flag — the subprocess ignores it there anyway, but keeping the cmd
+        clean prevents accidental sidecar writes from polluting the configs
+        dir during baseline runs."""
+        self._seed_files(sandbox)
+        mock_run.return_value = _make_mock_result()
+        sandbox.execute_inference(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, LOSS_CFG)
+        (cmd,), _ = mock_run.call_args
+        assert "--timing_out_json" not in cmd
+
+    @patch("core.sandbox_executor.subprocess.run")
+    def test_success_returns_per_file_timings_and_decomposed_wall(
+        self, mock_run, sandbox
+    ):
+        """On successful trial-mode inference, the return dict must carry
+        the parsed sidecar plus the parent-measured wall time, with
+        ``process_startup_ms`` = wall − sum(per-file). This is the
+        decomposition Commit C's aggregator + Commit D's gate consume."""
+        self._seed_files(sandbox)
+        sample_set = {"0": [0, 1, 2], "1": [0]}
+        # Two files with known elapsed_ms; the parent sums these and
+        # subtracts from its own wall measurement.
+        payload = [
+            {"file_index": 0, "n_psd_segs": 3, "elapsed_ms": 100.0},
+            {"file_index": 1, "n_psd_segs": 1, "elapsed_ms": 50.0},
+        ]
+        mock_run.side_effect = self._make_subprocess_writes_sidecar(sandbox, payload)
+        result = sandbox.execute_inference(
+            EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, LOSS_CFG,
+            sample_set=sample_set,
+        )
+        assert result["status"] == "success"
+        assert result["per_file_timings_ms"] == payload
+        assert isinstance(result["subprocess_wall_ms"], float)
+        assert result["subprocess_wall_ms"] >= 0.0
+        assert result["process_startup_ms"] is not None
+        # Parent wall always >= sum of per-file (by definition of
+        # subprocess wall time) — but the mock makes the work
+        # instantaneous, so wall ≪ 150ms and the max(0, ...) clamp kicks
+        # in. Pin only that the clamp prevented a negative value.
+        assert result["process_startup_ms"] >= 0.0
+
+    @patch("core.sandbox_executor.subprocess.run")
+    def test_success_with_missing_sidecar_returns_empty_timings(
+        self, mock_run, sandbox
+    ):
+        """If the subprocess succeeded but no sidecar was written (e.g. the
+        subprocess crashed silently between the loop and the write — or the
+        feature flag was unset by an external invoker), the parent must not
+        crash. Empty list + None startup is the documented fallback shape;
+        the aggregator (Commit C) returns None in this case which routes
+        the gate to the constant-ratio fallback."""
+        self._seed_files(sandbox)
+        sample_set = {"0": [0]}
+        # Standard mock — does NOT write the sidecar.
+        mock_run.return_value = _make_mock_result()
+        result = sandbox.execute_inference(
+            EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, LOSS_CFG,
+            sample_set=sample_set,
+        )
+        assert result["status"] == "success"
+        assert result["per_file_timings_ms"] == []
+        assert result["process_startup_ms"] is None
+        assert isinstance(result["subprocess_wall_ms"], float)
+
+    @patch("core.sandbox_executor.subprocess.run")
+    def test_failure_path_returns_uniform_keys(self, mock_run, sandbox):
+        """``CalledProcessError`` must still return the new keys (with
+        empty/None values) so callers can read the dict uniformly without
+        a ``KeyError`` when the trial OOMs."""
+        self._seed_files(sandbox)
+        sample_set = {"0": [0]}
+        mock_run.side_effect = subprocess.CalledProcessError(
+            returncode=1, cmd=["dummy"], stderr="boom",
+        )
+        result = sandbox.execute_inference(
+            EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, LOSS_CFG,
+            sample_set=sample_set,
+        )
+        assert result["status"] in {"error", "oom_host_ram"}
+        assert result["per_file_timings_ms"] == []
+        assert result["process_startup_ms"] is None
+        assert result["subprocess_wall_ms"] is None
+
+
+# ==========================================
 # execute_scoring
 # ==========================================
 
