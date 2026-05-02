@@ -251,10 +251,12 @@ class TestRenderComparisonTable:
         assert md.startswith(
             "### Per-file performance (log-space, all three columns on global s_max)"
         )
-        # Phase 8 / P1-Impact: header now carries Weight % and Impact columns.
+        # Phase 8 / P1-Impact: header carries Impact and Weight % columns.
+        # Post-V9 audit: Impact precedes Weight % so the visual scan order
+        # matches the synthesis directive ("Read the Impact_Score column FIRST").
         assert (
             "| file | raw_baseline | ground_truth | **model** | gain vs raw | "
-            "headroom vs gt | Weight % | Impact |"
+            "headroom vs gt | Impact | Weight % |"
         ) in md
         assert "### Aggregated scalar (log space, global s_max)" in md
         assert "### Sampled files re-ranked by Impact_Score (descending)" in md

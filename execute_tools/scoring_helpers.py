@@ -330,6 +330,11 @@ def _compute_weight_and_impact(
         log_after = math.log(
             max(gm_after, 0.0) + _LOG_OFFSET, _LOG_BASE,
         )
+        # Clip to non-negative: a model that over-amplifies file i above
+        # its gt ceiling would produce a negative raw delta when swapped
+        # to ceiling. Surfacing that as "negative Impact" would invert
+        # the agent's lever logic — over-amplification is not a fixable
+        # lever, so clipping is the explicit design choice.
         impacts[i] = max(log_after - log_current, 0.0)
 
     return weights, impacts
@@ -392,9 +397,9 @@ _HEADER = (
     "### Per-file performance (log-space, all three columns on global s_max)\n"
     "\n"
     "| file | raw_baseline | ground_truth | **model** | gain vs raw | "
-    "headroom vs gt | Weight % | Impact |\n"
+    "headroom vs gt | Impact | Weight % |\n"
     "|-----:|-------------:|-------------:|----------:|------------:|"
-    "---------------:|---------:|-------:|"
+    "---------------:|-------:|---------:|"
 )
 
 _AGG_HEADER = (
@@ -486,8 +491,8 @@ def _render_row(row: PerFileRow) -> str:
         _fmt_log(row.model),
         _fmt_log(row.gain_vs_raw),
         _fmt_log(row.headroom_vs_gt),
-        _fmt_pct(row.linear_weight),
         _fmt_log(row.impact_score),
+        _fmt_pct(row.linear_weight),
     ]
     return (
         f"| {cells[0]} "
@@ -496,8 +501,8 @@ def _render_row(row: PerFileRow) -> str:
         f"| {cells[3]:>9} "
         f"| {cells[4]:>11} "
         f"| {cells[5]:>14} "
-        f"| {cells[6]:>8} "
-        f"| {cells[7]:>6} |"
+        f"| {cells[6]:>6} "
+        f"| {cells[7]:>8} |"
     )
 
 
