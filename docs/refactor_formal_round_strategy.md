@@ -1,11 +1,11 @@
 # Refactor: Formal-Round Inheritance → Strategy-Based Dispatch
 
-> **Status**: design — awaiting sign-off before phase 1.
+> **Status**: **CLOSED — all 4 phases landed 2026-05-02 on `fix/cognitive-alignment-v9`**.
 > **Author**: Yue + Claude · **Date**: 2026-05-02
-> **Branch target**: `fix/cognitive-alignment-v9` (current) or a new
-> `refactor/formal-strategy` branch — caller decision before phase 1.
+> **Phase commits**: Phase 1 `7bc2ea8` · Phase 2 `4b44a78` · Phase 3 `934ddb9` · Phase 4 `26da0fa`.
+> **Reference for future sessions**: `docs/memories/project_formal_strategy_refactor.md`.
 
----t
+---
 
 ## 1. Observation & Motivation
 
@@ -442,7 +442,84 @@ If we need to fully revert to pre-refactor: revert Phase 1 last
 
 ## 11. Sign-off
 
-- [ ] User reviewed §2 (semantic contract) and §6 (phased checklist).
-- [ ] User confirmed branch target (continue on `fix/cognitive-alignment-v9` or new `refactor/formal-strategy`).
-- [ ] User confirmed commit cadence (4 commits as in §6, or roll into 1).
-- [ ] Phase 1 starts after sign-off.
+- [x] User reviewed §2 (semantic contract) and §6 (phased checklist).
+- [x] User confirmed branch target: continued on `fix/cognitive-alignment-v9`.
+- [x] User confirmed commit cadence: 4 commits as in §6 (one per phase).
+- [x] Phase 1 started after sign-off.
+
+---
+
+## 12. Closeout (2026-05-02)
+
+All four phases landed on `fix/cognitive-alignment-v9`. The end-state
+matches the §1.3 goal: an explicit three-mode registry (`full_clone`,
+`hybrid_params`, `independent`) with legacy literals (`inherit_best_trial`,
+`llm_propose`) accepted as schema-level aliases.
+
+### 12.1 Per-phase commits
+
+| Phase | SHA       | Headline                                                                |
+|-------|-----------|-------------------------------------------------------------------------|
+| 1     | `7bc2ea8` | `refactor(schema): formal_round_strategy accepts canonical names + aliases legacy {inherit_best_trial, llm_propose}` |
+| 2     | `4b44a78` | `refactor(formal-round): strategy-registry dispatch + hybrid_params mode + audit logging` |
+| 3     | `934ddb9` | `refactor(cli): formal_round_strategy canonical names plumbed through CLI + chain wrapper + workflow` |
+| 4     | `26da0fa` | `docs(formal-round): record canonical strategy names + alias mapping`   |
+
+### 12.2 What landed
+
+- **Schema** (`agent/schemas/hyperparam_tuning.py`): `Literal[...]` widened
+  to 5 values (3 canonical + 2 legacy); `@field_validator(mode="before")`
+  named `_canonicalise_legacy_strategy` resolves legacy → canonical
+  before Literal-validation runs. Default flipped from `inherit_best_trial`
+  to `full_clone`. Description block rewritten.
+- **Protocol** (`agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py`):
+  matching 5-value Literal in the `local_validated_model` parameter list.
+- **Node** (`nodes/ml_hyperparameter_tune_agent.py`): if/elif replaced by
+  `_FORMAL_STRATEGY_REGISTRY` dict + 3 small handlers
+  (`_strategy_full_clone`, `_strategy_hybrid_params`, `_strategy_independent`).
+  Two-line `[STRATEGY]` + `[FORMAL OVERRIDE]` audit log emitted on every
+  formal round per §3 contract. The §2 vs §7.2 reconciliation: `independent`
+  emits a structured `winner=none inherited=(none)` line on the no-winner
+  path (no WARNING) — see Phase 2 checkbox notes for the rationale.
+- **CLIs** (`run_exploration_adaptive.py`, `sdsc_submission_scripts/run_one_iteration.py`):
+  `choices` widened to the 5-value union; default flipped to `full_clone`;
+  help text rewritten.
+- **Chain wrapper** (`sdsc_submission_scripts/_chain_common.sh:67`):
+  `FORMAL_ROUND_STRATEGY="full_clone"` default; case-arm + APP_ARGS unchanged
+  (pass-through; schema canonicalises downstream).
+- **Workflow** (`workflows/model_exploration.py:583`): default flipped to
+  `full_clone`. Type stays `str` (sibling-flag consistency).
+- **Tests**: `tests/unit/agent/tune_ml_hyperparam_agent/test_force_formal_round.py`
+  gained 14 new tests across 5 §7.2 classes (51 pass total in the file);
+  `tests/unit/scripts/test_chain_consistency.py` extended with
+  `formal_round_strategy` in `SHARED_FLAGS` / `THREE_WAY_FLAGS` /
+  `_COMMON_ARGV` / `EXPECTED_KWARG_NAMES`; `tests/unit/workflows/test_model_exploration.py`
+  gained `hybrid_params` + `inherit_best_trial`-alias workflow-surface tests.
+- **Docs**: V8 Gap Report inline-annotated at the 4 references to
+  `inherit_best_trial`; project memory at
+  `docs/memories/project_formal_strategy_refactor.md` (local-only —
+  directory is gitignored, file is loaded via the auto-memory pointer).
+
+### 12.3 Verification at close
+
+- Phase 3 targeted: `tests/unit/workflows/test_model_exploration.py +
+  tests/unit/scripts/test_chain_consistency.py` → **79 passed in 3.54s**.
+- Phase 4 wide: `tests/unit/agent/` → **1730 passed, 6 failed in 229.94s**.
+  All 6 failures are pre-existing estimator-constant drift on the clean
+  tree (verified via `git stash`): 2 × `SAFETY_MULTIPLIER==2.0` stale
+  assertions, 2 × `_ligroup`/unknown-host estimator-coefficient drift,
+  2 × `proposer_preflight` feasibility verdicts hitting the same
+  recalibrated coefficients. None touch `formal_round_strategy` or its
+  dispatch surface.
+- Smoke: `--help` on both CLIs shows the 5-value union + rewritten help
+  block; `bash -n sdsc_submission_scripts/_chain_common.sh` clean.
+
+### 12.4 What's NOT in scope of this refactor
+
+- No live-chain migration. V9 chains running with `inherit_best_trial`
+  in their config keep working — schema canonicalises at validation time.
+  The audit log surfaces `(alias_of:inherit_best_trial)` so post-mortems
+  can grep for chains still on legacy configs.
+- The 6 pre-existing test failures listed in §12.3 are tracked separately
+  (estimator recalibration follow-up); they were pre-existing before this
+  refactor began and remain pre-existing after it closes.
