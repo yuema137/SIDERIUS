@@ -163,6 +163,69 @@ class ExperimentMemory(BaseModel):
         ),
     )
 
+    # refine_inference_time_estimator.md — measured per-PSD-segment inference
+    # cost captured during a successful trial round. Commit C populates the
+    # five measurement fields below from the trial-mode subprocess sidecar
+    # (see core/sandbox_executor.py::execute_inference); Commit D consumes
+    # ``inference_per_psd_seg_ms_measured`` to feed the formal round's time
+    # gate as a hint, replacing the hand-calibrated × 2.7 ratio that
+    # over-predicts for archs whose true ratio is lower. All optional so
+    # pre-Commit-C records still validate.
+    inference_per_psd_seg_ms_measured: Optional[float] = Field(
+        default=None,
+        description=(
+            "Median per-PSD-segment inference cost (ms) measured during the "
+            "trial round, after dropping a leading warmup fraction. None on "
+            "rounds with too few timed files (n_files < 2) or zero elapsed."
+        ),
+    )
+    inference_warmup_aggregator: Optional[Literal["median"]] = Field(
+        default=None,
+        description=(
+            "Which aggregator produced ``inference_per_psd_seg_ms_measured``. "
+            "Currently only 'median'; field exists so future aggregator "
+            "variants stay distinguishable in audit logs without a schema "
+            "migration."
+        ),
+    )
+    inference_n_timed_files: Optional[int] = Field(
+        default=None,
+        description=(
+            "Number of files contributing to the median (n_files − n_warmup). "
+            "0 when the aggregator returned None."
+        ),
+    )
+    inference_warmup_fraction: Optional[float] = Field(
+        default=None,
+        description=(
+            "Fraction of leading files discarded as warmup (default 0.20). "
+            "Applied as ``round(n_files × fraction)``, clamped to "
+            "``[1, n_files−1]``."
+        ),
+    )
+    inference_process_startup_ms: Optional[float] = Field(
+        default=None,
+        description=(
+            "Parent-measured fixed cost per inference call: subprocess wall "
+            "minus sum of per-file elapsed. Captures Python import + CUDA "
+            "context init + ``torch.load`` + h5py library init. Reported for "
+            "audit; not consumed by the gate (the gate uses only the "
+            "per-file marginal). None if the sidecar was missing."
+        ),
+    )
+    inference_ms_source: Optional[str] = Field(
+        default=None,
+        description=(
+            "Provenance tag set by the time gate when the inference-ms "
+            "estimate is computed. One of "
+            "'trial_inference_warmup' (Commit D measured-hint path), "
+            "'training_warmup_x2.7_fallback' (legacy ratio scaling when no "
+            "trial measurement is available), or 'static_formula' "
+            "(no warmup signal at all). None on records where the gate did "
+            "not run."
+        ),
+    )
+
     # Phase L — per-round attempt-budget bookkeeping. The tuner now counts
     # SUCCESSFUL rounds, not raw attempts, so a single round can span
     # multiple attempts (each one a separate ExperimentRecord). These two

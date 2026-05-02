@@ -49,6 +49,9 @@ from execute_tools.build_anchor_map import load_anchor_map
 from nodes.scoring_reference import load_reference_scores
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.skills.evaluate_time_skill import calibration as time_calibration
+from agent.skills.evaluate_time_skill.wrapper import (
+    _aggregate_inference_file_timings,
+)
 from agent.utils.architectural_pattern_tagger import (
     TIME_FACTOR_THRESHOLD,
     VRAM_FACTOR_THRESHOLD,
@@ -2013,6 +2016,39 @@ class HyperparamTuningAgent:
                     # identify success rounds that ran against a guessed batch.
                     if resource_check.get("inference_batch_uncalibrated"):
                         final_record["memory"]["inference_batch_uncalibrated"] = True
+                    # refine_inference_time_estimator.md Commit C — persist the
+                    # measured per-PSD-segment inference cost into the round's
+                    # memory whenever the trial-mode subprocess emitted a
+                    # populated sidecar. Commit D will read this value back via
+                    # ``_latest_trial_inference_marginal`` to feed the formal
+                    # round's time gate as a hint, replacing the hand-calibrated
+                    # × 2.7 ratio that drove V9 §8 over-prediction. The fields
+                    # are written even when the aggregator returns ``None`` —
+                    # an absent sidecar (legacy / OOM-killed trial / non-trial
+                    # round) falls through to ``inf_status.get(...)`` returning
+                    # an empty list, the aggregator returning ``None``, and the
+                    # measurement keys staying ``None``. The schema accepts None
+                    # for all six (Optional[T] = None), so nothing breaks for
+                    # legacy or fallback rounds.
+                    inf_per_file = inf_status.get("per_file_timings_ms", []) or []
+                    inf_per_psd_seg_ms, inf_breakdown = (
+                        _aggregate_inference_file_timings(inf_per_file)
+                    )
+                    final_record["memory"]["inference_per_psd_seg_ms_measured"] = (
+                        inf_per_psd_seg_ms
+                    )
+                    final_record["memory"]["inference_warmup_aggregator"] = (
+                        inf_breakdown.get("aggregator")
+                    )
+                    final_record["memory"]["inference_n_timed_files"] = (
+                        inf_breakdown.get("n_timed_files")
+                    )
+                    final_record["memory"]["inference_warmup_fraction"] = (
+                        inf_breakdown.get("warmup_fraction")
+                    )
+                    final_record["memory"]["inference_process_startup_ms"] = (
+                        inf_status.get("process_startup_ms")
+                    )
                     # Phase L — round bookkeeping for the per-round budget audit.
                     final_record["memory"]["round_index"] = round_index
                     final_record["memory"]["attempt_in_round"] = attempt_in_round

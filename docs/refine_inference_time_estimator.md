@@ -537,19 +537,22 @@ Four sequential commits. Each commit ships a self-contained slice and leaves the
 
 ### Commit C — aggregator + memory persistence + schema
 
-- [ ] Read `agent/skills/evaluate_time_skill/wrapper.py` aggregator helper region (line 96-151)
-- [ ] Add `_aggregate_inference_file_timings` next to `_aggregate_warmup_timings`
-- [ ] Match return shape: `(value_or_None, breakdown_dict)`
-- [ ] Read `agent/schemas/hyperparam_tuning.py` `ExperimentMemory` definition
-- [ ] Add 6 new optional fields (`inference_per_psd_seg_ms_measured`, `inference_warmup_aggregator`, `inference_n_timed_files`, `inference_warmup_fraction`, `inference_process_startup_ms`, `inference_ms_source`)
-- [ ] Locate the success-path memory-write site in `nodes/ml_hyperparameter_tune_agent.py` (~line 1554 onward — where `inf_status` becomes a record)
-- [ ] Call aggregator on `inf_status["per_file_timings_ms"]`; write 5 keys into the round's memory
-- [ ] Locate the `final_record["memory"]` site (~line 1962); ensure same fields propagate
-- [ ] Create `tests/unit/agent/evaluate_time_skill/test_inference_aggregator.py`
-- [ ] Tests: empty, 1 file, 2 files, 5 files, 10 files, all-zero, mixed n_psd_segs, fractional rounding
-- [ ] Extend existing tuner unit test to verify new memory keys appear on success records
-- [ ] Run `tests/unit/agent/evaluate_time_skill/` and `tests/unit/agent/tune_ml_hyperparam_agent/` — green
-- [ ] Run schema test suite to confirm `ExperimentMemory` round-trips with new fields
+- [x] Read `agent/skills/evaluate_time_skill/wrapper.py` aggregator helper region (line 96-151)
+- [x] Added `_aggregate_inference_file_timings(per_file_timings_ms, warmup_fraction=0.20)` immediately after `_aggregate_warmup_timings`. Defensive `.get()` on the dict consumption so legacy/partial sidecars don't crash. Smoke-tested: empty → None; 1 file → None; 5 files with elapsed [10..14] / 2 PSD-segs each → drops 1, medians [5.5, 6.0, 6.5, 7.0] = 6.25; all-zero → None.
+- [x] Return shape matches `_aggregate_warmup_timings`: `(value_or_None, breakdown_dict)` where breakdown carries `aggregator` ('median' or None), `n_warmup_files`, `n_timed_files`, `warmup_fraction`, `timings_ms`.
+- [x] Read `agent/schemas/hyperparam_tuning.py` `ExperimentMemory` definition (lines 106-188; 6 new fields inserted between `inference_batch_uncalibrated` and the Phase L `round_index` block)
+- [x] Added 6 new optional fields (`inference_per_psd_seg_ms_measured: Optional[float]`, `inference_warmup_aggregator: Optional[Literal["median"]]`, `inference_n_timed_files: Optional[int]`, `inference_warmup_fraction: Optional[float]`, `inference_process_startup_ms: Optional[float]`, `inference_ms_source: Optional[str]`). Smoke-validated round-trip — defaults are all `None`; populating with the expected values validates cleanly.
+- [x] Located the success-path memory-write site in `nodes/ml_hyperparameter_tune_agent.py` — the only `final_record` assignment is at line 1942, with the per-key memory writes flowing into it (`final_record["memory"][...]` between lines 1991–2054). The design doc's two separate bullets ("success-path memory-write site ~line 1554" and "`final_record['memory']` site ~line 1962") refer to the same location; only one edit was needed.
+- [x] Added the import `from agent.skills.evaluate_time_skill.wrapper import _aggregate_inference_file_timings` at the top of the module (line 52).
+- [x] Inserted the aggregator call + 5 memory key writes immediately after the existing `inference_batch_uncalibrated` block (line 2020+). Reads from `inf_status.get("per_file_timings_ms", []) or []` (defensive — empty list on legacy / failed-trial / non-trial rounds), passes through the aggregator, and writes `inference_per_psd_seg_ms_measured`, `inference_warmup_aggregator`, `inference_n_timed_files`, `inference_warmup_fraction`, `inference_process_startup_ms`. Inline comment explains the fall-through contract: an absent sidecar yields `None`/`0`/default-fraction, which the schema accepts.
+- [x] Created `tests/unit/agent/tune_ml_hyperparam_agent/test_inference_aggregator.py` — landed in the existing per-agent dir (CLAUDE.md convention) instead of the design-doc-stipulated `tests/unit/agent/evaluate_time_skill/` (that dir doesn't exist; sibling files like `test_evaluate_time_skill.py` already live in `tune_ml_hyperparam_agent/`)
+- [x] Tests: 20 cases across 5 classes — `TestFallbackBranches` (empty / 1-file / all-zero / negative), `TestWarmupDiscard` (2 / 5 / 10 / 20-file discard math, clamp-below-n-files, zero-fraction floor), `TestPerPsdSegNormalisation` (mixed seg counts normalise to identical median, outlier robustness, n_psd_segs=0 floor), `TestDefensiveConsumption` (missing keys, input-list independence), `TestBreakdownShape` (required keys, fraction echoed, aggregator label). **20/20 green** in 0.07s.
+- [x] Extended `test_tuning_agent.py` with new `TestInferenceTimingPersistedToMemory` class — 2 tests asserting the wiring contract end-to-end through `agent.run()`:
+  - `test_populated_timings_aggregate_into_memory` — feeds 5-file inference result with `process_startup_ms=1234.5` and per-PSD-seg cost = 10 ms each; asserts memory carries `inference_per_psd_seg_ms_measured == 10.0`, `inference_warmup_aggregator == "median"`, `n_timed_files == 4`, `warmup_fraction == 0.20`, `process_startup_ms == 1234.5`.
+  - `test_legacy_inference_result_writes_safe_defaults` — feeds bare `{"status": "success", "results": {}}` (no timings, mirrors pre-Commit-B records and OOM-killed trials); asserts all 5 keys are present with safe defaults: value/aggregator/startup are `None`, `n_timed_files == 0`, `warmup_fraction == 0.20` (the aggregator returns the default fraction in its breakdown even when it returns `None`).
+- [x] Ran aggregator + schema + new memory-persistence tests together — **159/159 green** in 5.26s.
+- [x] Ran `tests/unit/agent/tune_ml_hyperparam_agent/test_tuning_agent.py` (the file housing the new `TestInferenceTimingPersistedToMemory` class) end-to-end — **66/66 green** in 190.98s. No regression to the rest of the file from the new test class. (The legacy `tests/unit/agent/evaluate_time_skill/` dir doesn't exist on this branch — coverage for the aggregator lives in the per-agent dir per CLAUDE.md.)
+- [x] Schema test suite confirmation: `tests/unit/agent/tune_ml_hyperparam_agent/test_hyperparam_schemas.py` runs green inside the 159-test sweep above. `ExperimentMemory.model_validate({})` round-trips fine; populating with all six new fields validates cleanly. No back-compat regressions.
 - [ ] Show diff to user
 - [ ] Commit
 

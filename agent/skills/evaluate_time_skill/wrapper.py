@@ -151,6 +151,79 @@ def _aggregate_warmup_timings(
     return statistics.median(timed), breakdown
 
 
+def _aggregate_inference_file_timings(
+    per_file_timings_ms: list,
+    warmup_fraction: float = 0.20,
+) -> tuple[float | None, dict]:
+    """Reduce raw per-file trial-mode inference timings into a single
+    per-PSD-segment ms estimate, robust to warmup leak.
+
+    Mirrors ``_aggregate_warmup_timings`` in spirit: discard a leading
+    fraction of files (CUDA context init, cold-disk h5py read, lazy CUDA
+    graph capture all leak into the first 1-2 files even though they're
+    one-shot costs) and take the median of the remainder normalised per
+    PSD segment.
+
+    Per-PSD-segment normalisation matters because trial files are sampled
+    sparsely — file 0 might carry 3 PSD segments, file 1 might carry 8 —
+    and the raw elapsed_ms scales with the segment count. Normalising by
+    ``n_psd_segs`` produces a unit cost the formal round can multiply
+    back up by its own segment count.
+
+    Args:
+        per_file_timings_ms: List of dicts emitted by the trial-mode
+            subprocess sidecar. Each dict carries
+            ``{"file_index", "n_psd_segs", "elapsed_ms"}``. Defensive
+            ``.get()`` is used on consumption so legacy or partial
+            sidecars don't crash the aggregator.
+        warmup_fraction: Fraction of leading files to discard as warmup.
+            Applied as ``round(n_files × warmup_fraction)``, clamped to
+            ``[1, n_files − 1]``. Default 0.20 means 1 file warmup at
+            n=5, 2 at n=10, 4 at n=20.
+
+    Returns:
+        ``(per_psd_seg_ms_or_None, breakdown_dict)``. The breakdown
+        mirrors ``_aggregate_warmup_timings``'s shape so downstream
+        record-writing is symmetric.
+
+    Returns ``None`` (with the aggregator key still ``None``) when:
+      * fewer than 2 files exist (no signal to discard warmup from);
+      * the post-warmup slice is empty;
+      * every post-warmup per-PSD-seg cost is ≤ 0 (degenerate sidecar).
+
+    The ``None`` return routes the caller to the legacy ``× 2.7``
+    fallback in Commit D — preserving back-compat for tiny trials and
+    OOM-killed subprocesses where no measurement was captured.
+    """
+    n_files = len(per_file_timings_ms)
+    breakdown: dict = {
+        "aggregator": None,
+        "n_warmup_files": 0,
+        "n_timed_files": 0,
+        "warmup_fraction": warmup_fraction,
+        "timings_ms": list(per_file_timings_ms),
+    }
+    if n_files < 2:
+        return None, breakdown
+
+    n_warmup = min(max(1, round(n_files * warmup_fraction)), n_files - 1)
+    timed = per_file_timings_ms[n_warmup:]
+    if not timed:
+        return None, breakdown
+
+    per_psd_seg_ms = [
+        float(t.get("elapsed_ms", 0.0)) / max(int(t.get("n_psd_segs", 1)), 1)
+        for t in timed
+    ]
+    if not per_psd_seg_ms or all(v <= 0 for v in per_psd_seg_ms):
+        return None, breakdown
+
+    breakdown["aggregator"] = "median"
+    breakdown["n_warmup_files"] = n_warmup
+    breakdown["n_timed_files"] = len(timed)
+    return statistics.median(per_psd_seg_ms), breakdown
+
+
 # ── torch-dependent helpers (warmup infrastructure) ──────────────────────────
 
 
