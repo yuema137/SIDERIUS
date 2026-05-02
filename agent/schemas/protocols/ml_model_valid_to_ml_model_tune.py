@@ -66,6 +66,7 @@ def local_validated_model(
     force_formal_round: bool = True,
     formal_round_strategy: Literal[
         "full_clone",
+        "hybrid_params",
         "independent",
         "inherit_best_trial",  # legacy alias of full_clone
         "llm_propose",         # legacy alias of independent

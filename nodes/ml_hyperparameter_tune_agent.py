@@ -19,7 +19,7 @@ import argparse
 import importlib
 import traceback
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 from pydantic import ValidationError
 
@@ -164,15 +164,16 @@ def _latest_trial_inference_marginal(memory_history: list) -> Optional[float]:
 
 
 # --------------------------------------------------------------------- #
-# Formal-round strategy aliasing (Phase 1 of refactor_formal_round_strategy.md)
+# Formal-round strategy aliasing + registry
+# (refactor_formal_round_strategy.md — Phase 1 added the alias map; Phase 2
+# wires the three handlers + dispatch table consumed below in
+# :func:`_apply_mode_override_chain`.)
 # --------------------------------------------------------------------- #
-# Maps legacy literal values to their canonical post-2026-05-02 form.
 # The schema's ``@field_validator`` is the primary canonicalisation point
 # and live callers always reach this function with the already-canonical
 # name; this helper is a defensive second pass so unit tests, ad-hoc
 # constructions, and any future internal caller that bypasses the schema
-# still see consistent behavior. Phase 2 will retire the if/elif this
-# helper guards by replacing it with a strategy-registry dispatch.
+# still see consistent behavior.
 _LEGACY_STRATEGY_ALIASES: Dict[str, str] = {
     "inherit_best_trial": "full_clone",
     "llm_propose":        "independent",
@@ -186,6 +187,72 @@ def _canonical_strategy(name: str) -> str:
     responsible for rejecting them.
     """
     return _LEGACY_STRATEGY_ALIASES.get(name, name)
+
+
+# --------------------------------------------------------------------- #
+# Strategy handlers
+# --------------------------------------------------------------------- #
+# Each handler mutates ``plan`` in place using the trial ``winner`` record
+# and returns the list of inherited field names (used by the audit log).
+# Signature is uniform so the registry can dispatch without special-casing.
+# Defensive ``.get()`` reads on ``winner["params"]["train_config"]`` keys —
+# legacy/sparse records may omit ``epochs``/``batch_size``; in that case
+# the planner's value survives rather than crashing the chain on KeyError.
+
+def _strategy_full_clone(plan: ExperimentPlan, winner: dict) -> List[str]:
+    """Inherit all five fields: model_cfg, loss_cfg, lr, epochs, batch_size.
+
+    Production default. Required for the trial→formal inference-time
+    measurement reuse landed in commits B–D of
+    ``docs/refine_inference_time_estimator.md`` — the timing measurement
+    must be for the same architecture the formal round runs.
+    """
+    p = winner["params"]
+    plan.model_cfg = dict(p.get("model_config") or {})
+    plan.loss_cfg = dict(p["loss_config"])
+    plan.train_cfg["lr"] = p["train_config"]["lr"]
+    inherited = ["model_cfg", "loss_cfg", "lr"]
+    inherited_epochs = p["train_config"].get("epochs")
+    if inherited_epochs is not None:
+        plan.train_cfg["epochs"] = inherited_epochs
+        inherited.append("epochs")
+    inherited_bs = p["train_config"].get("batch_size")
+    if inherited_bs is not None:
+        plan.train_cfg["batch_size"] = inherited_bs
+        inherited.append("batch_size")
+    return inherited
+
+
+def _strategy_hybrid_params(plan: ExperimentPlan, winner: dict) -> List[str]:
+    """Inherit only loss_cfg + lr; planner keeps model_cfg, epochs, batch_size.
+
+    Audit/exploration use case — lock the evaluation surface (loss + lr)
+    but let the LLM scale capacity for the full-data pass. The time gate
+    may reject the planner's heavier choice on the formal round; that is
+    the intended trade-off, not a bug.
+    """
+    p = winner["params"]
+    plan.loss_cfg = dict(p["loss_config"])
+    plan.train_cfg["lr"] = p["train_config"]["lr"]
+    return ["loss_cfg", "lr"]
+
+
+def _strategy_independent(plan: ExperimentPlan, winner: dict) -> List[str]:
+    """No-op. Planner's full plan survives verbatim.
+
+    ``winner`` is unused but kept in the signature so the registry can
+    dispatch without special-casing.
+    """
+    return []
+
+
+_FORMAL_STRATEGY_REGISTRY: Dict[
+    str, Callable[[ExperimentPlan, dict], List[str]]
+] = {
+    "full_clone":    _strategy_full_clone,
+    "hybrid_params": _strategy_hybrid_params,
+    "independent":   _strategy_independent,
+}
 
 
 def _apply_mode_override_chain(
@@ -207,102 +274,100 @@ def _apply_mode_override_chain(
        every iteration normally forces ``plan.is_trial = False`` so the
        run produces a cross-architecture comparable score. Operators can
        disable this override by passing ``--no-force_formal_round``.
-    3. **Hyperparameter inheritance**, gated on
-       ``formal_round_strategy`` (canonical names; legacy aliases
-       ``inherit_best_trial`` / ``llm_propose`` resolve to ``full_clone``
-       / ``independent`` via :func:`_canonical_strategy`):
+    3. **Hyperparameter inheritance**, dispatched through
+       :data:`_FORMAL_STRATEGY_REGISTRY` keyed by the canonical
+       ``formal_round_strategy`` (legacy aliases ``inherit_best_trial`` /
+       ``llm_propose`` resolve via :func:`_canonical_strategy`):
 
-       * ``"full_clone"`` (default) — when (2) fires AND
-         ``memory_history`` contains at least one successful trial
-         round, the highest-scoring trial round's ``model_config``,
-         ``loss_config``, and the ``lr``/``epochs``/``batch_size``
-         keys of its ``train_config`` are copied into ``plan``,
-         overwriting whatever the planner emitted. The formal round
-         is by definition a longer training of the trial winner with
-         full eval — not a sandbox for new architectures, losses, or
-         hyperparameters. If no trial winner exists, the planner's
-         choices survive and a warning is logged (resilient: a messy
-         trial stage shouldn't kill the chain).
-       * ``"independent"`` — inheritance is skipped; the planner's
-         model_config, loss_config, and train_config survive verbatim.
-         ``plan.is_trial`` is still flipped to False so the round
-         runs as formal.
+       * ``"full_clone"`` (default) — copies all 5 fields from the
+         highest-scoring trial-mode success record. Production default;
+         required for trial→formal inference-time measurement reuse.
+       * ``"hybrid_params"`` — copies only ``loss_cfg`` + ``lr``;
+         planner keeps ``model_cfg`` / ``epochs`` / ``batch_size``.
+         Audit / exploration use case.
+       * ``"independent"`` — no inheritance; planner's plan survives
+         verbatim. ``plan.is_trial`` is still flipped to False.
 
-       A third canonical strategy, ``"hybrid_params"`` (loss_cfg + lr
-       only), is reserved for Phase 2 of
-       ``docs/refactor_formal_round_strategy.md`` and is not yet a
-       valid value at the schema layer.
+       Shared no-winner fallback for ``full_clone`` and ``hybrid_params``:
+       when ``memory_history`` carries no successful trial round, the
+       planner's plan is preserved unchanged and a WARNING is logged
+       (resilient — a messy trial stage shouldn't kill the chain).
+       ``independent`` skips the warning because the strategy explicitly
+       disclaims inheritance — there was nothing the user wanted to
+       inherit.
 
-       Why the inheritance default exists: V7 iter_001/iter_002 of
-       explore_novel showed the LLM picking an untested ``focal_cw``
-       loss for the formal round despite all trial rounds using
-       ``focal``; the resulting model collapsed to ~0 PSD output. V9
-       audit §7 found the same pattern at the architecture level —
-       formal rounds emitting ``kernel_size=2``/``use_same_padding=False``
-       when both trial rounds used ``kernel_size=3``/``use_same_padding=True``.
-       Inheriting ``model_cfg`` is also a hard prerequisite for the
-       trial→formal inference-time measurement reuse landed in commits
-       B–D of this branch — without it, the timing measurement is
-       for a different architecture than the formal round runs.
+       Why the default exists: V7 iter_001/iter_002 of explore_novel
+       showed the LLM picking an untested ``focal_cw`` loss for the
+       formal round despite all trial rounds using ``focal``; the
+       resulting model collapsed to ~0 PSD output. V9 audit §7 found
+       the same pattern at the architecture level — formal rounds
+       emitting ``kernel_size=2``/``use_same_padding=False`` when both
+       trial rounds used ``kernel_size=3``/``use_same_padding=True``.
+
+    Audit log contract (refactor_formal_round_strategy.md §3):
+
+    * ``[STRATEGY] formal_round_strategy=<canonical>`` — emitted once
+      per forced formal round. Includes ``(alias_of:<legacy>)`` when
+      the caller passed a legacy literal.
+    * ``[FORMAL OVERRIDE] strategy=<canonical> winner=<exp_id>
+      score=<float> inherited=<comma-list>`` on the inherit path, OR
+      a WARNING line on the no-winner path (full_clone / hybrid_params).
 
     Mutates ``plan`` in place and returns it for caller-chaining.
     """
     if not trial_allowed:
         plan.is_trial = False
-    if is_formal_round and force_formal_round:
-        plan.is_trial = False
-        # Phase 1 transitional shim — Phase 2 of the formal-strategy refactor
-        # will replace this if/elif with a strategy-registry dispatch.
-        # Resolve any legacy alias here so the comparison always uses the
-        # canonical name regardless of whether the schema validator was the
-        # entry point (live path) or the caller bypassed it (test path).
-        canonical_strategy = _canonical_strategy(formal_round_strategy)
-        if canonical_strategy == "full_clone":
-            winner = _best_trial_winner(memory_history or [])
-            if winner is not None:
-                winner_loss = winner["params"]["loss_config"]
-                winner_train = winner["params"]["train_config"]
-                winner_model = winner["params"].get("model_config") or {}
-                plan.loss_cfg = dict(winner_loss)  # copy to avoid aliasing
-                plan.model_cfg = dict(winner_model)
-                # Defensive .get() for train_cfg keys: in production records the
-                # planner's TrainConfig may omit fields that defaulted at
-                # validation time (e.g. ``batch_size`` lives in ``model_cfg``
-                # for some legacy plans). When a key is missing, the planner's
-                # value survives — the alternative is crashing the chain on a
-                # KeyError, which defeats the point of resilient inheritance.
-                plan.train_cfg["lr"] = winner_train["lr"]
-                inherited_epochs = winner_train.get("epochs")
-                inherited_bs = winner_train.get("batch_size")
-                if inherited_epochs is not None:
-                    plan.train_cfg["epochs"] = inherited_epochs
-                if inherited_bs is not None:
-                    plan.train_cfg["batch_size"] = inherited_bs
-                print(
-                    f"  [FORMAL OVERRIDE] inheriting from best trial round "
-                    f"{winner['exp_id']!r} (score={winner['denoising_score']:.4f}): "
-                    f"loss={winner_loss.get('loss_type')!r} "
-                    f"lr={winner_train['lr']} "
-                    f"epochs={inherited_epochs if inherited_epochs is not None else '(planner)'} "
-                    f"batch_size={inherited_bs if inherited_bs is not None else '(planner)'} "
-                    f"model_cfg_keys={sorted(winner_model.keys())}"
-                )
-            else:
-                print(
-                    "  [FORMAL OVERRIDE] WARNING: no successful trial round "
-                    "in this iteration — formal round will use the planner's "
-                    "model_config, loss_config, and train_config unchanged. "
-                    "Score may be unreliable."
-                )
-        else:
-            # ``independent`` (canonical) / ``llm_propose`` (legacy alias) —
-            # explicit opt-out from inheritance. Phase 2 will route this
-            # through a dedicated handler in the strategy registry.
+    if not (is_formal_round and force_formal_round):
+        return plan
+
+    plan.is_trial = False
+    canonical = _canonical_strategy(formal_round_strategy)
+    handler = _FORMAL_STRATEGY_REGISTRY.get(canonical)
+    if handler is None:
+        # Defensive — schema validation should reject unknown literals
+        # before they reach this function. If a caller bypassed the
+        # schema (e.g. an ad-hoc test fixture), surface the bypass loudly
+        # and treat the request as ``independent`` to avoid silent
+        # mis-inheritance.
+        print(
+            f"  [STRATEGY] WARNING: unknown strategy {formal_round_strategy!r} — "
+            "treating as 'independent' (no inheritance)."
+        )
+        return plan
+
+    print(
+        f"  [STRATEGY] formal_round_strategy={canonical}"
+        + (
+            f" (alias_of:{formal_round_strategy})"
+            if canonical != formal_round_strategy
+            else ""
+        )
+    )
+
+    winner = _best_trial_winner(memory_history or [])
+    if winner is None:
+        if canonical == "independent":
+            # ``independent`` explicitly disclaims inheritance — a missing
+            # winner is not a warning condition. Still emit one structured
+            # log line so the audit trail is uniform.
             print(
-                f"  [FORMAL OVERRIDE] strategy={canonical_strategy!r} "
-                f"(input={formal_round_strategy!r}) — planner's "
-                "model_config, loss_config, and train_config honored verbatim."
+                f"  [FORMAL OVERRIDE] strategy={canonical} "
+                f"winner=none inherited=(none)"
             )
+        else:
+            print(
+                "  [FORMAL OVERRIDE] WARNING: no successful trial round "
+                "in this iteration — planner's plan unchanged. "
+                "Score may be unreliable."
+            )
+        return plan
+
+    inherited = handler(plan, winner)
+    print(
+        f"  [FORMAL OVERRIDE] strategy={canonical} "
+        f"winner={winner['exp_id']!r} score={winner['denoising_score']:.4f} "
+        f"inherited={','.join(inherited) if inherited else '(none)'}"
+    )
     return plan
 
 

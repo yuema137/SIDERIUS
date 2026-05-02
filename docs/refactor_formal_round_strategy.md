@@ -5,7 +5,7 @@
 > **Branch target**: `fix/cognitive-alignment-v9` (current) or a new
 > `refactor/formal-strategy` branch — caller decision before phase 1.
 
----
+---t
 
 ## 1. Observation & Motivation
 
@@ -299,14 +299,23 @@ shim when the registry replaces the `if/elif`.
 
 ### Phase 2 — Strategy registry + logic refactor + hybrid_params introduction
 
-- [ ] Add `hybrid_params` to the schema Literal (`agent/schemas/hyperparam_tuning.py` and the protocol). Now 5 valid input values: 3 canonical + 2 legacy aliases. Update the description block to describe all 3 canonical strategies.
-- [ ] Add `_strategy_full_clone`, `_strategy_hybrid_params`, `_strategy_independent` handlers + `_FORMAL_STRATEGY_REGISTRY` dict to `nodes/ml_hyperparameter_tune_agent.py`.
-- [ ] Replace the Phase-1 transitional shim (`if _canonical_strategy(...) == "full_clone":`) and the `else` branch with the registry dispatch shown in §5.
-- [ ] Add the two-line `[STRATEGY]` + `[FORMAL OVERRIDE]` log contract from §3.
-- [ ] Update existing tests in `test_force_formal_round.py` to use canonical names where they read the strategy literal.
-- [ ] Add new tests: `hybrid_params` inherits exactly `loss_cfg + lr` (model_cfg/epochs/batch_size from planner survive); `hybrid_params` no-winner path (planner unchanged, WARNING logged); `independent` ignores winner entirely; alias-resolution: passing `inherit_best_trial` produces `full_clone` behavior + the `alias_of:` log line.
-- **Verify**: `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent/ -q` — green (modulo the 2 pre-existing SAFETY_MULTIPLIER failures inherited from before this refactor).
-- **Commit**: `refactor(formal-round): strategy-registry dispatch + hybrid_params mode + audit logging`.
+- [x] Add `hybrid_params` to the schema Literal (`agent/schemas/hyperparam_tuning.py:808` and `agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py:67`). Both now accept 5 values: 3 canonical (`full_clone`, `hybrid_params`, `independent`) + 2 legacy aliases (`inherit_best_trial`, `llm_propose`). Description block in the schema rewritten to describe all 3 canonical strategies and the no-winner fallback. Removed the pre-Phase-2 "reserved — passing it raises ValidationError" reference and the matching exclusion comment in `_canonicalise_legacy_strategy`.
+- [x] Add `_strategy_full_clone`, `_strategy_hybrid_params`, `_strategy_independent` handlers + `_FORMAL_STRATEGY_REGISTRY` dict to `nodes/ml_hyperparameter_tune_agent.py`. Uniform signature `(plan, winner) -> List[str]` returning the inherited field names for the audit log. `Callable` added to the typing import.
+- [x] Replace the Phase-1 transitional shim (`if _canonical_strategy(...) == "full_clone":`) and the `else` branch with the registry dispatch. Inverted the outer guard (`if not (is_formal_round and force_formal_round): return plan`) to flatten one level of nesting. The unknown-strategy branch is defensive only — schema validation should reject unknowns before this point — but logs loudly and falls through to `independent` behavior to avoid silent mis-inheritance if a test fixture bypasses the schema.
+- [x] Add the two-line `[STRATEGY]` + `[FORMAL OVERRIDE]` log contract from §3. ``[STRATEGY]`` shows `formal_round_strategy=<canonical>` with optional ` (alias_of:<legacy>)` when the input differed. ``[FORMAL OVERRIDE]`` shows `strategy=<canonical> winner=<exp_id|none> [score=<f>] inherited=<comma-list|(none)>`, OR the WARNING line on the no-winner path for `full_clone`/`hybrid_params`. **§2 contract reconciliation**: §2 said "every strategy emits the same WARNING" on no-winner; §7.2's `test_no_winner_no_warning` said `independent` should stay silent. The implementation follows §7.2's user-aligned reasoning (`independent` users explicitly disclaim inheritance — warning about a missing winner contradicts their intent), and instead emits a structured `[FORMAL OVERRIDE] strategy=independent winner=none inherited=(none)` line so the audit trail stays uniform. §2's "every strategy emits the same WARNING" line is now superseded by this implementation note — when the doc body next sees a real edit, it should be tightened in place.
+- [x] Update existing tests in `test_force_formal_round.py` to use canonical names where they read the strategy literal. Updated 4 tests to the new audit-log format:
+  - `test_strategy_hybrid_params_rejected_in_phase_1` → `test_strategy_hybrid_params_validates` (Phase 1 regression guard inverted to a Phase 2 acceptance test).
+  - `test_inheritance_logs_winner_identity` — replaced legacy log assertions (`loss='focal'`, `lr=5e-5`, etc.) with the new `[STRATEGY] formal_round_strategy=full_clone` + `[FORMAL OVERRIDE] ... winner='r2' score=5.4523 inherited=model_cfg,loss_cfg,lr,epochs,batch_size` shape.
+  - `test_strategy_llm_propose_keeps_planner_choices` — replaced "honored verbatim" string with the new `[STRATEGY] formal_round_strategy=independent (alias_of:llm_propose)` + `[FORMAL OVERRIDE] strategy=independent winner='r2' inherited=(none)` assertions.
+  - `test_shim_canonical_independent_skips_inheritance` — same audit-log update without the `alias_of` annotation (caller passed canonical).
+- [x] Add new tests: `hybrid_params` inherits exactly `loss_cfg + lr`, no-winner path, `independent` ignores winner, alias-resolution + `alias_of:` log line. Added a new "5c. Phase 2 — strategy registry tests" section to `test_force_formal_round.py` with 14 tests across 5 classes mirroring §7.2:
+  - `TestFullCloneStrategy` (2 tests): `test_inherits_all_five_fields_from_winner`, `test_falls_back_to_planner_when_no_winner`.
+  - `TestHybridParamsStrategy` (4 tests): `test_inherits_only_loss_cfg_and_lr`, `test_does_not_touch_model_cfg`, `test_falls_back_to_planner_when_no_winner`, `test_log_lists_inherited_fields`.
+  - `TestIndependentStrategy` (2 tests): `test_planner_choices_survive_verbatim`, `test_no_winner_no_warning` (verifies the no-warning + uniform `[FORMAL OVERRIDE]` line decision from §2 reconciliation).
+  - `TestAliasResolution` (3 tests): `test_inherit_best_trial_behaves_as_full_clone`, `test_llm_propose_behaves_as_independent`, `test_alias_log_line_emitted`.
+  - `TestRegistryShape` (3 tests): `test_registry_has_three_canonical_strategies`, `test_all_strategies_uniform_signature` (smoke-calls each handler), `test_registry_directly_exposes_handler_callables`.
+- [x] **Verify**: targeted file `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent/test_force_formal_round.py -q` → **51 passed in 0.99s** (37 pre-existing + 14 new tests across the 5 §7.2 classes). Wider scope `tests/unit/agent/tune_ml_hyperparam_agent/ + tests/unit/agent/protocols/ + tests/unit/workflows/` → **735 passed, 2 failed in 226.13s**. The 2 failures (`test_estimator_static_patch::test_safety_multiplier_raised`, `test_warmup_activation::test_static_formula_uses_patched_constants`) are the same pre-existing `SAFETY_MULTIPLIER==2.0` stale-constant assertions documented in Phase 1 (now reading 1.3) — unrelated to this refactor and confirmed pre-existing on the clean tree.
+- [ ] **Commit**: `refactor(formal-round): strategy-registry dispatch + hybrid_params mode + audit logging`.
 
 ### Phase 3 — CLI + chain wrapper + workflow
 

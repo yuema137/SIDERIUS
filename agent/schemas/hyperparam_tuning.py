@@ -807,6 +807,7 @@ class HyperparamTuningInput(BaseModel):
     )
     formal_round_strategy: Literal[
         "full_clone",
+        "hybrid_params",
         "independent",
         "inherit_best_trial",  # legacy alias of full_clone
         "llm_propose",         # legacy alias of independent
@@ -822,25 +823,34 @@ class HyperparamTuningInput(BaseModel):
             "  ``model_config``, ``loss_config``, ``train_config.lr``, "
             "  ``train_config.epochs``, and ``train_config.batch_size`` "
             "  from the highest-scoring trial-mode success record in the "
-            "  current iteration. The formal round is a longer training "
-            "  of the trial winner with full eval — not a sandbox for new "
-            "  architectures, losses, or hyperparameters. If no successful "
-            "  trial round exists, the planner's choices survive and a "
-            "  WARNING is logged. Required for the trial→formal "
+            "  current iteration. Maximum execution certainty: the formal "
+            "  round is a longer training of the trial winner with full "
+            "  eval — not a sandbox for new architectures, losses, or "
+            "  hyperparameters. Required for the trial→formal "
             "  inference-time measurement reuse landed in commits B–D of "
             "  ``docs/refine_inference_time_estimator.md``.\n"
+            "* ``hybrid_params`` — the formal round inherits "
+            "  ``loss_config`` and ``train_config.lr`` only; the "
+            "  planner's ``model_config``, ``train_config.epochs``, and "
+            "  ``train_config.batch_size`` survive verbatim. Audit / "
+            "  exploration use case: lock the evaluation surface (loss + "
+            "  lr) but let the LLM scale capacity for the full-data pass. "
+            "  The time gate may reject the planner's heavier choice; "
+            "  that is the trade-off.\n"
             "* ``independent`` — the planner's choices for the formal "
-            "  round are honored verbatim (no inheritance). Use only when "
-            "  the formal round is meant to be a sandbox for new "
-            "  hyperparameters.\n\n"
+            "  round are honored verbatim (no inheritance). Use only "
+            "  when the formal round is meant to be a sandbox for new "
+            "  hyperparameters; trial-round measurements are NOT reused.\n\n"
+            "All three strategies share the no-winner fallback: if no "
+            "successful trial round exists in the current iteration, the "
+            "planner's plan is preserved unchanged and a WARNING is "
+            "logged. Strategy only controls *what to copy when a winner "
+            "exists* — it does not change no-winner behavior. ``is_trial`` "
+            "is always flipped to ``False`` regardless of strategy.\n\n"
             "Legacy aliases (accepted for backward compat with running "
             "chains and pre-2026-05-02 ``tuner_advice/*.json`` configs):\n"
             "* ``inherit_best_trial`` → canonicalised to ``full_clone``.\n"
             "* ``llm_propose`` → canonicalised to ``independent``.\n\n"
-            "A third strategy, ``hybrid_params`` (loss_cfg + lr only, "
-            "planner keeps model_cfg/epochs/batch_size), is reserved for "
-            "Phase 2 of ``docs/refactor_formal_round_strategy.md`` and is "
-            "not yet a valid value — passing it raises ValidationError.\n\n"
             "Has no effect when ``force_formal_round=False`` or on non-last "
             "rounds. Generic across tasks — the predicate ``time_mode == "
             "'trial' AND status == 'success'`` is task-agnostic."
@@ -853,10 +863,6 @@ class HyperparamTuningInput(BaseModel):
         """Resolve legacy literals to their canonical name before
         Literal-validation runs. See docs/refactor_formal_round_strategy.md
         §2.1 for the alias table.
-
-        ``hybrid_params`` is intentionally NOT in the legacy table — it is
-        a new strategy reserved for Phase 2 and rejected here so users
-        can't select it before its handler exists.
         """
         legacy = {
             "inherit_best_trial": "full_clone",

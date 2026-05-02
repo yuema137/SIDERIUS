@@ -173,23 +173,14 @@ def test_strategy_legacy_llm_propose_aliases_to_independent():
     assert inp.formal_round_strategy == "independent"
 
 
-def test_strategy_hybrid_params_rejected_in_phase_1():
-    """Regression guard: ``hybrid_params`` is reserved for Phase 2 of
-    refactor_formal_round_strategy.md and must NOT be acceptable in
-    Phase 1 — accepting it before the registry handler exists would
-    let users select a strategy that silently falls into the
-    ``independent`` branch.
-
-    When Phase 2 lands, this test should be deleted (or flipped to
-    assert ``hybrid_params`` is now accepted)."""
-    import pydantic
-    try:
-        _make_input(formal_round_strategy="hybrid_params")
-    except pydantic.ValidationError:
-        return
-    raise AssertionError(
-        "ValidationError expected — hybrid_params is reserved for Phase 2"
-    )
+def test_strategy_hybrid_params_validates():
+    """Phase 2 of refactor_formal_round_strategy.md adds ``hybrid_params``
+    as a valid canonical strategy alongside ``full_clone`` and
+    ``independent``. This is the inverse of the Phase 1 regression guard
+    (``test_strategy_hybrid_params_rejected_in_phase_1``) — Phase 2 lands
+    the registry handler so the schema can now accept it."""
+    inp = _make_input(formal_round_strategy="hybrid_params")
+    assert inp.formal_round_strategy == "hybrid_params"
 
 
 def test_strategy_rejects_unknown_value():
@@ -569,8 +560,16 @@ def test_inheritance_default_memory_history_none():
 
 
 def test_inheritance_logs_winner_identity(capsys):
-    """The success-path log line must surface enough context that an
-    operator can audit the inheritance after the fact."""
+    """The success-path log lines must surface enough context that an
+    operator can audit the inheritance after the fact.
+
+    Phase 2 audit-log contract (refactor_formal_round_strategy.md §3):
+    a ``[STRATEGY]`` line names the canonical strategy + alias
+    provenance (when applicable), and a ``[FORMAL OVERRIDE]`` line
+    names the winner exp_id, score, and the comma-list of inherited
+    fields. The actual hyperparameter values aren't echoed in the log
+    anymore — those live in the round's record. The winner's exp_id
+    + score is enough to look the rest up."""
     plan = _make_plan(is_trial=True)
     plan.loss_cfg = {"loss_type": "focal_cw"}
     plan.train_cfg = {"lr": 1e-3, "epochs": 1}
@@ -581,22 +580,28 @@ def test_inheritance_logs_winner_identity(capsys):
         memory_history=history,
     )
     out = capsys.readouterr().out
-    assert "FORMAL OVERRIDE" in out
-    assert "r2" in out
-    assert "focal" in out
-    assert "5e-05" in out or "5.0e-05" in out or "5e-5" in out
-    # V9 §7 fix — print must surface the inherited training + model_cfg fields
-    assert "epochs=2" in out
-    assert "batch_size=8" in out
-    assert "model_cfg_keys=" in out
+    # [STRATEGY] line — canonical name, no alias (caller passed default).
+    assert "[STRATEGY] formal_round_strategy=full_clone" in out
+    assert "alias_of" not in out
+    # [FORMAL OVERRIDE] line — winner identity + score + inherited fields.
+    assert "[FORMAL OVERRIDE]" in out
+    assert "winner='r2'" in out
+    assert "score=5.4523" in out
+    # full_clone with all 5 fields available → all 5 listed in inherited=...
+    assert "inherited=model_cfg,loss_cfg,lr,epochs,batch_size" in out
 
 
 def test_strategy_llm_propose_keeps_planner_choices(capsys):
-    """The escape hatch: with strategy='llm_propose', the planner's
-    model_config, loss_config, and train_config survive verbatim even
-    when a perfectly good trial winner exists. ``is_trial`` is still
-    flipped to False because the formal-round mode flip is independent
-    of the inheritance policy."""
+    """The escape hatch: with strategy='llm_propose' (legacy alias of
+    canonical 'independent'), the planner's model_config, loss_config,
+    and train_config survive verbatim even when a perfectly good trial
+    winner exists. ``is_trial`` is still flipped to False because the
+    formal-round mode flip is independent of the inheritance policy.
+
+    Phase 2 log contract: the ``[STRATEGY]`` line surfaces both the
+    canonical name and the legacy alias the caller passed
+    (``alias_of:llm_propose``). ``[FORMAL OVERRIDE]`` shows
+    ``inherited=(none)`` because ``independent`` is a no-op handler."""
     plan = _make_plan(is_trial=True)
     plan.loss_cfg = {"loss_type": "focal_cw", "experimental_flag": True}
     plan.train_cfg = {"lr": 1e-3, "epochs": 4, "batch_size": 16}
@@ -618,8 +623,10 @@ def test_strategy_llm_propose_keeps_planner_choices(capsys):
     assert plan.model_cfg["kernel_size"] == 2
     assert plan.model_cfg["use_same_padding"] is False
     out = capsys.readouterr().out
-    assert "llm_propose" in out
-    assert "honored verbatim" in out
+    assert "[STRATEGY] formal_round_strategy=independent (alias_of:llm_propose)" in out
+    assert "[FORMAL OVERRIDE] strategy=independent" in out
+    assert "winner='r2'" in out
+    assert "inherited=(none)" in out
 
 
 def test_strategy_llm_propose_no_warning_without_winner(capsys):
@@ -678,8 +685,9 @@ def test_shim_canonical_full_clone_inherits_like_legacy(capsys):
 
 def test_shim_canonical_independent_skips_inheritance(capsys):
     """``independent`` (canonical) must take the no-inheritance branch
-    and emit the same 'honored verbatim' log as the legacy
-    ``llm_propose``."""
+    and emit the Phase 2 ``[FORMAL OVERRIDE] strategy=independent ...
+    inherited=(none)`` line. No ``alias_of`` annotation since the caller
+    passed the canonical name directly."""
     plan = _make_plan(is_trial=True)
     plan.loss_cfg = {"loss_type": "focal_cw"}
     plan.train_cfg = {"lr": 1e-3}
@@ -695,9 +703,10 @@ def test_shim_canonical_independent_skips_inheritance(capsys):
     assert plan.train_cfg["lr"] == 1e-3
     assert plan.model_cfg["kernel_size"] == 2
     out = capsys.readouterr().out
-    assert "honored verbatim" in out
-    # Log surfaces both the canonical name and the input value.
-    assert "independent" in out
+    assert "[STRATEGY] formal_round_strategy=independent" in out
+    assert "alias_of" not in out  # caller passed canonical, not legacy
+    assert "[FORMAL OVERRIDE] strategy=independent" in out
+    assert "inherited=(none)" in out
 
 
 def test_shim_legacy_inherit_best_trial_still_works(capsys):
@@ -716,6 +725,320 @@ def test_shim_legacy_inherit_best_trial_still_works(capsys):
     )
     assert plan.loss_cfg["loss_type"] == "focal"
     assert plan.train_cfg["lr"] == 5e-5
+
+
+# ---------------------------------------------------------------------------
+# 5c. Phase 2 — strategy registry tests
+# ---------------------------------------------------------------------------
+# Phase 2 of refactor_formal_round_strategy.md replaces the if/elif chain
+# inside ``_apply_mode_override_chain`` with a registry dispatch keyed by
+# the canonical strategy name, and adds ``hybrid_params`` as the third
+# canonical strategy. Section 5 (above) already exercises ``full_clone``
+# (default) and the legacy ``llm_propose`` alias paths; this section adds
+# the registry-shape pin, the ``hybrid_params`` cases, and the
+# alias-resolution log assertion called for in §7.2 of the design doc.
+
+
+from typing import get_type_hints
+import inspect
+
+from nodes.ml_hyperparameter_tune_agent import (
+    _FORMAL_STRATEGY_REGISTRY,
+    _strategy_full_clone,
+    _strategy_hybrid_params,
+    _strategy_independent,
+)
+
+
+class TestFullCloneStrategy:
+    """``full_clone`` is the production default. Sections 5 (above) and 5b
+    cover most paths with the default; these are the explicit
+    canonical-name re-statements per §7.2."""
+
+    def test_inherits_all_five_fields_from_winner(self):
+        plan = _make_plan(is_trial=True)
+        plan.loss_cfg = {"loss_type": "focal_cw"}
+        plan.train_cfg = {"lr": 1e-3, "epochs": 4, "batch_size": 16}
+        plan.model_cfg = {"kernel_size": 2}
+        winner_model = {"segmentation_size": 1000, "kernel_size": 3,
+                        "use_same_padding": True, "num_blocks": 4}
+        history = [_make_trial_record("r1", score=5.45, loss_type="focal",
+                                       lr=5e-5, epochs=2, batch_size=8,
+                                       model_config=winner_model)]
+        _apply_mode_override_chain(
+            plan, trial_allowed=True, is_formal_round=True,
+            force_formal_round=True,
+            formal_round_strategy="full_clone",
+            memory_history=history,
+        )
+        assert plan.loss_cfg["loss_type"] == "focal"
+        assert plan.train_cfg["lr"] == 5e-5
+        assert plan.train_cfg["epochs"] == 2
+        assert plan.train_cfg["batch_size"] == 8
+        assert plan.model_cfg == winner_model
+
+    def test_falls_back_to_planner_when_no_winner(self, capsys):
+        plan = _make_plan(is_trial=True)
+        plan.loss_cfg = {"loss_type": "focal_cw"}
+        plan.train_cfg = {"lr": 1e-3, "epochs": 1}
+        plan.model_cfg = {"kernel_size": 2}
+        _apply_mode_override_chain(
+            plan, trial_allowed=True, is_formal_round=True,
+            force_formal_round=True,
+            formal_round_strategy="full_clone",
+            memory_history=[],
+        )
+        # Planner's plan unchanged.
+        assert plan.loss_cfg["loss_type"] == "focal_cw"
+        assert plan.train_cfg["lr"] == 1e-3
+        assert plan.model_cfg["kernel_size"] == 2
+        out = capsys.readouterr().out
+        assert "WARNING" in out
+        assert "no successful trial" in out.lower()
+
+
+class TestHybridParamsStrategy:
+    """The Phase 2 newcomer: lock loss + lr from the trial winner, leave
+    everything else (model_cfg, epochs, batch_size) to the planner. See
+    §2 of refactor_formal_round_strategy.md."""
+
+    def test_inherits_only_loss_cfg_and_lr(self):
+        plan = _make_plan(is_trial=True)
+        plan.loss_cfg = {"loss_type": "focal_cw"}
+        plan.train_cfg = {"lr": 1e-3, "epochs": 4, "batch_size": 16}
+        plan.model_cfg = {"kernel_size": 5, "num_blocks": 8}  # planner's pick
+        history = [_make_trial_record(
+            "r1", score=5.45, loss_type="focal", lr=5e-5,
+            epochs=2, batch_size=8,
+            model_config={"kernel_size": 3, "num_blocks": 4},
+        )]
+        _apply_mode_override_chain(
+            plan, trial_allowed=True, is_formal_round=True,
+            force_formal_round=True,
+            formal_round_strategy="hybrid_params",
+            memory_history=history,
+        )
+        # Inherited: loss + lr.
+        assert plan.loss_cfg["loss_type"] == "focal"
+        assert plan.train_cfg["lr"] == 5e-5
+        # Survived from planner: model_cfg, epochs, batch_size.
+        assert plan.model_cfg == {"kernel_size": 5, "num_blocks": 8}
+        assert plan.train_cfg["epochs"] == 4
+        assert plan.train_cfg["batch_size"] == 16
+
+    def test_does_not_touch_model_cfg(self):
+        """Pin: hybrid_params must NOT clone model_cfg even when the
+        winner's record has a perfectly good one. The whole point of
+        ``hybrid_params`` is to let the planner scale capacity."""
+        plan = _make_plan(is_trial=True)
+        plan.model_cfg = {"untouched": True}
+        history = [_make_trial_record(
+            "r1", score=5.45,
+            model_config={"would_be_inherited_in_full_clone": True},
+        )]
+        _apply_mode_override_chain(
+            plan, trial_allowed=True, is_formal_round=True,
+            force_formal_round=True,
+            formal_round_strategy="hybrid_params",
+            memory_history=history,
+        )
+        assert plan.model_cfg == {"untouched": True}
+
+    def test_falls_back_to_planner_when_no_winner(self, capsys):
+        """Same fallback contract as full_clone: no winner → planner's
+        plan unchanged, WARNING logged. Score gate may still flag the
+        round as unreliable downstream."""
+        plan = _make_plan(is_trial=True)
+        plan.loss_cfg = {"loss_type": "focal_cw"}
+        plan.train_cfg = {"lr": 1e-3, "epochs": 1}
+        _apply_mode_override_chain(
+            plan, trial_allowed=True, is_formal_round=True,
+            force_formal_round=True,
+            formal_round_strategy="hybrid_params",
+            memory_history=[],
+        )
+        assert plan.loss_cfg["loss_type"] == "focal_cw"
+        assert plan.train_cfg["lr"] == 1e-3
+        out = capsys.readouterr().out
+        assert "WARNING" in out
+        assert "no successful trial" in out.lower()
+
+    def test_log_lists_inherited_fields(self, capsys):
+        """The audit log must show ``inherited=loss_cfg,lr`` (in this
+        exact order) so a post-mortem reader can grep the strategy
+        without re-deriving from diffs."""
+        plan = _make_plan(is_trial=True)
+        history = [_make_trial_record("r1", score=5.4500)]
+        _apply_mode_override_chain(
+            plan, trial_allowed=True, is_formal_round=True,
+            force_formal_round=True,
+            formal_round_strategy="hybrid_params",
+            memory_history=history,
+        )
+        out = capsys.readouterr().out
+        assert "[STRATEGY] formal_round_strategy=hybrid_params" in out
+        assert "[FORMAL OVERRIDE] strategy=hybrid_params" in out
+        assert "winner='r1'" in out
+        assert "inherited=loss_cfg,lr" in out
+
+
+class TestIndependentStrategy:
+    """``independent`` ignores any winner that may exist. Sections 5 and
+    5b above exercise this through the legacy alias and the canonical
+    name; these are the explicit per-§7.2 statements."""
+
+    def test_planner_choices_survive_verbatim(self):
+        plan = _make_plan(is_trial=True)
+        plan.loss_cfg = {"loss_type": "focal_cw"}
+        plan.train_cfg = {"lr": 1e-3, "epochs": 4, "batch_size": 16}
+        plan.model_cfg = {"kernel_size": 2}
+        history = [_make_trial_record(
+            "r1", score=5.45, loss_type="focal", lr=5e-5,
+            epochs=1, batch_size=1,
+            model_config={"kernel_size": 3},
+        )]
+        _apply_mode_override_chain(
+            plan, trial_allowed=True, is_formal_round=True,
+            force_formal_round=True,
+            formal_round_strategy="independent",
+            memory_history=history,
+        )
+        assert plan.loss_cfg["loss_type"] == "focal_cw"
+        assert plan.train_cfg["lr"] == 1e-3
+        assert plan.train_cfg["epochs"] == 4
+        assert plan.train_cfg["batch_size"] == 16
+        assert plan.model_cfg["kernel_size"] == 2
+
+    def test_no_winner_no_warning(self, capsys):
+        """Pin: ``independent`` shouldn't emit a WARNING about a missing
+        winner — the policy explicitly disclaims inheritance, so the
+        warning would be noise. Uniform `[FORMAL OVERRIDE]` line still
+        surfaces so the audit trail is consistent."""
+        plan = _make_plan(is_trial=True)
+        _apply_mode_override_chain(
+            plan, trial_allowed=True, is_formal_round=True,
+            force_formal_round=True,
+            formal_round_strategy="independent",
+            memory_history=[],
+        )
+        out = capsys.readouterr().out
+        assert "WARNING" not in out
+        assert "no successful trial" not in out.lower()
+        assert "[FORMAL OVERRIDE] strategy=independent" in out
+        assert "winner=none" in out
+        assert "inherited=(none)" in out
+
+
+class TestAliasResolution:
+    """Backward-compat path: the schema validator canonicalises legacy
+    literals before they reach ``_apply_mode_override_chain``, but
+    ``_canonical_strategy`` inside the function provides a defensive
+    second pass for unit tests / ad-hoc constructions that bypass the
+    schema. These tests pin the second-pass behavior so a refactor
+    can't silently drop alias support."""
+
+    def test_inherit_best_trial_behaves_as_full_clone(self):
+        plan = _make_plan(is_trial=True)
+        plan.loss_cfg = {"loss_type": "focal_cw"}
+        plan.train_cfg = {"lr": 1e-3, "epochs": 4, "batch_size": 16}
+        plan.model_cfg = {"kernel_size": 2}
+        history = [_make_trial_record(
+            "r1", score=5.45, loss_type="focal", lr=5e-5,
+            epochs=2, batch_size=8,
+            model_config={"kernel_size": 3, "num_blocks": 4},
+        )]
+        _apply_mode_override_chain(
+            plan, trial_allowed=True, is_formal_round=True,
+            force_formal_round=True,
+            formal_round_strategy="inherit_best_trial",  # legacy
+            memory_history=history,
+        )
+        # Same outcome as full_clone — all 5 fields inherited.
+        assert plan.loss_cfg["loss_type"] == "focal"
+        assert plan.train_cfg["lr"] == 5e-5
+        assert plan.train_cfg["epochs"] == 2
+        assert plan.train_cfg["batch_size"] == 8
+        assert plan.model_cfg["kernel_size"] == 3
+
+    def test_llm_propose_behaves_as_independent(self):
+        plan = _make_plan(is_trial=True)
+        plan.loss_cfg = {"loss_type": "focal_cw"}
+        plan.train_cfg = {"lr": 1e-3}
+        plan.model_cfg = {"kernel_size": 2}
+        history = [_make_trial_record("r1", score=5.45)]
+        _apply_mode_override_chain(
+            plan, trial_allowed=True, is_formal_round=True,
+            force_formal_round=True,
+            formal_round_strategy="llm_propose",  # legacy
+            memory_history=history,
+        )
+        # Same outcome as independent — planner's plan untouched.
+        assert plan.loss_cfg["loss_type"] == "focal_cw"
+        assert plan.train_cfg["lr"] == 1e-3
+        assert plan.model_cfg["kernel_size"] == 2
+
+    def test_alias_log_line_emitted(self, capsys):
+        """The ``[STRATEGY]`` line must surface ``alias_of:<legacy>``
+        when the input differed from the canonical name. This is the
+        single most useful audit-trail field — a reader scanning
+        workflow_log.txt can see at a glance which configs came from
+        legacy paths and need migration."""
+        plan = _make_plan(is_trial=True)
+        history = [_make_trial_record("r1", score=5.45)]
+        _apply_mode_override_chain(
+            plan, trial_allowed=True, is_formal_round=True,
+            force_formal_round=True,
+            formal_round_strategy="inherit_best_trial",
+            memory_history=history,
+        )
+        out = capsys.readouterr().out
+        assert "[STRATEGY] formal_round_strategy=full_clone" in out
+        assert "(alias_of:inherit_best_trial)" in out
+
+
+class TestRegistryShape:
+    """Pin the registry's structural invariants so a future strategy
+    addition can't silently drift the contract."""
+
+    def test_registry_has_three_canonical_strategies(self):
+        assert set(_FORMAL_STRATEGY_REGISTRY.keys()) == {
+            "full_clone", "hybrid_params", "independent"
+        }
+
+    def test_all_strategies_uniform_signature(self):
+        """Every handler must accept ``(plan, winner)`` and return a
+        list-like sequence of strings (the inherited field names).
+        Catches future drift if someone adds a 4th handler with a
+        different signature."""
+        for name, handler in _FORMAL_STRATEGY_REGISTRY.items():
+            sig = inspect.signature(handler)
+            params = list(sig.parameters.values())
+            assert len(params) == 2, (
+                f"Handler {name!r} must accept exactly 2 args; got {len(params)}"
+            )
+            # Smoke-call each handler with a minimal valid winner record
+            # to confirm the contract holds in practice (signature alone
+            # doesn't rule out a handler that crashes on every input).
+            plan = _make_plan(is_trial=True)
+            winner = _make_trial_record("smoke", score=5.0)
+            inherited = handler(plan, winner)
+            assert isinstance(inherited, list), (
+                f"Handler {name!r} returned {type(inherited).__name__}, "
+                "expected list[str]"
+            )
+            for field in inherited:
+                assert isinstance(field, str), (
+                    f"Handler {name!r} returned non-string in "
+                    f"inherited list: {field!r}"
+                )
+
+    def test_registry_directly_exposes_handler_callables(self):
+        """Sanity: the three module-level handler symbols are the same
+        objects as the registry values, so test fixtures can poke them
+        directly without going through the dispatch wrapper."""
+        assert _FORMAL_STRATEGY_REGISTRY["full_clone"] is _strategy_full_clone
+        assert _FORMAL_STRATEGY_REGISTRY["hybrid_params"] is _strategy_hybrid_params
+        assert _FORMAL_STRATEGY_REGISTRY["independent"] is _strategy_independent
 
 
 # ---------------------------------------------------------------------------
