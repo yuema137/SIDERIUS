@@ -332,12 +332,15 @@ shim when the registry replaces the `if/elif`.
 
 ### Phase 4 — Documentation + memory + smoke
 
-- [ ] Update `agent/schemas/hyperparam_tuning.py:808` description with the post-refactor 3-strategy contract (already done in phase 1; double-check after phases 2-3 land).
-- [ ] Append a project memory: `docs/memories/project_formal_strategy_refactor.md` recording the alias mapping + the date of canonical migration (so future sessions don't reintroduce `inherit_best_trial` as a primary).
-- [ ] Update `docs/V8_Gap_Report.md:17,19,133,171` references to `inherit_best_trial` with a note that the literal was renamed to `full_clone` on 2026-05-02.
-- [ ] Smoke test: `.venv/bin/python run_exploration_adaptive.py --help` shows the new choices; `bash sdsc_submission_scripts/_chain_common.sh` syntax check; one short trial-mode dry run with each of the 3 strategies confirming the `[STRATEGY]` log line appears once per formal round.
-- **Verify**: full `.venv/bin/python -m pytest tests/unit/agent/ -q` — green (modulo the same 2 pre-existing failures).
-- **Commit**: `docs(formal-round): record canonical strategy names + alias mapping`.
+- [x] **Schema docstring audit**: re-read `agent/schemas/hyperparam_tuning.py:808-857`. The Phase 1+2 docstring already covers all 3 canonical strategies, the no-winner fallback, and the legacy alias mapping with the explicit "canonicalises legacy literals to their canonical form before downstream code sees the value" line. No re-edit needed.
+- [x] **Project memory**: created `docs/memories/project_formal_strategy_refactor.md` capturing the canonical names, the alias mapping, the rename date (2026-05-02), the per-phase commit SHAs (`7bc2ea8`, `4b44a78`, `934ddb9`), and "how to apply going forward" guidance (use canonical in new configs; don't reintroduce `inherit_best_trial` as a primary; preserve the `[STRATEGY]` / `[FORMAL OVERRIDE]` log shape contract). Indexed in `docs/memories/README.md`. **Note**: `docs/memories/` is gitignored (per-developer local memory store) — the file lives on disk and is loaded via the auto-memory pointer in `~/.claude/projects/.../memory/MEMORY.md`, but is NOT pushed in this commit. The README index update is similarly local-only.
+- [x] **`docs/V8_Gap_Report.md` updates**: surgical inline annotations at all 4 references (lines 17, 19, 133, 171) noting the 2026-05-02 rename and that semantics are unchanged. The audit verdict (Domain 4 = ALL CORRECT) is preserved verbatim — historical record stays intact.
+- [x] **Smoke test**:
+  - `--help` on both CLIs shows the 5-value union (verified in Phase 3 verify).
+  - `bash -n sdsc_submission_scripts/_chain_common.sh` syntax check clean (verified in Phase 3 verify).
+  - One short trial-mode dry run with each of the 3 strategies: the equivalent contract is already covered by `tests/unit/agent/tune_ml_hyperparam_agent/test_force_formal_round.py` — `TestFullCloneStrategy`, `TestHybridParamsStrategy`, `TestIndependentStrategy`, and `TestAliasResolution::test_alias_log_line_emitted` collectively assert the `[STRATEGY]` line content for all 3 canonical strategies + 2 aliases without burning LLM/GPU time. Live dry-run skipped as redundant.
+- [x] **Verify**: `.venv/bin/python -m pytest tests/unit/agent/ -q` → **1730 passed, 6 failed in 229.94s**. The 6 failures are pre-existing on a clean tree (verified via `git stash` → same 6 fail in `test_estimator.py`, `test_proposer_preflight.py`, `test_estimator_static_patch.py`, `test_warmup_activation.py`). All 6 are estimator-constant drift unrelated to this refactor: 2 are the `SAFETY_MULTIPLIER==2.0` stale assertions documented from Phase 1+2, 2 are `_ligroup` ms_per_step / unknown-host fallback assertions hardcoded against an older calibration, and 2 are `proposer_preflight` feasibility verdicts that flip due to the same recalibrated coefficients. None touch `formal_round_strategy` or its dispatch surface.
+- [ ] **Commit**: `docs(formal-round): record canonical strategy names + alias mapping`.
 
 ---
 

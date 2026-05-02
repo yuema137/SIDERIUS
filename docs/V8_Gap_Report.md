@@ -14,9 +14,11 @@
 | 1 | Genetic bottleneck (negative-feedback persistence) | **BROKEN** in chain mode | **HIGH** |
 | 2 | Silent failure (crash → evidence loss) | **PARTIALLY BROKEN** | **HIGH** |
 | 3 | Observability (evolution stats) | **MISSING** but data exists | **MED** |
-| 4 | `inherit_best_trial` correctness | **ALL CORRECT** | none |
+| 4 | `inherit_best_trial` correctness [^1] | **ALL CORRECT** | none |
 
-**Bottom line**: V8 is **not yet bulletproof**. Two HIGH-severity structural gaps (chain-mode amnesia of negative feedback; multiple silent-crash paths) plus one MED-severity blind-spot (no chain-level evolution dashboard). The `inherit_best_trial` path — the most subtle area — is verified clean and doesn't need a fix.
+[^1]: The literal `inherit_best_trial` was renamed to `full_clone` on 2026-05-02 (see `docs/refactor_formal_round_strategy.md` and `docs/memories/project_formal_strategy_refactor.md`). The legacy literal is still accepted as an alias but the canonical name is `full_clone`. Audit verdict below is unchanged — the rename did not touch the inheritance semantics.
+
+**Bottom line**: V8 is **not yet bulletproof**. Two HIGH-severity structural gaps (chain-mode amnesia of negative feedback; multiple silent-crash paths) plus one MED-severity blind-spot (no chain-level evolution dashboard). The `inherit_best_trial` path (post-2026-05-02: `full_clone`) — the most subtle area — is verified clean and doesn't need a fix.
 
 ---
 
@@ -132,6 +134,8 @@ evolution_stats = {
 
 ## Domain 4 — `inherit_best_trial` Correctness
 
+> **2026-05-02 update**: this literal was renamed to `full_clone` (canonical) as part of the strategy-registry refactor (`docs/refactor_formal_round_strategy.md`). Legacy alias still accepted; semantics unchanged. Audit verdict below remains valid.
+
 **Verdict**: **ALL CORRECT — no fix needed**.
 
 All 7 audit questions answered green with file:line evidence and existing test coverage:
@@ -168,7 +172,7 @@ The most subtle area in the codebase is in fact our cleanest. No action.
 | 1. Genetic bottleneck | HIGH | LOW |
 | 2. Silent failure | HIGH | LOW |
 | 3. Observability | MED | LOW |
-| 4. inherit_best_trial | (already LOW) | LOW |
+| 4. inherit_best_trial (renamed `full_clone` 2026-05-02) | (already LOW) | LOW |
 
 **Total estimated effort**: ~165 LOC across 5 files + ~6 unit tests. ~half a day of focused work + smoke run.
 
