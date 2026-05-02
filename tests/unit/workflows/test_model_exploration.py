@@ -1284,20 +1284,35 @@ class TestOrchestrationParamForwarding:
         sig = inspect.signature(run_workflow)
         assert "formal_round_strategy" in sig.parameters
 
-    def test_formal_round_strategy_default_inherit_best_trial(
+    def test_formal_round_strategy_default_full_clone(
         self, workflow_env, tmp_path
     ):
+        """Phase 1 of refactor_formal_round_strategy.md flipped the
+        schema default from legacy ``inherit_best_trial`` to canonical
+        ``full_clone``. Behavior identical, name normalised."""
         tune_input = _tune_input_from_workflow(workflow_env, tmp_path)
-        assert tune_input.formal_round_strategy == "inherit_best_trial"
+        assert tune_input.formal_round_strategy == "full_clone"
 
-    def test_formal_round_strategy_llm_propose_reaches_tuning_input(
+    def test_formal_round_strategy_canonical_independent_reaches_tuning_input(
         self, workflow_env, tmp_path
     ):
         tune_input = _tune_input_from_workflow(
             workflow_env, tmp_path,
+            formal_round_strategy="independent",
+        )
+        assert tune_input.formal_round_strategy == "independent"
+
+    def test_formal_round_strategy_legacy_alias_canonicalised(
+        self, workflow_env, tmp_path
+    ):
+        """A workflow caller passing the legacy literal must see the
+        canonicalised name on ``HyperparamTuningInput`` because the
+        schema validator runs after the protocol fan-out."""
+        tune_input = _tune_input_from_workflow(
+            workflow_env, tmp_path,
             formal_round_strategy="llm_propose",
         )
-        assert tune_input.formal_round_strategy == "llm_propose"
+        assert tune_input.formal_round_strategy == "independent"
 
     def test_signature_accepts_degenerate_penalty_score(self):
         import inspect

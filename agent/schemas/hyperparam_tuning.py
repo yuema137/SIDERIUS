@@ -12,7 +12,7 @@ Both are accepted wherever ExpertAdviceInput is used.
 from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional, Union
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from agent.schemas.score_table import ScoreComparisonTable
@@ -805,24 +805,66 @@ class HyperparamTuningInput(BaseModel):
             "``plan.is_trial``."
         ),
     )
-    formal_round_strategy: Literal["inherit_best_trial", "llm_propose"] = Field(
-        default="inherit_best_trial",
+    formal_round_strategy: Literal[
+        "full_clone",
+        "independent",
+        "inherit_best_trial",  # legacy alias of full_clone
+        "llm_propose",         # legacy alias of independent
+    ] = Field(
+        default="full_clone",
         description=(
-            "Orchestration policy for the forced formal round. Two values:\n"
-            "* ``inherit_best_trial`` (default) — the formal round inherits "
-            "  ``loss_config`` and ``train_config.lr`` from the highest-scoring "
-            "  trial-mode success record in the current iteration. "
-            "  ``model_config``, ``epochs``, and ``batch_size`` are left for the "
-            "  planner. If no successful trial round exists, the planner's "
-            "  choices survive and a WARNING is logged.\n"
-            "* ``llm_propose`` — the planner's choices for the formal round are "
-            "  honored verbatim. Use only when the formal round is meant to be "
-            "  a sandbox for new hyperparameters.\n"
+            "Orchestration policy for the forced formal round. Canonical "
+            "values + legacy aliases — the validator canonicalises legacy "
+            "literals to their canonical form before downstream code sees "
+            "the value, so call sites only handle canonical names.\n\n"
+            "Canonical values:\n"
+            "* ``full_clone`` (default) — the formal round inherits "
+            "  ``model_config``, ``loss_config``, ``train_config.lr``, "
+            "  ``train_config.epochs``, and ``train_config.batch_size`` "
+            "  from the highest-scoring trial-mode success record in the "
+            "  current iteration. The formal round is a longer training "
+            "  of the trial winner with full eval — not a sandbox for new "
+            "  architectures, losses, or hyperparameters. If no successful "
+            "  trial round exists, the planner's choices survive and a "
+            "  WARNING is logged. Required for the trial→formal "
+            "  inference-time measurement reuse landed in commits B–D of "
+            "  ``docs/refine_inference_time_estimator.md``.\n"
+            "* ``independent`` — the planner's choices for the formal "
+            "  round are honored verbatim (no inheritance). Use only when "
+            "  the formal round is meant to be a sandbox for new "
+            "  hyperparameters.\n\n"
+            "Legacy aliases (accepted for backward compat with running "
+            "chains and pre-2026-05-02 ``tuner_advice/*.json`` configs):\n"
+            "* ``inherit_best_trial`` → canonicalised to ``full_clone``.\n"
+            "* ``llm_propose`` → canonicalised to ``independent``.\n\n"
+            "A third strategy, ``hybrid_params`` (loss_cfg + lr only, "
+            "planner keeps model_cfg/epochs/batch_size), is reserved for "
+            "Phase 2 of ``docs/refactor_formal_round_strategy.md`` and is "
+            "not yet a valid value — passing it raises ValidationError.\n\n"
             "Has no effect when ``force_formal_round=False`` or on non-last "
-            "rounds. Generic across tasks — the predicate ``time_mode == 'trial' "
-            "AND status == 'success'`` is task-agnostic."
+            "rounds. Generic across tasks — the predicate ``time_mode == "
+            "'trial' AND status == 'success'`` is task-agnostic."
         ),
     )
+
+    @field_validator("formal_round_strategy", mode="before")
+    @classmethod
+    def _canonicalise_legacy_strategy(cls, v):
+        """Resolve legacy literals to their canonical name before
+        Literal-validation runs. See docs/refactor_formal_round_strategy.md
+        §2.1 for the alias table.
+
+        ``hybrid_params`` is intentionally NOT in the legacy table — it is
+        a new strategy reserved for Phase 2 and rejected here so users
+        can't select it before its handler exists.
+        """
+        legacy = {
+            "inherit_best_trial": "full_clone",
+            "llm_propose":        "independent",
+        }
+        if isinstance(v, str):
+            return legacy.get(v, v)
+        return v
     degenerate_penalty_score: Optional[float] = Field(
         default=None,
         description=(

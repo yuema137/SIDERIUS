@@ -139,16 +139,57 @@ def test_accepts_true_explicit():
     assert inp.force_formal_round is True
 
 
-def test_strategy_default_is_inherit_best_trial():
-    """The default policy mandates the 'safe' inheritance behaviour
-    out-of-the-box."""
+def test_strategy_default_is_full_clone():
+    """Phase 1 of refactor_formal_round_strategy.md flipped the schema
+    default from the legacy ``inherit_best_trial`` literal to its
+    canonical equivalent ``full_clone``. The behavior is unchanged —
+    just the name on disk."""
     inp = _make_input()
-    assert inp.formal_round_strategy == "inherit_best_trial"
+    assert inp.formal_round_strategy == "full_clone"
 
 
-def test_strategy_accepts_llm_propose():
+def test_strategy_accepts_canonical_full_clone():
+    inp = _make_input(formal_round_strategy="full_clone")
+    assert inp.formal_round_strategy == "full_clone"
+
+
+def test_strategy_accepts_canonical_independent():
+    inp = _make_input(formal_round_strategy="independent")
+    assert inp.formal_round_strategy == "independent"
+
+
+def test_strategy_legacy_inherit_best_trial_aliases_to_full_clone():
+    """Backward-compat: live V9 chains and pre-2026-05-02
+    ``tuner_advice/*.json`` configs still pass ``inherit_best_trial``.
+    The schema validator must canonicalise it to ``full_clone`` so
+    downstream code only handles canonical names."""
+    inp = _make_input(formal_round_strategy="inherit_best_trial")
+    assert inp.formal_round_strategy == "full_clone"
+
+
+def test_strategy_legacy_llm_propose_aliases_to_independent():
+    """Same backward-compat contract for the second legacy literal."""
     inp = _make_input(formal_round_strategy="llm_propose")
-    assert inp.formal_round_strategy == "llm_propose"
+    assert inp.formal_round_strategy == "independent"
+
+
+def test_strategy_hybrid_params_rejected_in_phase_1():
+    """Regression guard: ``hybrid_params`` is reserved for Phase 2 of
+    refactor_formal_round_strategy.md and must NOT be acceptable in
+    Phase 1 — accepting it before the registry handler exists would
+    let users select a strategy that silently falls into the
+    ``independent`` branch.
+
+    When Phase 2 lands, this test should be deleted (or flipped to
+    assert ``hybrid_params`` is now accepted)."""
+    import pydantic
+    try:
+        _make_input(formal_round_strategy="hybrid_params")
+    except pydantic.ValidationError:
+        return
+    raise AssertionError(
+        "ValidationError expected — hybrid_params is reserved for Phase 2"
+    )
 
 
 def test_strategy_rejects_unknown_value():
@@ -595,6 +636,86 @@ def test_strategy_llm_propose_no_warning_without_winner(capsys):
     out = capsys.readouterr().out
     assert "WARNING" not in out
     assert "no successful trial" not in out.lower()
+
+
+# ---------------------------------------------------------------------------
+# 5b. Phase 1 transitional shim — canonical names reach the same code paths
+# ---------------------------------------------------------------------------
+# Phase 1 of refactor_formal_round_strategy.md adds ``_canonical_strategy``
+# to the override chain so callers may pass either the legacy literal
+# (``inherit_best_trial`` / ``llm_propose``) OR the new canonical name
+# (``full_clone`` / ``independent``) and reach the same behavior. Phase 2
+# replaces the if/elif with a registry; deleting these tests is fine then,
+# but until the registry lands they pin the shim's correctness.
+
+
+def test_shim_canonical_full_clone_inherits_like_legacy(capsys):
+    """``full_clone`` (canonical) must trigger the same 5-field
+    inheritance as ``inherit_best_trial`` (legacy). The shim resolves
+    the alias inside ``_apply_mode_override_chain`` so the comparison
+    works regardless of which name the caller used."""
+    plan = _make_plan(is_trial=True)
+    plan.loss_cfg = {"loss_type": "focal_cw"}
+    plan.train_cfg = {"lr": 1e-3, "epochs": 4, "batch_size": 16}
+    plan.model_cfg = {"kernel_size": 2}  # planner's wrong choice
+    history = [_make_trial_record(
+        "r1", score=5.45, loss_type="focal", lr=5e-5,
+        epochs=2, batch_size=8,
+        model_config={"kernel_size": 3, "use_same_padding": True, "num_blocks": 4},
+    )]
+    _apply_mode_override_chain(
+        plan, trial_allowed=True, is_formal_round=True, force_formal_round=True,
+        formal_round_strategy="full_clone",  # canonical, not legacy
+        memory_history=history,
+    )
+    # All 5 inheritance fields applied — proves the shim hit the inherit path.
+    assert plan.loss_cfg["loss_type"] == "focal"
+    assert plan.train_cfg["lr"] == 5e-5
+    assert plan.train_cfg["epochs"] == 2
+    assert plan.train_cfg["batch_size"] == 8
+    assert plan.model_cfg["kernel_size"] == 3  # winner's value, not planner's
+
+
+def test_shim_canonical_independent_skips_inheritance(capsys):
+    """``independent`` (canonical) must take the no-inheritance branch
+    and emit the same 'honored verbatim' log as the legacy
+    ``llm_propose``."""
+    plan = _make_plan(is_trial=True)
+    plan.loss_cfg = {"loss_type": "focal_cw"}
+    plan.train_cfg = {"lr": 1e-3}
+    plan.model_cfg = {"kernel_size": 2}
+    history = [_make_trial_record("r1", score=5.45)]
+    _apply_mode_override_chain(
+        plan, trial_allowed=True, is_formal_round=True, force_formal_round=True,
+        formal_round_strategy="independent",  # canonical, not legacy
+        memory_history=history,
+    )
+    # Planner's choices survive — no inheritance happened.
+    assert plan.loss_cfg["loss_type"] == "focal_cw"
+    assert plan.train_cfg["lr"] == 1e-3
+    assert plan.model_cfg["kernel_size"] == 2
+    out = capsys.readouterr().out
+    assert "honored verbatim" in out
+    # Log surfaces both the canonical name and the input value.
+    assert "independent" in out
+
+
+def test_shim_legacy_inherit_best_trial_still_works(capsys):
+    """The whole point of the shim: live V9 chains passing
+    ``inherit_best_trial`` directly to ``_apply_mode_override_chain``
+    (bypassing the schema validator) must still trigger inheritance.
+    This is the production-path regression guard."""
+    plan = _make_plan(is_trial=True)
+    plan.loss_cfg = {"loss_type": "focal_cw"}
+    plan.train_cfg = {"lr": 1e-3, "epochs": 4}
+    history = [_make_trial_record("r1", score=5.0, loss_type="focal", lr=5e-5)]
+    _apply_mode_override_chain(
+        plan, trial_allowed=True, is_formal_round=True, force_formal_round=True,
+        formal_round_strategy="inherit_best_trial",  # legacy literal
+        memory_history=history,
+    )
+    assert plan.loss_cfg["loss_type"] == "focal"
+    assert plan.train_cfg["lr"] == 5e-5
 
 
 # ---------------------------------------------------------------------------

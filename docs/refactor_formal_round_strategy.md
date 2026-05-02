@@ -1,0 +1,433 @@
+# Refactor: Formal-Round Inheritance → Strategy-Based Dispatch
+
+> **Status**: design — awaiting sign-off before phase 1.
+> **Author**: Yue + Claude · **Date**: 2026-05-02
+> **Branch target**: `fix/cognitive-alignment-v9` (current) or a new
+> `refactor/formal-strategy` branch — caller decision before phase 1.
+
+---
+
+## 1. Observation & Motivation
+
+### 1.1 Current state (post-Commit A, 2026-05-01)
+
+`_apply_mode_override_chain` in `nodes/ml_hyperparameter_tune_agent.py:166`
+accepts a `formal_round_strategy: str` parameter with the literal type
+`Literal["inherit_best_trial", "llm_propose"]` (schema:808). The current
+implementation has two arms:
+
+| Strategy           | What gets inherited from the trial winner                                   |
+|--------------------|------------------------------------------------------------------------------|
+| `inherit_best_trial` (default) | `model_cfg`, `loss_cfg`, `train_cfg.lr`, `train_cfg.epochs`, `train_cfg.batch_size` (5 fields, the **full clone**) |
+| `llm_propose`      | Nothing — planner's choices survive verbatim (only `is_trial=False` is forced) |
+
+### 1.2 Problems with the current state
+
+1. **The `inherit_best_trial` literal is a misnomer post-Commit A**. Commit
+   A (2026-04-30) widened inheritance from `loss_cfg + lr` only to all five
+   fields. The literal name still suggests the older semantics, and the
+   schema docstring at `agent/schemas/hyperparam_tuning.py:812-817` still
+   describes the pre-Commit A behavior. Audit logs reading the strategy
+   name are misleading.
+2. **No middle ground is reachable**. We have full clone or zero inheritance.
+   The historical V7/V8 design (`loss_cfg + lr` only, planner chooses the
+   rest) is no longer expressible — Commit A removed it.
+3. **`if/elif` chain inside `_apply_mode_override_chain` will not scale**.
+   At three strategies the in-line branches cross the threshold where a
+   registry pattern earns its keep — each strategy becomes independently
+   testable, and adding a fourth (e.g. `inherit_loss_only` for spectral
+   ablation) is a one-line registry addition.
+
+### 1.3 Goal
+
+Replace the implicit two-mode strategy with an **explicit three-mode
+registry**: `full_clone`, `hybrid_params`, `independent`. Aliasing keeps
+old configs working. Logging at each round lets the post-mortem audit
+read the active strategy at a glance.
+
+---
+
+## 2. Three Strategies — Semantic Contract
+
+| Strategy        | Inherits from trial winner                                | Equivalent legacy name | Use case |
+|-----------------|-----------------------------------------------------------|------------------------|----------|
+| `full_clone`    | `model_cfg`, `loss_cfg`, `lr`, `epochs`, `batch_size`     | post-Commit A `inherit_best_trial` (alias) | Production. Maximum execution certainty. Trial measurement reuse for the time gate (Commit B–D) requires this. |
+| `hybrid_params` | `loss_cfg`, `lr` only — planner keeps `model_cfg`, `epochs`, `batch_size` | pre-Commit A `inherit_best_trial` (no current implementation) | Audit/exploration. Lock evaluation (loss + lr) but let LLM scale capacity for the full-data pass. **Time gate may reject; that is the trade-off.** |
+| `independent`   | Nothing — planner's full plan honored verbatim            | `llm_propose` (alias)  | Free exploration; sandbox runs. Hyperparameter measurements from trial are NOT reused. |
+
+**Contract for all three**:
+- `is_trial` is always flipped to `False` on the formal round.
+- If no trial winner exists in `memory_history` (e.g. all trial rounds
+  failed), every strategy falls back to "planner's plan unchanged" and
+  emits the same WARNING. The strategy name only controls *what to copy
+  when there IS a winner* — it does not change the no-winner behavior.
+- Defensive `.get()` reads on `winner["params"]["train_config"]` keys —
+  any missing key falls back to the planner's value rather than raising
+  `KeyError`. Currently enforced for `epochs`/`batch_size`; we extend the
+  same discipline to `loss_config` and `model_config` reads.
+
+### 2.1 Backward-compat aliasing
+
+| Legacy literal       | Alias resolves to | Where the alias lives |
+|----------------------|-------------------|----------------------|
+| `inherit_best_trial` | `full_clone`      | Pydantic validator on `formal_round_strategy` (canonicalises before validation) |
+| `llm_propose`        | `independent`     | same |
+
+Old `tuner_advice/*.json` and SDSC `_chain_common.sh` defaults continue
+to validate without a code change. The canonicalisation happens once at
+schema validation; downstream code (`_apply_mode_override_chain`,
+registry lookup) only ever sees the canonical name.
+
+---
+
+## 3. Logging Contract
+
+Two log lines per formal round, always emitted (no conditional silence):
+
+```
+[STRATEGY] formal_round_strategy=<canonical> (source=<default|cli|alias_of:<legacy>>)
+[FORMAL OVERRIDE] strategy=<canonical> winner=<exp_id|none> inherited=<comma-list-of-fields>
+```
+
+- `source=default` — operator did not pass the flag.
+- `source=cli` — operator explicitly set the canonical name.
+- `source=alias_of:inherit_best_trial` — operator passed legacy name; we resolved the alias.
+
+This makes the post-mortem trivially greppable: `grep "STRATEGY"
+workflow_log.txt` shows every formal round's strategy + provenance.
+
+---
+
+## 4. File-Level Surface Map
+
+| # | File | Change |
+|---|------|--------|
+| 1 | `agent/schemas/hyperparam_tuning.py:808` | `Literal[...]` → all 3 canonical values + Pydantic `@field_validator` for legacy aliases. Update docstring to match post-refactor semantics. |
+| 2 | `agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py:67,199` | Update `Literal[...]` to mirror the schema. Protocol passes the canonical value through (legacy resolution happens in the schema). |
+| 3 | `nodes/ml_hyperparameter_tune_agent.py:166-265` | Replace `if/elif` with `_FORMAL_STRATEGY_REGISTRY` dict + 3 small handlers (`_strategy_full_clone`, `_strategy_hybrid_params`, `_strategy_independent`). Add the two-line `[STRATEGY]` log. |
+| 4 | `nodes/ml_hyperparameter_tune_agent.py:1159-1165` | Call site stays mostly the same (already passes `agent_input.formal_round_strategy`). Strategy name is already canonical post-validation. |
+| 5 | `workflows/model_exploration.py:583,1166` | Update default + Literal hint; legacy values resolved upstream. |
+| 6 | `run_exploration_adaptive.py:230-239,372` | Update `--formal_round_strategy` `choices` to `[full_clone, hybrid_params, independent]`. Help text rewrite. Keep accepting legacy values via `argparse` `choices` extension OR delegate alias resolution to the schema (preferred — single source of truth). |
+| 7 | `sdsc_submission_scripts/run_one_iteration.py:317-326,674` | Same as #6. |
+| 8 | `sdsc_submission_scripts/_chain_common.sh:67,150,227` | Update default literal in shell + comment. Bash side does NOT alias-resolve; it passes whatever string the user gave. Schema canonicalises. |
+| 9 | `tests/unit/agent/tune_ml_hyperparam_agent/test_force_formal_round.py` | New: `hybrid_params` tests (4 cases). Update existing `inherit_best_trial`/`llm_propose` tests to canonical names + add 2 alias-resolution tests. |
+| 10 | `tests/unit/agent/protocols/test_ml_model_valid_to_ml_model_tune.py:454+` | Update fan-out tests to use canonical names + add 1 alias test. |
+| 11 | `tests/unit/workflows/test_model_exploration.py:1248-1300` | Same as #10. |
+| 12 | `tests/unit/scripts/test_chain_consistency.py` | Confirm Bash/Python literal lists are consistent (regenerate the assertion against the canonical+legacy union). |
+| **NEW** | `docs/memories/project_formal_strategy_refactor.md` | Record the alias mapping as a project memory so future sessions don't trip on the legacy name. |
+
+12 files touched, 1 new memory file. Source-only LoC delta is small;
+test additions dominate.
+
+---
+
+## 5. Implementation — Strategy Registry Snippet
+
+```python
+# nodes/ml_hyperparameter_tune_agent.py
+
+from typing import Callable, Optional, Sequence
+
+# --------------------------------------------------------------------- #
+# Formal-round inheritance strategies
+# --------------------------------------------------------------------- #
+
+_LEGACY_STRATEGY_ALIASES: dict[str, str] = {
+    "inherit_best_trial": "full_clone",
+    "llm_propose":        "independent",
+}
+
+def _canonical_strategy(name: str) -> str:
+    """Resolve legacy literal to canonical name. Schema validator calls
+    this before validation; runtime callers should already see canonical."""
+    return _LEGACY_STRATEGY_ALIASES.get(name, name)
+
+
+# Each handler mutates ``plan`` in place using the trial ``winner`` record
+# and returns the list of inherited field names (for the log line).
+# Signature is uniform so the registry can dispatch without special-casing.
+
+def _strategy_full_clone(plan: ExperimentPlan, winner: dict) -> Sequence[str]:
+    p = winner["params"]
+    plan.model_cfg = dict(p.get("model_config") or {})
+    plan.loss_cfg  = dict(p["loss_config"])
+    plan.train_cfg["lr"] = p["train_config"]["lr"]
+    inherited = ["model_cfg", "loss_cfg", "lr"]
+    if (e := p["train_config"].get("epochs")) is not None:
+        plan.train_cfg["epochs"] = e
+        inherited.append("epochs")
+    if (b := p["train_config"].get("batch_size")) is not None:
+        plan.train_cfg["batch_size"] = b
+        inherited.append("batch_size")
+    return inherited
+
+def _strategy_hybrid_params(plan: ExperimentPlan, winner: dict) -> Sequence[str]:
+    # V7/V8 historical intent: lock loss + lr, let planner pick capacity.
+    p = winner["params"]
+    plan.loss_cfg = dict(p["loss_config"])
+    plan.train_cfg["lr"] = p["train_config"]["lr"]
+    return ["loss_cfg", "lr"]
+
+def _strategy_independent(plan: ExperimentPlan, winner: dict) -> Sequence[str]:
+    # No-op. Planner's full plan survives. Winner is unused but kept in
+    # the signature for registry-uniformity.
+    return []
+
+_FORMAL_STRATEGY_REGISTRY: dict[str, Callable[[ExperimentPlan, dict], Sequence[str]]] = {
+    "full_clone":    _strategy_full_clone,
+    "hybrid_params": _strategy_hybrid_params,
+    "independent":   _strategy_independent,
+}
+
+
+def _apply_mode_override_chain(
+    plan: ExperimentPlan,
+    *,
+    trial_allowed: bool,
+    is_formal_round: bool,
+    force_formal_round: bool,
+    formal_round_strategy: str = "full_clone",
+    memory_history: Optional[list] = None,
+) -> ExperimentPlan:
+    if not trial_allowed:
+        plan.is_trial = False
+    if not (is_formal_round and force_formal_round):
+        return plan
+
+    plan.is_trial = False
+    canonical = _canonical_strategy(formal_round_strategy)
+    handler = _FORMAL_STRATEGY_REGISTRY.get(canonical)
+    if handler is None:
+        # Defensive — should be unreachable post-validation, but log loudly
+        # if the schema layer is bypassed.
+        print(f"  [STRATEGY] WARNING: unknown strategy {formal_round_strategy!r} — "
+              "treating as 'independent' (no inheritance).")
+        return plan
+
+    print(f"  [STRATEGY] formal_round_strategy={canonical}"
+          + (f" (alias_of:{formal_round_strategy})"
+             if canonical != formal_round_strategy else ""))
+
+    winner = _best_trial_winner(memory_history or [])
+    if winner is None:
+        print("  [FORMAL OVERRIDE] WARNING: no successful trial round in this "
+              "iteration — planner's plan unchanged. Score may be unreliable.")
+        return plan
+
+    inherited = handler(plan, winner)
+    print(f"  [FORMAL OVERRIDE] strategy={canonical} "
+          f"winner={winner['exp_id']!r} score={winner['denoising_score']:.4f} "
+          f"inherited={','.join(inherited) if inherited else '(none)'}")
+    return plan
+```
+
+### 5.1 Pydantic alias resolution
+
+```python
+# agent/schemas/hyperparam_tuning.py
+
+from pydantic import field_validator
+
+class HyperparamTuningInput(BaseModel):
+    formal_round_strategy: Literal["full_clone", "hybrid_params", "independent"] = Field(
+        default="full_clone",
+        description=(...),  # rewritten to describe all three canonical strategies
+    )
+
+    @field_validator("formal_round_strategy", mode="before")
+    @classmethod
+    def _canonicalise_legacy_strategy(cls, v):
+        # Legacy → canonical resolution. Runs before Literal-validation.
+        legacy = {"inherit_best_trial": "full_clone",
+                  "llm_propose":        "independent"}
+        return legacy.get(v, v) if isinstance(v, str) else v
+```
+
+### 5.2 CLI alias acceptance
+
+```python
+# run_exploration_adaptive.py + sdsc_submission_scripts/run_one_iteration.py
+
+CANONICAL = ["full_clone", "hybrid_params", "independent"]
+LEGACY    = ["inherit_best_trial", "llm_propose"]
+parser.add_argument(
+    "--formal_round_strategy",
+    type=str,
+    choices=CANONICAL + LEGACY,  # accept both; schema canonicalises
+    default="full_clone",
+    help="Formal-round inheritance strategy. Legacy names "
+         "(inherit_best_trial → full_clone; llm_propose → independent) "
+         "are aliased and emit a one-line resolution note in workflow_log.",
+)
+```
+
+---
+
+## 6. Phased Implementation Checklist
+
+Each phase is independently committable; verification step at the end of
+each. Stop and update this doc after each phase before moving to the
+next.
+
+### Phase 1 — Schema layer + alias resolution + node-side shim
+
+**Important ordering note**: Phase 1 deliberately defers `hybrid_params` to
+Phase 2. If Phase 1 added `hybrid_params` to the schema, users could select
+it before the node-code registry (Phase 2) knows how to dispatch it, and
+the existing `else`-branch would silently treat it as `independent` — a
+hidden footgun. So Phase 1's schema accepts only the **2 new canonical
+names that map 1:1 to existing legacy behavior** (`full_clone` ↔
+`inherit_best_trial`, `independent` ↔ `llm_propose`). `hybrid_params`
+lands in Phase 2 atomically with its handler.
+
+The schema validator canonicalises legacy → canonical, so post-Phase-1
+the node code sees `full_clone` instead of `inherit_best_trial`. The
+existing `if formal_round_strategy == "inherit_best_trial":` would then
+fall through to the `else` branch (no inheritance) — breaking production
+behavior between Phase 1 and Phase 2. Phase 1 therefore includes a
+**1-line transitional shim** in `_apply_mode_override_chain`: `if
+_canonical_strategy(strategy) == "full_clone":`. Phase 2 deletes the
+shim when the registry replaces the `if/elif`.
+
+- [x] Add `_LEGACY_STRATEGY_ALIASES` constant + `_canonical_strategy` helper to `nodes/ml_hyperparameter_tune_agent.py` (just above `_apply_mode_override_chain`). Also added `Dict` to the typing import.
+- [x] **Apply the transitional shim**: changed the `if formal_round_strategy == "inherit_best_trial":` branch in `_apply_mode_override_chain` to compute `canonical_strategy = _canonical_strategy(formal_round_strategy)` once, then `if canonical_strategy == "full_clone":`. Updated the `else`-branch print to surface both the canonical name and the input value (e.g. `strategy='independent' (input='llm_propose')`).
+- [x] Updated `agent/schemas/hyperparam_tuning.py:808` Literal to `{full_clone, independent, inherit_best_trial, llm_propose}` (4 values, `hybrid_params` deferred to Phase 2) + added `@field_validator("formal_round_strategy", mode="before")` named `_canonicalise_legacy_strategy`. Default flipped to `full_clone`. Description block rewritten to describe both canonical strategies, the alias mapping, and a forward-reference to the Phase 2 reservation of `hybrid_params`.
+- [x] Updated `agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py:67` Literal to mirror the 4-value union + default to `full_clone`.
+- [x] Added unit tests covering (a)-(f) as planned. Specifically: `test_strategy_default_is_full_clone`, `test_strategy_accepts_canonical_full_clone`, `test_strategy_accepts_canonical_independent`, `test_strategy_legacy_inherit_best_trial_aliases_to_full_clone`, `test_strategy_legacy_llm_propose_aliases_to_independent`, `test_strategy_hybrid_params_rejected_in_phase_1` (regression guard), and three shim tests (`test_shim_canonical_full_clone_inherits_like_legacy`, `test_shim_canonical_independent_skips_inheritance`, `test_shim_legacy_inherit_best_trial_still_works`). Also updated existing protocol-fan-out and workflow-forwarding tests to assert the canonicalised default.
+- [x] **Verify**: targeted suite `tests/unit/agent/tune_ml_hyperparam_agent/test_force_formal_round.py + test_hyperparam_schemas.py + tests/unit/agent/protocols/test_ml_model_valid_to_ml_model_tune.py + tests/unit/workflows/test_model_exploration.py` → **272 passed in 3.23s**. Wider scope (`tests/unit/agent/tune_ml_hyperparam_agent/ + tests/unit/agent/protocols/ + tests/unit/workflows/ + tests/unit/scripts/`) → **754 passed, 3 failed in 225.10s**. All 3 failures are pre-existing on a clean tree (verified via `git stash`): 2 are the `SAFETY_MULTIPLIER==2.0` stale-constant assertions inherited from commit `5ac6a53` (V7 recalibration), 1 is a chain-resume kwargs drift in `test_chain_consistency::test_kwargs_match_modulo_documented_exemptions` between `run_exploration_adaptive.py` and `sdsc_submission_scripts/run_one_iteration.py` — unrelated to `formal_round_strategy`.
+- [ ] **Commit**: `refactor(schema): formal_round_strategy accepts canonical names + aliases legacy {inherit_best_trial, llm_propose}`.
+
+### Phase 2 — Strategy registry + logic refactor + hybrid_params introduction
+
+- [ ] Add `hybrid_params` to the schema Literal (`agent/schemas/hyperparam_tuning.py` and the protocol). Now 5 valid input values: 3 canonical + 2 legacy aliases. Update the description block to describe all 3 canonical strategies.
+- [ ] Add `_strategy_full_clone`, `_strategy_hybrid_params`, `_strategy_independent` handlers + `_FORMAL_STRATEGY_REGISTRY` dict to `nodes/ml_hyperparameter_tune_agent.py`.
+- [ ] Replace the Phase-1 transitional shim (`if _canonical_strategy(...) == "full_clone":`) and the `else` branch with the registry dispatch shown in §5.
+- [ ] Add the two-line `[STRATEGY]` + `[FORMAL OVERRIDE]` log contract from §3.
+- [ ] Update existing tests in `test_force_formal_round.py` to use canonical names where they read the strategy literal.
+- [ ] Add new tests: `hybrid_params` inherits exactly `loss_cfg + lr` (model_cfg/epochs/batch_size from planner survive); `hybrid_params` no-winner path (planner unchanged, WARNING logged); `independent` ignores winner entirely; alias-resolution: passing `inherit_best_trial` produces `full_clone` behavior + the `alias_of:` log line.
+- **Verify**: `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent/ -q` — green (modulo the 2 pre-existing SAFETY_MULTIPLIER failures inherited from before this refactor).
+- **Commit**: `refactor(formal-round): strategy-registry dispatch + hybrid_params mode + audit logging`.
+
+### Phase 3 — CLI + chain wrapper + workflow
+
+- [ ] Update `run_exploration_adaptive.py` `--formal_round_strategy` choices/help/default to canonical (accepts legacy too).
+- [ ] Update `sdsc_submission_scripts/run_one_iteration.py` similarly.
+- [ ] Update `sdsc_submission_scripts/_chain_common.sh:67,150,227` default literal + comment to canonical.
+- [ ] Update `workflows/model_exploration.py:583,1166` default + Literal hint.
+- [ ] Update `tests/unit/workflows/test_model_exploration.py:1248-1300` and `tests/unit/scripts/test_chain_consistency.py` to assert canonical names + alias acceptance.
+- **Verify**: `.venv/bin/python -m pytest tests/unit/workflows/ tests/unit/scripts/ -q` — green.
+- **Commit**: `refactor(cli): formal_round_strategy canonical names plumbed through CLI + chain wrapper + workflow`.
+
+### Phase 4 — Documentation + memory + smoke
+
+- [ ] Update `agent/schemas/hyperparam_tuning.py:808` description with the post-refactor 3-strategy contract (already done in phase 1; double-check after phases 2-3 land).
+- [ ] Append a project memory: `docs/memories/project_formal_strategy_refactor.md` recording the alias mapping + the date of canonical migration (so future sessions don't reintroduce `inherit_best_trial` as a primary).
+- [ ] Update `docs/V8_Gap_Report.md:17,19,133,171` references to `inherit_best_trial` with a note that the literal was renamed to `full_clone` on 2026-05-02.
+- [ ] Smoke test: `.venv/bin/python run_exploration_adaptive.py --help` shows the new choices; `bash sdsc_submission_scripts/_chain_common.sh` syntax check; one short trial-mode dry run with each of the 3 strategies confirming the `[STRATEGY]` log line appears once per formal round.
+- **Verify**: full `.venv/bin/python -m pytest tests/unit/agent/ -q` — green (modulo the same 2 pre-existing failures).
+- **Commit**: `docs(formal-round): record canonical strategy names + alias mapping`.
+
+---
+
+## 7. Test Plan (Concrete Cases)
+
+### 7.1 Schema-layer tests (Phase 1)
+
+```python
+# tests/unit/agent/tune_ml_hyperparam_agent/test_hyperparam_schemas.py
+
+def test_strategy_full_clone_validates(): ...
+def test_strategy_hybrid_params_validates(): ...
+def test_strategy_independent_validates(): ...
+def test_strategy_alias_inherit_best_trial_resolves_to_full_clone(): ...
+def test_strategy_alias_llm_propose_resolves_to_independent(): ...
+def test_strategy_unknown_literal_raises(): ...
+def test_strategy_default_is_full_clone(): ...
+```
+
+### 7.2 Registry-dispatch tests (Phase 2)
+
+```python
+# tests/unit/agent/tune_ml_hyperparam_agent/test_force_formal_round.py — new section
+
+class TestFullCloneStrategy:
+    def test_inherits_all_five_fields_from_winner(self): ...
+    def test_falls_back_to_planner_when_no_winner(self, capsys):
+        # Asserts WARNING log line, plan untouched.
+
+class TestHybridParamsStrategy:
+    def test_inherits_only_loss_cfg_and_lr(self):
+        # planner's model_cfg / epochs / batch_size survive verbatim.
+    def test_does_not_touch_model_cfg(self):
+        # Pin: hybrid_params must NOT clone model_cfg even if winner has one.
+    def test_falls_back_to_planner_when_no_winner(self, capsys): ...
+    def test_log_lists_inherited_fields(self, capsys):
+        # "inherited=loss_cfg,lr" in the log line.
+
+class TestIndependentStrategy:
+    def test_planner_choices_survive_verbatim(self): ...
+    def test_no_winner_no_warning(self, capsys):
+        # Pin: independent shouldn't warn about the missing winner — by
+        # design it never wanted one.
+
+class TestAliasResolution:
+    def test_inherit_best_trial_behaves_as_full_clone(self): ...
+    def test_llm_propose_behaves_as_independent(self): ...
+    def test_alias_log_line_emitted(self, capsys):
+        # "alias_of:inherit_best_trial" present in the [STRATEGY] log.
+
+class TestRegistryShape:
+    def test_all_strategies_uniform_signature(self):
+        # Every handler in _FORMAL_STRATEGY_REGISTRY accepts (plan, winner)
+        # and returns Sequence[str]. Catches future drift if someone adds
+        # a 4th strategy with a different signature.
+```
+
+### 7.3 CLI / chain-wrapper consistency (Phase 3)
+
+- Existing `tests/unit/scripts/test_chain_consistency.py` already enforces Bash↔Python literal-list parity. Update its expected list to `{full_clone, hybrid_params, independent, inherit_best_trial, llm_propose}` (canonical + legacy union).
+- Add to `tests/unit/workflows/test_model_exploration.py`: legacy literal passed to the workflow → `tune_input.formal_round_strategy == "full_clone"` (canonical resolution happens inside the schema).
+
+---
+
+## 8. Risks & Edge Cases
+
+1. **Live V9 chain with `inherit_best_trial` config in flight**. Alias resolution at the schema layer means the running chain keeps working — schema sees `inherit_best_trial`, hands `full_clone` to `_apply_mode_override_chain`, behavior identical to today. Verified by: `test_alias_resolution_unchanged_behavior`.
+2. **Pydantic v1 vs v2 `field_validator`**. Repo uses Pydantic v2 (verified by `from pydantic import field_validator` already in use elsewhere). `mode="before"` is the v2 spelling.
+3. **`hybrid_params` blowing the time gate**. Documented behavior. The time gate is the safety net; the user-supplied `formal_train_portion` and `formal_portion` already reduce data volume on formal rounds, but `hybrid_params` keeping the planner's `batch_size` could still bust the budget. The strategy is for explicit experimental use — not a default.
+4. **Stale schema description after Phase 2**. Docstring is rewritten in Phase 1 to describe all 3 strategies. Phase 2 verifies behavior matches the description (no implicit re-description needed).
+5. **Test files referencing `inherit_best_trial` in test names**. We rename the test functions to `test_strategy_full_clone_*` patterns in Phase 2 (test names should describe canonical behavior, not legacy aliases). The alias-resolution tests get their own dedicated names (`test_alias_inherit_best_trial_*`).
+6. **Memory file `project_phase68_chain_resume_status.md` mentions `inherit_best_trial`**. Out of scope — those are historical chain-state notes; updating them retroactively would erase the timeline. We leave them as-is and rely on the new memory file (Phase 4) to record the rename.
+
+---
+
+## 9. Rollback Plan
+
+Each phase is committed independently. If Phase 2 (the logic refactor)
+introduces a regression that's not caught by the unit tests, `git revert
+<phase-2-commit>` returns to the post-Phase-1 state — schema accepts new
+literals, but logic still runs the old `if/elif`. The schema change in
+Phase 1 is forward-compatible (legacy values still validate), so the
+Phase-1 commit is safe to keep even if Phase 2 is reverted.
+
+If we need to fully revert to pre-refactor: revert Phase 1 last
+(reverting it first would break old configs that say
+`inherit_best_trial`). Phases revert in reverse order: 4 → 3 → 2 → 1.
+
+---
+
+## 10. Out of Scope
+
+- Changing the trial-winner selection logic (`_best_trial_winner`).
+- Adding a 4th strategy (e.g. `inherit_loss_only`).
+- Touching the time-gate (Commits B–D of `refine_inference_time_estimator.md`).
+- Migrating any historical data files; the rename is forward-only with alias support.
+
+---
+
+## 11. Sign-off
+
+- [ ] User reviewed §2 (semantic contract) and §6 (phased checklist).
+- [ ] User confirmed branch target (continue on `fix/cognitive-alignment-v9` or new `refactor/formal-strategy`).
+- [ ] User confirmed commit cadence (4 commits as in §6, or roll into 1).
+- [ ] Phase 1 starts after sign-off.

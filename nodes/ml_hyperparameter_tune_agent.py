@@ -19,7 +19,7 @@ import argparse
 import importlib
 import traceback
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 from pydantic import ValidationError
 
@@ -163,13 +163,38 @@ def _latest_trial_inference_marginal(memory_history: list) -> Optional[float]:
     return None
 
 
+# --------------------------------------------------------------------- #
+# Formal-round strategy aliasing (Phase 1 of refactor_formal_round_strategy.md)
+# --------------------------------------------------------------------- #
+# Maps legacy literal values to their canonical post-2026-05-02 form.
+# The schema's ``@field_validator`` is the primary canonicalisation point
+# and live callers always reach this function with the already-canonical
+# name; this helper is a defensive second pass so unit tests, ad-hoc
+# constructions, and any future internal caller that bypasses the schema
+# still see consistent behavior. Phase 2 will retire the if/elif this
+# helper guards by replacing it with a strategy-registry dispatch.
+_LEGACY_STRATEGY_ALIASES: Dict[str, str] = {
+    "inherit_best_trial": "full_clone",
+    "llm_propose":        "independent",
+}
+
+
+def _canonical_strategy(name: str) -> str:
+    """Return the canonical name for ``name``, resolving any legacy alias.
+
+    Unknown names pass through unchanged — schema-layer validation is
+    responsible for rejecting them.
+    """
+    return _LEGACY_STRATEGY_ALIASES.get(name, name)
+
+
 def _apply_mode_override_chain(
     plan: ExperimentPlan,
     *,
     trial_allowed: bool,
     is_formal_round: bool,
     force_formal_round: bool,
-    formal_round_strategy: str = "inherit_best_trial",
+    formal_round_strategy: str = "full_clone",
     memory_history: Optional[list] = None,
 ) -> ExperimentPlan:
     """Apply the run-level + last-round overrides to ``plan``.
@@ -183,9 +208,11 @@ def _apply_mode_override_chain(
        run produces a cross-architecture comparable score. Operators can
        disable this override by passing ``--no-force_formal_round``.
     3. **Hyperparameter inheritance**, gated on
-       ``formal_round_strategy``:
+       ``formal_round_strategy`` (canonical names; legacy aliases
+       ``inherit_best_trial`` / ``llm_propose`` resolve to ``full_clone``
+       / ``independent`` via :func:`_canonical_strategy`):
 
-       * ``"inherit_best_trial"`` (default) — when (2) fires AND
+       * ``"full_clone"`` (default) — when (2) fires AND
          ``memory_history`` contains at least one successful trial
          round, the highest-scoring trial round's ``model_config``,
          ``loss_config``, and the ``lr``/``epochs``/``batch_size``
@@ -196,10 +223,15 @@ def _apply_mode_override_chain(
          hyperparameters. If no trial winner exists, the planner's
          choices survive and a warning is logged (resilient: a messy
          trial stage shouldn't kill the chain).
-       * ``"llm_propose"`` — inheritance is skipped; the planner's
+       * ``"independent"`` — inheritance is skipped; the planner's
          model_config, loss_config, and train_config survive verbatim.
          ``plan.is_trial`` is still flipped to False so the round
          runs as formal.
+
+       A third canonical strategy, ``"hybrid_params"`` (loss_cfg + lr
+       only), is reserved for Phase 2 of
+       ``docs/refactor_formal_round_strategy.md`` and is not yet a
+       valid value at the schema layer.
 
        Why the inheritance default exists: V7 iter_001/iter_002 of
        explore_novel showed the LLM picking an untested ``focal_cw``
@@ -219,7 +251,13 @@ def _apply_mode_override_chain(
         plan.is_trial = False
     if is_formal_round and force_formal_round:
         plan.is_trial = False
-        if formal_round_strategy == "inherit_best_trial":
+        # Phase 1 transitional shim — Phase 2 of the formal-strategy refactor
+        # will replace this if/elif with a strategy-registry dispatch.
+        # Resolve any legacy alias here so the comparison always uses the
+        # canonical name regardless of whether the schema validator was the
+        # entry point (live path) or the caller bypassed it (test path).
+        canonical_strategy = _canonical_strategy(formal_round_strategy)
+        if canonical_strategy == "full_clone":
             winner = _best_trial_winner(memory_history or [])
             if winner is not None:
                 winner_loss = winner["params"]["loss_config"]
@@ -257,10 +295,13 @@ def _apply_mode_override_chain(
                     "Score may be unreliable."
                 )
         else:
-            # llm_propose — explicit opt-out from inheritance.
+            # ``independent`` (canonical) / ``llm_propose`` (legacy alias) —
+            # explicit opt-out from inheritance. Phase 2 will route this
+            # through a dedicated handler in the strategy registry.
             print(
-                f"  [FORMAL OVERRIDE] strategy={formal_round_strategy!r} — "
-                "planner's model_config, loss_config, and train_config honored verbatim."
+                f"  [FORMAL OVERRIDE] strategy={canonical_strategy!r} "
+                f"(input={formal_round_strategy!r}) — planner's "
+                "model_config, loss_config, and train_config honored verbatim."
             )
     return plan
 

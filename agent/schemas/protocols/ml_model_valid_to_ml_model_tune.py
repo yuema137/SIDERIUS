@@ -64,7 +64,12 @@ def local_validated_model(
     formal_portion: float = 0.1,
     formal_train_portion: float = 1.0,
     force_formal_round: bool = True,
-    formal_round_strategy: Literal["inherit_best_trial", "llm_propose"] = "inherit_best_trial",
+    formal_round_strategy: Literal[
+        "full_clone",
+        "independent",
+        "inherit_best_trial",  # legacy alias of full_clone
+        "llm_propose",         # legacy alias of independent
+    ] = "full_clone",
     # --- Degenerate-output reaction (paired with execute_tools.squid_health_checks) ---
     degenerate_penalty_score: Optional[float] = None,
     # --- Per-round attempt budget (Phase L, §11) ---

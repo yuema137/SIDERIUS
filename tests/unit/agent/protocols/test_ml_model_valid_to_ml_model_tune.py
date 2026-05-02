@@ -453,26 +453,52 @@ class TestAttemptBudgetFanOut:
 # ---------------------------------------------------------------------------
 # formal_round_strategy fan-out
 #
-# Orchestration policy for the forced formal round. The protocol must
-# surface caller overrides to HyperparamTuningInput and otherwise leave
-# the schema default ('inherit_best_trial').
+# Orchestration policy for the forced formal round. Phase 1 of
+# refactor_formal_round_strategy.md flipped the schema default to the
+# canonical name ``full_clone`` and added legacy aliasing. The protocol
+# must (a) leave the schema default in effect when the caller omits the
+# field, (b) surface canonical caller overrides verbatim, and (c) let
+# legacy literals reach the schema layer where the validator
+# canonicalises them.
 # ---------------------------------------------------------------------------
 
 
 class TestFormalRoundStrategyFanOut:
 
     def test_default_when_omitted(self, validator_output, proposal_output, storage):
+        """Default flipped from legacy ``inherit_best_trial`` to canonical
+        ``full_clone`` in Phase 1 — behavior unchanged, just the name."""
         result = local_validated_model(validator_output, proposal_output, storage)
-        assert result.formal_round_strategy == "inherit_best_trial"
+        assert result.formal_round_strategy == "full_clone"
 
-    def test_llm_propose_passed_through(
+    def test_canonical_independent_passed_through(
+        self, validator_output, proposal_output, storage
+    ):
+        result = local_validated_model(
+            validator_output, proposal_output, storage,
+            formal_round_strategy="independent",
+        )
+        assert result.formal_round_strategy == "independent"
+
+    def test_legacy_inherit_best_trial_canonicalised(
+        self, validator_output, proposal_output, storage
+    ):
+        """Live V9 chains pass the legacy literal; the schema validator
+        canonicalises it before downstream code sees the value."""
+        result = local_validated_model(
+            validator_output, proposal_output, storage,
+            formal_round_strategy="inherit_best_trial",
+        )
+        assert result.formal_round_strategy == "full_clone"
+
+    def test_legacy_llm_propose_canonicalised(
         self, validator_output, proposal_output, storage
     ):
         result = local_validated_model(
             validator_output, proposal_output, storage,
             formal_round_strategy="llm_propose",
         )
-        assert result.formal_round_strategy == "llm_propose"
+        assert result.formal_round_strategy == "independent"
 
 
 # ---------------------------------------------------------------------------
