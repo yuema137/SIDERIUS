@@ -78,7 +78,12 @@ VRAM_WARN_GB = 22.0   # >22 GB → "High Pressure"
 VRAM_FAIL_GB = 32.0   # >32 GB → OOM
 FORMAL_TIME_FAIL_S = 1200.0   # 20 min
 
-TRIAL_BUDGET_MIN = 1.0      # 60 s
+TRIAL_BUDGET_MIN = 15.0     # 900 s — see Phase Q in docs/resource_estimator_implement.md.
+                            # At trial_portion=0.02 + seg=1250 the PSD micro-segment
+                            # expansion (PSD_SEGMENT_LENGTH//seg = 8000) yields
+                            # ~32k steps/epoch, so the floor is ~7 min for any
+                            # architecture. 1 min was unachievable; 15 min lets
+                            # plausible drafts pass while still gating obvious bloat.
 FORMAL_BUDGET_MIN = 20.0    # 1200 s
 
 
@@ -343,6 +348,8 @@ class TestScoreTableRealSmoke:
                 max_epochs=1,
                 trial_time_budget_minutes=TRIAL_BUDGET_MIN,
                 formal_time_budget_minutes=FORMAL_BUDGET_MIN,
+                trial_vram_budget_gb=2.0,
+                formal_vram_budget_gb=2.0,
                 **{f"human_advice_{k}": v for k, v in advice.items()},
             )
 
@@ -419,6 +426,8 @@ class TestScoreTableRealSmoke:
                 max_epochs=1,
                 trial_time_budget_minutes=TRIAL_BUDGET_MIN,
                 formal_time_budget_minutes=FORMAL_BUDGET_MIN,
+                trial_vram_budget_gb=2.0,
+                formal_vram_budget_gb=2.0,
                 **{f"human_advice_{k}": v for k, v in advice.items()},
             )
 
