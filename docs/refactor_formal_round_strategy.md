@@ -315,17 +315,20 @@ shim when the registry replaces the `if/elif`.
   - `TestAliasResolution` (3 tests): `test_inherit_best_trial_behaves_as_full_clone`, `test_llm_propose_behaves_as_independent`, `test_alias_log_line_emitted`.
   - `TestRegistryShape` (3 tests): `test_registry_has_three_canonical_strategies`, `test_all_strategies_uniform_signature` (smoke-calls each handler), `test_registry_directly_exposes_handler_callables`.
 - [x] **Verify**: targeted file `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent/test_force_formal_round.py -q` → **51 passed in 0.99s** (37 pre-existing + 14 new tests across the 5 §7.2 classes). Wider scope `tests/unit/agent/tune_ml_hyperparam_agent/ + tests/unit/agent/protocols/ + tests/unit/workflows/` → **735 passed, 2 failed in 226.13s**. The 2 failures (`test_estimator_static_patch::test_safety_multiplier_raised`, `test_warmup_activation::test_static_formula_uses_patched_constants`) are the same pre-existing `SAFETY_MULTIPLIER==2.0` stale-constant assertions documented in Phase 1 (now reading 1.3) — unrelated to this refactor and confirmed pre-existing on the clean tree.
-- [ ] **Commit**: `refactor(formal-round): strategy-registry dispatch + hybrid_params mode + audit logging`.
+- [x] **Commit**: `refactor(formal-round): strategy-registry dispatch + hybrid_params mode + audit logging` → `4b44a78`.
 
 ### Phase 3 — CLI + chain wrapper + workflow
 
-- [ ] Update `run_exploration_adaptive.py` `--formal_round_strategy` choices/help/default to canonical (accepts legacy too).
-- [ ] Update `sdsc_submission_scripts/run_one_iteration.py` similarly.
-- [ ] Update `sdsc_submission_scripts/_chain_common.sh:67,150,227` default literal + comment to canonical.
-- [ ] Update `workflows/model_exploration.py:583,1166` default + Literal hint.
-- [ ] Update `tests/unit/workflows/test_model_exploration.py:1248-1300` and `tests/unit/scripts/test_chain_consistency.py` to assert canonical names + alias acceptance.
-- **Verify**: `.venv/bin/python -m pytest tests/unit/workflows/ tests/unit/scripts/ -q` — green.
-- **Commit**: `refactor(cli): formal_round_strategy canonical names plumbed through CLI + chain wrapper + workflow`.
+- [x] Update `run_exploration_adaptive.py:230-247` `--formal_round_strategy` `choices` to the 5-value union (3 canonical + 2 legacy aliases), default flipped from `inherit_best_trial` to `full_clone`, help-text rewritten to describe all 3 canonical strategies and call out the alias resolution.
+- [x] Update `sdsc_submission_scripts/run_one_iteration.py:316-336` identically (mirror change). Both CLIs now expose the same 5-value choice + same help text.
+- [x] Update `sdsc_submission_scripts/_chain_common.sh:67` default literal flipped to `full_clone` + comment rewritten to list canonical names and note alias acceptance. Lines 150 (case arm) and 227 (APP_ARGS thread-through) need no change — they pass whatever string the user gave; schema canonicalises downstream.
+- [x] Update `workflows/model_exploration.py:583` default flipped from `inherit_best_trial` to `full_clone`. Type stays `str` (not `Literal[...]`) for consistency with the sibling `formal_strategy: str = "snapshot"` parameter; the schema is the source of truth.
+- [x] Update `tests/unit/scripts/test_chain_consistency.py` — added `formal_round_strategy` to `SHARED_FLAGS`, `THREE_WAY_FLAGS`, `_COMMON_ARGV` (`--formal_round_strategy full_clone`), and `EXPECTED_KWARG_NAMES`. Now both Python-Python parity (`TestDefaultParity`) and three-way Python↔shell parity (`TestThreeWayConsistency`) lock in the `full_clone` default across all three layers.
+- [x] Update `tests/unit/workflows/test_model_exploration.py:TestOrchestrationParamForwarding` — added two new tests symmetric to the existing canonical/alias coverage:
+  - `test_formal_round_strategy_canonical_hybrid_params_reaches_tuning_input` (Phase 2's new mode).
+  - `test_formal_round_strategy_legacy_inherit_best_trial_canonicalised` (legacy alias → `full_clone`).
+- [x] **Verify**: targeted suite `.venv/bin/python -m pytest tests/unit/workflows/test_model_exploration.py tests/unit/scripts/test_chain_consistency.py -q` → **79 passed in 3.54s**. Smoke checks: `--help` text on both CLIs shows the 5-value union and the rewritten help block; `bash -n sdsc_submission_scripts/_chain_common.sh` passes (shell syntax clean).
+- [ ] **Commit**: `refactor(cli): formal_round_strategy canonical names plumbed through CLI + chain wrapper + workflow`.
 
 ### Phase 4 — Documentation + memory + smoke
 

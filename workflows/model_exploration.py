@@ -580,7 +580,7 @@ def run_workflow(
     formal_portion: float = 0.1,
     formal_train_portion: float = 1.0,
     force_formal_round: bool = True,
-    formal_round_strategy: str = "inherit_best_trial",
+    formal_round_strategy: str = "full_clone",
     # --- Degenerate-output reaction policy (paired with execute_tools.squid_health_checks) ---
     degenerate_penalty_score: Optional[float] = None,
     # --- Per-round attempt budget (Phase L, docs/resource_estimator_implement.md §11) ---

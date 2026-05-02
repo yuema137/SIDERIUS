@@ -1302,6 +1302,17 @@ class TestOrchestrationParamForwarding:
         )
         assert tune_input.formal_round_strategy == "independent"
 
+    def test_formal_round_strategy_canonical_hybrid_params_reaches_tuning_input(
+        self, workflow_env, tmp_path
+    ):
+        """Phase 2 introduced ``hybrid_params`` (loss_cfg + lr only). The
+        workflow must accept it and forward it verbatim to the tuner."""
+        tune_input = _tune_input_from_workflow(
+            workflow_env, tmp_path,
+            formal_round_strategy="hybrid_params",
+        )
+        assert tune_input.formal_round_strategy == "hybrid_params"
+
     def test_formal_round_strategy_legacy_alias_canonicalised(
         self, workflow_env, tmp_path
     ):
@@ -1313,6 +1324,18 @@ class TestOrchestrationParamForwarding:
             formal_round_strategy="llm_propose",
         )
         assert tune_input.formal_round_strategy == "independent"
+
+    def test_formal_round_strategy_legacy_inherit_best_trial_canonicalised(
+        self, workflow_env, tmp_path
+    ):
+        """Symmetric to the ``llm_propose`` alias test: the historical
+        ``inherit_best_trial`` literal must surface as ``full_clone`` on
+        the tuning input."""
+        tune_input = _tune_input_from_workflow(
+            workflow_env, tmp_path,
+            formal_round_strategy="inherit_best_trial",
+        )
+        assert tune_input.formal_round_strategy == "full_clone"
 
     def test_signature_accepts_degenerate_penalty_score(self):
         import inspect

@@ -64,7 +64,7 @@ TRIAL_STRATEGY="snapshot"           # choices: snapshot|anchors|target
 FORMAL_STRATEGY="snapshot"          # choices: snapshot|anchors|target
 FORMAL_PORTION=0.1                  # segments per file for formal training scope
 FORMAL_TRAIN_PORTION=1.0            # per-epoch iteration fraction for formal training
-FORMAL_ROUND_STRATEGY="inherit_best_trial"  # choices: inherit_best_trial|llm_propose
+FORMAL_ROUND_STRATEGY="full_clone"  # canonical: full_clone|hybrid_params|independent (legacy aliases inherit_best_trial|llm_propose accepted, schema canonicalises)
 # §3.2 — Degenerate-output reaction policy (paired with execute_tools.squid_health_checks)
 DEGENERATE_PENALTY_SCORE=""                 # empty → omit flag → schema default None (null score on collapse)
 # §3.2 — Data slicing / reproducibility (13.C-bis; None-default → omit when empty)
