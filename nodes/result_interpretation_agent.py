@@ -97,7 +97,7 @@ Produce a JSON object with exactly these fields:
   ],
   "best_config_analysis": "Why the best config worked — what made it better than others",
   "score_trend": "How scores evolved across rounds — improving, plateauing, or erratic",
-  "per_file_analysis": "Read the per-file table by Impact_Score descending. Cite specific files only by their Impact_Score and Linear_Weight values for this iter. Identify which files carry the largest remaining lever and which are already saturated. Do not assert a file is permanently weak from a single iter's reading.",
+  "per_file_analysis": "Read the per-file table by Impact_Score descending. Cite specific files BY file_index together with their Impact_Score and Linear_Weight values for this iter. When a clear Impact_Score leader exists, you MUST name the leader's file_index explicitly as the primary remaining lever — do NOT declare this model saturated while a clear lever remains, even if model_scalar is close to its ceiling. Only call a file 'already saturated' when its Impact_Score is uniformly small with the rest of the column. Do not assert a file is permanently weak from a single iter's reading.",
   "data_sensitivity": "How sensitive the model is to data volume. Did scores improve when trial_portion increased? How large is the trial-vs-formal gap?",
   "efficiency_assessment": "Model parameter count vs performance. Is there a simpler config with similar score? Cost-performance tradeoff.",
   "strategy_assessment": "Did the agent explore effectively? Did it increase data when needed? Did it follow screening→refinement→solidification phases?"
@@ -288,7 +288,7 @@ Produce a JSON object with exactly these fields:
   ],
   "per_file_comparison": "Cite Impact_Score, Linear_Weight, and gain_vs_raw together when discussing per-file bottlenecks. Rank candidates for the next iter's improvement by Impact_Score descending across models. Do not assert a file is universally weak from headroom alone — a large headroom on a low-weight file implies a near-zero Impact_Score and is not actionable.",
   "efficiency_comparison": "Compare model sizes (parameter counts) against scores. Identify the best score-per-parameter architecture.",
-  "take_home_message": "One sentence: the single most critical insight that motivates the next step. If the Impact_Score distribution across all candidate models is small relative to model_scalar, declare ceiling reached rather than manufacture an architectural deficiency."
+  "take_home_message": "One sentence: the single most critical insight that motivates the next step. Read the Impact_Score column FIRST — never decide saturation from model_scalar alone. (a) If one or more files show an Impact_Score visibly larger than the rest (a clear leader, even when model_scalar is close to its ceiling), your take_home_message MUST explicitly identify the file_index with the largest Impact_Score as the primary objective for the next iteration; do NOT declare saturation while a clear performance lever remains. (b) Only when the entire Impact_Score column is uniformly small relative to model_scalar AND significantly smaller than the gains identified in previous iterations of this chain, declare ceiling reached rather than manufacture an architectural deficiency."
 }
 
 Rules:
@@ -296,7 +296,7 @@ Rules:
 - bottlenecks: focus on fundamental limitations shared across architectures, not per-model issues
 - per_file_comparison: rank by Impact_Score descending; cite Linear_Weight as context, not as a ranking metric on its own; do not use fixed cutoffs or fixed file-index labels
 - efficiency_comparison: reference actual parameter counts and scores
-- take_home_message: exactly one sentence, grounded in the Impact_Score distribution
+- take_home_message: exactly one sentence, grounded in the Impact_Score distribution. When a clear Impact_Score leader exists, you MUST cite that file's file_index explicitly (e.g. "file 17"); a high model_scalar does not override a remaining lever.
 - Do not repeat per-model findings verbatim — synthesise and draw cross-model conclusions
 - Output only the JSON object — no preamble, no commentary, no markdown
 """
