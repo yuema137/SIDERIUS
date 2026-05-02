@@ -1500,6 +1500,7 @@ matched the regenerated JSONs).
 | 5 | `refactor(infra): replace range(20) with NUM_FILES; parameterise schema bounds` | ✅ landed `6f82aac` (2026-05-01) | Mechanical: `execute_tools/scoring_helpers.py:167`, `nodes/scoring_reference.py:27`, `compute_raw_baseline.py:154` — `range(20)` → `range(NUM_FILES)`. `agent/schemas/score_table.py` — `PerFileRow.file_index`, `AggregateScalars.num_sampled_files`, `ScoreComparisonTable.rows` length all reference `NUM_FILES` from `execute_tools/dataset_config`. Verification: 72/72 affected unit tests green (schemas, scoring_helpers, score_table_adversarial, compute_raw_baseline). |
 | 5a | `fix(test): align compute_raw_baseline expectations with +1e-10 soft floor` | ✅ landed `0792f05` (2026-05-01) | Pre-existing failures surfaced during Commit 5 verification: 5 sites in `tests/unit/test_compute_raw_baseline.py` had baked `expected = math.log(v, 5.27)` without the production soft-floor offset (Path-A regen `8947511` only dropped the `round(·, 2)` quantization, not the `+1e-10`). Drift ≈ `1e-10 / (mean × ln(5.27))`, above the 1e-12 tolerance. Fix: add `+ 1e-10` inside each `expected_*` formula. 9/9 green standalone. |
 | 5b | `fix(tuner): use local run_name for score_table audit metadata` | ✅ landed `7755556` (2026-05-01) | Regression introduced with Foundation Commit 2 (`b222a16`, P-Alpha audit stream): the metadata block at `nodes/ml_hyperparameter_tune_agent.py:1780` accessed `agent_input.run_name` — no such top-level attribute on `HyperparamTuningInput`; `run_name` lives at `agent_input.storage.local.run_name` (extracted to a local variable at line 793). Bug only fired when `score_table is not None`, taking down 5 of the 7 `TestScoreTablePropagation` tests. Fix: use the local `run_name` to match surrounding metadata sites (lines 912, 1231, 1245). 7/7 green post-fix. |
+| 5c | `refactor(ui): swap Impact and Weight columns to align with cognitive scanning path` | ✅ landed `5254b38` (2026-05-01) | Post-Gate-1 V9 audit follow-up (Findings #4 + #6, see "Post-Gate-1 V9 Audit" subsection below). Primary table header in `execute_tools/scoring_helpers.py:391` swapped from `... \| Weight % \| Impact \|` to `... \| Impact \| Weight % \|` (separator widths flipped together; `_render_row` `cells[6]` / `cells[7]` and format widths swapped to match). Secondary impact-ranked block at `_SECONDARY_HEADER:417` was already in correct order — left untouched. 5-line comment added at the Impact non-negative clip (`scoring_helpers.py:333`) explaining the over-amplification design choice. Test expectation in `tests/unit/execute_tools/test_scoring_helpers.py:254-258` updated. Verification: 29/29 + 1/1 + 59/59 green (`test_scoring_helpers.py`, `test_synthesis_prompt_renders_weight_and_impact_columns`, `test_prompt_banned_vocabulary.py`); no Gate 1 / Gate 2 re-run required. |
 
 **Audit decision (2026-05-01)**: during the commit-3 pause we audited the doc
 for hardcoded classification logic. The committed and staged code carries
@@ -2845,6 +2846,58 @@ Two work items, sequenced so the cognitive-alignment commits stay clean:
       parametrised absence assertions × 5 production prompts) so this
       regression-guard runs in CI from now on.
 
+#### Post-Gate-1 V9 Audit (2026-05-01)
+
+After Run #7 cleared Gate 1 (all six metrics green), a final risk audit
+swept the live codebase across three orthogonal axes — (a) mathematical
+edge cases, (b) cognitive drift, (c) engineering robustness — to surface
+any remaining risk before Phase 8 closure. **Nine findings catalogued;
+two warranted code changes** (landed in Foundation Commit 5c, `5254b38`).
+
+**Findings (full list, with verification anchor):**
+
+| # | Area | Finding | Severity | Action |
+|---|------|---------|----------|--------|
+| 1 | Math | Σ Linear_Mean_f near zero — `scoring_helpers.py:289` early-returns when `sigma ≤ 0 or not finite`. No division-by-zero path reachable. | ✅ verified safe | None |
+| 2 | Math | `+1e-10` log offset sufficient — applied after `max(grand_mean, 0.0)` clamp; worst case `log_5.27(1e-10) ≈ -13.86`, finite, no NaN/Inf. | ✅ verified safe | None |
+| 3 | Math | Linear-log mismatch in `build_score_table` — all linear arithmetic stays linear (line 313 multiplies by n_segments → line 316 sums → line 320 divides); single log conversion at line 321/330. | ✅ verified safe | None |
+| 4 | Math | `max(log_after - log_current, 0.0)` clip at `scoring_helpers.py:333` silently zeroes Impact when the model over-amplifies file `i` above its gt ceiling (would produce a small negative raw delta when swapped to ceiling). Defensible — over-amplification is not a fixable lever — but rationale was invisible. | ⚠️ edge case | **Comment added** (5c) |
+| 5 | Cognitive | Linear_Weight ≈ Impact_Score correlation on real data when models are far from saturation: high-energy files contribute most to grand-mean AND show highest Impact, so the agent's "go where the weight is" heuristic is right by accident. Path E chain-gain anchor partially mitigates, but only when previous-iter Impact magnitudes are visible in the synthesis scope. | ⚠️ medium | Watch in Gate 2 + first real run |
+| 6 | Cognitive | Primary table column order had `Weight %` before `Impact` (`scoring_helpers.py:395`), contradicting the synthesis directive ("Read the Impact_Score column FIRST"). Visual scan order misaligned with prompt instruction. The secondary impact-ranked block at `_SECONDARY_HEADER:417` was already correctly ordered. | ⚠️ small | **Column swap landed** (5c) |
+| 7 | Engineering | `agent_data_stream.jsonl` disk-full / file-locked behaviour — `nodes/agent_data_stream.py:54-69` wraps `append_event` in `try/except Exception`. `OSError: No space left on device` and `OSError: locked` are caught and printed; training loop never crashes. Confirmed safe for the 15-hour tuning loop. | ✅ verified safe | None |
+| 8 | Engineering | jsonl append-event failures surface only via stdout `print()`. No module-level counter, no end-of-run summary. If the audit log is dead for 8 of 30 iters during a tmux run, the failure is invisible without grep. | ⚠️ small | Held as future work |
+| 9 | Engineering | `linear_weight_total ≈ 1.0` tolerance `1e-9` (`agent/schemas/score_table.py:220, 226`) over thousands of runs — Python `float` is IEEE double (eps ≈ 2.22e-16); accumulated rounding ≤ `49 × eps × 1.0 ≈ 1.1e-14`, three orders of magnitude below threshold. Float32 downcast would break this; not currently exercised. | ✅ verified safe | None |
+
+**Findings acted on (Foundation Commit 5c, `5254b38`):**
+
+- **Finding #4 — over-amplification clip rationale.** A 5-line comment
+  added at `execute_tools/scoring_helpers.py:333` explaining the design
+  choice: a model that over-amplifies file `i` above its gt ceiling
+  produces a negative raw delta when swapped to ceiling, which clips to
+  zero Impact. Surfacing as "negative Impact" would invert the agent's
+  lever logic — over-amplification is not a fixable lever. Behaviour
+  unchanged; only the *why* is now visible to future readers.
+- **Finding #6 — primary table column swap.** Header reordered to
+  `... | Impact | Weight % |` (separator widths flipped together);
+  `_render_row` `cells[6]` / `cells[7]` order and format widths swapped
+  in lockstep. Test expectation in
+  `tests/unit/execute_tools/test_scoring_helpers.py:254-258` updated.
+
+**Verification (no Gate 1 / Gate 2 re-run required, per audit decision):**
+
+- `tests/unit/execute_tools/test_scoring_helpers.py` 29/29 green.
+- `test_synthesis_prompt_renders_weight_and_impact_columns` 1/1 green
+  (order-independent assertions held).
+- `test_prompt_banned_vocabulary.py` 59/59 green (no UI text drifted to
+  a banned term — A4 grep clean).
+
+**Outcome:** Phase 8 production code is rock-solid against the audit's
+three axes. The seven ✅-verified-safe findings are documented above so
+future audits can see what was already checked. Finding #5
+(Linear_Weight ≈ Impact correlation on real data) is a watch item for
+Gate 2 + the first real V9 run; Finding #8 (silent jsonl failures) is
+held as post-Phase-8 future work. Neither blocks V9 launch.
+
 #### Out of scope (tracked separately)
 
 - **Vocab freeze** (`vocab_total=21, candidate=0, promoted=0` across all 6
@@ -3049,19 +3102,40 @@ Workflow (real-run):
 
 ## 14. Decisions required from you
 
-1. **Open decision 1** (§5): cache the raw-baseline scalar to disk (a), or
-   recompute at import (b)? **My recommendation: (a).**
-2. **Interpreter / proposer file_vector fields** — keep them alongside the new
+*All four decisions resolved during Phase 8 (2026-05-01). Retained for
+historical context.*
+
+1. ~~**Open decision 1** (§5): cache the raw-baseline scalar to disk (a), or
+   recompute at import (b)? **My recommendation: (a).**~~
+   **RESOLVED (Foundation Commit 1, `8947511`):** cached to disk via
+   Path-A regen — `compute_raw_baseline.py` writes per-file JSONs and
+   `reference_data/raw_and_ground_score.md`; `nodes/scoring_reference.py`
+   loads them at runtime.
+2. ~~**Interpreter / proposer file_vector fields** — keep them alongside the new
    `score_table` for one release cycle, then delete; or delete immediately?
    Keeping them is safer for the dashboard; deleting is cleaner. **My
-   recommendation: keep for one cycle.**
-3. **Trial-mode rows.** When a file isn't in the sampled set, we have
+   recommendation: keep for one cycle.**~~
+   **RESOLVED (2-zh, `3ea439e`):** hybrid kept-and-renamed.
+   `best_file_vector` retained on `ModelRunSummary` (still load-bearing
+   for the dashboard); `frequency_analysis` → `per_file_analysis`,
+   `frequency_comparison` → `per_file_comparison`;
+   `weak_frequency_files` deleted entirely under `extra="ignore"` for
+   stale-JSON re-reads.
+3. ~~**Trial-mode rows.** When a file isn't in the sampled set, we have
    `raw_baseline` and `ground_truth` but no `model`. Render as `N/A` in the
    model column, or omit the row entirely? **My recommendation: render `N/A`
    — the row still informs the LLM about which frequency it skipped and what
-   the reference looked like.**
-4. **Confirm the seed scope.** Once this lands, the `small_sample_trial_v1`
-   rerun uses the new schema from the start — no v0 backfill needed. Agreed?
+   the reference looked like.**~~
+   **RESOLVED (recommendation accepted):** `_render_row` in
+   `execute_tools/scoring_helpers.py` emits `"N/A"` in the five
+   unsampled-side columns; verified by
+   `test_na_cell_rendered_for_unsampled_files`.
+4. ~~**Confirm the seed scope.** Once this lands, the `small_sample_trial_v1`
+   rerun uses the new schema from the start — no v0 backfill needed. Agreed?~~
+   **RESOLVED:** confirmed — V9 (post-Phase-8) launches use the
+   post-Path-A schema natively; no v0 backfill performed.
+   `small_sample_trial_v0` records remain on the V8 schema for
+   historical comparison only.
 
 ---
 
