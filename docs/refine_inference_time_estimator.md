@@ -553,8 +553,8 @@ Four sequential commits. Each commit ships a self-contained slice and leaves the
 - [x] Ran aggregator + schema + new memory-persistence tests together — **159/159 green** in 5.26s.
 - [x] Ran `tests/unit/agent/tune_ml_hyperparam_agent/test_tuning_agent.py` (the file housing the new `TestInferenceTimingPersistedToMemory` class) end-to-end — **66/66 green** in 190.98s. No regression to the rest of the file from the new test class. (The legacy `tests/unit/agent/evaluate_time_skill/` dir doesn't exist on this branch — coverage for the aggregator lives in the per-agent dir per CLAUDE.md.)
 - [x] Schema test suite confirmation: `tests/unit/agent/tune_ml_hyperparam_agent/test_hyperparam_schemas.py` runs green inside the 159-test sweep above. `ExperimentMemory.model_validate({})` round-trips fine; populating with all six new fields validates cleanly. No back-compat regressions.
-- [ ] Show diff to user
-- [ ] Commit
+- [x] Show diff to user
+- [x] Commit (`8cc6248` — `feat(timing): aggregate trial inference per-PSD-seg cost + persist to round memory`)
 
 ### Commit D — estimator hint path + 10% slack + tuner plumbing
 
