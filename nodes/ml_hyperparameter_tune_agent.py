@@ -434,10 +434,13 @@ def _resolve_sample_set_cfg(
 ) -> dict:
     """Resolve sample-set config for one round based on trial/formal/single_file mode.
 
-    Formal-mode eval is LOCKED to snapshot + eval_portion=1.0 so scores are
-    architecturally comparable across architectures (Phase M, §12.2). Formal
-    training levers come from ``agent_input.formal_*``. Trial-mode values come
-    from the planner. Single-file mode uses safe defaults.
+    Formal-mode eval strategy is locked to ``snapshot``; the portion defaults
+    to 1.0 (full clone — Phase M §12.2 production contract for cross-arch
+    score comparability) but is now operator-controllable via
+    ``agent_input.formal_eval_portion`` for smoke / CI runs that need to fit
+    a tight ``formal_time_budget_minutes`` (Phase R, §13). Formal training
+    levers come from ``agent_input.formal_*``. Trial-mode values come from
+    the planner. Single-file mode uses safe defaults.
 
     Args:
         mode: One of ``"trial"``, ``"formal"``, ``"single_file"``.
@@ -454,7 +457,7 @@ def _resolve_sample_set_cfg(
             "trial_portion":  agent_input.formal_portion,
             "train_portion":  agent_input.formal_train_portion,
             "eval_strategy":  "snapshot",
-            "eval_portion":   1.0,
+            "eval_portion":   agent_input.formal_eval_portion,
         }
     if mode == "trial":
         return {
@@ -1287,10 +1290,12 @@ class HyperparamTuningAgent:
                     else:
                         mode = "single_file"
     
-                    # Phase M — mode-gated sample-set config. Formal-mode eval is
-                    # LOCKED to snapshot + 1.0 so scores are architecturally
-                    # comparable; formal training is operator-configurable via
-                    # agent_input.formal_* fields. See docs/resource_estimator_implement.md §12.
+                    # Phase M / Phase R — mode-gated sample-set config. Formal-mode
+                    # eval strategy is locked to ``snapshot``; the portion defaults
+                    # to 1.0 (production full-clone, §12.2) but is operator-
+                    # configurable via ``agent_input.formal_eval_portion`` (Phase R,
+                    # §13). Formal training levers come from agent_input.formal_*.
+                    # See docs/resource_estimator_implement.md §12 and §13.
                     _cfg = _resolve_sample_set_cfg(mode, agent_input, plan)
                     cfg_trial_strategy = _cfg["trial_strategy"]
                     cfg_trial_portion  = _cfg["trial_portion"]
@@ -2573,9 +2578,10 @@ def main():
     parser.add_argument("--train_portion", type=float, default=0.1,
                         help="Per-epoch subsample from training scope (default: 0.1).")
 
-    # Formal-mode training levers (Phase M). Eval side is hardcoded to
-    # snapshot + eval_portion=1.0 in the tuner — not operator-configurable.
-    # See docs/resource_estimator_implement.md §12.
+    # Formal-mode training levers (Phase M). Eval scope defaults to full
+    # snapshot (formal_eval_portion=1.0) for production score comparability,
+    # but is now operator-configurable for smoke / CI runs that need to fit
+    # a tight budget — Phase R, docs/resource_estimator_implement.md §13.
     parser.add_argument("--formal_strategy", type=str, default="snapshot",
                         choices=["snapshot", "anchors", "target"],
                         help="Training-side sampling strategy in formal mode (default: snapshot).")
@@ -2583,6 +2589,11 @@ def main():
                         help="Fraction of segments per file for formal training scope (default: 0.1).")
     parser.add_argument("--formal_train_portion", type=float, default=1.0,
                         help="Per-epoch iteration fraction for formal training (default: 1.0).")
+    parser.add_argument("--formal_eval_portion", type=float, default=1.0,
+                        help="Fraction of segments per file for the formal-mode eval "
+                             "scope (snapshot strategy). Default 1.0 = legacy full-clone "
+                             "behaviour. Lower (e.g. 0.05) for smoke / CI runs that need "
+                             "to fit the formal_time_budget_minutes gate.")
 
     parser.add_argument("--human_advice", type=str, default=None,
                         help="Human guidance for the agent (injected alongside expert_advice).")
@@ -2699,6 +2710,7 @@ def main():
     input_dict["formal_strategy"]      = args.formal_strategy
     input_dict["formal_portion"]       = args.formal_portion
     input_dict["formal_train_portion"] = args.formal_train_portion
+    input_dict["formal_eval_portion"]  = args.formal_eval_portion
 
     if args.human_advice:
         input_dict["human_advice"] = args.human_advice

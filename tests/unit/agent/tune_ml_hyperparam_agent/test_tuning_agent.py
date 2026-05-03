@@ -680,8 +680,12 @@ class TestDynamicTrialFormal:
     def test_formal_round_builds_two_sample_sets(self, agent_and_mocks, tmp_path):
         """Formal round: two build_sample_set calls — one for train, one for eval.
 
-        Phase M invariants (docs/resource_estimator_implement.md §12):
-          * Eval side is LOCKED to snapshot + portion=1.0 — not configurable.
+        Phase M invariants (docs/resource_estimator_implement.md §12), refined
+        by Phase R (§13):
+          * Eval strategy is locked to ``snapshot``; the portion defaults to
+            1.0 (production full-clone, §12.2) but is operator-configurable
+            via ``HyperparamTuningInput.formal_eval_portion``. This test pins
+            the *default* — a separate Phase R test covers the opt-down path.
           * Train side comes from ``agent_input.formal_strategy/portion/train_portion``
             (defaults snapshot / 0.1 / 1.0), so train_portion defaults to 1.0 in
             formal mode regardless of what the planner chose for the trial rounds.
@@ -702,7 +706,8 @@ class TestDynamicTrialFormal:
 
             # Final round (max_rounds=1) → formal mode → two build_sample_set calls:
             # one for training scope (formal_portion=0.1), one for eval scope
-            # (locked to snapshot + portion=1.0).
+            # (snapshot strategy, portion defaults to 1.0 — operator can opt
+            # down via formal_eval_portion, Phase R §13).
             build_calls = mock_build.call_args_list
             assert len(build_calls) == 2, f"Expected 2 build_sample_set calls for formal, got {len(build_calls)}"
             portions = [c.kwargs.get("trial_portion") for c in build_calls]

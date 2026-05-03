@@ -59,10 +59,11 @@ def local_validated_model(
     # --- VRAM-budget gate (evaluate_vram_skill, Phase K two-budget split) ---
     trial_vram_budget_gb: Optional[float] = None,
     formal_vram_budget_gb: Optional[float] = None,
-    # --- Formal-mode training levers (Phase M) ---
+    # --- Formal-mode training levers (Phase M) + eval-scope (Phase R) ---
     formal_strategy: Literal["snapshot", "anchors", "target"] = "snapshot",
     formal_portion: float = 0.1,
     formal_train_portion: float = 1.0,
+    formal_eval_portion: float = 1.0,
     force_formal_round: bool = True,
     formal_round_strategy: Literal[
         "full_clone",
@@ -127,10 +128,15 @@ def local_validated_model(
       - formal_strategy / formal_portion / formal_train_portion :
         operator-configurable training-side sample-set knobs for any round
         promoted to formal (Phase M). Defaults snapshot / 0.1 / 1.0.
-        Eval-side in formal mode is hardcoded to snapshot + eval_portion=1.0
-        inside the tuner — intentionally NOT operator-configurable, so
-        formal scores are architecturally comparable across architectures.
         See docs/resource_estimator_implement.md §12.
+      - formal_eval_portion :
+        Phase R (§13) — eval-side scope knob. Default 1.0 reproduces the
+        legacy full-clone behaviour required for cross-architecture score
+        comparability in production. Smoke / CI runs may lower this
+        (e.g. 0.05) so the formal round fits inside a tight
+        ``formal_time_budget_minutes`` without miscalibrating the
+        physical estimator constants. Eval strategy stays locked to
+        ``snapshot``.
       - degenerate_penalty_score :
         Operator policy for the agent's reaction when score_vector's
         task-specific health check flags a degenerate formal-round output
@@ -201,6 +207,7 @@ def local_validated_model(
         formal_strategy=formal_strategy,
         formal_portion=formal_portion,
         formal_train_portion=formal_train_portion,
+        formal_eval_portion=formal_eval_portion,
         force_formal_round=force_formal_round,
         formal_round_strategy=formal_round_strategy,
         degenerate_penalty_score=degenerate_penalty_score,

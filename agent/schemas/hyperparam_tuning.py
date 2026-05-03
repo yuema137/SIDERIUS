@@ -385,7 +385,10 @@ class TrialConfig(BaseModel):
 
     Validation side:
     - ``eval_strategy`` + ``eval_portion`` → validation scope (what to inference + score on)
-    - In formal mode: ``eval_portion=1.0`` (all segments)
+    - In formal mode: strategy is locked to ``snapshot``; portion defaults to
+      1.0 (all segments) for production cross-arch comparability, but is
+      operator-controllable via ``HyperparamTuningInput.formal_eval_portion``
+      (Phase R, docs/resource_estimator_implement.md §13).
 
     ``train_validation_align``:
     - True: train and eval scopes use the same seed → same file/segment indices
@@ -762,14 +765,18 @@ class HyperparamTuningInput(BaseModel):
     )
 
     # --- Formal-mode training levers (Phase M — see docs/resource_estimator_implement.md §12) ---
-    # Formal-mode eval is hardcoded to snapshot + eval_portion=1.0 in the
-    # tuner (intentionally not operator-configurable — see §12.2 rationale).
+    # Formal-mode eval defaults to snapshot + eval_portion=1.0 (full clone)
+    # so cross-architecture scores are physically comparable. Phase R
+    # (docs §13) adds ``formal_eval_portion`` so smoke / CI runs can opt
+    # into a smaller deterministic eval scope without changing physical
+    # constants — production runs should keep the 1.0 default.
     formal_strategy: Literal["snapshot", "anchors", "target"] = Field(
         default="snapshot",
         description=(
             "Training-side sampling strategy in formal mode. Overrides the "
             "planner's trial_strategy on any round promoted to formal. Eval "
-            "side is always locked to snapshot + eval_portion=1.0."
+            "strategy is always locked to ``snapshot``; eval scope is "
+            "controlled by ``formal_eval_portion`` (default 1.0)."
         ),
     )
     formal_portion: float = Field(
@@ -783,6 +790,18 @@ class HyperparamTuningInput(BaseModel):
         ge=0.01,
         le=1.0,
         description="Per-epoch iteration fraction from the formal training scope.",
+    )
+    formal_eval_portion: float = Field(
+        default=1.0,
+        gt=0.0,
+        le=1.0,
+        description=(
+            "Fraction of segments per file used for the formal-mode eval "
+            "scope (snapshot strategy). Default 1.0 reproduces the legacy "
+            "full-clone behaviour required for production score "
+            "comparability. Smoke / CI runs may lower this (e.g. 0.05) "
+            "to fit a tight time budget — Phase R, §13."
+        ),
     )
     force_formal_round: bool = Field(
         default=True,

@@ -572,13 +572,15 @@ def run_workflow(
     # Tuner-only fan-out; no proposer-side gate in Phase K (§10.17).
     trial_vram_budget_gb: float | None = None,
     formal_vram_budget_gb: float | None = None,
-    # --- Formal-mode training levers (Phase M, docs/resource_estimator_implement.md §12) ---
-    # Training-side knobs applied on any round promoted to formal. Eval side in
-    # formal mode is hardcoded to snapshot + eval_portion=1.0 in the tuner so
-    # formal scores are architecturally comparable — see §12.2.
+    # --- Formal-mode training levers (Phase M, docs §12) + eval scope (Phase R, §13) ---
+    # Training-side knobs applied on any round promoted to formal. Formal eval
+    # strategy is locked to ``snapshot``; ``formal_eval_portion`` defaults to
+    # 1.0 (production full-clone, §12.2) and is operator-controllable for
+    # smoke / CI runs that need to fit a tight formal_time_budget_minutes.
     formal_strategy: str = "snapshot",
     formal_portion: float = 0.1,
     formal_train_portion: float = 1.0,
+    formal_eval_portion: float = 1.0,
     force_formal_round: bool = True,
     formal_round_strategy: str = "full_clone",
     # --- Degenerate-output reaction policy (paired with execute_tools.squid_health_checks) ---
@@ -1171,6 +1173,7 @@ def run_workflow(
             formal_strategy=formal_strategy,
             formal_portion=formal_portion,
             formal_train_portion=formal_train_portion,
+            formal_eval_portion=formal_eval_portion,
             force_formal_round=force_formal_round,
             formal_round_strategy=formal_round_strategy,
             degenerate_penalty_score=degenerate_penalty_score,
