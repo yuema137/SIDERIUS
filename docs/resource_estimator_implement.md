@@ -3850,3 +3850,191 @@ regardless of the immediately-prior outcome — unlike the §14.N
 window which is still sensitive to how many recent iterations
 aborted. Full design to be drafted when Option A's behaviour is
 observed in real runs and the need is empirically confirmed.
+
+## 15. Phase R — Inference reality-check + formal eval-scope knob (design 2026-05-02)
+
+### 15.1 Why this is needed
+
+Gate 2 Run-4 (cognitive-alignment smoke) showed the formal-round
+pre-flight rejecting every attempt with `factor ≈ 7×` against the
+20-minute formal time budget. The dominant phase was *inference*:
+
+```
+[Skill: TimeEval] POSITIONAL_GATED_TCN (bs=1, seg=10000, epochs=1, budget=20 min)
+    Parameters   : 6,024
+    Train steps  : 400,000
+    ms/step      : 2.00  (static_formula_phase_b)
+    Phase sec    : train=1040.0  inf=6258.6  score=1105.0
+    Est minutes  : 140.1 / budget 20.0  (dominant: inference)
+    Feasible     : NO
+```
+
+The intuitive read is "the inference estimator is over-projecting;
+lower its constants." A V9 audit of empirical inference timings
+(see §15.2) shows the **opposite**: the static formula
+*under*-projects 5090 inference time by ~8× across every observed
+architecture. Touching `_STATIC_MS_PER_FLOP` or
+`_INFERENCE_VS_TRAINING_RATIO` to silence the smoke-test gate
+would defeat the gate's purpose in production.
+
+The real cause of Run-4's rejection is a **scope mismatch**: the
+formal round inherits `eval_portion=1.0` (full-clone) per Phase M
+§12.2, while trial mode runs at `eval_portion=0.02`. At a 5090-
+realistic inference cost, the full-clone formal eval legitimately
+needs ~100 min — which a 20-minute smoke test budget cannot
+accommodate. The fix is to scope down the formal eval *for
+smoke/CI runs only*, leaving production at the legacy default.
+
+### 15.2 V9 audit — empirical inference ms/step
+
+Method: collect every `inference_timing_*.json` under V9 chain
+workspaces (`exploration_*v9*_0502`), sum `elapsed_ms` and
+`n_psd_segs` per record, recompute `total_inference_steps =
+ceil(n_psd × ml_per_psd / inf_batch)`, divide elapsed by steps,
+and compare against the static formula
+`num_params × seg × inf_batch × _STATIC_MS_PER_FLOP × _INFERENCE_VS_TRAINING_RATIO`
+with `_STATIC_MS_PER_FLOP = 6e-10` and ratio `2.7`.
+
+| arch | params | seg | inf_b | empirical ms/step | static prediction | k = emp/pred |
+|---|---|---|---|---|---|---|
+| pure_symmetric_gated_tcn | 280,160 | 40,000 | 25 | 1635 | 454 | **3.6×** |
+| compact_sym_gated_tcn | 280,160 | 16,000 | 25 | 674 | 182 | **3.7×** |
+| grouped_cyclic_spectral_local_refiner | 324,480 | 8,000 | 25 | 281 | 105 | **2.7×** |
+| grouped_dualscale_skip_refiner | 69,509 | 12,500 | 25 | 369 | 35 | **10.5×** |
+| grouped_cyclic_spectral_wavenext | 38–48 k | 16,000 | 25 | 183–387 | 25–31 | **7.5–14.8×** |
+| cyclic_spectral_skipformer_cnn | 46,691 | 6,250 | 25 | 52–123 | 12 | **4.4–10.4×** |
+
+**N = 12; k median = 8.17×, min = 2.67×, max = 14.82×, mean = 7.75×.**
+
+Every empirical point is *higher* than the formula's prediction.
+The current `_INFERENCE_VS_TRAINING_RATIO = 2.7` is already
+optimistic on the 5090 — production runs would benefit from a
+~3× upward adjustment, not a downward one. That calibration is
+deferred (see §15.5 Phase S placeholder); §15 is intentionally
+scoped to the smoke-test scope fix only.
+
+### 15.3 New schema field — `formal_eval_portion`
+
+Adds one operator-configurable knob to `HyperparamTuningInput`:
+
+```python
+formal_eval_portion: float = Field(
+    default=1.0, gt=0.0, le=1.0,
+    description=(
+        "Fraction of segments per file used for the formal-mode eval "
+        "scope (snapshot strategy). Default 1.0 reproduces the legacy "
+        "full-clone behaviour required for production score "
+        "comparability. Smoke / CI runs may lower this (e.g. 0.05) "
+        "to fit a tight time budget — Phase R, §13."
+    ),
+)
+```
+
+Strategy stays locked to `snapshot` — only the portion is
+configurable. Default 1.0 preserves the Phase M §12.2 invariant
+for every existing caller; only callers that explicitly opt down
+see a smaller scope.
+
+### 15.4 Files touched
+
+- `agent/schemas/hyperparam_tuning.py` — new field on `HyperparamTuningInput`.
+- `agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py` —
+  new kwarg on `local_validated_model`, propagated to the tuner input.
+- `workflows/model_exploration.py` — new kwarg on `run_workflow`,
+  forwarded to the protocol.
+- `nodes/ml_hyperparameter_tune_agent.py` — `_resolve_sample_set_cfg`
+  reads `agent_input.formal_eval_portion` instead of the literal
+  `1.0`; standalone CLI gains `--formal_eval_portion`; docstrings
+  + per-round inline comment reframed from "LOCKED to 1.0" to
+  "default 1.0; controllable via formal_eval_portion (Phase R)".
+- `agent/skills/evaluate_time_skill/wrapper.py` — parenthetical
+  comment at the eval-sample-set extraction site reframed to cite
+  Phase R + production default; estimator/runtime lockstep
+  re-stated explicitly (same `eval_sample_set` object reaches both
+  the gate and the runtime, by construction).
+- `sdsc_submission_scripts/run_one_iteration.py` — chain CLI
+  exposes `--formal_eval_portion` (default 1.0); forwards to
+  `run_workflow(...)`.
+- `run_exploration_adaptive.py` — adaptive CLI exposes
+  `--formal_eval_portion`; forwards to the inner call; runtime
+  banner at the formal-mode resolution site no longer prints
+  "LOCKED" — it now prints
+  `strategy=snapshot eval_portion={value}` plus a
+  `(production full-clone, §12.2)` or
+  `(smoke / CI scope-down, Phase R §13)` tag based on the actual
+  value.
+- `run_comparison.py` — argument-help block annotated to clarify
+  why this baseline runner does **not** surface
+  `--formal_eval_portion` (it does not exercise the formal-mode
+  trial/formal split; chain CLIs do).
+- `tests/integration/workflows/test_score_table_real_smoke.py` —
+  passes `formal_eval_portion=0.05` for both iterations.
+- `tests/unit/agent/tune_ml_hyperparam_agent/test_tuning_agent.py`
+  — docstring + inline comment reframed from "LOCKED" to
+  "default + operator-configurable"; assertion logic untouched
+  (still asserts `1.0 in portions` for the default-call path).
+
+### 15.5 Phase S (deferred) — physical constant recalibration
+
+Once the V9 calibration set has more than 12 records and covers
+more architectures, raise `_INFERENCE_VS_TRAINING_RATIO` (or
+introduce a per-arch table) so the formula projects within ~1.5×
+of empirical 5090 timings. **Not** done in Phase R because the
+existing 2.7 value matches V7-era hardware and the fleet still
+includes V7-class machines via SDSC; a unilateral shift here
+would over-protect those nodes. Tracked as a separate doc when
+the calibration set is large enough to justify a regime split.
+
+### 15.6 Acceptance
+
+- Default behaviour: every existing caller — production chains,
+  unit tests, CI baseline — sees the legacy `eval_portion=1.0`
+  formal eval.
+- Opt-down behaviour: when a caller passes
+  `formal_eval_portion < 1.0`, the formal round uses that scope
+  and the time-gate factor drops proportionally.
+- Gate 2 Run-5 (smoke, `formal_eval_portion=0.05`) survives the
+  formal-round pre-flight and progresses iter-1 → iter-2.
+
+### 15.7 CLI expansion + documentation cleanup (debris pass, 2026-05-02)
+
+The Phase R schema knob would be invisible without operator-facing
+exposure on the production entry points. The debris pass aligns
+the CLIs and kills the stale "LOCKED to 1.0" claims that the code
+inherited from the Phase M era.
+
+**Why this matters:**
+- **Smoke-test parity** — the integration smoke
+  (`test_score_table_real_smoke.py`) and the chain CLIs now pull
+  the same lever via the same name. There is no "test-only"
+  back-channel for shrinking the formal eval scope.
+- **Diagnostic control** — operators investigating a tight
+  formal budget on a particular GPU class (e.g. lilab 5090) can
+  now reduce the eval scope from the command line for a single
+  run without code edits, then restore production scope with
+  `--formal_eval_portion 1.0` (or by omitting the flag).
+- **Honest runtime banner** — the adaptive runner's startup
+  banner used to print `formal sample-set: LOCKED to snapshot +
+  eval_portion=1.0 (Phase M)` regardless of what was actually in
+  effect. It now reflects the resolved value and tags the regime:
+  production full-clone (§12.2) when `1.0`, smoke / CI scope-down
+  (§13 / Phase R) when below `1.0`.
+
+**Surface area exposed:**
+- `sdsc_submission_scripts/run_one_iteration.py` —
+  `--formal_eval_portion FLOAT` (default `1.0`), forwarded to
+  `run_workflow(...)` in the same shape as `--formal_portion`.
+- `run_exploration_adaptive.py` — same flag, same default,
+  forwarded to the inner per-iteration call. The boot-time
+  banner at the formal-mode resolution site no longer claims
+  the value is locked.
+- `run_comparison.py` — explicitly does **not** expose the flag;
+  it is a single-shot baseline runner without the trial/formal
+  split. Annotated in-place so a future contributor does not
+  add the flag by reflex.
+
+**Lie-sweep guard:** the regex
+`LOCKED.*1\.0|LOCKED to snapshot|hardcoded.*eval_portion=1\.0|locked eval_portion=1\.0|NOT operator-configurable`
+returns zero hits across `*.py` and `*.md` after this pass.
+A future regression that reintroduces a "locked" claim can be
+caught with the same grep.
