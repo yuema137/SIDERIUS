@@ -286,6 +286,37 @@ Then pass it as `expert_context=expert_context_for_propose` to
 `local_full_context`. The protocol already merges `expert_context` with any
 legacy `human_advice` it converts.
 
+**3.3.5 On-disk persistence of the union (V11 hotfix, 2026-05-03)**
+
+Until V11, the `accumulated_key_findings` union was a process-only object:
+`load_latest_knowledge` rebuilt it from prior `interpretation_iter_NNN.json`
+files at the start of every iter, forwarded it as a runtime kwarg, packed it
+into the proposer's `ExpertContextItem.content`, and let it die when the
+process exited. Nothing on disk recorded *what cross-iter context iter N
+actually consumed*, which made the V10 iter-6 ValidationError
+(`content > 10_000` chars) only diagnosable by replaying the chain in memory.
+
+The fix is a sidecar snapshot, not a schema change: the chain runner writes
+`{iter_dir}/accumulated_findings_iter_NNN.json` immediately after
+`restore_prior_state` returns. The file is a log of what iter N consumed —
+the runtime channel into the workflow is unchanged. Schema:
+
+```json
+{
+  "iter_index": 6,
+  "consumed_by": "iter_006",
+  "source_iters": [1, 2, 3, 4, 5],
+  "count": 30,
+  "produced_at": "2026-05-03T...Z",
+  "findings": ["...", "..."]
+}
+```
+
+This keeps the Inter-Node Communication Principle intact (CLAUDE.md): the
+union is communicated through the runtime kwarg / protocol, and storage is
+the audit log alongside it. iter 1 has no priors and writes nothing; the
+file's absence is itself meaningful.
+
 ### 3.4 `sdsc_submission_scripts/run_one_iteration.py` — Wiring
 
 In the `run_workflow(...)` call (line ~652):

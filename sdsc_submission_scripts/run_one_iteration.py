@@ -34,6 +34,7 @@ import os
 import sys
 import traceback
 import warnings
+from datetime import datetime, timezone
 
 # Ensure SIDERIUS root is importable
 SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -651,6 +652,30 @@ def main():
         )
         if state.restored_plugins:
             print(f"        plugins: {state.restored_plugins}")
+
+        # Persist the accumulated_key_findings union as an on-disk sidecar so
+        # the cross-iter context iter N consumes is auditable without
+        # replaying load_latest_knowledge in memory. The union itself is
+        # still communicated to the workflow via the runtime kwarg below; this
+        # file is a log, not the channel. See
+        # docs/Consistent_growing_vocab_list.md §3.3.5.
+        snapshot_path = os.path.join(
+            iter_dir, f"accumulated_findings_{run_name}.json"
+        )
+        snapshot = {
+            "iter_index": args.start_iteration,
+            "consumed_by": run_name,
+            "source_iters": list(state.committed_iters),
+            "count": len(state.accumulated_key_findings),
+            "produced_at": datetime.now(timezone.utc).isoformat(),
+            "findings": list(state.accumulated_key_findings),
+        }
+        with open(snapshot_path, "w") as f:
+            json.dump(snapshot, f, indent=2)
+        print(
+            f"[CHAIN] Wrote {snapshot['count']} accumulated findings "
+            f"→ {snapshot_path}"
+        )
     resolved_paths = state.resolved_source_paths
 
     if args.llm_config:
