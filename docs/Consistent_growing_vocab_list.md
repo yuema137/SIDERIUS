@@ -543,7 +543,7 @@ master (`dce064a`):
 
 | Gap | Field | Severity | Status post-PR-#66 |
 |---|---|---|---|
-| G1 | `previous_proposal_data` → `proposed_vocab_candidates` / `proposed_vocab_links` | High | **OPEN** |
+| G1 | `previous_proposal_data` → `proposed_vocab_candidates` / `proposed_vocab_links` | High | **CLOSED** (Phase 1, commits 1.1–1.4 + hotfix `f14fc69`, 2026-05-03) |
 | G2 | `cumulative_information_gain` | Med | **OPEN** |
 | G3 | `vocab_link_confirmations` | Med | **OPEN** |
 | G4 | `accumulated_key_findings` cap | Med | **OPEN** |
@@ -634,12 +634,16 @@ storage surface.
 
 In severity order:
 
-1. **G1 (high)** — see **§10 Evolution Loop Closure** for the full
-   approved plan. Summary: extend `RestoredState` with
-   `previous_proposal_data: dict | None`, add a `_proposal_path()` helper
-   + `load_latest_proposal()` reader, thread a new `restored_previous_
-   proposal` kwarg through `run_workflow`, and forward it from
-   `run_one_iteration.py`.
+1. **G1 (high) — ✅ CLOSED** (Phase 1, 2026-05-03). Implemented per
+   §10 Evolution Loop Closure: `RestoredState.previous_proposal_data`
+   field (Commit 1.1, `e1ca13d`); `_proposal_path` + `load_latest_proposal`
+   readers (Commit 1.1); `run_workflow` `restored_previous_proposal` kwarg
+   (Commit 1.2, `14acc26`); `run_one_iteration.py` forwarding (Commit 1.3,
+   `19da8dd`); G1 Bridge dual-mode integration test (Commit 1.4, `9b3bd12`)
+   asserts `foo.tier == 'canonical'` after a 4-iter chain. Hotfix `f14fc69`
+   aligned `_proposal_path` / `_interpretation_path` with the post-cc198ad
+   chain layout (`iter_NNN/iteration_NNN/...`). Phase-1 gate verification
+   recorded in Commit 1.5's commit message body per §15.2.4.
 2. **G2 + G3 (med, paired)** — add `cumulative_information_gain: float`
    and `vocab_link_confirmations: dict[str, list[str]]` to `RestoredState`
    from the latest committed iter's interp digest. Forward both into the
@@ -885,9 +889,9 @@ override of line 1217's local update.
 - [x] §10.3.3 `run_workflow` accepts and consumes the new kwarg — Commit 1.2 (2026-05-02)
 - [x] §10.3.4 `run_one_iteration.py` forwards the new kwarg — Commit 1.3 (2026-05-03)
 - [x] §10.4.1 unit tests (4 cases) pass — `e1ca13d` shipped 9 (Commit 1.1; 4 mandated + 5 edge cases)
-- [ ] §10.4.2 integration test (`foo` graduation) passes — pending Commit 1.4
-- [ ] §10.4.3 regression: in-process multi-iter promotion still works — pending Commit 1.4
-- [ ] §9.6 G1 bullet marked closed once §10 lands — pending Commit 1.5
+- [x] §10.4.2 integration test (`foo` graduation) passes — Commit 1.4 (`9b3bd12`, 2026-05-03)
+- [x] §10.4.3 regression: in-process multi-iter promotion still works — Commit 1.4 (`9b3bd12`, 2026-05-03; `test_in_process_run_workflow_promotes_foo_after_four_iters`)
+- [x] §9.6 G1 bullet marked closed once §10 lands — Commit 1.5 (this commit)
 
 ### 10.7 Risks (post-merge watch list)
 
@@ -914,6 +918,16 @@ override of line 1217's local update.
    `foo` once and never again, `seen_in_runs` stops at 1. This is
    correct system behaviour, not a bug — but it must be set as
    expectation when interpreting the `foo` integration-test result.
+
+### 10.8 Phase-1 closure marker
+
+**Phase 1 closed 2026-05-03 on branch `fix/cognitive-alignment-v9`** —
+commits `e1ca13d` (1.1) → `14acc26` (1.2) → `19da8dd` (1.3) → `9b3bd12`
+(1.4) plus hotfix `f14fc69`, doc closeout this commit (1.5). G1 Bridge
+verified end-to-end via `tests/integration/workflows/test_chain_candidate_graduation.py`
+(2 pseudo dual-mode tests, both passing). §15.2 gate-verification
+results for this phase-boundary recorded in this commit's body per
+§15.2.4.
 
 ---
 
@@ -2468,12 +2482,12 @@ Verification:
 **Note**: flip §10.6 checkboxes; mark §9.2 G1 row CLOSED; run §15.2 gates; record results in commit message.
 
 Checklist:
-- [ ] §10.6 all `[ ]` → `[x]`
-- [ ] §9.2 G1 row: `OPEN` → `CLOSED (Phase 1, commits 1.1–1.4, <date>)`
-- [ ] One-line "Phase 1 closed YYYY-MM-DD on branch `<name>`" appended to §10
-- [ ] **Gate 1 green at this commit's HEAD** (§15.2.2 procedure)
-- [ ] **Gate 2 green at this commit's HEAD** (§15.2.2 procedure)
-- [ ] Gate results recorded in commit message body per §15.2.4 format
+- [x] §10.6 all `[ ]` → `[x]` — _ticked 2026-05-03_
+- [x] §9.2 G1 row: `OPEN` → `CLOSED (Phase 1, commits 1.1–1.4 + hotfix f14fc69, 2026-05-03)`
+- [x] One-line "Phase 1 closed 2026-05-03 on branch `fix/cognitive-alignment-v9`" appended to §10.8
+- [x] **Gate 1 green at this commit's HEAD** — 1 passed in 465.96s (0:07:45); all six metrics passed (see §15.2.4 block in this commit's message body)
+- [x] **Gate 2 — skipped** per §15.2.4 carve-out (Phase 1 — purely metadata carry-over, no data-flow surface; user-authorised skip)
+- [x] Gate results recorded in commit message body per §15.2.4 format
 
 Verification: doc-only code change, but the two gate runs are the load-bearing verification for the phase boundary. Failures triaged via §15.2.3.
 
