@@ -83,7 +83,7 @@ class RestoredState:
             Equivalent to ``range(1, current_iter)`` for a clean chain.
         runtime_vocab: latest committed iter's
             ``InterpretationOutput.runtime_vocab``, loaded from
-            ``iter_NNN/iteration_001/interpretation_iter_NNN.json``. Empty
+            ``iter_NNN/iteration_NNN/interpretation_iter_NNN.json``. Empty
             list when ``current_iter == 1`` or no committed iter has a
             parseable interpretation digest. ``seen_in_runs`` is preserved
             verbatim — the next iter's ``build_runtime_vocab`` appends the
@@ -108,6 +108,22 @@ class RestoredState:
             to the next workflow's ``recent_tune_outputs`` deque so the
             proposer's ``[RECENT GATE EXHAUSTIONS]`` block reflects the
             chain history. See docs/V8_Gap_Report.md Domain 1.
+        previous_proposal_data: latest committed iter's proposal JSON
+            (raw dict, not validated) — the file produced by the
+            proposal node at
+            ``iter_NNN/iteration_NNN/attempt_MMM_<model>/proposal_iter_NNN.json``.
+            Forwarded to the next iter's ``run_workflow`` as
+            ``restored_previous_proposal``, replacing the unconditional
+            ``None`` initialisation that today erases ``proposed_vocab_candidates``
+            at every chain-subprocess boundary. Latest-wins semantics
+            (one iter's snapshot, not a merged history) — the asymmetry
+            with ``runtime_vocab`` is correct because the interp digest
+            already carries cumulative ``seen_in_runs``; the proposal
+            channel only contributes the iter-N delta. None when
+            ``current_iter == 1`` or no committed iter has a parseable
+            proposal JSON. See ``docs/Consistent_growing_vocab_list.md``
+            §10 for the bridge design and the three downstream consumers
+            this unblocks.
     """
     resolved_source_paths: List[str] = field(default_factory=list)
     restored_plugins: List[str] = field(default_factory=list)
@@ -116,6 +132,7 @@ class RestoredState:
     accumulated_key_findings: List[str] = field(default_factory=list)
     accumulated_physical_rejections: List[PhysicalRejection] = field(default_factory=list)
     accumulated_gate_exhaustions: List[GateExhaustionInfo] = field(default_factory=list)
+    previous_proposal_data: dict | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -221,14 +238,24 @@ def _interpretation_path(workspace: str, iter_idx: int) -> str:
     Mirrors ``workflows.model_exploration.run_workflow``: the interp agent's
     storage is rooted at ``{iter_dir}/`` with run_name ``iter_NNN``, and
     ``ResultInterpretationAgent.run`` writes
-    ``interpretation_{run_name}.json`` under that workspace. For chain mode
-    that resolves to::
+    ``interpretation_{run_name}.json`` under that workspace. Post-cc198ad
+    (V8 Domain 3 fix), the workflow's iter loop runs
+    ``range(start_iteration, start_iteration + max_iterations)`` and the
+    iter dir name encodes the chain-wide iter index, so for chain mode this
+    resolves to::
 
-        {workspace}/iter_NNN/iteration_001/interpretation_iter_NNN.json
+        {workspace}/iter_NNN/iteration_NNN/interpretation_iter_NNN.json
+
+    Both NNN segments carry the same chain-wide iter index because in chain
+    mode each subprocess sets ``run_name = f"iter_{start_iteration:03d}"``
+    AND the workflow's loop variable is also ``start_iteration``. (Pre-fix,
+    the loop ran from 1 so the inner segment was always ``iteration_001``;
+    that legacy is what older V8 workspaces on disk still show.)
     """
     run_name = _iter_run_name(iter_idx)
     return os.path.join(
-        workspace, run_name, "iteration_001", f"interpretation_{run_name}.json",
+        workspace, run_name, f"iteration_{iter_idx:03d}",
+        f"interpretation_{run_name}.json",
     )
 
 
@@ -310,6 +337,118 @@ def load_latest_knowledge(
             runtime_vocab = validated  # overwrite: only LAST iter's wins
 
     return runtime_vocab, findings
+
+
+# ---------------------------------------------------------------------------
+# Proposal carry-over (G1 bridge — proposed_vocab_candidates persistence).
+# See docs/Consistent_growing_vocab_list.md §10.
+# ---------------------------------------------------------------------------
+
+def _proposal_path(workspace: str, iter_idx: int) -> str | None:
+    """Resolve the proposal JSON path for a committed iter.
+
+    Layout written by the proposal node + sandbox executor::
+
+        {workspace}/iter_NNN/iteration_NNN/attempt_MMM_<model_name>/
+                                                  proposal_iter_NNN.json
+
+    Both NNN segments carry the same chain-wide iter index (see
+    :func:`_interpretation_path` for the post-cc198ad rationale). The
+    implementor produces one final attempt dir per iter under happy
+    path; under validation retries, multiple ``attempt_MMM_*`` dirs may
+    exist with monotonically increasing ``MMM`` prefix. The highest-MMM
+    attempt is the one whose proposal was accepted, so it wins.
+
+    Returns:
+        Absolute path to the chosen proposal JSON, or ``None`` if no
+        ``attempt_MMM_*`` directory exists (no_records iter).
+    """
+    import glob as _glob
+
+    run_name = _iter_run_name(iter_idx)
+    iteration_dir = os.path.join(
+        workspace, run_name, f"iteration_{iter_idx:03d}",
+    )
+    if not os.path.isdir(iteration_dir):
+        return None
+
+    # Match attempt_MMM_<anything>/ directories. Sort by basename so
+    # the lexicographic order on the zero-padded MMM prefix gives
+    # numeric ordering (attempt_001 < attempt_002 < ... < attempt_999).
+    candidates = sorted(
+        _glob.glob(os.path.join(iteration_dir, "attempt_*_*")),
+    )
+    candidates = [c for c in candidates if os.path.isdir(c)]
+    if not candidates:
+        return None
+
+    chosen = candidates[-1]  # highest MMM prefix wins
+    proposal_file = os.path.join(chosen, f"proposal_{run_name}.json")
+    if not os.path.isfile(proposal_file):
+        return None
+    return proposal_file
+
+
+def load_latest_proposal(
+    workspace: str,
+    committed_iters: Sequence[int],
+) -> dict | None:
+    """Walk ``committed_iters`` in reverse; return the first parseable
+    proposal dict.
+
+    Latest-wins, mirrors :func:`load_latest_knowledge`'s ``runtime_vocab``
+    semantics: the proposal channel forwards exactly one iter's snapshot
+    (the most-recent one whose JSON parses), not a merged history. The
+    downstream consumer (``workflows.model_exploration.run_workflow``)
+    seeds ``previous_proposal_data`` with this dict in place of an
+    unconditional ``None``.
+
+    Args:
+        workspace: chain workspace root (absolute path preferred).
+        committed_iters: ascending list of iter indices already known
+            to be committed (i.e. their manifests parsed cleanly via
+            ``_read_manifest``). Empty → returns ``None``.
+
+    Returns:
+        The latest committed iter's ``proposal_iter_NNN.json`` contents
+        as a raw dict, or ``None`` if no committed iter has a parseable
+        proposal. The dict is **not** validated against any Pydantic
+        schema here — the workflow does that on consumption.
+
+    Soft-fail policy: a missing proposal file or a malformed JSON emits
+    a ``UserWarning`` and is skipped; the loader falls back to the
+    next-older iter and continues. This mirrors how
+    :func:`load_latest_knowledge` tolerates a missing interpretation
+    digest — proposal carry-over is best-effort, not a hard
+    prerequisite. A no-records iter (no ``attempt_MMM_*`` subdir)
+    returns silently with no warning since there is genuinely nothing
+    to load.
+    """
+    if not committed_iters:
+        return None
+
+    for iter_idx in reversed(committed_iters):
+        path = _proposal_path(workspace, iter_idx)
+        if path is None:
+            # No proposal file produced this iter (no_records or
+            # implementor failure path). Silently fall back.
+            continue
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            warnings.warn(
+                f"[resume] iter {iter_idx:03d}: cannot read proposal "
+                f"JSON {path}: {e}. Falling back to the next-older "
+                f"committed iter for proposal carry-over.",
+                UserWarning, stacklevel=2,
+            )
+            continue
+        # Loader contract: latest parseable wins. Return immediately —
+        # do NOT keep walking older iters.
+        return data
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -476,6 +615,24 @@ def restore_prior_state(
             f"[resume] knowledge carry-over: "
             f"{len(state.runtime_vocab)} vocab entries, "
             f"{len(state.accumulated_key_findings)} accumulated key findings"
+        )
+
+    # G1 bridge — proposal carry-over restores `proposed_vocab_candidates`
+    # across the chain-subprocess boundary. Without this, the workflow's
+    # init at workflows/model_exploration.py:784 unconditionally resets
+    # the candidate channel to None at every iter, so a candidate proposed
+    # in iter N never accumulates `seen_in_runs` evidence at iter N+1.
+    # See docs/Consistent_growing_vocab_list.md §10.
+    state.previous_proposal_data = load_latest_proposal(
+        abs_workspace, state.committed_iters,
+    )
+    if state.previous_proposal_data is not None:
+        n_candidates = len(
+            state.previous_proposal_data.get("proposed_vocab_candidates") or []
+        )
+        print(
+            f"[resume] proposal carry-over: latest proposal restored "
+            f"({n_candidates} proposed_vocab_candidates)"
         )
     if state.accumulated_physical_rejections or state.accumulated_gate_exhaustions:
         print(

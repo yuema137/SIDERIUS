@@ -724,6 +724,8 @@ def main():
             # Cross-iter negative-feedback carry-over (docs/V8_Gap_Report.md Domain 1)
             accumulated_physical_rejections=state.accumulated_physical_rejections,
             accumulated_gate_exhaustions=state.accumulated_gate_exhaustions,
+            # Cross-iter proposal carry-over — G1 bridge (docs/Consistent_growing_vocab_list.md §10.3.4)
+            restored_previous_proposal=state.previous_proposal_data,
         )
     except Exception as e:
         print(f"FAIL: Workflow raised exception: {type(e).__name__}: {e}")
