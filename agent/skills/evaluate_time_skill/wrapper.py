@@ -468,8 +468,10 @@ def run_skill(sandbox, **kwargs) -> dict:
     # eval_sample_set drives inference + scoring projections. Falls back to
     # sample_set for back-compat with callers that haven't been updated to
     # pass both. The bug this guards against: in formal mode train data is
-    # ~10% (formal_portion=0.1) but eval data is 100% (locked eval_portion=1.0),
-    # so using sample_set for inf/score under-projects by ~10×.
+    # ~10% (formal_portion=0.1) but eval data defaults to 100%
+    # (formal_eval_portion=1.0 — Phase M § 12.2 production default; now
+    # operator-configurable per Phase R §13), so using sample_set for
+    # inf/score under-projects by ~10×.
     eval_sample_set = kwargs.get("eval_sample_set", sample_set)
     train_portion = float(kwargs.get("train_portion", 1.0))
     budget_min   = float(kwargs.get("time_budget_minutes", 0.0))

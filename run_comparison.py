@@ -533,9 +533,12 @@ def main():
         "--cleanup_denoised", action="store_true",
         help="Delete denoised HDF5 files after scoring each round to save disk space.",
     )
-    # --- Formal-mode training levers (Phase M, docs/resource_estimator_implement.md §12) ---
-    # Forwarded to the agent subprocess. Eval side in formal mode is hardcoded
-    # to snapshot + eval_portion=1.0 in the tuner — NOT operator-configurable.
+    # --- Formal-mode training levers (Phase M, docs §12) ---
+    # Forwarded to the agent subprocess. Formal eval strategy is locked to
+    # ``snapshot``; the portion defaults to 1.0 (production full-clone,
+    # §12.2) and can be opted down via the agent CLI's
+    # ``--formal_eval_portion`` (Phase R, §13) — not surfaced here because
+    # this script is a baseline benchmark runner, not a chain entry point.
     parser.add_argument(
         "--formal_strategy", type=str, default="snapshot",
         choices=["snapshot", "anchors", "target"],
