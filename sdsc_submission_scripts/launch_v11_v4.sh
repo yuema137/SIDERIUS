@@ -72,7 +72,7 @@ echo "  ADVICE:             $ADVICE"
 echo "  llm_config:         llm_configs/openai_tiered_v1.json"
 echo "  --- V4 contract ---"
 echo "  max_iterations:               30"
-echo "  max_rounds:                   6"
+echo "  max_rounds:                   4"
 echo "  trial_portion:                0.05"
 echo "  eval_portion:                 0.1"
 echo "  trial_time_budget_minutes:    20"
@@ -87,7 +87,7 @@ exec "$PYTHON" "$RUNNER" \
     --advice "$ADVICE" \
     --llm_config "llm_configs/openai_tiered_v1.json" \
     --max_iterations 30 \
-    --max_rounds 6 \
+    --max_rounds 4 \
     --trial_portion 0.05 \
     --eval_portion 0.1 \
     --trial_time_budget_minutes 20 \
