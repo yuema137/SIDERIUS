@@ -2870,7 +2870,7 @@ is a contract violation.
 | §16.3 Commit 1 — `refactor(prompts):` | ✅ LANDED | commit `6fe2e21` (this branch) |
 | §16.3 Commit 2 — `chore(runner):` | ✅ LANDED | commit `85b1610` (this branch) |
 | §16.3 Commit 3 — `docs(vocab-list):` | ✅ this commit | the §16 post-mortem itself |
-| §16.3 V11 fire | ⏳ pending all 3 commits | screen launch commands ready |
+| §16.3 V11 fire | ⏳ pending operator green-light | all 3 commits landed; both pre-fire greps pass |
 | §16.5 Followup — proposing_stage mindset injection | ⏳ deferred (not blocking) | filed as separate followup |
 | §16.5 Followup — mindset list-to-string coercion | ⏳ deferred (not blocking) | filed as separate followup |
 
@@ -3030,18 +3030,21 @@ operator should re-run immediately before `screen` launch.
   ```
   Expected: all pass. **Actual: 395 passed in 1.17s.** ✅
 
-- [ ] **Launch script banner + exec args still aligned at V4** *(re-run before fire)*
+- [x] **Launch script banner + exec args still aligned at V4** *(verified 2026-05-03 pre-push)*
   ```
-  grep -E "max_iterations|max_rounds|trial_portion|eval_portion|formal_time_budget|trial_time_budget|formal_round_strategy" sdsc_submission_scripts/launch_v11_v4.sh
+  grep -nE "max_iterations|max_rounds|trial_portion|eval_portion|formal_time_budget|trial_time_budget|formal_round_strategy" sdsc_submission_scripts/launch_v11_v4.sh
   ```
-  Expected: every banner line and every `--flag VALUE` pair shows V4 values
-  (`30 / 4 / 0.05 / 0.1 / 180 / 20 / inherit_best_trial`).
+  Expected: every banner line and every `--flag VALUE` pair shows V4 values.
+  **Actual** (lines 74–80 banner + 89–95 exec args):
+  `max_iterations=30 / max_rounds=4 / trial_portion=0.05 / eval_portion=0.1 / trial_time_budget_minutes=20 / formal_time_budget_minutes=180 / formal_round_strategy=inherit_best_trial`.
+  Banner ↔ exec values match line-for-line. ✅
 
-- [ ] **V4 advice mindset/propose/implement/tune all reference `max_rounds=4`** *(re-run before fire)*
+- [x] **V4 advice mindset/propose/implement/tune all reference `max_rounds=4`** *(verified 2026-05-03 pre-push)*
   ```
   grep -n "max_rounds" tuner_advice/{explore_novel,exploit_cnn}_v4.json
   ```
   Expected: every occurrence reads `max_rounds=4`.
+  **Actual: 2 occurrences in each file, all read `max_rounds=4`** (`explore_novel_v4.json:75–76`, `exploit_cnn_v4.json:60–61`); no stale `max_rounds=6` references. ✅
 
 ## §16.5 Followup work (not in this commit set)
 
