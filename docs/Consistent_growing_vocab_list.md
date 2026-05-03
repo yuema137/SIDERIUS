@@ -2427,20 +2427,40 @@ $ .venv/bin/python -m py_compile sdsc_submission_scripts/run_one_iteration.py
 # clean — file parses
 ```
 
-#### Commit 1.4 — Integration test: `foo` graduation in 3-iter chain
+#### Commit 1.4 — Integration test: `foo` graduation in 4-iter chain
 
-**Note**: new dual-mode test simulates 3 chain iters proposing the same candidate `foo`; asserts iter-3 final digest contains `foo` with `kind == 'capability'` (promotion fired).
+**Note**: new dual-mode test simulates 4 chain iters proposing the same candidate `foo`; asserts iter-4 final digest contains `foo` with `tier == 'canonical'` and `seen_in_runs` len 3 (promotion fired). The Mock Proposer **physically writes** `proposal_iter_NNN.json` to disk on every iter so the test exercises `core.resume.load_latest_proposal`'s glob+open code — the bridge's load-bearing disk roundtrip.
+
+**Spec drift (resolved 2026-05-03)**: original §15.3 specified 3 iters reaching `seen_in_runs` len 3. Tracing the iter-N proposer → iter-N+1 interp timing offset shows that 3 cold-start iters yields `seen_in_runs` len 2 (only iter 2 and iter 3 ingest a prior iter's proposal). Reaching len 3 from a **cold** start requires 4 iters — promotion fires at the end of iter 4 when iter 4's interp ingests iter 3's proposal. (The 3-iter version of H.2 in `test_vocab_accumulation.py` works because it bootstraps with a non-null `previous_proposal` at iter 1, which is **not** a realistic chain behaviour — `restore_prior_state(current_iter=1)` always returns `previous_proposal_data=None`.) Test uses 4 iters from cold; assertion language updated accordingly.
 
 Checklist:
-- [ ] New file `tests/integration/workflows/test_chain_candidate_graduation.py`
-- [ ] `@pytest.mark.dual_mode`, pseudo by default, real-mode opt-in via `--real-api-call`
-- [ ] Asserts `seen_in_runs` for `foo` has 3 distinct iter-tagged entries by end-of-iter-3
-- [ ] Regression case: in-process `max_iterations=3` produces the same outcome (proves Phase-1 is path-symmetric)
+- [x] New file `tests/integration/workflows/test_chain_candidate_graduation.py` — _written 2026-05-03_
+- [x] `@pytest.mark.dual_mode`, pseudo-only (real-mode would add no signal — assertion is structural, not LLM-quality)
+- [x] Mock Proposer writes `proposal_{run_name}.json` to `inp.storage.local.workspace` per iter (mirrors `nodes/ml_model_proposal_agent.py:754-761`)
+- [x] Mock Interpreter implements the real seen_in_runs accumulation (proposed_by_run injection + `build_runtime_vocab` + `promote_candidates`) and persists `interpretation_{run_name}.json` so chain-mode `load_latest_knowledge` finds the digest on the next iter
+- [x] Test 1 (chain): 4 separate `run_workflow` calls; between iters the test writes manifest + run_output and calls `restore_prior_state` for real, forwarding `state.previous_proposal_data` via `restored_previous_proposal`
+- [x] Test 2 (regression): single `run_workflow(max_iterations=4)`; asserts identical final vocab — proves bridge is path-symmetric (chain ≡ in-process)
+- [x] Headline assertion: `foo.tier == 'canonical'`, `len(foo.seen_in_runs) == 3`, runs are `{model_iter_001, model_iter_002, model_iter_003}` (the iter-N proposer's model_name appears in iter-N+1's digest, by construction)
+- [x] Pseudo-mode passes locally — _verified 2026-05-03, commit f14fc69_
+
+**Hotfix landed alongside this commit (f14fc69)** — the test caught a real
+bug in Commit 1.1's `_proposal_path` (and the same drift in
+`_interpretation_path`). Both helpers hardcoded `iteration_001` in the
+chain layout, but post-cc198ad (V8 Domain 3 fix, 2026-05-01) the workflow
+loop runs `range(start_iteration, start_iteration + max_iterations)` so
+chain iter N writes to `iter_NNN/iteration_NNN/...`, not
+`iter_NNN/iteration_001/...`. Both segments now carry the same chain-wide
+iter index. Two regression unit tests in `tests/unit/core/test_resume.py`
+pin the dynamic name (`test_proposal_path_uses_chain_wide_iter_dir_name_for_iter_above_1`,
+`test_interpretation_path_uses_chain_wide_iter_dir_name_for_iter_above_1`).
+The same fix repairs `_interpretation_path` for `load_latest_knowledge`,
+which had been silently emitting "interpretation digest not found"
+warnings on every iter > 1 of any post-cc198ad chain run.
 
 Verification:
 ```
 .venv/bin/python -m pytest tests/integration/workflows/test_chain_candidate_graduation.py -xvs
-# expected: both pseudo paths pass (chain mode + in-process mode)
+# 2 passed, 3 warnings in 1.45s (chain mode + in-process regression)
 ```
 
 #### Commit 1.5 — Doc closeout + Phase-1 gate verification
