@@ -22,9 +22,10 @@ from dataclasses import dataclass
 from typing import Optional
 
 from execute_tools.data_paths import SIDERIUS_DATA_DIR
+from execute_tools.dataset_config import NUM_FILES
 
 
-_FINE_INDICES = tuple(range(20))
+_FINE_INDICES = tuple(range(NUM_FILES))
 
 _RAW_PER_FILE_FMT = "raw_baseline_score_file_{idx:04d}.json"
 _GT_PER_FILE_FMT = "ground_truth_score_file_{idx:04d}.json"

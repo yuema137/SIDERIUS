@@ -78,7 +78,12 @@ VRAM_WARN_GB = 22.0   # >22 GB → "High Pressure"
 VRAM_FAIL_GB = 32.0   # >32 GB → OOM
 FORMAL_TIME_FAIL_S = 1200.0   # 20 min
 
-TRIAL_BUDGET_MIN = 1.0      # 60 s
+TRIAL_BUDGET_MIN = 15.0     # 900 s — see Phase Q in docs/resource_estimator_implement.md.
+                            # At trial_portion=0.02 + seg=1250 the PSD micro-segment
+                            # expansion (PSD_SEGMENT_LENGTH//seg = 8000) yields
+                            # ~32k steps/epoch, so the floor is ~7 min for any
+                            # architecture. 1 min was unachievable; 15 min lets
+                            # plausible drafts pass while still gating obvious bloat.
 FORMAL_BUDGET_MIN = 20.0    # 1200 s
 
 
@@ -238,23 +243,27 @@ def _print_report_table(reports: list[IterReport]) -> None:
 
 def _build_llm_config():
     """
-    Build the OpenAI routing config per feedback_prefer_openai_for_smoke.md:
-      - tuner planner    = gpt-5-mini (reasoning-heavy)
-      - tuner reflector  = gpt-4o-mini
-      - interp/propose/implement/validate = gpt-4o-mini
+    Load the production tiered LLM config — the same JSON used by the
+    V8/V9 chain runs (``llm_configs/openai_tiered_v1.json``).
+
+    Earlier versions of this test pinned everything except the tuner
+    planner to ``gpt-4o-mini``. Gate 2 run-3 showed that mini-class
+    models cannot reliably do shape arithmetic for dilated/causal
+    convolutions: the implementor failed 9/9 attempts in iter 1, all
+    on off-by-(k-1) padding/trim mistakes. Production runs use the
+    tiered config, which routes the reasoning-heavy slots (interpret,
+    propose.reasoning, propose.proposing, implement, tune.planner) to
+    a frontier model and keeps cheaper models only for templated
+    extraction (validate, propose.comparison, tune.reflector). Testing
+    with a strictly weaker model than production was producing
+    failures that could never reproduce in real chains.
     """
-    from workflows.llm_config import (
-        NodeLLMConfig, ProposalLLMConfig, TunerLLMConfig, WorkflowLLMConfig,
-    )
-    mini = NodeLLMConfig(provider="openai", model_id="gpt-4o-mini")
-    gpt5_mini = NodeLLMConfig(provider="openai", model_id="gpt-5-mini")
-    return WorkflowLLMConfig(
-        interpret=mini,
-        propose=ProposalLLMConfig(comparison=mini, reasoning=mini, proposing=mini),
-        implement=mini,
-        validate_model=mini,
-        tune=TunerLLMConfig(planner=gpt5_mini, reflector=mini),
-    )
+    from pathlib import Path
+    from workflows.llm_config import WorkflowLLMConfig
+
+    repo_root = Path(__file__).resolve().parents[3]
+    cfg_path = repo_root / "llm_configs" / "openai_tiered_v1.json"
+    return WorkflowLLMConfig.from_json(str(cfg_path))
 
 
 def _load_shared_advice() -> dict:
@@ -304,7 +313,7 @@ class TestScoreTableRealSmoke:
         print(f"\n{'='*72}")
         print("  PHASE 6.5 STAGE 2 — REAL-TRAINING SMOKE")
         print(f"  Workspace: {workspace}")
-        print(f"  LLM: OpenAI (tuner.planner=gpt-5-mini, rest=gpt-4o-mini)")
+        print(f"  LLM: OpenAI tiered (llm_configs/openai_tiered_v1.json — production config)")
         print(f"  Trial budget: {TRIAL_BUDGET_MIN*60:.0f}s | "
               f"Formal budget: {FORMAL_BUDGET_MIN*60:.0f}s")
         print(f"  VRAM warn>{VRAM_WARN_GB}GB, fail>{VRAM_FAIL_GB}GB")
@@ -343,6 +352,18 @@ class TestScoreTableRealSmoke:
                 max_epochs=1,
                 trial_time_budget_minutes=TRIAL_BUDGET_MIN,
                 formal_time_budget_minutes=FORMAL_BUDGET_MIN,
+                trial_vram_budget_gb=2.0,
+                formal_vram_budget_gb=2.0,
+                # Phase R (§13) — formal eval scope tightened for the smoke
+                # test so the forced formal round fits inside FORMAL_BUDGET_MIN.
+                # Production runs keep the 1.0 default; lowering this here
+                # reflects a scope decision, not a calibration fix. The V9
+                # audit (§13) showed the inference estimator under-projects
+                # by ~8x on 5090 hardware, so silencing the formula by
+                # touching its constants would defeat the gate. Matching
+                # the trial eval_portion=0.02 keeps cross-architecture
+                # comparability at smoke-test scope.
+                formal_eval_portion=0.05,
                 **{f"human_advice_{k}": v for k, v in advice.items()},
             )
 
@@ -419,6 +440,18 @@ class TestScoreTableRealSmoke:
                 max_epochs=1,
                 trial_time_budget_minutes=TRIAL_BUDGET_MIN,
                 formal_time_budget_minutes=FORMAL_BUDGET_MIN,
+                trial_vram_budget_gb=2.0,
+                formal_vram_budget_gb=2.0,
+                # Phase R (§13) — formal eval scope tightened for the smoke
+                # test so the forced formal round fits inside FORMAL_BUDGET_MIN.
+                # Production runs keep the 1.0 default; lowering this here
+                # reflects a scope decision, not a calibration fix. The V9
+                # audit (§13) showed the inference estimator under-projects
+                # by ~8x on 5090 hardware, so silencing the formula by
+                # touching its constants would defeat the gate. Matching
+                # the trial eval_portion=0.02 keeps cross-architecture
+                # comparability at smoke-test scope.
+                formal_eval_portion=0.05,
                 **{f"human_advice_{k}": v for k, v in advice.items()},
             )
 

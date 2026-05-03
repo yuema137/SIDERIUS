@@ -10,7 +10,7 @@ Per-file formula (same ruler as ``scoring_utils.score_vector`` and as the
 ground-truth ceiling — global ``s_max`` from the anchor map):
 
     per_segment  = (snr_sg[i] / s_max_GLOBAL) · snr_squid_raw[i]
-    score        = log_{5.27}(round(mean_i(per_segment), 2) + 1e-10)
+    score        = log_{5.27}(mean_i(per_segment) + 1e-10)
 
 where ``snr_squid_raw`` is the raw CH1 SNR at the CH2 peak frequency
 (i.e. no denoiser applied), computed via the Option B primitives
@@ -49,6 +49,7 @@ import numpy as np
 from tqdm import tqdm
 
 from execute_tools.build_anchor_map import load_anchor_map
+from execute_tools.dataset_config import NUM_FILES
 from execute_tools.scoring_utils import coerce_nonfinite_to_none, process_segment
 
 # ---------------------------------------------------------------------------
@@ -77,7 +78,7 @@ def _calculate_score(
     """Global-s_max per-file score + aggregation primitives for the scalar.
 
         per_segment  = (snr_sg[i] / s_max_GLOBAL) · snr_squid[i]
-        score        = log_{5.27}(round(mean_i(per_segment), 2) + 1e-10)
+        score        = log_{5.27}(mean_i(per_segment) + 1e-10)
 
     ``s_max`` is always the global value from ``segment_anchors.json`` —
     the same ruler that ``scoring_utils.score_vector`` uses for model
@@ -89,11 +90,20 @@ def _calculate_score(
     same ``s_max`` — a coarse run is a sparse sampling of the same
     physical signal, so it must be weighed on the same ruler as a fine run.
 
+    The ``+ 1e-10`` offset places a soft log-space floor at
+    ``log_{5.27}(1e-10) ≈ −13.854`` so a file with no signal renders as a
+    finite floor value rather than ``-inf``. Negligible for any
+    ``mean_linear ≫ 1e-10``. The legacy ``round(·, 2)`` quantization that
+    used to live alongside the offset was removed by commit ``6c3f736``
+    ("kill ghost scores") — it conflated distinct scores at the 0.01 grid
+    and is intentionally not reinstated.
+
     Returns a 3-tuple ``(log_score, linear_sum, n_segments)`` where
-    ``linear_sum = Σ_i per_segment[i]`` is the **unrounded** linear sum (the
-    per-file log-space ``score`` is lossy under ``round(·, 2)``, so the
-    grand-mean scalar must be aggregated from the linear sums — see Decision
-    13 in ``docs/aggregated_score_table_awareness.md``).
+    ``linear_sum = Σ_i per_segment[i]`` is the unrounded linear sum.
+    The grand-mean scalar must be aggregated from the linear sums (not
+    averaged from the per-file log scores) so that subset-scoped
+    aggregation under trial-mode sampling is consistent — see Decision 13
+    in ``docs/aggregated_score_table_awareness.md``.
     """
     n = _FINE_SEGMENTS if not coarse else _COARSE_SEGMENTS
 
@@ -118,8 +128,8 @@ def _calculate_score(
     per_segment = (snr_sg / s_max) * snr_squid
     linear_sum = float(np.sum(per_segment))
     mean_linear = linear_sum / n
-    if mean_linear > 0 and math.isfinite(mean_linear):
-        log_score = float(math.log(mean_linear, 5.27))
+    if math.isfinite(mean_linear):
+        log_score = float(math.log(max(mean_linear, 0.0) + 1e-10, 5.27))
     else:
         log_score = float("-inf")
     return log_score, linear_sum, n
@@ -131,14 +141,18 @@ def _calculate_score(
 # Symmetric with ``compute_ground_truth._anchor_normalized_ceiling``:
 #
 #     grand_mean  = Σ_f linear_sum[f]  /  Σ_f n_segments[f]
-#     scalar      = log_{5.27}(grand_mean)  [or -inf when grand_mean ≤ 0]
+#     scalar      = log_{5.27}(grand_mean + 1e-10)
+#
+# The ``+ 1e-10`` offset matches the per-file convention so a fully collapsed
+# run renders as the same soft floor (~−13.854) at every aggregation level
+# instead of producing ``-inf`` here while per-file rows show finite floors.
 #
 # Only fine files (0–19) contribute — coarse files are a sparse sampling of
 # the same physical signal and would bias the grand mean if mixed in. See
 # Decision 13 in ``docs/aggregated_score_table_awareness.md``.
 # ---------------------------------------------------------------------------
 
-_FINE_INDICES = tuple(range(20))
+_FINE_INDICES = tuple(range(NUM_FILES))
 
 
 def _maybe_write_anchor_normalized_scalar(
@@ -181,8 +195,8 @@ def _maybe_write_anchor_normalized_scalar(
     total_linear = sum(p["linear_sum"] for p in per_file)
     total_n = sum(p["n_segments"] for p in per_file)
     grand_mean = total_linear / total_n
-    if grand_mean > 0 and math.isfinite(grand_mean):
-        scalar = float(math.log(grand_mean, 5.27))
+    if math.isfinite(grand_mean):
+        scalar = float(math.log(max(grand_mean, 0.0) + 1e-10, 5.27))
     else:
         scalar = float("-inf")
 

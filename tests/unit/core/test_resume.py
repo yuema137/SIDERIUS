@@ -542,3 +542,406 @@ class TestPseudoIntegrationTwoIterChain:
 
         state = restore_prior_state(str(tmp_path), 2, [])
         assert state.restored_plugins == ["resume_test_arch_a"]
+
+
+# ===========================================================================
+# Cross-iter knowledge persistence (load_latest_knowledge)
+# See docs/Consistent_growing_vocab_list.md.
+# ===========================================================================
+
+from core.resume import _interpretation_path, load_latest_knowledge
+
+
+def _write_interp_digest(
+    workspace,
+    iter_idx: int,
+    *,
+    runtime_vocab: list | None = None,
+    key_findings: list[str] | None = None,
+    raw_text: str | None = None,
+):
+    """Write a synthetic ``interpretation_iter_NNN.json`` under the chain layout.
+
+    ``raw_text`` lets a test inject malformed JSON deliberately; otherwise the
+    given vocab + findings are serialised. Only the fields the loader reads are
+    required — the rest of ``InterpretationOutput`` is irrelevant here.
+    """
+    path = workspace / _interpretation_path("", iter_idx).lstrip(os.sep)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if raw_text is not None:
+        path.write_text(raw_text)
+        return path
+    payload = {
+        "runtime_vocab": runtime_vocab or [],
+        "key_findings":  key_findings or [],
+    }
+    path.write_text(json.dumps(payload))
+    return path
+
+
+def _vocab_entry(
+    name: str,
+    *,
+    kind: str = "feature",
+    tier: str = "candidate",
+    seen_in_runs: list[str] | None = None,
+) -> dict:
+    """Minimum-required dict that validates as VocabEntry."""
+    return {
+        "name": name,
+        "kind": kind,
+        "description": f"test entry {name}",
+        "tier": tier,
+        "seen_in_runs": list(seen_in_runs or []),
+    }
+
+
+class TestLoadLatestKnowledge:
+    """Read-only loader behaviour — no plugin / manifest involvement."""
+
+    def test_iter1_returns_empty(self, tmp_path):
+        """current_iter == 1 short-circuits; no disk read attempted."""
+        vocab, findings = load_latest_knowledge(str(tmp_path), 1, [])
+        assert vocab == []
+        assert findings == []
+
+    def test_picks_latest_runtime_vocab(self, tmp_path):
+        """Latest committed iter wins on runtime_vocab (not concatenation)."""
+        _write_interp_digest(
+            tmp_path, 1,
+            runtime_vocab=[_vocab_entry("feat_iter1")],
+            key_findings=["finding_iter1"],
+        )
+        _write_interp_digest(
+            tmp_path, 2,
+            runtime_vocab=[_vocab_entry("feat_iter2_a"), _vocab_entry("feat_iter2_b")],
+            key_findings=["finding_iter2"],
+        )
+        vocab, findings = load_latest_knowledge(str(tmp_path), 3, [1, 2])
+        names = sorted(v.name for v in vocab)
+        assert names == ["feat_iter2_a", "feat_iter2_b"]
+
+    def test_accumulates_findings_chronologically(self, tmp_path):
+        """Union across iters; first-occurrence wins on dedup."""
+        _write_interp_digest(
+            tmp_path, 1,
+            runtime_vocab=[_vocab_entry("v")],
+            key_findings=["A", "B"],
+        )
+        _write_interp_digest(
+            tmp_path, 2,
+            runtime_vocab=[_vocab_entry("v")],
+            key_findings=["B", "C"],
+        )
+        _vocab, findings = load_latest_knowledge(str(tmp_path), 3, [1, 2])
+        assert findings == ["A", "B", "C"]
+
+    def test_skips_missing_digest_with_warning(self, tmp_path):
+        """Iter committed but interp digest missing → warn + continue."""
+        _write_interp_digest(
+            tmp_path, 1,
+            runtime_vocab=[_vocab_entry("feat_iter1")],
+            key_findings=["finding_iter1"],
+        )
+        # iter_002 has no digest written.
+        with pytest.warns(UserWarning, match="iter 002.*digest not found"):
+            vocab, findings = load_latest_knowledge(str(tmp_path), 3, [1, 2])
+        # iter_001's vocab still survives.
+        assert [v.name for v in vocab] == ["feat_iter1"]
+        assert findings == ["finding_iter1"]
+
+    def test_skips_malformed_json_with_warning(self, tmp_path):
+        """Malformed digest → warn + continue with the rest."""
+        _write_interp_digest(
+            tmp_path, 1,
+            runtime_vocab=[_vocab_entry("feat_iter1")],
+            key_findings=["finding_iter1"],
+        )
+        _write_interp_digest(tmp_path, 2, raw_text="{not valid json")
+        with pytest.warns(UserWarning, match="iter 002.*cannot read"):
+            vocab, findings = load_latest_knowledge(str(tmp_path), 3, [1, 2])
+        assert [v.name for v in vocab] == ["feat_iter1"]
+        assert findings == ["finding_iter1"]
+
+    def test_drops_malformed_vocab_entries_with_warning(self, tmp_path):
+        """Per-entry validation failure → drop that entry, keep the rest."""
+        _write_interp_digest(
+            tmp_path, 1,
+            runtime_vocab=[
+                _vocab_entry("good_a"),
+                {"name": "bad_entry"},  # missing required fields → ValidationError
+                _vocab_entry("good_b"),
+            ],
+            key_findings=["finding_iter1"],
+        )
+        with pytest.warns(UserWarning, match="dropped malformed runtime_vocab entry"):
+            vocab, findings = load_latest_knowledge(str(tmp_path), 2, [1])
+        names = sorted(v.name for v in vocab)
+        assert names == ["good_a", "good_b"]
+        assert findings == ["finding_iter1"]
+
+    def test_seen_in_runs_preserved_verbatim(self, tmp_path):
+        """Loader must not mutate seen_in_runs — preservation is contract.
+
+        See docs/Consistent_growing_vocab_list.md §2.1: build_runtime_vocab
+        is the only place seen_in_runs grows, via the proposed_candidates
+        channel inside the next iter's interp call.
+        """
+        _write_interp_digest(
+            tmp_path, 1,
+            runtime_vocab=[_vocab_entry(
+                "carry_me", seen_in_runs=["iter_001"],
+            )],
+            key_findings=[],
+        )
+        vocab, _findings = load_latest_knowledge(str(tmp_path), 2, [1])
+        assert len(vocab) == 1
+        assert vocab[0].seen_in_runs == ["iter_001"]
+
+
+class TestRestorePriorStateKnowledgeCarryOver:
+    """Full-stack: restore_prior_state populates the new RestoredState fields."""
+
+    def test_iter1_leaves_new_fields_empty(self, tmp_path, isolated_registries):
+        state = restore_prior_state(str(tmp_path), 1, [])
+        assert state.runtime_vocab == []
+        assert state.accumulated_key_findings == []
+        # V8 Domain 1 — negative-feedback fields also empty at iter 1
+        assert state.accumulated_physical_rejections == []
+        assert state.accumulated_gate_exhaustions == []
+
+    def test_populates_new_fields_from_prior_iters(self, tmp_path, isolated_registries):
+        """Mock 2-iter workspace: manifests + run_outputs + interp digests.
+
+        After restore, RestoredState.runtime_vocab should reflect iter_002's
+        digest and accumulated_key_findings should be the chronological
+        union of both iters' findings.
+        """
+        _materialise_iter(tmp_path, 1, "resume_test_arch_a", 0.71)
+        _materialise_iter(tmp_path, 2, "resume_test_arch_b", 0.78)
+        _write_interp_digest(
+            tmp_path, 1,
+            runtime_vocab=[_vocab_entry("feat_iter1", seen_in_runs=["iter_001"])],
+            key_findings=["lesson_iter1"],
+        )
+        _write_interp_digest(
+            tmp_path, 2,
+            runtime_vocab=[
+                _vocab_entry("feat_iter1", seen_in_runs=["iter_001", "iter_002"]),
+                _vocab_entry("feat_iter2", seen_in_runs=["iter_002"]),
+            ],
+            key_findings=["lesson_iter2"],
+        )
+        state = restore_prior_state(str(tmp_path), 3, [])
+        assert state.committed_iters == [1, 2]
+        names = sorted(v.name for v in state.runtime_vocab)
+        assert names == ["feat_iter1", "feat_iter2"]
+        # iter_002's seen_in_runs (the latest) wins as a whole.
+        feat_iter1 = next(v for v in state.runtime_vocab if v.name == "feat_iter1")
+        assert feat_iter1.seen_in_runs == ["iter_001", "iter_002"]
+        assert state.accumulated_key_findings == ["lesson_iter1", "lesson_iter2"]
+
+
+# ===========================================================================
+# Cross-iter negative-feedback persistence (V8 Domain 1)
+# See docs/V8_Gap_Report.md.
+# ===========================================================================
+
+from core.resume import (
+    _MAX_ACCUMULATED_GATE_EXHAUSTIONS,
+    _MAX_ACCUMULATED_REJECTIONS,
+)
+
+
+def _physical_rejection(model_type: str, *, estimated_gb: float = 14.0,
+                        budget_gb: float = 12.0) -> dict:
+    """Minimum-required dict that validates as PhysicalRejection."""
+    return {
+        "attempt_config": {"model_type": model_type, "batch_size": 4},
+        "binding_cap": "vram",
+        "dominant_layer": f"{model_type}.layer_0",
+        "dominant_layer_gb": 6.0,
+        "dominant_fraction": 0.5,
+        "budget_gb": budget_gb,
+        "estimated_gb": estimated_gb,
+        "suggestion": f"reduce batch_size below 2 for {model_type}",
+    }
+
+
+def _gate_exhaustion(active_mode: str = "trial", *, total_attempts: int = 3,
+                     summary: str = "all attempts gate-rejected") -> dict:
+    """Minimum-required dict that validates as GateExhaustionInfo."""
+    return {
+        "total_attempts": total_attempts,
+        "vram_gated_attempts": total_attempts,
+        "time_gated_attempts": 0,
+        "other_failure_attempts": 0,
+        "active_mode": active_mode,
+        "summary_message": summary,
+    }
+
+
+class TestRestorePriorStateNegativeFeedbackCarryOver:
+    """V8 Domain 1: restore_prior_state populates the two negative-feedback
+    fields on RestoredState by walking each prior iter's parsed
+    HyperparamTuningOutput. Caps applied at K=10 most-recent."""
+
+    def test_iter1_leaves_negative_feedback_empty(self, tmp_path, isolated_registries):
+        state = restore_prior_state(str(tmp_path), 1, [])
+        assert state.accumulated_physical_rejections == []
+        assert state.accumulated_gate_exhaustions == []
+
+    def test_collects_rejections_chronologically(self, tmp_path, isolated_registries):
+        """3-iter chain, each with one rejection → all three collected in order."""
+        _materialise_iter(
+            tmp_path, 1, "resume_test_arch_a",
+            run_output_overrides={
+                "physical_rejections": [_physical_rejection("arch_a", estimated_gb=15.0)],
+            },
+        )
+        _materialise_iter(
+            tmp_path, 2, "resume_test_arch_b",
+            run_output_overrides={
+                "physical_rejections": [_physical_rejection("arch_b", estimated_gb=18.0)],
+            },
+        )
+        _materialise_iter(
+            tmp_path, 3, "resume_test_arch_c",
+            run_output_overrides={
+                "physical_rejections": [_physical_rejection("arch_c", estimated_gb=20.0)],
+            },
+        )
+        state = restore_prior_state(str(tmp_path), 4, [])
+        assert len(state.accumulated_physical_rejections) == 3
+        # Order: iter_001 → iter_002 → iter_003
+        order = [r.attempt_config["model_type"] for r in state.accumulated_physical_rejections]
+        assert order == ["arch_a", "arch_b", "arch_c"]
+
+    def test_collects_gate_exhaustions_chronologically(self, tmp_path, isolated_registries):
+        """3-iter chain with gate_exhaustion → all three collected in order."""
+        _materialise_iter(
+            tmp_path, 1, "resume_test_arch_a",
+            run_output_overrides={"gate_exhaustion": _gate_exhaustion(summary="iter1")},
+        )
+        _materialise_iter(
+            tmp_path, 2, "resume_test_arch_b",
+            run_output_overrides={"gate_exhaustion": _gate_exhaustion(summary="iter2")},
+        )
+        _materialise_iter(
+            tmp_path, 3, "resume_test_arch_c",
+            run_output_overrides={"gate_exhaustion": _gate_exhaustion(summary="iter3")},
+        )
+        state = restore_prior_state(str(tmp_path), 4, [])
+        msgs = [g.summary_message for g in state.accumulated_gate_exhaustions]
+        assert msgs == ["iter1", "iter2", "iter3"]
+
+    def test_rejections_capped_at_K10_most_recent_wins(self, tmp_path, isolated_registries):
+        """Build a 3-iter chain that produces 12 rejections total. After cap,
+        only the 10 most-recent should remain (oldest 2 evicted)."""
+        # iter_001: 4 rejections, iter_002: 4 rejections, iter_003: 4 rejections
+        for iter_idx, model in [(1, "arch_a"), (2, "arch_b"), (3, "arch_c")]:
+            _materialise_iter(
+                tmp_path, iter_idx, f"resume_test_arch_{chr(96 + iter_idx)}",
+                run_output_overrides={
+                    "physical_rejections": [
+                        _physical_rejection(model, estimated_gb=10.0 + i)
+                        for i in range(4)
+                    ],
+                },
+            )
+        state = restore_prior_state(str(tmp_path), 4, [])
+        assert len(state.accumulated_physical_rejections) == _MAX_ACCUMULATED_REJECTIONS
+        # First 2 (oldest) should have been evicted; last 10 retained.
+        # iter_001 contributed 4, iter_002 contributed 4, iter_003 contributed 4.
+        # Evicting oldest 2 means iter_001's first 2 are dropped, the rest kept.
+        # So accumulator starts with iter_001[2], iter_001[3], iter_002[*], iter_003[*].
+        first = state.accumulated_physical_rejections[0]
+        assert first.attempt_config["model_type"] == "arch_a"
+        last = state.accumulated_physical_rejections[-1]
+        assert last.attempt_config["model_type"] == "arch_c"
+
+    def test_gate_exhaustions_capped_at_K10(self, tmp_path, isolated_registries):
+        """Build a 12-iter chain (one gate_exhaustion each). After cap, only
+        the 10 most-recent retained."""
+        for iter_idx in range(1, 13):
+            _materialise_iter(
+                tmp_path, iter_idx, f"resume_test_arch_{iter_idx:02d}",
+                run_output_overrides={
+                    "gate_exhaustion": _gate_exhaustion(summary=f"iter{iter_idx:02d}"),
+                },
+            )
+        state = restore_prior_state(str(tmp_path), 13, [])
+        assert len(state.accumulated_gate_exhaustions) == _MAX_ACCUMULATED_GATE_EXHAUSTIONS
+        # iter_01 and iter_02 evicted; iter_03..iter_12 retained.
+        msgs = [g.summary_message for g in state.accumulated_gate_exhaustions]
+        assert msgs[0] == "iter03"
+        assert msgs[-1] == "iter12"
+
+    def test_iter_with_no_rejections_contributes_nothing(self, tmp_path, isolated_registries):
+        """Iters with empty/missing physical_rejections must not break collection."""
+        _materialise_iter(
+            tmp_path, 1, "resume_test_arch_a",
+            run_output_overrides={
+                "physical_rejections": [_physical_rejection("arch_a")],
+            },
+        )
+        # iter_002: no overrides → defaults to empty physical_rejections list.
+        _materialise_iter(tmp_path, 2, "resume_test_arch_b")
+        _materialise_iter(
+            tmp_path, 3, "resume_test_arch_c",
+            run_output_overrides={
+                "physical_rejections": [_physical_rejection("arch_c")],
+            },
+        )
+        state = restore_prior_state(str(tmp_path), 4, [])
+        # Only iter_001 and iter_003 contribute.
+        assert len(state.accumulated_physical_rejections) == 2
+        order = [r.attempt_config["model_type"] for r in state.accumulated_physical_rejections]
+        assert order == ["arch_a", "arch_c"]
+
+    def test_iter_with_none_gate_exhaustion_skipped(self, tmp_path, isolated_registries):
+        """Iters with gate_exhaustion=None (the default) must be skipped silently."""
+        _materialise_iter(
+            tmp_path, 1, "resume_test_arch_a",
+            run_output_overrides={"gate_exhaustion": _gate_exhaustion(summary="iter1")},
+        )
+        # iter_002: no override → default gate_exhaustion=None.
+        _materialise_iter(tmp_path, 2, "resume_test_arch_b")
+        _materialise_iter(
+            tmp_path, 3, "resume_test_arch_c",
+            run_output_overrides={"gate_exhaustion": _gate_exhaustion(summary="iter3")},
+        )
+        state = restore_prior_state(str(tmp_path), 4, [])
+        msgs = [g.summary_message for g in state.accumulated_gate_exhaustions]
+        assert msgs == ["iter1", "iter3"]
+
+    def test_no_records_iter_does_not_break_accumulation(self, tmp_path, isolated_registries):
+        """A no_records iter (gate-exhaustion that produced no run_output) is
+        skipped without affecting the rejection accumulator."""
+        _materialise_iter(
+            tmp_path, 1, "resume_test_arch_a",
+            run_output_overrides={
+                "physical_rejections": [_physical_rejection("arch_a")],
+            },
+        )
+        # iter_002: no_records (workspace + manifest only, no run_output).
+        run_name_2 = _iter_run_name(2)
+        iter_dir_2 = tmp_path / run_name_2
+        iter_dir_2.mkdir()
+        (iter_dir_2 / "manifest.json").write_text(json.dumps({
+            "status": "no_records",
+            "iteration_dir": str(iter_dir_2),
+            "output_path": None,
+            "model_name": None,
+            "best_score": None,
+        }))
+        _materialise_iter(
+            tmp_path, 3, "resume_test_arch_c",
+            run_output_overrides={
+                "physical_rejections": [_physical_rejection("arch_c")],
+            },
+        )
+        state = restore_prior_state(str(tmp_path), 4, [])
+        # iter_002 contributes nothing; iter_001 and iter_003 do.
+        assert len(state.accumulated_physical_rejections) == 2
+        assert state.committed_iters == [1, 3]

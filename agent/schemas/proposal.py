@@ -125,8 +125,10 @@ class ExpertContextItem(BaseModel):
         description="Identifier of the producer. E.g. 'human', "
                     "'data_analysis_agent', 'physics_expert_agent'."
     )
-    kind: Literal["empirical", "theoretical", "literature", "human", "narrative"] = Field(
-        description="What type of context this is."
+    kind: Literal["empirical", "theoretical", "literature", "human", "narrative", "findings"] = Field(
+        description="What type of context this is. 'findings' is the "
+                    "accumulated key_findings union forwarded by chain-mode "
+                    "across iterations (workflows/model_exploration.py)."
     )
     content: str = Field(
         max_length=10000,

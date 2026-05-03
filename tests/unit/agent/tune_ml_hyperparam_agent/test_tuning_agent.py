@@ -322,6 +322,97 @@ class TestHyperparamTuningAgentRun:
         assert output.run_name == "test_run"
 
 
+class TestInferenceTimingPersistedToMemory:
+    """refine_inference_time_estimator.md Commit C wiring contract — when the
+    inference subprocess returns ``per_file_timings_ms`` and
+    ``process_startup_ms`` (Commit B), the success record's memory dict must
+    carry the five derived measurement keys so Commit D can read them back as
+    a hint. Validates aggregator call + dict-key spelling + fallthrough; the
+    aggregator's own math is covered exhaustively in
+    ``test_inference_aggregator.py``.
+    """
+
+    def _saved_records_with_inference_result(self, tmp_path, inference_result):
+        with patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge, \
+             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox, \
+             patch("nodes.ml_hyperparameter_tune_agent._run_skill") as mock_skill, \
+             patch("nodes.ml_hyperparameter_tune_agent.load_reference_scores",
+                   return_value=_synth_reference()), \
+             tempfile.TemporaryDirectory() as configs_dir:
+
+            mock_brain = MockBridge.return_value
+            mock_brain.plan.return_value = FAKE_PLAN_RESPONSE
+            mock_brain.reflect.return_value = FAKE_REFLECT_RESPONSE
+
+            saved_records = []
+            mock_sandbox = MockSandbox.return_value
+            mock_sandbox.get_summary.side_effect = lambda: list(saved_records)
+            mock_sandbox.save_record.side_effect = lambda r: saved_records.append(r)
+            mock_sandbox.dirs = {"configs": configs_dir}
+
+            def dispatch(skill_folder, sandbox, **params):
+                if skill_folder == "inference_skill":
+                    return inference_result
+                return _mock_run_skill(skill_folder, sandbox, **params)
+            mock_skill.side_effect = dispatch
+
+            agent = HyperparamTuningAgent()
+            agent.run(_make_input(tmp_path))
+            return saved_records
+
+    def test_populated_timings_aggregate_into_memory(self, tmp_path):
+        """Inference returns 5 files of per-PSD-segment cost = 10 ms each →
+        memory carries the median (10.0) plus the audit trail keys."""
+        rich_inference = {
+            "status": "success",
+            "results": {},
+            "per_file_timings_ms": [
+                {"file_index": 0, "n_psd_segs": 2, "elapsed_ms": 100.0},  # warmup
+                {"file_index": 1, "n_psd_segs": 2, "elapsed_ms": 20.0},
+                {"file_index": 2, "n_psd_segs": 2, "elapsed_ms": 20.0},
+                {"file_index": 3, "n_psd_segs": 2, "elapsed_ms": 20.0},
+                {"file_index": 4, "n_psd_segs": 2, "elapsed_ms": 20.0},
+            ],
+            "process_startup_ms": 1234.5,
+            "subprocess_wall_ms": 1500.0,
+        }
+        saved_records = self._saved_records_with_inference_result(
+            tmp_path, rich_inference
+        )
+        assert saved_records, "expected at least one saved record"
+        mem = saved_records[0]["memory"]
+        assert mem["inference_per_psd_seg_ms_measured"] == pytest.approx(10.0)
+        assert mem["inference_warmup_aggregator"] == "median"
+        assert mem["inference_n_timed_files"] == 4
+        assert mem["inference_warmup_fraction"] == pytest.approx(0.20)
+        assert mem["inference_process_startup_ms"] == pytest.approx(1234.5)
+
+    def test_legacy_inference_result_writes_safe_defaults(self, tmp_path):
+        """A bare success result with no timings (legacy / pre-Commit-B / OOM
+        with empty sidecar) → all five memory keys present, with the aggregator
+        contract: value+aggregator+startup are ``None``, n_timed_files is ``0``,
+        warmup_fraction is the default ``0.20``. Schema accepts all values so
+        back-compat holds."""
+        legacy_inference = {"status": "success", "results": {}}
+        saved_records = self._saved_records_with_inference_result(
+            tmp_path, legacy_inference
+        )
+        mem = saved_records[0]["memory"]
+        for key in (
+            "inference_per_psd_seg_ms_measured",
+            "inference_warmup_aggregator",
+            "inference_n_timed_files",
+            "inference_warmup_fraction",
+            "inference_process_startup_ms",
+        ):
+            assert key in mem, f"memory missing required key: {key}"
+        assert mem["inference_per_psd_seg_ms_measured"] is None
+        assert mem["inference_warmup_aggregator"] is None
+        assert mem["inference_process_startup_ms"] is None
+        assert mem["inference_n_timed_files"] == 0
+        assert mem["inference_warmup_fraction"] == pytest.approx(0.20)
+
+
 class TestHyperparamTuningAgentOOM:
     """Tests for OOM-skip behaviour within run()."""
 
@@ -589,8 +680,12 @@ class TestDynamicTrialFormal:
     def test_formal_round_builds_two_sample_sets(self, agent_and_mocks, tmp_path):
         """Formal round: two build_sample_set calls — one for train, one for eval.
 
-        Phase M invariants (docs/resource_estimator_implement.md §12):
-          * Eval side is LOCKED to snapshot + portion=1.0 — not configurable.
+        Phase M invariants (docs/resource_estimator_implement.md §12), refined
+        by Phase R (§13):
+          * Eval strategy is locked to ``snapshot``; the portion defaults to
+            1.0 (production full-clone, §12.2) but is operator-configurable
+            via ``HyperparamTuningInput.formal_eval_portion``. This test pins
+            the *default* — a separate Phase R test covers the opt-down path.
           * Train side comes from ``agent_input.formal_strategy/portion/train_portion``
             (defaults snapshot / 0.1 / 1.0), so train_portion defaults to 1.0 in
             formal mode regardless of what the planner chose for the trial rounds.
@@ -611,7 +706,8 @@ class TestDynamicTrialFormal:
 
             # Final round (max_rounds=1) → formal mode → two build_sample_set calls:
             # one for training scope (formal_portion=0.1), one for eval scope
-            # (locked to snapshot + portion=1.0).
+            # (snapshot strategy, portion defaults to 1.0 — operator can opt
+            # down via formal_eval_portion, Phase R §13).
             build_calls = mock_build.call_args_list
             assert len(build_calls) == 2, f"Expected 2 build_sample_set calls for formal, got {len(build_calls)}"
             portions = [c.kwargs.get("trial_portion") for c in build_calls]

@@ -222,3 +222,136 @@ class TestTrialModeDelPlacement:
         assert call.func.attr == "collect"
         assert isinstance(call.func.value, ast.Name)
         assert call.func.value.id == "gc"
+
+
+# =============================================================================
+# 3. Trial-mode per-file timing instrumentation — AST inspection
+# =============================================================================
+#
+# Pin the structural contract introduced by Commit B of
+# docs/refine_inference_time_estimator.md: trial-mode emits per-file timings
+# to a sidecar JSON when ``--timing_out_json`` is set, so the parent process
+# can decompose subprocess wall-time into ``process_startup_ms`` (Python +
+# CUDA + torch.load — paid once) and ``per_file_elapsed_ms`` (scales with
+# eval volume). Without this separation the gate amortises a fixed cost over
+# trial's tiny denominator and over-predicts formal-round time.
+
+
+def _function_def(tree: ast.Module, name: str) -> ast.FunctionDef:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return node
+    raise AssertionError(f"Could not locate function {name!r} in inference_single.py")
+
+
+class TestTimingFlagAndInstrumentation:
+    """Commit B contract: ``--timing_out_json`` plumbing + per-file timing
+    accumulation in the trial loop. AST-level so we don't need to spin up a
+    real torch + h5py subprocess; the parent-side wiring is exercised
+    separately in tests/unit/core/test_sandbox_executor.py."""
+
+    def test_timing_out_json_flag_registered(self):
+        """``get_parser`` must expose ``--timing_out_json`` so the parent's
+        ``cmd.extend([...])`` doesn't get rejected as unrecognised."""
+        get_parser = _function_def(_parse_inference_module(), "get_parser")
+        flags: set[str] = set()
+        for node in ast.walk(get_parser):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "add_argument"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+            ):
+                flags.add(node.args[0].value)
+        assert "--timing_out_json" in flags, (
+            f"get_parser is missing --timing_out_json; current flags: {sorted(flags)}"
+        )
+
+    def test_trial_loop_brackets_each_iteration_with_perf_counter(self):
+        """Each iteration must record ``time.perf_counter()`` at the start
+        and compute ``elapsed_ms`` near the end. This is the per-file
+        timing that the parent sums into ``process_startup_ms``."""
+        loop = _find_trial_loop(_parse_inference_module())
+        perf_counter_calls = [
+            node for node in ast.walk(loop)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "perf_counter"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "time"
+        ]
+        assert len(perf_counter_calls) >= 2, (
+            f"Expected at least 2 time.perf_counter() calls in trial loop "
+            f"(start + end of each iteration); found {len(perf_counter_calls)}"
+        )
+
+    def test_per_file_timings_list_appended(self):
+        """The trial loop must append a dict with ``file_index``,
+        ``n_psd_segs``, and ``elapsed_ms`` keys to the per-file accumulator
+        — those are the three columns the aggregator (Commit C) reads."""
+        loop = _find_trial_loop(_parse_inference_module())
+        for node in ast.walk(loop):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "append"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "per_file_timings_ms"
+                and node.args
+                and isinstance(node.args[0], ast.Dict)
+            ):
+                keys = {
+                    k.value for k in node.args[0].keys
+                    if isinstance(k, ast.Constant)
+                }
+                assert {"file_index", "n_psd_segs", "elapsed_ms"}.issubset(keys), (
+                    f"per_file_timings_ms.append payload missing required keys; "
+                    f"got: {sorted(keys)}"
+                )
+                return
+        raise AssertionError(
+            "No per_file_timings_ms.append({...}) call found in trial loop"
+        )
+
+    def test_sidecar_written_when_flag_set(self):
+        """After the loop, ``args.timing_out_json`` must gate a JSON dump
+        of the accumulator. The parent reads this file back; if the gate is
+        missing or the wrong variable is dumped, the parent silently sees
+        an empty list and falls back to the constant ratio."""
+        tree = _parse_inference_module()
+        # The write block is inside ``main`` after the trial loop. We walk
+        # main's body looking for `if args.timing_out_json:` followed by a
+        # `json.dump(per_file_timings_ms, ...)` call.
+        main_fn = _function_def(tree, "main")
+        found = False
+        for node in ast.walk(main_fn):
+            if not isinstance(node, ast.If):
+                continue
+            test = node.test
+            if not (
+                isinstance(test, ast.Attribute)
+                and test.attr == "timing_out_json"
+                and isinstance(test.value, ast.Name)
+                and test.value.id == "args"
+            ):
+                continue
+            for inner in ast.walk(node):
+                if (
+                    isinstance(inner, ast.Call)
+                    and isinstance(inner.func, ast.Attribute)
+                    and inner.func.attr == "dump"
+                    and isinstance(inner.func.value, ast.Name)
+                    and inner.func.value.id == "json"
+                    and inner.args
+                    and isinstance(inner.args[0], ast.Name)
+                    and inner.args[0].id == "per_file_timings_ms"
+                ):
+                    found = True
+                    break
+            if found:
+                break
+        assert found, (
+            "Expected `if args.timing_out_json: ... json.dump(per_file_timings_ms, ...)` "
+            "block in main(); not found."
+        )

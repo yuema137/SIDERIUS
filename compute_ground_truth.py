@@ -15,10 +15,10 @@ grand-mean formulas collapse to anchor-only expressions:
 
     per_segment      = anchor[f][i]² / s_max_GLOBAL
     per_file_linear  = mean_i(per_segment)
-    per_file_score   = log_{5.27}(round(per_file_linear, 2) + 1e-10)
+    per_file_score   = log_{5.27}(per_file_linear + 1e-10)
 
     grand_mean       = ( Σ_{f,i} per_segment ) / ( Σ_f |S_f| )
-    scalar_score     = log_{5.27}(round(grand_mean, 2) + 1e-10)
+    scalar_score     = log_{5.27}(grand_mean + 1e-10)
 
 Both are read directly from ``segment_anchors.json`` — no HDF5 reads, runs
 in milliseconds.
@@ -68,25 +68,32 @@ def _global_per_file_ceiling(
         per_segment     = anchor[i]² / s_max_GLOBAL
         linear_sum      = Σ_i per_segment                   (unrounded)
         per_file_linear = linear_sum / n
-        log_score       = log_{5.27}(round(per_file_linear, 2) + 1e-10)
+        log_score       = log_{5.27}(per_file_linear + 1e-10)
 
     Same ruler as ``compute_raw_baseline._calculate_score`` and as
     ``scoring_utils.score_vector`` (``legacy_mode=False``), so baseline,
     ceiling, and model scores are mutually comparable.
 
-    Returns a 3-tuple ``(log_score, linear_sum, n_segments)``. The unrounded
-    ``linear_sum`` + ``n_segments`` are required by subset-aware aggregation
-    in ``execute_tools.scoring_helpers.build_score_table`` (see Decision 14
-    in ``docs/aggregated_score_table_awareness.md``) — the per-file log
-    score is lossy under ``round(·, 2)`` at weak-injection files.
+    The ``+ 1e-10`` offset places a soft log-space floor at
+    ``log_{5.27}(1e-10) ≈ −13.854`` for files with no signal. Negligible
+    for any ``per_file_linear ≫ 1e-10``. The legacy ``round(·, 2)``
+    quantization that used to live alongside the offset was removed by
+    commit ``6c3f736`` ("kill ghost scores") and is intentionally not
+    reinstated.
+
+    Returns a 3-tuple ``(log_score, linear_sum, n_segments)``. The
+    unrounded ``linear_sum`` + ``n_segments`` are required by
+    subset-aware aggregation in
+    ``execute_tools.scoring_helpers.build_score_table`` (see Decision 14
+    in ``docs/aggregated_score_table_awareness.md``).
 
     See ``docs/align_denoising_score.md`` §4.1.
     """
     n = len(anchors_f)
     linear_sum = sum(v * v for v in anchors_f) / s_max
     per_file_linear = linear_sum / n
-    if per_file_linear > 0 and math.isfinite(per_file_linear):
-        log_score = float(math.log(per_file_linear, 5.27))
+    if math.isfinite(per_file_linear):
+        log_score = float(math.log(max(per_file_linear, 0.0) + 1e-10, 5.27))
     else:
         log_score = float("-inf")
     return log_score, float(linear_sum), n
@@ -100,7 +107,7 @@ def _anchor_normalized_ceiling(
     Per-segment:   per_segment[f,i] = anchor[f,i]² / s_max
     Per-file:      file_vector[f]   = mean_i(per_segment[f,i])
     Grand mean:    grand            = Σ_{f,i} per_segment  /  Σ_f |S_f|
-    Scalar:        score            = log_{5.27}(grand)  [or -inf if grand ≤ 0]
+    Scalar:        score            = log_{5.27}(grand + 1e-10)
 
     Same aggregation as ``scoring_utils.score_vector`` (grand mean over
     log_{5.27}); the only change is that ``snr_squid`` is replaced by
@@ -124,8 +131,8 @@ def _anchor_normalized_ceiling(
         total_weighted += file_sum
         total_count += len(a)
     grand_mean = total_weighted / total_count
-    if grand_mean > 0 and math.isfinite(grand_mean):
-        scalar = math.log(grand_mean, 5.27)
+    if math.isfinite(grand_mean):
+        scalar = math.log(max(grand_mean, 0.0) + 1e-10, 5.27)
     else:
         scalar = float("-inf")
     return file_vector, float(scalar)

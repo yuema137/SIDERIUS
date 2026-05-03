@@ -11,7 +11,7 @@
     ],
     "best_config_analysis": "depth=4, multi=16, focal gamma=2 — architecture has saturated; further depth increases yield near-zero marginal gains.",
     "score_trend": "Scores improved from 1.20 to 1.29 across 2 rounds then plateaued. Architecture capacity is exhausted at this scale.",
-    "frequency_analysis": "Files 0-4 near zero. Files 5-14 around 1.0-1.5. Files 15-19 around 1.0. Uniformly poor across all frequency bands.",
+    "per_file_analysis": "Files 0-4 near zero. Files 5-14 around 1.0-1.5. Files 15-19 around 1.0. Uniformly poor across all frequency bands.",
     "data_sensitivity": "Minimal sensitivity — model is data-saturated at current scale.",
     "efficiency_assessment": "12.3M parameters at 1.29 score. Spectral_net achieves 6.1 with fewer parameters — punet is dominated.",
     "strategy_assessment": "Agent correctly identified the focal loss gain and depth saturation. Architecture replacement is the right next step."
@@ -28,7 +28,7 @@
     ],
     "best_config_analysis": "The frequency-domain convolution configuration achieved the best score. Spectral processing directly addresses the low-frequency gap identified in previous iterations.",
     "score_trend": "Scores improved steadily: 5.85 (round 1) → 5.98 (round 2) → 6.10 (round 3). Stable convergence, no instability.",
-    "frequency_analysis": "Files 0-4: 1.5-2.5 (major improvement over wavenet's near-zero). Files 5-14: 7-9 (comparable to wavenet). Files 15-19: 8-9 (strong).",
+    "per_file_analysis": "Files 0-4: 1.5-2.5 (major improvement over wavenet's near-zero). Files 5-14: 7-9 (comparable to wavenet). Files 15-19: 8-9 (strong).",
     "data_sensitivity": "Moderate sensitivity — score improved 0.25 points when doubling training data in round 2. Not yet data-saturated.",
     "efficiency_assessment": "Comparable parameter count to wavenet, with higher score. Positive efficiency trade-off.",
     "strategy_assessment": "The discovery from iter 1 (low-frequency blindness is structural) directly motivated this architecture. The hypothesis was well-formed and confirmed."
@@ -45,7 +45,7 @@
     ],
     "best_config_analysis": "num_layers=6, dilation_channels=16, focal loss — remains optimal for wavenet. No headroom for further improvement within this architecture family.",
     "score_trend": "Scores stable: 5.52 → 5.57 → 5.58. Model has converged; wavenet has reached its ceiling.",
-    "frequency_analysis": "Files 0-4 near zero — confirmed low-frequency blind spot. Files 5-19 score 6-9. Spectral_net now dominates in the low-frequency band.",
+    "per_file_analysis": "Files 0-4 near zero — confirmed low-frequency blind spot. Files 5-19 score 6-9. Spectral_net now dominates in the low-frequency band.",
     "data_sensitivity": "Minimal — model is data-saturated. Spectral_net shows higher data sensitivity, suggesting more room for improvement with more data.",
     "efficiency_assessment": "4.1M parameters at 5.576. Previously Pareto-dominant; spectral_net now offers better score at similar cost.",
     "strategy_assessment": "Wavenet correctly served as the seed that motivated spectral_net's design. The feedback loop worked as intended."
@@ -62,7 +62,7 @@
       "Files 0-2 still score below 1.0 — the very lowest frequency band remains unresolved even by spectral_net.",
       "Training stability with spectral layers requires careful initialisation — further investigation needed for multi-round robustness."
     ],
-    "frequency_comparison": "Spectral_net dominates files 0-4 (1.5-2.5 vs near-zero for wavenet and punet). Files 5-19: all three architectures score comparably (6-9). The low-frequency gap is the only remaining differentiated region.",
+    "per_file_comparison": "Spectral_net dominates files 0-4 (1.5-2.5 vs near-zero for wavenet and punet). Files 5-19: all three architectures score comparably (6-9). The low-frequency gap is the only remaining differentiated region.",
     "efficiency_comparison": "Spectral_net achieves +0.524 over wavenet at similar parameter count. This is the most efficient architecture improvement to date.",
     "take_home_message": "Frequency-domain processing has been validated as the solution to the low-frequency blind spot — the next iteration should focus on the remaining gap at the very lowest frequency bands (files 0-2)."
   }

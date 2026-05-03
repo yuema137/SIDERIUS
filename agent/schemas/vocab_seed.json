@@ -90,21 +90,21 @@
   {
     "name": "receptive_field",
     "kind": "capability",
-    "description": "How far back in time the model can see per layer stack \u2014 wider receptive field enables better low-frequency signal capture.",
+    "description": "How far back in time the model can see per layer stack \u2014 wider receptive field enables capture of long-timescale signal structure.",
     "related_to": [],
     "tier": "canonical"
   },
   {
     "name": "frequency_resolution",
     "kind": "capability",
-    "description": "The model's ability to distinguish and process different frequency bands in the signal independently.",
+    "description": "The model's ability to distinguish and process different spectral components in the signal independently.",
     "related_to": [],
     "tier": "canonical"
   },
   {
     "name": "selective_frequency_processing",
     "kind": "capability",
-    "description": "Ability to attenuate or amplify specific frequency bands independently, rather than treating the spectrum uniformly.",
+    "description": "Ability to attenuate or amplify specific spectral components independently, rather than treating the spectrum uniformly.",
     "related_to": [],
     "tier": "canonical"
   },
@@ -125,7 +125,7 @@
   {
     "name": "long_range_dependency",
     "kind": "capability",
-    "description": "Model's capacity to capture correlations across distant timesteps \u2014 critical for low-frequency signal recovery.",
+    "description": "Model's capacity to capture correlations across distant timesteps \u2014 critical for recovering slowly-varying signal structure.",
     "related_to": [],
     "tier": "canonical"
   },

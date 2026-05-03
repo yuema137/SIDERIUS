@@ -9,12 +9,14 @@ from core.server_configs._base import ServerConfig
 
 CONFIG: ServerConfig = ServerConfig(
     hostname="ligroup",
-    # Measured 2026-04-18 on ligroup, single-process sequential.
-    # N=100 PSD segments of /home/klz/Data/TIDMAD/abra_validation_0000.h5
-    # via execute_tools.scoring_utils.process_segment (2× get_one_sec_psd
-    # + 2× get_snr per segment). Warm-cache mean = 612.9 ms, stdev =
-    # 1.34 ms, p95 = 614.9 ms (cold mean 638.9 ms). See Phase K.2.5
-    # commit 4 in docs/resource_estimator_implement.md for the
-    # measurement protocol.
-    per_psd_segment_seconds=0.613,
+    # Recalibrated 2026-04-30 from V7 formal-round end-to-end timings:
+    # 4000 PSDs × ~0.275 s/segment effective (8-worker pool) ≈ 1100 s
+    # observed across 8 architectures. The 2026-04-18 figure (0.613)
+    # was a single-file warm-cache micro-benchmark on
+    # abra_validation_0000.h5 and underestimated the per-segment cost
+    # of the full validation set by 3.6× (file IO + cross-file variance
+    # + worker spawn overhead are not amortized in the micro-benchmark).
+    # 2.21 = 0.275 s effective × 8 workers, the per-segment raw cost
+    # the estimator divides by num_workers when projecting wall-time.
+    per_psd_segment_seconds=2.21,
 )

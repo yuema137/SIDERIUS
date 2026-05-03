@@ -189,9 +189,11 @@ def parse_args():
             "None → skill falls back to free×0.8 defensive limit."
         ),
     )
-    # --- Formal-mode training levers (Phase M, docs/resource_estimator_implement.md §12) ---
-    # Eval side in formal mode is hardcoded to snapshot + eval_portion=1.0 in
-    # the tuner (intentionally NOT operator-configurable — see §12.2).
+    # --- Formal-mode training levers (Phase M, docs §12) + eval scope (Phase R, §13) ---
+    # Formal eval strategy is locked to ``snapshot``; the portion defaults to
+    # 1.0 (production full-clone for cross-arch comparability, §12.2) and
+    # is operator-configurable via ``--formal_eval_portion`` for smoke / CI
+    # runs that must fit a tight ``--formal_time_budget_minutes`` — §13.
     parser.add_argument(
         "--formal_strategy", type=str, default="snapshot",
         choices=["snapshot", "anchors", "target"],
@@ -209,6 +211,16 @@ def parse_args():
     parser.add_argument(
         "--formal_train_portion", type=float, default=1.0,
         help="Per-epoch iteration fraction from the formal training scope (default 1.0).",
+    )
+    parser.add_argument(
+        "--formal_eval_portion", type=float, default=1.0,
+        help=(
+            "Fraction of segments per file for the formal-mode eval scope "
+            "(snapshot strategy). Default 1.0 = production full-clone for "
+            "cross-architecture score comparability. Lower (e.g. 0.05) for "
+            "smoke / CI runs that must fit --formal_time_budget_minutes "
+            "(Phase R, §13)."
+        ),
     )
     parser.add_argument(
         "--force_formal_round",
@@ -229,14 +241,21 @@ def parse_args():
     parser.add_argument(
         "--formal_round_strategy",
         type=str,
-        choices=["inherit_best_trial", "llm_propose"],
-        default="inherit_best_trial",
+        choices=[
+            "full_clone", "hybrid_params", "independent",  # canonical
+            "inherit_best_trial", "llm_propose",            # legacy aliases
+        ],
+        default="full_clone",
         help=(
             "Orchestration policy for the forced formal round. "
-            "'inherit_best_trial' (default): inherit loss_config + lr from "
-            "the highest-scoring trial-mode success in the iteration; "
-            "model_config, epochs, and batch_size remain LLM-controlled. "
-            "'llm_propose': planner's choices are honored verbatim. "
+            "'full_clone' (default): inherit model_config, loss_config, lr, "
+            "epochs, and batch_size from the highest-scoring trial-mode "
+            "success in the iteration. "
+            "'hybrid_params': inherit only loss_config + lr (planner keeps "
+            "model_config, epochs, batch_size). "
+            "'independent': planner's choices honored verbatim. "
+            "Legacy aliases accepted: 'inherit_best_trial' -> full_clone, "
+            "'llm_propose' -> independent (resolved by schema). "
             "Has no effect when --no-force_formal_round is set."
         ),
     )
@@ -332,16 +351,53 @@ def parse_args():
 
 
 def _run_one_iter(args, workspace, llm_config, advice, source_paths, iteration):
-    """Run a single iteration in the chain-in-one-process loop."""
+    """Run a single iteration in the chain-in-one-process loop.
+
+    Mirrors ``sdsc_submission_scripts/run_one_iteration.py`` main(): each
+    iter re-derives chain-resume state from disk via ``restore_prior_state``
+    and threads the cross-iter carry-over fields (vocab + accumulated
+    negative feedback) into ``run_workflow``. The in-process loop is then
+    structurally identical to the SDSC per-iter chain modulo the process
+    boundary, so any future kwargs added to one entry must reach the other
+    (Phase 6.8 §3.8 / test_chain_consistency.py Gate B).
+
+    ``source_paths`` is the immutable user-supplied seed list — never the
+    growing chain list. ``restore_prior_state`` walks the workspace and
+    prepends prior iter outputs onto these seeds to assemble the per-iter
+    chain source list.
+    """
     run_name = f"iter_{iteration:03d}"
     iter_dir = os.path.join(workspace, run_name)
     os.makedirs(iter_dir, exist_ok=True)
 
+    # Re-derive chain-resume state from disk every iter. For iteration == 1
+    # this is a no-op returning seeds verbatim with empty accumulators; for
+    # iteration > 1 it walks committed iters and assembles vocab +
+    # accumulated_* alongside the chain source-paths list. Single source of
+    # truth — replaces both the legacy outer ``if start_iter > 1`` block and
+    # the manual ``source_paths.append(manifest["output_path"])`` chain-feed.
+    try:
+        state = restore_prior_state(
+            workspace=workspace,
+            current_iter=iteration,
+            seed_paths=source_paths,
+        )
+    except ResumeError as e:
+        print(f"ERROR: restore_prior_state refused at iter {iteration}: {e}")
+        sys.exit(1)
+
+    if state.committed_iters:
+        print(
+            f"[CHAIN] Restored {len(state.restored_plugins)} prior plugin(s) "
+            f"from iters {state.committed_iters}"
+        )
+
     results = run_workflow(
-        source_paths=source_paths,
+        source_paths=state.resolved_source_paths,
         workspace=workspace,
         run_name=run_name,
         max_iterations=1,
+        start_iteration=iteration,
         max_rounds=args.max_rounds,
         max_proposal_attempts=args.max_proposal_attempts,
         llm_config=llm_config,
@@ -368,6 +424,7 @@ def _run_one_iter(args, workspace, llm_config, advice, source_paths, iteration):
         formal_strategy=args.formal_strategy,
         formal_portion=args.formal_portion,
         formal_train_portion=args.formal_train_portion,
+        formal_eval_portion=args.formal_eval_portion,
         force_formal_round=args.force_formal_round,
         formal_round_strategy=args.formal_round_strategy,
         degenerate_penalty_score=args.degenerate_penalty_score,
@@ -383,6 +440,10 @@ def _run_one_iter(args, workspace, llm_config, advice, source_paths, iteration):
         minimum_boldness=args.minimum_boldness,
         max_impl_attempts=args.max_impl_attempts,
         debug_dump_prompts=args.debug_dump_prompts,
+        restored_runtime_vocab=state.runtime_vocab,
+        accumulated_key_findings=state.accumulated_key_findings,
+        accumulated_physical_rejections=state.accumulated_physical_rejections,
+        accumulated_gate_exhaustions=state.accumulated_gate_exhaustions,
     )
 
     manifest = write_manifest(iter_dir, run_name, results)
@@ -486,7 +547,12 @@ def main():
     print(f"  VRAM budget   : trial={trial_vram_str}  |  formal={formal_vram_str}")
     print(f"  Formal train  : strategy={args.formal_strategy}  portion={args.formal_portion}  train_portion={args.formal_train_portion}")
     print(f"  Last round    : force_formal={args.force_formal_round} (False ⇒ honour planner — testing only)")
-    print(f"  Formal eval   : LOCKED to snapshot + eval_portion=1.0 (Phase M)")
+    formal_eval_note = (
+        " (production full-clone, §12.2)"
+        if args.formal_eval_portion == 1.0
+        else " (smoke / CI scope-down, Phase R §13)"
+    )
+    print(f"  Formal eval   : strategy=snapshot  eval_portion={args.formal_eval_portion}{formal_eval_note}")
     print(f"  Attempt budget: trial={args.attempts_per_round}/round  formal={args.attempts_per_formal_round}/round  fail-brake={args.max_fail_rounds} (Phase L)")
     print(f"  Data dir      : {args.data_dir or 'unset (skill uses static formula)'}")
     print(f"  Advice    : {args.advice}")
@@ -496,22 +562,12 @@ def main():
     print(f"  Min boldness     : {args.minimum_boldness}")
     print("=" * 60)
 
-    # Restore prior state when resuming from a higher iteration
-    if start_iter > 1:
-        try:
-            state = restore_prior_state(
-                workspace=workspace,
-                current_iter=start_iter,
-                seed_paths=source_paths,
-            )
-        except ResumeError as e:
-            print(f"ERROR: restore_prior_state refused: {e}")
-            sys.exit(1)
-        source_paths = state.resolved_source_paths
-        print(f"[CHAIN] Restored {len(state.restored_plugins)} prior plugin(s) "
-              f"from iters {state.committed_iters}")
-
-    # Chain-in-one-process loop: each iter is run_workflow(max_iterations=1)
+    # Chain-in-one-process loop: each iter is run_workflow(max_iterations=1).
+    # ``source_paths`` here is the immutable user-supplied seed list — the
+    # per-iter ``restore_prior_state`` call inside ``_run_one_iter`` walks
+    # the workspace and prepends prior iter outputs onto these seeds, so the
+    # seed list is never mutated by the loop itself. This matches one-iter's
+    # main(): restore is the single source of truth for chain assembly.
     for iteration in range(start_iter, args.max_iterations + 1):
         print(f"\n{'='*60}")
         print(f"  IN-PROCESS CHAIN — ITERATION {iteration}/{args.max_iterations}")
@@ -522,7 +578,6 @@ def main():
         )
 
         if manifest["status"] == "completed" and manifest.get("output_path"):
-            source_paths = list(source_paths) + [manifest["output_path"]]
             print(f"  Iteration {iteration} completed: score={manifest['best_score']}")
         else:
             print(f"  Iteration {iteration} failed — stopping chain.")

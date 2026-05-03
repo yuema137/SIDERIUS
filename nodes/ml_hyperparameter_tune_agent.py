@@ -19,7 +19,7 @@ import argparse
 import importlib
 import traceback
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 from pydantic import ValidationError
 
@@ -39,12 +39,19 @@ from agent.schemas.hyperparam_tuning import (
 )
 from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_utils import SampleSet, coerce_nonfinite_to_none
-from execute_tools.scoring_helpers import build_score_table
+from execute_tools.scoring_helpers import (
+    build_score_table,
+    file_vector_to_log_space,
+)
+from nodes.agent_data_stream import log_score_table
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 from execute_tools.build_anchor_map import load_anchor_map
 from nodes.scoring_reference import load_reference_scores
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.skills.evaluate_time_skill import calibration as time_calibration
+from agent.skills.evaluate_time_skill.wrapper import (
+    _aggregate_inference_file_timings,
+)
 from agent.utils.architectural_pattern_tagger import (
     TIME_FACTOR_THRESHOLD,
     VRAM_FACTOR_THRESHOLD,
@@ -123,13 +130,138 @@ def _best_trial_winner(memory_history: list) -> Optional[dict]:
     return max(candidates, key=lambda r: r["denoising_score"])
 
 
+def _latest_trial_inference_marginal(memory_history: list) -> Optional[float]:
+    """Return the most recent successful trial round's measured per-PSD-segment
+    inference cost in ms, or ``None`` if no qualifying record exists.
+
+    refine_inference_time_estimator.md Commit D — feeds the formal round's
+    time gate as ``inference_per_psd_seg_ms_hint`` so the gate uses the
+    measured marginal instead of the legacy ``× 2.7`` ratio.
+
+    Looks within the *current iteration's* memory history only — under the
+    Commit A (Step 0) ``model_cfg`` inheritance rule, formal rounds within
+    an iteration always run the trial-winner architecture, so a measurement
+    from an earlier iter is for a different arch and must not be reused.
+    The chain runner already partitions ``memory_history`` per iteration,
+    so the caller passes whatever in-iter record list it already has.
+
+    Eligibility predicate: ``status == "success"`` AND
+    ``memory.time_mode == "trial"`` AND
+    ``memory.inference_per_psd_seg_ms_measured`` is a positive float. We
+    walk in reverse so an OOM-killed retry between two successful trials
+    doesn't displace the most recent useful measurement.
+    """
+    for r in reversed(memory_history):
+        if r.get("status") != "success":
+            continue
+        mem = r.get("memory") or {}
+        if mem.get("time_mode") != "trial":
+            continue
+        v = mem.get("inference_per_psd_seg_ms_measured")
+        if v is not None and v > 0:
+            return float(v)
+    return None
+
+
+# --------------------------------------------------------------------- #
+# Formal-round strategy aliasing + registry
+# (refactor_formal_round_strategy.md — Phase 1 added the alias map; Phase 2
+# wires the three handlers + dispatch table consumed below in
+# :func:`_apply_mode_override_chain`.)
+# --------------------------------------------------------------------- #
+# The schema's ``@field_validator`` is the primary canonicalisation point
+# and live callers always reach this function with the already-canonical
+# name; this helper is a defensive second pass so unit tests, ad-hoc
+# constructions, and any future internal caller that bypasses the schema
+# still see consistent behavior.
+_LEGACY_STRATEGY_ALIASES: Dict[str, str] = {
+    "inherit_best_trial": "full_clone",
+    "llm_propose":        "independent",
+}
+
+
+def _canonical_strategy(name: str) -> str:
+    """Return the canonical name for ``name``, resolving any legacy alias.
+
+    Unknown names pass through unchanged — schema-layer validation is
+    responsible for rejecting them.
+    """
+    return _LEGACY_STRATEGY_ALIASES.get(name, name)
+
+
+# --------------------------------------------------------------------- #
+# Strategy handlers
+# --------------------------------------------------------------------- #
+# Each handler mutates ``plan`` in place using the trial ``winner`` record
+# and returns the list of inherited field names (used by the audit log).
+# Signature is uniform so the registry can dispatch without special-casing.
+# Defensive ``.get()`` reads on ``winner["params"]["train_config"]`` keys —
+# legacy/sparse records may omit ``epochs``/``batch_size``; in that case
+# the planner's value survives rather than crashing the chain on KeyError.
+
+def _strategy_full_clone(plan: ExperimentPlan, winner: dict) -> List[str]:
+    """Inherit all five fields: model_cfg, loss_cfg, lr, epochs, batch_size.
+
+    Production default. Required for the trial→formal inference-time
+    measurement reuse landed in commits B–D of
+    ``docs/refine_inference_time_estimator.md`` — the timing measurement
+    must be for the same architecture the formal round runs.
+    """
+    p = winner["params"]
+    plan.model_cfg = dict(p.get("model_config") or {})
+    plan.loss_cfg = dict(p["loss_config"])
+    plan.train_cfg["lr"] = p["train_config"]["lr"]
+    inherited = ["model_cfg", "loss_cfg", "lr"]
+    inherited_epochs = p["train_config"].get("epochs")
+    if inherited_epochs is not None:
+        plan.train_cfg["epochs"] = inherited_epochs
+        inherited.append("epochs")
+    inherited_bs = p["train_config"].get("batch_size")
+    if inherited_bs is not None:
+        plan.train_cfg["batch_size"] = inherited_bs
+        inherited.append("batch_size")
+    return inherited
+
+
+def _strategy_hybrid_params(plan: ExperimentPlan, winner: dict) -> List[str]:
+    """Inherit only loss_cfg + lr; planner keeps model_cfg, epochs, batch_size.
+
+    Audit/exploration use case — lock the evaluation surface (loss + lr)
+    but let the LLM scale capacity for the full-data pass. The time gate
+    may reject the planner's heavier choice on the formal round; that is
+    the intended trade-off, not a bug.
+    """
+    p = winner["params"]
+    plan.loss_cfg = dict(p["loss_config"])
+    plan.train_cfg["lr"] = p["train_config"]["lr"]
+    return ["loss_cfg", "lr"]
+
+
+def _strategy_independent(plan: ExperimentPlan, winner: dict) -> List[str]:
+    """No-op. Planner's full plan survives verbatim.
+
+    ``winner`` is unused but kept in the signature so the registry can
+    dispatch without special-casing.
+    """
+    return []
+
+
+_FORMAL_STRATEGY_REGISTRY: Dict[
+    str, Callable[[ExperimentPlan, dict], List[str]]
+] = {
+    "full_clone":    _strategy_full_clone,
+    "hybrid_params": _strategy_hybrid_params,
+    "independent":   _strategy_independent,
+}
+
+
 def _apply_mode_override_chain(
     plan: ExperimentPlan,
     *,
     trial_allowed: bool,
     is_formal_round: bool,
     force_formal_round: bool,
-    formal_round_strategy: str = "inherit_best_trial",
+    formal_round_strategy: str = "full_clone",
     memory_history: Optional[list] = None,
 ) -> ExperimentPlan:
     """Apply the run-level + last-round overrides to ``plan``.
@@ -142,60 +274,100 @@ def _apply_mode_override_chain(
        every iteration normally forces ``plan.is_trial = False`` so the
        run produces a cross-architecture comparable score. Operators can
        disable this override by passing ``--no-force_formal_round``.
-    3. **Hyperparameter inheritance**, gated on
-       ``formal_round_strategy``:
+    3. **Hyperparameter inheritance**, dispatched through
+       :data:`_FORMAL_STRATEGY_REGISTRY` keyed by the canonical
+       ``formal_round_strategy`` (legacy aliases ``inherit_best_trial`` /
+       ``llm_propose`` resolve via :func:`_canonical_strategy`):
 
-       * ``"inherit_best_trial"`` (default) — when (2) fires AND
-         ``memory_history`` contains at least one successful trial
-         round, ``plan.loss_cfg`` and ``plan.train_cfg["lr"]`` are
-         overwritten with the highest-scoring trial round's values.
-         ``model_cfg``, ``epochs``, and ``batch_size`` are left
-         untouched — the LLM may legitimately scale those for the
-         formal pass. If no trial winner exists, the planner's choices
-         survive and a warning is logged (resilient: a messy trial
-         stage shouldn't kill the chain).
-       * ``"llm_propose"`` — inheritance is skipped; the planner's
-         loss + lr survive verbatim. ``plan.is_trial`` is still flipped
-         to False so the round runs as formal.
+       * ``"full_clone"`` (default) — copies all 5 fields from the
+         highest-scoring trial-mode success record. Production default;
+         required for trial→formal inference-time measurement reuse.
+       * ``"hybrid_params"`` — copies only ``loss_cfg`` + ``lr``;
+         planner keeps ``model_cfg`` / ``epochs`` / ``batch_size``.
+         Audit / exploration use case.
+       * ``"independent"`` — no inheritance; planner's plan survives
+         verbatim. ``plan.is_trial`` is still flipped to False.
 
-       Why the inheritance default exists: in iter_001/iter_002 of
-       explore_novel_v7 the LLM picked an untested ``focal_cw`` loss
-       for the formal round despite all trial rounds using ``focal``;
-       the resulting model collapsed to ~0 PSD output. The default
-       policy mandates the formal round be a longer training of the
-       winning trial config, not a sandbox for new loss functions.
+       Shared no-winner fallback for ``full_clone`` and ``hybrid_params``:
+       when ``memory_history`` carries no successful trial round, the
+       planner's plan is preserved unchanged and a WARNING is logged
+       (resilient — a messy trial stage shouldn't kill the chain).
+       ``independent`` skips the warning because the strategy explicitly
+       disclaims inheritance — there was nothing the user wanted to
+       inherit.
+
+       Why the default exists: V7 iter_001/iter_002 of explore_novel
+       showed the LLM picking an untested ``focal_cw`` loss for the
+       formal round despite all trial rounds using ``focal``; the
+       resulting model collapsed to ~0 PSD output. V9 audit §7 found
+       the same pattern at the architecture level — formal rounds
+       emitting ``kernel_size=2``/``use_same_padding=False`` when both
+       trial rounds used ``kernel_size=3``/``use_same_padding=True``.
+
+    Audit log contract (refactor_formal_round_strategy.md §3):
+
+    * ``[STRATEGY] formal_round_strategy=<canonical>`` — emitted once
+      per forced formal round. Includes ``(alias_of:<legacy>)`` when
+      the caller passed a legacy literal.
+    * ``[FORMAL OVERRIDE] strategy=<canonical> winner=<exp_id>
+      score=<float> inherited=<comma-list>`` on the inherit path, OR
+      a WARNING line on the no-winner path (full_clone / hybrid_params).
 
     Mutates ``plan`` in place and returns it for caller-chaining.
     """
     if not trial_allowed:
         plan.is_trial = False
-    if is_formal_round and force_formal_round:
-        plan.is_trial = False
-        if formal_round_strategy == "inherit_best_trial":
-            winner = _best_trial_winner(memory_history or [])
-            if winner is not None:
-                winner_loss = winner["params"]["loss_config"]
-                winner_lr = winner["params"]["train_config"]["lr"]
-                plan.loss_cfg = dict(winner_loss)  # copy to avoid aliasing
-                plan.train_cfg["lr"] = winner_lr
-                print(
-                    f"  [FORMAL OVERRIDE] inheriting loss="
-                    f"{winner_loss.get('loss_type')!r} lr={winner_lr} "
-                    f"from best trial round {winner['exp_id']!r} "
-                    f"(score={winner['denoising_score']:.4f})"
-                )
-            else:
-                print(
-                    "  [FORMAL OVERRIDE] WARNING: no successful trial round "
-                    "in this iteration — formal round will use the planner's "
-                    "loss_config and lr unchanged. Score may be unreliable."
-                )
-        else:
-            # llm_propose — explicit opt-out from inheritance.
+    if not (is_formal_round and force_formal_round):
+        return plan
+
+    plan.is_trial = False
+    canonical = _canonical_strategy(formal_round_strategy)
+    handler = _FORMAL_STRATEGY_REGISTRY.get(canonical)
+    if handler is None:
+        # Defensive — schema validation should reject unknown literals
+        # before they reach this function. If a caller bypassed the
+        # schema (e.g. an ad-hoc test fixture), surface the bypass loudly
+        # and treat the request as ``independent`` to avoid silent
+        # mis-inheritance.
+        print(
+            f"  [STRATEGY] WARNING: unknown strategy {formal_round_strategy!r} — "
+            "treating as 'independent' (no inheritance)."
+        )
+        return plan
+
+    print(
+        f"  [STRATEGY] formal_round_strategy={canonical}"
+        + (
+            f" (alias_of:{formal_round_strategy})"
+            if canonical != formal_round_strategy
+            else ""
+        )
+    )
+
+    winner = _best_trial_winner(memory_history or [])
+    if winner is None:
+        if canonical == "independent":
+            # ``independent`` explicitly disclaims inheritance — a missing
+            # winner is not a warning condition. Still emit one structured
+            # log line so the audit trail is uniform.
             print(
-                f"  [FORMAL OVERRIDE] strategy={formal_round_strategy!r} — "
-                "planner's loss_config and lr honored verbatim."
+                f"  [FORMAL OVERRIDE] strategy={canonical} "
+                f"winner=none inherited=(none)"
             )
+        else:
+            print(
+                "  [FORMAL OVERRIDE] WARNING: no successful trial round "
+                "in this iteration — planner's plan unchanged. "
+                "Score may be unreliable."
+            )
+        return plan
+
+    inherited = handler(plan, winner)
+    print(
+        f"  [FORMAL OVERRIDE] strategy={canonical} "
+        f"winner={winner['exp_id']!r} score={winner['denoising_score']:.4f} "
+        f"inherited={','.join(inherited) if inherited else '(none)'}"
+    )
     return plan
 
 
@@ -262,10 +434,13 @@ def _resolve_sample_set_cfg(
 ) -> dict:
     """Resolve sample-set config for one round based on trial/formal/single_file mode.
 
-    Formal-mode eval is LOCKED to snapshot + eval_portion=1.0 so scores are
-    architecturally comparable across architectures (Phase M, §12.2). Formal
-    training levers come from ``agent_input.formal_*``. Trial-mode values come
-    from the planner. Single-file mode uses safe defaults.
+    Formal-mode eval strategy is locked to ``snapshot``; the portion defaults
+    to 1.0 (full clone — Phase M §12.2 production contract for cross-arch
+    score comparability) but is now operator-controllable via
+    ``agent_input.formal_eval_portion`` for smoke / CI runs that need to fit
+    a tight ``formal_time_budget_minutes`` (Phase R, §13). Formal training
+    levers come from ``agent_input.formal_*``. Trial-mode values come from
+    the planner. Single-file mode uses safe defaults.
 
     Args:
         mode: One of ``"trial"``, ``"formal"``, ``"single_file"``.
@@ -282,7 +457,7 @@ def _resolve_sample_set_cfg(
             "trial_portion":  agent_input.formal_portion,
             "train_portion":  agent_input.formal_train_portion,
             "eval_strategy":  "snapshot",
-            "eval_portion":   1.0,
+            "eval_portion":   agent_input.formal_eval_portion,
         }
     if mode == "trial":
         return {
@@ -1115,10 +1290,12 @@ class HyperparamTuningAgent:
                     else:
                         mode = "single_file"
     
-                    # Phase M — mode-gated sample-set config. Formal-mode eval is
-                    # LOCKED to snapshot + 1.0 so scores are architecturally
-                    # comparable; formal training is operator-configurable via
-                    # agent_input.formal_* fields. See docs/resource_estimator_implement.md §12.
+                    # Phase M / Phase R — mode-gated sample-set config. Formal-mode
+                    # eval strategy is locked to ``snapshot``; the portion defaults
+                    # to 1.0 (production full-clone, §12.2) but is operator-
+                    # configurable via ``agent_input.formal_eval_portion`` (Phase R,
+                    # §13). Formal training levers come from agent_input.formal_*.
+                    # See docs/resource_estimator_implement.md §12 and §13.
                     _cfg = _resolve_sample_set_cfg(mode, agent_input, plan)
                     cfg_trial_strategy = _cfg["trial_strategy"]
                     cfg_trial_portion  = _cfg["trial_portion"]
@@ -1451,15 +1628,32 @@ class HyperparamTuningAgent:
                                           else formal_time_budget)
                     time_check = None
                     if chosen_time_budget is not None:
+                        # refine_inference_time_estimator.md Commit D — pull
+                        # the most recent successful trial round's measured
+                        # per-PSD-segment inference cost out of this iter's
+                        # memory_history (Commit C populated the field) and
+                        # pass it as a hint. The wrapper prefers it over the
+                        # legacy × 2.7 ratio when present and >0; absent or
+                        # zero falls through to the existing fallback
+                        # branches. ``memory_history`` is fetched from
+                        # ``sandbox.get_summary()`` earlier in this attempt
+                        # and is iter-scoped under the chain runner.
+                        inference_hint = _latest_trial_inference_marginal(
+                            memory_history
+                        )
                         print(f"\n[Pre-flight 2/2] Time check "
                               f"(mode={'trial' if plan.is_trial else 'formal'}, "
-                              f"budget={chosen_time_budget} min)...")
+                              f"budget={chosen_time_budget} min, "
+                              f"inf_hint="
+                              f"{f'{inference_hint:.2f} ms/psd_seg' if inference_hint else 'none'}"
+                              f")...")
                         time_check = _run_skill(
                             "evaluate_time_skill",
                             sandbox,
                             **active_params,
                             time_budget_minutes=chosen_time_budget,
                             data_dir=time_data_dir,
+                            inference_per_psd_seg_ms_hint=inference_hint,
                         )
                         if time_check.get("status") == "error":
                             raise RuntimeError(
@@ -1499,6 +1693,15 @@ class HyperparamTuningAgent:
                                     "time_estimate_minutes": time_check.get("estimated_minutes"),
                                     "time_budget_minutes":   time_check.get("limit_minutes"),
                                     "time_mode":             "trial" if plan.is_trial else "formal",
+                                    # refine_inference_time_estimator.md Commit D —
+                                    # surface the inference-ms branch on skipped
+                                    # records too so a verdict that says "skipped"
+                                    # under the measured path is distinguishable
+                                    # from one under the legacy × 2.7 ratio.
+                                    "inference_ms_source": (
+                                        (time_check.get("breakdown") or {})
+                                        .get("inference_ms_source")
+                                    ),
                                 },
                             }
                             # K.2.5-8 — propagate inference soft-fallback flag.
@@ -1620,41 +1823,91 @@ class HyperparamTuningAgent:
                     probe_memory(iter_idx=round_index, phase="pre_score",
                                  workspace=workspace, scope="tuner")
                     t0 = time.time()
-                    if anchor_map_data is not None:
-                        # Anchor-normalized scoring (both trial and formal modes).
-                        # Trial: sparse SampleSet. Formal: full SampleSet (all 20 × 200).
-                        def _denoised_fn(fi):
-                            return f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_{fi:04d}.h5"
-                        # Reference vector for the task-specific health check
-                        # inside score_vector (commits b1+b2). Only meaningful
-                        # on a formal round AND when a trial winner exists in
-                        # this iteration's memory_history. None on trial rounds
-                        # (no benchmark) or on all-formal runs (trial_allowed
-                        # =False) → score_vector skips the predicate gracefully.
-                        _ref_fv = None
-                        if not plan.is_trial:
-                            _winner = _best_trial_winner(memory_history)
-                            if _winner is not None:
-                                _ref_fv = _winner.get("file_vector")
-                        file_vector, final_scalar, is_degenerate, failure_reason = sandbox.score_vector(
-                            sample_set=eval_sample_set,
-                            anchor_map=anchor_map_data["anchors"],
-                            s_max=anchor_map_data["s_max"],
-                            denoised_filename_fn=_denoised_fn,
-                            reference_file_vector=_ref_fv,
-                        )
-                        score_res = {
-                            "status": "success",
-                            "results": {
-                                "denoising_score": final_scalar,
-                                "file_vector": file_vector,
-                                "is_degenerate": is_degenerate,
-                                "failure_reason": failure_reason,
+                    # V8 hardening Domain 2a — wrap the entire scoring block.
+                    # Pre-V8, an exception in score_vector / denoising_score_skill
+                    # bubbled past the loop without writing a record, so the
+                    # tuner's iteration silently lost evidence (training
+                    # checkpoint preserved on disk but no entry in
+                    # memory_history). Now we catch, write an error_scoring
+                    # record (matches the error_training/inference pattern
+                    # above), and continue. See docs/V8_Gap_Report.md Domain 2a.
+                    try:
+                        if anchor_map_data is not None:
+                            # Anchor-normalized scoring (both trial and formal modes).
+                            # Trial: sparse SampleSet. Formal: full SampleSet (all 20 × 200).
+                            def _denoised_fn(fi):
+                                return f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_{fi:04d}.h5"
+                            # Reference vector for the task-specific health check
+                            # inside score_vector (commits b1+b2). Only meaningful
+                            # on a formal round AND when a trial winner exists in
+                            # this iteration's memory_history. None on trial rounds
+                            # (no benchmark) or on all-formal runs (trial_allowed
+                            # =False) → score_vector skips the predicate gracefully.
+                            _ref_fv = None
+                            if not plan.is_trial:
+                                _winner = _best_trial_winner(memory_history)
+                                if _winner is not None:
+                                    _ref_fv = _winner.get("file_vector")
+                            file_vector, final_scalar, is_degenerate, failure_reason = sandbox.score_vector(
+                                sample_set=eval_sample_set,
+                                anchor_map=anchor_map_data["anchors"],
+                                s_max=anchor_map_data["s_max"],
+                                denoised_filename_fn=_denoised_fn,
+                                reference_file_vector=_ref_fv,
+                            )
+                            score_res = {
+                                "status": "success",
+                                "results": {
+                                    "denoising_score": final_scalar,
+                                    "file_vector": file_vector,
+                                    "is_degenerate": is_degenerate,
+                                    "failure_reason": failure_reason,
+                                },
+                            }
+                        else:
+                            # Legacy single-file mode (trial_allowed=False, no anchor map)
+                            score_res = _run_skill("denoising_score_skill", sandbox, **active_params)
+                    except Exception as e:
+                        scoring_time = round(time.time() - t0, 1)
+                        probe_memory(iter_idx=round_index, phase="post_score",
+                                     workspace=workspace, scope="tuner")
+                        error_msg = f"{type(e).__name__}: {e}"
+                        short_msg = error_msg[-500:] if len(error_msg) > 500 else error_msg
+                        error_record = {
+                            "exp_id":          exp_id,
+                            "status":          "error_scoring",
+                            "model_type":      model_type,
+                            "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "file_index":      file_index,
+                            "params":          record_params,
+                            "denoising_score": None,
+                            "timing": {
+                                "train_time_s":     train_time,
+                                "inference_time_s": inference_time,
+                                "scoring_time_s":   scoring_time,
+                            },
+                            "memory": {
+                                "expert_advice_followed": expert_advice_str,
+                                "hypothesis":    hypothesis,
+                                "conclusion":    f"Scoring crashed: {short_msg}",
+                                "discovery":     (
+                                    f"Training and inference completed but scoring "
+                                    f"raised {type(e).__name__}: {short_msg}"
+                                ),
+                                "memory_update": (
+                                    "Scoring crash — training succeeded so the "
+                                    "checkpoint may be reusable. Investigate the "
+                                    "scoring path (anchor map, sample_set, file "
+                                    "vector shape) before retrying this config."
+                                ),
                             },
                         }
-                    else:
-                        # Legacy single-file mode (trial_allowed=False, no anchor map)
-                        score_res = _run_skill("denoising_score_skill", sandbox, **active_params)
+                        error_record["memory"]["round_index"] = round_index
+                        error_record["memory"]["attempt_in_round"] = attempt_in_round
+                        ExperimentRecord.model_validate(error_record)
+                        sandbox.save_record(error_record)
+                        print(f"  Saved error record: {error_record['status']}")
+                        continue
                     scoring_time = round(time.time() - t0, 1)
                     probe_memory(iter_idx=round_index, phase="post_score",
                                  workspace=workspace, scope="tuner")
@@ -1687,13 +1940,22 @@ class HyperparamTuningAgent:
                     # penalty leaves the scalar populated — rendering the
                     # penalty into the markdown 'model' column would mislead
                     # the next planner. failure_reason carries the signal.
+                    # Phase 8 / P0 (docs/aggregated_score_table_awareness.md):
+                    # ``score_vector`` returns ``file_vector`` in LINEAR space
+                    # (per-file mean of the normalised score), but
+                    # ``build_score_table`` expects the model column in LOG
+                    # space so it is unit-consistent with the log-space
+                    # reference columns. Convert via the project-standard
+                    # log_{5.27}(v + 1e-10) helper before handing off.
                     score_table: Optional[ScoreComparisonTable] = None
                     _sc_fv = score_results.get("file_vector")
                     _sc_scalar = score_results.get("denoising_score")
                     if _sc_fv is not None and _sc_scalar is not None and not _is_degenerate_formal:
                         try:
+                            _sc_fv_log = file_vector_to_log_space(_sc_fv)
                             score_table = build_score_table(
-                                model_fv_log=_sc_fv,
+                                model_fv_log=_sc_fv_log,
+                                model_fv_linear=_sc_fv,
                                 model_scalar=_sc_scalar,
                                 reference=reference_scores,
                             )
@@ -1704,6 +1966,26 @@ class HyperparamTuningAgent:
                                 f"score_table=None."
                             )
                             score_table = None
+
+                    # Phase 8 / P-Alpha: append every successfully-built
+                    # score_table to the workspace audit stream so we have
+                    # a queryable record of exactly what was rendered for
+                    # the next agent. Best-effort — failures are logged
+                    # inside ``log_score_table`` and never raised.
+                    if score_table is not None:
+                        log_score_table(
+                            workspace=workspace,
+                            score_table=score_table,
+                            metadata={
+                                "run_name": run_name,
+                                "model_type": agent_input.model_type,
+                                "exp_id": exp_id,
+                                "round_index": round_index,
+                                "attempt_in_round": attempt_in_round,
+                                "is_trial": plan.is_trial,
+                                "table_kind": "trial" if plan.is_trial else "formal",
+                            },
+                        )
 
                     # Cleanup denoised files to save disk space
                     if agent_input.cleanup_denoised:
@@ -1885,6 +2167,16 @@ class HyperparamTuningAgent:
                         final_record["memory"]["time_mode"] = (
                             "trial" if plan.is_trial else "formal"
                         )
+                        # refine_inference_time_estimator.md Commit D — record
+                        # which branch of the 3-way inference-ms derivation
+                        # the gate took. Audit logs distinguish a measured
+                        # ``trial_inference_warmup`` verdict from the legacy
+                        # ``training_warmup_x2.7_fallback`` and the
+                        # ``static_formula`` paths. Source is None on records
+                        # where the breakdown didn't carry it (defensive).
+                        final_record["memory"]["inference_ms_source"] = (
+                            (time_check.get("breakdown") or {}).get("inference_ms_source")
+                        )
                     # Phase K — surface pre-flight VRAM-estimator context to the
                     # planner the same way Phase J surfaces time context. Only
                     # added when the gate ran with a budget (chosen_vram_budget
@@ -1904,6 +2196,39 @@ class HyperparamTuningAgent:
                     # identify success rounds that ran against a guessed batch.
                     if resource_check.get("inference_batch_uncalibrated"):
                         final_record["memory"]["inference_batch_uncalibrated"] = True
+                    # refine_inference_time_estimator.md Commit C — persist the
+                    # measured per-PSD-segment inference cost into the round's
+                    # memory whenever the trial-mode subprocess emitted a
+                    # populated sidecar. Commit D will read this value back via
+                    # ``_latest_trial_inference_marginal`` to feed the formal
+                    # round's time gate as a hint, replacing the hand-calibrated
+                    # × 2.7 ratio that drove V9 §8 over-prediction. The fields
+                    # are written even when the aggregator returns ``None`` —
+                    # an absent sidecar (legacy / OOM-killed trial / non-trial
+                    # round) falls through to ``inf_status.get(...)`` returning
+                    # an empty list, the aggregator returning ``None``, and the
+                    # measurement keys staying ``None``. The schema accepts None
+                    # for all six (Optional[T] = None), so nothing breaks for
+                    # legacy or fallback rounds.
+                    inf_per_file = inf_status.get("per_file_timings_ms", []) or []
+                    inf_per_psd_seg_ms, inf_breakdown = (
+                        _aggregate_inference_file_timings(inf_per_file)
+                    )
+                    final_record["memory"]["inference_per_psd_seg_ms_measured"] = (
+                        inf_per_psd_seg_ms
+                    )
+                    final_record["memory"]["inference_warmup_aggregator"] = (
+                        inf_breakdown.get("aggregator")
+                    )
+                    final_record["memory"]["inference_n_timed_files"] = (
+                        inf_breakdown.get("n_timed_files")
+                    )
+                    final_record["memory"]["inference_warmup_fraction"] = (
+                        inf_breakdown.get("warmup_fraction")
+                    )
+                    final_record["memory"]["inference_process_startup_ms"] = (
+                        inf_status.get("process_startup_ms")
+                    )
                     # Phase L — round bookkeeping for the per-round budget audit.
                     final_record["memory"]["round_index"] = round_index
                     final_record["memory"]["attempt_in_round"] = attempt_in_round
@@ -2080,7 +2405,7 @@ class HyperparamTuningAgent:
                 f"Surfacing to next proposer."
             )
 
-        agent_output = HyperparamTuningOutput.model_validate({
+        agent_output_dict = {
             "run_name":                          run_name,
             "model_type":                        model_type_setting,
             "file_index":                        file_index,
@@ -2108,16 +2433,52 @@ class HyperparamTuningAgent:
             "max_fail_rounds":                   max_fail_rounds_setting,
             "consecutive_fail_rounds_at_exit":   consecutive_fails,
             "termination_reason":                termination_reason,
-        })
+        }
 
         output_path = os.path.join(workspace, f"run_output_{run_name}.json")
-        # Coerce float('-inf') no-signal sentinels to JSON null at the storage
-        # boundary — model_dump_json would otherwise emit non-standard
-        # ``-Infinity`` tokens that break the dashboard's ``JSON.parse``.
-        safe_output = coerce_nonfinite_to_none(agent_output.model_dump())
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(safe_output, f, indent=4)
-        print(f"Output validated and saved -> {output_path}")
+        # V8 hardening Domain 2c — wrap final output validation + write so
+        # a partial file lands on disk even if Pydantic validation or JSON
+        # serialization raises. Without this, a malformed all_records entry
+        # left no run_output_*.json at all, and core.resume.restore_prior_state
+        # halted the entire chain on "run_output file missing". The fallback
+        # writes a minimal status="failed" record carrying just the chain-
+        # restoration essentials so the next iter can keep going.
+        # See docs/V8_Gap_Report.md Domain 2c.
+        try:
+            agent_output = HyperparamTuningOutput.model_validate(agent_output_dict)
+            # Coerce float('-inf') no-signal sentinels to JSON null at the
+            # storage boundary — model_dump_json would otherwise emit
+            # non-standard ``-Infinity`` tokens that break the dashboard's
+            # ``JSON.parse``.
+            safe_output = coerce_nonfinite_to_none(agent_output.model_dump())
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(safe_output, f, indent=4)
+            print(f"Output validated and saved -> {output_path}")
+        except Exception as e:
+            print(
+                f"  [DEGRADED] HyperparamTuningOutput serialization failed: "
+                f"{type(e).__name__}: {e}. Writing best-effort partial output."
+            )
+            partial_dict = {
+                "run_name":         run_name,
+                "model_type":       model_type_setting,
+                "file_index":       file_index,
+                "status":           "failed",
+                "completed_rounds": completed_rounds,
+                "total_attempts":   total_attempts,
+                "started_at":       started_at,
+                "finished_at":      finished_at,
+                "termination_reason": termination_reason,
+                "_partial_reason":  f"{type(e).__name__}: {e}",
+            }
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(partial_dict, f, indent=4, default=str)
+            print(f"  [DEGRADED] Partial output written -> {output_path}")
+            # Also build a minimal-but-valid in-memory output so callers
+            # downstream (run_one_iteration manifest writer) don't crash on
+            # a None reference. This second validate is on a strictly
+            # smaller payload — re-raising here means a true bug.
+            agent_output = HyperparamTuningOutput.model_validate(partial_dict)
 
         if termination_reason == "completed":
             print(f"\nCompleted {completed_rounds} research rounds. Loop terminated.")
@@ -2217,9 +2578,10 @@ def main():
     parser.add_argument("--train_portion", type=float, default=0.1,
                         help="Per-epoch subsample from training scope (default: 0.1).")
 
-    # Formal-mode training levers (Phase M). Eval side is hardcoded to
-    # snapshot + eval_portion=1.0 in the tuner — not operator-configurable.
-    # See docs/resource_estimator_implement.md §12.
+    # Formal-mode training levers (Phase M). Eval scope defaults to full
+    # snapshot (formal_eval_portion=1.0) for production score comparability,
+    # but is now operator-configurable for smoke / CI runs that need to fit
+    # a tight budget — Phase R, docs/resource_estimator_implement.md §13.
     parser.add_argument("--formal_strategy", type=str, default="snapshot",
                         choices=["snapshot", "anchors", "target"],
                         help="Training-side sampling strategy in formal mode (default: snapshot).")
@@ -2227,6 +2589,11 @@ def main():
                         help="Fraction of segments per file for formal training scope (default: 0.1).")
     parser.add_argument("--formal_train_portion", type=float, default=1.0,
                         help="Per-epoch iteration fraction for formal training (default: 1.0).")
+    parser.add_argument("--formal_eval_portion", type=float, default=1.0,
+                        help="Fraction of segments per file for the formal-mode eval "
+                             "scope (snapshot strategy). Default 1.0 = legacy full-clone "
+                             "behaviour. Lower (e.g. 0.05) for smoke / CI runs that need "
+                             "to fit the formal_time_budget_minutes gate.")
 
     parser.add_argument("--human_advice", type=str, default=None,
                         help="Human guidance for the agent (injected alongside expert_advice).")
@@ -2343,6 +2710,7 @@ def main():
     input_dict["formal_strategy"]      = args.formal_strategy
     input_dict["formal_portion"]       = args.formal_portion
     input_dict["formal_train_portion"] = args.formal_train_portion
+    input_dict["formal_eval_portion"]  = args.formal_eval_portion
 
     if args.human_advice:
         input_dict["human_advice"] = args.human_advice

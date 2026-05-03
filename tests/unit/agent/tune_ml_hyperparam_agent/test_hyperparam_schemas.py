@@ -341,6 +341,84 @@ class TestExperimentRecordSuccess:
 
 
 # ---------------------------------------------------------------------------
+# V8 hardening Domain 2a — error_scoring status (commit e247e1d Fix 2a)
+# ---------------------------------------------------------------------------
+
+class TestExperimentRecordErrorScoringStatus:
+    """The Fix 2a scoring-crash handler in ml_hyperparameter_tune_agent.py
+    builds an ExperimentRecord with status='error_scoring' and validates it
+    via model_validate. If the schema's status Literal does not include
+    'error_scoring', that validate call raises ValidationError mid-handler
+    and the iteration crashes — the exact failure mode Fix 2a was supposed
+    to prevent. These tests pin the contract.
+    """
+
+    def _error_scoring_record(self) -> dict:
+        """Mirror the exact dict shape built by Fix 2a in
+        ml_hyperparameter_tune_agent.py at the scoring crash branch."""
+        return {
+            "exp_id":          "punet_v1_007",
+            "status":          "error_scoring",
+            "model_type":      "punet",
+            "timestamp":       "2026-04-30 16:00:00",
+            "file_index":      6,
+            "params":          {"model_config": {}, "train_config": {}, "loss_config": {}},
+            "denoising_score": None,
+            "timing": {
+                "train_time_s":     45.0,
+                "inference_time_s": 12.0,
+                "scoring_time_s":   2.0,
+            },
+            "memory": {
+                "expert_advice_followed": "try focal loss",
+                "hypothesis":    "focal loss with depth=4",
+                "conclusion":    "Scoring crashed: RuntimeError: anchor_map mismatch",
+                "discovery": (
+                    "Training and inference completed but scoring "
+                    "raised RuntimeError: anchor_map mismatch"
+                ),
+                "memory_update": (
+                    "Scoring crash — training succeeded so the "
+                    "checkpoint may be reusable. Investigate the "
+                    "scoring path before retrying this config."
+                ),
+            },
+        }
+
+    def test_error_scoring_validates_cleanly(self):
+        """The Fix 2a record dict must round-trip through model_validate."""
+        rec = ExperimentRecord.model_validate(self._error_scoring_record())
+        assert rec.status == "error_scoring"
+        assert rec.denoising_score is None
+        assert rec.timing.scoring_time_s == 2.0
+
+    def test_error_scoring_memory_carries_crash_evidence(self):
+        """Conclusion and discovery must preserve the exception detail so the
+        next iter's proposer/planner can read what went wrong."""
+        rec = ExperimentRecord.model_validate(self._error_scoring_record())
+        assert "Scoring crashed" in rec.memory.conclusion
+        assert "RuntimeError" in rec.memory.discovery
+
+    def test_error_scoring_round_trips_through_json(self):
+        """Persistence path: dict → ExperimentRecord → JSON → dict → ExperimentRecord."""
+        import json
+        rec = ExperimentRecord.model_validate(self._error_scoring_record())
+        as_json = rec.model_dump_json()
+        rehydrated = ExperimentRecord.model_validate(json.loads(as_json))
+        assert rehydrated.status == "error_scoring"
+        assert rehydrated.memory.conclusion == rec.memory.conclusion
+
+    def test_unknown_error_variant_still_rejected(self):
+        """Sanity: the Literal still rejects fabricated statuses — we only
+        widened it by exactly one entry."""
+        bad = self._error_scoring_record()
+        bad["status"] = "error_storage"
+        with pytest.raises(ValidationError) as exc:
+            ExperimentRecord.model_validate(bad)
+        assert "status" in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
 # Phase J — ExperimentMemory time fields (planner-feedback channel)
 # ---------------------------------------------------------------------------
 
@@ -818,7 +896,7 @@ class TestExperimentRecordExecutionErrors:
 
     def test_invalid_status_rejected(self):
         with pytest.raises(ValidationError):
-            ExperimentRecord.model_validate(self._make_error_record("error_scoring"))
+            ExperimentRecord.model_validate(self._make_error_record("error_storage"))
 
 
 # ---------------------------------------------------------------------------

@@ -129,9 +129,10 @@ def test_run_skill_estimated_minutes_is_sum_of_phase_seconds(monkeypatch):
 
 
 def test_run_skill_dominant_phase_is_training_for_typical_config(monkeypatch):
-    # 100k params × 16000 seg × 400 PSDs is firmly training-dominated for the
-    # static formula: per-step cost × 250k steps overwhelms the forward-only
-    # inference pass + the FFT-bound scoring phase.
+    # 100k params × 16000 seg × 400 PSDs is training-dominated under the
+    # 2026-04-30 calibration (_INFERENCE_VS_TRAINING_RATIO=2.7, data-driven
+    # median over V7 formal-success records). Per-step training cost × 250k
+    # steps overwhelms the forward-only inference pass + FFT-bound scoring.
     _patch_count_params(monkeypatch, 100_000)
     result = ts.run_skill(FakeSandbox(), **_base_kwargs())
     assert result["dominant_phase"] == "training"
@@ -143,14 +144,16 @@ def test_run_skill_dominant_phase_is_training_for_typical_config(monkeypatch):
 
 
 def test_run_skill_feasible_tiny_model(monkeypatch):
-    # 100k params is tiny. Even after summing training + inference + scoring
-    # the total should sit well under 60 min for 400 PSDs.
+    # 100k params is tiny. Under the 2026-04-30 recalibration the static-path
+    # total for this case is ≈ 88 min (train 26 + inf 60 + score 2). Budget is
+    # the V7 formal-mode 120 min — still well within reach for a 100k-param
+    # model.
     _patch_count_params(monkeypatch, 100_000)
-    result = ts.run_skill(FakeSandbox(), **_base_kwargs(time_budget_minutes=60.0))
+    result = ts.run_skill(FakeSandbox(), **_base_kwargs(time_budget_minutes=120.0))
     assert result["feasible"] is True
     assert "FITS" in result["verdict"]
     assert result["suggestion"] == ""
-    assert result["estimated_minutes"] < 60.0
+    assert result["estimated_minutes"] < 120.0
 
 
 def test_run_skill_infeasible_large_model(monkeypatch):
@@ -270,17 +273,24 @@ def test_run_skill_skips_warmup_without_data_dir(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_warmup_scales_inference_ms_by_one_third(monkeypatch):
+def test_warmup_scales_inference_ms_by_ratio(monkeypatch):
     # When the training warmup reports M ms/step, the wrapper must hand the
-    # inference estimator M/3 as its inference_ms_per_step (no backward pass).
+    # inference estimator M × _INFERENCE_VS_TRAINING_RATIO as its
+    # inference_ms_per_step. Asserts against the imported constant rather than
+    # a literal so the test remains correct under future recalibrations.
+    from agent.skills.inference_skill.estimator import _INFERENCE_VS_TRAINING_RATIO
+
     _patch_count_params(monkeypatch, 100_000)
+    measured = 9.0
     monkeypatch.setattr(
-        ts, "_measure_ms_per_step", lambda **kw: (9.0, _stub_warmup_breakdown("median"))
+        ts, "_measure_ms_per_step", lambda **kw: (measured, _stub_warmup_breakdown("median"))
     )
     result = ts.run_skill(FakeSandbox(), **_base_kwargs(data_dir="/any/path"))
     inf_bd = result["phase_breakdown"]["inference"]["breakdown"]
     assert inf_bd["ms_source"] == "derived_from_training_warmup"
-    assert inf_bd["ms_per_step"] == pytest.approx(3.0, rel=1e-6)
+    assert inf_bd["ms_per_step"] == pytest.approx(
+        measured * _INFERENCE_VS_TRAINING_RATIO, rel=1e-6
+    )
 
 
 # ---------------------------------------------------------------------------

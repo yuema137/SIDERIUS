@@ -62,11 +62,6 @@ from agent.skills.inference_skill       import estimator as _inference_est
 from agent.skills.denoising_score_skill import estimator as _scoring_est
 
 
-# Inference has no backward pass; training ms/step includes bwd+optimizer+loss.
-# Mirrors inference_skill/estimator.py's _INFERENCE_VS_TRAINING_RATIO so the
-# warmup-derived inference ms/step matches the static formula's slope.
-_INFERENCE_VS_TRAINING_RATIO: float = 1.0 / 3.0
-
 # Phase 6.7 Fix 1 — fast-fail short-circuit for DOA models. If a single
 # forward+backward+optimizer step at step 0 already takes ≥ this many ms,
 # the model is hopelessly slow and we abort the warmup rather than burn
@@ -154,6 +149,79 @@ def _aggregate_warmup_timings(
     breakdown["n_timed_batches"] = len(timed)
     breakdown["aggregator"] = "median"
     return statistics.median(timed), breakdown
+
+
+def _aggregate_inference_file_timings(
+    per_file_timings_ms: list,
+    warmup_fraction: float = 0.20,
+) -> tuple[float | None, dict]:
+    """Reduce raw per-file trial-mode inference timings into a single
+    per-PSD-segment ms estimate, robust to warmup leak.
+
+    Mirrors ``_aggregate_warmup_timings`` in spirit: discard a leading
+    fraction of files (CUDA context init, cold-disk h5py read, lazy CUDA
+    graph capture all leak into the first 1-2 files even though they're
+    one-shot costs) and take the median of the remainder normalised per
+    PSD segment.
+
+    Per-PSD-segment normalisation matters because trial files are sampled
+    sparsely — file 0 might carry 3 PSD segments, file 1 might carry 8 —
+    and the raw elapsed_ms scales with the segment count. Normalising by
+    ``n_psd_segs`` produces a unit cost the formal round can multiply
+    back up by its own segment count.
+
+    Args:
+        per_file_timings_ms: List of dicts emitted by the trial-mode
+            subprocess sidecar. Each dict carries
+            ``{"file_index", "n_psd_segs", "elapsed_ms"}``. Defensive
+            ``.get()`` is used on consumption so legacy or partial
+            sidecars don't crash the aggregator.
+        warmup_fraction: Fraction of leading files to discard as warmup.
+            Applied as ``round(n_files × warmup_fraction)``, clamped to
+            ``[1, n_files − 1]``. Default 0.20 means 1 file warmup at
+            n=5, 2 at n=10, 4 at n=20.
+
+    Returns:
+        ``(per_psd_seg_ms_or_None, breakdown_dict)``. The breakdown
+        mirrors ``_aggregate_warmup_timings``'s shape so downstream
+        record-writing is symmetric.
+
+    Returns ``None`` (with the aggregator key still ``None``) when:
+      * fewer than 2 files exist (no signal to discard warmup from);
+      * the post-warmup slice is empty;
+      * every post-warmup per-PSD-seg cost is ≤ 0 (degenerate sidecar).
+
+    The ``None`` return routes the caller to the legacy ``× 2.7``
+    fallback in Commit D — preserving back-compat for tiny trials and
+    OOM-killed subprocesses where no measurement was captured.
+    """
+    n_files = len(per_file_timings_ms)
+    breakdown: dict = {
+        "aggregator": None,
+        "n_warmup_files": 0,
+        "n_timed_files": 0,
+        "warmup_fraction": warmup_fraction,
+        "timings_ms": list(per_file_timings_ms),
+    }
+    if n_files < 2:
+        return None, breakdown
+
+    n_warmup = min(max(1, round(n_files * warmup_fraction)), n_files - 1)
+    timed = per_file_timings_ms[n_warmup:]
+    if not timed:
+        return None, breakdown
+
+    per_psd_seg_ms = [
+        float(t.get("elapsed_ms", 0.0)) / max(int(t.get("n_psd_segs", 1)), 1)
+        for t in timed
+    ]
+    if not per_psd_seg_ms or all(v <= 0 for v in per_psd_seg_ms):
+        return None, breakdown
+
+    breakdown["aggregator"] = "median"
+    breakdown["n_warmup_files"] = n_warmup
+    breakdown["n_timed_files"] = len(timed)
+    return statistics.median(per_psd_seg_ms), breakdown
 
 
 # ── torch-dependent helpers (warmup infrastructure) ──────────────────────────
@@ -397,6 +465,14 @@ def run_skill(sandbox, **kwargs) -> dict:
     train_config = kwargs.get("train_config", {})
     loss_config  = kwargs.get("loss_config", {})
     sample_set   = kwargs.get("sample_set", {})
+    # eval_sample_set drives inference + scoring projections. Falls back to
+    # sample_set for back-compat with callers that haven't been updated to
+    # pass both. The bug this guards against: in formal mode train data is
+    # ~10% (formal_portion=0.1) but eval data defaults to 100%
+    # (formal_eval_portion=1.0 — Phase M § 12.2 production default; now
+    # operator-configurable per Phase R §13), so using sample_set for
+    # inf/score under-projects by ~10×.
+    eval_sample_set = kwargs.get("eval_sample_set", sample_set)
     train_portion = float(kwargs.get("train_portion", 1.0))
     budget_min   = float(kwargs.get("time_budget_minutes", 0.0))
     data_dir     = kwargs.get("data_dir")
@@ -447,18 +523,53 @@ def run_skill(sandbox, **kwargs) -> dict:
             loss_type=loss_type,
         )
 
-        inference_ms = (
-            measured * _INFERENCE_VS_TRAINING_RATIO
-            if (measured is not None and measured > 0)
-            else None
-        )
+        # refine_inference_time_estimator.md Commit D — three-branch
+        # inference-ms derivation, in priority order:
+        #   1. ``trial_inference_warmup``: the tuner passed a measured
+        #      per-PSD-segment cost via ``inference_per_psd_seg_ms_hint``
+        #      (Commit C aggregator output, captured during the trial
+        #      round and now consumed by the formal round). This is the
+        #      most accurate path — convert per-PSD-seg cost back to
+        #      per-step cost by inverting the estimator's
+        #      ``total_steps = ceil(n_psd × ml_per_psd / inf_batch)``
+        #      identity. See the design doc §3.5 correction note for
+        #      the derivation.
+        #   2. ``training_warmup_x2.7_fallback``: the legacy path —
+        #      training warmup measured ms/step, scale by the
+        #      hand-calibrated ``_INFERENCE_VS_TRAINING_RATIO`` constant.
+        #      Used when no trial measurement is available (first iter,
+        #      OOM-killed trial, CPU-only host).
+        #   3. ``static_formula``: nothing measured. The inference
+        #      estimator's internal static fallback fires because
+        #      ``inference_ms_per_step`` is None. Source tag is set
+        #      explicitly here so audit logs distinguish "we passed
+        #      None" from a measured path.
+        inference_per_psd_seg_ms_hint = kwargs.get("inference_per_psd_seg_ms_hint")
+        inf_batch = _inference_est.inference_batch_for(model_type)
+        ml_per_psd = max(PSD_SEGMENT_LENGTH // max(seg_size, 1), 1)
+        if (inference_per_psd_seg_ms_hint is not None
+                and inference_per_psd_seg_ms_hint > 0):
+            inference_ms = (
+                float(inference_per_psd_seg_ms_hint)
+                * inf_batch / ml_per_psd
+            )
+            inference_ms_source = "trial_inference_warmup"
+        elif measured is not None and measured > 0:
+            inference_ms = (
+                measured * _inference_est._INFERENCE_VS_TRAINING_RATIO
+            )
+            inference_ms_source = "training_warmup_x2.7_fallback"
+        else:
+            inference_ms = None
+            inference_ms_source = "static_formula"
+
         inference = _inference_est.estimate_wall_time_seconds(
-            model_type, model_config, sample_set,
+            model_type, model_config, eval_sample_set,
             inference_ms_per_step=inference_ms,
             num_params=num_params,
         )
 
-        scoring = _scoring_est.estimate_wall_time_seconds(sample_set)
+        scoring = _scoring_est.estimate_wall_time_seconds(eval_sample_set)
 
     except Exception as e:
         msg = f"TimeEval error: {e}\n{traceback.format_exc()}"
@@ -491,14 +602,34 @@ def run_skill(sandbox, **kwargs) -> dict:
             f"novel architecture. Treat verdict as best-effort."
         )
 
-    feasible = total_min <= budget_min
+    # refine_inference_time_estimator.md Commit D / Step 6.5 — measurement-
+    # aware feasibility check. When the inference path was the measured
+    # ``trial_inference_warmup`` branch, the estimate is precise to ±10%
+    # in practice (median over n≥4 post-warmup files), so a config that
+    # lands at e.g. 102% of budget is throwing away signal if we reject it
+    # on the strict ``<=``. Soften by 10%. The fallback paths
+    # (``training_warmup_x2.7_fallback``, ``static_formula``) keep the
+    # strict check because their uncertainty bands are much wider — a 10%
+    # slack would let configs that genuinely overrun budget by 30% slip
+    # through.
+    SLACK_FRACTION_WHEN_MEASURED = 0.10
+    if inference_ms_source == "trial_inference_warmup":
+        effective_budget_min = budget_min * (1.0 + SLACK_FRACTION_WHEN_MEASURED)
+        slack_applied = True
+    else:
+        effective_budget_min = budget_min
+        slack_applied = False
+    feasible = total_min <= effective_budget_min
 
     # Flat breakdown: preserves the pre-K.2.5 contract so
     # nodes/ml_hyperparameter_tune_agent.py can still read `source` +
     # `gpu_name` to trigger the Phase F EMA update. Phase 6.7 Fix 1
     # appends ``warmup_aggregator`` + the per-step timing detail so the
     # audit log distinguishes a steady-state median from a step-0
-    # fast-fail event without losing the legacy keys.
+    # fast-fail event without losing the legacy keys. Commit D appends
+    # ``inference_ms_source`` + slack-rule fields so the tuner can record
+    # which branch produced the inference-ms estimate and whether the
+    # 10% slack softened the verdict.
     tbd = training["breakdown"]
     breakdown = {
         "total_train_steps":  tbd["total_train_steps"],
@@ -513,13 +644,23 @@ def run_skill(sandbox, **kwargs) -> dict:
         "warmup_n_warmup_batches": warmup_breakdown.get("n_warmup_batches", 0),
         "warmup_n_timed_batches":  warmup_breakdown.get("n_timed_batches", 0),
         "warmup_timings_ms":       warmup_breakdown.get("timings_ms", []),
+        "inference_ms_source":     inference_ms_source,
+        "slack_applied":           slack_applied,
+        "effective_budget_minutes": round(effective_budget_min, 2),
     }
 
+    slack_note = (
+        f" (within +{int(SLACK_FRACTION_WHEN_MEASURED * 100)}% slack on "
+        f"measured inference)"
+        if slack_applied and feasible and total_min > budget_min
+        else ""
+    )
     verdict = (
         f"{'✅ FITS' if feasible else '❌ OVER BUDGET'} — "
         f"Est {total_min:.1f} min vs budget {budget_min:.1f} min "
         f"(train {training['seconds']:.1f}s + inf {inference['seconds']:.1f}s "
         f"+ score {scoring['seconds']:.1f}s). Dominant phase: {dominant}."
+        f"{slack_note}"
     )
     suggestion = "" if feasible else _suggest_lever(
         tbd["ms_per_step"], seg_size, batch_size

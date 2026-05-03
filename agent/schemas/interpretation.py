@@ -81,9 +81,10 @@ class ModelRunSummary(BaseModel):
     # --- Per-file performance (from file_vector) ---
     best_file_vector: Optional[List[Optional[float]]] = Field(
         default=None,
-        description="Length-20 score vector from the best experiment. Each index = one "
-                    "validation file (frequency, log scale: 0=lowest, 19=highest). "
-                    "None for files not evaluated. Reveals frequency-dependent weaknesses.",
+        description="Score vector from the best experiment, one entry per validation "
+                    "file. None for files not evaluated. Per-file semantics are defined "
+                    "by the dataset configuration; the agent reads opportunity from the "
+                    "Impact_Score column rather than fixed file-index labels.",
     )
     formal_score: Optional[float] = Field(
         default=None,
@@ -237,6 +238,18 @@ class InterpretationInput(BaseModel):
         description="Where this node reads its inputs and writes its interpretation output.",
     )
 
+    # --- Iteration index (V8 Domain 3 — evolution observability) ---
+    iteration: int = Field(
+        default=1,
+        ge=1,
+        description="1-based iteration index within the current chain or workflow "
+                    "run. Stamped into the per-iter row appended to "
+                    "{workspace}/evolution_log.jsonl by the interpretation agent. "
+                    "Populated by the workflow (model_exploration.run_workflow) "
+                    "from its loop variable. Defaults to 1 for ad-hoc / single-iter "
+                    "callers. See docs/V8_Gap_Report.md Domain 3.",
+    )
+
     @model_validator(mode="after")
     def require_at_least_one_model(self) -> "InterpretationInput":
         if self.model_types is not None and len(self.model_types) == 0:
@@ -308,7 +321,7 @@ class InterpretationOutput(BaseModel):
         default_factory=dict,
         description="model_type → self-sufficient cache entry produced by Phase 1. "
                     "Each entry contains: Phase 1 LLM text (key_findings, bottlenecks, "
-                    "best_config_analysis, score_trend, frequency_analysis, data_sensitivity, "
+                    "best_config_analysis, score_trend, per_file_analysis, data_sensitivity, "
                     "efficiency_assessment, strategy_assessment) plus a '_stats' sub-dict "
                     "(best_denoising_score, worst_denoising_score, best_file_vector, "
                     "best_model_params, completed_rounds). Carry this forward as "
@@ -327,19 +340,17 @@ class InterpretationOutput(BaseModel):
         description="Single critical insight that directly motivates proposing a new architecture.",
     )
 
-    # --- Frequency analysis (from score_table) ---
+    # --- Per-file analysis (from score_table) ---
     per_model_score_tables: Optional[Dict[str, ScoreComparisonTable]] = Field(
         default=None,
         description="model_type → best ScoreComparisonTable. Strict superset of the "
                     "old per_model_file_vectors (every rows[i].model equals the old "
                     "fv[i]) plus raw_baseline, ground_truth, gain_vs_raw, "
-                    "headroom_vs_gt columns and pre-rendered markdown. Replaces "
-                    "per_model_file_vectors per Decision 6 (hard swap).",
-    )
-    weak_frequency_files: Optional[Dict[str, List[int]]] = Field(
-        default=None,
-        description="model_type → list of file indices where the model scores poorly. "
-                    "Computed from file_vector analysis (scores below threshold).",
+                    "headroom_vs_gt, linear_weight, and impact_score columns plus "
+                    "pre-rendered markdown. The Impact_Score column is the canonical "
+                    "per-file opportunity ranking — downstream consumers read levers "
+                    "from the table directly rather than relying on a separate "
+                    "threshold-derived index list.",
     )
 
     # --- Efficiency context ---
@@ -424,4 +435,33 @@ class InterpretationOutput(BaseModel):
                     "'feature:capability' → list of run_names where the link was confirmed. "
                     "Carry forward as InterpretationInput.vocab_link_confirmations "
                     "in the next iteration.",
+    )
+
+    # --- Degraded-mode flag (V8 hardening Domain 2b) ---
+    is_degraded: bool = Field(
+        default=False,
+        description="True when the interpreter produced this digest via the "
+                    "fallback path (LLM call failed after the Bridge's 3-retry "
+                    "envelope). Degraded outputs preserve the incoming "
+                    "runtime_vocab verbatim (no growth this iter), have empty "
+                    "key_findings/bottlenecks/new_discoveries, and are still "
+                    "written to disk so the chain's load_latest_knowledge() "
+                    "step finds a digest. Without this flag, an interp LLM "
+                    "failure left no digest on disk and the next iter's "
+                    "load_latest_knowledge skipped the affected iter — "
+                    "causing a 2-iter vocab regression. See "
+                    "docs/V8_Gap_Report.md Domain 2b.",
+    )
+
+    # --- Per-iteration evolution metrics (V8 hardening Domain 3) ---
+    evolution_stats: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Per-iteration vocabulary evolution metrics, snapshotted at "
+                    "the end of result_interpretation_agent.run(). Populated keys: "
+                    "vocab_total (int), vocab_canonical (int), vocab_candidate "
+                    "(int), promoted_this_iter (int — count from "
+                    "promote_candidates() this iter, reflects the Tested-only "
+                    "threshold), is_degraded (bool — mirrors the field above). "
+                    "Also appended as one row to {workspace}/evolution_log.jsonl "
+                    "for tail -f monitoring. See docs/V8_Gap_Report.md Domain 3.",
     )

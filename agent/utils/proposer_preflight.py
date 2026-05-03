@@ -85,6 +85,7 @@ def estimate_proposal_time(
     time_budget_minutes: float,
     sample_set: Optional[Dict[Any, List[int]]] = None,
     train_portion: float = _DEFAULT_TRAIN_PORTION,
+    trial_portion: float = _DEFAULT_TRIAL_PORTION,
 ) -> Dict[str, Any]:
     """Estimate wall-time for a draft proposal, CPU-only.
 
@@ -106,12 +107,20 @@ def estimate_proposal_time(
         time_budget_minutes: The active-mode budget the draft is checked
                     against. Usually ``ProposalInput.trial_time_budget_minutes``
                     in trial mode.
-        sample_set: ``{file_index: [segment_indices]}``. None → the
-                    default snapshot@0.1 sample_set is synthesised so the
-                    estimate reflects the active scope without disk I/O.
+        sample_set: ``{file_index: [segment_indices]}``. None → a sample_set
+                    is synthesised at ``trial_portion`` so the estimate
+                    reflects the caller's active scope without disk I/O.
         train_portion: Per-epoch subsample fraction applied to
                     ``sample_set``. Default 0.1 mirrors
                     ``HyperparamTuningInput.train_portion``.
+        trial_portion: Fraction of segments per file when synthesising the
+                    default sample_set. Mirrors
+                    ``HyperparamTuningInput.trial_portion`` /
+                    ``ProposalInput.trial_portion``. Ignored if the caller
+                    passes an explicit ``sample_set``. Without this kwarg
+                    the gate would assume snapshot@0.1 regardless of the
+                    caller's actual scope, producing 5× over-projection
+                    when callers set ``trial_portion=0.02``.
 
     Returns:
         ``{"estimated_minutes": float, "factor": float, "verdict": str,
@@ -136,7 +145,7 @@ def estimate_proposal_time(
         )
 
     if sample_set is None:
-        sample_set = _synthesise_default_sample_set()
+        sample_set = _synthesise_default_sample_set(trial_portion=trial_portion)
 
     loss_type = loss_config.get("loss_type", "ce")
 

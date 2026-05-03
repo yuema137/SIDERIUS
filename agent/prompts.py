@@ -86,28 +86,28 @@ You can choose how much data to use for each experiment:
 - **Trial mode** (`is_trial=true`): Train and evaluate on a sparse sample of segments across
   multiple files. Fast iteration — use this for early exploration when you are still searching
   for good hyperparameters. Scores are anchor-normalized and comparable across runs.
-- **Formal mode** (`is_trial=false`): Train and evaluate on ALL segments across ALL 20 files.
-  Much slower but gives a definitive, comprehensive score. Use this when you have a promising
-  config and want to validate it on the full dataset.
+- **Formal mode** (`is_trial=false`): Train and evaluate on the full dataset (all segments
+  across all validation files). Much slower but gives a definitive, comprehensive score.
+  Use this when you have a promising config and want to validate it.
 
 Trial strategies (only relevant when `is_trial=true`):
-- `"snapshot"`: Sample from **all 20 files**. Each file gets `trial_portion` fraction of its
-  200 PSD segments. Gives broad frequency coverage but spreads data thinly across files.
-  At trial_portion=0.05, you get ~10 segments/file × 20 files = ~200 segments total.
-  At trial_portion=0.5, you get ~100 segments/file × 20 files = ~2000 segments total.
-- `"anchors"`: Sample from **files 0, 10, 19 only** (lowest, mid, highest frequency).
-  3× more segments per file than snapshot at the same trial_portion, but zero coverage on
-  17 files. Useful when you want to quickly check performance across the frequency range
-  with denser per-file sampling. file_vector will have 17 NaN entries.
-- `"target"`: Sample from **specific files** you choose (provide `target_files` list).
-  Concentrates all data on those files. Useful when file_vector reveals specific weak
-  frequency bands — you can focus training and evaluation on just those files to iterate
-  faster. For example, if files 0-3 score < 1.0, use `target_files: [0, 1, 2, 3]` to
-  dedicate all training data to improving low-frequency denoising.
+- `"snapshot"`: Sample uniformly across all validation files. Each file gets
+  `trial_portion` fraction of its segments. Gives broad coverage but spreads data thinly
+  per file.
+- `"anchors"`: Sample from a small fixed subset of files (workflow-defined). More segments
+  per file than snapshot at the same trial_portion, but other files receive zero coverage
+  (their entries in `file_vector` are NaN).
+- `"target"`: Sample from a caller-specified list of files (`target_files`). Concentrates
+  all data on those files. Useful when the per-file score table indicates a small set of
+  files carries most of the next-iter improvement budget — those are the files with the
+  largest `Impact_Score` for the current best model. Choosing `target_files` is a
+  data-allocation decision; it should be driven by the Impact_Score column, not by
+  fixed file-index labels or thresholds.
 
 **Key tradeoff**: snapshot gives broad but shallow coverage per file. anchors and target
-give deep coverage on fewer files. Consider your file_vector results — if performance is
-uniform across files, snapshot is efficient. If specific files are weak, target those files.
+give deep coverage on fewer files. Consult the per-file score table below — if
+`Impact_Score` is roughly uniform across files, snapshot is efficient. If a small subset
+of files dominates the `Impact_Score` ranking, target those files.
 
 `trial_portion` (0.01–1.0): fraction of segments per file for the **training scope**.
 This determines how much data the model trains on. More data = better model but slower.
@@ -152,8 +152,22 @@ reference columns:
 All three are log-space under the same global s_max, so differences are
 directly comparable.
 
-- `gain vs raw > 0`  → your model is doing useful work on that file.
-- `headroom vs gt`   → how far below the theoretical ceiling you are.
+- `gain vs raw > 0`   → your model is doing useful work on that file.
+- `headroom vs gt`    → how far below the theoretical ceiling you are.
+- `Linear_Weight`     → the file's share of the linear denominator behind the
+                        aggregate scalar. Sums to 1 across sampled files.
+- `Impact_Score`      → the log-scalar gain you would obtain by lifting this
+                        file's `model` to its `ground_truth`. This is the
+                        per-file opportunity ranking; the table is followed
+                        by a secondary block re-sorted by `Impact_Score`
+                        descending.
+
+Read the table by `Impact_Score` descending — that is where the next-iter
+lever is. A multi-log-unit `headroom_vs_gt` does not by itself indicate
+opportunity; only `Impact_Score` does. A high-weight file at its ceiling has
+zero `Impact_Score` and is not actionable. If the entire `Impact_Score`
+column is small in magnitude relative to the chain's per-iter gains, this
+configuration has reached the dataset ceiling.
 
 {SCORE_COMPARISON_TABLE}
 
@@ -190,12 +204,22 @@ You are a Research Analyst. Your job is to transform raw experiment results into
 - A result is BAD if it is LOWER than most previous scores.
 - NEVER call a result a failure just because the score is negative.
 
-### PER-FILE COMPARISON (frequency-band awareness):
+### PER-FILE COMPARISON (Impact-Aware):
 The score_comparison_table below shows per-file performance against the raw
-baseline and the ground-truth ceiling. Use it to produce frequency-aware
-discoveries and hypotheses — e.g., "architecture X handled files 15-19 but
-regressed on files 0-3" rather than "score went up." These band-level
-insights compound across rounds when the next planner inherits them.
+baseline and the ground-truth ceiling, alongside `Linear_Weight` (each
+file's share of the linear denominator behind the aggregate scalar) and
+`Impact_Score` (the log-scalar gain available if that file's `model` were
+lifted to its `ground_truth`). The table is followed by a secondary block
+re-sorted by `Impact_Score` descending.
+
+Use the table to produce per-file discoveries grounded in the
+`Impact_Score` ranking — e.g., "architecture X recovered most of the
+high-Impact rows but left rows with the largest remaining Impact untouched"
+rather than "score went up." Cite `Impact_Score` and `Linear_Weight`
+together when discussing per-file bottlenecks; do not assert that a file is
+permanently weak from a single round's reading or from `headroom_vs_gt`
+alone. These row-level insights compound across rounds when the next
+planner inherits them.
 
 {SCORE_COMPARISON_TABLE}
 

@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import json
+import time
 import subprocess
 import datetime
 from typing import Callable, Dict, Any, Optional
@@ -575,6 +576,13 @@ class TidmadSandbox:
             else inference_batch_for(model_type)
         )
 
+        # Per-iter sidecar path. Iteration scoping comes from ``run_name`` (the
+        # configs dir is already iter-keyed); ``exp_id`` makes it unique within
+        # an iteration so concurrent rounds don't clobber each other.
+        timing_out = os.path.abspath(
+            os.path.join(self.dirs["configs"], f"inference_timing_{exp_id}.json")
+        )
+
         cmd = [sys.executable, "execute_tools/inference_single.py", "--mode", "agent", "-m", model_type,
                "--model_cfg", m_path, "--loss_cfg", l_path,
                "--model_path", model_path, "--exp_id", exp_id, "--run_name", run_name,
@@ -588,9 +596,14 @@ class TidmadSandbox:
             with open(ss_path, 'w') as f:
                 json.dump(sample_set, f)
             cmd.extend(["--sample_set_json", ss_path])
+            # Trial-mode only — the subprocess emits per-file timings to
+            # ``timing_out`` and we read them back below to feed the
+            # measurement-driven gate path (see refine_inference_time_estimator.md).
+            cmd.extend(["--timing_out_json", timing_out])
 
         try:
             print(f">>> [Executor] Running inference for {exp_id}...")
+            t_subprocess_start = time.perf_counter()
             result = subprocess.run(
                 cmd,
                 check=True,
@@ -600,14 +613,47 @@ class TidmadSandbox:
                 env=_subprocess_env(plugin_dir=self.plugin_dir),
                 preexec_fn=_limited_preexec(_subprocess_rss_gb("inference")),
             )
+            subprocess_wall_ms = (time.perf_counter() - t_subprocess_start) * 1000.0
             if not self.progress_bar and result.stdout:
                 print(f"--- Inference Output ---\n{result.stdout}")
-            return {"status": "success", "message": "Inference finished."}
+
+            # Parse the trial-mode sidecar if it exists. ``process_startup_ms``
+            # is the parent-side residual: subprocess wall-time minus the sum
+            # of per-file elapsed times, capturing fixed costs (Python import,
+            # CUDA context, ``torch.load``) that aren't billed to any single
+            # file. ``max(0, ...)`` defends against tiny clock skew between
+            # the two ``perf_counter`` clocks (subprocess vs. parent).
+            per_file_timings_ms: list = []
+            process_startup_ms = None
+            if sample_set is not None and os.path.exists(timing_out):
+                try:
+                    with open(timing_out) as f:
+                        per_file_timings_ms = json.load(f)
+                    sum_per_file = sum(
+                        float(t.get("elapsed_ms", 0.0)) for t in per_file_timings_ms
+                    )
+                    process_startup_ms = max(0.0, subprocess_wall_ms - sum_per_file)
+                except Exception as exc:
+                    print(f"[execute_inference] sidecar parse failed: {exc}")
+
+            return {
+                "status": "success",
+                "message": "Inference finished.",
+                "per_file_timings_ms": per_file_timings_ms,
+                "process_startup_ms": process_startup_ms,
+                "subprocess_wall_ms": subprocess_wall_ms,
+            }
         except subprocess.CalledProcessError as e:
             error_msg = _format_subprocess_error(e, "Inference")
             print(f"--- Inference Error ---\n{error_msg}")
             status = "oom_host_ram" if _is_oom_failure(e) else "error"
-            return {"status": status, "message": error_msg}
+            return {
+                "status": status,
+                "message": error_msg,
+                "per_file_timings_ms": [],
+                "process_startup_ms": None,
+                "subprocess_wall_ms": None,
+            }
 
     def score_vector(self, sample_set, anchor_map: dict, s_max: float,
                      denoised_filename_fn: callable, **kwargs) -> tuple:

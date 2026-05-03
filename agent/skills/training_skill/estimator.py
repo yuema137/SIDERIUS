@@ -50,7 +50,12 @@ _BYTES_I64 = 8
 # static fallback path (Phase 6.8 §4.2): the original 1.1 was calibrated for
 # warmup variance (~10%), but the static formula itself is 2-5x wrong for novel
 # architectures, so the multiplier must absorb formula error, not just variance.
-SAFETY_MULTIPLIER: float = 2.0
+# Recalibrated 2026-04-30 from 2.0 → 1.3: V7 empirical data shows the warmup-
+# measured ms/step path is consistently 1.7-3× over actual training time, and
+# the 2.0 multiplier was causing the gate to skip configs that would have fit.
+# 1.3 keeps a margin for warmup variance + k correction without compounding
+# the formula's structural over-prediction.
+SAFETY_MULTIPLIER: float = 1.3
 
 # Static ms/step fallback used when the aggregator cannot supply a warmup-
 # measured ms_per_step (CPU-only hosts, unit tests, failed warmup).

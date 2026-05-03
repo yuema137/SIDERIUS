@@ -12,7 +12,7 @@ Both are accepted wherever ExpertAdviceInput is used.
 from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional, Union
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from agent.schemas.score_table import ScoreComparisonTable
@@ -163,6 +163,69 @@ class ExperimentMemory(BaseModel):
         ),
     )
 
+    # refine_inference_time_estimator.md — measured per-PSD-segment inference
+    # cost captured during a successful trial round. Commit C populates the
+    # five measurement fields below from the trial-mode subprocess sidecar
+    # (see core/sandbox_executor.py::execute_inference); Commit D consumes
+    # ``inference_per_psd_seg_ms_measured`` to feed the formal round's time
+    # gate as a hint, replacing the hand-calibrated × 2.7 ratio that
+    # over-predicts for archs whose true ratio is lower. All optional so
+    # pre-Commit-C records still validate.
+    inference_per_psd_seg_ms_measured: Optional[float] = Field(
+        default=None,
+        description=(
+            "Median per-PSD-segment inference cost (ms) measured during the "
+            "trial round, after dropping a leading warmup fraction. None on "
+            "rounds with too few timed files (n_files < 2) or zero elapsed."
+        ),
+    )
+    inference_warmup_aggregator: Optional[Literal["median"]] = Field(
+        default=None,
+        description=(
+            "Which aggregator produced ``inference_per_psd_seg_ms_measured``. "
+            "Currently only 'median'; field exists so future aggregator "
+            "variants stay distinguishable in audit logs without a schema "
+            "migration."
+        ),
+    )
+    inference_n_timed_files: Optional[int] = Field(
+        default=None,
+        description=(
+            "Number of files contributing to the median (n_files − n_warmup). "
+            "0 when the aggregator returned None."
+        ),
+    )
+    inference_warmup_fraction: Optional[float] = Field(
+        default=None,
+        description=(
+            "Fraction of leading files discarded as warmup (default 0.20). "
+            "Applied as ``round(n_files × fraction)``, clamped to "
+            "``[1, n_files−1]``."
+        ),
+    )
+    inference_process_startup_ms: Optional[float] = Field(
+        default=None,
+        description=(
+            "Parent-measured fixed cost per inference call: subprocess wall "
+            "minus sum of per-file elapsed. Captures Python import + CUDA "
+            "context init + ``torch.load`` + h5py library init. Reported for "
+            "audit; not consumed by the gate (the gate uses only the "
+            "per-file marginal). None if the sidecar was missing."
+        ),
+    )
+    inference_ms_source: Optional[str] = Field(
+        default=None,
+        description=(
+            "Provenance tag set by the time gate when the inference-ms "
+            "estimate is computed. One of "
+            "'trial_inference_warmup' (Commit D measured-hint path), "
+            "'training_warmup_x2.7_fallback' (legacy ratio scaling when no "
+            "trial measurement is available), or 'static_formula' "
+            "(no warmup signal at all). None on records where the gate did "
+            "not run."
+        ),
+    )
+
     # Phase L — per-round attempt-budget bookkeeping. The tuner now counts
     # SUCCESSFUL rounds, not raw attempts, so a single round can span
     # multiple attempts (each one a separate ExperimentRecord). These two
@@ -200,6 +263,7 @@ class ExperimentRecord(BaseModel):
         "error_training_oom",
         "error_inference",
         "error_inference_oom",
+        "error_scoring",
         "failed_mode_collapse",
     ]
     model_type: str
@@ -321,7 +385,10 @@ class TrialConfig(BaseModel):
 
     Validation side:
     - ``eval_strategy`` + ``eval_portion`` → validation scope (what to inference + score on)
-    - In formal mode: ``eval_portion=1.0`` (all segments)
+    - In formal mode: strategy is locked to ``snapshot``; portion defaults to
+      1.0 (all segments) for production cross-arch comparability, but is
+      operator-controllable via ``HyperparamTuningInput.formal_eval_portion``
+      (Phase R, docs/resource_estimator_implement.md §13).
 
     ``train_validation_align``:
     - True: train and eval scopes use the same seed → same file/segment indices
@@ -698,14 +765,18 @@ class HyperparamTuningInput(BaseModel):
     )
 
     # --- Formal-mode training levers (Phase M — see docs/resource_estimator_implement.md §12) ---
-    # Formal-mode eval is hardcoded to snapshot + eval_portion=1.0 in the
-    # tuner (intentionally not operator-configurable — see §12.2 rationale).
+    # Formal-mode eval defaults to snapshot + eval_portion=1.0 (full clone)
+    # so cross-architecture scores are physically comparable. Phase R
+    # (docs §13) adds ``formal_eval_portion`` so smoke / CI runs can opt
+    # into a smaller deterministic eval scope without changing physical
+    # constants — production runs should keep the 1.0 default.
     formal_strategy: Literal["snapshot", "anchors", "target"] = Field(
         default="snapshot",
         description=(
             "Training-side sampling strategy in formal mode. Overrides the "
             "planner's trial_strategy on any round promoted to formal. Eval "
-            "side is always locked to snapshot + eval_portion=1.0."
+            "strategy is always locked to ``snapshot``; eval scope is "
+            "controlled by ``formal_eval_portion`` (default 1.0)."
         ),
     )
     formal_portion: float = Field(
@@ -719,6 +790,18 @@ class HyperparamTuningInput(BaseModel):
         ge=0.01,
         le=1.0,
         description="Per-epoch iteration fraction from the formal training scope.",
+    )
+    formal_eval_portion: float = Field(
+        default=1.0,
+        gt=0.0,
+        le=1.0,
+        description=(
+            "Fraction of segments per file used for the formal-mode eval "
+            "scope (snapshot strategy). Default 1.0 reproduces the legacy "
+            "full-clone behaviour required for production score "
+            "comparability. Smoke / CI runs may lower this (e.g. 0.05) "
+            "to fit a tight time budget — Phase R, §13."
+        ),
     )
     force_formal_round: bool = Field(
         default=True,
@@ -741,24 +824,72 @@ class HyperparamTuningInput(BaseModel):
             "``plan.is_trial``."
         ),
     )
-    formal_round_strategy: Literal["inherit_best_trial", "llm_propose"] = Field(
-        default="inherit_best_trial",
+    formal_round_strategy: Literal[
+        "full_clone",
+        "hybrid_params",
+        "independent",
+        "inherit_best_trial",  # legacy alias of full_clone
+        "llm_propose",         # legacy alias of independent
+    ] = Field(
+        default="full_clone",
         description=(
-            "Orchestration policy for the forced formal round. Two values:\n"
-            "* ``inherit_best_trial`` (default) — the formal round inherits "
-            "  ``loss_config`` and ``train_config.lr`` from the highest-scoring "
-            "  trial-mode success record in the current iteration. "
-            "  ``model_config``, ``epochs``, and ``batch_size`` are left for the "
-            "  planner. If no successful trial round exists, the planner's "
-            "  choices survive and a WARNING is logged.\n"
-            "* ``llm_propose`` — the planner's choices for the formal round are "
-            "  honored verbatim. Use only when the formal round is meant to be "
-            "  a sandbox for new hyperparameters.\n"
+            "Orchestration policy for the forced formal round. Canonical "
+            "values + legacy aliases — the validator canonicalises legacy "
+            "literals to their canonical form before downstream code sees "
+            "the value, so call sites only handle canonical names.\n\n"
+            "Canonical values:\n"
+            "* ``full_clone`` (default) — the formal round inherits "
+            "  ``model_config``, ``loss_config``, ``train_config.lr``, "
+            "  ``train_config.epochs``, and ``train_config.batch_size`` "
+            "  from the highest-scoring trial-mode success record in the "
+            "  current iteration. Maximum execution certainty: the formal "
+            "  round is a longer training of the trial winner with full "
+            "  eval — not a sandbox for new architectures, losses, or "
+            "  hyperparameters. Required for the trial→formal "
+            "  inference-time measurement reuse landed in commits B–D of "
+            "  ``docs/refine_inference_time_estimator.md``.\n"
+            "* ``hybrid_params`` — the formal round inherits "
+            "  ``loss_config`` and ``train_config.lr`` only; the "
+            "  planner's ``model_config``, ``train_config.epochs``, and "
+            "  ``train_config.batch_size`` survive verbatim. Audit / "
+            "  exploration use case: lock the evaluation surface (loss + "
+            "  lr) but let the LLM scale capacity for the full-data pass. "
+            "  The time gate may reject the planner's heavier choice; "
+            "  that is the trade-off.\n"
+            "* ``independent`` — the planner's choices for the formal "
+            "  round are honored verbatim (no inheritance). Use only "
+            "  when the formal round is meant to be a sandbox for new "
+            "  hyperparameters; trial-round measurements are NOT reused.\n\n"
+            "All three strategies share the no-winner fallback: if no "
+            "successful trial round exists in the current iteration, the "
+            "planner's plan is preserved unchanged and a WARNING is "
+            "logged. Strategy only controls *what to copy when a winner "
+            "exists* — it does not change no-winner behavior. ``is_trial`` "
+            "is always flipped to ``False`` regardless of strategy.\n\n"
+            "Legacy aliases (accepted for backward compat with running "
+            "chains and pre-2026-05-02 ``tuner_advice/*.json`` configs):\n"
+            "* ``inherit_best_trial`` → canonicalised to ``full_clone``.\n"
+            "* ``llm_propose`` → canonicalised to ``independent``.\n\n"
             "Has no effect when ``force_formal_round=False`` or on non-last "
-            "rounds. Generic across tasks — the predicate ``time_mode == 'trial' "
-            "AND status == 'success'`` is task-agnostic."
+            "rounds. Generic across tasks — the predicate ``time_mode == "
+            "'trial' AND status == 'success'`` is task-agnostic."
         ),
     )
+
+    @field_validator("formal_round_strategy", mode="before")
+    @classmethod
+    def _canonicalise_legacy_strategy(cls, v):
+        """Resolve legacy literals to their canonical name before
+        Literal-validation runs. See docs/refactor_formal_round_strategy.md
+        §2.1 for the alias table.
+        """
+        legacy = {
+            "inherit_best_trial": "full_clone",
+            "llm_propose":        "independent",
+        }
+        if isinstance(v, str):
+            return legacy.get(v, v)
+        return v
     degenerate_penalty_score: Optional[float] = Field(
         default=None,
         description=(

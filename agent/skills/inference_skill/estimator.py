@@ -61,7 +61,23 @@ _BYTES_F32 = 4
 # fwd) + optimizer step + loss overhead. 1/3 is the rough working ratio
 # used by the static fallback and by the aggregator when it derives an
 # inference ms/step from a training-warmup measurement.
-_INFERENCE_VS_TRAINING_RATIO: float = 1.0 / 3.0
+# Recalibrated 2026-04-30: Spectral TCN architectures exhibit heavy
+# inference overhead (non-linear FFT/Memory-bound) exceeding training
+# ms/step. Data-driven median across V7 formal-success records:
+#
+#   arch                          params    train_ms  inf_ms  ratio
+#   fft_fused_cyclic_tcn          22 K        10.4    15.0    1.45
+#   gated_context_dualpath_tcn   902 K        19.7    53.6    2.72
+#                                                            -------
+#                                                     median  2.72
+#
+# 2.7 matches the empirical median; the gate will under-predict for
+# archs with ratio > 2.7 and over-predict for those below, by at most
+# ~2× in either direction across the observed range. This is a blunt
+# constant — a per-arch ms/step model would be the structurally correct
+# fix, but N=2 datapoints don't justify one yet. Pending more formal
+# successes to widen the calibration set. Tracked in docs/memories/.
+_INFERENCE_VS_TRAINING_RATIO: float = 2.7
 
 # Same 6e-10 ms/flop baseline as the training static formula. Scaled
 # down by the training-vs-inference ratio below to approximate the

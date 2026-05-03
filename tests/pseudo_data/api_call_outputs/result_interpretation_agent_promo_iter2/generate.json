@@ -11,7 +11,7 @@
     ],
     "best_config_analysis": "spectral_channels=32 with 4 blocks optimal. More channels overfit.",
     "score_trend": "Rapid improvement: 5.85 → 5.98 → 6.10. Model not yet data-saturated at round 3.",
-    "frequency_analysis": "Files 0-4 now score 1.5-2.5. Files 5-14 score 5-7. Files 15-19 score 8-9.",
+    "per_file_analysis": "Files 0-4 now score 1.5-2.5. Files 5-14 score 5-7. Files 15-19 score 8-9.",
     "data_sensitivity": "High — score improved 0.25 per added round. More rounds would help.",
     "efficiency_assessment": "2× compute vs wavenet but +0.52 score. Reasonable trade-off.",
     "strategy_assessment": "Spectral gating appears to be the key mechanism. Worth preserving in next proposals."
@@ -26,7 +26,7 @@
       "Files 0-2 still partially addressed. Very low frequencies need further investigation.",
       "Compute cost increase from spectral operations limits practical deployment."
     ],
-    "frequency_comparison": "spectral_net is the first model to score >1.0 on files 0-4. Structural gap partially closed.",
+    "per_file_comparison": "spectral_net is the first model to score >1.0 on files 0-4. Structural gap partially closed.",
     "efficiency_comparison": "spectral_net best absolute score. wavenet still Pareto-dominant on score/compute ratio.",
     "take_home_message": "spectral_gating is confirmed as a high-value mechanism. Next proposal should combine spectral gating with wavenet's dilated convolution backbone for both efficiency and low-freq coverage."
   }

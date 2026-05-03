@@ -69,10 +69,13 @@ def local_full_context(
       - model_descriptions   : full markdown descriptions of each architecture
       - per_model_best/worst, best_denoising_score, best_config
       - key_findings, bottlenecks, take_home_message
-      - per_model_score_tables : per-model ScoreComparisonTable (per-file denoising
-                                  scores + raw_baseline + ground_truth + rendered markdown).
+      - per_model_score_tables : per-model ScoreComparisonTable (per-file
+                                  scores + raw_baseline + ground_truth +
+                                  linear_weight + impact_score + rendered markdown).
                                   Replaces per_model_file_vectors per §7.3 / Decision 6.
-      - weak_frequency_files    : file indices where each model scores poorly
+                                  Impact_Score is the canonical per-file opportunity
+                                  ranking — downstream consumers rank from this column
+                                  directly, no threshold-derived index list is passed.
       - per_model_params        : parameter count per model (efficiency)
       - per_model_training_segments : training data volume per model
 

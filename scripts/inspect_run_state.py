@@ -350,8 +350,19 @@ def compute_next_iter(
 
     Rules (chain mode only):
       * empty workspace → 1
-      * first non-COMMITTED iter → that index
-      * all COMMITTED → ``max(iter_idx) + 1``
+      * any iter COMMITTED → ``max(committed_iter_idx) + 1`` (advance past
+        the verified history; do NOT retry a non-COMMITTED iter that sits
+        below a later committed one — overwriting later successful work
+        is a far worse failure mode than leaving a broken iter on disk)
+      * no iter COMMITTED → first non-COMMITTED iter index (retry the
+        broken first iter; nothing useful would be lost)
+
+    The "any committed → max+1" rule is what diverges from earlier
+    revisions: previously this function returned the first non-COMMITTED
+    iter even when later iters had committed, causing auto-resume to
+    launch into a directory whose neighbours were finished. See
+    :func:`find_dangling_broken_iters` for the partial-below-committed
+    case operators should know about.
     """
     if gap is not None:
         raise ValueError(
@@ -360,10 +371,40 @@ def compute_next_iter(
         )
     if not reports:
         return 1
+    committed = [r for r in reports if r.status == "COMMITTED"]
+    if committed:
+        return max(r.iter_idx for r in committed) + 1
+    # No committed history — retry the first broken iter (legacy fallback).
     for r in reports:
         if r.status != "COMMITTED":
             return r.iter_idx
-    return max(r.iter_idx for r in reports) + 1
+    raise AssertionError(
+        "unreachable: reports non-empty but no committed AND no "
+        "non-committed entries"
+    )
+
+
+def find_dangling_broken_iters(
+    reports: list[IterationReport],
+) -> list[int]:
+    """Iter indices that are non-COMMITTED but below max(COMMITTED).
+
+    These represent broken state left behind when a later iter
+    succeeded. Auto-resume's :func:`compute_next_iter` advances past
+    them; this helper surfaces them so operators can choose to clean
+    them up. Returns an empty list when no committed iters exist or
+    when all non-COMMITTED iters are already above max(committed).
+    """
+    if not reports:
+        return []
+    committed_idxs = [r.iter_idx for r in reports if r.status == "COMMITTED"]
+    if not committed_idxs:
+        return []
+    max_committed = max(committed_idxs)
+    return sorted(
+        r.iter_idx for r in reports
+        if r.status != "COMMITTED" and r.iter_idx < max_committed
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -470,6 +511,8 @@ def _run_layout_chain(args: argparse.Namespace) -> int:
     reports = [inspect_chain_iteration(d) for d in iter_dirs]
     gap = find_iter_gap(reports)
 
+    dangling = find_dangling_broken_iters(reports)
+
     if args.next_iter:
         if gap is not None:
             print(
@@ -479,6 +522,14 @@ def _run_layout_chain(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 2
+        if dangling:
+            dangling_str = ", ".join(f"iter_{i:03d}" for i in dangling)
+            print(
+                f"WARN: dangling broken iter(s) below latest committed: "
+                f"{dangling_str}. Auto-resume advances past them; clean "
+                f"up at your discretion.",
+                file=sys.stderr,
+            )
         print(compute_next_iter(reports, gap))
         return 0
 
@@ -514,6 +565,14 @@ def _run_layout_chain(args: argparse.Namespace) -> int:
         else:
             print(f"No committed iter — --auto_resume would launch "
                   f"iter_{next_idx:03d}.")
+        if dangling:
+            dangling_str = ", ".join(f"iter_{i:03d}" for i in dangling)
+            print(
+                f"WARN: dangling broken iter(s) below latest committed: "
+                f"{dangling_str}. Auto-resume advances past them; clean "
+                f"up at your discretion.",
+                file=sys.stderr,
+            )
     return 0
 
 

@@ -281,9 +281,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--train_portion", type=float, default=0.1)
     parser.add_argument(
         "--eval_portion", type=float, default=0.1)
-    # --- Formal-mode training levers (Phase M, docs/resource_estimator_implement.md §12) ---
-    # Eval side in formal mode is hardcoded to snapshot + eval_portion=1.0 in
-    # the tuner (intentionally NOT operator-configurable — see §12.2).
+    # --- Formal-mode training levers (Phase M, docs §12) + eval scope (Phase R, §13) ---
+    # Formal eval strategy is locked to ``snapshot``; the portion defaults to
+    # 1.0 (production full-clone for cross-arch comparability, §12.2) and
+    # is operator-configurable via ``--formal_eval_portion`` for smoke / CI
+    # runs that need to fit a tight ``--formal_time_budget_minutes`` — §13.
     parser.add_argument(
         "--formal_strategy", type=str, default="snapshot",
         choices=["snapshot", "anchors", "target"],
@@ -296,6 +298,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--formal_train_portion", type=float, default=1.0,
         help="Per-epoch iteration fraction for formal training (default 1.0).",
+    )
+    parser.add_argument(
+        "--formal_eval_portion", type=float, default=1.0,
+        help=(
+            "Fraction of segments per file for the formal-mode eval scope "
+            "(snapshot strategy). Default 1.0 = production full-clone for "
+            "cross-architecture score comparability. Lower (e.g. 0.05) for "
+            "smoke / CI runs that must fit --formal_time_budget_minutes "
+            "(Phase R, §13)."
+        ),
     )
     parser.add_argument(
         "--force_formal_round",
@@ -316,14 +328,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--formal_round_strategy",
         type=str,
-        choices=["inherit_best_trial", "llm_propose"],
-        default="inherit_best_trial",
+        choices=[
+            "full_clone", "hybrid_params", "independent",  # canonical
+            "inherit_best_trial", "llm_propose",            # legacy aliases
+        ],
+        default="full_clone",
         help=(
             "Orchestration policy for the forced formal round. "
-            "'inherit_best_trial' (default): inherit loss_config + lr from "
-            "the highest-scoring trial-mode success in the iteration; "
-            "model_config, epochs, and batch_size remain LLM-controlled. "
-            "'llm_propose': planner's choices are honored verbatim. "
+            "'full_clone' (default): inherit model_config, loss_config, lr, "
+            "epochs, and batch_size from the highest-scoring trial-mode "
+            "success in the iteration. "
+            "'hybrid_params': inherit only loss_config + lr (planner keeps "
+            "model_config, epochs, batch_size). "
+            "'independent': planner's choices honored verbatim. "
+            "Legacy aliases accepted: 'inherit_best_trial' -> full_clone, "
+            "'llm_propose' -> independent (resolved by schema). "
             "Has no effect when --no-force_formal_round is set."
         ),
     )
@@ -655,6 +674,7 @@ def main():
             run_name=run_name,
             llm_config=llm_config,
             max_iterations=1,
+            start_iteration=args.start_iteration,
             max_rounds=args.max_rounds,
             max_proposal_attempts=args.max_proposal_attempts,
             is_trial=args.is_trial or True,  # default to trial mode
@@ -665,10 +685,11 @@ def main():
             eval_strategy=args.trial_strategy,
             eval_portion=args.eval_portion,
             sampling_seed=args.sampling_seed,
-            # Phase M — formal-mode training levers (eval side locked in tuner)
+            # Phase M — formal-mode training levers; Phase R — eval scope.
             formal_strategy=args.formal_strategy,
             formal_portion=args.formal_portion,
             formal_train_portion=args.formal_train_portion,
+            formal_eval_portion=args.formal_eval_portion,
             force_formal_round=args.force_formal_round,
             formal_round_strategy=args.formal_round_strategy,
             degenerate_penalty_score=args.degenerate_penalty_score,
@@ -697,6 +718,12 @@ def main():
             minimum_boldness=args.minimum_boldness,
             max_impl_attempts=args.max_impl_attempts,
             debug_dump_prompts=args.debug_dump_prompts,
+            # Cross-iter knowledge carry-over (docs/Consistent_growing_vocab_list.md)
+            restored_runtime_vocab=state.runtime_vocab,
+            accumulated_key_findings=state.accumulated_key_findings,
+            # Cross-iter negative-feedback carry-over (docs/V8_Gap_Report.md Domain 1)
+            accumulated_physical_rejections=state.accumulated_physical_rejections,
+            accumulated_gate_exhaustions=state.accumulated_gate_exhaustions,
         )
     except Exception as e:
         print(f"FAIL: Workflow raised exception: {type(e).__name__}: {e}")

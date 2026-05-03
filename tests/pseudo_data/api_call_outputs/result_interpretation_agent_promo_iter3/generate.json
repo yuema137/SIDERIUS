@@ -11,7 +11,7 @@
     ],
     "best_config_analysis": "wavelet_levels=3, spectral_channels=16 optimal. Deeper levels overfit on low-freq files.",
     "score_trend": "6.05 → 6.18 → 6.30. Consistent improvement, model still improving.",
-    "frequency_analysis": "Files 0-2 score 2-3. Files 3-9 score 5-7. Files 10-19 score 8-9.",
+    "per_file_analysis": "Files 0-2 score 2-3. Files 3-9 score 5-7. Files 10-19 score 8-9.",
     "data_sensitivity": "High — would benefit from more rounds. Trial mode limiting performance.",
     "efficiency_assessment": "3× compute vs wavenet, +0.72 over wavenet score. Reasonable for the gain.",
     "strategy_assessment": "Combining spectral_gating with multi-resolution is the productive direction."
@@ -26,7 +26,7 @@
       "Files 0-2 still the hardest — even wavelet_net only partially addresses very low frequencies.",
       "Compute cost scaling with each generation: wavenet(1×) → spectral_net(2×) → wavelet_net(3×)."
     ],
-    "frequency_comparison": "Progressive improvement on low-freq files across 3 generations. The trend is clear.",
+    "per_file_comparison": "Progressive improvement on low-freq files across 3 generations. The trend is clear.",
     "efficiency_comparison": "wavenet still most efficient. wavelet_net best absolute score at highest compute.",
     "take_home_message": "spectral_gating is now confirmed across 3 independent models — it should be promoted to canonical vocabulary. Next step: reduce compute overhead while preserving spectral coverage."
   },

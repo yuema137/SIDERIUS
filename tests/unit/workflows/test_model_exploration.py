@@ -561,6 +561,75 @@ class TestRunWorkflowMultiIteration:
 
 
 # ---------------------------------------------------------------------------
+# run_workflow — start_iteration plumbing (Phase 8 P3)
+# ---------------------------------------------------------------------------
+
+class TestRunWorkflowStartIteration:
+    """Verify the chain-mode iteration-index plumbing.
+
+    Pre-P3, ``run_workflow`` always looped ``range(1, max_iterations + 1)``,
+    so every chain subprocess (which runs ``max_iterations=1``) wrote
+    ``iteration=1`` into ``evolution_log.jsonl`` regardless of which chain
+    iter it actually was. P3 adds a ``start_iteration`` parameter that
+    offsets the loop and therefore the value carried on
+    ``InterpretationInput.iteration`` — which is what the evolution-log
+    writer in ``nodes.result_interpretation_agent`` reads.
+    """
+
+    def test_default_start_iteration_unchanged(self, workflow_env):
+        """start_iteration omitted → first iter stamps iteration=1 (legacy)."""
+        run_workflow(
+            data_dir=workflow_env["data_dir"],
+            model_types=["punet"],
+            source_run_name="v1",
+            workspace=workflow_env["workspace"],
+            run_name="test_run",
+        )
+        interp_input = workflow_env["interp"].return_value.run.call_args_list[0][0][0]
+        assert interp_input.iteration == 1
+
+    def test_start_iteration_offsets_loop(self, workflow_env):
+        """start_iteration=5, max_iterations=1 → exactly one iter stamped 5."""
+        run_workflow(
+            data_dir=workflow_env["data_dir"],
+            model_types=["punet"],
+            source_run_name="v1",
+            workspace=workflow_env["workspace"],
+            run_name="test_run",
+            start_iteration=5,
+            max_iterations=1,
+        )
+        calls = workflow_env["interp"].return_value.run.call_args_list
+        assert len(calls) == 1
+        assert calls[0][0][0].iteration == 5
+        # Directory name reflects the offset too — keeps post-mortem grep
+        # alignment with evolution_log.jsonl rows.
+        run_dir = os.path.join(workflow_env["workspace"], "test_run")
+        assert os.path.isdir(os.path.join(run_dir, "iteration_005"))
+
+    def test_start_iteration_with_multi_iter(self, workflow_env):
+        """start_iteration=3, max_iterations=2 → iters stamped 3 and 4."""
+        names = iter(["model_a", "model_b"])
+        workflow_env["propose"].return_value.run.side_effect = (
+            lambda inp: _make_proposal_output(next(names))
+        )
+        workflow_env["tune"].return_value.run.side_effect = (
+            lambda inp: _make_tune_output(model_type=inp.model_type, score=1.6)
+        )
+        run_workflow(
+            data_dir=workflow_env["data_dir"],
+            model_types=["punet"],
+            source_run_name="v1",
+            workspace=workflow_env["workspace"],
+            run_name="test_run",
+            start_iteration=3,
+            max_iterations=2,
+        )
+        calls = workflow_env["interp"].return_value.run.call_args_list
+        assert [c[0][0].iteration for c in calls] == [3, 4]
+
+
+# ---------------------------------------------------------------------------
 # run_workflow — validation failure + retry tests
 # ---------------------------------------------------------------------------
 
@@ -1215,20 +1284,58 @@ class TestOrchestrationParamForwarding:
         sig = inspect.signature(run_workflow)
         assert "formal_round_strategy" in sig.parameters
 
-    def test_formal_round_strategy_default_inherit_best_trial(
+    def test_formal_round_strategy_default_full_clone(
         self, workflow_env, tmp_path
     ):
+        """Phase 1 of refactor_formal_round_strategy.md flipped the
+        schema default from legacy ``inherit_best_trial`` to canonical
+        ``full_clone``. Behavior identical, name normalised."""
         tune_input = _tune_input_from_workflow(workflow_env, tmp_path)
-        assert tune_input.formal_round_strategy == "inherit_best_trial"
+        assert tune_input.formal_round_strategy == "full_clone"
 
-    def test_formal_round_strategy_llm_propose_reaches_tuning_input(
+    def test_formal_round_strategy_canonical_independent_reaches_tuning_input(
         self, workflow_env, tmp_path
     ):
         tune_input = _tune_input_from_workflow(
             workflow_env, tmp_path,
+            formal_round_strategy="independent",
+        )
+        assert tune_input.formal_round_strategy == "independent"
+
+    def test_formal_round_strategy_canonical_hybrid_params_reaches_tuning_input(
+        self, workflow_env, tmp_path
+    ):
+        """Phase 2 introduced ``hybrid_params`` (loss_cfg + lr only). The
+        workflow must accept it and forward it verbatim to the tuner."""
+        tune_input = _tune_input_from_workflow(
+            workflow_env, tmp_path,
+            formal_round_strategy="hybrid_params",
+        )
+        assert tune_input.formal_round_strategy == "hybrid_params"
+
+    def test_formal_round_strategy_legacy_alias_canonicalised(
+        self, workflow_env, tmp_path
+    ):
+        """A workflow caller passing the legacy literal must see the
+        canonicalised name on ``HyperparamTuningInput`` because the
+        schema validator runs after the protocol fan-out."""
+        tune_input = _tune_input_from_workflow(
+            workflow_env, tmp_path,
             formal_round_strategy="llm_propose",
         )
-        assert tune_input.formal_round_strategy == "llm_propose"
+        assert tune_input.formal_round_strategy == "independent"
+
+    def test_formal_round_strategy_legacy_inherit_best_trial_canonicalised(
+        self, workflow_env, tmp_path
+    ):
+        """Symmetric to the ``llm_propose`` alias test: the historical
+        ``inherit_best_trial`` literal must surface as ``full_clone`` on
+        the tuning input."""
+        tune_input = _tune_input_from_workflow(
+            workflow_env, tmp_path,
+            formal_round_strategy="inherit_best_trial",
+        )
+        assert tune_input.formal_round_strategy == "full_clone"
 
     def test_signature_accepts_degenerate_penalty_score(self):
         import inspect

@@ -325,6 +325,27 @@ Background on the task:
   or Linear + transpose to achieve this.
 - GPU budget: <10 GB VRAM, <100M parameters for initial exploration.
 
+## Allowed imports — STRICT ALLOW-LIST
+
+The plugin runtime is a RESTRICTED sandbox. The ONLY modules you may import are:
+  - torch
+  - torch.nn (as nn)
+  - torch.nn.functional (as F)
+  - pydantic (BaseModel, Field, model_validator)
+  - typing (Self, Optional, List, Tuple, etc.)
+  - math
+  - dataclasses
+
+ANY other import will fail at plugin load time. In particular:
+  - Do NOT import from `your_module`, `some_module`, `ml_models`, `agent`,
+    `core`, `utils`, or any project-internal path.
+  - Do NOT import third-party libraries (numpy, scipy, einops, etc.) — they
+    are not guaranteed available in the sandbox.
+  - Do NOT use placeholder names like `from your_module import X` even as a
+    template; the plugin loader will reject them.
+  - If you need a primitive that is not in the allow-list, INLINE its logic
+    using the allowed modules — do not invent an import.
+
 In your reasoning, cover all of the following:
 1. What nn.Module submodules are needed? Name each one and its role.
 2. How will you handle the embedding step and get the right tensor shapes?
@@ -354,7 +375,7 @@ Now commit to the actual code sections.
 Output a JSON object with exactly these fields:
 
 {
-  "extra_imports": "any additional import lines beyond torch/nn/F/BaseModel/Field/model_validator, one per line, or empty string",
+  "extra_imports": "any additional import lines beyond torch/nn/F/BaseModel/Field/model_validator, one per line, or empty string. STRICT ALLOW-LIST: only `import math`, `import dataclasses`, and additional `from typing import ...` lines are accepted. NEVER emit `from your_module import ...`, `from some_module import ...`, `from ml_models...`, or any project-internal/third-party path — the plugin loader will fail.",
   "config_fields_code": "additional Pydantic field definitions — each line indented with 4 spaces, e.g.:\\n    channels: int = Field(default=64, ge=8, le=256)\\n    depth: int = Field(default=4, ge=1, le=8)",
   "config_validators_code": "a @model_validator(mode='after') method enforcing divisibility constraints, indented with 4 spaces — or empty string if no constraints needed. Example:\\n    @model_validator(mode='after')\\n    def check_constraints(self) -> Self:\\n        if self.gate_channels % 2 != 0:\\n            raise ValueError(f'gate_channels must be even, got {self.gate_channels}')\\n        if self.skip_channels % self.nhead != 0:\\n            raise ValueError(f'skip_channels ({self.skip_channels}) must be divisible by nhead ({self.nhead})')\\n        return self",
   "config_fields": {"field_name": default_value, ...},
@@ -459,15 +480,32 @@ def _build_reasoning_prompt(inp: ImplementorInput) -> str:
     if inp.reference_code:
         lines += [
             "",
-            "## Reference Code (from ancestor models — for context)",
+            "## Reference Code (from ancestor models — for ARCHITECTURAL INSPIRATION ONLY)",
             "",
-            "The following source code is from models that have been tested on",
-            "this task. Use it according to the implement advice above.",
+            "⚠ WARNING — read before using the snippets below:",
+            "",
+            "1. Private helper classes (e.g. `CausalConv1d`, `WaveNetBlock`,",
+            "   `DoubleConv`, `PositionalEncoding`, `Down`, `Up`, etc.) shown below",
+            "   are NOT available in your plugin's runtime — they live in",
+            "   `ml_models/models_sandbox.py` which the plugin loader does not import.",
+            "   You MUST inline their logic using only the allowed primitives",
+            "   (torch, torch.nn, torch.nn.functional). Do NOT reference these helper",
+            "   class names in your `init_body` or `forward_body` — that produces",
+            "   `NameError` at smoke-test time.",
+            "",
+            "2. The `self.config = config` + `self.config.X` access pattern that some",
+            "   reference samples use is FORBIDDEN in your plugin. The `config` object",
+            "   is only in scope during `__init__`. Store every value you need as a",
+            "   plain attribute on `self` (e.g. `self.channels = config.channels`)",
+            "   inside `init_body`, then reference `self.channels` in `forward_body`.",
+            "",
+            "3. Use the references for architectural ideas (block structure, dilation",
+            "   schedules, skip-connection topology) — not as code to copy verbatim.",
             "",
         ]
         for model_type, source in inp.reference_code.items():
             lines += [
-                f"### {model_type} (reference implementation)",
+                f"### {model_type} (reference implementation — inspiration only)",
                 "```python",
                 source,
                 "```",

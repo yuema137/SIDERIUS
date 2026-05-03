@@ -341,6 +341,57 @@ class TestDefaultSampleSet:
         )
         assert out["estimated_minutes"] > 0.0
 
+    def test_trial_portion_kwarg_scales_default_sample_set(self):
+        """trial_portion=0.02 must shrink the synthesised sample_set vs
+        the 0.1 default — otherwise a caller that runs with
+        ``HyperparamTuningInput.trial_portion=0.02`` (e.g. the score-table
+        smoke gate) gets a 5x over-projected estimate even though its
+        actual training scope is 5x smaller."""
+        ss_default = _synthesise_default_sample_set()  # 0.1
+        ss_small = _synthesise_default_sample_set(trial_portion=0.02)
+        n_default = sum(len(v) for v in ss_default.values())
+        n_small = sum(len(v) for v in ss_small.values())
+        assert n_small < n_default, (
+            f"trial_portion=0.02 sample_set ({n_small} segs) should be smaller "
+            f"than the 0.1 default ({n_default} segs)"
+        )
+
+    def test_estimate_proposal_time_respects_trial_portion(self):
+        """estimate_proposal_time must thread ``trial_portion`` into the
+        synthesised sample_set so the wall-time estimate scales linearly
+        with the caller's actual scope.
+
+        Total wall-time is dominated by ``total_steps × ms_per_step``
+        with ``total_steps ∝ trial_portion`` (via ``ceil(p × 200)``
+        segments per file × 20 files). So at fixed model_config /
+        train_config, halving trial_portion should ~halve estimated
+        minutes, and ``trial_portion=0.02`` (Gate 2's scope) should land
+        at ~0.2× the default 0.1 estimate.
+
+        Regression target: pre-fix, trial_portion was ignored — a
+        trial_portion=0.02 run was over-projected by ~5× because the
+        gate always synthesised snapshot@0.1.
+        """
+        kwargs = dict(
+            model_type="tcn",
+            model_config=_iter4_tcn_model_cfg(),
+            train_config=_train_cfg(epochs=2),
+            loss_config=_loss_cfg(),
+            num_params=1_000_000,
+            time_budget_minutes=20.0,
+        )
+        out_default = estimate_proposal_time(**kwargs)              # trial_portion=0.1
+        out_small = estimate_proposal_time(**kwargs, trial_portion=0.02)
+
+        # ceil(0.1 × 200) = 20 segs/file vs ceil(0.02 × 200) = 4 segs/file → exact 1/5.
+        expected_ratio = 0.2
+        actual_ratio = out_small["estimated_minutes"] / out_default["estimated_minutes"]
+        assert abs(actual_ratio - expected_ratio) < 0.05, (
+            f"trial_portion=0.02 should give ~{expected_ratio:.2f}× the default "
+            f"estimate; got {actual_ratio:.3f} ("
+            f"{out_small['estimated_minutes']:.2f} / {out_default['estimated_minutes']:.2f} min)"
+        )
+
 
 # ---------------------------------------------------------------------------
 # No GPU / no disk — negative assertions via monkeypatch

@@ -25,9 +25,26 @@ import warnings
 from dataclasses import dataclass, field
 from typing import List, Sequence
 
-from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
+from agent.schemas.hyperparam_tuning import (
+    GateExhaustionInfo,
+    HyperparamTuningOutput,
+    PhysicalRejection,
+)
+from agent.schemas.proposal import VocabEntry
 from core.sandbox_executor import get_plugin_dir
 from workflows.model_exploration import _add_plugin_to_registries
+
+
+# ---------------------------------------------------------------------------
+# Cross-iter negative-feedback retention caps (V8 hardening §1).
+# Keep the K most-recent entries across ALL prior committed iters; older ones
+# are evicted. K=10 is the operator-approved balance between prompt bloat
+# (each rendered rejection ≈150 chars, so K=10 → ~1.5 KB worst-case) and
+# coverage (a 30-iter chain typically has ≤2 distinct architectural classes
+# rejected, so 10 is generous). See docs/V8_Gap_Report.md Domain 1.
+# ---------------------------------------------------------------------------
+_MAX_ACCUMULATED_REJECTIONS = 10
+_MAX_ACCUMULATED_GATE_EXHAUSTIONS = 10
 
 
 # ---------------------------------------------------------------------------
@@ -64,10 +81,41 @@ class RestoredState:
             ``memory_history`` reconstruction doesn't need the class).
         committed_iters: 1-based iter indices successfully restored.
             Equivalent to ``range(1, current_iter)`` for a clean chain.
+        runtime_vocab: latest committed iter's
+            ``InterpretationOutput.runtime_vocab``, loaded from
+            ``iter_NNN/iteration_001/interpretation_iter_NNN.json``. Empty
+            list when ``current_iter == 1`` or no committed iter has a
+            parseable interpretation digest. ``seen_in_runs`` is preserved
+            verbatim — the next iter's ``build_runtime_vocab`` appends the
+            current run's ID via the ``proposed_candidates`` channel only.
+            See ``docs/Consistent_growing_vocab_list.md``.
+        accumulated_key_findings: chronological union (dedup by string,
+            first-occurrence wins) of every committed iter's
+            ``InterpretationOutput.key_findings``. Forwarded to the next
+            proposer as a single ``ExpertContextItem`` so the LLM sees the
+            full chain history, not just iter N-1's take-homes.
+        accumulated_physical_rejections: VRAM-gate rejections collected
+            from every committed iter's ``HyperparamTuningOutput.physical_rejections``,
+            in chronological order, capped to the last
+            ``_MAX_ACCUMULATED_REJECTIONS`` entries (most-recent wins on
+            overflow). Forwarded to the next workflow's ``previous_failures``
+            seed so the proposer sees full-chain VRAM lessons, not just
+            iter N-1's. See docs/V8_Gap_Report.md Domain 1.
+        accumulated_gate_exhaustions: gate-abort summaries collected from
+            every committed iter's ``HyperparamTuningOutput.gate_exhaustion``
+            (only when non-None), in chronological order, capped to the
+            last ``_MAX_ACCUMULATED_GATE_EXHAUSTIONS`` entries. Forwarded
+            to the next workflow's ``recent_tune_outputs`` deque so the
+            proposer's ``[RECENT GATE EXHAUSTIONS]`` block reflects the
+            chain history. See docs/V8_Gap_Report.md Domain 1.
     """
     resolved_source_paths: List[str] = field(default_factory=list)
     restored_plugins: List[str] = field(default_factory=list)
     committed_iters: List[int] = field(default_factory=list)
+    runtime_vocab: List[VocabEntry] = field(default_factory=list)
+    accumulated_key_findings: List[str] = field(default_factory=list)
+    accumulated_physical_rejections: List[PhysicalRejection] = field(default_factory=list)
+    accumulated_gate_exhaustions: List[GateExhaustionInfo] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +209,107 @@ def _validate_run_output(
             f"iter {iter_idx:03d}: run_output failed validation at "
             f"{output_path}: {e}"
         ) from e
+
+
+# ---------------------------------------------------------------------------
+# Knowledge carry-over (cross-iter vocab + findings persistence)
+# ---------------------------------------------------------------------------
+
+def _interpretation_path(workspace: str, iter_idx: int) -> str:
+    """Path convention for the chain-mode interpretation digest.
+
+    Mirrors ``workflows.model_exploration.run_workflow``: the interp agent's
+    storage is rooted at ``{iter_dir}/`` with run_name ``iter_NNN``, and
+    ``ResultInterpretationAgent.run`` writes
+    ``interpretation_{run_name}.json`` under that workspace. For chain mode
+    that resolves to::
+
+        {workspace}/iter_NNN/iteration_001/interpretation_iter_NNN.json
+    """
+    run_name = _iter_run_name(iter_idx)
+    return os.path.join(
+        workspace, run_name, "iteration_001", f"interpretation_{run_name}.json",
+    )
+
+
+def load_latest_knowledge(
+    workspace: str,
+    current_iter: int,
+    committed_iters: Sequence[int],
+) -> tuple[List[VocabEntry], List[str]]:
+    """Read prior iters' interpretation digests; return knowledge carry-over.
+
+    Args:
+        workspace: chain workspace root (absolute path preferred).
+        current_iter: iter the runner is about to launch. ``<= 1`` short-circuits
+            to ``([], [])``.
+        committed_iters: ascending list of iter indices known to be committed
+            (i.e. their manifests parsed cleanly via ``_read_manifest``).
+
+    Returns:
+        ``(runtime_vocab, accumulated_key_findings)``:
+          * ``runtime_vocab`` — the LATEST parseable digest's
+            ``runtime_vocab`` (already merged with seed via
+            ``build_runtime_vocab`` on the prior iter). Per-entry validation
+            failure → that entry is dropped + warning emitted; the rest of
+            the digest survives.
+          * ``accumulated_key_findings`` — chronological union across every
+            parseable digest, dedup by string, first-occurrence wins.
+
+    Soft-fail policy: a missing or malformed digest emits a ``UserWarning``
+    and is skipped; the loader continues with the remaining iters. This
+    mirrors how plugin restoration tolerates a missing ``.py`` file —
+    knowledge carry-over is best-effort, not a hard prerequisite.
+    """
+    if current_iter <= 1 or not committed_iters:
+        return [], []
+
+    runtime_vocab: List[VocabEntry] = []
+    findings: List[str] = []
+    seen: set[str] = set()
+
+    for iter_idx in committed_iters:  # already ascending per restore_prior_state
+        path = _interpretation_path(workspace, iter_idx)
+        if not os.path.isfile(path):
+            warnings.warn(
+                f"[resume] iter {iter_idx:03d}: interpretation digest not "
+                f"found at {path}. Skipping for knowledge carry-over.",
+                UserWarning, stacklevel=2,
+            )
+            continue
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            warnings.warn(
+                f"[resume] iter {iter_idx:03d}: cannot read interpretation "
+                f"digest {path}: {e}. Skipping for knowledge carry-over.",
+                UserWarning, stacklevel=2,
+            )
+            continue
+
+        for kf in data.get("key_findings") or []:
+            if isinstance(kf, str) and kf and kf not in seen:
+                findings.append(kf)
+                seen.add(kf)
+
+        # Latest parseable digest wins for runtime_vocab. Validate each entry
+        # individually to drop malformed records without losing the rest.
+        raw_vocab = data.get("runtime_vocab") or []
+        validated: List[VocabEntry] = []
+        for entry in raw_vocab:
+            try:
+                validated.append(VocabEntry.model_validate(entry))
+            except Exception as e:
+                warnings.warn(
+                    f"[resume] iter {iter_idx:03d}: dropped malformed "
+                    f"runtime_vocab entry {entry!r}: {e}",
+                    UserWarning, stacklevel=2,
+                )
+        if validated:
+            runtime_vocab = validated  # overwrite: only LAST iter's wins
+
+    return runtime_vocab, findings
 
 
 # ---------------------------------------------------------------------------
@@ -292,6 +441,49 @@ def restore_prior_state(
 
         state.resolved_source_paths.append(output_path)
         state.committed_iters.append(iter_idx)
+
+        # V8 Domain 1 — accumulate negative feedback as we walk prior iters.
+        # The same parsed HyperparamTuningOutput already validated above
+        # carries every signal we need; no second disk pass required. The
+        # caps below enforce K=10 most-recent retention per channel.
+        # See docs/V8_Gap_Report.md Domain 1.
+        if parsed.physical_rejections:
+            state.accumulated_physical_rejections.extend(parsed.physical_rejections)
+        if parsed.gate_exhaustion is not None:
+            state.accumulated_gate_exhaustions.append(parsed.gate_exhaustion)
+
+    # Apply K-most-recent caps. We collect chronologically and trim from the
+    # head so the *latest* signals win — older rejections become stale once
+    # the architecture/budget combo evolves past them.
+    if len(state.accumulated_physical_rejections) > _MAX_ACCUMULATED_REJECTIONS:
+        state.accumulated_physical_rejections = (
+            state.accumulated_physical_rejections[-_MAX_ACCUMULATED_REJECTIONS:]
+        )
+    if len(state.accumulated_gate_exhaustions) > _MAX_ACCUMULATED_GATE_EXHAUSTIONS:
+        state.accumulated_gate_exhaustions = (
+            state.accumulated_gate_exhaustions[-_MAX_ACCUMULATED_GATE_EXHAUSTIONS:]
+        )
+
+    # Cross-iter knowledge carry-over. Without this, every chain iter's
+    # interp node sees only the static seed (empirically: 5 iters × 21
+    # entries on the V7 explore workspace before this patch landed). See
+    # docs/Consistent_growing_vocab_list.md §1.2 for the bug evidence.
+    state.runtime_vocab, state.accumulated_key_findings = load_latest_knowledge(
+        abs_workspace, current_iter, state.committed_iters,
+    )
+    if state.runtime_vocab or state.accumulated_key_findings:
+        print(
+            f"[resume] knowledge carry-over: "
+            f"{len(state.runtime_vocab)} vocab entries, "
+            f"{len(state.accumulated_key_findings)} accumulated key findings"
+        )
+    if state.accumulated_physical_rejections or state.accumulated_gate_exhaustions:
+        print(
+            f"[resume] negative-feedback carry-over: "
+            f"{len(state.accumulated_physical_rejections)} physical rejection(s), "
+            f"{len(state.accumulated_gate_exhaustions)} gate-exhaustion summar"
+            f"{'y' if len(state.accumulated_gate_exhaustions) == 1 else 'ies'}"
+        )
 
     return state
 
