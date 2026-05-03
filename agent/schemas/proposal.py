@@ -131,7 +131,7 @@ class ExpertContextItem(BaseModel):
                     "across iterations (workflows/model_exploration.py)."
     )
     content: str = Field(
-        max_length=10000,
+        max_length=100000,
         description="The actual advice / finding / constraint."
     )
     cite_id: str = Field(
