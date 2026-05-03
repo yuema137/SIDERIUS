@@ -281,9 +281,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--train_portion", type=float, default=0.1)
     parser.add_argument(
         "--eval_portion", type=float, default=0.1)
-    # --- Formal-mode training levers (Phase M, docs/resource_estimator_implement.md §12) ---
-    # Eval side in formal mode is hardcoded to snapshot + eval_portion=1.0 in
-    # the tuner (intentionally NOT operator-configurable — see §12.2).
+    # --- Formal-mode training levers (Phase M, docs §12) + eval scope (Phase R, §13) ---
+    # Formal eval strategy is locked to ``snapshot``; the portion defaults to
+    # 1.0 (production full-clone for cross-arch comparability, §12.2) and
+    # is operator-configurable via ``--formal_eval_portion`` for smoke / CI
+    # runs that need to fit a tight ``--formal_time_budget_minutes`` — §13.
     parser.add_argument(
         "--formal_strategy", type=str, default="snapshot",
         choices=["snapshot", "anchors", "target"],
@@ -296,6 +298,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--formal_train_portion", type=float, default=1.0,
         help="Per-epoch iteration fraction for formal training (default 1.0).",
+    )
+    parser.add_argument(
+        "--formal_eval_portion", type=float, default=1.0,
+        help=(
+            "Fraction of segments per file for the formal-mode eval scope "
+            "(snapshot strategy). Default 1.0 = production full-clone for "
+            "cross-architecture score comparability. Lower (e.g. 0.05) for "
+            "smoke / CI runs that must fit --formal_time_budget_minutes "
+            "(Phase R, §13)."
+        ),
     )
     parser.add_argument(
         "--force_formal_round",
@@ -673,10 +685,11 @@ def main():
             eval_strategy=args.trial_strategy,
             eval_portion=args.eval_portion,
             sampling_seed=args.sampling_seed,
-            # Phase M — formal-mode training levers (eval side locked in tuner)
+            # Phase M — formal-mode training levers; Phase R — eval scope.
             formal_strategy=args.formal_strategy,
             formal_portion=args.formal_portion,
             formal_train_portion=args.formal_train_portion,
+            formal_eval_portion=args.formal_eval_portion,
             force_formal_round=args.force_formal_round,
             formal_round_strategy=args.formal_round_strategy,
             degenerate_penalty_score=args.degenerate_penalty_score,

@@ -189,9 +189,11 @@ def parse_args():
             "None → skill falls back to free×0.8 defensive limit."
         ),
     )
-    # --- Formal-mode training levers (Phase M, docs/resource_estimator_implement.md §12) ---
-    # Eval side in formal mode is hardcoded to snapshot + eval_portion=1.0 in
-    # the tuner (intentionally NOT operator-configurable — see §12.2).
+    # --- Formal-mode training levers (Phase M, docs §12) + eval scope (Phase R, §13) ---
+    # Formal eval strategy is locked to ``snapshot``; the portion defaults to
+    # 1.0 (production full-clone for cross-arch comparability, §12.2) and
+    # is operator-configurable via ``--formal_eval_portion`` for smoke / CI
+    # runs that must fit a tight ``--formal_time_budget_minutes`` — §13.
     parser.add_argument(
         "--formal_strategy", type=str, default="snapshot",
         choices=["snapshot", "anchors", "target"],
@@ -209,6 +211,16 @@ def parse_args():
     parser.add_argument(
         "--formal_train_portion", type=float, default=1.0,
         help="Per-epoch iteration fraction from the formal training scope (default 1.0).",
+    )
+    parser.add_argument(
+        "--formal_eval_portion", type=float, default=1.0,
+        help=(
+            "Fraction of segments per file for the formal-mode eval scope "
+            "(snapshot strategy). Default 1.0 = production full-clone for "
+            "cross-architecture score comparability. Lower (e.g. 0.05) for "
+            "smoke / CI runs that must fit --formal_time_budget_minutes "
+            "(Phase R, §13)."
+        ),
     )
     parser.add_argument(
         "--force_formal_round",
@@ -412,6 +424,7 @@ def _run_one_iter(args, workspace, llm_config, advice, source_paths, iteration):
         formal_strategy=args.formal_strategy,
         formal_portion=args.formal_portion,
         formal_train_portion=args.formal_train_portion,
+        formal_eval_portion=args.formal_eval_portion,
         force_formal_round=args.force_formal_round,
         formal_round_strategy=args.formal_round_strategy,
         degenerate_penalty_score=args.degenerate_penalty_score,
@@ -534,7 +547,12 @@ def main():
     print(f"  VRAM budget   : trial={trial_vram_str}  |  formal={formal_vram_str}")
     print(f"  Formal train  : strategy={args.formal_strategy}  portion={args.formal_portion}  train_portion={args.formal_train_portion}")
     print(f"  Last round    : force_formal={args.force_formal_round} (False ⇒ honour planner — testing only)")
-    print(f"  Formal eval   : LOCKED to snapshot + eval_portion=1.0 (Phase M)")
+    formal_eval_note = (
+        " (production full-clone, §12.2)"
+        if args.formal_eval_portion == 1.0
+        else " (smoke / CI scope-down, Phase R §13)"
+    )
+    print(f"  Formal eval   : strategy=snapshot  eval_portion={args.formal_eval_portion}{formal_eval_note}")
     print(f"  Attempt budget: trial={args.attempts_per_round}/round  formal={args.attempts_per_formal_round}/round  fail-brake={args.max_fail_rounds} (Phase L)")
     print(f"  Data dir      : {args.data_dir or 'unset (skill uses static formula)'}")
     print(f"  Advice    : {args.advice}")
