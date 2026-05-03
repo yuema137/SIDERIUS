@@ -685,6 +685,15 @@ def run_workflow(
     os.makedirs(run_dir, exist_ok=True)
     started_at = time.strftime("%Y-%m-%d %H:%M:%S")
 
+    # Anchor SIDERIUS_CHAIN_WORKSPACE for in-process / single-iteration
+    # callers (e.g. integration smoke tests, ad-hoc workflow invocations).
+    # ml_models.model_descriptions.get_model_description reads this env var
+    # to walk {workspace}/plugins/*/{model_type}/description.md and resolve
+    # agent-generated plugin descriptions on iter > 1. Chain entry scripts
+    # (run_one_iteration.py, run_exploration_adaptive.py) set it earlier;
+    # only override here when unset so chain mode keeps precedence.
+    os.environ.setdefault("SIDERIUS_CHAIN_WORKSPACE", os.path.abspath(workspace))
+
     print(f"\n{'='*60}")
     print(f"  SIDERIUS Model Exploration Workflow")
     print(f"  Started       : {started_at}")
