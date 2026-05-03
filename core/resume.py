@@ -83,7 +83,7 @@ class RestoredState:
             Equivalent to ``range(1, current_iter)`` for a clean chain.
         runtime_vocab: latest committed iter's
             ``InterpretationOutput.runtime_vocab``, loaded from
-            ``iter_NNN/iteration_001/interpretation_iter_NNN.json``. Empty
+            ``iter_NNN/iteration_NNN/interpretation_iter_NNN.json``. Empty
             list when ``current_iter == 1`` or no committed iter has a
             parseable interpretation digest. ``seen_in_runs`` is preserved
             verbatim — the next iter's ``build_runtime_vocab`` appends the
@@ -111,7 +111,7 @@ class RestoredState:
         previous_proposal_data: latest committed iter's proposal JSON
             (raw dict, not validated) — the file produced by the
             proposal node at
-            ``iter_NNN/iteration_001/attempt_MMM_<model>/proposal_iter_NNN.json``.
+            ``iter_NNN/iteration_NNN/attempt_MMM_<model>/proposal_iter_NNN.json``.
             Forwarded to the next iter's ``run_workflow`` as
             ``restored_previous_proposal``, replacing the unconditional
             ``None`` initialisation that today erases ``proposed_vocab_candidates``
@@ -238,14 +238,24 @@ def _interpretation_path(workspace: str, iter_idx: int) -> str:
     Mirrors ``workflows.model_exploration.run_workflow``: the interp agent's
     storage is rooted at ``{iter_dir}/`` with run_name ``iter_NNN``, and
     ``ResultInterpretationAgent.run`` writes
-    ``interpretation_{run_name}.json`` under that workspace. For chain mode
-    that resolves to::
+    ``interpretation_{run_name}.json`` under that workspace. Post-cc198ad
+    (V8 Domain 3 fix), the workflow's iter loop runs
+    ``range(start_iteration, start_iteration + max_iterations)`` and the
+    iter dir name encodes the chain-wide iter index, so for chain mode this
+    resolves to::
 
-        {workspace}/iter_NNN/iteration_001/interpretation_iter_NNN.json
+        {workspace}/iter_NNN/iteration_NNN/interpretation_iter_NNN.json
+
+    Both NNN segments carry the same chain-wide iter index because in chain
+    mode each subprocess sets ``run_name = f"iter_{start_iteration:03d}"``
+    AND the workflow's loop variable is also ``start_iteration``. (Pre-fix,
+    the loop ran from 1 so the inner segment was always ``iteration_001``;
+    that legacy is what older V8 workspaces on disk still show.)
     """
     run_name = _iter_run_name(iter_idx)
     return os.path.join(
-        workspace, run_name, "iteration_001", f"interpretation_{run_name}.json",
+        workspace, run_name, f"iteration_{iter_idx:03d}",
+        f"interpretation_{run_name}.json",
     )
 
 
@@ -339,10 +349,12 @@ def _proposal_path(workspace: str, iter_idx: int) -> str | None:
 
     Layout written by the proposal node + sandbox executor::
 
-        {workspace}/iter_NNN/iteration_001/attempt_MMM_<model_name>/
+        {workspace}/iter_NNN/iteration_NNN/attempt_MMM_<model_name>/
                                                   proposal_iter_NNN.json
 
-    The implementor produces one final attempt dir per iter under happy
+    Both NNN segments carry the same chain-wide iter index (see
+    :func:`_interpretation_path` for the post-cc198ad rationale). The
+    implementor produces one final attempt dir per iter under happy
     path; under validation retries, multiple ``attempt_MMM_*`` dirs may
     exist with monotonically increasing ``MMM`` prefix. The highest-MMM
     attempt is the one whose proposal was accepted, so it wins.
@@ -355,7 +367,7 @@ def _proposal_path(workspace: str, iter_idx: int) -> str | None:
 
     run_name = _iter_run_name(iter_idx)
     iteration_dir = os.path.join(
-        workspace, run_name, "iteration_001",
+        workspace, run_name, f"iteration_{iter_idx:03d}",
     )
     if not os.path.isdir(iteration_dir):
         return None

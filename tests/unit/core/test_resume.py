@@ -966,15 +966,16 @@ def _write_proposal(
 ):
     """Write a synthetic ``proposal_iter_NNN.json`` under the chain layout.
 
-    Mirrors ``{workspace}/iter_NNN/iteration_001/attempt_MMM_<model>/
-    proposal_iter_NNN.json``. ``raw_text`` lets a test inject malformed
-    JSON deliberately. ``payload`` defaults to a minimal dict carrying
-    a ``proposed_vocab_candidates`` field so the loader's downstream
-    consumer (the workflow) has something parseable to seed.
+    Mirrors ``{workspace}/iter_NNN/iteration_NNN/attempt_MMM_<model>/
+    proposal_iter_NNN.json`` — both NNN segments carry the same chain-wide
+    iter index (post-cc198ad workflow loop). ``raw_text`` lets a test
+    inject malformed JSON deliberately. ``payload`` defaults to a minimal
+    dict carrying a ``proposed_vocab_candidates`` field so the loader's
+    downstream consumer (the workflow) has something parseable to seed.
     """
     run_name = _iter_run_name(iter_idx)
     attempt_dir = (
-        workspace / run_name / "iteration_001"
+        workspace / run_name / f"iteration_{iter_idx:03d}"
         / f"attempt_{attempt:03d}_{model_name}"
     )
     attempt_dir.mkdir(parents=True, exist_ok=True)
@@ -1045,8 +1046,57 @@ class TestLoadLatestProposal:
         assert _proposal_path(str(tmp_path), 1) is None
 
     def test_proposal_path_returns_none_when_iteration_dir_missing(self, tmp_path):
-        """No iter_NNN/iteration_001/ at all → silent None (no_records iter)."""
+        """No iter_NNN/iteration_NNN/ at all → silent None (no_records iter)."""
         assert _proposal_path(str(tmp_path), 5) is None
+
+    def test_proposal_path_uses_chain_wide_iter_dir_name_for_iter_above_1(
+        self, tmp_path,
+    ):
+        """Regression for the cc198ad path drift.
+
+        Post-cc198ad, ``workflows.model_exploration.run_workflow`` builds
+        ``iter_dir = run_dir / f"iteration_{iteration:03d}"`` where
+        ``iteration`` is the chain-wide loop variable. In chain mode that
+        means iter 5 writes its attempt under
+        ``iter_005/iteration_005/...``, NOT ``iter_005/iteration_001/...``.
+        The earlier hardcoded ``iteration_001`` would silently miss every
+        post-cc198ad chain iter > 1 — this test pins the dynamic name.
+        """
+        # Place a proposal under the post-cc198ad layout for iter 5.
+        path = _write_proposal(
+            tmp_path, 5,
+            payload={"id": "iter5_proposal_under_dynamic_dir"},
+        )
+        # Sanity: writer is honouring the dynamic layout.
+        assert "iteration_005" in str(path), (
+            f"_write_proposal still writing legacy layout: {path!r}"
+        )
+        # Loader must resolve the same dynamic path.
+        resolved = _proposal_path(str(tmp_path), 5)
+        assert resolved is not None
+        assert "iter_005" in resolved and "iteration_005" in resolved, (
+            f"_proposal_path resolved {resolved!r} — expected dynamic "
+            f"iteration_005 segment, not the legacy iteration_001."
+        )
+        with open(resolved) as f:
+            assert json.load(f) == {"id": "iter5_proposal_under_dynamic_dir"}
+
+    def test_interpretation_path_uses_chain_wide_iter_dir_name_for_iter_above_1(
+        self, tmp_path,
+    ):
+        """Regression for the cc198ad path drift on the knowledge channel.
+
+        Same root cause as the proposal-path drift: ``_interpretation_path``
+        previously hardcoded ``iteration_001`` and would silently miss
+        every post-cc198ad chain iter > 1. This test pins the dynamic name
+        for the digest reader.
+        """
+        from core.resume import _interpretation_path
+        path = _interpretation_path(str(tmp_path), 7)
+        assert "iter_007" in path and "iteration_007" in path, (
+            f"_interpretation_path resolved {path!r} — expected dynamic "
+            f"iteration_007 segment, not the legacy iteration_001."
+        )
 
 
 class TestRestorePriorStateProposalCarryOver:
