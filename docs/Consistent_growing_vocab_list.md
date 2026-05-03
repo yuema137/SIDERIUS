@@ -883,7 +883,7 @@ override of line 1217's local update.
 - [x] §10.3.2 `_proposal_path` + `load_latest_proposal` helpers shipped — `e1ca13d` (Commit 1.1)
 - [x] `restore_prior_state` wires the loader + populates field — `e1ca13d` (Commit 1.1)
 - [x] §10.3.3 `run_workflow` accepts and consumes the new kwarg — Commit 1.2 (2026-05-02)
-- [ ] §10.3.4 `run_one_iteration.py` forwards the new kwarg — pending Commit 1.3
+- [x] §10.3.4 `run_one_iteration.py` forwards the new kwarg — Commit 1.3 (2026-05-03)
 - [x] §10.4.1 unit tests (4 cases) pass — `e1ca13d` shipped 9 (Commit 1.1; 4 mandated + 5 edge cases)
 - [ ] §10.4.2 integration test (`foo` graduation) passes — pending Commit 1.4
 - [ ] §10.4.3 regression: in-process multi-iter promotion still works — pending Commit 1.4
@@ -2405,16 +2405,26 @@ $ .venv/bin/python -m pytest tests/integration/workflows/test_vocab_accumulation
 
 **Note**: forward `state.previous_proposal_data` into the `run_workflow` call alongside the existing 4 memory channels.
 
-Checklist:
-- [ ] One new line at the `run_workflow(...)` call site (lines 722–726): `restored_previous_proposal=state.previous_proposal_data`
-- [ ] No other change in this file
+**Status**: ✅ CLOSED — landed on `fix/cognitive-alignment-v9` (2026-05-03).
 
-Verification:
+Checklist:
+- [x] One new line at the `run_workflow(...)` call site (line 728): `restored_previous_proposal=state.previous_proposal_data`, with a one-line `# Cross-iter proposal carry-over — G1 bridge` comment grouping it under §10.3.4 (mirrors the existing 4 memory-channel comment groupings)
+- [x] No other change in this file
+
+Verification (2026-05-03):
 ```
-grep -n 'restored_previous_proposal' sdsc_submission_scripts/run_one_iteration.py
-# expected: exactly 1 match in the run_workflow(...) call
-.venv/bin/python -c "from sdsc_submission_scripts.run_one_iteration import _resolve_chain_state; print('OK')"
-# expected: prints OK (import smoke)
+$ grep -n 'restored_previous_proposal' sdsc_submission_scripts/run_one_iteration.py
+# 1 match: line 728 (the run_workflow(...) forwarding line)
+
+$ .venv/bin/python -c "from sdsc_submission_scripts.run_one_iteration \
+    import build_parser, normalize_args, write_manifest, main; \
+    print('OK')"
+# OK — import smoke. (Note: the spec originally named `_resolve_chain_state`
+# but no such symbol exists in this module; the real public symbols above
+# are the right import-smoke targets.)
+
+$ .venv/bin/python -m py_compile sdsc_submission_scripts/run_one_iteration.py
+# clean — file parses
 ```
 
 #### Commit 1.4 — Integration test: `foo` graduation in 3-iter chain
@@ -2704,8 +2714,8 @@ against the closed phase.
 | # | Phase | File(s) touched | Test gate | Commit hash | Date |
 |---|---|---|---|---|---|
 | 1.1 | G1 | `core/resume.py` | unit (proposal) | `e1ca13d` | 2026-05-02 |
-| 1.2 | G1 | `workflows/model_exploration.py` | accumulation regression |  |  |
-| 1.3 | G1 | `sdsc_submission_scripts/run_one_iteration.py` | import smoke |  |  |
+| 1.2 | G1 | `workflows/model_exploration.py` | accumulation regression | `14acc26` | 2026-05-03 |
+| 1.3 | G1 | `sdsc_submission_scripts/run_one_iteration.py` | import smoke | _pending_ | 2026-05-03 |
 | 1.4 | G1 | `tests/integration/workflows/test_chain_candidate_graduation.py` | dual-mode pseudo |  |  |
 | 1.5 | G1 | doc | **Gate 1 + Gate 2** (§15.2) |  |  |
 | 2.1 | Tier-B | `core/resume.py` | 4 monotonicity unit |  |  |
