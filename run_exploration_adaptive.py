@@ -89,12 +89,21 @@ def parse_args():
              "from disk via restore_prior_state before entering the iter loop.",
     )
     parser.add_argument(
-        "--max_iterations", type=int, default=20,
-        help="Number of propose->implement->validate->tune iterations.",
+        "--max_iterations", type=int, default=30,
+        help=(
+            "Number of propose->implement->validate->tune iterations. "
+            "Default aligned with the V4 contract; the launch script "
+            "(sdsc_submission_scripts/launch_v11_v4.sh) is the authoritative "
+            "entry point and always passes this explicitly."
+        ),
     )
     parser.add_argument(
-        "--max_rounds", type=int, default=3,
-        help="Tuning rounds per iteration.",
+        "--max_rounds", type=int, default=4,
+        help=(
+            "Tuning rounds per iteration. Default aligned with the V4 "
+            "contract (3 trial + 1 formal); the launch script is "
+            "authoritative."
+        ),
     )
     parser.add_argument(
         "--max_proposal_attempts", type=int, default=3,
@@ -109,8 +118,11 @@ def parse_args():
         ),
     )
     parser.add_argument(
-        "--trial_portion", type=float, default=0.1,
-        help="Fraction of data used for trial-mode training/eval.",
+        "--trial_portion", type=float, default=0.05,
+        help=(
+            "Fraction of data used for trial-mode training/eval. Default "
+            "aligned with the V4 contract; the launch script is authoritative."
+        ),
     )
     parser.add_argument(
         "--train_portion", type=float, default=0.1,
