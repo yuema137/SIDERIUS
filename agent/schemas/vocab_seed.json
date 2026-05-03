@@ -156,21 +156,5 @@
     "description": "Processing the signal strictly left-to-right with hidden state accumulation \u2014 enables streaming but limits parallelism.",
     "related_to": [],
     "tier": "canonical"
-  },
-  {
-    "name": "band_limited_spectral_residual",
-    "kind": "feature",
-    "description": "A residual Fourier branch that modifies only selected low/mid rFFT bins (band-restricted spectral mixing) and returns to the time domain before fusion with the time-domain path. Contrasts with full-spectrum spectral_conv by leaving high-frequency bins untouched, keeping parameter cost bounded by band width rather than full sequence length. Promoted manually 2026-05-03 (V4) as a canonical anchor for sub-Hz drift handling.",
-    "related_to": ["spectral_conv", "frequency_resolution"],
-    "tier": "canonical",
-    "pattern": "rfft|spectral_residual|band_limited"
-  },
-  {
-    "name": "global_skip_sum",
-    "kind": "feature",
-    "description": "Aggregation strategy that sums projected skip outputs from every processing block before the output head \u2014 the WaveNet skip_sum accumulation across all residual blocks. Provides multi-scale information fusion without per-block cross-attention. Promoted manually 2026-05-03 (V4) as a canonical anchor whose composition with new global-context modules is encouraged.",
-    "related_to": ["skip_connection", "multi_scale_aggregation"],
-    "tier": "canonical",
-    "pattern": "skip_sum|skip_aggregation|global_skip"
   }
 ]
