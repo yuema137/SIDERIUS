@@ -945,3 +945,140 @@ class TestRestorePriorStateNegativeFeedbackCarryOver:
         # iter_002 contributes nothing; iter_001 and iter_003 do.
         assert len(state.accumulated_physical_rejections) == 2
         assert state.committed_iters == [1, 3]
+
+
+# ===========================================================================
+# G1 bridge — proposal carry-over (load_latest_proposal)
+# See docs/Consistent_growing_vocab_list.md §10 + §15.3 Commit 1.1.
+# ===========================================================================
+
+from core.resume import _proposal_path, load_latest_proposal
+
+
+def _write_proposal(
+    workspace,
+    iter_idx: int,
+    *,
+    attempt: int = 1,
+    model_name: str = "synthetic_model",
+    payload: dict | None = None,
+    raw_text: str | None = None,
+):
+    """Write a synthetic ``proposal_iter_NNN.json`` under the chain layout.
+
+    Mirrors ``{workspace}/iter_NNN/iteration_001/attempt_MMM_<model>/
+    proposal_iter_NNN.json``. ``raw_text`` lets a test inject malformed
+    JSON deliberately. ``payload`` defaults to a minimal dict carrying
+    a ``proposed_vocab_candidates`` field so the loader's downstream
+    consumer (the workflow) has something parseable to seed.
+    """
+    run_name = _iter_run_name(iter_idx)
+    attempt_dir = (
+        workspace / run_name / "iteration_001"
+        / f"attempt_{attempt:03d}_{model_name}"
+    )
+    attempt_dir.mkdir(parents=True, exist_ok=True)
+    path = attempt_dir / f"proposal_{run_name}.json"
+    if raw_text is not None:
+        path.write_text(raw_text)
+        return path
+    body = payload if payload is not None else {
+        "proposed_model_type": model_name,
+        "proposed_vocab_candidates": [
+            {"name": f"cand_{run_name}", "kind": "feature"},
+        ],
+    }
+    path.write_text(json.dumps(body))
+    return path
+
+
+class TestLoadLatestProposal:
+    """Read-only loader behaviour for the G1 bridge.
+
+    Four contract cases per §10.4.1:
+      1. No committed iters → returns None.
+      2. Three committed iters with parseable proposals → latest wins.
+      3. Latest iter has a malformed proposal → warn + fall back to next-older.
+      4. An iter has both attempt_001_* and attempt_002_* dirs → highest MMM wins.
+    """
+
+    def test_load_latest_proposal_no_committed_iters_returns_none(self, tmp_path):
+        assert load_latest_proposal(str(tmp_path), []) is None
+
+    def test_load_latest_proposal_latest_committed_wins(self, tmp_path):
+        """Three committed iters; loader returns iter_003's payload."""
+        _write_proposal(tmp_path, 1, payload={"id": "iter1_proposal"})
+        _write_proposal(tmp_path, 2, payload={"id": "iter2_proposal"})
+        _write_proposal(tmp_path, 3, payload={"id": "iter3_proposal"})
+        out = load_latest_proposal(str(tmp_path), [1, 2, 3])
+        assert out == {"id": "iter3_proposal"}
+
+    def test_load_latest_proposal_malformed_warns_and_skips(self, tmp_path):
+        """Iter_002 malformed JSON → warn, fall back to iter_001."""
+        _write_proposal(tmp_path, 1, payload={"id": "iter1_proposal"})
+        _write_proposal(tmp_path, 2, raw_text="{not valid json")
+        with pytest.warns(UserWarning, match=r"iter 002.*cannot read proposal"):
+            out = load_latest_proposal(str(tmp_path), [1, 2])
+        assert out == {"id": "iter1_proposal"}
+
+    def test_load_latest_proposal_glob_walks_attempt_dirs(self, tmp_path):
+        """Same iter has attempt_001 + attempt_002 → highest MMM wins."""
+        # Older attempt with the rejected proposal:
+        _write_proposal(
+            tmp_path, 3, attempt=1, model_name="rejected_arch",
+            payload={"id": "iter3_attempt1_rejected"},
+        )
+        # Newer attempt that was accepted:
+        _write_proposal(
+            tmp_path, 3, attempt=2, model_name="accepted_arch",
+            payload={"id": "iter3_attempt2_accepted"},
+        )
+        out = load_latest_proposal(str(tmp_path), [3])
+        assert out == {"id": "iter3_attempt2_accepted"}
+
+    # ---- structural sanity for _proposal_path itself ----
+
+    def test_proposal_path_returns_none_when_no_attempt_dir(self, tmp_path):
+        """No ``attempt_MMM_*`` subdir → loader resolves to None silently."""
+        # Iter dir exists but no attempt_* sub-dir under it.
+        (tmp_path / "iter_001" / "iteration_001").mkdir(parents=True)
+        assert _proposal_path(str(tmp_path), 1) is None
+
+    def test_proposal_path_returns_none_when_iteration_dir_missing(self, tmp_path):
+        """No iter_NNN/iteration_001/ at all → silent None (no_records iter)."""
+        assert _proposal_path(str(tmp_path), 5) is None
+
+
+class TestRestorePriorStateProposalCarryOver:
+    """Full-stack: restore_prior_state populates the new field."""
+
+    def test_iter1_leaves_proposal_field_none(self, tmp_path, isolated_registries):
+        state = restore_prior_state(str(tmp_path), 1, [])
+        assert state.previous_proposal_data is None
+
+    def test_populates_previous_proposal_data_from_latest_iter(
+        self, tmp_path, isolated_registries,
+    ):
+        """2-iter workspace with proposals at both iters; latest wins."""
+        _materialise_iter(tmp_path, 1, "resume_test_arch_a", 0.71)
+        _materialise_iter(tmp_path, 2, "resume_test_arch_b", 0.78)
+        _write_proposal(
+            tmp_path, 1, model_name="resume_test_arch_a",
+            payload={"proposed_model_type": "resume_test_arch_a", "id": "p1"},
+        )
+        _write_proposal(
+            tmp_path, 2, model_name="resume_test_arch_b",
+            payload={"proposed_model_type": "resume_test_arch_b", "id": "p2"},
+        )
+        state = restore_prior_state(str(tmp_path), 3, [])
+        assert state.previous_proposal_data is not None
+        assert state.previous_proposal_data["id"] == "p2"
+
+    def test_proposal_field_none_when_no_proposal_files_exist(
+        self, tmp_path, isolated_registries,
+    ):
+        """Manifests + run_outputs present but no proposal JSON → None."""
+        _materialise_iter(tmp_path, 1, "resume_test_arch_a", 0.71)
+        state = restore_prior_state(str(tmp_path), 2, [])
+        assert state.committed_iters == [1]
+        assert state.previous_proposal_data is None
