@@ -879,15 +879,15 @@ override of line 1217's local update.
 
 ### 10.6 Checklist
 
-- [ ] §10.3.1 schema field added to `RestoredState` with docstring
-- [ ] §10.3.2 `_proposal_path` + `load_latest_proposal` helpers shipped
-- [ ] `restore_prior_state` wires the loader + populates field
-- [ ] §10.3.3 `run_workflow` accepts and consumes the new kwarg
-- [ ] §10.3.4 `run_one_iteration.py` forwards the new kwarg
-- [ ] §10.4.1 unit tests (4 cases) pass
-- [ ] §10.4.2 integration test (`foo` graduation) passes
-- [ ] §10.4.3 regression: in-process multi-iter promotion still works
-- [ ] §9.6 G1 bullet marked closed once §10 lands
+- [x] §10.3.1 schema field added to `RestoredState` with docstring — `e1ca13d` (Commit 1.1)
+- [x] §10.3.2 `_proposal_path` + `load_latest_proposal` helpers shipped — `e1ca13d` (Commit 1.1)
+- [x] `restore_prior_state` wires the loader + populates field — `e1ca13d` (Commit 1.1)
+- [ ] §10.3.3 `run_workflow` accepts and consumes the new kwarg — pending Commit 1.2
+- [ ] §10.3.4 `run_one_iteration.py` forwards the new kwarg — pending Commit 1.3
+- [x] §10.4.1 unit tests (4 cases) pass — `e1ca13d` shipped 9 (Commit 1.1; 4 mandated + 5 edge cases)
+- [ ] §10.4.2 integration test (`foo` graduation) passes — pending Commit 1.4
+- [ ] §10.4.3 regression: in-process multi-iter promotion still works — pending Commit 1.4
+- [ ] §9.6 G1 bullet marked closed once §10 lands — pending Commit 1.5
 
 ### 10.7 Risks (post-merge watch list)
 
@@ -2340,19 +2340,33 @@ subprocess boundary, unblocking `seen_in_runs ≥ 3` promotion.
 
 **Note**: extend `RestoredState` with `previous_proposal_data: dict | None`; add `_proposal_path` glob helper and `load_latest_proposal` reader; wire into `restore_prior_state`.
 
-Checklist:
-- [ ] `RestoredState.previous_proposal_data: dict | None = None` field added with docstring (§10.3.1)
-- [ ] `_proposal_path(workspace, iter_idx) -> str | None` walks `iter_NNN/iteration_*/attempt_*_<model>/proposal_iter_NNN.json`
-- [ ] `load_latest_proposal(workspace, committed_iters) -> dict | None` returns latest non-empty parseable; soft-fail (warn + skip) on missing/malformed (§10.3.2)
-- [ ] `restore_prior_state` calls loader and populates the field
-- [ ] 4 unit tests added: `test_load_latest_proposal_no_committed_iters_returns_none`, `test_load_latest_proposal_glob_walks_attempt_dirs`, `test_load_latest_proposal_malformed_warns_and_skips`, `test_load_latest_proposal_latest_committed_wins`
+**Status**: ✅ CLOSED — landed in `e1ca13d` on `fix/cognitive-alignment-v9` (2026-05-02).
 
-Verification:
+Checklist:
+- [x] `RestoredState.previous_proposal_data: dict | None = None` field added with docstring (§10.3.1) — `core/resume.py:135`
+- [x] `_proposal_path(workspace, iter_idx) -> str | None` walks `iter_NNN/iteration_*/attempt_*_<model>/proposal_iter_NNN.json` — `core/resume.py:337`; uses `sorted(...)[-1]` so highest `MMM` prefix wins (validation-retry case)
+- [x] `load_latest_proposal(workspace, committed_iters) -> dict | None` returns latest non-empty parseable; soft-fail (warn + skip) on missing/malformed (§10.3.2) — `core/resume.py:380`
+- [x] `restore_prior_state` calls loader and populates the field — `core/resume.py:614`; emits a one-line `[resume] proposal carry-over: latest proposal restored (N proposed_vocab_candidates)` log when populated
+- [x] Unit tests added: **9 total** (over-delivered vs. the spec'd 4 — kept the 4 mandated cases and added 5 path-helper / restore-integration cases for edge coverage):
+  - `TestLoadLatestProposal::test_load_latest_proposal_no_committed_iters_returns_none` ✅
+  - `TestLoadLatestProposal::test_load_latest_proposal_latest_committed_wins` ✅
+  - `TestLoadLatestProposal::test_load_latest_proposal_malformed_warns_and_skips` ✅
+  - `TestLoadLatestProposal::test_load_latest_proposal_glob_walks_attempt_dirs` ✅
+  - `TestLoadLatestProposal::test_proposal_path_returns_none_when_no_attempt_dir` ✅
+  - `TestLoadLatestProposal::test_proposal_path_returns_none_when_iteration_dir_missing` ✅
+  - `TestRestorePriorStateProposalCarryOver::test_iter1_leaves_proposal_field_none` ✅
+  - `TestRestorePriorStateProposalCarryOver::test_populates_previous_proposal_data_from_latest_iter` ✅
+  - `TestRestorePriorStateProposalCarryOver::test_proposal_field_none_when_no_proposal_files_exist` ✅
+
+Verification (2026-05-02):
 ```
-.venv/bin/python -m pytest tests/unit/core/test_resume.py -k "proposal" -xvs
-# expected: 4 new tests pass; existing resume tests unchanged
-grep -n 'previous_proposal_data\|load_latest_proposal\|_proposal_path' core/resume.py
-# expected: ≥ 4 matches (field, helper, loader, restore_prior_state call)
+$ .venv/bin/python -m pytest tests/unit/core/test_resume.py \
+    -k "proposal or LatestKnowledge or NegativeFeedback or CleanThreeIter or TrivialPaths"
+# 34 passed, 18 deselected — 9 new proposal tests + 25 regression-scope tests, all green
+
+$ grep -n 'previous_proposal_data\|load_latest_proposal\|_proposal_path' core/resume.py
+# 10 matches: field decl (135) + docstring (111) + helper (337) + loader (380, 391, 419)
+#            + restore_prior_state call + log (614, 617, 619)
 ```
 
 #### Commit 1.2 — `workflows/model_exploration.py`: kwarg + init replacement
@@ -2675,7 +2689,7 @@ against the closed phase.
 
 | # | Phase | File(s) touched | Test gate | Commit hash | Date |
 |---|---|---|---|---|---|
-| 1.1 | G1 | `core/resume.py` | unit (proposal) |  |  |
+| 1.1 | G1 | `core/resume.py` | unit (proposal) | `e1ca13d` | 2026-05-02 |
 | 1.2 | G1 | `workflows/model_exploration.py` | accumulation regression |  |  |
 | 1.3 | G1 | `sdsc_submission_scripts/run_one_iteration.py` | import smoke |  |  |
 | 1.4 | G1 | `tests/integration/workflows/test_chain_candidate_graduation.py` | dual-mode pseudo |  |  |
