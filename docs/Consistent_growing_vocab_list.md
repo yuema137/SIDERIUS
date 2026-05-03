@@ -882,7 +882,7 @@ override of line 1217's local update.
 - [x] §10.3.1 schema field added to `RestoredState` with docstring — `e1ca13d` (Commit 1.1)
 - [x] §10.3.2 `_proposal_path` + `load_latest_proposal` helpers shipped — `e1ca13d` (Commit 1.1)
 - [x] `restore_prior_state` wires the loader + populates field — `e1ca13d` (Commit 1.1)
-- [ ] §10.3.3 `run_workflow` accepts and consumes the new kwarg — pending Commit 1.2
+- [x] §10.3.3 `run_workflow` accepts and consumes the new kwarg — Commit 1.2 (2026-05-02)
 - [ ] §10.3.4 `run_one_iteration.py` forwards the new kwarg — pending Commit 1.3
 - [x] §10.4.1 unit tests (4 cases) pass — `e1ca13d` shipped 9 (Commit 1.1; 4 mandated + 5 edge cases)
 - [ ] §10.4.2 integration test (`foo` graduation) passes — pending Commit 1.4
@@ -2373,18 +2373,32 @@ $ grep -n 'previous_proposal_data\|load_latest_proposal\|_proposal_path' core/re
 
 **Note**: accept `restored_previous_proposal: dict | None` kwarg in `run_workflow`; replace the line-784 unconditional `previous_proposal_data: dict | None = None` reset with a priority check.
 
-Checklist:
-- [ ] `run_workflow` signature gains `restored_previous_proposal: dict | None = None`
-- [ ] Line-784 init replaced with `previous_proposal_data: dict | None = restored_previous_proposal`
-- [ ] In-process multi-iter path (no kwarg) preserves bit-for-bit behaviour (the local update at line 1217 still fires)
-- [ ] Docstring on the new kwarg points to §10.3.3
+**Status**: ✅ CLOSED — landed on `fix/cognitive-alignment-v9` (2026-05-02).
 
-Verification:
+Checklist:
+- [x] `run_workflow` signature gains `restored_previous_proposal: dict | None = None` — `workflows/model_exploration.py:625` (kwarg parked next to the existing 4 memory kwargs at lines 608–616 to keep all chain-restore inputs co-located)
+- [x] Line-784 init replaced with `previous_proposal_data: dict | None = restored_previous_proposal` — now at `workflows/model_exploration.py:799` (the 6-line preceding comment block documents the chain-vs-in-process branch)
+- [x] In-process multi-iter path (no kwarg) preserves bit-for-bit behaviour (the local update at line 1217 still fires) — confirmed at `workflows/model_exploration.py:1232` (re-numbered after the comment block above), and exercised by all 5 `test_vocab_accumulation.py` tests
+- [x] Docstring on the new kwarg points to §10.3.3 — `workflows/model_exploration.py:617–624` (8-line block above the kwarg)
+
+Verification (2026-05-02):
 ```
-.venv/bin/python -m pytest tests/integration/workflows/test_vocab_accumulation.py -xvs
-# regression: in-process multi-iter promotion still works
-grep -n 'previous_proposal_data: dict | None = None' workflows/model_exploration.py
-# expected: 0 matches (the unconditional reset is gone)
+$ grep -n 'previous_proposal_data: dict | None = None' workflows/model_exploration.py
+# 0 matches — the unconditional reset is gone
+
+$ grep -n 'restored_previous_proposal\|previous_proposal_data' workflows/model_exploration.py
+# 8 matches: kwarg comment block (619-620), kwarg decl (625), priority init
+#            comment block (793-797), priority init (799), inner-call (886),
+#            in-process update (1232)
+
+$ .venv/bin/python -c "from workflows.model_exploration import run_workflow; \
+    import inspect; sig = inspect.signature(run_workflow); \
+    p = sig.parameters['restored_previous_proposal']; \
+    print(f'OK: default={p.default!r}, kind={p.kind.name}')"
+# OK: default=None, kind=POSITIONAL_OR_KEYWORD
+
+$ .venv/bin/python -m pytest tests/integration/workflows/test_vocab_accumulation.py
+# 5 passed — in-process multi-iter promotion regression preserved
 ```
 
 #### Commit 1.3 — `sdsc_submission_scripts/run_one_iteration.py`: forwarding

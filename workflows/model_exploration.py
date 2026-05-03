@@ -614,6 +614,15 @@ def run_workflow(
     # See docs/V8_Gap_Report.md Domain 1.
     accumulated_physical_rejections: list | None = None,
     accumulated_gate_exhaustions: list | None = None,
+    # --- Cross-iter proposal carry-over (G1 bridge, Phase 1 Commit 1.2) ---
+    # Latest committed iter's full proposal_iter_NNN.json dict. Chain runner
+    # populates this from state.previous_proposal_data so that the local
+    # `previous_proposal_data` seed is non-None on the very first round of
+    # this iteration — closing the candidate channel that the chain
+    # subprocess boundary was darkening. In-process / first-iter callers
+    # leave this at None and behaviour is bit-for-bit unchanged.
+    # See docs/Consistent_growing_vocab_list.md §10.3.3.
+    restored_previous_proposal: dict | None = None,
 ) -> list[HyperparamTuningOutput]:
     """
     Execute the model exploration workflow for one or more iterations.
@@ -780,8 +789,14 @@ def run_workflow(
     iteration_results: list[HyperparamTuningOutput] = []
     best_score_overall: float | None = None
 
-    # Long-term memory: variables carried forward across iterations
-    previous_proposal_data: dict | None = None  # serialized ProposalOutput from iter N-1
+    # Long-term memory: variables carried forward across iterations.
+    # Chain mode: seed from `restored_previous_proposal` (forwarded by
+    # `sdsc_submission_scripts/run_one_iteration.py` from
+    # `RestoredState.previous_proposal_data`) so the candidate channel
+    # survives the subprocess boundary. In-process / first-iter callers
+    # pass None and the local update at line ~1217 takes over after iter 1.
+    # See docs/Consistent_growing_vocab_list.md §10.3.3.
+    previous_proposal_data: dict | None = restored_previous_proposal  # serialized ProposalOutput from iter N-1
     # Priority: chain-restored runtime_vocab > static seed. The static seed
     # is the first-iter bootstrap; once any iter has run, the latest
     # committed iter's runtime_vocab is the source of truth (already merged
