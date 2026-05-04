@@ -18,6 +18,7 @@ Examples
       --workspace /home/klz/Data/SIDEREIS_DATA/exploration_adaptive_v2
 """
 import argparse
+import datetime
 import json
 import sys
 import os
@@ -30,6 +31,30 @@ from workflows.model_exploration import run_workflow
 from workflows.llm_config import WorkflowLLMConfig
 from core.resume import restore_prior_state, validate_workspace_layout, ResumeError
 from sdsc_submission_scripts.run_one_iteration import write_manifest
+
+
+class _TeeStream:
+    """Duplex text writer fanning out to multiple streams.
+
+    Mirrors stdout/stderr to a chain log file without losing the original
+    console stream. Forces flush after every write so a detached screen's
+    chain_log.txt is tail-able in real time. Phase R resilience addition.
+    """
+    def __init__(self, *streams):
+        self._streams = streams
+
+    def write(self, data):
+        for s in self._streams:
+            s.write(data)
+            s.flush()
+        return len(data)
+
+    def flush(self):
+        for s in self._streams:
+            s.flush()
+
+    def isatty(self):
+        return False
 
 # Default source paths (wavenet + punet seed runs)
 DEFAULT_SOURCE_PATHS = [
@@ -317,6 +342,17 @@ def parse_args():
             "shared attempt pool which could starve the formal round."
         ),
     )
+    parser.add_argument(
+        "--max_failed_iterations", type=int, default=3,
+        help=(
+            "Outer-chain consecutive-failure brake (default 3). After this "
+            "many iterations in a row return status != 'completed' (e.g. "
+            "no_records, aborted_fail_rounds), the chain stops. A successful "
+            "iteration resets the counter. Phase R resilience addition — "
+            "replaces the prior single-failure sys.exit so a bad architecture "
+            "proposal does not kill the entire 30-iter chain."
+        ),
+    )
     # Phase 6.8 Commit 11 — canonical name --seed_paths; --source_paths kept
     # as a deprecated alias for one release. See §3.5 Commit 11.
     parser.add_argument(
@@ -462,6 +498,53 @@ def _run_one_iter(args, workspace, llm_config, advice, source_paths, iteration):
     return manifest
 
 
+def _append_evolution_failure(workspace: str, iteration: int, manifest: dict) -> None:
+    """Append a kind='iteration_failure' entry to evolution_log.jsonl.
+
+    Phase R resilience: a no-records / aborted iteration never writes a
+    normal interpretation row, so without this hook the chain log loses
+    any trace of why iter N produced nothing. Pulls the deeper
+    `termination_reason` from
+    {iter_dir}/iteration_NNN/{model_name}/run_output_iter_NNN.json
+    when present (it carries the tuner's Phase-L exit code), and falls
+    back to manifest['status']. Best-effort: any IO/JSON error is
+    swallowed so observability never breaks the chain.
+    """
+    arch = manifest.get("model_name") or "<unknown>"
+    iter_dir = manifest.get("iteration_dir")
+    termination_reason = manifest.get("status") or "unknown"
+
+    if iter_dir and arch != "<unknown>":
+        run_out = os.path.join(
+            iter_dir, f"iteration_{iteration:03d}", arch,
+            f"run_output_iter_{iteration:03d}.json",
+        )
+        try:
+            if os.path.exists(run_out):
+                with open(run_out) as f:
+                    ro = json.load(f)
+                termination_reason = ro.get("termination_reason") or termination_reason
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    entry = {
+        "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
+        "iteration": iteration,
+        "kind": "iteration_failure",
+        "architecture_name": arch,
+        "termination_reason": termination_reason,
+        "manifest_status": manifest.get("status"),
+        "completed_rounds": manifest.get("completed_rounds", 0),
+    }
+    log_path = os.path.join(workspace, "evolution_log.jsonl")
+    try:
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+    except OSError as e:
+        print(f"  [evolution_log] WARN: failed to append failure entry: "
+              f"{type(e).__name__}: {e}")
+
+
 def main():
     args = parse_args()
 
@@ -476,6 +559,16 @@ def main():
     # ``workflows.model_exploration._register_plugin``. Set before any node
     # initialisation so descendant calls see it.
     os.environ["SIDERIUS_CHAIN_WORKSPACE"] = os.path.abspath(workspace)
+
+    # Persistent logging: tee stdout/stderr into {workspace}/chain_log.txt
+    # so a detached screen session is not the only stdout sink. Line-buffered
+    # for real-time `tail -f`. Phase R resilience addition.
+    os.makedirs(workspace, exist_ok=True)
+    _chain_log_path = os.path.join(workspace, "chain_log.txt")
+    _chain_log_fh = open(_chain_log_path, "a", buffering=1, encoding="utf-8")
+    sys.stdout = _TeeStream(sys.__stdout__, _chain_log_fh)
+    sys.stderr = _TeeStream(sys.__stderr__, _chain_log_fh)
+    print(f"[CHAIN] Mirroring stdout/stderr to {_chain_log_path}")
 
     # Workspace layout guard (§3.9)
     try:
@@ -574,12 +667,20 @@ def main():
     print(f"  Min boldness     : {args.minimum_boldness}")
     print("=" * 60)
 
-    # Chain-in-one-process loop: each iter is run_workflow(max_iterations=1).
+    # Chain-in-one-process loop with iteration-resilience brake (Phase R).
     # ``source_paths`` here is the immutable user-supplied seed list — the
     # per-iter ``restore_prior_state`` call inside ``_run_one_iter`` walks
-    # the workspace and prepends prior iter outputs onto these seeds, so the
-    # seed list is never mutated by the loop itself. This matches one-iter's
-    # main(): restore is the single source of truth for chain assembly.
+    # the workspace and prepends prior iter outputs onto these seeds, so
+    # the seed list is never mutated by the loop itself. This matches
+    # one-iter's main(): restore is the single source of truth for chain
+    # assembly.
+    #
+    # A failed iteration (no_records / aborted_fail_rounds / etc.) no
+    # longer kills the chain — it logs a warning, appends an
+    # ``iteration_failure`` row to evolution_log.jsonl, and proceeds to
+    # the next architecture. Only ``--max_failed_iterations`` consecutive
+    # failures stop the chain; a successful iteration resets the counter.
+    consecutive_failed = 0
     for iteration in range(start_iter, args.max_iterations + 1):
         print(f"\n{'='*60}")
         print(f"  IN-PROCESS CHAIN — ITERATION {iteration}/{args.max_iterations}")
@@ -591,8 +692,26 @@ def main():
 
         if manifest["status"] == "completed" and manifest.get("output_path"):
             print(f"  Iteration {iteration} completed: score={manifest['best_score']}")
-        else:
-            print(f"  Iteration {iteration} failed — stopping chain.")
+            consecutive_failed = 0
+            continue
+
+        consecutive_failed += 1
+        arch = manifest.get("model_name") or "<unknown>"
+        print(
+            f"\n  *** [WARNING] Iteration {iteration} failed to produce "
+            f"records (architecture={arch}, status={manifest['status']}). "
+            f"Skipping to next architecture. "
+            f"[consecutive failures: {consecutive_failed}/"
+            f"{args.max_failed_iterations}] ***\n"
+        )
+        _append_evolution_failure(workspace, iteration, manifest)
+
+        if consecutive_failed >= args.max_failed_iterations:
+            print(
+                f"\n  *** [ABORT] {consecutive_failed} consecutive "
+                f"iterations failed (>= --max_failed_iterations="
+                f"{args.max_failed_iterations}). Stopping chain. ***"
+            )
             sys.exit(1)
 
 
