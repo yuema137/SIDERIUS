@@ -29,17 +29,27 @@
 
 import os
 import json
+import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, List, Dict, Optional
 from openai import OpenAI
 from dotenv import load_dotenv
+from pydantic import ValidationError
 
 from agent.prompts import (
     PLANNER_PROMPT,
     REFLECTOR_PROMPT,
     get_planner_user_prompt,
     get_reflector_user_prompt
+)
+from agent.schemas.telemetry import (
+    LLMBridgeContextError,
+    TokenCounts,
+    TokenUsageChars,
+    TokenUsageRow,
 )
 
 
@@ -267,6 +277,19 @@ class LLMBridge:
                 base_url=reflect_base_url,
             )
 
+        # --- Run-context state (Commit 1: scaffolding; Commit 2: setter) ---
+        # All four fields stay None until set_run_context() is wired in
+        # Commit 2. While None, _record_usage is a silent no-op — the bridge
+        # captures response.usage but does not write a row anywhere. This
+        # lets unit tests that patch the OpenAI client run without touching
+        # disk, and ensures that during the rollout of Commit 1 (before any
+        # workflow calls the setter) production runs do not start writing
+        # half-formed rows under a missing run_id.
+        self._token_usage_path: Optional[Path] = None
+        self._iter: Optional[int] = None
+        self._run_id: Optional[str] = None
+        self._run_name: Optional[str] = None
+
     def list_models(self) -> List[str]:
         """
         List model IDs available from the current provider.
@@ -398,7 +421,11 @@ class LLMBridge:
         final_user_prompt += manual_context
 
         print(f"    [PROMPT_SIZE] planner: {len(final_user_prompt)} chars")
-        return self.generate(system_prompt, final_user_prompt)
+        # Internal call site: label is fixed (§1.5), wired in Commit 1 so
+        # the V12 baseline run is meaningfully labeled and chain_log is
+        # clean of "unlabeled" warnings from inside the bridge itself.
+        return self.generate(system_prompt, final_user_prompt,
+                             label="tuner.planner")
 
     def reflect(self, exp_id: str, hypothesis: str, actual_results: Dict,
                 reflection_context: Optional[Dict] = None) -> Dict:
@@ -430,8 +457,13 @@ class LLMBridge:
         )
         user_prompt = get_reflector_user_prompt(exp_id, hypothesis, actual_results, reflection_context)
 
+        # Internal call site: label is fixed (§1.5). Provider is the
+        # reflect provider (may differ from self.provider when cross-
+        # provider routing is configured).
         return self._chat_json(self.reflect_client, self.reflect_model_name,
-                               system_prompt, user_prompt)
+                               system_prompt, user_prompt,
+                               label="tuner.reflector",
+                               provider=self.reflect_provider)
 
     # Retry policy for ALL OpenAI API calls. SDK-level retry is disabled
     # (max_retries=0 in the client constructors), so this helper is the
@@ -575,8 +607,120 @@ class LLMBridge:
 
         return text
 
+    # ------------------------------------------------------------------
+    # Telemetry — per-LLM-call audit row (Phase 1, Commit 1)
+    # ------------------------------------------------------------------
+    # See docs/audit_and_optimize_token_usage_and_growth.md §1.2 / §1.7.
+    # _record_usage is the single point where we serialize one
+    # TokenUsageRow per API call. The row schema lives in
+    # agent/schemas/telemetry/token_usage.py.
+    #
+    # Behaviour summary:
+    #   - Silent no-op when self._token_usage_path is None (context
+    #     unset; Commit 2 wires set_run_context()).
+    #   - Per-attempt: every successful API response produces one row,
+    #     including content-retry attempts where the JSON later fails
+    #     to parse (Q1 confirmed 2026-05-04). The caller passes
+    #     extra={"attempt": N, "status": "ok"|"json_decode_error"|...}
+    #     to make the retry-cost visible.
+    #   - Graceful degradation when response.usage is missing: token
+    #     counts written as None; char counts always populated.
+    #
+    # The row is appended in "a" mode with line buffering (buffering=1)
+    # so concurrent bridge instances inside the same process do not
+    # interleave partial lines. Cross-process safety is not yet
+    # required — only the workflow runner writes here.
+    # ------------------------------------------------------------------
+    def _record_usage(self, *, response: Any, label: str,
+                      system_prompt: str, user_prompt: str,
+                      model_name: str, provider: str,
+                      extra: Optional[Dict[str, Any]] = None) -> None:
+        """Append one ``TokenUsageRow`` to ``{workspace}/token_usage.jsonl``.
+
+        Silent no-op when ``self._token_usage_path is None`` (run context
+        unset). Telemetry must never abort a real run — any unexpected
+        error in this helper is logged to stderr and swallowed, *except*
+        for ``LLMBridgeContextError`` which propagates per §1.4.2.
+
+        Args:
+            response:       The raw OpenAI SDK response object. ``response.usage``
+                            is read if present; missing/None is fine.
+            label:          Stable call-site identifier (see §1.5). Defaults
+                            to ``"unlabeled"`` at the public-method level.
+            system_prompt:  The system prompt as sent to the API.
+            user_prompt:    The user prompt as sent to the API.
+            model_name:     Provider model id used for this call.
+            provider:       Provider name (``"openai"``, ``"gemini"``, etc.).
+            extra:          Free-form caller context, e.g.
+                            ``{"attempt": 0, "status": "ok"}``.
+        """
+        if self._token_usage_path is None:
+            # Context not set — Commit 2 wires the setter; until then,
+            # treat the helper as plumbing-only. No file is created.
+            return
+
+        # --- Pull provider-reported token counts (graceful if missing) ---
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            tokens = TokenCounts()  # all None
+        else:
+            tokens = TokenCounts(
+                prompt=getattr(usage, "prompt_tokens", None),
+                completion=getattr(usage, "completion_tokens", None),
+                total=getattr(usage, "total_tokens", None),
+            )
+
+        # --- Compute local char counts (always available) ---
+        sys_chars = len(system_prompt) if system_prompt else 0
+        usr_chars = len(user_prompt) if user_prompt else 0
+        chars = TokenUsageChars(
+            system=sys_chars,
+            user=usr_chars,
+            total=sys_chars + usr_chars,
+        )
+
+        # --- Assemble + validate the row ---
+        try:
+            row = TokenUsageRow(
+                ts=datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+                  .replace("+00:00", "Z"),
+                run_id=self._run_id or "unbound",
+                run_name=self._run_name or "unbound",
+                iter=self._iter,
+                label=label,
+                model=model_name,
+                provider=provider,
+                tokens=tokens,
+                chars=chars,
+                components={},  # populated by Commit 3's _audit_proposer_components
+                extra=extra or {},
+            )
+        except ValidationError as ve:
+            # A row that fails our own schema is a programming bug, not
+            # a runtime degradation. Log to stderr and skip this row;
+            # do not raise (telemetry must not abort a real run).
+            print(
+                f"[LLMBridge._record_usage] schema validation failed for "
+                f"label={label!r}: {ve}",
+                file=sys.stderr, flush=True,
+            )
+            return
+
+        # --- Append the row (line-buffered for in-process safety) ---
+        try:
+            with open(self._token_usage_path, "a", buffering=1) as f:
+                f.write(row.model_dump_json() + "\n")
+        except OSError as oe:
+            print(
+                f"[LLMBridge._record_usage] failed to append to "
+                f"{self._token_usage_path}: {oe}",
+                file=sys.stderr, flush=True,
+            )
+
     def _chat_json(self, client: OpenAI, model_name: str,
-                   system_prompt: str, user_prompt: str) -> Dict:
+                   system_prompt: str, user_prompt: str,
+                   *, label: str = "unlabeled",
+                   provider: Optional[str] = None) -> Dict:
         """
         Internal helper: send a system+user prompt through a specific client
         to a specific model, and return the parsed JSON response.
@@ -597,6 +741,19 @@ class LLMBridge:
         # body is empty / non-JSON / wrong top-level type — observed with
         # deepseek-v4-pro on long structured prompts. Bounded so genuinely
         # malformed contracts surface promptly.
+        #
+        # Per-attempt telemetry (Phase 1, Commit 1): every attempt that
+        # successfully returns from _call_with_retry produces one row in
+        # token_usage.jsonl, regardless of whether the JSON parses. The row
+        # carries extra={"attempt": N, "status": "ok"|"json_decode_error"|
+        # "empty_content"|"wrong_type"} so content-retry cost is visible.
+        # Provider defaults to self.provider for the main client, falls back
+        # to self.reflect_provider when the reflect client is in use.
+        if provider is None:
+            provider = (
+                self.reflect_provider if client is self.reflect_client
+                else self.provider
+            )
         last_text = ""
         last_err_label = ""
         wait = self._CONTENT_RETRY_INITIAL_WAIT
@@ -616,32 +773,55 @@ class LLMBridge:
             text = self._sanitize_json_text(raw.strip())
             last_text = text
 
+            # Determine attempt status before recording so each row carries
+            # an honest status field. Decode is repeated below in the
+            # success branch — the first decode here is consulted only for
+            # status classification; the second is the source of truth for
+            # the returned object.
+            decoded = None
+            end_idx = None
+            attempt_status: str
             if not text:
+                attempt_status = "empty_content"
                 last_err_label = "empty_content"
             else:
-                # Use raw_decode so trailing prose / a second JSON object after
-                # the first valid one doesn't crash the run. We accept the first
-                # object and discard any trailing content. Wrong top-level type
-                # (e.g. a JSON string) is still a contract violation.
                 try:
                     decoded, end_idx = json.JSONDecoder().raw_decode(text)
                 except json.JSONDecodeError as e:
+                    attempt_status = "json_decode_error"
                     last_err_label = f"json_decode_error: {e.msg}"
+                    decoded = None
                 else:
                     if not isinstance(decoded, (dict, list)):
+                        attempt_status = "wrong_type"
                         last_err_label = (
                             f"wrong_type: decoded to {type(decoded).__name__}"
                         )
+                        decoded = None
                     else:
-                        # Success path
-                        trailing = text[end_idx:].strip()
-                        if trailing:
-                            print(
-                                f"[LLMBridge._chat_json] Discarded {len(trailing)} chars of "
-                                f"trailing data after valid JSON (model={model_name}).",
-                                flush=True,
-                            )
-                        return decoded
+                        attempt_status = "ok"
+
+            # Record one row per attempt, including content-retry failures.
+            # No-op when run context is unset (Commit 2 wires the setter).
+            self._record_usage(
+                response=response,
+                label=label,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                model_name=model_name,
+                provider=provider,
+                extra={"attempt": attempt, "status": attempt_status},
+            )
+
+            if attempt_status == "ok":
+                trailing = text[end_idx:].strip()
+                if trailing:
+                    print(
+                        f"[LLMBridge._chat_json] Discarded {len(trailing)} chars of "
+                        f"trailing data after valid JSON (model={model_name}).",
+                        flush=True,
+                    )
+                return decoded
 
             # Content-level failure — retry if budget remains.
             if attempt < self._CONTENT_RETRY_BUDGET:
@@ -668,24 +848,55 @@ class LLMBridge:
             f"Last response started with: {last_text[:200]}"
         )
 
-    def generate(self, system_prompt: str, user_prompt: str) -> Dict:
+    # Sentinel used by the public-method `label` kwargs. Calls that pass
+    # the default "unlabeled" emit a one-line warning to stderr so a
+    # missed label site is visible without aborting the run. Production
+    # call sites are labeled in Commit 3 (proposer, interp, validator);
+    # internal sites (plan / reflect) are labeled in this commit.
+    _DEFAULT_LABEL = "unlabeled"
+
+    def _warn_default_label(self, method_name: str) -> None:
+        """Print a one-line stderr warning when label= falls to the default."""
+        print(
+            f"[LLMBridge.{method_name}] WARNING: called without label= kwarg "
+            f"(label fell back to {self._DEFAULT_LABEL!r}). Pass an explicit "
+            f"label per docs/audit_and_optimize_token_usage_and_growth.md §1.5.",
+            file=sys.stderr, flush=True,
+        )
+
+    def generate(self, system_prompt: str, user_prompt: str,
+                 *, label: str = _DEFAULT_LABEL) -> Dict:
         """
         Call the main LLM (``self.client`` + ``self.model_name``) with a
         system prompt and a user prompt, return a JSON dict.
 
         Uses ``response_format={"type": "json_object"}`` via the unified
         OpenAI-compatible ``chat.completions.create`` endpoint for all providers.
-        """
-        return self._chat_json(self.client, self.model_name,
-                               system_prompt, user_prompt)
 
-    def generate_text(self, system_prompt: str, user_prompt: str) -> str:
+        Args:
+            system_prompt: System role content.
+            user_prompt:   User role content.
+            label:         Stable call-site identifier (see §1.5). Defaults
+                           to ``"unlabeled"`` to keep legacy callers working;
+                           a one-line warning is emitted to stderr until
+                           every site is labeled (Commit 3).
+        """
+        if label == self._DEFAULT_LABEL:
+            self._warn_default_label("generate")
+        return self._chat_json(self.client, self.model_name,
+                               system_prompt, user_prompt,
+                               label=label, provider=self.provider)
+
+    def generate_text(self, system_prompt: str, user_prompt: str,
+                      *, label: str = _DEFAULT_LABEL) -> str:
         """
         Call the LLM with a system prompt and user prompt, return plain text.
 
         Used for free-form reasoning steps where JSON mode would constrain
-        output quality.
+        output quality. ``label`` is captured into the per-call telemetry row.
         """
+        if label == self._DEFAULT_LABEL:
+            self._warn_default_label("generate_text")
         response = self._call_with_retry(
             lambda: self.client.chat.completions.create(
                 model=self.model_name,
@@ -696,6 +907,17 @@ class LLMBridge:
             ),
             label="generate_text",
         )
+        # Telemetry: one row per successful API response. Plain-text mode
+        # has no content-retry, so attempt is always 0 and status "ok".
+        self._record_usage(
+            response=response,
+            label=label,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model_name=self.model_name,
+            provider=self.provider,
+            extra={"attempt": 0, "status": "ok"},
+        )
         return response.choices[0].message.content.strip()
 
     def tool_call(
@@ -703,6 +925,8 @@ class LLMBridge:
         system_prompt: str,
         user_prompt: str,
         tools: List[Dict[str, Any]],
+        *,
+        label: str = _DEFAULT_LABEL,
     ) -> ToolCallResult:
         """
         Ask the LLM to select a tool and provide arguments.
@@ -715,6 +939,7 @@ class LLMBridge:
             user_prompt:   The user message describing the goal or context.
             tools:         List of OpenAI-format tool definitions.  Typically
                            built via ``SkillSpec.to_openai_tool()``.
+            label:         Stable call-site identifier (see §1.5).
 
         Returns:
             A ``ToolCallResult`` with the chosen tool name, parsed arguments
@@ -724,6 +949,8 @@ class LLMBridge:
             ValueError: If the model response does not contain a tool call
                         (e.g. the model replied with plain text instead).
         """
+        if label == self._DEFAULT_LABEL:
+            self._warn_default_label("tool_call")
         response = self._call_with_retry(
             lambda: self.client.chat.completions.create(
                 model=self.model_name,
@@ -738,6 +965,20 @@ class LLMBridge:
         )
 
         message = response.choices[0].message
+
+        # Telemetry: record the row regardless of whether a tool_call came
+        # back. The API charged for the tokens either way; the response
+        # shape is the caller's contract concern.
+        tool_status = "ok" if message.tool_calls else "no_tool_call"
+        self._record_usage(
+            response=response,
+            label=label,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model_name=self.model_name,
+            provider=self.provider,
+            extra={"attempt": 0, "status": tool_status},
+        )
 
         if not message.tool_calls:
             raise ValueError(
