@@ -68,6 +68,36 @@ def _positive_int(s: str) -> int:
     return v
 
 
+def _portion_floor(s: str) -> float:
+    """argparse type validator: a portion in [0.01, 1.0].
+
+    Mirrors ``run_exploration_adaptive._portion_floor`` so the
+    consistency contract in ``tests/unit/scripts/test_chain_consistency.py``
+    holds. The 0.01 floor enforces a segment-integrity rule: with
+    ``SEGMENTS_PER_FILE=200``, anything below 0.01 collapses to one
+    segment per file (via the ``max(1, ...)`` floor in
+    ``execute_tools.sample_set_builder``), which is statistically too
+    noisy for trial-mode signal. Failing here at argparse-time keeps
+    the iteration from spending tokens on Interpretation only to crash
+    inside the Proposer's Pydantic validator.
+    """
+    try:
+        v = float(s)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError(
+            f"expected a float in [0.01, 1.0], got {s!r}"
+        )
+    if not (0.01 <= v <= 1.0):
+        raise argparse.ArgumentTypeError(
+            f"expected a float in [0.01, 1.0], got {v}. The 0.01 floor "
+            f"matches the Pydantic schema (ProposalInput.trial_portion / "
+            f"HyperparamTuningInput.{{trial,eval}}_portion ge=0.01); below "
+            f"that, sample_set_builder collapses to one segment per file, "
+            f"which is too noisy for trial-mode signal."
+        )
+    return v
+
+
 def resolve_source_paths(source_paths: list[str]) -> list[str]:
     """
     Resolve source path entries to actual JSON file paths.
@@ -277,11 +307,13 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["snapshot", "anchors", "target"],
     )
     parser.add_argument(
-        "--trial_portion", type=float, default=0.1)
+        "--trial_portion", type=_portion_floor, default=0.1,
+        help="Floor 0.01 (segment-integrity; mirrors Pydantic ge=0.01).")
     parser.add_argument(
         "--train_portion", type=float, default=0.1)
     parser.add_argument(
-        "--eval_portion", type=float, default=0.1)
+        "--eval_portion", type=_portion_floor, default=0.1,
+        help="Floor 0.01 (segment-integrity; mirrors Pydantic ge=0.01).")
     # --- Formal-mode training levers (Phase M, docs §12) + eval scope (Phase R, §13) ---
     # Formal eval strategy is locked to ``snapshot``; the portion defaults to
     # 1.0 (production full-clone for cross-arch comparability, §12.2) and

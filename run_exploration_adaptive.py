@@ -149,6 +149,36 @@ def _positive_int(s: str) -> int:
     return v
 
 
+def _portion_floor(s: str) -> float:
+    """argparse type validator: a portion in [0.01, 1.0].
+
+    The 0.01 floor mirrors the Pydantic constraint on
+    ``ProposalInput.trial_portion`` / ``HyperparamTuningInput.trial_portion``
+    / ``HyperparamTuningInput.eval_portion`` (all ``ge=0.01``). It enforces
+    a **segment-integrity** rule: with ``SEGMENTS_PER_FILE=200``, anything
+    below 0.01 yields only one segment per file (via the ``max(1, ...)``
+    floor in ``execute_tools.sample_set_builder``), which is statistically
+    too noisy to discriminate architectures in trial mode. Failing here at
+    argparse-time keeps the chain from spending tokens on Interpretation
+    only to crash inside the Proposer's Pydantic validator.
+    """
+    try:
+        v = float(s)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError(
+            f"expected a float in [0.01, 1.0], got {s!r}"
+        )
+    if not (0.01 <= v <= 1.0):
+        raise argparse.ArgumentTypeError(
+            f"expected a float in [0.01, 1.0], got {v}. The 0.01 floor "
+            f"matches the Pydantic schema (ProposalInput.trial_portion / "
+            f"HyperparamTuningInput.{{trial,eval}}_portion ge=0.01); below "
+            f"that, sample_set_builder collapses to one segment per file, "
+            f"which is too noisy for trial-mode signal."
+        )
+    return v
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Launch SIDERIUS adaptive exploration workflow.",
@@ -210,10 +240,11 @@ def parse_args():
         ),
     )
     parser.add_argument(
-        "--trial_portion", type=float, default=0.05,
+        "--trial_portion", type=_portion_floor, default=0.05,
         help=(
             "Fraction of data used for trial-mode training/eval. Default "
-            "aligned with the V4 contract; the launch script is authoritative."
+            "aligned with the V4 contract; the launch script is authoritative. "
+            "Floor is 0.01 (segment-integrity; mirrors Pydantic ge=0.01)."
         ),
     )
     parser.add_argument(
@@ -221,8 +252,11 @@ def parse_args():
         help="Fraction of trial data used per epoch.",
     )
     parser.add_argument(
-        "--eval_portion", type=float, default=0.1,
-        help="Fraction of data used for trial-mode evaluation.",
+        "--eval_portion", type=_portion_floor, default=0.1,
+        help=(
+            "Fraction of data used for trial-mode evaluation. "
+            "Floor is 0.01 (segment-integrity; mirrors Pydantic ge=0.01)."
+        ),
     )
     parser.add_argument(
         "--max_epochs", type=_positive_int, default=1,

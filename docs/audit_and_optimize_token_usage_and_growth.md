@@ -338,6 +338,120 @@ If verdict (1) is reached **but** total token spend at iter 5 is < 1.5× iter 1 
 
 ---
 
+## 1.5 Phase 1.5 — Certification (mandatory gate before V12 baseline)
+
+The infrastructure committed in §8 Commits 1–4 is not trusted in production until two
+certification gates have been observed green on the **real production graph**. These gates
+exist because Phase 1 added telemetry that touches every LLM call site, opens a new file
+handle per chain, and adds JSONL I/O inside the hot path of every node. Any of those changes
+can silently break the experiment (corrupted data) or break the wall-clock (watchdog trip).
+We therefore verify both signal integrity and system stability *before* declaring the
+V11→V12 baseline ready to compare.
+
+The gates are inserted in §8 between Commit 4 and Commit 5. The V12 baseline run (Commit 5)
+must not start until both gates are green.
+
+**Decision branch**:
+- T1 green ∧ T2 green → proceed to Commit 5 (V12 baseline + Top-3 Bloat Report).
+- Either red → **STOP**. Open a remediation commit (numbered Commit 4.x) before re-attempting the failed gate.
+
+### 1.5.1 Gate T1 — Telemetry Integrity (Signal Gate)
+
+**Goal**: confirm 100 % label coverage and audit-row accuracy under a 3-iter real-graph run.
+
+**Setup** (decided per Q1 Option A — runner with `--is_trial` + tiny portions; pseudo-training
+mode does not exist in the production runner, and a synthetic harness would certify a path
+production never takes):
+
+```bash
+screen -S siderius-certify-t1 -d -m bash -c '
+  .venv/bin/python run_exploration_adaptive.py \
+      --run_name certify_t1_0504_v2 \
+      --advice tuner_advice/exploration_adaptive_v1.json \
+      --llm_config llm_configs/certify_minimal.json \
+      --max_iterations 3 --max_rounds 1 \
+      --trial_portion 0.01 --eval_portion 0.01 --max_epochs 1 \
+      2>&1 | tee /tmp/certify_t1.log
+'
+```
+
+Workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_certify_t1_0504_v2`.
+
+**Routing note**: T1/T2 use `llm_configs/certify_minimal.json` (every role pinned to
+`gpt-4o-mini`) rather than the production `openai_tiered_v1.json`. The gates certify the
+*plumbing* — usage objects, label routing, component-payload accuracy, rollup math — none
+of which depend on model intelligence. gpt-4o-mini emits the same Pydantic-shaped `usage`
+objects and obeys the same labelling contract as gpt-5.4 at ~10× lower cost.
+
+**Floor note (Commit 4.1, 2026-05-04)**: `--trial_portion`/`--eval_portion` floor is **0.01**,
+enforced at argparse-time by `_portion_floor` in both `run_exploration_adaptive.py` and
+`sdsc_submission_scripts/run_one_iteration.py`. This mirrors the Pydantic `ge=0.01` on
+`ProposalInput.trial_portion` and `HyperparamTuningInput.{trial,eval}_portion`. The first
+T1 attempt (2026-05-04) used 0.005 and crashed inside the Proposer's Pydantic validator
+after spending 16 008 interpretation tokens — the argparse floor prevents that failure
+mode. Reason: with `SEGMENTS_PER_FILE=200`, 0.005 collapses to one segment per file via
+the `max(1, …)` floor in `execute_tools.sample_set_builder` — physically valid but too
+noisy to discriminate architectures in trial mode.
+
+**Success metrics** (all four must hold for T1 = green):
+
+| # | Metric | Verification |
+|---|--------|-------------|
+| 1 | Zero unlabeled calls | `grep -c '"label":\s*"unlabeled"' token_usage.jsonl` returns `0` |
+| 2 | 9-key components payload accuracy | every `proposer.*` row has all 9 keys present and `sum(components.values()) == chars.total`. Canonical 9 keys: `system_prompt`, `candidates_markdown`, `interpretation_json`, `previous_failures`, `vocab_block`, `expert_context_block`, `agent_cards_block`, `prior_stage_outputs`, `recent_gate_block` |
+| 3 | Rollup math match | every `[TOKEN_ITER]` line in `chain_log.txt` exactly equals the row-sum from `token_usage.jsonl` for that iter (no rounding tolerance) |
+| 4 | Fail-fast wired | `pytest tests/integration/runner/test_token_log_iter_rollup.py::test_runner_aborts_on_runid_mismatch` passed at Commit 4 (2026-05-04, 7/7). No manual repro required (Q2 confirmed) |
+
+**Status**: pending.
+**Results**: _filled in after the run._
+
+### 1.5.2 Gate T2 — System Stability (Plumbing Gate)
+
+**Goal**: confirm the new telemetry writes don't push the per-call architectural-probe wall
+beyond the 60 s `evaluate_vram_skill` SIGALRM watchdog (commit 1972fee), and that the JSONL
+remains parsable under the multi-agent concurrent writes that happen inside one full
+3-trial-+-1-formal V4 iter.
+
+**Setup**:
+
+```bash
+screen -S siderius-certify-t2 -d -m bash -c '
+  .venv/bin/python run_exploration_adaptive.py \
+      --run_name certify_t2_0504 \
+      --advice tuner_advice/exploration_adaptive_v1.json \
+      --llm_config llm_configs/certify_minimal.json \
+      --max_iterations 1 --max_rounds 4 \
+      --trial_portion 0.02 --eval_portion 0.02 \
+      --formal_portion 0.02 --formal_eval_portion 0.02 \
+      --max_epochs 1 \
+      2>&1 | tee /tmp/certify_t2.log
+'
+```
+
+Workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_certify_t2_0504`.
+
+**Success metrics** (all three must hold for T2 = green):
+
+| # | Metric | Verification |
+|---|--------|-------------|
+| 1 | Watchdog compliance | no SIGALRM firing in `chain_log.txt` (0 hits via `grep -c 'evaluate_vram_skill timed out' chain_log.txt`); no `[WATCHDOG]` markers either |
+| 2 | JSONL parseability | every line of `token_usage.jsonl` parses with `json.loads` (no partial writes / interleaved bytes from concurrent writers) |
+| 3 | No regression in scoring/training | `run_output_iter_001.json` exists, contains a numeric `denoising_score` for at least the formal round, and round-trips through its Pydantic schema |
+
+**Status**: pending.
+**Results**: _filled in after the run._
+
+### 1.5.3 Graceful Degradation note
+
+If a network drop causes `response.usage` to be missing or unparseable, the bridge logs the
+row with `tokens.{prompt,completion,total}` set to `None` and continues — the character-count
+audit still works, the experiment proceeds, only the per-row token counter is degraded for
+that single call. This is preferable to aborting a long run on a transient network blip.
+**Hardening status**: deferred to Phase 2 unless T1 or T2 surfaces an actual missing-usage
+row in the wild.
+
+---
+
 ## 2. Phase 2 — Context Dehydration Surgery ("the Blade")
 
 **Conditional**: applies only if §1.9 verdict is "Confirmed Proposer Hypothesis." Pivot verdicts trigger a fresh design.
@@ -1000,6 +1114,41 @@ Atomicity of small JSONL appends is reinforced by `buffering=1` (line buffering)
 **Definition of Done**: every iter of a workflow run emits one `[TOKEN_ITER]` rollup line into `chain_log.txt` and a clean stretch of rows in `token_usage.jsonl`; the linter passes. **Status (2026-05-04)**: code path is in place and unit-verified; the end-to-end "one rollup per iter in `chain_log.txt`" assertion will be observed for the first time in the Commit 5 V12 chain run, where it doubles as the input to the baseline report.
 
 **Out of Scope**: the V12 baseline run + report (Commit 5); the `tools/validate_token_usage_jsonl.py --rollup-check` linter (built in Commit 5 alongside `tools/build_token_baseline_report.py`).
+
+---
+
+### Commit 4.1: Argparse-to-schema floor alignment + minimal certification config
+
+**Phase**: 1.5 (pre-gate hardening — surfaced by the first T1 attempt on 2026-05-04).
+
+**Scope**:
+- `run_exploration_adaptive.py` — add `_portion_floor` validator; apply to `--trial_portion` and `--eval_portion`.
+- `sdsc_submission_scripts/run_one_iteration.py` — mirror `_portion_floor` (parity with the chain-consistency contract in `tests/unit/scripts/test_chain_consistency.py`).
+- `llm_configs/certify_minimal.json` (new) — every role pinned to `gpt-4o-mini` for T1/T2.
+- `tests/unit/scripts/test_portion_floor.py` (new) — 17 tests parametrised across both runners; `test_floor_rejects_just_below` reproduces the 2026-05-04 T1 crash mode (0.005).
+
+**Tasks**:
+- [x] Add `_portion_floor(s)` mirroring the Pydantic `ge=0.01` constraint with a clear error message that names the segment-integrity reason. Applied to both `--trial_portion` and `--eval_portion` on both runners.
+- [x] Create `llm_configs/certify_minimal.json`. Loads cleanly via `WorkflowLLMConfig.from_json` (verified 2026-05-04); the `_comment` key is silently ignored by Pydantic v2 default `extra="ignore"`.
+- [x] Add 17 unit tests covering both validators (adaptive + ROI), boundary, sub-floor reject, zero/negative/non-numeric reject, above-1.0 reject, name parity, and end-to-end argparse exit-code-2 on `--trial_portion 0.005` / `--eval_portion 0.005`. **Result: 17/17 PASSED in 1.33s** (2026-05-04).
+- [x] `TestTypeParity` and `TestFlagNameParity` from `test_chain_consistency.py` still green after the type change. (`TestDefaultParity` is **pre-existing** RED on master c975df5 for `--max_rounds` and `--trial_portion` defaults — out of scope for this commit; tracked separately.)
+
+**Definition of Done**: `--trial_portion 0.005` aborts at argparse time on both runners with a message that explains the segment-integrity floor. `certify_minimal.json` loads cleanly. The Phase 1.5 launch commands in §1.5.1 / §1.5.2 reference the new config.
+
+**Out of Scope**: lowering the schema `ge=0.01` (decided 2026-05-04: keep — it's a hard statistical constraint, not just defensive). Fixing the pre-existing `TestDefaultParity` mismatches (`--max_rounds: 4 vs 3`, `--trial_portion: 0.05 vs 0.1`) — both predate this work.
+
+---
+
+### Phase 1.5 — Certification Gates T1 + T2 (mandatory before Commit 5)
+
+Before Commit 5 starts, both **Gate T1 — Telemetry Integrity** and **Gate T2 — System
+Stability** must be observed green on the real production graph. Specifications, launch
+commands, and success metrics are in §1.5.1 and §1.5.2 above. Gate results are recorded
+in those sub-sections; this anchor exists so the commit ledger reads chronologically.
+
+**Gate ordering**: T1 → T2 → Commit 5. Either gate red → STOP and open a Commit 4.x
+remediation before retrying. The V12 baseline numbers are not allowed to be quoted until
+both gates are green.
 
 ---
 
