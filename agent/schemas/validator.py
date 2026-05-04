@@ -142,6 +142,13 @@ class ValidatorOutput(BaseModel):
     config_fields_valid: bool = Field(
         description="Whether all config fields are scalar types (int, float, bool).",
     )
+    forbidden_patterns_check_passed: bool = Field(
+        default=True,
+        description="Whether the plugin source is free of Python loops over the time "
+                    "dimension inside `forward(...)`. AST-based static check. "
+                    "False blocks the trainability gate — such loops cause RAM OOMs "
+                    "and CPU hangs at long T (the V11 kill mode at T=200,000).",
+    )
     instantiation_passed: bool = Field(
         description="Whether the model could be instantiated in-process and the forward pass "
                     "produced the correct output shape [1, 256, 64].",
