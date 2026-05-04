@@ -623,6 +623,18 @@ def run_workflow(
     # leave this at None and behaviour is bit-for-bit unchanged.
     # See docs/Consistent_growing_vocab_list.md §10.3.3.
     restored_previous_proposal: dict | None = None,
+    # --- Token-usage audit context (Phase 1 Commit 4 — design doc §1.4) ---
+    # When both are non-None, every agent constructed inside the iter loop
+    # has its bridge bound to (workspace, iter, chain_run_name, run_id) so
+    # ``LLMBridge._record_usage`` can append a row to
+    # ``{workspace}/token_usage.jsonl``. When either is None, the bind is
+    # skipped — bridges keep their default no-op behaviour and no audit
+    # rows are written. Legacy / pseudo-mode tests pass None; the
+    # production runner (``run_exploration_adaptive.py``) generates a
+    # ``run_id`` once at startup and threads both through. See §1.4.1 for
+    # the immutability + forward-only contract enforced by the bridge.
+    chain_run_name: str | None = None,
+    run_id: str | None = None,
 ) -> list[HyperparamTuningOutput]:
     """
     Execute the model exploration workflow for one or more iterations.
@@ -843,6 +855,29 @@ def run_workflow(
 
     # --- Iteration loop ---
     from core.memory_probe import probe_memory
+    from pathlib import Path as _Path
+
+    # Token-usage audit binder (§1.4). Closes over the workflow-local
+    # ``chain_run_name`` / ``run_id`` so each agent's bridge writes rows to
+    # ``{workspace}/token_usage.jsonl`` tagged with the immutable run_id.
+    # When either kwarg is None (legacy / pseudo-mode tests) the bind is
+    # skipped; bridges keep their default no-op behaviour. Dispatches on
+    # the agent contract:
+    #   * agents with an eager ``self.bridge`` (interpreter / proposer /
+    #     implementor / validator) get the bridge bound directly.
+    #   * the tuner exposes its own ``set_run_context`` that stashes the
+    #     args until ``run()`` builds ``brain``.
+    def _bind_iter_context(agent) -> None:
+        if chain_run_name is None or run_id is None:
+            return
+        kwargs = dict(
+            workspace=_Path(workspace), iter=iteration,
+            run_name=chain_run_name, run_id=run_id,
+        )
+        if hasattr(agent, "set_run_context") and not hasattr(agent, "bridge"):
+            agent.set_run_context(**kwargs)
+        elif hasattr(agent, "bridge") and agent.bridge is not None:
+            agent.bridge.set_run_context(**kwargs)
 
     # Chain mode runs each iter as its own subprocess with max_iterations=1 and
     # an externally-supplied start_iteration. The loop variable becomes the
@@ -889,9 +924,11 @@ def run_workflow(
         )
 
         print(f"  [{iteration}] Interpreting experiment results...")
-        interpretation = ResultInterpretationAgent(
+        _interp_agent = ResultInterpretationAgent(
             **llm_config.get("interpret"),
-        ).run(interp_input)
+        )
+        _bind_iter_context(_interp_agent)
+        interpretation = _interp_agent.run(interp_input)
         print(f"    Take-home: {interpretation.take_home_message}")
         print(f"    Best score: {interpretation.best_denoising_score}")
         print(f"    Models: {interpretation.model_types}\n")
@@ -1030,9 +1067,11 @@ def run_workflow(
                         "_proposing_system_prompt.md",
                     )
 
-                proposal = MLModelProposalAgent(
+                _propose_agent = MLModelProposalAgent(
                     **llm_config.get("propose"),
-                ).run(propose_input)
+                )
+                _bind_iter_context(_propose_agent)
+                proposal = _propose_agent.run(propose_input)
                 print(f"    Proposed: {proposal.model_name}")
 
                 # Rename attempt dir to include model name
@@ -1076,9 +1115,11 @@ def run_workflow(
                     if previous_validation_failure is not None:
                         impl_input.previous_validation_failure = previous_validation_failure
 
-                    impl_output = MLModelImplementor(
+                    _impl_agent = MLModelImplementor(
                         **llm_config.get("implement"),
-                    ).run(impl_input)
+                    )
+                    _bind_iter_context(_impl_agent)
+                    impl_output = _impl_agent.run(impl_input)
                     print(f"    Plugin: {impl_output.model_file_path}")
 
                     # --- Validate ---
@@ -1093,9 +1134,11 @@ def run_workflow(
                     if hasattr(proposal, 'inherited_components') and proposal.inherited_components:
                         valid_input.inherited_components = proposal.inherited_components
 
-                    validation = MLCodeValidatorAgent(
+                    _valid_agent = MLCodeValidatorAgent(
                         **valid_llm,
-                    ).run(valid_input)
+                    )
+                    _bind_iter_context(_valid_agent)
+                    validation = _valid_agent.run(valid_input)
 
                     if validation.passed:
                         print(f"    All 7 checks passed.\n")
@@ -1199,7 +1242,9 @@ def run_workflow(
         if human_advice_tune is not None:
             tune_input.human_advice = human_advice_tune
 
-        tune_output = HyperparamTuningAgent().run(tune_input)
+        _tune_agent = HyperparamTuningAgent()
+        _bind_iter_context(_tune_agent)
+        tune_output = _tune_agent.run(tune_input)
         iteration_results.append(tune_output)
         # Phase N (§14.N) — append to the bounded FIFO; deque(maxlen=3)
         # auto-evicts the oldest entry so the next iteration's

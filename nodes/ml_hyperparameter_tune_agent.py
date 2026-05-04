@@ -944,6 +944,31 @@ class HyperparamTuningAgent:
     def __init__(self, bridge_factory=None, sandbox_factory=None):
         self._bridge_factory = bridge_factory or LLMBridge
         self._sandbox_factory = sandbox_factory or TidmadSandbox
+        # Token-usage audit plumbing (Phase 1 Commit 4 — design doc §1.4).
+        # Unlike interpreter/proposer/implementor/validator, the tuner builds
+        # its bridge ("brain") lazily inside ``run()`` after the input has
+        # been parsed, so the workflow cannot bind run-context at agent
+        # construction time. Instead the workflow calls ``set_run_context``
+        # to deposit the four args here; ``run()`` re-applies them to the
+        # newly built brain right after the factory call. Default ``None``
+        # preserves the legacy / pseudo-mode behaviour: no bind, brain's
+        # bridge writes nothing to ``token_usage.jsonl``.
+        self._pending_run_context: Optional[dict] = None
+
+    def set_run_context(self, *, workspace, iter: int,
+                        run_name: str, run_id: str) -> None:
+        """Deposit run-context for the brain that will be built in ``run()``.
+
+        Mirrors :meth:`agent.llm_bridge.LLMBridge.set_run_context` keyword
+        signature; the stored dict is forwarded verbatim to the brain
+        right after construction. Calling this method twice with different
+        args overwrites the prior values silently — the bridge itself
+        enforces immutability once it sees them.
+        """
+        self._pending_run_context = dict(
+            workspace=workspace, iter=iter,
+            run_name=run_name, run_id=run_id,
+        )
 
     def run(self, agent_input: HyperparamTuningInput) -> HyperparamTuningOutput:
         """
@@ -1045,6 +1070,12 @@ class HyperparamTuningAgent:
             reflect_model_id=agent_input.reflect_model_id,
             max_retries=agent_input.max_retries,
         )
+
+        # Apply deposited run-context (workflow → set_run_context → here).
+        # Guarded by hasattr so RecordingLLMBridge / other test doubles that
+        # don't implement set_run_context never break the run.
+        if self._pending_run_context is not None and hasattr(brain, "set_run_context"):
+            brain.set_run_context(**self._pending_run_context)
 
         # --- Pre-load anchor map if any round might use trial mode ---
         anchor_map_data: Optional[dict] = None

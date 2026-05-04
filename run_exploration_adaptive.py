@@ -31,6 +31,73 @@ from workflows.model_exploration import run_workflow
 from workflows.llm_config import WorkflowLLMConfig
 from core.resume import restore_prior_state, validate_workspace_layout, ResumeError
 from sdsc_submission_scripts.run_one_iteration import write_manifest
+from agent.schemas.telemetry import LLMBridgeContextError
+
+
+def _generate_run_id(run_name: str) -> str:
+    """Build the immutable per-chain run identifier per §1.4.1.
+
+    Format: ``{run_name}-{utc_ts}-{pid}``. The triple uniqueness comes from
+    the wall-clock UTC second and the process id; a re-run within the same
+    second from the same pid would collide, but that requires cooperating
+    schedulers and is not a concern in the chain runner's workflow.
+    """
+    ts = (
+        datetime.datetime.now(datetime.timezone.utc)
+        .strftime("%Y%m%dT%H%M%S")
+    )
+    return f"{run_name}-{ts}-{os.getpid()}"
+
+
+def _emit_token_iter_rollup(workspace: str, iteration: int,
+                            cumulative_total_in: int) -> int:
+    """Emit one ``[TOKEN_ITER]`` line for the just-finished iteration.
+
+    Reads ``{workspace}/token_usage.jsonl``, filters rows whose ``iter`` matches
+    ``iteration`` (skipping the synthetic ``_iter_flush`` markers), aggregates
+    by ``label`` prefix (``proposer``/``tuner``/``interp``), and prints one
+    summary line that the Phase-R ``_TeeStream`` mirrors into ``chain_log.txt``.
+    Returns the updated cumulative total so the caller can carry it across
+    iterations.
+    """
+    path = os.path.join(workspace, "token_usage.jsonl")
+    if not os.path.exists(path):
+        return cumulative_total_in
+
+    calls = 0
+    iter_total = 0
+    by_node: dict[str, int] = {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if row.get("iter") != iteration:
+                    continue
+                if row.get("label") == "_iter_flush":
+                    continue
+                calls += 1
+                tok_total = (row.get("tokens") or {}).get("total", 0) or 0
+                iter_total += tok_total
+                label = row.get("label") or "unlabeled"
+                node_key = label.split(".", 1)[0]
+                by_node[node_key] = by_node.get(node_key, 0) + tok_total
+    except OSError:
+        return cumulative_total_in
+
+    cumulative_total_out = cumulative_total_in + iter_total
+    breakdown = "  ".join(f"{k}={v}" for k, v in sorted(by_node.items()))
+    print(
+        f"[TOKEN_ITER] iter={iteration:02d}  calls={calls}  "
+        f"total_tok={iter_total}  ({breakdown})  "
+        f"cumulative_total={cumulative_total_out}"
+    )
+    return cumulative_total_out
 
 
 class _TeeStream:
@@ -398,7 +465,8 @@ def parse_args():
     return parser.parse_args()
 
 
-def _run_one_iter(args, workspace, llm_config, advice, source_paths, iteration):
+def _run_one_iter(args, workspace, llm_config, advice, source_paths,
+                  iteration, *, run_id: str):
     """Run a single iteration in the chain-in-one-process loop.
 
     Mirrors ``sdsc_submission_scripts/run_one_iteration.py`` main(): each
@@ -444,6 +512,8 @@ def _run_one_iter(args, workspace, llm_config, advice, source_paths, iteration):
         source_paths=state.resolved_source_paths,
         workspace=workspace,
         run_name=run_name,
+        chain_run_name=args.run_name,
+        run_id=run_id,
         max_iterations=1,
         start_iteration=iteration,
         max_rounds=args.max_rounds,
@@ -625,6 +695,13 @@ def main():
 
     start_iter = args.start_iteration
 
+    # Generate the immutable per-chain run_id (§1.4.1). Threaded into every
+    # bridge instance via set_run_context — the bridge refuses to write
+    # rows tagged with a different run_id, so this string is the audit
+    # log's identity-of-record for the entire chain.
+    run_id = _generate_run_id(args.run_name)
+    print(f"[TOKEN] run_id = {run_id}")
+
     # Print summary
     print("=" * 60)
     print("  SIDERIUS Adaptive Exploration (chain-in-one-process)")
@@ -681,38 +758,67 @@ def main():
     # the next architecture. Only ``--max_failed_iterations`` consecutive
     # failures stop the chain; a successful iteration resets the counter.
     consecutive_failed = 0
-    for iteration in range(start_iter, args.max_iterations + 1):
-        print(f"\n{'='*60}")
-        print(f"  IN-PROCESS CHAIN — ITERATION {iteration}/{args.max_iterations}")
-        print(f"{'='*60}")
+    cumulative_token_total = 0
+    try:
+        for iteration in range(start_iter, args.max_iterations + 1):
+            print(f"\n{'='*60}")
+            print(f"  IN-PROCESS CHAIN — ITERATION {iteration}/{args.max_iterations}")
+            print(f"{'='*60}")
 
-        manifest = _run_one_iter(
-            args, workspace, llm_config, advice, source_paths, iteration,
-        )
-
-        if manifest["status"] == "completed" and manifest.get("output_path"):
-            print(f"  Iteration {iteration} completed: score={manifest['best_score']}")
-            consecutive_failed = 0
-            continue
-
-        consecutive_failed += 1
-        arch = manifest.get("model_name") or "<unknown>"
-        print(
-            f"\n  *** [WARNING] Iteration {iteration} failed to produce "
-            f"records (architecture={arch}, status={manifest['status']}). "
-            f"Skipping to next architecture. "
-            f"[consecutive failures: {consecutive_failed}/"
-            f"{args.max_failed_iterations}] ***\n"
-        )
-        _append_evolution_failure(workspace, iteration, manifest)
-
-        if consecutive_failed >= args.max_failed_iterations:
-            print(
-                f"\n  *** [ABORT] {consecutive_failed} consecutive "
-                f"iterations failed (>= --max_failed_iterations="
-                f"{args.max_failed_iterations}). Stopping chain. ***"
+            manifest = _run_one_iter(
+                args, workspace, llm_config, advice, source_paths, iteration,
+                run_id=run_id,
             )
-            sys.exit(1)
+
+            # Per-iter [TOKEN_ITER] rollup (§1.6). Best-effort: any IO/JSON
+            # error in the rollup must never break the chain — the
+            # token_usage.jsonl file is itself the source of truth.
+            try:
+                cumulative_token_total = _emit_token_iter_rollup(
+                    workspace=workspace,
+                    iteration=iteration,
+                    cumulative_total_in=cumulative_token_total,
+                )
+            except Exception as e:
+                print(f"  [TOKEN_ITER] WARN: rollup emit failed: "
+                      f"{type(e).__name__}: {e}")
+
+            if manifest["status"] == "completed" and manifest.get("output_path"):
+                print(f"  Iteration {iteration} completed: score={manifest['best_score']}")
+                consecutive_failed = 0
+                continue
+
+            consecutive_failed += 1
+            arch = manifest.get("model_name") or "<unknown>"
+            print(
+                f"\n  *** [WARNING] Iteration {iteration} failed to produce "
+                f"records (architecture={arch}, status={manifest['status']}). "
+                f"Skipping to next architecture. "
+                f"[consecutive failures: {consecutive_failed}/"
+                f"{args.max_failed_iterations}] ***\n"
+            )
+            _append_evolution_failure(workspace, iteration, manifest)
+
+            if consecutive_failed >= args.max_failed_iterations:
+                print(
+                    f"\n  *** [ABORT] {consecutive_failed} consecutive "
+                    f"iterations failed (>= --max_failed_iterations="
+                    f"{args.max_failed_iterations}). Stopping chain. ***"
+                )
+                sys.exit(1)
+    except LLMBridgeContextError as e:
+        # §1.4.2 fail-fast contract. Telemetry-internal corruption (run_id
+        # mismatch, backwards iter) means the audit log can no longer be
+        # trusted. Continuing past this point would produce convincing-but-
+        # wrong numbers — the worst possible failure mode for an audit log.
+        # exit(2) is intentionally distinct from the consecutive-failure
+        # brake's exit(1) so a downstream classifier can tell the two apart.
+        print(
+            f"[FATAL] LLMBridgeContextError: {e} — aborting run to "
+            f"prevent telemetry corruption.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
 
 if __name__ == "__main__":
