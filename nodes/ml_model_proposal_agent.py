@@ -488,6 +488,110 @@ def _render_stage_user_prompt(accumulated: Dict[str, Any]) -> str:
     return json_region
 
 
+# Keys in `accumulated` that came in from `ProposalInput` (vs. produced by
+# upstream proposer stages such as `comparison`, `causal_reasoning`,
+# `proposing_stage_errors`). Used by `_audit_proposer_components` to
+# attribute prompt characters to the prior-stage-output bucket.
+_PROPOSER_INPUT_KEYS = {
+    "candidates",
+    "non_candidates_overview",
+    "interpretation_summary",
+    "existing_model_types",
+    "previous_failures",
+}
+
+
+def _extract_prior_stage_keys(accumulated: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the subset of ``accumulated`` produced by earlier proposer stages.
+
+    Anything not in :data:`_PROPOSER_INPUT_KEYS` is treated as a stage output
+    (``comparison``, ``causal_reasoning``, ``proposing_stage_errors``, etc.).
+    """
+    return {k: v for k, v in accumulated.items() if k not in _PROPOSER_INPUT_KEYS}
+
+
+def _audit_proposer_components(
+    *,
+    inp: ProposalInput,
+    accumulated: Dict[str, Any],
+    agent_cards_block: str,
+    expert_context_block: str,
+    vocab_block: str,
+    system_prompt: str,
+    stage_name: str,
+) -> Dict[str, Any]:
+    """Pre-merge char-count breakdown of a proposer LLM call (§1.3).
+
+    Returns a 9-key ``components`` dict suitable for ``bridge.generate(
+    components=...)``, plus a ``stage_name`` and ``total_chars`` for tests
+    and ad-hoc debugging. The breakdown mirrors the structure of the user
+    prompt assembled by :func:`_render_stage_user_prompt` and the per-call-
+    site appends of ``agent_cards_block`` / ``expert_context_block`` /
+    ``vocab_block``. Each value is the char count of that component
+    *before* tokenization, so a downstream report can localise bloat to a
+    specific source even when the provider's tokenizer is opaque.
+
+    Empty / missing blocks (``""`` or absent dict keys) yield ``0`` for
+    that component — never a missing key. The 9 keys are stable and
+    enforced by ``test_audit_components.py``.
+    """
+    from nodes.proposal_helpers import build_candidate_markdown_block
+
+    # ---- candidates_markdown: identical computation to _render_stage_user_prompt
+    candidates = accumulated.get("candidates") or []
+    candidates_markdown_chars = len(build_candidate_markdown_block(candidates))
+
+    # ---- interpretation_json: drop per_model_score_tables exactly like
+    # _render_stage_user_prompt does, then serialise. Empty dict / missing
+    # → empty JSON object literal "{}", contributing 2 chars.
+    interp_summary = accumulated.get("interpretation_summary")
+    if isinstance(interp_summary, dict) and "per_model_score_tables" in interp_summary:
+        interp_summary = {
+            k: v for k, v in interp_summary.items() if k != "per_model_score_tables"
+        }
+    interpretation_json_chars = len(
+        json.dumps(interp_summary or {}, default=str)
+    )
+
+    # ---- prior_stage_outputs: stage-produced keys, with heavy candidate
+    # fields stripped to mirror what actually lands in the user prompt.
+    prior_stage_payload = _extract_prior_stage_keys(accumulated)
+    # candidates is an input key (handled separately above), but if a stage
+    # ever overwrites it the markdown block already reflects that — leave
+    # prior_stage_outputs to the actual stage-only keys.
+    prior_stage_chars = len(
+        json.dumps(prior_stage_payload, default=str)
+    )
+
+    # ---- previous_failures: sum char count over the list of strings.
+    previous_failures_chars = sum(
+        len(s) for s in (inp.previous_failures or [])
+    )
+
+    # ---- recent_gate_block: rendered via the same helper the prompt uses,
+    # so the audit number matches what the LLM actually sees.
+    recent_gate_chars = len(
+        _format_recent_gate_exhaustions_block(inp.recent_gate_exhaustions or [])
+    )
+
+    components: Dict[str, int] = {
+        "system_prompt":        len(system_prompt or ""),
+        "candidates_markdown":  candidates_markdown_chars,
+        "interpretation_json":  interpretation_json_chars,
+        "previous_failures":    previous_failures_chars,
+        "vocab_block":          len(vocab_block) if vocab_block else 0,
+        "expert_context_block": len(expert_context_block) if expert_context_block else 0,
+        "agent_cards_block":    len(agent_cards_block) if agent_cards_block else 0,
+        "prior_stage_outputs":  prior_stage_chars,
+        "recent_gate_block":    recent_gate_chars,
+    }
+    return {
+        "stage_name": stage_name,
+        "components": components,
+        "total_chars": sum(components.values()),
+    }
+
+
 def _truncate_description(text: str, max_chars: int = 1500) -> str:
     """Truncate a model description for prompt injection."""
     if len(text) <= max_chars:
@@ -777,7 +881,10 @@ class MLModelProposalAgent:
         """
         reasoning_prompt = _build_reasoning_prompt(inp)
         print(f"    [PROMPT_SIZE] proposer_reasoning: {len(reasoning_prompt)} chars")
-        reasoning = self.bridge.generate_text(PROPOSAL_REASONING_PROMPT, reasoning_prompt)
+        reasoning = self.bridge.generate_text(
+            PROPOSAL_REASONING_PROMPT, reasoning_prompt,
+            label="proposer.legacy_reasoning",
+        )
         print(f"   Legacy reasoning complete ({len(reasoning)} chars).")
 
         base_commit_prompt = _build_commit_prompt(reasoning, inp.existing_model_types)
@@ -794,7 +901,10 @@ class MLModelProposalAgent:
                     + "\n\n".join(preflight_errors)
                 )
 
-            raw = self.bridge.generate(PROPOSAL_COMMIT_PROMPT, commit_prompt)
+            raw = self.bridge.generate(
+                PROPOSAL_COMMIT_PROMPT, commit_prompt,
+                label="proposer.legacy_commit",
+            )
 
             proposed_name = raw.get("model_name", "")
             if proposed_name in inp.existing_model_types:
@@ -1007,11 +1117,29 @@ class MLModelProposalAgent:
 
             print(f"   Stage '{stage.name}': calling LLM... "
                   f"[PROMPT_SIZE] {len(user_prompt)} chars")
+            stage_audit = _audit_proposer_components(
+                inp=inp,
+                accumulated=accumulated,
+                agent_cards_block=agent_cards_block,
+                expert_context_block=expert_context_block,
+                vocab_block=vocab_block,
+                system_prompt=system_prompt,
+                stage_name=stage.name,
+            )
+            stage_label = f"proposer.{stage.name}"
             if stage.output_mode == "text":
-                result = self.bridge.generate_text(system_prompt, user_prompt)
+                result = self.bridge.generate_text(
+                    system_prompt, user_prompt,
+                    label=stage_label,
+                    components=stage_audit["components"],
+                )
                 accumulated[stage.name] = result
             else:
-                result = self.bridge.generate(system_prompt, user_prompt)
+                result = self.bridge.generate(
+                    system_prompt, user_prompt,
+                    label=stage_label,
+                    components=stage_audit["components"],
+                )
                 accumulated[stage.name] = result
 
             print(f"   Stage '{stage.name}': done.")
@@ -1059,8 +1187,19 @@ class MLModelProposalAgent:
                             if vocab_block:
                                 retry_user += f"\n\n{vocab_block}"
                             print("   Stage 'causal_reasoning': retrying (boldness)...")
+                            retry_audit = _audit_proposer_components(
+                                inp=inp,
+                                accumulated=accumulated,
+                                agent_cards_block=agent_cards_block,
+                                expert_context_block=expert_context_block,
+                                vocab_block=vocab_block,
+                                system_prompt=retry_system,
+                                stage_name="causal_reasoning",
+                            )
                             accumulated["causal_reasoning"] = self.bridge.generate(
-                                retry_system, retry_user
+                                retry_system, retry_user,
+                                label="proposer.causal_reasoning",
+                                components=retry_audit["components"],
                             )
                 except (ValidationError, Exception):
                     pass  # malformed prediction — let the proposing stage handle it
@@ -1131,7 +1270,23 @@ class MLModelProposalAgent:
                     f"(pre-flight {preflight_attempt + 1}/{_MAX_PREFLIGHT_ATTEMPTS}, "
                     f"structural {attempt + 1}/{_MAX_PROPOSING_RETRIES + 1})..."
                 )
-                raw = self.bridge.generate(proposing_prompt, proposing_user)
+                # Proposing-stage user prompt does not append vocab_block
+                # (only agent_cards + expert_context); the audit reflects
+                # this so component sums match the actual prompt sent.
+                proposing_audit = _audit_proposer_components(
+                    inp=inp,
+                    accumulated=accumulated,
+                    agent_cards_block=agent_cards_block,
+                    expert_context_block=expert_context_block,
+                    vocab_block="",
+                    system_prompt=proposing_prompt,
+                    stage_name="proposing",
+                )
+                raw = self.bridge.generate(
+                    proposing_prompt, proposing_user,
+                    label="proposer.proposing",
+                    components=proposing_audit["components"],
+                )
 
                 try:
                     proposed_name = raw.get("model_name", "")

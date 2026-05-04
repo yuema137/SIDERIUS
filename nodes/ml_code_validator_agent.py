@@ -541,7 +541,10 @@ class MLCodeValidatorAgent:
         inst_err: str | None = None,
     ) -> LLMCodeReview:
         user_prompt = _build_review_prompt(inp, plugin_src, test_output=test_output, inst_err=inst_err)
-        raw = self.bridge.generate(VALIDATOR_REVIEW_SYSTEM_PROMPT, user_prompt)
+        raw = self.bridge.generate(
+            VALIDATOR_REVIEW_SYSTEM_PROMPT, user_prompt,
+            label="validator.code_review",
+        )
         return LLMCodeReview.model_validate(raw)
 
     def _save(self, inp: ValidatorInput, out: ValidatorOutput) -> None:

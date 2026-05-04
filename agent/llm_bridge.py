@@ -891,6 +891,7 @@ class LLMBridge:
     def _record_usage(self, *, response: Any, label: str,
                       system_prompt: str, user_prompt: str,
                       model_name: str, provider: str,
+                      components: Optional[Dict[str, int]] = None,
                       extra: Optional[Dict[str, Any]] = None) -> None:
         """Append one ``TokenUsageRow`` to ``{workspace}/token_usage.jsonl``.
 
@@ -908,6 +909,11 @@ class LLMBridge:
             user_prompt:    The user prompt as sent to the API.
             model_name:     Provider model id used for this call.
             provider:       Provider name (``"openai"``, ``"gemini"``, etc.).
+            components:     Pre-merge char-count breakdown of the user prompt,
+                            produced by the proposer's
+                            ``_audit_proposer_components`` hook (§1.3). ``None``
+                            for non-proposer calls and the legacy 2-call path —
+                            stored as an empty dict in that case.
             extra:          Free-form caller context, e.g.
                             ``{"attempt": 0, "status": "ok"}``.
         """
@@ -964,7 +970,7 @@ class LLMBridge:
                     provider=provider,
                     tokens=tokens,
                     chars=chars,
-                    components={},  # populated by Commit 3's hook
+                    components=components or {},
                     extra=extra or {},
                 )
             except ValidationError as ve:
@@ -1000,7 +1006,8 @@ class LLMBridge:
     def _chat_json(self, client: OpenAI, model_name: str,
                    system_prompt: str, user_prompt: str,
                    *, label: str = "unlabeled",
-                   provider: Optional[str] = None) -> Dict:
+                   provider: Optional[str] = None,
+                   components: Optional[Dict[str, int]] = None) -> Dict:
         """
         Internal helper: send a system+user prompt through a specific client
         to a specific model, and return the parsed JSON response.
@@ -1090,6 +1097,7 @@ class LLMBridge:
                 user_prompt=user_prompt,
                 model_name=model_name,
                 provider=provider,
+                components=components,
                 extra={"attempt": attempt, "status": attempt_status},
             )
 
@@ -1145,7 +1153,8 @@ class LLMBridge:
         )
 
     def generate(self, system_prompt: str, user_prompt: str,
-                 *, label: str = _DEFAULT_LABEL) -> Dict:
+                 *, label: str = _DEFAULT_LABEL,
+                 components: Optional[Dict[str, int]] = None) -> Dict:
         """
         Call the main LLM (``self.client`` + ``self.model_name``) with a
         system prompt and a user prompt, return a JSON dict.
@@ -1160,20 +1169,28 @@ class LLMBridge:
                            to ``"unlabeled"`` to keep legacy callers working;
                            a one-line warning is emitted to stderr until
                            every site is labeled (Commit 3).
+            components:    Pre-merge char-count breakdown for proposer call
+                           sites (see §1.3 / ``_audit_proposer_components``).
+                           ``None`` for non-proposer calls — stored as an
+                           empty dict on the row.
         """
         if label == self._DEFAULT_LABEL:
             self._warn_default_label("generate")
         return self._chat_json(self.client, self.model_name,
                                system_prompt, user_prompt,
-                               label=label, provider=self.provider)
+                               label=label, provider=self.provider,
+                               components=components)
 
     def generate_text(self, system_prompt: str, user_prompt: str,
-                      *, label: str = _DEFAULT_LABEL) -> str:
+                      *, label: str = _DEFAULT_LABEL,
+                      components: Optional[Dict[str, int]] = None) -> str:
         """
         Call the LLM with a system prompt and user prompt, return plain text.
 
         Used for free-form reasoning steps where JSON mode would constrain
         output quality. ``label`` is captured into the per-call telemetry row.
+        ``components`` carries the optional pre-merge char-count breakdown
+        from ``_audit_proposer_components`` (proposer text-mode stages only).
         """
         if label == self._DEFAULT_LABEL:
             self._warn_default_label("generate_text")
@@ -1196,6 +1213,7 @@ class LLMBridge:
             user_prompt=user_prompt,
             model_name=self.model_name,
             provider=self.provider,
+            components=components,
             extra={"attempt": 0, "status": "ok"},
         )
         return response.choices[0].message.content.strip()
@@ -1207,6 +1225,7 @@ class LLMBridge:
         tools: List[Dict[str, Any]],
         *,
         label: str = _DEFAULT_LABEL,
+        components: Optional[Dict[str, int]] = None,
     ) -> ToolCallResult:
         """
         Ask the LLM to select a tool and provide arguments.
@@ -1257,6 +1276,7 @@ class LLMBridge:
             user_prompt=user_prompt,
             model_name=self.model_name,
             provider=self.provider,
+            components=components,
             extra={"attempt": 0, "status": tool_status},
         )
 

@@ -206,16 +206,23 @@ Each LLM call must have a stable `label` that names *which* prompt fired. Today 
 | Label | Site |
 |-------|------|
 | `proposer.comparison` | `_render_stage_user_prompt` for `COMPARATIVE_ANALYSIS` stage |
-| `proposer.causal_reasoning` | same, `CAUSAL_REASONING` stage |
+| `proposer.causal_reasoning` | same, `CAUSAL_REASONING` stage (incl. boldness retry) |
 | `proposer.proposing` | same, `proposing` stage (line 1134 region) |
+| `proposer.legacy_reasoning` | legacy 2-call path, `generate_text` at `ml_model_proposal_agent.py:780` |
+| `proposer.legacy_commit` | legacy 2-call path, `generate` at `ml_model_proposal_agent.py:797` |
 | `tuner.planner` | `agent/llm_bridge.py:401` (existing planner call) |
 | `tuner.reflector` | `LLMBridge.reflect` (line 403) |
 | `interpretation.per_model` | `result_interpretation_agent.py:714` |
 | `interpretation.synthesis` | same, line 820 |
 | `interpretation.dedup` | same, line 1179 |
 | `validator.code_review` | wherever the validator's LLM step calls `generate` |
+| `implementor.reasoning` | `ml_model_implementor.py:751` (free-text reasoning call) |
+| `implementor.code` | `ml_model_implementor.py:756` (strict-JSON code commit) |
+| `implementor.repair` | `ml_model_implementor.py:769` (validate→repair loop) |
 
 Add the label to every call site as an explicit arg threaded through `bridge.generate(label=...)`. The bridge stores it in the row.
+
+**Component breakdowns** are passed only by call sites that build their user prompt via `_render_stage_user_prompt` (the staged proposer pipeline + boldness retry + proposing). The legacy 2-call path uses `_build_reasoning_prompt` / `_build_commit_prompt` and does not produce a 9-key breakdown — its rows leave `components` empty (still labeled, so chain_log stays clean). See §1.3 for the breakdown shape.
 
 ### 1.6 chain_log.txt Live Reporting
 
@@ -908,26 +915,44 @@ Atomicity of small JSONL appends is reinforced by `buffering=1` (line buffering)
 **§5 steps**: 4, 5, 6.
 
 **Scope**:
-- `nodes/ml_model_proposal_agent.py` (add `_audit_proposer_components`, three `bridge.generate(label=..., extra=...)` call sites)
-- `nodes/ml_hyperparameter_tune_agent.py` (label planner + reflector calls)
+- `agent/llm_bridge.py` (thread `components: Optional[Dict[str, int]]` kwarg through `_record_usage`, `_chat_json`, `generate`, `generate_text`, `tool_call`)
+- `nodes/ml_model_proposal_agent.py` (add `_audit_proposer_components` + `_extract_prior_stage_keys`, label all 6 call sites, pass `components=` on the 4 staged sites)
+- `nodes/ml_model_implementor.py` (label 3 call sites — discovered during the static AST sweep; not in original scope but required for the "no `label=unlabeled`" gate)
 - `nodes/result_interpretation_agent.py` (label per_model + synthesis + dedup calls)
 - `nodes/ml_code_validator_agent.py` (label code-review call)
-- `tests/unit/agent/proposal/test_audit_components.py` (new)
+- `tests/unit/agent/ml_model_proposal_agent/test_audit_components.py` (new — placed under existing proposer test dir per project convention)
+- `tests/unit/agent/llm_bridge/test_all_calls_labeled.py` (new — permanent AST regression guard)
+- Tuner is unchanged: `LLMBridge.plan()` and `LLMBridge.reflect()` already pass `label="tuner.planner"` / `label="tuner.reflector"` internally (landed in Commit 1).
 
 **Tasks**:
-- [ ] Implement `_audit_proposer_components(accumulated, agent_cards_block, expert_context_block, vocab_block, system_prompt) -> dict` per §1.3.
-- [ ] Call it before each `self.bridge.generate(...)` invocation in `ml_model_proposal_agent.py` (lines 1014, 1054, 1134); pass result as `extra` and `label="proposer.<stage_name>"`.
-- [ ] Add `label="tuner.planner"` and `label="tuner.reflector"` to the tuner call sites.
-- [ ] Add `label="interpretation.per_model"`, `"interpretation.synthesis"`, `"interpretation.dedup"` to the interpretation call sites.
-- [ ] Add `label="validator.code_review"` to the validator's LLM call site.
+- [x] Add `components: Optional[Dict[str, int]] = None` kwarg to `_record_usage`, `_chat_json`, `generate`, `generate_text`, `tool_call`. Caller-supplied dict lands in `row.components` (the schema's dedicated field) — `extra` continues to carry the retry-status payload (`{"attempt": N, "status": ...}`) untouched. **Decision (2026-05-04, Q1 confirmation)**: §1.3's "passed as `extra`" wording was imprecise; the schema split between `components` and `extra` is the real contract.
+- [x] Implement `_audit_proposer_components(*, inp: ProposalInput, accumulated, agent_cards_block, expert_context_block, vocab_block, system_prompt, stage_name) -> dict` per §1.3. Returns `{stage_name, components: {9 keys}, total_chars}`. `inp` and `stage_name` were added to the original 5-arg signature (Q3 confirmation) so the function has direct access to `inp.previous_failures` and `inp.recent_gate_exhaustions`. Helper `_extract_prior_stage_keys(accumulated)` partitions stage outputs from input keys via the `_PROPOSER_INPUT_KEYS` set.
+- [x] Call the hook before each `self.bridge.generate(...)` invocation in `ml_model_proposal_agent.py` and pass result via `components=` (NOT `extra=`):
+  - **Staged loop (line 1011/1014 region)**: `label=f"proposer.{stage.name}"` resolves to `proposer.comparison` / `proposer.causal_reasoning` / `proposer.proposing` depending on which stage runs.
+  - **Boldness retry**: `label="proposer.causal_reasoning"`, components recomputed from current `accumulated`.
+  - **Proposing stage**: `label="proposer.proposing"`. Audit hook is called with `vocab_block=""` to mirror the actual user prompt assembly (proposing user prompt does NOT append the vocab block — only `agent_cards` + `expert_context`).
+- [x] Label the legacy 2-call path: `label="proposer.legacy_reasoning"` (line 780) and `label="proposer.legacy_commit"` (line 797). Components is omitted (the legacy path uses `_build_reasoning_prompt` / `_build_commit_prompt`, not `_render_stage_user_prompt`, so the 9-key breakdown does not apply). Q2 confirmation: visibility over granularity for deprecated code.
+- [x] Add `label="interpretation.per_model"` (line 714), `"interpretation.synthesis"` (line 820), `"interpretation.dedup"` (line 1179) to `result_interpretation_agent.py`.
+- [x] Add `label="validator.code_review"` (line 544) to `ml_code_validator_agent.py`.
+- [x] Add `label="implementor.reasoning"` / `"implementor.code"` / `"implementor.repair"` to `ml_model_implementor.py` (lines 751/756/769). The implementor was not in the original §1.5 table; discovered via the AST sweep and added because it is a node that calls the bridge. §1.5 table updated to reflect this.
+- [x] Tuner labels: no change required. `brain.plan()` and `brain.reflect()` already pass labels internally (Commit 1).
+
+**Implementation Details (2026-05-04)**:
+
+- **Bridge plumbing**: `components` is keyword-only on every public method; threaded as `components=components` from each entry point down to `_record_usage`. The previous `components={}` hard-code in the row construction is replaced with `components=components or {}` so non-proposer calls produce empty dicts (schema-valid, distinguishable in downstream reports).
+- **Audit hook locality**: `_audit_proposer_components` lives next to `_render_stage_user_prompt` in `ml_model_proposal_agent.py`. It computes the same `cleaned` interpretation summary (drops `per_model_score_tables` to mirror the prompt assembly) and uses `build_candidate_markdown_block` for the markdown count — so the audit's char numbers reflect what the LLM actually saw, not a separate pre-merge computation. The `_format_recent_gate_exhaustions_block` helper at module level is reused for the `recent_gate_block` count.
+- **`_extract_prior_stage_keys`**: a small helper that returns `{k: v for k, v in accumulated.items() if k not in _PROPOSER_INPUT_KEYS}`. The fixed `_PROPOSER_INPUT_KEYS = {candidates, non_candidates_overview, interpretation_summary, existing_model_types, previous_failures}` set defines what counts as input vs. stage output — anything else is attributed to `prior_stage_outputs`.
+- **`__init__.py` test compat**: `tests/unit/agent/result_interpretation_agent/test_interpretation_agent.py::_llm_dispatch` was updated to accept `**kwargs` so the new `label=` / `components=` kwargs from the bridge call sites no longer raise `TypeError` against the mock side_effect. No other test fixture changes were required (proposer/implementor mocks already used `*a, **kw` patterns).
 
 **Pre-Commit Checklist**:
-- [ ] **Positive test**: `pytest tests/unit/agent/proposal/test_audit_components.py` — synthetic `accumulated` dict; assert all 9 component keys present in the returned breakdown; assert `total_chars == sum(components.values()) + len(system_prompt)`.
-- [ ] **Quantitative metric**: `grep -nE "bridge.(generate|generate_text|reflect|tool_call)\(" nodes/ | wc -l` matches `grep -nE "label=" nodes/ | wc -l` (every call site labeled). Also: warn-on-`unlabeled` log message must be 0 lines in the pseudo-mode integration run.
-- [ ] **Negative test**: `pytest -k test_audit_components_handles_empty_blocks` — when vocab_block / agent_cards / expert_context are empty strings, the breakdown still has the keys present with value 0; no KeyError.
-- [ ] Static check: `python -c "import ast; …"` confirms no `bridge.generate(` call lacks a `label=` kwarg in `nodes/`.
+- [x] **Positive test**: `pytest tests/unit/agent/ml_model_proposal_agent/test_audit_components.py` — synthetic `accumulated` dict; asserts all 9 component keys present in the returned breakdown; asserts `total_chars == sum(components.values())` (the original "+ len(system_prompt)" wording was a doc bug — `system_prompt` is already one of the 9 components, so it would double-count). **Result: 5/5 PASS.**
+- [x] **Quantitative metric**: AST sweep over `nodes/**/*.py` finds **0** `bridge.{generate,generate_text,tool_call}` calls without `label=` kwarg. Verified by the new permanent regression guard `tests/unit/agent/llm_bridge/test_all_calls_labeled.py`.
+- [x] **Negative test**: `test_audit_components_handles_empty_blocks` — when `vocab_block` / `agent_cards_block` / `expert_context_block` / `system_prompt` are empty strings, the breakdown still has all 9 keys present (value 0 for the empty blocks; `interpretation_json` and `prior_stage_outputs` collapse to `len("{}") == 2`). **Result: PASS.**
+- [x] **Static check (permanent)**: `tests/unit/agent/llm_bridge/test_all_calls_labeled.py::test_every_bridge_call_in_nodes_has_label_kwarg` walks every `<expr>.bridge.{generate,generate_text,tool_call}` call under `nodes/` and asserts `label=` is present. Q4 confirmation: chosen as a permanent regression guard rather than a one-off shell command, mirroring the `test_no_silent_swallow.py` pattern from Commit 2. **Result: 2/2 PASS.**
+- [x] **Bridge bundle regression**: `pytest tests/unit/agent/llm_bridge/` — Commit 2's setter-safety + no-silent-swallow tests still pass with the new `components` kwarg threaded through. **Result: all bridge tests PASS.**
+- [x] **Affected-node bundles regression**: `pytest tests/unit/agent/{ml_model_proposal_agent,result_interpretation_agent,ml_code_validator_agent,ml_model_implementor}/` — the new label/components kwargs do not break existing proposer/interp/validator/implementor unit tests. **Result: 781/781 PASS** (full suite of the 5 affected dirs including the 7 new C3 tests).
 
-**Definition of Done**: every proposer LLM call writes a 9-key component breakdown to `token_usage.jsonl.extra`; every other node's LLM call has a stable label; no call site emits `label="unlabeled"` in production.
+**Definition of Done**: every proposer LLM call writes a 9-key component breakdown to `token_usage.jsonl.components`; every other node's LLM call has a stable label in `token_usage.jsonl.label`; no call site under `nodes/` emits `label="unlabeled"` (verified by AST regression guard). **Status (2026-05-04): MET.**
 
 **Out of Scope**: workflow's `set_run_context` call (Commit 4); the V12 baseline run (Commit 5).
 

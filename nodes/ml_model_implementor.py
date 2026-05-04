@@ -748,12 +748,18 @@ class MLModelImplementor:
 
         # --- Call 1: reasoning (free text, runs once) ---
         reasoning_prompt = _build_reasoning_prompt(inp)
-        reasoning = self.bridge.generate_text(IMPLEMENTOR_REASONING_PROMPT, reasoning_prompt)
+        reasoning = self.bridge.generate_text(
+            IMPLEMENTOR_REASONING_PROMPT, reasoning_prompt,
+            label="implementor.reasoning",
+        )
         print(f"   Reasoning complete ({len(reasoning)} chars).")
 
         # --- Call 2: code commit (strict JSON) ---
         code_prompt = _build_code_prompt(reasoning, inp)
-        code = self.bridge.generate(IMPLEMENTOR_CODE_PROMPT, code_prompt)
+        code = self.bridge.generate(
+            IMPLEMENTOR_CODE_PROMPT, code_prompt,
+            label="implementor.code",
+        )
         code = self._patch_common_mistakes(code)
 
         # --- Validate → repair loop ---
@@ -766,7 +772,10 @@ class MLModelImplementor:
             print(f"   ⚠ Attempt {attempt + 1}/{max_retries + 1}: {error}")
             repair_prompt = _build_repair_prompt(code, error, inp, error_history)
             error_history.append((attempt, error))
-            code = self.bridge.generate(IMPLEMENTOR_REPAIR_PROMPT, repair_prompt)
+            code = self.bridge.generate(
+                IMPLEMENTOR_REPAIR_PROMPT, repair_prompt,
+                label="implementor.repair",
+            )
             code = self._patch_common_mistakes(code)
             error = self._validate_code(code, inp)
 
