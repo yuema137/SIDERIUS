@@ -30,6 +30,7 @@
 import os
 import json
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -278,17 +279,273 @@ class LLMBridge:
             )
 
         # --- Run-context state (Commit 1: scaffolding; Commit 2: setter) ---
-        # All four fields stay None until set_run_context() is wired in
-        # Commit 2. While None, _record_usage is a silent no-op — the bridge
-        # captures response.usage but does not write a row anywhere. This
-        # lets unit tests that patch the OpenAI client run without touching
-        # disk, and ensures that during the rollout of Commit 1 (before any
-        # workflow calls the setter) production runs do not start writing
-        # half-formed rows under a missing run_id.
+        # The four primary fields stay None until set_run_context() is called
+        # by the workflow runner (Commit 4). While None, _record_usage is a
+        # silent no-op — the bridge captures response.usage but does not write
+        # a row anywhere. This lets unit tests that patch the OpenAI client
+        # run without touching disk, and ensures that production runs which
+        # never get a setter call do not start writing half-formed rows.
         self._token_usage_path: Optional[Path] = None
         self._iter: Optional[int] = None
         self._run_id: Optional[str] = None
         self._run_name: Optional[str] = None
+
+        # --- Setter Safety Protocol state (Commit 2) ---
+        # _lock serializes set_run_context with _record_usage so that the
+        # state-check / iter-flush write / state-update sequence is atomic.
+        # Any code path that mutates run-context state OR appends a row must
+        # be inside `with self._lock:`. Helpers suffixed `_locked` assume the
+        # caller already holds the lock. This is a plain Lock (not RLock) —
+        # we never re-enter from inside a locked block.
+        self._lock = threading.Lock()
+        # Set when set_run_context() is called; copied into rows' extra if
+        # callers ask for it. Plain ISO-8601 string for cheap diffing.
+        self._set_at_ts: Optional[str] = None
+        # Lazy cache of the file's first-row run_id (read once on first write).
+        # If the file does not exist or is empty when we first try to write,
+        # this is set to our own run_id (we own the file from row 0).
+        self._first_row_run_id_cache: Optional[str] = None
+        # Tracks the highest iter value successfully appended (rows + markers).
+        # Used to detect backwards-iter leaks per §1.4.1.
+        self._last_logged_iter: Optional[int] = None
+        # Tracks the most recent ts string written; used for the soft
+        # monotonic-timestamp warning (clock-skew detection — not a raise).
+        self._last_ts: Optional[str] = None
+
+    # ------------------------------------------------------------------
+    # Setter Safety Protocol (§1.4.1 / §1.4.2 of the design doc)
+    # ------------------------------------------------------------------
+    # set_run_context is the *only* way to bind run-context state on the
+    # bridge. It is called by the workflow runner once per iter (Commit 4
+    # wires it). The body is wrapped in self._lock so that the
+    # state-check / iter-flush / state-update sequence is atomic with
+    # respect to concurrent _record_usage callers — without the lock,
+    # an in-flight _record_usage could write a row using stale iter
+    # *after* a flush marker was emitted, leaking into a flushed iter.
+    #
+    # Two invariants are enforced loudly (LLMBridgeContextError):
+    #   - run_id immutability: once set, the bridge refuses any setter
+    #     call with a different run_id. This is the strongest guard
+    #     against pointing a bridge instance at another run's log.
+    #   - forward-only iter: same-iter re-entry is allowed (stage retries
+    #     within the same iter), but going backwards is rejected.
+    #
+    # On legitimate iter advancement (new_iter > current self._iter),
+    # _flush_iter_marker_locked appends one synthetic row with
+    # label='_iter_flush' for the *previous* iter, then state is updated.
+    # ------------------------------------------------------------------
+    def set_run_context(self, *, workspace: Path, iter: int,
+                        run_name: str, run_id: str) -> None:
+        """Bind run-context state used by ``_record_usage``.
+
+        Args:
+            workspace:  Directory that owns ``token_usage.jsonl``. The file
+                        path is ``workspace / "token_usage.jsonl"``. Must be
+                        an existing, writable directory; checked once here.
+            iter:       Iteration index for subsequent calls. Must be
+                        non-negative; must be ``>=`` any prior value bound
+                        on this bridge.
+            run_name:   Human-readable run name (e.g. ``"explore_v12_0504"``).
+            run_id:     Immutable run identifier (format
+                        ``{run_name}-{utc_ts}-{pid}``). Once bound on this
+                        bridge, calling the setter with a different
+                        ``run_id`` raises :class:`LLMBridgeContextError`.
+
+        Raises:
+            LLMBridgeContextError: on run_id mutation or backwards iter.
+            OSError: if ``workspace`` does not exist or is not writable.
+            ValueError: if ``iter`` is negative.
+        """
+        if iter < 0:
+            raise ValueError(f"iter must be non-negative, got {iter}")
+        workspace = Path(workspace)
+
+        with self._lock:
+            # --- run_id immutability check (§1.4.1 row 1) ---
+            if self._run_id is not None and run_id != self._run_id:
+                raise LLMBridgeContextError(
+                    f"run_id mutation forbidden: bridge bound to "
+                    f"{self._run_id!r}, refused new {run_id!r}. "
+                    f"A new run_id requires a fresh LLMBridge instance."
+                )
+            # --- forward-only iter check (§1.4.1 row 3 of contract) ---
+            if self._iter is not None and iter < self._iter:
+                raise LLMBridgeContextError(
+                    f"backwards iter rejected: bridge at iter={self._iter}, "
+                    f"refused setter call with iter={iter}. "
+                    f"Same-iter re-entry is allowed; backwards is not."
+                )
+            # --- workspace writability check (loud OSError per §1.4.1) ---
+            if not workspace.exists():
+                raise OSError(
+                    f"workspace does not exist: {workspace}. "
+                    f"Refusing to bind token-usage path to a missing dir."
+                )
+            if not os.access(workspace, os.W_OK):
+                raise OSError(
+                    f"workspace not writable: {workspace}. "
+                    f"Cannot append token_usage.jsonl."
+                )
+            # --- legitimate iter advancement: flush prior iter first ---
+            #
+            # Strict-greater-than per the user's concurrency directive
+            # ("State-Change Guard: ensure that _iter_flush only fires if
+            # the new iter is strictly greater than the current self._iter,
+            # to prevent redundant flush markers if multiple components
+            # call the setter for the same iteration").
+            if self._iter is not None and iter > self._iter:
+                self._flush_iter_marker_locked(prev_iter=self._iter)
+
+            # --- update state (last step inside the lock) ---
+            self._token_usage_path = workspace / "token_usage.jsonl"
+            self._iter = iter
+            self._run_name = run_name
+            self._run_id = run_id
+            self._set_at_ts = (
+                datetime.now(timezone.utc)
+                .isoformat(timespec="milliseconds")
+                .replace("+00:00", "Z")
+            )
+
+    def _flush_iter_marker_locked(self, *, prev_iter: int) -> None:
+        """Append one synthetic row marking the close of ``prev_iter``.
+
+        Caller must hold ``self._lock``. The marker uses
+        ``label='_iter_flush'``, zeroed token/char counts, and
+        ``extra={'marker': 'iter_end'}`` per §1.4.1 of the design doc.
+
+        Pre-write checks (run_id, path, ts) are run via
+        ``_validate_pre_write_locked`` so a marker write that would
+        corrupt the log fails the same way a normal row would.
+        """
+        # Defensive: if the path is unset (shouldn't happen — set_run_context
+        # only calls this on iter advancement, and iter advancement implies
+        # a prior bind), silently no-op.
+        if self._token_usage_path is None:
+            return
+        ts = (
+            datetime.now(timezone.utc)
+            .isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z")
+        )
+        # Run pre-write invariant checks (loud on violation).
+        self._validate_pre_write_locked(target_iter=prev_iter, ts=ts)
+        try:
+            row = TokenUsageRow(
+                ts=ts,
+                run_id=self._run_id or "unbound",
+                run_name=self._run_name or "unbound",
+                iter=prev_iter,
+                label="_iter_flush",
+                model=None,
+                provider=None,
+                tokens=TokenCounts(),
+                chars=TokenUsageChars(system=0, user=0, total=0),
+                components={},
+                extra={"marker": "iter_end"},
+            )
+        except ValidationError as ve:
+            print(
+                f"[LLMBridge._flush_iter_marker] schema validation failed "
+                f"for iter={prev_iter}: {ve}",
+                file=sys.stderr, flush=True,
+            )
+            return
+        # Append (line-buffered). Transient OSError swallowed; structural
+        # writability was already verified by _validate_pre_write_locked.
+        try:
+            with open(self._token_usage_path, "a", buffering=1) as f:
+                f.write(row.model_dump_json() + "\n")
+                f.flush()  # Per concurrency directive: explicit flush in lock
+        except OSError as oe:
+            print(
+                f"[LLMBridge._flush_iter_marker] append failed for "
+                f"{self._token_usage_path}: {oe}",
+                file=sys.stderr, flush=True,
+            )
+            return
+        # Track that this iter has been flushed (for monotonic check).
+        self._last_logged_iter = prev_iter
+        self._last_ts = ts
+
+    def _validate_pre_write_locked(self, *, target_iter: Optional[int],
+                                   ts: str) -> None:
+        """Run the four §1.4.1 pre-write invariant checks. Caller holds lock.
+
+        Raises:
+            LLMBridgeContextError: on run_id or backwards-iter violation
+                (rows 1-2 of the §1.4.1 table).
+            OSError: on path corruption (row 3). Logs a stderr warning on
+                non-monotonic ts (row 4) but does *not* raise — clock skew
+                is real but rare and shouldn't tank a run.
+        """
+        # --- Row 3: path writable ---
+        path = self._token_usage_path
+        if path is None:
+            # Caller bug: pre-write should never run with unset path.
+            raise OSError("_validate_pre_write_locked called with no path")
+        parent = path.parent
+        if not parent.exists():
+            raise OSError(
+                f"token_usage.jsonl parent dir vanished: {parent}"
+            )
+        if not os.access(parent, os.W_OK):
+            raise OSError(
+                f"token_usage.jsonl parent dir no longer writable: {parent}"
+            )
+
+        # --- Row 1: first-row run_id matches (lazy, cached) ---
+        if self._first_row_run_id_cache is None:
+            if path.exists() and path.stat().st_size > 0:
+                with open(path, "r") as f:
+                    first_line = f.readline().strip()
+                if first_line:
+                    try:
+                        first_row = json.loads(first_line)
+                    except json.JSONDecodeError:
+                        raise LLMBridgeContextError(
+                            f"first line of {path} is not valid JSON; "
+                            f"audit log already corrupted, refusing to write."
+                        )
+                    file_run_id = first_row.get("run_id")
+                    if file_run_id != self._run_id:
+                        raise LLMBridgeContextError(
+                            f"run_id mismatch: file owner={file_run_id!r}, "
+                            f"bridge={self._run_id!r}. Audit-log integrity "
+                            f"violation — refusing write to {path}."
+                        )
+                    self._first_row_run_id_cache = file_run_id
+                else:
+                    # File exists but empty — we own it.
+                    self._first_row_run_id_cache = self._run_id
+            else:
+                # File missing — we will create it; we own row 0.
+                self._first_row_run_id_cache = self._run_id
+        else:
+            # Cache hit — verify the bridge's run_id hasn't drifted.
+            if self._first_row_run_id_cache != self._run_id:
+                raise LLMBridgeContextError(
+                    f"run_id mismatch (cached): file owner="
+                    f"{self._first_row_run_id_cache!r}, "
+                    f"bridge={self._run_id!r}."
+                )
+
+        # --- Row 2: iter not less than last logged ---
+        if (target_iter is not None and self._last_logged_iter is not None
+                and target_iter < self._last_logged_iter):
+            raise LLMBridgeContextError(
+                f"backwards iter leak: trying to write iter={target_iter} "
+                f"but last logged iter={self._last_logged_iter}. "
+                f"Audit log would be non-monotonic — aborting."
+            )
+
+        # --- Row 4: ts monotonic (warn-only) ---
+        if self._last_ts is not None and ts < self._last_ts:
+            print(
+                f"[LLMBridge] WARNING: non-monotonic timestamp "
+                f"({ts} < last {self._last_ts}). Clock skew? Row still written.",
+                file=sys.stderr, flush=True,
+            )
 
     def list_models(self) -> List[str]:
         """
@@ -655,8 +912,7 @@ class LLMBridge:
                             ``{"attempt": 0, "status": "ok"}``.
         """
         if self._token_usage_path is None:
-            # Context not set — Commit 2 wires the setter; until then,
-            # treat the helper as plumbing-only. No file is created.
+            # Context not set — silent no-op until set_run_context is called.
             return
 
         # --- Pull provider-reported token counts (graceful if missing) ---
@@ -679,43 +935,67 @@ class LLMBridge:
             total=sys_chars + usr_chars,
         )
 
-        # --- Assemble + validate the row ---
-        try:
-            row = TokenUsageRow(
-                ts=datetime.now(timezone.utc).isoformat(timespec="milliseconds")
-                  .replace("+00:00", "Z"),
-                run_id=self._run_id or "unbound",
-                run_name=self._run_name or "unbound",
-                iter=self._iter,
-                label=label,
-                model=model_name,
-                provider=provider,
-                tokens=tokens,
-                chars=chars,
-                components={},  # populated by Commit 3's _audit_proposer_components
-                extra=extra or {},
-            )
-        except ValidationError as ve:
-            # A row that fails our own schema is a programming bug, not
-            # a runtime degradation. Log to stderr and skip this row;
-            # do not raise (telemetry must not abort a real run).
-            print(
-                f"[LLMBridge._record_usage] schema validation failed for "
-                f"label={label!r}: {ve}",
-                file=sys.stderr, flush=True,
-            )
-            return
+        ts = (
+            datetime.now(timezone.utc)
+            .isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z")
+        )
 
-        # --- Append the row (line-buffered for in-process safety) ---
-        try:
-            with open(self._token_usage_path, "a", buffering=1) as f:
-                f.write(row.model_dump_json() + "\n")
-        except OSError as oe:
-            print(
-                f"[LLMBridge._record_usage] failed to append to "
-                f"{self._token_usage_path}: {oe}",
-                file=sys.stderr, flush=True,
-            )
+        # --- Lock-protected validate + append + state update.
+        # The §1.4.1 pre-write checks must observe the same run-context
+        # that the row is built from, and the state-update (last_logged_iter
+        # / last_ts) must follow the append without interleaving with a
+        # concurrent set_run_context call. The lock provides that guarantee.
+        with self._lock:
+            # Pre-write invariants (loud on violation; LLMBridgeContextError
+            # propagates per §1.4.2 — never wrap this in try/except).
+            self._validate_pre_write_locked(target_iter=self._iter, ts=ts)
+
+            # Build + validate the row (schema errors are programming bugs;
+            # log + skip rather than abort the run).
+            try:
+                row = TokenUsageRow(
+                    ts=ts,
+                    run_id=self._run_id or "unbound",
+                    run_name=self._run_name or "unbound",
+                    iter=self._iter,
+                    label=label,
+                    model=model_name,
+                    provider=provider,
+                    tokens=tokens,
+                    chars=chars,
+                    components={},  # populated by Commit 3's hook
+                    extra=extra or {},
+                )
+            except ValidationError as ve:
+                print(
+                    f"[LLMBridge._record_usage] schema validation failed for "
+                    f"label={label!r}: {ve}",
+                    file=sys.stderr, flush=True,
+                )
+                return
+
+            # Append + explicit flush (per concurrency directive).
+            # Transient OSError on append (e.g. ENOSPC mid-write) is
+            # logged + swallowed — structural writability was verified
+            # in _validate_pre_write_locked above, so any error here is
+            # a transient I/O issue and shouldn't tank the run.
+            try:
+                with open(self._token_usage_path, "a", buffering=1) as f:
+                    f.write(row.model_dump_json() + "\n")
+                    f.flush()
+            except OSError as oe:
+                print(
+                    f"[LLMBridge._record_usage] append failed for "
+                    f"{self._token_usage_path}: {oe}",
+                    file=sys.stderr, flush=True,
+                )
+                return
+
+            # Update tracking state (success path only).
+            if self._iter is not None:
+                self._last_logged_iter = self._iter
+            self._last_ts = ts
 
     def _chat_json(self, client: OpenAI, model_name: str,
                    system_prompt: str, user_prompt: str,
