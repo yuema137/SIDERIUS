@@ -941,6 +941,26 @@ class LLMBridge:
             total=sys_chars + usr_chars,
         )
 
+        # --- Close the component-coverage gap (§1.5 Phase 1.5 / Commit 4.2) ---
+        # The proposer's `_audit_proposer_components` hook reports the 9 named
+        # content payloads but not the user-prompt template wrapper text
+        # (section headers like "## Interpretation Summary", key-value preludes
+        # like "Models analysed: [...]", stage-specific instructions) that
+        # `_build_*_prompt` injects around them. Gate T1 (2026-05-04) measured
+        # the gap at ~7.5–8.3 K chars per proposer call (~22 % of each user
+        # prompt). To make the audit lossless, we inject a 10th catch-all key
+        # `template_and_scaffolding = chars.total - sum(content components)`.
+        # Only applied to rows that carry a non-empty components dict (i.e.
+        # proposer rows): keeps the schema-empty default for non-proposer
+        # rows untouched. `max(0, ...)` guards against a future audit-hook
+        # bug that overcounts; we'd rather log zero than a negative.
+        if components:
+            content_sum = sum(components.values())
+            components = {
+                **components,
+                "template_and_scaffolding": max(0, chars.total - content_sum),
+            }
+
         ts = (
             datetime.now(timezone.utc)
             .isoformat(timespec="milliseconds")

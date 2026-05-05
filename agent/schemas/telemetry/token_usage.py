@@ -150,13 +150,17 @@ class TokenUsageRow(BaseModel):
     )
     components: Dict[str, int] = Field(
         default_factory=dict,
-        description="Optional pre-merge component breakdown of the user prompt. "
+        description="Optional pre-merge component breakdown of the prompt. "
                     "Populated by the proposer's _audit_proposer_components hook "
                     "(see §1.3); empty for non-proposer calls and marker rows. "
-                    "Keys are component names (system_prompt, candidates_markdown, "
+                    "Nine content keys (system_prompt, candidates_markdown, "
                     "interpretation_json, previous_failures, vocab_block, "
                     "expert_context_block, agent_cards_block, prior_stage_outputs, "
-                    "recent_gate_block); values are char counts.",
+                    "recent_gate_block) plus a 10th catch-all key "
+                    "`template_and_scaffolding` injected by LLMBridge._record_usage "
+                    "(§1.5 / Commit 4.2) holding `chars.total - sum(other 9)` so "
+                    "every char is accounted for. Values are char counts; the "
+                    "10th key is non-negative by construction.",
     )
     extra: Dict[str, Any] = Field(
         default_factory=dict,

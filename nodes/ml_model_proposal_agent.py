@@ -534,6 +534,17 @@ def _audit_proposer_components(
     Empty / missing blocks (``""`` or absent dict keys) yield ``0`` for
     that component — never a missing key. The 9 keys are stable and
     enforced by ``test_audit_components.py``.
+
+    Note (Commit 4.2, 2026-05-04): the audit hook covers the 9 *content*
+    payloads injected into the user prompt, but not the template wrapper
+    text (section headers, key-value preludes, stage instructions) added
+    by the ``_build_*_prompt`` builders. Gate T1 measured that wrapper
+    overhead at ~7.5–8.3 K chars per proposer call. To keep the row-level
+    audit lossless, ``LLMBridge._record_usage`` augments the dict on
+    write with a 10th catch-all key ``template_and_scaffolding``
+    (= ``chars.total - sum(this hook's 9)``). The hook itself is
+    intentionally unaware of that key — it only reports content payloads
+    it can derive from inputs.
     """
     from nodes.proposal_helpers import build_candidate_markdown_block
 

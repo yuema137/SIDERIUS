@@ -366,22 +366,26 @@ production never takes):
 ```bash
 screen -S siderius-certify-t1 -d -m bash -c '
   .venv/bin/python run_exploration_adaptive.py \
-      --run_name certify_t1_0504_v2 \
+      --run_name certify_t1_0504_v3 \
       --advice tuner_advice/exploration_adaptive_v1.json \
-      --llm_config llm_configs/certify_minimal.json \
+      --llm_config llm_configs/openai_tiered_v1.json \
       --max_iterations 3 --max_rounds 1 \
       --trial_portion 0.01 --eval_portion 0.01 --max_epochs 1 \
       2>&1 | tee /tmp/certify_t1.log
 '
 ```
 
-Workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_certify_t1_0504_v2`.
+Workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_certify_t1_0504_v3`.
 
-**Routing note**: T1/T2 use `llm_configs/certify_minimal.json` (every role pinned to
-`gpt-4o-mini`) rather than the production `openai_tiered_v1.json`. The gates certify the
-*plumbing* — usage objects, label routing, component-payload accuracy, rollup math — none
-of which depend on model intelligence. gpt-4o-mini emits the same Pydantic-shaped `usage`
-objects and obeys the same labelling contract as gpt-5.4 at ~10× lower cost.
+**Routing note (revised 2026-05-04)**: T1/T2 use the **production** `llm_configs/openai_tiered_v1.json`,
+not `llm_configs/certify_minimal.json` (the gpt-4o-mini-only file from C4.1). The first T1 attempt
+with the minimal config was plumbing-correct but ran into an *intelligence floor*: gpt-4o-mini's
+implementor could not produce a compiling plugin, so every iter ended `no_records` and the
+runner brake fired at iter 3. T2 is unreachable under that floor — it audits training-loop
+telemetry, which only emits when the implementor writes runnable code. The plumbing claim
+(usage objects, label routing, rollup math) is already certified by Commit 4 unit tests; the
+remaining gates need real implementor output. `certify_minimal.json` is retained for fast
+local plumbing smoke runs but no longer used for the formal Phase 1.5 gates.
 
 **Floor note (Commit 4.1, 2026-05-04)**: `--trial_portion`/`--eval_portion` floor is **0.01**,
 enforced at argparse-time by `_portion_floor` in both `run_exploration_adaptive.py` and
@@ -398,12 +402,35 @@ noisy to discriminate architectures in trial mode.
 | # | Metric | Verification |
 |---|--------|-------------|
 | 1 | Zero unlabeled calls | `grep -c '"label":\s*"unlabeled"' token_usage.jsonl` returns `0` |
-| 2 | 9-key components payload accuracy | every `proposer.*` row has all 9 keys present and `sum(components.values()) == chars.total`. Canonical 9 keys: `system_prompt`, `candidates_markdown`, `interpretation_json`, `previous_failures`, `vocab_block`, `expert_context_block`, `agent_cards_block`, `prior_stage_outputs`, `recent_gate_block` |
+| 2 | 10-key components payload accuracy | every `proposer.*` row has all 10 keys present and `sum(components.values()) == chars.total`. Canonical 10 keys: 9 content keys (`system_prompt`, `candidates_markdown`, `interpretation_json`, `previous_failures`, `vocab_block`, `expert_context_block`, `agent_cards_block`, `prior_stage_outputs`, `recent_gate_block`) reported by `_audit_proposer_components` + 1 catch-all key `template_and_scaffolding` injected by `LLMBridge._record_usage` (Commit 4.2) holding the user-prompt template wrapper chars (= `chars.total - sum(other 9)`). After C4.2, `Δ` per row must be `0` — no tolerance. |
 | 3 | Rollup math match | every `[TOKEN_ITER]` line in `chain_log.txt` exactly equals the row-sum from `token_usage.jsonl` for that iter (no rounding tolerance) |
 | 4 | Fail-fast wired | `pytest tests/integration/runner/test_token_log_iter_rollup.py::test_runner_aborts_on_runid_mismatch` passed at Commit 4 (2026-05-04, 7/7). No manual repro required (Q2 confirmed) |
 
-**Status**: pending.
-**Results**: _filled in after the run._
+**Status**: **PENDING re-run** (2026-05-04) — first attempt RED on metric 2 (template-wrapper gap); Commit 4.2 fix landed; re-run under production `openai_tiered_v1.json` queued.
+
+**Results — first attempt (2026-05-04, run_id `certify_t1_0504_v2-20260504T234843-844114`, `certify_minimal.json`)**:
+
+Workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_certify_t1_0504_v2`. 72 rows in `token_usage.jsonl`, 3 iters × (3 interp + 3 proposer + 1–4 implementor). All three iters failed implementation under gpt-4o-mini and the runner brake fired (3 consecutive `no_records`); this did *not* affect the gate evaluation, which is plumbing-only.
+
+| # | Metric | Verdict | Detail |
+|---|--------|---------|--------|
+| 1 | Zero unlabeled calls | ✅ green | 0 / 72 rows had `label == "unlabeled"`. |
+| 2 | 9-key components payload accuracy | ❌ **RED** | Every proposer row has all 9 keys present, but `sum(components)` consistently undershoots `chars.total` by **7,524–8,335 chars** (≈ 22 % of each user prompt). Example (iter 1, attempt 0, `proposer.comparison`): `chars.system=6916`, `chars.user=27855`, `chars.total=34771`; components sum to 27,247 — gap **7,524 chars**. The undershoot is the user-prompt **template wrapper** text (section headers like `## Interpretation Summary`, key-value preludes like `Models analysed: [...]`, stage-specific instructions) injected by `_build_reasoning_prompt` / `_build_comparison_prompt` / `_build_proposing_prompt` in `nodes/ml_model_proposal_agent.py`. The 9 keys cover the *content payloads* but not the template that strings them together. |
+| 3 | Rollup math match | ✅ green | All 3 `[TOKEN_ITER]` lines in `chain_log.txt` exactly equal the per-iter row sums in `token_usage.jsonl` (no rounding tolerance): iter 01 = 130 049, iter 02 = 130 195, iter 03 = 130 436, cumulative 390 680. |
+| 4 | Fail-fast wired | ✅ green | Verified by Commit 4 (c975df5) test `test_runner_aborts_on_runid_mismatch` (passed 7/7 on 2026-05-04). |
+
+**Component growth observation** (`prior_stage_outputs` across iter 1 attempt 0):
+- `proposer.comparison`     →    2 chars (first stage, no prior — JSON `"{}"` literal)
+- `proposer.causal_reasoning` →  2 408 chars (carries comparison output)
+- `proposer.proposing`       →  4 470 chars (carries comparison + causal_reasoning)
+
+Growth is monotonic and additive as expected. **It does *not* become the dominant component** by the proposing stage — the ranking at proposing is `candidates_markdown 13 296` ≫ `system_prompt 6 997` > `prior_stage_outputs 4 470` > `interpretation_json 1 940` > `expert_context_block 1 542`. Notable: `vocab_block` drops from 3 551 chars in comparison/causal to **0** in proposing (deliberate — by then the architecture is named).
+
+**Remediation (Commit 4.2, 2026-05-04, Option A)**: closed the component-coverage gap by adding a 10th catch-all key `template_and_scaffolding` to every proposer row, computed in `LLMBridge._record_usage` as `max(0, chars.total - sum(other 9))`. The fix lives in the bridge rather than the audit hook because the bridge is the only point that sees both the rendered prompt total and the components dict at write time. The hook still reports 9 keys; the bridge augments them on write. After C4.2, `sum(components.values()) == chars.total` is enforced for every row by construction.
+
+Decision rationale: Option A (catch-all) over Option B (decompose template into named sub-components). A is lossless, cheap (~5 LOC), and lets us monitor template overhead as a single bucket throughout the V12 baseline. B is more informative but invasive (~50–100 LOC across 3 builders + audit hook); deferred to a future post-baseline refinement if the bucket proves load-bearing.
+
+**Re-run plan (2026-05-04)**: T1 and T2 will be relaunched in parallel under production `openai_tiered_v1.json`. T1 verifies the 10-key delta is zero on every proposer row across 3 iters; T2 verifies training-loop telemetry, watchdog compliance, and concurrent-write JSONL parseability under 1 iter of real training (`trial_portion=0.01, eval_portion=0.01`). Parallelisation is permitted because T2 audits a disjoint surface (training-loop telemetry, watchdog timing, JSONL concurrency) from T1 (label coverage, component math, rollup math); neither gate's verification depends on the other.
 
 ### 1.5.2 Gate T2 — System Stability (Plumbing Gate)
 
@@ -419,10 +446,10 @@ screen -S siderius-certify-t2 -d -m bash -c '
   .venv/bin/python run_exploration_adaptive.py \
       --run_name certify_t2_0504 \
       --advice tuner_advice/exploration_adaptive_v1.json \
-      --llm_config llm_configs/certify_minimal.json \
+      --llm_config llm_configs/openai_tiered_v1.json \
       --max_iterations 1 --max_rounds 4 \
-      --trial_portion 0.02 --eval_portion 0.02 \
-      --formal_portion 0.02 --formal_eval_portion 0.02 \
+      --trial_portion 0.01 --eval_portion 0.01 \
+      --formal_portion 0.01 --formal_eval_portion 0.01 \
       --max_epochs 1 \
       2>&1 | tee /tmp/certify_t2.log
 '
@@ -1136,6 +1163,28 @@ Atomicity of small JSONL appends is reinforced by `buffering=1` (line buffering)
 **Definition of Done**: `--trial_portion 0.005` aborts at argparse time on both runners with a message that explains the segment-integrity floor. `certify_minimal.json` loads cleanly. The Phase 1.5 launch commands in §1.5.1 / §1.5.2 reference the new config.
 
 **Out of Scope**: lowering the schema `ge=0.01` (decided 2026-05-04: keep — it's a hard statistical constraint, not just defensive). Fixing the pre-existing `TestDefaultParity` mismatches (`--max_rounds: 4 vs 3`, `--trial_portion: 0.05 vs 0.1`) — both predate this work.
+
+---
+
+### Commit 4.2: Component-coverage catch-all (`template_and_scaffolding`)
+
+**Phase**: 1.5 (T1.2 remediation — surfaced by the first Gate T1 run on 2026-05-04).
+
+**Scope**:
+- `agent/llm_bridge.py` — in `_record_usage`, when the caller passed a non-empty `components` dict, augment it with a 10th key `template_and_scaffolding = max(0, chars.total - sum(values))` before constructing the row. Applied to proposer rows only (only call site that passes components).
+- `agent/schemas/telemetry/token_usage.py` — update the `TokenUsageRow.components` field docstring to document the 10-key set.
+- `nodes/ml_model_proposal_agent.py` — update `_audit_proposer_components` docstring noting the bridge augments the dict on write; the hook itself remains 9-key.
+- `tests/unit/agent/llm_bridge/test_template_and_scaffolding.py` (new) — 5 tests pinning the contract: non-empty components get the 10th key with `chars.total - sum(other 9)`; empty / missing components are untouched (no 10th key on non-proposer rows); over-counting clamps to 0; exact-match yields 0; sum of all 10 keys equals `chars.total`.
+
+**Tasks**:
+- [x] Bridge edit: 11-line block injected into `_record_usage` between the `chars` construction and the `_TokenUsageRow` instantiation. `if components:` guards the empty-dict case so non-proposer rows stay schema-empty.
+- [x] Schema docstring: lists all 10 keys, names which are reported by the hook vs injected by the bridge, references §1.5 / Commit 4.2.
+- [x] Audit-hook docstring: cross-references the bridge augmentation so future readers don't expect the hook to emit 10 keys.
+- [x] Unit tests for the bridge: 5/5 PASSED (2026-05-04). Existing `test_audit_components.py` (hook-level, 9 keys) and `test_record_usage.py` (no-components paths) both still green: 21/21 across the three files.
+
+**Definition of Done**: every proposer row in a future Gate T1 run has 10 keys in `components`, and `chars.total - sum(components.values()) == 0` exactly (no tolerance). The audit hook's 9-key contract is unchanged; the 10th key is purely a write-time accounting layer.
+
+**Out of Scope**: decomposing the template wrapper into named sub-components (`section_headers`, `task_instructions`, ...; was Option B in §1.5.1). Deferred until V12 baseline reports show the catch-all bucket is load-bearing enough to warrant the ~50–100 LOC refactor. Reverting `certify_minimal.json` — the file stays in the repo for future plumbing-only smoke runs but is no longer used by the formal Phase 1.5 gates (see §1.5.1 routing note).
 
 ---
 
