@@ -30,7 +30,13 @@
 - §8 **Commit 4.3** closed: Pre-Commit sanity gate ☑, Definition of Done **GREEN**.
 - New §8 **Commit 4.3.1** — `sdsc_submission_scripts/_chain_common.sh` wrapper fix: thread `--run_name` through to `run_one_iteration.py`. Caught at the V12 launch dry-run audit; without this, every chain iter would have crashed at argparse on the new required flag. Three new dry-run unit tests in `tests/unit/scripts/test_chain_wrapper_run_name.py` pin the contract (required-flag check, value forwarding, no silent auto-derivation from workspace basename).
 - V12 chains launched 2026-05-05 (`explore_novel_v12_0504`, `exploit_cnn_v12_0504`); both writing `token_usage.jsonl` with `run_id` correctly bound to `{workspace}/.token_run_id`. Commit 5 baseline data is now being generated.
-- **Known issue logged** (does not block Commit 5): the `chain_run_name` field in JSONL rows reads `None` even though the sidecar holds the right value. Run-id immutability (§1.4.1) is unaffected — only the redundant audit-label field is missing the value. Follow-up patch in `LLMBridge.set_run_context` deferred.
+
+### Revision 5 changelog
+
+- **V12 Calibration Data (iter 1-13, explore chain) folded into the design** — see §1.5.1.2. Total prompt tokens grew **2.39×** from iter 1 (198 K) to iter 13 (474 K) and is still climbing.
+- **Phase 2 priority pivot.** V12 data shows the bottleneck is not the proposer (3.3× sublinear) but **`interpretation.synthesis` (9.3× near-linear, 4.7K → 40K)**. The original Phase 2 §2 design assumed proposer-first; the V12 calibration overrides that assumption. Commits 6.1 (interpretation sliding window) and 6.2 (proposer prior_stage_outputs management) are inserted as the new high-priority Phase 2 entry points; Template Dehydration is moved to Commit 11.1 (low priority — fixed 21% template share is dwarfed by the linear-growth components).
+- **§8 Commit 5 spec finalized** — `tools/build_token_baseline_report.py` must segment Happy-Path-Cost vs Recovery-Cost (`extra.attempt == 0 AND extra.status == "ok"` boundary), report `tokens_per_iteration` + `growth_slope` per sub-call label, and emit a Context-Explosion alert when any single call's `tokens.prompt` exceeds 50 K.
+- **Report retraction** — the Rev 4 entry "Known issue: `chain_run_name` reads `None` in JSONL rows" was **incorrect**. The JSONL field is `run_name` (not `chain_run_name` — that's the Python variable name in `model_exploration.py:875`). All 346 production rows across both V12 chains have `run_name` correctly bound. No follow-up patch is needed; no Commit 4.3.2 is being scheduled. The corresponding line in `reports/v12_20260504.md` has been removed.
 
 ---
 
@@ -616,6 +622,58 @@ Workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_certify_t1_sanity_0504`. **
 | 3 | `[TOKEN_ITER]` rollup ≡ JSONL row sum | ✅ green | rollup `total_tok` = 82 236; JSONL `prompt + completion` sum = 82 236 (exact match). `_emit_token_iter_rollup`'s JSONL-seeded cumulative path is mathematically correct. |
 
 **Conclusion**: Commit 4.3 instrumentation produces a `token_usage.jsonl` of identical shape and integrity to the historical adaptive-runner T1 attestation. Phase 1.5 gate ladder is complete on the chain-first path; Commit 5 (V12 baseline) is unblocked from the certification side and was launched same-day (see Revision 4 changelog).
+
+#### 1.5.1.2 V12 Live Observation — first 13 iters of production explore (Rev 5)
+
+**Source**: `/home/klz/Data/SIDEREIS_DATA/exploration_explore_novel_v12_0504/token_usage.jsonl`, snapshot at iter 13 of 30. Run still in progress at the time of this revision.
+
+**Per-iteration prompt-token totals (explore chain)**:
+
+| iter | calls | prompt tokens | growth vs iter 1 | proposer | tuner | interpretation | implementor | validator |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 20 | 198,516 | 1.00× | 68 K | 102 K | 11 K | 12 K | 3 K |
+| 2 | 21 | 233,412 | 1.18× | 93 K | 103 K | 20 K | 11 K | 4 K |
+| 3 | 21 | 239,999 | 1.21× | 100 K | 95 K | 29 K | 10 K | 4 K |
+| 4 | 24 | 313,321 | 1.58× | 119 K | 149 K | 29 K | 10 K | 3 K |
+| 5 | 23 | 306,372 | 1.54× | 144 K | 103 K | 40 K | 13 K | 4 K |
+| 6 | 24 | 338,940 | 1.71× | 136 K | 132 K | 50 K | 14 K | 5 K |
+| 7 | 24 | 338,456 | 1.70× | 162 K | 108 K | 50 K | 11 K | 5 K |
+| 8 | 27 | 425,286 | 2.14× | 215 K | 131 K | 61 K | 11 K | 4 K |
+| 9 | 26 | 403,582 | 2.03× | 215 K | 108 K | 61 K | 12 K | 5 K |
+| 10 | 30 | 428,523 | 2.16× | 171 K | 136 K | 73 K | 33 K | 13 K |
+| 11 | 28 | 465,210 | 2.34× | 223 K | 138 K | 83 K | 13 K | 6 K |
+| 12 | 27 | 425,879 | 2.14× | 207 K | 105 K | 93 K | 12 K | 7 K |
+| 13 | 30 | 474,396 | **2.39×** | 225 K | 104 K | 102 K | 27 K | 13 K |
+
+**Component-level growth (iter 1 → iter 13, prompt tokens)**:
+
+| Component | iter 1 | iter 13 | growth | shape | verdict |
+|---|---:|---:|---:|---|---|
+| `interpretation` | 11 K | 102 K | **9.3×** | near-linear ↑ | bloating (primary target) |
+| `proposer` | 68 K | 225 K | **3.3×** | sublinear ↑ | bloating (secondary target) |
+| `validator` | 3 K | 13 K | 4.3× | flat-ish | bounded |
+| `implementor` | 12 K | 27 K | 2.3× | flat-ish | bounded |
+| `tuner` | 102 K | 104 K | **1.0×** | **flat** | **C4.1 instrumentation success** |
+
+**Interpretation breakdown** — the 9.3× growth is structural, not a per-call inflation:
+
+| iter | per_model: calls | per_model tok/call | synthesis prompt tokens |
+|---:|---:|---:|---:|
+| 1 | 2 | 3,636 | 4,657 |
+| 5 | 5 | 4,873 | 16,588 |
+| 9 | 7 | 5,291 | 24,636 |
+| 13 | 11 | **5,621 (saturated)** | **40,365 (still linear)** |
+
+- `interpretation.per_model` per-call cost has plateaued at ~5.6 K (the per-model record is bounded). The number of *calls* grows because every distinct `model_type` ever proposed gets a per-model summary. The `model_knowledge_cache` (`nodes/result_interpretation_agent.py:685-783`) is hit-on-repeat, so calls grow only when a new architecture appears (~0.7 new model_types per iter).
+- `interpretation.synthesis` is one call per iter, but its prompt **concatenates every cached model summary**. There is **no N-iter window cap**. Synthesis cost grows ~3 K/iter; on the current trajectory iter 30 will be ≈ 80 K tokens for synthesis alone.
+
+**Headline takeaways for Phase 2**:
+
+1. The bottleneck is **interpretation, not proposer**. Original §2 design ranked proposer first; V12 calibration inverts that. See Commit 6.1 (sliding-window the synthesis prompt over `model_knowledge_cache`).
+2. **Proposer is real but secondary.** 3.3× growth is driven by `prior_stage_outputs` (4 K → 14 K, ~3.5×) + `vocab_block` (3.5 K, stable). See Commit 6.2.
+3. **Tuner is the success story.** Flat at ~100 K/iter — C4.1 portion-floor + components instrumentation introduced zero drift. No surgery needed.
+4. The "22% Template Tax" hypothesis from Sanity-T1 (§1.5.1.1) replicates in production for `proposer.comparison` (21.0%, both chains, iter 1) but is dwarfed by the linear-growth components — Template Dehydration deferred to Commit 11.1 (low priority).
+5. Exploit chain (`exploit_cnn_v12_0504`) died at iter 2 from kernel OOM-killer (see `reports/v12_20260504.md`); only 2 iters of data — insufficient to corroborate the curve. Explore alone is the calibration baseline for Commit 5.
 
 ### 1.5.2 Gate T2 — System Stability (Plumbing Gate)
 
@@ -1589,18 +1647,35 @@ run-id immutability or any C4.2 invariant.
 - `reports/v12_top3_bloat.md` (new — output artifact)
 
 **Tasks**:
-- [ ] Run a V12 chain (settings matching V11 baseline: `openai_tiered_v1.json` routing, 5+ iters minimum). The run is the deliverable, not a code change.
-- [ ] Implement `tools/build_token_baseline_report.py`: reads `token_usage.jsonl` from the V12 workspace; emits §1.9.1 tables (per-iter totals, top-3 bloat per iter, aggregate growth verdicts).
+- [ ] Run a V12 chain (settings matching V11 baseline: `openai_tiered_v1.json` routing, 5+ iters minimum). The run is the deliverable, not a code change. **(Already in flight — explore at iter 13/30 at time of Rev 5.)**
+- [ ] Implement `tools/build_token_baseline_report.py` per the spec below.
 - [ ] Write `reports/v12_token_baseline.md`: real per-call token counts, per-iter trend, comparison against the §12-audit estimates.
 - [ ] Write `reports/v12_top3_bloat.md`: tables per §1.9.1; ends with one of the three §1.9.2 verdicts.
+
+**`build_token_baseline_report.py` spec (Rev 5 finalized)**:
+
+The tool reads one or more `{workspace}/token_usage.jsonl` files and emits per-label aggregates. Three behaviours are mandatory:
+
+1. **Cost segmentation — Happy Path vs Recovery**. Each row carries `extra.attempt` (0 = first try, ≥1 = retry) and `extra.status` (`"ok"`, `"retry_quota"`, `"error"`, etc.). Split aggregates accordingly:
+   - **Happy-Path-Cost**: rows where `extra.attempt == 0 AND extra.status == "ok"` — the cost of the iteration if everything goes right first time.
+   - **Recovery-Cost**: all other rows (retries, validator-rejected proposals causing implementor repairs, quota-driven re-tries). Reported as a separate column so we can see what fraction of total spend is overhead from failures.
+
+2. **Growth tracking — `tokens_per_iteration` and `growth_slope`**. For every distinct `label` (e.g. `proposer.comparison`, `interpretation.synthesis`, `tuner.planner`):
+   - emit a per-iter row with `tokens_per_iteration = sum(prompt + completion)` for that label that iter,
+   - compute `growth_slope` as `(tokens_at_iter_N - tokens_at_iter_1) / (N - 1)` once N ≥ 5,
+   - flag any label whose slope > 0 with 95% confidence (simple linear regression, p < 0.05).
+
+3. **Alerting — Context Explosion threshold**. Any single row with `tokens.prompt > 50_000` produces a `[CONTEXT_EXPLOSION]` warning in the report (with iter, label, attempt, run_id). 50 K is the soft ceiling: above this, the model's own attention starts degrading (recall drops on dense-context benchmarks past ~64 K) and we are paying for capacity we cannot use. Operators should investigate before publishing the report.
 
 **Pre-Commit Checklist**:
 - [ ] **Positive test**: `python tools/build_token_baseline_report.py --workspace <v12-ws>` produces both reports without error; both render in markdown without broken tables.
 - [ ] **Quantitative metric**: for the 5-iter run, the report shows a clean per-iter token sparkline; the linter on the JSONL returns 0 anomalies.
+- [ ] **Segmentation test**: hand-craft a 3-row JSONL with one `attempt=0,status=ok` row and two `attempt=1` retry rows. Assert the tool reports Happy-Path-Cost = first row's tokens, Recovery-Cost = sum of the other two.
+- [ ] **Alert test**: hand-craft a row with `tokens.prompt = 60_000`. Assert the tool emits `[CONTEXT_EXPLOSION]` for that row and exits 0 (alert is informational, not fatal).
 - [ ] **Negative test**: run the report generator against a workspace whose `token_usage.jsonl` has been hand-corrupted (drop an `_iter_flush` marker). Assert the generator refuses to publish — emits "AUDIT LOG CORRUPTION DETECTED" and exits nonzero. We never publish numbers from a corrupted log.
 - [ ] **Verdict recorded**: §1.9.2 verdict is written explicitly at the top of `reports/v12_top3_bloat.md` — Confirmed Proposer / Pivot Tuner / Pivot Other / Sanity Floor.
 
-**Definition of Done (Gate G1)**: real V12 baseline numbers exist; the verdict is recorded; the team has explicitly chosen one of the four branches (continue to Commit 6, pivot, or stop).
+**Definition of Done (Gate G1)**: real V12 baseline numbers exist; Happy-Path/Recovery segmentation is reported; per-label growth slopes are reported; the verdict is recorded; the team has explicitly chosen one of the four branches (continue to Commit 6.1, pivot, or stop).
 
 **Decision branch**:
 - Verdict = "Confirmed Proposer Hypothesis" → proceed to Commit 6.
@@ -1608,6 +1683,76 @@ run-id immutability or any C4.2 invariant.
 - Verdict = Sanity Floor tripped → **DEFER**. Re-run at iter 15 and re-evaluate.
 
 **Out of Scope**: any Phase 2 work.
+
+---
+
+### Phase 2 — V12-Calibration Override (Rev 5)
+
+The original Phase 2 ordering (Commits 6 → 12 below) assumed proposer-first dehydration. **V12 calibration data (§1.5.1.2) shows interpretation is the primary bleed**, so two new commits are inserted at the top of Phase 2 ahead of the original sequence:
+
+- **Commit 6.1** — Interpretation Sliding Window (high priority — addresses the 9.3× growth)
+- **Commit 6.2** — Proposer `prior_stage_outputs` Management (medium priority — addresses the 3.3× growth)
+
+The original Commits 6-12 still apply but at lower priority. Commit 11.1 (Template Dehydration) is added at the end of Phase 2 to capture the 21% template share now that we know it is fixed cost, not growth.
+
+---
+
+### Commit 6.1: Interpretation Sliding Window (Rev 5 — V12-driven, high priority)
+
+**Phase**: 2.
+**§5 step**: 12a (new).
+
+**Why this commit, why first**: V12 explore data shows `interpretation.synthesis` grew 4.7 K → 40 K tokens over iters 1-13 (8.7×) and is still climbing linearly. The growth driver is `model_knowledge_cache` accumulation: every `model_type` ever proposed gets a per-model summary entry, and the synthesis prompt concatenates **all** of them. There is no N-iter window cap today (verified against `nodes/result_interpretation_agent.py` and `nodes/interpretation_helpers.py`). At the current ~3 K/iter slope, iter 30 will cost ≈ 80 K tokens for synthesis alone.
+
+**Scope**:
+- `nodes/interpretation_helpers.py` (modify — add `compress_model_summary` helper + `select_active_models` policy)
+- `nodes/result_interpretation_agent.py` (modify — synthesis-prompt assembly reads compressed entries for non-active models)
+- `tests/unit/agent/result_interpretation_agent/test_sliding_window.py` (new)
+
+**Tasks**:
+- [ ] Define a "Top-K + Last-N" active-model policy: keep full detail for the K models with the highest `best_denoising_score` ever seen (default K=3), plus the last N models proposed (default N=2). Union, deduplicated. All others compress.
+- [ ] Implement `compress_model_summary(entry: dict) -> dict` in `interpretation_helpers.py`: takes a `model_knowledge_cache[mt]` entry and returns a one-line shape — `{model_type, best_score, n_rounds, one_line_takeaway}`. The takeaway field is whatever the original LLM summary's "key_finding" was (extract from existing summary text deterministically; do not call LLM again). Target compressed size < 200 chars per model.
+- [ ] Implement `select_active_models(model_knowledge_cache, k=3, n=2) -> set[str]`: returns the union of top-K-by-score and last-N-by-iteration model_types.
+- [ ] In `result_interpretation_agent._build_synthesis_prompt` (or equivalent), replace the current "all entries verbatim" assembly with: full detail for active models, compressed summaries for the rest. Add a single line at the top of the historical block: `"[N older architectures compressed for context budget — see {workspace}/iter_{i}/interpretation.json for full detail]"`.
+- [ ] Both K and N are configurable via the existing tuner config layer (no new top-level CLI flag needed); add to the LLM-config schema.
+
+**Pre-Commit Checklist**:
+- [ ] **Positive test**: `pytest tests/unit/agent/result_interpretation_agent/test_sliding_window.py::test_active_set_top_k_plus_last_n` — given a 7-model cache with synthetic scores and proposed-iter ordering, the active set is exactly `top3 ∪ last2` (5-element union when disjoint, fewer when overlapping).
+- [ ] **Compression test**: `test_compress_preserves_key_finding` — `compress_model_summary` extracts the original "key_finding" verbatim and emits ≤ 200 chars.
+- [ ] **Synthesis-prompt size regression test**: with a synthetic 13-model cache (mimicking iter 13 of explore V12), the new synthesis prompt is < 15 K chars (vs. the V12 baseline of ~40 K). Quantify the compression ratio.
+- [ ] **Behavioural test**: synthesis output still mentions every model_type at least once (active = full, compressed = one-liner) — no model is silently dropped from the prompt.
+
+**Definition of Done (Gate G1.5)**: re-run a 5-iter chain post-implementation; verify `interpretation.synthesis` `tokens.prompt` no longer grows linearly. Acceptance: per-iter slope drops from V12's ~3 K/iter to **< 500 tokens/iter** between iter 3 and iter 5 (i.e. growth is sub-linear, ideally `O(log n)` or `O(1)`). The new chain's `build_token_baseline_report.py` output replaces V12 as the Phase 2 baseline.
+
+**Out of Scope**: per_model call count reduction (the 11-call growth at iter 13 is a separate axis driven by vocab; addressed by upstream proposer-restraint policy, not this commit).
+
+---
+
+### Commit 6.2: Proposer `prior_stage_outputs` Management (Rev 5 — V12-driven, medium priority)
+
+**Phase**: 2.
+**§5 step**: 12b (new).
+
+**Why this commit, why second**: V12 data shows proposer grew 68 K → 225 K (3.3×) over 13 iters. Component breakdown of the iter-1 vs iter-late `proposer.proposing` row indicates `prior_stage_outputs` is the dominant growth contributor — at iter 1 it's 13 K chars, by iter 13 it dominates the per-call assembly. The other proposer components are largely flat: `system_prompt` ~7 K (fixed), `vocab_block` ~3.5 K (slow), `template_and_scaffolding` ~8 K (fixed).
+
+**Scope**:
+- `nodes/ml_model_proposal_agent.py` (modify — `prior_stage_outputs` assembly)
+- `tests/unit/agent/proposal/test_prior_stage_truncation.py` (new)
+
+**Tasks**:
+- [ ] Audit what `prior_stage_outputs` actually contains today (history of which prior stage's outputs concatenated how). Document in the commit message — we may discover it's already wrong, not just bloated.
+- [ ] Apply a max-chars truncation per stage entry (default 2 K chars per prior stage, configurable). Trim from the middle (keep first 1 K and last 1 K), insert `[... N chars elided ...]` marker. Preserves head + tail, both of which are typically high signal.
+- [ ] Alternative consideration (decide before implementation): semantic compression via a deterministic extractor (e.g., keep only the JSON keys, not values, for prior-stage outputs that are large dicts). Lower risk than LLM-based compression but loses some signal.
+- [ ] Pin the policy in the LLM-config schema; do not hardcode the threshold.
+
+**Pre-Commit Checklist**:
+- [ ] **Positive test**: 4 K input → 2 K output, with first-1 K and last-1 K verbatim and the `[... 2000 chars elided ...]` marker between.
+- [ ] **Idempotence test**: applying truncation to an already-truncated string is a no-op.
+- [ ] **Quantitative metric**: against a synthetic iter-13-shape proposer assembly, `proposer.proposing.tokens.prompt` drops by ≥ 30%. (Don't promise a flat curve here — proposer growth has multiple sources; we're targeting the largest one.)
+
+**Definition of Done (Gate G1.5b)**: re-run a 5-iter chain post-implementation; verify `proposer.proposing` token growth slope drops by ≥ 30% relative to V12 baseline.
+
+**Out of Scope**: `vocab_block` compression (separate concern, addressed in Phase 3 if vocab keeps growing); `candidates_markdown` compression (already bounded by gate-block design).
 
 ---
 
@@ -1808,6 +1953,33 @@ run-id immutability or any C4.2 invariant.
 **Definition of Done (Gate G4)**: V13 chain run shows the refactor delivered the target cost reduction without regressing any intelligence metric; legacy paths removed; the system is on the new architecture.
 
 **Out of Scope**: anything Phase 3 (tuner refactor, dashboard, etc.).
+
+---
+
+### Commit 11.1: Template Dehydration (Rev 5 — deprioritized)
+
+**Phase**: 2 (low priority — to be considered only after Commits 6.1 + 6.2 land and the linear-growth bleed is stopped).
+**§5 step**: 21a (new, low priority).
+
+**Why this commit, why deprioritized**: V12 production data (§1.5.1.2) and Sanity-T1 (§1.5.1.1) confirm the proposer's template + system_prompt + scaffolding is ~21% of `proposer.comparison`'s prompt cost (7.5 K out of 36 K chars at iter 1). This is a real fixed cost — but it does **not grow with iterations**. Compared to the 9.3× linear-growth interpretation bleed and 3.3× proposer growth, dehydrating fixed cost is the wrong place to optimize first. We address this only after the growth curves are flat.
+
+**Scope**:
+- `agent/prompt_templates/proposal/*.md` (×9 — section header tightening, instruction-block compression)
+- `nodes/ml_model_proposal_agent.py` (`system_prompt` audit — strip duplicated instructions if any)
+
+**Tasks**:
+- [ ] Audit each of the 9 proposer template files for redundancy: section headers that restate themselves, instructions that duplicate `system_prompt` content, multi-paragraph framing that could be a single sentence.
+- [ ] Apply mechanical compressions only (no semantic content drop). Target: 30% reduction in `template_and_scaffolding` chars without changing the rendered task description.
+- [ ] Re-run proposer behavioural tests (existing) — assert no test fails as a result of the compression. The Trap Test (Commit 11) is the strict gate: if compression silently drops a behavioural cue, the Trap Test will catch it.
+
+**Pre-Commit Checklist**:
+- [ ] **Positive test**: `template_and_scaffolding` chars in a synthetic iter-1 proposer assembly drop from ~7.5 K to ≤ 5.3 K (≥ 30% reduction).
+- [ ] **Behaviour-preservation test**: full existing proposer test suite passes (`pytest tests/unit/agent/proposal/ tests/integration/nodes/test_ml_model_proposal_agent.py`).
+- [ ] **Trap Test rerun**: `pytest tests/integration/proposer/test_long_term_wisdom_trap.py --real-api-call` still passes — compression did not erase the long-term wisdom behaviour.
+
+**Definition of Done**: 30% template-tax reduction; no behavioural regression. This is opportunistic optimization, not a gate; if Commits 6.1/6.2 already brought total per-iter cost below the target, this commit can be skipped entirely.
+
+**Out of Scope**: changing prompt semantics, reordering stages, adding/removing template sections.
 
 ---
 
