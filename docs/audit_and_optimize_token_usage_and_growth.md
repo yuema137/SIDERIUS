@@ -1,7 +1,7 @@
 # Audit & Optimize Token Usage and Growth
 
-**Status**: Design draft, revision 4 (2026-05-05). G0 (architecture) approved; T1-Sanity GREEN; Commit 4.3 + 4.3.1 landed; V12 chains live.
-**Author**: drafted 2026-05-04, revised 2026-05-04 (rev 2 — safety/forensic/retention gates), revised 2026-05-04 (rev 3 — commit ledger + hybrid DRR + fail-fast formalization), revised 2026-05-05 (rev 4 — T1-Sanity green + Commit 4.3.1 chain-wrapper parity + V12 launch).
+**Status**: Design draft, revision 7 (2026-05-05). G0 approved; G1 baseline LANDED (verdict: Confirmed Proposer Hypothesis); V12 (iter 14) reveals multi-dimensional explosion — Interpretation **call-multiplication** (`per_model` 2 → 12 calls/iter) and **Expert-Context bloat** (`expert_context_block` 24×, 7.5K → 181K chars) escalated to Critical Priority. New Commit 4.3.2 (attribution audit) gates Phase 2.
+**Author**: drafted 2026-05-04, revised 2026-05-04 (rev 2 — safety/forensic/retention gates), revised 2026-05-04 (rev 3 — commit ledger + hybrid DRR + fail-fast formalization), revised 2026-05-05 (rev 4 — T1-Sanity green + Commit 4.3.1 chain-wrapper parity + V12 launch), revised 2026-05-05 (rev 5 — V12 iter 1–13 calibration + Phase 2 priority pivot), revised 2026-05-05 (rev 6 — Targeted O(N) Dehydration + USD tracking + Phase 3 split), revised 2026-05-05 (rev 7 — V12 iter 14 multi-dimensional explosion: Stability Filter, Knowledge Consolidation, Attribution Audit).
 **Inputs**:
 
 - `reports/v11_20250503_token_usage.md` §12 (Proposer Internal Workflow & Feedback Logic) — the audit that motivates this doc.
@@ -47,6 +47,24 @@
 - **Template Dehydration moved to Phase 3 (Optional)**. Removed from Commit 11.1 in §8; new §9 "Phase 3 (Optional)" section appended to the doc. Phase 3 is opportunistic: only triggered if Commits 6.1/6.2 do not bring per-iter cost under target.
 - **§8 Commit 5 spec finalized — USD cost tracking + $1.50/iter bloat alert added**. The tool now computes per-iter cost using the production model's rate card (default `$10/1M prompt + $30/1M completion`, configurable via CLI). Two alert thresholds emitted in the report: `[BLOAT_ALERT]` when an iter's total USD exceeds $1.50 (the **post-dehydration target ceiling** — at V12 rates this fires on every iter; quieting this alert is the success criterion for Commits 6.1/6.2), and `[CONTEXT_EXPLOSION]` when any single call's `tokens.prompt` exceeds 50 K.
 - **Cleanup**: removed the Rev 4 → Rev 5 cross-references to the non-existent `chain_run_name = None` bug. The doc now reflects that `run_name` is correctly bound across all V12 production rows. No further mention.
+
+### Revision 7 changelog (2026-05-05) — "Full Stop" Pivot
+
+**Status**: G1 baseline LANDED — `tools/build_token_baseline_report.py` produced `reports/v12_token_baseline.md` + `reports/v12_top3_bloat.md` against the live `explore_novel_v12_0504` workspace (iters 1–14, 366 rows, run_id `explore_novel_v12_0504-20260505T070526-1028759`). **Verdict: Confirmed Proposer Hypothesis.** Cumulative cost across 14 iters: $72.73 (avg $5.20/iter). Iter 14 hit **$9.43 = 6.3× the $1.50 ceiling** with 2 `[CONTEXT_EXPLOSION]` events on `proposer.causal_reasoning`. `[BLOAT_ALERT]` fires 14/14 iters (by design — North Star).
+
+The V12 calibration also surfaced **three findings the Rev 6 spec did not anticipate**, requiring Phase 2 to be re-scoped:
+
+1. **`interpretation.per_model` is the hidden #2 bleeder** — slope **+5,947 tok/iter (R²=0.98)**, nearly **2× `interpretation.synthesis`'s slope** (+2,982/iter). Mechanism is *not* prompt-size growth: it is **call-count multiplication**. Iter 1 = 2 per_model calls; iter 14 = 12 calls — one per accumulated `model_type`. Commit 6.1 as specced in Rev 6 only clamped synthesis prompt size; it did nothing about call multiplication. **Commit 6.1 is expanded** to add a "Stability Filter" — only LLM-summarize model_types active in the current iter or showing significant score deltas; pull stable historicals from the cache without a fresh LLM call.
+
+2. **`expert_context_block` grew 24.30×** (7,476 → 181,668 chars) — by ratio, the **largest O(N) bleeder of any component**. Was not on the Phase 2 dehydration list at all. **New Commit 6.3** added: "Knowledge Consolidation" — every iter, perform a Merge & Prune over the accumulated findings, collapsing similar entries into a bounded set of **5–8 high-signal conclusions**. Bounds the block to a fixed budget regardless of iter count.
+
+3. **`template_and_scaffolding` grew 11.00×** (50K → 555K chars). Partly explained by call-count doubling (iter 1: 20 calls; iter 14: 40 calls including 2 `implementor.repair`), but per-call scaffolding still inflates ~5×. The catch-all is computed as `chars.total - sum(other_9_named_components)`, so an 11× growth implies dynamic content is leaking out of the 9 named keys into the unnamed bucket — i.e., our 10-key attribution is regressing as iterations accumulate. **New Commit 4.3.2** (Phase 1 amendment, blocks Phase 2): an Attribution Audit must locate the leak and either (a) add a missing component key to capture the un-attributed content, or (b) prove the growth is genuinely structural (more calls per iter, not unaccounted bytes per call). **Phase 2 surgery is gated on this audit** — we do not optimize numbers we don't trust.
+
+- **Phase 1 reopened** to admit Commit 4.3.2 as a hard gate for trusting the per-component breakdown.
+- **Commit 6.1 expanded** to address call-multiplication, not just prompt-size growth.
+- **Commit 6.3 added** as a sibling of 6.1/6.2 — Knowledge Consolidation for `expert_context_block`. Critical Priority alongside 6.1.
+- **Phase 3 unchanged** — Template Dehydration remains optional, post-G1.5.
+- Commit Map redrawn (see end of §8).
 
 ---
 
@@ -1639,10 +1657,43 @@ operator intervention; the chain-runner contract is end-to-end testable in the u
 layer (no live GPU required to catch wrapper drift). **Status (2026-05-05)**: GREEN
 — landed as commit `609ac64`; V12 chains live.
 
-**Out of Scope**: populating the `chain_run_name` audit-label field in the JSONL row
-payload (currently `None` despite sidecar correctness — see Revision 4 known-issue
-note). That is a separate `LLMBridge.set_run_context` follow-up; it does not affect
-run-id immutability or any C4.2 invariant.
+**Out of Scope**: any further wrapper-layer plumbing beyond the `--run_name` thread.
+
+---
+
+### Commit 4.3.2: Attribution Audit — `template_and_scaffolding` 11× leak (Rev 7)
+
+**Phase**: 1 (amendment — **blocks Phase 2**).
+**§5 step**: 14b (new, between 14a Commit 4.3.1 and 15 Commit 5 follow-up).
+
+**Why this commit**: The Gate G1 baseline (Commit 5) reported `template_and_scaffolding` grew **11.00×** across iter 1 → iter 14 (50,422 → 554,774 chars). This bucket is *defined* as the catch-all residue: `chars.total − sum(other_9_named_components)`. By construction, growth in the catch-all means content is appearing in the prompt that none of the 9 named keys is capturing. Either:
+
+  - **(H1) Attribution leak** — a real, measurable, *named* category of dynamic content (e.g. a new prompt section, a renamed block, an iter-by-iter accumulator) is being inserted into the prompt without being routed through one of the 9 component keys. In this case, our top-3 bloat report is *misattributing* the leak's growth, and the 10-key breakdown is unsafe to base Phase 2 surgery on.
+  - **(H2) Structural call-count amplification** — the catch-all is genuinely fixed *per call* (~7.5K), but iter 14 has 40 proposer calls vs. iter 1's 20, so the *summed* catch-all doubles from call multiplication alone. In this case the 10-key breakdown is sound; the growth is real but explained.
+
+These two hypotheses have different downstream consequences. **(H1) requires a code fix before Phase 2.** **(H2) requires only a denominator change in the report (per-call instead of summed).** Phase 2 cannot proceed until we know which one we are seeing.
+
+**Scope** (read-only investigation + targeted fix if H1):
+- `agent/llm_bridge.py:_record_usage` — the site that computes `template_and_scaffolding = chars.total − sum(other_9)`.
+- `nodes/ml_model_proposal_agent.py:_audit_proposer_components` — the proposer-side hook that populates the 9 named keys (Commit 4.2).
+- `agent/prompt_templates/proposal/*.md` — to enumerate every dynamic block the templates reference.
+- The V12 `token_usage.jsonl` rows themselves — for forensic reconstruction.
+
+**Tasks**:
+- [ ] **Per-call check**: re-run `tools/build_token_baseline_report.py` against V12 explore with a new `--per-call-components` view that divides `template_and_scaffolding` by `n_proposer_calls` for each iter. If the per-call value is ~constant (within ±20%), H2 is confirmed.
+- [ ] **Forensic diff**: pick one iter-1 `proposer.proposing` row and one iter-14 `proposer.proposing` row with the same call-site (same `extra.stage_idx`). Compute the per-row `template_and_scaffolding` chars. If it grew within a single call, H1 is confirmed.
+- [ ] **Source-side audit (if H1)**: enumerate every dynamic block currently being concatenated into the proposer prompt (template render, system prompt builder, every `_render_*` helper). For each, verify it is being attributed to one of the 9 keys. Any block that is not routed through `_audit_proposer_components` is a candidate leak source.
+- [ ] **Fix (if H1)**: either add a new component key (`recent_records_block`, `forensic_summary_block`, etc. — name follows the leaking content) and route the un-attributed content through it, or refactor the leaking call site to thread its content into one of the existing 9 keys. The post-fix re-run must show `template_and_scaffolding` growth ≤ 1.5× (i.e., bounded — Phase 2 then proceeds against a *trusted* breakdown).
+- [ ] **Doc** (if H2): update §1.9.1 to clarify that the top-3 component table aggregates across `n_proposer_calls`, and add a "per-call" view to the report. No code fix needed; mark Commit 4.3.2 closed with H2 verdict.
+
+**Pre-Commit Checklist**:
+- [ ] **Verdict recorded**: §8 Commit 4.3.2 closes with an explicit "H1 confirmed (leak found, fixed)" or "H2 confirmed (call-count amplification only, report view added)" line — never both, never ambiguous.
+- [ ] **Per-call test**: a new unit test in `tests/unit/agent/llm_bridge/test_audit_attribution_floor.py` constructs a synthetic proposer call where the 9 named components account for *all* dynamic content; assert `template_and_scaffolding` is within a fixed budget (≤ 8K chars) regardless of how many candidates / records / failures are passed in. Pin this floor so future leaks regress the test.
+- [ ] **Re-baseline**: re-run Commit 5's tool against the V12 workspace; confirm the new top-3 table reflects either the corrected attribution (H1) or the new per-call view (H2).
+
+**Definition of Done**: H1 or H2 is **explicitly chosen** with evidence; if H1, the leak is sealed and the named-key sum captures all dynamic content; if H2, the report exposes per-call vs summed views; the new attribution test passes. **Phase 2 (Commits 6.1, 6.2, 6.3) MUST NOT begin until this commit is closed.** We do not perform surgery on a chart whose denominators are wrong.
+
+**Out of Scope**: changing what content goes *into* the proposer prompt (that is Phase 2's job — Commits 6.1, 6.2, 6.3); reducing the catch-all chars by template compression (that is Phase 3's job — Commit 11.1).
 
 ---
 
@@ -1719,34 +1770,51 @@ The original Commits 6-12 still apply but at lower priority. Commit 11.1 (Templa
 
 ---
 
-### Commit 6.1: Interpretation Sliding Window (Rev 5 — V12-driven, high priority)
+### Commit 6.1: Interpretation Call-on-Demand — Sliding Window + Stability Filter (Rev 7 — Critical Priority, expanded)
 
-**Phase**: 2.
-**§5 step**: 12a (new).
+**Phase**: 2 (gated on Commit 4.3.2 closing).
+**§5 step**: 12a.
 
-**Why this commit, why first**: V12 explore data shows `interpretation.synthesis` grew 4.7 K → 40 K tokens over iters 1-13 (8.7×) and is still climbing linearly. The growth driver is `model_knowledge_cache` accumulation: every `model_type` ever proposed gets a per-model summary entry, and the synthesis prompt concatenates **all** of them. There is no N-iter window cap today (verified against `nodes/result_interpretation_agent.py` and `nodes/interpretation_helpers.py`). At the current ~3 K/iter slope, iter 30 will cost ≈ 80 K tokens for synthesis alone.
+**Why this commit, why critical**: V12 explore data exposed **two distinct linear-growth axes** in the interpretation agent. Both must be clamped here because they share the same source of state (`model_knowledge_cache`):
+
+1. **Synthesis prompt-size growth (Rev 5 finding)**: `interpretation.synthesis` grew 4.7 K → 40 K tokens over iters 1–13 (8.7×). Driver: the synthesis prompt concatenates *all* entries in `model_knowledge_cache` verbatim — no window cap.
+2. **per_model call-count growth (Rev 7 finding)**: `interpretation.per_model` grew **2 calls/iter (iter 1) → 12 calls/iter (iter 14)**. Slope **+5,947 tok/iter (R²=0.98)** — nearly 2× the synthesis slope. Driver: the agent currently issues a fresh LLM summary call for *every* `model_type` ever proposed, on every iter. Stable historical models (no new training rounds, no score change) are re-summarized every iter against unchanged data — pure waste.
+
+The Rev 5 spec only addressed (1). Rev 7 expands the commit to also address (2) — the per_model call multiplication. **Both fixes share the active-model selection policy**, so they belong together: deciding which models are "active enough to need attention" gates both whether we re-call per_model and whether we keep their entry expanded in synthesis.
 
 **Scope**:
-- `nodes/interpretation_helpers.py` (modify — add `compress_model_summary` helper + `select_active_models` policy)
-- `nodes/result_interpretation_agent.py` (modify — synthesis-prompt assembly reads compressed entries for non-active models)
-- `tests/unit/agent/result_interpretation_agent/test_sliding_window.py` (new)
+- `nodes/interpretation_helpers.py` (modify — add `select_active_models`, `compress_model_summary`, `should_recall_per_model`)
+- `nodes/result_interpretation_agent.py` (modify — synthesis assembly reads compressed entries for non-active models; per_model dispatcher consults `should_recall_per_model` before issuing each call)
+- `tests/unit/agent/result_interpretation_agent/test_sliding_window.py` (new — covers both axes)
+- `tests/unit/agent/result_interpretation_agent/test_stability_filter.py` (new — Rev 7)
 
 **Tasks**:
-- [ ] Define a "Top-K + Last-N" active-model policy: keep full detail for the K models with the highest `best_denoising_score` ever seen (default K=3), plus the last N models proposed (default N=2). Union, deduplicated. All others compress.
-- [ ] Implement `compress_model_summary(entry: dict) -> dict` in `interpretation_helpers.py`: takes a `model_knowledge_cache[mt]` entry and returns a one-line shape — `{model_type, best_score, n_rounds, one_line_takeaway}`. The takeaway field is whatever the original LLM summary's "key_finding" was (extract from existing summary text deterministically; do not call LLM again). Target compressed size < 200 chars per model.
-- [ ] Implement `select_active_models(model_knowledge_cache, k=3, n=2) -> set[str]`: returns the union of top-K-by-score and last-N-by-iteration model_types.
-- [ ] In `result_interpretation_agent._build_synthesis_prompt` (or equivalent), replace the current "all entries verbatim" assembly with: full detail for active models, compressed summaries for the rest. Add a single line at the top of the historical block: `"[N older architectures compressed for context budget — see {workspace}/iter_{i}/interpretation.json for full detail]"`.
-- [ ] Both K and N are configurable via the existing tuner config layer (no new top-level CLI flag needed); add to the LLM-config schema.
+- [ ] **Active-model policy** (shared by synthesis + per_model): "Top-K + Last-N + Delta-Δ". Keep full detail / re-call per_model for the union of:
+   - Top K models by `best_denoising_score` ever seen (default K=3),
+   - Last N models proposed by recency (default N=2),
+   - any model whose `best_denoising_score` changed in the current iter beyond a threshold Δ (default `abs(Δ) ≥ 0.05` in normalized score units).
+   All other models are "stable" — pulled from cache as-is, no LLM call.
+- [ ] **Sliding-window compression (axis 1)**: implement `compress_model_summary(entry) -> dict` returning `{model_type, best_score, n_rounds, one_line_takeaway}`. Takeaway field extracted *deterministically* from the existing cached summary's `key_finding` — no fresh LLM call. Target ≤ 200 chars per model.
+- [ ] **Stability Filter (axis 2)**: implement `should_recall_per_model(model_type, cache_entry, current_iter_records) -> bool`. Returns `True` iff the model is in the active set AND has either (a) at least one new training record in the current iter, or (b) a score delta ≥ Δ. Stable models return `False` — the dispatcher pulls the previous cache entry verbatim and skips the LLM call. The skip path emits a single `_iter_flush`-style audit row with `label="interpretation.per_model_skipped"`, `tokens=None`, `extra={"reason": "stable", "cached_iter": <iter>}` so the audit log preserves the count of skipped calls (we want to *measure* the savings, not hide them).
+- [ ] **Synthesis-prompt assembly** (axis 1): replace "all entries verbatim" with active-full + stable-compressed. Add a single line at the top of the historical block: `"[N older architectures compressed for context budget — see {workspace}/iter_{i}/interpretation.json for full detail]"`.
+- [ ] **per_model dispatcher** (axis 2): consult `should_recall_per_model` before each LLM call; on skip, write the audit marker and reuse the previous cache entry. Total per_model LLM calls per iter must equal `|active_set|`, not `|model_knowledge_cache|`.
+- [ ] **Configurable**: K, N, Δ all live in the LLM-config schema (no new CLI flag); defaults documented in the schema.
 
 **Pre-Commit Checklist**:
-- [ ] **Positive test**: `pytest tests/unit/agent/result_interpretation_agent/test_sliding_window.py::test_active_set_top_k_plus_last_n` — given a 7-model cache with synthetic scores and proposed-iter ordering, the active set is exactly `top3 ∪ last2` (5-element union when disjoint, fewer when overlapping).
-- [ ] **Compression test**: `test_compress_preserves_key_finding` — `compress_model_summary` extracts the original "key_finding" verbatim and emits ≤ 200 chars.
-- [ ] **Synthesis-prompt size regression test**: with a synthetic 13-model cache (mimicking iter 13 of explore V12), the new synthesis prompt is < 15 K chars (vs. the V12 baseline of ~40 K). Quantify the compression ratio.
+- [ ] **Active-set test**: `test_active_set_top_k_plus_last_n_plus_delta` — given a 7-model cache with synthetic scores, recency, and one model with a current-iter score delta ≥ Δ, the active set is exactly `top3 ∪ last2 ∪ {delta_model}` (deduplicated).
+- [ ] **Compression test (axis 1)**: `test_compress_preserves_key_finding` — `compress_model_summary` extracts the original `key_finding` verbatim and emits ≤ 200 chars.
+- [ ] **Stability Filter test (axis 2)**: `test_stability_filter_skips_stable_models` — given a 7-model cache where 5 models are stable (no new records, no score delta) and 2 are active, assert `should_recall_per_model` returns `False` for the 5 and `True` for the 2. Assert the audit log gains exactly 5 `interpretation.per_model_skipped` marker rows for that iter.
+- [ ] **Synthesis-prompt size regression test (axis 1)**: with a synthetic 13-model cache (mimicking iter 13 of explore V12), the new synthesis prompt is **< 15 K chars** (vs. V12 baseline ~40 K). Quantify the compression ratio in the test assertion message.
+- [ ] **per_model call-count regression test (axis 2)**: with a synthetic 12-model cache (mimicking iter 14 of explore V12) where 9 models are stable, assert the agent issues exactly **3 LLM calls** for that iter (active set size), not 12. Reuses the existing pseudo-LLM harness.
 - [ ] **Behavioural test**: synthesis output still mentions every model_type at least once (active = full, compressed = one-liner) — no model is silently dropped from the prompt.
+- [ ] **Audit-log test**: skipped per_model calls produce countable marker rows (so the savings are measurable in `tools/build_token_baseline_report.py`'s output).
 
-**Definition of Done (Gate G1.5)**: re-run a 5-iter chain post-implementation; verify `interpretation.synthesis` `tokens.prompt` no longer grows linearly. Acceptance: per-iter slope drops from V12's ~3 K/iter to **< 500 tokens/iter** between iter 3 and iter 5 (i.e. growth is sub-linear, ideally `O(log n)` or `O(1)`). The new chain's `build_token_baseline_report.py` output replaces V12 as the Phase 2 baseline.
+**Definition of Done (Gate G1.5)**: re-run a 5-iter chain post-implementation; both axes must clamp:
+- `interpretation.synthesis` `tokens.prompt` slope drops from V12's ~3 K/iter to **< 500 tokens/iter** between iter 3 and iter 5.
+- `interpretation.per_model` summed prompt tokens per iter drops from V12's +5,947 tok/iter slope to **< 1 K tok/iter** (sub-linear; ideally flat).
+The new chain's `build_token_baseline_report.py` output replaces V12 as the Phase 2 baseline. Both slopes are reported in `reports/v12post_dehydration_baseline.md`.
 
-**Out of Scope**: per_model call count reduction (the 11-call growth at iter 13 is a separate axis driven by vocab; addressed by upstream proposer-restraint policy, not this commit).
+**Out of Scope**: model_knowledge_cache *eviction* (we keep the full cache for forensic recovery; only the *prompt assembly* and *call dispatch* read a windowed view); the 21% template tax on `proposer.comparison` (Phase 3, Commit 11.1).
 
 ---
 
@@ -1775,6 +1843,44 @@ The original Commits 6-12 still apply but at lower priority. Commit 11.1 (Templa
 **Definition of Done (Gate G1.5b)**: re-run a 5-iter chain post-implementation; verify `proposer.proposing` token growth slope drops by ≥ 30% relative to V12 baseline.
 
 **Out of Scope**: `vocab_block` compression (separate concern, addressed in Phase 3 if vocab keeps growing); `candidates_markdown` compression (already bounded by gate-block design).
+
+---
+
+### Commit 6.3: Expert Context Distillation — Knowledge Consolidation (Rev 7 — Critical Priority)
+
+**Phase**: 2 (gated on Commit 4.3.2 closing).
+**§5 step**: 12c (new).
+
+**Why this commit**: V12 explore G1 baseline (Commit 5) shows `expert_context_block` grew **24.30×** — the largest growth ratio of any proposer component, by a wide margin (vs. `interpretation_json` 2.01× and `prior_stage_outputs` 1.32×). Iter 1 = 7,476 chars; iter 14 = **181,668 chars**. The block was not on the Rev 6 dehydration list because it had not been profiled before V12 — this is a Rev 7 surfacing.
+
+The mechanism is **append-only accumulation**: every iter's expert findings are concatenated to the running expert-context block, with no consolidation pass. Findings repeat across iters (the same ridge condition or model failure mode is rephrased and re-added), and there is no upper bound on the block size. At ~13 K chars/iter growth, by iter 30 this single block alone will exceed 400 K chars — larger than the *entire* iter-1 prompt budget.
+
+**Scope**:
+- Locate the expert-context assembly site (likely `nodes/ml_model_proposal_agent.py` or a helper in `nodes/proposal_helpers.py`; first task confirms the file:line).
+- New `agent/expert_context_consolidator.py` — Pydantic-validated Merge & Prune over expert findings.
+- `tests/unit/agent/proposal/test_expert_context_consolidator.py` (new).
+
+**Tasks**:
+- [ ] **Locate the assembly site**: grep for `expert_context_block` in the proposer pipeline; confirm the exact function that builds the block. Document file:line in the commit message. (Suspect: `_build_expert_context` or similar; the audit hook in Commit 4.2 tags chars to this key, so the producer is reachable.)
+- [ ] **Define a finding schema** (Pydantic): `ExpertFinding(category: Literal[...], statement: str, evidence_iters: list[int], strength: Literal["weak","moderate","strong"])`. Categories enumerated from existing finding patterns (e.g. `frequency_band`, `architecture_constraint`, `failure_mode`, `data_property`).
+- [ ] **Knowledge Consolidation policy** (Merge & Prune): every iter, before appending new findings to the block, pass the union (existing block + new findings) through a consolidator that:
+   - **Merges** findings with the same category and overlapping statements (deterministic: cosine similarity over normalized text ≥ 0.7, OR explicit category+key-noun match). Merged findings union their `evidence_iters`.
+   - **Prunes** to a bounded set of **5–8 high-signal conclusions** per category, ranked by `(strength, len(evidence_iters), recency)`. Cap total findings at **24** across all categories.
+   - The pruned findings are dropped from the prompt-time block but archived to `{workspace}/iter_{i}/expert_context_archive.json` for forensic recovery.
+- [ ] **Render**: the consolidated block is what gets concatenated into the proposer prompt. Format: one section per category, each containing 5–8 lines, each line a single distilled statement with `(iters: 3,5,7)` evidence trailer.
+- [ ] **No LLM call in the consolidator** by default — use deterministic similarity (TF-IDF / sentence-transformer-cached or simple normalized string match). An LLM-merge path may be added later if signal loss is observed; out of scope for this commit.
+
+**Pre-Commit Checklist**:
+- [ ] **Schema test**: invalid `ExpertFinding` (missing category, empty statement) rejected by Pydantic with a useful error.
+- [ ] **Merge test**: two findings with category `frequency_band` and statements "ridge near 50 Hz dominates" and "the 50 Hz ridge is the dominant feature" merge into one with both evidence iters in the list.
+- [ ] **Prune test**: a 30-finding input pruned to ≤ 24 outputs; per-category cap of 8 enforced; weak findings dropped first.
+- [ ] **Bounded-size regression test**: with a synthetic 14-iter accumulation (mimicking V12 iter 14), the rendered block is **≤ 12 K chars** (vs. V12's 181 K). Quantify the compression ratio in the assertion message.
+- [ ] **Archive test**: pruned findings appear in `expert_context_archive.json` (forensic-recoverable, not silently lost).
+- [ ] **Behavioural test**: every category that had at least one strong finding pre-consolidation still has at least one finding post-consolidation — strong signals are not lost to overzealous pruning.
+
+**Definition of Done (Gate G1.5c)**: re-run a 5-iter chain post-implementation; `expert_context_block` summed chars per iter must be **bounded** — i.e., `growth_x` (iter5 / iter1) **≤ 1.5×**, vs. V12's 24× over 14 iters. The new chain's `tools/build_token_baseline_report.py` output reports the new `expert_context_block` row as `bounded` in the §1.9.2 verdict table.
+
+**Out of Scope**: changing the *content* policy of what counts as an expert finding (that's the proposer's reasoning module's job); LLM-based merging (deferred — only revisit if deterministic merge demonstrably loses signal in the behavioural test).
 
 ---
 
@@ -1978,28 +2084,36 @@ The original Commits 6-12 still apply but at lower priority. Commit 11.1 (Templa
 
 ---
 
-### Commit Map (visual — Rev 6)
+### Commit Map (visual — Rev 7)
 
 ```
-Phase 1 (Telemetry)         Phase 2 (Targeted O(N) Dehydration)        Phase 3 (Optional)
- ┌─────────────────┐         ┌─────────────────────────────┐            ┌────────────────┐
- │ C1 capture      │         │ C6.1 Interp sliding window  │ ★ HIGH     │ C11.1 Template │
- │ C2 setter+fail  │         │      (clamp 9.3× O(N))      │            │      Dehydration│
- │ C3 audit+labels │         │ C6.2 Proposer prior-stage   │   MED      │   (21% fixed)  │
- │ C4 plumbing     │         │      mid-truncation         │            │   opportunistic│
- │ C5 G1 baseline  │ ──────▶ │      (clamp 3.3× O(N))      │            └────────────────┘
- │     (verdict)   │         │ ─── G1.5 re-baseline ───    │
- │   USD + bloat   │         │ C6 ErrorSig (lower prio)    │
- └─────────────────┘         │ C7 G2 forensic              │
-                             │ C8 schemas                  │
-                             │ C9 helpers                  │
-                             │ C10 assembly                │
-                             │ C11 G3 trap                 │
-                             │ C12 G4 + cleanup            │
-                             └─────────────────────────────┘
+Phase 1 (Telemetry)              Phase 2 (Targeted O(N) Dehydration)            Phase 3 (Optional)
+ ┌──────────────────────┐         ┌─────────────────────────────────┐            ┌─────────────────┐
+ │ C1 capture           │         │ C6.1 Interp Call-on-Demand      │ ★★ CRIT    │ C11.1 Template  │
+ │ C2 setter+fail       │         │      sliding-window (synthesis) │            │       Dehydration│
+ │ C3 audit+labels      │         │      + Stability Filter         │            │   (21% fixed)   │
+ │ C4 plumbing          │         │      (per_model call clamp)     │            │   opportunistic │
+ │ C4.3.2 ATTRIBUTION ──┼──BLOCKS▶│ C6.3 Expert Context Distillation│ ★★ CRIT    │   post-G1.5     │
+ │   audit (11× catch-  │         │      (Merge & Prune, 24× → 1.5×)│            └─────────────────┘
+ │   all leak — H1/H2)  │         │ C6.2 Proposer prior-stage       │   MED
+ │ C5 G1 baseline       │ ──────▶ │      mid-truncation             │
+ │   USD + bloat        │         │      (clamp 3.3× O(N))          │
+ │   (verdict LANDED)   │         │ ─── G1.5 re-baseline ───        │
+ └──────────────────────┘         │ C6 ErrorSig                     │
+                                  │ C7 G2 forensic                  │
+                                  │ C8 schemas                      │
+                                  │ C9 helpers                      │
+                                  │ C10 assembly                    │
+                                  │ C11 G3 trap                     │
+                                  │ C12 G4 + cleanup                │
+                                  └─────────────────────────────────┘
 ```
 
-Gates G1, G1.5, G2, G3, G4 are explicit STOP points. **G1.5 (new in Rev 6)** is the post-Commit-6.1/6.2 re-baseline check: re-run the chain, recompute `growth_slope` for `interpretation.synthesis` and `proposer.proposing`, verify both have dropped from O(N) to ≤ O(log N). If G1.5 fails, do not proceed to Commit 6 — return to 6.1/6.2 and tighten the policy. Each gate's failure has a documented remediation path back into a prior commit, not a workaround.
+Gates G1, G1.5, G2, G3, G4 are explicit STOP points.
+
+- **G1 (LANDED)**: Commit 5 produced `reports/v12_token_baseline.md` + `reports/v12_top3_bloat.md`. Verdict: Confirmed Proposer Hypothesis. 14/14 BLOAT_ALERT. Commit 4.3.2 surfaced as a Phase-1 blocker.
+- **G1.5 (new in Rev 6, expanded in Rev 7)**: post-Commit-6.1/6.2/6.3 re-baseline. Re-run the chain, recompute `growth_slope` for `interpretation.synthesis`, `interpretation.per_model`, `proposer.proposing`, and `expert_context_block` chars. **All four must drop from O(N) to ≤ O(log N) or bounded ≤ 1.5× iter5/iter1.** If G1.5 fails, do not proceed to Commit 6 — return to 6.1 / 6.2 / 6.3 and tighten the policy. Each gate's failure has a documented remediation path back into a prior commit, not a workaround.
+- **Phase 2 entry is gated on Commit 4.3.2** — until the attribution audit confirms the 10-key breakdown is trustworthy (or the 10-key view is patched), surgery on per-component bloat is premature.
 
 ---
 
