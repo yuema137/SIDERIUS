@@ -28,6 +28,12 @@ set -o pipefail
 WORKSPACE=""
 NUM_ITERATIONS=2
 SEED_PATHS=()
+# Commit 4.3 follow-up — chain-level run name. Forwarded as --run_name to
+# run_one_iteration.py, where it (a) labels chain_run_name in audit logs
+# and (b) seeds {workspace}/.token_run_id on iter 1 so all subprocess
+# iters share one immutable run_id (§1.4.1). Required: chain runs must
+# pin their identity at launch, not at the first subprocess.
+RUN_NAME=""
 MAX_ROUNDS=3                        # §3.2: matches run_one_iteration.py default 3
 MAX_EPOCHS=1                        # §3.2: matches run_one_iteration.py default 1
 LLM_MODEL="gemini-3.1-pro-preview"  # §3.2: matches run_one_iteration.py default
@@ -102,6 +108,7 @@ parse_chain_args() {
     while [[ $# -gt 0 ]]; do
       case $1 in
         --workspace)              WORKSPACE="$2"; shift 2 ;;
+        --run_name)               RUN_NAME="$2"; shift 2 ;;
         --num_iterations)         NUM_ITERATIONS="$2"; shift 2 ;;
         --seed_paths)
           shift
@@ -171,8 +178,8 @@ parse_chain_args() {
       esac
     done
 
-    if [ -z "$WORKSPACE" ] || [ ${#SEED_PATHS[@]} -eq 0 ]; then
-        echo "Required: --workspace, --seed_paths" >&2
+    if [ -z "$WORKSPACE" ] || [ ${#SEED_PATHS[@]} -eq 0 ] || [ -z "$RUN_NAME" ]; then
+        echo "Required: --workspace, --seed_paths, --run_name" >&2
         exit 1
     fi
 }
@@ -205,6 +212,7 @@ build_app_args() {
     local iter=$1
     APP_ARGS=(
         --workspace "$WORKSPACE"
+        --run_name "$RUN_NAME"
         --start_iteration "$iter"
         --seed_paths "${SEED_PATHS[@]}"
         --max_rounds "$MAX_ROUNDS"

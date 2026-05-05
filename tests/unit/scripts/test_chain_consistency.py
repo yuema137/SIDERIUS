@@ -929,6 +929,7 @@ def _run_dry(mode: str, workspace: _Path, num_iters: int, seed_path: _Path):
         "--mode", mode,
         "--dry-run",
         "--workspace", str(workspace),
+        "--run_name", "dryrun_test_chain",
         "--num_iterations", str(num_iters),
         "--seed_paths", str(seed_path),
     ]
