@@ -340,20 +340,82 @@ If verdict (1) is reached **but** total token spend at iter 5 is < 1.5× iter 1 
 
 ## 1.5 Phase 1.5 — Certification (mandatory gate before V12 baseline)
 
-The infrastructure committed in §8 Commits 1–4 is not trusted in production until two
-certification gates have been observed green on the **real production graph**. These gates
-exist because Phase 1 added telemetry that touches every LLM call site, opens a new file
-handle per chain, and adds JSONL I/O inside the hot path of every node. Any of those changes
-can silently break the experiment (corrupted data) or break the wall-clock (watchdog trip).
-We therefore verify both signal integrity and system stability *before* declaring the
-V11→V12 baseline ready to compare.
+The infrastructure committed in §8 Commits 1–4 is not trusted in production until three
+certification gates have been observed green. They form a cost-ladder of increasing
+confidence and increasing GPU/wall-clock cost:
+
+| Gate | Surface | Real LLM? | Real training? | Wall clock | When to run |
+|---|---|---|---|---|---|
+| **T0** — Cognitive Plumbing | label coverage, 10-key components math, `template_and_scaffolding` accounting, fail-fast wiring | ✅ | ❌ pseudo (synthetic `ModelRunSummary` fixtures) | ~30–90 s, no GPU | Cheap pre-gate. Run on every commit that touches the LLM bridge, audit hook, or label routing. Zero-cost regression filter. |
+| **T1** — Telemetry Integrity | T0 surface + per-iter `[TOKEN_ITER]` rollup match across a real workflow loop | ✅ | ✅ trivially-real (`--is_trial`, `--trial_portion 0.01`, `--max_epochs 1`) | ~10–15 min, GPU | Pre-baseline mandatory. The smallest real-graph run that still exercises the iter boundary. |
+| **T2** — System Stability | watchdog compliance under telemetry I/O, JSONL parseability under concurrent writes during real training, `agent_data_stream.jsonl` unit consistency | ✅ | ✅ real (still trial-mode portions) | ~10–15 min, GPU | Pre-baseline mandatory. Audits a disjoint surface from T1 — GPU-side observability rather than LLM-side telemetry. |
+
+These gates exist because Phase 1 added telemetry that touches every LLM call site, opens a
+new file handle per chain, and adds JSONL I/O inside the hot path of every node. Any of those
+changes can silently break the experiment (corrupted data) or break the wall-clock (watchdog
+trip). We therefore verify cognitive plumbing, signal integrity, and system stability —
+in that order — *before* declaring the V11→V12 baseline ready to compare.
 
 The gates are inserted in §8 between Commit 4 and Commit 5. The V12 baseline run (Commit 5)
-must not start until both gates are green.
+must not start until **all three** gates are green. T0 may be parallelised with T1/T2; T1
+and T2 audit disjoint surfaces and may also be parallelised (see §1.5.1 routing note).
 
 **Decision branch**:
-- T1 green ∧ T2 green → proceed to Commit 5 (V12 baseline + Top-3 Bloat Report).
-- Either red → **STOP**. Open a remediation commit (numbered Commit 4.x) before re-attempting the failed gate.
+- T0 green ∧ T1 green ∧ T2 green → proceed to Commit 5 (V12 baseline + Top-3 Bloat Report).
+- Any red → **STOP**. Open a remediation commit (numbered Commit 4.x) before re-attempting the failed gate.
+- T0 red but T1/T2 green is structurally impossible (T1 is a strict superset of T0's surface). If observed, treat as an audit-tooling bug: T0 wasn't actually exercising what it claims.
+
+### 1.5.0 Gate T0 — Cognitive Plumbing (Pseudo-Training Gate)
+
+**Goal**: catch label-coverage, components-math, and `template_and_scaffolding`-accounting
+regressions on the real LLM surface — without spinning up the GPU or paying for a full
+workflow loop. T0 is the cheapest filter that still calls real OpenAI; if a commit breaks
+the bridge's audit invariants, T0 fails in seconds rather than 10 minutes into T1.
+
+**Setup** (agent-level pytest harness, no production runner):
+- Drive `ResultInterpretationAgent.run()`, `MLModelProposalAgent.run()`, and (optionally)
+  `ml_model_implementor.run()` directly per-iter with synthetic `ModelRunSummary` fixtures
+  shaped for the V12 dataset structure. The fixture is the same shape used by
+  `tests/integration/workflows/test_score_table_pseudo_smoke.py` — 20 files with
+  hand-tuned `raw_baseline` / `ground_truth` / `model` columns covering dead-zone,
+  low-headroom, and high-headroom cases.
+- LLM provider: real OpenAI via `RecordingOpenAIBridge` (the thin `LLMBridge` subclass
+  ported from `test_score_table_pseudo_smoke.py:196` that proxies every `generate` /
+  `generate_text` call to real OpenAI and appends `(method, system_prompt, user_prompt,
+  response)` to a shared call log). The bridge writes its own `token_usage.jsonl` into a
+  `tmp_path`-scoped workspace exactly as in production.
+- Training, scoring, VRAM probe, and hardware context: pseudo / mocked. The point is
+  cognitive-layer plumbing, not GPU stress.
+- Iteration count: ≥ 2 (single iter cannot exercise the chain hand-off; T1 is the place
+  for full iter-rollup math, but T0 should still cover ≥ 1 inter-iter transition to catch
+  state-leak between LLMBridge instances).
+
+**Realisation file** (new, to be added when the gate is first wired):
+`tests/integration/agent/test_token_usage_pseudo_smoke.py`. Skipped automatically without
+`OPENAI_API_KEY`. Estimated wall-time: ~30–90 s for a 2-iter run (~12–18 LLM calls @ 1–6 s
+each on `gpt-4o-mini`), no GPU. Cost: a few cents per run on `gpt-4o-mini`.
+
+**Success metrics** (all four must hold for T0 = green; verification scripts mirror T1):
+
+| # | Metric | Verification |
+|---|--------|-------------|
+| 1 | Zero unlabeled calls | every row in the harness's `token_usage.jsonl` has `label != "unlabeled"`. Same grep as T1.1. |
+| 2 | 10-key components payload accuracy | every `proposer.*` row has all 10 keys (9 content + `template_and_scaffolding`) and `chars.total - sum(components.values()) == 0` exactly. Same invariant as T1.2 post-Commit 4.2. |
+| 3 | `template_and_scaffolding` non-negative | the catch-all key is `>= 0` on every proposer row (the bridge's `max(0, …)` clamp must never need to fire — if it does, the audit hook is over-counting). |
+| 4 | Fail-fast wired | `pytest tests/unit/agent/llm_bridge/test_no_silent_swallow.py tests/integration/runner/test_token_log_iter_rollup.py::test_runner_aborts_on_runid_mismatch` green. Carries forward the Commit 4 contract — same evidence as T1.4. |
+
+**Out of T0 scope** (covered by T1 / T2): per-iter `[TOKEN_ITER]` rollup math (needs
+the real workflow loop); watchdog compliance (needs real training); JSONL parseability
+under concurrent writes (needs real multi-agent inner loop).
+
+**Calibration check**: the gate is only meaningful if it is sensitive to the regressions
+it claims to catch. Before promoting T0 to a hard pre-baseline gate, validate by reverting
+the C4.2 commit locally and re-running — metric 2 must turn red. If it stays green on
+broken code, the assertions are too weak.
+
+**Status**: definition added 2026-05-04 (this commit); realisation pending. Until the
+realisation lands, T0 is implicitly covered by T1.2 + T1.4 — but a focused T0 is the
+right home for fast feedback on bridge / audit-hook changes.
 
 ### 1.5.1 Gate T1 — Telemetry Integrity (Signal Gate)
 
