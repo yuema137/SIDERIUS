@@ -3,7 +3,7 @@
 ml_code_validator_agent — Node 5 in the SIDERIUS graph.
 
 Receives file paths, config metadata, and model spec from ml_model_implementor
-(via ValidatorInput) and performs seven checks:
+(via ValidatorInput) and performs eight checks:
 
 Deterministic:
   1. Plugin load: file imports without error; PLUGIN_MODEL_TYPE, PLUGIN_CONFIG_CLASS,
@@ -11,15 +11,17 @@ Deterministic:
   2. Tests pass: pytest exits 0 on the generated test file.
   3. Description valid: description.md exists and has >50 characters.
   4. Config fields scalar: all config_fields values are int, float, or bool.
+  5. Forbidden patterns: forward() contains no Python loops over the time
+     dimension (T). Such loops cause RAM OOMs and CPU hangs at long T.
 
 In-process (no subprocess):
-  5. Instantiation: PLUGIN_CONFIG_CLASS() and PLUGIN_MODEL_CLASS(config) succeed;
+  6. Instantiation: PLUGIN_CONFIG_CLASS() and PLUGIN_MODEL_CLASS(config) succeed;
      forward pass on a small dummy input [1, 64] produces shape [1, 256, 64].
-  6. Gradient flow: loss.backward() succeeds; all trainable parameters have
+  7. Gradient flow: loss.backward() succeeds; all trainable parameters have
      non-None gradients.
 
 LLM review:
-  7. Code review: LLM reads plugin source + mathematical definition + model description
+  8. Code review: LLM reads plugin source + mathematical definition + model description
      and assesses spec alignment, trainability concerns, and implementation issues.
 
 Output written to: {workspace}/validation_{run_name}.json
@@ -47,6 +49,7 @@ import torch
 from agent.llm_bridge import LLMBridge
 from agent.schemas.validator import ValidatorInput, ValidatorOutput, LLMCodeReview
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.skills.forbidden_pattern_skill import check_file as _check_forbidden_patterns
 
 
 # ---------------------------------------------------------------------------
@@ -390,7 +393,15 @@ class MLCodeValidatorAgent:
         # 4. Config fields
         cfg_ok, cfg_err = _check_config_fields(inp.config_fields)
 
-        # 5 + 6 + 8. In-process instantiation + gradient + output type (only if plugin loaded)
+        # 5. Forbidden patterns: AST scan rejects Python loops over the time
+        #    dim in `forward(...)`. Cheap, deterministic, runs even if the
+        #    plugin failed to import.
+        if os.path.isfile(inp.model_file_path):
+            forbid_ok, forbid_err = _check_forbidden_patterns(inp.model_file_path)
+        else:
+            forbid_ok, forbid_err = False, "Skipped — plugin file not found"
+
+        # 6 + 7 + (output-type). In-process instantiation + gradient + output type (only if plugin loaded)
         if plugin_ok:
             inst_ok, grad_ok, otype_ok, inst_err = _check_instantiation_and_gradient(inp.model_file_path)
         else:
@@ -452,9 +463,9 @@ class MLCodeValidatorAgent:
         # are too brittle to block a model that otherwise runs and trains). It is surfaced
         # as a deviation note so the tuner/interpretation agents can treat unverified
         # component claims with appropriate skepticism.
-        passed = all([plugin_ok, tests_ok, desc_ok, cfg_ok, inst_ok, grad_ok, otype_ok, llm_ok])
+        passed = all([plugin_ok, tests_ok, desc_ok, cfg_ok, forbid_ok, inst_ok, grad_ok, otype_ok, llm_ok])
 
-        errors = [e for e in [plugin_err, desc_err, cfg_err, inst_err] if e is not None]
+        errors = [e for e in [plugin_err, desc_err, cfg_err, forbid_err, inst_err] if e is not None]
         if not tests_ok:
             errors.append("pytest tests failed — see test_output for details")
         if not llm_ok:
@@ -501,6 +512,7 @@ class MLCodeValidatorAgent:
             tests_passed=tests_ok,
             description_valid=desc_ok,
             config_fields_valid=cfg_ok,
+            forbidden_patterns_check_passed=forbid_ok,
             instantiation_passed=inst_ok,
             gradient_check_passed=grad_ok,
             output_type_valid=otype_ok,
@@ -529,7 +541,10 @@ class MLCodeValidatorAgent:
         inst_err: str | None = None,
     ) -> LLMCodeReview:
         user_prompt = _build_review_prompt(inp, plugin_src, test_output=test_output, inst_err=inst_err)
-        raw = self.bridge.generate(VALIDATOR_REVIEW_SYSTEM_PROMPT, user_prompt)
+        raw = self.bridge.generate(
+            VALIDATOR_REVIEW_SYSTEM_PROMPT, user_prompt,
+            label="validator.code_review",
+        )
         return LLMCodeReview.model_validate(raw)
 
     def _save(self, inp: ValidatorInput, out: ValidatorOutput) -> None:

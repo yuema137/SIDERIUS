@@ -40,6 +40,8 @@ from __future__ import annotations
 
 import gc
 import inspect
+import signal
+from contextlib import contextmanager
 from typing import Optional
 
 import psutil
@@ -78,6 +80,46 @@ _DEFAULT_OPTIMIZER: str = "adam"
 # runs ``loss_module(logits, target)``, so target shape has to match
 # what the loss's forward expects or the probe crashes.
 _FLOAT_TARGET_LOSSES: frozenset[str] = frozenset({"smooth_l1", "mse", "l1"})
+
+# Hard ceiling on a single forward-pass probe call. A Python time-loop
+# inside `forward()` at long T will burn host RAM linearly under autograd;
+# at T=200,000 the V11 kill mode reached 28 GB anon-rss before the kernel
+# OOM-killed the process. SIGALRM trips long before that point.
+_FORWARD_PASS_TIMEOUT_S: int = 60
+
+
+class ForwardPassTimeoutError(Exception):
+    """Raised when a probe's forward pass exceeds ``_FORWARD_PASS_TIMEOUT_S``."""
+
+
+@contextmanager
+def _forward_pass_timeout(seconds: int, label: str):
+    """SIGALRM-based watchdog around a forward-pass probe call.
+
+    On Linux, installs a SIGALRM handler that raises
+    ``ForwardPassTimeoutError`` after ``seconds`` of wall time. On
+    platforms without SIGALRM (e.g. Windows), the watchdog is a no-op —
+    the production target is Linux, and CI mocks the probe.
+    """
+    if not hasattr(signal, "SIGALRM"):
+        yield
+        return
+
+    def _handler(signum, frame):
+        raise ForwardPassTimeoutError(
+            f"Forward-pass probe '{label}' exceeded {seconds}s. "
+            f"Most common cause: a Python `for`/`while` loop over the "
+            f"time dimension inside `nn.Module.forward(...)`. Use "
+            f"vectorized ops (FFT, linear attention, associative scans)."
+        )
+
+    old_handler = signal.signal(signal.SIGALRM, _handler)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old_handler)
 
 
 # ── Model / loss instantiation helpers ──────────────────────────────────────
@@ -407,11 +449,12 @@ def run_skill(sandbox, **kwargs):
         # 3. Training-phase probe ─────────────────────────────────────────
         rss_before = psutil.Process().memory_info().rss
         x_train, y_train = _build_probe_tensors(batch_size, seg_size, loss_type)
-        training_probe   = probe_activation_footprint(
-            model=model_for_train, loss_module=loss_module,
-            input_sample=x_train, target_sample=y_train,
-            mode="training",
-        )
+        with _forward_pass_timeout(_FORWARD_PASS_TIMEOUT_S, "training_probe"):
+            training_probe = probe_activation_footprint(
+                model=model_for_train, loss_module=loss_module,
+                input_sample=x_train, target_sample=y_train,
+                mode="training",
+            )
         training_peak, training_breakdown = _compose_training_peak(
             training_probe, optimizer,
         )
@@ -443,21 +486,23 @@ def run_skill(sandbox, **kwargs):
         inference_err:       Optional[str] = None
         try:
             model_for_resolve = _build_model(model_type, model_cfg, loss_type)
-            inference_batch = resolve_inference_batch(
-                model_for_resolve, segmentation_size=seg_size, cap_bytes=cap_bytes,
-            )
+            with _forward_pass_timeout(_FORWARD_PASS_TIMEOUT_S, "resolve_inference_batch"):
+                inference_batch = resolve_inference_batch(
+                    model_for_resolve, segmentation_size=seg_size, cap_bytes=cap_bytes,
+                )
             del model_for_resolve
             gc.collect()
 
             model_for_bd = _build_model(model_type, model_cfg, loss_type)
-            inference_probe = probe_activation_footprint(
-                model=model_for_bd, loss_module=None,
-                input_sample=torch.zeros(
-                    (inference_batch, seg_size), dtype=torch.long,
-                ),
-                target_sample=None,
-                mode="inference",
-            )
+            with _forward_pass_timeout(_FORWARD_PASS_TIMEOUT_S, "inference_probe"):
+                inference_probe = probe_activation_footprint(
+                    model=model_for_bd, loss_module=None,
+                    input_sample=torch.zeros(
+                        (inference_batch, seg_size), dtype=torch.long,
+                    ),
+                    target_sample=None,
+                    mode="inference",
+                )
             del model_for_bd
             gc.collect()
 

@@ -711,7 +711,10 @@ class ResultInterpretationAgent:
                     expert_advice_str=expert_advice_str,
                     human_advice=inp.human_advice,
                 )
-                llm_response = self.bridge.generate(PER_MODEL_SYSTEM_PROMPT, per_model_prompt)
+                llm_response = self.bridge.generate(
+                    PER_MODEL_SYSTEM_PROMPT, per_model_prompt,
+                    label="interpretation.per_model",
+                )
                 # Build self-sufficient cache entry: LLM text + numerical _stats.
                 # best_score_table is stored as a plain dict so model_knowledge_cache
                 # round-trips through JSON serialization cleanly; reads must
@@ -817,7 +820,10 @@ class ResultInterpretationAgent:
                     vocab_diversity_ratio=prior_vocab_diversity_ratio,
                     cumulative_information_gain=prior_cumulative_info_gain,
                 )
-                synthesis_response = self.bridge.generate(SYNTHESIS_SYSTEM_PROMPT, synthesis_prompt)
+                synthesis_response = self.bridge.generate(
+                    SYNTHESIS_SYSTEM_PROMPT, synthesis_prompt,
+                    label="interpretation.synthesis",
+                )
                 llm_findings = synthesis_response.get("key_findings", [])
                 llm_bottlenecks = synthesis_response.get("bottlenecks", [])
                 llm_take_home = synthesis_response.get("take_home_message", "")
@@ -1176,7 +1182,10 @@ class ResultInterpretationAgent:
                 continue
 
             prompt   = _build_dedup_prompt(entry, existing)
-            response = self.bridge.generate(DEDUP_SYSTEM_PROMPT, prompt)
+            response = self.bridge.generate(
+                DEDUP_SYSTEM_PROMPT, prompt,
+                label="interpretation.dedup",
+            )
 
             is_dup = response.get("is_duplicate", False)
             dup_of = response.get("duplicate_of")

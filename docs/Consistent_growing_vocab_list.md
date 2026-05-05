@@ -286,6 +286,37 @@ Then pass it as `expert_context=expert_context_for_propose` to
 `local_full_context`. The protocol already merges `expert_context` with any
 legacy `human_advice` it converts.
 
+**3.3.5 On-disk persistence of the union (V11 hotfix, 2026-05-03)**
+
+Until V11, the `accumulated_key_findings` union was a process-only object:
+`load_latest_knowledge` rebuilt it from prior `interpretation_iter_NNN.json`
+files at the start of every iter, forwarded it as a runtime kwarg, packed it
+into the proposer's `ExpertContextItem.content`, and let it die when the
+process exited. Nothing on disk recorded *what cross-iter context iter N
+actually consumed*, which made the V10 iter-6 ValidationError
+(`content > 10_000` chars) only diagnosable by replaying the chain in memory.
+
+The fix is a sidecar snapshot, not a schema change: the chain runner writes
+`{iter_dir}/accumulated_findings_iter_NNN.json` immediately after
+`restore_prior_state` returns. The file is a log of what iter N consumed —
+the runtime channel into the workflow is unchanged. Schema:
+
+```json
+{
+  "iter_index": 6,
+  "consumed_by": "iter_006",
+  "source_iters": [1, 2, 3, 4, 5],
+  "count": 30,
+  "produced_at": "2026-05-03T...Z",
+  "findings": ["...", "..."]
+}
+```
+
+This keeps the Inter-Node Communication Principle intact (CLAUDE.md): the
+union is communicated through the runtime kwarg / protocol, and storage is
+the audit log alongside it. iter 1 has no priors and writes nothing; the
+file's absence is itself meaningful.
+
 ### 3.4 `sdsc_submission_scripts/run_one_iteration.py` — Wiring
 
 In the `run_workflow(...)` call (line ~652):
@@ -2768,6 +2799,268 @@ against the closed phase.
 **Phase 3 v2 deferred**: full importance-scored two-bucket retention per §14.1–§14.12 is contingent on observed Milestone Erosion (§14.13); not in this sprint's commit count.
 **Hashes + dates**: filled in as each commit lands.
 **Phase boundary gate**: §15.1 pre-flight → §15.7 final smoke must pass before tagging the phase closed. §15.2 certification gates fire at preflight + each phase boundary (commits 1.5 / 2.3 / 3.3 / 4.5).
+
+---
+
+# §16. Shadow Advice Purge — Total System–Strategy Decoupling (V11 / 2026-05-03)
+
+## §16.1 Problem statement
+
+The V4 advice JSONs (`tuner_advice/{explore_novel,exploit_cnn}_v4.json`) call
+for an aggressive paradigm shift — `explore` rejects pure-TCN proposals,
+`exploit` mandates CNN+Global hybrids, both lift segmentation_size to
+80,000–250,000 and pin the VRAM ceiling at 8 GB. A deep audit of the V4
+contract boundary surfaced a critical drift: the proposal-stage prompt
+templates in `agent/prompt_templates/proposal/{comparison,causal_reasoning,proposing}_stage_{explore,exploit}.md`
+contain pre-V4 hardcoded directives that **directly contradict the V4 advice**.
+This is "Shadow Advice" — system-level files behaving as if they were the
+advice contract.
+
+### §16.1.1 Concrete contradictions identified
+
+| File | Line | Hardcoded directive | V4 contract |
+|---|---|---|---|
+| `proposing_stage_exploit.md` | 11–13 | "up to ~100M params, ~10 GB VRAM" | **8 GB VRAM ceiling** |
+| `proposing_stage_exploit.md` | 14–16 | "trial_portion=0.1, increase to 0.3" | **trial_portion=0.05, system-enforced** |
+| `proposing_stage_explore.md` | 9–13 | "Favor minimal architectures … <10M params" | "do NOT propose tiny models … several million parameters minimum" |
+| `proposing_stage_explore.md` | 5–6 | "The goal is **not to beat the SOTA**" | "Final goal is ALWAYS to improve the denoising score" |
+| `causal_reasoning_stage_explore.md` | 7–14 | "**Do NOT propose ablations** … BUILD ON what works" | Creative Destruction: "Anti-Stagnation: TCN/CNN family is SATURATED" |
+| `causal_reasoning_stage_explore.md` | 28–29 | "One new feature added to the SOTA is better than a completely new architecture" | "A clean novel architecture may have a short list — that is fine, even encouraged" |
+
+All six entries are **direct contradictions**, not minor drift. The proposer
+LLM was receiving two opposing directives every iteration and silently
+choosing the more conservative one — this is the structural cause of the
+5.5–5.6 plateau, not a hyperparameter issue.
+
+### §16.1.2 Aggravating factor: proposing_stage skips advice mindset injection
+
+`agent/prompt_templates/proposal/__init__.py:60–66` resolves the mindset
+block with priority `advice mindset > mode .md file`. However
+`nodes/ml_model_proposal_agent.py:1069–1073` calls `load_stage_prompt` for
+the proposing stage **without** passing `mindset=inp.mindset`. The proposing
+stage — the highest-leverage stage — therefore always falls back to the
+hardcoded `proposing_stage_{explore,exploit}.md` content regardless of what
+the advice says. The two stages that DO pass `mindset` (comparison, causal)
+also benefit from a methodology-only fallback when advice mindset is absent.
+
+### §16.1.3 Design principle
+
+The V4 contract boundary is:
+
+- **Advice JSON** = the "What": strategic direction, architectural
+  priorities, resource budgets, mode-specific mindsets, named bottlenecks,
+  per-iteration decisions.
+- **Prompt templates** = the "How": methodology scaffolding only —
+  proposal-completeness rules, citation conventions, vocabulary-naming
+  conventions, falsifiability requirements. Mode-agnostic.
+- **System code** = generic infrastructure: routing, gating, validation,
+  persistence. No mode-specific or score-specific hardcoded content.
+
+Any file that hardcodes architectural family preferences, parameter scales,
+VRAM ceilings, trial portions, or score thresholds outside `tuner_advice/*.json`
+is a contract violation.
+
+### §16.1.4 Implementation status (as of 2026-05-03)
+
+| Sub-step | Status | Evidence |
+|---|---|---|
+| §16.2.1 — Six prompt templates refactored | ✅ DONE (on disk, uncommitted) | `wc -l` 127 → 202; Contract Hierarchy preamble in all 6 (grep confirmed) |
+| §16.2.2 — Argparse defaults V4-aligned | ✅ DONE (on disk, uncommitted) | runtime check: `30 / 4 / 0.05` for `max_iterations / max_rounds / trial_portion` |
+| §16.2.3 — Vocab seed reverted | ✅ DONE (committed) | commit `808d32c`, 21 canonical entries |
+| §16.3 Commit 1 — `refactor(prompts):` | ✅ LANDED | commit `6fe2e21` (this branch) |
+| §16.3 Commit 2 — `chore(runner):` | ✅ LANDED | commit `85b1610` (this branch) |
+| §16.3 Commit 3 — `docs(vocab-list):` | ✅ this commit | the §16 post-mortem itself |
+| §16.3 V11 fire | ⏳ pending operator green-light | all 3 commits landed; both pre-fire greps pass |
+| §16.5 Followup — proposing_stage mindset injection | ⏳ deferred (not blocking) | filed as separate followup |
+| §16.5 Followup — mindset list-to-string coercion | ⏳ deferred (not blocking) | filed as separate followup |
+
+## §16.2 Refactor plan — what changed
+
+### §16.2.1 Six prompt templates — replaced wholesale ✅ DONE
+
+Each of the six mode-specific prompt files now follows the same structure:
+
+```
+# {Stage} Stage — {EXPLORE|EXPLOIT} Mode
+
+## Contract Hierarchy
+[advice precedence statement]
+
+## Operating Mode
+[short identifier — refer to Advice for mindset]
+
+## Methodology — [stage-specific scaffolding]
+[mode-agnostic methodology rules only]
+```
+
+**Removed entirely**:
+
+- All VRAM ceilings ("~10 GB", "8 GB" are not in templates).
+- All parameter-scale targets ("<10M", "~100M params" — gone).
+- All trial_portion / epoch values (those are CLI / advice).
+- All architectural family mentions (CNN/TCN/SSM/FNO — gone from templates).
+- Mode mindset narration ("EARLY phase", "REFINEMENT phase", "build the best
+  possible model", "do not beat the SOTA" — all gone).
+- "MUST inherit", "BUILD ON what works", "Do NOT propose ablations" — all
+  removed; inheritance posture is advice-driven.
+
+**Retained**:
+
+- Citation conventions (vocabulary names by registry, prior runs by exp_id).
+- Causal-hypothesis structure (bottleneck → mechanism → expected effect).
+- Falsifiable-prediction structure (measurable, can be wrong).
+- Vocabulary growth methodology (candidate channel, related_to linkage).
+- Implementation-detail surfacing requirement.
+
+**File-by-file line counts** (lines grew because Contract Hierarchy preamble
+adds ~13 lines per file; methodology content itself is shorter):
+
+| File | Before | After | Δ |
+|---|---:|---:|---:|
+| `proposing_stage_explore.md` | 15 | 29 | +14 |
+| `proposing_stage_exploit.md` | 18 | 28 | +10 |
+| `causal_reasoning_stage_explore.md` | 29 | 40 | +11 |
+| `causal_reasoning_stage_exploit.md` | 20 | 34 | +14 |
+| `comparison_stage_explore.md` | 24 | 36 | +12 |
+| `comparison_stage_exploit.md` | 21 | 35 | +14 |
+| **Total** | **127** | **202** | **+75** |
+
+**Test result** — proposal-agent unit suite (the relevant blast radius for a
+prompt-template refactor): `pytest tests/unit/agent/ml_model_proposal_agent/`
+→ **395 passed in 1.17s** (no regressions; covers prompt rendering,
+contract-reassertion, citation discipline, hardware-context block,
+boldness enforcement, baseline-config validators, etc.).
+
+### §16.2.2 Argparse defaults — V4-aligned ✅ DONE
+
+`run_exploration_adaptive.py` argparse defaults updated:
+
+| Flag | Old default | New default | V4 contract |
+|---|---|---|---|
+| `--max_iterations` | 20 | **30** | 30 |
+| `--max_rounds` | 3 | **4** | 4 (3 trial + 1 formal) |
+| `--trial_portion` | 0.1 | **0.05** | 0.05 |
+
+Other defaults left unchanged (`eval_portion=0.1` already V4-aligned;
+`formal_round_strategy=full_clone` is the canonical alias for the
+launch-script's `inherit_best_trial`). The launch script remains the
+authoritative entry point and always passes these explicitly — defaults are
+a safety net for ad-hoc runs.
+
+**Runtime verification** — invoking `parse_args` with only the four required
+flags (`--run_name`, `--workspace`, `--advice`, `--llm_config`) and inspecting
+the resulting `Namespace`:
+
+```
+max_iterations: 30
+max_rounds: 4
+trial_portion: 0.05
+eval_portion: 0.1
+formal_round_strategy: full_clone
+```
+
+All five values match the V4 contract. `python -c "import ast;
+ast.parse(open('run_exploration_adaptive.py').read())"` → parse OK; `--help`
+renders without errors.
+
+### §16.2.3 Vocab seed — confirmed reverted ✅ DONE (committed `808d32c`)
+
+`agent/schemas/vocab_seed.json` was reverted to 21 canonical entries in
+commit `808d32c` (this branch). No manual promotion of V10 implementation
+details. Vocabulary evolves through the candidate channel (Phase 1 G1 Bridge,
+§15.3).
+
+## §16.3 Commit plan
+
+Three logical commits, in order. All work is on disk and verified; awaiting
+operator greenlight before landing.
+
+1. **`refactor(prompts): purge shadow advice from mode-specific proposal templates`** ✅ LANDED as `6fe2e21`
+   - Files: `agent/prompt_templates/proposal/{comparison,causal_reasoning,proposing}_stage_{explore,exploit}.md` (6 files)
+   - Contents: replaced wholesale with Contract Hierarchy + Operating Mode + Methodology-only structure.
+   - Verification (re-run fresh immediately before commit): grep for hardcoded VRAM/param/portion strings returns empty (exit 1, 0 matches); Contract Hierarchy preamble present in all 6; 395 proposal-agent unit tests pass in 1.17s. See §16.4 checklist.
+   - Commit stats: 6 files changed, 202 insertions(+), 127 deletions(-), files rewritten 98–99%.
+
+2. **`chore(runner): align run_exploration_adaptive.py defaults with V4 contract`** ✅ LANDED as `85b1610`
+   - File: `run_exploration_adaptive.py` (3 argparse defaults: `max_iterations`, `max_rounds`, `trial_portion`)
+   - Verification (re-run fresh immediately before commit): runtime `parse_args` returns `30 / 4 / 0.05 / 0.1 / full_clone`; help text now documents that the launch script is authoritative.
+   - Launch script unchanged; remains authoritative.
+   - Commit stats: 1 file changed, 18 insertions(+), 6 deletions(-).
+
+3. **`docs(vocab-list): post-mortem on shadow advice + V4 contract hierarchy (§16)`** ✅ this commit
+   - File: `docs/Consistent_growing_vocab_list.md` (this section, including post-implementation status updates with hashes for commits 1+2).
+   - Captures problem statement, refactor plan with implementation evidence, commit plan with landed hashes, verification checklist with results.
+
+After all three land, fire V11 with the existing launch script (already
+committed in `d9b4807` and tightened to `max_rounds=4` in `62b26fc`).
+
+## §16.4 Verification checklist
+
+Each box marked `[x]` was run during the §16 implementation; the actual
+output is captured below it. Boxes marked `[ ]` are pre-fire gates the
+operator should re-run immediately before `screen` launch.
+
+- [x] **Shadow-advice strings absent from prompt templates** *(verified 2026-05-03)*
+  ```
+  grep -nE "10 ?GB|100M|10M|trial_portion=0\.|beat the SOTA|do NOT propose|MUST inherit|favor minimal|early phase|refinement phase|EARLY phase|REFINEMENT phase|build the best possible|ablation experiments that remove|BUILD ON what works" agent/prompt_templates/proposal/*_explore.md agent/prompt_templates/proposal/*_exploit.md
+  ```
+  Expected: empty output. **Actual: empty (0 matches across all 6 files).** ✅
+
+- [x] **Contract Hierarchy preamble present in all 6 templates** *(verified 2026-05-03)*
+  ```
+  grep -l "Contract Hierarchy" agent/prompt_templates/proposal/*_explore.md agent/prompt_templates/proposal/*_exploit.md | wc -l
+  ```
+  Expected: `6`. **Actual: `6`.** ✅
+
+- [x] **Vocab seed at canonical 21 entries** *(verified 2026-05-03; committed `808d32c`)*
+  ```
+  python -c "import json; print(len(json.load(open('agent/schemas/vocab_seed.json'))))"
+  ```
+  Expected: `21`. **Actual: `21`.** ✅
+
+- [x] **Argparse defaults V4-aligned** *(verified 2026-05-03)*
+  ```
+  python -c "import sys; sys.argv = ['x', '--run_name', 'x', '--workspace', '/tmp/x', '--advice', 'tuner_advice/explore_novel_v4.json', '--llm_config', 'llm_configs/openai_tiered_v1.json']; from run_exploration_adaptive import parse_args; a = parse_args(); print(a.max_iterations, a.max_rounds, a.trial_portion)"
+  ```
+  Expected: `30 4 0.05`. **Actual: `30 4 0.05`.** ✅
+
+- [x] **No tests broken by the prompt refactor** *(verified 2026-05-03)*
+  ```
+  /home/yuema137/SIDERIUS/.venv/bin/python -m pytest tests/unit/agent/ml_model_proposal_agent/ -q
+  ```
+  Expected: all pass. **Actual: 395 passed in 1.17s.** ✅
+
+- [x] **Launch script banner + exec args still aligned at V4** *(verified 2026-05-03 pre-push)*
+  ```
+  grep -nE "max_iterations|max_rounds|trial_portion|eval_portion|formal_time_budget|trial_time_budget|formal_round_strategy" sdsc_submission_scripts/launch_v11_v4.sh
+  ```
+  Expected: every banner line and every `--flag VALUE` pair shows V4 values.
+  **Actual** (lines 74–80 banner + 89–95 exec args):
+  `max_iterations=30 / max_rounds=4 / trial_portion=0.05 / eval_portion=0.1 / trial_time_budget_minutes=20 / formal_time_budget_minutes=180 / formal_round_strategy=inherit_best_trial`.
+  Banner ↔ exec values match line-for-line. ✅
+
+- [x] **V4 advice mindset/propose/implement/tune all reference `max_rounds=4`** *(verified 2026-05-03 pre-push)*
+  ```
+  grep -n "max_rounds" tuner_advice/{explore_novel,exploit_cnn}_v4.json
+  ```
+  Expected: every occurrence reads `max_rounds=4`.
+  **Actual: 2 occurrences in each file, all read `max_rounds=4`** (`explore_novel_v4.json:75–76`, `exploit_cnn_v4.json:60–61`); no stale `max_rounds=6` references. ✅
+
+## §16.5 Followup work (not in this commit set)
+
+- **`proposing_stage` mindset injection**: `nodes/ml_model_proposal_agent.py:1069`
+  does not pass `mindset=inp.mindset` to the proposing-stage `load_stage_prompt`
+  call. With this refactor it is no longer load-bearing (the proposing-stage
+  templates are now methodology-only, so the fallback is safe). However the
+  inconsistency vs the comparison and causal_reasoning stages (which DO pass
+  mindset) is worth fixing for symmetry — file as a separate commit on the
+  next sweep.
+
+- **Mindset list-to-string coercion**: `advice["mindset"]` is `list[str]` but
+  `ProposalInput.mindset` is `Optional[str]`. Pydantic may be coercing this
+  silently to `str(list)`. If the proposer is receiving the Python repr of
+  the list rather than a joined string, that's a UX bug. Worth verifying with
+  a `debug_dump_prompts=True` run before V12.
 
 ---
 

@@ -120,8 +120,13 @@ def agent():
         yield a
 
 
-def _llm_dispatch(system_prompt: str, user_prompt: str) -> dict:
-    """Route mock LLM calls to the right fake response based on the system prompt."""
+def _llm_dispatch(system_prompt: str, user_prompt: str, **kwargs) -> dict:
+    """Route mock LLM calls to the right fake response based on the system prompt.
+
+    Accepts ``**kwargs`` so newer ``label=`` / ``components=`` kwargs from
+    the bridge call sites (Commit 3 of the token-usage refactor) don't
+    raise ``TypeError`` against this stub.
+    """
     if "ONE model architecture" in system_prompt:
         return FAKE_PER_MODEL_RESPONSE
     else:

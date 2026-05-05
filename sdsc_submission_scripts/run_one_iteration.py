@@ -34,6 +34,7 @@ import os
 import sys
 import traceback
 import warnings
+from datetime import datetime, timezone
 
 # Ensure SIDERIUS root is importable
 SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -63,6 +64,36 @@ def _positive_int(s: str) -> int:
     if v < 1:
         raise argparse.ArgumentTypeError(
             f"expected a positive integer (>= 1), got {v}"
+        )
+    return v
+
+
+def _portion_floor(s: str) -> float:
+    """argparse type validator: a portion in [0.01, 1.0].
+
+    Mirrors ``run_exploration_adaptive._portion_floor`` so the
+    consistency contract in ``tests/unit/scripts/test_chain_consistency.py``
+    holds. The 0.01 floor enforces a segment-integrity rule: with
+    ``SEGMENTS_PER_FILE=200``, anything below 0.01 collapses to one
+    segment per file (via the ``max(1, ...)`` floor in
+    ``execute_tools.sample_set_builder``), which is statistically too
+    noisy for trial-mode signal. Failing here at argparse-time keeps
+    the iteration from spending tokens on Interpretation only to crash
+    inside the Proposer's Pydantic validator.
+    """
+    try:
+        v = float(s)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError(
+            f"expected a float in [0.01, 1.0], got {s!r}"
+        )
+    if not (0.01 <= v <= 1.0):
+        raise argparse.ArgumentTypeError(
+            f"expected a float in [0.01, 1.0], got {v}. The 0.01 floor "
+            f"matches the Pydantic schema (ProposalInput.trial_portion / "
+            f"HyperparamTuningInput.{{trial,eval}}_portion ge=0.01); below "
+            f"that, sample_set_builder collapses to one segment per file, "
+            f"which is too noisy for trial-mode signal."
         )
     return v
 
@@ -276,11 +307,13 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["snapshot", "anchors", "target"],
     )
     parser.add_argument(
-        "--trial_portion", type=float, default=0.1)
+        "--trial_portion", type=_portion_floor, default=0.1,
+        help="Floor 0.01 (segment-integrity; mirrors Pydantic ge=0.01).")
     parser.add_argument(
         "--train_portion", type=float, default=0.1)
     parser.add_argument(
-        "--eval_portion", type=float, default=0.1)
+        "--eval_portion", type=_portion_floor, default=0.1,
+        help="Floor 0.01 (segment-integrity; mirrors Pydantic ge=0.01).")
     # --- Formal-mode training levers (Phase M, docs §12) + eval scope (Phase R, §13) ---
     # Formal eval strategy is locked to ``snapshot``; the portion defaults to
     # 1.0 (production full-clone for cross-arch comparability, §12.2) and
@@ -651,6 +684,30 @@ def main():
         )
         if state.restored_plugins:
             print(f"        plugins: {state.restored_plugins}")
+
+        # Persist the accumulated_key_findings union as an on-disk sidecar so
+        # the cross-iter context iter N consumes is auditable without
+        # replaying load_latest_knowledge in memory. The union itself is
+        # still communicated to the workflow via the runtime kwarg below; this
+        # file is a log, not the channel. See
+        # docs/Consistent_growing_vocab_list.md §3.3.5.
+        snapshot_path = os.path.join(
+            iter_dir, f"accumulated_findings_{run_name}.json"
+        )
+        snapshot = {
+            "iter_index": args.start_iteration,
+            "consumed_by": run_name,
+            "source_iters": list(state.committed_iters),
+            "count": len(state.accumulated_key_findings),
+            "produced_at": datetime.now(timezone.utc).isoformat(),
+            "findings": list(state.accumulated_key_findings),
+        }
+        with open(snapshot_path, "w") as f:
+            json.dump(snapshot, f, indent=2)
+        print(
+            f"[CHAIN] Wrote {snapshot['count']} accumulated findings "
+            f"→ {snapshot_path}"
+        )
     resolved_paths = state.resolved_source_paths
 
     if args.llm_config:

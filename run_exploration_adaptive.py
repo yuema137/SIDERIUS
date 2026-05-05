@@ -18,6 +18,7 @@ Examples
       --workspace /home/klz/Data/SIDEREIS_DATA/exploration_adaptive_v2
 """
 import argparse
+import datetime
 import json
 import sys
 import os
@@ -30,6 +31,97 @@ from workflows.model_exploration import run_workflow
 from workflows.llm_config import WorkflowLLMConfig
 from core.resume import restore_prior_state, validate_workspace_layout, ResumeError
 from sdsc_submission_scripts.run_one_iteration import write_manifest
+from agent.schemas.telemetry import LLMBridgeContextError
+
+
+def _generate_run_id(run_name: str) -> str:
+    """Build the immutable per-chain run identifier per §1.4.1.
+
+    Format: ``{run_name}-{utc_ts}-{pid}``. The triple uniqueness comes from
+    the wall-clock UTC second and the process id; a re-run within the same
+    second from the same pid would collide, but that requires cooperating
+    schedulers and is not a concern in the chain runner's workflow.
+    """
+    ts = (
+        datetime.datetime.now(datetime.timezone.utc)
+        .strftime("%Y%m%dT%H%M%S")
+    )
+    return f"{run_name}-{ts}-{os.getpid()}"
+
+
+def _emit_token_iter_rollup(workspace: str, iteration: int,
+                            cumulative_total_in: int) -> int:
+    """Emit one ``[TOKEN_ITER]`` line for the just-finished iteration.
+
+    Reads ``{workspace}/token_usage.jsonl``, filters rows whose ``iter`` matches
+    ``iteration`` (skipping the synthetic ``_iter_flush`` markers), aggregates
+    by ``label`` prefix (``proposer``/``tuner``/``interp``), and prints one
+    summary line that the Phase-R ``_TeeStream`` mirrors into ``chain_log.txt``.
+    Returns the updated cumulative total so the caller can carry it across
+    iterations.
+    """
+    path = os.path.join(workspace, "token_usage.jsonl")
+    if not os.path.exists(path):
+        return cumulative_total_in
+
+    calls = 0
+    iter_total = 0
+    by_node: dict[str, int] = {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if row.get("iter") != iteration:
+                    continue
+                if row.get("label") == "_iter_flush":
+                    continue
+                calls += 1
+                tok_total = (row.get("tokens") or {}).get("total", 0) or 0
+                iter_total += tok_total
+                label = row.get("label") or "unlabeled"
+                node_key = label.split(".", 1)[0]
+                by_node[node_key] = by_node.get(node_key, 0) + tok_total
+    except OSError:
+        return cumulative_total_in
+
+    cumulative_total_out = cumulative_total_in + iter_total
+    breakdown = "  ".join(f"{k}={v}" for k, v in sorted(by_node.items()))
+    print(
+        f"[TOKEN_ITER] iter={iteration:02d}  calls={calls}  "
+        f"total_tok={iter_total}  ({breakdown})  "
+        f"cumulative_total={cumulative_total_out}"
+    )
+    return cumulative_total_out
+
+
+class _TeeStream:
+    """Duplex text writer fanning out to multiple streams.
+
+    Mirrors stdout/stderr to a chain log file without losing the original
+    console stream. Forces flush after every write so a detached screen's
+    chain_log.txt is tail-able in real time. Phase R resilience addition.
+    """
+    def __init__(self, *streams):
+        self._streams = streams
+
+    def write(self, data):
+        for s in self._streams:
+            s.write(data)
+            s.flush()
+        return len(data)
+
+    def flush(self):
+        for s in self._streams:
+            s.flush()
+
+    def isatty(self):
+        return False
 
 # Default source paths (wavenet + punet seed runs)
 DEFAULT_SOURCE_PATHS = [
@@ -53,6 +145,36 @@ def _positive_int(s: str) -> int:
     if v < 1:
         raise argparse.ArgumentTypeError(
             f"expected a positive integer (>= 1), got {v}"
+        )
+    return v
+
+
+def _portion_floor(s: str) -> float:
+    """argparse type validator: a portion in [0.01, 1.0].
+
+    The 0.01 floor mirrors the Pydantic constraint on
+    ``ProposalInput.trial_portion`` / ``HyperparamTuningInput.trial_portion``
+    / ``HyperparamTuningInput.eval_portion`` (all ``ge=0.01``). It enforces
+    a **segment-integrity** rule: with ``SEGMENTS_PER_FILE=200``, anything
+    below 0.01 yields only one segment per file (via the ``max(1, ...)``
+    floor in ``execute_tools.sample_set_builder``), which is statistically
+    too noisy to discriminate architectures in trial mode. Failing here at
+    argparse-time keeps the chain from spending tokens on Interpretation
+    only to crash inside the Proposer's Pydantic validator.
+    """
+    try:
+        v = float(s)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError(
+            f"expected a float in [0.01, 1.0], got {s!r}"
+        )
+    if not (0.01 <= v <= 1.0):
+        raise argparse.ArgumentTypeError(
+            f"expected a float in [0.01, 1.0], got {v}. The 0.01 floor "
+            f"matches the Pydantic schema (ProposalInput.trial_portion / "
+            f"HyperparamTuningInput.{{trial,eval}}_portion ge=0.01); below "
+            f"that, sample_set_builder collapses to one segment per file, "
+            f"which is too noisy for trial-mode signal."
         )
     return v
 
@@ -89,12 +211,21 @@ def parse_args():
              "from disk via restore_prior_state before entering the iter loop.",
     )
     parser.add_argument(
-        "--max_iterations", type=int, default=20,
-        help="Number of propose->implement->validate->tune iterations.",
+        "--max_iterations", type=int, default=30,
+        help=(
+            "Number of propose->implement->validate->tune iterations. "
+            "Default aligned with the V4 contract; the launch script "
+            "(sdsc_submission_scripts/launch_v11_v4.sh) is the authoritative "
+            "entry point and always passes this explicitly."
+        ),
     )
     parser.add_argument(
-        "--max_rounds", type=int, default=3,
-        help="Tuning rounds per iteration.",
+        "--max_rounds", type=int, default=4,
+        help=(
+            "Tuning rounds per iteration. Default aligned with the V4 "
+            "contract (3 trial + 1 formal); the launch script is "
+            "authoritative."
+        ),
     )
     parser.add_argument(
         "--max_proposal_attempts", type=int, default=3,
@@ -109,16 +240,23 @@ def parse_args():
         ),
     )
     parser.add_argument(
-        "--trial_portion", type=float, default=0.1,
-        help="Fraction of data used for trial-mode training/eval.",
+        "--trial_portion", type=_portion_floor, default=0.05,
+        help=(
+            "Fraction of data used for trial-mode training/eval. Default "
+            "aligned with the V4 contract; the launch script is authoritative. "
+            "Floor is 0.01 (segment-integrity; mirrors Pydantic ge=0.01)."
+        ),
     )
     parser.add_argument(
         "--train_portion", type=float, default=0.1,
         help="Fraction of trial data used per epoch.",
     )
     parser.add_argument(
-        "--eval_portion", type=float, default=0.1,
-        help="Fraction of data used for trial-mode evaluation.",
+        "--eval_portion", type=_portion_floor, default=0.1,
+        help=(
+            "Fraction of data used for trial-mode evaluation. "
+            "Floor is 0.01 (segment-integrity; mirrors Pydantic ge=0.01)."
+        ),
     )
     parser.add_argument(
         "--max_epochs", type=_positive_int, default=1,
@@ -305,6 +443,17 @@ def parse_args():
             "shared attempt pool which could starve the formal round."
         ),
     )
+    parser.add_argument(
+        "--max_failed_iterations", type=int, default=3,
+        help=(
+            "Outer-chain consecutive-failure brake (default 3). After this "
+            "many iterations in a row return status != 'completed' (e.g. "
+            "no_records, aborted_fail_rounds), the chain stops. A successful "
+            "iteration resets the counter. Phase R resilience addition — "
+            "replaces the prior single-failure sys.exit so a bad architecture "
+            "proposal does not kill the entire 30-iter chain."
+        ),
+    )
     # Phase 6.8 Commit 11 — canonical name --seed_paths; --source_paths kept
     # as a deprecated alias for one release. See §3.5 Commit 11.
     parser.add_argument(
@@ -350,7 +499,8 @@ def parse_args():
     return parser.parse_args()
 
 
-def _run_one_iter(args, workspace, llm_config, advice, source_paths, iteration):
+def _run_one_iter(args, workspace, llm_config, advice, source_paths,
+                  iteration, *, run_id: str):
     """Run a single iteration in the chain-in-one-process loop.
 
     Mirrors ``sdsc_submission_scripts/run_one_iteration.py`` main(): each
@@ -396,6 +546,8 @@ def _run_one_iter(args, workspace, llm_config, advice, source_paths, iteration):
         source_paths=state.resolved_source_paths,
         workspace=workspace,
         run_name=run_name,
+        chain_run_name=args.run_name,
+        run_id=run_id,
         max_iterations=1,
         start_iteration=iteration,
         max_rounds=args.max_rounds,
@@ -450,6 +602,53 @@ def _run_one_iter(args, workspace, llm_config, advice, source_paths, iteration):
     return manifest
 
 
+def _append_evolution_failure(workspace: str, iteration: int, manifest: dict) -> None:
+    """Append a kind='iteration_failure' entry to evolution_log.jsonl.
+
+    Phase R resilience: a no-records / aborted iteration never writes a
+    normal interpretation row, so without this hook the chain log loses
+    any trace of why iter N produced nothing. Pulls the deeper
+    `termination_reason` from
+    {iter_dir}/iteration_NNN/{model_name}/run_output_iter_NNN.json
+    when present (it carries the tuner's Phase-L exit code), and falls
+    back to manifest['status']. Best-effort: any IO/JSON error is
+    swallowed so observability never breaks the chain.
+    """
+    arch = manifest.get("model_name") or "<unknown>"
+    iter_dir = manifest.get("iteration_dir")
+    termination_reason = manifest.get("status") or "unknown"
+
+    if iter_dir and arch != "<unknown>":
+        run_out = os.path.join(
+            iter_dir, f"iteration_{iteration:03d}", arch,
+            f"run_output_iter_{iteration:03d}.json",
+        )
+        try:
+            if os.path.exists(run_out):
+                with open(run_out) as f:
+                    ro = json.load(f)
+                termination_reason = ro.get("termination_reason") or termination_reason
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    entry = {
+        "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
+        "iteration": iteration,
+        "kind": "iteration_failure",
+        "architecture_name": arch,
+        "termination_reason": termination_reason,
+        "manifest_status": manifest.get("status"),
+        "completed_rounds": manifest.get("completed_rounds", 0),
+    }
+    log_path = os.path.join(workspace, "evolution_log.jsonl")
+    try:
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+    except OSError as e:
+        print(f"  [evolution_log] WARN: failed to append failure entry: "
+              f"{type(e).__name__}: {e}")
+
+
 def main():
     args = parse_args()
 
@@ -464,6 +663,16 @@ def main():
     # ``workflows.model_exploration._register_plugin``. Set before any node
     # initialisation so descendant calls see it.
     os.environ["SIDERIUS_CHAIN_WORKSPACE"] = os.path.abspath(workspace)
+
+    # Persistent logging: tee stdout/stderr into {workspace}/chain_log.txt
+    # so a detached screen session is not the only stdout sink. Line-buffered
+    # for real-time `tail -f`. Phase R resilience addition.
+    os.makedirs(workspace, exist_ok=True)
+    _chain_log_path = os.path.join(workspace, "chain_log.txt")
+    _chain_log_fh = open(_chain_log_path, "a", buffering=1, encoding="utf-8")
+    sys.stdout = _TeeStream(sys.__stdout__, _chain_log_fh)
+    sys.stderr = _TeeStream(sys.__stderr__, _chain_log_fh)
+    print(f"[CHAIN] Mirroring stdout/stderr to {_chain_log_path}")
 
     # Workspace layout guard (§3.9)
     try:
@@ -520,6 +729,13 @@ def main():
 
     start_iter = args.start_iteration
 
+    # Generate the immutable per-chain run_id (§1.4.1). Threaded into every
+    # bridge instance via set_run_context — the bridge refuses to write
+    # rows tagged with a different run_id, so this string is the audit
+    # log's identity-of-record for the entire chain.
+    run_id = _generate_run_id(args.run_name)
+    print(f"[TOKEN] run_id = {run_id}")
+
     # Print summary
     print("=" * 60)
     print("  SIDERIUS Adaptive Exploration (chain-in-one-process)")
@@ -562,26 +778,81 @@ def main():
     print(f"  Min boldness     : {args.minimum_boldness}")
     print("=" * 60)
 
-    # Chain-in-one-process loop: each iter is run_workflow(max_iterations=1).
+    # Chain-in-one-process loop with iteration-resilience brake (Phase R).
     # ``source_paths`` here is the immutable user-supplied seed list — the
     # per-iter ``restore_prior_state`` call inside ``_run_one_iter`` walks
-    # the workspace and prepends prior iter outputs onto these seeds, so the
-    # seed list is never mutated by the loop itself. This matches one-iter's
-    # main(): restore is the single source of truth for chain assembly.
-    for iteration in range(start_iter, args.max_iterations + 1):
-        print(f"\n{'='*60}")
-        print(f"  IN-PROCESS CHAIN — ITERATION {iteration}/{args.max_iterations}")
-        print(f"{'='*60}")
+    # the workspace and prepends prior iter outputs onto these seeds, so
+    # the seed list is never mutated by the loop itself. This matches
+    # one-iter's main(): restore is the single source of truth for chain
+    # assembly.
+    #
+    # A failed iteration (no_records / aborted_fail_rounds / etc.) no
+    # longer kills the chain — it logs a warning, appends an
+    # ``iteration_failure`` row to evolution_log.jsonl, and proceeds to
+    # the next architecture. Only ``--max_failed_iterations`` consecutive
+    # failures stop the chain; a successful iteration resets the counter.
+    consecutive_failed = 0
+    cumulative_token_total = 0
+    try:
+        for iteration in range(start_iter, args.max_iterations + 1):
+            print(f"\n{'='*60}")
+            print(f"  IN-PROCESS CHAIN — ITERATION {iteration}/{args.max_iterations}")
+            print(f"{'='*60}")
 
-        manifest = _run_one_iter(
-            args, workspace, llm_config, advice, source_paths, iteration,
+            manifest = _run_one_iter(
+                args, workspace, llm_config, advice, source_paths, iteration,
+                run_id=run_id,
+            )
+
+            # Per-iter [TOKEN_ITER] rollup (§1.6). Best-effort: any IO/JSON
+            # error in the rollup must never break the chain — the
+            # token_usage.jsonl file is itself the source of truth.
+            try:
+                cumulative_token_total = _emit_token_iter_rollup(
+                    workspace=workspace,
+                    iteration=iteration,
+                    cumulative_total_in=cumulative_token_total,
+                )
+            except Exception as e:
+                print(f"  [TOKEN_ITER] WARN: rollup emit failed: "
+                      f"{type(e).__name__}: {e}")
+
+            if manifest["status"] == "completed" and manifest.get("output_path"):
+                print(f"  Iteration {iteration} completed: score={manifest['best_score']}")
+                consecutive_failed = 0
+                continue
+
+            consecutive_failed += 1
+            arch = manifest.get("model_name") or "<unknown>"
+            print(
+                f"\n  *** [WARNING] Iteration {iteration} failed to produce "
+                f"records (architecture={arch}, status={manifest['status']}). "
+                f"Skipping to next architecture. "
+                f"[consecutive failures: {consecutive_failed}/"
+                f"{args.max_failed_iterations}] ***\n"
+            )
+            _append_evolution_failure(workspace, iteration, manifest)
+
+            if consecutive_failed >= args.max_failed_iterations:
+                print(
+                    f"\n  *** [ABORT] {consecutive_failed} consecutive "
+                    f"iterations failed (>= --max_failed_iterations="
+                    f"{args.max_failed_iterations}). Stopping chain. ***"
+                )
+                sys.exit(1)
+    except LLMBridgeContextError as e:
+        # §1.4.2 fail-fast contract. Telemetry-internal corruption (run_id
+        # mismatch, backwards iter) means the audit log can no longer be
+        # trusted. Continuing past this point would produce convincing-but-
+        # wrong numbers — the worst possible failure mode for an audit log.
+        # exit(2) is intentionally distinct from the consecutive-failure
+        # brake's exit(1) so a downstream classifier can tell the two apart.
+        print(
+            f"[FATAL] LLMBridgeContextError: {e} — aborting run to "
+            f"prevent telemetry corruption.",
+            file=sys.stderr,
         )
-
-        if manifest["status"] == "completed" and manifest.get("output_path"):
-            print(f"  Iteration {iteration} completed: score={manifest['best_score']}")
-        else:
-            print(f"  Iteration {iteration} failed — stopping chain.")
-            sys.exit(1)
+        sys.exit(2)
 
 
 if __name__ == "__main__":

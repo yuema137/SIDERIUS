@@ -187,18 +187,34 @@ def main():
 
             t_file_start = time.perf_counter()
 
+            # Lazy indexed reads: keep the timeseries as h5py.Dataset handles
+            # and slice only the PSD segments the sample_set requests. Eliminates
+            # the ~1.6 GB-per-channel full-file materialization that dominated
+            # both wall-time and RSS in trial mode (where eval_portion is small,
+            # often only 1-2 PSD segments per file). Slices must be taken
+            # inside the file-handle context — once the `with` block exits,
+            # ds_ch1/ds_ch2 are invalid. The slice itself returns a numpy
+            # array that survives the context exit, which is what we
+            # concatenate below.
             with h5py.File(fpath, 'r') as ABRAfile:
-                raw_ch1 = np.array(ABRAfile['timeseries']['channel0001']['timeseries'])
-                raw_ch2 = np.array(ABRAfile['timeseries']['channel0002']['timeseries'])
+                ds_ch1 = ABRAfile['timeseries']['channel0001']['timeseries']
+                ds_ch2 = ABRAfile['timeseries']['channel0002']['timeseries']
 
-            # Extract requested PSD segments and reshape to ML segments
-            input_chunks = []
-            target_chunks = []
-            for psd_idx in psd_segment_indices:
-                start = psd_idx * PSD_SEGMENT_LENGTH
-                end = start + PSD_SEGMENT_LENGTH
-                input_chunks.append(raw_ch1[start:end])
-                target_chunks.append(raw_ch2[start:end])
+                total_psd_segments = ds_ch1.shape[0] // PSD_SEGMENT_LENGTH
+
+                input_chunks = []
+                target_chunks = []
+                for psd_idx in psd_segment_indices:
+                    start = psd_idx * PSD_SEGMENT_LENGTH
+                    end = start + PSD_SEGMENT_LENGTH
+                    input_chunks.append(ds_ch1[start:end])
+                    target_chunks.append(ds_ch2[start:end])
+
+                print(
+                    f"[perf] Lazy loading applied: read only "
+                    f"{len(psd_segment_indices)} segments out of "
+                    f"{total_psd_segments} total."
+                )
 
             all_input = np.concatenate(input_chunks)    # flat array
             all_target = np.concatenate(target_chunks)   # flat array
@@ -226,14 +242,15 @@ def main():
             if os.path.exists(out_name):
                 os.remove(out_name)
 
-            # Phase 6.7 Fix 2 — release the raw + view-aliasing buffers BEFORE
-            # create_abra_file. The audit observed 4/35 trial runs hitting
-            # numpy._ArrayMemoryError inside create_abra_file's flatten/astype
-            # copies because raw_ch1/raw_ch2 (~1.6 GB each on a full file) and
-            # train_loader/target_loader (views over all_input/all_target)
-            # stayed live through the call. Mirrors the proven normal-mode
-            # del set at the bottom of this function.
-            del train_loader, target_loader, all_input, all_target, raw_ch1, raw_ch2
+            # Phase 6.7 Fix 2 (updated 2026-05-03) — release the
+            # view-aliasing buffers BEFORE create_abra_file. The original fix
+            # also dropped raw_ch1/raw_ch2 (~1.6 GB each from full-file
+            # materialization), but the lazy-slice refactor above eliminates
+            # those entirely; only the per-segment chunks remain. We still
+            # drop train_loader/target_loader (views over all_input/
+            # all_target) and the chunk lists, since create_abra_file's
+            # flatten/astype copies still inflate call peak otherwise.
+            del train_loader, target_loader, all_input, all_target, input_chunks, target_chunks
             gc.collect()
 
             create_abra_file(out_name, denoised.flatten().astype(np.int8), injected.flatten().astype(np.int8), indexed=False)

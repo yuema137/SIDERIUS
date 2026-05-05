@@ -113,8 +113,8 @@ _CANONICAL_TRIAL_FREE_NAMES = {
     "target_loader",
     "all_input",
     "all_target",
-    "raw_ch1",
-    "raw_ch2",
+    "input_chunks",
+    "target_chunks",
 }
 
 

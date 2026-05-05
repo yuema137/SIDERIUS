@@ -29,17 +29,28 @@
 
 import os
 import json
+import sys
+import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, List, Dict, Optional
 from openai import OpenAI
 from dotenv import load_dotenv
+from pydantic import ValidationError
 
 from agent.prompts import (
     PLANNER_PROMPT,
     REFLECTOR_PROMPT,
     get_planner_user_prompt,
     get_reflector_user_prompt
+)
+from agent.schemas.telemetry import (
+    LLMBridgeContextError,
+    TokenCounts,
+    TokenUsageChars,
+    TokenUsageRow,
 )
 
 
@@ -267,6 +278,275 @@ class LLMBridge:
                 base_url=reflect_base_url,
             )
 
+        # --- Run-context state (Commit 1: scaffolding; Commit 2: setter) ---
+        # The four primary fields stay None until set_run_context() is called
+        # by the workflow runner (Commit 4). While None, _record_usage is a
+        # silent no-op — the bridge captures response.usage but does not write
+        # a row anywhere. This lets unit tests that patch the OpenAI client
+        # run without touching disk, and ensures that production runs which
+        # never get a setter call do not start writing half-formed rows.
+        self._token_usage_path: Optional[Path] = None
+        self._iter: Optional[int] = None
+        self._run_id: Optional[str] = None
+        self._run_name: Optional[str] = None
+
+        # --- Setter Safety Protocol state (Commit 2) ---
+        # _lock serializes set_run_context with _record_usage so that the
+        # state-check / iter-flush write / state-update sequence is atomic.
+        # Any code path that mutates run-context state OR appends a row must
+        # be inside `with self._lock:`. Helpers suffixed `_locked` assume the
+        # caller already holds the lock. This is a plain Lock (not RLock) —
+        # we never re-enter from inside a locked block.
+        self._lock = threading.Lock()
+        # Set when set_run_context() is called; copied into rows' extra if
+        # callers ask for it. Plain ISO-8601 string for cheap diffing.
+        self._set_at_ts: Optional[str] = None
+        # Lazy cache of the file's first-row run_id (read once on first write).
+        # If the file does not exist or is empty when we first try to write,
+        # this is set to our own run_id (we own the file from row 0).
+        self._first_row_run_id_cache: Optional[str] = None
+        # Tracks the highest iter value successfully appended (rows + markers).
+        # Used to detect backwards-iter leaks per §1.4.1.
+        self._last_logged_iter: Optional[int] = None
+        # Tracks the most recent ts string written; used for the soft
+        # monotonic-timestamp warning (clock-skew detection — not a raise).
+        self._last_ts: Optional[str] = None
+
+    # ------------------------------------------------------------------
+    # Setter Safety Protocol (§1.4.1 / §1.4.2 of the design doc)
+    # ------------------------------------------------------------------
+    # set_run_context is the *only* way to bind run-context state on the
+    # bridge. It is called by the workflow runner once per iter (Commit 4
+    # wires it). The body is wrapped in self._lock so that the
+    # state-check / iter-flush / state-update sequence is atomic with
+    # respect to concurrent _record_usage callers — without the lock,
+    # an in-flight _record_usage could write a row using stale iter
+    # *after* a flush marker was emitted, leaking into a flushed iter.
+    #
+    # Two invariants are enforced loudly (LLMBridgeContextError):
+    #   - run_id immutability: once set, the bridge refuses any setter
+    #     call with a different run_id. This is the strongest guard
+    #     against pointing a bridge instance at another run's log.
+    #   - forward-only iter: same-iter re-entry is allowed (stage retries
+    #     within the same iter), but going backwards is rejected.
+    #
+    # On legitimate iter advancement (new_iter > current self._iter),
+    # _flush_iter_marker_locked appends one synthetic row with
+    # label='_iter_flush' for the *previous* iter, then state is updated.
+    # ------------------------------------------------------------------
+    def set_run_context(self, *, workspace: Path, iter: int,
+                        run_name: str, run_id: str) -> None:
+        """Bind run-context state used by ``_record_usage``.
+
+        Args:
+            workspace:  Directory that owns ``token_usage.jsonl``. The file
+                        path is ``workspace / "token_usage.jsonl"``. Must be
+                        an existing, writable directory; checked once here.
+            iter:       Iteration index for subsequent calls. Must be
+                        non-negative; must be ``>=`` any prior value bound
+                        on this bridge.
+            run_name:   Human-readable run name (e.g. ``"explore_v12_0504"``).
+            run_id:     Immutable run identifier (format
+                        ``{run_name}-{utc_ts}-{pid}``). Once bound on this
+                        bridge, calling the setter with a different
+                        ``run_id`` raises :class:`LLMBridgeContextError`.
+
+        Raises:
+            LLMBridgeContextError: on run_id mutation or backwards iter.
+            OSError: if ``workspace`` does not exist or is not writable.
+            ValueError: if ``iter`` is negative.
+        """
+        if iter < 0:
+            raise ValueError(f"iter must be non-negative, got {iter}")
+        workspace = Path(workspace)
+
+        with self._lock:
+            # --- run_id immutability check (§1.4.1 row 1) ---
+            if self._run_id is not None and run_id != self._run_id:
+                raise LLMBridgeContextError(
+                    f"run_id mutation forbidden: bridge bound to "
+                    f"{self._run_id!r}, refused new {run_id!r}. "
+                    f"A new run_id requires a fresh LLMBridge instance."
+                )
+            # --- forward-only iter check (§1.4.1 row 3 of contract) ---
+            if self._iter is not None and iter < self._iter:
+                raise LLMBridgeContextError(
+                    f"backwards iter rejected: bridge at iter={self._iter}, "
+                    f"refused setter call with iter={iter}. "
+                    f"Same-iter re-entry is allowed; backwards is not."
+                )
+            # --- workspace writability check (loud OSError per §1.4.1) ---
+            if not workspace.exists():
+                raise OSError(
+                    f"workspace does not exist: {workspace}. "
+                    f"Refusing to bind token-usage path to a missing dir."
+                )
+            if not os.access(workspace, os.W_OK):
+                raise OSError(
+                    f"workspace not writable: {workspace}. "
+                    f"Cannot append token_usage.jsonl."
+                )
+            # --- legitimate iter advancement: flush prior iter first ---
+            #
+            # Strict-greater-than per the user's concurrency directive
+            # ("State-Change Guard: ensure that _iter_flush only fires if
+            # the new iter is strictly greater than the current self._iter,
+            # to prevent redundant flush markers if multiple components
+            # call the setter for the same iteration").
+            if self._iter is not None and iter > self._iter:
+                self._flush_iter_marker_locked(prev_iter=self._iter)
+
+            # --- update state (last step inside the lock) ---
+            self._token_usage_path = workspace / "token_usage.jsonl"
+            self._iter = iter
+            self._run_name = run_name
+            self._run_id = run_id
+            self._set_at_ts = (
+                datetime.now(timezone.utc)
+                .isoformat(timespec="milliseconds")
+                .replace("+00:00", "Z")
+            )
+
+    def _flush_iter_marker_locked(self, *, prev_iter: int) -> None:
+        """Append one synthetic row marking the close of ``prev_iter``.
+
+        Caller must hold ``self._lock``. The marker uses
+        ``label='_iter_flush'``, zeroed token/char counts, and
+        ``extra={'marker': 'iter_end'}`` per §1.4.1 of the design doc.
+
+        Pre-write checks (run_id, path, ts) are run via
+        ``_validate_pre_write_locked`` so a marker write that would
+        corrupt the log fails the same way a normal row would.
+        """
+        # Defensive: if the path is unset (shouldn't happen — set_run_context
+        # only calls this on iter advancement, and iter advancement implies
+        # a prior bind), silently no-op.
+        if self._token_usage_path is None:
+            return
+        ts = (
+            datetime.now(timezone.utc)
+            .isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z")
+        )
+        # Run pre-write invariant checks (loud on violation).
+        self._validate_pre_write_locked(target_iter=prev_iter, ts=ts)
+        try:
+            row = TokenUsageRow(
+                ts=ts,
+                run_id=self._run_id or "unbound",
+                run_name=self._run_name or "unbound",
+                iter=prev_iter,
+                label="_iter_flush",
+                model=None,
+                provider=None,
+                tokens=TokenCounts(),
+                chars=TokenUsageChars(system=0, user=0, total=0),
+                components={},
+                extra={"marker": "iter_end"},
+            )
+        except ValidationError as ve:
+            print(
+                f"[LLMBridge._flush_iter_marker] schema validation failed "
+                f"for iter={prev_iter}: {ve}",
+                file=sys.stderr, flush=True,
+            )
+            return
+        # Append (line-buffered). Transient OSError swallowed; structural
+        # writability was already verified by _validate_pre_write_locked.
+        try:
+            with open(self._token_usage_path, "a", buffering=1) as f:
+                f.write(row.model_dump_json() + "\n")
+                f.flush()  # Per concurrency directive: explicit flush in lock
+        except OSError as oe:
+            print(
+                f"[LLMBridge._flush_iter_marker] append failed for "
+                f"{self._token_usage_path}: {oe}",
+                file=sys.stderr, flush=True,
+            )
+            return
+        # Track that this iter has been flushed (for monotonic check).
+        self._last_logged_iter = prev_iter
+        self._last_ts = ts
+
+    def _validate_pre_write_locked(self, *, target_iter: Optional[int],
+                                   ts: str) -> None:
+        """Run the four §1.4.1 pre-write invariant checks. Caller holds lock.
+
+        Raises:
+            LLMBridgeContextError: on run_id or backwards-iter violation
+                (rows 1-2 of the §1.4.1 table).
+            OSError: on path corruption (row 3). Logs a stderr warning on
+                non-monotonic ts (row 4) but does *not* raise — clock skew
+                is real but rare and shouldn't tank a run.
+        """
+        # --- Row 3: path writable ---
+        path = self._token_usage_path
+        if path is None:
+            # Caller bug: pre-write should never run with unset path.
+            raise OSError("_validate_pre_write_locked called with no path")
+        parent = path.parent
+        if not parent.exists():
+            raise OSError(
+                f"token_usage.jsonl parent dir vanished: {parent}"
+            )
+        if not os.access(parent, os.W_OK):
+            raise OSError(
+                f"token_usage.jsonl parent dir no longer writable: {parent}"
+            )
+
+        # --- Row 1: first-row run_id matches (lazy, cached) ---
+        if self._first_row_run_id_cache is None:
+            if path.exists() and path.stat().st_size > 0:
+                with open(path, "r") as f:
+                    first_line = f.readline().strip()
+                if first_line:
+                    try:
+                        first_row = json.loads(first_line)
+                    except json.JSONDecodeError:
+                        raise LLMBridgeContextError(
+                            f"first line of {path} is not valid JSON; "
+                            f"audit log already corrupted, refusing to write."
+                        )
+                    file_run_id = first_row.get("run_id")
+                    if file_run_id != self._run_id:
+                        raise LLMBridgeContextError(
+                            f"run_id mismatch: file owner={file_run_id!r}, "
+                            f"bridge={self._run_id!r}. Audit-log integrity "
+                            f"violation — refusing write to {path}."
+                        )
+                    self._first_row_run_id_cache = file_run_id
+                else:
+                    # File exists but empty — we own it.
+                    self._first_row_run_id_cache = self._run_id
+            else:
+                # File missing — we will create it; we own row 0.
+                self._first_row_run_id_cache = self._run_id
+        else:
+            # Cache hit — verify the bridge's run_id hasn't drifted.
+            if self._first_row_run_id_cache != self._run_id:
+                raise LLMBridgeContextError(
+                    f"run_id mismatch (cached): file owner="
+                    f"{self._first_row_run_id_cache!r}, "
+                    f"bridge={self._run_id!r}."
+                )
+
+        # --- Row 2: iter not less than last logged ---
+        if (target_iter is not None and self._last_logged_iter is not None
+                and target_iter < self._last_logged_iter):
+            raise LLMBridgeContextError(
+                f"backwards iter leak: trying to write iter={target_iter} "
+                f"but last logged iter={self._last_logged_iter}. "
+                f"Audit log would be non-monotonic — aborting."
+            )
+
+        # --- Row 4: ts monotonic (warn-only) ---
+        if self._last_ts is not None and ts < self._last_ts:
+            print(
+                f"[LLMBridge] WARNING: non-monotonic timestamp "
+                f"({ts} < last {self._last_ts}). Clock skew? Row still written.",
+                file=sys.stderr, flush=True,
+            )
+
     def list_models(self) -> List[str]:
         """
         List model IDs available from the current provider.
@@ -398,7 +678,11 @@ class LLMBridge:
         final_user_prompt += manual_context
 
         print(f"    [PROMPT_SIZE] planner: {len(final_user_prompt)} chars")
-        return self.generate(system_prompt, final_user_prompt)
+        # Internal call site: label is fixed (§1.5), wired in Commit 1 so
+        # the V12 baseline run is meaningfully labeled and chain_log is
+        # clean of "unlabeled" warnings from inside the bridge itself.
+        return self.generate(system_prompt, final_user_prompt,
+                             label="tuner.planner")
 
     def reflect(self, exp_id: str, hypothesis: str, actual_results: Dict,
                 reflection_context: Optional[Dict] = None) -> Dict:
@@ -430,8 +714,13 @@ class LLMBridge:
         )
         user_prompt = get_reflector_user_prompt(exp_id, hypothesis, actual_results, reflection_context)
 
+        # Internal call site: label is fixed (§1.5). Provider is the
+        # reflect provider (may differ from self.provider when cross-
+        # provider routing is configured).
         return self._chat_json(self.reflect_client, self.reflect_model_name,
-                               system_prompt, user_prompt)
+                               system_prompt, user_prompt,
+                               label="tuner.reflector",
+                               provider=self.reflect_provider)
 
     # Retry policy for ALL OpenAI API calls. SDK-level retry is disabled
     # (max_retries=0 in the client constructors), so this helper is the
@@ -575,8 +864,170 @@ class LLMBridge:
 
         return text
 
+    # ------------------------------------------------------------------
+    # Telemetry — per-LLM-call audit row (Phase 1, Commit 1)
+    # ------------------------------------------------------------------
+    # See docs/audit_and_optimize_token_usage_and_growth.md §1.2 / §1.7.
+    # _record_usage is the single point where we serialize one
+    # TokenUsageRow per API call. The row schema lives in
+    # agent/schemas/telemetry/token_usage.py.
+    #
+    # Behaviour summary:
+    #   - Silent no-op when self._token_usage_path is None (context
+    #     unset; Commit 2 wires set_run_context()).
+    #   - Per-attempt: every successful API response produces one row,
+    #     including content-retry attempts where the JSON later fails
+    #     to parse (Q1 confirmed 2026-05-04). The caller passes
+    #     extra={"attempt": N, "status": "ok"|"json_decode_error"|...}
+    #     to make the retry-cost visible.
+    #   - Graceful degradation when response.usage is missing: token
+    #     counts written as None; char counts always populated.
+    #
+    # The row is appended in "a" mode with line buffering (buffering=1)
+    # so concurrent bridge instances inside the same process do not
+    # interleave partial lines. Cross-process safety is not yet
+    # required — only the workflow runner writes here.
+    # ------------------------------------------------------------------
+    def _record_usage(self, *, response: Any, label: str,
+                      system_prompt: str, user_prompt: str,
+                      model_name: str, provider: str,
+                      components: Optional[Dict[str, int]] = None,
+                      extra: Optional[Dict[str, Any]] = None) -> None:
+        """Append one ``TokenUsageRow`` to ``{workspace}/token_usage.jsonl``.
+
+        Silent no-op when ``self._token_usage_path is None`` (run context
+        unset). Telemetry must never abort a real run — any unexpected
+        error in this helper is logged to stderr and swallowed, *except*
+        for ``LLMBridgeContextError`` which propagates per §1.4.2.
+
+        Args:
+            response:       The raw OpenAI SDK response object. ``response.usage``
+                            is read if present; missing/None is fine.
+            label:          Stable call-site identifier (see §1.5). Defaults
+                            to ``"unlabeled"`` at the public-method level.
+            system_prompt:  The system prompt as sent to the API.
+            user_prompt:    The user prompt as sent to the API.
+            model_name:     Provider model id used for this call.
+            provider:       Provider name (``"openai"``, ``"gemini"``, etc.).
+            components:     Pre-merge char-count breakdown of the user prompt,
+                            produced by the proposer's
+                            ``_audit_proposer_components`` hook (§1.3). ``None``
+                            for non-proposer calls and the legacy 2-call path —
+                            stored as an empty dict in that case.
+            extra:          Free-form caller context, e.g.
+                            ``{"attempt": 0, "status": "ok"}``.
+        """
+        if self._token_usage_path is None:
+            # Context not set — silent no-op until set_run_context is called.
+            return
+
+        # --- Pull provider-reported token counts (graceful if missing) ---
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            tokens = TokenCounts()  # all None
+        else:
+            tokens = TokenCounts(
+                prompt=getattr(usage, "prompt_tokens", None),
+                completion=getattr(usage, "completion_tokens", None),
+                total=getattr(usage, "total_tokens", None),
+            )
+
+        # --- Compute local char counts (always available) ---
+        sys_chars = len(system_prompt) if system_prompt else 0
+        usr_chars = len(user_prompt) if user_prompt else 0
+        chars = TokenUsageChars(
+            system=sys_chars,
+            user=usr_chars,
+            total=sys_chars + usr_chars,
+        )
+
+        # --- Close the component-coverage gap (§1.5 Phase 1.5 / Commit 4.2) ---
+        # The proposer's `_audit_proposer_components` hook reports the 9 named
+        # content payloads but not the user-prompt template wrapper text
+        # (section headers like "## Interpretation Summary", key-value preludes
+        # like "Models analysed: [...]", stage-specific instructions) that
+        # `_build_*_prompt` injects around them. Gate T1 (2026-05-04) measured
+        # the gap at ~7.5–8.3 K chars per proposer call (~22 % of each user
+        # prompt). To make the audit lossless, we inject a 10th catch-all key
+        # `template_and_scaffolding = chars.total - sum(content components)`.
+        # Only applied to rows that carry a non-empty components dict (i.e.
+        # proposer rows): keeps the schema-empty default for non-proposer
+        # rows untouched. `max(0, ...)` guards against a future audit-hook
+        # bug that overcounts; we'd rather log zero than a negative.
+        if components:
+            content_sum = sum(components.values())
+            components = {
+                **components,
+                "template_and_scaffolding": max(0, chars.total - content_sum),
+            }
+
+        ts = (
+            datetime.now(timezone.utc)
+            .isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z")
+        )
+
+        # --- Lock-protected validate + append + state update.
+        # The §1.4.1 pre-write checks must observe the same run-context
+        # that the row is built from, and the state-update (last_logged_iter
+        # / last_ts) must follow the append without interleaving with a
+        # concurrent set_run_context call. The lock provides that guarantee.
+        with self._lock:
+            # Pre-write invariants (loud on violation; LLMBridgeContextError
+            # propagates per §1.4.2 — never wrap this in try/except).
+            self._validate_pre_write_locked(target_iter=self._iter, ts=ts)
+
+            # Build + validate the row (schema errors are programming bugs;
+            # log + skip rather than abort the run).
+            try:
+                row = TokenUsageRow(
+                    ts=ts,
+                    run_id=self._run_id or "unbound",
+                    run_name=self._run_name or "unbound",
+                    iter=self._iter,
+                    label=label,
+                    model=model_name,
+                    provider=provider,
+                    tokens=tokens,
+                    chars=chars,
+                    components=components or {},
+                    extra=extra or {},
+                )
+            except ValidationError as ve:
+                print(
+                    f"[LLMBridge._record_usage] schema validation failed for "
+                    f"label={label!r}: {ve}",
+                    file=sys.stderr, flush=True,
+                )
+                return
+
+            # Append + explicit flush (per concurrency directive).
+            # Transient OSError on append (e.g. ENOSPC mid-write) is
+            # logged + swallowed — structural writability was verified
+            # in _validate_pre_write_locked above, so any error here is
+            # a transient I/O issue and shouldn't tank the run.
+            try:
+                with open(self._token_usage_path, "a", buffering=1) as f:
+                    f.write(row.model_dump_json() + "\n")
+                    f.flush()
+            except OSError as oe:
+                print(
+                    f"[LLMBridge._record_usage] append failed for "
+                    f"{self._token_usage_path}: {oe}",
+                    file=sys.stderr, flush=True,
+                )
+                return
+
+            # Update tracking state (success path only).
+            if self._iter is not None:
+                self._last_logged_iter = self._iter
+            self._last_ts = ts
+
     def _chat_json(self, client: OpenAI, model_name: str,
-                   system_prompt: str, user_prompt: str) -> Dict:
+                   system_prompt: str, user_prompt: str,
+                   *, label: str = "unlabeled",
+                   provider: Optional[str] = None,
+                   components: Optional[Dict[str, int]] = None) -> Dict:
         """
         Internal helper: send a system+user prompt through a specific client
         to a specific model, and return the parsed JSON response.
@@ -597,6 +1048,19 @@ class LLMBridge:
         # body is empty / non-JSON / wrong top-level type — observed with
         # deepseek-v4-pro on long structured prompts. Bounded so genuinely
         # malformed contracts surface promptly.
+        #
+        # Per-attempt telemetry (Phase 1, Commit 1): every attempt that
+        # successfully returns from _call_with_retry produces one row in
+        # token_usage.jsonl, regardless of whether the JSON parses. The row
+        # carries extra={"attempt": N, "status": "ok"|"json_decode_error"|
+        # "empty_content"|"wrong_type"} so content-retry cost is visible.
+        # Provider defaults to self.provider for the main client, falls back
+        # to self.reflect_provider when the reflect client is in use.
+        if provider is None:
+            provider = (
+                self.reflect_provider if client is self.reflect_client
+                else self.provider
+            )
         last_text = ""
         last_err_label = ""
         wait = self._CONTENT_RETRY_INITIAL_WAIT
@@ -616,32 +1080,56 @@ class LLMBridge:
             text = self._sanitize_json_text(raw.strip())
             last_text = text
 
+            # Determine attempt status before recording so each row carries
+            # an honest status field. Decode is repeated below in the
+            # success branch — the first decode here is consulted only for
+            # status classification; the second is the source of truth for
+            # the returned object.
+            decoded = None
+            end_idx = None
+            attempt_status: str
             if not text:
+                attempt_status = "empty_content"
                 last_err_label = "empty_content"
             else:
-                # Use raw_decode so trailing prose / a second JSON object after
-                # the first valid one doesn't crash the run. We accept the first
-                # object and discard any trailing content. Wrong top-level type
-                # (e.g. a JSON string) is still a contract violation.
                 try:
                     decoded, end_idx = json.JSONDecoder().raw_decode(text)
                 except json.JSONDecodeError as e:
+                    attempt_status = "json_decode_error"
                     last_err_label = f"json_decode_error: {e.msg}"
+                    decoded = None
                 else:
                     if not isinstance(decoded, (dict, list)):
+                        attempt_status = "wrong_type"
                         last_err_label = (
                             f"wrong_type: decoded to {type(decoded).__name__}"
                         )
+                        decoded = None
                     else:
-                        # Success path
-                        trailing = text[end_idx:].strip()
-                        if trailing:
-                            print(
-                                f"[LLMBridge._chat_json] Discarded {len(trailing)} chars of "
-                                f"trailing data after valid JSON (model={model_name}).",
-                                flush=True,
-                            )
-                        return decoded
+                        attempt_status = "ok"
+
+            # Record one row per attempt, including content-retry failures.
+            # No-op when run context is unset (Commit 2 wires the setter).
+            self._record_usage(
+                response=response,
+                label=label,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                model_name=model_name,
+                provider=provider,
+                components=components,
+                extra={"attempt": attempt, "status": attempt_status},
+            )
+
+            if attempt_status == "ok":
+                trailing = text[end_idx:].strip()
+                if trailing:
+                    print(
+                        f"[LLMBridge._chat_json] Discarded {len(trailing)} chars of "
+                        f"trailing data after valid JSON (model={model_name}).",
+                        flush=True,
+                    )
+                return decoded
 
             # Content-level failure — retry if budget remains.
             if attempt < self._CONTENT_RETRY_BUDGET:
@@ -668,24 +1156,64 @@ class LLMBridge:
             f"Last response started with: {last_text[:200]}"
         )
 
-    def generate(self, system_prompt: str, user_prompt: str) -> Dict:
+    # Sentinel used by the public-method `label` kwargs. Calls that pass
+    # the default "unlabeled" emit a one-line warning to stderr so a
+    # missed label site is visible without aborting the run. Production
+    # call sites are labeled in Commit 3 (proposer, interp, validator);
+    # internal sites (plan / reflect) are labeled in this commit.
+    _DEFAULT_LABEL = "unlabeled"
+
+    def _warn_default_label(self, method_name: str) -> None:
+        """Print a one-line stderr warning when label= falls to the default."""
+        print(
+            f"[LLMBridge.{method_name}] WARNING: called without label= kwarg "
+            f"(label fell back to {self._DEFAULT_LABEL!r}). Pass an explicit "
+            f"label per docs/audit_and_optimize_token_usage_and_growth.md §1.5.",
+            file=sys.stderr, flush=True,
+        )
+
+    def generate(self, system_prompt: str, user_prompt: str,
+                 *, label: str = _DEFAULT_LABEL,
+                 components: Optional[Dict[str, int]] = None) -> Dict:
         """
         Call the main LLM (``self.client`` + ``self.model_name``) with a
         system prompt and a user prompt, return a JSON dict.
 
         Uses ``response_format={"type": "json_object"}`` via the unified
         OpenAI-compatible ``chat.completions.create`` endpoint for all providers.
-        """
-        return self._chat_json(self.client, self.model_name,
-                               system_prompt, user_prompt)
 
-    def generate_text(self, system_prompt: str, user_prompt: str) -> str:
+        Args:
+            system_prompt: System role content.
+            user_prompt:   User role content.
+            label:         Stable call-site identifier (see §1.5). Defaults
+                           to ``"unlabeled"`` to keep legacy callers working;
+                           a one-line warning is emitted to stderr until
+                           every site is labeled (Commit 3).
+            components:    Pre-merge char-count breakdown for proposer call
+                           sites (see §1.3 / ``_audit_proposer_components``).
+                           ``None`` for non-proposer calls — stored as an
+                           empty dict on the row.
+        """
+        if label == self._DEFAULT_LABEL:
+            self._warn_default_label("generate")
+        return self._chat_json(self.client, self.model_name,
+                               system_prompt, user_prompt,
+                               label=label, provider=self.provider,
+                               components=components)
+
+    def generate_text(self, system_prompt: str, user_prompt: str,
+                      *, label: str = _DEFAULT_LABEL,
+                      components: Optional[Dict[str, int]] = None) -> str:
         """
         Call the LLM with a system prompt and user prompt, return plain text.
 
         Used for free-form reasoning steps where JSON mode would constrain
-        output quality.
+        output quality. ``label`` is captured into the per-call telemetry row.
+        ``components`` carries the optional pre-merge char-count breakdown
+        from ``_audit_proposer_components`` (proposer text-mode stages only).
         """
+        if label == self._DEFAULT_LABEL:
+            self._warn_default_label("generate_text")
         response = self._call_with_retry(
             lambda: self.client.chat.completions.create(
                 model=self.model_name,
@@ -696,6 +1224,18 @@ class LLMBridge:
             ),
             label="generate_text",
         )
+        # Telemetry: one row per successful API response. Plain-text mode
+        # has no content-retry, so attempt is always 0 and status "ok".
+        self._record_usage(
+            response=response,
+            label=label,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model_name=self.model_name,
+            provider=self.provider,
+            components=components,
+            extra={"attempt": 0, "status": "ok"},
+        )
         return response.choices[0].message.content.strip()
 
     def tool_call(
@@ -703,6 +1243,9 @@ class LLMBridge:
         system_prompt: str,
         user_prompt: str,
         tools: List[Dict[str, Any]],
+        *,
+        label: str = _DEFAULT_LABEL,
+        components: Optional[Dict[str, int]] = None,
     ) -> ToolCallResult:
         """
         Ask the LLM to select a tool and provide arguments.
@@ -715,6 +1258,7 @@ class LLMBridge:
             user_prompt:   The user message describing the goal or context.
             tools:         List of OpenAI-format tool definitions.  Typically
                            built via ``SkillSpec.to_openai_tool()``.
+            label:         Stable call-site identifier (see §1.5).
 
         Returns:
             A ``ToolCallResult`` with the chosen tool name, parsed arguments
@@ -724,6 +1268,8 @@ class LLMBridge:
             ValueError: If the model response does not contain a tool call
                         (e.g. the model replied with plain text instead).
         """
+        if label == self._DEFAULT_LABEL:
+            self._warn_default_label("tool_call")
         response = self._call_with_retry(
             lambda: self.client.chat.completions.create(
                 model=self.model_name,
@@ -738,6 +1284,21 @@ class LLMBridge:
         )
 
         message = response.choices[0].message
+
+        # Telemetry: record the row regardless of whether a tool_call came
+        # back. The API charged for the tokens either way; the response
+        # shape is the caller's contract concern.
+        tool_status = "ok" if message.tool_calls else "no_tool_call"
+        self._record_usage(
+            response=response,
+            label=label,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model_name=self.model_name,
+            provider=self.provider,
+            components=components,
+            extra={"attempt": 0, "status": tool_status},
+        )
 
         if not message.tool_calls:
             raise ValueError(

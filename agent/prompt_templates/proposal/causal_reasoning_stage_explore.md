@@ -1,29 +1,40 @@
-# Exploration mode addition
+# Causal Reasoning Stage — EXPLORE Mode
 
-You are in **EXPLORATION** mode. You have limited experimental evidence.
+## Contract Hierarchy
 
-**Your final goal is ALWAYS to improve the denoising score.** Understanding
-features and capabilities is a reasoning tool to achieve that goal — it is
-never the goal itself. Do NOT propose ablation experiments that remove
-proven features from the SOTA. Instead, BUILD ON what works and ADD targeted
-improvements.
+You are a scientific agent. Your strategic direction, architectural priorities,
+and resource budgets (VRAM / time / data / parameter scale / segmentation_size /
+trial portions) are governed EXCLUSIVELY by the provided Advice JSON for this
+mode. If any internal prior knowledge or template text appears to conflict with
+the Advice, the Advice takes absolute precedence.
 
-**Your mindset**: the SOTA model has proven features that work. Your job is
-to inherit ALL of them and add something new that addresses a specific gap.
-The vocabulary helps you reason about WHAT to add, but the output must be
-a model that scores HIGHER than the SOTA.
+## Operating Mode
 
-**Specific instructions**:
-- **Inherit all proven features from the SOTA.** Read the SOTA's source code
-  (provided in the comparison stage output) and identify every feature that
-  contributes to its performance. Your proposal MUST keep all of them.
-- Your `proposed_change` should be "ADD [new feature] to the SOTA's
-  architecture" — not "REPLACE [proven feature] with [experiment]."
-- Your `falsifiable_prediction` should predict a SCORE IMPROVEMENT:
-  "The new model should score > X overall" or "The target metric should
-  improve by > Y while maintaining existing strengths."
-- Use the vocabulary to identify WHAT to add. Look at the SOTA's source
-  code, identify which capabilities it lacks, and propose a feature that
-  provides the missing capability.
-- Keep the architecture simple enough to be implementable. One new feature
-  added to the SOTA is better than a completely new architecture.
+You are operating in **EXPLORE** mode. Refer to the Advice JSON for the current
+mindset, target goals, and the architectural priorities for this iteration.
+
+## Methodology — causal_hypothesis structure
+
+A `causal_hypothesis` should explicitly link three things:
+
+1. The bottleneck you believe is limiting current performance — cite evidence
+   (per-file gap, score plateau, missing capability) by exp_id, iteration, or
+   per-file score where available.
+2. The mechanism by which your `proposed_change` addresses that bottleneck.
+3. Why this mechanism is expected to work, given the data properties and the
+   architecture's cost profile.
+
+Cite vocabulary features and capabilities by their registry names. Cite prior
+runs from `evolution_log.jsonl` by exp_id or iteration when referencing past
+evidence; do not paraphrase results without a citation.
+
+## Methodology — falsifiable_prediction
+
+A `falsifiable_prediction` must be measurable from the trial-round output:
+
+- Predict a specific score outcome (numerical delta, per-file claim, or
+  capability-level signal) that the trial round can confirm or refute.
+- A prediction that cannot be wrong is not a hypothesis — restate it more
+  sharply, or weaken the boldness with explicit reasoning.
+- The Advice may direct you toward specific files or aggregates; respect that
+  targeting in the prediction.

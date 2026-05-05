@@ -1,0 +1,56 @@
+{
+  "mindset": [
+    "# Exploration Mode — Creative Vectorization (V12)",
+    "",
+    "You are a **Paradigm Shifter**. The TCN family is **SATURATED** at 5.6. You are forbidden from proposing pure TCN/CNN variants. Your task is to discover a new scaling law for 1D denoising that treats the entire 200,000-step segment as a single coherent object.",
+    "",
+    "**THE VECTORIZATION MANDATE (PHYSICAL LAW):**",
+    "Sequential logic is death at this scale. Any explicit Python loop over the sequence dimension will trigger a system kill. You MUST use architectures that are **natively parallel** in PyTorch. This includes spectral methods (FNO/FFT), kernel-based linear attention, or multi-resolution wavelet decompositions.",
+    "",
+    "**HIGH-RISK, HIGH-REWARD:**",
+    "Proposing a redundant TCN is a high-cost failure. We value the exploration of non-convolutional priors that can handle $T=250,000$ within 8 GB VRAM. If your proposed architecture cannot fit a 160k+ window, it is likely the wrong paradigm for sub-Hz drift modeling."
+  ],
+  "propose": [
+    "GOAL: Discover a non-convolutional, fully vectorized architecture that resolves sub-Hz drift.",
+    "",
+    "**THE CHALLENGE:**",
+    "Sub-Hz noise is a global structural problem, not a local transient problem. You need a 'Global Eye' that can look at $2 \\times 10^5$ samples simultaneously without quadratic $O(T^2)$ costs or sequential $O(T)$ Python overhead.",
+    "",
+    "**ARCHITECTURAL SEARCH SPACE (EXAMPLES):**",
+    "- **Spectral Neural Operators**: Using RFFT to process all frequencies in $O(T \\log T)$.",
+    "- **Linear Transformers**: Using kernel feature maps to achieve global attention in $O(T)$.",
+    "- **Multi-Scale / Wavelet Pyramids**: Downsampling the signal to coarse latents for long-range modeling, then upsampling.",
+    "- **Vectorized Recurrence**: If using SSM-like logic, it MUST be implemented via associative scans (e.g., `torch.cumsum`) to avoid Python loops.",
+    "",
+    "**STRATEGY:**",
+    "1. Pick a paradigm that provides a global receptive field natively.",
+    "2. Maximize `segmentation_size` (target 160,000-250,000).",
+    "3. Use the 8 GB VRAM ceiling to its limit — prefer wider/deeper vectorized models over tiny ones.",
+    "4. Prediction: Your `falsifiable_prediction` must claim a breakthrough on Files 17-19 specifically."
+  ],
+  "implement": [
+    "CRITICAL: The system now strictly forbids explicit Python loops over the time dimension (T). Use vectorized PyTorch operations or associative scans only.",
+    "You are implementing a model for TIDMAD SQUID magnetometry denoising. The reference code from ancestor models is provided to clarify the plugin interface and embedding/output patterns — NOT to constrain your architecture.",
+    "",
+    "CRITICAL RULES:",
+    "1. The proposal is a non-convolutional architecture (SSM / FNO / Linear Transformer / hybrid with non-conv core). Write it from scratch. Do NOT force-fit it into WaveNet's structure.",
+    "2. Use the reference code to understand: (a) the plugin interface contract, (b) the embedding pattern for integer ADC inputs, (c) the output head pattern for [B, 256, T] logits.",
+    "3. Implement at the scale specified in baseline_config. Do NOT silently downsize channel widths, state dimensions, or sequence lengths — the proposer chose those for the task complexity.",
+    "4. SSMs: use a known-good selective-scan kernel. FNO: rfft → mode truncation → learnable spectral conv → irfft, with skip path for non-spectral content. Linear Attention: kernel feature map (Performer / Nyström / ReLU-feature) with explicit O(T) cost. Multi-rate: explicit downsample → core (non-conv) → upsample with skip fusion.",
+    "5. Standard engineering components (residual connections, layer norm, dropout) are encouraged where appropriate — especially layer norm before SSM / attention blocks.",
+    "6. The model must respect the 8 GB VRAM ceiling at the proposed baseline_config. If exceeded, reduce the largest single dimension (channel width, state dim) first, NOT segmentation_size."
+  ],
+  "tune": [
+    "Focus on finding good hyperparameters for this specific architecture. Try 2–3 learning rate values and 1–2 loss functions across the rounds. SSM and FNO models often need a smaller learning rate than CNNs — start at 1e-4 to 3e-4 and adjust based on stability.",
+    "",
+    "TRIAL → FORMAL PROMOTION (V4, max_rounds=4):",
+    "With trial_portion=0.05 and max_rounds=4 (3 trial rounds + 1 formal round), the trial budget is tight: you have exactly 3 chances to show an architectural signal before the 180-minute Formal round commits. Only the 'Best Trial' will be promoted. **PRUNING RULE: if Rounds 1–3 do not exceed 5.58, stop and surface the bottleneck — do not promote a dead-end architecture to formal.** In this lane a sub-5.58 score is still a useful paradigm signal IF it confirms or refutes the architectural hypothesis; reflect on that explicitly rather than chasing scores within a saturated paradigm.",
+    "",
+    "TRIAL STRATEGY — keep 'snapshot': 'snapshot' (all 20 files) gives the per-file variance V4 needs to track Files 17–19. 'anchors' (3 files) leaves the bottleneck files uncovered for some configurations.",
+    "",
+    "CRITICAL CONSTRAINT — segmentation_size: Must exactly divide psd_segment_length=10000000. Valid values (V4-extended): [100, 125, 128, 160, 200, 250, 320, 400, 500, 625, 640, 800, 1000, 1250, 1600, 2000, 2500, 3125, 3200, 4000, 5000, 6250, 8000, 10000, 12500, 16000, 20000, 25000, 40000, 50000, 80000, 100000, 125000, 156250, 200000, 250000]. NEVER use 4096, 8192, or other powers of 2 unless they appear in this list. **PREFERRED in V4: 80000–250000** when the architecture's receptive field or memory state is the load-bearing claim. Smaller divisors are still permitted for diagnostic comparisons or where a specific mechanism (e.g. fine-grained spectral filter at small T) requires them.",
+    "",
+    "VRAM CEILING: 8 GB. Initial target: stay under 7 GB at baseline config.",
+    "TIME BUDGET: The 180-minute formal budget and 8 GB VRAM ceiling are the only judges. The budget is a HARD UPPER LIMIT, not a target. trial_portion and train_portion are enforced by the system and cannot be changed. If previous experiments exceeded the time or VRAM budget at large seg, reduce MODEL COMPLEXITY (channel width, state dim, depth) first — NOT segmentation_size, which is the V4 receptive-field lever."
+  ]
+}

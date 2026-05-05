@@ -1,0 +1,39 @@
+{
+  "_comment": "Phase 1.5 certification config — every role pinned to gpt-4o-mini. Use ONLY for Gates T1/T2; T1/T2 certify plumbing/usage objects, not model intelligence. The V12 baseline (Commit 5) and production runs use openai_tiered_v1.json.",
+  "interpret": {
+    "provider": "openai",
+    "model_id": "gpt-4o-mini"
+  },
+  "propose": {
+    "comparison": {
+      "provider": "openai",
+      "model_id": "gpt-4o-mini"
+    },
+    "reasoning": {
+      "provider": "openai",
+      "model_id": "gpt-4o-mini"
+    },
+    "proposing": {
+      "provider": "openai",
+      "model_id": "gpt-4o-mini"
+    }
+  },
+  "implement": {
+    "provider": "openai",
+    "model_id": "gpt-4o-mini"
+  },
+  "validate": {
+    "provider": "openai",
+    "model_id": "gpt-4o-mini"
+  },
+  "tune": {
+    "planner": {
+      "provider": "openai",
+      "model_id": "gpt-4o-mini"
+    },
+    "reflector": {
+      "provider": "openai",
+      "model_id": "gpt-4o-mini"
+    }
+  }
+}
