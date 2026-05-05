@@ -1,7 +1,7 @@
 # Audit & Optimize Token Usage and Growth
 
-**Status**: Design draft, revision 3 (2026-05-04). G0 (architecture) approved; this revision adds the §8 Commit Ledger and hybrid DRR in preparation for execution.
-**Author**: drafted 2026-05-04, revised 2026-05-04 (rev 2 — safety/forensic/retention gates), revised 2026-05-04 (rev 3 — commit ledger + hybrid DRR + fail-fast formalization).
+**Status**: Design draft, revision 8 (2026-05-05) — "Drain the Swamp" Pivot. G0 approved; G1 baseline LANDED. Commit 4.3.2 **CLOSED with H1 verdict** — the 11× `template_and_scaffolding` growth was an attribution leak inside `non_candidates_overview` (15 K → 111 K chars, 113 % of the catch-all Δ). Commit 4.3.3 (11th audit key) ships the fix. The leak's source — `model_knowledge_cache` + `model_descriptions` — is also the upstream of `expert_context_block` (24× growth). Commit 6.3 escalated to **Centralized Cache Dehydration**: prune at the `model_knowledge_cache` source so both leaks shrink simultaneously, with explicit Error-Signature preservation guard for Gate G3. Phase 2 unblocked.
+**Author**: drafted 2026-05-04, revised 2026-05-04 (rev 2 — safety/forensic/retention gates), revised 2026-05-04 (rev 3 — commit ledger + hybrid DRR + fail-fast formalization), revised 2026-05-05 (rev 4 — T1-Sanity green + Commit 4.3.1 chain-wrapper parity + V12 launch), revised 2026-05-05 (rev 5 — V12 iter 1–13 calibration + Phase 2 priority pivot), revised 2026-05-05 (rev 6 — Targeted O(N) Dehydration + USD tracking + Phase 3 split), revised 2026-05-05 (rev 7 — V12 iter 14 multi-dimensional explosion: Stability Filter, Knowledge Consolidation, Attribution Audit), revised 2026-05-05 (rev 8 — H1 verdict on 4.3.2 leak + Commit 4.3.3 11th audit key + Commit 6.3 escalated to source-level cache dehydration).
 **Inputs**:
 
 - `reports/v11_20250503_token_usage.md` §12 (Proposer Internal Workflow & Feedback Logic) — the audit that motivates this doc.
@@ -23,6 +23,69 @@
 - §4.2 metric #8 (DRR) restructured into **Hybrid DRR**: split into `DRR_LLM` (semantic, LLM-judge) and `DRR_Structural` (AST/regex match against the source-code diff). Both must pass; their *gap* is itself a published metric — a large gap indicates "Reasoning Hallucination."
 - New §8: **Step-by-Step Commit & Validation Ledger**. The 24 implementation steps in §5 are grouped into **12 atomic commits** (Phase 1: commits 1–5; Phase 2: commits 6–12). Each commit carries a `[ ]` task list, a Pre-Commit Verification block (positive test + quantitative metric + negative test), and a Definition of Done. §5 step numbers carry an annotation `(Commit N)` so the two sections are synchronized — "Execute Commit #N" maps deterministically to the §5 substeps.
 - §6 expanded with the Structural-vs-Semantic DRR question.
+
+### Revision 4 changelog
+
+- §1.5.1.1 T1-Sanity attested **GREEN** (2026-05-05) — M1 (sidecar binding), M2 (10-key Δ=0 across all 3 proposer rows), M3 (`[TOKEN_ITER]` rollup ≡ JSONL row sum) all hold. Run details captured inline.
+- §8 **Commit 4.3** closed: Pre-Commit sanity gate ☑, Definition of Done **GREEN**.
+- New §8 **Commit 4.3.1** — `sdsc_submission_scripts/_chain_common.sh` wrapper fix: thread `--run_name` through to `run_one_iteration.py`. Caught at the V12 launch dry-run audit; without this, every chain iter would have crashed at argparse on the new required flag. Three new dry-run unit tests in `tests/unit/scripts/test_chain_wrapper_run_name.py` pin the contract (required-flag check, value forwarding, no silent auto-derivation from workspace basename).
+- V12 chains launched 2026-05-05 (`explore_novel_v12_0504`, `exploit_cnn_v12_0504`); both writing `token_usage.jsonl` with `run_id` correctly bound to `{workspace}/.token_run_id`. Commit 5 baseline data is now being generated.
+
+### Revision 5 changelog
+
+- **V12 Calibration Data (iter 1-13, explore chain) folded into the design** — see §1.5.1.2. Total prompt tokens grew **2.39×** from iter 1 (198 K) to iter 13 (474 K) and is still climbing.
+- **Phase 2 priority pivot.** V12 data shows the bottleneck is not the proposer (3.3× sublinear) but **`interpretation.synthesis` (9.3× near-linear, 4.7K → 40K)**. The original Phase 2 §2 design assumed proposer-first; the V12 calibration overrides that assumption. Commits 6.1 (interpretation sliding window) and 6.2 (proposer prior_stage_outputs management) are inserted as the new high-priority Phase 2 entry points.
+- **§8 Commit 5 spec finalized (initial)** — `tools/build_token_baseline_report.py` must segment Happy-Path-Cost vs Recovery-Cost, report per-label `tokens_per_iteration` + `growth_slope`, and alert on `tokens.prompt > 50K` per call. *(USD cost tracking added in Rev 6.)*
+
+### Revision 6 changelog (2026-05-05)
+
+**Status**: G0 approved; V12 calibration confirmed Interpretation as primary bloat; Phase 2 priorities pivoted to O(N) components.
+
+- **Targeted O(N) Dehydration** is the new framing. V12 data partitions the bleed into two regimes:
+  - **O(N) growth (the bleeding arteries)**: `interpretation.synthesis` (9.3× over 13 iters, near-linear) and `proposer.prior_stage_outputs` (3.3× sublinear). Both clamped by Commits 6.1 + 6.2 — these are the only Phase 2 commits that ship.
+  - **O(1) fixed cost (the structural cost)**: the 21% "Template Tax" on `proposer.comparison`. Necessary for prompt adherence; does *not* scale with iterations. Optimizing fixed cost while linear growth bleeds is the wrong order.
+- **Template Dehydration moved to Phase 3 (Optional)**. Removed from Commit 11.1 in §8; new §9 "Phase 3 (Optional)" section appended to the doc. Phase 3 is opportunistic: only triggered if Commits 6.1/6.2 do not bring per-iter cost under target.
+- **§8 Commit 5 spec finalized — USD cost tracking + $1.50/iter bloat alert added**. The tool now computes per-iter cost using the production model's rate card (default `$10/1M prompt + $30/1M completion`, configurable via CLI). Two alert thresholds emitted in the report: `[BLOAT_ALERT]` when an iter's total USD exceeds $1.50 (the **post-dehydration target ceiling** — at V12 rates this fires on every iter; quieting this alert is the success criterion for Commits 6.1/6.2), and `[CONTEXT_EXPLOSION]` when any single call's `tokens.prompt` exceeds 50 K.
+- **Cleanup**: removed the Rev 4 → Rev 5 cross-references to the non-existent `chain_run_name = None` bug. The doc now reflects that `run_name` is correctly bound across all V12 production rows. No further mention.
+
+### Revision 7 changelog (2026-05-05) — "Full Stop" Pivot
+
+**Status**: G1 baseline LANDED — `tools/build_token_baseline_report.py` produced `reports/v12_token_baseline.md` + `reports/v12_top3_bloat.md` against the live `explore_novel_v12_0504` workspace (iters 1–14, 366 rows, run_id `explore_novel_v12_0504-20260505T070526-1028759`). **Verdict: Confirmed Proposer Hypothesis.** Cumulative cost across 14 iters: $72.73 (avg $5.20/iter). Iter 14 hit **$9.43 = 6.3× the $1.50 ceiling** with 2 `[CONTEXT_EXPLOSION]` events on `proposer.causal_reasoning`. `[BLOAT_ALERT]` fires 14/14 iters (by design — North Star).
+
+The V12 calibration also surfaced **three findings the Rev 6 spec did not anticipate**, requiring Phase 2 to be re-scoped:
+
+1. **`interpretation.per_model` is the hidden #2 bleeder** — slope **+5,947 tok/iter (R²=0.98)**, nearly **2× `interpretation.synthesis`'s slope** (+2,982/iter). Mechanism is *not* prompt-size growth: it is **call-count multiplication**. Iter 1 = 2 per_model calls; iter 14 = 12 calls — one per accumulated `model_type`. Commit 6.1 as specced in Rev 6 only clamped synthesis prompt size; it did nothing about call multiplication. **Commit 6.1 is expanded** to add a "Stability Filter" — only LLM-summarize model_types active in the current iter or showing significant score deltas; pull stable historicals from the cache without a fresh LLM call.
+
+2. **`expert_context_block` grew 24.30×** (7,476 → 181,668 chars) — by ratio, the **largest O(N) bleeder of any component**. Was not on the Phase 2 dehydration list at all. **New Commit 6.3** added: "Knowledge Consolidation" — every iter, perform a Merge & Prune over the accumulated findings, collapsing similar entries into a bounded set of **5–8 high-signal conclusions**. Bounds the block to a fixed budget regardless of iter count.
+
+3. **`template_and_scaffolding` grew 11.00×** (50K → 555K chars). Partly explained by call-count doubling (iter 1: 20 calls; iter 14: 40 calls including 2 `implementor.repair`), but per-call scaffolding still inflates ~5×. The catch-all is computed as `chars.total - sum(other_9_named_components)`, so an 11× growth implies dynamic content is leaking out of the 9 named keys into the unnamed bucket — i.e., our 10-key attribution is regressing as iterations accumulate. **New Commit 4.3.2** (Phase 1 amendment, blocks Phase 2): an Attribution Audit must locate the leak and either (a) add a missing component key to capture the un-attributed content, or (b) prove the growth is genuinely structural (more calls per iter, not unaccounted bytes per call). **Phase 2 surgery is gated on this audit** — we do not optimize numbers we don't trust.
+
+- **Phase 1 reopened** to admit Commit 4.3.2 as a hard gate for trusting the per-component breakdown.
+- **Commit 6.1 expanded** to address call-multiplication, not just prompt-size growth.
+- **Commit 6.3 added** as a sibling of 6.1/6.2 — Knowledge Consolidation for `expert_context_block`. Critical Priority alongside 6.1.
+- **Phase 3 unchanged** — Template Dehydration remains optional, post-G1.5.
+- Commit Map redrawn (see end of §8).
+
+### Revision 8 changelog (2026-05-05) — "Drain the Swamp" Pivot
+
+**Status**: Commit 4.3.2 **CLOSED with H1 verdict** — leak located and fixed. Phase 2 unblocked.
+
+The 4.3.2 forensic audit produced a definitive answer:
+
+1. **H1 (attribution leak) confirmed; H2 ruled out.** Per-call `template_and_scaffolding` grew **8.6 K → 92.8 K chars (10.75×) inside a single proposer call** (iter 1 → iter 14, same `proposer.proposing` happy-path row). H2 (call-count amplification) requires a stable per-call value — the data shows the opposite. Cross-label uniformity (`proposer.proposing` 92.8 K, `comparison` 91.2 K, `causal_reasoning` 92.6 K at iter 14, all within ±2 %) further confirms a shared content leak, not call multiplication.
+
+2. **The leak is `non_candidates_overview`.** The forensic single-row diff isolated **+84,160 chars** of un-attributed growth at iter 14. Reconstruction of the proposer's `accumulated["non_candidates_overview"]` (built at `nodes/ml_model_proposal_agent.py:1010-1034` from `model_descriptions` + `model_knowledge_cache`) sized this single field at **15,440 chars (iter 1) → 109,991 chars (iter 14) — Δ +94,551 chars**, accounting for **113 % of the catch-all delta** (upper-bound reconstruction; the small over-shoot is the reconstruction assumption that all non-proposed model_types are non-candidates). The audit hook listed `non_candidates_overview` as a `_PROPOSER_INPUT_KEY` (excluded from `prior_stage_outputs`) but never gave it a dedicated component key, so its chars fell through to the catch-all.
+
+3. **Upstream sources are shared with `expert_context_block`.** Both `non_candidates_overview` (Rev 8 leak) and `expert_context_block` (Rev 7 24× bleeder) draw from `model_knowledge_cache` (24 K → 275 K, 11.4×) and `model_descriptions` (6.7 K → 56 K, 8.4×). This is the single largest mechanical insight of Rev 8: **two of the four worst leaks share one root**. Pruning `model_knowledge_cache` at the source dehydrates both downstream blocks for free. This reframes Commit 6.3's scope.
+
+Changes landing in Rev 8:
+
+- **Commit 4.3.2 closed** — H1 confirmed; verdict, evidence chain, and per-row data appended in §8.
+- **New Commit 4.3.3** (Phase 1, ships before Phase 2): `_audit_proposer_components` gains an 11th content key — `non_candidates_overview`. The bridge's catch-all formula auto-shrinks to the true wrapper baseline (~8 K chars per call). 5 unit tests pin the contract (10-key set, char-accounting, leak-attribution non-overlap with `prior_stage_outputs`, sum invariant). All proposer-row consumers (`tools/build_token_baseline_report.py`, the §1.9 Top-3 table) now operate on a trusted breakdown.
+- **Commit 6.3 escalated** — pivots from "expert_context_block injection-point pruning" to **Centralized Cache Dehydration** at `model_knowledge_cache`. Same Merge & Prune algorithm, but applied at the source so both `non_candidates_overview` and `expert_context_block` shrink simultaneously. Adds an explicit **Error-Signature Preservation Guard**: the consolidation algorithm must keep every unique `failure_class` + `last_frames` signature (Commit 6 schema) so the Gate G3 Trap Test (§2.9) — which assumes a fatal flaw planted at iter 2 is still cited at iter 10 — still passes.
+- **Commit 6.1 unchanged** in scope; the cache-source dehydration in 6.3 also reduces the `interpretation.per_model` per-call payload, but the call-multiplication clamp (Stability Filter) is orthogonal and remains a separate fix.
+- **Phase 1 closes** with Commit 4.3.3. Phase 2 entry is unblocked.
+- Commit Map redrawn (Rev 8 — see end of §8). G1.5 expanded to 5 metrics (the new metric tracks the cache dehydration's impact on both downstream blocks).
 
 ---
 
@@ -222,7 +285,7 @@ Each LLM call must have a stable `label` that names *which* prompt fired. Today 
 
 Add the label to every call site as an explicit arg threaded through `bridge.generate(label=...)`. The bridge stores it in the row.
 
-**Component breakdowns** are passed only by call sites that build their user prompt via `_render_stage_user_prompt` (the staged proposer pipeline + boldness retry + proposing). The legacy 2-call path uses `_build_reasoning_prompt` / `_build_commit_prompt` and does not produce a 9-key breakdown — its rows leave `components` empty (still labeled, so chain_log stays clean). See §1.3 for the breakdown shape.
+**Component breakdowns** are passed only by call sites that build their user prompt via `_render_stage_user_prompt` (the staged proposer pipeline + boldness retry + proposing). The legacy 2-call path uses `_build_reasoning_prompt` / `_build_commit_prompt` and does not produce a structured-key breakdown — its rows leave `components` empty (still labeled, so chain_log stays clean). See §1.3 for the breakdown shape (currently 10 named keys + 1 catch-all = 11 keys total per proposer row, post-Commit-4.3.3).
 
 ### 1.6 chain_log.txt Live Reporting
 
@@ -284,7 +347,7 @@ Pydantic schema lives at `agent/schemas/telemetry/token_usage.py`. A new module 
 | Test | Scope |
 |------|-------|
 | `tests/unit/agent/llm_bridge/test_record_usage.py` | Mock the OpenAI client to return a fixed `Usage(prompt_tokens=…)` shape; assert one row appended to a tmp_path log. Cover the `usage is None` fallback. |
-| `tests/unit/agent/proposal/test_audit_components.py` | Build a synthetic `accumulated` dict + blocks; assert all 9 component keys present and sum to total. |
+| `tests/unit/agent/ml_model_proposal_agent/test_audit_components.py` | Build a synthetic `accumulated` dict + blocks; assert all 10 named component keys present (post-Commit-4.3.3; was 9 pre-4.3.3) and sum to total. |
 | `tests/unit/runner/test_token_log_iter_rollup.py` | Mock 3 LLM calls with known token counts; assert the `[TOKEN_ITER]` rollup line is emitted with correct totals. |
 | Pseudo-mode integration | Run a one-iter pseudo workflow end-to-end; assert `token_usage.jsonl` exists and parses; assert ≥4 rows (proposer × 3 stages + interp × 1). |
 
@@ -339,6 +402,19 @@ If verdict (1) is reached **but** total token spend at iter 5 is < 1.5× iter 1 
 ---
 
 ## 1.5 Phase 1.5 — Certification (mandatory gate before V12 baseline)
+
+> **Runner unification (2026-05-04, Commit 4.3)**. The original Phase 1.5 gates (T0 / T1 / T2)
+> were certified under `run_exploration_adaptive.py`. During the V12 launch we discovered a
+> parity gap: V12 production uses the chain-first runner (`run_chain.sh` →
+> `sdsc_submission_scripts/run_one_iteration.py`), which was not instrumented with
+> `set_run_context` — so `token_usage.jsonl` was never written for V12 despite real LLM
+> calls happening. Commit 4.3 closes the gap by porting the audit context, run_id sidecar,
+> fail-fast handler, and `[TOKEN_ITER]` rollup into the chain-first runner. The adaptive
+> runner is **deprecated** — all future certification and production runs use
+> `run_one_iteration.py` (wrapped in a small bash loop for multi-iter gates). The historical
+> T1/T2 attestations below are preserved unchanged as audit-trail proof that the
+> bridge / workflow / audit-hook code is correct; new attestations from the chain-first
+> runner appear in §1.5.1.1 (T1-Sanity).
 
 The infrastructure committed in §8 Commits 1–4 is not trusted in production until three
 certification gates have been observed green. They form a cost-ladder of increasing
@@ -453,18 +529,28 @@ mode does not exist in the production runner, and a synthetic harness would cert
 production never takes):
 
 ```bash
-screen -S siderius-certify-t1 -d -m bash -c '
-  .venv/bin/python run_exploration_adaptive.py \
-      --run_name certify_t1_0504_v3 \
-      --advice tuner_advice/exploration_adaptive_v1.json \
-      --llm_config llm_configs/openai_tiered_v1.json \
-      --max_iterations 3 --max_rounds 1 \
-      --trial_portion 0.01 --eval_portion 0.01 --max_epochs 1 \
-      2>&1 | tee /tmp/certify_t1.log
-'
+# Canonical chain-first invocation (Commit 4.3 — replaces run_exploration_adaptive.py).
+# A 3-iter gate is a small bash loop because run_one_iteration.py runs ONE iter per call.
+WS=/home/klz/Data/SIDEREIS_DATA/exploration_certify_t1_0504
+RN=certify_t1_0504
+SEED=/home/klz/Data/SIDEREIS_DATA/exploration_seeds_v1/run_output_punet.json
+screen -S siderius-certify-t1 -d -m bash -c "
+  for i in 1 2 3; do
+    .venv/bin/python sdsc_submission_scripts/run_one_iteration.py \
+        --workspace \$WS --run_name \$RN --start_iteration \$i \
+        --seed_paths \$SEED \
+        --advice tuner_advice/exploration_adaptive_v1.json \
+        --llm_config llm_configs/openai_tiered_v1.json \
+        --max_rounds 1 --is_trial \
+        --trial_portion 0.01 --eval_portion 0.01 --max_epochs 1 \
+        2>&1 | tee -a /tmp/certify_t1.log || break
+  done
+"
 ```
 
-Workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_certify_t1_0504_v3`.
+Workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_certify_t1_0504`. The sidecar at
+`{workspace}/.token_run_id` is created by iter 1 and read by iters 2/3 to preserve §1.4.1
+run_id immutability across the subprocess boundary.
 
 **Routing note (revised 2026-05-04)**: T1/T2 use the **production** `llm_configs/openai_tiered_v1.json`,
 not `llm_configs/certify_minimal.json` (the gpt-4o-mini-only file from C4.1). The first T1 attempt
@@ -534,6 +620,110 @@ Decision rationale: Option A (catch-all) over Option B (decompose template into 
 
 **Re-run plan (2026-05-04)**: T1 and T2 will be relaunched in parallel under production `openai_tiered_v1.json`. T1 verifies the 10-key delta is zero on every proposer row across 3 iters; T2 verifies training-loop telemetry, watchdog compliance, and concurrent-write JSONL parseability under 1 iter of real training (`trial_portion=0.01, eval_portion=0.01`). Parallelisation is permitted because T2 audits a disjoint surface (training-loop telemetry, watchdog timing, JSONL concurrency) from T1 (label coverage, component math, rollup math); neither gate's verification depends on the other.
 
+#### 1.5.1.1 T1-Sanity (Chain-Runner Re-cert, Commit 4.3)
+
+**Goal**: prove that the Commit 4.3 instrumentation of `sdsc_submission_scripts/run_one_iteration.py`
+(sidecar run_id resolver, `set_run_context` wiring via `chain_run_name`/`run_id` kwargs to
+`run_workflow`, `LLMBridgeContextError → sys.exit(2)` handler, `[TOKEN_ITER]` rollup with
+JSONL-seeded cumulative) produces a `token_usage.jsonl` of equivalent shape and integrity
+to the adaptive-runner T1 attestation above. This is a 1-iter sanity check, not a full
+3-iter T1 — the multi-iter `_iter_flush` marker behaviour was already declared an unrelated
+known-issue in §1.5.2.1.
+
+**Setup**:
+
+```bash
+WS=/home/klz/Data/SIDEREIS_DATA/exploration_certify_t1_sanity_0504
+RN=certify_t1_sanity_0504
+SEED=/home/klz/Data/SIDEREIS_DATA/exploration_seeds_v1/run_output_punet.json
+screen -S siderius-certify-t1-sanity -d -m bash -c "
+  .venv/bin/python sdsc_submission_scripts/run_one_iteration.py \
+      --workspace \$WS --run_name \$RN --start_iteration 1 \
+      --seed_paths \$SEED \
+      --advice tuner_advice/exploration_adaptive_v1.json \
+      --llm_config llm_configs/openai_tiered_v1.json \
+      --max_rounds 1 --is_trial \
+      --trial_portion 0.01 --eval_portion 0.01 --max_epochs 1 \
+      2>&1 | tee /tmp/certify_t1_sanity.log
+"
+```
+
+**Success metrics** (all three must hold for sanity = green):
+
+| # | Metric | Verification |
+|---|--------|-------------|
+| 1 | `token_usage.jsonl` written | file exists at `{workspace}/token_usage.jsonl`; ≥ 4 rows; every row's `run_id` matches the contents of `{workspace}/.token_run_id` (sidecar binding round-trip) |
+| 2 | 10-key Δ=0 invariant on chain runner | every `proposer.*` row has all 10 component keys and `chars.total - sum(components.values()) == 0` exactly. C4.2 invariant carried across the runner switch. |
+| 3 | `[TOKEN_ITER]` rollup line emitted | exactly one `[TOKEN_ITER] iter=01 ...` line in stdout (captured to `/tmp/certify_t1_sanity.log`); its `total_tok` equals the row sum from `token_usage.jsonl` |
+
+**Out-of-scope** for this sanity (intentionally — covered by historical T1/T2 above): cross-iter rollup math (single iter), `_iter_flush` markers (no advancement), watchdog under real training (T2 surface), formal-round behaviour.
+
+**Status**: **GREEN** (2026-05-05).
+
+**Results (2026-05-05, run_id `certify_t1_sanity_0504-20260505T052619-1011326`)**:
+
+Workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_certify_t1_sanity_0504`. **11 rows** in `token_usage.jsonl` — 3 proposer (`comparison`, `causal_reasoning`, `proposing`) + 4 interpretation + 1 implementor + 2 tuner + 1 validator. Wall ~1 h 35 min (training 27 min + inference 35 min + scoring 25 min). Iter 1 was real `--is_trial` punet+wavenet seeds under `openai_tiered_v1.json`.
+
+| # | Metric | Verdict | Detail |
+|---|--------|---------|--------|
+| 1 | `token_usage.jsonl` written + sidecar binding | ✅ green | 11 rows; every `run_id` equals the contents of `{workspace}/.token_run_id` (`certify_t1_sanity_0504-20260505T052619-1011326`); the immutable run_id (§1.4.1) survives the would-be subprocess boundary. |
+| 2 | 10-key Δ=0 invariant on chain runner | ✅ green | All 3 proposer rows have exactly the canonical 10 component keys (per `nodes/ml_model_proposal_agent.py:588-598` + `agent/llm_bridge.py:961`) and `chars.total - sum(components.values()) == 0` exactly. C4.2 invariant carries unchanged across the runner switch. |
+| 3 | `[TOKEN_ITER]` rollup ≡ JSONL row sum | ✅ green | rollup `total_tok` = 82 236; JSONL `prompt + completion` sum = 82 236 (exact match). `_emit_token_iter_rollup`'s JSONL-seeded cumulative path is mathematically correct. |
+
+**Conclusion**: Commit 4.3 instrumentation produces a `token_usage.jsonl` of identical shape and integrity to the historical adaptive-runner T1 attestation. Phase 1.5 gate ladder is complete on the chain-first path; Commit 5 (V12 baseline) is unblocked from the certification side and was launched same-day (see Revision 4 changelog).
+
+#### 1.5.1.2 V12 Live Observation — first 13 iters of production explore (Rev 5)
+
+**Source**: `/home/klz/Data/SIDEREIS_DATA/exploration_explore_novel_v12_0504/token_usage.jsonl`, snapshot at iter 13 of 30. Run still in progress at the time of this revision.
+
+**Per-iteration prompt-token totals (explore chain)**:
+
+| iter | calls | prompt tokens | growth vs iter 1 | proposer | tuner | interpretation | implementor | validator |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 20 | 198,516 | 1.00× | 68 K | 102 K | 11 K | 12 K | 3 K |
+| 2 | 21 | 233,412 | 1.18× | 93 K | 103 K | 20 K | 11 K | 4 K |
+| 3 | 21 | 239,999 | 1.21× | 100 K | 95 K | 29 K | 10 K | 4 K |
+| 4 | 24 | 313,321 | 1.58× | 119 K | 149 K | 29 K | 10 K | 3 K |
+| 5 | 23 | 306,372 | 1.54× | 144 K | 103 K | 40 K | 13 K | 4 K |
+| 6 | 24 | 338,940 | 1.71× | 136 K | 132 K | 50 K | 14 K | 5 K |
+| 7 | 24 | 338,456 | 1.70× | 162 K | 108 K | 50 K | 11 K | 5 K |
+| 8 | 27 | 425,286 | 2.14× | 215 K | 131 K | 61 K | 11 K | 4 K |
+| 9 | 26 | 403,582 | 2.03× | 215 K | 108 K | 61 K | 12 K | 5 K |
+| 10 | 30 | 428,523 | 2.16× | 171 K | 136 K | 73 K | 33 K | 13 K |
+| 11 | 28 | 465,210 | 2.34× | 223 K | 138 K | 83 K | 13 K | 6 K |
+| 12 | 27 | 425,879 | 2.14× | 207 K | 105 K | 93 K | 12 K | 7 K |
+| 13 | 30 | 474,396 | **2.39×** | 225 K | 104 K | 102 K | 27 K | 13 K |
+
+**Component-level growth (iter 1 → iter 13, prompt tokens)**:
+
+| Component | iter 1 | iter 13 | growth | shape | verdict |
+|---|---:|---:|---:|---|---|
+| `interpretation` | 11 K | 102 K | **9.3×** | near-linear ↑ | bloating (primary target) |
+| `proposer` | 68 K | 225 K | **3.3×** | sublinear ↑ | bloating (secondary target) |
+| `validator` | 3 K | 13 K | 4.3× | flat-ish | bounded |
+| `implementor` | 12 K | 27 K | 2.3× | flat-ish | bounded |
+| `tuner` | 102 K | 104 K | **1.0×** | **flat** | **C4.1 instrumentation success** |
+
+**Interpretation breakdown** — the 9.3× growth is structural, not a per-call inflation:
+
+| iter | per_model: calls | per_model tok/call | synthesis prompt tokens |
+|---:|---:|---:|---:|
+| 1 | 2 | 3,636 | 4,657 |
+| 5 | 5 | 4,873 | 16,588 |
+| 9 | 7 | 5,291 | 24,636 |
+| 13 | 11 | **5,621 (saturated)** | **40,365 (still linear)** |
+
+- `interpretation.per_model` per-call cost has plateaued at ~5.6 K (the per-model record is bounded). The number of *calls* grows because every distinct `model_type` ever proposed gets a per-model summary. The `model_knowledge_cache` (`nodes/result_interpretation_agent.py:685-783`) is hit-on-repeat, so calls grow only when a new architecture appears (~0.7 new model_types per iter).
+- `interpretation.synthesis` is one call per iter, but its prompt **concatenates every cached model summary**. There is **no N-iter window cap**. Synthesis cost grows ~3 K/iter; on the current trajectory iter 30 will be ≈ 80 K tokens for synthesis alone.
+
+**Headline takeaways for Phase 2**:
+
+1. The bottleneck is **interpretation, not proposer**. Original §2 design ranked proposer first; V12 calibration inverts that. See Commit 6.1 (sliding-window the synthesis prompt over `model_knowledge_cache`).
+2. **Proposer is real but secondary.** 3.3× growth is driven by `prior_stage_outputs` (4 K → 14 K, ~3.5×) + `vocab_block` (3.5 K, stable). See Commit 6.2.
+3. **Tuner is the success story.** Flat at ~100 K/iter — C4.1 portion-floor + components instrumentation introduced zero drift. No surgery needed.
+4. The "22% Template Tax" hypothesis from Sanity-T1 (§1.5.1.1) replicates in production for `proposer.comparison` (21.0%, both chains, iter 1) but is dwarfed by the linear-growth components — Template Dehydration deferred to Commit 11.1 (low priority).
+5. Exploit chain (`exploit_cnn_v12_0504`) died at iter 2 from kernel OOM-killer (see `reports/v12_20260504.md`); only 2 iters of data — insufficient to corroborate the curve. Explore alone is the calibration baseline for Commit 5.
+
 ### 1.5.2 Gate T2 — System Stability (Plumbing Gate)
 
 **Goal**: confirm the new telemetry writes don't push the per-call architectural-probe wall
@@ -541,23 +731,29 @@ beyond the 60 s `evaluate_vram_skill` SIGALRM watchdog (commit 1972fee), and tha
 remains parsable under the multi-agent concurrent writes that happen inside one full
 3-trial-+-1-formal V4 iter.
 
-**Setup**:
+**Setup** (canonical chain-first invocation, Commit 4.3):
 
 ```bash
-screen -S siderius-certify-t2 -d -m bash -c '
-  .venv/bin/python run_exploration_adaptive.py \
-      --run_name certify_t2_0504 \
+WS=/home/klz/Data/SIDEREIS_DATA/exploration_certify_t2_0504
+RN=certify_t2_0504
+SEED=/home/klz/Data/SIDEREIS_DATA/exploration_seeds_v1/run_output_punet.json
+screen -S siderius-certify-t2 -d -m bash -c "
+  .venv/bin/python sdsc_submission_scripts/run_one_iteration.py \
+      --workspace \$WS --run_name \$RN --start_iteration 1 \
+      --seed_paths \$SEED \
       --advice tuner_advice/exploration_adaptive_v1.json \
       --llm_config llm_configs/openai_tiered_v1.json \
-      --max_iterations 1 --max_rounds 4 \
+      --max_rounds 4 --is_trial \
       --trial_portion 0.01 --eval_portion 0.01 \
       --formal_portion 0.01 --formal_eval_portion 0.01 \
       --max_epochs 1 \
       2>&1 | tee /tmp/certify_t2.log
-'
+"
 ```
 
-Workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_certify_t2_0504`.
+Workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_certify_t2_0504`. T2 is single-iter
+so no bash loop is needed; the sidecar at `{workspace}/.token_run_id` is created and
+read once.
 
 **Success metrics** (all three must hold for T2 = green):
 
@@ -1324,6 +1520,249 @@ both gates are green.
 
 ---
 
+### Commit 4.3: Chain-first runner instrumentation (runner unification)
+
+**Phase**: 1.5 (post-T1/T2 hardening — surfaced by the V12 launch on 2026-05-04).
+
+**Why this exists**: T0/T1/T2 all certified the bridge / workflow / audit-hook code under
+`run_exploration_adaptive.py`. V12 production launches via `run_chain.sh` →
+`sdsc_submission_scripts/run_one_iteration.py` (chain-first runner). The chain runner
+was never instrumented with the audit context, so the V12 chains made real LLM calls
+but wrote **zero rows** to `token_usage.jsonl`. The Phase 1.5 attestations were
+correct-but-narrow: they certified one of the two production code paths. Commit 4.3
+closes the parity gap and **deprecates the adaptive runner** so future drift is
+impossible — there is now exactly one production runner.
+
+**Scope**:
+- `sdsc_submission_scripts/run_one_iteration.py` — add `--run_name` (chain-level run
+  name, required); add `_resolve_chain_run_id(workspace, run_name)` sidecar helper at
+  `{workspace}/.token_run_id` so the immutable run_id (§1.4.1) survives the subprocess
+  boundary; add `_emit_token_iter_rollup` (chain-runner-adapted: cumulative seed read
+  from JSONL since each iter is a fresh subprocess with no in-memory carry); add
+  `LLMBridgeContextError` import + handler around `run_workflow(...)` that mirrors the
+  adaptive runner's `[FATAL] ... → sys.exit(2)` contract; pass
+  `chain_run_name=args.run_name, run_id=run_id` into `run_workflow(...)`.
+- `tests/unit/scripts/test_chain_run_id_sidecar.py` (new) — 5 tests pinning the sidecar
+  contract: fresh-workspace generation, idempotent re-read, run_name-mismatch ignored
+  (sidecar wins), empty-sidecar treated as missing, workspace-creation tolerance.
+- `docs/audit_and_optimize_token_usage_and_growth.md` — §1.5 adaptive-runner
+  deprecation banner; §1.5.1 setup-block update (now uses `run_one_iteration.py` in a
+  bash loop); new §1.5.1.1 (T1-Sanity placeholder) and §1.5.2 setup-block update.
+  Historical T1/T2 attestations preserved unchanged as audit-trail proof.
+
+**Design decisions (locked before code)**:
+- **Q1 — run_id resolution across the subprocess boundary**: sidecar file at
+  `{workspace}/.token_run_id`. Iter 1 generates and writes; iters 2+ read back. Naive
+  per-process `_generate_run_id` would mint a fresh id every iter (different `pid +
+  utc_ts`) and trip the bridge's run_id-immutability check on iter 2. The sidecar is
+  the cheapest mechanism that preserves §1.4.1 without sharing parent-process state.
+- **Q2 — `--run_name` as required argparse arg vs derived from `basename(workspace)`**:
+  required arg. The adaptive runner has `--run_name` (required). Adding it to the
+  chain runner gives explicit naming parity and avoids the silent failure mode where
+  two distinct chains living in the same `/data/$user` end up with the same run_id
+  because their workspace basenames collide.
+- **Q3 — `_emit_token_iter_rollup` cumulative seed**: read from JSONL each call, summing
+  rows where `iter < current_iter` (skipping `_iter_flush` markers). The adaptive
+  runner threads cumulative through the in-process loop; the chain runner has no such
+  loop. Recomputing from JSONL is O(rows) per call but the file is small (≤ ~50 rows
+  per iter × 30 iters = 1.5k rows worst case). Cleaner than introducing a second
+  sidecar for cumulative state.
+- **Q4 — Adaptive runner kept for now or removed in this commit**: kept (deprecation
+  banner only). Removal is a separate follow-up commit so this PR's diff stays
+  minimally focused on the parity fix. The adaptive runner is no longer the canonical
+  path but its file remains for one release window in case any external operator has
+  an in-flight chain pinned to it.
+
+**Tasks**:
+- [x] Implement `_resolve_chain_run_id(workspace, run_name)` with sidecar persistence; format
+      matches `run_exploration_adaptive._generate_run_id` (`{run_name}-{utc_ts}-{pid}`).
+- [x] Implement `_emit_token_iter_rollup(workspace, iteration)` with JSONL-seeded cumulative;
+      best-effort (`OSError` returns silently; malformed rows skipped).
+- [x] Add `--run_name` (required) to the argparse; print `[TOKEN] chain_run_name = ...` and
+      `[TOKEN] run_id = ...` at iter start.
+- [x] Pass `chain_run_name=args.run_name, run_id=run_id` into `run_workflow(...)`.
+- [x] Wrap `run_workflow(...)` in `try ... except LLMBridgeContextError` that writes a
+      `crashed=True` manifest, prints `[FATAL] ...` to stderr, and `sys.exit(2)`.
+- [x] Emit the rollup line after `write_manifest(...)` and before the status-branch exits.
+
+**Pre-Commit Checklist**:
+- [x] **Positive test (sidecar contract)**: `pytest tests/unit/scripts/test_chain_run_id_sidecar.py`
+      — 5 tests, all green. **Result: 5/5 PASS** (2026-05-04).
+- [x] **Regression — token bundle intact**: `pytest tests/unit/agent/llm_bridge/
+      tests/integration/runner/test_token_log_iter_rollup.py` — Commit 4 contracts
+      unaffected by the chain-runner port. **Result: 41/41 PASS** (2026-05-04).
+- [x] **Smoke — argparse**: `.venv/bin/python sdsc_submission_scripts/run_one_iteration.py
+      --help` parses without error and shows `--run_name` as required. **Result: PASS**.
+- [x] **Sanity gate (1-iter chain runner under `openai_tiered_v1.json`)**:
+      `token_usage.jsonl` exists, ≥4 rows, all rows' `run_id` match `{workspace}/.token_run_id`,
+      every proposer row has 10-key Δ=0; one `[TOKEN_ITER] iter=01 ...` line in stdout
+      whose `total_tok` equals the JSONL row sum. **Result: GREEN** (2026-05-05) —
+      11 rows, M1+M2+M3 all PASS; run_id `certify_t1_sanity_0504-20260505T052619-1011326`.
+      Detail in §1.5.1.1.
+
+**Definition of Done**: V12 production chains write `token_usage.jsonl` with the same
+schema and run_id-binding properties as the historical adaptive-runner gates. The
+adaptive runner is marked deprecated. **Status (2026-05-05)**: **GREEN** — T1-Sanity
+attested; V12 explore + exploit chains launched same day and confirmed writing JSONL
+with sidecar-bound run_ids on iter 1.
+
+**Out of Scope**: removing `run_exploration_adaptive.py` (separate follow-up); a Tier-2
+integration test that drives `run_one_iteration.py` end-to-end through a pseudo
+workflow (the V12 chain itself is the natural fixture, parallel to Commit 4's same
+deferral pattern).
+
+---
+
+### Commit 4.3.1: Chain-wrapper `--run_name` parity (V12 launch hotfix)
+
+**Phase**: 1.5 (immediate follow-up to Commit 4.3 — surfaced at the V12 launch dry-run audit).
+
+**Why this exists**: Commit 4.3 made `--run_name` a *required* argparse flag in
+`sdsc_submission_scripts/run_one_iteration.py` (so the chain-level run name pins the
+sidecar and audit labels), but did **not** update the bash wrapper layer
+(`sdsc_submission_scripts/_chain_common.sh`) that builds the per-iter Python invocation.
+Result: any V12 launch using `run_chain.sh` would have crashed at argparse on iter 1
+with `error: the following arguments are required: --run_name`, exit ≠ 0. Auto-resume
+would see no manifest, decide iter 1 still pending, and re-launch the same broken
+command for all 20 iterations — both V12 chains hung on iter 1 forever. Caught by the
+pre-launch wrapper audit; never reached production.
+
+**Scope**:
+- `sdsc_submission_scripts/_chain_common.sh` (4 edits, +9 lines):
+  - Add `RUN_NAME=""` to defaults block with comment explaining sidecar/audit role.
+  - Add `--run_name) RUN_NAME="$2"; shift 2 ;;` parser case (alongside `--workspace`).
+  - Extend the required-flag check: `--run_name` joins `--workspace` and `--seed_paths`
+    in the canonical "Required:" stderr message; missing flag → `exit 1`.
+  - Add `--run_name "$RUN_NAME"` to `APP_ARGS` in `build_app_args()`, immediately after
+    `--workspace`, so it appears in every per-iter Python invocation.
+- `tests/unit/scripts/test_chain_wrapper_run_name.py` (new, 3 tests, dry-run-driven):
+  - `test_run_name_required_when_missing` — wrapper exits non-zero with canonical
+    error when `--run_name` is omitted.
+  - `test_run_name_threads_through_to_runner_args` — `--dry-run` output includes
+    `--run_name <value>` verbatim; no transformation.
+  - `test_run_name_distinct_from_workspace_basename` — pin: wrapper must not silently
+    derive run_name from `basename(workspace)`. An operator's typo in `--run_name`
+    must NOT be invisibly papered over by basename inheritance, otherwise audit logs
+    would lie about chain identity.
+- `tests/unit/scripts/test_chain_consistency.py` (1-line helper update): the existing
+  `_run_dry()` smoke helper now passes `--run_name dryrun_test_chain` to satisfy the
+  new required check; without this, 4 pre-existing dry-run smoke tests would have
+  red-marked from the new wrapper-side enforcement.
+
+**Tasks**:
+- [x] Apply 4 wrapper edits.
+- [x] Add 3 dry-run unit tests.
+- [x] Update `_run_dry` helper in `test_chain_consistency.py`.
+- [x] Verify both V12 dry-runs (`--mode lilab --dry-run` for explore + exploit) print
+      `--run_name <value>` correctly threaded into the Python invocation.
+
+**Pre-Commit Checklist**:
+- [x] **Positive test (wrapper contract)**: `pytest tests/unit/scripts/test_chain_wrapper_run_name.py`
+      — 3/3 PASS (2026-05-05).
+- [x] **Regression — existing scripts unit tests intact**: `pytest tests/unit/scripts/`
+      — 27 wrapper-related tests green (3 fresh + 24 pre-existing). The 3 pre-existing
+      `test_chain_consistency.py` failures (`test_defaults_match`,
+      `test_kwargs_match_modulo_documented_exemptions`, `test_every_three_way_flag_is_in_kwargs`)
+      are unrelated drift carried from before this commit.
+- [x] **Smoke — V12 launch dry-runs**: `bash run_chain.sh --mode lilab --dry-run ...`
+      for both explore and exploit V12 commands prints `--run_name explore_novel_v12_0504`
+      / `--run_name exploit_cnn_v12_0504` correctly inside the would-exec command.
+- [x] **Live verification**: V12 chains launched 2026-05-05 in two screens
+      (`siderius-v12-explore`, `siderius-v12-exploit`); both produced
+      `{workspace}/.token_run_id` sidecars with the right run_name prefix and started
+      writing `token_usage.jsonl` rows whose `run_id` field matches the sidecar exactly.
+
+**Definition of Done**: the bash wrapper enforces `--run_name` symmetrically with
+`run_one_iteration.py`'s argparse; V12 production launches succeed at iter 1 without
+operator intervention; the chain-runner contract is end-to-end testable in the unit
+layer (no live GPU required to catch wrapper drift). **Status (2026-05-05)**: GREEN
+— landed as commit `609ac64`; V12 chains live.
+
+**Out of Scope**: any further wrapper-layer plumbing beyond the `--run_name` thread.
+
+---
+
+### Commit 4.3.2: Attribution Audit — `template_and_scaffolding` 11× leak (Rev 7 — **CLOSED H1, Rev 8**)
+
+**Phase**: 1 (amendment — gated Phase 2 entry; gate now released).
+**§5 step**: 14b (new, between 14a Commit 4.3.1 and 15 Commit 5 follow-up).
+**Status**: **CLOSED — H1 (Leak Found) confirmed 2026-05-05.** Forensic evidence below; remediation in Commit 4.3.3.
+
+**Why this commit**: The Gate G1 baseline (Commit 5) reported `template_and_scaffolding` grew **11.00×** across iter 1 → iter 14 (50,422 → 554,774 chars). This bucket is *defined* as the catch-all residue: `chars.total − sum(other_9_named_components)`. By construction, growth in the catch-all means content is appearing in the prompt that none of the 9 named keys is capturing. Either:
+
+  - **(H1) Attribution leak** — a real, measurable, *named* category of dynamic content (e.g. a new prompt section, a renamed block, an iter-by-iter accumulator) is being inserted into the prompt without being routed through one of the 9 component keys. In this case, our top-3 bloat report is *misattributing* the leak's growth, and the 10-key breakdown is unsafe to base Phase 2 surgery on.
+  - **(H2) Structural call-count amplification** — the catch-all is genuinely fixed *per call* (~7.5K), but iter 14 has 40 proposer calls vs. iter 1's 20, so the *summed* catch-all doubles from call multiplication alone. In this case the 10-key breakdown is sound; the growth is real but explained.
+
+These two hypotheses have different downstream consequences. **(H1) requires a code fix before Phase 2.** **(H2) requires only a denominator change in the report (per-call instead of summed).** Phase 2 cannot proceed until we know which one we are seeing.
+
+**Scope** (read-only investigation + targeted fix if H1):
+- `agent/llm_bridge.py:_record_usage` — the site that computes `template_and_scaffolding = chars.total − sum(other_9)`.
+- `nodes/ml_model_proposal_agent.py:_audit_proposer_components` — the proposer-side hook that populates the 9 named keys (Commit 4.2).
+- `agent/prompt_templates/proposal/*.md` — to enumerate every dynamic block the templates reference.
+- The V12 `token_usage.jsonl` rows themselves — for forensic reconstruction.
+
+**Tasks** (executed 2026-05-05, ad-hoc forensic scripts against V12 workspace, no production code touched):
+- [x] **Per-call check**: same-call comparison of `proposer.proposing` (attempt 0, status ok) at iter 1 vs iter 14 — per-call `template_and_scaffolding` grew **8,630 → 92,790 chars (10.75×)**. Cross-label uniformity at iter 14: `proposing=92,790`, `comparison=91,176`, `causal_reasoning=92,608` (stdev within iter+label cell ≈ 0). H2 ruled out: per-call is not stable; this is per-call growth, not call multiplication. iter 14 ran 6 proposer calls, same as iter 1 — call count is constant.
+- [x] **Forensic diff**: row-level component diff (single iter-1 vs single iter-14 `proposer.proposing` row, same call-site):
+
+   | key                          | iter 1  | iter 14 |     Δ    | growth × |
+   |------------------------------|--------:|--------:|---------:|---------:|
+   | system_prompt                |   6,997 |   7,333 |     +336 |    1.05× |
+   | candidates_markdown          |  13,296 |  20,517 |   +7,221 |    1.54× |
+   | interpretation_json          |   4,162 |   8,380 |   +4,218 |    2.01× |
+   | expert_context_block         |   1,246 |  30,278 |  +29,032 |   24.30× |
+   | prior_stage_outputs          |  13,670 |  18,320 |   +4,650 |    1.34× |
+   | **template_and_scaffolding** |   8,630 |  92,790 |  +84,160 |   10.75× |
+   | **chars.total**              |  48,001 | 177,618 | +129,617 |    3.70× |
+
+   Named keys captured +45,457 chars (35 % of total Δ). The catch-all swallowed +84,160 chars (65 % of total Δ). H1 confirmed.
+- [x] **Source-side audit**: traced the proposer's `accumulated` dict construction (`nodes/ml_model_proposal_agent.py:1046-1066`) and the cleaned-dict JSON region of `_render_stage_user_prompt` (`:444-488`). Three input fields end up in the JSON region but were not audited as dedicated keys: `non_candidates_overview`, `existing_model_types`, the cleaned-candidates JSON residue. Of these, only `non_candidates_overview` carries dynamic per-iter growth at scale.
+- [x] **Quantification**: reconstructed the proposer's `non_candidates_overview` from the on-disk `interpretation_iter_NN.json` (using the same logic at `:1010-1034` — pulling `description` from `model_descriptions`, `key_findings`/`bottlenecks`/`score_trend`/`strategy_assessment` from `model_knowledge_cache`, plus `score_summary` from `per_model_score_tables` via `build_score_summary_line`). Result: **15,440 chars (iter 1) → 109,991 chars (iter 14) — Δ +94,551 chars, 7.12× growth**. Δ ratio vs the +84,160 catch-all delta = **113.6 %** (upper-bound reconstruction; the actual list excludes `candidates ⊆ model_types`, slightly fewer entries than the proposed-only exclusion used in reconstruction).
+- [x] **Verdict**: **H1 (Leak Found).** Mechanism: dynamic content from `model_knowledge_cache` (24 K → 275 K chars, 11.4×) and `model_descriptions` (6.7 K → 56 K chars, 8.4×) flows through `non_candidates_overview` into the prompt's JSON region without being routed through any of the 9 named audit keys.
+- [x] **Remediation deferred to Commit 4.3.3** (audit-hook fix) and **Commit 6.3** (source-level cache dehydration). See those commits for implementation.
+
+**Pre-Commit Checklist** (all satisfied by the forensic deliverable):
+- [x] **Verdict recorded**: H1 confirmed with quantitative evidence (this section).
+- [x] **No regression in existing tests**: forensic scripts were read-only; no production code modified in 4.3.2 itself.
+- [x] **Re-baseline plan**: Commit 4.3.3 tests pin the new 11-key contract; a future re-run of `tools/build_token_baseline_report.py` post-4.3.3 will reflect the corrected attribution. (Re-running the tool against the *existing* V12 JSONL still shows the old 10-key shape — old rows were written before the audit hook gained the new key. New chains will report the trusted breakdown.)
+
+**Definition of Done**: ✅ H1 explicitly chosen, evidence published in this section. Remediation lands in Commit 4.3.3. Phase 2 (Commits 6.1, 6.2, 6.3) is unblocked.
+
+**Out of Scope**: changing what content goes *into* the proposer prompt (that is Phase 2's job — Commits 6.1, 6.2, 6.3); reducing the catch-all chars by template compression (that is Phase 3's job — Commit 11.1).
+
+---
+
+### Commit 4.3.3: Add `non_candidates_overview` as 11th audit key (Rev 8)
+
+**Phase**: 1 (closes the 4.3.2 verdict — last commit before Phase 2 begins).
+**§5 step**: 14c (new, immediately after 14b Commit 4.3.2).
+
+**Why this commit**: Commit 4.3.2 isolated `non_candidates_overview` as the source of the false `template_and_scaffolding` 11× growth signal. With the leak named, the audit hook can route its chars to a dedicated component key — restoring the catch-all to its true wrapper baseline (~8 K chars per proposer call) and giving Phase 2 surgery a trustworthy per-component breakdown.
+
+**Scope**:
+- `nodes/ml_model_proposal_agent.py` — `_audit_proposer_components` gains a 4th content-key derivation block (`non_candidates_overview` → `len(json.dumps(value, default=str))`) and emits it as a new entry in the returned components dict.
+- `tests/unit/agent/ml_model_proposal_agent/test_audit_components.py` — `_EXPECTED_KEYS` set updated from 9 to 10 entries; existing `test_audit_components_handles_empty_blocks` extended to assert the new key collapses to `len("[]") == 2` for empty/missing input; new dedicated regression test pins three properties (exact char count, non-overlap with `prior_stage_outputs`, 10-key contract).
+- No bridge change: `LLMBridge._record_usage`'s catch-all formula (`chars.total - sum(content_components)`) is generic — adding an 11th content key auto-shrinks `template_and_scaffolding` without code changes.
+
+**Tasks**:
+- [x] Add `non_candidates_overview_chars = len(json.dumps(non_candidates_overview or [], default=str))` to `_audit_proposer_components`.
+- [x] Add the new key to the returned `components` dict (placed between `interpretation_json` and `previous_failures` for consistency with the prompt assembly order).
+- [x] Update the docstring's "9-key" / "10-key catch-all" wording to "10-key" / "11-key catch-all" and append a Commit 4.3.3 note explaining the V12-derived motivation.
+- [x] Update `_EXPECTED_KEYS` in the test (and the test name `test_audit_components_returns_all_9_keys_with_full_payload` → `..._10_keys_...`).
+- [x] Extend `test_audit_components_handles_empty_blocks`: empty/missing → 2 chars (`"[]"`).
+- [x] Add `test_audit_components_non_candidates_overview_attributed_separately`: with a populated `non_candidates_overview` value, the new key matches `len(json.dumps(value, default=str))` exactly; the same chars are NOT also counted in `prior_stage_outputs` (non-overlap regression); the 10-key contract holds.
+
+**Pre-Commit Checklist**:
+- [x] **All tests pass**: `pytest tests/unit/agent/ml_model_proposal_agent/test_audit_components.py tests/unit/agent/llm_bridge/test_template_and_scaffolding.py` → **11/11 green** (6 audit-hook tests including the new regression + 5 catch-all tests verifying the bridge formula is unchanged).
+- [x] **Catch-all baseline**: simulated 11-key view of the iter 14 `proposer.proposing` row from the V12 JSONL (using reconstructed `non_candidates_overview = 109,991`) shows the catch-all collapsing from 92,790 chars → ~0 (upper-bound reconstruction; expected real-world catch-all is the wrapper baseline ≈ 8 K chars per call, matching iter 1's measured 8,630).
+- [x] **No regression in catch-all clamp**: the bridge's `max(0, ...)` clamp behavior is untouched; the new key flows through the same formula. The 5 existing `test_template_and_scaffolding.py` tests still pass.
+
+**Definition of Done**: ✅ 11-key audit hook live; tests green; catch-all returns to fixed-template baseline; Phase 2 unblocked.
+
+**Out of Scope**: re-processing the existing V12 JSONL to retroactively populate the new key (rows are immutable; new chains will write the 11-key shape from launch); changing what `non_candidates_overview` *contains* (that's Commit 6.3's job — source-level cache dehydration).
+
+---
+
 ### Commit 5: V12 baseline run + Top-3 Bloat Report (Gate G1)
 
 **Phase**: 1.
@@ -1335,18 +1774,47 @@ both gates are green.
 - `reports/v12_top3_bloat.md` (new — output artifact)
 
 **Tasks**:
-- [ ] Run a V12 chain (settings matching V11 baseline: `openai_tiered_v1.json` routing, 5+ iters minimum). The run is the deliverable, not a code change.
-- [ ] Implement `tools/build_token_baseline_report.py`: reads `token_usage.jsonl` from the V12 workspace; emits §1.9.1 tables (per-iter totals, top-3 bloat per iter, aggregate growth verdicts).
+- [ ] Run a V12 chain (settings matching V11 baseline: `openai_tiered_v1.json` routing, 5+ iters minimum). The run is the deliverable, not a code change. **(Already in flight — explore at iter 13/30 at time of Rev 5.)**
+- [ ] Implement `tools/build_token_baseline_report.py` per the spec below.
 - [ ] Write `reports/v12_token_baseline.md`: real per-call token counts, per-iter trend, comparison against the §12-audit estimates.
 - [ ] Write `reports/v12_top3_bloat.md`: tables per §1.9.1; ends with one of the three §1.9.2 verdicts.
+
+**`build_token_baseline_report.py` spec (Rev 6 finalized — adds USD cost tracking + bloat alert)**:
+
+The tool reads one or more `{workspace}/token_usage.jsonl` files and emits per-label aggregates. Four behaviours are mandatory:
+
+1. **Cost segmentation — Happy Path vs Recovery**. Each row carries `extra.attempt` (0 = first try, ≥1 = retry) and `extra.status` (`"ok"`, `"retry_quota"`, `"error"`, etc.). Split aggregates accordingly:
+   - **Happy-Path-Cost**: rows where `extra.attempt == 0 AND extra.status == "ok"` — the cost of the iteration if everything goes right first time.
+   - **Recovery-Cost**: all other rows (retries, validator-rejected proposals causing implementor repairs, quota-driven re-tries). Reported as a separate column so we can see what fraction of total spend is overhead from failures.
+
+2. **Growth tracking — `tokens_per_iteration` and `growth_slope`**. For every distinct `label` (e.g. `proposer.comparison`, `interpretation.synthesis`, `tuner.planner`):
+   - emit a per-iter row with `tokens_per_iteration = sum(prompt + completion)` for that label that iter,
+   - compute `growth_slope` as `(tokens_at_iter_N - tokens_at_iter_1) / (N - 1)` once N ≥ 5,
+   - flag any label whose slope > 0 with 95% confidence (simple linear regression, p < 0.05).
+
+3. **USD cost tracking (Rev 6)**. Each row's USD cost is computed as `(tokens.prompt × rate_prompt + tokens.completion × rate_completion) / 1_000_000`. Default rates: `$10/1M prompt + $30/1M completion` (placeholder for gpt-5.4 production rates — *operator must verify and override via `--rate-prompt` and `--rate-completion` CLI flags before publishing the report*). The report emits:
+   - per-iter total USD,
+   - per-iter Happy-Path USD vs Recovery USD,
+   - cumulative-to-date USD,
+   - per-label USD growth slope (USD/iter), so dehydration impact can be priced directly.
+
+4. **Alerting — two thresholds**.
+   - `[BLOAT_ALERT]`: any iter whose total USD exceeds **$1.50**. This is the **post-dehydration target ceiling**, not a description of current state — at V12 rates every iter trips it (iter 1 ≈ $2.83, iter 13 ≈ $6.73). Quieting this alert is the explicit success criterion for Commits 6.1/6.2.
+   - `[CONTEXT_EXPLOSION]`: any single row with `tokens.prompt > 50_000` (with iter, label, attempt, run_id). 50 K is the soft ceiling: above this, the model's own attention starts degrading (recall drops on dense-context benchmarks past ~64 K) and we are paying for capacity we cannot use.
+
+   Both alerts are informational (exit 0), not fatal — they appear inline in the report at the top of the affected iter's section, and as a summary block at the end.
 
 **Pre-Commit Checklist**:
 - [ ] **Positive test**: `python tools/build_token_baseline_report.py --workspace <v12-ws>` produces both reports without error; both render in markdown without broken tables.
 - [ ] **Quantitative metric**: for the 5-iter run, the report shows a clean per-iter token sparkline; the linter on the JSONL returns 0 anomalies.
+- [ ] **Segmentation test**: hand-craft a 3-row JSONL with one `attempt=0,status=ok` row and two `attempt=1` retry rows. Assert the tool reports Happy-Path-Cost = first row's tokens, Recovery-Cost = sum of the other two.
+- [ ] **USD test**: hand-craft a row with `prompt=100_000, completion=10_000`. With default rates, assert reported USD = `100000*10/1e6 + 10000*30/1e6 = $1.30` exactly (precision check; floating-point assertion to 4 decimals).
+- [ ] **Alert test (CONTEXT)**: hand-craft a row with `tokens.prompt = 60_000`. Assert the tool emits `[CONTEXT_EXPLOSION]` for that row and exits 0.
+- [ ] **Alert test (BLOAT)**: hand-craft a 1-iter JSONL whose total cost computes to $2.00 USD. Assert the tool emits `[BLOAT_ALERT]` for that iter and exits 0. Then hand-craft another at $1.20 — assert no `[BLOAT_ALERT]`.
 - [ ] **Negative test**: run the report generator against a workspace whose `token_usage.jsonl` has been hand-corrupted (drop an `_iter_flush` marker). Assert the generator refuses to publish — emits "AUDIT LOG CORRUPTION DETECTED" and exits nonzero. We never publish numbers from a corrupted log.
 - [ ] **Verdict recorded**: §1.9.2 verdict is written explicitly at the top of `reports/v12_top3_bloat.md` — Confirmed Proposer / Pivot Tuner / Pivot Other / Sanity Floor.
 
-**Definition of Done (Gate G1)**: real V12 baseline numbers exist; the verdict is recorded; the team has explicitly chosen one of the four branches (continue to Commit 6, pivot, or stop).
+**Definition of Done (Gate G1)**: real V12 baseline numbers exist; Happy-Path/Recovery segmentation is reported; per-label growth slopes are reported; per-iter USD costs are reported; both alert thresholds are evaluated; the verdict is recorded; the team has explicitly chosen one of the four branches (continue to Commit 6.1, pivot, or stop).
 
 **Decision branch**:
 - Verdict = "Confirmed Proposer Hypothesis" → proceed to Commit 6.
@@ -1354,6 +1822,159 @@ both gates are green.
 - Verdict = Sanity Floor tripped → **DEFER**. Re-run at iter 15 and re-evaluate.
 
 **Out of Scope**: any Phase 2 work.
+
+---
+
+### Phase 2 — V12-Calibration Override (Rev 5)
+
+The original Phase 2 ordering (Commits 6 → 12 below) assumed proposer-first dehydration. **V12 calibration data (§1.5.1.2) shows interpretation is the primary bleed**, so two new commits are inserted at the top of Phase 2 ahead of the original sequence:
+
+- **Commit 6.1** — Interpretation Sliding Window (high priority — addresses the 9.3× growth)
+- **Commit 6.2** — Proposer `prior_stage_outputs` Management (medium priority — addresses the 3.3× growth)
+
+The original Commits 6-12 still apply but at lower priority. Commit 11.1 (Template Dehydration) is added at the end of Phase 2 to capture the 21% template share now that we know it is fixed cost, not growth.
+
+---
+
+### Commit 6.1: Interpretation Call-on-Demand — Sliding Window + Stability Filter (Rev 7 — Critical Priority, expanded)
+
+**Phase**: 2 (gated on Commit 4.3.2 closing).
+**§5 step**: 12a.
+
+**Why this commit, why critical**: V12 explore data exposed **two distinct linear-growth axes** in the interpretation agent. Both must be clamped here because they share the same source of state (`model_knowledge_cache`):
+
+1. **Synthesis prompt-size growth (Rev 5 finding)**: `interpretation.synthesis` grew 4.7 K → 40 K tokens over iters 1–13 (8.7×). Driver: the synthesis prompt concatenates *all* entries in `model_knowledge_cache` verbatim — no window cap.
+2. **per_model call-count growth (Rev 7 finding)**: `interpretation.per_model` grew **2 calls/iter (iter 1) → 12 calls/iter (iter 14)**. Slope **+5,947 tok/iter (R²=0.98)** — nearly 2× the synthesis slope. Driver: the agent currently issues a fresh LLM summary call for *every* `model_type` ever proposed, on every iter. Stable historical models (no new training rounds, no score change) are re-summarized every iter against unchanged data — pure waste.
+
+The Rev 5 spec only addressed (1). Rev 7 expands the commit to also address (2) — the per_model call multiplication. **Both fixes share the active-model selection policy**, so they belong together: deciding which models are "active enough to need attention" gates both whether we re-call per_model and whether we keep their entry expanded in synthesis.
+
+**Scope**:
+- `nodes/interpretation_helpers.py` (modify — add `select_active_models`, `compress_model_summary`, `should_recall_per_model`)
+- `nodes/result_interpretation_agent.py` (modify — synthesis assembly reads compressed entries for non-active models; per_model dispatcher consults `should_recall_per_model` before issuing each call)
+- `tests/unit/agent/result_interpretation_agent/test_sliding_window.py` (new — covers both axes)
+- `tests/unit/agent/result_interpretation_agent/test_stability_filter.py` (new — Rev 7)
+
+**Tasks**:
+- [ ] **Active-model policy** (shared by synthesis + per_model): "Top-K + Last-N + Delta-Δ". Keep full detail / re-call per_model for the union of:
+   - Top K models by `best_denoising_score` ever seen (default K=3),
+   - Last N models proposed by recency (default N=2),
+   - any model whose `best_denoising_score` changed in the current iter beyond a threshold Δ (default `abs(Δ) ≥ 0.05` in normalized score units).
+   All other models are "stable" — pulled from cache as-is, no LLM call.
+- [ ] **Sliding-window compression (axis 1)**: implement `compress_model_summary(entry) -> dict` returning `{model_type, best_score, n_rounds, one_line_takeaway}`. Takeaway field extracted *deterministically* from the existing cached summary's `key_finding` — no fresh LLM call. Target ≤ 200 chars per model.
+- [ ] **Stability Filter (axis 2)**: implement `should_recall_per_model(model_type, cache_entry, current_iter_records) -> bool`. Returns `True` iff the model is in the active set AND has either (a) at least one new training record in the current iter, or (b) a score delta ≥ Δ. Stable models return `False` — the dispatcher pulls the previous cache entry verbatim and skips the LLM call. The skip path emits a single `_iter_flush`-style audit row with `label="interpretation.per_model_skipped"`, `tokens=None`, `extra={"reason": "stable", "cached_iter": <iter>}` so the audit log preserves the count of skipped calls (we want to *measure* the savings, not hide them).
+- [ ] **Synthesis-prompt assembly** (axis 1): replace "all entries verbatim" with active-full + stable-compressed. Add a single line at the top of the historical block: `"[N older architectures compressed for context budget — see {workspace}/iter_{i}/interpretation.json for full detail]"`.
+- [ ] **per_model dispatcher** (axis 2): consult `should_recall_per_model` before each LLM call; on skip, write the audit marker and reuse the previous cache entry. Total per_model LLM calls per iter must equal `|active_set|`, not `|model_knowledge_cache|`.
+- [ ] **Configurable**: K, N, Δ all live in the LLM-config schema (no new CLI flag); defaults documented in the schema.
+
+**Pre-Commit Checklist**:
+- [ ] **Active-set test**: `test_active_set_top_k_plus_last_n_plus_delta` — given a 7-model cache with synthetic scores, recency, and one model with a current-iter score delta ≥ Δ, the active set is exactly `top3 ∪ last2 ∪ {delta_model}` (deduplicated).
+- [ ] **Compression test (axis 1)**: `test_compress_preserves_key_finding` — `compress_model_summary` extracts the original `key_finding` verbatim and emits ≤ 200 chars.
+- [ ] **Stability Filter test (axis 2)**: `test_stability_filter_skips_stable_models` — given a 7-model cache where 5 models are stable (no new records, no score delta) and 2 are active, assert `should_recall_per_model` returns `False` for the 5 and `True` for the 2. Assert the audit log gains exactly 5 `interpretation.per_model_skipped` marker rows for that iter.
+- [ ] **Synthesis-prompt size regression test (axis 1)**: with a synthetic 13-model cache (mimicking iter 13 of explore V12), the new synthesis prompt is **< 15 K chars** (vs. V12 baseline ~40 K). Quantify the compression ratio in the test assertion message.
+- [ ] **per_model call-count regression test (axis 2)**: with a synthetic 12-model cache (mimicking iter 14 of explore V12) where 9 models are stable, assert the agent issues exactly **3 LLM calls** for that iter (active set size), not 12. Reuses the existing pseudo-LLM harness.
+- [ ] **Behavioural test**: synthesis output still mentions every model_type at least once (active = full, compressed = one-liner) — no model is silently dropped from the prompt.
+- [ ] **Audit-log test**: skipped per_model calls produce countable marker rows (so the savings are measurable in `tools/build_token_baseline_report.py`'s output).
+
+**Definition of Done (Gate G1.5)**: re-run a 5-iter chain post-implementation; both axes must clamp:
+- `interpretation.synthesis` `tokens.prompt` slope drops from V12's ~3 K/iter to **< 500 tokens/iter** between iter 3 and iter 5.
+- `interpretation.per_model` summed prompt tokens per iter drops from V12's +5,947 tok/iter slope to **< 1 K tok/iter** (sub-linear; ideally flat).
+The new chain's `build_token_baseline_report.py` output replaces V12 as the Phase 2 baseline. Both slopes are reported in `reports/v12post_dehydration_baseline.md`.
+
+**Out of Scope**: model_knowledge_cache *eviction* (we keep the full cache for forensic recovery; only the *prompt assembly* and *call dispatch* read a windowed view); the 21% template tax on `proposer.comparison` (Phase 3, Commit 11.1).
+
+---
+
+### Commit 6.2: Proposer `prior_stage_outputs` Management (Rev 5 — V12-driven, medium priority)
+
+**Phase**: 2.
+**§5 step**: 12b (new).
+
+**Why this commit, why second**: V12 data shows proposer grew 68 K → 225 K (3.3×) over 13 iters. Component breakdown of the iter-1 vs iter-late `proposer.proposing` row indicates `prior_stage_outputs` is the dominant growth contributor — at iter 1 it's 13 K chars, by iter 13 it dominates the per-call assembly. The other proposer components are largely flat: `system_prompt` ~7 K (fixed), `vocab_block` ~3.5 K (slow), `template_and_scaffolding` ~8 K (fixed).
+
+**Scope**:
+- `nodes/ml_model_proposal_agent.py` (modify — `prior_stage_outputs` assembly)
+- `tests/unit/agent/proposal/test_prior_stage_truncation.py` (new)
+
+**Tasks**:
+- [ ] Audit what `prior_stage_outputs` actually contains today (history of which prior stage's outputs concatenated how). Document in the commit message — we may discover it's already wrong, not just bloated.
+- [ ] Apply a max-chars truncation per stage entry (default 2 K chars per prior stage, configurable). Trim from the middle (keep first 1 K and last 1 K), insert `[... N chars elided ...]` marker. Preserves head + tail, both of which are typically high signal.
+- [ ] Alternative consideration (decide before implementation): semantic compression via a deterministic extractor (e.g., keep only the JSON keys, not values, for prior-stage outputs that are large dicts). Lower risk than LLM-based compression but loses some signal.
+- [ ] Pin the policy in the LLM-config schema; do not hardcode the threshold.
+
+**Pre-Commit Checklist**:
+- [ ] **Positive test**: 4 K input → 2 K output, with first-1 K and last-1 K verbatim and the `[... 2000 chars elided ...]` marker between.
+- [ ] **Idempotence test**: applying truncation to an already-truncated string is a no-op.
+- [ ] **Quantitative metric**: against a synthetic iter-13-shape proposer assembly, `proposer.proposing.tokens.prompt` drops by ≥ 30%. (Don't promise a flat curve here — proposer growth has multiple sources; we're targeting the largest one.)
+
+**Definition of Done (Gate G1.5b)**: re-run a 5-iter chain post-implementation; verify `proposer.proposing` token growth slope drops by ≥ 30% relative to V12 baseline.
+
+**Out of Scope**: `vocab_block` compression (separate concern, addressed in Phase 3 if vocab keeps growing); `candidates_markdown` compression (already bounded by gate-block design).
+
+---
+
+### Commit 6.3: Centralized Cache Dehydration — `model_knowledge_cache` Source-Level Merge & Prune (Rev 8 — Critical Priority, escalated from Rev 7)
+
+**Phase**: 2 (gated on Commit 4.3.3 landing).
+**§5 step**: 12c (escalated scope, same step number).
+
+**Why this commit (Rev 8 escalation)**: Rev 7 framed this commit as a fix for `expert_context_block` (24× growth). The 4.3.2 forensic audit revealed two leaks share one root cause:
+
+| downstream block            | iter 1 → iter 14 chars | growth | upstream source                         |
+|-----------------------------|-----------------------:|-------:|------------------------------------------|
+| `expert_context_block`      |          7.5 K → 181 K |   24×  | `model_knowledge_cache` (key_findings, bottlenecks, lessons, recommendations) + curated text |
+| `non_candidates_overview`   |           15 K → 110 K |    7×  | `model_descriptions` + `model_knowledge_cache` (key_findings, bottlenecks, score_trend, strategy_assessment) |
+
+Both blocks are **read-only consumers** of the upstream cache. The cache itself grew 24 K → **275 K chars (11.4×)** — and `model_descriptions` grew 6.7 K → **56 K chars (8.4×)**. These two upstream artefacts are the actual append-only accumulators; the downstream blocks are just the visible symptoms.
+
+**Pruning at the injection point** (Rev 7 design — a per-block consolidator at `expert_context_block` assembly) leaves the cache itself unbounded, which means `non_candidates_overview` continues to bleed even after `expert_context_block` is fixed. **Pruning at the source** — applying Merge & Prune to `model_knowledge_cache` itself, inside the interpretation node where the cache is maintained — dehydrates both consumers simultaneously and bounds future consumers automatically.
+
+**Scope** (escalated from Rev 7):
+- `nodes/result_interpretation_agent.py` (or wherever `model_knowledge_cache` is updated each iter — first task confirms file:line). The cache update path is the new pruning site.
+- New `agent/cache_consolidator.py` — Pydantic-validated Merge & Prune over per-model-type cache entries. Each cache entry is a dict per `model_type` carrying `key_findings`, `bottlenecks`, `score_trend`, `strategy_assessment`, `lessons`, `recommendations` (verify via grep).
+- New `tests/unit/agent/result_interpretation_agent/test_cache_consolidator.py`.
+- `nodes/result_interpretation_agent.py` integration test (Tier 1) verifying cache size bounded across simulated 10-iter accumulation.
+- **No changes** to `expert_context_block` assembly or `non_candidates_overview` builders — they read from the now-bounded cache and shrink for free.
+
+**Tasks**:
+- [ ] **Locate the cache-maintenance site**: grep for `model_knowledge_cache` writes in `nodes/result_interpretation_agent.py`; confirm the function that appends new findings each iter. Document file:line in the commit message.
+- [ ] **Define a per-entry schema** (Pydantic): `CacheEntry(model_type: str, key_findings: list[ConsolidatedFinding], bottlenecks: list[ConsolidatedFinding], lessons: list[ConsolidatedFinding], recommendations: list[ConsolidatedFinding], error_signatures: list[ErrorSignature], score_trend: str, strategy_assessment: str)`. Each `ConsolidatedFinding(statement: str, evidence_iters: list[int], strength: Literal["weak","moderate","strong"])`. The `error_signatures` field is **load-bearing** for Gate G3 (see Performance Guard below).
+- [ ] **Merge & Prune policy** (deterministic, no LLM call):
+   - **Merge** within each `(model_type, field)` bucket: findings with overlapping statements (cosine similarity over normalized text ≥ 0.7, OR explicit key-noun match) collapse into one; merged findings union their `evidence_iters`.
+   - **Prune** to a bounded set per `(model_type, field)`: **5–8 conclusions per field per model_type**, ranked by `(strength, len(evidence_iters), recency)`. Total cap: **24 findings per model_type across all text fields**.
+   - **Error Signatures are EXEMPT from numerical pruning** (see Performance Guard).
+   - Pruned findings are archived to `{workspace}/iter_{i}/cache_archive_{model_type}.json` for forensic recovery; never silently dropped.
+- [ ] **Hook into the cache-update path**: after each iter's interpretation builds the new cache entry for a model_type, run the consolidator over `existing_cache[mt] ⊕ new_findings` before persisting. Persist the consolidated entry only.
+- [ ] **No producer changes** for `expert_context_block` or `non_candidates_overview` — they continue to read from the (now-bounded) cache. Verify in the bounded-size test that both blocks shrink as a side effect.
+
+**Performance Guard — Error Signature Preservation (Gate G3)** ⚠️:
+
+> The Merge & Prune algorithm **must NOT collapse or rank-prune unique error signatures**. Each `ErrorSignature` (Commit 6 schema: `failure_class`, `last_frames`, `short_message`) is keyed by the tuple `(failure_class, top_user_frame, error_type)`. The consolidator treats `error_signatures` as a SET — duplicates (same key tuple) merge by unioning `evidence_iters`, but distinct signatures are NEVER pruned, regardless of the per-field cap.
+>
+> **Why**: Gate G3 (§2.9 Trap Test) plants a fatal flaw in iter-2 ledger and asserts the proposer cites it correctly at iter 10. If the consolidator drops the iter-2 error signature during a high-cardinality iter, G3 fails by definition. The 5–8 cap on text findings (`key_findings`, `bottlenecks`, etc.) is fine — those are reasoning summaries, redundant by nature. Error signatures are forensic primary sources; their loss is information loss.
+>
+> **Implementation**: a separate `_prune_text_findings` path for the four text fields (capped) and a `_dedupe_error_signatures` path for `error_signatures` (set-merge only, no cap). The behavioural test (below) pins this distinction.
+
+**Pre-Commit Checklist**:
+- [ ] **Schema test**: invalid `CacheEntry` / `ConsolidatedFinding` / `ErrorSignature` (missing fields, empty statement, unknown `failure_class`) rejected by Pydantic with a useful error.
+- [ ] **Merge test (text fields)**: two `key_findings` for the same `model_type` with statements "ridge near 50 Hz dominates" and "the 50 Hz ridge is the dominant feature" merge into one with both evidence iters listed.
+- [ ] **Prune test (text fields)**: a 30-finding input for one `(model_type, key_findings)` bucket prunes to ≤ 8 outputs; weak findings dropped first; remaining ranked by `(strength, len(evidence_iters), recency)`.
+- [ ] **Error-signature preservation test (Gate G3 prerequisite)**: input cache with 12 distinct error signatures (different `failure_class`/`top_user_frame` tuples) across one model_type — consolidator output must contain ALL 12. Repeat with a 30-signature input where the per-field cap of 8 would otherwise apply: assert no signature is dropped. **This test is the load-bearing guard against G3 regression.**
+- [ ] **Bounded-size regression test (downstream blocks)**: simulate a 14-iter accumulation feeding the consolidator (mimicking V12 iter 14). After the consolidator runs each iter, both `model_knowledge_cache` total chars **≤ 60 K** (vs. V12's 275 K) AND the derived `expert_context_block` chars **≤ 12 K** AND the derived `non_candidates_overview` chars **≤ 30 K**. Assert all three thresholds in one test; quantify compression ratios in the message.
+- [ ] **Archive test**: pruned text findings (NOT error signatures) appear in `cache_archive_{model_type}.json`; the iter index, model_type, and original finding text are all present (forensic-recoverable, not silently lost).
+- [ ] **Behavioural test (no signal loss)**: every `(model_type, field)` bucket that had at least one `strength="strong"` finding pre-consolidation still has at least one finding post-consolidation. Plus the error-signature preservation test above.
+- [ ] **No LLM call in the consolidator** by default — deterministic similarity (normalized text + cosine over hashed tokens, OR `difflib.SequenceMatcher.ratio() ≥ 0.7`). LLM-based merging deferred; out of scope.
+
+**Definition of Done (Gate G1.5c — Rev 8)**: re-run a 5-iter chain post-implementation; report under `tools/build_token_baseline_report.py` (with the Commit 4.3.3 11-key audit live) shows **all three** of the following bounded:
+
+| metric                        | V12 iter 14 | post-6.3 iter 5 target |
+|-------------------------------|------------:|------------------------:|
+| `model_knowledge_cache` chars |       275 K |              ≤ 60 K     |
+| `expert_context_block` chars  |       181 K |              ≤ 12 K     |
+| `non_candidates_overview` chars (new key) | 110 K |          ≤ 30 K     |
+
+If any of the three exceeds its target, the policy is too lenient — return to the consolidator and tighten before Phase 2 progresses.
+
+**Out of Scope**: changing the *content* policy of what counts as a finding (that's the interpretation node's reasoning module's job); LLM-based merging (deferred — only revisit if deterministic merge demonstrably loses signal in the behavioural test); changing the `expert_context_block` or `non_candidates_overview` *render* paths (they keep reading from the now-bounded cache).
 
 ---
 
@@ -1557,19 +2178,78 @@ both gates are green.
 
 ---
 
-### Commit Map (visual)
+### Commit Map (visual — Rev 8)
 
 ```
-Phase 1 (Telemetry)              Phase 2 (Dehydration)
- ┌─────────────────┐              ┌─────────────────┐
- │ C1 capture      │              │ C6 ErrorSig     │
- │ C2 setter+fail  │              │ C7 G2 forensic  │
- │ C3 audit+labels │              │ C8 schemas      │
- │ C4 plumbing     │              │ C9 helpers      │
- │ C5 G1 baseline  │ ───────────▶ │ C10 assembly    │
- │     (verdict)   │              │ C11 G3 trap     │
- └─────────────────┘              │ C12 G4 + cleanup│
-                                  └─────────────────┘
+Phase 1 (Telemetry — CLOSED)             Phase 2 (Targeted O(N) Dehydration)              Phase 3 (Optional)
+ ┌──────────────────────────────┐         ┌─────────────────────────────────────┐          ┌─────────────────┐
+ │ C1 capture                   │         │ C6.1 Interp Call-on-Demand          │ ★★ CRIT  │ C11.1 Template  │
+ │ C2 setter+fail               │         │      sliding-window (synthesis)     │          │       Dehydration│
+ │ C3 audit+labels              │         │      + Stability Filter             │          │   (21% fixed)   │
+ │ C4 plumbing                  │         │      (per_model call clamp)         │          │   opportunistic │
+ │ C4.3.2 ATTRIBUTION ✓ CLOSED  │         │ C6.3 Source-Level Cache Drain       │ ★★ CRIT  │   post-G1.5     │
+ │   H1 verdict — leak in       │         │      Merge & Prune over             │          └─────────────────┘
+ │   non_candidates_overview    │         │      model_knowledge_cache          │
+ │ C4.3.3 11th audit key ✓      │         │      → both expert_context AND      │
+ │   (catch-all → ~8K baseline) │ ──────▶ │      non_candidates_overview shrink │
+ │ C5 G1 baseline (LANDED)      │         │      [GUARD: preserve ErrorSigs]    │
+ │   USD + bloat (verdict ✓)    │         │ C6.2 Proposer prior-stage           │   MED
+ └──────────────────────────────┘         │      mid-truncation                 │
+                                          │      (clamp 3.3× O(N))              │
+                                          │ ─── G1.5 re-baseline (5 metrics) ───│
+                                          │ C6 ErrorSig                         │
+                                          │ C7 G2 forensic                      │
+                                          │ C8 schemas                          │
+                                          │ C9 helpers                          │
+                                          │ C10 assembly                        │
+                                          │ C11 G3 trap (depends on 6.3 guard)  │
+                                          │ C12 G4 + cleanup                    │
+                                          └─────────────────────────────────────┘
 ```
 
-Gates G1, G2, G3, G4 are explicit STOP points. Each gate's failure has a documented remediation path back into a prior commit, not a workaround.
+Gates G1, G1.5, G2, G3, G4 are explicit STOP points.
+
+- **G1 (LANDED)**: Commit 5 produced `reports/v12_token_baseline.md` + `reports/v12_top3_bloat.md`. Verdict: Confirmed Proposer Hypothesis. 14/14 BLOAT_ALERT. Commit 4.3.2 surfaced as a Phase-1 blocker.
+- **G1 audit closure (Rev 8)**: Commit 4.3.2 closed with H1 verdict; Commit 4.3.3 ships the 11-key audit. The 10→11-key shift restores `template_and_scaffolding` to its true wrapper baseline (~8 K chars per call), and Phase 2 surgery now operates on a trusted breakdown.
+- **G1.5 (Rev 8 — 5 metrics)**: post-Commit-6.1/6.2/6.3 re-baseline. Re-run the chain, recompute the following five and bound each:
+   1. `interpretation.synthesis` chars per call (Rev 5 target — clamped by 6.1 sliding window).
+   2. `interpretation.per_model` calls per iter (Rev 7 target — clamped by 6.1 Stability Filter).
+   3. `proposer.prior_stage_outputs` chars per call (Rev 6 target — clamped by 6.2 mid-truncation).
+   4. `expert_context_block` chars per call (Rev 7 target — bounded as a side-effect of 6.3 source-level drain).
+   5. `non_candidates_overview` chars per call (Rev 8 NEW — bounded as a side-effect of 6.3 source-level drain; visible only because Commit 4.3.3 promoted it to a named key).
+
+   **All five must drop from O(N) to ≤ O(log N) or bounded ≤ 1.5× iter5/iter1.** If G1.5 fails on any, return to the responsible commit (6.1/6.2/6.3) and tighten before proceeding.
+- **Phase 2 entry**: unblocked by Commit 4.3.3 (Rev 8). Phase 1 fully closed.
+- **G3 dependency**: Commit 11's Trap Test (§2.9) depends on Commit 6.3's Error-Signature Preservation Guard. If 6.3 prunes error signatures, G3 fails. The guard is a hard requirement, pinned by a dedicated unit test in 6.3's Pre-Commit Checklist.
+
+---
+
+## 9. Phase 3 (Optional) — Fixed-Cost Shaving
+
+Phase 3 is **opportunistic, not mandatory**. It is triggered only if Commits 6.1 + 6.2 have landed, the G1.5 re-baseline shows the O(N) bleed is clamped, **and** per-iter USD is still above the $1.50 target ceiling. If the post-6.1/6.2 baseline already meets the target, Phase 3 is skipped entirely.
+
+**Rationale for the deferral**: V12 calibration (§1.5.1.2) shows the proposer's template + system_prompt + scaffolding is ~21% of `proposer.comparison`'s prompt cost (7.5 K of 36 K chars at iter 1). This is structural fixed cost — necessary for prompt adherence, does not grow with iterations. While shaving it is technically possible, it is the wrong order: optimizing fixed cost while linear growth bleeds 3 K tokens/iter into the synthesis prompt would be polishing a leaking bucket. We address fixed cost only after the leaks are sealed.
+
+### Commit 11.1 (Phase 3, Optional): Template Dehydration
+
+**Phase**: 3 (Optional — post-G1.5).
+
+**Trigger condition**: Commits 6.1 + 6.2 landed; G1.5 passed; per-iter USD still above target ceiling.
+
+**Scope**:
+- `agent/prompt_templates/proposal/*.md` (×9 — section header tightening, instruction-block compression)
+- `nodes/ml_model_proposal_agent.py` (`system_prompt` audit — strip duplicated instructions if any)
+
+**Tasks**:
+- [ ] Audit each of the 9 proposer template files for redundancy: section headers that restate themselves, instructions that duplicate `system_prompt` content, multi-paragraph framing that could be a single sentence.
+- [ ] Apply mechanical compressions only (no semantic content drop). Target: 30% reduction in `template_and_scaffolding` chars without changing the rendered task description.
+- [ ] Re-run proposer behavioural tests (existing) — assert no test fails as a result of the compression. The Trap Test (Commit 11) is the strict gate: if compression silently drops a behavioural cue, the Trap Test will catch it.
+
+**Pre-Commit Checklist**:
+- [ ] **Positive test**: `template_and_scaffolding` chars in a synthetic iter-1 proposer assembly drop from ~7.5 K to ≤ 5.3 K (≥ 30% reduction).
+- [ ] **Behaviour-preservation test**: full existing proposer test suite passes (`pytest tests/unit/agent/proposal/ tests/integration/nodes/test_ml_model_proposal_agent.py`).
+- [ ] **Trap Test rerun**: `pytest tests/integration/proposer/test_long_term_wisdom_trap.py --real-api-call` still passes — compression did not erase the long-term wisdom behaviour.
+
+**Definition of Done**: 30% template-tax reduction; no behavioural regression; per-iter USD cost moves measurably toward the $1.50 ceiling. If the trigger condition was never met, this commit is *not done* — it is *not needed*, and that's a successful Phase 2.
+
+**Out of Scope**: changing prompt semantics, reordering stages, adding/removing template sections.
