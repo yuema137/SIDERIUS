@@ -522,7 +522,7 @@ def _audit_proposer_components(
 ) -> Dict[str, Any]:
     """Pre-merge char-count breakdown of a proposer LLM call (§1.3).
 
-    Returns a 9-key ``components`` dict suitable for ``bridge.generate(
+    Returns a 10-key ``components`` dict suitable for ``bridge.generate(
     components=...)``, plus a ``stage_name`` and ``total_chars`` for tests
     and ad-hoc debugging. The breakdown mirrors the structure of the user
     prompt assembled by :func:`_render_stage_user_prompt` and the per-call-
@@ -532,17 +532,27 @@ def _audit_proposer_components(
     specific source even when the provider's tokenizer is opaque.
 
     Empty / missing blocks (``""`` or absent dict keys) yield ``0`` for
-    that component — never a missing key. The 9 keys are stable and
+    that component — never a missing key. The 10 keys are stable and
     enforced by ``test_audit_components.py``.
 
-    Note (Commit 4.2, 2026-05-04): the audit hook covers the 9 *content*
+    Commit 4.3.3 (Rev 8, 2026-05-05): added ``non_candidates_overview`` as
+    a dedicated content key. The forensic audit (§8 Commit 4.3.2) showed
+    this field carries a per-model dump pulled from ``model_descriptions``
+    + ``model_knowledge_cache`` and grew from 15 K → 111 K chars between
+    iter 1 and iter 14 of the V12 explore run — the dominant contributor
+    (113 % of the catch-all delta) to the false ``template_and_scaffolding``
+    11× signal. With this key live, the catch-all returns to its true
+    fixed-template baseline (~8 K chars) and Phase 2 surgery operates on
+    a trustworthy breakdown.
+
+    Note (Commit 4.2, 2026-05-04): the audit hook covers the 10 *content*
     payloads injected into the user prompt, but not the template wrapper
     text (section headers, key-value preludes, stage instructions) added
     by the ``_build_*_prompt`` builders. Gate T1 measured that wrapper
     overhead at ~7.5–8.3 K chars per proposer call. To keep the row-level
     audit lossless, ``LLMBridge._record_usage`` augments the dict on
-    write with a 10th catch-all key ``template_and_scaffolding``
-    (= ``chars.total - sum(this hook's 9)``). The hook itself is
+    write with a catch-all key ``template_and_scaffolding``
+    (= ``chars.total - sum(this hook's 10)``). The hook itself is
     intentionally unaware of that key — it only reports content payloads
     it can derive from inputs.
     """
@@ -562,6 +572,22 @@ def _audit_proposer_components(
         }
     interpretation_json_chars = len(
         json.dumps(interp_summary or {}, default=str)
+    )
+
+    # ---- non_candidates_overview: list of per-non-candidate-model summary
+    # dicts (lines 1010–1034), each carrying full ``description`` from
+    # ``model_descriptions`` plus 4 cache fields (``key_findings``,
+    # ``bottlenecks``, ``score_trend``, ``strategy_assessment``) drawn from
+    # ``model_knowledge_cache``. Sized via the same compact serialization
+    # used for ``interpretation_json`` / ``prior_stage_outputs`` for
+    # consistency. Missing → ``[]`` → ``len("[]") == 2``. Promoted to a
+    # named key by Commit 4.3.3 (Rev 8) after the §8 forensic audit
+    # measured this single field at 15 K → 111 K chars across iter 1 → 14
+    # of the V12 explore run — the dominant contributor (113 % of the Δ)
+    # to the false ``template_and_scaffolding`` 11× growth signal.
+    non_candidates_overview = accumulated.get("non_candidates_overview")
+    non_candidates_overview_chars = len(
+        json.dumps(non_candidates_overview or [], default=str)
     )
 
     # ---- prior_stage_outputs: stage-produced keys, with heavy candidate
@@ -586,15 +612,16 @@ def _audit_proposer_components(
     )
 
     components: Dict[str, int] = {
-        "system_prompt":        len(system_prompt or ""),
-        "candidates_markdown":  candidates_markdown_chars,
-        "interpretation_json":  interpretation_json_chars,
-        "previous_failures":    previous_failures_chars,
-        "vocab_block":          len(vocab_block) if vocab_block else 0,
-        "expert_context_block": len(expert_context_block) if expert_context_block else 0,
-        "agent_cards_block":    len(agent_cards_block) if agent_cards_block else 0,
-        "prior_stage_outputs":  prior_stage_chars,
-        "recent_gate_block":    recent_gate_chars,
+        "system_prompt":            len(system_prompt or ""),
+        "candidates_markdown":      candidates_markdown_chars,
+        "interpretation_json":      interpretation_json_chars,
+        "non_candidates_overview":  non_candidates_overview_chars,
+        "previous_failures":        previous_failures_chars,
+        "vocab_block":              len(vocab_block) if vocab_block else 0,
+        "expert_context_block":     len(expert_context_block) if expert_context_block else 0,
+        "agent_cards_block":        len(agent_cards_block) if agent_cards_block else 0,
+        "prior_stage_outputs":      prior_stage_chars,
+        "recent_gate_block":        recent_gate_chars,
     }
     return {
         "stage_name": stage_name,

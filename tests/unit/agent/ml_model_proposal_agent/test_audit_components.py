@@ -34,6 +34,7 @@ _EXPECTED_KEYS = {
     "system_prompt",
     "candidates_markdown",
     "interpretation_json",
+    "non_candidates_overview",
     "previous_failures",
     "vocab_block",
     "expert_context_block",
@@ -60,7 +61,7 @@ def _make_input(**overrides: Any) -> ProposalInput:
     return ProposalInput(**base)
 
 
-def test_audit_components_returns_all_9_keys_with_full_payload():
+def test_audit_components_returns_all_10_keys_with_full_payload():
     inp = _make_input(previous_failures=["err one", "err two longer"])
     accumulated: Dict[str, Any] = {
         "candidates": [],  # empty list → markdown helper returns ""
@@ -121,6 +122,9 @@ def test_audit_components_handles_empty_blocks():
     # object literal '{}' — 2 chars each — when their inputs are missing.
     assert components["interpretation_json"] == 2
     assert components["prior_stage_outputs"] == 2
+    # non_candidates_overview serialises to the JSON list literal '[]' —
+    # also 2 chars — when missing/empty (Commit 4.3.3, Rev 8).
+    assert components["non_candidates_overview"] == 2
     assert result["total_chars"] == sum(components.values())
 
 
@@ -171,6 +175,68 @@ def test_audit_components_char_accounting_matches_helpers():
 
     # interpretation_json: missing key → audit reports len("{}") == 2.
     assert result["components"]["interpretation_json"] == 2
+
+
+def test_audit_components_non_candidates_overview_attributed_separately():
+    """Commit 4.3.3 (Rev 8) regression — ``non_candidates_overview`` is its
+    own audit key, not pooled into ``prior_stage_outputs``.
+
+    Background: the V12 forensic audit (§8 Commit 4.3.2) showed this single
+    field grew from 15 K → 111 K chars across iter 1 → 14 of the explore run,
+    contributing 113 % of the false ``template_and_scaffolding`` Δ. Promoting
+    it to a named key was the gate that made the per-component breakdown
+    trustworthy for Phase 2 surgery.
+
+    Pin three properties of the fix:
+
+    1. The reported value equals ``len(json.dumps(value, default=str))`` —
+       the same compact serialisation used for ``interpretation_json`` and
+       ``prior_stage_outputs``. Mismatches mean the audit number is lying.
+    2. Because ``non_candidates_overview`` is in ``_PROPOSER_INPUT_KEYS``,
+       it is excluded from ``prior_stage_outputs``. Otherwise the same
+       chars would be double-counted (and the bridge's catch-all clamp
+       would kick in, masking real leaks).
+    3. The 10-key set is reported (no key dropped, no extra key added).
+    """
+    overview = [
+        {
+            "model_type": "fake_arch_a",
+            "best_score": -1.5,
+            "description": "A fake description string." * 10,
+            "key_findings": ["finding-a"] * 5,
+        },
+        {
+            "model_type": "fake_arch_b",
+            "best_score": -2.1,
+            "description": "Another fake description." * 8,
+        },
+    ]
+    expected_chars = len(json.dumps(overview, default=str))
+
+    inp = _make_input()
+    accumulated = {
+        "non_candidates_overview": overview,
+        # A real stage output to keep ``prior_stage_outputs`` non-trivial:
+        "comparison": {"output": "stage_payload_X"},
+    }
+    result = _audit_proposer_components(
+        inp=inp,
+        accumulated=accumulated,
+        agent_cards_block="",
+        expert_context_block="",
+        vocab_block="",
+        system_prompt="",
+        stage_name="proposing",
+    )
+
+    components = result["components"]
+    # Property 1 — exact char count.
+    assert components["non_candidates_overview"] == expected_chars
+    # Property 2 — non-overlap with prior_stage_outputs. If the leak were
+    # double-counted, prior_stage_outputs would include the overview chars.
+    assert components["prior_stage_outputs"] < expected_chars
+    # Property 3 — the 10-key contract holds.
+    assert set(components.keys()) == _EXPECTED_KEYS
 
 
 def test_audit_components_total_chars_is_sum_invariant():
