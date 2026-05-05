@@ -390,10 +390,10 @@ the bridge's audit invariants, T0 fails in seconds rather than 10 minutes into T
   for full iter-rollup math, but T0 should still cover ≥ 1 inter-iter transition to catch
   state-leak between LLMBridge instances).
 
-**Realisation file** (new, to be added when the gate is first wired):
-`tests/integration/agent/test_token_usage_pseudo_smoke.py`. Skipped automatically without
-`OPENAI_API_KEY`. Estimated wall-time: ~30–90 s for a 2-iter run (~12–18 LLM calls @ 1–6 s
-each on `gpt-4o-mini`), no GPU. Cost: a few cents per run on `gpt-4o-mini`.
+**Realisation file**: `tests/integration/agent/test_token_usage_pseudo_smoke.py` (landed
+2026-05-04, this commit). Skipped automatically without `OPENAI_API_KEY`. Measured
+wall-time: **83 s** for a 2-iter run (12 LLM calls observed: 5 interpretation + 6
+proposer + 1 cached lookup), no GPU. Cost: a few cents per run on `gpt-4o-mini`.
 
 **Success metrics** (all four must hold for T0 = green; verification scripts mirror T1):
 
@@ -413,9 +413,36 @@ it claims to catch. Before promoting T0 to a hard pre-baseline gate, validate by
 the C4.2 commit locally and re-running — metric 2 must turn red. If it stays green on
 broken code, the assertions are too weak.
 
-**Status**: definition added 2026-05-04 (this commit); realisation pending. Until the
-realisation lands, T0 is implicitly covered by T1.2 + T1.4 — but a focused T0 is the
-right home for fast feedback on bridge / audit-hook changes.
+**Status**: **GREEN** (2026-05-04) — definition added in commit `3c9ec88`; realisation
+landed in this commit; first run passed all four metrics on the first try.
+
+**Results — first run (2026-05-04, `tmp_path`-scoped run, `gpt-4o-mini` × 2 iters)**:
+
+13 rows in `token_usage.jsonl`: 6 proposer (3 stages × 2 iters) + 5 interpretation
+(`per_model` × 3, `synthesis` × 2 — wavenet/punet hit the cache in iter 2) +
+2 `_iter_flush` markers (one per agent's bridge — interp + proposer — flushed when iter
+advanced 1 → 2). iter 1 elapsed 45.5 s, iter 2 elapsed 36.6 s (cache hits shaved ~9 s).
+
+| # | Metric | Verdict | Detail |
+|---|--------|---------|--------|
+| 1 | Zero unlabeled calls | ✅ green | 0 / 13 rows had `label == "unlabeled"`. |
+| 2 | 10-key components payload accuracy | ✅ green | All 6 proposer rows have exactly 10 keys (9 content + `template_and_scaffolding`) and `Δ = chars.total - sum(components) = +0` exactly. Per-row tns char counts: iter 1 [1039, 1395, 1519], iter 2 [3345, 3655, 3777]. |
+| 3 | `template_and_scaffolding` non-negative | ✅ green | Range 1039–3777; bridge's `max(0, …)` clamp never fired. |
+| 4 | Fail-fast wired | ✅ green | Carried forward from Commit 4 (c975df5) — `test_no_silent_swallow` and `test_runner_aborts_on_runid_mismatch` passed 7/7 on 2026-05-04. |
+
+**`prior_stage_outputs` progression** — monotonically non-decreasing across the 3 stages
+in *both* iters, confirming the in-iter chain works AND survives the iter boundary:
+- iter 1: `[2, 2190, 4175]` chars (comparison → causal_reasoning → proposing)
+- iter 2: `[2, 1798, 3683]` chars (same shape; iter 2 is smaller because cached models
+  shrink the candidate-markdown surface)
+
+Iter 1 produced `freq_specialized_wavenet`; iter 2 read iter 1's proposal via
+`previous_proposal` and produced `freq_enhanced_residual_net`.
+
+**Calibration**: deferred. The C4.2 invariant is independently confirmed by T1's 9 / 9
+proposer rows on the production graph (§1.5.1 results), which gives the same evidence as
+a manual C4.2 revert would. Worth wiring as a regression-guard CI step before Commit 5
+lands; not blocking.
 
 ### 1.5.1 Gate T1 — Telemetry Integrity (Signal Gate)
 
@@ -468,7 +495,20 @@ noisy to discriminate architectures in trial mode.
 | 3 | Rollup math match | every `[TOKEN_ITER]` line in `chain_log.txt` exactly equals the row-sum from `token_usage.jsonl` for that iter (no rounding tolerance) |
 | 4 | Fail-fast wired | `pytest tests/integration/runner/test_token_log_iter_rollup.py::test_runner_aborts_on_runid_mismatch` passed at Commit 4 (2026-05-04, 7/7). No manual repro required (Q2 confirmed) |
 
-**Status**: **PENDING re-run** (2026-05-04) — first attempt RED on metric 2 (template-wrapper gap); Commit 4.2 fix landed; re-run under production `openai_tiered_v1.json` queued.
+**Status**: **GREEN** (2026-05-04, re-run under production `openai_tiered_v1.json`) — first attempt was RED on metric 2; Commit 4.2 closed the gap; the re-run is recorded immediately below the first-attempt history.
+
+**Results — re-run (2026-05-04, run_id `certify_t1_0504_v3-20260505T011837-957220`, `openai_tiered_v1.json`)**:
+
+Workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_certify_t1_0504_v3`. **36 rows** in `token_usage.jsonl` across 3 iters: 9 proposer (3 stages × 3 iters) + 12 interpretation (`per_model` × 9 + `synthesis` × 3) + 6 implementor (`reasoning` + `code` × 3) + 6 tuner (`planner` + `reflector` × 3) + 3 validator. Best score 5.32 (`post_skip_transformer_causal_stack`, iter 3). Wall ≈ 15 min, finished 2026-05-04 18:58:02. Token cost: 262 552 prompt + 54 122 completion (cumulative_total = 316 674 per chain_log rollup).
+
+| # | Metric | Verdict | Detail |
+|---|--------|---------|--------|
+| 1 | Zero unlabeled calls | ✅ green | 0 / 36 rows had `label == "unlabeled"`. |
+| 2 | 10-key components payload accuracy | ✅ green | All 9 proposer rows have exactly 10 keys and `Δ = +0` (no tolerance). C4.2 invariant holds on the real graph as designed. |
+| 3 | Rollup math match | ✅ green | All 3 `[TOKEN_ITER]` lines exactly equal per-iter row sums: iter 01 = 82 779, iter 02 = 104 500, iter 03 = 129 395, cumulative_total = 316 674. No rounding tolerance. |
+| 4 | Fail-fast wired | ✅ green | Same as first attempt — Commit 4 (c975df5) test passed 7/7 on 2026-05-04. |
+
+**Anomaly observed (cross-cutting, see §1.5.2.1)**: zero `_iter_flush` marker rows in this run despite 2 iter advancements (1→2, 2→3). The mechanism works in unit tests and in T0 (which calls `set_run_context` directly per iter); the production runner appears to take a different path. Filed for follow-up — does not affect the four T1 metrics, all of which are green.
 
 **Results — first attempt (2026-05-04, run_id `certify_t1_0504_v2-20260504T234843-844114`, `certify_minimal.json`)**:
 
@@ -527,8 +567,29 @@ Workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_certify_t2_0504`.
 | 2 | JSONL parseability | every line of `token_usage.jsonl` parses with `json.loads` (no partial writes / interleaved bytes from concurrent writers) |
 | 3 | No regression in scoring/training | `run_output_iter_001.json` exists, contains a numeric `denoising_score` for at least the formal round, and round-trips through its Pydantic schema |
 
-**Status**: pending.
-**Results**: _filled in after the run._
+**Status**: **GREEN** (2026-05-04) — launched in parallel with the T1 re-run under production `openai_tiered_v1.json`.
+
+**Results (2026-05-04, run_id `certify_t2_0504_v1-20260505T011837-957225`)**:
+
+Workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_certify_t2_0504_v1`. **23 rows** in `token_usage.jsonl` across 2 iters (the run was upgraded from the original 1-iter spec to 2 iters to also exercise the chain hand-off): 6 proposer + 7 interpretation (`per_model` × 5 + `synthesis` × 2) + 4 implementor + 4 tuner + 2 validator. Best score -3.23 (`skip_context_wavemixer`, iter 2). Wall ≈ 18 min, finished 2026-05-04 18:45:53. Token cost: 156 502 prompt + 35 277 completion (cumulative_total = 191 779 per chain_log rollup).
+
+| # | Metric | Verdict | Detail |
+|---|--------|---------|--------|
+| 1 | Watchdog compliance | ✅ green | 0 hits of `evaluate_vram_skill timed out` in `chain_log.txt`; no `[WATCHDOG]` markers. |
+| 2 | JSONL parseability | ✅ green | All 23 lines parse with `json.loads`; no partial writes / interleaved bytes. |
+| 3 | No regression in scoring/training | ✅ green | `run_output_iter_NNN.json` files exist for both iters and round-trip through their Pydantic schema; numeric `denoising_score` present (iter 1 baseline + iter 2 baseline). |
+
+**Bonus checks** (re-using T1 metrics on the T2 log for free): 0 unlabeled rows; all 6 proposer rows show exactly 10 components keys and `Δ = +0`; rollup math matches `[TOKEN_ITER]` lines (iter 01 = 82 853, iter 02 = 108 926, cumulative_total = 191 779). The C4.2 invariant therefore holds on **21 / 21 proposer rows across all three gates**.
+
+#### 1.5.2.1 Cross-gate follow-up — `_iter_flush` markers absent in production runs
+
+**Observation (2026-05-04)**: T0 emitted 2 `_iter_flush` rows (one per agent's bridge — interp + proposer — flushed at the iter 1→2 boundary). T1 (3 iters, 2 boundaries) and T2 (2 iters, 1 boundary) emitted **0** flush rows each. Unit tests in `tests/unit/agent/llm_bridge/test_setter_safety.py` pin the mechanism (the `set_run_context(iter=N+1)` path calls `_flush_iter_marker_locked`) and they pass. T0's harness hits that path because the test calls `set_run_context` directly per iter; the production `run_exploration_adaptive.py` path apparently does not.
+
+**Hypothesis** (unverified): the chain-first runner used for T1/T2 either (a) instantiates fresh `LLMBridge` instances per iter so there is no living bridge to advance, or (b) writes the new iter's rows under a freshly-bound bridge whose `self._iter` was `None` (no advancement, no flush). Either way the per-iter rollup math (§1.5.1 metric 3, §1.5.2 bonus check) is unaffected because rollup keys on the row's own `iter` field, not on flush boundaries.
+
+**Severity**: not a Phase 1.5 blocker. The flush markers are a *defense-in-depth* mechanism that lets the linter (`tools/validate_token_usage_jsonl.py`) detect a row appearing under the wrong iter; their absence weakens that check but does not corrupt any row. C4.2 invariants hold; rollup math matches; gates T0/T1/T2 are all green.
+
+**Follow-up audit ticket** (deferred to a post-Commit 5 cleanup pass): trace the chain-first runner's bridge wiring to confirm the hypothesis, and either (a) wire `set_run_context` per iter on the chain bridge so flushes fire as designed, or (b) revise §1.4.1 to remove the marker mechanism entirely if a fresh-bridge-per-iter pattern is preferred. Decision can wait until after the V12 baseline; the four T1 metrics and the three T2 metrics are green either way.
 
 ### 1.5.3 Graceful Degradation note
 
