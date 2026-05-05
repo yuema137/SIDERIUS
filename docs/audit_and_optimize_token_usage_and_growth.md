@@ -1,7 +1,7 @@
 # Audit & Optimize Token Usage and Growth
 
-**Status**: Design draft, revision 8 (2026-05-05) — "Drain the Swamp" Pivot. G0 approved; G1 baseline LANDED. Commit 4.3.2 **CLOSED with H1 verdict** — the 11× `template_and_scaffolding` growth was an attribution leak inside `non_candidates_overview` (15 K → 111 K chars, 113 % of the catch-all Δ). Commit 4.3.3 (11th audit key) ships the fix. The leak's source — `model_knowledge_cache` + `model_descriptions` — is also the upstream of `expert_context_block` (24× growth). Commit 6.3 escalated to **Centralized Cache Dehydration**: prune at the `model_knowledge_cache` source so both leaks shrink simultaneously, with explicit Error-Signature preservation guard for Gate G3. Phase 2 unblocked.
-**Author**: drafted 2026-05-04, revised 2026-05-04 (rev 2 — safety/forensic/retention gates), revised 2026-05-04 (rev 3 — commit ledger + hybrid DRR + fail-fast formalization), revised 2026-05-05 (rev 4 — T1-Sanity green + Commit 4.3.1 chain-wrapper parity + V12 launch), revised 2026-05-05 (rev 5 — V12 iter 1–13 calibration + Phase 2 priority pivot), revised 2026-05-05 (rev 6 — Targeted O(N) Dehydration + USD tracking + Phase 3 split), revised 2026-05-05 (rev 7 — V12 iter 14 multi-dimensional explosion: Stability Filter, Knowledge Consolidation, Attribution Audit), revised 2026-05-05 (rev 8 — H1 verdict on 4.3.2 leak + Commit 4.3.3 11th audit key + Commit 6.3 escalated to source-level cache dehydration).
+**Status**: Design draft, revision 8.1 (2026-05-05) — "Closing the Creativity Gap". G0 approved; G1 baseline LANDED. Commit 4.3.2 **CLOSED with H1 verdict** — the 11× `template_and_scaffolding` growth was an attribution leak inside `non_candidates_overview` (15 K → 111 K chars, 113 % of the catch-all Δ). Commit 4.3.3 (11th audit key) ships the fix. The leak's source — `model_knowledge_cache` + `model_descriptions` — is also the upstream of `expert_context_block` (24× growth). Commit 6.3 escalated to **Centralized Cache Dehydration**: prune at the `model_knowledge_cache` source so both leaks shrink simultaneously, with explicit Error-Signature preservation guard for Gate G3. **Rev 8.1** adds Gate G3.5 (SOTA Replication) — an *aspirational* intelligence guard verifying the dehydrated agent can still navigate to the high-performance architectures the V12-rich-context agent discovered. Phase 2 unblocked.
+**Author**: drafted 2026-05-04, revised 2026-05-04 (rev 2 — safety/forensic/retention gates), revised 2026-05-04 (rev 3 — commit ledger + hybrid DRR + fail-fast formalization), revised 2026-05-05 (rev 4 — T1-Sanity green + Commit 4.3.1 chain-wrapper parity + V12 launch), revised 2026-05-05 (rev 5 — V12 iter 1–13 calibration + Phase 2 priority pivot), revised 2026-05-05 (rev 6 — Targeted O(N) Dehydration + USD tracking + Phase 3 split), revised 2026-05-05 (rev 7 — V12 iter 14 multi-dimensional explosion: Stability Filter, Knowledge Consolidation, Attribution Audit), revised 2026-05-05 (rev 8 — H1 verdict on 4.3.2 leak + Commit 4.3.3 11th audit key + Commit 6.3 escalated to source-level cache dehydration), revised 2026-05-05 (rev 8.1 — Gate G3.5 SOTA Replication + Metric #12 SRR + Commit 11.2 verify_sota_replication.py).
 **Inputs**:
 
 - `reports/v11_20250503_token_usage.md` §12 (Proposer Internal Workflow & Feedback Logic) — the audit that motivates this doc.
@@ -86,6 +86,21 @@ Changes landing in Rev 8:
 - **Commit 6.1 unchanged** in scope; the cache-source dehydration in 6.3 also reduces the `interpretation.per_model` per-call payload, but the call-multiplication clamp (Stability Filter) is orthogonal and remains a separate fix.
 - **Phase 1 closes** with Commit 4.3.3. Phase 2 entry is unblocked.
 - Commit Map redrawn (Rev 8 — see end of §8). G1.5 expanded to 5 metrics (the new metric tracks the cache dehydration's impact on both downstream blocks).
+
+### Revision 8.1 changelog (2026-05-05) — "Closing the Creativity Gap"
+
+**Status**: Rev 8 spec'd Memory (Trap Test, G3) and Integrity (Hybrid DRR, G4) safeguards but had no aspirational metric for **Retained Capability** — every existing intelligence metric was *defensive* (catches regressions). Rev 8.1 adds the missing pillar.
+
+The audit finding driving Rev 8.1: FRR catches "don't repeat bads" and DRR catches "claims = code", but neither asks the question — *can the dehydrated agent still navigate to the high-signal architectures the V12-rich-context agent discovered?* An agent could pass G3 + G4 and still produce mediocre-but-honest proposals because the consolidator's Merge & Prune dropped the high-signal architectural insight that originally drove SOTA. We need a guard that proves consolidation does not "lop off the peak" of our collective wisdom.
+
+Changes landing in Rev 8.1:
+
+- **New §2.10 — Gate G3.5: SOTA Replication Test.** Pick a "Golden Iteration" from the V12 baseline (the iter that produced the highest `denoising_score`), reconstruct its upstream state, push it through the post-6.3 dehydrated cache, and let the proposer make a real LLM call. Compare the new proposal against the V12 original on two axes: **Structural Fidelity ≥ 0.7** (AST match on encoder/decoder/key innovations) and **Reasoning Density ≥ 75 %** (LLM judge on `delta_reasoning` informativeness). Failure = consolidator is pruning load-bearing creative signal.
+- **§4.2 metric #12 — SOTA Retention Rate (SRR).** Aggregate of G3.5 across the top 3 V12 architectures: pass on **≥ 2 of 3**. Below target blocks Phase 2 exit.
+- **New Commit 11.2 — `tools/verify_sota_replication.py`.** Automates Golden-State extraction from V12 artefacts + AST/LLM-judge comparison. Lands alongside Commit 11 (Trap Test) so G3 and G3.5 can be evaluated together.
+- **Commit Map redrawn.** G3.5 inserted between G3 (Trap) and G4 (Full V13 Metrics) in the Phase 2 sequence.
+
+**Framing**: Rev 8.1 shifts the conversation from "how much can we cut?" to "how much signal must we keep?" The Trap Test protects Memory; Hybrid DRR protects Integrity; SOTA Replication protects Creativity. The agent must not only be small and honest — it must remain a world-class architect.
 
 ---
 
@@ -1086,6 +1101,76 @@ If the test fails for reasons (1) or (2), we have explicit knobs to tune:
 
 The Trap Test is the empirical scoreboard for setting these knobs.
 
+### 2.10 The SOTA Replication Test — retained creative capability (Gate G3.5)
+
+The Trap Test (§2.9) protects the agent's **memory** — known bads stay known. The Hybrid DRR (§4.2 #8a–8c) protects its **integrity** — claims match code. Neither asks the harder question: *can the dehydrated agent still navigate to the high-signal architectures the V12-rich-context agent discovered?* Without a guard for **retained creative capability**, every existing intelligence metric is *defensive*; we have no aspirational metric proving the consolidator preserved the peak of our collective wisdom.
+
+Gate G3.5 closes that gap. It is a Phase 2 exit gate, run *after* G3 (Trap) and *before* G4 (full V13 metrics).
+
+#### 2.10.1 Setup — Pick the "Golden Iteration"
+
+From the V12 explore baseline (`/home/klz/Data/SIDEREIS_DATA/exploration_explore_novel_v12_0504/`), select the iteration that produced the highest `denoising_score` — the **Golden Iteration**. For breadth, also identify the **top 3 V12 architectures by `denoising_score`**; G3.5 is run independently on each, and the SRR metric (§4.2 #12) requires ≥ 2 of 3 to pass.
+
+The selection is deterministic and automated by `tools/verify_sota_replication.py` (Commit 11.2): it parses `run_output_*.json` + per-iter records, ranks by formal `denoising_score`, and emits the Golden Iteration set as a JSON manifest committed to the test fixture path.
+
+#### 2.10.2 State reconstruction
+
+For each Golden Iteration, extract the upstream state **as it existed at the start of that iteration** (i.e., the inputs the proposer would have seen):
+
+- `model_knowledge_cache` — the full accumulated cache *just before* the Golden Iteration's proposer call.
+- `model_descriptions` — same temporal cut.
+- Prior iter records (interpretation outputs, validator outputs, training results) — needed to drive the consolidator's Merge & Prune logic.
+
+This reconstruction must match what was actually fed to the V12 proposer at that iter — verified by replaying the V12 record's input hash, not by trusting the live workspace state.
+
+#### 2.10.3 Dehydrated re-run
+
+Process the reconstructed state through the **Commit 6.3 consolidator**, producing the new dehydrated cache. Build the proposer's input from that cache (using the post-6.3 protocols). Issue **a real LLM call** (gated `@real_run`, same model + temperature as the V12 baseline call) to generate a new proposal.
+
+The proposer is given the same task framing as V12 — no biased prompt, no nudge toward the V12 architecture. The point is to verify that the dehydrated context still *naturally* leads the proposer to a competitive solution, not that the test rigs the answer.
+
+#### 2.10.4 Success metrics
+
+Two axes, both must pass per Golden Iteration:
+
+| Axis | Metric | Target | Computation |
+|------|--------|--------|-------------|
+| **Structural Fidelity** | AST overlap on core architectural primitives (encoder family, decoder family, key innovations — e.g., FFT layer, attention block, residual structure) | **≥ 0.7** | Plugin AST parse on both proposals; compute Jaccard on a curated set of "primitive" node-types. Deterministic. |
+| **Reasoning Density** | LLM judge (gpt-4o-mini, temp=0) compares new `delta_reasoning` + `causal_hypothesis` against the V12 originals. Returns: "the new reasoning is at least as targeted, specific, and historically informed as the original — yes/no." | **≥ 75 %** of judges' verdicts return "yes" across all sampled claims | Same judge model used for DRR_LLM (§4.2 #8b) for cost control. Multiple-judgment averaging reduces variance. |
+
+Pass criterion per iteration: `Structural ≥ 0.7 AND Reasoning Density ≥ 75 %`.
+
+#### 2.10.5 Failure trigger
+
+If the new proposal scores below either threshold, the consolidator's Merge & Prune is **lopping off the peak** of our collective wisdom — high-signal architectural insights that drove V12 SOTA are being collapsed into generic summaries. Do not ship Phase 2.
+
+Diagnostic next steps when G3.5 fails:
+
+1. Inspect which V12 cache entries were dropped or merged before reaching the proposer in the dehydrated run.
+2. If a load-bearing `key_findings` entry was merged into a generic bucket → tighten the consolidator's similarity threshold (raise the merge bar).
+3. If the active-set policy excluded the Golden Iteration's parent architecture → expand the active-set inclusion rule (e.g., "always retain top-K by historical `denoising_score`").
+4. If the failure persists after both knob adjustments, the cache schema itself is too lossy — escalate back to Commit 6.3 design.
+
+#### 2.10.6 Tuning knobs
+
+| Knob | Default | Effect |
+|------|---------|--------|
+| `consolidator.merge_similarity_threshold` | 0.85 | Raise to merge less aggressively (preserves more peaks; larger cache). |
+| `consolidator.active_set_top_k` | 5 | Lowest-cost protection for Golden Iteration parent architectures: always keep the top-K by historical `denoising_score`. |
+| `srr.judge_n_samples` | 3 | More LLM-judge samples per claim = lower variance, higher cost. |
+| `srr.required_pass_count` | 2 (of 3 top architectures) | Tighter bar = stricter Phase 2 exit; SRR is the aggregate (§4.2 #12). |
+
+These knobs are tuned *before* G3.5 is declared a hard gate; the first SRR run produces a calibration distribution that informs the production thresholds.
+
+#### 2.10.7 Why this gate is aspirational, not defensive
+
+FRR (§4.2 #7) measures "did the agent re-try a known failure?" — defensive.
+DRR (§4.2 #8) measures "did the agent's claims match its code?" — defensive.
+Cr (§4.2 #10) measures "is the compressor compressing?" — defensive.
+**SRR (§4.2 #12) measures "can the agent still find what it found before?" — aspirational.**
+
+Without SRR, every existing intelligence metric could pass while the agent quietly produces mediocre-but-honest proposals. The dehydration goal is to keep the agent small *and* honest *and* a world-class architect; G3.5 is the only gate that pins the third property.
+
 ---
 
 ## 3. Files Touched — Full List
@@ -1153,6 +1238,7 @@ These are the metrics that prove Phase 2 didn't lobotomize the agent. They are m
 | 8c | **DRR Gap** (hallucination indicator) | 2 | `gap = abs(DRR_LLM − DRR_Structural)`. A small gap means the two methods agree and the result is trustworthy. A large gap means one method is being fooled — usually it's the LLM judge being too generous (claim "I added attention" matches semantically against any attention-shaped code, even pre-existing). | **≤ 0.15** | **> 0.25** — the two graders disagree materially. Either the structural matcher is too strict or the LLM judge is too lenient. Re-tune the methods before trusting either number. |
 | 10 | **Dehydration Compression Ratio (Cr)** | 2 | Per failed attempt: `Cr = len(rendered_signature) / len(raw_traceback_or_log)`. Computed across all failures in a 30-iter chain run; reported as `(median, p95)`. | **median Cr < 0.10**, **p95 Cr < 0.15**. | **median Cr ≥ 0.15** — compressor is not compressing. **p95 Cr ≥ 0.30** — pathological cases (long tracebacks) are slipping through, which is exactly when compression matters most. |
 | 11 | **delta_reasoning presence** | 2 | 100% of `ProposalOutput` payloads carry a non-null, schema-valid `delta_reasoning` (bounded list lengths, all required subfields). | 100% | < 100% — schema validation should make this impossible; any missing payload is a regression. |
+| 12 | **SOTA Retention Rate (SRR)** | 2 | Aggregate of the §2.10 SOTA Replication Test (Gate G3.5) across the **top 3 V12 architectures by `denoising_score`**. Per architecture: pass = `Structural Fidelity ≥ 0.7 AND Reasoning Density ≥ 75 %`. SRR = number of passing architectures. **Aspirational guard** — verifies the dehydrated agent still navigates to the high-signal architectures the V12-rich-context agent discovered. | **≥ 2 of 3** | **< 2 of 3** — the consolidator is lopping off the peak of collective wisdom. **Blocks Phase 2 exit.** Tighten consolidator knobs (§2.10.6) or revisit Commit 6.3 design before retesting. |
 
 #### 4.2.1 How the intelligence metrics are computed
 
@@ -1161,6 +1247,7 @@ These are the metrics that prove Phase 2 didn't lobotomize the agent. They are m
 - **DRR_LLM computation** is semi-automated: same script invokes a cheap LLM judge (gpt-4o-mini, temperature=0) with the claim + diff hunks; returns realized/not per claim with a one-line rationale. The LLM judge is deliberately lighter than the proposer's own model — we don't want the judge to share blind spots with the proposer.
 - **DRR Gap** is just `abs(DRR_LLM - DRR_Structural)`; reported alongside the two raw numbers. The first 30-iter run uses both methods on every sample so we can calibrate the gap distribution before deciding to lean on one or the other long-term (open question §6.1).
 - **Cr** is computed in-process whenever `ErrorSignatureSkill.extract` runs on a real failure: the skill records `(input_chars, output_chars)` to a sidecar log; aggregator reports median + p95.
+- **SRR computation** is automated by `tools/verify_sota_replication.py` (Commit 11.2): selects the top-3 V12 architectures from `run_output_*.json` by `denoising_score`; reconstructs upstream state at each Golden Iteration; processes through the post-6.3 dehydrated cache; issues a real proposer LLM call per architecture (`@real_run`-gated); computes Structural Fidelity (AST Jaccard on architectural primitives) deterministically and Reasoning Density via the same gpt-4o-mini judge used for DRR_LLM (§2.10.4). Outputs a CSV row per architecture + an SRR aggregate. Runs as a CI step on the V13 chain output, gating Phase 2 exit alongside G4.
 
 #### 4.2.2 Caveats
 
@@ -1178,6 +1265,7 @@ These are the metrics that prove Phase 2 didn't lobotomize the agent. They are m
 - **Gate G1** — Phase 1 baseline report (`reports/v12_token_baseline.md`) + Top-3 Bloat Report (`reports/v12_top3_bloat.md`, §1.9) — gates Phase 2 design validity.
 - **Gate G2** — Offline Forensic Benchmark (§2.8) passes — gates `ErrorSignatureSkill` going to production.
 - **Gate G3** — Trap Test (§2.9) passes — gates the Sliding Window going to production.
+- **Gate G3.5** — SOTA Replication Test (§2.10) passes on ≥ 2 of 3 top V12 architectures (Metric #12, SRR) — gates Phase 2 exit. Aspirational guard: verifies the consolidator did not prune the high-signal architectural insights that drove V12 SOTA.
 - **Gate G4** — All §4 metrics pass on V13 chain run — gates legacy-path removal.
 
 Each step is annotated `(Commit N)` matching the §8 commit ledger. Within a commit, all listed steps land together — they are not separately committable.
@@ -1774,10 +1862,10 @@ These two hypotheses have different downstream consequences. **(H1) requires a c
 - `reports/v12_top3_bloat.md` (new — output artifact)
 
 **Tasks**:
-- [ ] Run a V12 chain (settings matching V11 baseline: `openai_tiered_v1.json` routing, 5+ iters minimum). The run is the deliverable, not a code change. **(Already in flight — explore at iter 13/30 at time of Rev 5.)**
-- [ ] Implement `tools/build_token_baseline_report.py` per the spec below.
-- [ ] Write `reports/v12_token_baseline.md`: real per-call token counts, per-iter trend, comparison against the §12-audit estimates.
-- [ ] Write `reports/v12_top3_bloat.md`: tables per §1.9.1; ends with one of the three §1.9.2 verdicts.
+- [x] Run a V12 chain (settings matching V11 baseline: `openai_tiered_v1.json` routing, 5+ iters minimum). The run is the deliverable, not a code change. **Done — `run_id explore_novel_v12_0504-20260505T070526-1028759`, 14 iters captured.**
+- [x] Implement `tools/build_token_baseline_report.py` per the spec below.
+- [x] Write `reports/v12_token_baseline.md`: real per-call token counts, per-iter trend, comparison against the §12-audit estimates.
+- [x] Write `reports/v12_top3_bloat.md`: tables per §1.9.1; ends with one of the three §1.9.2 verdicts.
 
 **`build_token_baseline_report.py` spec (Rev 6 finalized — adds USD cost tracking + bloat alert)**:
 
@@ -1805,14 +1893,14 @@ The tool reads one or more `{workspace}/token_usage.jsonl` files and emits per-l
    Both alerts are informational (exit 0), not fatal — they appear inline in the report at the top of the affected iter's section, and as a summary block at the end.
 
 **Pre-Commit Checklist**:
-- [ ] **Positive test**: `python tools/build_token_baseline_report.py --workspace <v12-ws>` produces both reports without error; both render in markdown without broken tables.
-- [ ] **Quantitative metric**: for the 5-iter run, the report shows a clean per-iter token sparkline; the linter on the JSONL returns 0 anomalies.
-- [ ] **Segmentation test**: hand-craft a 3-row JSONL with one `attempt=0,status=ok` row and two `attempt=1` retry rows. Assert the tool reports Happy-Path-Cost = first row's tokens, Recovery-Cost = sum of the other two.
-- [ ] **USD test**: hand-craft a row with `prompt=100_000, completion=10_000`. With default rates, assert reported USD = `100000*10/1e6 + 10000*30/1e6 = $1.30` exactly (precision check; floating-point assertion to 4 decimals).
-- [ ] **Alert test (CONTEXT)**: hand-craft a row with `tokens.prompt = 60_000`. Assert the tool emits `[CONTEXT_EXPLOSION]` for that row and exits 0.
-- [ ] **Alert test (BLOAT)**: hand-craft a 1-iter JSONL whose total cost computes to $2.00 USD. Assert the tool emits `[BLOAT_ALERT]` for that iter and exits 0. Then hand-craft another at $1.20 — assert no `[BLOAT_ALERT]`.
-- [ ] **Negative test**: run the report generator against a workspace whose `token_usage.jsonl` has been hand-corrupted (drop an `_iter_flush` marker). Assert the generator refuses to publish — emits "AUDIT LOG CORRUPTION DETECTED" and exits nonzero. We never publish numbers from a corrupted log.
-- [ ] **Verdict recorded**: §1.9.2 verdict is written explicitly at the top of `reports/v12_top3_bloat.md` — Confirmed Proposer / Pivot Tuner / Pivot Other / Sanity Floor.
+- [x] **Positive test**: `python tools/build_token_baseline_report.py --workspace <v12-ws>` produces both reports without error; both render in markdown without broken tables. (`tests/unit/tools/test_token_baseline_report.py::test_end_to_end_positive_run`)
+- [x] **Quantitative metric**: for the 5-iter run, the report shows a clean per-iter token sparkline; the linter on the JSONL returns 0 anomalies. (`tools/validate_token_usage_jsonl.py` against the V12 file → `[OK] clean (0 warnings)`; report contains all 14 iters of per-iter rows.)
+- [x] **Segmentation test**: hand-craft a 3-row JSONL with one `attempt=0,status=ok` row and two `attempt=1` retry rows. Assert the tool reports Happy-Path-Cost = first row's tokens, Recovery-Cost = sum of the other two. (`test_segmentation_3_row_jsonl` + `test_happy_path_classifier`)
+- [x] **USD test**: hand-craft a row with `prompt=100_000, completion=10_000`. With default rates, assert reported USD = `100000*10/1e6 + 10000*30/1e6 = $1.30` exactly (precision check; floating-point assertion to 4 decimals). (`test_usd_precision_to_four_decimals` + `test_usd_overrides_propagate`)
+- [x] **Alert test (CONTEXT)**: hand-craft a row with `tokens.prompt = 60_000`. Assert the tool emits `[CONTEXT_EXPLOSION]` for that row and exits 0. (`test_context_explosion_alert_fires_above_threshold` + `test_context_explosion_silent_at_threshold`)
+- [x] **Alert test (BLOAT)**: hand-craft a 1-iter JSONL whose total cost computes to $2.00 USD. Assert the tool emits `[BLOAT_ALERT]` for that iter and exits 0. Then hand-craft another at $1.20 — assert no `[BLOAT_ALERT]`. (`test_bloat_alert_fires_above_threshold` + `test_bloat_alert_silent_below_threshold`)
+- [x] **Negative test**: run the report generator against a workspace whose `token_usage.jsonl` has been hand-corrupted (drop an `_iter_flush` marker). Assert the generator refuses to publish — emits "AUDIT LOG CORRUPTION DETECTED" and exits nonzero. We never publish numbers from a corrupted log. (`test_corrupted_jsonl_blocks_publication` + `test_skip_lint_bypasses_corruption_block`)
+- [x] **Verdict recorded**: §1.9.2 verdict is written explicitly at the top of `reports/v12_top3_bloat.md` — Confirmed Proposer / Pivot Tuner / Pivot Other / Sanity Floor. (Top of file: `## Verdict: **Confirmed Proposer Hypothesis**`. `test_verdict_written_at_top_of_top3_report` pins the contract.)
 
 **Definition of Done (Gate G1)**: real V12 baseline numbers exist; Happy-Path/Recovery segmentation is reported; per-label growth slopes are reported; per-iter USD costs are reported; both alert thresholds are evaluated; the verdict is recorded; the team has explicitly chosen one of the four branches (continue to Commit 6.1, pivot, or stop).
 
@@ -2140,9 +2228,43 @@ If any of the three exceeds its target, the policy is too lenient — return to 
 - [ ] **Quantitative metric (Gate G3)**: `pytest tests/integration/proposer/test_long_term_wisdom_trap.py --real-api-call` — both assertions pass (proposer cites iter-2 lesson AND avoids the failing architecture).
 - [ ] **Negative test**: `pytest -k test_proposer_falls_back_when_ledger_missing` — with `inp.ledger=None`, the legacy `previous_failures` rendering is used and produces a valid prompt (regression-guard for the fallback path).
 
-**Definition of Done (Gate G3)**: ledger is rendered correctly; `delta_reasoning` is in every output; the Trap Test demonstrates 8-iter retention. If G3 fails, tune §2.9.4 knobs (older_attempts_K, confirmed_lessons_min_iters, last_frames_count) and re-run before proceeding to Commit 12.
+**Definition of Done (Gate G3)**: ledger is rendered correctly; `delta_reasoning` is in every output; the Trap Test demonstrates 8-iter retention. If G3 fails, tune §2.9.4 knobs (older_attempts_K, confirmed_lessons_min_iters, last_frames_count) and re-run before proceeding to Commit 11.2.
 
-**Out of Scope**: V13 chain run (Commit 12); legacy-path removal (Commit 12 cleanup).
+**Out of Scope**: SOTA Replication tooling (Commit 11.2); V13 chain run (Commit 12); legacy-path removal (Commit 12 cleanup).
+
+---
+
+### Commit 11.2: SOTA Replication tooling + Gate G3.5
+
+**Phase**: 2.
+**§2 ref**: 2.10. **§4.2 ref**: metric #12 (SRR).
+
+**Scope**:
+- `tools/verify_sota_replication.py` (new — Golden Iteration extraction, dehydrated re-run, AST + LLM-judge comparison)
+- `tests/integration/proposer/test_sota_replication.py` (new — `@real_run`-gated test that drives `verify_sota_replication.py` against the V12 baseline workspace)
+- `tests/unit/tools/test_verify_sota_replication.py` (new — synthetic-fixture unit tests for the deterministic pieces: Golden Iteration ranking, AST Jaccard, manifest schema)
+- `reports/v13_sota_replication.md` (new — output artefact; one row per Golden Iteration, plus SRR aggregate)
+
+**Tasks**:
+- [ ] Implement `tools/verify_sota_replication.py` per §2.10:
+  - Golden-Iteration selector: rank V12 `run_output_*.json` by `denoising_score`; emit a manifest (top-3 architectures, source iter, source workspace).
+  - State reconstructor: extract `model_knowledge_cache` + `model_descriptions` + prior records as they existed at the start of each Golden Iteration; verify reconstruction fidelity via input-hash replay.
+  - Dehydrated re-runner: process state through the Commit 6.3 consolidator; issue a real proposer LLM call (`@real_run`-gated) using the post-6.3 protocols.
+  - Comparator (Structural Fidelity): plugin-AST parse on both proposals; compute Jaccard on a curated primitive-node set (encoder family, decoder family, FFT/attention/residual presence). Deterministic.
+  - Comparator (Reasoning Density): cheap LLM judge (gpt-4o-mini, temp=0) compares new `delta_reasoning` + `causal_hypothesis` against V12 originals; multi-sample to reduce variance.
+  - Reporter: emit `reports/v13_sota_replication.md` with per-architecture verdict, the AST evidence string, the LLM-judge rationale, and the SRR aggregate.
+- [ ] Implement the unit tests for the deterministic pieces (no LLM in the loop): Golden ranking, AST Jaccard math, manifest schema.
+- [ ] Implement the `@real_run`-gated integration test that exercises the full pipeline on the V12 baseline workspace.
+
+**Pre-Commit Checklist**:
+- [ ] **Positive test (unit)**: `pytest tests/unit/tools/test_verify_sota_replication.py` — Golden Iteration ranking is deterministic given a fixed manifest; AST Jaccard returns 1.0 on identical primitives, 0.0 on disjoint sets, expected fractions on partial overlaps; manifest schema rejects malformed inputs.
+- [ ] **Positive test (Gate G3.5)**: `pytest tests/integration/proposer/test_sota_replication.py --real-api-call` against the V12 baseline workspace. **Pass criterion**: SRR ≥ 2 of 3 (each passing architecture meets `Structural Fidelity ≥ 0.7 AND Reasoning Density ≥ 75 %`).
+- [ ] **Negative test (consolidator regression sentinel)**: with a synthetic adversarial cache (top-K active set zeroed out), assert SRR drops to 0 — proves the metric is sensitive to the consolidator dropping load-bearing entries.
+- [ ] **Quantitative metric**: report cost — total LLM spend for one full SRR run ≤ \$2 (3 proposer calls + ~15 judge calls). SRR is run gated on Phase 2 exit, not per-iter.
+
+**Definition of Done (Gate G3.5)**: `tools/verify_sota_replication.py` produces a verdict CSV + `reports/v13_sota_replication.md` for the top-3 V12 architectures; SRR ≥ 2 of 3; the failing-case diagnostic (§2.10.5) is exercised at least once via the adversarial-cache sentinel test. If SRR < 2 of 3, tune §2.10.6 knobs (`merge_similarity_threshold`, `active_set_top_k`) and re-run before proceeding to Commit 12.
+
+**Out of Scope**: V13 chain run (Commit 12); legacy-path removal (Commit 12 cleanup); SRR running per-iter (it is a gate, not a continuous metric).
 
 ---
 
@@ -2178,7 +2300,7 @@ If any of the three exceeds its target, the policy is too lenient — return to 
 
 ---
 
-### Commit Map (visual — Rev 8)
+### Commit Map (visual — Rev 8.1)
 
 ```
 Phase 1 (Telemetry — CLOSED)             Phase 2 (Targeted O(N) Dehydration)              Phase 3 (Optional)
@@ -2203,11 +2325,15 @@ Phase 1 (Telemetry — CLOSED)             Phase 2 (Targeted O(N) Dehydration)  
                                           │ C9 helpers                          │
                                           │ C10 assembly                        │
                                           │ C11 G3 trap (depends on 6.3 guard)  │
+                                          │ C11.2 G3.5 SOTA Replication ★ NEW   │
+                                          │      (verify_sota_replication.py;   │
+                                          │       SRR ≥ 2/3 top-V12 archs;      │
+                                          │       aspirational creativity guard)│
                                           │ C12 G4 + cleanup                    │
                                           └─────────────────────────────────────┘
 ```
 
-Gates G1, G1.5, G2, G3, G4 are explicit STOP points.
+Gates G1, G1.5, G2, G3, G3.5, G4 are explicit STOP points.
 
 - **G1 (LANDED)**: Commit 5 produced `reports/v12_token_baseline.md` + `reports/v12_top3_bloat.md`. Verdict: Confirmed Proposer Hypothesis. 14/14 BLOAT_ALERT. Commit 4.3.2 surfaced as a Phase-1 blocker.
 - **G1 audit closure (Rev 8)**: Commit 4.3.2 closed with H1 verdict; Commit 4.3.3 ships the 11-key audit. The 10→11-key shift restores `template_and_scaffolding` to its true wrapper baseline (~8 K chars per call), and Phase 2 surgery now operates on a trusted breakdown.
@@ -2221,6 +2347,7 @@ Gates G1, G1.5, G2, G3, G4 are explicit STOP points.
    **All five must drop from O(N) to ≤ O(log N) or bounded ≤ 1.5× iter5/iter1.** If G1.5 fails on any, return to the responsible commit (6.1/6.2/6.3) and tighten before proceeding.
 - **Phase 2 entry**: unblocked by Commit 4.3.3 (Rev 8). Phase 1 fully closed.
 - **G3 dependency**: Commit 11's Trap Test (§2.9) depends on Commit 6.3's Error-Signature Preservation Guard. If 6.3 prunes error signatures, G3 fails. The guard is a hard requirement, pinned by a dedicated unit test in 6.3's Pre-Commit Checklist.
+- **G3.5 (Rev 8.1 — NEW)**: Commit 11.2's SOTA Replication Test (§2.10) verifies the *aspirational* property — the dehydrated agent can still navigate to the high-signal architectures the V12-rich-context agent discovered. Computed via `tools/verify_sota_replication.py`: per-architecture verdict on Structural Fidelity (≥ 0.7) AND Reasoning Density (≥ 75 %); SRR aggregate (Metric #12) requires ≥ 2 of 3 top V12 architectures to pass. Below threshold = consolidator's Merge & Prune is lopping off the peak; tune §2.10.6 knobs (`merge_similarity_threshold`, `active_set_top_k`) and re-run. **Blocks Phase 2 exit.** Rationale: FRR + DRR are defensive guards (catch regressions); SRR is the only aspirational guard (verifies retained creative capability).
 
 ---
 
