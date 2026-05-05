@@ -1,7 +1,7 @@
 # Audit & Optimize Token Usage and Growth
 
-**Status**: Design draft, revision 3 (2026-05-04). G0 (architecture) approved; this revision adds the §8 Commit Ledger and hybrid DRR in preparation for execution.
-**Author**: drafted 2026-05-04, revised 2026-05-04 (rev 2 — safety/forensic/retention gates), revised 2026-05-04 (rev 3 — commit ledger + hybrid DRR + fail-fast formalization).
+**Status**: Design draft, revision 4 (2026-05-05). G0 (architecture) approved; T1-Sanity GREEN; Commit 4.3 + 4.3.1 landed; V12 chains live.
+**Author**: drafted 2026-05-04, revised 2026-05-04 (rev 2 — safety/forensic/retention gates), revised 2026-05-04 (rev 3 — commit ledger + hybrid DRR + fail-fast formalization), revised 2026-05-05 (rev 4 — T1-Sanity green + Commit 4.3.1 chain-wrapper parity + V12 launch).
 **Inputs**:
 
 - `reports/v11_20250503_token_usage.md` §12 (Proposer Internal Workflow & Feedback Logic) — the audit that motivates this doc.
@@ -23,6 +23,14 @@
 - §4.2 metric #8 (DRR) restructured into **Hybrid DRR**: split into `DRR_LLM` (semantic, LLM-judge) and `DRR_Structural` (AST/regex match against the source-code diff). Both must pass; their *gap* is itself a published metric — a large gap indicates "Reasoning Hallucination."
 - New §8: **Step-by-Step Commit & Validation Ledger**. The 24 implementation steps in §5 are grouped into **12 atomic commits** (Phase 1: commits 1–5; Phase 2: commits 6–12). Each commit carries a `[ ]` task list, a Pre-Commit Verification block (positive test + quantitative metric + negative test), and a Definition of Done. §5 step numbers carry an annotation `(Commit N)` so the two sections are synchronized — "Execute Commit #N" maps deterministically to the §5 substeps.
 - §6 expanded with the Structural-vs-Semantic DRR question.
+
+### Revision 4 changelog
+
+- §1.5.1.1 T1-Sanity attested **GREEN** (2026-05-05) — M1 (sidecar binding), M2 (10-key Δ=0 across all 3 proposer rows), M3 (`[TOKEN_ITER]` rollup ≡ JSONL row sum) all hold. Run details captured inline.
+- §8 **Commit 4.3** closed: Pre-Commit sanity gate ☑, Definition of Done **GREEN**.
+- New §8 **Commit 4.3.1** — `sdsc_submission_scripts/_chain_common.sh` wrapper fix: thread `--run_name` through to `run_one_iteration.py`. Caught at the V12 launch dry-run audit; without this, every chain iter would have crashed at argparse on the new required flag. Three new dry-run unit tests in `tests/unit/scripts/test_chain_wrapper_run_name.py` pin the contract (required-flag check, value forwarding, no silent auto-derivation from workspace basename).
+- V12 chains launched 2026-05-05 (`explore_novel_v12_0504`, `exploit_cnn_v12_0504`); both writing `token_usage.jsonl` with `run_id` correctly bound to `{workspace}/.token_run_id`. Commit 5 baseline data is now being generated.
+- **Known issue logged** (does not block Commit 5): the `chain_run_name` field in JSONL rows reads `None` even though the sidecar holds the right value. Run-id immutability (§1.4.1) is unaffected — only the redundant audit-label field is missing the value. Follow-up patch in `LLMBridge.set_run_context` deferred.
 
 ---
 
@@ -595,7 +603,19 @@ screen -S siderius-certify-t1-sanity -d -m bash -c "
 
 **Out-of-scope** for this sanity (intentionally — covered by historical T1/T2 above): cross-iter rollup math (single iter), `_iter_flush` markers (no advancement), watchdog under real training (T2 surface), formal-round behaviour.
 
-**Status**: pending execution.
+**Status**: **GREEN** (2026-05-05).
+
+**Results (2026-05-05, run_id `certify_t1_sanity_0504-20260505T052619-1011326`)**:
+
+Workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_certify_t1_sanity_0504`. **11 rows** in `token_usage.jsonl` — 3 proposer (`comparison`, `causal_reasoning`, `proposing`) + 4 interpretation + 1 implementor + 2 tuner + 1 validator. Wall ~1 h 35 min (training 27 min + inference 35 min + scoring 25 min). Iter 1 was real `--is_trial` punet+wavenet seeds under `openai_tiered_v1.json`.
+
+| # | Metric | Verdict | Detail |
+|---|--------|---------|--------|
+| 1 | `token_usage.jsonl` written + sidecar binding | ✅ green | 11 rows; every `run_id` equals the contents of `{workspace}/.token_run_id` (`certify_t1_sanity_0504-20260505T052619-1011326`); the immutable run_id (§1.4.1) survives the would-be subprocess boundary. |
+| 2 | 10-key Δ=0 invariant on chain runner | ✅ green | All 3 proposer rows have exactly the canonical 10 component keys (per `nodes/ml_model_proposal_agent.py:588-598` + `agent/llm_bridge.py:961`) and `chars.total - sum(components.values()) == 0` exactly. C4.2 invariant carries unchanged across the runner switch. |
+| 3 | `[TOKEN_ITER]` rollup ≡ JSONL row sum | ✅ green | rollup `total_tok` = 82 236; JSONL `prompt + completion` sum = 82 236 (exact match). `_emit_token_iter_rollup`'s JSONL-seeded cumulative path is mathematically correct. |
+
+**Conclusion**: Commit 4.3 instrumentation produces a `token_usage.jsonl` of identical shape and integrity to the historical adaptive-runner T1 attestation. Phase 1.5 gate ladder is complete on the chain-first path; Commit 5 (V12 baseline) is unblocked from the certification side and was launched same-day (see Revision 4 changelog).
 
 ### 1.5.2 Gate T2 — System Stability (Plumbing Gate)
 
@@ -1466,20 +1486,95 @@ impossible — there is now exactly one production runner.
       unaffected by the chain-runner port. **Result: 41/41 PASS** (2026-05-04).
 - [x] **Smoke — argparse**: `.venv/bin/python sdsc_submission_scripts/run_one_iteration.py
       --help` parses without error and shows `--run_name` as required. **Result: PASS**.
-- [ ] **Sanity gate (1-iter chain runner under `openai_tiered_v1.json`)**:
+- [x] **Sanity gate (1-iter chain runner under `openai_tiered_v1.json`)**:
       `token_usage.jsonl` exists, ≥4 rows, all rows' `run_id` match `{workspace}/.token_run_id`,
       every proposer row has 10-key Δ=0; one `[TOKEN_ITER] iter=01 ...` line in stdout
-      whose `total_tok` equals the JSONL row sum. **Status: pending — see §1.5.1.1**.
+      whose `total_tok` equals the JSONL row sum. **Result: GREEN** (2026-05-05) —
+      11 rows, M1+M2+M3 all PASS; run_id `certify_t1_sanity_0504-20260505T052619-1011326`.
+      Detail in §1.5.1.1.
 
 **Definition of Done**: V12 production chains write `token_usage.jsonl` with the same
 schema and run_id-binding properties as the historical adaptive-runner gates. The
-adaptive runner is marked deprecated. **Status (2026-05-04)**: code path in place and
-unit-verified; sanity attestation pending.
+adaptive runner is marked deprecated. **Status (2026-05-05)**: **GREEN** — T1-Sanity
+attested; V12 explore + exploit chains launched same day and confirmed writing JSONL
+with sidecar-bound run_ids on iter 1.
 
 **Out of Scope**: removing `run_exploration_adaptive.py` (separate follow-up); a Tier-2
 integration test that drives `run_one_iteration.py` end-to-end through a pseudo
 workflow (the V12 chain itself is the natural fixture, parallel to Commit 4's same
 deferral pattern).
+
+---
+
+### Commit 4.3.1: Chain-wrapper `--run_name` parity (V12 launch hotfix)
+
+**Phase**: 1.5 (immediate follow-up to Commit 4.3 — surfaced at the V12 launch dry-run audit).
+
+**Why this exists**: Commit 4.3 made `--run_name` a *required* argparse flag in
+`sdsc_submission_scripts/run_one_iteration.py` (so the chain-level run name pins the
+sidecar and audit labels), but did **not** update the bash wrapper layer
+(`sdsc_submission_scripts/_chain_common.sh`) that builds the per-iter Python invocation.
+Result: any V12 launch using `run_chain.sh` would have crashed at argparse on iter 1
+with `error: the following arguments are required: --run_name`, exit ≠ 0. Auto-resume
+would see no manifest, decide iter 1 still pending, and re-launch the same broken
+command for all 20 iterations — both V12 chains hung on iter 1 forever. Caught by the
+pre-launch wrapper audit; never reached production.
+
+**Scope**:
+- `sdsc_submission_scripts/_chain_common.sh` (4 edits, +9 lines):
+  - Add `RUN_NAME=""` to defaults block with comment explaining sidecar/audit role.
+  - Add `--run_name) RUN_NAME="$2"; shift 2 ;;` parser case (alongside `--workspace`).
+  - Extend the required-flag check: `--run_name` joins `--workspace` and `--seed_paths`
+    in the canonical "Required:" stderr message; missing flag → `exit 1`.
+  - Add `--run_name "$RUN_NAME"` to `APP_ARGS` in `build_app_args()`, immediately after
+    `--workspace`, so it appears in every per-iter Python invocation.
+- `tests/unit/scripts/test_chain_wrapper_run_name.py` (new, 3 tests, dry-run-driven):
+  - `test_run_name_required_when_missing` — wrapper exits non-zero with canonical
+    error when `--run_name` is omitted.
+  - `test_run_name_threads_through_to_runner_args` — `--dry-run` output includes
+    `--run_name <value>` verbatim; no transformation.
+  - `test_run_name_distinct_from_workspace_basename` — pin: wrapper must not silently
+    derive run_name from `basename(workspace)`. An operator's typo in `--run_name`
+    must NOT be invisibly papered over by basename inheritance, otherwise audit logs
+    would lie about chain identity.
+- `tests/unit/scripts/test_chain_consistency.py` (1-line helper update): the existing
+  `_run_dry()` smoke helper now passes `--run_name dryrun_test_chain` to satisfy the
+  new required check; without this, 4 pre-existing dry-run smoke tests would have
+  red-marked from the new wrapper-side enforcement.
+
+**Tasks**:
+- [x] Apply 4 wrapper edits.
+- [x] Add 3 dry-run unit tests.
+- [x] Update `_run_dry` helper in `test_chain_consistency.py`.
+- [x] Verify both V12 dry-runs (`--mode lilab --dry-run` for explore + exploit) print
+      `--run_name <value>` correctly threaded into the Python invocation.
+
+**Pre-Commit Checklist**:
+- [x] **Positive test (wrapper contract)**: `pytest tests/unit/scripts/test_chain_wrapper_run_name.py`
+      — 3/3 PASS (2026-05-05).
+- [x] **Regression — existing scripts unit tests intact**: `pytest tests/unit/scripts/`
+      — 27 wrapper-related tests green (3 fresh + 24 pre-existing). The 3 pre-existing
+      `test_chain_consistency.py` failures (`test_defaults_match`,
+      `test_kwargs_match_modulo_documented_exemptions`, `test_every_three_way_flag_is_in_kwargs`)
+      are unrelated drift carried from before this commit.
+- [x] **Smoke — V12 launch dry-runs**: `bash run_chain.sh --mode lilab --dry-run ...`
+      for both explore and exploit V12 commands prints `--run_name explore_novel_v12_0504`
+      / `--run_name exploit_cnn_v12_0504` correctly inside the would-exec command.
+- [x] **Live verification**: V12 chains launched 2026-05-05 in two screens
+      (`siderius-v12-explore`, `siderius-v12-exploit`); both produced
+      `{workspace}/.token_run_id` sidecars with the right run_name prefix and started
+      writing `token_usage.jsonl` rows whose `run_id` field matches the sidecar exactly.
+
+**Definition of Done**: the bash wrapper enforces `--run_name` symmetrically with
+`run_one_iteration.py`'s argparse; V12 production launches succeed at iter 1 without
+operator intervention; the chain-runner contract is end-to-end testable in the unit
+layer (no live GPU required to catch wrapper drift). **Status (2026-05-05)**: GREEN
+— landed as commit `609ac64`; V12 chains live.
+
+**Out of Scope**: populating the `chain_run_name` audit-label field in the JSONL row
+payload (currently `None` despite sidecar correctness — see Revision 4 known-issue
+note). That is a separate `LLMBridge.set_run_context` follow-up; it does not affect
+run-id immutability or any C4.2 invariant.
 
 ---
 
