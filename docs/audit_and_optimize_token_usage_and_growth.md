@@ -34,9 +34,19 @@
 ### Revision 5 changelog
 
 - **V12 Calibration Data (iter 1-13, explore chain) folded into the design** — see §1.5.1.2. Total prompt tokens grew **2.39×** from iter 1 (198 K) to iter 13 (474 K) and is still climbing.
-- **Phase 2 priority pivot.** V12 data shows the bottleneck is not the proposer (3.3× sublinear) but **`interpretation.synthesis` (9.3× near-linear, 4.7K → 40K)**. The original Phase 2 §2 design assumed proposer-first; the V12 calibration overrides that assumption. Commits 6.1 (interpretation sliding window) and 6.2 (proposer prior_stage_outputs management) are inserted as the new high-priority Phase 2 entry points; Template Dehydration is moved to Commit 11.1 (low priority — fixed 21% template share is dwarfed by the linear-growth components).
-- **§8 Commit 5 spec finalized** — `tools/build_token_baseline_report.py` must segment Happy-Path-Cost vs Recovery-Cost (`extra.attempt == 0 AND extra.status == "ok"` boundary), report `tokens_per_iteration` + `growth_slope` per sub-call label, and emit a Context-Explosion alert when any single call's `tokens.prompt` exceeds 50 K.
-- **Report retraction** — the Rev 4 entry "Known issue: `chain_run_name` reads `None` in JSONL rows" was **incorrect**. The JSONL field is `run_name` (not `chain_run_name` — that's the Python variable name in `model_exploration.py:875`). All 346 production rows across both V12 chains have `run_name` correctly bound. No follow-up patch is needed; no Commit 4.3.2 is being scheduled. The corresponding line in `reports/v12_20260504.md` has been removed.
+- **Phase 2 priority pivot.** V12 data shows the bottleneck is not the proposer (3.3× sublinear) but **`interpretation.synthesis` (9.3× near-linear, 4.7K → 40K)**. The original Phase 2 §2 design assumed proposer-first; the V12 calibration overrides that assumption. Commits 6.1 (interpretation sliding window) and 6.2 (proposer prior_stage_outputs management) are inserted as the new high-priority Phase 2 entry points.
+- **§8 Commit 5 spec finalized (initial)** — `tools/build_token_baseline_report.py` must segment Happy-Path-Cost vs Recovery-Cost, report per-label `tokens_per_iteration` + `growth_slope`, and alert on `tokens.prompt > 50K` per call. *(USD cost tracking added in Rev 6.)*
+
+### Revision 6 changelog (2026-05-05)
+
+**Status**: G0 approved; V12 calibration confirmed Interpretation as primary bloat; Phase 2 priorities pivoted to O(N) components.
+
+- **Targeted O(N) Dehydration** is the new framing. V12 data partitions the bleed into two regimes:
+  - **O(N) growth (the bleeding arteries)**: `interpretation.synthesis` (9.3× over 13 iters, near-linear) and `proposer.prior_stage_outputs` (3.3× sublinear). Both clamped by Commits 6.1 + 6.2 — these are the only Phase 2 commits that ship.
+  - **O(1) fixed cost (the structural cost)**: the 21% "Template Tax" on `proposer.comparison`. Necessary for prompt adherence; does *not* scale with iterations. Optimizing fixed cost while linear growth bleeds is the wrong order.
+- **Template Dehydration moved to Phase 3 (Optional)**. Removed from Commit 11.1 in §8; new §9 "Phase 3 (Optional)" section appended to the doc. Phase 3 is opportunistic: only triggered if Commits 6.1/6.2 do not bring per-iter cost under target.
+- **§8 Commit 5 spec finalized — USD cost tracking + $1.50/iter bloat alert added**. The tool now computes per-iter cost using the production model's rate card (default `$10/1M prompt + $30/1M completion`, configurable via CLI). Two alert thresholds emitted in the report: `[BLOAT_ALERT]` when an iter's total USD exceeds $1.50 (the **post-dehydration target ceiling** — at V12 rates this fires on every iter; quieting this alert is the success criterion for Commits 6.1/6.2), and `[CONTEXT_EXPLOSION]` when any single call's `tokens.prompt` exceeds 50 K.
+- **Cleanup**: removed the Rev 4 → Rev 5 cross-references to the non-existent `chain_run_name = None` bug. The doc now reflects that `run_name` is correctly bound across all V12 production rows. No further mention.
 
 ---
 
@@ -1652,9 +1662,9 @@ run-id immutability or any C4.2 invariant.
 - [ ] Write `reports/v12_token_baseline.md`: real per-call token counts, per-iter trend, comparison against the §12-audit estimates.
 - [ ] Write `reports/v12_top3_bloat.md`: tables per §1.9.1; ends with one of the three §1.9.2 verdicts.
 
-**`build_token_baseline_report.py` spec (Rev 5 finalized)**:
+**`build_token_baseline_report.py` spec (Rev 6 finalized — adds USD cost tracking + bloat alert)**:
 
-The tool reads one or more `{workspace}/token_usage.jsonl` files and emits per-label aggregates. Three behaviours are mandatory:
+The tool reads one or more `{workspace}/token_usage.jsonl` files and emits per-label aggregates. Four behaviours are mandatory:
 
 1. **Cost segmentation — Happy Path vs Recovery**. Each row carries `extra.attempt` (0 = first try, ≥1 = retry) and `extra.status` (`"ok"`, `"retry_quota"`, `"error"`, etc.). Split aggregates accordingly:
    - **Happy-Path-Cost**: rows where `extra.attempt == 0 AND extra.status == "ok"` — the cost of the iteration if everything goes right first time.
@@ -1665,17 +1675,29 @@ The tool reads one or more `{workspace}/token_usage.jsonl` files and emits per-l
    - compute `growth_slope` as `(tokens_at_iter_N - tokens_at_iter_1) / (N - 1)` once N ≥ 5,
    - flag any label whose slope > 0 with 95% confidence (simple linear regression, p < 0.05).
 
-3. **Alerting — Context Explosion threshold**. Any single row with `tokens.prompt > 50_000` produces a `[CONTEXT_EXPLOSION]` warning in the report (with iter, label, attempt, run_id). 50 K is the soft ceiling: above this, the model's own attention starts degrading (recall drops on dense-context benchmarks past ~64 K) and we are paying for capacity we cannot use. Operators should investigate before publishing the report.
+3. **USD cost tracking (Rev 6)**. Each row's USD cost is computed as `(tokens.prompt × rate_prompt + tokens.completion × rate_completion) / 1_000_000`. Default rates: `$10/1M prompt + $30/1M completion` (placeholder for gpt-5.4 production rates — *operator must verify and override via `--rate-prompt` and `--rate-completion` CLI flags before publishing the report*). The report emits:
+   - per-iter total USD,
+   - per-iter Happy-Path USD vs Recovery USD,
+   - cumulative-to-date USD,
+   - per-label USD growth slope (USD/iter), so dehydration impact can be priced directly.
+
+4. **Alerting — two thresholds**.
+   - `[BLOAT_ALERT]`: any iter whose total USD exceeds **$1.50**. This is the **post-dehydration target ceiling**, not a description of current state — at V12 rates every iter trips it (iter 1 ≈ $2.83, iter 13 ≈ $6.73). Quieting this alert is the explicit success criterion for Commits 6.1/6.2.
+   - `[CONTEXT_EXPLOSION]`: any single row with `tokens.prompt > 50_000` (with iter, label, attempt, run_id). 50 K is the soft ceiling: above this, the model's own attention starts degrading (recall drops on dense-context benchmarks past ~64 K) and we are paying for capacity we cannot use.
+
+   Both alerts are informational (exit 0), not fatal — they appear inline in the report at the top of the affected iter's section, and as a summary block at the end.
 
 **Pre-Commit Checklist**:
 - [ ] **Positive test**: `python tools/build_token_baseline_report.py --workspace <v12-ws>` produces both reports without error; both render in markdown without broken tables.
 - [ ] **Quantitative metric**: for the 5-iter run, the report shows a clean per-iter token sparkline; the linter on the JSONL returns 0 anomalies.
 - [ ] **Segmentation test**: hand-craft a 3-row JSONL with one `attempt=0,status=ok` row and two `attempt=1` retry rows. Assert the tool reports Happy-Path-Cost = first row's tokens, Recovery-Cost = sum of the other two.
-- [ ] **Alert test**: hand-craft a row with `tokens.prompt = 60_000`. Assert the tool emits `[CONTEXT_EXPLOSION]` for that row and exits 0 (alert is informational, not fatal).
+- [ ] **USD test**: hand-craft a row with `prompt=100_000, completion=10_000`. With default rates, assert reported USD = `100000*10/1e6 + 10000*30/1e6 = $1.30` exactly (precision check; floating-point assertion to 4 decimals).
+- [ ] **Alert test (CONTEXT)**: hand-craft a row with `tokens.prompt = 60_000`. Assert the tool emits `[CONTEXT_EXPLOSION]` for that row and exits 0.
+- [ ] **Alert test (BLOAT)**: hand-craft a 1-iter JSONL whose total cost computes to $2.00 USD. Assert the tool emits `[BLOAT_ALERT]` for that iter and exits 0. Then hand-craft another at $1.20 — assert no `[BLOAT_ALERT]`.
 - [ ] **Negative test**: run the report generator against a workspace whose `token_usage.jsonl` has been hand-corrupted (drop an `_iter_flush` marker). Assert the generator refuses to publish — emits "AUDIT LOG CORRUPTION DETECTED" and exits nonzero. We never publish numbers from a corrupted log.
 - [ ] **Verdict recorded**: §1.9.2 verdict is written explicitly at the top of `reports/v12_top3_bloat.md` — Confirmed Proposer / Pivot Tuner / Pivot Other / Sanity Floor.
 
-**Definition of Done (Gate G1)**: real V12 baseline numbers exist; Happy-Path/Recovery segmentation is reported; per-label growth slopes are reported; the verdict is recorded; the team has explicitly chosen one of the four branches (continue to Commit 6.1, pivot, or stop).
+**Definition of Done (Gate G1)**: real V12 baseline numbers exist; Happy-Path/Recovery segmentation is reported; per-label growth slopes are reported; per-iter USD costs are reported; both alert thresholds are evaluated; the verdict is recorded; the team has explicitly chosen one of the four branches (continue to Commit 6.1, pivot, or stop).
 
 **Decision branch**:
 - Verdict = "Confirmed Proposer Hypothesis" → proceed to Commit 6.
@@ -1956,12 +1978,42 @@ The original Commits 6-12 still apply but at lower priority. Commit 11.1 (Templa
 
 ---
 
-### Commit 11.1: Template Dehydration (Rev 5 — deprioritized)
+### Commit Map (visual — Rev 6)
 
-**Phase**: 2 (low priority — to be considered only after Commits 6.1 + 6.2 land and the linear-growth bleed is stopped).
-**§5 step**: 21a (new, low priority).
+```
+Phase 1 (Telemetry)         Phase 2 (Targeted O(N) Dehydration)        Phase 3 (Optional)
+ ┌─────────────────┐         ┌─────────────────────────────┐            ┌────────────────┐
+ │ C1 capture      │         │ C6.1 Interp sliding window  │ ★ HIGH     │ C11.1 Template │
+ │ C2 setter+fail  │         │      (clamp 9.3× O(N))      │            │      Dehydration│
+ │ C3 audit+labels │         │ C6.2 Proposer prior-stage   │   MED      │   (21% fixed)  │
+ │ C4 plumbing     │         │      mid-truncation         │            │   opportunistic│
+ │ C5 G1 baseline  │ ──────▶ │      (clamp 3.3× O(N))      │            └────────────────┘
+ │     (verdict)   │         │ ─── G1.5 re-baseline ───    │
+ │   USD + bloat   │         │ C6 ErrorSig (lower prio)    │
+ └─────────────────┘         │ C7 G2 forensic              │
+                             │ C8 schemas                  │
+                             │ C9 helpers                  │
+                             │ C10 assembly                │
+                             │ C11 G3 trap                 │
+                             │ C12 G4 + cleanup            │
+                             └─────────────────────────────┘
+```
 
-**Why this commit, why deprioritized**: V12 production data (§1.5.1.2) and Sanity-T1 (§1.5.1.1) confirm the proposer's template + system_prompt + scaffolding is ~21% of `proposer.comparison`'s prompt cost (7.5 K out of 36 K chars at iter 1). This is a real fixed cost — but it does **not grow with iterations**. Compared to the 9.3× linear-growth interpretation bleed and 3.3× proposer growth, dehydrating fixed cost is the wrong place to optimize first. We address this only after the growth curves are flat.
+Gates G1, G1.5, G2, G3, G4 are explicit STOP points. **G1.5 (new in Rev 6)** is the post-Commit-6.1/6.2 re-baseline check: re-run the chain, recompute `growth_slope` for `interpretation.synthesis` and `proposer.proposing`, verify both have dropped from O(N) to ≤ O(log N). If G1.5 fails, do not proceed to Commit 6 — return to 6.1/6.2 and tighten the policy. Each gate's failure has a documented remediation path back into a prior commit, not a workaround.
+
+---
+
+## 9. Phase 3 (Optional) — Fixed-Cost Shaving
+
+Phase 3 is **opportunistic, not mandatory**. It is triggered only if Commits 6.1 + 6.2 have landed, the G1.5 re-baseline shows the O(N) bleed is clamped, **and** per-iter USD is still above the $1.50 target ceiling. If the post-6.1/6.2 baseline already meets the target, Phase 3 is skipped entirely.
+
+**Rationale for the deferral**: V12 calibration (§1.5.1.2) shows the proposer's template + system_prompt + scaffolding is ~21% of `proposer.comparison`'s prompt cost (7.5 K of 36 K chars at iter 1). This is structural fixed cost — necessary for prompt adherence, does not grow with iterations. While shaving it is technically possible, it is the wrong order: optimizing fixed cost while linear growth bleeds 3 K tokens/iter into the synthesis prompt would be polishing a leaking bucket. We address fixed cost only after the leaks are sealed.
+
+### Commit 11.1 (Phase 3, Optional): Template Dehydration
+
+**Phase**: 3 (Optional — post-G1.5).
+
+**Trigger condition**: Commits 6.1 + 6.2 landed; G1.5 passed; per-iter USD still above target ceiling.
 
 **Scope**:
 - `agent/prompt_templates/proposal/*.md` (×9 — section header tightening, instruction-block compression)
@@ -1977,25 +2029,6 @@ The original Commits 6-12 still apply but at lower priority. Commit 11.1 (Templa
 - [ ] **Behaviour-preservation test**: full existing proposer test suite passes (`pytest tests/unit/agent/proposal/ tests/integration/nodes/test_ml_model_proposal_agent.py`).
 - [ ] **Trap Test rerun**: `pytest tests/integration/proposer/test_long_term_wisdom_trap.py --real-api-call` still passes — compression did not erase the long-term wisdom behaviour.
 
-**Definition of Done**: 30% template-tax reduction; no behavioural regression. This is opportunistic optimization, not a gate; if Commits 6.1/6.2 already brought total per-iter cost below the target, this commit can be skipped entirely.
+**Definition of Done**: 30% template-tax reduction; no behavioural regression; per-iter USD cost moves measurably toward the $1.50 ceiling. If the trigger condition was never met, this commit is *not done* — it is *not needed*, and that's a successful Phase 2.
 
 **Out of Scope**: changing prompt semantics, reordering stages, adding/removing template sections.
-
----
-
-### Commit Map (visual)
-
-```
-Phase 1 (Telemetry)              Phase 2 (Dehydration)
- ┌─────────────────┐              ┌─────────────────┐
- │ C1 capture      │              │ C6 ErrorSig     │
- │ C2 setter+fail  │              │ C7 G2 forensic  │
- │ C3 audit+labels │              │ C8 schemas      │
- │ C4 plumbing     │              │ C9 helpers      │
- │ C5 G1 baseline  │ ───────────▶ │ C10 assembly    │
- │     (verdict)   │              │ C11 G3 trap     │
- └─────────────────┘              │ C12 G4 + cleanup│
-                                  └─────────────────┘
-```
-
-Gates G1, G2, G3, G4 are explicit STOP points. Each gate's failure has a documented remediation path back into a prior commit, not a workaround.
