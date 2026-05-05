@@ -47,6 +47,7 @@ load_dotenv()
 from workflows.model_exploration import run_workflow
 from workflows.llm_config import WorkflowLLMConfig
 from core.resume import restore_prior_state, ResumeError
+from agent.schemas.telemetry import LLMBridgeContextError
 
 
 def _positive_int(s: str) -> int:
@@ -96,6 +97,88 @@ def _portion_floor(s: str) -> float:
             f"which is too noisy for trial-mode signal."
         )
     return v
+
+
+def _resolve_chain_run_id(workspace: str, run_name: str) -> str:
+    """Resolve the immutable per-chain run_id (§1.4.1) for this iteration.
+
+    The chain runner invokes one fresh subprocess per iter — naive
+    ``_generate_run_id`` would yield a different value per process and
+    violate the bridge's run_id-immutability contract on iter ≥ 2. A
+    sidecar file at ``{workspace}/.token_run_id`` carries the value
+    forward: iter 1 generates and writes it; later iters read it back.
+
+    Format: ``{run_name}-{utc_ts}-{pid}`` — same as
+    ``run_exploration_adaptive._generate_run_id`` so the two runners
+    produce shape-identical IDs.
+    """
+    sidecar = os.path.join(workspace, ".token_run_id")
+    if os.path.exists(sidecar):
+        with open(sidecar, "r", encoding="utf-8") as f:
+            existing = f.read().strip()
+        if existing:
+            return existing
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    new = f"{run_name}-{ts}-{os.getpid()}"
+    os.makedirs(workspace, exist_ok=True)
+    with open(sidecar, "w", encoding="utf-8") as f:
+        f.write(new)
+    return new
+
+
+def _emit_token_iter_rollup(workspace: str, iteration: int) -> int:
+    """Emit one ``[TOKEN_ITER]`` line for the just-finished iteration.
+
+    Chain-runner-adapted port of
+    ``run_exploration_adaptive._emit_token_iter_rollup``: because each
+    iter is a fresh subprocess with no in-memory carry, the cumulative
+    seed is recomputed from ``token_usage.jsonl`` itself by summing rows
+    where ``iter < iteration`` (skipping ``_iter_flush`` markers). The
+    printed rollup mirrors the adaptive runner's format so a chain log
+    grep treats both runners interchangeably.
+    """
+    path = os.path.join(workspace, "token_usage.jsonl")
+    if not os.path.exists(path):
+        return 0
+
+    calls = 0
+    iter_total = 0
+    cumulative_prior = 0
+    by_node: dict[str, int] = {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if row.get("label") == "_iter_flush":
+                    continue
+                row_iter = row.get("iter")
+                tok_total = (row.get("tokens") or {}).get("total", 0) or 0
+                if row_iter == iteration:
+                    calls += 1
+                    iter_total += tok_total
+                    label = row.get("label") or "unlabeled"
+                    node_key = label.split(".", 1)[0]
+                    by_node[node_key] = by_node.get(node_key, 0) + tok_total
+                elif isinstance(row_iter, int) and row_iter < iteration:
+                    cumulative_prior += tok_total
+    except OSError:
+        return 0
+
+    cumulative_total = cumulative_prior + iter_total
+    breakdown = "  ".join(f"{k}={v}" for k, v in sorted(by_node.items()))
+    print(
+        f"[TOKEN_ITER] iter={iteration:02d}  calls={calls}  "
+        f"total_tok={iter_total}  ({breakdown})  "
+        f"cumulative_total={cumulative_total}"
+    )
+    return cumulative_total
 
 
 def resolve_source_paths(source_paths: list[str]) -> list[str]:
@@ -225,6 +308,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--workspace", type=str, required=True,
         help="Root output directory for this exploration (shared across all iterations)."
+    )
+    parser.add_argument(
+        "--run_name", type=str, required=True,
+        help="Chain-level run name (e.g. 'explore_v12_0504'). Used as the "
+             "audit-log identity (chain_run_name) and seeded into the "
+             "immutable run_id sidecar at {workspace}/.token_run_id. "
+             "Must remain identical across every iteration of the chain — "
+             "the bridge refuses run_id mutation per §1.4.1."
     )
     # Phase 6.8 Task 2 Commit 8 — rename --iteration → --start_iteration so the
     # name matches the unified resume/chain philosophy ("which iter is this
@@ -620,6 +711,17 @@ def main():
     # possible so any descendant node call sees it.
     os.environ["SIDERIUS_CHAIN_WORKSPACE"] = os.path.abspath(args.workspace)
 
+    # Resolve the immutable per-chain run_id (§1.4.1). The sidecar file at
+    # ``{workspace}/.token_run_id`` carries the value across the subprocess
+    # boundary so every iter binds the same run_id — the bridge refuses
+    # any mutation. Threaded into ``run_workflow`` via ``chain_run_name``
+    # + ``run_id`` so each agent's bridge writes audit rows tagged with
+    # this identity.
+    chain_run_name = args.run_name
+    run_id = _resolve_chain_run_id(args.workspace, chain_run_name)
+    print(f"[TOKEN] chain_run_name = {chain_run_name}")
+    print(f"[TOKEN] run_id = {run_id}")
+
     print("=" * 60)
     # --- Resolve reflect provider/model defaults ---
     # The tuner's reflector sub-call does templated extraction (not
@@ -729,6 +831,8 @@ def main():
             source_paths=resolved_paths,
             workspace=args.workspace,
             run_name=run_name,
+            chain_run_name=chain_run_name,
+            run_id=run_id,
             llm_config=llm_config,
             max_iterations=1,
             start_iteration=args.start_iteration,
@@ -784,6 +888,19 @@ def main():
             # Cross-iter proposal carry-over — G1 bridge (docs/Consistent_growing_vocab_list.md §10.3.4)
             restored_previous_proposal=state.previous_proposal_data,
         )
+    except LLMBridgeContextError as e:
+        # §1.4.2 fail-fast contract. Telemetry-internal corruption (run_id
+        # mismatch, backwards iter) means the audit log can no longer be
+        # trusted. exit(2) is intentionally distinct from the failure
+        # exit(1) below so a downstream classifier can tell them apart —
+        # mirrors run_exploration_adaptive.py's top-level handler.
+        print(
+            f"[FATAL] LLMBridgeContextError: {e} — aborting iteration to "
+            f"prevent telemetry corruption.",
+            file=sys.stderr,
+        )
+        write_manifest(iter_dir, run_name, results=[], crashed=True)
+        sys.exit(2)
     except Exception as e:
         print(f"FAIL: Workflow raised exception: {type(e).__name__}: {e}")
         traceback.print_exc()
@@ -791,6 +908,18 @@ def main():
         sys.exit(1)
 
     manifest = write_manifest(iter_dir, run_name, results)
+
+    # Per-iter [TOKEN_ITER] rollup (§1.6). Best-effort: any IO/JSON error
+    # in the rollup must never break the chain — token_usage.jsonl is
+    # itself the source of truth.
+    try:
+        _emit_token_iter_rollup(
+            workspace=args.workspace,
+            iteration=args.start_iteration,
+        )
+    except Exception as e:
+        print(f"  [TOKEN_ITER] WARN: rollup emit failed: "
+              f"{type(e).__name__}: {e}")
 
     if manifest["status"] == "completed":
         print()

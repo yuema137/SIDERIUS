@@ -340,6 +340,19 @@ If verdict (1) is reached **but** total token spend at iter 5 is < 1.5× iter 1 
 
 ## 1.5 Phase 1.5 — Certification (mandatory gate before V12 baseline)
 
+> **Runner unification (2026-05-04, Commit 4.3)**. The original Phase 1.5 gates (T0 / T1 / T2)
+> were certified under `run_exploration_adaptive.py`. During the V12 launch we discovered a
+> parity gap: V12 production uses the chain-first runner (`run_chain.sh` →
+> `sdsc_submission_scripts/run_one_iteration.py`), which was not instrumented with
+> `set_run_context` — so `token_usage.jsonl` was never written for V12 despite real LLM
+> calls happening. Commit 4.3 closes the gap by porting the audit context, run_id sidecar,
+> fail-fast handler, and `[TOKEN_ITER]` rollup into the chain-first runner. The adaptive
+> runner is **deprecated** — all future certification and production runs use
+> `run_one_iteration.py` (wrapped in a small bash loop for multi-iter gates). The historical
+> T1/T2 attestations below are preserved unchanged as audit-trail proof that the
+> bridge / workflow / audit-hook code is correct; new attestations from the chain-first
+> runner appear in §1.5.1.1 (T1-Sanity).
+
 The infrastructure committed in §8 Commits 1–4 is not trusted in production until three
 certification gates have been observed green. They form a cost-ladder of increasing
 confidence and increasing GPU/wall-clock cost:
@@ -453,18 +466,28 @@ mode does not exist in the production runner, and a synthetic harness would cert
 production never takes):
 
 ```bash
-screen -S siderius-certify-t1 -d -m bash -c '
-  .venv/bin/python run_exploration_adaptive.py \
-      --run_name certify_t1_0504_v3 \
-      --advice tuner_advice/exploration_adaptive_v1.json \
-      --llm_config llm_configs/openai_tiered_v1.json \
-      --max_iterations 3 --max_rounds 1 \
-      --trial_portion 0.01 --eval_portion 0.01 --max_epochs 1 \
-      2>&1 | tee /tmp/certify_t1.log
-'
+# Canonical chain-first invocation (Commit 4.3 — replaces run_exploration_adaptive.py).
+# A 3-iter gate is a small bash loop because run_one_iteration.py runs ONE iter per call.
+WS=/home/klz/Data/SIDEREIS_DATA/exploration_certify_t1_0504
+RN=certify_t1_0504
+SEED=/home/klz/Data/SIDEREIS_DATA/exploration_seeds_v1/run_output_punet.json
+screen -S siderius-certify-t1 -d -m bash -c "
+  for i in 1 2 3; do
+    .venv/bin/python sdsc_submission_scripts/run_one_iteration.py \
+        --workspace \$WS --run_name \$RN --start_iteration \$i \
+        --seed_paths \$SEED \
+        --advice tuner_advice/exploration_adaptive_v1.json \
+        --llm_config llm_configs/openai_tiered_v1.json \
+        --max_rounds 1 --is_trial \
+        --trial_portion 0.01 --eval_portion 0.01 --max_epochs 1 \
+        2>&1 | tee -a /tmp/certify_t1.log || break
+  done
+"
 ```
 
-Workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_certify_t1_0504_v3`.
+Workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_certify_t1_0504`. The sidecar at
+`{workspace}/.token_run_id` is created by iter 1 and read by iters 2/3 to preserve §1.4.1
+run_id immutability across the subprocess boundary.
 
 **Routing note (revised 2026-05-04)**: T1/T2 use the **production** `llm_configs/openai_tiered_v1.json`,
 not `llm_configs/certify_minimal.json` (the gpt-4o-mini-only file from C4.1). The first T1 attempt
@@ -534,6 +557,46 @@ Decision rationale: Option A (catch-all) over Option B (decompose template into 
 
 **Re-run plan (2026-05-04)**: T1 and T2 will be relaunched in parallel under production `openai_tiered_v1.json`. T1 verifies the 10-key delta is zero on every proposer row across 3 iters; T2 verifies training-loop telemetry, watchdog compliance, and concurrent-write JSONL parseability under 1 iter of real training (`trial_portion=0.01, eval_portion=0.01`). Parallelisation is permitted because T2 audits a disjoint surface (training-loop telemetry, watchdog timing, JSONL concurrency) from T1 (label coverage, component math, rollup math); neither gate's verification depends on the other.
 
+#### 1.5.1.1 T1-Sanity (Chain-Runner Re-cert, Commit 4.3)
+
+**Goal**: prove that the Commit 4.3 instrumentation of `sdsc_submission_scripts/run_one_iteration.py`
+(sidecar run_id resolver, `set_run_context` wiring via `chain_run_name`/`run_id` kwargs to
+`run_workflow`, `LLMBridgeContextError → sys.exit(2)` handler, `[TOKEN_ITER]` rollup with
+JSONL-seeded cumulative) produces a `token_usage.jsonl` of equivalent shape and integrity
+to the adaptive-runner T1 attestation above. This is a 1-iter sanity check, not a full
+3-iter T1 — the multi-iter `_iter_flush` marker behaviour was already declared an unrelated
+known-issue in §1.5.2.1.
+
+**Setup**:
+
+```bash
+WS=/home/klz/Data/SIDEREIS_DATA/exploration_certify_t1_sanity_0504
+RN=certify_t1_sanity_0504
+SEED=/home/klz/Data/SIDEREIS_DATA/exploration_seeds_v1/run_output_punet.json
+screen -S siderius-certify-t1-sanity -d -m bash -c "
+  .venv/bin/python sdsc_submission_scripts/run_one_iteration.py \
+      --workspace \$WS --run_name \$RN --start_iteration 1 \
+      --seed_paths \$SEED \
+      --advice tuner_advice/exploration_adaptive_v1.json \
+      --llm_config llm_configs/openai_tiered_v1.json \
+      --max_rounds 1 --is_trial \
+      --trial_portion 0.01 --eval_portion 0.01 --max_epochs 1 \
+      2>&1 | tee /tmp/certify_t1_sanity.log
+"
+```
+
+**Success metrics** (all three must hold for sanity = green):
+
+| # | Metric | Verification |
+|---|--------|-------------|
+| 1 | `token_usage.jsonl` written | file exists at `{workspace}/token_usage.jsonl`; ≥ 4 rows; every row's `run_id` matches the contents of `{workspace}/.token_run_id` (sidecar binding round-trip) |
+| 2 | 10-key Δ=0 invariant on chain runner | every `proposer.*` row has all 10 component keys and `chars.total - sum(components.values()) == 0` exactly. C4.2 invariant carried across the runner switch. |
+| 3 | `[TOKEN_ITER]` rollup line emitted | exactly one `[TOKEN_ITER] iter=01 ...` line in stdout (captured to `/tmp/certify_t1_sanity.log`); its `total_tok` equals the row sum from `token_usage.jsonl` |
+
+**Out-of-scope** for this sanity (intentionally — covered by historical T1/T2 above): cross-iter rollup math (single iter), `_iter_flush` markers (no advancement), watchdog under real training (T2 surface), formal-round behaviour.
+
+**Status**: pending execution.
+
 ### 1.5.2 Gate T2 — System Stability (Plumbing Gate)
 
 **Goal**: confirm the new telemetry writes don't push the per-call architectural-probe wall
@@ -541,23 +604,29 @@ beyond the 60 s `evaluate_vram_skill` SIGALRM watchdog (commit 1972fee), and tha
 remains parsable under the multi-agent concurrent writes that happen inside one full
 3-trial-+-1-formal V4 iter.
 
-**Setup**:
+**Setup** (canonical chain-first invocation, Commit 4.3):
 
 ```bash
-screen -S siderius-certify-t2 -d -m bash -c '
-  .venv/bin/python run_exploration_adaptive.py \
-      --run_name certify_t2_0504 \
+WS=/home/klz/Data/SIDEREIS_DATA/exploration_certify_t2_0504
+RN=certify_t2_0504
+SEED=/home/klz/Data/SIDEREIS_DATA/exploration_seeds_v1/run_output_punet.json
+screen -S siderius-certify-t2 -d -m bash -c "
+  .venv/bin/python sdsc_submission_scripts/run_one_iteration.py \
+      --workspace \$WS --run_name \$RN --start_iteration 1 \
+      --seed_paths \$SEED \
       --advice tuner_advice/exploration_adaptive_v1.json \
       --llm_config llm_configs/openai_tiered_v1.json \
-      --max_iterations 1 --max_rounds 4 \
+      --max_rounds 4 --is_trial \
       --trial_portion 0.01 --eval_portion 0.01 \
       --formal_portion 0.01 --formal_eval_portion 0.01 \
       --max_epochs 1 \
       2>&1 | tee /tmp/certify_t2.log
-'
+"
 ```
 
-Workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_certify_t2_0504`.
+Workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_certify_t2_0504`. T2 is single-iter
+so no bash loop is needed; the sidecar at `{workspace}/.token_run_id` is created and
+read once.
 
 **Success metrics** (all three must hold for T2 = green):
 
@@ -1321,6 +1390,96 @@ in those sub-sections; this anchor exists so the commit ledger reads chronologic
 **Gate ordering**: T1 → T2 → Commit 5. Either gate red → STOP and open a Commit 4.x
 remediation before retrying. The V12 baseline numbers are not allowed to be quoted until
 both gates are green.
+
+---
+
+### Commit 4.3: Chain-first runner instrumentation (runner unification)
+
+**Phase**: 1.5 (post-T1/T2 hardening — surfaced by the V12 launch on 2026-05-04).
+
+**Why this exists**: T0/T1/T2 all certified the bridge / workflow / audit-hook code under
+`run_exploration_adaptive.py`. V12 production launches via `run_chain.sh` →
+`sdsc_submission_scripts/run_one_iteration.py` (chain-first runner). The chain runner
+was never instrumented with the audit context, so the V12 chains made real LLM calls
+but wrote **zero rows** to `token_usage.jsonl`. The Phase 1.5 attestations were
+correct-but-narrow: they certified one of the two production code paths. Commit 4.3
+closes the parity gap and **deprecates the adaptive runner** so future drift is
+impossible — there is now exactly one production runner.
+
+**Scope**:
+- `sdsc_submission_scripts/run_one_iteration.py` — add `--run_name` (chain-level run
+  name, required); add `_resolve_chain_run_id(workspace, run_name)` sidecar helper at
+  `{workspace}/.token_run_id` so the immutable run_id (§1.4.1) survives the subprocess
+  boundary; add `_emit_token_iter_rollup` (chain-runner-adapted: cumulative seed read
+  from JSONL since each iter is a fresh subprocess with no in-memory carry); add
+  `LLMBridgeContextError` import + handler around `run_workflow(...)` that mirrors the
+  adaptive runner's `[FATAL] ... → sys.exit(2)` contract; pass
+  `chain_run_name=args.run_name, run_id=run_id` into `run_workflow(...)`.
+- `tests/unit/scripts/test_chain_run_id_sidecar.py` (new) — 5 tests pinning the sidecar
+  contract: fresh-workspace generation, idempotent re-read, run_name-mismatch ignored
+  (sidecar wins), empty-sidecar treated as missing, workspace-creation tolerance.
+- `docs/audit_and_optimize_token_usage_and_growth.md` — §1.5 adaptive-runner
+  deprecation banner; §1.5.1 setup-block update (now uses `run_one_iteration.py` in a
+  bash loop); new §1.5.1.1 (T1-Sanity placeholder) and §1.5.2 setup-block update.
+  Historical T1/T2 attestations preserved unchanged as audit-trail proof.
+
+**Design decisions (locked before code)**:
+- **Q1 — run_id resolution across the subprocess boundary**: sidecar file at
+  `{workspace}/.token_run_id`. Iter 1 generates and writes; iters 2+ read back. Naive
+  per-process `_generate_run_id` would mint a fresh id every iter (different `pid +
+  utc_ts`) and trip the bridge's run_id-immutability check on iter 2. The sidecar is
+  the cheapest mechanism that preserves §1.4.1 without sharing parent-process state.
+- **Q2 — `--run_name` as required argparse arg vs derived from `basename(workspace)`**:
+  required arg. The adaptive runner has `--run_name` (required). Adding it to the
+  chain runner gives explicit naming parity and avoids the silent failure mode where
+  two distinct chains living in the same `/data/$user` end up with the same run_id
+  because their workspace basenames collide.
+- **Q3 — `_emit_token_iter_rollup` cumulative seed**: read from JSONL each call, summing
+  rows where `iter < current_iter` (skipping `_iter_flush` markers). The adaptive
+  runner threads cumulative through the in-process loop; the chain runner has no such
+  loop. Recomputing from JSONL is O(rows) per call but the file is small (≤ ~50 rows
+  per iter × 30 iters = 1.5k rows worst case). Cleaner than introducing a second
+  sidecar for cumulative state.
+- **Q4 — Adaptive runner kept for now or removed in this commit**: kept (deprecation
+  banner only). Removal is a separate follow-up commit so this PR's diff stays
+  minimally focused on the parity fix. The adaptive runner is no longer the canonical
+  path but its file remains for one release window in case any external operator has
+  an in-flight chain pinned to it.
+
+**Tasks**:
+- [x] Implement `_resolve_chain_run_id(workspace, run_name)` with sidecar persistence; format
+      matches `run_exploration_adaptive._generate_run_id` (`{run_name}-{utc_ts}-{pid}`).
+- [x] Implement `_emit_token_iter_rollup(workspace, iteration)` with JSONL-seeded cumulative;
+      best-effort (`OSError` returns silently; malformed rows skipped).
+- [x] Add `--run_name` (required) to the argparse; print `[TOKEN] chain_run_name = ...` and
+      `[TOKEN] run_id = ...` at iter start.
+- [x] Pass `chain_run_name=args.run_name, run_id=run_id` into `run_workflow(...)`.
+- [x] Wrap `run_workflow(...)` in `try ... except LLMBridgeContextError` that writes a
+      `crashed=True` manifest, prints `[FATAL] ...` to stderr, and `sys.exit(2)`.
+- [x] Emit the rollup line after `write_manifest(...)` and before the status-branch exits.
+
+**Pre-Commit Checklist**:
+- [x] **Positive test (sidecar contract)**: `pytest tests/unit/scripts/test_chain_run_id_sidecar.py`
+      — 5 tests, all green. **Result: 5/5 PASS** (2026-05-04).
+- [x] **Regression — token bundle intact**: `pytest tests/unit/agent/llm_bridge/
+      tests/integration/runner/test_token_log_iter_rollup.py` — Commit 4 contracts
+      unaffected by the chain-runner port. **Result: 41/41 PASS** (2026-05-04).
+- [x] **Smoke — argparse**: `.venv/bin/python sdsc_submission_scripts/run_one_iteration.py
+      --help` parses without error and shows `--run_name` as required. **Result: PASS**.
+- [ ] **Sanity gate (1-iter chain runner under `openai_tiered_v1.json`)**:
+      `token_usage.jsonl` exists, ≥4 rows, all rows' `run_id` match `{workspace}/.token_run_id`,
+      every proposer row has 10-key Δ=0; one `[TOKEN_ITER] iter=01 ...` line in stdout
+      whose `total_tok` equals the JSONL row sum. **Status: pending — see §1.5.1.1**.
+
+**Definition of Done**: V12 production chains write `token_usage.jsonl` with the same
+schema and run_id-binding properties as the historical adaptive-runner gates. The
+adaptive runner is marked deprecated. **Status (2026-05-04)**: code path in place and
+unit-verified; sanity attestation pending.
+
+**Out of Scope**: removing `run_exploration_adaptive.py` (separate follow-up); a Tier-2
+integration test that drives `run_one_iteration.py` end-to-end through a pseudo
+workflow (the V12 chain itself is the natural fixture, parallel to Commit 4's same
+deferral pattern).
 
 ---
 
