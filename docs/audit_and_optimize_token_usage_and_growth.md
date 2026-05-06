@@ -124,6 +124,45 @@ Changes landing in Rev 8.2:
 
 **Why this matters for the safeguards**: G3 (Trap Test) plants a fatal flaw in iter-2 ledger and asserts citation at iter 10. Under the current frozen-cache, this passes trivially (the iter-2 finding is never overwritten — it's just never *enriched* either). Under the Rev 8.2 accumulator, the iter-2 error_signature must merge correctly with iter-10 evidence (set-union, not replacement). The Pre-Commit Checklist for 6.3 must pin both behaviours.
 
+### Revision 8.3 changelog (2026-05-05) — "Subprocess Amnesia" Fix
+
+**Status**: mid-Commit-6.1. A production-chain audit (2026-05-05, between Commit 6.1's helper-layer landing and dispatcher wiring) discovered that `model_knowledge_cache` is **persisted but never restored** across chain-subprocess boundaries. This is the root cause of the +5,947 tok/iter `interpretation.per_model` slope that Commit 6.1 was meant to clamp — the Stability Filter would be dead code in production until cache restoration is added.
+
+**The audit finding** (verified against current code, 2026-05-05):
+
+1. **Production path is chain-mode, one subprocess per iter.** `sdsc_submission_scripts/run_chain.sh` invokes `run_one_iteration.py` per iter — lilab mode forks foreground, SDSC mode `sbatch --dependency=afterany`. Each iter is a fresh Python process; no in-memory state survives.
+2. **`RestoredState` carries 8 fields, none for the cache.** `core/resume.py:128-135` defines `RestoredState` with `resolved_source_paths`, `restored_plugins`, `committed_iters`, `runtime_vocab`, `accumulated_key_findings`, `accumulated_physical_rejections`, `accumulated_gate_exhaustions`, `previous_proposal_data`. **No 9th field for `model_knowledge_cache`.**
+3. **`load_latest_knowledge` ignores the cache.** `core/resume.py:262-339` reads each prior iter's `interpretation_iter_NNN.json` digest but only consumes `runtime_vocab` and `key_findings`. The digest's `model_knowledge_cache` field is left on disk.
+4. **`run_workflow` is invoked with 5 carry-over kwargs, not 6.** `run_one_iteration.py:830-890` threads `restored_runtime_vocab`, `accumulated_key_findings`, `accumulated_physical_rejections`, `accumulated_gate_exhaustions`, `restored_previous_proposal`. **No `restored_model_knowledge_cache=...` kwarg exists in either the call site or the workflow signature.**
+5. **Cache resets every subprocess.** `workflows/model_exploration.py:830` — unconditional `model_knowledge_cache: dict = {}`. No `if restored_*: ... else: {}` branch.
+6. **The Stability Filter has no production target.** `nodes/result_interpretation_agent.py:687-693` cache-hit branch (`if mt in inp.model_knowledge_cache: ... continue`) is the *only* code path that skips a per_model LLM call. In chain mode, `inp.model_knowledge_cache` is the empty dict from step 5 → every `mt` falls through → fresh LLM call per model per iter, regardless of what `should_recall_per_model()` returns.
+
+**Empirical confirmation** (V12 `explore_novel_v12_0504`, audit log + on-disk digests):
+
+| iter | per_model calls | per_model summed prompt tokens | synthesis prompt tokens | cache entries on disk |
+|---|---|---|---|---|
+| 1 | 2 | 7,272 | 4,657 | 2 |
+| 7 | 6 | 29,574 | 20,958 | (mid-chain) |
+| 14 | 12 | 69,669 | 44,903 | 10 (iter_012 digest) |
+
+The cache **does** accumulate on disk — iter_005 has 5 entries, iter_012 has 10. Persistence works; restoration is the gap.
+
+**Why doc lines 753 and 1957 contradicted each other**:
+- Line 753 ("cache hit-on-repeat, calls grow only on new architecture") is **true for in-process runs** (single Python process loops `range(start_iteration, start_iteration + max_iterations)` and the iter-end re-assignment keeps the dict alive).
+- Line 1957 ("fresh LLM call for every model_type ever proposed, on every iter") is **true for chain mode** (the actual production path).
+
+Both authors were right about their respective regime; the regime difference itself was undocumented.
+
+**Changes landing in Rev 8.3**:
+
+- **NEW Commit 6.1.a — Knowledge Restoration (precondition for 6.1).** Extend `RestoredState` with a `model_knowledge_cache` field, extend `load_latest_knowledge` (or a sibling loader) to read the latest committed iter's `model_knowledge_cache` from `interpretation_iter_NNN.json`, thread `restored_model_knowledge_cache=...` as a 6th carry-over kwarg through `run_one_iteration.py:830-890`, and accept it in `workflows/model_exploration.py` to seed the L830 dict. Latest-wins semantics (parallel to `runtime_vocab`). After this lands, chain mode has cache hits → 6.1's Stability Filter has actual targets to gate.
+- **Sequencing**: 6.1.a → 6.1 (resume current scope: dispatcher wiring + audit markers) → 6.3 (Knowledge Accumulator). The 6.1 spec itself does not change — its tasks were already correct against the in-process semantics; 6.1.a just makes those semantics apply in production.
+- **Commit 6.1 intro updated** to name 6.1.a as the precondition. The existing 4 helper-layer tasks/tests (`select_active_models`, `compress_model_summary`, `should_recall_per_model`, schema fields) stay marked complete — they are correct as-is. Only the dispatcher wiring (T4) and end-to-end Pre-Commit checks now have a real target.
+- **NEW Commit 4.3.4 — Legacy Runner Deletion (standalone cleanup).** Remove `run_exploration_adaptive.py` and update its 4 test dependencies + `launch_v11_v4.sh` to reference `run_one_iteration.py` (or local helpers). Ships **after** 6.1.a + 6.1 land — bundling it into the cache-restoration commit would conflate "fix subprocess amnesia" with "delete dead code", and the legacy runner has live test imports (`test_chain_consistency.py`, `test_portion_floor.py`, `test_token_log_iter_rollup.py`, `test_resilience.py`). Per "Slow is Smooth", clean cuts only.
+- **No changes** to Commits 6.2, 6.3, or any Phase 2 gate. G1.5's 5-metric re-baseline still applies; metric (2) (`interpretation.per_model` calls per iter) is the one most directly unblocked by 6.1.a.
+
+**Why this matters for chain-mode invariants**: the existing 5 carry-over kwargs already cover *evidence* (vocab, findings, rejections, gate exhaustions, prior proposal). The 6th — `model_knowledge_cache` — covers *summarised knowledge*: the LLM-distilled per-model interpretation that turns raw evidence into a Phase-1 cache entry. Without it, every chain subprocess re-pays the summarisation cost from scratch. With it, the chain's "memory" is complete and the Stability Filter starts saving real tokens.
+
 ---
 
 ## 0. Problem Statement
@@ -1873,6 +1912,51 @@ These two hypotheses have different downstream consequences. **(H1) requires a c
 
 ---
 
+### Commit 4.3.4: Legacy Runner Deletion — retire `run_exploration_adaptive.py` (Rev 8.3 — Standalone Cleanup, sequenced after 6.1)
+
+**Phase**: 1 cleanup (debt retirement, no behaviour change for production chains).
+**§5 step**: 14d (new, after 14c Commit 4.3.3, but **landing order is post-6.1.a + post-6.1** — see Sequencing below).
+
+**Why this commit**: the chain-first runner (`sdsc_submission_scripts/run_one_iteration.py` + `run_chain.sh`) is the production path. `run_exploration_adaptive.py` is the legacy in-process runner — kept around through Phase 6.8 for parity testing and ad-hoc dev runs. Two regimes coexisting created the doc-line-753-vs-1957 contradiction (Rev 8.3 changelog) by hiding which runner was authoritative. Eliminating the second regime is the durable fix: one runner, one set of carry-over semantics, one path to audit.
+
+**Sequencing rationale (do NOT reorder)**:
+
+1. Land **6.1.a** (Knowledge Restoration) first — touches `core/resume.py` + `run_one_iteration.py`; tests stay green because the legacy runner is unaffected.
+2. Land **6.1** (Stability Filter dispatcher wiring + audit markers) — touches `nodes/result_interpretation_agent.py`; orthogonal to the runner.
+3. Land **4.3.4** (this commit) — touches `run_exploration_adaptive.py` (delete) + 4 tests + 1 shell script. Bundling it earlier would conflate "fix subprocess amnesia" with "delete dead code"; doing it last means the cache-restoration code has stable parity-test coverage during its landing.
+
+**Scope**:
+- **Delete**: `run_exploration_adaptive.py` (repo root).
+- **Update tests** (4 files):
+   - `tests/unit/scripts/test_chain_consistency.py` — currently imports `parse_args` from `run_exploration_adaptive` to verify flag-set parity with `run_one_iteration.py`. With the legacy runner gone, the parity test loses its other side. **Decision**: convert to a single-runner schema test (assert `run_one_iteration.parse_args` accepts the canonical flag set) OR delete entirely if redundant against `test_chain_run_id_sidecar.py` + `test_portion_floor.py`. Decide during implementation.
+   - `tests/unit/scripts/test_portion_floor.py` — imports `_portion_floor` from both runners for parity. After deletion, drop the adaptive-runner half; keep the `run_one_iteration.py` half.
+   - `tests/integration/runner/test_token_log_iter_rollup.py` — imports `_emit_token_iter_rollup` from `run_exploration_adaptive`. The chain runner has its own rollup helper at `run_one_iteration.py:134` (commented as mirroring the adaptive version). Repoint the import; verify the rollup still emits the `[TOKEN_ITER]` line.
+   - `tests/unit/runner/test_resilience.py` — Phase R resilience tests against the adaptive runner's top-level handler. The chain runner has a parallel handler at `run_one_iteration.py:891-900` (also commented as mirroring). Repoint the test target.
+- **Update launch script** (1 file):
+   - `sdsc_submission_scripts/launch_v11_v4.sh:54` — `RUNNER="$REPO_ROOT/run_exploration_adaptive.py"` → either delete the script entirely (if V11_v4 is no longer launched) OR repoint to a small wrapper that invokes `run_chain.sh`. Decide during implementation by checking last-launch date.
+- **Update doc references** (~15 doc files contain non-load-bearing prose mentions): leave as-is unless they describe behaviour that no longer holds. The Rev 8.3 changelog already pins the new authoritative runner; older sections can carry historical context without correction.
+
+**Tasks**:
+- [ ] Delete `run_exploration_adaptive.py`.
+- [ ] Triage `tests/unit/scripts/test_chain_consistency.py`: convert to single-runner contract test or delete (post-deletion the "parity" framing is meaningless).
+- [ ] Update `tests/unit/scripts/test_portion_floor.py`: drop the `from run_exploration_adaptive import _portion_floor` block; keep the chain-runner side.
+- [ ] Update `tests/integration/runner/test_token_log_iter_rollup.py`: repoint import to `sdsc_submission_scripts.run_one_iteration`.
+- [ ] Update `tests/unit/runner/test_resilience.py`: change `RUNNER_PATH` to the chain runner; verify the resilience contract still holds (the chain runner's top-level handler is comment-pinned to mirror the adaptive one).
+- [ ] Update or delete `sdsc_submission_scripts/launch_v11_v4.sh`: if obsolete, delete; if still useful, repoint to the chain.
+- [ ] Run the full unit + integration test suite to confirm no orphaned import remains.
+
+**Pre-Commit Checklist**:
+- [ ] `grep -r "run_exploration_adaptive" --include="*.py" --include="*.sh"` returns **zero** code matches (doc matches OK as historical context).
+- [ ] `pytest tests/unit/scripts/ tests/unit/runner/ tests/integration/runner/` is green.
+- [ ] A 1-iter chain smoke launch via `run_chain.sh` (lilab mode, pseudo-training) reaches the iter-end manifest write — confirms the integration of the surviving runner is unbroken.
+- [ ] Commit message links to the Rev 8.3 changelog block so the rationale is git-archaeologically discoverable.
+
+**Definition of Done**: legacy runner deleted; all 4 test dependencies updated or removed; one production runner remains; future contributors cannot mistake which runner is authoritative.
+
+**Out of Scope**: doc cleanup of historical mentions in `docs/phase68_*.md` and `docs/Consistent_growing_vocab_list.md` (those are versioned design docs — they record the regime that existed at their time of writing); migrating any in-flight V11_v4 chains (none active per 2026-05-05 ops state).
+
+---
+
 ### Commit 5: V12 baseline run + Top-3 Bloat Report (Gate G1)
 
 **Phase**: 1.
@@ -1946,10 +2030,61 @@ The original Commits 6-12 still apply but at lower priority. Commit 11.1 (Templa
 
 ---
 
-### Commit 6.1: Interpretation Call-on-Demand — Sliding Window + Stability Filter (Rev 7 — Critical Priority, expanded)
+### Commit 6.1.a: Knowledge Restoration — carry `model_knowledge_cache` across chain iters (Rev 8.3 — Critical Priority, precondition for 6.1)
 
-**Phase**: 2 (gated on Commit 4.3.2 closing).
+**Phase**: 2 (precondition for Commit 6.1; lands first).
+**§5 step**: 11.5 (new — between Commit 5 baseline and 12a Commit 6.1).
+
+**Why this commit, why first**: Rev 8.3 audit established that `model_knowledge_cache` is persisted to disk (`interpretation_iter_NNN.json` already carries the full dict) but never restored across chain-subprocess boundaries. The Stability Filter (6.1) gates the cache-hit branch in `nodes/result_interpretation_agent.py:687-693`, which is the *only* code path that skips a per_model LLM call. With every chain subprocess starting on an empty cache, the filter would be dead code in production. 6.1.a closes the persistence gap so 6.1 has real targets to gate.
+
+**The minimal fix shape** (verified against current code):
+
+| # | File | Change |
+|---|---|---|
+| 1 | `core/resume.py` (`RestoredState` dataclass, L128-135) | Add 9th field: `model_knowledge_cache: Dict[str, Dict] = field(default_factory=dict)`. Update docstring with latest-wins semantics + cross-reference to `runtime_vocab` (also latest-wins). |
+| 2 | `core/resume.py` (`load_latest_knowledge`, L262) | Either extend the existing function's return tuple OR add a sibling `load_latest_knowledge_cache(workspace, current_iter, committed_iters) -> Dict[str, Dict]`. **Decision: sibling loader.** Rationale — the existing function's return type is documented in its docstring + consumers; widening the tuple risks call-site drift. A sibling function with the same iter-walk + soft-fail policy (UserWarning on missing/malformed digest, skip + continue) keeps the surface explicit. |
+| 3 | `core/resume.py` (`restore_prior_state`, L458) | After computing `runtime_vocab` + `accumulated_key_findings`, also compute `model_knowledge_cache` via the new loader and assign it onto the `RestoredState`. |
+| 4 | `sdsc_submission_scripts/run_one_iteration.py` (the `run_workflow(...)` call, L830-890) | Add a 6th carry-over kwarg between L884 and L886: `restored_model_knowledge_cache=state.model_knowledge_cache,`. Group it with the other knowledge carry-over kwargs under the existing `# Cross-iter knowledge carry-over` comment. |
+| 5 | `workflows/model_exploration.py` (`run_workflow` signature) | Accept the new kwarg with a default of `None` (so in-process callers and pseudo-mode tests don't need to thread it). Type: `Optional[Dict[str, Dict]] = None`. |
+| 6 | `workflows/model_exploration.py:830` | Replace unconditional `model_knowledge_cache: dict = {}` with `model_knowledge_cache: dict = dict(restored_model_knowledge_cache) if restored_model_knowledge_cache else {}`. The `dict(...)` copy is defensive — the workflow mutates the dict in place at iter end, and we don't want to mutate the caller's reference. Add a `print()` log line mirroring the existing `Vocab restored from prior chain iters` line at L823, e.g. `Knowledge cache restored from prior chain iter: N entries`. |
+| 7 | `workflows/model_exploration.py:1266-1274` | No change. The post-iter `_cap_knowledge_cache(max_entries=5)` call already runs against whatever the in-iter cache became. Cap continues to apply across the chain. |
+
+**Scope** (files touched):
+- `core/resume.py` (modify — `RestoredState` + new `load_latest_knowledge_cache` + `restore_prior_state` plumbing)
+- `sdsc_submission_scripts/run_one_iteration.py` (modify — add 6th carry-over kwarg)
+- `workflows/model_exploration.py` (modify — accept kwarg, replace L830 init)
+- `tests/unit/core/test_resume.py` (modify — add cache-restoration cases, parallel to existing runtime_vocab cases)
+- `tests/unit/workflows/test_model_exploration.py` OR a dedicated new file (add a 2-iter pseudo-chain cache-roundtrip test)
+
+**Tasks**:
+- [ ] **T1 — Schema**: add `model_knowledge_cache` field to `RestoredState`. Verify the field's type matches `InterpretationOutput.model_knowledge_cache` (also `Dict[str, Dict]`). Update the dataclass docstring.
+- [ ] **T2 — Loader**: implement `load_latest_knowledge_cache(workspace, current_iter, committed_iters)` in `core/resume.py`. Walks `committed_iters` ascending; reads each iter's `interpretation_iter_NNN.json`; returns the **latest parseable digest's** `model_knowledge_cache` (latest-wins, mirroring `runtime_vocab`). Soft-fail on missing/malformed digest (UserWarning, skip).
+- [ ] **T3 — `restore_prior_state` plumbing**: call the new loader after the existing `load_latest_knowledge` invocation, assign to `state.model_knowledge_cache`. Confirm `current_iter == 1` short-circuits to empty dict (mirrors the existing `runtime_vocab` short-circuit at L291).
+- [ ] **T4 — Runner kwarg**: add `restored_model_knowledge_cache=state.model_knowledge_cache` to the `run_workflow(...)` call in `run_one_iteration.py:830-890`. Place it in the "Cross-iter knowledge carry-over" group adjacent to `restored_runtime_vocab`.
+- [ ] **T5 — Workflow signature + init**: accept `restored_model_knowledge_cache` in `run_workflow`'s signature; replace the L830 init; emit a one-line log message on non-empty restore.
+- [ ] **T6 — Unit test (resume)**: in `tests/unit/core/test_resume.py`, add a test that synthesises a 2-iter workspace where iter_001/interpretation has `model_knowledge_cache = {"punet": {...}, "wavenet": {...}}`, calls `restore_prior_state(workspace, current_iter=2, ...)`, asserts `state.model_knowledge_cache` has both keys with verbatim values.
+- [ ] **T7 — Unit test (workflow plumbing)**: a pseudo-mode 2-iter chain test where iter 1 produces a non-empty `model_knowledge_cache`, the chain restarts (simulated subprocess boundary), iter 2 enters `run_workflow` with `restored_model_knowledge_cache=...`, and the test asserts the iter-2 `InterpretationInput.model_knowledge_cache` has the iter-1 entries before the per_model loop runs. Reuses the existing `tests/integration/agent/test_token_usage_pseudo_smoke.py` harness if practical.
+- [ ] **T8 — Doc tick**: mark this task list complete in §8, fold the empirical V12 disk-evidence numbers into the final commit message.
+
+**Pre-Commit Checklist**:
+- [ ] **Soft-fail policy**: corrupted iter_001 digest (e.g. truncated JSON) → UserWarning emitted, restoration continues with empty cache. (Test: synthesise `interpretation_iter_001.json` with a syntax error; expect warning + `state.model_knowledge_cache == {}`.)
+- [ ] **Latest-wins semantics**: 3-iter workspace where iter_001 has `{a:1}`, iter_002 has `{b:2}`, iter_003 has `{c:3}`; `restore_prior_state(current_iter=4)` returns `{c:3}` (NOT `{a:1, b:2, c:3}`). This matches `runtime_vocab` behaviour and is correct because each digest already carries cumulative state via `_cap_knowledge_cache`'s 5-entry rolling window.
+- [ ] **Empty cache short-circuit**: `current_iter=1` → `state.model_knowledge_cache == {}`. Mirrors the runtime_vocab short-circuit at `core/resume.py:291`.
+- [ ] **Workflow integration**: 2-iter pseudo-chain — iter 1 writes non-empty cache to disk, iter 2 (simulated subprocess) reads it via the new kwarg and the L830 init reflects it. Assert iter-2's `interp_input.model_knowledge_cache` has iter-1 keys.
+- [ ] **No regression**: full `tests/unit/core/test_resume.py` + `tests/unit/workflows/test_model_exploration.py` + `tests/unit/scripts/test_chain_consistency.py` pass. The existing 5 carry-over kwargs remain unchanged in shape.
+
+**Definition of Done**: in a 2-iter pseudo-run on a chain workspace, iter 2's `nodes/result_interpretation_agent.py:687-693` cache-hit branch fires for at least one model (i.e. `inp.model_knowledge_cache` is non-empty at iter-2 entry). Once Commit 6.1 lands on top, the `interpretation.per_model_skipped` audit markers will appear in the production JSONL — verifiable in the next 5-iter chain re-baseline.
+
+**Out of Scope**: changing the cache *update* mechanism (that is Commit 6.3 — the Knowledge Accumulator); changing the eviction cap (`_cap_knowledge_cache(max_entries=5)` is unchanged); modifying the digest schema (`InterpretationOutput.model_knowledge_cache` already has the right shape and is being written by every iter).
+
+---
+
+### Commit 6.1: Interpretation Call-on-Demand — Sliding Window + Stability Filter (Rev 7 — Critical Priority, expanded; Rev 8.3 — gated on 6.1.a)
+
+**Phase**: 2 (gated on Commit 4.3.2 closing AND Commit 6.1.a landing).
 **§5 step**: 12a.
+
+> **Rev 8.3 status note (2026-05-05)**: The helper-layer (T1-T3) and schema (T5) tasks below are already complete (commits `6190e32` + `d3c6eef`). The remaining wiring (T4) and end-to-end tests (T6) **require Commit 6.1.a (Knowledge Restoration) to land first** — without it, the cache-hit branch this commit gates is unreachable in production chains. Once 6.1.a is in, resume here with T4 + T6 + T7 unchanged. The 6.1 spec itself does not change; only its production-effectiveness is unlocked by 6.1.a.
 
 **Why this commit, why critical**: V12 explore data exposed **two distinct linear-growth axes** in the interpretation agent. Both must be clamped here because they share the same source of state (`model_knowledge_cache`):
 
