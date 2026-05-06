@@ -7,7 +7,7 @@ They evaluate predictions, generate discoveries, and build the runtime vocabular
 """
 
 import math
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from agent.schemas.proposal import VocabEntry, ProposedVocabLink, FalsifiablePrediction
 
@@ -479,3 +479,230 @@ def update_vocab_link_confirmations(
 
     updated_vocab = list(vocab_by_name.values())
     return updated_confs, updated_vocab, newly_promoted
+
+
+# ---------------------------------------------------------------------------
+# Commit 6.1: Active-model selection + per_model Stability Filter +
+#             synthesis-prompt compression.
+#
+# These three helpers form the "Active Model" policy that gates two distinct
+# growth axes in the interpretation agent (V12 forensic finding):
+#   axis 1 — synthesis prompt size grows linearly because every cached
+#            model_type is concatenated verbatim into the prompt.
+#   axis 2 — per_model LLM call count grows linearly because every cached
+#            model_type triggers a fresh per_model call each iter.
+#
+# The shared decision is: which model_types are "active enough to need
+# attention" this iter? Stable models are pulled from the cache as-is,
+# without a fresh LLM call (axis 2) and represented as a one-line takeaway
+# in the synthesis prompt (axis 1). The thresholds (top_k, last_n,
+# score_delta_threshold) are configured via InterpretationInput.
+# ---------------------------------------------------------------------------
+
+
+def select_active_models(
+    cache_entries: Dict[str, Dict[str, Any]],
+    current_iter_summaries: List[Any],  # List[ModelRunSummary]; loose-typed to avoid circular import
+    top_k: int = 3,
+    last_n: int = 2,
+    score_delta_threshold: float = 0.05,
+) -> Set[str]:
+    """Pick the active model_types as the union of three sets.
+
+    The active set is the union of:
+
+      1. **Top-K by best score** — the K models with the highest
+         ``_stats.best_denoising_score`` across ``cache_entries``. Ties
+         broken by lexicographic order on ``model_type`` for determinism.
+         Models whose cached ``best_denoising_score`` is None are excluded
+         from this ranking (cannot be ranked).
+      2. **Last-N most-recent** — the N model_types from
+         ``current_iter_summaries`` (these are by definition the freshest
+         tuning runs this iter). If ``len(current_iter_summaries) > last_n``,
+         the helper takes the first N from the list (callers may pre-sort
+         by proposal time). If ``last_n=0`` this set is empty.
+      3. **Delta-Δ models** — for each ``mt`` in ``current_iter_summaries``
+         that also has a prior cache entry, include ``mt`` if
+         ``abs(new_best_score - cached_best_score) >= score_delta_threshold``.
+         A model in ``current_iter_summaries`` with no prior cache entry
+         contributes via Last-N (no prior score to compare to).
+
+    Args:
+        cache_entries: Mapping ``{model_type: cache_entry}`` from
+            ``InterpretationInput.model_knowledge_cache`` (i.e., the cache
+            as it exists at the start of this iter, before any updates).
+        current_iter_summaries: This iter's ``ModelRunSummary`` list (one
+            per newly-tuned model). Pass the full list; the helper handles
+            ordering for the Last-N selection.
+        top_k: Top-K cap by best_score. Default 3.
+        last_n: Last-N cap by recency. Default 2.
+        score_delta_threshold: Absolute delta (in normalised score units)
+            required to include a model via the Delta-Δ pathway. Default
+            0.05.
+
+    Returns:
+        ``Set[str]`` of active model_types. Always a subset of
+        ``set(cache_entries.keys()) | {s.model_type for s in current_iter_summaries}``.
+    """
+    if top_k < 0 or last_n < 0 or score_delta_threshold < 0:
+        raise ValueError(
+            "select_active_models thresholds must be non-negative: "
+            f"top_k={top_k}, last_n={last_n}, score_delta_threshold={score_delta_threshold}"
+        )
+
+    active: Set[str] = set()
+
+    # (1) Top-K by best_denoising_score across cache_entries.
+    scored = [
+        (mt, entry.get("_stats", {}).get("best_denoising_score"))
+        for mt, entry in cache_entries.items()
+    ]
+    scored = [(mt, s) for mt, s in scored if s is not None]
+    # Sort by (-score, mt) so highest score comes first; lex-tiebreak for determinism.
+    scored.sort(key=lambda x: (-x[1], x[0]))
+    active.update(mt for mt, _ in scored[:top_k])
+
+    # (2) Last-N most-recent: current iter's summaries.
+    recent_mts = [s.model_type for s in current_iter_summaries]
+    active.update(recent_mts[:last_n])
+
+    # (3) Delta-Δ: current iter's summaries with significant score change vs cache.
+    for s in current_iter_summaries:
+        mt = s.model_type
+        new_score = s.best_denoising_score
+        if new_score is None:
+            continue
+        prior = cache_entries.get(mt, {}).get("_stats", {}).get("best_denoising_score")
+        if prior is None:
+            continue  # no baseline to compare; covered by Last-N
+        if abs(new_score - prior) >= score_delta_threshold:
+            active.add(mt)
+
+    return active
+
+
+def compress_model_summary(
+    model_type: str,
+    cache_entry: Dict[str, Any],
+    max_takeaway_chars: int = 150,
+) -> Dict[str, Any]:
+    """Compact a frozen cache entry into a one-line summary for the synthesis prompt.
+
+    The returned dict is meant to slot into the synthesis prompt's per-model
+    loop in place of the full multi-section block. Total target: ≤ 200 chars
+    when serialised back into the prompt (one line of metadata + one line
+    of takeaway).
+
+    The takeaway is **deterministically extracted** from the entry's
+    ``key_findings`` (first finding, truncated to ``max_takeaway_chars``).
+    No LLM call is issued. If ``key_findings`` is empty, the takeaway falls
+    back to ``best_config_analysis`` (truncated), then to a placeholder.
+
+    Args:
+        model_type: The architecture key (used in the returned dict).
+        cache_entry: A frozen cache entry — the dict stored at
+            ``model_knowledge_cache[model_type]``. Expected keys: any of
+            ``key_findings`` (list[str]), ``best_config_analysis`` (str),
+            and the ``_stats`` block (numerical).
+        max_takeaway_chars: Hard cap on the takeaway string. Default 150.
+
+    Returns:
+        ``{"model_type": str, "best_score": Optional[float], "n_rounds": int,
+           "one_line_takeaway": str}``.
+    """
+    if max_takeaway_chars <= 0:
+        raise ValueError(f"max_takeaway_chars must be positive, got {max_takeaway_chars}")
+
+    stats = cache_entry.get("_stats", {}) or {}
+
+    findings = cache_entry.get("key_findings") or []
+    takeaway = ""
+    if findings and isinstance(findings[0], str):
+        takeaway = findings[0]
+    elif cache_entry.get("best_config_analysis"):
+        takeaway = str(cache_entry["best_config_analysis"])
+    else:
+        takeaway = "(no cached takeaway)"
+
+    if len(takeaway) > max_takeaway_chars:
+        takeaway = takeaway[: max_takeaway_chars - 1].rstrip() + "…"
+
+    return {
+        "model_type": model_type,
+        "best_score": stats.get("best_denoising_score"),
+        "n_rounds": stats.get("completed_rounds", 0) or 0,
+        "one_line_takeaway": takeaway,
+    }
+
+
+def should_recall_per_model(
+    model_type: str,
+    cache_entry: Optional[Dict[str, Any]],
+    current_iter_summary: Optional[Any],  # Optional[ModelRunSummary]
+    active_set: Set[str],
+    score_delta_threshold: float = 0.05,
+) -> bool:
+    """Decide whether to issue a fresh ``interpretation.per_model`` LLM call.
+
+    Returns ``True`` when the agent must re-summarise the model_type with a
+    fresh LLM call this iter; returns ``False`` when the cached entry is
+    safe to reuse verbatim (zero LLM cost — the V12 fix).
+
+    The decision tree:
+
+      1. **Cache miss** (``cache_entry is None``): always ``True``.
+         A model never seen before must be summarised at least once,
+         regardless of active-set membership.
+      2. **Cache hit + not in active_set**: ``False``. Stable historical
+         model — reuse the prior summary, skip the LLM call.
+      3. **Cache hit + in active_set + has new training data**: ``True``.
+         The active model has fresh evidence to reflect; re-call the LLM.
+         "Has new training data" means ``current_iter_summary`` is not
+         ``None`` AND either (a) ``completed_rounds`` increased vs. the
+         cached count, OR (b) ``abs(new_best - cached_best) >= threshold``.
+      4. **Cache hit + in active_set + no new training data**: ``False``.
+         The model is in the active set (e.g., via Top-K) but had no new
+         tuning rounds this iter. Reuse the cache; do not waste an LLM
+         call on unchanged data.
+
+    Args:
+        model_type: The architecture key (used for clarity; the function
+            does not look it up — the caller passes ``cache_entry`` and
+            ``current_iter_summary`` directly).
+        cache_entry: The prior cache entry, or ``None`` for a cache miss.
+        current_iter_summary: This iter's ``ModelRunSummary`` for this
+            model_type, or ``None`` if the model was not tuned this iter.
+        active_set: The set of active model_types from ``select_active_models``.
+        score_delta_threshold: Score-delta cutoff for "has new evidence".
+            Should match the threshold used in ``select_active_models``
+            so the two decisions are coherent. Default 0.05.
+
+    Returns:
+        ``bool`` — ``True`` to issue a fresh LLM call, ``False`` to reuse
+        the cached entry verbatim.
+    """
+    # (1) Cache miss → must summarise.
+    if cache_entry is None:
+        return True
+
+    # (2) Stable model (not in active set) → reuse cache.
+    if model_type not in active_set:
+        return False
+
+    # (3 & 4) Active model — only recall if there's new evidence.
+    if current_iter_summary is None:
+        return False  # no new tuning data this iter
+
+    cached_stats = (cache_entry.get("_stats") or {})
+    cached_rounds = cached_stats.get("completed_rounds", 0) or 0
+    new_rounds = getattr(current_iter_summary, "completed_rounds", 0) or 0
+    if new_rounds > cached_rounds:
+        return True
+
+    cached_best = cached_stats.get("best_denoising_score")
+    new_best = getattr(current_iter_summary, "best_denoising_score", None)
+    if cached_best is not None and new_best is not None:
+        if abs(new_best - cached_best) >= score_delta_threshold:
+            return True
+
+    return False
