@@ -87,12 +87,12 @@ def _skip_if_no_seeds():
 
 
 # ---------------------------------------------------------------------------
-# Helpers — load advice + LLM config the same way run_exploration_adaptive does
+# Helpers — load advice + LLM config the same way the chain runner does
 # ---------------------------------------------------------------------------
 
 def _load_advice(path: str) -> dict:
     """Load an advice JSON; list values get joined into one string (matches
-    run_exploration_adaptive.py's handling)."""
+    the chain runner's handling)."""
     with open(path, "r", encoding="utf-8") as f:
         raw = json.load(f)
     return {

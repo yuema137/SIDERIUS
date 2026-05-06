@@ -499,8 +499,8 @@ def _run_layout_chain(args: argparse.Namespace) -> int:
     workspace: Path = args.workspace.resolve()
 
     # Legacy guard: refuse to walk a workspace that holds v5/v6 artifacts.
-    # Reuses the same helper used at runtime by run_exploration_adaptive.py
-    # so "what counts as legacy" has a single source of truth.
+    # Reuses the same helper used at runtime by the chain runner so
+    # "what counts as legacy" has a single source of truth.
     try:
         validate_workspace_layout(str(workspace))
     except ResumeError as e:

@@ -27,8 +27,9 @@ _ID_SHAPE = re.compile(r"^[A-Za-z0-9_]+-\d{8}T\d{6}-\d+$")
 
 def test_fresh_workspace_generates_id_with_expected_shape(tmp_path):
     """A workspace without a sidecar gets a freshly-minted run_id whose
-    shape matches ``{run_name}-{YYYYMMDDThhmmss}-{pid}`` — the same
-    format ``run_exploration_adaptive._generate_run_id`` produces."""
+    shape matches ``{run_name}-{YYYYMMDDThhmmss}-{pid}`` — the format
+    ``sdsc_submission_scripts.run_one_iteration._resolve_chain_run_id``
+    produces on first call."""
     workspace = str(tmp_path)
     run_name = "explore_v12_test"
 
@@ -86,6 +87,29 @@ def test_empty_sidecar_is_treated_as_missing(tmp_path):
     assert _ID_SHAPE.match(rid)
     assert rid.startswith("explore_v12_test-")
     assert open(sidecar, encoding="utf-8").read().strip() == rid
+
+
+def test_distinct_run_names_in_distinct_workspaces_produce_distinct_ids(tmp_path):
+    """Two fresh workspaces with two different run_names must yield ids
+    that begin with their respective prefixes and are not equal.
+
+    Pre-4.3.4 the legacy in-process runner had a stateless
+    ``_generate_run_id`` whose distinctness was easy to test in one
+    process. The chain runner's sidecar locks each workspace to one id,
+    so distinctness is meaningful only across workspaces — but the
+    format guarantee (``{run_name}-{utc}-{pid}``) still puts the
+    user-supplied prefix at the head of every id. This test pins that
+    contract directly so the property survives without relying on the
+    deleted ``test_token_log_iter_rollup.py`` coverage."""
+    ws_a = str(tmp_path / "ws_a")
+    ws_b = str(tmp_path / "ws_b")
+
+    rid_a = _resolve_chain_run_id(ws_a, "explore_alpha")
+    rid_b = _resolve_chain_run_id(ws_b, "exploit_beta")
+
+    assert rid_a.startswith("explore_alpha-")
+    assert rid_b.startswith("exploit_beta-")
+    assert rid_a != rid_b
 
 
 def test_workspace_is_created_if_missing(tmp_path):

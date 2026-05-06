@@ -2633,7 +2633,7 @@ def main():
 
     # evaluate_time_skill gate (Phase E1, Phase I two-budget split). Each
     # default is None, which keeps that mode's gate off — matches the
-    # workflow-level CLI in run_exploration_adaptive.py.
+    # chain-runner CLI defaults.
     parser.add_argument("--trial_time_budget_minutes", type=float, default=None,
                         help="Wall-time budget (minutes) for the evaluate_time_skill "
                              "gate on rounds where plan.is_trial=True. None disables "
@@ -2650,7 +2650,7 @@ def main():
 
     # evaluate_vram_skill gate (Phase K two-budget split). Each default is
     # None which keeps that mode's budget disabled — skill falls back to the
-    # defensive free×0.8 limit. Matches run_exploration_adaptive.py.
+    # defensive free×0.8 limit. Matches the chain-runner CLI defaults.
     parser.add_argument("--trial_vram_budget_gb", type=float, default=None,
                         help="Per-mode VRAM ceiling (GB) for the evaluate_vram_skill "
                              "gate on rounds where plan.is_trial=True. None → "
@@ -2728,8 +2728,8 @@ def main():
         # Clamp the LLM's per-round ExperimentPlan portions to the operator's
         # CLI values. Without this, the top-level trial_portion only sizes the
         # sample set; the LLM is still free to pick its own ExperimentPlan
-        # portions, which can blow past the time-budget gate. Mirrors
-        # run_exploration_adaptive.py's plan_overrides wiring.
+        # portions, which can blow past the time-budget gate. Mirrors the
+        # chain runner's plan_overrides wiring.
         input_dict["plan_overrides"] = {
             "is_trial":      True,
             "trial_portion": args.trial_portion,

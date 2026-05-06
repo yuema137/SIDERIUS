@@ -1,9 +1,9 @@
 """Subprocess harness — exercises §1.4.2 fail-fast contract end-to-end.
 
 Used by ``test_runner_aborts_on_runid_mismatch`` (Q4 confirmed: real
-subprocess, no monkey-patching). Mirrors the
-``run_exploration_adaptive.py`` top-level handler: build a real
-``LLMBridge``, bind a deliberately-fresh ``run_id`` against a workspace
+subprocess, no monkey-patching). Mirrors the chain runner's top-level
+handler: build a real ``LLMBridge``, bind a deliberately-fresh
+``run_id`` against a workspace
 whose ``token_usage.jsonl`` is already owned by a *different* run_id,
 then call ``_record_usage``. The bridge's first-row check (§1.4.1)
 should raise :class:`LLMBridgeContextError`; the handler below
@@ -81,9 +81,9 @@ def main() -> None:
               file=sys.stderr)
         sys.exit(0)
     except LLMBridgeContextError as e:
-        # The exact wording mirrors the production handler in
-        # run_exploration_adaptive.py::main so a single grep covers
-        # both code paths.
+        # The exact wording mirrors the chain runner's top-level handler
+        # in sdsc_submission_scripts/run_one_iteration.py so a single
+        # grep catches drift.
         print(
             f"[FATAL] LLMBridgeContextError: {e} — aborting run to "
             f"prevent telemetry corruption.",
