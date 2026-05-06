@@ -541,6 +541,94 @@ class TestRunWorkflowMultiIteration:
         assert len(iter2_inp.summaries) == 1                    # new model only
         assert "punet" in iter2_inp.model_knowledge_cache       # seed carried forward
 
+    def test_restored_model_knowledge_cache_seeds_first_iter(self, workflow_env):
+        """Commit 6.1.a — chain runner forwards prior iter's cache via the
+        new ``restored_model_knowledge_cache`` kwarg. The first iter of this
+        subprocess must see those entries already present in
+        ``InterpretationInput.model_knowledge_cache``, exactly as the
+        in-process iter-2 case (covered by the test above) does.
+
+        Without this wiring, the cache-hit branch at
+        ``nodes/result_interpretation_agent.py:687-693`` is unreachable in
+        chain mode and the Stability Filter (Commit 6.1) is dead code.
+        """
+        prior_cache = {
+            "punet": {
+                "key_findings": ["frozen finding from prior iter"],
+                "best_config_analysis": "noted",
+                "_stats": {"best_denoising_score": 1.42},
+            },
+        }
+        workflow_env["propose"].return_value.run.return_value = _make_proposal_output("model_a")
+        workflow_env["tune"].return_value.run.side_effect = lambda inp: _make_tune_output(
+            model_type=inp.model_type, score=1.6,
+        )
+
+        run_workflow(
+            data_dir=workflow_env["data_dir"],
+            model_types=["punet"],
+            source_run_name="v1",
+            workspace=workflow_env["workspace"],
+            run_name="test_run",
+            max_iterations=1,
+            restored_model_knowledge_cache=prior_cache,
+        )
+        iter1_inp = workflow_env["interp"].return_value.run.call_args_list[0][0][0]
+        # Cache must be seeded before per_model loop; verbatim round-trip.
+        assert "punet" in iter1_inp.model_knowledge_cache
+        assert (
+            iter1_inp.model_knowledge_cache["punet"]["_stats"]["best_denoising_score"]
+            == 1.42
+        )
+
+    def test_restored_model_knowledge_cache_defensive_copy(self, workflow_env):
+        """The workflow mutates its in-iter cache (writes new entries on
+        cache miss); mutation must not bleed back into the caller's dict."""
+        caller_cache = {
+            "punet": {
+                "key_findings": ["original"],
+                "_stats": {"best_denoising_score": 1.0},
+            },
+        }
+        workflow_env["propose"].return_value.run.return_value = _make_proposal_output("model_a")
+        workflow_env["tune"].return_value.run.side_effect = lambda inp: _make_tune_output(
+            model_type=inp.model_type, score=1.6,
+        )
+
+        run_workflow(
+            data_dir=workflow_env["data_dir"],
+            model_types=["punet"],
+            source_run_name="v1",
+            workspace=workflow_env["workspace"],
+            run_name="test_run",
+            max_iterations=1,
+            restored_model_knowledge_cache=caller_cache,
+        )
+        # Caller's dict must still have exactly the one entry it started with —
+        # the workflow's cache-miss path may have written model_a, but only
+        # to its own copy.
+        assert list(caller_cache.keys()) == ["punet"]
+
+    def test_no_restored_cache_preserves_legacy_empty_init(self, workflow_env):
+        """Default-None kwarg keeps the in-process / first-iter behaviour:
+        the iter starts with an empty cache. Regression guard against
+        breaking pseudo-mode tests that don't pass the new kwarg."""
+        workflow_env["propose"].return_value.run.return_value = _make_proposal_output("model_a")
+        workflow_env["tune"].return_value.run.side_effect = lambda inp: _make_tune_output(
+            model_type=inp.model_type, score=1.6,
+        )
+        run_workflow(
+            data_dir=workflow_env["data_dir"],
+            model_types=["punet"],
+            source_run_name="v1",
+            workspace=workflow_env["workspace"],
+            run_name="test_run",
+            max_iterations=1,
+            # restored_model_knowledge_cache omitted — defaults to None.
+        )
+        iter1_inp = workflow_env["interp"].return_value.run.call_args_list[0][0][0]
+        assert iter1_inp.model_knowledge_cache == {}
+
     def test_stops_on_target_score(self, workflow_env):
         names = iter(["model_a", "model_b", "model_c"])
         workflow_env["propose"].return_value.run.side_effect = lambda inp: _make_proposal_output(next(names))

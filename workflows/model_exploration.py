@@ -607,6 +607,15 @@ def run_workflow(
     # RestoredState. See docs/Consistent_growing_vocab_list.md.
     restored_runtime_vocab: list | None = None,
     accumulated_key_findings: list[str] | None = None,
+    # --- Cross-iter knowledge-cache carry-over (Commit 6.1.a precondition) ---
+    # Latest committed iter's per-model summarisation cache. Default None
+    # preserves the in-process / first-iter contract (start with an empty
+    # cache; build up across the in-process loop). The chain runner
+    # populates this from state.model_knowledge_cache so the Stability
+    # Filter at nodes/result_interpretation_agent.py:687-693 can fire in
+    # production. See docs/audit_and_optimize_token_usage_and_growth.md
+    # Rev 8.3 changelog (Commit 6.1.a).
+    restored_model_knowledge_cache: dict | None = None,
     # --- Cross-iter negative-feedback carry-over (V8 hardening Domain 1) ---
     # Same shape as the knowledge carry-over above: chain runner populates
     # both from RestoredState; in-process / first-iter callers leave both at
@@ -827,7 +836,24 @@ def run_workflow(
         )
     else:
         current_runtime_vocab = list(vocab_seed)  # first iter or in-process run
-    model_knowledge_cache: dict = {}             # per-model Phase 1 cache (grows once per model)
+    # Per-model Phase 1 cache (grows once per model). Commit 6.1.a — chain
+    # mode forwards the latest committed iter's cache via
+    # restored_model_knowledge_cache so the cache-hit branch at
+    # nodes/result_interpretation_agent.py:687-693 can fire across the
+    # subprocess boundary. In-process / first-iter callers pass None and
+    # behaviour is unchanged. Defensive copy: the workflow mutates the dict
+    # in place at iter end; we don't want to alias the caller's reference.
+    model_knowledge_cache: dict = (
+        dict(restored_model_knowledge_cache) if restored_model_knowledge_cache else {}
+    )
+    if model_knowledge_cache:
+        _cache_keys_preview = sorted(model_knowledge_cache)[:5]
+        print(
+            f"  Knowledge cache restored from prior chain iter: "
+            f"{len(model_knowledge_cache)} entries "
+            f"({_cache_keys_preview}"
+            f"{'...' if len(model_knowledge_cache) > 5 else ''})"
+        )
     latest_new_summary = None                    # ModelRunSummary from the most recent tune
     # Phase N (§14.N) — bounded FIFO of the last 3 tuner outputs so the
     # interp→propose protocol can surface their gate_exhaustion summaries
