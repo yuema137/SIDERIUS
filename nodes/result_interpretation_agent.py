@@ -17,7 +17,7 @@ Node contract:
 import os
 import json
 import argparse
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from agent.llm_bridge import LLMBridge
 from agent.schemas.interpretation import (
@@ -318,8 +318,22 @@ def _build_synthesis_prompt(
     per_model_formal: Optional[Dict[str, Optional[float]]] = None,
     vocab_diversity_ratio: Optional[float] = None,
     cumulative_information_gain: Optional[float] = None,
+    compressed_model_types: Optional[Set[str]] = None,
+    workspace: Optional[str] = None,
 ) -> str:
-    """Build the user prompt for cross-model synthesis."""
+    """Build the user prompt for cross-model synthesis.
+
+    ``compressed_model_types`` (Commit 6.1 — Sliding Window) marks the
+    model_types whose ``per_model_summaries`` entry has been replaced
+    by a deterministic one-line takeaway (output of
+    ``compress_model_summary``). For those entries, this function emits
+    a short 3-line block (header + best/n_rounds + takeaway) instead of
+    the full multi-section LLM-text expansion, and prefixes the block
+    with a single header line that points the LLM to the on-disk
+    iteration record for full detail. Active models render unchanged.
+    """
+    compressed_model_types = compressed_model_types or set()
+
     lines = [
         "## Overall Performance",
         f"Best score across all models : {overall_best_score}",
@@ -328,7 +342,19 @@ def _build_synthesis_prompt(
         "",
     ]
 
-    for model_type, summary in per_model_summaries.items():
+    # Render active models first (full block), then compressed models
+    # (short block) under a single header. Stable iteration order is
+    # preserved within each group via the dict's insertion order.
+    active_items = [
+        (mt, s) for mt, s in per_model_summaries.items()
+        if mt not in compressed_model_types
+    ]
+    compressed_items = [
+        (mt, s) for mt, s in per_model_summaries.items()
+        if mt in compressed_model_types
+    ]
+
+    for model_type, summary in active_items:
         lines += [
             "---",
             f"## Model: {model_type}",
@@ -376,6 +402,31 @@ def _build_synthesis_prompt(
                 table.rendered_markdown,
             ]
 
+        lines.append("")
+
+    # Compressed (stable) models: single header + short blocks.
+    if compressed_items:
+        ws_hint = (
+            f"see {workspace}/iter_*/interpretation.json for full detail"
+            if workspace else
+            "see prior interpretation.json files for full detail"
+        )
+        lines += [
+            "---",
+            f"## Stable Architectures (Compressed)",
+            f"[{len(compressed_items)} older architectures compressed for "
+            f"context budget — {ws_hint}]",
+            "",
+        ]
+        for model_type, summary in compressed_items:
+            takeaway = summary.get("one_line_takeaway") or summary.get(
+                "key_findings", [""]
+            )[0] if summary.get("key_findings") else "(no cached takeaway)"
+            best = summary.get("best_score", per_model_best.get(model_type))
+            n_rounds = summary.get("n_rounds", 0)
+            lines += [
+                f"- **{model_type}** (best={best}, n_rounds={n_rounds}): {takeaway}",
+            ]
         lines.append("")
 
     # Established discoveries from previous iterations
@@ -681,15 +732,62 @@ class ResultInterpretationAgent:
         # load_latest_knowledge() skipped the affected iter — causing a
         # 2-iter vocab regression. See docs/V8_Gap_Report.md Domain 2b.
         try:
-            # --- Phase 1: Per-model summarization (cache-first) ---
-            # Cache hit  → reuse entry from inp.model_knowledge_cache, zero LLM calls.
-            # Cache miss → call LLM, build self-sufficient entry (LLM text + _stats).
+            # --- Phase 1: Per-model summarization (Stability Filter — Commit 6.1) ---
+            # Compute the active set ONCE for this iter — gates both per_model
+            # recall (axis 2) and synthesis-prompt expansion (axis 1).
+            #     active_set = Top-K-by-best-score
+            #                  ∪ Last-N-by-recency
+            #                  ∪ {mt | |Δ score| ≥ threshold}
+            # `should_recall_per_model` then decides per-model whether the
+            # cache entry can be reused verbatim (no LLM call) or whether
+            # fresh evidence warrants a fresh per_model call.
+            from nodes.interpretation_helpers import (
+                select_active_models,
+                should_recall_per_model,
+            )
+
+            active_set = select_active_models(
+                cache_entries=inp.model_knowledge_cache,
+                current_iter_summaries=inp.summaries,
+                top_k=inp.active_model_top_k,
+                last_n=inp.active_model_last_n,
+                score_delta_threshold=inp.active_model_score_delta,
+            )
+            print(
+                f"  Active models ({len(active_set)}/{len(effective_types)}): "
+                f"{sorted(active_set)}"
+            )
+
             model_knowledge_cache: Dict[str, Dict] = {}
+            n_skipped = 0
             for mt in effective_types:
-                if mt in inp.model_knowledge_cache:
-                    # Cache hit: model was summarized in a previous iteration
-                    model_knowledge_cache[mt] = inp.model_knowledge_cache[mt]
-                    print(f"  Phase 1: {mt} — cache hit, skipping LLM call.")
+                cache_entry = inp.model_knowledge_cache.get(mt)
+                current_summary = per_model_summary_input.get(mt)
+
+                # Stability Filter decision: True → recall LLM, False → reuse cache.
+                recall = should_recall_per_model(
+                    model_type=mt,
+                    cache_entry=cache_entry,
+                    current_iter_summary=current_summary,
+                    active_set=active_set,
+                    score_delta_threshold=inp.active_model_score_delta,
+                )
+
+                if not recall and cache_entry is not None:
+                    # Stable model with a usable cache → reuse verbatim, emit
+                    # audit marker so build_token_baseline_report.py can count
+                    # the savings. The skip is countable but charges zero
+                    # tokens / chars.
+                    model_knowledge_cache[mt] = cache_entry
+                    n_skipped += 1
+                    self.bridge.emit_marker(
+                        label="interpretation.per_model_skipped",
+                        extra={"reason": "stable", "model_type": mt},
+                    )
+                    print(
+                        f"  Phase 1: {mt} — Stability Filter skip "
+                        f"(cached entry reused, no LLM call)."
+                    )
                     continue
 
                 if mt not in per_model_summary_input:
@@ -739,6 +837,13 @@ class ResultInterpretationAgent:
                 print(f"    {mt}: {len(llm_response.get('key_findings', []))} findings, "
                       f"{len(llm_response.get('bottlenecks', []))} bottlenecks")
 
+            if n_skipped:
+                print(
+                    f"  Stability Filter: {n_skipped} model_type(s) skipped "
+                    f"(cache reused; saved {n_skipped} interpretation.per_model "
+                    f"LLM call(s) this iter)."
+                )
+
             # --- Pre-compute enriched fields ---
             # New models: read from inp.summaries.
             # Cached models: read from model_knowledge_cache[mt]["_stats"].
@@ -775,13 +880,32 @@ class ResultInterpretationAgent:
                 if stats.get("best_model_params") is not None:
                     per_model_params[mt] = stats["best_model_params"]
 
-            # --- Phase 2: Cross-model synthesis ---
-            # Strip _stats from model_knowledge_cache entries before passing to synthesis
-            # (synthesis prompt receives the LLM text fields only, stats are shown separately)
-            per_model_summaries_for_prompt = {
-                mt: {k: v for k, v in entry.items() if k != "_stats"}
-                for mt, entry in model_knowledge_cache.items()
-            }
+            # --- Phase 2: Cross-model synthesis (Sliding Window — Commit 6.1) ---
+            # Active models: full LLM-text block expanded into the synthesis
+            # prompt (existing behaviour, minus _stats which is shown separately).
+            # Stable models: deterministic one-line takeaway via
+            # `compress_model_summary` — no LLM call, target ≤ 200 chars per
+            # model. This clamps axis 1 (synthesis prompt-size growth) by
+            # replacing the V12 "concatenate every cache entry verbatim"
+            # behaviour with a windowed view.
+            from nodes.interpretation_helpers import compress_model_summary
+            per_model_summaries_for_prompt: Dict[str, Dict] = {}
+            compressed_set: Set[str] = set()
+            for mt, entry in model_knowledge_cache.items():
+                if mt in active_set:
+                    per_model_summaries_for_prompt[mt] = {
+                        k: v for k, v in entry.items() if k != "_stats"
+                    }
+                else:
+                    per_model_summaries_for_prompt[mt] = compress_model_summary(mt, entry)
+                    compressed_set.add(mt)
+            n_compressed = len(compressed_set)
+            if n_compressed:
+                print(
+                    f"  Phase 2: {n_compressed} stable model(s) compressed "
+                    f"to one-liners for the synthesis prompt "
+                    f"(active: {len(active_set)})."
+                )
 
             # Compute prior-state health metrics from the *incoming* vocab and cumulative
             # before Phase 2 synthesis so the LLM can see the research trajectory so far.
@@ -819,6 +943,8 @@ class ResultInterpretationAgent:
                     per_model_formal=per_model_formal or None,
                     vocab_diversity_ratio=prior_vocab_diversity_ratio,
                     cumulative_information_gain=prior_cumulative_info_gain,
+                    compressed_model_types=compressed_set,
+                    workspace=inp.storage.local.workspace,
                 )
                 synthesis_response = self.bridge.generate(
                     SYNTHESIS_SYSTEM_PROMPT, synthesis_prompt,

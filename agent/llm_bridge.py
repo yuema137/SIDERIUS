@@ -468,6 +468,93 @@ class LLMBridge:
         self._last_logged_iter = prev_iter
         self._last_ts = ts
 
+    # ------------------------------------------------------------------
+    # Public marker emit (Commit 6.1 — Stability Filter audit support)
+    # ------------------------------------------------------------------
+    # Callers that deliberately *skip* a labelled LLM call (e.g. the
+    # interpretation agent's Stability Filter, which reuses a cached
+    # per_model entry instead of re-querying the LLM) emit a synthetic
+    # row through this method so the skip is countable in
+    # token_usage.jsonl. Without this, build_token_baseline_report.py
+    # cannot quantify the savings — the skip would be invisible to the
+    # audit. Mirrors _flush_iter_marker_locked's row shape (zeroed
+    # tokens/chars, marker-style extra) but with caller-provided label
+    # and extra. See docs/audit_and_optimize_token_usage_and_growth.md
+    # Commit 6.1 (T4 wiring + audit-log test).
+    # ------------------------------------------------------------------
+    def emit_marker(self, *, label: str,
+                    extra: Optional[Dict[str, Any]] = None) -> None:
+        """Append a synthetic marker row without an LLM call.
+
+        Args:
+            label: Stable call-site identifier, e.g.
+                ``"interpretation.per_model_skipped"``. Must be non-empty.
+            extra: Free-form caller context, e.g.
+                ``{"reason": "stable", "model_type": "punet"}``.
+
+        Silent no-op when run context is unset (mirrors ``_record_usage``).
+        Pre-write invariants (run_id, path, ts) are validated the same
+        way as a real LLM row — a marker that would corrupt the log
+        fails as loudly as a real row would.
+
+        Raises:
+            ValueError: empty ``label``.
+            LLMBridgeContextError: pre-write invariant violation
+                (run_id mutation, backwards iter). Propagates per §1.4.2.
+        """
+        if not label:
+            raise ValueError("emit_marker requires a non-empty label")
+        if self._token_usage_path is None:
+            return  # context unset — silent no-op
+
+        ts = (
+            datetime.now(timezone.utc)
+            .isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z")
+        )
+
+        with self._lock:
+            self._validate_pre_write_locked(target_iter=self._iter, ts=ts)
+            try:
+                row = TokenUsageRow(
+                    ts=ts,
+                    run_id=self._run_id or "unbound",
+                    run_name=self._run_name or "unbound",
+                    iter=self._iter,
+                    label=label,
+                    model=None,
+                    provider=None,
+                    tokens=TokenCounts(),
+                    chars=TokenUsageChars(system=0, user=0, total=0),
+                    components={},
+                    extra=dict(extra) if extra else {},
+                )
+            except ValidationError as ve:
+                print(
+                    f"[LLMBridge.emit_marker] schema validation failed "
+                    f"for label={label!r}: {ve}",
+                    file=sys.stderr, flush=True,
+                )
+                return
+            try:
+                with open(self._token_usage_path, "a", buffering=1) as f:
+                    f.write(row.model_dump_json() + "\n")
+                    f.flush()
+            except OSError as oe:
+                print(
+                    f"[LLMBridge.emit_marker] append failed for "
+                    f"{self._token_usage_path}: {oe}",
+                    file=sys.stderr, flush=True,
+                )
+                return
+            # Track for monotonic checks (mirrors _flush_iter_marker_locked).
+            if self._iter is not None and (
+                self._last_logged_iter is None
+                or self._iter > self._last_logged_iter
+            ):
+                self._last_logged_iter = self._iter
+            self._last_ts = ts
+
     def _validate_pre_write_locked(self, *, target_iter: Optional[int],
                                    ts: str) -> None:
         """Run the four §1.4.1 pre-write invariant checks. Caller holds lock.
