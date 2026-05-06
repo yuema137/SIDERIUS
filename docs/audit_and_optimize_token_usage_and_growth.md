@@ -1,7 +1,7 @@
 # Audit & Optimize Token Usage and Growth
 
-**Status**: Design draft, revision 8.2 (2026-05-05) — "Knowledge Accumulator". G0 approved; G1 baseline LANDED; Phase 1 CLOSED. Commit 4.3.2 closed with H1 verdict; Commit 4.3.3 (11th audit key) merged. **Phase 2 in progress.** Commit 6.3 promoted from "Source-Level Merge & Prune" (Rev 8) to **Knowledge Accumulator Refactor** after a code audit (2026-05-05) revealed the cache is currently a *frozen snapshot* (`nodes/result_interpretation_agent.py:687-693` — cache hit copies verbatim, no merging path), not a cumulative ledger. The Rev 8 spec assumed accumulation across iters; the code provides none. Rev 8.2 reframes 6.3 as a two-part refactor: (i) modify the cache update path so a cache hit performs a *light merge* against new findings, and (ii) reconcile the 8 existing LLM text fields (`key_findings, bottlenecks, best_config_analysis, score_trend, per_file_analysis, data_sensitivity, efficiency_assessment, strategy_assessment`) with the consolidated schema. **Sequencing**: Commit 6.1 (Stability Filter + Synthesis Window) ships first to clamp the call-multiplication bleed; 6.3 follows with the schema heart-transplant. Phase 2 entry point is Commit 6.1.
-**Author**: drafted 2026-05-04, revised 2026-05-04 (rev 2 — safety/forensic/retention gates), revised 2026-05-04 (rev 3 — commit ledger + hybrid DRR + fail-fast formalization), revised 2026-05-05 (rev 4 — T1-Sanity green + Commit 4.3.1 chain-wrapper parity + V12 launch), revised 2026-05-05 (rev 5 — V12 iter 1–13 calibration + Phase 2 priority pivot), revised 2026-05-05 (rev 6 — Targeted O(N) Dehydration + USD tracking + Phase 3 split), revised 2026-05-05 (rev 7 — V12 iter 14 multi-dimensional explosion: Stability Filter, Knowledge Consolidation, Attribution Audit), revised 2026-05-05 (rev 8 — H1 verdict on 4.3.2 leak + Commit 4.3.3 11th audit key + Commit 6.3 escalated to source-level cache dehydration), revised 2026-05-05 (rev 8.1 — Gate G3.5 SOTA Replication + Metric #12 SRR + Commit 11.2 verify_sota_replication.py), revised 2026-05-05 (rev 8.2 — code audit confirms frozen-cache discrepancy; Commit 6.3 promoted to Knowledge Accumulator refactor; Phase 2 entry sequenced as 6.1 → 6.3).
+**Status**: Design draft, revision 8.4 (2026-05-06) — "4-Stage Pseudo-Mode & Cleanup Roadmap". G0 approved; G1 baseline LANDED; Phase 1 CLOSED. Commit 4.3.2 closed with H1 verdict; Commit 4.3.3 (11th audit key) merged. **Phase 2 in progress.** Commit 6.3 promoted from "Source-Level Merge & Prune" (Rev 8) to **Knowledge Accumulator Refactor** after a code audit (2026-05-05) revealed the cache is currently a *frozen snapshot* (`nodes/result_interpretation_agent.py:687-693` — cache hit copies verbatim, no merging path), not a cumulative ledger. The Rev 8 spec assumed accumulation across iters; the code provides none. Rev 8.2 reframes 6.3 as a two-part refactor: (i) modify the cache update path so a cache hit performs a *light merge* against new findings, and (ii) reconcile the 8 existing LLM text fields (`key_findings, bottlenecks, best_config_analysis, score_trend, per_file_analysis, data_sensitivity, efficiency_assessment, strategy_assessment`) with the consolidated schema. **Sequencing**: Commit 6.1 (Stability Filter + Synthesis Window) ships first to clamp the call-multiplication bleed; 6.3 follows with the schema heart-transplant. Phase 2 entry point is Commit 6.1. **Rev 8.4** splits the legacy-runner cleanup work into a four-stage roadmap (Commits 4.3.4 → 4.4 → 4.5 → 4.6): Stage 1 retires `run_exploration_adaptive.py`; Stage 2 builds stateless `StubLLMBridge` + `StubSandbox`; Stage 3 wires `--is_pseudo_llm`/`--is_pseudo_training` CLI flags + a 0-cost smoke; Stage 4 closes Gap #3 with a manifest-based consecutive-iter brake. Map first, march second.
+**Author**: drafted 2026-05-04, revised 2026-05-04 (rev 2 — safety/forensic/retention gates), revised 2026-05-04 (rev 3 — commit ledger + hybrid DRR + fail-fast formalization), revised 2026-05-05 (rev 4 — T1-Sanity green + Commit 4.3.1 chain-wrapper parity + V12 launch), revised 2026-05-05 (rev 5 — V12 iter 1–13 calibration + Phase 2 priority pivot), revised 2026-05-05 (rev 6 — Targeted O(N) Dehydration + USD tracking + Phase 3 split), revised 2026-05-05 (rev 7 — V12 iter 14 multi-dimensional explosion: Stability Filter, Knowledge Consolidation, Attribution Audit), revised 2026-05-05 (rev 8 — H1 verdict on 4.3.2 leak + Commit 4.3.3 11th audit key + Commit 6.3 escalated to source-level cache dehydration), revised 2026-05-05 (rev 8.1 — Gate G3.5 SOTA Replication + Metric #12 SRR + Commit 11.2 verify_sota_replication.py), revised 2026-05-05 (rev 8.2 — code audit confirms frozen-cache discrepancy; Commit 6.3 promoted to Knowledge Accumulator refactor; Phase 2 entry sequenced as 6.1 → 6.3), revised 2026-05-05 (rev 8.3 — subprocess-amnesia fix: NEW Commit 6.1.a Knowledge Restoration; NEW Commit 4.3.4 Legacy Runner Deletion), revised 2026-05-06 (rev 8.4 — 4-Stage Pseudo-Mode & Cleanup Roadmap: 4.3.4 split into Stage 1, plus NEW Stage 2 / 3 / 4 commits 4.4 / 4.5 / 4.6 — stateless stubs, CLI flags + 0-cost smoke, manifest-based consecutive-iter brake closing Gap #3).
 **Inputs**:
 
 - `reports/v11_20250503_token_usage.md` §12 (Proposer Internal Workflow & Feedback Logic) — the audit that motivates this doc.
@@ -162,6 +162,30 @@ Both authors were right about their respective regime; the regime difference its
 - **No changes** to Commits 6.2, 6.3, or any Phase 2 gate. G1.5's 5-metric re-baseline still applies; metric (2) (`interpretation.per_model` calls per iter) is the one most directly unblocked by 6.1.a.
 
 **Why this matters for chain-mode invariants**: the existing 5 carry-over kwargs already cover *evidence* (vocab, findings, rejections, gate exhaustions, prior proposal). The 6th — `model_knowledge_cache` — covers *summarised knowledge*: the LLM-distilled per-model interpretation that turns raw evidence into a Phase-1 cache entry. Without it, every chain subprocess re-pays the summarisation cost from scratch. With it, the chain's "memory" is complete and the Stability Filter starts saving real tokens.
+
+### Revision 8.4 changelog (2026-05-06) — "4-Stage Pseudo-Mode & Cleanup Roadmap"
+
+**Status**: Stage 1 substantially complete (S1–S7d done, smoke + final commit gate pending). Stages 2–4 specified here, awaiting "Map approved" sign-off from the user before implementation begins.
+
+**The pivot**: Rev 8.3 introduced Commit 4.3.4 ("Legacy Runner Deletion") as a single standalone commit. Mid-execution (2026-05-06) two adjacent concerns surfaced that legitimately belong to the same arc but cannot be bundled into one commit without violating "Slow is Smooth, Smooth is Fast":
+
+1. **Pseudo-mode is pytest-only today.** `tests/conftest.py` exposes `--real-llm` / `--real-training` (default False = pseudo) to the test runner only. There is no path to run a chain end-to-end with pseudo LLM + pseudo training from `run_chain.sh`. Operators who want a 0-cost wiring smoke (e.g. confirm `manifest.json` taxonomy, confirm Slurm `afterany` chaining, confirm `evolution_log.jsonl` schema) must launch a real LLM run. This is the friction Rev 8.4 retires.
+2. **Gap #3 (consecutive-iter brake) was deferred to "Phase 2 manifest scanning" without a commit number.** That deferral was an admission that the legacy `--max_failed_iterations` brake had no host. Rev 8.4 names a specific home (Commit 4.6) and the manifest-scanning design.
+
+**The decision (2026-05-06, after two rounds of pushback on bundling)**: split the work into four sequenced commits, each with a tight DoD. Stub-development (4.4) and CLI integration (4.5) are independent enough to ship separately; the brake (4.6) is gated on the manifest taxonomy already produced by the chain runner; Stage 1 (4.3.4) was the precondition that made all three viable.
+
+**Why stateless stubs (not tape-based fakes) for 4.4**: `tests/helpers/recording_llm_bridge.py` and `tests/helpers/_pseudo_data.py` ship the per-method FIFO-tape pattern that powers `@dual_mode` unit/integration tests. Tapes are pinned to specific agent + scenario combinations under `tests/pseudo_data/{category}/{name}/`; queue exhaustion is a loud `RuntimeError`. That contract is correct for tests but **wrong for a long-form chain smoke** — a 30-iter chain with 14 distinct LLM labels per iter would need ~420 hand-curated tape entries, and any branch the operator's prompt didn't anticipate would crash the run. Stage 2's `StubLLMBridge` is therefore *generative* (synthesise a schema-valid response from the label) rather than *replay* (read from a tape). Same applies to `StubSandbox` for training/scoring/inference.
+
+**Changes landing in Rev 8.4**:
+
+- **Commit 4.3.4 renamed to "Stage 1: Cleanup & Baseline Correction"** — content unchanged from Rev 8.3 (S1 deletion + 18-comment sweep + S2-S5 test repoints + S7b hotfix + Gaps #1/#2 closure). Smoke (S8) + commit gate (S9) remain in scope. DoD: green tests in touched dirs (`tests/unit/scripts/`, `tests/unit/sdsc_submission_scripts/`, `tests/unit/agent/result_interpretation_agent/`, `tests/integration/runner/`).
+- **NEW Commit 4.4 — Stage 2: Stateless Stub Development.** `agent/llm_bridge.py` gains a `StubLLMBridge` that returns schema-valid synthetic responses for all 14 production labels (tuner.{planner,reflector}; interpretation.{per_model, per_model_skipped, synthesis, dedup}; proposer.{legacy_reasoning, legacy_commit, causal_reasoning, proposing}; implementor.{reasoning, code, repair}; validator.code_review). Sandbox layer gains a parallel `StubSandbox` covering `execute_training` / `execute_scoring` / `execute_inference` / `save_record`. Implementation risks pinned upfront: (a) `implementor.code` must return runnable Python — solution: hardcoded plugin template that satisfies `core/plugin_loader.py`'s contract (`PLUGIN_MODEL_TYPE`, `PLUGIN_CONFIG_CLASS`, `PLUGIN_MODEL_CLASS`, `[B,T] int → [B,256,T] float`); (b) cross-stub coupling — proposer's `model_name` must match implementor's plugin filename and the tuner's config target; solution: deterministic `f"stub_arch_{iter:03d}_{slot}"` slug threaded through all three stubs. DoD: dedicated unit tests pass for `StubLLMBridge` (schema-validity of every label's response) + `StubSandbox` (4 method contracts).
+- **NEW Commit 4.5 — Stage 3: CLI Integration & 0-Cost Smoke.** `sdsc_submission_scripts/run_one_iteration.py` `build_parser` gains `--is_pseudo_llm` and `--is_pseudo_training` boolean flags (default False = production). `_chain_common.sh` + `run_chain.sh` thread both flags as passthrough args. Factory wiring at the top of `main()`: when `args.is_pseudo_llm`, the LLM bridge is replaced with `StubLLMBridge`; when `args.is_pseudo_training`, the sandbox is replaced with `StubSandbox`. **The four combinations** (real/pseudo × real/pseudo) are now reachable from the chain layer as well as pytest. DoD: `run_chain.sh --mode lilab --is_pseudo_llm --is_pseudo_training` produces a valid `manifest.json` for at least 1 iter, and `evolution_log.jsonl` contains a row with `is_degraded` populated.
+- **NEW Commit 4.6 — Stage 4: Manifest-Based Failure Brake.** Closes Gap #3. `sdsc_submission_scripts/run_one_iteration.main()` gains a preflight that scans the last N (default 3) iter dirs under `{workspace}/iter_NNN/manifest.json`; if all carry `status="failed"`, write a halt-marker (`{workspace}/.chain_halted`) and exit non-zero so Slurm `afterok` cannot fire. New flag `--max_failed_iterations N` (default 3) exposes the threshold. **Stress-tested via** `tests/unit/sdsc_submission_scripts/test_consecutive_failure_brake.py` against synthetic manifest fixtures (3 failed → halt; 2 failed + 1 completed → continue; mixed `failed`/`no_records`/`completed` matrix). DoD: stress test passes; design-doc §1.5.5 (currently "Known Deficiency Gap #3 — deferred") flips to "**Closed by Commit 4.6**".
+- **No changes** to Phase 2 commits (6.1, 6.1.a, 6.2, 6.3) or any gate (G1.5, G3, G3.5, G4). The Rev 8.4 work is parallel-track cleanup; it does not modify the production prompt path.
+- **Sequencing**: 4.3.4 (Stage 1) → 4.4 (Stage 2) → 4.5 (Stage 3) → 4.6 (Stage 4). Stages 2 + 3 are tightly coupled (the stubs are useless without the CLI flags; the flags are useless without the stubs), but splitting them keeps each commit's diff small enough to audit. Stage 4 is independent of 2/3 — it operates on manifests that already exist — but listed last because it benefits from the 0-cost smoke harness in Stage 3 for stress-testing the "halt the chain" path without burning real tokens.
+
+**Map first, march second**: per the user directive (2026-05-06), no code lands until the four-stage spec is signed off. This block is the map. Commits 4.4 / 4.5 / 4.6 below carry the per-commit Scope / Tasks / Pre-Commit Checklist / DoD that operationalise it.
 
 ---
 
@@ -1912,7 +1936,9 @@ These two hypotheses have different downstream consequences. **(H1) requires a c
 
 ---
 
-### Commit 4.3.4: Legacy Runner Deletion — retire `run_exploration_adaptive.py` (Rev 8.3 — Standalone Cleanup, sequenced after 6.1)
+### Commit 4.3.4 — Stage 1: Cleanup & Baseline Correction — retire `run_exploration_adaptive.py` (Rev 8.3; restated under Rev 8.4 as Stage 1 of the 4-stage roadmap)
+
+> **Rev 8.4 framing (2026-05-06)**: this commit is **Stage 1 of 4** in the legacy-runner / pseudo-mode roadmap. Stage 1's job is to retire the legacy in-process runner and bring the touched test directories back to green — nothing more. Stages 2 / 3 / 4 (Commits 4.4 / 4.5 / 4.6 below) build the stateless stubs, wire CLI flags, and close Gap #3 respectively. Stage 1's existing scope is unchanged from Rev 8.3; the rename is purely structural so the four stages share a contiguous home in §8.
 
 **Phase**: 1 cleanup (debt retirement, no behaviour change for production chains).
 **§5 step**: 14d (new, after 14c Commit 4.3.3, but **landing order is post-6.1.a + post-6.1** — see Sequencing below).
@@ -1972,15 +1998,193 @@ These two hypotheses have different downstream consequences. **(H1) requires a c
 - [x] **S7d — Gap #2 (MEDIUM)**: pre-4.3.4 the legacy runner's `_append_evolution_failure` had a tight unit test (`test_resilience.py::test_append_evolution_failure_writes_expected_schema`) pinning the JSONL schema with `kind="iteration_failure"`. That test died with `test_resilience.py` in S5. The replacement writer is `nodes/result_interpretation_agent.py::_append_evolution_log` (line 581), with a *different* schema (no `kind`; payload is `iteration` + `evolution_stats` + `best_score_so_far` + `take_home_message`; writer prepends `timestamp`). Until now it was covered only indirectly by `tests/integration/workflows/test_v8_certification_smoke.py` (`@real_run`, expensive). Added `tests/unit/agent/result_interpretation_agent/test_evolution_log_schema.py` with 9 fast unit tests pinning: file path + creation, payload-fields-reach-disk, timestamp prepended (ISO-8601 seconds), append-only growth across calls, smoke-extension-keys-pass-through, mkdirs-if-missing, `default=str` fallback for non-JSON-native values, IO-error swallowed.
    - **Test result**: `pytest tests/unit/agent/result_interpretation_agent/test_evolution_log_schema.py -v` → **9 passed in 0.91s**.
 
+**Known Deficiency (Gap #3 — Architectural, scheduled for Stage 4 / Commit 4.6 of the Rev 8.4 roadmap)**:
+
+The legacy in-process runner's **consecutive-iteration brake** (`--max_failed_iterations N`, default 3 — the "halt the chain after N consecutive failed iters" safety net) was lost when `run_exploration_adaptive.py` was deleted in S1. The chain runner's `build_parser` exposes no equivalent flag, and the only "consecutive" brake on the chain side is `MAX_FAIL_ROUNDS=3` in `_chain_common.sh:64`, which fires for **propose→implement** retries within one iter — not across iters.
+
+In the chain world today:
+- Each iter is a fresh subprocess; Slurm `afterany` queues the next iter regardless of the previous's exit code.
+- `manifest.status="failed"` (set by `crashed=True` in `write_manifest`) signals "this iter crashed."
+- But there is **no cross-iter counter** that says "if 3 consecutive iters mark `failed`, halt the chain."
+
+**Why we're not fixing it in 4.3.4 / Stage 1**: re-implementing the brake is an architectural decision, not a test port. The cleanest design is a Python-side preflight in `run_one_iteration.main()` that scans recent manifests (`manifest.json` per iter dir under `{workspace}/iter_NNN/`) and aborts with a non-zero exit code if N consecutive are `status=failed` — mirroring the legacy semantics but driven by the manifest taxonomy that the chain world introduced. An alternate design (Slurm `afterok` chain swap) is simpler but loses the "tolerate one bad iter, halt only on a streak" property that gave the legacy brake its value. Bundling that decision into Stage 1's "delete dead code" commit would conflate two unrelated concerns.
+
+**Scheduled re-implementation**: **Commit 4.6 (Stage 4 of the Rev 8.4 roadmap — see §8 below)**.
+- Lives in `sdsc_submission_scripts/run_one_iteration.py` near `_resolve_chain_run_id` (same anchoring concerns).
+- New flag `--max_failed_iterations N` (default 3) exposes the threshold; the preflight reads the last N committed iter dirs' `manifest.json`; if all carry `status=failed`, writes `{workspace}/.chain_halted` (a halt-marker), logs to `chain_log.txt`, and exits non-zero so the next Slurm step's `afterok` does not fire.
+- Parallel unit test in `tests/unit/sdsc_submission_scripts/test_consecutive_failure_brake.py` against synthetic manifest fixtures (3 failed → halt; 2 failed + 1 completed → continue; mixed `failed` / `no_records` / `completed` matrix).
+- Stress-tested end-to-end via Stage 3's 0-cost smoke (Commit 4.5) — `StubLLMBridge` can be configured to force every iter to `status="failed"`, so the brake's "halt after 3" behaviour is verifiable without burning real tokens.
+
+**Operational risk in the interim** (between Stage 1 closing and Stage 4 landing): a chain that catastrophically degrades (e.g., LLM provider down, GPU OOM on every iter) will continue queueing through the full Slurm cap (typically 30 iters) before stopping. Mitigation: operator-level monitoring of `evolution_log.jsonl` and `manifest.status` is already routine; the missing brake adds latency to "operator notices and cancels", not silent failure. Once Commit 4.6 lands, this section will be promoted from "Known Deficiency" to "**Closed by Commit 4.6**" with a one-line citation of the brake's location in source.
+
 **Pre-Commit Checklist**:
-- [x] `grep -r "run_exploration_adaptive" --include="*.py" --include="*.sh"` returns **zero** code matches (doc matches OK as historical context).
-- [x] `pytest tests/unit/scripts/ tests/unit/sdsc_submission_scripts/ tests/unit/agent/result_interpretation_agent/ tests/integration/runner/` is green — **267 passed in 1.83s** (re-verified pre-commit on 2026-05-06).
-- [ ] A 1-iter chain smoke launch via `run_chain.sh` (lilab mode, pseudo-training) reaches the iter-end manifest write — confirms the integration of the surviving runner is unbroken. **Use a fresh test-only run_name** (e.g. `cleanup_4_3_4_smoke_0505`, `chain_smoke_<date>`); **never reuse a historical name** (`v8`, `v11_v4`, `v12`, `explore_novel_v8_0430`, …) — those workspaces under `/home/klz/Data/SIDEREIS_DATA/` already hold the production-of-record artefacts and must not be stomped or shadowed by a sibling smoke workspace. Verify the chosen name is fresh by checking `ls /home/klz/Data/SIDEREIS_DATA/` first. **Deferred to a follow-up 0-cost smoke harness**: a real-LLM smoke now would burn ~$5 to validate strictly less than the deferred harness will validate for free; deferring keeps this commit's "delete dead code" diff scoped.
-- [x] Commit message links to the Rev 8.3 changelog block so the rationale is git-archaeologically discoverable.
+- [ ] `grep -r "run_exploration_adaptive" --include="*.py" --include="*.sh"` returns **zero** code matches (doc matches OK as historical context).
+- [ ] `pytest tests/unit/scripts/ tests/unit/runner/ tests/integration/runner/` is green.
+- [ ] A 1-iter chain smoke launch via `run_chain.sh` (lilab mode, pseudo-training) reaches the iter-end manifest write — confirms the integration of the surviving runner is unbroken. **Use a fresh test-only run_name** (e.g. `cleanup_4_3_4_smoke_0505`, `chain_smoke_<date>`); **never reuse a historical name** (`v8`, `v11_v4`, `v12`, `explore_novel_v8_0430`, …) — those workspaces under `/home/klz/Data/SIDEREIS_DATA/` already hold the production-of-record artefacts and must not be stomped or shadowed by a sibling smoke workspace. Verify the chosen name is fresh by checking `ls /home/klz/Data/SIDEREIS_DATA/` first.
+- [ ] Commit message links to the Rev 8.3 changelog block so the rationale is git-archaeologically discoverable.
 
-**Definition of Done**: legacy runner deleted; all 4 test dependencies updated or removed; one production runner remains; future contributors cannot mistake which runner is authoritative; **green tests in every touched directory** (`tests/unit/scripts/`, `tests/unit/sdsc_submission_scripts/`, `tests/unit/agent/result_interpretation_agent/`, `tests/integration/runner/`).
+**Definition of Done (Stage 1)**: legacy runner deleted; all 4 test dependencies updated or removed; one production runner remains; future contributors cannot mistake which runner is authoritative; **green tests in every touched directory** (`tests/unit/scripts/`, `tests/unit/sdsc_submission_scripts/`, `tests/unit/agent/result_interpretation_agent/`, `tests/integration/runner/`). Stages 2–4 (Commits 4.4 / 4.5 / 4.6) own the pseudo-mode bridge/sandbox + CLI integration + consecutive-iter brake — explicitly **not** in Stage 1's scope.
 
-**Out of Scope**: doc cleanup of historical mentions in `docs/phase68_*.md` and `docs/Consistent_growing_vocab_list.md` (those are versioned design docs — they record the regime that existed at their time of writing); migrating any in-flight V11_v4 chains (none active per 2026-05-05 ops state — V11_v4 is fully done, which is precisely why its run_name is off-limits for the smoke launch above).
+**Out of Scope**: doc cleanup of historical mentions in `docs/phase68_*.md` and `docs/Consistent_growing_vocab_list.md` (those are versioned design docs — they record the regime that existed at their time of writing); migrating any in-flight V11_v4 chains (none active per 2026-05-05 ops state — V11_v4 is fully done, which is precisely why its run_name is off-limits for the smoke launch above); the **stateless pseudo-mode bridge / sandbox** (Stage 2 / Commit 4.4); the **`--is_pseudo_llm` / `--is_pseudo_training` CLI flags** (Stage 3 / Commit 4.5); the **manifest-based consecutive-iter brake** (Stage 4 / Commit 4.6).
+
+---
+
+### Commit 4.4 — Stage 2: Stateless Stub Development (Rev 8.4 — NEW; sequenced after Stage 1 lands)
+
+**Phase**: 1 cleanup (companion to Stage 1; no behaviour change for production chains — the stubs are dormant unless explicitly selected via Stage 3's CLI flags).
+**§5 step**: 14e (new, immediately after 14d Stage 1).
+
+**Why this commit, why now**: Rev 8.4's "Map first, march second" framing identified that an end-to-end 0-cost smoke through `run_chain.sh` requires two pieces — generative stubs (this commit) + CLI plumbing (Stage 3). Bundling the two would produce a single ~600-line diff spanning `agent/llm_bridge.py`, `execute_tools/sandbox.py`, the runner's `build_parser`, and two shell scripts. Splitting them keeps each commit's diff scoped to one concern (Stage 2 = stub correctness; Stage 3 = wiring), which is the only way the Pre-Commit Checklist's "every test we add is targeted" principle holds.
+
+**Why generative, not tape-based** (recap from Rev 8.4 changelog): `tests/helpers/recording_llm_bridge.py` ships a per-method FIFO-tape pattern that is correct for `@dual_mode` unit/integration tests (queue-exhaustion is a loud `RuntimeError` — exactly what we want when a test's premise drifts). For a long-form chain smoke, that contract is wrong: a 30-iter chain × 14 distinct labels would need ~420 hand-curated tape entries, and any branch the operator's prompt didn't anticipate would crash the run. The stubs in this commit therefore **synthesise** schema-valid responses from the label, not replay them.
+
+**Scope**:
+- `agent/llm_bridge.py` (modify — add `StubLLMBridge` class subclassing the existing `LLMBridge`; overrides `generate` / `generate_text` / `tool_call` / `reflect` / `plan` / `_chat_json` to bypass HTTP and return synthetic responses).
+- `execute_tools/sandbox.py` (modify — add `StubSandbox` parallel to the existing sandbox class; overrides `execute_training` / `execute_scoring` / `execute_inference` / `save_record` to bypass GPU and return synthetic timing + score records).
+- `tests/unit/agent/llm_bridge/test_stub_llm_bridge.py` (new — one test per label asserting the synthetic response validates against the corresponding output schema).
+- `tests/unit/execute_tools/test_stub_sandbox.py` (new — one test per method asserting the synthetic record matches the production record schema).
+- `agent_generated/_stub_plugin_template.py` (new, gitignored sibling of the runtime plugins — the hardcoded plugin source string the `implementor.code` stub returns; kept as a separate file so it can be lint-checked and unit-tested in isolation).
+
+**The 14-label catalogue (Stage 2 must cover all of these)**:
+
+| # | Label | Caller | Synthetic-response shape |
+|---|---|---|---|
+| 1 | `tuner.planner` | `LLMBridge.plan` (in `nodes/ml_hyperparameter_tune_agent.py`) | `ExperimentPlan` Pydantic — minimum viable hyperparameters for the current `model_type` |
+| 2 | `tuner.reflector` | `LLMBridge.reflect` | `ReflectionOutput` — one fixed "no-op, continue" verdict |
+| 3 | `interpretation.per_model` | `nodes/result_interpretation_agent.py` per-model dispatcher | 8-field summary dict matching `model_knowledge_cache` entry shape |
+| 4 | `interpretation.per_model_skipped` | same dispatcher (Stability Filter skip path) | marker row only — no LLM call to stub |
+| 5 | `interpretation.synthesis` | synthesis assembly | `InterpretationOutput.take_home_message` + `evolution_stats` |
+| 6 | `interpretation.dedup` | dedup pass | `List[str]` of canonical model_types |
+| 7 | `proposer.legacy_reasoning` | `nodes/ml_model_proposal_agent.py` legacy 2-call path | free-text reasoning string |
+| 8 | `proposer.legacy_commit` | same | `ProposalOutput` minimal |
+| 9 | `proposer.causal_reasoning` | staged loop | reasoning string |
+| 10 | `proposer.proposing` | staged loop | `ProposalOutput` with deterministic `model_name = f"stub_arch_{iter:03d}_{slot}"` |
+| 11 | `implementor.reasoning` | `nodes/ml_model_implementor.py` | free-text |
+| 12 | `implementor.code` | same — must be runnable Python | hardcoded plugin template (see mitigation below) |
+| 13 | `implementor.repair` | repair loop | same plugin template; never invoked under stub training because validator passes |
+| 14 | `validator.code_review` | `nodes/ml_code_validator_agent.py` | `ValidatorOutput.passed=True` always |
+
+**Implementation risks pinned upfront** (per the user-provided spec):
+
+1. **`implementor.code` must be runnable.** `core/plugin_loader.py` imports the returned source string and asserts the three plugin contract symbols (`PLUGIN_MODEL_TYPE`, `PLUGIN_CONFIG_CLASS`, `PLUGIN_MODEL_CLASS`) plus the forward-pass shape (`[B, T] int → [B, 256, T] float`). **Mitigation**: ship a single hardcoded plugin source string that defines a tiny `nn.Embedding(256, 8) → nn.Linear(8, 256)` model — schema-correct, GPU-friendly, ≤ 60 lines. The stub returns this string verbatim regardless of the proposer's intent.
+2. **Cross-stub coupling — model_name sync.** Proposer's `model_name` becomes the implementor's plugin filename (`agent_generated/models/{model_name}.py`) and the tuner's config target. If the three stubs disagree, training will crash on `ImportError`. **Mitigation**: a single helper `_synth_stub_model_name(iter, slot) -> str` (in `agent/llm_bridge.py`) is the single source of truth for the slug; proposer.proposing / implementor.code / tuner.planner all derive their model_name from it.
+3. **Sandbox return-shape coupling.** `execute_training` returns a record with `timing.train_time_s`, `timing.inference_time_s`, `timing.scoring_time_s`. `execute_scoring` returns a `denoising_score: float`. **Mitigation**: synthetic timings are a constant (e.g., 0.01 s); synthetic score is `random.uniform(-3.0, -2.0)` seeded by `iter` for determinism.
+
+**Tasks**:
+- [ ] **T1 — `_synth_stub_model_name` helper**: shared slug generator in `agent/llm_bridge.py`; deterministic `f"stub_arch_{iter:03d}_{slot}"` format; unit-tested for collision-freedom across 100 iter/slot combinations.
+- [ ] **T2 — `StubLLMBridge` class**: subclass `LLMBridge` (inherit run-context binding, telemetry, `_record_usage`); override the 6 entry points listed above with a `_synthesise(label, …) -> response` dispatch table covering all 14 labels (label 4 is a marker-only path the dispatcher already handles, no override needed).
+- [ ] **T3 — Hardcoded plugin template**: `agent_generated/_stub_plugin_template.py` — ≤ 60 lines, defines `PLUGIN_MODEL_TYPE = "stub_arch"`, a `PLUGIN_CONFIG_CLASS` Pydantic with one int field, and a `PLUGIN_MODEL_CLASS` `nn.Module` with the required forward-pass shape. **Verify by `core.plugin_loader.load_plugin(...)` against a tmp file** in T6.
+- [ ] **T4 — `StubSandbox` class**: parallel structure to existing sandbox; overrides 4 methods; uses a deterministic seeded `random.Random` instance per chain run (seeded by `run_id` hash) so smokes are reproducible.
+- [ ] **T5 — Unit tests for `StubLLMBridge`**: one test per label (13 tests; label 4 covered transitively in the dispatcher test). Each asserts the response round-trips through the corresponding Pydantic schema (`ExperimentPlan`, `ProposalOutput`, etc.) without `ValidationError`.
+- [ ] **T6 — Unit tests for `StubSandbox`**: 4 tests, one per method, asserting the returned record matches the production record schema and contains the deterministic-RNG-derived score.
+- [ ] **T7 — Plugin-loadability test**: `tests/unit/agent_generated/test_stub_plugin_template_loads.py` — write the template string to a tmp file, invoke `core.plugin_loader.load_plugin`, run a `[1, 8] int` tensor through the forward pass, assert output shape `[1, 256, 8]` float.
+- [ ] **T8 — Doc tick**: tick this section's checkboxes; record final test counts.
+
+**Pre-Commit Checklist**:
+- [ ] `pytest tests/unit/agent/llm_bridge/test_stub_llm_bridge.py tests/unit/execute_tools/test_stub_sandbox.py tests/unit/agent_generated/test_stub_plugin_template_loads.py` all green.
+- [ ] `grep -r "raise NotImplementedError" agent/llm_bridge.py execute_tools/sandbox.py` returns zero hits inside the new `StubLLMBridge` / `StubSandbox` classes (every label / method is implemented, not punted).
+- [ ] **Schema-validity quantitative check**: T5 + T6 between them produce ≥ 14 + 4 = 18 round-trip assertions, one per label and one per sandbox method. Documented in the test file's module docstring.
+- [ ] **No production-path regression**: `pytest tests/unit/agent/llm_bridge/ tests/unit/execute_tools/` still green after the additions (the stubs are subclasses; the parent `LLMBridge` / sandbox classes are untouched).
+
+**Definition of Done (Stage 2)**: `StubLLMBridge` returns schema-valid responses for all 14 labels; `StubSandbox` returns schema-valid records for all 4 methods; `agent_generated/_stub_plugin_template.py` loads via `core.plugin_loader` and forward-passes correctly; all dedicated unit tests pass. **The stubs are dormant in production** — Stage 3's CLI flags are required to activate them.
+
+**Out of Scope**: any change to the production `LLMBridge` or sandbox classes; any CLI flag (Stage 3); any chain-runner factory wiring (Stage 3); manifest scanning (Stage 4); replacing the existing `tests/helpers/recording_llm_bridge.py` tape-based fakes (those remain the right tool for `@dual_mode` unit tests — they pin specific tape contents per scenario; the stubs are for chain-smoke-scale work, not pinned-scenario tests).
+
+---
+
+### Commit 4.5 — Stage 3: CLI Integration & 0-Cost Smoke (Rev 8.4 — NEW; sequenced after Stage 2 lands)
+
+**Phase**: 1 cleanup (companion to Stages 1 + 2; activates the dormant stubs from Stage 2 via explicit operator flags).
+**§5 step**: 14f (new, immediately after 14e Stage 2).
+
+**Why this commit, why critical**: Stage 2's stubs are dead code unless `run_chain.sh` knows how to ask for them. Today, pseudo-mode is reachable only from pytest via `--real-llm` / `--real-training` (default False = pseudo). An operator who wants to smoke-test wiring (manifest taxonomy, Slurm chaining, evolution_log schema, the Stage 4 brake's halt path) without burning real tokens has no path. Stage 3 closes that gap by exposing two explicit CLI flags — **explicit because pseudo-mode is a load-bearing operational choice**, not a debug toggle (a wrong default would silently downgrade a production chain to a no-op).
+
+**The four-combination matrix this unlocks** (already reachable from pytest; now also reachable from `run_chain.sh`):
+
+| `--is_pseudo_llm` | `--is_pseudo_training` | What runs | Cost | Use case |
+|---|---|---|---|---|
+| False (default) | False (default) | Real LLM + real training | Production cost | Production chains |
+| **True** | False | Stub LLM + real training | Training only | Validating training rig without LLM spend |
+| False | **True** | Real LLM + stub training | LLM only | Validating prompts without GPU spend |
+| **True** | **True** | Stub everything | $0, < 1 s/iter | Wiring smoke; **the headline use case for Rev 8.4** |
+
+**Scope**:
+- `sdsc_submission_scripts/run_one_iteration.py` (modify — `build_parser` gains `--is_pseudo_llm` and `--is_pseudo_training` flags; `main()` gains a factory branch at the top that swaps in `StubLLMBridge` / `StubSandbox` based on the flags).
+- `sdsc_submission_scripts/_chain_common.sh` (modify — accept the two new flags as passthrough vars; existing `_FLAG_PASSTHROUGH` mechanism extended).
+- `sdsc_submission_scripts/run_chain.sh` (modify — argparse-side accepts the two flags and forwards them via the existing passthrough channel).
+- `tests/unit/scripts/test_chain_consistency.py` (modify — extend the existing shell ↔ chain CLI contract test to assert the two new flags propagate from `run_chain.sh` through to `run_one_iteration.py`).
+- `tests/unit/sdsc_submission_scripts/test_run_one_iteration.py` (modify — add tests asserting the factory branch swaps correctly: `--is_pseudo_llm` → `StubLLMBridge` instance; `--is_pseudo_training` → `StubSandbox` instance; default → production classes).
+
+**Tasks**:
+- [ ] **T1 — `build_parser` flags**: `--is_pseudo_llm` (action=`"store_true"`, default False) + `--is_pseudo_training` (same). Help text explicitly names the cost implication ("Replaces the LLM bridge with a generative stub that returns schema-valid responses without HTTP calls. Use for 0-cost wiring smoke tests.").
+- [ ] **T2 — Factory branch in `main()`**: at the top of `main()`, **before** any LLM/sandbox instantiation, branch on `args.is_pseudo_llm` and `args.is_pseudo_training` to select the bridge / sandbox class. Add a one-line stderr log when either stub is active so operators cannot accidentally publish results from a pseudo run.
+- [ ] **T3 — Shell passthrough**: `_chain_common.sh` already has a `_extra_args` slot; thread the two new flags into it. `run_chain.sh` gains argparse-side handling.
+- [ ] **T4 — Chain-consistency test extension**: `tests/unit/scripts/test_chain_consistency.py::TestShellPythonConsistency` gains 2 cases — one asserting `run_chain.sh ... --is_pseudo_llm` flows to `run_one_iteration.py`'s argv with the flag; one for `--is_pseudo_training`. Reuses the existing `--dry-run` harness (no real chain launch).
+- [ ] **T5 — Factory unit tests**: 4 tests in `test_run_one_iteration.py` — `--is_pseudo_llm` → `isinstance(bridge, StubLLMBridge)`; `--is_pseudo_training` → `isinstance(sandbox, StubSandbox)`; both → both stubs; neither → production classes. Tests use `parser.parse_args` + the factory function directly, not the full `main()` body.
+- [ ] **T6 — End-to-end 0-cost smoke** (the DoD-defining test, manual not pytest): `run_chain.sh --mode lilab --workspace /tmp/stub_smoke_$(date +%s) --start_iteration 1 --max_iterations 1 --is_pseudo_llm --is_pseudo_training --run_name stub_smoke_$(date +%Y%m%d) --seed_paths …`. Assert: (a) the iter completes in < 30 s; (b) `{workspace}/iter_001/manifest.json` exists with `status="completed"`; (c) `{workspace}/evolution_log.jsonl` contains exactly 1 row with the Stage-1-pinned schema (timestamp + iteration + evolution_stats + best_score_so_far + take_home_message); (d) `{workspace}/token_usage.jsonl` contains 0 real-API rows (the stub bridge bypasses `_record_usage` for synthetic responses). Capture the run output and append to this section as the DoD evidence.
+- [ ] **T7 — Doc tick**: tick checkboxes; record smoke duration + cost (should be $0.00).
+
+**Pre-Commit Checklist**:
+- [ ] `pytest tests/unit/scripts/test_chain_consistency.py tests/unit/sdsc_submission_scripts/test_run_one_iteration.py` all green.
+- [ ] **Smoke evidence captured**: T6 produces a valid `manifest.json` + `evolution_log.jsonl` row + `chain_log.txt` excerpt; the three artefacts are pasted into this section's "Smoke Evidence" subsection.
+- [ ] **Default-safety check**: `pytest tests/unit/sdsc_submission_scripts/test_run_one_iteration.py::TestArgparseSurface` confirms that absent flags → production classes (no silent downgrade).
+- [ ] `grep -n "is_pseudo" sdsc_submission_scripts/_chain_common.sh sdsc_submission_scripts/run_chain.sh` shows the flags wired in both files; `grep -n "is_pseudo" sdsc_submission_scripts/run_one_iteration.py` shows the argparse declaration + factory branch + stderr log.
+
+**Definition of Done (Stage 3)**: `run_chain.sh --mode lilab --is_pseudo_llm --is_pseudo_training` (with otherwise canonical args) produces a valid `manifest.json` for at least 1 iter; `evolution_log.jsonl` contains the Stage-1-pinned schema; total cost is $0.00; total wall-clock ≤ 30 s/iter. The four-combination matrix is now reachable from both pytest and the chain runner.
+
+**Out of Scope**: any change to the stubs themselves (Stage 2's job); the manifest-based brake (Stage 4 — though Stage 3's smoke harness is the substrate Stage 4 stress-tests against); any modification to the SDSC Slurm scripts (`run_chain.sh --mode sdsc` is unchanged — the flags pass through verbatim, but Stage 3 does not validate the Slurm path; that is a follow-up if needed).
+
+---
+
+### Commit 4.6 — Stage 4: Manifest-Based Failure Brake (Rev 8.4 — NEW; closes Gap #3)
+
+**Phase**: 1 cleanup (companion to Stages 1–3; closes the Known Deficiency block in Stage 1's §1.5.5).
+**§5 step**: 14g (new, immediately after 14f Stage 3).
+
+**Why this commit, why last**: Gap #3 (the consecutive-iter brake) was introduced when the legacy in-process runner — which carried `--max_failed_iterations N` natively — was deleted in Stage 1. The chain world's manifest taxonomy (`completed` / `no_records` / `failed`) is the load-bearing primitive for re-implementing the brake, so the design is "scan recent manifests; if last N are `failed`, halt". This is **last** in the roadmap because:
+
+1. It is independent of Stages 2 / 3 — the brake operates on real manifests, regardless of whether they came from real or stub runs.
+2. **It benefits from Stage 3's 0-cost smoke as its stress-test substrate**: with `StubLLMBridge` configurable to force `crashed=True`, the brake's "halt after 3 consecutive failures" behaviour can be validated end-to-end without burning real tokens or waiting on Slurm.
+3. Bundling it with Stage 1 was rejected (Rev 8.3 changelog) on commit-hygiene grounds — "delete dead code" and "re-implement an architectural feature" are different concerns.
+
+**The design** (recap from Stage 1's Known Deficiency note):
+
+- A Python-side preflight at the top of `sdsc_submission_scripts/run_one_iteration.main()` — runs **before** the LLM bridge / sandbox is even instantiated, so a halted chain costs nothing.
+- Reads the last `--max_failed_iterations` (default 3) committed iter dirs' `{workspace}/iter_NNN/manifest.json`.
+- If **all** carry `status="failed"`, writes `{workspace}/.chain_halted` (a halt-marker file with timestamp + the failing iter numbers), logs `[HALT] consecutive failure brake fired (N=3)` to `chain_log.txt`, and exits non-zero (exit code 3 — distinct from argparse's 2 and the LLMBridgeContextError's 2 in §1.4.2).
+- If the last N include any `completed` or `no_records`, the chain continues. **Tolerate one bad iter; halt only on a streak.** This is the property that gave the legacy brake its operational value — a single transient failure (e.g., an OpenAI 503) does not kill a 30-iter chain.
+- The exit-3 propagation up through Slurm: SDSC mode uses `--dependency=afterany`, which queues the next iter regardless of the previous's exit code. To make the brake bite under SDSC, we additionally write `.chain_halted` and the next iter's preflight checks for it before doing anything else; if present → exit 3 immediately. Lilab mode (foreground fork) honours exit codes natively.
+
+**Scope**:
+- `sdsc_submission_scripts/run_one_iteration.py` (modify — add `_check_consecutive_failure_brake(workspace, max_failed) -> Optional[List[int]]` + `_check_halt_marker(workspace) -> bool` helpers; call both at the top of `main()`; add `--max_failed_iterations N` flag with default 3).
+- `tests/unit/sdsc_submission_scripts/test_consecutive_failure_brake.py` (new — fixture-driven against synthetic `manifest.json` files).
+- The Stage 1 Known-Deficiency block in this doc (modify — flip from "Deferred" to "**Closed by Commit 4.6**"; cite the brake's location in source).
+
+**Tasks**:
+- [ ] **T1 — `_check_consecutive_failure_brake` helper**: takes `workspace: str` + `max_failed: int`; walks `{workspace}/iter_NNN/manifest.json` files in descending iter order; returns the list of failing iter numbers if the last N are all `status="failed"`, else None. Soft-fails on missing or malformed manifest (treats as "not failed" — fail-open is safer than fail-closed for a safety brake).
+- [ ] **T2 — `_check_halt_marker` helper**: returns True iff `{workspace}/.chain_halted` exists. Cheap; called before every iter under SDSC `afterany`.
+- [ ] **T3 — `main()` integration**: at the top of `main()`, immediately after argparse, call `_check_halt_marker` (exit 3 if present). Then, after `_resolve_chain_run_id` but before LLM/sandbox instantiation, call `_check_consecutive_failure_brake`; if it returns a non-None list, write the halt marker, log to stderr, exit 3. Order matters — halt-marker check first (cheap); brake check second (needs the workspace + run_id resolved).
+- [ ] **T4 — `--max_failed_iterations N` flag**: argparse-side, `type=int`, `default=3`, `_min_int_floor` validator with `≥ 1` (zero would brake on every chain, negative is nonsense).
+- [ ] **T5 — Stress test (synthetic manifests)**: 6 cases in `test_consecutive_failure_brake.py` —
+   - 3 consecutive `failed` → halt (returns the iter list);
+   - 2 consecutive `failed` + most recent `completed` → continue (returns None);
+   - 3 `failed` but most recent is `no_records` → continue (`no_records` is not a failure; this property protects against false positives from dry-iter chains);
+   - mixed `failed` / `no_records` / `completed` → continue;
+   - empty workspace (no manifests yet, e.g. iter 1) → continue;
+   - `--max_failed_iterations=1` + 1 `failed` → halt (boundary).
+- [ ] **T6 — End-to-end stress via Stage 3's smoke** (manual, not pytest): configure `StubLLMBridge` with a `force_crash=True` switch (added in this commit, not Stage 2 — it is a brake-stress concern, not a stub correctness concern); launch a 4-iter chain via Stage 3's smoke command; assert iter 4 never starts (the brake halts after iter 3); `.chain_halted` exists; `chain_log.txt` contains the `[HALT]` line.
+- [ ] **T7 — Doc flip**: update §1.5.5 / Stage 1's "Known Deficiency (Gap #3)" block — change the heading from "Architectural, scheduled for Stage 4 / Commit 4.6" to "**Closed by Commit 4.6** (2026-MM-DD)" with a one-line citation of the brake's source location.
+- [ ] **T8 — Doc tick**: tick this section's checkboxes; record final test counts + brake-stress evidence.
+
+**Pre-Commit Checklist**:
+- [ ] `pytest tests/unit/sdsc_submission_scripts/test_consecutive_failure_brake.py` — all 6 fixture cases green.
+- [ ] **Stress evidence captured**: T6's 4-iter stub chain produces `.chain_halted` after iter 3; iter 4 is never instantiated (`{workspace}/iter_004/` does not exist).
+- [ ] **No production-path regression**: `pytest tests/unit/sdsc_submission_scripts/test_run_one_iteration.py` still green (the new preflight is additive, runs before all existing `main()` body code).
+- [ ] **§1.5.5 doc flip landed**: `grep -n "Closed by Commit 4.6" docs/audit_and_optimize_token_usage_and_growth.md` returns at least one hit.
+
+**Definition of Done (Stage 4)**: 6-case fixture suite passes; the 4-iter stub stress reproduces the halt-after-3 behaviour; `.chain_halted` is written exactly once; the Stage 1 Known-Deficiency block is flipped to "Closed by Commit 4.6". Gap #3 is no longer an open architectural debt.
+
+**Out of Scope**: alternate brake policies (e.g. "halt on N failures within a sliding window of M iters" — the consecutive-streak property is the legacy semantic; ratcheting up is a future commit if operational data shows the streak rule is too lax); operator-side cancellation tooling (`scancel` is the existing remedy and stays the existing remedy); any change to how `manifest.status` is set (`completed` / `no_records` / `failed` taxonomy is unchanged from Stage 1).
 
 ---
 
@@ -2579,38 +2783,40 @@ If any size target is exceeded, the policy is too lenient — tighten the per-fi
 
 ---
 
-### Commit Map (visual — Rev 8.1)
+### Commit Map (visual — Rev 8.4)
 
 ```
-Phase 1 (Telemetry — CLOSED)             Phase 2 (Targeted O(N) Dehydration)              Phase 3 (Optional)
- ┌──────────────────────────────┐         ┌─────────────────────────────────────┐          ┌─────────────────┐
- │ C1 capture                   │         │ C6.1 Interp Call-on-Demand          │ ★★ CRIT  │ C11.1 Template  │
- │ C2 setter+fail               │         │      sliding-window (synthesis)     │          │       Dehydration│
- │ C3 audit+labels              │         │      + Stability Filter             │          │   (21% fixed)   │
- │ C4 plumbing                  │         │      (per_model call clamp)         │          │   opportunistic │
- │ C4.3.2 ATTRIBUTION ✓ CLOSED  │         │ C6.3 Source-Level Cache Drain       │ ★★ CRIT  │   post-G1.5     │
- │   H1 verdict — leak in       │         │      Merge & Prune over             │          └─────────────────┘
- │   non_candidates_overview    │         │      model_knowledge_cache          │
- │ C4.3.3 11th audit key ✓      │         │      → both expert_context AND      │
- │   (catch-all → ~8K baseline) │ ──────▶ │      non_candidates_overview shrink │
- │ C5 G1 baseline (LANDED)      │         │      [GUARD: preserve ErrorSigs]    │
- │   USD + bloat (verdict ✓)    │         │ C6.2 Proposer prior-stage           │   MED
- └──────────────────────────────┘         │      mid-truncation                 │
-                                          │      (clamp 3.3× O(N))              │
-                                          │ ─── G1.5 re-baseline (5 metrics) ───│
-                                          │ C6 ErrorSig                         │
-                                          │ C7 G2 forensic                      │
-                                          │ C8 schemas                          │
-                                          │ C9 helpers                          │
-                                          │ C10 assembly                        │
-                                          │ C11 G3 trap (depends on 6.3 guard)  │
-                                          │ C11.2 G3.5 SOTA Replication ★ NEW   │
-                                          │      (verify_sota_replication.py;   │
-                                          │       SRR ≥ 2/3 top-V12 archs;      │
-                                          │       aspirational creativity guard)│
-                                          │ C12 G4 + cleanup                    │
-                                          └─────────────────────────────────────┘
+Phase 1 (Telemetry — CLOSED + 4-Stage cleanup)   Phase 2 (Targeted O(N) Dehydration)              Phase 3 (Optional)
+ ┌────────────────────────────────────────┐       ┌─────────────────────────────────────┐          ┌─────────────────┐
+ │ C1 capture                             │       │ C6.1 Interp Call-on-Demand          │ ★★ CRIT  │ C11.1 Template  │
+ │ C2 setter+fail                         │       │      sliding-window (synthesis)     │          │       Dehydration│
+ │ C3 audit+labels                        │       │      + Stability Filter             │          │   (21% fixed)   │
+ │ C4 plumbing                            │       │      (per_model call clamp)         │          │   opportunistic │
+ │ C4.3.2 ATTRIBUTION ✓ CLOSED            │       │ C6.3 Source-Level Cache Drain       │ ★★ CRIT  │   post-G1.5     │
+ │   H1 verdict — leak in                 │       │      Merge & Prune over             │          └─────────────────┘
+ │   non_candidates_overview              │       │      model_knowledge_cache          │
+ │ C4.3.3 11th audit key ✓                │       │      → both expert_context AND      │
+ │   (catch-all → ~8K baseline)           │ ────▶ │      non_candidates_overview shrink │
+ │ C5 G1 baseline (LANDED)                │       │      [GUARD: preserve ErrorSigs]    │
+ │   USD + bloat (verdict ✓)              │       │ C6.2 Proposer prior-stage           │   MED
+ │ ── Rev 8.4 4-Stage Cleanup Roadmap ──  │       │      mid-truncation                 │
+ │ C4.3.4 Stage 1 — Cleanup & Baseline ✓  │       │      (clamp 3.3× O(N))              │
+ │   delete legacy runner; Gaps #1+#2 ✓   │       │ ─── G1.5 re-baseline (5 metrics) ───│
+ │ C4.4   Stage 2 — Stub Development ★    │       │ C6 ErrorSig                         │
+ │   StubLLMBridge (14 labels) +          │       │ C7 G2 forensic                      │
+ │   StubSandbox (4 methods)              │       │ C8 schemas                          │
+ │ C4.5   Stage 3 — CLI + 0-Cost Smoke ★  │       │ C9 helpers                          │
+ │   --is_pseudo_llm + --is_pseudo_train  │       │ C10 assembly                        │
+ │   end-to-end run_chain.sh smoke ($0)   │       │ C11 G3 trap (depends on 6.3 guard)  │
+ │ C4.6   Stage 4 — Failure Brake ★       │       │ C11.2 G3.5 SOTA Replication ★ NEW   │
+ │   manifest scan, halt-after-N=3        │       │      (verify_sota_replication.py;   │
+ │   CLOSES Gap #3                        │       │       SRR ≥ 2/3 top-V12 archs;      │
+ └────────────────────────────────────────┘       │       aspirational creativity guard)│
+                                                  │ C12 G4 + cleanup                    │
+                                                  └─────────────────────────────────────┘
 ```
+
+Stages 1 → 4 share the same `Phase 1` column because they are cleanup commits, not surgery on the production prompt path. Stage 1 is substantially complete (S1–S7d done; S8 smoke + S9 commit gate remain). Stages 2 / 3 / 4 specified in this Rev; awaiting "Map approved" sign-off.
 
 Gates G1, G1.5, G2, G3, G3.5, G4 are explicit STOP points.
 
