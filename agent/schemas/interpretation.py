@@ -250,6 +250,38 @@ class InterpretationInput(BaseModel):
                     "callers. See docs/V8_Gap_Report.md Domain 3.",
     )
 
+    # --- Active-Model policy (Commit 6.1 — Stability Filter + Synthesis Window) ---
+    # K/N/Δ thresholds shared by select_active_models() and should_recall_per_model()
+    # in nodes/interpretation_helpers.py. The active model_types are the union of:
+    #   Top-K by best_denoising_score ∪ Last-N by recency ∪ models with |Δ| ≥ threshold
+    # Stable (non-active) models are pulled from the cache verbatim — no fresh LLM call.
+    active_model_top_k: int = Field(
+        default=3,
+        ge=0,
+        description="Top-K cap by best_denoising_score for the active-model set. "
+                    "These models keep their full per_model summary expanded in "
+                    "the synthesis prompt and are eligible for fresh per_model "
+                    "LLM re-calls. Set to 0 to disable the Top-K pathway.",
+    )
+    active_model_last_n: int = Field(
+        default=2,
+        ge=0,
+        description="Last-N cap by recency for the active-model set. The N model_types "
+                    "from the current iter's `summaries` list (taken in the order "
+                    "supplied) are unconditionally active. Set to 0 to disable the "
+                    "Last-N pathway.",
+    )
+    active_model_score_delta: float = Field(
+        default=0.05,
+        ge=0.0,
+        description="Absolute score-delta threshold (in normalized denoising-score "
+                    "units) at or above which a model with both a prior cache entry "
+                    "and a current-iter summary is considered active. Also used by "
+                    "should_recall_per_model() to decide whether new evidence "
+                    "warrants a fresh per_model LLM call. Set to 0.0 to make any "
+                    "non-zero score change trigger activation.",
+    )
+
     @model_validator(mode="after")
     def require_at_least_one_model(self) -> "InterpretationInput":
         if self.model_types is not None and len(self.model_types) == 0:
