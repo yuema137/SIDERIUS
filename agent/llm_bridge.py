@@ -1432,3 +1432,305 @@ class LLMBridge:
             arguments=json.loads(tc.function.arguments),
             call_id=tc.id,
         )
+
+
+# ---------------------------------------------------------------------------
+# StubLLMBridge — stateless generative stub (Commit 4.4 Stage 2 / PR-B B2)
+#
+# Drop-in LLMBridge replacement for 0-cost chain smokes. Returns deterministic,
+# schema-valid synthetic responses for every production label without any
+# HTTP call. Selected via Stage 3 CLI flags (`--is_pseudo_llm`); dormant in
+# production until then.
+#
+# Design contract (see docs/audit_and_optimize_token_usage_and_growth.md
+# §8 Commit 4.4):
+#   * Inherits `set_run_context`, `emit_marker`, `_validate_pre_write_locked`,
+#     and the run-context state machine — the test harness watches
+#     `token_usage.jsonl` flush + skip markers exactly as for the real bridge.
+#   * Overrides `_record_usage` to a no-op so synthetic calls never pollute
+#     production telemetry with zero-token rows (defensive — synthesise paths
+#     do not call `_record_usage` either, but the override is the contract).
+#   * Skips `OpenAI()` construction in `__init__` so the stub works with no
+#     API key and no network.
+#   * Overrides `_chat_json` (catches `generate` + `reflect` JSON paths),
+#     `generate_text`, and `tool_call`.
+#   * Each label dispatches through `_SYNTH_HANDLERS_JSON` /
+#     `_SYNTH_HANDLERS_TEXT`. Unknown labels raise `NotImplementedError`
+#     instead of silently returning something — drift is loud.
+#
+# B2a covers 5 labels (tuner.{planner,reflector} +
+# interpretation.{per_model, synthesis, dedup}); B2b adds the remaining 8
+# (proposer + implementor + validator).
+# ---------------------------------------------------------------------------
+class StubLLMBridge(LLMBridge):
+    """Generative stub LLMBridge for 0-cost chain smokes.
+
+    Returns deterministic, schema-valid synthetic responses for every label
+    without HTTP calls. Selected by the Stage 3 chain-runner factory when
+    ``--is_pseudo_llm`` is passed; dormant otherwise.
+
+    Public surface mirrors :class:`LLMBridge` so downstream nodes do not
+    need to know which bridge is wired:
+      * ``set_run_context`` / ``emit_marker`` are inherited as-is (the
+        run-context state machine and skip-marker emission are shared
+        behaviour the smoke harness depends on).
+      * ``generate`` / ``plan`` / ``reflect`` are inherited; they call into
+        ``_chat_json`` which is overridden.
+      * ``generate_text`` / ``tool_call`` / ``_chat_json`` are overridden.
+      * ``_record_usage`` is overridden to a no-op so synthetic calls never
+        write zero-token rows to ``token_usage.jsonl``.
+
+    Cross-stub coupling: ``_synth_stub_model_name(iter, slot)`` is the
+    single source of truth for the plugin slug — ``tuner.planner`` (here)
+    and ``proposer.proposing`` / ``implementor.code`` (B2b) all derive
+    their model_name from it so the chain's training step finds the same
+    plugin file.
+    """
+
+    # --- Dispatch tables (label -> method-name) --------------------------
+    # Keyed by string method names rather than method objects so the dict
+    # can sit in the class body without forward-referencing each method.
+    _SYNTH_HANDLERS_JSON: Dict[str, str] = {
+        "tuner.planner":              "_synth_tuner_planner",
+        "tuner.reflector":            "_synth_tuner_reflector",
+        "interpretation.per_model":   "_synth_interpretation_per_model",
+        "interpretation.synthesis":   "_synth_interpretation_synthesis",
+        "interpretation.dedup":       "_synth_interpretation_dedup",
+        # B2b: proposer.legacy_commit / proposer.causal_reasoning /
+        #      proposer.proposing / implementor.code / implementor.repair /
+        #      validator.code_review
+    }
+    _SYNTH_HANDLERS_TEXT: Dict[str, str] = {
+        # B2b: proposer.legacy_reasoning / implementor.reasoning
+    }
+
+    def __init__(self, *, max_retries: Optional[int] = 0):
+        """Initialise stub bridge state without any OpenAI client.
+
+        Deliberately does NOT call ``super().__init__()``: the parent
+        constructor instantiates ``OpenAI()`` clients which need an API
+        key and (for the gemini default) hit the network during list_models
+        probes. The stub bridge has neither; it sets only the state that
+        the inherited ``set_run_context`` / ``emit_marker`` /
+        ``_validate_pre_write_locked`` paths require.
+
+        Args:
+            max_retries: Honoured for API-shape parity only — no HTTP calls
+                         are made, so the value is unused. Defaults to ``0``
+                         (clearer than ``None`` for "no retries needed").
+        """
+        load_dotenv()
+        self.provider: str = "stub"
+        self.model_name: Optional[str] = "stub_model"
+        self.api_key: Optional[str] = None
+        self.max_retries: Optional[int] = max_retries
+
+        # Reflect-side mirror — same provider/model so cross-provider
+        # routing is a no-op in stub mode.
+        self.reflect_provider: str = "stub"
+        self.reflect_model_name: Optional[str] = "stub_model"
+
+        # No OpenAI clients. Both attributes exist so any inherited code
+        # that grabs `self.client` / `self.reflect_client` fails fast
+        # (NoneType attribute access) instead of silently masking a bug.
+        self.client = None
+        self.reflect_client = None
+
+        # --- Run-context state (mirrors LLMBridge.__init__) ---
+        self._token_usage_path: Optional[Path] = None
+        self._iter: Optional[int] = None
+        self._run_id: Optional[str] = None
+        self._run_name: Optional[str] = None
+
+        # --- Setter Safety Protocol state (mirrors LLMBridge.__init__) ---
+        self._lock = threading.Lock()
+        self._set_at_ts: Optional[str] = None
+        self._first_row_run_id_cache: Optional[str] = None
+        self._last_logged_iter: Optional[int] = None
+        self._last_ts: Optional[str] = None
+
+    # ------------------------------------------------------------------
+    # Telemetry: synthetic calls never write per-call rows.
+    # ------------------------------------------------------------------
+    def _record_usage(self, **_kwargs) -> None:
+        """No-op: synthetic responses must not appear in token_usage.jsonl.
+
+        The synth paths below never call ``_record_usage`` directly, so
+        this override is defence-in-depth — it guarantees that any future
+        code path on ``StubLLMBridge`` (or any inherited helper that
+        reaches the writer) cannot leak zero-token rows into a real run's
+        audit log. ``emit_marker`` is intentionally left inherited so the
+        Stability-Filter-skipped markers continue to flow.
+        """
+        return
+
+    # ------------------------------------------------------------------
+    # Dispatch helpers — one per response type.
+    # ------------------------------------------------------------------
+    def _synthesise_json(self, label: str) -> Dict:
+        """Return a JSON-mode synthetic response for ``label``."""
+        handler_name = self._SYNTH_HANDLERS_JSON.get(label)
+        if handler_name is None:
+            raise NotImplementedError(
+                f"StubLLMBridge: no JSON synthesiser registered for "
+                f"label={label!r}. Known JSON labels: "
+                f"{sorted(self._SYNTH_HANDLERS_JSON)}."
+            )
+        return getattr(self, handler_name)()
+
+    def _synthesise_text(self, label: str) -> str:
+        """Return a text-mode synthetic response for ``label``."""
+        handler_name = self._SYNTH_HANDLERS_TEXT.get(label)
+        if handler_name is None:
+            raise NotImplementedError(
+                f"StubLLMBridge: no text synthesiser registered for "
+                f"label={label!r}. Known text labels: "
+                f"{sorted(self._SYNTH_HANDLERS_TEXT)}."
+            )
+        return getattr(self, handler_name)()
+
+    # ------------------------------------------------------------------
+    # Entry-point overrides.
+    # ------------------------------------------------------------------
+    def _chat_json(self, client: Any, model_name: str,
+                   system_prompt: str, user_prompt: str,
+                   *, label: str = LLMBridge._DEFAULT_LABEL,
+                   provider: Optional[str] = None,
+                   components: Optional[Dict[str, int]] = None) -> Dict:
+        """Bypass HTTP; dispatch to the JSON synthesiser registered for ``label``.
+
+        Catches every JSON-mode call: ``generate`` (inherited, calls
+        ``self._chat_json``), ``plan`` (inherited, calls ``self.generate``),
+        and ``reflect`` (inherited, calls ``self._chat_json`` directly with
+        the reflect client/model). The ``client`` / ``model_name`` /
+        ``provider`` / ``components`` args are accepted for signature
+        parity but ignored — synthesis is purely label-driven.
+        """
+        if label == self._DEFAULT_LABEL:
+            self._warn_default_label("_chat_json")
+        return self._synthesise_json(label)
+
+    def generate_text(self, system_prompt: str, user_prompt: str,
+                      *, label: str = LLMBridge._DEFAULT_LABEL,
+                      components: Optional[Dict[str, int]] = None) -> str:
+        """Bypass HTTP; dispatch to the text synthesiser registered for ``label``."""
+        if label == self._DEFAULT_LABEL:
+            self._warn_default_label("generate_text")
+        return self._synthesise_text(label)
+
+    def tool_call(self, system_prompt: str, user_prompt: str,
+                  tools: List[Dict[str, Any]],
+                  *, label: str = LLMBridge._DEFAULT_LABEL,
+                  components: Optional[Dict[str, int]] = None) -> ToolCallResult:
+        """Loud refusal — no production label currently routes through ``tool_call``.
+
+        ``validator.code_review`` was suspected to use ``tool_call`` but
+        actually calls ``generate`` (verified at
+        ``nodes/ml_code_validator_agent.py:544``). If a future label adds
+        a tool-call site, register it on a new ``_SYNTH_HANDLERS_TOOL``
+        dispatch table rather than silently returning a sentinel.
+        """
+        raise NotImplementedError(
+            f"StubLLMBridge.tool_call() has no synthesiser for label={label!r}. "
+            f"No production label routes through tool_call() today. If a new "
+            f"site is added, extend StubLLMBridge with a tool-call dispatch "
+            f"table; do not silently return a sentinel ToolCallResult."
+        )
+
+    # ==================================================================
+    # B2a synthesisers: tuner (2) + interpretation (3)
+    # ==================================================================
+
+    def _synth_tuner_planner(self) -> Dict:
+        """Return an ``ExperimentPlan``-validatable dict with stub hyperparameters.
+
+        Uses ``_synth_stub_model_name(iter, "a")`` for ``model_type`` so the
+        slug matches what proposer.proposing / implementor.code will return
+        in B2b — the chain's training step then finds
+        ``agent_generated/models/{slug}.py`` where the implementor wrote it.
+
+        Keys use the LLM-facing aliases (``model_config`` / ``train_config`` /
+        ``loss_config``) — Pydantic's ``populate_by_name=True`` accepts both
+        these and the Python field names (``model_cfg`` etc.).
+        """
+        iter_idx = self._iter if self._iter is not None else 0
+        return {
+            "model_type":             _synth_stub_model_name(iter_idx, "a"),
+            "hypothesis":             "Stub planner: no-op verdict; the "
+                                      "chain proceeds with default trial mode.",
+            "reasoning":              "Stub mode — no real planning; "
+                                      "minimal viable hyperparameters returned.",
+            "model_config":           {},
+            "train_config":           {"epochs": 1, "batch_size": 1, "lr": 1e-3},
+            "loss_config":            {"loss_type": "ce"},
+            "is_trial":               True,
+            "trial_strategy":         "snapshot",
+            "trial_portion":          0.02,
+            "target_files":           [],
+            "train_portion":          0.1,
+            "eval_strategy":          "snapshot",
+            "eval_portion":           0.02,
+            "train_validation_align": True,
+        }
+
+    def _synth_tuner_reflector(self) -> Dict:
+        """Return the four reflector keys consumed by the tuner agent.
+
+        See ``nodes/ml_hyperparameter_tune_agent.py`` ``reflection.get(...)``
+        callsites and ``agent/prompts.py`` REFLECTOR_PROMPT output schema.
+        """
+        return {
+            "conclusion":    "Stub reflector: neutral verdict — chain continues.",
+            "key_factor":    "(none — stub mode)",
+            "discovery":     "(none — stub mode)",
+            "memory_update": "Continue with default plan; stub mode in effect.",
+        }
+
+    def _synth_interpretation_per_model(self) -> Dict:
+        """Return all 8 fields specified by ``PER_MODEL_SYSTEM_PROMPT``.
+
+        Every key is required so the Knowledge Accumulator's downstream
+        merge/compress paths (``model_knowledge_cache``,
+        ``compress_model_summary``) find non-empty values. See
+        ``nodes/result_interpretation_agent.py`` PER_MODEL_SYSTEM_PROMPT
+        for the full contract.
+        """
+        return {
+            "key_findings":         ["Stub: no real findings."],
+            "bottlenecks":          ["Stub: no real bottlenecks."],
+            "best_config_analysis": "Stub: no analysis performed.",
+            "score_trend":          "Stub: no trend computed.",
+            "per_file_analysis":    "Stub: no per-file analysis.",
+            "data_sensitivity":     "Stub: no data-sensitivity analysis.",
+            "efficiency_assessment":"Stub: no efficiency analysis.",
+            "strategy_assessment":  "Stub: no strategy analysis.",
+        }
+
+    def _synth_interpretation_synthesis(self) -> Dict:
+        """Return all 5 fields specified by ``SYNTHESIS_SYSTEM_PROMPT``.
+
+        The synthesis callsite reads only ``key_findings`` / ``bottlenecks`` /
+        ``take_home_message``, but the prompt asks for 5 fields; we provide
+        the full set so a future consumer that reads the extra two fields
+        finds non-empty values.
+        """
+        return {
+            "key_findings":          ["Stub: no real cross-model findings."],
+            "bottlenecks":           ["Stub: no real cross-model bottlenecks."],
+            "per_file_comparison":   "Stub: no per-file comparison.",
+            "efficiency_comparison": "Stub: no efficiency comparison.",
+            "take_home_message":     "Stub mode — no real synthesis performed.",
+        }
+
+    def _synth_interpretation_dedup(self) -> Dict:
+        """Return ``is_duplicate=False`` so the dedup pass keeps every term.
+
+        See ``DEDUP_SYSTEM_PROMPT`` and the callsite at
+        ``nodes/result_interpretation_agent.py:1311`` which reads
+        ``is_duplicate`` / ``duplicate_of`` / ``rationale``.
+        """
+        return {
+            "is_duplicate": False,
+            "duplicate_of": None,
+            "rationale":    "Stub: not a duplicate (default verdict).",
+        }
