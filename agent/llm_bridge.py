@@ -118,6 +118,104 @@ _KNOWN_PROVIDERS: Dict[str, Dict[str, Optional[str]]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Stub-mode model name synthesiser (Commit 4.4 Stage 2).
+#
+# Single source of truth for the cross-stub `model_name` slug. The
+# StubLLMBridge derives proposer.proposing / implementor.code / tuner.planner
+# model_name fields from this helper so all three label outputs agree on
+# the slug — which becomes the plugin filename
+# (`agent_generated/models/{model_name}.py`) and the training target.
+#
+# Format: ``stub_arch_{iter:03d}_{slot}``. Deterministic, collision-free
+# across iters and slots, and lands within Python's identifier rules so
+# `importlib` accepts it as a module name without escaping.
+# ---------------------------------------------------------------------------
+def _synth_stub_model_name(iter_idx: int, slot: str) -> str:
+    """Return the canonical stub-mode plugin slug for ``(iter_idx, slot)``.
+
+    Args:
+        iter_idx: Iteration index (≥ 0). Zero-padded to 3 digits.
+        slot:     Per-iter sub-id distinguishing models proposed within
+                  the same iter (e.g. ``"a"``, ``"b"``).
+
+    Returns:
+        Slug of shape ``stub_arch_{iter:03d}_{slot}``.
+    """
+    return f"stub_arch_{iter_idx:03d}_{slot}"
+
+
+# ---------------------------------------------------------------------------
+# B2b — shared stub payload constants and helpers.
+#
+# Both `proposer.legacy_commit` and `proposer.proposing` produce a
+# ProposalOutput-validatable dict with the same architecture description,
+# expert advice, and baseline config; the proposing path additionally
+# carries `memo_consistency_notes`. Centralising the shared fields keeps
+# the two synthesisers in lockstep and makes drift visible.
+#
+# `baseline_config["model_config"]["segmentation_size"]` is 40 000 — it
+# divides `psd_segment_length=10 000 000` cleanly (250 chunks) so the
+# `ProposalOutput._validate_baseline_segmentation_size` model-validator
+# accepts the dict.
+# ---------------------------------------------------------------------------
+
+_STUB_MODEL_DESCRIPTION = (
+    "Stub architecture: nn.Embedding(256, hidden_dim) followed by "
+    "nn.Linear(hidden_dim, 256). Returns [B, 256, T] floats — the "
+    "minimum viable plugin that satisfies the chain's forward contract."
+)
+
+_STUB_MATHEMATICAL_DEFINITION = (
+    "x in Z^{B x T}; e = Embed(x) in R^{B x T x h}; "
+    "y = Linear(e) in R^{B x T x 256}; "
+    "out = transpose(y, 1, 2) in R^{B x 256 x T}."
+)
+
+_STUB_MOTIVATION = (
+    "Stub mode: emits the minimal model that respects the [B, 256, T] "
+    "forward contract so downstream stages have a runnable plugin to "
+    "consume. Architecture choice is irrelevant under stub training."
+)
+
+
+def _stub_expert_advice_dict() -> Dict:
+    """Default ``ExpertAdvice``-validatable dict for stub proposals."""
+    return {
+        "focus_areas":           ["Stub mode — exploration is a no-op."],
+        "constraints":           ["Forward contract: [B, T] int -> [B, 256, T] float."],
+        "known_failures":        [],
+        "suggested_directions":  ["Continue with default trial settings."],
+        "rationale":             "Stub bridge in effect; no real guidance.",
+        "freeform_notes":        None,
+    }
+
+
+def _stub_baseline_config_dict() -> Dict:
+    """Minimal ``baseline_config`` with ``model_config`` / ``train_config`` / ``loss_config``.
+
+    The only constraint enforced by ``ProposalOutput._validate_baseline_segmentation_size``
+    is that ``segmentation_size`` (when present) must divide
+    ``psd_segment_length=10_000_000``. ``40000`` does (250 chunks).
+    """
+    return {
+        "model_config": {
+            "model_type":        "stub_arch",
+            "segmentation_size": 40000,
+            "batch_size":        1,
+            "hidden_dim":        8,
+        },
+        "train_config": {
+            "epochs":     1,
+            "batch_size": 1,
+            "lr":         1e-3,
+        },
+        "loss_config": {
+            "loss_type": "ce",
+        },
+    }
+
+
 class LLMBridge:
     """
     Universal API gateway for all LLM calls in SIDERIUS.
@@ -1405,3 +1503,506 @@ class LLMBridge:
             arguments=json.loads(tc.function.arguments),
             call_id=tc.id,
         )
+
+
+# ---------------------------------------------------------------------------
+# StubLLMBridge — stateless generative stub (Commit 4.4 Stage 2 / PR-B B2)
+#
+# Drop-in LLMBridge replacement for 0-cost chain smokes. Returns deterministic,
+# schema-valid synthetic responses for every production label without any
+# HTTP call. Selected via Stage 3 CLI flags (`--is_pseudo_llm`); dormant in
+# production until then.
+#
+# Design contract (see docs/audit_and_optimize_token_usage_and_growth.md
+# §8 Commit 4.4):
+#   * Inherits `set_run_context`, `emit_marker`, `_validate_pre_write_locked`,
+#     and the run-context state machine — the test harness watches
+#     `token_usage.jsonl` flush + skip markers exactly as for the real bridge.
+#   * Overrides `_record_usage` to a no-op so synthetic calls never pollute
+#     production telemetry with zero-token rows (defensive — synthesise paths
+#     do not call `_record_usage` either, but the override is the contract).
+#   * Skips `OpenAI()` construction in `__init__` so the stub works with no
+#     API key and no network.
+#   * Overrides `_chat_json` (catches `generate` + `reflect` JSON paths),
+#     `generate_text`, and `tool_call`.
+#   * Each label dispatches through `_SYNTH_HANDLERS_JSON` /
+#     `_SYNTH_HANDLERS_TEXT`. Unknown labels raise `NotImplementedError`
+#     instead of silently returning something — drift is loud.
+#
+# B2a covers 5 labels (tuner.{planner,reflector} +
+# interpretation.{per_model, synthesis, dedup}); B2b adds 9 more
+# (proposer.{legacy_reasoning, legacy_commit, comparison,
+# causal_reasoning, proposing} + implementor.{reasoning, code, repair}
+# + validator.code_review). Total: 14 cognitive labels.
+# ---------------------------------------------------------------------------
+class StubLLMBridge(LLMBridge):
+    """Generative stub LLMBridge for 0-cost chain smokes.
+
+    Returns deterministic, schema-valid synthetic responses for every label
+    without HTTP calls. Selected by the Stage 3 chain-runner factory when
+    ``--is_pseudo_llm`` is passed; dormant otherwise.
+
+    Public surface mirrors :class:`LLMBridge` so downstream nodes do not
+    need to know which bridge is wired:
+      * ``set_run_context`` / ``emit_marker`` are inherited as-is (the
+        run-context state machine and skip-marker emission are shared
+        behaviour the smoke harness depends on).
+      * ``generate`` / ``plan`` / ``reflect`` are inherited; they call into
+        ``_chat_json`` which is overridden.
+      * ``generate_text`` / ``tool_call`` / ``_chat_json`` are overridden.
+      * ``_record_usage`` is overridden to a no-op so synthetic calls never
+        write zero-token rows to ``token_usage.jsonl``.
+
+    Cross-stub coupling: ``_synth_stub_model_name(iter, slot)`` is the
+    single source of truth for the plugin slug — ``tuner.planner`` (here)
+    and ``proposer.proposing`` / ``implementor.code`` (B2b) all derive
+    their model_name from it so the chain's training step finds the same
+    plugin file.
+    """
+
+    # --- Dispatch tables (label -> method-name) --------------------------
+    # Keyed by string method names rather than method objects so the dict
+    # can sit in the class body without forward-referencing each method.
+    _SYNTH_HANDLERS_JSON: Dict[str, str] = {
+        # B2a — tuner + interpretation
+        "tuner.planner":              "_synth_tuner_planner",
+        "tuner.reflector":            "_synth_tuner_reflector",
+        "interpretation.per_model":   "_synth_interpretation_per_model",
+        "interpretation.synthesis":   "_synth_interpretation_synthesis",
+        "interpretation.dedup":       "_synth_interpretation_dedup",
+        # B2b — proposer (4 of 5: the 5th, legacy_reasoning, is text)
+        "proposer.legacy_commit":     "_synth_proposer_legacy_commit",
+        "proposer.comparison":        "_synth_proposer_comparison",
+        "proposer.causal_reasoning":  "_synth_proposer_causal_reasoning",
+        "proposer.proposing":         "_synth_proposer_proposing",
+        # B2b — implementor (2 of 3: reasoning is text)
+        "implementor.code":           "_synth_implementor_code",
+        "implementor.repair":         "_synth_implementor_repair",
+        # B2b — validator
+        "validator.code_review":      "_synth_validator_code_review",
+    }
+    _SYNTH_HANDLERS_TEXT: Dict[str, str] = {
+        # B2b — proposer + implementor free-text labels
+        "proposer.legacy_reasoning":  "_synth_proposer_legacy_reasoning",
+        "implementor.reasoning":      "_synth_implementor_reasoning",
+    }
+
+    def __init__(self, *, max_retries: Optional[int] = 0):
+        """Initialise stub bridge state without any OpenAI client.
+
+        Deliberately does NOT call ``super().__init__()``: the parent
+        constructor instantiates ``OpenAI()`` clients which need an API
+        key and (for the gemini default) hit the network during list_models
+        probes. The stub bridge has neither; it sets only the state that
+        the inherited ``set_run_context`` / ``emit_marker`` /
+        ``_validate_pre_write_locked`` paths require.
+
+        Args:
+            max_retries: Honoured for API-shape parity only — no HTTP calls
+                         are made, so the value is unused. Defaults to ``0``
+                         (clearer than ``None`` for "no retries needed").
+        """
+        load_dotenv()
+        self.provider: str = "stub"
+        self.model_name: Optional[str] = "stub_model"
+        self.api_key: Optional[str] = None
+        self.max_retries: Optional[int] = max_retries
+
+        # Reflect-side mirror — same provider/model so cross-provider
+        # routing is a no-op in stub mode.
+        self.reflect_provider: str = "stub"
+        self.reflect_model_name: Optional[str] = "stub_model"
+
+        # No OpenAI clients. Both attributes exist so any inherited code
+        # that grabs `self.client` / `self.reflect_client` fails fast
+        # (NoneType attribute access) instead of silently masking a bug.
+        self.client = None
+        self.reflect_client = None
+
+        # --- Run-context state (mirrors LLMBridge.__init__) ---
+        self._token_usage_path: Optional[Path] = None
+        self._iter: Optional[int] = None
+        self._run_id: Optional[str] = None
+        self._run_name: Optional[str] = None
+
+        # --- Setter Safety Protocol state (mirrors LLMBridge.__init__) ---
+        self._lock = threading.Lock()
+        self._set_at_ts: Optional[str] = None
+        self._first_row_run_id_cache: Optional[str] = None
+        self._last_logged_iter: Optional[int] = None
+        self._last_ts: Optional[str] = None
+
+    # ------------------------------------------------------------------
+    # Telemetry: synthetic calls never write per-call rows.
+    # ------------------------------------------------------------------
+    def _record_usage(self, **_kwargs) -> None:
+        """No-op: synthetic responses must not appear in token_usage.jsonl.
+
+        The synth paths below never call ``_record_usage`` directly, so
+        this override is defence-in-depth — it guarantees that any future
+        code path on ``StubLLMBridge`` (or any inherited helper that
+        reaches the writer) cannot leak zero-token rows into a real run's
+        audit log. ``emit_marker`` is intentionally left inherited so the
+        Stability-Filter-skipped markers continue to flow.
+        """
+        return
+
+    # ------------------------------------------------------------------
+    # Dispatch helpers — one per response type.
+    # ------------------------------------------------------------------
+    def _synthesise_json(self, label: str) -> Dict:
+        """Return a JSON-mode synthetic response for ``label``."""
+        handler_name = self._SYNTH_HANDLERS_JSON.get(label)
+        if handler_name is None:
+            raise NotImplementedError(
+                f"StubLLMBridge: no JSON synthesiser registered for "
+                f"label={label!r}. Known JSON labels: "
+                f"{sorted(self._SYNTH_HANDLERS_JSON)}."
+            )
+        return getattr(self, handler_name)()
+
+    def _synthesise_text(self, label: str) -> str:
+        """Return a text-mode synthetic response for ``label``."""
+        handler_name = self._SYNTH_HANDLERS_TEXT.get(label)
+        if handler_name is None:
+            raise NotImplementedError(
+                f"StubLLMBridge: no text synthesiser registered for "
+                f"label={label!r}. Known text labels: "
+                f"{sorted(self._SYNTH_HANDLERS_TEXT)}."
+            )
+        return getattr(self, handler_name)()
+
+    # ------------------------------------------------------------------
+    # Entry-point overrides.
+    # ------------------------------------------------------------------
+    def _chat_json(self, client: Any, model_name: str,
+                   system_prompt: str, user_prompt: str,
+                   *, label: str = LLMBridge._DEFAULT_LABEL,
+                   provider: Optional[str] = None,
+                   components: Optional[Dict[str, int]] = None) -> Dict:
+        """Bypass HTTP; dispatch to the JSON synthesiser registered for ``label``.
+
+        Catches every JSON-mode call: ``generate`` (inherited, calls
+        ``self._chat_json``), ``plan`` (inherited, calls ``self.generate``),
+        and ``reflect`` (inherited, calls ``self._chat_json`` directly with
+        the reflect client/model). The ``client`` / ``model_name`` /
+        ``provider`` / ``components`` args are accepted for signature
+        parity but ignored — synthesis is purely label-driven.
+        """
+        if label == self._DEFAULT_LABEL:
+            self._warn_default_label("_chat_json")
+        return self._synthesise_json(label)
+
+    def generate_text(self, system_prompt: str, user_prompt: str,
+                      *, label: str = LLMBridge._DEFAULT_LABEL,
+                      components: Optional[Dict[str, int]] = None) -> str:
+        """Bypass HTTP; dispatch to the text synthesiser registered for ``label``."""
+        if label == self._DEFAULT_LABEL:
+            self._warn_default_label("generate_text")
+        return self._synthesise_text(label)
+
+    def tool_call(self, system_prompt: str, user_prompt: str,
+                  tools: List[Dict[str, Any]],
+                  *, label: str = LLMBridge._DEFAULT_LABEL,
+                  components: Optional[Dict[str, int]] = None) -> ToolCallResult:
+        """Loud refusal — no production label currently routes through ``tool_call``.
+
+        ``validator.code_review`` was suspected to use ``tool_call`` but
+        actually calls ``generate`` (verified at
+        ``nodes/ml_code_validator_agent.py:544``). If a future label adds
+        a tool-call site, register it on a new ``_SYNTH_HANDLERS_TOOL``
+        dispatch table rather than silently returning a sentinel.
+        """
+        raise NotImplementedError(
+            f"StubLLMBridge.tool_call() has no synthesiser for label={label!r}. "
+            f"No production label routes through tool_call() today. If a new "
+            f"site is added, extend StubLLMBridge with a tool-call dispatch "
+            f"table; do not silently return a sentinel ToolCallResult."
+        )
+
+    # ==================================================================
+    # B2a synthesisers: tuner (2) + interpretation (3)
+    # ==================================================================
+
+    def _synth_tuner_planner(self) -> Dict:
+        """Return an ``ExperimentPlan``-validatable dict with stub hyperparameters.
+
+        Uses ``_synth_stub_model_name(iter, "a")`` for ``model_type`` so the
+        slug matches what proposer.proposing / implementor.code will return
+        in B2b — the chain's training step then finds
+        ``agent_generated/models/{slug}.py`` where the implementor wrote it.
+
+        Keys use the LLM-facing aliases (``model_config`` / ``train_config`` /
+        ``loss_config``) — Pydantic's ``populate_by_name=True`` accepts both
+        these and the Python field names (``model_cfg`` etc.).
+        """
+        iter_idx = self._iter if self._iter is not None else 0
+        return {
+            "model_type":             _synth_stub_model_name(iter_idx, "a"),
+            "hypothesis":             "Stub planner: no-op verdict; the "
+                                      "chain proceeds with default trial mode.",
+            "reasoning":              "Stub mode — no real planning; "
+                                      "minimal viable hyperparameters returned.",
+            "model_config":           {},
+            "train_config":           {"epochs": 1, "batch_size": 1, "lr": 1e-3},
+            "loss_config":            {"loss_type": "ce"},
+            "is_trial":               True,
+            "trial_strategy":         "snapshot",
+            "trial_portion":          0.02,
+            "target_files":           [],
+            "train_portion":          0.1,
+            "eval_strategy":          "snapshot",
+            "eval_portion":           0.02,
+            "train_validation_align": True,
+        }
+
+    def _synth_tuner_reflector(self) -> Dict:
+        """Return the four reflector keys consumed by the tuner agent.
+
+        See ``nodes/ml_hyperparameter_tune_agent.py`` ``reflection.get(...)``
+        callsites and ``agent/prompts.py`` REFLECTOR_PROMPT output schema.
+        """
+        return {
+            "conclusion":    "Stub reflector: neutral verdict — chain continues.",
+            "key_factor":    "(none — stub mode)",
+            "discovery":     "(none — stub mode)",
+            "memory_update": "Continue with default plan; stub mode in effect.",
+        }
+
+    def _synth_interpretation_per_model(self) -> Dict:
+        """Return all 8 fields specified by ``PER_MODEL_SYSTEM_PROMPT``.
+
+        Every key is required so the Knowledge Accumulator's downstream
+        merge/compress paths (``model_knowledge_cache``,
+        ``compress_model_summary``) find non-empty values. See
+        ``nodes/result_interpretation_agent.py`` PER_MODEL_SYSTEM_PROMPT
+        for the full contract.
+        """
+        return {
+            "key_findings":         ["Stub: no real findings."],
+            "bottlenecks":          ["Stub: no real bottlenecks."],
+            "best_config_analysis": "Stub: no analysis performed.",
+            "score_trend":          "Stub: no trend computed.",
+            "per_file_analysis":    "Stub: no per-file analysis.",
+            "data_sensitivity":     "Stub: no data-sensitivity analysis.",
+            "efficiency_assessment":"Stub: no efficiency analysis.",
+            "strategy_assessment":  "Stub: no strategy analysis.",
+        }
+
+    def _synth_interpretation_synthesis(self) -> Dict:
+        """Return all 5 fields specified by ``SYNTHESIS_SYSTEM_PROMPT``.
+
+        The synthesis callsite reads only ``key_findings`` / ``bottlenecks`` /
+        ``take_home_message``, but the prompt asks for 5 fields; we provide
+        the full set so a future consumer that reads the extra two fields
+        finds non-empty values.
+        """
+        return {
+            "key_findings":          ["Stub: no real cross-model findings."],
+            "bottlenecks":           ["Stub: no real cross-model bottlenecks."],
+            "per_file_comparison":   "Stub: no per-file comparison.",
+            "efficiency_comparison": "Stub: no efficiency comparison.",
+            "take_home_message":     "Stub mode — no real synthesis performed.",
+        }
+
+    def _synth_interpretation_dedup(self) -> Dict:
+        """Return ``is_duplicate=False`` so the dedup pass keeps every term.
+
+        See ``DEDUP_SYSTEM_PROMPT`` and the callsite at
+        ``nodes/result_interpretation_agent.py:1311`` which reads
+        ``is_duplicate`` / ``duplicate_of`` / ``rationale``.
+        """
+        return {
+            "is_duplicate": False,
+            "duplicate_of": None,
+            "rationale":    "Stub: not a duplicate (default verdict).",
+        }
+
+    # ==================================================================
+    # B2b synthesisers: proposer (5) + implementor (3) + validator (1)
+    # ==================================================================
+    # The cross-stub model_name contract is: proposer.{legacy_commit,
+    # proposing} and tuner.planner (B2a) all derive from
+    # ``_synth_stub_model_name(self._iter or 0, "a")``. implementor.code
+    # then writes its plugin to ``agent_generated/models/{slug}.py``,
+    # and the tuner's planner config targets the same slug. Drift here
+    # crashes the chain on ``ImportError`` mid-iter.
+
+    def _synth_proposer_legacy_reasoning(self) -> str:
+        """Free-text reasoning for the legacy 2-call proposer path.
+
+        See ``nodes/ml_model_proposal_agent.py:922`` — the caller only
+        checks ``len(reasoning)``; any non-empty string suffices.
+        """
+        return (
+            "Stub proposer reasoning: the simplest model that "
+            "satisfies the [B, 256, T] forward contract is a token "
+            "embedding into a linear head. Stub mode emits this "
+            "baseline regardless of the upstream interpretation."
+        )
+
+    def _synth_proposer_legacy_commit(self) -> Dict:
+        """``ProposalOutput``-validatable dict for the legacy 2-call commit path.
+
+        See the call at ``nodes/ml_model_proposal_agent.py:955``: the
+        agent reads model_name / model_description /
+        mathematical_definition / motivation / expert_advice /
+        baseline_config / parameter_count_estimate from this dict and
+        passes them to ``ProposalOutput.model_validate(...)``.
+        """
+        iter_idx = self._iter if self._iter is not None else 0
+        return {
+            "model_name":              _synth_stub_model_name(iter_idx, "a"),
+            "model_description": _STUB_MODEL_DESCRIPTION,
+            "mathematical_definition": _STUB_MATHEMATICAL_DEFINITION,
+            "motivation":              _STUB_MOTIVATION,
+            "expert_advice":           _stub_expert_advice_dict(),
+            "baseline_config":         _stub_baseline_config_dict(),
+            "parameter_count_estimate": 4096,
+        }
+
+    def _synth_proposer_comparison(self) -> Dict:
+        """Stage-1 output for the 3-stage pipeline.
+
+        Comparison's dict is read at lines 1273+1278 of the proposer
+        for ``proposed_vocab_links`` and ``proposed_vocab_candidates``;
+        both default to empty so downstream stages degenerate cleanly.
+        The dict is also rendered into causal_reasoning's user prompt
+        via ``_render_stage_user_prompt(accumulated)`` — empty-but-
+        typed fields render as harmless placeholders.
+        """
+        return {
+            "comparative_analysis":      [],
+            "sota_model_type":           "stub_arch",
+            "sota_score":                -2.5,
+            "sota_mechanism":            "Stub: token embedding to linear head.",
+            "proposed_vocab_links":      [],
+            "proposed_vocab_candidates": [],
+        }
+
+    def _synth_proposer_causal_reasoning(self) -> Dict:
+        """Stage-2 output. ``falsifiable_prediction`` MUST clear the boldness gate.
+
+        ``boldness = abs(predicted - current) / max(abs(current), 1e-6)``.
+        With ``current=1.0`` and ``predicted=2.0`` the boldness is
+        ``1.0`` — well above the default ``policy.minimum_boldness=0.05``
+        floor. The Pydantic ``predicted_value != current_value``
+        validator is also satisfied. See ``FalsifiablePrediction`` at
+        ``agent/schemas/proposal.py:32`` and the boldness retry at
+        ``nodes/ml_model_proposal_agent.py:1194``.
+        """
+        return {
+            "causal_hypothesis": (
+                "Stub: a token-embedding head should produce some "
+                "signal; the chain's wiring is the real test surface, "
+                "not the architecture."
+            ),
+            "proposed_change":         "Stub: no change vs SOTA — stub baseline.",
+            "inherited_components":    [],
+            "falsifiable_prediction": {
+                "metric":                  "denoising_score",
+                "current_value":           1.0,
+                "predicted_value":         2.0,
+                "threshold_for_refutation": 0.5,
+                "rationale":               "Stub bridge synthetic prediction.",
+            },
+            "predicted_failure_modes":   ["Stub mode: failure modes not predicted."],
+            "proposed_vocab_links":      [],
+            "proposed_vocab_candidates": [],
+            "citation_sources":          [],
+        }
+
+    def _synth_proposer_proposing(self) -> Dict:
+        """Stage-3 / final output. ``ProposalOutput`` contract — same as legacy_commit.
+
+        ``model_name`` from ``_synth_stub_model_name(self._iter or 0, "a")``
+        matches both ``tuner.planner`` (B2a) and ``implementor.code``;
+        the chain's plugin filename / config target / module import
+        all resolve to the same slug.
+        """
+        iter_idx = self._iter if self._iter is not None else 0
+        return {
+            "model_name":              _synth_stub_model_name(iter_idx, "a"),
+            "model_description":       _STUB_MODEL_DESCRIPTION,
+            "mathematical_definition": _STUB_MATHEMATICAL_DEFINITION,
+            "motivation":              _STUB_MOTIVATION,
+            "expert_advice":           _stub_expert_advice_dict(),
+            "baseline_config":         _stub_baseline_config_dict(),
+            "memo_consistency_notes":  [],
+            "parameter_count_estimate": 4096,
+        }
+
+    def _synth_implementor_reasoning(self) -> str:
+        """Free-text reasoning for ``implementor.reasoning``.
+
+        See ``nodes/ml_model_implementor.py:755`` — only
+        ``len(reasoning)`` is logged; any non-empty string suffices.
+        """
+        return (
+            "Stub implementor reasoning: implement the proposed stub "
+            "architecture as a token embedding into a linear head. "
+            "The forward pass transposes the last two dimensions to "
+            "produce [B, 256, T]."
+        )
+
+    def _synth_implementor_code(self) -> Dict:
+        """Snippets that, after ``_assemble_plugin``, produce a plugin
+        functionally equivalent to ``agent_generated/_stub_plugin_template.py``.
+
+        The bridge cannot return the template's flat source string
+        directly — the implementor's caller treats the response as a
+        6-key dict and formats the snippets into ``PLUGIN_TEMPLATE``
+        (see ``nodes/ml_model_implementor.py:594-646``). The assembled
+        plugin matches the template's architecture
+        (``Embedding(256, h) → Linear(h, 256) → transpose``) and the
+        ``[B, T] int → [B, 256, T] float`` forward contract.
+
+        Notes:
+          - ``hidden_dim`` is the only tunable field. Its default
+            ``8`` MUST match between ``config_fields_code`` (parsed by
+            the ``_check_config_field_consistency`` regex) and the
+            ``config_fields`` dict (read by the scalar-type check).
+          - Indentation is normalised by ``_assemble_plugin`` via
+            ``textwrap.dedent`` then re-indented to 8 spaces, so the
+            snippets are written at zero indent for readability.
+        """
+        return {
+            "extra_imports":          "",
+            "config_fields_code":     "    hidden_dim: int = Field(default=8, ge=1, le=256)",
+            "config_validators_code": "",
+            "init_body": (
+                "self.embedding = nn.Embedding(256, config.hidden_dim)\n"
+                "self.head = nn.Linear(config.hidden_dim, 256)"
+            ),
+            "forward_body": (
+                "x = self.embedding(x.long())\n"
+                "x = self.head(x)\n"
+                "return x.transpose(1, 2)"
+            ),
+            "config_fields": {"hidden_dim": 8},
+        }
+
+    def _synth_implementor_repair(self) -> Dict:
+        """Identical payload to ``implementor.code``.
+
+        Under stub training the validator gate passes on the first
+        attempt, so this label is never invoked end-to-end. Registering
+        it here means a future code path that triggers the repair loop
+        cannot crash with ``NotImplementedError``.
+        """
+        return self._synth_implementor_code()
+
+    def _synth_validator_code_review(self) -> Dict:
+        """``LLMCodeReview``-validatable dict that approves the plugin.
+
+        See ``LLMCodeReview`` at ``agent/schemas/validator.py:21``.
+        ``passed=True`` lets the smoke chain advance past the
+        validator gate into the tuner.
+        """
+        return {
+            "spec_alignment":        True,
+            "trainability_concerns": [],
+            "implementation_issues": [],
+            "passed":                True,
+            "notes":                 "Stub validator approval.",
+        }
