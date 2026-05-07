@@ -23,7 +23,7 @@ import os
 import re
 import warnings
 from dataclasses import dataclass, field
-from typing import List, Sequence
+from typing import Dict, List, Sequence
 
 from agent.schemas.hyperparam_tuning import (
     GateExhaustionInfo,
@@ -124,6 +124,26 @@ class RestoredState:
             proposal JSON. See ``docs/Consistent_growing_vocab_list.md``
             §10 for the bridge design and the three downstream consumers
             this unblocks.
+        model_knowledge_cache: latest committed iter's
+            ``InterpretationOutput.model_knowledge_cache`` — the per-model
+            Phase-1 summarisation cache (``Dict[model_type, cache_entry]``).
+            Forwarded to the next iter's ``run_workflow`` as
+            ``restored_model_knowledge_cache`` so that
+            ``workflows/model_exploration.py:830``'s unconditional
+            ``model_knowledge_cache: dict = {}`` becomes a chain-aware
+            ``dict(restored_model_knowledge_cache)`` re-init. Without this,
+            every chain subprocess starts with an empty cache, the
+            interp agent's cache-hit branch never fires, and every
+            ``model_type`` triggers a fresh ``interpretation.per_model``
+            LLM call regardless of how stable its evidence is. Latest-wins
+            semantics (mirrors ``runtime_vocab`` and ``previous_proposal_data``)
+            because each digest already carries the rolling ``_cap_knowledge_cache``
+            window — concatenating across iters would leak evicted entries
+            back in. Empty dict when ``current_iter == 1`` or no committed
+            iter has a parseable interpretation digest. See Commit 6.1.a
+            in ``docs/audit_and_optimize_token_usage_and_growth.md``
+            (Rev 8.3 changelog) for the audit that found the persistence /
+            restoration asymmetry.
     """
     resolved_source_paths: List[str] = field(default_factory=list)
     restored_plugins: List[str] = field(default_factory=list)
@@ -133,6 +153,7 @@ class RestoredState:
     accumulated_physical_rejections: List[PhysicalRejection] = field(default_factory=list)
     accumulated_gate_exhaustions: List[GateExhaustionInfo] = field(default_factory=list)
     previous_proposal_data: dict | None = None
+    model_knowledge_cache: Dict[str, Dict] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -337,6 +358,84 @@ def load_latest_knowledge(
             runtime_vocab = validated  # overwrite: only LAST iter's wins
 
     return runtime_vocab, findings
+
+
+def load_latest_knowledge_cache(
+    workspace: str,
+    current_iter: int,
+    committed_iters: Sequence[int],
+) -> Dict[str, Dict]:
+    """Read prior iters' interpretation digests; return the latest committed
+    iter's ``model_knowledge_cache`` for cross-subprocess restoration.
+
+    This is the sibling of :func:`load_latest_knowledge` for the per-model
+    Phase-1 summarisation cache. Walking the same digests as the vocab
+    loader (one disk read per iter) is intentional — both reads share the
+    same soft-fail policy and warning surface, so an operator who sees one
+    iter skipped for vocab also sees it skipped for the cache.
+
+    Args:
+        workspace: chain workspace root (absolute path preferred).
+        current_iter: iter the runner is about to launch. ``<= 1``
+            short-circuits to ``{}``.
+        committed_iters: ascending list of iter indices known to be
+            committed (i.e. their manifests parsed cleanly).
+
+    Returns:
+        ``Dict[model_type, cache_entry]`` from the latest parseable
+        digest. Empty dict on any of:
+          * ``current_iter <= 1``
+          * empty ``committed_iters``
+          * no committed iter has a parseable digest
+          * the latest parseable digest has no ``model_knowledge_cache``
+            key (older digests written before Commit 6.1.a may lack it)
+
+    Latest-wins semantics, matching ``load_latest_knowledge``'s
+    ``runtime_vocab`` channel. Concatenation across iters is incorrect
+    because each digest already carries the rolling
+    ``_cap_knowledge_cache(max_entries=5)`` window; merging would leak
+    evicted entries back in.
+
+    Soft-fail policy: missing or malformed digest emits a ``UserWarning``
+    and is skipped; the loader continues with the remaining iters.
+    Mirrors :func:`load_latest_knowledge`.
+
+    See docs/audit_and_optimize_token_usage_and_growth.md Rev 8.3
+    changelog (Commit 6.1.a) for the gap this closes.
+    """
+    if current_iter <= 1 or not committed_iters:
+        return {}
+
+    cache: Dict[str, Dict] = {}
+
+    for iter_idx in committed_iters:  # ascending per restore_prior_state
+        path = _interpretation_path(workspace, iter_idx)
+        if not os.path.isfile(path):
+            warnings.warn(
+                f"[resume] iter {iter_idx:03d}: interpretation digest not "
+                f"found at {path}. Skipping for knowledge-cache carry-over.",
+                UserWarning, stacklevel=2,
+            )
+            continue
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            warnings.warn(
+                f"[resume] iter {iter_idx:03d}: cannot read interpretation "
+                f"digest {path}: {e}. Skipping for knowledge-cache carry-over.",
+                UserWarning, stacklevel=2,
+            )
+            continue
+
+        raw_cache = data.get("model_knowledge_cache")
+        # `None` / missing key (legacy digest) → leave the running `cache`
+        # untouched and continue. An *empty dict* on disk is still a valid
+        # latest snapshot — overwrite to reflect the operator's eviction.
+        if isinstance(raw_cache, dict):
+            cache = dict(raw_cache)  # latest-wins; defensive copy
+
+    return cache
 
 
 # ---------------------------------------------------------------------------
@@ -615,6 +714,22 @@ def restore_prior_state(
             f"[resume] knowledge carry-over: "
             f"{len(state.runtime_vocab)} vocab entries, "
             f"{len(state.accumulated_key_findings)} accumulated key findings"
+        )
+
+    # Commit 6.1.a — Knowledge Restoration. Pull the latest committed iter's
+    # model_knowledge_cache so the next subprocess's interp agent sees a
+    # populated cache and the Stability Filter (Commit 6.1) can skip the
+    # per_model LLM call for stable architectures. Without this, the
+    # cache-hit branch at nodes/result_interpretation_agent.py:687-693 is
+    # unreachable in chain mode. See Rev 8.3 changelog.
+    state.model_knowledge_cache = load_latest_knowledge_cache(
+        abs_workspace, current_iter, state.committed_iters,
+    )
+    if state.model_knowledge_cache:
+        n = len(state.model_knowledge_cache)
+        print(
+            f"[resume] knowledge-cache carry-over: "
+            f"{n} cached model {'summary' if n == 1 else 'summaries'} restored"
         )
 
     # G1 bridge — proposal carry-over restores `proposed_vocab_candidates`

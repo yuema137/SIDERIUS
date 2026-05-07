@@ -1,7 +1,7 @@
 # Audit & Optimize Token Usage and Growth
 
-**Status**: Design draft, revision 8 (2026-05-05) — "Drain the Swamp" Pivot. G0 approved; G1 baseline LANDED. Commit 4.3.2 **CLOSED with H1 verdict** — the 11× `template_and_scaffolding` growth was an attribution leak inside `non_candidates_overview` (15 K → 111 K chars, 113 % of the catch-all Δ). Commit 4.3.3 (11th audit key) ships the fix. The leak's source — `model_knowledge_cache` + `model_descriptions` — is also the upstream of `expert_context_block` (24× growth). Commit 6.3 escalated to **Centralized Cache Dehydration**: prune at the `model_knowledge_cache` source so both leaks shrink simultaneously, with explicit Error-Signature preservation guard for Gate G3. Phase 2 unblocked.
-**Author**: drafted 2026-05-04, revised 2026-05-04 (rev 2 — safety/forensic/retention gates), revised 2026-05-04 (rev 3 — commit ledger + hybrid DRR + fail-fast formalization), revised 2026-05-05 (rev 4 — T1-Sanity green + Commit 4.3.1 chain-wrapper parity + V12 launch), revised 2026-05-05 (rev 5 — V12 iter 1–13 calibration + Phase 2 priority pivot), revised 2026-05-05 (rev 6 — Targeted O(N) Dehydration + USD tracking + Phase 3 split), revised 2026-05-05 (rev 7 — V12 iter 14 multi-dimensional explosion: Stability Filter, Knowledge Consolidation, Attribution Audit), revised 2026-05-05 (rev 8 — H1 verdict on 4.3.2 leak + Commit 4.3.3 11th audit key + Commit 6.3 escalated to source-level cache dehydration).
+**Status**: Design draft, revision 8.2 (2026-05-05) — "Knowledge Accumulator". G0 approved; G1 baseline LANDED; Phase 1 CLOSED. Commit 4.3.2 closed with H1 verdict; Commit 4.3.3 (11th audit key) merged. **Phase 2 in progress.** Commit 6.3 promoted from "Source-Level Merge & Prune" (Rev 8) to **Knowledge Accumulator Refactor** after a code audit (2026-05-05) revealed the cache is currently a *frozen snapshot* (`nodes/result_interpretation_agent.py:687-693` — cache hit copies verbatim, no merging path), not a cumulative ledger. The Rev 8 spec assumed accumulation across iters; the code provides none. Rev 8.2 reframes 6.3 as a two-part refactor: (i) modify the cache update path so a cache hit performs a *light merge* against new findings, and (ii) reconcile the 8 existing LLM text fields (`key_findings, bottlenecks, best_config_analysis, score_trend, per_file_analysis, data_sensitivity, efficiency_assessment, strategy_assessment`) with the consolidated schema. **Sequencing**: Commit 6.1 (Stability Filter + Synthesis Window) ships first to clamp the call-multiplication bleed; 6.3 follows with the schema heart-transplant. Phase 2 entry point is Commit 6.1.
+**Author**: drafted 2026-05-04, revised 2026-05-04 (rev 2 — safety/forensic/retention gates), revised 2026-05-04 (rev 3 — commit ledger + hybrid DRR + fail-fast formalization), revised 2026-05-05 (rev 4 — T1-Sanity green + Commit 4.3.1 chain-wrapper parity + V12 launch), revised 2026-05-05 (rev 5 — V12 iter 1–13 calibration + Phase 2 priority pivot), revised 2026-05-05 (rev 6 — Targeted O(N) Dehydration + USD tracking + Phase 3 split), revised 2026-05-05 (rev 7 — V12 iter 14 multi-dimensional explosion: Stability Filter, Knowledge Consolidation, Attribution Audit), revised 2026-05-05 (rev 8 — H1 verdict on 4.3.2 leak + Commit 4.3.3 11th audit key + Commit 6.3 escalated to source-level cache dehydration), revised 2026-05-05 (rev 8.1 — Gate G3.5 SOTA Replication + Metric #12 SRR + Commit 11.2 verify_sota_replication.py), revised 2026-05-05 (rev 8.2 — code audit confirms frozen-cache discrepancy; Commit 6.3 promoted to Knowledge Accumulator refactor; Phase 2 entry sequenced as 6.1 → 6.3).
 **Inputs**:
 
 - `reports/v11_20250503_token_usage.md` §12 (Proposer Internal Workflow & Feedback Logic) — the audit that motivates this doc.
@@ -86,6 +86,82 @@ Changes landing in Rev 8:
 - **Commit 6.1 unchanged** in scope; the cache-source dehydration in 6.3 also reduces the `interpretation.per_model` per-call payload, but the call-multiplication clamp (Stability Filter) is orthogonal and remains a separate fix.
 - **Phase 1 closes** with Commit 4.3.3. Phase 2 entry is unblocked.
 - Commit Map redrawn (Rev 8 — see end of §8). G1.5 expanded to 5 metrics (the new metric tracks the cache dehydration's impact on both downstream blocks).
+
+### Revision 8.1 changelog (2026-05-05) — "Closing the Creativity Gap"
+
+**Status**: Rev 8 spec'd Memory (Trap Test, G3) and Integrity (Hybrid DRR, G4) safeguards but had no aspirational metric for **Retained Capability** — every existing intelligence metric was *defensive* (catches regressions). Rev 8.1 adds the missing pillar.
+
+The audit finding driving Rev 8.1: FRR catches "don't repeat bads" and DRR catches "claims = code", but neither asks the question — *can the dehydrated agent still navigate to the high-signal architectures the V12-rich-context agent discovered?* An agent could pass G3 + G4 and still produce mediocre-but-honest proposals because the consolidator's Merge & Prune dropped the high-signal architectural insight that originally drove SOTA. We need a guard that proves consolidation does not "lop off the peak" of our collective wisdom.
+
+Changes landing in Rev 8.1:
+
+- **New §2.10 — Gate G3.5: SOTA Replication Test.** Pick a "Golden Iteration" from the V12 baseline (the iter that produced the highest `denoising_score`), reconstruct its upstream state, push it through the post-6.3 dehydrated cache, and let the proposer make a real LLM call. Compare the new proposal against the V12 original on two axes: **Structural Fidelity ≥ 0.7** (AST match on encoder/decoder/key innovations) and **Reasoning Density ≥ 75 %** (LLM judge on `delta_reasoning` informativeness). Failure = consolidator is pruning load-bearing creative signal.
+- **§4.2 metric #12 — SOTA Retention Rate (SRR).** Aggregate of G3.5 across the top 3 V12 architectures: pass on **≥ 2 of 3**. Below target blocks Phase 2 exit.
+- **New Commit 11.2 — `tools/verify_sota_replication.py`.** Automates Golden-State extraction from V12 artefacts + AST/LLM-judge comparison. Lands alongside Commit 11 (Trap Test) so G3 and G3.5 can be evaluated together.
+- **Commit Map redrawn.** G3.5 inserted between G3 (Trap) and G4 (Full V13 Metrics) in the Phase 2 sequence.
+
+**Framing**: Rev 8.1 shifts the conversation from "how much can we cut?" to "how much signal must we keep?" The Trap Test protects Memory; Hybrid DRR protects Integrity; SOTA Replication protects Creativity. The agent must not only be small and honest — it must remain a world-class architect.
+
+### Revision 8.2 changelog (2026-05-05) — "Knowledge Accumulator"
+
+**Status**: Phase 2 entry. Code audit (2026-05-05) of `model_knowledge_cache` exposed a structural mismatch between the Rev 8 Commit 6.3 spec and the production code. Documented here so the next contributor sees the gap before writing a single line of consolidator code.
+
+**The audit finding**:
+
+1. **Cache is a frozen snapshot, not a cumulative ledger.** `nodes/result_interpretation_agent.py:687-693` shows the cache-hit branch literally copies the prior iter's entry verbatim and skips the LLM call entirely. The cache-miss branch (L722-738) builds a fresh entry from a single LLM response + `_stats`. There is **no path** that merges new findings into an existing entry across iters. Once a `model_type` is summarised, its findings are frozen — even if the same architecture is re-tuned at a later iter and produces new evidence.
+2. **The Rev 8 6.3 spec assumed accumulation.** The "Merge within `(model_type, field)` bucket — collapse overlapping statements into one with unioned `evidence_iters`" algorithm presupposes a list of statements grew across iters. Under current code there is nothing to merge — each entry has a single iter's findings.
+3. **The Rev 8 6.3 spec listed schema fields that don't exist in code.** The spec's `lessons`, `recommendations`, `error_signatures` keys are not in the production cache. The actual entry has 8 LLM text fields (`key_findings, bottlenecks, best_config_analysis, score_trend, per_file_analysis, data_sensitivity, efficiency_assessment, strategy_assessment`) plus `_stats`. The doc and code drifted apart.
+4. **Cache count is already capped, content is not.** `workflows/model_exploration.py:369-392` (`_cap_knowledge_cache`) caps to **5 entries** by best_score + current model. So the per-entry size (~25 K) × 5 = 125 K floor — already exceeds the Rev 8 ≤60 K target *under the existing schema*. Per-entry truncation is required regardless of whether accumulation is added.
+
+**The decision (2026-05-05)**: choose Option (A) — Schema Rewrite + Accumulation Logic. The "frozen snapshot" cache is the antithesis of an evolutionary system: a fatal lesson learned at iter 2 must survive even if the same architecture is re-tested and re-summarised at iter 20. Truncation alone (Option B) does not solve this; it only bounds size. Option (A) bounds size *and* preserves cumulative wisdom.
+
+Changes landing in Rev 8.2:
+
+- **Commit 6.3 promoted** from "Source-Level Merge & Prune" to **Knowledge Accumulator Refactor** — see refined spec in §8. Two-part work: (i) cache update path refactor so a cache hit performs a *light merge* (compare new LLM output against cached entry, append/distill the delta) instead of a verbatim skip; (ii) consolidated schema reconciles the 8 existing fields with the new accumulator fields, plus `error_signatures` (Commit 6 schema, load-bearing for G3). Per-entry merge & prune happens *inside* the cache update path.
+- **Sequencing fixed**: 6.1 → 6.3 (was: 6.1, 6.2, 6.3 in priority order). Rationale: 6.1 (Stability Filter) is well-defined against the current frozen-cache code and addresses the immediate +5,947 tok/iter bleed. 6.3's cache-path refactor depends on 6.1's "Active Model" decision (only active models trigger a re-call → only those entries get merged). Doing 6.3 first would mean refactoring against a soon-to-change call-dispatch path.
+- **6.2 (Proposer prior_stage_outputs)** unchanged in scope; sequenced after 6.1 and before 6.3, since 6.2 is independent of cache mechanics.
+- **No changes** to Gates G3 (Trap Test) or G3.5 (SRR) — both still pass against the post-6.3 accumulator cache, and the Error-Signature Preservation Guard remains load-bearing for G3.
+
+**Why this matters for the safeguards**: G3 (Trap Test) plants a fatal flaw in iter-2 ledger and asserts citation at iter 10. Under the current frozen-cache, this passes trivially (the iter-2 finding is never overwritten — it's just never *enriched* either). Under the Rev 8.2 accumulator, the iter-2 error_signature must merge correctly with iter-10 evidence (set-union, not replacement). The Pre-Commit Checklist for 6.3 must pin both behaviours.
+
+### Revision 8.3 changelog (2026-05-05) — "Subprocess Amnesia" Fix
+
+**Status**: mid-Commit-6.1. A production-chain audit (2026-05-05, between Commit 6.1's helper-layer landing and dispatcher wiring) discovered that `model_knowledge_cache` is **persisted but never restored** across chain-subprocess boundaries. This is the root cause of the +5,947 tok/iter `interpretation.per_model` slope that Commit 6.1 was meant to clamp — the Stability Filter would be dead code in production until cache restoration is added.
+
+**The audit finding** (verified against current code, 2026-05-05):
+
+1. **Production path is chain-mode, one subprocess per iter.** `sdsc_submission_scripts/run_chain.sh` invokes `run_one_iteration.py` per iter — lilab mode forks foreground, SDSC mode `sbatch --dependency=afterany`. Each iter is a fresh Python process; no in-memory state survives.
+2. **`RestoredState` carries 8 fields, none for the cache.** `core/resume.py:128-135` defines `RestoredState` with `resolved_source_paths`, `restored_plugins`, `committed_iters`, `runtime_vocab`, `accumulated_key_findings`, `accumulated_physical_rejections`, `accumulated_gate_exhaustions`, `previous_proposal_data`. **No 9th field for `model_knowledge_cache`.**
+3. **`load_latest_knowledge` ignores the cache.** `core/resume.py:262-339` reads each prior iter's `interpretation_iter_NNN.json` digest but only consumes `runtime_vocab` and `key_findings`. The digest's `model_knowledge_cache` field is left on disk.
+4. **`run_workflow` is invoked with 5 carry-over kwargs, not 6.** `run_one_iteration.py:830-890` threads `restored_runtime_vocab`, `accumulated_key_findings`, `accumulated_physical_rejections`, `accumulated_gate_exhaustions`, `restored_previous_proposal`. **No `restored_model_knowledge_cache=...` kwarg exists in either the call site or the workflow signature.**
+5. **Cache resets every subprocess.** `workflows/model_exploration.py:830` — unconditional `model_knowledge_cache: dict = {}`. No `if restored_*: ... else: {}` branch.
+6. **The Stability Filter has no production target.** `nodes/result_interpretation_agent.py:687-693` cache-hit branch (`if mt in inp.model_knowledge_cache: ... continue`) is the *only* code path that skips a per_model LLM call. In chain mode, `inp.model_knowledge_cache` is the empty dict from step 5 → every `mt` falls through → fresh LLM call per model per iter, regardless of what `should_recall_per_model()` returns.
+
+**Empirical confirmation** (V12 `explore_novel_v12_0504`, audit log + on-disk digests):
+
+| iter | per_model calls | per_model summed prompt tokens | synthesis prompt tokens | cache entries on disk |
+|---|---|---|---|---|
+| 1 | 2 | 7,272 | 4,657 | 2 |
+| 7 | 6 | 29,574 | 20,958 | (mid-chain) |
+| 14 | 12 | 69,669 | 44,903 | 10 (iter_012 digest) |
+
+The cache **does** accumulate on disk — iter_005 has 5 entries, iter_012 has 10. Persistence works; restoration is the gap.
+
+**Why doc lines 753 and 1957 contradicted each other**:
+- Line 753 ("cache hit-on-repeat, calls grow only on new architecture") is **true for in-process runs** (single Python process loops `range(start_iteration, start_iteration + max_iterations)` and the iter-end re-assignment keeps the dict alive).
+- Line 1957 ("fresh LLM call for every model_type ever proposed, on every iter") is **true for chain mode** (the actual production path).
+
+Both authors were right about their respective regime; the regime difference itself was undocumented.
+
+**Changes landing in Rev 8.3**:
+
+- **NEW Commit 6.1.a — Knowledge Restoration (precondition for 6.1).** Extend `RestoredState` with a `model_knowledge_cache` field, extend `load_latest_knowledge` (or a sibling loader) to read the latest committed iter's `model_knowledge_cache` from `interpretation_iter_NNN.json`, thread `restored_model_knowledge_cache=...` as a 6th carry-over kwarg through `run_one_iteration.py:830-890`, and accept it in `workflows/model_exploration.py` to seed the L830 dict. Latest-wins semantics (parallel to `runtime_vocab`). After this lands, chain mode has cache hits → 6.1's Stability Filter has actual targets to gate.
+- **Sequencing**: 6.1.a → 6.1 (resume current scope: dispatcher wiring + audit markers) → 6.3 (Knowledge Accumulator). The 6.1 spec itself does not change — its tasks were already correct against the in-process semantics; 6.1.a just makes those semantics apply in production.
+- **Commit 6.1 intro updated** to name 6.1.a as the precondition. The existing 4 helper-layer tasks/tests (`select_active_models`, `compress_model_summary`, `should_recall_per_model`, schema fields) stay marked complete — they are correct as-is. Only the dispatcher wiring (T4) and end-to-end Pre-Commit checks now have a real target.
+- **NEW Commit 4.3.4 — Legacy Runner Deletion (standalone cleanup).** Remove `run_exploration_adaptive.py` and update its 4 test dependencies + `launch_v11_v4.sh` to reference `run_one_iteration.py` (or local helpers). Ships **after** 6.1.a + 6.1 land — bundling it into the cache-restoration commit would conflate "fix subprocess amnesia" with "delete dead code", and the legacy runner has live test imports (`test_chain_consistency.py`, `test_portion_floor.py`, `test_token_log_iter_rollup.py`, `test_resilience.py`). Per "Slow is Smooth", clean cuts only.
+- **No changes** to Commits 6.2, 6.3, or any Phase 2 gate. G1.5's 5-metric re-baseline still applies; metric (2) (`interpretation.per_model` calls per iter) is the one most directly unblocked by 6.1.a.
+
+**Why this matters for chain-mode invariants**: the existing 5 carry-over kwargs already cover *evidence* (vocab, findings, rejections, gate exhaustions, prior proposal). The 6th — `model_knowledge_cache` — covers *summarised knowledge*: the LLM-distilled per-model interpretation that turns raw evidence into a Phase-1 cache entry. Without it, every chain subprocess re-pays the summarisation cost from scratch. With it, the chain's "memory" is complete and the Stability Filter starts saving real tokens.
 
 ---
 
@@ -1086,6 +1162,76 @@ If the test fails for reasons (1) or (2), we have explicit knobs to tune:
 
 The Trap Test is the empirical scoreboard for setting these knobs.
 
+### 2.10 The SOTA Replication Test — retained creative capability (Gate G3.5)
+
+The Trap Test (§2.9) protects the agent's **memory** — known bads stay known. The Hybrid DRR (§4.2 #8a–8c) protects its **integrity** — claims match code. Neither asks the harder question: *can the dehydrated agent still navigate to the high-signal architectures the V12-rich-context agent discovered?* Without a guard for **retained creative capability**, every existing intelligence metric is *defensive*; we have no aspirational metric proving the consolidator preserved the peak of our collective wisdom.
+
+Gate G3.5 closes that gap. It is a Phase 2 exit gate, run *after* G3 (Trap) and *before* G4 (full V13 metrics).
+
+#### 2.10.1 Setup — Pick the "Golden Iteration"
+
+From the V12 explore baseline (`/home/klz/Data/SIDEREIS_DATA/exploration_explore_novel_v12_0504/`), select the iteration that produced the highest `denoising_score` — the **Golden Iteration**. For breadth, also identify the **top 3 V12 architectures by `denoising_score`**; G3.5 is run independently on each, and the SRR metric (§4.2 #12) requires ≥ 2 of 3 to pass.
+
+The selection is deterministic and automated by `tools/verify_sota_replication.py` (Commit 11.2): it parses `run_output_*.json` + per-iter records, ranks by formal `denoising_score`, and emits the Golden Iteration set as a JSON manifest committed to the test fixture path.
+
+#### 2.10.2 State reconstruction
+
+For each Golden Iteration, extract the upstream state **as it existed at the start of that iteration** (i.e., the inputs the proposer would have seen):
+
+- `model_knowledge_cache` — the full accumulated cache *just before* the Golden Iteration's proposer call.
+- `model_descriptions` — same temporal cut.
+- Prior iter records (interpretation outputs, validator outputs, training results) — needed to drive the consolidator's Merge & Prune logic.
+
+This reconstruction must match what was actually fed to the V12 proposer at that iter — verified by replaying the V12 record's input hash, not by trusting the live workspace state.
+
+#### 2.10.3 Dehydrated re-run
+
+Process the reconstructed state through the **Commit 6.3 consolidator**, producing the new dehydrated cache. Build the proposer's input from that cache (using the post-6.3 protocols). Issue **a real LLM call** (gated `@real_run`, same model + temperature as the V12 baseline call) to generate a new proposal.
+
+The proposer is given the same task framing as V12 — no biased prompt, no nudge toward the V12 architecture. The point is to verify that the dehydrated context still *naturally* leads the proposer to a competitive solution, not that the test rigs the answer.
+
+#### 2.10.4 Success metrics
+
+Two axes, both must pass per Golden Iteration:
+
+| Axis | Metric | Target | Computation |
+|------|--------|--------|-------------|
+| **Structural Fidelity** | AST overlap on core architectural primitives (encoder family, decoder family, key innovations — e.g., FFT layer, attention block, residual structure) | **≥ 0.7** | Plugin AST parse on both proposals; compute Jaccard on a curated set of "primitive" node-types. Deterministic. |
+| **Reasoning Density** | LLM judge (gpt-4o-mini, temp=0) compares new `delta_reasoning` + `causal_hypothesis` against the V12 originals. Returns: "the new reasoning is at least as targeted, specific, and historically informed as the original — yes/no." | **≥ 75 %** of judges' verdicts return "yes" across all sampled claims | Same judge model used for DRR_LLM (§4.2 #8b) for cost control. Multiple-judgment averaging reduces variance. |
+
+Pass criterion per iteration: `Structural ≥ 0.7 AND Reasoning Density ≥ 75 %`.
+
+#### 2.10.5 Failure trigger
+
+If the new proposal scores below either threshold, the consolidator's Merge & Prune is **lopping off the peak** of our collective wisdom — high-signal architectural insights that drove V12 SOTA are being collapsed into generic summaries. Do not ship Phase 2.
+
+Diagnostic next steps when G3.5 fails:
+
+1. Inspect which V12 cache entries were dropped or merged before reaching the proposer in the dehydrated run.
+2. If a load-bearing `key_findings` entry was merged into a generic bucket → tighten the consolidator's similarity threshold (raise the merge bar).
+3. If the active-set policy excluded the Golden Iteration's parent architecture → expand the active-set inclusion rule (e.g., "always retain top-K by historical `denoising_score`").
+4. If the failure persists after both knob adjustments, the cache schema itself is too lossy — escalate back to Commit 6.3 design.
+
+#### 2.10.6 Tuning knobs
+
+| Knob | Default | Effect |
+|------|---------|--------|
+| `consolidator.merge_similarity_threshold` | 0.85 | Raise to merge less aggressively (preserves more peaks; larger cache). |
+| `consolidator.active_set_top_k` | 5 | Lowest-cost protection for Golden Iteration parent architectures: always keep the top-K by historical `denoising_score`. |
+| `srr.judge_n_samples` | 3 | More LLM-judge samples per claim = lower variance, higher cost. |
+| `srr.required_pass_count` | 2 (of 3 top architectures) | Tighter bar = stricter Phase 2 exit; SRR is the aggregate (§4.2 #12). |
+
+These knobs are tuned *before* G3.5 is declared a hard gate; the first SRR run produces a calibration distribution that informs the production thresholds.
+
+#### 2.10.7 Why this gate is aspirational, not defensive
+
+FRR (§4.2 #7) measures "did the agent re-try a known failure?" — defensive.
+DRR (§4.2 #8) measures "did the agent's claims match its code?" — defensive.
+Cr (§4.2 #10) measures "is the compressor compressing?" — defensive.
+**SRR (§4.2 #12) measures "can the agent still find what it found before?" — aspirational.**
+
+Without SRR, every existing intelligence metric could pass while the agent quietly produces mediocre-but-honest proposals. The dehydration goal is to keep the agent small *and* honest *and* a world-class architect; G3.5 is the only gate that pins the third property.
+
 ---
 
 ## 3. Files Touched — Full List
@@ -1153,6 +1299,7 @@ These are the metrics that prove Phase 2 didn't lobotomize the agent. They are m
 | 8c | **DRR Gap** (hallucination indicator) | 2 | `gap = abs(DRR_LLM − DRR_Structural)`. A small gap means the two methods agree and the result is trustworthy. A large gap means one method is being fooled — usually it's the LLM judge being too generous (claim "I added attention" matches semantically against any attention-shaped code, even pre-existing). | **≤ 0.15** | **> 0.25** — the two graders disagree materially. Either the structural matcher is too strict or the LLM judge is too lenient. Re-tune the methods before trusting either number. |
 | 10 | **Dehydration Compression Ratio (Cr)** | 2 | Per failed attempt: `Cr = len(rendered_signature) / len(raw_traceback_or_log)`. Computed across all failures in a 30-iter chain run; reported as `(median, p95)`. | **median Cr < 0.10**, **p95 Cr < 0.15**. | **median Cr ≥ 0.15** — compressor is not compressing. **p95 Cr ≥ 0.30** — pathological cases (long tracebacks) are slipping through, which is exactly when compression matters most. |
 | 11 | **delta_reasoning presence** | 2 | 100% of `ProposalOutput` payloads carry a non-null, schema-valid `delta_reasoning` (bounded list lengths, all required subfields). | 100% | < 100% — schema validation should make this impossible; any missing payload is a regression. |
+| 12 | **SOTA Retention Rate (SRR)** | 2 | Aggregate of the §2.10 SOTA Replication Test (Gate G3.5) across the **top 3 V12 architectures by `denoising_score`**. Per architecture: pass = `Structural Fidelity ≥ 0.7 AND Reasoning Density ≥ 75 %`. SRR = number of passing architectures. **Aspirational guard** — verifies the dehydrated agent still navigates to the high-signal architectures the V12-rich-context agent discovered. | **≥ 2 of 3** | **< 2 of 3** — the consolidator is lopping off the peak of collective wisdom. **Blocks Phase 2 exit.** Tighten consolidator knobs (§2.10.6) or revisit Commit 6.3 design before retesting. |
 
 #### 4.2.1 How the intelligence metrics are computed
 
@@ -1161,6 +1308,7 @@ These are the metrics that prove Phase 2 didn't lobotomize the agent. They are m
 - **DRR_LLM computation** is semi-automated: same script invokes a cheap LLM judge (gpt-4o-mini, temperature=0) with the claim + diff hunks; returns realized/not per claim with a one-line rationale. The LLM judge is deliberately lighter than the proposer's own model — we don't want the judge to share blind spots with the proposer.
 - **DRR Gap** is just `abs(DRR_LLM - DRR_Structural)`; reported alongside the two raw numbers. The first 30-iter run uses both methods on every sample so we can calibrate the gap distribution before deciding to lean on one or the other long-term (open question §6.1).
 - **Cr** is computed in-process whenever `ErrorSignatureSkill.extract` runs on a real failure: the skill records `(input_chars, output_chars)` to a sidecar log; aggregator reports median + p95.
+- **SRR computation** is automated by `tools/verify_sota_replication.py` (Commit 11.2): selects the top-3 V12 architectures from `run_output_*.json` by `denoising_score`; reconstructs upstream state at each Golden Iteration; processes through the post-6.3 dehydrated cache; issues a real proposer LLM call per architecture (`@real_run`-gated); computes Structural Fidelity (AST Jaccard on architectural primitives) deterministically and Reasoning Density via the same gpt-4o-mini judge used for DRR_LLM (§2.10.4). Outputs a CSV row per architecture + an SRR aggregate. Runs as a CI step on the V13 chain output, gating Phase 2 exit alongside G4.
 
 #### 4.2.2 Caveats
 
@@ -1178,6 +1326,7 @@ These are the metrics that prove Phase 2 didn't lobotomize the agent. They are m
 - **Gate G1** — Phase 1 baseline report (`reports/v12_token_baseline.md`) + Top-3 Bloat Report (`reports/v12_top3_bloat.md`, §1.9) — gates Phase 2 design validity.
 - **Gate G2** — Offline Forensic Benchmark (§2.8) passes — gates `ErrorSignatureSkill` going to production.
 - **Gate G3** — Trap Test (§2.9) passes — gates the Sliding Window going to production.
+- **Gate G3.5** — SOTA Replication Test (§2.10) passes on ≥ 2 of 3 top V12 architectures (Metric #12, SRR) — gates Phase 2 exit. Aspirational guard: verifies the consolidator did not prune the high-signal architectural insights that drove V12 SOTA.
 - **Gate G4** — All §4 metrics pass on V13 chain run — gates legacy-path removal.
 
 Each step is annotated `(Commit N)` matching the §8 commit ledger. Within a commit, all listed steps land together — they are not separately committable.
@@ -1763,6 +1912,51 @@ These two hypotheses have different downstream consequences. **(H1) requires a c
 
 ---
 
+### Commit 4.3.4: Legacy Runner Deletion — retire `run_exploration_adaptive.py` (Rev 8.3 — Standalone Cleanup, sequenced after 6.1)
+
+**Phase**: 1 cleanup (debt retirement, no behaviour change for production chains).
+**§5 step**: 14d (new, after 14c Commit 4.3.3, but **landing order is post-6.1.a + post-6.1** — see Sequencing below).
+
+**Why this commit**: the chain-first runner (`sdsc_submission_scripts/run_one_iteration.py` + `run_chain.sh`) is the production path. `run_exploration_adaptive.py` is the legacy in-process runner — kept around through Phase 6.8 for parity testing and ad-hoc dev runs. Two regimes coexisting created the doc-line-753-vs-1957 contradiction (Rev 8.3 changelog) by hiding which runner was authoritative. Eliminating the second regime is the durable fix: one runner, one set of carry-over semantics, one path to audit.
+
+**Sequencing rationale (do NOT reorder)**:
+
+1. Land **6.1.a** (Knowledge Restoration) first — touches `core/resume.py` + `run_one_iteration.py`; tests stay green because the legacy runner is unaffected.
+2. Land **6.1** (Stability Filter dispatcher wiring + audit markers) — touches `nodes/result_interpretation_agent.py`; orthogonal to the runner.
+3. Land **4.3.4** (this commit) — touches `run_exploration_adaptive.py` (delete) + 4 tests + 1 shell script. Bundling it earlier would conflate "fix subprocess amnesia" with "delete dead code"; doing it last means the cache-restoration code has stable parity-test coverage during its landing.
+
+**Scope**:
+- **Delete**: `run_exploration_adaptive.py` (repo root).
+- **Update tests** (4 files):
+   - `tests/unit/scripts/test_chain_consistency.py` — currently imports `parse_args` from `run_exploration_adaptive` to verify flag-set parity with `run_one_iteration.py`. With the legacy runner gone, the parity test loses its other side. **Decision**: convert to a single-runner schema test (assert `run_one_iteration.parse_args` accepts the canonical flag set) OR delete entirely if redundant against `test_chain_run_id_sidecar.py` + `test_portion_floor.py`. Decide during implementation.
+   - `tests/unit/scripts/test_portion_floor.py` — imports `_portion_floor` from both runners for parity. After deletion, drop the adaptive-runner half; keep the `run_one_iteration.py` half.
+   - `tests/integration/runner/test_token_log_iter_rollup.py` — imports `_emit_token_iter_rollup` from `run_exploration_adaptive`. The chain runner has its own rollup helper at `run_one_iteration.py:134` (commented as mirroring the adaptive version). Repoint the import; verify the rollup still emits the `[TOKEN_ITER]` line.
+   - `tests/unit/runner/test_resilience.py` — Phase R resilience tests against the adaptive runner's top-level handler. The chain runner has a parallel handler at `run_one_iteration.py:891-900` (also commented as mirroring). Repoint the test target.
+- **Update launch script** (1 file):
+   - `sdsc_submission_scripts/launch_v11_v4.sh:54` — `RUNNER="$REPO_ROOT/run_exploration_adaptive.py"` → either delete the script entirely (if V11_v4 is no longer launched) OR repoint to a small wrapper that invokes `run_chain.sh`. Decide during implementation by checking last-launch date.
+- **Update doc references** (~15 doc files contain non-load-bearing prose mentions): leave as-is unless they describe behaviour that no longer holds. The Rev 8.3 changelog already pins the new authoritative runner; older sections can carry historical context without correction.
+
+**Tasks**:
+- [ ] Delete `run_exploration_adaptive.py`.
+- [ ] Triage `tests/unit/scripts/test_chain_consistency.py`: convert to single-runner contract test or delete (post-deletion the "parity" framing is meaningless).
+- [ ] Update `tests/unit/scripts/test_portion_floor.py`: drop the `from run_exploration_adaptive import _portion_floor` block; keep the chain-runner side.
+- [ ] Update `tests/integration/runner/test_token_log_iter_rollup.py`: repoint import to `sdsc_submission_scripts.run_one_iteration`.
+- [ ] Update `tests/unit/runner/test_resilience.py`: change `RUNNER_PATH` to the chain runner; verify the resilience contract still holds (the chain runner's top-level handler is comment-pinned to mirror the adaptive one).
+- [ ] Update or delete `sdsc_submission_scripts/launch_v11_v4.sh`: if obsolete, delete; if still useful, repoint to the chain.
+- [ ] Run the full unit + integration test suite to confirm no orphaned import remains.
+
+**Pre-Commit Checklist**:
+- [ ] `grep -r "run_exploration_adaptive" --include="*.py" --include="*.sh"` returns **zero** code matches (doc matches OK as historical context).
+- [ ] `pytest tests/unit/scripts/ tests/unit/runner/ tests/integration/runner/` is green.
+- [ ] A 1-iter chain smoke launch via `run_chain.sh` (lilab mode, pseudo-training) reaches the iter-end manifest write — confirms the integration of the surviving runner is unbroken.
+- [ ] Commit message links to the Rev 8.3 changelog block so the rationale is git-archaeologically discoverable.
+
+**Definition of Done**: legacy runner deleted; all 4 test dependencies updated or removed; one production runner remains; future contributors cannot mistake which runner is authoritative.
+
+**Out of Scope**: doc cleanup of historical mentions in `docs/phase68_*.md` and `docs/Consistent_growing_vocab_list.md` (those are versioned design docs — they record the regime that existed at their time of writing); migrating any in-flight V11_v4 chains (none active per 2026-05-05 ops state).
+
+---
+
 ### Commit 5: V12 baseline run + Top-3 Bloat Report (Gate G1)
 
 **Phase**: 1.
@@ -1774,10 +1968,10 @@ These two hypotheses have different downstream consequences. **(H1) requires a c
 - `reports/v12_top3_bloat.md` (new — output artifact)
 
 **Tasks**:
-- [ ] Run a V12 chain (settings matching V11 baseline: `openai_tiered_v1.json` routing, 5+ iters minimum). The run is the deliverable, not a code change. **(Already in flight — explore at iter 13/30 at time of Rev 5.)**
-- [ ] Implement `tools/build_token_baseline_report.py` per the spec below.
-- [ ] Write `reports/v12_token_baseline.md`: real per-call token counts, per-iter trend, comparison against the §12-audit estimates.
-- [ ] Write `reports/v12_top3_bloat.md`: tables per §1.9.1; ends with one of the three §1.9.2 verdicts.
+- [x] Run a V12 chain (settings matching V11 baseline: `openai_tiered_v1.json` routing, 5+ iters minimum). The run is the deliverable, not a code change. **Done — `run_id explore_novel_v12_0504-20260505T070526-1028759`, 14 iters captured.**
+- [x] Implement `tools/build_token_baseline_report.py` per the spec below.
+- [x] Write `reports/v12_token_baseline.md`: real per-call token counts, per-iter trend, comparison against the §12-audit estimates.
+- [x] Write `reports/v12_top3_bloat.md`: tables per §1.9.1; ends with one of the three §1.9.2 verdicts.
 
 **`build_token_baseline_report.py` spec (Rev 6 finalized — adds USD cost tracking + bloat alert)**:
 
@@ -1805,14 +1999,14 @@ The tool reads one or more `{workspace}/token_usage.jsonl` files and emits per-l
    Both alerts are informational (exit 0), not fatal — they appear inline in the report at the top of the affected iter's section, and as a summary block at the end.
 
 **Pre-Commit Checklist**:
-- [ ] **Positive test**: `python tools/build_token_baseline_report.py --workspace <v12-ws>` produces both reports without error; both render in markdown without broken tables.
-- [ ] **Quantitative metric**: for the 5-iter run, the report shows a clean per-iter token sparkline; the linter on the JSONL returns 0 anomalies.
-- [ ] **Segmentation test**: hand-craft a 3-row JSONL with one `attempt=0,status=ok` row and two `attempt=1` retry rows. Assert the tool reports Happy-Path-Cost = first row's tokens, Recovery-Cost = sum of the other two.
-- [ ] **USD test**: hand-craft a row with `prompt=100_000, completion=10_000`. With default rates, assert reported USD = `100000*10/1e6 + 10000*30/1e6 = $1.30` exactly (precision check; floating-point assertion to 4 decimals).
-- [ ] **Alert test (CONTEXT)**: hand-craft a row with `tokens.prompt = 60_000`. Assert the tool emits `[CONTEXT_EXPLOSION]` for that row and exits 0.
-- [ ] **Alert test (BLOAT)**: hand-craft a 1-iter JSONL whose total cost computes to $2.00 USD. Assert the tool emits `[BLOAT_ALERT]` for that iter and exits 0. Then hand-craft another at $1.20 — assert no `[BLOAT_ALERT]`.
-- [ ] **Negative test**: run the report generator against a workspace whose `token_usage.jsonl` has been hand-corrupted (drop an `_iter_flush` marker). Assert the generator refuses to publish — emits "AUDIT LOG CORRUPTION DETECTED" and exits nonzero. We never publish numbers from a corrupted log.
-- [ ] **Verdict recorded**: §1.9.2 verdict is written explicitly at the top of `reports/v12_top3_bloat.md` — Confirmed Proposer / Pivot Tuner / Pivot Other / Sanity Floor.
+- [x] **Positive test**: `python tools/build_token_baseline_report.py --workspace <v12-ws>` produces both reports without error; both render in markdown without broken tables. (`tests/unit/tools/test_token_baseline_report.py::test_end_to_end_positive_run`)
+- [x] **Quantitative metric**: for the 5-iter run, the report shows a clean per-iter token sparkline; the linter on the JSONL returns 0 anomalies. (`tools/validate_token_usage_jsonl.py` against the V12 file → `[OK] clean (0 warnings)`; report contains all 14 iters of per-iter rows.)
+- [x] **Segmentation test**: hand-craft a 3-row JSONL with one `attempt=0,status=ok` row and two `attempt=1` retry rows. Assert the tool reports Happy-Path-Cost = first row's tokens, Recovery-Cost = sum of the other two. (`test_segmentation_3_row_jsonl` + `test_happy_path_classifier`)
+- [x] **USD test**: hand-craft a row with `prompt=100_000, completion=10_000`. With default rates, assert reported USD = `100000*10/1e6 + 10000*30/1e6 = $1.30` exactly (precision check; floating-point assertion to 4 decimals). (`test_usd_precision_to_four_decimals` + `test_usd_overrides_propagate`)
+- [x] **Alert test (CONTEXT)**: hand-craft a row with `tokens.prompt = 60_000`. Assert the tool emits `[CONTEXT_EXPLOSION]` for that row and exits 0. (`test_context_explosion_alert_fires_above_threshold` + `test_context_explosion_silent_at_threshold`)
+- [x] **Alert test (BLOAT)**: hand-craft a 1-iter JSONL whose total cost computes to $2.00 USD. Assert the tool emits `[BLOAT_ALERT]` for that iter and exits 0. Then hand-craft another at $1.20 — assert no `[BLOAT_ALERT]`. (`test_bloat_alert_fires_above_threshold` + `test_bloat_alert_silent_below_threshold`)
+- [x] **Negative test**: run the report generator against a workspace whose `token_usage.jsonl` has been hand-corrupted (drop an `_iter_flush` marker). Assert the generator refuses to publish — emits "AUDIT LOG CORRUPTION DETECTED" and exits nonzero. We never publish numbers from a corrupted log. (`test_corrupted_jsonl_blocks_publication` + `test_skip_lint_bypasses_corruption_block`)
+- [x] **Verdict recorded**: §1.9.2 verdict is written explicitly at the top of `reports/v12_top3_bloat.md` — Confirmed Proposer / Pivot Tuner / Pivot Other / Sanity Floor. (Top of file: `## Verdict: **Confirmed Proposer Hypothesis**`. `test_verdict_written_at_top_of_top3_report` pins the contract.)
 
 **Definition of Done (Gate G1)**: real V12 baseline numbers exist; Happy-Path/Recovery segmentation is reported; per-label growth slopes are reported; per-iter USD costs are reported; both alert thresholds are evaluated; the verdict is recorded; the team has explicitly chosen one of the four branches (continue to Commit 6.1, pivot, or stop).
 
@@ -1836,10 +2030,61 @@ The original Commits 6-12 still apply but at lower priority. Commit 11.1 (Templa
 
 ---
 
-### Commit 6.1: Interpretation Call-on-Demand — Sliding Window + Stability Filter (Rev 7 — Critical Priority, expanded)
+### Commit 6.1.a: Knowledge Restoration — carry `model_knowledge_cache` across chain iters (Rev 8.3 — Critical Priority, precondition for 6.1)
 
-**Phase**: 2 (gated on Commit 4.3.2 closing).
+**Phase**: 2 (precondition for Commit 6.1; lands first).
+**§5 step**: 11.5 (new — between Commit 5 baseline and 12a Commit 6.1).
+
+**Why this commit, why first**: Rev 8.3 audit established that `model_knowledge_cache` is persisted to disk (`interpretation_iter_NNN.json` already carries the full dict) but never restored across chain-subprocess boundaries. The Stability Filter (6.1) gates the cache-hit branch in `nodes/result_interpretation_agent.py:687-693`, which is the *only* code path that skips a per_model LLM call. With every chain subprocess starting on an empty cache, the filter would be dead code in production. 6.1.a closes the persistence gap so 6.1 has real targets to gate.
+
+**The minimal fix shape** (verified against current code):
+
+| # | File | Change |
+|---|---|---|
+| 1 | `core/resume.py` (`RestoredState` dataclass, L128-135) | Add 9th field: `model_knowledge_cache: Dict[str, Dict] = field(default_factory=dict)`. Update docstring with latest-wins semantics + cross-reference to `runtime_vocab` (also latest-wins). |
+| 2 | `core/resume.py` (`load_latest_knowledge`, L262) | Either extend the existing function's return tuple OR add a sibling `load_latest_knowledge_cache(workspace, current_iter, committed_iters) -> Dict[str, Dict]`. **Decision: sibling loader.** Rationale — the existing function's return type is documented in its docstring + consumers; widening the tuple risks call-site drift. A sibling function with the same iter-walk + soft-fail policy (UserWarning on missing/malformed digest, skip + continue) keeps the surface explicit. |
+| 3 | `core/resume.py` (`restore_prior_state`, L458) | After computing `runtime_vocab` + `accumulated_key_findings`, also compute `model_knowledge_cache` via the new loader and assign it onto the `RestoredState`. |
+| 4 | `sdsc_submission_scripts/run_one_iteration.py` (the `run_workflow(...)` call, L830-890) | Add a 6th carry-over kwarg between L884 and L886: `restored_model_knowledge_cache=state.model_knowledge_cache,`. Group it with the other knowledge carry-over kwargs under the existing `# Cross-iter knowledge carry-over` comment. |
+| 5 | `workflows/model_exploration.py` (`run_workflow` signature) | Accept the new kwarg with a default of `None` (so in-process callers and pseudo-mode tests don't need to thread it). Type: `Optional[Dict[str, Dict]] = None`. |
+| 6 | `workflows/model_exploration.py:830` | Replace unconditional `model_knowledge_cache: dict = {}` with `model_knowledge_cache: dict = dict(restored_model_knowledge_cache) if restored_model_knowledge_cache else {}`. The `dict(...)` copy is defensive — the workflow mutates the dict in place at iter end, and we don't want to mutate the caller's reference. Add a `print()` log line mirroring the existing `Vocab restored from prior chain iters` line at L823, e.g. `Knowledge cache restored from prior chain iter: N entries`. |
+| 7 | `workflows/model_exploration.py:1266-1274` | No change. The post-iter `_cap_knowledge_cache(max_entries=5)` call already runs against whatever the in-iter cache became. Cap continues to apply across the chain. |
+
+**Scope** (files touched):
+- `core/resume.py` (modify — `RestoredState` + new `load_latest_knowledge_cache` + `restore_prior_state` plumbing)
+- `sdsc_submission_scripts/run_one_iteration.py` (modify — add 6th carry-over kwarg)
+- `workflows/model_exploration.py` (modify — accept kwarg, replace L830 init)
+- `tests/unit/core/test_resume.py` (modify — add cache-restoration cases, parallel to existing runtime_vocab cases)
+- `tests/unit/workflows/test_model_exploration.py` OR a dedicated new file (add a 2-iter pseudo-chain cache-roundtrip test)
+
+**Tasks**:
+- [x] **T1 — Schema**: `model_knowledge_cache: Dict[str, Dict] = field(default_factory=dict)` added as 9th field on `RestoredState` at `core/resume.py:155` (after `previous_proposal_data`). Type matches `InterpretationOutput.model_knowledge_cache`. Docstring at L127–146 documents latest-wins semantics, the contrast with the cumulative `runtime_vocab` digest, and the eviction-window correctness argument (each digest already carries the rolling `_cap_knowledge_cache` window — concatenating across iters would leak evicted entries back in).
+- [x] **T2 — Loader**: `load_latest_knowledge_cache(workspace, current_iter, committed_iters) -> Dict[str, Dict]` implemented at `core/resume.py:355-450` (after `load_latest_knowledge`). Short-circuits on `current_iter <= 1` or empty `committed_iters`. Walks `committed_iters` ascending; on each iter, reads `interpretation_iter_NNN.json`; if the file is missing or JSON-malformed → `warnings.warn(UserWarning, ...)` + `continue`; if parseable, `dict(raw_cache)` overwrites the running result (latest-wins, defensive copy). Treats absent `model_knowledge_cache` key as "no update for this iter" and explicit `{}` as a valid empty snapshot.
+- [x] **T3 — `restore_prior_state` plumbing**: at `core/resume.py:723-732`, after the existing `load_latest_knowledge` call, invoke `load_latest_knowledge_cache(abs_workspace, current_iter, state.committed_iters)` and assign to `state.model_knowledge_cache`. Emits `[resume] knowledge-cache carry-over: N cached model summary/summaries restored` (correct singular/plural). The `current_iter <= 1` short-circuit lives inside the loader, so no extra branch needed at the call site.
+- [x] **T4 — Runner kwarg**: 6th carry-over kwarg added at `sdsc_submission_scripts/run_one_iteration.py:885` between `restored_previous_proposal` and the next non-knowledge group. Comment block above it cross-references `docs/audit_and_optimize_token_usage_and_growth.md` Rev 8.3 + names the production-cost consequence ("Without this, every chain subprocess starts on an empty model_knowledge_cache, forcing a fresh interpretation.per_model LLM call per model per iter.").
+- [x] **T5 — Workflow signature + init**: `restored_model_knowledge_cache: dict | None = None` added to `run_workflow` signature in `workflows/model_exploration.py` (after `accumulated_key_findings`). L830's unconditional `model_knowledge_cache: dict = {}` replaced with ternary `dict(restored_model_knowledge_cache) if restored_model_knowledge_cache else {}`. Emits `Knowledge cache restored from prior chain iter: N entries (['punet', 'wavenet']...)` log line on non-empty restore (sorted, capped at 5 keys preview). Defensive `dict(...)` copy prevents mutating caller's reference.
+- [x] **T6 — Unit test (resume)**: 10 new tests added to `tests/unit/core/test_resume.py` — `TestLoadLatestKnowledgeCache` (8 tests) covers iter-1 short-circuit, empty `committed_iters`, 3-iter latest-wins, legacy digest without the key, explicit empty overwrite, missing-digest UserWarning, malformed-JSON UserWarning, and defensive-copy guarantee; `TestRestorePriorStateKnowledgeCacheCarryOver` (2 tests) covers iter-1 leaves cache empty + iter-2 populates from latest committed digest. Result: **64/64 pass** (54 existing + 10 new).
+- [x] **T7 — Unit test (workflow plumbing)**: 3 new tests added to `tests/unit/workflows/test_model_exploration.py::TestRunWorkflowMultiIteration` — `test_restored_model_knowledge_cache_seeds_first_iter` asserts the kwarg flows into iter-1's `InterpretationInput.model_knowledge_cache` verbatim; `test_restored_model_knowledge_cache_defensive_copy` mutates the in-workflow cache and asserts the caller's dict is unchanged; `test_no_restored_cache_preserves_legacy_empty_init` asserts default-`None` keeps the legacy empty-init behaviour for in-process callers. Result: **3/3 pass** (62/62 in full file). Did not need the `tests/integration/agent/test_token_usage_pseudo_smoke.py` harness — `TestRunWorkflowMultiIteration`'s existing pseudo-mode infrastructure already covers the 2-iter pattern.
+- [x] **T8 — Doc tick**: ticked here. Empirical V12 numbers (per_model 2→6→12, prompt tokens 7K→30K→70K, on-disk cache 5→10) folded into the Rev 8.3 changelog at L140–148; final commit message references this section.
+
+**Pre-Commit Checklist**:
+- [x] **Soft-fail policy**: covered by `TestLoadLatestKnowledgeCache::test_missing_digest_emits_userwarning` + `test_malformed_json_emits_userwarning`. Both assert `warnings.warn` fires + restoration continues with whatever earlier iters yielded.
+- [x] **Latest-wins semantics**: covered by `TestLoadLatestKnowledgeCache::test_latest_wins_over_three_iters` — workspace with iter_001/002/003 each carrying disjoint cache entries, asserts the loader returns iter_003's dict only (not the union). Argument from the eviction-window invariant lives in the `RestoredState` docstring (`core/resume.py:140-146`).
+- [x] **Empty cache short-circuit**: covered by `TestLoadLatestKnowledgeCache::test_iter1_short_circuit_returns_empty_dict` + `TestRestorePriorStateKnowledgeCacheCarryOver::test_iter1_leaves_cache_empty`.
+- [x] **Workflow integration**: covered by `TestRunWorkflowMultiIteration::test_restored_model_knowledge_cache_seeds_first_iter`. Iter-2 cache-hit branch firing in production is reachable post-merge (Definition of Done below).
+- [x] **No regression**: `tests/unit/core/test_resume.py` 64/64 ✓, `tests/unit/workflows/test_model_exploration.py` 62/62 ✓. `tests/unit/scripts/test_chain_consistency.py` has 3 pre-existing failures (`TypeError: _run_one_iter() missing 1 required keyword-only argument: 'run_id'`) **also present on `975369b` with our changes stashed** — orthogonal to 6.1.a, will be re-evaluated as part of Commit 4.3.4 (legacy runner deletion) which retires the parity test framework. The remaining 17 tests in that file pass. Existing 5 carry-over kwargs are structurally unchanged — the new 6th kwarg only adds a row.
+
+**Definition of Done**: in a 2-iter pseudo-run on a chain workspace, iter 2's `nodes/result_interpretation_agent.py:687-693` cache-hit branch fires for at least one model (i.e. `inp.model_knowledge_cache` is non-empty at iter-2 entry). Once Commit 6.1 lands on top, the `interpretation.per_model_skipped` audit markers will appear in the production JSONL — verifiable in the next 5-iter chain re-baseline.
+
+**Out of Scope**: changing the cache *update* mechanism (that is Commit 6.3 — the Knowledge Accumulator); changing the eviction cap (`_cap_knowledge_cache(max_entries=5)` is unchanged); modifying the digest schema (`InterpretationOutput.model_knowledge_cache` already has the right shape and is being written by every iter).
+
+---
+
+### Commit 6.1: Interpretation Call-on-Demand — Sliding Window + Stability Filter (Rev 7 — Critical Priority, expanded; Rev 8.3 — gated on 6.1.a)
+
+**Phase**: 2 (gated on Commit 4.3.2 closing AND Commit 6.1.a landing).
 **§5 step**: 12a.
+
+> **Rev 8.3 status note (2026-05-05)**: The helper-layer (T1-T3) and schema (T5) tasks below are already complete (commits `6190e32` + `d3c6eef`). The remaining wiring (T4) and end-to-end tests (T6) **require Commit 6.1.a (Knowledge Restoration) to land first** — without it, the cache-hit branch this commit gates is unreachable in production chains. Once 6.1.a is in, resume here with T4 + T6 + T7 unchanged. The 6.1 spec itself does not change; only its production-effectiveness is unlocked by 6.1.a.
 
 **Why this commit, why critical**: V12 explore data exposed **two distinct linear-growth axes** in the interpretation agent. Both must be clamped here because they share the same source of state (`model_knowledge_cache`):
 
@@ -1855,25 +2100,38 @@ The Rev 5 spec only addressed (1). Rev 7 expands the commit to also address (2) 
 - `tests/unit/agent/result_interpretation_agent/test_stability_filter.py` (new — Rev 7)
 
 **Tasks**:
-- [ ] **Active-model policy** (shared by synthesis + per_model): "Top-K + Last-N + Delta-Δ". Keep full detail / re-call per_model for the union of:
+- [x] **Active-model policy** (shared by synthesis + per_model): "Top-K + Last-N + Delta-Δ". Keep full detail / re-call per_model for the union of:
    - Top K models by `best_denoising_score` ever seen (default K=3),
    - Last N models proposed by recency (default N=2),
    - any model whose `best_denoising_score` changed in the current iter beyond a threshold Δ (default `abs(Δ) ≥ 0.05` in normalized score units).
    All other models are "stable" — pulled from cache as-is, no LLM call.
-- [ ] **Sliding-window compression (axis 1)**: implement `compress_model_summary(entry) -> dict` returning `{model_type, best_score, n_rounds, one_line_takeaway}`. Takeaway field extracted *deterministically* from the existing cached summary's `key_finding` — no fresh LLM call. Target ≤ 200 chars per model.
-- [ ] **Stability Filter (axis 2)**: implement `should_recall_per_model(model_type, cache_entry, current_iter_records) -> bool`. Returns `True` iff the model is in the active set AND has either (a) at least one new training record in the current iter, or (b) a score delta ≥ Δ. Stable models return `False` — the dispatcher pulls the previous cache entry verbatim and skips the LLM call. The skip path emits a single `_iter_flush`-style audit row with `label="interpretation.per_model_skipped"`, `tokens=None`, `extra={"reason": "stable", "cached_iter": <iter>}` so the audit log preserves the count of skipped calls (we want to *measure* the savings, not hide them).
-- [ ] **Synthesis-prompt assembly** (axis 1): replace "all entries verbatim" with active-full + stable-compressed. Add a single line at the top of the historical block: `"[N older architectures compressed for context budget — see {workspace}/iter_{i}/interpretation.json for full detail]"`.
-- [ ] **per_model dispatcher** (axis 2): consult `should_recall_per_model` before each LLM call; on skip, write the audit marker and reuse the previous cache entry. Total per_model LLM calls per iter must equal `|active_set|`, not `|model_knowledge_cache|`.
-- [ ] **Configurable**: K, N, Δ all live in the LLM-config schema (no new CLI flag); defaults documented in the schema.
+   *Implementation: `select_active_models()` at `nodes/interpretation_helpers.py:503`. Negative thresholds rejected; ties broken by `(-score, model_type)` lex order; models with `best_denoising_score=None` excluded from Top-K ranking.*
+- [x] **Sliding-window compression (axis 1)**: implement `compress_model_summary(entry) -> dict` returning `{model_type, best_score, n_rounds, one_line_takeaway}`. Takeaway field extracted *deterministically* from the existing cached summary's `key_finding` — no fresh LLM call. Target ≤ 200 chars per model.
+   *Implementation: `compress_model_summary()` at `nodes/interpretation_helpers.py:584`. Takeaway extracted from `key_findings[0]` → `best_config_analysis` → "(no cached takeaway)" placeholder; truncates with `…` ellipsis at `max_takeaway_chars-1`.*
+- [x] **Stability Filter (axis 2)**: implement `should_recall_per_model(model_type, cache_entry, current_iter_records) -> bool`. Returns `True` iff the model is in the active set AND has either (a) at least one new training record in the current iter, or (b) a score delta ≥ Δ. Stable models return `False` — the dispatcher pulls the previous cache entry verbatim and skips the LLM call. The skip path emits a single `_iter_flush`-style audit row with `label="interpretation.per_model_skipped"`, `tokens=None`, `extra={"reason": "stable", "cached_iter": <iter>}` so the audit log preserves the count of skipped calls (we want to *measure* the savings, not hide them).
+   *Helper implementation: `should_recall_per_model()` at `nodes/interpretation_helpers.py:638`. Decision tree: cache miss → always True; not active → False; active + new rounds OR Δ ≥ threshold → True; active + no new evidence → False. **Audit marker emission still pending** — wired in T4 (synthesis assembly + per_model dispatcher).*
+- [x] **Synthesis-prompt assembly** (axis 1): replace "all entries verbatim" with active-full + stable-compressed. Add a single line at the top of the historical block: `"[N older architectures compressed for context budget — see {workspace}/iter_{i}/interpretation.json for full detail]"`.
+   *Implementation: `_build_synthesis_prompt` in `nodes/result_interpretation_agent.py` accepts new kwargs `compressed_model_types: Optional[Set[str]] = None` and `workspace: Optional[str] = None`. Active models render unchanged (full multi-section block). Compressed models render under a `## Stable Architectures (Compressed)` header with the spec line `[N older architectures compressed for context budget — see {workspace}/iter_*/interpretation.json for full detail]`, then one bullet per model: `- **{mt}** (best={x}, n_rounds={y}): {one_line_takeaway}`. Iteration order: active first, compressed second. Dispatcher at `nodes/result_interpretation_agent.py:843–851` builds the `compressed_set` from `model_knowledge_cache.keys() − active_set` and passes it to `_build_synthesis_prompt` along with `inp.storage.local.workspace`.*
+- [x] **per_model dispatcher** (axis 2): consult `should_recall_per_model` before each LLM call; on skip, write the audit marker and reuse the previous cache entry. Total per_model LLM calls per iter must equal `|active_set|`, not `|model_knowledge_cache|`.
+   *Implementation: dispatcher rewrite in `nodes/result_interpretation_agent.py:684–740`. Computes `active_set = select_active_models(...)` once per iter, then per-model `should_recall_per_model(...)`. On skip with `cache_entry is not None`: copies the cache entry verbatim into the new `model_knowledge_cache` AND calls `self.bridge.emit_marker(label="interpretation.per_model_skipped", extra={"reason": "stable", "model_type": mt})`. Skip path is logged as `Phase 1: {mt} — Stability Filter skip`. After the loop, prints a summary line `Stability Filter: N model_type(s) skipped` when N > 0. **New bridge method**: `LLMBridge.emit_marker` at `agent/llm_bridge.py:485–556` — synthetic JSONL row with `tokens=TokenCounts()` (None defaults), `chars=TokenUsageChars(0,0,0)`, caller-provided `label` + `extra`. Mirrors `_flush_iter_marker_locked` lock + invariant validation; silent no-op when context is unset; rejects empty label with `ValueError`.*
+- [x] **Configurable**: K, N, Δ all live on `InterpretationInput` (no new CLI flag); defaults documented in the schema.
+   *Implementation: `active_model_top_k`, `active_model_last_n`, `active_model_score_delta` fields added to `agent/schemas/interpretation.py` `InterpretationInput`. Defaults K=3, N=2, Δ=0.05 match the design spec; all three are `ge=0` validated. **Doc-correction note**: Rev 7 phrasing said "LLM-config schema" — that was incorrect. `WorkflowLLMConfig.interpret` is `NodeLLMConfig` (provider+model only) and is never read by the interpretation agent; the agent's behavioural knobs belong on the input schema. Tests: 6 new cases in `tests/unit/agent/result_interpretation_agent/test_interpretation_schemas.py::TestInterpretationInput` covering defaults, custom values, zero-edge, and negative-rejection on all three fields. All pass.*
 
 **Pre-Commit Checklist**:
-- [ ] **Active-set test**: `test_active_set_top_k_plus_last_n_plus_delta` — given a 7-model cache with synthetic scores, recency, and one model with a current-iter score delta ≥ Δ, the active set is exactly `top3 ∪ last2 ∪ {delta_model}` (deduplicated).
-- [ ] **Compression test (axis 1)**: `test_compress_preserves_key_finding` — `compress_model_summary` extracts the original `key_finding` verbatim and emits ≤ 200 chars.
-- [ ] **Stability Filter test (axis 2)**: `test_stability_filter_skips_stable_models` — given a 7-model cache where 5 models are stable (no new records, no score delta) and 2 are active, assert `should_recall_per_model` returns `False` for the 5 and `True` for the 2. Assert the audit log gains exactly 5 `interpretation.per_model_skipped` marker rows for that iter.
-- [ ] **Synthesis-prompt size regression test (axis 1)**: with a synthetic 13-model cache (mimicking iter 13 of explore V12), the new synthesis prompt is **< 15 K chars** (vs. V12 baseline ~40 K). Quantify the compression ratio in the test assertion message.
-- [ ] **per_model call-count regression test (axis 2)**: with a synthetic 12-model cache (mimicking iter 14 of explore V12) where 9 models are stable, assert the agent issues exactly **3 LLM calls** for that iter (active set size), not 12. Reuses the existing pseudo-LLM harness.
-- [ ] **Behavioural test**: synthesis output still mentions every model_type at least once (active = full, compressed = one-liner) — no model is silently dropped from the prompt.
-- [ ] **Audit-log test**: skipped per_model calls produce countable marker rows (so the savings are measurable in `tools/build_token_baseline_report.py`'s output).
+- [x] **Active-set test**: `test_active_set_top_k_plus_last_n_plus_delta` — given a 7-model cache with synthetic scores, recency, and one model with a current-iter score delta ≥ Δ, the active set is exactly `top3 ∪ last2 ∪ {delta_model}` (deduplicated).
+   *Result: PASSED. File `tests/unit/agent/result_interpretation_agent/test_stability_filter.py::TestSelectActiveModels` — 9 tests covering headline 7-model case, None-score exclusion, Last-N truncation, Delta-with-no-prior path, below/at/above threshold boundaries, lex-tiebreak determinism, empty-input edge, and negative-threshold rejection. All 9 pass. Boundary test uses 0.5 (exactly representable) to avoid float-imprecision false negatives.*
+- [x] **Compression test (axis 1)**: `test_compress_preserves_key_finding` — `compress_model_summary` extracts the original `key_finding` verbatim and emits ≤ 200 chars.
+   *Result: PASSED. File `tests/unit/agent/result_interpretation_agent/test_stability_filter.py::TestCompressModelSummary` — 6 tests covering verbatim preservation, ellipsis truncation, fallback to `best_config_analysis`, placeholder when nothing available, total-serialised-length-under-200 budget check, and `max_takeaway_chars=0` rejection. All 6 pass.*
+- [x] **Stability Filter test (axis 2 — helper-level)**: `test_stability_filter_skips_stable_models` — given a 7-model cache where 5 models are stable (no new records, no score delta) and 2 are active, assert `should_recall_per_model` returns `False` for the 5 and `True` for the 2.
+   *Result: PASSED. File `tests/unit/agent/result_interpretation_agent/test_stability_filter.py::TestShouldRecallPerModel` — 7 tests covering cache-miss-always-recalls, 5/2 split (the headline 7-model assertion), active-with-more-rounds, active-with-Δ, active-with-no-new-evidence, inactive-with-new-data-still-skips (Stability Filter respects active gate), and below-threshold-Δ-skips. All 7 pass. **The audit-log marker assertion is deferred** — markers are emitted by the dispatcher (T4 wiring), not the helper, so it lives in the T4 audit-log test below.*
+- [x] **Synthesis-prompt size regression test (axis 1)**: with a synthetic 13-model cache (mimicking iter 13 of explore V12), the new synthesis prompt is **< 15 K chars** (vs. V12 baseline ~40 K). Quantify the compression ratio in the test assertion message.
+   *Result: PASSED. File `tests/unit/agent/result_interpretation_agent/test_dispatcher_wiring.py::test_synthesis_prompt_size_under_15k_for_13_models`. With a 13-model cache (top_k=3, last_n=0, score_delta=999) → 3 active blocks + 10 compressed one-liners under the historical-block header, the captured `interpretation.synthesis` user prompt is well under the 15 000-char target. The assertion message reports the achieved compression ratio (V12 ~40 K baseline ÷ measured prompt chars) so a future regression surfaces the magnitude of the slip immediately.*
+- [x] **per_model call-count regression test (axis 2)**: with a synthetic 12-model cache (mimicking iter 14 of explore V12) where 9 models are stable, assert the agent issues exactly **3 LLM calls** for that iter (active set size), not 12. Reuses the existing pseudo-LLM harness.
+   *Result: PASSED. File `tests/unit/agent/result_interpretation_agent/test_dispatcher_wiring.py::test_per_model_call_count_equals_active_set_size`. 12 cache entries (m00..m11) with strictly decreasing best_scores; top_k=3/last_n=0/score_delta=999 forces active set = {m00, m01, m02}; new ModelRunSummary objects passed for those 3 with `completed_rounds=4` (vs. cached 3) so `should_recall_per_model` returns True. Assertions: exactly 3 calls labelled `interpretation.per_model`, exactly 1 labelled `interpretation.synthesis`, total `bridge.generate.call_count == 4` (not the 13 the V12 dispatcher would have emitted).*
+- [x] **Behavioural test**: synthesis output still mentions every model_type at least once (active = full, compressed = one-liner) — no model is silently dropped from the prompt.
+   *Result: PASSED. File `tests/unit/agent/result_interpretation_agent/test_dispatcher_wiring.py::test_synthesis_prompt_mentions_every_model_type`. 13-model cache (`arch_00..arch_12`); captures the synthesis user prompt and asserts each `arch_NN` substring appears in it. Additional assertions: the spec phrase `compressed for context budget` appears once, and the prompt contains exactly 3 `## Model: ` full-block headers (one per active model — compressed entries use the bullet form, not the full block).*
+- [x] **Audit-log test**: skipped per_model calls produce countable marker rows (so the savings are measurable in `tools/build_token_baseline_report.py`'s output).
+   *Result: PASSED. Two layers, both green. (a) **Bridge layer**: `tests/unit/agent/llm_bridge/test_emit_marker.py` — 6 tests covering: zeroed-row shape (label, model=None, provider=None, tokens={None,None,None}, chars={0,0,0}, components={}, run-context propagation); silent no-op when `_token_usage_path is None`; `ValueError` on empty label (rejected before any disk write); `extra` dict round-tripping verbatim including nested lists/scalars; JSONL append ordering preserved across 3 emits; `extra=None` accepted and serialised to `{}`. (b) **Dispatcher layer**: `tests/unit/agent/result_interpretation_agent/test_dispatcher_wiring.py::test_skipped_calls_emit_audit_marker` — same 12-cache / 3-active fixture as the call-count test; asserts `bridge.emit_marker` is called exactly 9 times with `label="interpretation.per_model_skipped"` and `extra={"reason": "stable", "model_type": <mt>}`, with the 9 skipped model_types covering exactly `{m03..m11}` (no skip leakage into the active set). Together these prove the savings are countable in `token_usage.jsonl`.*
 
 **Definition of Done (Gate G1.5)**: re-run a 5-iter chain post-implementation; both axes must clamp:
 - `interpretation.synthesis` `tokens.prompt` slope drops from V12's ~3 K/iter to **< 500 tokens/iter** between iter 3 and iter 5.
@@ -1912,69 +2170,151 @@ The new chain's `build_token_baseline_report.py` output replaces V12 as the Phas
 
 ---
 
-### Commit 6.3: Centralized Cache Dehydration — `model_knowledge_cache` Source-Level Merge & Prune (Rev 8 — Critical Priority, escalated from Rev 7)
+### Commit 6.3: Knowledge Accumulator Refactor — Cache Update Path + Consolidated Schema (Rev 8.2 — Critical Priority, promoted from Rev 8)
 
-**Phase**: 2 (gated on Commit 4.3.3 landing).
-**§5 step**: 12c (escalated scope, same step number).
+**Phase**: 2 (sequenced after Commit 6.1; depends on 6.1's `should_recall_per_model` decision so only active-model entries flow through the merge path).
+**§5 step**: 12c (refactor scope, same step number).
 
-**Why this commit (Rev 8 escalation)**: Rev 7 framed this commit as a fix for `expert_context_block` (24× growth). The 4.3.2 forensic audit revealed two leaks share one root cause:
+**Why this commit (Rev 8.2 promotion)**: a code audit on 2026-05-05 (documented in the Rev 8.2 changelog) found the Rev 8 spec assumed accumulation that the production code does not implement. `nodes/result_interpretation_agent.py:687-693` shows the cache-hit branch copies the prior iter's entry verbatim and skips the LLM call entirely — once a `model_type` is summarised, its findings are *frozen*. The Rev 8 "Merge within `(model_type, field)` bucket" algorithm presupposes a list grew across iters; under current code there is nothing to merge. Two leaks (`expert_context_block` 24× and `non_candidates_overview` 7×) still share one root (`model_knowledge_cache` 11.4×, `model_descriptions` 8.4×), but the *fix* now requires changing the cache update mechanism, not just adding a consolidator at the injection point.
 
 | downstream block            | iter 1 → iter 14 chars | growth | upstream source                         |
 |-----------------------------|-----------------------:|-------:|------------------------------------------|
-| `expert_context_block`      |          7.5 K → 181 K |   24×  | `model_knowledge_cache` (key_findings, bottlenecks, lessons, recommendations) + curated text |
-| `non_candidates_overview`   |           15 K → 110 K |    7×  | `model_descriptions` + `model_knowledge_cache` (key_findings, bottlenecks, score_trend, strategy_assessment) |
+| `expert_context_block`      |          7.5 K → 181 K |   24×  | `model_knowledge_cache` (LLM text fields) + curated text |
+| `non_candidates_overview`   |           15 K → 110 K |    7×  | `model_descriptions` + `model_knowledge_cache` (LLM text fields) |
 
-Both blocks are **read-only consumers** of the upstream cache. The cache itself grew 24 K → **275 K chars (11.4×)** — and `model_descriptions` grew 6.7 K → **56 K chars (8.4×)**. These two upstream artefacts are the actual append-only accumulators; the downstream blocks are just the visible symptoms.
+The Rev 8.2 reframe: **the cache itself must become a cumulative ledger.** A fatal lesson learned at iter 2 must survive even if the same architecture is re-tested and re-summarised at iter 20 — the iter-20 finding *enriches* the iter-2 entry, never overwrites it. This is what an evolutionary system needs; truncation alone (the rejected Option B) bounds size but does not preserve cumulative wisdom.
 
-**Pruning at the injection point** (Rev 7 design — a per-block consolidator at `expert_context_block` assembly) leaves the cache itself unbounded, which means `non_candidates_overview` continues to bleed even after `expert_context_block` is fixed. **Pruning at the source** — applying Merge & Prune to `model_knowledge_cache` itself, inside the interpretation node where the cache is maintained — dehydrates both consumers simultaneously and bounds future consumers automatically.
+**Scope** (Rev 8.2 — refactor, not just consolidator):
 
-**Scope** (escalated from Rev 7):
-- `nodes/result_interpretation_agent.py` (or wherever `model_knowledge_cache` is updated each iter — first task confirms file:line). The cache update path is the new pruning site.
-- New `agent/cache_consolidator.py` — Pydantic-validated Merge & Prune over per-model-type cache entries. Each cache entry is a dict per `model_type` carrying `key_findings`, `bottlenecks`, `score_trend`, `strategy_assessment`, `lessons`, `recommendations` (verify via grep).
-- New `tests/unit/agent/result_interpretation_agent/test_cache_consolidator.py`.
-- `nodes/result_interpretation_agent.py` integration test (Tier 1) verifying cache size bounded across simulated 10-iter accumulation.
-- **No changes** to `expert_context_block` assembly or `non_candidates_overview` builders — they read from the now-bounded cache and shrink for free.
+1. **Cache update path refactor** in `nodes/result_interpretation_agent.py`: replace the verbatim-copy cache-hit branch (L687-693) with a *light merge* path. On cache hit for an active model (per 6.1's `should_recall_per_model`), the agent calls the LLM, then merges the new findings into the cached entry rather than overwriting. On cache hit for a stable model (6.1 says skip), the verbatim-copy behaviour is preserved (no extra LLM call, no merge).
+2. **New consolidated schema** in `agent/schemas/cache_entry.py` (Pydantic). Reconciles the 8 existing LLM text fields with the accumulator semantics. Field mapping spec under "Tasks" below.
+3. **New `agent/cache_consolidator.py`** — deterministic Merge & Prune over the consolidated entry. Pure function; no LLM call. Used by the cache update path on every merge.
+4. **New `tests/unit/agent/result_interpretation_agent/test_cache_consolidator.py`** — schema validation + merge + prune + error-signature preservation tests.
+5. **`nodes/result_interpretation_agent.py` integration test (Tier 1)** — simulated 14-iter chain, asserts cache stays bounded and findings accumulate (a finding planted at iter 2 is still cited at iter 14).
+6. **No producer changes** to `expert_context_block` or `non_candidates_overview` — they read from the now-bounded cache and shrink as a side effect (verified in the bounded-size test).
 
 **Tasks**:
-- [ ] **Locate the cache-maintenance site**: grep for `model_knowledge_cache` writes in `nodes/result_interpretation_agent.py`; confirm the function that appends new findings each iter. Document file:line in the commit message.
-- [ ] **Define a per-entry schema** (Pydantic): `CacheEntry(model_type: str, key_findings: list[ConsolidatedFinding], bottlenecks: list[ConsolidatedFinding], lessons: list[ConsolidatedFinding], recommendations: list[ConsolidatedFinding], error_signatures: list[ErrorSignature], score_trend: str, strategy_assessment: str)`. Each `ConsolidatedFinding(statement: str, evidence_iters: list[int], strength: Literal["weak","moderate","strong"])`. The `error_signatures` field is **load-bearing** for Gate G3 (see Performance Guard below).
-- [ ] **Merge & Prune policy** (deterministic, no LLM call):
-   - **Merge** within each `(model_type, field)` bucket: findings with overlapping statements (cosine similarity over normalized text ≥ 0.7, OR explicit key-noun match) collapse into one; merged findings union their `evidence_iters`.
-   - **Prune** to a bounded set per `(model_type, field)`: **5–8 conclusions per field per model_type**, ranked by `(strength, len(evidence_iters), recency)`. Total cap: **24 findings per model_type across all text fields**.
-   - **Error Signatures are EXEMPT from numerical pruning** (see Performance Guard).
-   - Pruned findings are archived to `{workspace}/iter_{i}/cache_archive_{model_type}.json` for forensic recovery; never silently dropped.
-- [ ] **Hook into the cache-update path**: after each iter's interpretation builds the new cache entry for a model_type, run the consolidator over `existing_cache[mt] ⊕ new_findings` before persisting. Persist the consolidated entry only.
-- [ ] **No producer changes** for `expert_context_block` or `non_candidates_overview` — they continue to read from the (now-bounded) cache. Verify in the bounded-size test that both blocks shrink as a side effect.
+
+- [ ] **T1 — Locate cache-maintenance site (verified during audit)**: cache hit / miss branches at `nodes/result_interpretation_agent.py:687-738`; cache eviction at `workflows/model_exploration.py:369-392` (`_cap_knowledge_cache`, currently caps to 5 entries by best_score + current). Document in commit message.
+
+- [ ] **T2 — Field reconciliation between live cache and accumulator schema**: the 8 existing LLM text fields (from `PER_MODEL_SYSTEM_PROMPT` at `result_interpretation_agent.py:36-116`) map onto the new schema as follows:
+
+  | live field                   | accumulator type           | rationale                                                    |
+  |------------------------------|----------------------------|--------------------------------------------------------------|
+  | `key_findings: list[str]`    | `list[ConsolidatedFinding]`| ranked observations — natural list-of-statements accumulator |
+  | `bottlenecks: list[str]`     | `list[ConsolidatedFinding]`| root causes — accumulator                                    |
+  | `best_config_analysis: str`  | `ConsolidatedNarrative`    | single narrative; merged by *replacement-with-history* (see policy below) |
+  | `score_trend: str`           | `ConsolidatedNarrative`    | single narrative; replacement-with-history                   |
+  | `per_file_analysis: str`     | `ConsolidatedNarrative`    | single narrative; replacement-with-history                   |
+  | `data_sensitivity: str`      | `ConsolidatedNarrative`    | single narrative; replacement-with-history                   |
+  | `efficiency_assessment: str` | `ConsolidatedNarrative`    | single narrative; replacement-with-history                   |
+  | `strategy_assessment: str`   | `ConsolidatedNarrative`    | single narrative; replacement-with-history                   |
+  | (new) `error_signatures`     | `list[ErrorSignature]`     | Commit 6 schema; load-bearing for Gate G3 — set-merge, no cap|
+  | (preserved) `_stats: dict`   | `_stats: dict`             | numerical, untouched by consolidator                         |
+
+  **Schema** (Pydantic):
+  ```python
+  class ConsolidatedFinding(BaseModel):
+      statement: str  # non-empty, max 500 chars
+      evidence_iters: list[int]  # union grows across iters
+      strength: Literal["weak", "moderate", "strong"]
+
+  class ConsolidatedNarrative(BaseModel):
+      latest: str  # current iter's narrative (max 800 chars)
+      history: list[tuple[int, str]]  # [(iter_index, prior_narrative), ...] — capped to last 3
+
+  class CacheEntry(BaseModel):
+      model_type: str
+      key_findings: list[ConsolidatedFinding]
+      bottlenecks: list[ConsolidatedFinding]
+      best_config_analysis: ConsolidatedNarrative
+      score_trend: ConsolidatedNarrative
+      per_file_analysis: ConsolidatedNarrative
+      data_sensitivity: ConsolidatedNarrative
+      efficiency_assessment: ConsolidatedNarrative
+      strategy_assessment: ConsolidatedNarrative
+      error_signatures: list[ErrorSignature]
+      stats: dict  # _stats passthrough; not consolidated
+  ```
+
+  No new LLM contract — the LLM still emits the 8 flat string/list fields it does today (`PER_MODEL_SYSTEM_PROMPT` unchanged). The consolidator is the layer that adapts the LLM's flat output into the accumulator entry.
+
+- [ ] **T3 — Cache update path refactor** (`nodes/result_interpretation_agent.py:687-738`): the cache-hit branch becomes a *decision point*:
+
+  ```python
+  for mt in effective_types:
+      if mt in inp.model_knowledge_cache:
+          if not should_recall_per_model(mt, ...):  # 6.1 stability filter
+              # Stable: verbatim copy, no LLM call (preserved behaviour)
+              model_knowledge_cache[mt] = inp.model_knowledge_cache[mt]
+              continue
+          # Active cache hit: re-call LLM, merge into cached entry
+          new_response = self.bridge.generate(...)
+          merged = consolidate(
+              prior=CacheEntry.parse(inp.model_knowledge_cache[mt]),
+              new_llm_output=new_response,
+              new_stats=...,
+              current_iter=current_iter,
+          )
+          model_knowledge_cache[mt] = merged.model_dump()
+          continue
+      # Cache miss: build initial entry from single LLM call (existing behaviour)
+      ...
+  ```
+
+  The merge happens **inside the cache update path**, gated on the active-model decision. A model that never enters the active set is never re-called, never merged — its frozen entry is fine.
+
+- [ ] **T4 — Merge & Prune policy** (deterministic, no LLM call, in `agent/cache_consolidator.py`):
+  - **List fields** (`key_findings`, `bottlenecks`):
+    - Merge: new findings whose normalized text matches a prior finding (`difflib.SequenceMatcher.ratio() ≥ 0.7` OR explicit key-noun overlap) collapse into the prior; the merged finding unions `evidence_iters` and takes the higher `strength`.
+    - Prune to **≤ 8 per field per model_type**, ranked by `(strength, len(evidence_iters), recency)`. Pruned items archived to `{workspace}/iter_{i}/cache_archive_{model_type}.json`.
+  - **Narrative fields** (`best_config_analysis`, `score_trend`, `per_file_analysis`, `data_sensitivity`, `efficiency_assessment`, `strategy_assessment`):
+    - Merge by **replacement-with-history**: `latest = new_response[field]`; the prior `latest` is appended to `history` with the prior iter index. `history` capped to last 3 entries (older entries archived).
+    - This shape preserves "what the agent thought *now*" while still letting downstream consumers see "what changed" without paying for full redundancy. Each narrative bounded ≤ 800 chars latest + 3 × 200 chars history = **≤ 1.4 K per field**.
+  - **Error signatures** (`error_signatures`):
+    - Set-merge by `(failure_class, top_user_frame, error_type)` tuple. Duplicates union `evidence_iters`. **NO numerical cap** — Gate G3 (§2.9 Trap Test) requires every distinct signature to survive forever.
+  - **Numerical stats** (`stats`): passthrough, untouched.
+
+  Implementation: separate `_merge_list_field`, `_merge_narrative_field`, `_dedupe_error_signatures` paths so the asymmetric semantics are explicit and individually testable.
+
+- [ ] **T5 — Hook into the cache-update path** at the active-cache-hit branch (T3). All persistence (workspace JSON, downstream prompt assembly) reads from the consolidated entry. Verify by running existing interpretation tests — no schema break for stable-model copy or initial-miss paths.
+
+- [ ] **T6 — No producer changes** for `expert_context_block` or `non_candidates_overview`. They continue to read from the cache. Confirm in the bounded-size test below that both downstream blocks shrink as a side effect (no per-block consolidator needed).
 
 **Performance Guard — Error Signature Preservation (Gate G3)** ⚠️:
 
-> The Merge & Prune algorithm **must NOT collapse or rank-prune unique error signatures**. Each `ErrorSignature` (Commit 6 schema: `failure_class`, `last_frames`, `short_message`) is keyed by the tuple `(failure_class, top_user_frame, error_type)`. The consolidator treats `error_signatures` as a SET — duplicates (same key tuple) merge by unioning `evidence_iters`, but distinct signatures are NEVER pruned, regardless of the per-field cap.
+> The consolidator **must NOT collapse or rank-prune unique error signatures**. Each `ErrorSignature` (Commit 6 schema: `failure_class`, `last_frames`, `short_message`) is keyed by the tuple `(failure_class, top_user_frame, error_type)`. The consolidator treats `error_signatures` as a SET — duplicates (same key tuple) merge by unioning `evidence_iters`, but distinct signatures are NEVER pruned, regardless of the per-field cap on text findings.
 >
-> **Why**: Gate G3 (§2.9 Trap Test) plants a fatal flaw in iter-2 ledger and asserts the proposer cites it correctly at iter 10. If the consolidator drops the iter-2 error signature during a high-cardinality iter, G3 fails by definition. The 5–8 cap on text findings (`key_findings`, `bottlenecks`, etc.) is fine — those are reasoning summaries, redundant by nature. Error signatures are forensic primary sources; their loss is information loss.
+> **Why**: Gate G3 (§2.9 Trap Test) plants a fatal flaw in iter-2 ledger and asserts the proposer cites it correctly at iter 10. Under the Rev 8.2 accumulator the iter-2 signature must merge correctly with iter-10 evidence (set-union, not replacement). The 8-cap on text findings is fine — those are reasoning summaries, redundant by nature. Error signatures are forensic primary sources; their loss is information loss.
 >
-> **Implementation**: a separate `_prune_text_findings` path for the four text fields (capped) and a `_dedupe_error_signatures` path for `error_signatures` (set-merge only, no cap). The behavioural test (below) pins this distinction.
+> **Implementation**: a separate `_dedupe_error_signatures` path (set-merge only, no cap) distinct from `_merge_list_field` (capped) and `_merge_narrative_field` (replacement-with-history). The behavioural tests (below) pin this distinction.
 
 **Pre-Commit Checklist**:
-- [ ] **Schema test**: invalid `CacheEntry` / `ConsolidatedFinding` / `ErrorSignature` (missing fields, empty statement, unknown `failure_class`) rejected by Pydantic with a useful error.
-- [ ] **Merge test (text fields)**: two `key_findings` for the same `model_type` with statements "ridge near 50 Hz dominates" and "the 50 Hz ridge is the dominant feature" merge into one with both evidence iters listed.
-- [ ] **Prune test (text fields)**: a 30-finding input for one `(model_type, key_findings)` bucket prunes to ≤ 8 outputs; weak findings dropped first; remaining ranked by `(strength, len(evidence_iters), recency)`.
-- [ ] **Error-signature preservation test (Gate G3 prerequisite)**: input cache with 12 distinct error signatures (different `failure_class`/`top_user_frame` tuples) across one model_type — consolidator output must contain ALL 12. Repeat with a 30-signature input where the per-field cap of 8 would otherwise apply: assert no signature is dropped. **This test is the load-bearing guard against G3 regression.**
-- [ ] **Bounded-size regression test (downstream blocks)**: simulate a 14-iter accumulation feeding the consolidator (mimicking V12 iter 14). After the consolidator runs each iter, both `model_knowledge_cache` total chars **≤ 60 K** (vs. V12's 275 K) AND the derived `expert_context_block` chars **≤ 12 K** AND the derived `non_candidates_overview` chars **≤ 30 K**. Assert all three thresholds in one test; quantify compression ratios in the message.
-- [ ] **Archive test**: pruned text findings (NOT error signatures) appear in `cache_archive_{model_type}.json`; the iter index, model_type, and original finding text are all present (forensic-recoverable, not silently lost).
+
+- [ ] **Schema test**: invalid `CacheEntry` / `ConsolidatedFinding` / `ConsolidatedNarrative` / `ErrorSignature` (missing fields, empty statement, unknown `failure_class`, narrative `latest` over 800 chars) rejected by Pydantic with a useful error.
+- [ ] **Field-reconciliation test**: a fresh LLM response (the 8 flat fields from `PER_MODEL_SYSTEM_PROMPT`) parses correctly into a `CacheEntry` via the consolidator's `from_initial_llm_response()` constructor. All 8 fields populated; `error_signatures` defaults to `[]`; `_stats` passthrough.
+- [ ] **List-merge test (text-list fields)**: two `key_findings` entries across iters — "ridge near 50 Hz dominates" (iter 2) and "the 50 Hz ridge is the dominant feature" (iter 5) — merge into one with `evidence_iters=[2,5]`.
+- [ ] **List-prune test**: a model with 30 accumulated `key_findings` across simulated iters prunes to ≤ 8 outputs; weak findings dropped first; remaining ranked by `(strength, len(evidence_iters), recency)`. Pruned items present in archive file.
+- [ ] **Narrative-merge test**: a `score_trend` field updated across iters 1, 4, 7, 10 — the iter-10 merged entry has `latest` = iter-10 text and `history` = `[(7, ...), (4, ...), (1, ...)]` (capped to last 3, oldest dropped).
+- [ ] **Error-signature preservation test (Gate G3 prerequisite)**: input cache with 12 distinct error signatures (different `failure_class`/`top_user_frame` tuples) across one `model_type` — consolidator output retains ALL 12. Repeat with 30 signatures: assert no signature dropped, set-merge of duplicates correctly unions `evidence_iters`. **Load-bearing guard against G3 regression.**
+- [ ] **Cache-hit-merge regression test (Rev 8.2 specific)**: simulate the active-cache-hit path — prior entry has iter-2 finding "VRAM spike at 16 GB"; new LLM response at iter 10 has finding "model OOMs at 18 GB on long sequences". After merge: both findings present (low text similarity, different statements); `evidence_iters` reflects only the iter-2 entry's prior history + iter-10 marker. Confirms the verbatim-copy regression cannot return.
+- [ ] **Frozen-cache regression test**: simulate the stable-model branch — `should_recall_per_model` returns False; the cache entry is copied verbatim, **no LLM call issued, no merge invoked**. Asserts the 6.1 fast-path is preserved post-refactor.
+- [ ] **Bounded-size regression test (downstream blocks)**: simulate a 14-iter accumulation feeding the cache-update path (mimicking V12 iter 14). After every iter the consolidator runs as part of the active-cache-hit branch. Targets: `model_knowledge_cache` total chars **≤ 60 K** (vs. V12's 275 K) AND derived `expert_context_block` chars **≤ 12 K** AND derived `non_candidates_overview` chars **≤ 30 K**. Assert all three thresholds in one test; quantify compression ratios in the message.
 - [ ] **Behavioural test (no signal loss)**: every `(model_type, field)` bucket that had at least one `strength="strong"` finding pre-consolidation still has at least one finding post-consolidation. Plus the error-signature preservation test above.
-- [ ] **No LLM call in the consolidator** by default — deterministic similarity (normalized text + cosine over hashed tokens, OR `difflib.SequenceMatcher.ratio() ≥ 0.7`). LLM-based merging deferred; out of scope.
+- [ ] **No LLM call inside the consolidator**: the consolidator itself is pure (deterministic similarity via `difflib.SequenceMatcher.ratio() ≥ 0.7`). LLM is called *outside* the consolidator (by the agent's existing per_model dispatcher) and the response is fed in. LLM-based merging deferred; out of scope.
 
-**Definition of Done (Gate G1.5c — Rev 8)**: re-run a 5-iter chain post-implementation; report under `tools/build_token_baseline_report.py` (with the Commit 4.3.3 11-key audit live) shows **all three** of the following bounded:
+**Definition of Done (Gate G1.5c — Rev 8.2)**: re-run a 5-iter chain post-implementation; report under `tools/build_token_baseline_report.py` (with the Commit 4.3.3 11-key audit live) shows **all four** of the following:
 
-| metric                        | V12 iter 14 | post-6.3 iter 5 target |
-|-------------------------------|------------:|------------------------:|
-| `model_knowledge_cache` chars |       275 K |              ≤ 60 K     |
-| `expert_context_block` chars  |       181 K |              ≤ 12 K     |
-| `non_candidates_overview` chars (new key) | 110 K |          ≤ 30 K     |
+| metric                          | V12 iter 14 | post-6.3 iter 5 target |
+|---------------------------------|------------:|------------------------:|
+| `model_knowledge_cache` chars   |       275 K |              ≤ 60 K     |
+| `expert_context_block` chars    |       181 K |              ≤ 12 K     |
+| `non_candidates_overview` chars |       110 K |              ≤ 30 K     |
+| **Trap Test (Gate G3)**: iter-2 error_signature still cited at iter 5+ | (not yet measured) | **PASS** |
 
-If any of the three exceeds its target, the policy is too lenient — return to the consolidator and tighten before Phase 2 progresses.
+If any size target is exceeded, the policy is too lenient — tighten the per-field caps. If Gate G3 fails, the merge logic is dropping load-bearing context — fix before Phase 2 progresses.
 
-**Out of Scope**: changing the *content* policy of what counts as a finding (that's the interpretation node's reasoning module's job); LLM-based merging (deferred — only revisit if deterministic merge demonstrably loses signal in the behavioural test); changing the `expert_context_block` or `non_candidates_overview` *render* paths (they keep reading from the now-bounded cache).
+**Out of Scope**: changing the *content* policy of what counts as a finding (interpretation agent's reasoning module's job); LLM-based merging (deferred — only revisit if deterministic merge demonstrably loses signal); changing `expert_context_block` or `non_candidates_overview` *render* paths (they keep reading from the now-bounded cache); changing `_cap_knowledge_cache`'s eviction policy (separate concern — eviction operates over whole entries, consolidation operates within an entry).
 
 ---
 
@@ -2140,9 +2480,43 @@ If any of the three exceeds its target, the policy is too lenient — return to 
 - [ ] **Quantitative metric (Gate G3)**: `pytest tests/integration/proposer/test_long_term_wisdom_trap.py --real-api-call` — both assertions pass (proposer cites iter-2 lesson AND avoids the failing architecture).
 - [ ] **Negative test**: `pytest -k test_proposer_falls_back_when_ledger_missing` — with `inp.ledger=None`, the legacy `previous_failures` rendering is used and produces a valid prompt (regression-guard for the fallback path).
 
-**Definition of Done (Gate G3)**: ledger is rendered correctly; `delta_reasoning` is in every output; the Trap Test demonstrates 8-iter retention. If G3 fails, tune §2.9.4 knobs (older_attempts_K, confirmed_lessons_min_iters, last_frames_count) and re-run before proceeding to Commit 12.
+**Definition of Done (Gate G3)**: ledger is rendered correctly; `delta_reasoning` is in every output; the Trap Test demonstrates 8-iter retention. If G3 fails, tune §2.9.4 knobs (older_attempts_K, confirmed_lessons_min_iters, last_frames_count) and re-run before proceeding to Commit 11.2.
 
-**Out of Scope**: V13 chain run (Commit 12); legacy-path removal (Commit 12 cleanup).
+**Out of Scope**: SOTA Replication tooling (Commit 11.2); V13 chain run (Commit 12); legacy-path removal (Commit 12 cleanup).
+
+---
+
+### Commit 11.2: SOTA Replication tooling + Gate G3.5
+
+**Phase**: 2.
+**§2 ref**: 2.10. **§4.2 ref**: metric #12 (SRR).
+
+**Scope**:
+- `tools/verify_sota_replication.py` (new — Golden Iteration extraction, dehydrated re-run, AST + LLM-judge comparison)
+- `tests/integration/proposer/test_sota_replication.py` (new — `@real_run`-gated test that drives `verify_sota_replication.py` against the V12 baseline workspace)
+- `tests/unit/tools/test_verify_sota_replication.py` (new — synthetic-fixture unit tests for the deterministic pieces: Golden Iteration ranking, AST Jaccard, manifest schema)
+- `reports/v13_sota_replication.md` (new — output artefact; one row per Golden Iteration, plus SRR aggregate)
+
+**Tasks**:
+- [ ] Implement `tools/verify_sota_replication.py` per §2.10:
+  - Golden-Iteration selector: rank V12 `run_output_*.json` by `denoising_score`; emit a manifest (top-3 architectures, source iter, source workspace).
+  - State reconstructor: extract `model_knowledge_cache` + `model_descriptions` + prior records as they existed at the start of each Golden Iteration; verify reconstruction fidelity via input-hash replay.
+  - Dehydrated re-runner: process state through the Commit 6.3 consolidator; issue a real proposer LLM call (`@real_run`-gated) using the post-6.3 protocols.
+  - Comparator (Structural Fidelity): plugin-AST parse on both proposals; compute Jaccard on a curated primitive-node set (encoder family, decoder family, FFT/attention/residual presence). Deterministic.
+  - Comparator (Reasoning Density): cheap LLM judge (gpt-4o-mini, temp=0) compares new `delta_reasoning` + `causal_hypothesis` against V12 originals; multi-sample to reduce variance.
+  - Reporter: emit `reports/v13_sota_replication.md` with per-architecture verdict, the AST evidence string, the LLM-judge rationale, and the SRR aggregate.
+- [ ] Implement the unit tests for the deterministic pieces (no LLM in the loop): Golden ranking, AST Jaccard math, manifest schema.
+- [ ] Implement the `@real_run`-gated integration test that exercises the full pipeline on the V12 baseline workspace.
+
+**Pre-Commit Checklist**:
+- [ ] **Positive test (unit)**: `pytest tests/unit/tools/test_verify_sota_replication.py` — Golden Iteration ranking is deterministic given a fixed manifest; AST Jaccard returns 1.0 on identical primitives, 0.0 on disjoint sets, expected fractions on partial overlaps; manifest schema rejects malformed inputs.
+- [ ] **Positive test (Gate G3.5)**: `pytest tests/integration/proposer/test_sota_replication.py --real-api-call` against the V12 baseline workspace. **Pass criterion**: SRR ≥ 2 of 3 (each passing architecture meets `Structural Fidelity ≥ 0.7 AND Reasoning Density ≥ 75 %`).
+- [ ] **Negative test (consolidator regression sentinel)**: with a synthetic adversarial cache (top-K active set zeroed out), assert SRR drops to 0 — proves the metric is sensitive to the consolidator dropping load-bearing entries.
+- [ ] **Quantitative metric**: report cost — total LLM spend for one full SRR run ≤ \$2 (3 proposer calls + ~15 judge calls). SRR is run gated on Phase 2 exit, not per-iter.
+
+**Definition of Done (Gate G3.5)**: `tools/verify_sota_replication.py` produces a verdict CSV + `reports/v13_sota_replication.md` for the top-3 V12 architectures; SRR ≥ 2 of 3; the failing-case diagnostic (§2.10.5) is exercised at least once via the adversarial-cache sentinel test. If SRR < 2 of 3, tune §2.10.6 knobs (`merge_similarity_threshold`, `active_set_top_k`) and re-run before proceeding to Commit 12.
+
+**Out of Scope**: V13 chain run (Commit 12); legacy-path removal (Commit 12 cleanup); SRR running per-iter (it is a gate, not a continuous metric).
 
 ---
 
@@ -2178,7 +2552,7 @@ If any of the three exceeds its target, the policy is too lenient — return to 
 
 ---
 
-### Commit Map (visual — Rev 8)
+### Commit Map (visual — Rev 8.1)
 
 ```
 Phase 1 (Telemetry — CLOSED)             Phase 2 (Targeted O(N) Dehydration)              Phase 3 (Optional)
@@ -2203,11 +2577,15 @@ Phase 1 (Telemetry — CLOSED)             Phase 2 (Targeted O(N) Dehydration)  
                                           │ C9 helpers                          │
                                           │ C10 assembly                        │
                                           │ C11 G3 trap (depends on 6.3 guard)  │
+                                          │ C11.2 G3.5 SOTA Replication ★ NEW   │
+                                          │      (verify_sota_replication.py;   │
+                                          │       SRR ≥ 2/3 top-V12 archs;      │
+                                          │       aspirational creativity guard)│
                                           │ C12 G4 + cleanup                    │
                                           └─────────────────────────────────────┘
 ```
 
-Gates G1, G1.5, G2, G3, G4 are explicit STOP points.
+Gates G1, G1.5, G2, G3, G3.5, G4 are explicit STOP points.
 
 - **G1 (LANDED)**: Commit 5 produced `reports/v12_token_baseline.md` + `reports/v12_top3_bloat.md`. Verdict: Confirmed Proposer Hypothesis. 14/14 BLOAT_ALERT. Commit 4.3.2 surfaced as a Phase-1 blocker.
 - **G1 audit closure (Rev 8)**: Commit 4.3.2 closed with H1 verdict; Commit 4.3.3 ships the 11-key audit. The 10→11-key shift restores `template_and_scaffolding` to its true wrapper baseline (~8 K chars per call), and Phase 2 surgery now operates on a trusted breakdown.
@@ -2221,6 +2599,7 @@ Gates G1, G1.5, G2, G3, G4 are explicit STOP points.
    **All five must drop from O(N) to ≤ O(log N) or bounded ≤ 1.5× iter5/iter1.** If G1.5 fails on any, return to the responsible commit (6.1/6.2/6.3) and tighten before proceeding.
 - **Phase 2 entry**: unblocked by Commit 4.3.3 (Rev 8). Phase 1 fully closed.
 - **G3 dependency**: Commit 11's Trap Test (§2.9) depends on Commit 6.3's Error-Signature Preservation Guard. If 6.3 prunes error signatures, G3 fails. The guard is a hard requirement, pinned by a dedicated unit test in 6.3's Pre-Commit Checklist.
+- **G3.5 (Rev 8.1 — NEW)**: Commit 11.2's SOTA Replication Test (§2.10) verifies the *aspirational* property — the dehydrated agent can still navigate to the high-signal architectures the V12-rich-context agent discovered. Computed via `tools/verify_sota_replication.py`: per-architecture verdict on Structural Fidelity (≥ 0.7) AND Reasoning Density (≥ 75 %); SRR aggregate (Metric #12) requires ≥ 2 of 3 top V12 architectures to pass. Below threshold = consolidator's Merge & Prune is lopping off the peak; tune §2.10.6 knobs (`merge_similarity_threshold`, `active_set_top_k`) and re-run. **Blocks Phase 2 exit.** Rationale: FRR + DRR are defensive guards (catch regressions); SRR is the only aspirational guard (verifies retained creative capability).
 
 ---
 

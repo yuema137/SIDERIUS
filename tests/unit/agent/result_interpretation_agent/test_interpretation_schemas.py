@@ -86,6 +86,51 @@ class TestInterpretationInput:
         inp = InterpretationInput(model_types=["punet"])
         assert inp.storage.local.workspace == "./siderius_workspace"
 
+    # --- Active-Model policy fields (Commit 6.1) ---
+
+    def test_active_model_defaults(self):
+        """Defaults match the design doc: K=3, N=2, Δ=0.05."""
+        inp = InterpretationInput(model_types=["punet"])
+        assert inp.active_model_top_k == 3
+        assert inp.active_model_last_n == 2
+        assert inp.active_model_score_delta == 0.05
+
+    def test_active_model_custom(self):
+        """Custom K/N/Δ propagate through validation."""
+        inp = InterpretationInput(
+            model_types=["punet"],
+            active_model_top_k=5,
+            active_model_last_n=1,
+            active_model_score_delta=0.1,
+        )
+        assert inp.active_model_top_k == 5
+        assert inp.active_model_last_n == 1
+        assert inp.active_model_score_delta == 0.1
+
+    def test_active_model_zero_allowed(self):
+        """K=0, N=0, Δ=0 are valid (disable Top-K / Last-N pathway, max sensitivity)."""
+        inp = InterpretationInput(
+            model_types=["punet"],
+            active_model_top_k=0,
+            active_model_last_n=0,
+            active_model_score_delta=0.0,
+        )
+        assert inp.active_model_top_k == 0
+        assert inp.active_model_last_n == 0
+        assert inp.active_model_score_delta == 0.0
+
+    def test_active_model_negative_top_k_rejected(self):
+        with pytest.raises(ValidationError, match="greater than or equal to 0"):
+            InterpretationInput(model_types=["punet"], active_model_top_k=-1)
+
+    def test_active_model_negative_last_n_rejected(self):
+        with pytest.raises(ValidationError, match="greater than or equal to 0"):
+            InterpretationInput(model_types=["punet"], active_model_last_n=-1)
+
+    def test_active_model_negative_delta_rejected(self):
+        with pytest.raises(ValidationError, match="greater than or equal to 0"):
+            InterpretationInput(model_types=["punet"], active_model_score_delta=-0.01)
+
 
 # ---------------------------------------------------------------------------
 # InterpretationOutput

@@ -882,6 +882,11 @@ def main():
             # Cross-iter knowledge carry-over (docs/Consistent_growing_vocab_list.md)
             restored_runtime_vocab=state.runtime_vocab,
             accumulated_key_findings=state.accumulated_key_findings,
+            # Cross-iter knowledge-cache carry-over — Commit 6.1.a precondition for the
+            # Stability Filter (docs/audit_and_optimize_token_usage_and_growth.md Rev 8.3).
+            # Without this, every chain subprocess starts on an empty model_knowledge_cache,
+            # forcing a fresh interpretation.per_model LLM call per model per iter.
+            restored_model_knowledge_cache=state.model_knowledge_cache,
             # Cross-iter negative-feedback carry-over (docs/V8_Gap_Report.md Domain 1)
             accumulated_physical_rejections=state.accumulated_physical_rejections,
             accumulated_gate_exhaustions=state.accumulated_gate_exhaustions,

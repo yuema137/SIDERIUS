@@ -743,6 +743,181 @@ class TestRestorePriorStateKnowledgeCarryOver:
 
 
 # ===========================================================================
+# Cross-iter knowledge-cache persistence (Commit 6.1.a — Rev 8.3)
+# See docs/audit_and_optimize_token_usage_and_growth.md Rev 8.3 changelog.
+# ===========================================================================
+
+from core.resume import load_latest_knowledge_cache
+
+
+def _write_interp_digest_with_cache(
+    workspace,
+    iter_idx: int,
+    *,
+    model_knowledge_cache: dict | None = None,
+    runtime_vocab: list | None = None,
+    key_findings: list[str] | None = None,
+):
+    """Like _write_interp_digest but adds the model_knowledge_cache field.
+
+    Older digests (written before Commit 6.1.a) lack the key entirely; this
+    helper supports both regimes — pass ``model_knowledge_cache=None`` to
+    omit the field, or a dict to include it.
+    """
+    path = workspace / _interpretation_path("", iter_idx).lstrip(os.sep)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "runtime_vocab": runtime_vocab or [],
+        "key_findings":  key_findings or [],
+    }
+    if model_knowledge_cache is not None:
+        payload["model_knowledge_cache"] = model_knowledge_cache
+    path.write_text(json.dumps(payload))
+    return path
+
+
+def _cache_entry(score: float, n_rounds: int = 5) -> dict:
+    """Minimal shape for a model_knowledge_cache value — only fields a
+    consumer might check are populated."""
+    return {
+        "key_findings": [f"summary at score {score}"],
+        "best_config_analysis": "no notable issues",
+        "_stats": {
+            "best_denoising_score": score,
+            "n_rounds_completed": n_rounds,
+        },
+    }
+
+
+class TestLoadLatestKnowledgeCache:
+    """Direct loader tests — parallel to TestLoadLatestKnowledge."""
+
+    def test_iter1_returns_empty_dict(self, tmp_path):
+        """current_iter <= 1 short-circuits; no disk read attempted."""
+        cache = load_latest_knowledge_cache(str(tmp_path), 1, [])
+        assert cache == {}
+
+    def test_empty_committed_iters_returns_empty(self, tmp_path):
+        cache = load_latest_knowledge_cache(str(tmp_path), 5, [])
+        assert cache == {}
+
+    def test_picks_latest_cache(self, tmp_path):
+        """3-iter chain: iter_003's cache wins (latest-wins, NOT union)."""
+        _write_interp_digest_with_cache(
+            tmp_path, 1, model_knowledge_cache={"a": _cache_entry(0.5)},
+        )
+        _write_interp_digest_with_cache(
+            tmp_path, 2, model_knowledge_cache={"b": _cache_entry(0.6)},
+        )
+        _write_interp_digest_with_cache(
+            tmp_path, 3, model_knowledge_cache={"c": _cache_entry(0.7)},
+        )
+        cache = load_latest_knowledge_cache(str(tmp_path), 4, [1, 2, 3])
+        assert sorted(cache.keys()) == ["c"]
+        # No leakage from older iters (proves latest-wins, not union).
+        assert "a" not in cache and "b" not in cache
+
+    def test_legacy_digest_without_cache_key_skipped(self, tmp_path):
+        """Pre-Commit-6.1.a digests have no model_knowledge_cache key — the
+        loader must leave the running cache untouched and continue."""
+        _write_interp_digest_with_cache(
+            tmp_path, 1, model_knowledge_cache={"early": _cache_entry(0.5)},
+        )
+        # iter_002 digest exists but lacks the cache key (legacy shape).
+        _write_interp_digest_with_cache(
+            tmp_path, 2, model_knowledge_cache=None,
+        )
+        cache = load_latest_knowledge_cache(str(tmp_path), 3, [1, 2])
+        # iter_001's cache must survive — iter_002's missing key is treated
+        # as "no update", not "explicit empty".
+        assert sorted(cache.keys()) == ["early"]
+
+    def test_explicit_empty_overwrites(self, tmp_path):
+        """An on-disk empty dict IS a valid latest snapshot (operator may have
+        evicted everything via _cap_knowledge_cache). Distinguished from a
+        missing key per the loader docstring."""
+        _write_interp_digest_with_cache(
+            tmp_path, 1, model_knowledge_cache={"early": _cache_entry(0.5)},
+        )
+        _write_interp_digest_with_cache(
+            tmp_path, 2, model_knowledge_cache={},
+        )
+        cache = load_latest_knowledge_cache(str(tmp_path), 3, [1, 2])
+        assert cache == {}
+
+    def test_skips_missing_digest_with_warning(self, tmp_path):
+        """Iter committed but interp digest missing → warn + continue."""
+        _write_interp_digest_with_cache(
+            tmp_path, 1, model_knowledge_cache={"a": _cache_entry(0.5)},
+        )
+        # iter_002 has no digest written.
+        with pytest.warns(UserWarning, match="iter 002.*digest not found"):
+            cache = load_latest_knowledge_cache(str(tmp_path), 3, [1, 2])
+        # iter_001's cache still survives.
+        assert sorted(cache.keys()) == ["a"]
+
+    def test_skips_malformed_json_with_warning(self, tmp_path):
+        """Malformed digest → warn + continue with the rest."""
+        _write_interp_digest_with_cache(
+            tmp_path, 1, model_knowledge_cache={"a": _cache_entry(0.5)},
+        )
+        # Write a corrupt iter_002 digest manually.
+        bad_path = tmp_path / _interpretation_path("", 2).lstrip(os.sep)
+        bad_path.parent.mkdir(parents=True, exist_ok=True)
+        bad_path.write_text("{not valid json")
+        with pytest.warns(UserWarning, match="iter 002.*cannot read"):
+            cache = load_latest_knowledge_cache(str(tmp_path), 3, [1, 2])
+        assert sorted(cache.keys()) == ["a"]
+
+    def test_returns_defensive_copy(self, tmp_path):
+        """Mutating the returned dict must not alter on-disk state if
+        re-read. Defends against caller-side mutation leaking back."""
+        _write_interp_digest_with_cache(
+            tmp_path, 1, model_knowledge_cache={"a": _cache_entry(0.5)},
+        )
+        cache_a = load_latest_knowledge_cache(str(tmp_path), 2, [1])
+        cache_a["mutated"] = {"sentinel": True}
+        cache_b = load_latest_knowledge_cache(str(tmp_path), 2, [1])
+        assert "mutated" not in cache_b
+
+
+class TestRestorePriorStateKnowledgeCacheCarryOver:
+    """Full-stack: restore_prior_state populates RestoredState.model_knowledge_cache."""
+
+    def test_iter1_leaves_cache_empty(self, tmp_path, isolated_registries):
+        state = restore_prior_state(str(tmp_path), 1, [])
+        assert state.model_knowledge_cache == {}
+
+    def test_populates_cache_from_latest_iter(self, tmp_path, isolated_registries):
+        """2-iter chain: state.model_knowledge_cache reflects iter_002's
+        cache verbatim — the field a fresh chain subprocess reads to seed
+        its in-iter cache before the per_model loop runs."""
+        _materialise_iter(tmp_path, 1, "resume_cache_arch_a", 0.71)
+        _materialise_iter(tmp_path, 2, "resume_cache_arch_b", 0.78)
+        _write_interp_digest_with_cache(
+            tmp_path, 1,
+            model_knowledge_cache={"resume_cache_arch_a": _cache_entry(0.71)},
+        )
+        _write_interp_digest_with_cache(
+            tmp_path, 2,
+            model_knowledge_cache={
+                "resume_cache_arch_a": _cache_entry(0.71),
+                "resume_cache_arch_b": _cache_entry(0.78),
+            },
+        )
+        state = restore_prior_state(str(tmp_path), 3, [])
+        assert state.committed_iters == [1, 2]
+        assert sorted(state.model_knowledge_cache.keys()) == [
+            "resume_cache_arch_a", "resume_cache_arch_b",
+        ]
+        # iter_002's entry for arch_b is the latest; spot-check round-trip.
+        assert (
+            state.model_knowledge_cache["resume_cache_arch_b"]["_stats"]["best_denoising_score"]
+            == 0.78
+        )
+
+
+# ===========================================================================
 # Cross-iter negative-feedback persistence (V8 Domain 1)
 # See docs/V8_Gap_Report.md.
 # ===========================================================================
