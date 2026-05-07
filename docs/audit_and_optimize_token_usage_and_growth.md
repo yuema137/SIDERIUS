@@ -1,6 +1,6 @@
 # Audit & Optimize Token Usage and Growth
 
-**Status**: Design draft, revision 8.4 (2026-05-06) — "4-Stage Pseudo-Mode & Cleanup Roadmap". G0 approved; G1 baseline LANDED; Phase 1 CLOSED. Commit 4.3.2 closed with H1 verdict; Commit 4.3.3 (11th audit key) merged. **Phase 2 in progress.** Commit 6.3 promoted from "Source-Level Merge & Prune" (Rev 8) to **Knowledge Accumulator Refactor** after a code audit (2026-05-05) revealed the cache is currently a *frozen snapshot* (`nodes/result_interpretation_agent.py:687-693` — cache hit copies verbatim, no merging path), not a cumulative ledger. The Rev 8 spec assumed accumulation across iters; the code provides none. Rev 8.2 reframes 6.3 as a two-part refactor: (i) modify the cache update path so a cache hit performs a *light merge* against new findings, and (ii) reconcile the 8 existing LLM text fields (`key_findings, bottlenecks, best_config_analysis, score_trend, per_file_analysis, data_sensitivity, efficiency_assessment, strategy_assessment`) with the consolidated schema. **Sequencing**: Commit 6.1 (Stability Filter + Synthesis Window) ships first to clamp the call-multiplication bleed; 6.3 follows with the schema heart-transplant. Phase 2 entry point is Commit 6.1. **Rev 8.4** splits the legacy-runner cleanup work into a four-stage roadmap (Commits 4.3.4 → 4.4 → 4.5 → 4.6): Stage 1 retires `run_exploration_adaptive.py`; Stage 2 builds stateless `StubLLMBridge` + `StubSandbox`; Stage 3 wires `--is_pseudo_llm`/`--is_pseudo_training` CLI flags + a 0-cost smoke; Stage 4 closes Gap #3 with a manifest-based consecutive-iter brake. Map first, march second.
+**Status**: Design draft, revision 8.4 (2026-05-06). G0 approved; G1 baseline LANDED; **Phase 1 cleanup IN PROGRESS (Stage 1 LANDED)**. **Phase 2 memory infrastructure landed, surgery pending Stage 3 validation.** See Revision 8.2 / 8.3 / 8.4 changelog blocks below for the rationale behind Commit 6.3's promotion to a Knowledge Accumulator refactor and the four-stage pseudo-mode / cleanup roadmap (Commits 4.3.4 → 4.4 → 4.5 → 4.6). Map first, march second.
 **Author**: drafted 2026-05-04, revised 2026-05-04 (rev 2 — safety/forensic/retention gates), revised 2026-05-04 (rev 3 — commit ledger + hybrid DRR + fail-fast formalization), revised 2026-05-05 (rev 4 — T1-Sanity green + Commit 4.3.1 chain-wrapper parity + V12 launch), revised 2026-05-05 (rev 5 — V12 iter 1–13 calibration + Phase 2 priority pivot), revised 2026-05-05 (rev 6 — Targeted O(N) Dehydration + USD tracking + Phase 3 split), revised 2026-05-05 (rev 7 — V12 iter 14 multi-dimensional explosion: Stability Filter, Knowledge Consolidation, Attribution Audit), revised 2026-05-05 (rev 8 — H1 verdict on 4.3.2 leak + Commit 4.3.3 11th audit key + Commit 6.3 escalated to source-level cache dehydration), revised 2026-05-05 (rev 8.1 — Gate G3.5 SOTA Replication + Metric #12 SRR + Commit 11.2 verify_sota_replication.py), revised 2026-05-05 (rev 8.2 — code audit confirms frozen-cache discrepancy; Commit 6.3 promoted to Knowledge Accumulator refactor; Phase 2 entry sequenced as 6.1 → 6.3), revised 2026-05-05 (rev 8.3 — subprocess-amnesia fix: NEW Commit 6.1.a Knowledge Restoration; NEW Commit 4.3.4 Legacy Runner Deletion), revised 2026-05-06 (rev 8.4 — 4-Stage Pseudo-Mode & Cleanup Roadmap: 4.3.4 split into Stage 1, plus NEW Stage 2 / 3 / 4 commits 4.4 / 4.5 / 4.6 — stateless stubs, CLI flags + 0-cost smoke, manifest-based consecutive-iter brake closing Gap #3).
 **Inputs**:
 
@@ -1403,15 +1403,15 @@ Each step is annotated `(Commit N)` matching the §8 commit ledger. Within a com
 
 ## 6. Open Questions for Reviewer
 
-1. **Structural-vs-Semantic DRR — long-term direction**: revision 3 keeps both `DRR_Structural` (AST/regex) and `DRR_LLM` (semantic judge) as a hybrid. Three options going forward:
+1. **Structural-vs-Semantic DRR — long-term direction** — **✓ Resolved (2026-05-06)**: keep both `DRR_Structural` (AST/regex) and `DRR_LLM` (semantic judge) for the **initial calibration chain run**; decide between (b) promote-Structural / (c) richer AST-diffing skill **after** the gap distribution has been observed on real V13 data. Original options retained below for future reference if (b) or (c) is reopened:
    - (a) Keep both forever. Cost: every metrics run is two passes; gap is informative but redundant once calibrated.
    - (b) Promote `DRR_Structural` to canonical, demote `DRR_LLM` to spot-check (e.g. run only when gap > 0.25 was observed in the previous run). Cost: depends on a working AST matcher across all proposer claim types.
    - (c) Build a richer **AST-diffing skill** (`agent/skills/ast_diff_skill.py`) that emits typed deltas (`ConvLayerAdded(channels=64, kernel=3)`, `LSTMReplacedByGRU`, etc.). The proposer's `delta_reasoning` claims are then matched in a typed namespace, not regex. Higher upfront cost; eliminates LLM-judge dependency entirely.
-   - **Recommendation: (a) for the first chain run, then decide based on the gap distribution.** If the gap is consistently small, move to (b); if claim shapes are too varied for AST matching, defer (c) as a later refactor. Marked here as an explicit open question because option (c) is significant engineering and warrants its own design doc if pursued.
+   - **Decision: (a) for the first chain run, then decide based on the gap distribution.** If the gap is consistently small, move to (b); if claim shapes are too varied for AST matching, defer (c) as a later refactor. Option (c) remains a candidate for its own design doc if pursued.
 
 2. **Sliding-window default (`K`)**: I propose `older_attempts` ≤ 8 entries. Too aggressive? Too lax? An iter-30 run has 27 older attempts; we need to pick which are kept (latest 8? top-8 by score? mixed?).
-3. **`recent_gate_exhaustions` overlap**: this field is already bounded to 3. Does it stay as a separate field, or fold into `confirmed_lessons` of the ledger? Folding is cleaner; keeping is safer for the gate-exhaustion-specific telemetry already being read elsewhere. Phase 1 measurements should answer whether the field is still load-bearing.
-4. **Pricing tier coverage in the bridge**: should `_record_usage` also record an estimated dollar cost per row, or is that a downstream report-builder concern? I lean toward the latter — pricing tiers change; the row should stay raw.
+3. **`recent_gate_exhaustions` overlap** — **✓ Resolved (2026-05-06)**: **fold into the Ledger** as part of Commit 6.3 (Knowledge Accumulator Refactor) so the proposer reads a single unified schema rather than juggling parallel `recent_gate_exhaustions` + `confirmed_lessons` fields. Backwards-compat surface (any caller still reading `recent_gate_exhaustions` directly) is enumerated and migrated in 6.3's Pre-Commit Checklist.
+4. **Pricing tier coverage in the bridge** — **✓ Resolved (2026-05-06)**: cost logic stays **out of the Bridge**. `_record_usage` keeps writing raw `prompt_tokens` / `completion_tokens` only. Dollar-cost estimation is a **report-builder concern** (e.g. `scripts/build_token_baseline_report.py`) — pricing tiers change over time and a stale price baked into a 2026-05 row would silently misrepresent a 2027 re-read. Keep the row raw; let the report layer apply current pricing at render time.
 5. **Validator + implementor LLM calls**: are these in scope for Phase 1 telemetry? They emit smaller prompts but they fire many times during repair loops. Recommend yes; cheap to label.
 6. **Backwards compat window for the legacy fields**: do we keep `previous_failures: List[str]` as a deprecated field for one release, or remove on land? A V11 forensic re-run might want to read old proposal_iter_*.json files — schema removal would break that.
 
@@ -1936,7 +1936,7 @@ These two hypotheses have different downstream consequences. **(H1) requires a c
 
 ---
 
-### Commit 4.3.4 — Stage 1: Cleanup & Baseline Correction — retire `run_exploration_adaptive.py` (Rev 8.3; restated under Rev 8.4 as Stage 1 of the 4-stage roadmap)
+### Commit 4.3.4 — Stage 1: Cleanup & Baseline Correction — retire `run_exploration_adaptive.py` (Rev 8.3; restated under Rev 8.4 as Stage 1 of the 4-stage roadmap) — ✓ LANDED (PR #72, 2026-05-06)
 
 > **Rev 8.4 framing (2026-05-06)**: this commit is **Stage 1 of 4** in the legacy-runner / pseudo-mode roadmap. Stage 1's job is to retire the legacy in-process runner and bring the touched test directories back to green — nothing more. Stages 2 / 3 / 4 (Commits 4.4 / 4.5 / 4.6 below) build the stateless stubs, wire CLI flags, and close Gap #3 respectively. Stage 1's existing scope is unchanged from Rev 8.3; the rename is purely structural so the four stages share a contiguous home in §8.
 
@@ -2188,7 +2188,7 @@ In the chain world today:
 
 ---
 
-### Commit 5: V12 baseline run + Top-3 Bloat Report (Gate G1)
+### Commit 5: V12 baseline run + Top-3 Bloat Report (Gate G1) — ✓ LANDED (PR #69, 2026-05-05)
 
 **Phase**: 1.
 **§5 steps**: 10, 11.
@@ -2261,7 +2261,7 @@ The original Commits 6-12 still apply but at lower priority. Commit 11.1 (Templa
 
 ---
 
-### Commit 6.1.a: Knowledge Restoration — carry `model_knowledge_cache` across chain iters (Rev 8.3 — Critical Priority, precondition for 6.1)
+### Commit 6.1.a: Knowledge Restoration — carry `model_knowledge_cache` across chain iters (Rev 8.3 — Critical Priority, precondition for 6.1) — ✓ LANDED (PR #70, 2026-05-06)
 
 **Phase**: 2 (precondition for Commit 6.1; lands first).
 **§5 step**: 11.5 (new — between Commit 5 baseline and 12a Commit 6.1).
@@ -2310,7 +2310,7 @@ The original Commits 6-12 still apply but at lower priority. Commit 11.1 (Templa
 
 ---
 
-### Commit 6.1: Interpretation Call-on-Demand — Sliding Window + Stability Filter (Rev 7 — Critical Priority, expanded; Rev 8.3 — gated on 6.1.a)
+### Commit 6.1: Interpretation Call-on-Demand — Sliding Window + Stability Filter (Rev 7 — Critical Priority, expanded; Rev 8.3 — gated on 6.1.a) — ✓ LANDED (PR #70, 2026-05-06; **production validation pending Stage 3 smoke**)
 
 **Phase**: 2 (gated on Commit 4.3.2 closing AND Commit 6.1.a landing).
 **§5 step**: 12a.
@@ -2788,10 +2788,10 @@ If any size target is exceeded, the policy is too lenient — tighten the per-fi
 ```
 Phase 1 (Telemetry — CLOSED + 4-Stage cleanup)   Phase 2 (Targeted O(N) Dehydration)              Phase 3 (Optional)
  ┌────────────────────────────────────────┐       ┌─────────────────────────────────────┐          ┌─────────────────┐
- │ C1 capture                             │       │ C6.1 Interp Call-on-Demand          │ ★★ CRIT  │ C11.1 Template  │
+ │ C1 capture                             │       │ C6.1 Interp Call-on-Demand          │ ✓ LANDED │ C11.1 Template  │
  │ C2 setter+fail                         │       │      sliding-window (synthesis)     │          │       Dehydration│
  │ C3 audit+labels                        │       │      + Stability Filter             │          │   (21% fixed)   │
- │ C4 plumbing                            │       │      (per_model call clamp)         │          │   opportunistic │
+ │ C4 plumbing                            │       │      (per_model clamp; 6.1.a ✓)     │          │   opportunistic │
  │ C4.3.2 ATTRIBUTION ✓ CLOSED            │       │ C6.3 Source-Level Cache Drain       │ ★★ CRIT  │   post-G1.5     │
  │   H1 verdict — leak in                 │       │      Merge & Prune over             │          └─────────────────┘
  │   non_candidates_overview              │       │      model_knowledge_cache          │
@@ -2816,7 +2816,7 @@ Phase 1 (Telemetry — CLOSED + 4-Stage cleanup)   Phase 2 (Targeted O(N) Dehydr
                                                   └─────────────────────────────────────┘
 ```
 
-Stages 1 → 4 share the same `Phase 1` column because they are cleanup commits, not surgery on the production prompt path. Stage 1 is substantially complete (S1–S7d done; S8 smoke + S9 commit gate remain). Stages 2 / 3 / 4 specified in this Rev; awaiting "Map approved" sign-off.
+Stages 1 → 4 share the same `Phase 1` column because they are cleanup commits, not surgery on the production prompt path. Stage 1 LANDED via PR #72 (2026-05-06 PDT; S1–S9 all closed, recovery replay merged into master at `c19a090`). Stages 2 / 3 / 4 specified in this Rev; awaiting Stage 2 implementation kickoff.
 
 Gates G1, G1.5, G2, G3, G3.5, G4 are explicit STOP points.
 
