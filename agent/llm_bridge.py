@@ -118,6 +118,33 @@ _KNOWN_PROVIDERS: Dict[str, Dict[str, Optional[str]]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Stub-mode model name synthesiser (Commit 4.4 Stage 2).
+#
+# Single source of truth for the cross-stub `model_name` slug. The
+# StubLLMBridge derives proposer.proposing / implementor.code / tuner.planner
+# model_name fields from this helper so all three label outputs agree on
+# the slug — which becomes the plugin filename
+# (`agent_generated/models/{model_name}.py`) and the training target.
+#
+# Format: ``stub_arch_{iter:03d}_{slot}``. Deterministic, collision-free
+# across iters and slots, and lands within Python's identifier rules so
+# `importlib` accepts it as a module name without escaping.
+# ---------------------------------------------------------------------------
+def _synth_stub_model_name(iter_idx: int, slot: str) -> str:
+    """Return the canonical stub-mode plugin slug for ``(iter_idx, slot)``.
+
+    Args:
+        iter_idx: Iteration index (≥ 0). Zero-padded to 3 digits.
+        slot:     Per-iter sub-id distinguishing models proposed within
+                  the same iter (e.g. ``"a"``, ``"b"``).
+
+    Returns:
+        Slug of shape ``stub_arch_{iter:03d}_{slot}``.
+    """
+    return f"stub_arch_{iter_idx:03d}_{slot}"
+
+
 class LLMBridge:
     """
     Universal API gateway for all LLM calls in SIDERIUS.
