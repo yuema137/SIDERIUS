@@ -133,6 +133,7 @@ class TestArgparseSurface:
     def _minimal_argv(self, *extra):
         return [
             "--workspace", "/tmp/ws",
+            "--run_name", "iter_001",
             "--seed_paths", "/tmp/seed.json",
             *extra,
         ]
@@ -188,7 +189,8 @@ class TestArgparseSurface:
     def test_seed_paths_is_required(self, capsys):
         """Omitting BOTH --seed_paths and --source_paths is an error."""
         args = runner.build_parser().parse_args(
-            ["--workspace", "/tmp/ws", "--start_iteration", "1"])
+            ["--workspace", "/tmp/ws", "--run_name", "iter_001",
+             "--start_iteration", "1"])
         with pytest.raises(SystemExit):
             runner.normalize_args(args)
         err = capsys.readouterr().err
@@ -198,6 +200,7 @@ class TestArgparseSurface:
         """--source_paths still resolves to args.seed_paths and emits one DeprecationWarning."""
         args = runner.build_parser().parse_args([
             "--workspace", "/tmp/ws",
+            "--run_name", "iter_001",
             "--start_iteration", "1",
             "--source_paths", "/tmp/seed.json",
         ])
@@ -213,6 +216,7 @@ class TestArgparseSurface:
     def test_seed_paths_and_source_paths_both_supplied_is_an_error(self, capsys):
         args = runner.build_parser().parse_args([
             "--workspace", "/tmp/ws",
+            "--run_name", "iter_001",
             "--start_iteration", "1",
             "--seed_paths", "/tmp/a.json",
             "--source_paths", "/tmp/b.json",
@@ -291,7 +295,23 @@ class _StubResult:
 
 
 def _run_main(argv):
-    """Invoke runner.main() under SystemExit catch + return the captured args."""
+    """Invoke runner.main() under SystemExit catch + return the captured args.
+
+    Injects ``--run_name iter_NNN`` (matching ``--start_iteration N`` /
+    ``--iteration N``) when the caller didn't supply one. The chain
+    runner now requires ``--run_name``; the production chain shell
+    always supplies it. These unit tests target the runner's argparse
+    + wiring layer in isolation, so we synthesise the same shell-side
+    convention here rather than baking ``--run_name`` into every
+    hand-crafted argv list.
+    """
+    if "--run_name" not in argv:
+        iter_n = 1
+        for flag in ("--start_iteration", "--iteration"):
+            if flag in argv:
+                iter_n = int(argv[argv.index(flag) + 1])
+                break
+        argv = ["--run_name", f"iter_{iter_n:03d}", *argv]
     with patch.object(sys, "argv", ["run_one_iteration.py", *argv]):
         try:
             runner.main()

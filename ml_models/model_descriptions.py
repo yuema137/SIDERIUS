@@ -6,11 +6,10 @@ Each built-in model has a description.md in ml_models/{model_type}/description.m
 Agent-generated plugins get their description.md mirrored into the chain
 workspace by ``workflows.model_exploration._register_plugin`` at the path
 ``{workspace}/plugins/{run_name}/{model_type}/description.md``. The chain
-entry scripts (``sdsc_submission_scripts/run_one_iteration.py``,
-``run_exploration_adaptive.py``) and the in-process workflow entry
-(``workflows.model_exploration.run_workflow``) set ``SIDERIUS_CHAIN_WORKSPACE``
-to that workspace root, and this loader picks up the plugin descriptions
-from the chain tree on later iterations.
+entry script (``sdsc_submission_scripts/run_one_iteration.py``) and the
+in-process workflow entry (``workflows.model_exploration.run_workflow``)
+set ``SIDERIUS_CHAIN_WORKSPACE`` to that workspace root, and this loader
+picks up the plugin descriptions from the chain tree on later iterations.
 
 Descriptions are written in markdown with math and are injected into LLM prompts
 by the interpretation and proposal agents.

@@ -639,9 +639,11 @@ def run_workflow(
     # ``{workspace}/token_usage.jsonl``. When either is None, the bind is
     # skipped — bridges keep their default no-op behaviour and no audit
     # rows are written. Legacy / pseudo-mode tests pass None; the
-    # production runner (``run_exploration_adaptive.py``) generates a
-    # ``run_id`` once at startup and threads both through. See §1.4.1 for
-    # the immutability + forward-only contract enforced by the bridge.
+    # production runner (``sdsc_submission_scripts/run_one_iteration.py``
+    # via ``run_chain.sh``) generates a ``run_id`` once at startup (or
+    # restores it from the ``{workspace}/.token_run_id`` sidecar on iter
+    # ≥ 2) and threads both through. See §1.4.1 for the immutability +
+    # forward-only contract enforced by the bridge.
     chain_run_name: str | None = None,
     run_id: str | None = None,
 ) -> list[HyperparamTuningOutput]:
@@ -721,9 +723,9 @@ def run_workflow(
     # callers (e.g. integration smoke tests, ad-hoc workflow invocations).
     # ml_models.model_descriptions.get_model_description reads this env var
     # to walk {workspace}/plugins/*/{model_type}/description.md and resolve
-    # agent-generated plugin descriptions on iter > 1. Chain entry scripts
-    # (run_one_iteration.py, run_exploration_adaptive.py) set it earlier;
-    # only override here when unset so chain mode keeps precedence.
+    # agent-generated plugin descriptions on iter > 1. The chain entry
+    # script (run_one_iteration.py) sets it earlier; only override here
+    # when unset so chain mode keeps precedence.
     os.environ.setdefault("SIDERIUS_CHAIN_WORKSPACE", os.path.abspath(workspace))
 
     print(f"\n{'='*60}")

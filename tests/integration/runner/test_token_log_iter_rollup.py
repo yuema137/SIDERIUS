@@ -1,29 +1,32 @@
 """Integration tests for Phase 1 Commit 4 — runner integration & rollup.
 
 Per §8 Commit 4 of ``docs/audit_and_optimize_token_usage_and_growth.md``,
-this file exercises three contracts:
+this file exercises two contracts owned by the chain runner:
 
-1. **Run-ID format** — ``_generate_run_id`` produces the documented
-   ``{run_name}-{utc_ts}-{pid}`` shape (§1.4.1). The string is the
-   immutable owner of ``token_usage.jsonl`` for the chain's lifetime,
-   so its shape is part of the public contract — the v12 baseline
-   report parses it.
-2. **Per-iter rollup** — ``_emit_token_iter_rollup`` reads a real-shape
+1. **Per-iter rollup** — ``_emit_token_iter_rollup`` reads a real-shape
    ``token_usage.jsonl``, filters rows by ``iter``, groups totals by
-   ``label`` prefix, prints one ``[TOKEN_ITER]`` line, and carries the
-   cumulative total across calls (§1.6).
-3. **Subprocess fail-fast** — when a chain runner is pointed at a
+   ``label`` prefix, prints one ``[TOKEN_ITER]`` line, and **recomputes**
+   the cumulative seed from the file itself (because each chain iter is
+   a fresh subprocess with no in-memory carry — §1.6).
+2. **Subprocess fail-fast** — when a chain runner is pointed at a
    workspace whose ``token_usage.jsonl`` is owned by a *different*
    ``run_id``, the bridge's first-row check (§1.4.1) raises
    :class:`LLMBridgeContextError`, the runner's top-level handler
    translates it into ``sys.exit(2)``, and ``[FATAL]`` lands on
    stderr (§1.4.2). Q4 confirmed: real subprocess, not monkey-patch.
+
+Pre-Commit 4.3.4 this file also exercised the run-id format
+contract via the legacy in-process runner's ``_generate_run_id``.
+That runner was retired in Commit 4.3.4; the chain runner uses
+``_resolve_chain_run_id`` (sidecar-backed) and the same
+``{run_name}-{utc_ts}-{pid}`` format is now pinned by
+``tests/unit/scripts/test_chain_run_id_sidecar.py::test_fresh_workspace_generates_id_with_expected_shape``.
+The format-contract block was therefore removed here, not duplicated.
 """
 from __future__ import annotations
 
 import io
 import json
-import re
 import subprocess
 import sys
 from contextlib import redirect_stdout
@@ -31,36 +34,11 @@ from pathlib import Path
 
 import pytest
 
-from run_exploration_adaptive import (
-    _emit_token_iter_rollup,
-    _generate_run_id,
-)
+from sdsc_submission_scripts.run_one_iteration import _emit_token_iter_rollup
 
 
 # ---------------------------------------------------------------------------
-# 1. Run-ID format
-# ---------------------------------------------------------------------------
-
-def test_generate_run_id_matches_documented_format():
-    """``{run_name}-{utc_ts}-{pid}`` with utc_ts as YYYYMMDDTHHMMSS."""
-    rid = _generate_run_id("explore_v12_0504")
-    # The pid is the *current* process id — match any positive integer.
-    assert re.match(r"^explore_v12_0504-\d{8}T\d{6}-\d+$", rid), rid
-
-
-def test_generate_run_id_different_run_names_produce_distinct_ids():
-    """Two different run names produce two different run_ids."""
-    a = _generate_run_id("foo")
-    b = _generate_run_id("bar")
-    # Even when called within the same UTC second, the run_name prefix
-    # differs, so the strings cannot collide.
-    assert a != b
-    assert a.startswith("foo-")
-    assert b.startswith("bar-")
-
-
-# ---------------------------------------------------------------------------
-# 2. Per-iter rollup emission
+# 1. Per-iter rollup emission
 # ---------------------------------------------------------------------------
 
 def _seed_jsonl(path: Path, rows: list[dict]) -> None:
@@ -87,7 +65,7 @@ def test_emit_rollup_aggregates_by_node_prefix(tmp_path):
     buf = io.StringIO()
     with redirect_stdout(buf):
         new_total = _emit_token_iter_rollup(
-            workspace=str(tmp_path), iteration=1, cumulative_total_in=0,
+            workspace=str(tmp_path), iteration=1,
         )
     out = buf.getvalue()
 
@@ -103,15 +81,25 @@ def test_emit_rollup_aggregates_by_node_prefix(tmp_path):
 
 
 def test_emit_rollup_handles_missing_file(tmp_path):
-    """No ``token_usage.jsonl`` → no error, cumulative is unchanged."""
+    """No ``token_usage.jsonl`` → no error, returns 0.
+
+    The chain runner recomputes cumulative from the file itself
+    (no in-memory carry across subprocesses), so a missing file
+    is a clean zero — not "preserve the input cumulative".
+    """
     new_total = _emit_token_iter_rollup(
-        workspace=str(tmp_path), iteration=1, cumulative_total_in=42,
+        workspace=str(tmp_path), iteration=1,
     )
-    assert new_total == 42
+    assert new_total == 0
 
 
-def test_emit_rollup_carries_cumulative_across_calls(tmp_path):
-    """Two iters → cumulative tracks the running sum."""
+def test_emit_rollup_recomputes_cumulative_from_prior_iters(tmp_path):
+    """Two iters → cumulative is recomputed from prior-iter rows in the file.
+
+    The chain-runner contract: each iter is a fresh subprocess that re-reads
+    ``token_usage.jsonl``. For iter=N, ``cumulative_total = sum(rows where
+    iter < N) + sum(rows where iter == N)`` — no parameter is threaded in.
+    """
     _seed_jsonl(tmp_path / "token_usage.jsonl", [
         {"iter": 1, "label": "proposer.x", "tokens": {"total": 50}},
         {"iter": 2, "label": "proposer.y", "tokens": {"total": 70}},
@@ -119,17 +107,16 @@ def test_emit_rollup_carries_cumulative_across_calls(tmp_path):
     buf = io.StringIO()
     with redirect_stdout(buf):
         after_1 = _emit_token_iter_rollup(
-            workspace=str(tmp_path), iteration=1, cumulative_total_in=1000,
+            workspace=str(tmp_path), iteration=1,
         )
         after_2 = _emit_token_iter_rollup(
-            workspace=str(tmp_path), iteration=2, cumulative_total_in=after_1,
+            workspace=str(tmp_path), iteration=2,
         )
-    assert after_1 == 1050
-    assert after_2 == 1120
+    assert after_1 == 50,  f"iter=1 cumulative should be 50, got {after_1}"
+    assert after_2 == 120, f"iter=2 cumulative should be 50+70=120, got {after_2}"
     out = buf.getvalue()
-    # The two emitted lines must mention each cumulative checkpoint.
-    assert "cumulative_total=1050" in out
-    assert "cumulative_total=1120" in out
+    assert "cumulative_total=50" in out
+    assert "cumulative_total=120" in out
 
 
 def test_emit_rollup_skips_malformed_jsonl_rows(tmp_path):
@@ -144,13 +131,13 @@ def test_emit_rollup_skips_malformed_jsonl_rows(tmp_path):
             {"iter": 1, "label": "proposer.y", "tokens": {"total": 20}}
         ) + "\n")
     new_total = _emit_token_iter_rollup(
-        workspace=str(tmp_path), iteration=1, cumulative_total_in=0,
+        workspace=str(tmp_path), iteration=1,
     )
     assert new_total == 30  # malformed row skipped, both valid ones counted
 
 
 # ---------------------------------------------------------------------------
-# 3. Subprocess negative test — Q4: real subprocess, real exit code
+# 2. Subprocess negative test — Q4: real subprocess, real exit code
 # ---------------------------------------------------------------------------
 
 _HARNESS = Path(__file__).resolve().parent / "_runid_mismatch_harness.py"

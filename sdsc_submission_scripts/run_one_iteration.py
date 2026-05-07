@@ -72,9 +72,7 @@ def _positive_int(s: str) -> int:
 def _portion_floor(s: str) -> float:
     """argparse type validator: a portion in [0.01, 1.0].
 
-    Mirrors ``run_exploration_adaptive._portion_floor`` so the
-    consistency contract in ``tests/unit/scripts/test_chain_consistency.py``
-    holds. The 0.01 floor enforces a segment-integrity rule: with
+    The 0.01 floor enforces a segment-integrity rule: with
     ``SEGMENTS_PER_FILE=200``, anything below 0.01 collapses to one
     segment per file (via the ``max(1, ...)`` floor in
     ``execute_tools.sample_set_builder``), which is statistically too
@@ -108,9 +106,7 @@ def _resolve_chain_run_id(workspace: str, run_name: str) -> str:
     sidecar file at ``{workspace}/.token_run_id`` carries the value
     forward: iter 1 generates and writes it; later iters read it back.
 
-    Format: ``{run_name}-{utc_ts}-{pid}`` — same as
-    ``run_exploration_adaptive._generate_run_id`` so the two runners
-    produce shape-identical IDs.
+    Format: ``{run_name}-{utc_ts}-{pid}``.
     """
     sidecar = os.path.join(workspace, ".token_run_id")
     if os.path.exists(sidecar):
@@ -130,13 +126,10 @@ def _resolve_chain_run_id(workspace: str, run_name: str) -> str:
 def _emit_token_iter_rollup(workspace: str, iteration: int) -> int:
     """Emit one ``[TOKEN_ITER]`` line for the just-finished iteration.
 
-    Chain-runner-adapted port of
-    ``run_exploration_adaptive._emit_token_iter_rollup``: because each
-    iter is a fresh subprocess with no in-memory carry, the cumulative
-    seed is recomputed from ``token_usage.jsonl`` itself by summing rows
-    where ``iter < iteration`` (skipping ``_iter_flush`` markers). The
-    printed rollup mirrors the adaptive runner's format so a chain log
-    grep treats both runners interchangeably.
+    Because each chain iter is a fresh subprocess with no in-memory
+    carry, the cumulative seed is recomputed from ``token_usage.jsonl``
+    itself by summing rows where ``iter < iteration`` (skipping
+    ``_iter_flush`` markers).
     """
     path = os.path.join(workspace, "token_usage.jsonl")
     if not os.path.exists(path):
@@ -521,7 +514,7 @@ def build_parser() -> argparse.ArgumentParser:
              "E.g. '{\"trial_portion\": 0.2, \"train_portion\": 1.0}'. "
              "Keys must be valid ExperimentPlan fields."
     )
-    # --- Flags synced with run_exploration_adaptive.py (Phase 6.8 Commit 11) ---
+    # --- Workflow-level CLI flags (Phase 6.8 Commit 11) ---
     parser.add_argument(
         "--llm_config", type=str, default=None,
         help="Path to a WorkflowLLMConfig JSON file for per-node model routing. "
@@ -672,7 +665,7 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
     if advice_path:
         with open(advice_path) as f:
             advice = json.load(f)
-        # Normalise list-of-lines form (same as run_exploration_adaptive.py)
+        # Normalise list-of-lines form.
         advice = {k: ("\n".join(v) if isinstance(v, list) else v)
                   for k, v in advice.items()}
         # 4-key schema: propose, implement, tune, mindset
@@ -897,8 +890,7 @@ def main():
         # §1.4.2 fail-fast contract. Telemetry-internal corruption (run_id
         # mismatch, backwards iter) means the audit log can no longer be
         # trusted. exit(2) is intentionally distinct from the failure
-        # exit(1) below so a downstream classifier can tell them apart —
-        # mirrors run_exploration_adaptive.py's top-level handler.
+        # exit(1) below so a downstream classifier can tell them apart.
         print(
             f"[FATAL] LLMBridgeContextError: {e} — aborting iteration to "
             f"prevent telemetry corruption.",
