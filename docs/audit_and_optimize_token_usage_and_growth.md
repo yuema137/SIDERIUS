@@ -1936,7 +1936,7 @@ These two hypotheses have different downstream consequences. **(H1) requires a c
 
 ---
 
-### Commit 4.3.4 — Stage 1: Cleanup & Baseline Correction — retire `run_exploration_adaptive.py` (Rev 8.3; restated under Rev 8.4 as Stage 1 of the 4-stage roadmap) — ✓ LANDED (PR #72, 2026-05-07)
+### Commit 4.3.4 — Stage 1: Cleanup & Baseline Correction — retire `run_exploration_adaptive.py` (Rev 8.3; restated under Rev 8.4 as Stage 1 of the 4-stage roadmap) — ✓ LANDED (PR #72, 2026-05-06)
 
 > **Rev 8.4 framing (2026-05-06)**: this commit is **Stage 1 of 4** in the legacy-runner / pseudo-mode roadmap. Stage 1's job is to retire the legacy in-process runner and bring the touched test directories back to green — nothing more. Stages 2 / 3 / 4 (Commits 4.4 / 4.5 / 4.6 below) build the stateless stubs, wire CLI flags, and close Gap #3 respectively. Stage 1's existing scope is unchanged from Rev 8.3; the rename is purely structural so the four stages share a contiguous home in §8.
 
@@ -2816,7 +2816,7 @@ Phase 1 (Telemetry — CLOSED + 4-Stage cleanup)   Phase 2 (Targeted O(N) Dehydr
                                                   └─────────────────────────────────────┘
 ```
 
-Stages 1 → 4 share the same `Phase 1` column because they are cleanup commits, not surgery on the production prompt path. Stage 1 LANDED via PR #72 (2026-05-07; S1–S9 all closed, recovery replay merged into master at `c19a090`). Stages 2 / 3 / 4 specified in this Rev; awaiting Stage 2 implementation kickoff.
+Stages 1 → 4 share the same `Phase 1` column because they are cleanup commits, not surgery on the production prompt path. Stage 1 LANDED via PR #72 (2026-05-06 PDT; S1–S9 all closed, recovery replay merged into master at `c19a090`). Stages 2 / 3 / 4 specified in this Rev; awaiting Stage 2 implementation kickoff.
 
 Gates G1, G1.5, G2, G3, G3.5, G4 are explicit STOP points.
 
