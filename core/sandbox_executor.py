@@ -4,9 +4,10 @@ import re
 import sys
 import json
 import time
+import random
 import subprocess
 import datetime
-from typing import Callable, Dict, Any, Optional
+from typing import Callable, Dict, Any, List, Optional
 from ml_models.models_format_sandbox import get_config_class, TrainConfig, LossConfig, ExperimentConfig, PLUGIN_CONFIG_REGISTRY
 from execute_tools.scoring_utils import coerce_nonfinite_to_none, validate_sample_set
 from execute_tools.data_paths import TIDMAD_DATA_DIR
@@ -732,3 +733,166 @@ class TidmadSandbox:
         except Exception as e:
             print(f"--- Scoring Internal Error ---\n{str(e)}")
             return {"status": "error", "message": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# StubSandbox — synthetic, deterministic sandbox for 0-cost smoke runs
+# ---------------------------------------------------------------------------
+#
+# Subclasses ``TidmadSandbox`` so it inherits the recorder/workspace plumbing
+# and stays a drop-in replacement at the chain orchestration layer. Overrides
+# the four execution methods (``execute_training`` / ``execute_inference`` /
+# ``execute_scoring`` / ``save_record``) to skip every subprocess launch and
+# synthesise pydantic-valid results from a single run-id-seeded RNG.
+#
+# Determinism contract: ``random.Random(self._run_id)`` — passing the string
+# directly uses CPython's stable SHA-512-based seeding path, so the same
+# ``run_id`` yields the same number stream on every fresh interpreter.
+# ``random.Random(hash(run_id))`` would NOT be stable: ``hash()`` on strings
+# is randomized per-process via ``PYTHONHASHSEED``.
+class StubSandbox(TidmadSandbox):
+    """Stateless, deterministic sandbox for pseudo-mode smoke runs.
+
+    The chain orchestration layer (``ml_hyperparameter_tune_agent``) treats
+    a sandbox as a black box that returns ``status: success`` plus a results
+    dict shaped like the production trainer / inference / scorer output.
+    StubSandbox honours that contract without launching any subprocesses,
+    writing any GPU artefacts, or touching the real data directory.
+
+    Per-method synthesis:
+        * ``execute_training``: ``final_loss`` ∈ [0.5, 5.0],
+          ``loss_history`` = [final_loss], ``model_params`` ∈ [1e3, 1e8].
+        * ``execute_inference``: empty per-file timing list, fixed 10 ms
+          ``process_startup_ms`` / ``subprocess_wall_ms``.
+        * ``execute_scoring``: merges cached training results (mirroring the
+          prod merge order in ``TidmadSandbox.execute_scoring``) and adds
+          ``denoising_score`` ∈ [-3.0, -2.0], a length-9 ``file_vector``,
+          ``is_degenerate=False``, ``failure_reason=None``.
+        * ``save_record``: stamps ``_pseudo_origin = "stub_sandbox"`` on the
+          record dict (audit trail to distinguish synthetic smoke results
+          from real measurements), then delegates to the parent recorder
+          for on-disk persistence and mirrors the record into
+          ``self.saved_records`` for unit-test inspection.
+    """
+
+    def __init__(
+        self,
+        metadata_source: str = "local",
+        mongodb_uri: Optional[str] = None,
+        run_name: str = "test_run",
+        workspace: str = "./siderius_workspace",
+        progress_bar: bool = False,
+        file_index: int = 6,
+        run_id: Optional[str] = None,
+    ):
+        super().__init__(
+            metadata_source=metadata_source,
+            mongodb_uri=mongodb_uri,
+            run_name=run_name,
+            workspace=workspace,
+            progress_bar=progress_bar,
+            file_index=file_index,
+        )
+        self._run_id: str = run_id or run_name
+        self._rng = random.Random(self._run_id)
+        self.saved_records: List[Dict[str, Any]] = []
+        # Cache training results so ``execute_scoring`` can merge them like
+        # prod does (the prod path reads ``experiment_results_*.json`` from
+        # disk; the stub keeps an in-memory analogue keyed by ``exp_id``).
+        self._train_results_cache: Dict[str, Dict[str, Any]] = {}
+
+    def set_run_context(self, run_id: str) -> None:
+        """Re-seed the RNG with a new run_id.
+
+        Mirrors ``StubLLMBridge.set_run_context`` so the chain runner can
+        bind both the bridge and the sandbox to the same ``run_id`` and get
+        consistent synthetic outputs across the two layers.
+        """
+        self._run_id = run_id
+        self._rng = random.Random(self._run_id)
+
+    def execute_training(
+        self,
+        exp_id: str,
+        run_name: str,
+        model_type: str,
+        m_cfg: Dict,
+        t_cfg: Dict,
+        l_cfg: Dict,
+        sample_set: Optional[Dict] = None,
+        train_portion: Optional[float] = None,
+        train_base_seed: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Synthesise a successful training result. No subprocess launch."""
+        final_loss = self._rng.uniform(0.5, 5.0)
+        results = {
+            "final_loss": final_loss,
+            "loss_history": [final_loss],
+            "model_params": self._rng.randint(1_000, 100_000_000),
+        }
+        self._train_results_cache[exp_id] = results
+        return {
+            "status": "success",
+            "message": "stub_training_ok",
+            "results": results,
+        }
+
+    def execute_inference(
+        self,
+        exp_id: str,
+        run_name: str,
+        model_type: str,
+        m_cfg: Dict,
+        l_cfg: Dict,
+        sample_set: Optional[Dict] = None,
+        inference_batch: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Synthesise a successful inference result. No subprocess launch."""
+        return {
+            "status": "success",
+            "message": "stub_inference_ok",
+            "per_file_timings_ms": [],
+            "process_startup_ms": 10.0,
+            "subprocess_wall_ms": 10.0,
+        }
+
+    def execute_scoring(
+        self,
+        exp_id: str,
+        run_name: str,
+        model_type: str,
+        m_cfg: Dict,
+        t_cfg: Dict,
+        l_cfg: Dict,
+    ) -> Dict[str, Any]:
+        """Synthesise scoring + merge cached training results.
+
+        Mirrors the prod merge order in ``TidmadSandbox.execute_scoring``:
+        training keys first, then scoring keys (so ``final_loss`` /
+        ``loss_history`` / ``model_params`` from the cached trainer output
+        appear alongside the synthetic ``denoising_score`` etc.).
+        """
+        results: Dict[str, Any] = {}
+        results.update(self._train_results_cache.get(exp_id, {}))
+        results["denoising_score"] = self._rng.uniform(-3.0, -2.0)
+        results["file_vector"] = [
+            self._rng.uniform(-3.0, -2.0) for _ in range(9)
+        ]
+        results["is_degenerate"] = False
+        results["failure_reason"] = None
+        return {"status": "success", "results": results}
+
+    def save_record(self, record: Dict[str, Any]) -> None:
+        """Stamp ``_pseudo_origin`` audit marker, persist via parent, mirror in-memory.
+
+        ``ExperimentRecord`` (Pydantic v2 default) silently ignores extra
+        keys during validation, so the upstream
+        ``ExperimentRecord.model_validate(record)`` call in
+        ``ml_hyperparameter_tune_agent`` accepts the marker. The raw dict
+        (with the marker preserved) is what gets json-dumped on disk by
+        ``LocalRecorder.save_record``, so operators can grep the records
+        directory for synthetic results.
+        """
+        record["_pseudo_origin"] = "stub_sandbox"
+        super().save_record(record)
+        self.saved_records.append(record)
