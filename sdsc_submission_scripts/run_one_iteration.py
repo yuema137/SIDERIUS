@@ -583,6 +583,28 @@ def build_parser() -> argparse.ArgumentParser:
         "--debug_dump_prompts", action="store_true",
         help="Dump rendered proposing-stage prompts to debug/ for audit.",
     )
+    # --- Pseudo-mode flags (Stage 3 / Commit 4.5) ---
+    # When set, the runner swaps the production ``LLMBridge`` /
+    # ``TidmadSandbox`` for stateless ``StubLLMBridge`` / ``StubSandbox``
+    # instances at the top of ``main()``. The chain still exercises the
+    # full propose→implement→validate→tune wiring, but every LLM call
+    # returns canned per-label output at $0 token cost and every training
+    # call returns canned trial/formal scores. Defaults preserve the
+    # production code path bit-for-bit. See
+    # ``docs/audit_and_optimize_token_usage_and_growth.md`` Commit 4.5.
+    parser.add_argument(
+        "--is_pseudo_llm", action="store_true",
+        help="Swap LLMBridge → StubLLMBridge for all 5 agents "
+             "(interpret/propose/implement/validate/tune). Returns canned, "
+             "Pydantic-valid per-label outputs at $0 token cost. Use for "
+             "chain-wiring smoke tests; not for production runs."
+    )
+    parser.add_argument(
+        "--is_pseudo_training", action="store_true",
+        help="Swap TidmadSandbox → StubSandbox in the tuner agent. Skips "
+             "real training and returns canned trial / formal scores. Use "
+             "for chain-wiring smoke tests; not for production runs."
+    )
     return parser
 
 
@@ -691,6 +713,35 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
 
 def main():
     args = normalize_args(build_parser().parse_args())
+
+    # --- Pseudo-mode factory resolution (Stage 3 / Commit 4.5) ---
+    # ``--is_pseudo_llm`` / ``--is_pseudo_training`` request stub
+    # implementations of the LLM bridge and sandbox. We resolve the
+    # factories here (early, before any other setup) and forward them
+    # to ``run_workflow``, which threads them into every agent. ``None``
+    # = production class — see ``workflows.model_exploration.run_workflow``.
+    # The stderr warning is loud-on-purpose: it must be impossible to
+    # mistake a $0-cost smoke run for a real chain when reading logs.
+    bridge_factory = None
+    sandbox_factory = None
+    if args.is_pseudo_llm:
+        from agent.llm_bridge import StubLLMBridge
+        bridge_factory = StubLLMBridge
+    if args.is_pseudo_training:
+        from core.sandbox_executor import StubSandbox
+        sandbox_factory = StubSandbox
+    if args.is_pseudo_llm or args.is_pseudo_training:
+        modes = []
+        if args.is_pseudo_llm:
+            modes.append("LLM")
+        if args.is_pseudo_training:
+            modes.append("training")
+        print(
+            f"[PSEUDO-MODE ACTIVE] {' + '.join(modes)} stub(s) engaged — "
+            f"this run is a $0-cost wiring smoke; outputs are canned and "
+            f"do not reflect real LLM / training behaviour.",
+            file=sys.stderr,
+        )
 
     # Iteration directory: {workspace}/iter_{N:03d}
     run_name = f"iter_{args.start_iteration:03d}"
@@ -885,6 +936,11 @@ def main():
             accumulated_gate_exhaustions=state.accumulated_gate_exhaustions,
             # Cross-iter proposal carry-over — G1 bridge (docs/Consistent_growing_vocab_list.md §10.3.4)
             restored_previous_proposal=state.previous_proposal_data,
+            # Pseudo-mode factories (Stage 3 / Commit 4.5). None preserves the
+            # production code path; non-None swaps the bridge / sandbox class
+            # for every agent constructed inside ``run_workflow``.
+            bridge_factory=bridge_factory,
+            sandbox_factory=sandbox_factory,
         )
     except LLMBridgeContextError as e:
         # §1.4.2 fail-fast contract. Telemetry-internal corruption (run_id
