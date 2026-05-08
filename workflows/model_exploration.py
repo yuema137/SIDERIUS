@@ -65,7 +65,7 @@ import shutil
 import argparse
 import time
 from collections import deque
-from typing import Optional
+from typing import Callable, Optional
 
 # Ensure SIDERIUS root and ml_models/ are importable.
 # ml_models/ uses flat internal imports (e.g. from models_format_sandbox import ...)
@@ -646,6 +646,18 @@ def run_workflow(
     # forward-only contract enforced by the bridge.
     chain_run_name: str | None = None,
     run_id: str | None = None,
+    # --- Pseudo-mode factories (Stage 3, Commit 4.5) ---
+    # Optional class/factory swaps for the LLM bridge and the sandbox.
+    # When None (default), each agent uses its built-in production class
+    # (``LLMBridge`` and ``TidmadSandbox``). The chain runner sets these
+    # to ``StubLLMBridge`` / ``StubSandbox`` when ``--is_pseudo_llm`` /
+    # ``--is_pseudo_training`` are passed, enabling a $0-cost wiring smoke
+    # without touching the agent code paths. ``bridge_factory`` is
+    # threaded into all 5 agents; ``sandbox_factory`` is threaded only
+    # into ``HyperparamTuningAgent`` (the only agent that runs training).
+    # See ``docs/audit_and_optimize_token_usage_and_growth.md`` Commit 4.5.
+    bridge_factory: Optional[Callable] = None,
+    sandbox_factory: Optional[Callable] = None,
 ) -> list[HyperparamTuningOutput]:
     """
     Execute the model exploration workflow for one or more iterations.
@@ -954,6 +966,7 @@ def run_workflow(
         print(f"  [{iteration}] Interpreting experiment results...")
         _interp_agent = ResultInterpretationAgent(
             **llm_config.get("interpret"),
+            bridge_factory=bridge_factory,
         )
         _bind_iter_context(_interp_agent)
         interpretation = _interp_agent.run(interp_input)
@@ -1097,6 +1110,7 @@ def run_workflow(
 
                 _propose_agent = MLModelProposalAgent(
                     **llm_config.get("propose"),
+                    bridge_factory=bridge_factory,
                 )
                 _bind_iter_context(_propose_agent)
                 proposal = _propose_agent.run(propose_input)
@@ -1145,6 +1159,7 @@ def run_workflow(
 
                     _impl_agent = MLModelImplementor(
                         **llm_config.get("implement"),
+                        bridge_factory=bridge_factory,
                     )
                     _bind_iter_context(_impl_agent)
                     impl_output = _impl_agent.run(impl_input)
@@ -1164,6 +1179,7 @@ def run_workflow(
 
                     _valid_agent = MLCodeValidatorAgent(
                         **valid_llm,
+                        bridge_factory=bridge_factory,
                     )
                     _bind_iter_context(_valid_agent)
                     validation = _valid_agent.run(valid_input)
@@ -1270,7 +1286,10 @@ def run_workflow(
         if human_advice_tune is not None:
             tune_input.human_advice = human_advice_tune
 
-        _tune_agent = HyperparamTuningAgent()
+        _tune_agent = HyperparamTuningAgent(
+            bridge_factory=bridge_factory,
+            sandbox_factory=sandbox_factory,
+        )
         _bind_iter_context(_tune_agent)
         tune_output = _tune_agent.run(tune_input)
         iteration_results.append(tune_output)
