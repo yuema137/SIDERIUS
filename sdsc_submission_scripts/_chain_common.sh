@@ -78,6 +78,12 @@ TARGET_FILES=()                     # int list; passed only when non-empty
 SAMPLING_SEED=""                    # empty == omit == Python None
 # §3.2 — Debugging (action=store_true; 1 emits the flag)
 DEBUG_DUMP_PROMPTS=0
+# §3.2 — Pseudo-mode flags (Stage 3 / Commit 4.5; action=store_true on Python side)
+# When set, the Python runner swaps LLMBridge / TidmadSandbox for stateless
+# stubs and prints a [PSEUDO-MODE ACTIVE] banner to stderr. Default 0 = off
+# = production. See docs/audit_and_optimize_token_usage_and_growth.md C4.5.
+IS_PSEUDO_LLM=0
+IS_PSEUDO_TRAINING=0
 
 # --- Unified-orchestrator (run_chain.sh) defaults ---
 # MODE picks the execution backend: lilab (foreground subprocess) or
@@ -168,6 +174,9 @@ parse_chain_args() {
         --sampling_seed)             SAMPLING_SEED="$2"; shift 2 ;;
         # §3.2 — Debugging
         --debug_dump_prompts)        DEBUG_DUMP_PROMPTS=1; shift ;;
+        # Stage 3 / Commit 4.5 — pseudo-mode flags
+        --is_pseudo_llm)             IS_PSEUDO_LLM=1; shift ;;
+        --is_pseudo_training)        IS_PSEUDO_TRAINING=1; shift ;;
         # Slurm-only flags — silently accepted on lilab too (ignored)
         --partition)              PARTITION="$2"; shift 2 ;;
         --time)                   TIME="$2"; shift 2 ;;
@@ -241,6 +250,13 @@ build_app_args() {
     )
     if [ "$DEBUG_DUMP_PROMPTS" -eq 1 ]; then
         APP_ARGS+=(--debug_dump_prompts)
+    fi
+    # Stage 3 / Commit 4.5 — pseudo-mode flags
+    if [ "$IS_PSEUDO_LLM" -eq 1 ]; then
+        APP_ARGS+=(--is_pseudo_llm)
+    fi
+    if [ "$IS_PSEUDO_TRAINING" -eq 1 ]; then
+        APP_ARGS+=(--is_pseudo_training)
     fi
     if [ ${#TARGET_FILES[@]} -gt 0 ]; then
         APP_ARGS+=(--target_files "${TARGET_FILES[@]}")
@@ -334,6 +350,16 @@ print_chain_header() {
         echo "    Debug dump     : ON (--debug_dump_prompts)"
     else
         echo "    Debug dump     : off"
+    fi
+    # Stage 3 / Commit 4.5 — Pseudo-mode (always-print: forensic visibility for dry-runs)
+    if [ "$IS_PSEUDO_LLM" -eq 1 ] || [ "$IS_PSEUDO_TRAINING" -eq 1 ]; then
+        local _llm="off"
+        local _train="off"
+        [ "$IS_PSEUDO_LLM" -eq 1 ] && _llm="ON"
+        [ "$IS_PSEUDO_TRAINING" -eq 1 ] && _train="ON"
+        echo "    Pseudo-mode    : llm=$_llm, training=$_train  (\$0-cost smoke)"
+    else
+        echo "    Pseudo-mode    : off (production)"
     fi
     if [ -n "$TRIAL_TIME_BUDGET_MINUTES" ] || [ -n "$FORMAL_TIME_BUDGET_MINUTES" ]; then
         echo "    Time budgets   : trial=${TRIAL_TIME_BUDGET_MINUTES:-(none)}min, formal=${FORMAL_TIME_BUDGET_MINUTES:-(none)}min"
