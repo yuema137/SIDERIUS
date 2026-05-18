@@ -705,3 +705,84 @@ class TestNoRecordsExit:
         # source_paths = seeds only (no iter_001 output to absorb).
         assert kwargs["source_paths"] == [str(seed)]
         assert kwargs["run_name"] == "iter_002"
+
+
+# ===========================================================================
+# Pseudo-mode factory wiring — Stage 3 / Commit 4.5
+# ===========================================================================
+
+class TestPseudoModeFactoryWiring:
+    """``--is_pseudo_llm`` / ``--is_pseudo_training`` select the correct
+    factory class and forward it to ``run_workflow`` via the
+    ``bridge_factory`` / ``sandbox_factory`` kwargs (landed in C1).
+
+    The four tests cover the four reachable combinations
+    (real/stub × real/stub) so any future refactor that drops a flag
+    or mis-routes a factory fails here, not in production. The
+    ``--is_pseudo_llm`` + ``--is_pseudo_training`` combination
+    additionally asserts the loud ``[PSEUDO-MODE ACTIVE]`` stderr
+    banner so a $0-cost smoke run cannot be mistaken for a real chain.
+    """
+
+    def _seed(self, tmp_path):
+        seed = tmp_path / "seed.json"
+        seed.write_text(json.dumps({
+            "run_name": "seed", "model_type": "punet", "file_index": 6,
+            "status": "completed", "completed_rounds": 1, "total_attempts": 1,
+            "started_at": "x", "finished_at": "y",
+        }))
+        return seed
+
+    def _invoke(self, tmp_path, *extra_flags):
+        seed = self._seed(tmp_path)
+        with patch.object(runner, "run_workflow") as mock_wf, \
+             patch.object(
+                 runner, "write_manifest",
+                 return_value={"status": "completed",
+                               "model_name": "c8_test_arch_a",
+                               "best_score": 0.7,
+                               "output_path": "x"},
+             ):
+            mock_wf.return_value = [_StubResult("c8_test_arch_a")]
+            code = _run_main([
+                "--workspace", str(tmp_path),
+                "--start_iteration", "1",
+                "--seed_paths", str(seed),
+                *extra_flags,
+            ])
+        return code, mock_wf.call_args.kwargs
+
+    def test_default_args_pass_no_factories(self, tmp_path, isolated_registries):
+        code, kwargs = self._invoke(tmp_path)
+        assert code == 0
+        assert kwargs["bridge_factory"] is None
+        assert kwargs["sandbox_factory"] is None
+
+    def test_is_pseudo_llm_swaps_bridge_only(self, tmp_path, isolated_registries):
+        from agent.llm_bridge import StubLLMBridge
+        code, kwargs = self._invoke(tmp_path, "--is_pseudo_llm")
+        assert code == 0
+        assert kwargs["bridge_factory"] is StubLLMBridge
+        assert kwargs["sandbox_factory"] is None
+
+    def test_is_pseudo_training_swaps_sandbox_only(self, tmp_path, isolated_registries):
+        from core.sandbox_executor import StubSandbox
+        code, kwargs = self._invoke(tmp_path, "--is_pseudo_training")
+        assert code == 0
+        assert kwargs["bridge_factory"] is None
+        assert kwargs["sandbox_factory"] is StubSandbox
+
+    def test_both_flags_swap_both_factories_and_warn_on_stderr(
+        self, tmp_path, isolated_registries, capsys,
+    ):
+        from agent.llm_bridge import StubLLMBridge
+        from core.sandbox_executor import StubSandbox
+        code, kwargs = self._invoke(
+            tmp_path, "--is_pseudo_llm", "--is_pseudo_training",
+        )
+        assert code == 0
+        assert kwargs["bridge_factory"] is StubLLMBridge
+        assert kwargs["sandbox_factory"] is StubSandbox
+        err = capsys.readouterr().err
+        assert "[PSEUDO-MODE ACTIVE]" in err
+        assert "LLM + training" in err

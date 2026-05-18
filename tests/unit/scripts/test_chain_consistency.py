@@ -149,6 +149,9 @@ CONTRACT_FLAGS = [
     "exploration_mode",
     "minimum_boldness",
     "debug_dump_prompts",
+    # Stage 3 / Commit 4.5 — pseudo-mode flags
+    "is_pseudo_llm",
+    "is_pseudo_training",
     "llm_config",
 ]
 

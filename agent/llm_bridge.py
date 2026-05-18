@@ -1587,7 +1587,15 @@ class StubLLMBridge(LLMBridge):
         "implementor.reasoning":      "_synth_implementor_reasoning",
     }
 
-    def __init__(self, *, max_retries: Optional[int] = 0):
+    def __init__(
+        self,
+        *,
+        provider: Optional[str] = None,
+        model_id: Optional[str] = None,
+        reflect_provider: Optional[str] = None,
+        reflect_model_id: Optional[str] = None,
+        max_retries: Optional[int] = 0,
+    ):
         """Initialise stub bridge state without any OpenAI client.
 
         Deliberately does NOT call ``super().__init__()``: the parent
@@ -1598,6 +1606,19 @@ class StubLLMBridge(LLMBridge):
         ``_validate_pre_write_locked`` paths require.
 
         Args:
+            provider, model_id, reflect_provider, reflect_model_id:
+                Accepted for call-shape parity with ``LLMBridge`` so
+                every agent's ``self._bridge_factory(provider=..., ...)``
+                call works without an isinstance check. Values are
+                **ignored** — the stub is a single black-box and hard-codes
+                its own identity (``self.provider = "stub"``,
+                ``self.model_name = "stub_model"``). See call sites in
+                ``nodes/result_interpretation_agent.py``,
+                ``nodes/ml_model_proposal_agent.py``,
+                ``nodes/ml_model_implementor.py``,
+                ``nodes/ml_code_validator_agent.py``, and
+                ``nodes/ml_hyperparameter_tune_agent.py`` (the last passes
+                the two extra ``reflect_*`` kwargs).
             max_retries: Honoured for API-shape parity only — no HTTP calls
                          are made, so the value is unused. Defaults to ``0``
                          (clearer than ``None`` for "no retries needed").
