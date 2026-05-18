@@ -84,6 +84,11 @@ DEBUG_DUMP_PROMPTS=0
 # = production. See docs/audit_and_optimize_token_usage_and_growth.md C4.5.
 IS_PSEUDO_LLM=0
 IS_PSEUDO_TRAINING=0
+# Stage 4 / Commit 4.6 — Consecutive-iter failure brake (chain-level).
+# Distinct from MAX_FAIL_ROUNDS (inner propose-implement loop brake): this
+# halts the *chain* when the most recent N committed iters all carry
+# manifest.status='failed'. Default 3 matches the Python argparse default.
+MAX_FAILED_ITERATIONS=3
 
 # --- Unified-orchestrator (run_chain.sh) defaults ---
 # MODE picks the execution backend: lilab (foreground subprocess) or
@@ -177,6 +182,8 @@ parse_chain_args() {
         # Stage 3 / Commit 4.5 — pseudo-mode flags
         --is_pseudo_llm)             IS_PSEUDO_LLM=1; shift ;;
         --is_pseudo_training)        IS_PSEUDO_TRAINING=1; shift ;;
+        # Stage 4 / Commit 4.6 — consecutive-iter failure brake
+        --max_failed_iterations)     MAX_FAILED_ITERATIONS="$2"; shift 2 ;;
         # Slurm-only flags — silently accepted on lilab too (ignored)
         --partition)              PARTITION="$2"; shift 2 ;;
         --time)                   TIME="$2"; shift 2 ;;
@@ -237,6 +244,7 @@ build_app_args() {
         --max_fail_rounds "$MAX_FAIL_ROUNDS"
         --max_proposal_attempts "$MAX_PROPOSAL_ATTEMPTS"
         --max_impl_attempts "$MAX_IMPL_ATTEMPTS"
+        --max_failed_iterations "$MAX_FAILED_ITERATIONS"
         --trial_strategy "$TRIAL_STRATEGY"
         --formal_strategy "$FORMAL_STRATEGY"
         --formal_portion "$FORMAL_PORTION"
@@ -336,6 +344,7 @@ print_chain_header() {
     echo "    Exploration    : $EXPLORATION_MODE  (boldness>=$MINIMUM_BOLDNESS)"
     echo "    Round attempts : trial=$ATTEMPTS_PER_ROUND, formal=$ATTEMPTS_PER_FORMAL_ROUND, max_fail_rounds=$MAX_FAIL_ROUNDS"
     echo "    Propose retry  : max_proposal_attempts=$MAX_PROPOSAL_ATTEMPTS, max_impl_attempts=$MAX_IMPL_ATTEMPTS"
+    echo "    Chain brake    : max_failed_iterations=$MAX_FAILED_ITERATIONS  (halt on streak of failed iter manifests)"
     echo "    Trial strategy : $TRIAL_STRATEGY"
     echo "    Formal scope   : strategy=$FORMAL_STRATEGY, portion=$FORMAL_PORTION, train_portion=$FORMAL_TRAIN_PORTION"
     echo "    Formal round   : policy=$FORMAL_ROUND_STRATEGY"

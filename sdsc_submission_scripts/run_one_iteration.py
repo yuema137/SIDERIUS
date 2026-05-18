@@ -35,6 +35,7 @@ import sys
 import traceback
 import warnings
 from datetime import datetime, timezone
+from typing import List, Optional
 
 # Ensure SIDERIUS root is importable
 SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -121,6 +122,80 @@ def _resolve_chain_run_id(workspace: str, run_name: str) -> str:
     with open(sidecar, "w", encoding="utf-8") as f:
         f.write(new)
     return new
+
+
+def _check_halt_marker(workspace: str) -> bool:
+    """Return True iff the consecutive-failure brake has already fired
+    in this workspace (Stage 4 / Commit 4.6).
+
+    Cheap fail-fast for SDSC ``afterany`` chains: Slurm queues the next
+    iter regardless of the previous's exit code, so we need an on-disk
+    sentinel for the next process to bail out before doing any work.
+    Called first thing in ``main()`` (after argparse), before any dirs
+    are created.
+    """
+    return os.path.exists(os.path.join(workspace, ".chain_halted"))
+
+
+def _check_consecutive_failure_brake(
+    workspace: str, max_failed: int,
+) -> Optional[List[int]]:
+    """Scan the workspace for a ``max_failed``-long streak of consecutive
+    ``status="failed"`` manifests (Stage 4 / Commit 4.6).
+
+    Walks ``{workspace}/iter_NNN/manifest.json`` files in descending iter
+    order. Returns the list of failing iter numbers (newest first) when
+    the most recent ``max_failed`` committed iters all carry
+    ``status="failed"``; returns None otherwise.
+
+    The brake is **fail-open**: a missing or malformed manifest counts
+    as "not failed" and breaks the streak. A safety brake must never
+    halt a chain on its own flaky reads.
+
+    Only ``status="failed"`` trips the brake. ``"completed"`` and
+    ``"no_records"`` both break the streak — ``no_records`` is a
+    graceful "no model passed gates" signal, not a failure.
+
+    Args:
+        workspace: chain workspace root. Need not exist yet (a fresh
+            chain with no iter dirs returns None).
+        max_failed: streak length to trip the brake. Caller enforces ≥1
+            via the ``_positive_int`` argparse validator.
+    """
+    if not os.path.isdir(workspace):
+        return None
+
+    iter_numbers: List[int] = []
+    for name in os.listdir(workspace):
+        # Match exactly ``iter_<3 digits>`` to avoid sweeping in
+        # artefacts like ``iter_001.bak`` or unrelated dirs.
+        if (
+            len(name) == 8
+            and name.startswith("iter_")
+            and name[5:].isdigit()
+        ):
+            iter_numbers.append(int(name[5:]))
+    iter_numbers.sort(reverse=True)
+
+    if len(iter_numbers) < max_failed:
+        return None
+
+    candidate = iter_numbers[:max_failed]
+    for n in candidate:
+        manifest_path = os.path.join(
+            workspace, f"iter_{n:03d}", "manifest.json"
+        )
+        if not os.path.exists(manifest_path):
+            return None
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return None
+        if manifest.get("status") != "failed":
+            return None
+
+    return candidate
 
 
 def _emit_token_iter_rollup(workspace: str, iteration: int) -> int:
@@ -605,6 +680,15 @@ def build_parser() -> argparse.ArgumentParser:
              "real training and returns canned trial / formal scores. Use "
              "for chain-wiring smoke tests; not for production runs."
     )
+    parser.add_argument(
+        "--max_failed_iterations", type=_positive_int, default=3,
+        help="Consecutive-failure brake (Stage 4 / Commit 4.6). Halt the "
+             "chain when the most recent N iters all carry "
+             "manifest.status='failed' (default 3). Brake is fail-open: "
+             "missing or malformed manifests count as 'not failed', and "
+             "'no_records' is never counted as a failure. On halt, writes "
+             "{workspace}/.chain_halted and exits 3."
+    )
     return parser
 
 
@@ -713,6 +797,47 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
 
 def main():
     args = normalize_args(build_parser().parse_args())
+
+    # --- Consecutive-failure brake preflight (Stage 4 / Commit 4.6) ---
+    # Two cheap on-disk checks before we touch anything else. Runs before
+    # iter_dir creation so a halted chain leaves no orphan dirs behind.
+    #
+    # (a) Halt-marker check — SDSC ``afterany`` queues the next iter even
+    #     when its predecessor exit-3'd. The sentinel file is how we bail
+    #     out without doing any work; iter 1 never sees it (fresh workspace).
+    # (b) Streak scan — walks the most recent N=args.max_failed_iterations
+    #     ``iter_NNN/manifest.json`` files. If all carry status="failed",
+    #     write the sentinel + exit 3. ``no_records`` and ``completed``
+    #     both break the streak.
+    if _check_halt_marker(args.workspace):
+        print(
+            f"[HALT] consecutive-failure brake already fired in this "
+            f"workspace — see {os.path.join(args.workspace, '.chain_halted')}",
+            file=sys.stderr,
+        )
+        sys.exit(3)
+
+    _failed_streak = _check_consecutive_failure_brake(
+        args.workspace, args.max_failed_iterations,
+    )
+    if _failed_streak is not None:
+        halt_path = os.path.join(args.workspace, ".chain_halted")
+        halt_payload = {
+            "halted_at": datetime.now(timezone.utc).isoformat(),
+            "workspace": os.path.abspath(args.workspace),
+            "max_failed_iterations": args.max_failed_iterations,
+            "failed_iters": _failed_streak,
+            "next_iteration_was": args.start_iteration,
+        }
+        with open(halt_path, "w", encoding="utf-8") as f:
+            json.dump(halt_payload, f, indent=2)
+        print(
+            f"[HALT] consecutive failure brake fired "
+            f"(N={args.max_failed_iterations}); failed iters: "
+            f"{_failed_streak}. Marker written: {halt_path}",
+            file=sys.stderr,
+        )
+        sys.exit(3)
 
     # --- Pseudo-mode factory resolution (Stage 3 / Commit 4.5) ---
     # ``--is_pseudo_llm`` / ``--is_pseudo_training`` request stub
