@@ -680,6 +680,15 @@ def build_parser() -> argparse.ArgumentParser:
              "real training and returns canned trial / formal scores. Use "
              "for chain-wiring smoke tests; not for production runs."
     )
+    parser.add_argument(
+        "--max_failed_iterations", type=_positive_int, default=3,
+        help="Consecutive-failure brake (Stage 4 / Commit 4.6). Halt the "
+             "chain when the most recent N iters all carry "
+             "manifest.status='failed' (default 3). Brake is fail-open: "
+             "missing or malformed manifests count as 'not failed', and "
+             "'no_records' is never counted as a failure. On halt, writes "
+             "{workspace}/.chain_halted and exits 3."
+    )
     return parser
 
 
@@ -788,6 +797,47 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
 
 def main():
     args = normalize_args(build_parser().parse_args())
+
+    # --- Consecutive-failure brake preflight (Stage 4 / Commit 4.6) ---
+    # Two cheap on-disk checks before we touch anything else. Runs before
+    # iter_dir creation so a halted chain leaves no orphan dirs behind.
+    #
+    # (a) Halt-marker check — SDSC ``afterany`` queues the next iter even
+    #     when its predecessor exit-3'd. The sentinel file is how we bail
+    #     out without doing any work; iter 1 never sees it (fresh workspace).
+    # (b) Streak scan — walks the most recent N=args.max_failed_iterations
+    #     ``iter_NNN/manifest.json`` files. If all carry status="failed",
+    #     write the sentinel + exit 3. ``no_records`` and ``completed``
+    #     both break the streak.
+    if _check_halt_marker(args.workspace):
+        print(
+            f"[HALT] consecutive-failure brake already fired in this "
+            f"workspace — see {os.path.join(args.workspace, '.chain_halted')}",
+            file=sys.stderr,
+        )
+        sys.exit(3)
+
+    _failed_streak = _check_consecutive_failure_brake(
+        args.workspace, args.max_failed_iterations,
+    )
+    if _failed_streak is not None:
+        halt_path = os.path.join(args.workspace, ".chain_halted")
+        halt_payload = {
+            "halted_at": datetime.now(timezone.utc).isoformat(),
+            "workspace": os.path.abspath(args.workspace),
+            "max_failed_iterations": args.max_failed_iterations,
+            "failed_iters": _failed_streak,
+            "next_iteration_was": args.start_iteration,
+        }
+        with open(halt_path, "w", encoding="utf-8") as f:
+            json.dump(halt_payload, f, indent=2)
+        print(
+            f"[HALT] consecutive failure brake fired "
+            f"(N={args.max_failed_iterations}); failed iters: "
+            f"{_failed_streak}. Marker written: {halt_path}",
+            file=sys.stderr,
+        )
+        sys.exit(3)
 
     # --- Pseudo-mode factory resolution (Stage 3 / Commit 4.5) ---
     # ``--is_pseudo_llm`` / ``--is_pseudo_training`` request stub
