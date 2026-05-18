@@ -1622,6 +1622,16 @@ class StubLLMBridge(LLMBridge):
             max_retries: Honoured for API-shape parity only — no HTTP calls
                          are made, so the value is unused. Defaults to ``0``
                          (clearer than ``None`` for "no retries needed").
+
+        Brake-stress hook (Stage 4 / Commit 4.6): the env var
+        ``SIDERIUS_STUB_FORCE_CRASH=1`` flips ``self._force_crash`` to
+        True at construction. The three entry-point overrides
+        (``_chat_json`` / ``generate_text`` / ``tool_call``) then raise
+        ``RuntimeError`` on every invocation, simulating an LLM-pipeline
+        crash so the consecutive-iter failure brake can be stress-tested
+        end-to-end without burning real tokens. ``_record_usage`` is
+        intentionally NOT hooked — telemetry must finalize during a
+        forced crash. Production callers never set this env var.
         """
         load_dotenv()
         self.provider: str = "stub"
@@ -1652,6 +1662,13 @@ class StubLLMBridge(LLMBridge):
         self._first_row_run_id_cache: Optional[str] = None
         self._last_logged_iter: Optional[int] = None
         self._last_ts: Optional[str] = None
+
+        # --- Brake-stress hook (Stage 4 / Commit 4.6) ---
+        # Captured once at __init__ time; the brake-stress scenario uses a
+        # fixed env var across the whole process lifetime. Exact-match on
+        # "1" so that "", "0", "true", "yes" all stay off — only the
+        # explicit operator-set value triggers the simulated crash.
+        self._force_crash: bool = os.environ.get("SIDERIUS_STUB_FORCE_CRASH") == "1"
 
     # ------------------------------------------------------------------
     # Telemetry: synthetic calls never write per-call rows.
@@ -1694,6 +1711,25 @@ class StubLLMBridge(LLMBridge):
         return getattr(self, handler_name)()
 
     # ------------------------------------------------------------------
+    # Brake-stress hook (Stage 4 / Commit 4.6).
+    # ------------------------------------------------------------------
+    def _maybe_crash(self, label: str) -> None:
+        """Raise ``RuntimeError`` if ``SIDERIUS_STUB_FORCE_CRASH=1`` was set
+        at __init__ time. No-op otherwise.
+
+        Called from the top of every entry-point override so a forced
+        crash propagates up through the agent layer, out of the workflow,
+        into the bare-except handler in ``run_one_iteration.main()`` —
+        which calls ``write_manifest(..., crashed=True)`` and exits 1.
+        Three such iters in a row trip the consecutive-failure brake.
+        """
+        if self._force_crash:
+            raise RuntimeError(
+                f"StubLLMBridge[force_crash]: simulated pipeline crash "
+                f"on label={label!r} for brake-stress (Commit 4.6)."
+            )
+
+    # ------------------------------------------------------------------
     # Entry-point overrides.
     # ------------------------------------------------------------------
     def _chat_json(self, client: Any, model_name: str,
@@ -1710,6 +1746,7 @@ class StubLLMBridge(LLMBridge):
         ``provider`` / ``components`` args are accepted for signature
         parity but ignored — synthesis is purely label-driven.
         """
+        self._maybe_crash(label)
         if label == self._DEFAULT_LABEL:
             self._warn_default_label("_chat_json")
         return self._synthesise_json(label)
@@ -1718,6 +1755,7 @@ class StubLLMBridge(LLMBridge):
                       *, label: str = LLMBridge._DEFAULT_LABEL,
                       components: Optional[Dict[str, int]] = None) -> str:
         """Bypass HTTP; dispatch to the text synthesiser registered for ``label``."""
+        self._maybe_crash(label)
         if label == self._DEFAULT_LABEL:
             self._warn_default_label("generate_text")
         return self._synthesise_text(label)
@@ -1734,6 +1772,7 @@ class StubLLMBridge(LLMBridge):
         a tool-call site, register it on a new ``_SYNTH_HANDLERS_TOOL``
         dispatch table rather than silently returning a sentinel.
         """
+        self._maybe_crash(label)
         raise NotImplementedError(
             f"StubLLMBridge.tool_call() has no synthesiser for label={label!r}. "
             f"No production label routes through tool_call() today. If a new "
