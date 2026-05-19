@@ -615,13 +615,28 @@ def compress_model_summary(
 
     stats = cache_entry.get("_stats", {}) or {}
 
+    # findings shape evolves across Commit 6.3:
+    #   pre-6.3 / cache-miss build  : list[str]                     (legacy flat dump)
+    #   post-6.3 / consolidator dump: list[{"statement": str, ...}] (CacheEntry.model_dump)
+    # The takeaway is always the first finding's text; the consolidator
+    # encodes [SUPERSEDES]/[CONFLICT] prefixes directly into the statement,
+    # so the same render rule works for both shapes.
     findings = cache_entry.get("key_findings") or []
     takeaway = ""
-    if findings and isinstance(findings[0], str):
-        takeaway = findings[0]
-    elif cache_entry.get("best_config_analysis"):
-        takeaway = str(cache_entry["best_config_analysis"])
-    else:
+    if findings:
+        first = findings[0]
+        if isinstance(first, str):
+            takeaway = first
+        elif isinstance(first, dict) and isinstance(first.get("statement"), str):
+            takeaway = first["statement"]
+    if not takeaway:
+        # best_config_analysis is str (legacy) or {"latest": str, ...} (modern).
+        bca = cache_entry.get("best_config_analysis")
+        if isinstance(bca, str) and bca:
+            takeaway = bca
+        elif isinstance(bca, dict) and isinstance(bca.get("latest"), str) and bca["latest"]:
+            takeaway = bca["latest"]
+    if not takeaway:
         takeaway = "(no cached takeaway)"
 
     if len(takeaway) > max_takeaway_chars:

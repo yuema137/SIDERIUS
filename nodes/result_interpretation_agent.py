@@ -25,8 +25,11 @@ from agent.schemas.interpretation import (
 )
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.cache_entry import CacheEntry
+from agent.cache_consolidator import consolidate
 from ml_models.model_descriptions import get_model_description
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
+from pydantic import ValidationError
 
 
 # ---------------------------------------------------------------------------
@@ -300,6 +303,49 @@ Rules:
 - Do not repeat per-model findings verbatim — synthesise and draw cross-model conclusions
 - Output only the JSON object — no preamble, no commentary, no markdown
 """
+
+
+# Narrative fields that, post-Commit-6.3 consolidation, are stored as
+# ConsolidatedNarrative dicts `{"latest": str, "history": [...]}` instead of
+# bare strings. The synthesis prompt builder still expects bare strings.
+_NARRATIVE_FIELDS_FOR_PROMPT = (
+    "best_config_analysis",
+    "score_trend",
+    "per_file_analysis",
+    "data_sensitivity",
+    "efficiency_assessment",
+    "strategy_assessment",
+)
+# List fields that, post-Commit-6.3, are stored as list[ConsolidatedFinding]
+# dicts instead of list[str].
+_LIST_FIELDS_FOR_PROMPT = ("key_findings", "bottlenecks")
+
+
+def _flatten_entry_for_prompt(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Flatten a (possibly modern-shape) cache entry into the legacy display
+    shape the synthesis prompt builder expects.
+
+    Why: post-Commit-6.3 active cache entries hold ConsolidatedFinding dicts
+    and ConsolidatedNarrative dicts. The synthesis builder reads narratives
+    as bare strings and findings as list-of-strings. This helper bridges the
+    two shapes without touching the builder — cache-miss (legacy flat) entries
+    pass through unchanged.
+    """
+    flat: Dict[str, Any] = {}
+    for k, v in entry.items():
+        if k == "_stats":
+            continue
+        if k in _LIST_FIELDS_FOR_PROMPT and isinstance(v, list):
+            flat[k] = [
+                item["statement"] if isinstance(item, dict) and "statement" in item
+                else item
+                for item in v
+            ]
+        elif k in _NARRATIVE_FIELDS_FOR_PROMPT and isinstance(v, dict):
+            flat[k] = v.get("latest", "") or ""
+        else:
+            flat[k] = v
+    return flat
 
 
 def _build_synthesis_prompt(
@@ -813,27 +859,86 @@ class ResultInterpretationAgent:
                     PER_MODEL_SYSTEM_PROMPT, per_model_prompt,
                     label="interpretation.per_model",
                 )
-                # Build self-sufficient cache entry: LLM text + numerical _stats.
-                # best_score_table is stored as a plain dict so model_knowledge_cache
-                # round-trips through JSON serialization cleanly; reads must
-                # re-validate it through ScoreComparisonTable.model_validate.
-                model_knowledge_cache[mt] = {
-                    **llm_response,
-                    "_stats": {
-                        "best_denoising_score":  summary.best_denoising_score,
-                        "worst_denoising_score": summary.worst_denoising_score,
-                        "best_file_vector":      summary.best_file_vector,
-                        "best_score_table":      (
-                            summary.best_score_table.model_dump()
-                            if summary.best_score_table else None
-                        ),
-                        "best_model_params":     summary.best_model_params,
-                        "completed_rounds":      summary.completed_rounds,
-                        "best_config":           summary.best_config,
-                        "formal_score":          summary.formal_score,
-                        "model_description":     model_descriptions.get(mt),
-                    },
+
+                new_stats = {
+                    "best_denoising_score":  summary.best_denoising_score,
+                    "worst_denoising_score": summary.worst_denoising_score,
+                    "best_file_vector":      summary.best_file_vector,
+                    "best_score_table":      (
+                        summary.best_score_table.model_dump()
+                        if summary.best_score_table else None
+                    ),
+                    "best_model_params":     summary.best_model_params,
+                    "completed_rounds":      summary.completed_rounds,
+                    "best_config":           summary.best_config,
+                    "formal_score":          summary.formal_score,
+                    "model_description":     model_descriptions.get(mt),
                 }
+
+                if cache_entry is None:
+                    # Cache miss: build initial entry from the LLM response.
+                    # Structurally unchanged from the legacy flat-dict shape
+                    # (Rev 8.5 C4 directive). Next iter, this entry is lifted
+                    # via CacheEntry.from_legacy_dict before being passed to
+                    # consolidate() — so the accumulator activates on the first
+                    # active-cache-hit and not earlier.
+                    model_knowledge_cache[mt] = {
+                        **llm_response,
+                        "_stats": new_stats,
+                    }
+                else:
+                    # Active cache hit: run the LLM-powered semantic
+                    # consolidator (Commit 6.3, Rev 8.5). The prior entry may
+                    # be legacy-flat (first re-call after cache-miss build) or
+                    # already in CacheEntry shape (post-first-merge); try the
+                    # modern shape first, fall back to the legacy adapter.
+                    prior_iter = max(0, inp.iteration - 1)
+                    # Modern-shape entries are stored with the `_stats` legacy
+                    # alias (line ~920); restore the schema name before
+                    # validation. The legacy flat-dict shape (cache-miss build)
+                    # has no `model_type` key and falls through to the adapter.
+                    candidate = dict(cache_entry)
+                    if "_stats" in candidate and "stats" not in candidate:
+                        candidate["stats"] = candidate.pop("_stats")
+                    try:
+                        prior_entry = CacheEntry.model_validate(candidate)
+                    except ValidationError:
+                        prior_entry = CacheEntry.from_legacy_dict(
+                            cache_entry,
+                            model_type=mt,
+                            current_iter=prior_iter,
+                        )
+
+                    merged_entry, archived_items = consolidate(
+                        self.bridge,
+                        prior=prior_entry,
+                        new_llm_response=llm_response,
+                        new_stats=new_stats,
+                        current_iter=inp.iteration,
+                        prior_iter=prior_iter,
+                    )
+
+                    dumped = merged_entry.model_dump()
+                    # Back-compat: legacy `_stats` key for downstream readers
+                    # in this module (lines ~643, ~693, ~873) and the
+                    # synthesis-prompt filter (line ~897). The CacheEntry's
+                    # `stats` field is the same passthrough dict — only the
+                    # key name differs.
+                    dumped["_stats"] = dumped.pop("stats")
+                    model_knowledge_cache[mt] = dumped
+
+                    if archived_items and inp.storage.backend == "local" and inp.storage.local:
+                        archive_dir = os.path.join(
+                            inp.storage.local.workspace,
+                            f"iter_{inp.iteration:03d}",
+                        )
+                        os.makedirs(archive_dir, exist_ok=True)
+                        archive_path = os.path.join(
+                            archive_dir, f"cache_archive_{mt}.json"
+                        )
+                        with open(archive_path, "w", encoding="utf-8") as f:
+                            json.dump(archived_items, f, indent=2, default=str)
+
                 print(f"    {mt}: {len(llm_response.get('key_findings', []))} findings, "
                       f"{len(llm_response.get('bottlenecks', []))} bottlenecks")
 
@@ -893,9 +998,7 @@ class ResultInterpretationAgent:
             compressed_set: Set[str] = set()
             for mt, entry in model_knowledge_cache.items():
                 if mt in active_set:
-                    per_model_summaries_for_prompt[mt] = {
-                        k: v for k, v in entry.items() if k != "_stats"
-                    }
+                    per_model_summaries_for_prompt[mt] = _flatten_entry_for_prompt(entry)
                 else:
                     per_model_summaries_for_prompt[mt] = compress_model_summary(mt, entry)
                     compressed_set.add(mt)
