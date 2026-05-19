@@ -8,184 +8,21 @@
 - Verified file:line citations against `agent/llm_bridge.py`, `nodes/ml_model_proposal_agent.py`, `agent/schemas/proposal.py`, `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py`.
 - V11 forensic workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_explore_novel_v11_0503/` (used as the offline benchmark target in §2.8).
 
-### Revision 2 changelog
+### Revision history — Rev 2 → Rev 8.4 (condensed 2026-05-18)
 
-- §1.4 expanded: Setter Safety Protocol — RunID + iter validation on every `_record_usage` call; explicit Context Flush at iter boundaries.
-- New §1.9: mandatory **Top-3 Bloat Report** after the first 5 iterations of the Phase 1 baseline run. If the bloat is not in the proposer, Phase 2 pivots — surgery follows the data, not the §12 prior.
-- New §2.8: **Offline Forensic Benchmark** — `ErrorSignatureSkill` must extract the V11 `spectral_u_operator_lite` failure (VRAM spike location + the specific FFT/U-Net layer) before any Phase 2 code lands.
-- New §2.9: **The Trap Test** — long-term wisdom retention. A fatal flaw planted in iter-2 ledger must still be cited at iter 10, proving the sliding window does not throw away load-bearing context.
-- §4 expanded: three new quantitative metrics — Failure Re-occurrence Rate (FRR), Delta Realization Rate (DRR), Dehydration Compression Ratio (Cr).
-- §5 implementation steps re-numbered to insert the new gate steps (offline forensic test runs *before* step 11 lands; Top-3 Bloat Report runs *between* phases).
+Closed-revision changelogs compacted to one-line summaries; see git history for the original Rev 2–8.4 blocks. Rev 8.5 (current) follows unchanged below.
 
-### Revision 3 changelog
-
-- §1.4.1 expanded: **Run-ID Fail-Fast Logic** formalized. `LLMBridgeContextError` is a `SystemExit`-class failure — the whole process aborts; no silent fallback path is permitted on RunID mismatch.
-- §4.2 metric #8 (DRR) restructured into **Hybrid DRR**: split into `DRR_LLM` (semantic, LLM-judge) and `DRR_Structural` (AST/regex match against the source-code diff). Both must pass; their *gap* is itself a published metric — a large gap indicates "Reasoning Hallucination."
-- New §8: **Step-by-Step Commit & Validation Ledger**. The 24 implementation steps in §5 are grouped into **12 atomic commits** (Phase 1: commits 1–5; Phase 2: commits 6–12). Each commit carries a `[ ]` task list, a Pre-Commit Verification block (positive test + quantitative metric + negative test), and a Definition of Done. §5 step numbers carry an annotation `(Commit N)` so the two sections are synchronized — "Execute Commit #N" maps deterministically to the §5 substeps.
-- §6 expanded with the Structural-vs-Semantic DRR question.
-
-### Revision 4 changelog
-
-- §1.5.1.1 T1-Sanity attested **GREEN** (2026-05-05) — M1 (sidecar binding), M2 (10-key Δ=0 across all 3 proposer rows), M3 (`[TOKEN_ITER]` rollup ≡ JSONL row sum) all hold. Run details captured inline.
-- §8 **Commit 4.3** closed: Pre-Commit sanity gate ☑, Definition of Done **GREEN**.
-- New §8 **Commit 4.3.1** — `sdsc_submission_scripts/_chain_common.sh` wrapper fix: thread `--run_name` through to `run_one_iteration.py`. Caught at the V12 launch dry-run audit; without this, every chain iter would have crashed at argparse on the new required flag. Three new dry-run unit tests in `tests/unit/scripts/test_chain_wrapper_run_name.py` pin the contract (required-flag check, value forwarding, no silent auto-derivation from workspace basename).
-- V12 chains launched 2026-05-05 (`explore_novel_v12_0504`, `exploit_cnn_v12_0504`); both writing `token_usage.jsonl` with `run_id` correctly bound to `{workspace}/.token_run_id`. Commit 5 baseline data is now being generated.
-
-### Revision 5 changelog
-
-- **V12 Calibration Data (iter 1-13, explore chain) folded into the design** — see §1.5.1.2. Total prompt tokens grew **2.39×** from iter 1 (198 K) to iter 13 (474 K) and is still climbing.
-- **Phase 2 priority pivot.** V12 data shows the bottleneck is not the proposer (3.3× sublinear) but **`interpretation.synthesis` (9.3× near-linear, 4.7K → 40K)**. The original Phase 2 §2 design assumed proposer-first; the V12 calibration overrides that assumption. Commits 6.1 (interpretation sliding window) and 6.2 (proposer prior_stage_outputs management) are inserted as the new high-priority Phase 2 entry points.
-- **§8 Commit 5 spec finalized (initial)** — `tools/build_token_baseline_report.py` must segment Happy-Path-Cost vs Recovery-Cost, report per-label `tokens_per_iteration` + `growth_slope`, and alert on `tokens.prompt > 50K` per call. *(USD cost tracking added in Rev 6.)*
-
-### Revision 6 changelog (2026-05-05)
-
-**Status**: G0 approved; V12 calibration confirmed Interpretation as primary bloat; Phase 2 priorities pivoted to O(N) components.
-
-- **Targeted O(N) Dehydration** is the new framing. V12 data partitions the bleed into two regimes:
-  - **O(N) growth (the bleeding arteries)**: `interpretation.synthesis` (9.3× over 13 iters, near-linear) and `proposer.prior_stage_outputs` (3.3× sublinear). Both clamped by Commits 6.1 + 6.2 — these are the only Phase 2 commits that ship.
-  - **O(1) fixed cost (the structural cost)**: the 21% "Template Tax" on `proposer.comparison`. Necessary for prompt adherence; does *not* scale with iterations. Optimizing fixed cost while linear growth bleeds is the wrong order.
-- **Template Dehydration moved to Phase 3 (Optional)**. Removed from Commit 11.1 in §8; new §9 "Phase 3 (Optional)" section appended to the doc. Phase 3 is opportunistic: only triggered if Commits 6.1/6.2 do not bring per-iter cost under target.
-- **§8 Commit 5 spec finalized — USD cost tracking + $1.50/iter bloat alert added**. The tool now computes per-iter cost using the production model's rate card (default `$10/1M prompt + $30/1M completion`, configurable via CLI). Two alert thresholds emitted in the report: `[BLOAT_ALERT]` when an iter's total USD exceeds $1.50 (the **post-dehydration target ceiling** — at V12 rates this fires on every iter; quieting this alert is the success criterion for Commits 6.1/6.2), and `[CONTEXT_EXPLOSION]` when any single call's `tokens.prompt` exceeds 50 K.
-- **Cleanup**: removed the Rev 4 → Rev 5 cross-references to the non-existent `chain_run_name = None` bug. The doc now reflects that `run_name` is correctly bound across all V12 production rows. No further mention.
-
-### Revision 7 changelog (2026-05-05) — "Full Stop" Pivot
-
-**Status**: G1 baseline LANDED — `tools/build_token_baseline_report.py` produced `reports/v12_token_baseline.md` + `reports/v12_top3_bloat.md` against the live `explore_novel_v12_0504` workspace (iters 1–14, 366 rows, run_id `explore_novel_v12_0504-20260505T070526-1028759`). **Verdict: Confirmed Proposer Hypothesis.** Cumulative cost across 14 iters: $72.73 (avg $5.20/iter). Iter 14 hit **$9.43 = 6.3× the $1.50 ceiling** with 2 `[CONTEXT_EXPLOSION]` events on `proposer.causal_reasoning`. `[BLOAT_ALERT]` fires 14/14 iters (by design — North Star).
-
-The V12 calibration also surfaced **three findings the Rev 6 spec did not anticipate**, requiring Phase 2 to be re-scoped:
-
-1. **`interpretation.per_model` is the hidden #2 bleeder** — slope **+5,947 tok/iter (R²=0.98)**, nearly **2× `interpretation.synthesis`'s slope** (+2,982/iter). Mechanism is *not* prompt-size growth: it is **call-count multiplication**. Iter 1 = 2 per_model calls; iter 14 = 12 calls — one per accumulated `model_type`. Commit 6.1 as specced in Rev 6 only clamped synthesis prompt size; it did nothing about call multiplication. **Commit 6.1 is expanded** to add a "Stability Filter" — only LLM-summarize model_types active in the current iter or showing significant score deltas; pull stable historicals from the cache without a fresh LLM call.
-
-2. **`expert_context_block` grew 24.30×** (7,476 → 181,668 chars) — by ratio, the **largest O(N) bleeder of any component**. Was not on the Phase 2 dehydration list at all. **New Commit 6.3** added: "Knowledge Consolidation" — every iter, perform a Merge & Prune over the accumulated findings, collapsing similar entries into a bounded set of **5–8 high-signal conclusions**. Bounds the block to a fixed budget regardless of iter count.
-
-3. **`template_and_scaffolding` grew 11.00×** (50K → 555K chars). Partly explained by call-count doubling (iter 1: 20 calls; iter 14: 40 calls including 2 `implementor.repair`), but per-call scaffolding still inflates ~5×. The catch-all is computed as `chars.total - sum(other_9_named_components)`, so an 11× growth implies dynamic content is leaking out of the 9 named keys into the unnamed bucket — i.e., our 10-key attribution is regressing as iterations accumulate. **New Commit 4.3.2** (Phase 1 amendment, blocks Phase 2): an Attribution Audit must locate the leak and either (a) add a missing component key to capture the un-attributed content, or (b) prove the growth is genuinely structural (more calls per iter, not unaccounted bytes per call). **Phase 2 surgery is gated on this audit** — we do not optimize numbers we don't trust.
-
-- **Phase 1 reopened** to admit Commit 4.3.2 as a hard gate for trusting the per-component breakdown.
-- **Commit 6.1 expanded** to address call-multiplication, not just prompt-size growth.
-- **Commit 6.3 added** as a sibling of 6.1/6.2 — Knowledge Consolidation for `expert_context_block`. Critical Priority alongside 6.1.
-- **Phase 3 unchanged** — Template Dehydration remains optional, post-G1.5.
-- Commit Map redrawn (see end of §8).
-
-### Revision 8 changelog (2026-05-05) — "Drain the Swamp" Pivot
-
-**Status**: Commit 4.3.2 **CLOSED with H1 verdict** — leak located and fixed. Phase 2 unblocked.
-
-The 4.3.2 forensic audit produced a definitive answer:
-
-1. **H1 (attribution leak) confirmed; H2 ruled out.** Per-call `template_and_scaffolding` grew **8.6 K → 92.8 K chars (10.75×) inside a single proposer call** (iter 1 → iter 14, same `proposer.proposing` happy-path row). H2 (call-count amplification) requires a stable per-call value — the data shows the opposite. Cross-label uniformity (`proposer.proposing` 92.8 K, `comparison` 91.2 K, `causal_reasoning` 92.6 K at iter 14, all within ±2 %) further confirms a shared content leak, not call multiplication.
-
-2. **The leak is `non_candidates_overview`.** The forensic single-row diff isolated **+84,160 chars** of un-attributed growth at iter 14. Reconstruction of the proposer's `accumulated["non_candidates_overview"]` (built at `nodes/ml_model_proposal_agent.py:1010-1034` from `model_descriptions` + `model_knowledge_cache`) sized this single field at **15,440 chars (iter 1) → 109,991 chars (iter 14) — Δ +94,551 chars**, accounting for **113 % of the catch-all delta** (upper-bound reconstruction; the small over-shoot is the reconstruction assumption that all non-proposed model_types are non-candidates). The audit hook listed `non_candidates_overview` as a `_PROPOSER_INPUT_KEY` (excluded from `prior_stage_outputs`) but never gave it a dedicated component key, so its chars fell through to the catch-all.
-
-3. **Upstream sources are shared with `expert_context_block`.** Both `non_candidates_overview` (Rev 8 leak) and `expert_context_block` (Rev 7 24× bleeder) draw from `model_knowledge_cache` (24 K → 275 K, 11.4×) and `model_descriptions` (6.7 K → 56 K, 8.4×). This is the single largest mechanical insight of Rev 8: **two of the four worst leaks share one root**. Pruning `model_knowledge_cache` at the source dehydrates both downstream blocks for free. This reframes Commit 6.3's scope.
-
-Changes landing in Rev 8:
-
-- **Commit 4.3.2 closed** — H1 confirmed; verdict, evidence chain, and per-row data appended in §8.
-- **New Commit 4.3.3** (Phase 1, ships before Phase 2): `_audit_proposer_components` gains an 11th content key — `non_candidates_overview`. The bridge's catch-all formula auto-shrinks to the true wrapper baseline (~8 K chars per call). 5 unit tests pin the contract (10-key set, char-accounting, leak-attribution non-overlap with `prior_stage_outputs`, sum invariant). All proposer-row consumers (`tools/build_token_baseline_report.py`, the §1.9 Top-3 table) now operate on a trusted breakdown.
-- **Commit 6.3 escalated** — pivots from "expert_context_block injection-point pruning" to **Centralized Cache Dehydration** at `model_knowledge_cache`. Same Merge & Prune algorithm, but applied at the source so both `non_candidates_overview` and `expert_context_block` shrink simultaneously. Adds an explicit **Error-Signature Preservation Guard**: the consolidation algorithm must keep every unique `failure_class` + `last_frames` signature (Commit 6 schema) so the Gate G3 Trap Test (§2.9) — which assumes a fatal flaw planted at iter 2 is still cited at iter 10 — still passes.
-- **Commit 6.1 unchanged** in scope; the cache-source dehydration in 6.3 also reduces the `interpretation.per_model` per-call payload, but the call-multiplication clamp (Stability Filter) is orthogonal and remains a separate fix.
-- **Phase 1 closes** with Commit 4.3.3. Phase 2 entry is unblocked.
-- Commit Map redrawn (Rev 8 — see end of §8). G1.5 expanded to 5 metrics (the new metric tracks the cache dehydration's impact on both downstream blocks).
-
-### Revision 8.1 changelog (2026-05-05) — "Closing the Creativity Gap"
-
-**Status**: Rev 8 spec'd Memory (Trap Test, G3) and Integrity (Hybrid DRR, G4) safeguards but had no aspirational metric for **Retained Capability** — every existing intelligence metric was *defensive* (catches regressions). Rev 8.1 adds the missing pillar.
-
-The audit finding driving Rev 8.1: FRR catches "don't repeat bads" and DRR catches "claims = code", but neither asks the question — *can the dehydrated agent still navigate to the high-signal architectures the V12-rich-context agent discovered?* An agent could pass G3 + G4 and still produce mediocre-but-honest proposals because the consolidator's Merge & Prune dropped the high-signal architectural insight that originally drove SOTA. We need a guard that proves consolidation does not "lop off the peak" of our collective wisdom.
-
-Changes landing in Rev 8.1:
-
-- **New §2.10 — Gate G3.5: SOTA Replication Test.** Pick a "Golden Iteration" from the V12 baseline (the iter that produced the highest `denoising_score`), reconstruct its upstream state, push it through the post-6.3 dehydrated cache, and let the proposer make a real LLM call. Compare the new proposal against the V12 original on two axes: **Structural Fidelity ≥ 0.7** (AST match on encoder/decoder/key innovations) and **Reasoning Density ≥ 75 %** (LLM judge on `delta_reasoning` informativeness). Failure = consolidator is pruning load-bearing creative signal.
-- **§4.2 metric #12 — SOTA Retention Rate (SRR).** Aggregate of G3.5 across the top 3 V12 architectures: pass on **≥ 2 of 3**. Below target blocks Phase 2 exit.
-- **New Commit 11.2 — `tools/verify_sota_replication.py`.** Automates Golden-State extraction from V12 artefacts + AST/LLM-judge comparison. Lands alongside Commit 11 (Trap Test) so G3 and G3.5 can be evaluated together.
-- **Commit Map redrawn.** G3.5 inserted between G3 (Trap) and G4 (Full V13 Metrics) in the Phase 2 sequence.
-
-**Framing**: Rev 8.1 shifts the conversation from "how much can we cut?" to "how much signal must we keep?" The Trap Test protects Memory; Hybrid DRR protects Integrity; SOTA Replication protects Creativity. The agent must not only be small and honest — it must remain a world-class architect.
-
-### Revision 8.2 changelog (2026-05-05) — "Knowledge Accumulator"
-
-**Status**: Phase 2 entry. Code audit (2026-05-05) of `model_knowledge_cache` exposed a structural mismatch between the Rev 8 Commit 6.3 spec and the production code. Documented here so the next contributor sees the gap before writing a single line of consolidator code.
-
-**The audit finding**:
-
-1. **Cache is a frozen snapshot, not a cumulative ledger.** `nodes/result_interpretation_agent.py:687-693` shows the cache-hit branch literally copies the prior iter's entry verbatim and skips the LLM call entirely. The cache-miss branch (L722-738) builds a fresh entry from a single LLM response + `_stats`. There is **no path** that merges new findings into an existing entry across iters. Once a `model_type` is summarised, its findings are frozen — even if the same architecture is re-tuned at a later iter and produces new evidence.
-2. **The Rev 8 6.3 spec assumed accumulation.** The "Merge within `(model_type, field)` bucket — collapse overlapping statements into one with unioned `evidence_iters`" algorithm presupposes a list of statements grew across iters. Under current code there is nothing to merge — each entry has a single iter's findings.
-3. **The Rev 8 6.3 spec listed schema fields that don't exist in code.** The spec's `lessons`, `recommendations`, `error_signatures` keys are not in the production cache. The actual entry has 8 LLM text fields (`key_findings, bottlenecks, best_config_analysis, score_trend, per_file_analysis, data_sensitivity, efficiency_assessment, strategy_assessment`) plus `_stats`. The doc and code drifted apart.
-4. **Cache count is already capped, content is not.** `workflows/model_exploration.py:369-392` (`_cap_knowledge_cache`) caps to **5 entries** by best_score + current model. So the per-entry size (~25 K) × 5 = 125 K floor — already exceeds the Rev 8 ≤60 K target *under the existing schema*. Per-entry truncation is required regardless of whether accumulation is added.
-
-**The decision (2026-05-05)**: choose Option (A) — Schema Rewrite + Accumulation Logic. The "frozen snapshot" cache is the antithesis of an evolutionary system: a fatal lesson learned at iter 2 must survive even if the same architecture is re-tested and re-summarised at iter 20. Truncation alone (Option B) does not solve this; it only bounds size. Option (A) bounds size *and* preserves cumulative wisdom.
-
-Changes landing in Rev 8.2:
-
-- **Commit 6.3 promoted** from "Source-Level Merge & Prune" to **Knowledge Accumulator Refactor** — see refined spec in §8. Two-part work: (i) cache update path refactor so a cache hit performs a *light merge* (compare new LLM output against cached entry, append/distill the delta) instead of a verbatim skip; (ii) consolidated schema reconciles the 8 existing fields with the new accumulator fields, plus `error_signatures` (Commit 6 schema, load-bearing for G3). Per-entry merge & prune happens *inside* the cache update path.
-- **Sequencing updated**: **6.1 → 6.3 → 6.2** (was: 6.1, 6.2, 6.3 in priority order). This sequencing strictly aligns with the visual Commit Map at the end of §8: 6.1 first because 6.3's cache-path refactor depends on its "Active Model" decision (only active models trigger a re-call → only those entries get merged); **6.3 ahead of 6.2 because 6.3 is the Critical-priority 24× / 7× leak** (`expert_context_block` + `non_candidates_overview`, both rooted in `model_knowledge_cache`), whereas 6.2 is the Medium-priority 3.3× leak (`proposer.prior_stage_outputs`). Tackling the critical bleed first follows the §0 "Slow is Smooth" directive — fix the bleeding arteries before tightening the capillaries.
-- **6.2 (Proposer prior_stage_outputs)** unchanged in scope; sequenced **after 6.3** since it operates on an orthogonal injection point (proposer prompt, not cache update) and is bounded by `model_knowledge_cache` size — which 6.3 already shrinks at the source. Running 6.2 against a 6.3-dehydrated cache means 6.2's mid-truncation rule operates on a cleaner input and is therefore easier to size correctly.
-- **No changes** to Gates G3 (Trap Test) or G3.5 (SRR) — both still pass against the post-6.3 accumulator cache, and the Error-Signature Preservation Guard remains load-bearing for G3.
-
-**Why this matters for the safeguards**: G3 (Trap Test) plants a fatal flaw in iter-2 ledger and asserts citation at iter 10. Under the current frozen-cache, this passes trivially (the iter-2 finding is never overwritten — it's just never *enriched* either). Under the Rev 8.2 accumulator, the iter-2 error_signature must merge correctly with iter-10 evidence (set-union, not replacement). The Pre-Commit Checklist for 6.3 must pin both behaviours.
-
-### Revision 8.3 changelog (2026-05-05) — "Subprocess Amnesia" Fix
-
-**Status**: mid-Commit-6.1. A production-chain audit (2026-05-05, between Commit 6.1's helper-layer landing and dispatcher wiring) discovered that `model_knowledge_cache` is **persisted but never restored** across chain-subprocess boundaries. This is the root cause of the +5,947 tok/iter `interpretation.per_model` slope that Commit 6.1 was meant to clamp — the Stability Filter would be dead code in production until cache restoration is added.
-
-**The audit finding** (verified against current code, 2026-05-05):
-
-1. **Production path is chain-mode, one subprocess per iter.** `sdsc_submission_scripts/run_chain.sh` invokes `run_one_iteration.py` per iter — lilab mode forks foreground, SDSC mode `sbatch --dependency=afterany`. Each iter is a fresh Python process; no in-memory state survives.
-2. **`RestoredState` carries 8 fields, none for the cache.** `core/resume.py:128-135` defines `RestoredState` with `resolved_source_paths`, `restored_plugins`, `committed_iters`, `runtime_vocab`, `accumulated_key_findings`, `accumulated_physical_rejections`, `accumulated_gate_exhaustions`, `previous_proposal_data`. **No 9th field for `model_knowledge_cache`.**
-3. **`load_latest_knowledge` ignores the cache.** `core/resume.py:262-339` reads each prior iter's `interpretation_iter_NNN.json` digest but only consumes `runtime_vocab` and `key_findings`. The digest's `model_knowledge_cache` field is left on disk.
-4. **`run_workflow` is invoked with 5 carry-over kwargs, not 6.** `run_one_iteration.py:830-890` threads `restored_runtime_vocab`, `accumulated_key_findings`, `accumulated_physical_rejections`, `accumulated_gate_exhaustions`, `restored_previous_proposal`. **No `restored_model_knowledge_cache=...` kwarg exists in either the call site or the workflow signature.**
-5. **Cache resets every subprocess.** `workflows/model_exploration.py:830` — unconditional `model_knowledge_cache: dict = {}`. No `if restored_*: ... else: {}` branch.
-6. **The Stability Filter has no production target.** `nodes/result_interpretation_agent.py:687-693` cache-hit branch (`if mt in inp.model_knowledge_cache: ... continue`) is the *only* code path that skips a per_model LLM call. In chain mode, `inp.model_knowledge_cache` is the empty dict from step 5 → every `mt` falls through → fresh LLM call per model per iter, regardless of what `should_recall_per_model()` returns.
-
-**Empirical confirmation** (V12 `explore_novel_v12_0504`, audit log + on-disk digests):
-
-| iter | per_model calls | per_model summed prompt tokens | synthesis prompt tokens | cache entries on disk |
-|---|---|---|---|---|
-| 1 | 2 | 7,272 | 4,657 | 2 |
-| 7 | 6 | 29,574 | 20,958 | (mid-chain) |
-| 14 | 12 | 69,669 | 44,903 | 10 (iter_012 digest) |
-
-The cache **does** accumulate on disk — iter_005 has 5 entries, iter_012 has 10. Persistence works; restoration is the gap.
-
-**Why doc lines 753 and 1957 contradicted each other**:
-- Line 753 ("cache hit-on-repeat, calls grow only on new architecture") is **true for in-process runs** (single Python process loops `range(start_iteration, start_iteration + max_iterations)` and the iter-end re-assignment keeps the dict alive).
-- Line 1957 ("fresh LLM call for every model_type ever proposed, on every iter") is **true for chain mode** (the actual production path).
-
-Both authors were right about their respective regime; the regime difference itself was undocumented.
-
-**Changes landing in Rev 8.3**:
-
-- **NEW Commit 6.1.a — Knowledge Restoration (precondition for 6.1).** Extend `RestoredState` with a `model_knowledge_cache` field, extend `load_latest_knowledge` (or a sibling loader) to read the latest committed iter's `model_knowledge_cache` from `interpretation_iter_NNN.json`, thread `restored_model_knowledge_cache=...` as a 6th carry-over kwarg through `run_one_iteration.py:830-890`, and accept it in `workflows/model_exploration.py` to seed the L830 dict. Latest-wins semantics (parallel to `runtime_vocab`). After this lands, chain mode has cache hits → 6.1's Stability Filter has actual targets to gate.
-- **Sequencing**: 6.1.a → 6.1 (resume current scope: dispatcher wiring + audit markers) → 6.3 (Knowledge Accumulator). The 6.1 spec itself does not change — its tasks were already correct against the in-process semantics; 6.1.a just makes those semantics apply in production.
-- **Commit 6.1 intro updated** to name 6.1.a as the precondition. The existing 4 helper-layer tasks/tests (`select_active_models`, `compress_model_summary`, `should_recall_per_model`, schema fields) stay marked complete — they are correct as-is. Only the dispatcher wiring (T4) and end-to-end Pre-Commit checks now have a real target.
-- **NEW Commit 4.3.4 — Legacy Runner Deletion (standalone cleanup).** Remove `run_exploration_adaptive.py` and update its 4 test dependencies + `launch_v11_v4.sh` to reference `run_one_iteration.py` (or local helpers). Ships **after** 6.1.a + 6.1 land — bundling it into the cache-restoration commit would conflate "fix subprocess amnesia" with "delete dead code", and the legacy runner has live test imports (`test_chain_consistency.py`, `test_portion_floor.py`, `test_token_log_iter_rollup.py`, `test_resilience.py`). Per "Slow is Smooth", clean cuts only.
-- **No changes** to Commits 6.2, 6.3, or any Phase 2 gate. G1.5's 5-metric re-baseline still applies; metric (2) (`interpretation.per_model` calls per iter) is the one most directly unblocked by 6.1.a.
-
-**Why this matters for chain-mode invariants**: the existing 5 carry-over kwargs already cover *evidence* (vocab, findings, rejections, gate exhaustions, prior proposal). The 6th — `model_knowledge_cache` — covers *summarised knowledge*: the LLM-distilled per-model interpretation that turns raw evidence into a Phase-1 cache entry. Without it, every chain subprocess re-pays the summarisation cost from scratch. With it, the chain's "memory" is complete and the Stability Filter starts saving real tokens.
-
-### Revision 8.4 changelog (2026-05-06) — "4-Stage Pseudo-Mode & Cleanup Roadmap"
-
-**Status**: Stage 1 substantially complete (S1–S7d done, smoke + final commit gate pending). Stages 2–4 specified here, awaiting "Map approved" sign-off from the user before implementation begins.
-
-**The pivot**: Rev 8.3 introduced Commit 4.3.4 ("Legacy Runner Deletion") as a single standalone commit. Mid-execution (2026-05-06) two adjacent concerns surfaced that legitimately belong to the same arc but cannot be bundled into one commit without violating "Slow is Smooth, Smooth is Fast":
-
-1. **Pseudo-mode is pytest-only today.** `tests/conftest.py` exposes `--real-llm` / `--real-training` (default False = pseudo) to the test runner only. There is no path to run a chain end-to-end with pseudo LLM + pseudo training from `run_chain.sh`. Operators who want a 0-cost wiring smoke (e.g. confirm `manifest.json` taxonomy, confirm Slurm `afterany` chaining, confirm `evolution_log.jsonl` schema) must launch a real LLM run. This is the friction Rev 8.4 retires.
-2. **Gap #3 (consecutive-iter brake) was deferred to "Phase 2 manifest scanning" without a commit number.** That deferral was an admission that the legacy `--max_failed_iterations` brake had no host. Rev 8.4 names a specific home (Commit 4.6) and the manifest-scanning design.
-
-**The decision (2026-05-06, after two rounds of pushback on bundling)**: split the work into four sequenced commits, each with a tight DoD. Stub-development (4.4) and CLI integration (4.5) are independent enough to ship separately; the brake (4.6) is gated on the manifest taxonomy already produced by the chain runner; Stage 1 (4.3.4) was the precondition that made all three viable.
-
-**Why stateless stubs (not tape-based fakes) for 4.4**: `tests/helpers/recording_llm_bridge.py` and `tests/helpers/_pseudo_data.py` ship the per-method FIFO-tape pattern that powers `@dual_mode` unit/integration tests. Tapes are pinned to specific agent + scenario combinations under `tests/pseudo_data/{category}/{name}/`; queue exhaustion is a loud `RuntimeError`. That contract is correct for tests but **wrong for a long-form chain smoke** — a 30-iter chain with 14 distinct LLM labels per iter would need ~420 hand-curated tape entries, and any branch the operator's prompt didn't anticipate would crash the run. Stage 2's `StubLLMBridge` is therefore *generative* (synthesise a schema-valid response from the label) rather than *replay* (read from a tape). Same applies to `StubSandbox` for training/scoring/inference.
-
-**Changes landing in Rev 8.4**:
-
-- **Commit 4.3.4 renamed to "Stage 1: Cleanup & Baseline Correction"** — content unchanged from Rev 8.3 (S1 deletion + 18-comment sweep + S2-S5 test repoints + S7b hotfix + Gaps #1/#2 closure). Smoke (S8) + commit gate (S9) remain in scope. DoD: green tests in touched dirs (`tests/unit/scripts/`, `tests/unit/sdsc_submission_scripts/`, `tests/unit/agent/result_interpretation_agent/`, `tests/integration/runner/`).
-- **NEW Commit 4.4 — Stage 2: Stateless Stub Development.** `agent/llm_bridge.py` gains a `StubLLMBridge` that returns schema-valid synthetic responses for all 14 production labels (tuner.{planner,reflector}; interpretation.{per_model, per_model_skipped, synthesis, dedup}; proposer.{legacy_reasoning, legacy_commit, causal_reasoning, proposing}; implementor.{reasoning, code, repair}; validator.code_review). Sandbox layer gains a parallel `StubSandbox` covering `execute_training` / `execute_scoring` / `execute_inference` / `save_record`. Implementation risks pinned upfront: (a) `implementor.code` must return runnable Python — solution: hardcoded plugin template that satisfies `ml_models/plugin_loader.py`'s contract (`PLUGIN_MODEL_TYPE`, `PLUGIN_CONFIG_CLASS`, `PLUGIN_MODEL_CLASS`, `[B,T] int → [B,256,T] float`); (b) cross-stub coupling — proposer's `model_name` must match implementor's plugin filename and the tuner's config target; solution: deterministic `f"stub_arch_{iter:03d}_{slot}"` slug threaded through all three stubs. DoD: dedicated unit tests pass for `StubLLMBridge` (schema-validity of every label's response) + `StubSandbox` (4 method contracts).
-- **NEW Commit 4.5 — Stage 3: CLI Integration & 0-Cost Smoke.** `sdsc_submission_scripts/run_one_iteration.py` `build_parser` gains `--is_pseudo_llm` and `--is_pseudo_training` boolean flags (default False = production). `_chain_common.sh` + `run_chain.sh` thread both flags as passthrough args. Factory wiring at the top of `main()`: when `args.is_pseudo_llm`, the LLM bridge is replaced with `StubLLMBridge`; when `args.is_pseudo_training`, the sandbox is replaced with `StubSandbox`. **The four combinations** (real/pseudo × real/pseudo) are now reachable from the chain layer as well as pytest. DoD: `run_chain.sh --mode lilab --is_pseudo_llm --is_pseudo_training` produces a valid `manifest.json` for at least 1 iter, and `evolution_log.jsonl` contains a row with `is_degraded` populated.
-- **NEW Commit 4.6 — Stage 4: Manifest-Based Failure Brake.** Closes Gap #3. `sdsc_submission_scripts/run_one_iteration.main()` gains a preflight that scans the last N (default 3) iter dirs under `{workspace}/iter_NNN/manifest.json`; if all carry `status="failed"`, write a halt-marker (`{workspace}/.chain_halted`) and exit non-zero so Slurm `afterok` cannot fire. New flag `--max_failed_iterations N` (default 3) exposes the threshold. **Stress-tested via** `tests/unit/sdsc_submission_scripts/test_consecutive_failure_brake.py` against synthetic manifest fixtures (3 failed → halt; 2 failed + 1 completed → continue; mixed `failed`/`no_records`/`completed` matrix). DoD: stress test passes; design-doc §1.5.5 (currently "Known Deficiency Gap #3 — deferred") flips to "**Closed by Commit 4.6**".
-- **No changes** to Phase 2 commits (6.1, 6.1.a, 6.2, 6.3) or any gate (G1.5, G3, G3.5, G4). The Rev 8.4 work is parallel-track cleanup; it does not modify the production prompt path.
-- **Sequencing**: 4.3.4 (Stage 1) → 4.4 (Stage 2) → 4.5 (Stage 3) → 4.6 (Stage 4). Stages 2 + 3 are tightly coupled (the stubs are useless without the CLI flags; the flags are useless without the stubs), but splitting them keeps each commit's diff small enough to audit. Stage 4 is independent of 2/3 — it operates on manifests that already exist — but listed last because it benefits from the 0-cost smoke harness in Stage 3 for stress-testing the "halt the chain" path without burning real tokens.
-
-**Map first, march second**: per the user directive (2026-05-06), no code lands until the four-stage spec is signed off. This block is the map. Commits 4.4 / 4.5 / 4.6 below carry the per-commit Scope / Tasks / Pre-Commit Checklist / DoD that operationalise it.
+- **Rev 2** (2026-05-04) — added Setter Safety Protocol (§1.4), Top-3 Bloat Report gate (§1.9), Offline Forensic Benchmark (§2.8), Trap Test (§2.9); new metrics FRR / DRR / Cr.
+- **Rev 3** (2026-05-04) — Hybrid DRR split (LLM + Structural); Run-ID fail-fast formalized; §8 Step-by-Step Commit & Validation Ledger introduced (12 atomic commits).
+- **Rev 4** (2026-05-05) — T1-Sanity attested GREEN; Commit 4.3 closed; NEW Commit 4.3.1 chain-wrapper `--run_name` parity; V12 chains launched (`explore_novel_v12_0504`, `exploit_cnn_v12_0504`).
+- **Rev 5** (2026-05-05) — V12 iter 1–13 calibration folded in (2.39× prompt growth in 13 iters); Phase 2 priority pivot — `interpretation.synthesis` (9.3× near-linear) is the bleeder, not the proposer.
+- **Rev 6** (2026-05-05) — Targeted O(N) Dehydration framing; Template Dehydration moved to Phase 3 (Optional); USD tracking added with `[BLOAT_ALERT]` ($1.50/iter) + `[CONTEXT_EXPLOSION]` (50K/call) thresholds.
+- **Rev 7** (2026-05-05) — "Full Stop": G1 baseline LANDED ($72.73/14-iter; iter 14 = 6.3× ceiling). Three new findings: `interpretation.per_model` +5.9K tok/iter (call-multiplication → Stability Filter), `expert_context_block` 24.30× (NEW Commit 6.3 Knowledge Consolidation), `template_and_scaffolding` 11× (NEW Commit 4.3.2 Attribution Audit blocks Phase 2).
+- **Rev 8** (2026-05-05) — "Drain the Swamp": Commit 4.3.2 CLOSED with H1 verdict — leak = `non_candidates_overview` (+84,160 chars/call at iter 14). NEW Commit 4.3.3 adds 11th audit key. Commit 6.3 escalated to centralized `model_knowledge_cache` dehydration (shared root with `expert_context_block`). G1.5 expanded to 5 metrics.
+- **Rev 8.1** (2026-05-05) — "Closing the Creativity Gap": NEW Gate G3.5 SOTA Replication Test + Metric #12 SRR + NEW Commit 11.2 `tools/verify_sota_replication.py`.
+- **Rev 8.2** (2026-05-05) — "Knowledge Accumulator": code audit found `model_knowledge_cache` is a frozen snapshot, not a cumulative ledger. Commit 6.3 promoted to schema rewrite + accumulation logic. Sequencing: 6.1 → 6.3 → 6.2.
+- **Rev 8.3** (2026-05-05) — "Subprocess Amnesia": cache persisted on disk but not restored across chain subprocesses (`RestoredState` had 8 fields, no `model_knowledge_cache`). NEW Commit 6.1.a Knowledge Restoration (precondition for 6.1, adds 6th carry-over kwarg). NEW Commit 4.3.4 Legacy Runner Deletion (`run_exploration_adaptive.py` retired).
+- **Rev 8.4** (2026-05-06) — "4-Stage Pseudo-Mode & Cleanup Roadmap": 4.3.4 renamed Stage 1. NEW Commits 4.4 (Stateless Stubs — `StubLLMBridge` + `StubSandbox`) / 4.5 (CLI flags `--is_pseudo_llm` / `--is_pseudo_training` + 0-cost smoke) / 4.6 (Manifest-based consecutive-failure brake, closes Gap #3). Stubs are generative (not tape-based) to support long-form chain smoke without per-scenario tape curation.
 
 ### Revision 8.5 changelog (2026-05-18)
 
@@ -571,351 +408,108 @@ and T2 audit disjoint surfaces and may also be parallelised (see §1.5.1 routing
 - Any red → **STOP**. Open a remediation commit (numbered Commit 4.x) before re-attempting the failed gate.
 - T0 red but T1/T2 green is structurally impossible (T1 is a strict superset of T0's surface). If observed, treat as an audit-tooling bug: T0 wasn't actually exercising what it claims.
 
-### 1.5.0 Gate T0 — Cognitive Plumbing (Pseudo-Training Gate)
+### 1.5.0 Gate T0 — Cognitive Plumbing — ✓ GREEN (2026-05-04)
 
-**Goal**: catch label-coverage, components-math, and `template_and_scaffolding`-accounting
-regressions on the real LLM surface — without spinning up the GPU or paying for a full
-workflow loop. T0 is the cheapest filter that still calls real OpenAI; if a commit breaks
-the bridge's audit invariants, T0 fails in seconds rather than 10 minutes into T1.
+**Realisation**: `tests/integration/agent/test_token_usage_pseudo_smoke.py`. 2-iter run on `gpt-4o-mini` via `RecordingOpenAIBridge` (`tmp_path`-scoped workspace; pseudo training / scoring / VRAM probe). 12 LLM calls (5 interpretation + 6 proposer + 1 cached). Wall **83 s**, no GPU; few cents per run.
 
-**Setup** (agent-level pytest harness, no production runner):
-- Drive `ResultInterpretationAgent.run()`, `MLModelProposalAgent.run()`, and (optionally)
-  `ml_model_implementor.run()` directly per-iter with synthetic `ModelRunSummary` fixtures
-  shaped for the V12 dataset structure. The fixture is the same shape used by
-  `tests/integration/workflows/test_score_table_pseudo_smoke.py` — 20 files with
-  hand-tuned `raw_baseline` / `ground_truth` / `model` columns covering dead-zone,
-  low-headroom, and high-headroom cases.
-- LLM provider: real OpenAI via `RecordingOpenAIBridge` (the thin `LLMBridge` subclass
-  ported from `test_score_table_pseudo_smoke.py:196` that proxies every `generate` /
-  `generate_text` call to real OpenAI and appends `(method, system_prompt, user_prompt,
-  response)` to a shared call log). The bridge writes its own `token_usage.jsonl` into a
-  `tmp_path`-scoped workspace exactly as in production.
-- Training, scoring, VRAM probe, and hardware context: pseudo / mocked. The point is
-  cognitive-layer plumbing, not GPU stress.
-- Iteration count: ≥ 2 (single iter cannot exercise the chain hand-off; T1 is the place
-  for full iter-rollup math, but T0 should still cover ≥ 1 inter-iter transition to catch
-  state-leak between LLMBridge instances).
-
-**Realisation file**: `tests/integration/agent/test_token_usage_pseudo_smoke.py` (landed
-2026-05-04, this commit). Skipped automatically without `OPENAI_API_KEY`. Measured
-wall-time: **83 s** for a 2-iter run (12 LLM calls observed: 5 interpretation + 6
-proposer + 1 cached lookup), no GPU. Cost: a few cents per run on `gpt-4o-mini`.
-
-**Success metrics** (all four must hold for T0 = green; verification scripts mirror T1):
-
-| # | Metric | Verification |
-|---|--------|-------------|
-| 1 | Zero unlabeled calls | every row in the harness's `token_usage.jsonl` has `label != "unlabeled"`. Same grep as T1.1. |
-| 2 | 10-key components payload accuracy | every `proposer.*` row has all 10 keys (9 content + `template_and_scaffolding`) and `chars.total - sum(components.values()) == 0` exactly. Same invariant as T1.2 post-Commit 4.2. |
-| 3 | `template_and_scaffolding` non-negative | the catch-all key is `>= 0` on every proposer row (the bridge's `max(0, …)` clamp must never need to fire — if it does, the audit hook is over-counting). |
-| 4 | Fail-fast wired | `pytest tests/unit/agent/llm_bridge/test_no_silent_swallow.py tests/integration/runner/test_token_log_iter_rollup.py::test_runner_aborts_on_runid_mismatch` green. Carries forward the Commit 4 contract — same evidence as T1.4. |
-
-**Out of T0 scope** (covered by T1 / T2): per-iter `[TOKEN_ITER]` rollup math (needs
-the real workflow loop); watchdog compliance (needs real training); JSONL parseability
-under concurrent writes (needs real multi-agent inner loop).
-
-**Calibration check**: the gate is only meaningful if it is sensitive to the regressions
-it claims to catch. Before promoting T0 to a hard pre-baseline gate, validate by reverting
-the C4.2 commit locally and re-running — metric 2 must turn red. If it stays green on
-broken code, the assertions are too weak.
-
-**Status**: **GREEN** (2026-05-04) — definition added in commit `3c9ec88`; realisation
-landed in this commit; first run passed all four metrics on the first try.
-
-**Results — first run (2026-05-04, `tmp_path`-scoped run, `gpt-4o-mini` × 2 iters)**:
-
-13 rows in `token_usage.jsonl`: 6 proposer (3 stages × 2 iters) + 5 interpretation
-(`per_model` × 3, `synthesis` × 2 — wavenet/punet hit the cache in iter 2) +
-2 `_iter_flush` markers (one per agent's bridge — interp + proposer — flushed when iter
-advanced 1 → 2). iter 1 elapsed 45.5 s, iter 2 elapsed 36.6 s (cache hits shaved ~9 s).
+**Results** (13 rows in `token_usage.jsonl`):
 
 | # | Metric | Verdict | Detail |
 |---|--------|---------|--------|
-| 1 | Zero unlabeled calls | ✅ green | 0 / 13 rows had `label == "unlabeled"`. |
-| 2 | 10-key components payload accuracy | ✅ green | All 6 proposer rows have exactly 10 keys (9 content + `template_and_scaffolding`) and `Δ = chars.total - sum(components) = +0` exactly. Per-row tns char counts: iter 1 [1039, 1395, 1519], iter 2 [3345, 3655, 3777]. |
-| 3 | `template_and_scaffolding` non-negative | ✅ green | Range 1039–3777; bridge's `max(0, …)` clamp never fired. |
-| 4 | Fail-fast wired | ✅ green | Carried forward from Commit 4 (c975df5) — `test_no_silent_swallow` and `test_runner_aborts_on_runid_mismatch` passed 7/7 on 2026-05-04. |
+| 1 | Zero unlabeled calls | ✅ | 0 / 13 rows had `label == "unlabeled"` |
+| 2 | 10-key components Δ = +0 | ✅ | All 6 proposer rows have exactly 10 keys (9 content + `template_and_scaffolding`); per-row `template_and_scaffolding` chars: iter 1 [1039, 1395, 1519], iter 2 [3345, 3655, 3777] |
+| 3 | `template_and_scaffolding` ≥ 0 | ✅ | Range 1039–3777; bridge's `max(0,…)` clamp never fired |
+| 4 | Fail-fast wired | ✅ | `test_no_silent_swallow` + `test_runner_aborts_on_runid_mismatch` 7/7 (carried from Commit 4) |
 
-**`prior_stage_outputs` progression** — monotonically non-decreasing across the 3 stages
-in *both* iters, confirming the in-iter chain works AND survives the iter boundary:
-- iter 1: `[2, 2190, 4175]` chars (comparison → causal_reasoning → proposing)
-- iter 2: `[2, 1798, 3683]` chars (same shape; iter 2 is smaller because cached models
-  shrink the candidate-markdown surface)
+**`prior_stage_outputs` progression** — monotonic across the 3 stages in both iters (in-iter chain works + survives iter boundary): iter 1 `[2, 2190, 4175]` chars, iter 2 `[2, 1798, 3683]`. iter 1 produced `freq_specialized_wavenet`; iter 2 read iter 1's proposal via `previous_proposal` and produced `freq_enhanced_residual_net`. 2 `_iter_flush` markers emitted at iter 1→2 boundary (one per agent's bridge).
 
-Iter 1 produced `freq_specialized_wavenet`; iter 2 read iter 1's proposal via
-`previous_proposal` and produced `freq_enhanced_residual_net`.
+### 1.5.1 Gate T1 — Telemetry Integrity — ✓ GREEN (2026-05-04 re-run under production `openai_tiered_v1.json`)
 
-**Calibration**: deferred. The C4.2 invariant is independently confirmed by T1's 9 / 9
-proposer rows on the production graph (§1.5.1 results), which gives the same evidence as
-a manual C4.2 revert would. Worth wiring as a regression-guard CI step before Commit 5
-lands; not blocking.
+**Setup**: 3-iter chain-loop, `--is_trial --trial_portion 0.01 --eval_portion 0.01 --max_epochs 1`, seed = punet baseline. Sidecar at `{workspace}/.token_run_id` preserves §1.4.1 run_id immutability across subprocess boundaries. Run_id `certify_t1_0504_v3-20260505T011837-957220`.
 
-### 1.5.1 Gate T1 — Telemetry Integrity (Signal Gate)
-
-**Goal**: confirm 100 % label coverage and audit-row accuracy under a 3-iter real-graph run.
-
-**Setup** (decided per Q1 Option A — runner with `--is_trial` + tiny portions; pseudo-training
-mode does not exist in the production runner, and a synthetic harness would certify a path
-production never takes):
-
-```bash
-# Canonical chain-first invocation (Commit 4.3 — replaces run_exploration_adaptive.py).
-# A 3-iter gate is a small bash loop because run_one_iteration.py runs ONE iter per call.
-WS=/home/klz/Data/SIDEREIS_DATA/exploration_certify_t1_0504
-RN=certify_t1_0504
-SEED=/home/klz/Data/SIDEREIS_DATA/exploration_seeds_v1/run_output_punet.json
-screen -S siderius-certify-t1 -d -m bash -c "
-  for i in 1 2 3; do
-    .venv/bin/python sdsc_submission_scripts/run_one_iteration.py \
-        --workspace \$WS --run_name \$RN --start_iteration \$i \
-        --seed_paths \$SEED \
-        --advice tuner_advice/exploration_adaptive_v1.json \
-        --llm_config llm_configs/openai_tiered_v1.json \
-        --max_rounds 1 --is_trial \
-        --trial_portion 0.01 --eval_portion 0.01 --max_epochs 1 \
-        2>&1 | tee -a /tmp/certify_t1.log || break
-  done
-"
-```
-
-Workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_certify_t1_0504`. The sidecar at
-`{workspace}/.token_run_id` is created by iter 1 and read by iters 2/3 to preserve §1.4.1
-run_id immutability across the subprocess boundary.
-
-**Routing note (revised 2026-05-04)**: T1/T2 use the **production** `llm_configs/openai_tiered_v1.json`,
-not `llm_configs/certify_minimal.json` (the gpt-4o-mini-only file from C4.1). The first T1 attempt
-with the minimal config was plumbing-correct but ran into an *intelligence floor*: gpt-4o-mini's
-implementor could not produce a compiling plugin, so every iter ended `no_records` and the
-runner brake fired at iter 3. T2 is unreachable under that floor — it audits training-loop
-telemetry, which only emits when the implementor writes runnable code. The plumbing claim
-(usage objects, label routing, rollup math) is already certified by Commit 4 unit tests; the
-remaining gates need real implementor output. `certify_minimal.json` is retained for fast
-local plumbing smoke runs but no longer used for the formal Phase 1.5 gates.
-
-**Floor note (Commit 4.1, 2026-05-04)**: `--trial_portion`/`--eval_portion` floor is **0.01**,
-enforced at argparse-time by `_portion_floor` in both `run_exploration_adaptive.py` and
-`sdsc_submission_scripts/run_one_iteration.py`. This mirrors the Pydantic `ge=0.01` on
-`ProposalInput.trial_portion` and `HyperparamTuningInput.{trial,eval}_portion`. The first
-T1 attempt (2026-05-04) used 0.005 and crashed inside the Proposer's Pydantic validator
-after spending 16 008 interpretation tokens — the argparse floor prevents that failure
-mode. Reason: with `SEGMENTS_PER_FILE=200`, 0.005 collapses to one segment per file via
-the `max(1, …)` floor in `execute_tools.sample_set_builder` — physically valid but too
-noisy to discriminate architectures in trial mode.
-
-**Success metrics** (all four must hold for T1 = green):
-
-| # | Metric | Verification |
-|---|--------|-------------|
-| 1 | Zero unlabeled calls | `grep -c '"label":\s*"unlabeled"' token_usage.jsonl` returns `0` |
-| 2 | 10-key components payload accuracy | every `proposer.*` row has all 10 keys present and `sum(components.values()) == chars.total`. Canonical 10 keys: 9 content keys (`system_prompt`, `candidates_markdown`, `interpretation_json`, `previous_failures`, `vocab_block`, `expert_context_block`, `agent_cards_block`, `prior_stage_outputs`, `recent_gate_block`) reported by `_audit_proposer_components` + 1 catch-all key `template_and_scaffolding` injected by `LLMBridge._record_usage` (Commit 4.2) holding the user-prompt template wrapper chars (= `chars.total - sum(other 9)`). After C4.2, `Δ` per row must be `0` — no tolerance. |
-| 3 | Rollup math match | every `[TOKEN_ITER]` line in `chain_log.txt` exactly equals the row-sum from `token_usage.jsonl` for that iter (no rounding tolerance) |
-| 4 | Fail-fast wired | `pytest tests/integration/runner/test_token_log_iter_rollup.py::test_runner_aborts_on_runid_mismatch` passed at Commit 4 (2026-05-04, 7/7). No manual repro required (Q2 confirmed) |
-
-**Status**: **GREEN** (2026-05-04, re-run under production `openai_tiered_v1.json`) — first attempt was RED on metric 2; Commit 4.2 closed the gap; the re-run is recorded immediately below the first-attempt history.
-
-**Results — re-run (2026-05-04, run_id `certify_t1_0504_v3-20260505T011837-957220`, `openai_tiered_v1.json`)**:
-
-Workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_certify_t1_0504_v3`. **36 rows** in `token_usage.jsonl` across 3 iters: 9 proposer (3 stages × 3 iters) + 12 interpretation (`per_model` × 9 + `synthesis` × 3) + 6 implementor (`reasoning` + `code` × 3) + 6 tuner (`planner` + `reflector` × 3) + 3 validator. Best score 5.32 (`post_skip_transformer_causal_stack`, iter 3). Wall ≈ 15 min, finished 2026-05-04 18:58:02. Token cost: 262 552 prompt + 54 122 completion (cumulative_total = 316 674 per chain_log rollup).
+**Results** — 36 rows across 3 iters (9 proposer + 12 interpretation + 6 implementor + 6 tuner + 3 validator); best score 5.32 (`post_skip_transformer_causal_stack`); 262,552 prompt + 54,122 completion = cumulative 316,674 tokens; wall ≈ 15 min.
 
 | # | Metric | Verdict | Detail |
 |---|--------|---------|--------|
-| 1 | Zero unlabeled calls | ✅ green | 0 / 36 rows had `label == "unlabeled"`. |
-| 2 | 10-key components payload accuracy | ✅ green | All 9 proposer rows have exactly 10 keys and `Δ = +0` (no tolerance). C4.2 invariant holds on the real graph as designed. |
-| 3 | Rollup math match | ✅ green | All 3 `[TOKEN_ITER]` lines exactly equal per-iter row sums: iter 01 = 82 779, iter 02 = 104 500, iter 03 = 129 395, cumulative_total = 316 674. No rounding tolerance. |
-| 4 | Fail-fast wired | ✅ green | Same as first attempt — Commit 4 (c975df5) test passed 7/7 on 2026-05-04. |
+| 1 | Zero unlabeled calls | ✅ | 0 / 36 rows |
+| 2 | 10-key components Δ = +0 | ✅ | All 9 proposer rows have exactly 10 keys (C4.2 invariant holds on real graph) |
+| 3 | `[TOKEN_ITER]` rollup ≡ JSONL row sum | ✅ | iter 01 = 82,779 / iter 02 = 104,500 / iter 03 = 129,395; cumulative 316,674 (no rounding tolerance) |
+| 4 | Fail-fast wired | ✅ | Carried from Commit 4 (`test_runner_aborts_on_runid_mismatch` 7/7) |
 
-**Anomaly observed (cross-cutting, see §1.5.2.1)**: zero `_iter_flush` marker rows in this run despite 2 iter advancements (1→2, 2→3). The mechanism works in unit tests and in T0 (which calls `set_run_context` directly per iter); the production runner appears to take a different path. Filed for follow-up — does not affect the four T1 metrics, all of which are green.
+**First attempt** (RED on metric 2, run_id `certify_t1_0504_v2`, `certify_minimal.json` / gpt-4o-mini): every proposer row undershot `chars.total` by 7,524–8,335 chars (~22% template wrapper not attributed; example iter 1 `proposer.comparison`: `chars.total=34,771`, components sum=27,247, gap=7,524). Implementor under gpt-4o-mini could not produce a compiling plugin → 3 consecutive `no_records` → runner brake fired (plumbing claim unaffected). **Closed by Commit 4.2** — added 10th catch-all key `template_and_scaffolding` to `LLMBridge._record_usage` (`max(0, chars.total - sum(other 9))`), enforcing `sum(components) == chars.total` by construction. Option A (catch-all, ~5 LOC) chosen over Option B (decompose template into named sub-components, ~50–100 LOC); B deferred unless the bucket proves load-bearing.
 
-**Results — first attempt (2026-05-04, run_id `certify_t1_0504_v2-20260504T234843-844114`, `certify_minimal.json`)**:
+**Routing rule (2026-05-04)**: T1/T2 use production `llm_configs/openai_tiered_v1.json`, not `certify_minimal.json` (gpt-4o-mini-only — hits an intelligence floor on implementor output). `certify_minimal.json` retained only for plumbing smoke.
 
-Workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_certify_t1_0504_v2`. 72 rows in `token_usage.jsonl`, 3 iters × (3 interp + 3 proposer + 1–4 implementor). All three iters failed implementation under gpt-4o-mini and the runner brake fired (3 consecutive `no_records`); this did *not* affect the gate evaluation, which is plumbing-only.
+**Floor (Commit 4.1)**: `--trial_portion` / `--eval_portion` floor = 0.01 (argparse `_portion_floor` mirrors Pydantic `ge=0.01`). First T1 attempt with 0.005 crashed inside Pydantic after spending 16,008 interpretation tokens; with `SEGMENTS_PER_FILE=200`, 0.005 collapses to 1 segment per file — physically valid but too noisy.
 
-| # | Metric | Verdict | Detail |
-|---|--------|---------|--------|
-| 1 | Zero unlabeled calls | ✅ green | 0 / 72 rows had `label == "unlabeled"`. |
-| 2 | 9-key components payload accuracy | ❌ **RED** | Every proposer row has all 9 keys present, but `sum(components)` consistently undershoots `chars.total` by **7,524–8,335 chars** (≈ 22 % of each user prompt). Example (iter 1, attempt 0, `proposer.comparison`): `chars.system=6916`, `chars.user=27855`, `chars.total=34771`; components sum to 27,247 — gap **7,524 chars**. The undershoot is the user-prompt **template wrapper** text (section headers like `## Interpretation Summary`, key-value preludes like `Models analysed: [...]`, stage-specific instructions) injected by `_build_reasoning_prompt` / `_build_comparison_prompt` / `_build_proposing_prompt` in `nodes/ml_model_proposal_agent.py`. The 9 keys cover the *content payloads* but not the template that strings them together. |
-| 3 | Rollup math match | ✅ green | All 3 `[TOKEN_ITER]` lines in `chain_log.txt` exactly equal the per-iter row sums in `token_usage.jsonl` (no rounding tolerance): iter 01 = 130 049, iter 02 = 130 195, iter 03 = 130 436, cumulative 390 680. |
-| 4 | Fail-fast wired | ✅ green | Verified by Commit 4 (c975df5) test `test_runner_aborts_on_runid_mismatch` (passed 7/7 on 2026-05-04). |
+**Anomaly** (see §1.5.2.1): zero `_iter_flush` marker rows despite 2 iter advancements. Doesn't affect the four T1 metrics.
 
-**Component growth observation** (`prior_stage_outputs` across iter 1 attempt 0):
-- `proposer.comparison`     →    2 chars (first stage, no prior — JSON `"{}"` literal)
-- `proposer.causal_reasoning` →  2 408 chars (carries comparison output)
-- `proposer.proposing`       →  4 470 chars (carries comparison + causal_reasoning)
+#### 1.5.1.1 T1-Sanity — Chain-Runner Re-cert (Commit 4.3) — ✓ GREEN (2026-05-05)
 
-Growth is monotonic and additive as expected. **It does *not* become the dominant component** by the proposing stage — the ranking at proposing is `candidates_markdown 13 296` ≫ `system_prompt 6 997` > `prior_stage_outputs 4 470` > `interpretation_json 1 940` > `expert_context_block 1 542`. Notable: `vocab_block` drops from 3 551 chars in comparison/causal to **0** in proposing (deliberate — by then the architecture is named).
+**Setup**: 1-iter `--is_trial` run on chain-first runner (`run_one_iteration.py`) to prove Commit 4.3's sidecar resolver / `set_run_context` wiring via `chain_run_name`/`run_id` kwargs / `LLMBridgeContextError → sys.exit(2)` handler / JSONL-seeded `[TOKEN_ITER]` rollup produce a `token_usage.jsonl` of identical shape to the historical T1. Run_id `certify_t1_sanity_0504-20260505T052619-1011326`.
 
-**Remediation (Commit 4.2, 2026-05-04, Option A)**: closed the component-coverage gap by adding a 10th catch-all key `template_and_scaffolding` to every proposer row, computed in `LLMBridge._record_usage` as `max(0, chars.total - sum(other 9))`. The fix lives in the bridge rather than the audit hook because the bridge is the only point that sees both the rendered prompt total and the components dict at write time. The hook still reports 9 keys; the bridge augments them on write. After C4.2, `sum(components.values()) == chars.total` is enforced for every row by construction.
-
-Decision rationale: Option A (catch-all) over Option B (decompose template into named sub-components). A is lossless, cheap (~5 LOC), and lets us monitor template overhead as a single bucket throughout the V12 baseline. B is more informative but invasive (~50–100 LOC across 3 builders + audit hook); deferred to a future post-baseline refinement if the bucket proves load-bearing.
-
-**Re-run plan (2026-05-04)**: T1 and T2 will be relaunched in parallel under production `openai_tiered_v1.json`. T1 verifies the 10-key delta is zero on every proposer row across 3 iters; T2 verifies training-loop telemetry, watchdog compliance, and concurrent-write JSONL parseability under 1 iter of real training (`trial_portion=0.01, eval_portion=0.01`). Parallelisation is permitted because T2 audits a disjoint surface (training-loop telemetry, watchdog timing, JSONL concurrency) from T1 (label coverage, component math, rollup math); neither gate's verification depends on the other.
-
-#### 1.5.1.1 T1-Sanity (Chain-Runner Re-cert, Commit 4.3)
-
-**Goal**: prove that the Commit 4.3 instrumentation of `sdsc_submission_scripts/run_one_iteration.py`
-(sidecar run_id resolver, `set_run_context` wiring via `chain_run_name`/`run_id` kwargs to
-`run_workflow`, `LLMBridgeContextError → sys.exit(2)` handler, `[TOKEN_ITER]` rollup with
-JSONL-seeded cumulative) produces a `token_usage.jsonl` of equivalent shape and integrity
-to the adaptive-runner T1 attestation above. This is a 1-iter sanity check, not a full
-3-iter T1 — the multi-iter `_iter_flush` marker behaviour was already declared an unrelated
-known-issue in §1.5.2.1.
-
-**Setup**:
-
-```bash
-WS=/home/klz/Data/SIDEREIS_DATA/exploration_certify_t1_sanity_0504
-RN=certify_t1_sanity_0504
-SEED=/home/klz/Data/SIDEREIS_DATA/exploration_seeds_v1/run_output_punet.json
-screen -S siderius-certify-t1-sanity -d -m bash -c "
-  .venv/bin/python sdsc_submission_scripts/run_one_iteration.py \
-      --workspace \$WS --run_name \$RN --start_iteration 1 \
-      --seed_paths \$SEED \
-      --advice tuner_advice/exploration_adaptive_v1.json \
-      --llm_config llm_configs/openai_tiered_v1.json \
-      --max_rounds 1 --is_trial \
-      --trial_portion 0.01 --eval_portion 0.01 --max_epochs 1 \
-      2>&1 | tee /tmp/certify_t1_sanity.log
-"
-```
-
-**Success metrics** (all three must hold for sanity = green):
-
-| # | Metric | Verification |
-|---|--------|-------------|
-| 1 | `token_usage.jsonl` written | file exists at `{workspace}/token_usage.jsonl`; ≥ 4 rows; every row's `run_id` matches the contents of `{workspace}/.token_run_id` (sidecar binding round-trip) |
-| 2 | 10-key Δ=0 invariant on chain runner | every `proposer.*` row has all 10 component keys and `chars.total - sum(components.values()) == 0` exactly. C4.2 invariant carried across the runner switch. |
-| 3 | `[TOKEN_ITER]` rollup line emitted | exactly one `[TOKEN_ITER] iter=01 ...` line in stdout (captured to `/tmp/certify_t1_sanity.log`); its `total_tok` equals the row sum from `token_usage.jsonl` |
-
-**Out-of-scope** for this sanity (intentionally — covered by historical T1/T2 above): cross-iter rollup math (single iter), `_iter_flush` markers (no advancement), watchdog under real training (T2 surface), formal-round behaviour.
-
-**Status**: **GREEN** (2026-05-05).
-
-**Results (2026-05-05, run_id `certify_t1_sanity_0504-20260505T052619-1011326`)**:
-
-Workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_certify_t1_sanity_0504`. **11 rows** in `token_usage.jsonl` — 3 proposer (`comparison`, `causal_reasoning`, `proposing`) + 4 interpretation + 1 implementor + 2 tuner + 1 validator. Wall ~1 h 35 min (training 27 min + inference 35 min + scoring 25 min). Iter 1 was real `--is_trial` punet+wavenet seeds under `openai_tiered_v1.json`.
+**Results** — 11 rows (3 proposer + 4 interpretation + 1 implementor + 2 tuner + 1 validator); wall ~1h 35min (training 27min + inference 35min + scoring 25min):
 
 | # | Metric | Verdict | Detail |
 |---|--------|---------|--------|
-| 1 | `token_usage.jsonl` written + sidecar binding | ✅ green | 11 rows; every `run_id` equals the contents of `{workspace}/.token_run_id` (`certify_t1_sanity_0504-20260505T052619-1011326`); the immutable run_id (§1.4.1) survives the would-be subprocess boundary. |
-| 2 | 10-key Δ=0 invariant on chain runner | ✅ green | All 3 proposer rows have exactly the canonical 10 component keys (per `nodes/ml_model_proposal_agent.py:588-598` + `agent/llm_bridge.py:961`) and `chars.total - sum(components.values()) == 0` exactly. C4.2 invariant carries unchanged across the runner switch. |
-| 3 | `[TOKEN_ITER]` rollup ≡ JSONL row sum | ✅ green | rollup `total_tok` = 82 236; JSONL `prompt + completion` sum = 82 236 (exact match). `_emit_token_iter_rollup`'s JSONL-seeded cumulative path is mathematically correct. |
+| M1 | Sidecar binding | ✅ | Every row's `run_id` ≡ `{workspace}/.token_run_id` contents |
+| M2 | 10-key Δ = +0 on chain runner | ✅ | All 3 proposer rows have exactly the canonical 10 keys (per `nodes/ml_model_proposal_agent.py:588-598` + `agent/llm_bridge.py:961`); C4.2 carries unchanged across runner switch |
+| M3 | `[TOKEN_ITER]` rollup ≡ JSONL sum | ✅ | `total_tok` = 82,236 = JSONL `prompt + completion` sum (exact match); `_emit_token_iter_rollup` JSONL-seeded path mathematically correct |
 
-**Conclusion**: Commit 4.3 instrumentation produces a `token_usage.jsonl` of identical shape and integrity to the historical adaptive-runner T1 attestation. Phase 1.5 gate ladder is complete on the chain-first path; Commit 5 (V12 baseline) is unblocked from the certification side and was launched same-day (see Revision 4 changelog).
+**Out-of-scope** (covered by historical T1/T2): cross-iter rollup (single iter), `_iter_flush` markers (no advancement), watchdog under real training (T2 surface), formal-round behaviour.
 
-#### 1.5.1.2 V12 Live Observation — first 13 iters of production explore (Rev 5)
+**Conclusion**: Phase 1.5 gate ladder complete on chain-first path; Commit 5 (V12 baseline) unblocked and launched same-day.
 
-**Source**: `/home/klz/Data/SIDEREIS_DATA/exploration_explore_novel_v12_0504/token_usage.jsonl`, snapshot at iter 13 of 30. Run still in progress at the time of this revision.
+#### 1.5.1.2 V12 Live Observation — first 13 iters of production explore (Rev 5 calibration)
 
-**Per-iteration prompt-token totals (explore chain)**:
+**Source**: `/home/klz/Data/SIDEREIS_DATA/exploration_explore_novel_v12_0504/token_usage.jsonl`, snapshot at iter 13/30.
 
-| iter | calls | prompt tokens | growth vs iter 1 | proposer | tuner | interpretation | implementor | validator |
-|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1 | 20 | 198,516 | 1.00× | 68 K | 102 K | 11 K | 12 K | 3 K |
-| 2 | 21 | 233,412 | 1.18× | 93 K | 103 K | 20 K | 11 K | 4 K |
-| 3 | 21 | 239,999 | 1.21× | 100 K | 95 K | 29 K | 10 K | 4 K |
-| 4 | 24 | 313,321 | 1.58× | 119 K | 149 K | 29 K | 10 K | 3 K |
-| 5 | 23 | 306,372 | 1.54× | 144 K | 103 K | 40 K | 13 K | 4 K |
-| 6 | 24 | 338,940 | 1.71× | 136 K | 132 K | 50 K | 14 K | 5 K |
-| 7 | 24 | 338,456 | 1.70× | 162 K | 108 K | 50 K | 11 K | 5 K |
-| 8 | 27 | 425,286 | 2.14× | 215 K | 131 K | 61 K | 11 K | 4 K |
-| 9 | 26 | 403,582 | 2.03× | 215 K | 108 K | 61 K | 12 K | 5 K |
-| 10 | 30 | 428,523 | 2.16× | 171 K | 136 K | 73 K | 33 K | 13 K |
-| 11 | 28 | 465,210 | 2.34× | 223 K | 138 K | 83 K | 13 K | 6 K |
-| 12 | 27 | 425,879 | 2.14× | 207 K | 105 K | 93 K | 12 K | 7 K |
-| 13 | 30 | 474,396 | **2.39×** | 225 K | 104 K | 102 K | 27 K | 13 K |
+**Headline**: total prompt tokens grew iter 1 = 198,516 → iter 13 = 474,396, **2.39× in 13 iters**, still climbing.
 
-**Component-level growth (iter 1 → iter 13, prompt tokens)**:
+**Component growth (iter 1 → iter 13, prompt tokens)**:
 
 | Component | iter 1 | iter 13 | growth | shape | verdict |
 |---|---:|---:|---:|---|---|
 | `interpretation` | 11 K | 102 K | **9.3×** | near-linear ↑ | bloating (primary target) |
-| `proposer` | 68 K | 225 K | **3.3×** | sublinear ↑ | bloating (secondary target) |
+| `proposer` | 68 K | 225 K | **3.3×** | sublinear ↑ | bloating (secondary) |
 | `validator` | 3 K | 13 K | 4.3× | flat-ish | bounded |
 | `implementor` | 12 K | 27 K | 2.3× | flat-ish | bounded |
 | `tuner` | 102 K | 104 K | **1.0×** | **flat** | **C4.1 instrumentation success** |
 
-**Interpretation breakdown** — the 9.3× growth is structural, not a per-call inflation:
+**Interpretation breakdown** — 9.3× growth is structural, not per-call inflation:
 
-| iter | per_model: calls | per_model tok/call | synthesis prompt tokens |
-|---:|---:|---:|---:|
-| 1 | 2 | 3,636 | 4,657 |
-| 5 | 5 | 4,873 | 16,588 |
-| 9 | 7 | 5,291 | 24,636 |
-| 13 | 11 | **5,621 (saturated)** | **40,365 (still linear)** |
+- `interpretation.per_model` per-call cost plateaued at ~5.6K (model_knowledge_cache hit-on-repeat). **Call count grows** because every distinct `model_type` ever proposed gets a per-model summary (iter 1: 2 calls → iter 13: 11 calls, ~0.7 new model_types per iter).
+- `interpretation.synthesis` is one call per iter, but its prompt **concatenates every cached model summary** with no window cap. Cost grows ~3K/iter (iter 1: 4,657 tok → iter 13: 40,365); projected ~80K by iter 30.
 
-- `interpretation.per_model` per-call cost has plateaued at ~5.6 K (the per-model record is bounded). The number of *calls* grows because every distinct `model_type` ever proposed gets a per-model summary. The `model_knowledge_cache` (`nodes/result_interpretation_agent.py:685-783`) is hit-on-repeat, so calls grow only when a new architecture appears (~0.7 new model_types per iter).
-- `interpretation.synthesis` is one call per iter, but its prompt **concatenates every cached model summary**. There is **no N-iter window cap**. Synthesis cost grows ~3 K/iter; on the current trajectory iter 30 will be ≈ 80 K tokens for synthesis alone.
+**Phase 2 takeaways**:
 
-**Headline takeaways for Phase 2**:
+1. Bottleneck is **interpretation, not proposer** — original §2 ranking inverted by V12 data. Drives Commit 6.1 (sliding-window the synthesis prompt + Stability Filter on per_model calls).
+2. Proposer secondary: 3.3× growth from `prior_stage_outputs` (4K → 14K) + stable vocab_block. Drives Commit 6.2.
+3. **Tuner flat** at ~100K/iter — C4.1 portion-floor + components instrumentation introduced zero drift.
+4. "22% Template Tax" hypothesis from Sanity-T1 replicates in production for `proposer.comparison` (21.0%) but dwarfed by linear-growth components → Template Dehydration deferred to Phase 3 (Commit 11.1).
+5. **Exploit chain died at iter 2** (kernel OOM-killer; see `reports/v12_20260504.md`); only explore is the Commit 5 calibration baseline.
 
-1. The bottleneck is **interpretation, not proposer**. Original §2 design ranked proposer first; V12 calibration inverts that. See Commit 6.1 (sliding-window the synthesis prompt over `model_knowledge_cache`).
-2. **Proposer is real but secondary.** 3.3× growth is driven by `prior_stage_outputs` (4 K → 14 K, ~3.5×) + `vocab_block` (3.5 K, stable). See Commit 6.2.
-3. **Tuner is the success story.** Flat at ~100 K/iter — C4.1 portion-floor + components instrumentation introduced zero drift. No surgery needed.
-4. The "22% Template Tax" hypothesis from Sanity-T1 (§1.5.1.1) replicates in production for `proposer.comparison` (21.0%, both chains, iter 1) but is dwarfed by the linear-growth components — Template Dehydration deferred to Commit 11.1 (low priority).
-5. Exploit chain (`exploit_cnn_v12_0504`) died at iter 2 from kernel OOM-killer (see `reports/v12_20260504.md`); only 2 iters of data — insufficient to corroborate the curve. Explore alone is the calibration baseline for Commit 5.
+### 1.5.2 Gate T2 — System Stability — ✓ GREEN (2026-05-04 parallel with T1 re-run)
 
-### 1.5.2 Gate T2 — System Stability (Plumbing Gate)
+**Setup**: 2-iter chain run (upgraded from 1-iter spec to exercise chain hand-off), `--is_trial --max_rounds 4 --formal_portion 0.01`. Audits a disjoint surface from T1: watchdog timing under telemetry I/O, JSONL parseability under concurrent multi-agent writes, training-loop telemetry under real training. Run_id `certify_t2_0504_v1-20260505T011837-957225`.
 
-**Goal**: confirm the new telemetry writes don't push the per-call architectural-probe wall
-beyond the 60 s `evaluate_vram_skill` SIGALRM watchdog (commit 1972fee), and that the JSONL
-remains parsable under the multi-agent concurrent writes that happen inside one full
-3-trial-+-1-formal V4 iter.
-
-**Setup** (canonical chain-first invocation, Commit 4.3):
-
-```bash
-WS=/home/klz/Data/SIDEREIS_DATA/exploration_certify_t2_0504
-RN=certify_t2_0504
-SEED=/home/klz/Data/SIDEREIS_DATA/exploration_seeds_v1/run_output_punet.json
-screen -S siderius-certify-t2 -d -m bash -c "
-  .venv/bin/python sdsc_submission_scripts/run_one_iteration.py \
-      --workspace \$WS --run_name \$RN --start_iteration 1 \
-      --seed_paths \$SEED \
-      --advice tuner_advice/exploration_adaptive_v1.json \
-      --llm_config llm_configs/openai_tiered_v1.json \
-      --max_rounds 4 --is_trial \
-      --trial_portion 0.01 --eval_portion 0.01 \
-      --formal_portion 0.01 --formal_eval_portion 0.01 \
-      --max_epochs 1 \
-      2>&1 | tee /tmp/certify_t2.log
-"
-```
-
-Workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_certify_t2_0504`. T2 is single-iter
-so no bash loop is needed; the sidecar at `{workspace}/.token_run_id` is created and
-read once.
-
-**Success metrics** (all three must hold for T2 = green):
-
-| # | Metric | Verification |
-|---|--------|-------------|
-| 1 | Watchdog compliance | no SIGALRM firing in `chain_log.txt` (0 hits via `grep -c 'evaluate_vram_skill timed out' chain_log.txt`); no `[WATCHDOG]` markers either |
-| 2 | JSONL parseability | every line of `token_usage.jsonl` parses with `json.loads` (no partial writes / interleaved bytes from concurrent writers) |
-| 3 | No regression in scoring/training | `run_output_iter_001.json` exists, contains a numeric `denoising_score` for at least the formal round, and round-trips through its Pydantic schema |
-
-**Status**: **GREEN** (2026-05-04) — launched in parallel with the T1 re-run under production `openai_tiered_v1.json`.
-
-**Results (2026-05-04, run_id `certify_t2_0504_v1-20260505T011837-957225`)**:
-
-Workspace: `/home/klz/Data/SIDEREIS_DATA/exploration_certify_t2_0504_v1`. **23 rows** in `token_usage.jsonl` across 2 iters (the run was upgraded from the original 1-iter spec to 2 iters to also exercise the chain hand-off): 6 proposer + 7 interpretation (`per_model` × 5 + `synthesis` × 2) + 4 implementor + 4 tuner + 2 validator. Best score -3.23 (`skip_context_wavemixer`, iter 2). Wall ≈ 18 min, finished 2026-05-04 18:45:53. Token cost: 156 502 prompt + 35 277 completion (cumulative_total = 191 779 per chain_log rollup).
+**Results** — 23 rows across 2 iters (6 proposer + 7 interpretation + 4 implementor + 4 tuner + 2 validator); best score -3.23 (`skip_context_wavemixer`); 156,502 prompt + 35,277 completion = 191,779 tokens; wall ≈ 18 min.
 
 | # | Metric | Verdict | Detail |
 |---|--------|---------|--------|
-| 1 | Watchdog compliance | ✅ green | 0 hits of `evaluate_vram_skill timed out` in `chain_log.txt`; no `[WATCHDOG]` markers. |
-| 2 | JSONL parseability | ✅ green | All 23 lines parse with `json.loads`; no partial writes / interleaved bytes. |
-| 3 | No regression in scoring/training | ✅ green | `run_output_iter_NNN.json` files exist for both iters and round-trip through their Pydantic schema; numeric `denoising_score` present (iter 1 baseline + iter 2 baseline). |
+| 1 | Watchdog compliance | ✅ | 0 hits of `evaluate_vram_skill timed out`; no `[WATCHDOG]` markers (60s SIGALRM, commit 1972fee, not tripped under telemetry I/O) |
+| 2 | JSONL parseability | ✅ | All 23 lines `json.loads` clean (no partial writes / interleaved bytes under concurrent multi-agent writes) |
+| 3 | No regression in scoring/training | ✅ | `run_output_iter_NNN.json` exists for both iters and round-trips through Pydantic; numeric `denoising_score` present |
 
-**Bonus checks** (re-using T1 metrics on the T2 log for free): 0 unlabeled rows; all 6 proposer rows show exactly 10 components keys and `Δ = +0`; rollup math matches `[TOKEN_ITER]` lines (iter 01 = 82 853, iter 02 = 108 926, cumulative_total = 191 779). The C4.2 invariant therefore holds on **21 / 21 proposer rows across all three gates**.
+**Bonus** (T1 metrics free-applied to T2 log): 0 unlabeled; all 6 proposer rows have 10 keys + Δ = +0; `[TOKEN_ITER]` rollup iter 01 = 82,853 / iter 02 = 108,926 / cumulative 191,779. **C4.2 invariant holds on 21/21 proposer rows across all three gates**.
 
-#### 1.5.2.1 Cross-gate follow-up — `_iter_flush` markers absent in production runs
+#### 1.5.2.1 Cross-gate follow-up — `_iter_flush` markers absent in production runs (deferred)
 
-**Observation (2026-05-04)**: T0 emitted 2 `_iter_flush` rows (one per agent's bridge — interp + proposer — flushed at the iter 1→2 boundary). T1 (3 iters, 2 boundaries) and T2 (2 iters, 1 boundary) emitted **0** flush rows each. Unit tests in `tests/unit/agent/llm_bridge/test_setter_safety.py` pin the mechanism (the `set_run_context(iter=N+1)` path calls `_flush_iter_marker_locked`) and they pass. T0's harness hits that path because the test calls `set_run_context` directly per iter; the production `run_exploration_adaptive.py` path apparently does not.
+T0 emitted 2 flush rows at the iter 1→2 boundary (one per agent's bridge); T1 (2 boundaries) and T2 (1 boundary) emitted **0** flush rows each. Unit tests (`tests/unit/agent/llm_bridge/test_setter_safety.py`) pin the mechanism and pass — T0's harness hits the `set_run_context(iter=N+1) → _flush_iter_marker_locked` path because it calls `set_run_context` directly per iter; production runner takes a different bridge-lifecycle path.
 
-**Hypothesis** (unverified): the chain-first runner used for T1/T2 either (a) instantiates fresh `LLMBridge` instances per iter so there is no living bridge to advance, or (b) writes the new iter's rows under a freshly-bound bridge whose `self._iter` was `None` (no advancement, no flush). Either way the per-iter rollup math (§1.5.1 metric 3, §1.5.2 bonus check) is unaffected because rollup keys on the row's own `iter` field, not on flush boundaries.
+**Hypothesis** (unverified): chain-first runner either instantiates fresh `LLMBridge` per iter (no living bridge to advance) or writes new rows under a freshly-bound bridge with `self._iter == None`. Either way, per-iter rollup math is unaffected (rollup keys on row's own `iter` field, not flush boundaries).
 
-**Severity**: not a Phase 1.5 blocker. The flush markers are a *defense-in-depth* mechanism that lets the linter (`tools/validate_token_usage_jsonl.py`) detect a row appearing under the wrong iter; their absence weakens that check but does not corrupt any row. C4.2 invariants hold; rollup math matches; gates T0/T1/T2 are all green.
-
-**Follow-up audit ticket** (deferred to a post-Commit 5 cleanup pass): trace the chain-first runner's bridge wiring to confirm the hypothesis, and either (a) wire `set_run_context` per iter on the chain bridge so flushes fire as designed, or (b) revise §1.4.1 to remove the marker mechanism entirely if a fresh-bridge-per-iter pattern is preferred. Decision can wait until after the V12 baseline; the four T1 metrics and the three T2 metrics are green either way.
+**Severity**: not a Phase 1.5 blocker. Markers are defense-in-depth for `tools/validate_token_usage_jsonl.py` to detect a row appearing under the wrong iter — absence weakens that check, doesn't corrupt rows. Follow-up audit deferred to post-Commit-5 cleanup.
 
 ### 1.5.3 Graceful Degradation note
 
@@ -2502,6 +2096,22 @@ The new chain's `build_token_baseline_report.py` output replaces V12 as the Phas
 **Phase**: 2 (sequenced after Commit 6.1; depends on 6.1's `should_recall_per_model` decision so only active-model entries flow through the merge path).
 **§5 step**: 12c (refactor scope, same step number).
 
+**Sub-commit ledger** (Stage 6.3):
+| sub-commit | scope                                                              | landed                    |
+|-----------:|--------------------------------------------------------------------|---------------------------|
+| C1 / T2    | `CacheEntry` Pydantic schema (38 unit tests)                       | `8060ed9` 2026-05-16      |
+| C2 / T4    | `agent/cache_consolidator.py` — LLM list-merge + deterministic narrative/error_sig + hybrid prompt | `5f9541f` 2026-05-16      |
+| C3         | Consolidator unit tests with mock bridge (28 tests)                | `5038c9c` 2026-05-17      |
+| C4 / T1+T3+T5 | Cache-update dispatcher wiring in `result_interpretation_agent.py` + `_flatten_entry_for_prompt` + `compress_model_summary` legacy/modern shape bridge | **uncommitted (this turn)** |
+| C5 / T6 + Pre-Commit gates 8 + 9 | Tier-1 14-iter integration test (`test_interpretation_cache_accumulator.py` — frozen-cache, bounded-size, memory-retention) | **uncommitted (this turn)** |
+
+**Test scoreboard (post-C4/C5)**:
+- 4 / 4 dispatcher-wiring unit tests (consolidator call-count contract)
+- 3 / 3 C5 integration tests (frozen-cache, memory-retention, size budgets)
+- 253 / 253 unit tests under `tests/unit/agent/result_interpretation_agent/` + `tests/unit/agent/cache/`
+- 533 / 533 broader regression sweep (workflows + proposer + resume + cap)
+- Mock-LLM 14-iter size budget: cache 18.39 KB / 60 KB (31%), `non_candidates_overview` 4.16 KB / 30 KB (14%), `expert_context_block` 1.44 KB / 12 KB (12%).
+
 **Why this commit (Rev 8.2 promotion)**: a code audit on 2026-05-05 (documented in the Rev 8.2 changelog) found the Rev 8 spec assumed accumulation that the production code does not implement. `nodes/result_interpretation_agent.py:687-693` shows the cache-hit branch copies the prior iter's entry verbatim and skips the LLM call entirely — once a `model_type` is summarised, its findings are *frozen*. The Rev 8 "Merge within `(model_type, field)` bucket" algorithm presupposes a list grew across iters; under current code there is nothing to merge. Two leaks (`expert_context_block` 24× and `non_candidates_overview` 7×) still share one root (`model_knowledge_cache` 11.4×, `model_descriptions` 8.4×), but the *fix* now requires changing the cache update mechanism, not just adding a consolidator at the injection point.
 
 | downstream block            | iter 1 → iter 14 chars | growth | upstream source                         |
@@ -2524,9 +2134,9 @@ The Rev 8.2 reframe: **the cache itself must become a cumulative ledger.** A fat
 
 **Tasks**:
 
-- [ ] **T1 — Locate cache-maintenance site (verified during audit)**: cache hit / miss branches at `nodes/result_interpretation_agent.py:687-738`; cache eviction at `workflows/model_exploration.py:369-392` (`_cap_knowledge_cache`, currently caps to 5 entries by best_score + current). Document in commit message.
+- [x] **T1 — Locate cache-maintenance site (verified during audit)**: cache hit / miss branches at `nodes/result_interpretation_agent.py:687-738`; cache eviction at `workflows/model_exploration.py:369-392` (`_cap_knowledge_cache`, currently caps to 5 entries by best_score + current). Document in commit message. **✓ Closed by C4** — refactor landed at the same `result_interpretation_agent.py` site (now expanded by ~149 lines).
 
-- [ ] **T2 — Field reconciliation between live cache and accumulator schema**: the 8 existing LLM text fields (from `PER_MODEL_SYSTEM_PROMPT` at `result_interpretation_agent.py:36-116`) map onto the new schema as follows:
+- [x] **T2 — Field reconciliation between live cache and accumulator schema**: the 8 existing LLM text fields (from `PER_MODEL_SYSTEM_PROMPT` at `result_interpretation_agent.py:36-116`) map onto the new schema as follows: **✓ Schema landed in commit `8060ed9` (C6.3-T2); 38 unit tests in `tests/unit/agent/cache/test_cache_entry_schema.py`.**
 
   | live field                   | accumulator type           | rationale                                                    |
   |------------------------------|----------------------------|--------------------------------------------------------------|
@@ -2568,7 +2178,7 @@ The Rev 8.2 reframe: **the cache itself must become a cumulative ledger.** A fat
 
   No new LLM contract — the LLM still emits the 8 flat string/list fields it does today (`PER_MODEL_SYSTEM_PROMPT` unchanged). The consolidator is the layer that adapts the LLM's flat output into the accumulator entry.
 
-- [ ] **T3 — Cache update path refactor** (`nodes/result_interpretation_agent.py:687-738`): the cache-hit branch becomes a *decision point*:
+- [x] **T3 — Cache update path refactor** (`nodes/result_interpretation_agent.py:687-738`): the cache-hit branch becomes a *decision point*: **✓ Landed in C4** — cache-miss path keeps the legacy flat-dict build; cache-hit-with-active-recall path loads the prior entry (modern shape first via `CacheEntry.model_validate`, falling back to `CacheEntry.from_legacy_dict` for the first re-call after a miss) and routes through `consolidate(self.bridge, prior, llm_response, new_stats, current_iter, prior_iter)`. The Stability-Filter skip branch (C6.1) is preserved unchanged — frozen models never reach the merge path.
 
   ```python
   for mt in effective_types:
@@ -2593,7 +2203,7 @@ The Rev 8.2 reframe: **the cache itself must become a cumulative ledger.** A fat
 
   The merge happens **inside the cache update path**, gated on the active-model decision. A model that never enters the active set is never re-called, never merged — its frozen entry is fine.
 
-- [ ] **T4 — Merge & Prune policy** (Rev 8.5 — **LLM-powered semantic merge for list fields**; narrative + error_sig paths remain deterministic), in `agent/cache_consolidator.py`:
+- [x] **T4 — Merge & Prune policy** (Rev 8.5 — **LLM-powered semantic merge for list fields**; narrative + error_sig paths remain deterministic), in `agent/cache_consolidator.py`: **✓ Landed in commit `5f9541f` (C6.3-C2)**; full asymmetric implementation (`_merge_list_field_llm`, `_merge_narrative_field`, `_dedupe_error_signatures`) with hybrid system/user prompt.
 
   The consolidator is asymmetric by design — only the *list fields* need semantic understanding, because only they accumulate ranked observations across iters with potential paraphrases, supersession, and contradictions. The other paths remain pure functions.
 
@@ -2626,9 +2236,9 @@ The Rev 8.2 reframe: **the cache itself must become a cumulative ledger.** A fat
   - **Module constants** (`LIST_FIELD_MAX_SURVIVORS=8`, `MAX_PRIOR_SUMMARY_CHARS=80`, `FINDING_STATEMENT_MAX_CHARS=500` from the schema) are bound as default args to `_build_list_merge_user_prompt`. Per-field or per-experiment overrides go through the builder's kwargs — no edit to the prompt text required.
   - **System prompt size**: ~4.5 K chars (constant, cacheable). User-prompt overhead for empty data: ~1.4 K chars (POLICY PARAMETERS + POLICY EXAMPLES). Per-call data section scales with `|prior| + |new|` — typically <500 chars at saturation.
 
-- [ ] **T5 — Hook into the cache-update path** at the active-cache-hit branch (T3). All persistence (workspace JSON, downstream prompt assembly) reads from the consolidated entry. Verify by running existing interpretation tests — no schema break for stable-model copy or initial-miss paths.
+- [x] **T5 — Hook into the cache-update path** at the active-cache-hit branch (T3). All persistence (workspace JSON, downstream prompt assembly) reads from the consolidated entry. Verify by running existing interpretation tests — no schema break for stable-model copy or initial-miss paths. **✓ Landed in C4** — `model_knowledge_cache[mt] = merged_entry.model_dump()` with `stats → _stats` rename for back-compat with the legacy synthesis-prompt + downstream readers; archived items dumped to `{workspace}/iter_{N:03d}/cache_archive_{mt}.json` per the Rev 8.5 spec. Synthesis prompt assembly now routes through `_flatten_entry_for_prompt` to convert modern `ConsolidatedFinding`/`ConsolidatedNarrative` dicts back to the flat shape the prompt builder expects. 253/253 unit tests across `tests/unit/agent/result_interpretation_agent/` + `tests/unit/agent/cache/` pass post-refactor.
 
-- [ ] **T6 — No producer changes** for `expert_context_block` or `non_candidates_overview`. They continue to read from the cache. Confirm in the bounded-size test below that both downstream blocks shrink as a side effect (no per-block consolidator needed).
+- [x] **T6 — No producer changes** for `expert_context_block` or `non_candidates_overview`. They continue to read from the cache. Confirm in the bounded-size test below that both downstream blocks shrink as a side effect (no per-block consolidator needed). **✓ Verified by C5's 14-iter integration test** — at iter 14 (mock-LLM, 12 model_types, 3 active + 9 frozen): `non_candidates_overview` = **4.16 KB** (≤ 30 KB), `expert_context_block` = **1.44 KB** (≤ 12 KB). Both built via the same reconstruction logic the proposer agent uses; no producer code changed.
 
 **Performance Guard — Error Signature Preservation (Gate G3)** ⚠️:
 
@@ -2647,8 +2257,8 @@ The Rev 8.2 reframe: **the cache itself must become a cumulative ledger.** A fat
 - [x] **Narrative-merge test**: a `score_trend` field updated across iters 1, 4, 7, 10 — the iter-10 merged entry has `latest` = iter-10 text and `history` = `[(7, ...), (4, ...), (1, ...)]` (capped to last 3, oldest dropped). **✓ Covered by C3's `test_narrative_merge_score_trend_across_four_iters` + overflow / idempotency / no-op companions (`test_narrative_history_overflow_goes_to_archive`, `test_narrative_idempotent_when_new_equals_prior`, `test_narrative_empty_new_with_empty_prior_is_noop`).**
 - [x] **Error-signature preservation test (Gate G3 prerequisite)**: input cache with 12 distinct error signatures (different `failure_class`/`top_user_frame` tuples) across one `model_type` — consolidator output retains ALL 12. Repeat with 30 signatures: assert no signature dropped, set-merge of duplicates correctly unions `evidence_iters`. **Load-bearing guard against G3 regression. ✓ Covered by C3's four-test bundle: `test_dedupe_preserves_twelve_distinct_signatures`, `test_dedupe_preserves_thirty_distinct_signatures`, `test_dedupe_unions_evidence_iters_for_duplicate_keys`, `test_dedupe_is_pure_no_bridge_argument` (static guard that the dedup function's signature cannot accept an LLM bridge).**
 - [x] **Cache-hit-merge regression test (Rev 8.2 specific)**: simulate the active-cache-hit path — prior entry has iter-2 finding "VRAM spike at 16 GB"; new LLM response at iter 10 has finding "model OOMs at 18 GB on long sequences". After merge: both findings present (low text similarity, different statements); `evidence_iters` reflects only the iter-2 entry's prior history + iter-10 marker. Confirms the verbatim-copy regression cannot return. **✓ Covered by C3's `test_cache_hit_merge_low_similarity_preserves_both_findings`.**
-- [ ] **Frozen-cache regression test**: simulate the stable-model branch — `should_recall_per_model` returns False; the cache entry is copied verbatim, **no LLM call issued, no merge invoked**. Asserts the 6.1 fast-path is preserved post-refactor. **Deferred to C5** — this test requires the C4 dispatcher to exist; the C3 unit-level suite only exercises `consolidate(...)` in isolation, which is reached *after* the stable-skip branch has been bypassed.
-- [ ] **Bounded-size regression test (downstream blocks)**: simulate a 14-iter accumulation feeding the cache-update path (mimicking V12 iter 14). After every iter the consolidator runs as part of the active-cache-hit branch. Targets: `model_knowledge_cache` total chars **≤ 60 K** (vs. V12's 275 K) AND derived `expert_context_block` chars **≤ 12 K** AND derived `non_candidates_overview` chars **≤ 30 K**. Assert all three thresholds in one test; quantify compression ratios in the message. **Deferred to C5** — this is a 14-iter chain-level integration check, not a single-call unit test.
+- [x] **Frozen-cache regression test**: simulate the stable-model branch — `should_recall_per_model` returns False; the cache entry is copied verbatim, **no LLM call issued, no merge invoked**. Asserts the 6.1 fast-path is preserved post-refactor. **✓ Covered by C5's `test_frozen_cache_skips_llm_and_consolidator`** in `tests/integration/nodes/test_interpretation_cache_accumulator.py` — 14-iter chain with 9 frozen (`m03..m11`) + 3 active (`m00, m01, m02`) model_types. Each frozen mt incurs exactly 1 `interpretation.per_model` call (iter 1 cache-miss build) and zero consolidator calls across all 14 iters; the consolidator prompt is asserted never to reference a frozen model_type.
+- [x] **Bounded-size regression test (downstream blocks)**: simulate a 14-iter accumulation feeding the cache-update path (mimicking V12 iter 14). After every iter the consolidator runs as part of the active-cache-hit branch. Targets: `model_knowledge_cache` total chars **≤ 60 K** (vs. V12's 275 K) AND derived `expert_context_block` chars **≤ 12 K** AND derived `non_candidates_overview` chars **≤ 30 K**. **✓ Covered by C5's `test_iter_14_size_targets`**. Measured at iter 14 with mock LLM: `model_knowledge_cache` = **18.39 KB** (30.6% of 60 KB budget), `non_candidates_overview` = **4.16 KB** (13.9% of 30 KB budget), `expert_context_block` = **1.44 KB** (12.0% of 12 KB budget). Strong margin against all three Gate G1.5c thresholds.
 - [x] **Behavioural test (no signal loss)**: every `(model_type, field)` bucket that had at least one `strength="strong"` finding pre-consolidation still has at least one finding post-consolidation. Plus the error-signature preservation test above. **✓ Covered by C3's `test_strong_finding_survives_consolidation` + the error-signature bundle.**
 - [x] **Semantic-rule behavioural test (mock LLM, Rev 8.5)**: four cases pinned with hand-crafted `mock_bridge` JSON responses, one per rule. (1) *Same-meaning merge*: two paraphrases of the same finding (e.g. "ridge near 50 Hz dominates" iter 2 + "the 50 Hz ridge is the dominant feature" iter 5) → mock LLM returns a single merged item; asserted `evidence_iters=[2,5]` and `strength` = max of inputs. (2) *Supersession replacement*: an iter-7 refinement of an iter-3 statement → survivor has iter-7 `statement`, iter-3 text preserved as a `history` entry. (3) *Contradiction preservation*: iter-2 "loss improved with dropout=0.3" + iter-5 "loss degraded with dropout=0.3" → mock LLM emits **two** items; the iter-5 `statement` prefixed `[CONFLICT iter-5 vs iter-2]`. (4) *Rank-prune to ≤ 8*: mock LLM input with 12 findings → output trimmed to 8; the 4 dropped items present in the archive file. This is the load-bearing semantic-correctness test for Rev 8.5. **✓ Covered by C3's Group B — `test_rule1_same_meaning_merge`, `test_rule2_supersession_replacement_preserves_prior_in_prefix` (statement-prefix encoding `[SUPERSEDES iter-N: <gist>]` since `ConsolidatedFinding` has no separate history field), `test_rule3_contradiction_preservation_emits_two_survivors`, `test_rule4_distinct_emits_both_unchanged` — plus the Group C rank-prune coverage.**
 - [x] **Bounded LLM-call-count test**: same fixture as the bounded-size regression test (14-iter, 10 active models). Assert `mock_bridge.call_count ≤ 2 × |active_models|` per consolidator invocation (one call for `key_findings`, one for `bottlenecks` — narratives + error_signatures stay deterministic). Guards the cost model documented in T4 ("~200 K tokens total over a 5-iter chain") from drift. **✓ Covered at unit level by C3's `test_consolidate_calls_bridge_at_most_twice_per_invocation` (≤2/invocation) and `test_consolidate_bridge_call_count_zero_when_both_lists_empty` (fast-path bypass). The full 14-iter cumulative variant lands in C5.**
@@ -2656,14 +2266,16 @@ The Rev 8.2 reframe: **the cache itself must become a cumulative ledger.** A fat
 
 **Definition of Done (Gate G1.5c — Rev 8.2)**: re-run a 5-iter chain post-implementation; report under `tools/build_token_baseline_report.py` (with the Commit 4.3.3 11-key audit live) shows **all four** of the following:
 
-| metric                          | V12 iter 14 | post-6.3 iter 5 target |
-|---------------------------------|------------:|------------------------:|
-| `model_knowledge_cache` chars   |       275 K |              ≤ 60 K     |
-| `expert_context_block` chars    |       181 K |              ≤ 12 K     |
-| `non_candidates_overview` chars |       110 K |              ≤ 30 K     |
-| **Trap Test (Gate G3)**: iter-2 error_signature still cited at iter 5+ | (not yet measured) | **PASS** |
+| metric                          | V12 iter 14 | post-6.3 target | post-6.3 mock 14-iter (C5) | verdict |
+|---------------------------------|------------:|----------------:|---------------------------:|--------:|
+| `model_knowledge_cache` chars   |       275 K |        ≤ 60 K   |                **18.83 K** | ✓ PASS (31% of budget) |
+| `expert_context_block` chars    |       181 K |        ≤ 12 K   |                 **1.47 K** | ✓ PASS (12% of budget) |
+| `non_candidates_overview` chars |       110 K |        ≤ 30 K   |                 **4.26 K** | ✓ PASS (14% of budget) |
+| **Trap Test (Gate G3)**: iter-2 error_signature still cited at iter 5+ | (not measured pre-6.3) | **PASS** | **✓ PASS** | ✓ PASS |
 
-If any size target is exceeded, the policy is too lenient — tighten the per-field caps. If Gate G3 fails, the merge logic is dropping load-bearing context — fix before Phase 2 progresses.
+**Mock-LLM caveat (post-C5 status)**: the three size numbers above come from C5's `test_iter_14_size_targets` integration test, which exercises the production refactor end-to-end with a deterministic mock LLM (mock_bridge returns synthetic but schema-valid responses). They prove the **mechanism** works — cache stays bounded across 14 iters and the seeded iter-2 strong finding + unique `ErrorSignature` both survive to iter 14 (validated by `test_memory_retention_seed_survives_to_iter_14`). They do **NOT** yet prove the size targets hold under a real production LLM where findings are wordier and per-model diversity is higher. The final Gate G1.5c attestation requires a real 5-iter chain with `tools/build_token_baseline_report.py`; that attestation lands at the post-merge production smoke test (TBD, separate from this commit gate).
+
+If any size target is exceeded under real LLM, the policy is too lenient — tighten the per-field caps. If Gate G3 fails, the merge logic is dropping load-bearing context — fix before Phase 2 progresses.
 
 **Out of Scope**: changing the *content* policy of what counts as a finding (interpretation agent's reasoning module's job); **LLM merging of narrative fields** (Rev 8.5 — narratives stay deterministic via replacement-with-history; LLM is only invoked for the two list fields `key_findings` and `bottlenecks` where paraphrase / contradiction signal is load-bearing); **LLM merging of `error_signatures`** (strict set-merge by `(failure_class, top_user_frame, error_type)` only — Gate G3 forbids any pruning, semantic or otherwise); changing `expert_context_block` or `non_candidates_overview` *render* paths (they keep reading from the now-bounded cache); changing `_cap_knowledge_cache`'s eviction policy (separate concern — eviction operates over whole entries, consolidation operates within an entry).
 
