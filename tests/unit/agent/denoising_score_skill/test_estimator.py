@@ -11,7 +11,10 @@ K.2.5 Commit 4 covers:
   * shape ``{"phase", "seconds", "breakdown"}``.
   * linear in total PSD-segment count.
   * inverse in ``num_workers``; ``num_workers=0`` floored to 1.
-  * ligroup path applies the measured 0.613 s/segment.
+  * ligroup path applies the measured 2.21 s/segment (recalibrated
+    2026-04-30 from V7 formal-round end-to-end timings; the earlier
+    0.613 s/segment was a warm-cache micro-benchmark that under-
+    estimated the full validation-set per-segment cost by 3.6x).
   * unknown host falls back to ligroup with a ``UserWarning``.
 """
 
@@ -83,12 +86,12 @@ class TestEstimateWallTimeSeconds:
         assert zero["breakdown"]["num_workers"] == 1
 
     def test_ligroup_arithmetic_against_measured_constant(self):
-        """400 segments / 8 workers × 0.613 s = 30.65 s."""
+        """400 segments / 8 workers × 2.21 s = 110.5 s."""
         out = est.estimate_wall_time_seconds(
             _sample_set(400), num_workers=8, hostname="ligroup",
         )
-        assert out["seconds"] == pytest.approx(400 * 0.613 / 8, rel=1e-6)
-        assert out["breakdown"]["per_psd_segment_seconds"] == pytest.approx(0.613)
+        assert out["seconds"] == pytest.approx(400 * 2.21 / 8, rel=1e-6)
+        assert out["breakdown"]["per_psd_segment_seconds"] == pytest.approx(2.21)
         assert out["breakdown"]["hostname"] == "ligroup"
         assert out["breakdown"]["total_psd_segments"] == 400
 
@@ -99,4 +102,4 @@ class TestEstimateWallTimeSeconds:
                 _sample_set(400), hostname="fake-host-xyz",
             )
         assert out["breakdown"]["hostname"] == "ligroup"
-        assert out["breakdown"]["per_psd_segment_seconds"] == pytest.approx(0.613)
+        assert out["breakdown"]["per_psd_segment_seconds"] == pytest.approx(2.21)
