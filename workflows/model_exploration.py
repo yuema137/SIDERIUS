@@ -65,6 +65,7 @@ import sys
 import time
 from collections import deque
 from collections.abc import Callable
+from contextlib import suppress
 
 # Ensure SIDERIUS root and ml_models/ are importable.
 # ml_models/ uses flat internal imports (e.g. from models_format_sandbox import ...)
@@ -1391,34 +1392,20 @@ def run_workflow(
         # decrements the local-name refcount. NameError-guarded
         # because early-exit paths may leave some names unbound.
         # See docs/phase68_task1_memory_diagnostic_20260427.md §2 Commit 3.
-        try:
+        with suppress(NameError):
             del proposal
-        except NameError:
-            pass
-        try:
+        with suppress(NameError):
             del impl_output
-        except NameError:
-            pass
-        try:
+        with suppress(NameError):
             del validation
-        except NameError:
-            pass
-        try:
+        with suppress(NameError):
             del interpretation
-        except NameError:
-            pass
-        try:
+        with suppress(NameError):
             del interp_input
-        except NameError:
-            pass
-        try:
+        with suppress(NameError):
             del tune_input
-        except NameError:
-            pass
-        try:
+        with suppress(NameError):
             del tune_output
-        except NameError:
-            pass
         gc.collect()
         probe_memory(iter_idx=iteration, phase="post_gc", workspace=workspace, scope="workflow")
 

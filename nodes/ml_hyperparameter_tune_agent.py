@@ -19,6 +19,7 @@ import os
 import time
 import traceback
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -2481,34 +2482,20 @@ class HyperparamTuningAgent:
             # NameError-guarded because early-exit paths (gate skip,
             # training crash before score) leave some names unbound.
             # See docs/phase68_task1_memory_diagnostic_20260427.md §2 Commit 4.
-            try:
+            with suppress(NameError):
                 del train_results
-            except NameError:
-                pass
-            try:
+            with suppress(NameError):
                 del score_results
-            except NameError:
-                pass
-            try:
+            with suppress(NameError):
                 del score_table
-            except NameError:
-                pass
-            try:
+            with suppress(NameError):
                 del file_vector
-            except NameError:
-                pass
-            try:
+            with suppress(NameError):
                 del final_scalar
-            except NameError:
-                pass
-            try:
+            with suppress(NameError):
                 del reflect_results
-            except NameError:
-                pass
-            try:
+            with suppress(NameError):
                 del memory_history
-            except NameError:
-                pass
             gc.collect()
 
         # --- Build, validate, and save the run output ---
