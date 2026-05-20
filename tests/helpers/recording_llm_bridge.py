@@ -22,7 +22,7 @@ Design principles (see ``docs/pseudo_test_infra.md`` §4B for the full story):
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 from tests.helpers._pseudo_data import load_pseudo_data
 

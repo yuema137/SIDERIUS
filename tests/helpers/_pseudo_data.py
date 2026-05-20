@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import pathlib
-from typing import Any, Dict
+from typing import Any
 
 # tests/helpers/_pseudo_data.py → tests/helpers/ → tests/ → tests/pseudo_data/
 PSEUDO_DATA_ROOT = pathlib.Path(__file__).resolve().parent.parent / "pseudo_data"

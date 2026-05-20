@@ -31,7 +31,7 @@ from __future__ import annotations
 import os
 import re
 import time
-from typing import List, Optional, Tuple
+from typing import Optional
 
 import pytest
 from dotenv import load_dotenv

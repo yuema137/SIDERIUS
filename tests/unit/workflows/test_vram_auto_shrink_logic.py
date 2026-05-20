@@ -32,8 +32,6 @@ Scenarios covered:
 
 from __future__ import annotations
 
-from typing import List
-
 import pytest
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput

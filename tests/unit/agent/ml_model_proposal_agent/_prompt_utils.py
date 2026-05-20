@@ -23,7 +23,7 @@ longer works because the prompt no longer starts with raw JSON.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict
+from typing import Any
 
 
 def extract_accumulated_json(user_prompt: str) -> dict[str, Any]:

@@ -41,7 +41,7 @@ never inspects anything else on the bridge object.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 import pytest
 

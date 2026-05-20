@@ -43,7 +43,6 @@ import os
 import time
 from datetime import UTC, datetime, timezone
 from pathlib import Path
-from typing import List, Tuple
 
 import pytest
 from dotenv import load_dotenv

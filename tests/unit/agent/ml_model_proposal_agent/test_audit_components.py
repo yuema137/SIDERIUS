@@ -25,7 +25,7 @@ Coverage:
 from __future__ import annotations
 
 import json
-from typing import Any, Dict
+from typing import Any
 
 from agent.schemas.proposal import ProposalInput
 from nodes.ml_model_proposal_agent import _audit_proposer_components

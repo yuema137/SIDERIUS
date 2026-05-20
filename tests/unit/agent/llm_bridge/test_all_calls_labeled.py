@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from typing import List, Tuple
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _NODES_DIR = _REPO_ROOT / "nodes"

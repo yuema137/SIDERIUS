@@ -13,7 +13,6 @@ load_stage_prompt() and render_expert_context().
 """
 
 import os
-from typing import List, Optional
 
 _PROMPT_DIR = os.path.dirname(os.path.abspath(__file__))
 

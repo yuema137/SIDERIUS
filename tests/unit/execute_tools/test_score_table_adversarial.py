@@ -23,7 +23,7 @@ produce.
 from __future__ import annotations
 
 import math
-from typing import List, Optional
+from typing import Optional
 
 import pytest
 from pydantic import ValidationError

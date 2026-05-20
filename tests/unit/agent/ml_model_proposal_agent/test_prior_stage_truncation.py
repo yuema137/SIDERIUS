@@ -19,7 +19,7 @@ matching the C2 attestation under the same Rev 8.6 NOTE.
 
 import copy
 import json
-from typing import Any, Dict, List
+from typing import Any
 
 from agent.schemas.proposal import ResearchPolicy
 from nodes.ml_model_proposal_agent import _PROPOSER_INPUT_KEYS
