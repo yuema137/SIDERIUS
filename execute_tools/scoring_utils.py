@@ -33,6 +33,8 @@ different butterfly ordering, and does not produce bit-identical output.
 import gc
 import math
 import os
+from collections.abc import Callable
+from typing import Any
 
 import h5py
 import numpy as np
@@ -365,7 +367,7 @@ def score_vector(
     sample_set: SampleSet,
     anchor_map: dict | None = None,
     s_max: float | None = None,
-    denoised_filename_fn: callable | None = None,
+    denoised_filename_fn: Callable[..., Any] | None = None,
     raw_data_dir: str | None = None,
     parallel: bool = True,
     num_workers: int = 8,
