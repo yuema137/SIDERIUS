@@ -17,7 +17,7 @@ Node contract:
 import argparse
 import json
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
@@ -32,6 +32,10 @@ from agent.schemas.interpretation import (
 )
 from agent.schemas.score_table import ScoreComparisonTable
 from ml_models.model_descriptions import get_model_description
+
+if TYPE_CHECKING:
+    from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
+    from agent.schemas.proposal import VocabEntry
 
 # ---------------------------------------------------------------------------
 # Phase 1 — Per-model summarization

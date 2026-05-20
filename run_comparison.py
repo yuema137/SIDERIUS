@@ -182,7 +182,7 @@ def run_baseline(
             "hypothesis": "Original hardcoded baseline configuration from the TIDMAD paper.",
             "conclusion": (
                 f"Baseline {model_type.upper()} achieved "
-                f"denoising_score={combined.get('denoising_score', 'N/A')}."
+                f"denoising_score={score_res.get('denoising_score', 'N/A')}."
             ),
             "discovery": (
                 "This is the paper's reference result. All subsequent agent experiments "
@@ -190,14 +190,14 @@ def run_baseline(
             ),
             "memory_update": (
                 f"Baseline {model_type.upper()} performance established. "
-                f"Score: {combined.get('denoising_score', 'N/A')}. "
+                f"Score: {score_res.get('denoising_score', 'N/A')}. "
                 "Use this as the minimum target for improvement."
             ),
         },
     }
 
     sandbox.save_record(record)
-    print(f"\n  Baseline complete. Denoising score: {combined.get('denoising_score', 'N/A')}")
+    print(f"\n  Baseline complete. Denoising score: {score_res.get('denoising_score', 'N/A')}")
     return record
 
 

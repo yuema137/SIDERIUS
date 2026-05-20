@@ -2,6 +2,7 @@ import argparse
 import gc
 import json
 import os
+import random
 import sys
 
 import h5py
@@ -241,10 +242,8 @@ class TIDMADEpochDataset(Dataset):
                             or 1.0, all segments in the scope are loaded.
             rng:            Random instance for reproducible subsampling.
         """
-        import random as _random
-
         if rng is None:
-            rng = _random.Random()
+            rng = random.Random()
 
         ml_segs_per_psd = PSD_SEGMENT_LENGTH // seg_size
         use_subsample = train_portion is not None and train_portion < 1.0
@@ -455,8 +454,6 @@ def run_experiment_streaming(
                            ``freeze_subsample=True``). When None, derived from
                            ``hash(exp_id)``.
     """
-    import random
-
     device = torch.device(train_cfg.device if torch.cuda.is_available() else "cpu")
     seg_size = model_cfg.segmentation_size
 
