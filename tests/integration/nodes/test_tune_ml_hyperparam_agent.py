@@ -822,7 +822,9 @@ def test_punet_one_round_dual_mode(tmp_path, request, is_trial):
         bridge_factory = LLMBridge
     else:
         bridge = RecordingLLMBridge.for_agent("ml_hyperparameter_tune_agent")
-        bridge_factory = lambda **kw: bridge
+
+        def bridge_factory(**kw):
+            return bridge
 
     if _is_real_training(request):
         _skip_if_no_data()
@@ -831,7 +833,9 @@ def test_punet_one_round_dual_mode(tmp_path, request, is_trial):
         sandbox_factory = TidmadSandbox
     else:
         sandbox = RecordingSandbox.for_model("punet", base_dir=workspace, run_name=run_name)
-        sandbox_factory = lambda **kw: sandbox
+
+        def sandbox_factory(**kw):
+            return sandbox
 
     agent = HyperparamTuningAgent(bridge_factory=bridge_factory, sandbox_factory=sandbox_factory)
 
@@ -993,14 +997,18 @@ def test_wavenet_one_round_dual_mode(tmp_path, request, monkeypatch):
                 "reflect": _WAVENET_CANNED_REFLECT,
             }
         )
-        bridge_factory = lambda **kw: bridge
+
+        def bridge_factory(**kw):
+            return bridge
 
     if _is_real_training(request):
         _skip_if_no_data()
         sandbox_factory = TidmadSandbox
     else:
         sandbox = RecordingSandbox.for_model("wavenet", base_dir=workspace, run_name=run_name)
-        sandbox_factory = lambda **kw: sandbox
+
+        def sandbox_factory(**kw):
+            return sandbox
 
     agent = HyperparamTuningAgent(bridge_factory=bridge_factory, sandbox_factory=sandbox_factory)
     output = agent.run(agent_input)

@@ -233,7 +233,9 @@ def test_proposal_pipeline_dual_mode(tmp_path, request):
         bridge_factory = LLMBridge
     else:
         bridge = RecordingLLMBridge.for_agent("ml_model_proposal_agent")
-        bridge_factory = lambda **kw: bridge
+
+        def bridge_factory(**kw):
+            return bridge
 
     agent = MLModelProposalAgent(
         provider="gemini", model_id="gemini-2.5-flash", bridge_factory=bridge_factory

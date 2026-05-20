@@ -190,7 +190,9 @@ def test_iter3_prompt_carries_iter1_summary_through_succeeding_iter2(tmp_path):
     # Proposer produces a uniquely-named arch per iteration so the
     # workflow's existing_model_types bookkeeping stays sane.
     proposal_names = iter(["m_iter1", "m_iter2", "m_iter3"])
-    proposal_factory = lambda inp: _make_proposal_output(next(proposal_names))
+
+    def proposal_factory(inp):
+        return _make_proposal_output(next(proposal_names))
 
     # Patch 4 agents + wire the real proposer with a canned bridge.
     with (

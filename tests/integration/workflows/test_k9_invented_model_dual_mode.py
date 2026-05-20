@@ -203,7 +203,9 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(tmp_path, request, mo
         bridge_factory = LLMBridge
     else:
         bridge = RecordingLLMBridge.for_agent(_PSEUDO_AGENT_FOLDER)
-        bridge_factory = lambda **kw: bridge
+
+        def bridge_factory(**kw):
+            return bridge
 
     if _is_real_training(request):
         pytest.skip(
@@ -214,7 +216,9 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(tmp_path, request, mo
         sandbox = RecordingSandbox.for_model(
             _PLUGIN_MODEL_TYPE, base_dir=workspace, run_name=run_name
         )
-        sandbox_factory = lambda **kw: sandbox
+
+        def sandbox_factory(**kw):
+            return sandbox
 
     agent = HyperparamTuningAgent(bridge_factory=bridge_factory, sandbox_factory=sandbox_factory)
 
