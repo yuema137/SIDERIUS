@@ -59,7 +59,7 @@ def test_exact_window_returns_all_verbatim():
     records = [_make_record(f"exp_{i}") for i in range(3)]
     result = _truncate_memory_history(records, full_window=3)
     assert len(result) == 3
-    for orig, out in zip(records, result):
+    for orig, out in zip(records, result, strict=True):
         assert out == orig
 
 

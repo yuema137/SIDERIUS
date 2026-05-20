@@ -209,7 +209,7 @@ class TestCrossConsistency:
 
         file_vector, _ = _anchor_normalized_ceiling(anchors, s_max)
 
-        for f_str, fv in zip(sorted(anchors, key=int), file_vector):
+        for f_str, fv in zip(sorted(anchors, key=int), file_vector, strict=True):
             direct_log, _, _ = _global_per_file_ceiling(anchors[f_str], s_max)
             via_fv = math.log(fv + 1e-10, 5.27)
             assert abs(direct_log - via_fv) < 1e-12

@@ -684,7 +684,7 @@ class GatedFNO(nn.Module):
         h = self.embedding(x.long()).transpose(1, 2)  # [B, Width, T]
 
         # 3. FNO Iterations
-        for fno, w in zip(self.fno_layers, self.w_layers):
+        for fno, w in zip(self.fno_layers, self.w_layers, strict=True):
             h_ft = torch.fft.rfft(h)
 
             # Spectral Path

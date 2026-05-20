@@ -490,7 +490,7 @@ class TidmadSandbox:
                     os.path.join(self.dirs["configs"], f"loss_config_{exp_id}.json")
                 ),
             }
-            for k, v in zip(["m", "t", "l"], [vm, vt, vl]):
+            for k, v in zip(["m", "t", "l"], [vm, vt, vl], strict=True):
                 with open(paths[k], "w") as f:
                     json.dump(v, f)
 

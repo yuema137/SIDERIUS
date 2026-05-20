@@ -538,7 +538,7 @@ def test_cognitive_alignment_gate_one(tmp_path, capsys):
     prev_proposal_dict: dict[str, Any] | None = None
 
     for k, (cand_summary, base_summary) in enumerate(
-        zip(iter_candidate_summaries, iter_baseline_summaries), start=1
+        zip(iter_candidate_summaries, iter_baseline_summaries, strict=True), start=1
     ):
         storage = StorageConfig(
             backend="local",

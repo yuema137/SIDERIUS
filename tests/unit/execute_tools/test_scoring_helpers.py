@@ -438,7 +438,7 @@ class TestLinearWeightProperty:
         # 5-file trial: sampled rows sum to 1, unsampled rows are None.
         ref = _make_reference()
         fv_linear: list[float | None] = [None] * 20
-        for i, val in zip((2, 5, 11, 13, 17), (0.05, 0.10, 0.20, 0.15, 0.30)):
+        for i, val in zip((2, 5, 11, 13, 17), (0.05, 0.10, 0.20, 0.15, 0.30), strict=True):
             fv_linear[i] = val
         fv_log = [
             (math.log(v + _LOG_OFFSET, _LOG_BASE) if v is not None else None) for v in fv_linear
@@ -559,7 +559,7 @@ class TestImpactScoreProperty:
 
         assert len(impacts_a) == 20
         assert len(impacts_b) == 20
-        for a, b in zip(impacts_a, impacts_b):
+        for a, b in zip(impacts_a, impacts_b, strict=True):
             assert a == pytest.approx(b, abs=1e-12)
 
 

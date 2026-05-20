@@ -106,7 +106,7 @@ class TestGhostScoreKiller:
         new_scalars = sorted(
             math.log(gm, _LOG_BASE) for gm in _HISTORICAL_GHOST_GRAND_MEANS.values()
         )
-        gaps = [b - a for a, b in zip(new_scalars[:-1], new_scalars[1:])]
+        gaps = [b - a for a, b in zip(new_scalars[:-1], new_scalars[1:], strict=True)]
         min_gap = min(gaps)
         assert min_gap > _NOISE_FLOOR_LOG_UNITS, (
             f"Tightest adjacent gap ({min_gap:.6f} log-units) is not "
