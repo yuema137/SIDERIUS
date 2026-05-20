@@ -261,7 +261,8 @@ def _check_description(description_file_path: str) -> tuple[bool, str | None]:
     """
     if not os.path.isfile(description_file_path):
         return False, f"description.md not found at {description_file_path}"
-    content = open(description_file_path).read()
+    with open(description_file_path) as f:
+        content = f.read()
     if len(content.strip()) <= 50:
         return False, (
             f"description.md at {description_file_path} is too short "
@@ -441,7 +442,8 @@ class MLCodeValidatorAgent:
 
         # 7. LLM code review (only if plugin file is readable)
         if os.path.isfile(inp.model_file_path):
-            plugin_src = open(inp.model_file_path).read()
+            with open(inp.model_file_path) as f:
+                plugin_src = f.read()
             review = self._llm_review(
                 inp,
                 plugin_src,
@@ -469,7 +471,11 @@ class MLCodeValidatorAgent:
         inherit_ok = True
         inherit_notes = None
         if inp.inherited_components and os.path.isfile(inp.model_file_path):
-            inherit_src = plugin_src if "plugin_src" in dir() else open(inp.model_file_path).read()
+            if "plugin_src" in dir():
+                inherit_src = plugin_src
+            else:
+                with open(inp.model_file_path) as f:
+                    inherit_src = f.read()
             # Load vocab seed for pattern lookup
             vocab_for_check = None
             try:

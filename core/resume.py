@@ -233,7 +233,8 @@ def _validate_run_output(
             f"{output_path} but the file does not exist."
         )
     try:
-        text = open(output_path, encoding="utf-8").read()
+        with open(output_path, encoding="utf-8") as f:
+            text = f.read()
     except OSError as e:
         raise ResumeError(f"iter {iter_idx:03d}: cannot read run_output {output_path}: {e}") from e
     try:
