@@ -4,18 +4,20 @@ Unit tests for execute_tools/build_anchor_map.py
 Tests the anchor map builder logic with mocked SNR computation.
 No real HDF5 files or TIDMAD data required.
 """
+
 import json
 import math
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from execute_tools.build_anchor_map import build_anchor_map, load_anchor_map
 from execute_tools.scoring_utils import NUM_FILES, SEGMENTS_PER_FILE
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _mock_compute_ch2_snr(file_index, segment_index, data_dir):
     """
@@ -29,8 +31,8 @@ def _mock_compute_ch2_snr(file_index, segment_index, data_dir):
 # build_anchor_map
 # ---------------------------------------------------------------------------
 
-class TestBuildAnchorMap:
 
+class TestBuildAnchorMap:
     @patch("execute_tools.build_anchor_map._compute_ch2_snr", side_effect=_mock_compute_ch2_snr)
     def test_returns_correct_structure(self, mock_compute):
         result = build_anchor_map(data_dir="/fake/path")
@@ -90,8 +92,8 @@ class TestBuildAnchorMap:
 # load_anchor_map
 # ---------------------------------------------------------------------------
 
-class TestLoadAnchorMap:
 
+class TestLoadAnchorMap:
     def test_round_trip(self, tmp_path):
         """Write a map to JSON, load it back, verify contents match."""
         original = {
@@ -117,10 +119,11 @@ class TestLoadAnchorMap:
 # scoring_utils constants
 # ---------------------------------------------------------------------------
 
-class TestConstants:
 
+class TestConstants:
     def test_segment_length(self):
         from execute_tools.scoring_utils import SEGMENT_LENGTH
+
         assert SEGMENT_LENGTH == 10_000_000
 
     def test_segments_per_file(self):

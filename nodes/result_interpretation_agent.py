@@ -14,23 +14,24 @@ Node contract:
   CLI: --workspace, --run_name, --model_type, --provider, --model_id
 """
 
-import os
-import json
 import argparse
-from typing import Any, Dict, List, Optional, Set
+import json
+import os
+from typing import Any
 
-from agent.llm_bridge import LLMBridge
-from agent.schemas.interpretation import (
-    InterpretationInput, InterpretationOutput, ModelRunSummary,
-)
-from agent.schemas.score_table import ScoreComparisonTable
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
-from agent.schemas.cache_entry import CacheEntry
-from agent.cache_consolidator import consolidate
-from ml_models.model_descriptions import get_model_description
-from agent.schemas.hyperparam_tuning import serialize_expert_advice
 from pydantic import ValidationError
 
+from agent.cache_consolidator import consolidate
+from agent.llm_bridge import LLMBridge
+from agent.schemas.cache_entry import CacheEntry
+from agent.schemas.hyperparam_tuning import serialize_expert_advice
+from agent.schemas.interpretation import (
+    InterpretationInput,
+    InterpretationOutput,
+    ModelRunSummary,
+)
+from agent.schemas.score_table import ScoreComparisonTable
+from ml_models.model_descriptions import get_model_description
 
 # ---------------------------------------------------------------------------
 # Phase 1 — Per-model summarization
@@ -123,7 +124,7 @@ def _build_per_model_prompt(
     summary: ModelRunSummary,
     description: str,
     expert_advice_str: str = "",
-    human_advice: Optional[str] = None,
+    human_advice: str | None = None,
 ) -> str:
     """Build the user prompt for a single model's summarization."""
     lines = [
@@ -143,8 +144,9 @@ def _build_per_model_prompt(
 
     # Data volume context
     if summary.training_psd_segments is not None:
-        lines.append(f"Training PSD segments: {summary.training_psd_segments} "
-                      f"(baseline typically uses 4000)")
+        lines.append(
+            f"Training PSD segments: {summary.training_psd_segments} (baseline typically uses 4000)"
+        )
     if summary.eval_psd_segments is not None:
         lines.append(f"Eval PSD segments    : {summary.eval_psd_segments}")
     if summary.trial_portion is not None:
@@ -184,10 +186,16 @@ def _build_per_model_prompt(
     for i in range(n_rounds):
         score = summary.round_scores[i] if i < len(summary.round_scores) else None
         conclusion = summary.round_conclusions[i] if i < len(summary.round_conclusions) else ""
-        trial_p = (summary.round_trial_portions[i]
-                   if summary.round_trial_portions and i < len(summary.round_trial_portions) else None)
-        params = (summary.round_model_params[i]
-                  if summary.round_model_params and i < len(summary.round_model_params) else None)
+        trial_p = (
+            summary.round_trial_portions[i]
+            if summary.round_trial_portions and i < len(summary.round_trial_portions)
+            else None
+        )
+        params = (
+            summary.round_model_params[i]
+            if summary.round_model_params and i < len(summary.round_model_params)
+            else None
+        )
 
         score_str = f"{score:.4f}" if score is not None else "skipped"
         extras = []
@@ -197,7 +205,7 @@ def _build_per_model_prompt(
             extras.append(f"params={params:,}")
         extra_str = f" [{', '.join(extras)}]" if extras else ""
 
-        lines.append(f"  Round {i+1}: score={score_str}{extra_str} — {conclusion}")
+        lines.append(f"  Round {i + 1}: score={score_str}{extra_str} — {conclusion}")
 
     if expert_advice_str:
         lines += [
@@ -321,7 +329,7 @@ _NARRATIVE_FIELDS_FOR_PROMPT = (
 _LIST_FIELDS_FOR_PROMPT = ("key_findings", "bottlenecks")
 
 
-def _flatten_entry_for_prompt(entry: Dict[str, Any]) -> Dict[str, Any]:
+def _flatten_entry_for_prompt(entry: dict[str, Any]) -> dict[str, Any]:
     """Flatten a (possibly modern-shape) cache entry into the legacy display
     shape the synthesis prompt builder expects.
 
@@ -331,14 +339,13 @@ def _flatten_entry_for_prompt(entry: Dict[str, Any]) -> Dict[str, Any]:
     two shapes without touching the builder — cache-miss (legacy flat) entries
     pass through unchanged.
     """
-    flat: Dict[str, Any] = {}
+    flat: dict[str, Any] = {}
     for k, v in entry.items():
         if k == "_stats":
             continue
         if k in _LIST_FIELDS_FOR_PROMPT and isinstance(v, list):
             flat[k] = [
-                item["statement"] if isinstance(item, dict) and "statement" in item
-                else item
+                item["statement"] if isinstance(item, dict) and "statement" in item else item
                 for item in v
             ]
         elif k in _NARRATIVE_FIELDS_FOR_PROMPT and isinstance(v, dict):
@@ -349,23 +356,23 @@ def _flatten_entry_for_prompt(entry: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _build_synthesis_prompt(
-    per_model_summaries: Dict[str, Dict],
-    per_model_best: Dict[str, Optional[float]],
-    per_model_worst: Dict[str, Optional[float]],
-    overall_best_score: Optional[float],
-    overall_worst_score: Optional[float],
-    overall_best_config: Optional[Dict],
-    per_model_score_tables: Optional[Dict[str, ScoreComparisonTable]] = None,
-    per_model_params: Optional[Dict[str, int]] = None,
-    per_model_training_segments: Optional[Dict[str, int]] = None,
+    per_model_summaries: dict[str, dict],
+    per_model_best: dict[str, float | None],
+    per_model_worst: dict[str, float | None],
+    overall_best_score: float | None,
+    overall_worst_score: float | None,
+    overall_best_config: dict | None,
+    per_model_score_tables: dict[str, ScoreComparisonTable] | None = None,
+    per_model_params: dict[str, int] | None = None,
+    per_model_training_segments: dict[str, int] | None = None,
     expert_advice_str: str = "",
-    human_advice: Optional[str] = None,
-    runtime_vocab: Optional[List] = None,
-    per_model_formal: Optional[Dict[str, Optional[float]]] = None,
-    vocab_diversity_ratio: Optional[float] = None,
-    cumulative_information_gain: Optional[float] = None,
-    compressed_model_types: Optional[Set[str]] = None,
-    workspace: Optional[str] = None,
+    human_advice: str | None = None,
+    runtime_vocab: list | None = None,
+    per_model_formal: dict[str, float | None] | None = None,
+    vocab_diversity_ratio: float | None = None,
+    cumulative_information_gain: float | None = None,
+    compressed_model_types: set[str] | None = None,
+    workspace: str | None = None,
 ) -> str:
     """Build the user prompt for cross-model synthesis.
 
@@ -392,12 +399,10 @@ def _build_synthesis_prompt(
     # (short block) under a single header. Stable iteration order is
     # preserved within each group via the dict's insertion order.
     active_items = [
-        (mt, s) for mt, s in per_model_summaries.items()
-        if mt not in compressed_model_types
+        (mt, s) for mt, s in per_model_summaries.items() if mt not in compressed_model_types
     ]
     compressed_items = [
-        (mt, s) for mt, s in per_model_summaries.items()
-        if mt in compressed_model_types
+        (mt, s) for mt, s in per_model_summaries.items() if mt in compressed_model_types
     ]
 
     for model_type, summary in active_items:
@@ -410,7 +415,9 @@ def _build_synthesis_prompt(
         if per_model_formal:
             formal = per_model_formal.get(model_type)
             if formal is not None and formal != per_model_best.get(model_type):
-                lines.append(f"Formal score: {formal}  (best_score above may be from a trial round)")
+                lines.append(
+                    f"Formal score: {formal}  (best_score above may be from a trial round)"
+                )
         if per_model_params and model_type in per_model_params:
             lines.append(f"Parameters : {per_model_params[model_type]:,}")
         if per_model_training_segments and model_type in per_model_training_segments:
@@ -424,14 +431,19 @@ def _build_synthesis_prompt(
             lines.append(f"  - {b}")
         lines += [
             "",
-            f"### Best Config Analysis",
+            "### Best Config Analysis",
             summary.get("best_config_analysis", "N/A"),
             "",
-            f"### Score Trend",
+            "### Score Trend",
             summary.get("score_trend", "N/A"),
         ]
         # New per-model analysis fields
-        for field in ["per_file_analysis", "data_sensitivity", "efficiency_assessment", "strategy_assessment"]:
+        for field in [
+            "per_file_analysis",
+            "data_sensitivity",
+            "efficiency_assessment",
+            "strategy_assessment",
+        ]:
             val = summary.get(field)
             if val:
                 lines += ["", f"### {field.replace('_', ' ').title()}", val]
@@ -454,20 +466,22 @@ def _build_synthesis_prompt(
     if compressed_items:
         ws_hint = (
             f"see {workspace}/iter_*/interpretation.json for full detail"
-            if workspace else
-            "see prior interpretation.json files for full detail"
+            if workspace
+            else "see prior interpretation.json files for full detail"
         )
         lines += [
             "---",
-            f"## Stable Architectures (Compressed)",
+            "## Stable Architectures (Compressed)",
             f"[{len(compressed_items)} older architectures compressed for "
             f"context budget — {ws_hint}]",
             "",
         ]
         for model_type, summary in compressed_items:
-            takeaway = summary.get("one_line_takeaway") or summary.get(
-                "key_findings", [""]
-            )[0] if summary.get("key_findings") else "(no cached takeaway)"
+            takeaway = (
+                summary.get("one_line_takeaway") or summary.get("key_findings", [""])[0]
+                if summary.get("key_findings")
+                else "(no cached takeaway)"
+            )
             best = summary.get("best_score", per_model_best.get(model_type))
             n_rounds = summary.get("n_rounds", 0)
             lines += [
@@ -478,7 +492,8 @@ def _build_synthesis_prompt(
     # Established discoveries from previous iterations
     if runtime_vocab:
         discoveries = [
-            v for v in runtime_vocab
+            v
+            for v in runtime_vocab
             if (v.get("kind") if isinstance(v, dict) else getattr(v, "kind", None)) == "discovery"
         ]
         if discoveries:
@@ -490,7 +505,9 @@ def _build_synthesis_prompt(
             ]
             for v in discoveries:
                 name = v.get("name") if isinstance(v, dict) else getattr(v, "name", "")
-                desc = v.get("description") if isinstance(v, dict) else getattr(v, "description", "")
+                desc = (
+                    v.get("description") if isinstance(v, dict) else getattr(v, "description", "")
+                )
                 lines.append(f"  [{name}]: {desc}")
             lines.append("")
 
@@ -558,7 +575,7 @@ Respond with a JSON object and nothing else:
 """
 
 
-def _build_dedup_prompt(entry: "VocabEntry", existing_canonicals: List) -> str:
+def _build_dedup_prompt(entry: "VocabEntry", existing_canonicals: list) -> str:
     """Build the user prompt for one dedup judgment."""
     lines = [
         "## Candidate term (newly promoted)",
@@ -583,6 +600,7 @@ def _build_dedup_prompt(entry: "VocabEntry", existing_canonicals: List) -> str:
 # V8 hardening Domain 3 — Evolution observability
 # ---------------------------------------------------------------------------
 
+
 def _resolve_evolution_log_root(agent_workspace: str) -> str:
     """Resolve the chain-root directory where evolution_log.jsonl lives.
 
@@ -595,10 +613,10 @@ def _resolve_evolution_log_root(agent_workspace: str) -> str:
 
 
 def _compute_evolution_stats(
-    runtime_vocab: List[Any],
+    runtime_vocab: list[Any],
     promoted_this_iter: int,
     is_degraded: bool,
-) -> Dict[str, int | bool]:
+) -> dict[str, int | bool]:
     """Snapshot vocab counts + promotion + degraded flag.
 
     `promoted_this_iter` is the count returned by promote_candidates() this
@@ -608,23 +626,21 @@ def _compute_evolution_stats(
     tier.
     """
     canonical = sum(
-        1 for v in runtime_vocab
-        if (v.tier if hasattr(v, "tier") else v.get("tier")) == "canonical"
+        1 for v in runtime_vocab if (v.tier if hasattr(v, "tier") else v.get("tier")) == "canonical"
     )
     candidate = sum(
-        1 for v in runtime_vocab
-        if (v.tier if hasattr(v, "tier") else v.get("tier")) == "candidate"
+        1 for v in runtime_vocab if (v.tier if hasattr(v, "tier") else v.get("tier")) == "candidate"
     )
     return {
-        "vocab_total":         len(runtime_vocab),
-        "vocab_canonical":     canonical,
-        "vocab_candidate":     candidate,
-        "promoted_this_iter":  promoted_this_iter,
-        "is_degraded":         is_degraded,
+        "vocab_total": len(runtime_vocab),
+        "vocab_canonical": canonical,
+        "vocab_candidate": candidate,
+        "promoted_this_iter": promoted_this_iter,
+        "is_degraded": is_degraded,
     }
 
 
-def _append_evolution_log(workspace_root: str, payload: Dict[str, Any]) -> None:
+def _append_evolution_log(workspace_root: str, payload: dict[str, Any]) -> None:
     """Append one JSON line to {workspace_root}/evolution_log.jsonl.
 
     Append-only: the file is created on first call (iteration 1 of a new
@@ -633,6 +649,7 @@ def _append_evolution_log(workspace_root: str, payload: Dict[str, Any]) -> None:
     swallowed — observability must never break the pipeline.
     """
     import datetime
+
     log_path = os.path.join(workspace_root, "evolution_log.jsonl")
     line = {
         "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
@@ -643,22 +660,27 @@ def _append_evolution_log(workspace_root: str, payload: Dict[str, Any]) -> None:
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(line, default=str) + "\n")
     except Exception as e:
-        print(
-            f"  [evolution_log] WARN: failed to append to {log_path}: "
-            f"{type(e).__name__}: {e}"
-        )
+        print(f"  [evolution_log] WARN: failed to append to {log_path}: {type(e).__name__}: {e}")
 
 
 # ---------------------------------------------------------------------------
 # Node
 # ---------------------------------------------------------------------------
 
-class ResultInterpretationAgent:
 
-    def __init__(self, provider: str = "gemini", model_id: str = "gemini-3.1-flash-lite-preview",
-                 max_retries: int | None = None, bridge_factory=None, **kwargs):
+class ResultInterpretationAgent:
+    def __init__(
+        self,
+        provider: str = "gemini",
+        model_id: str = "gemini-3.1-flash-lite-preview",
+        max_retries: int | None = None,
+        bridge_factory=None,
+        **kwargs,
+    ):
         self._bridge_factory = bridge_factory or LLMBridge
-        self.bridge = self._bridge_factory(provider=provider, model_id=model_id, max_retries=max_retries)
+        self.bridge = self._bridge_factory(
+            provider=provider, model_id=model_id, max_retries=max_retries
+        )
 
     def run(self, inp: InterpretationInput) -> InterpretationOutput:
         # --- Effective model types ---
@@ -673,7 +695,7 @@ class ResultInterpretationAgent:
         # For agent-generated models, the description may be passed directly
         # in ModelRunSummary.model_description (avoiding filesystem dependency).
         # For built-in models, load from description.md on disk.
-        model_descriptions: Dict[str, str] = {}
+        model_descriptions: dict[str, str] = {}
         for mt in effective_types:
             # Priority 1: inline description from current iteration's summaries
             inline_desc = None
@@ -698,17 +720,17 @@ class ResultInterpretationAgent:
         # --- Deterministic pre-computation ---
         # New models: read from inp.summaries.
         # Cached models: read from inp.model_knowledge_cache[mt]["_stats"].
-        per_model_best:   Dict[str, Optional[float]] = {}
-        per_model_worst:  Dict[str, Optional[float]] = {}
-        per_model_formal: Dict[str, Optional[float]] = {}
-        per_model_best_config: Dict[str, Optional[Dict]] = {}
-        overall_best_score:  Optional[float] = None
-        overall_worst_score: Optional[float] = None
-        overall_best_config: Optional[Dict[str, Any]] = None
+        per_model_best: dict[str, float | None] = {}
+        per_model_worst: dict[str, float | None] = {}
+        per_model_formal: dict[str, float | None] = {}
+        per_model_best_config: dict[str, dict | None] = {}
+        overall_best_score: float | None = None
+        overall_worst_score: float | None = None
+        overall_best_config: dict[str, Any] | None = None
         total_experiments = 0
 
         # Map model_type → ModelRunSummary (new models only)
-        per_model_summary_input: Dict[str, ModelRunSummary] = {}
+        per_model_summary_input: dict[str, ModelRunSummary] = {}
 
         for s in inp.summaries:
             mt = s.model_type
@@ -737,12 +759,12 @@ class ResultInterpretationAgent:
             if mt in per_model_summary_input:
                 continue  # new summary takes precedence
             stats = entry.get("_stats", {})
-            best  = stats.get("best_denoising_score")
+            best = stats.get("best_denoising_score")
             worst = stats.get("worst_denoising_score")
             total_experiments += stats.get("completed_rounds", 0)
 
-            per_model_best[mt]   = best
-            per_model_worst[mt]  = worst
+            per_model_best[mt] = best
+            per_model_worst[mt] = worst
             per_model_best_config[mt] = stats.get("best_config")
             if stats.get("formal_score") is not None:
                 per_model_formal[mt] = stats["formal_score"]
@@ -764,9 +786,11 @@ class ResultInterpretationAgent:
         # Serialize expert advice (soft edge input)
         expert_advice_str = serialize_expert_advice(inp.expert_advice) if inp.expert_advice else ""
 
-        print(f"Interpreting {len(inp.summaries)} model summary(ies) across "
-              f"{len(effective_types)} model(s): {effective_types} "
-              f"(overall best: {overall_best_score})")
+        print(
+            f"Interpreting {len(inp.summaries)} model summary(ies) across "
+            f"{len(effective_types)} model(s): {effective_types} "
+            f"(overall best: {overall_best_score})"
+        )
 
         # --- LLM-dependent flow ---
         # V8 hardening Domain 2b: the LLM-dependent portion of run() is
@@ -800,11 +824,10 @@ class ResultInterpretationAgent:
                 score_delta_threshold=inp.active_model_score_delta,
             )
             print(
-                f"  Active models ({len(active_set)}/{len(effective_types)}): "
-                f"{sorted(active_set)}"
+                f"  Active models ({len(active_set)}/{len(effective_types)}): {sorted(active_set)}"
             )
 
-            model_knowledge_cache: Dict[str, Dict] = {}
+            model_knowledge_cache: dict[str, dict] = {}
             n_skipped = 0
             for mt in effective_types:
                 cache_entry = inp.model_knowledge_cache.get(mt)
@@ -848,7 +871,9 @@ class ResultInterpretationAgent:
                     continue
 
                 summary = per_model_summary_input[mt]
-                print(f"  Phase 1: Summarizing {mt} ({summary.completed_rounds} rounds) — LLM call...")
+                print(
+                    f"  Phase 1: Summarizing {mt} ({summary.completed_rounds} rounds) — LLM call..."
+                )
                 per_model_prompt = _build_per_model_prompt(
                     summary=summary,
                     description=model_descriptions[mt],
@@ -856,23 +881,23 @@ class ResultInterpretationAgent:
                     human_advice=inp.human_advice,
                 )
                 llm_response = self.bridge.generate(
-                    PER_MODEL_SYSTEM_PROMPT, per_model_prompt,
+                    PER_MODEL_SYSTEM_PROMPT,
+                    per_model_prompt,
                     label="interpretation.per_model",
                 )
 
                 new_stats = {
-                    "best_denoising_score":  summary.best_denoising_score,
+                    "best_denoising_score": summary.best_denoising_score,
                     "worst_denoising_score": summary.worst_denoising_score,
-                    "best_file_vector":      summary.best_file_vector,
-                    "best_score_table":      (
-                        summary.best_score_table.model_dump()
-                        if summary.best_score_table else None
+                    "best_file_vector": summary.best_file_vector,
+                    "best_score_table": (
+                        summary.best_score_table.model_dump() if summary.best_score_table else None
                     ),
-                    "best_model_params":     summary.best_model_params,
-                    "completed_rounds":      summary.completed_rounds,
-                    "best_config":           summary.best_config,
-                    "formal_score":          summary.formal_score,
-                    "model_description":     model_descriptions.get(mt),
+                    "best_model_params": summary.best_model_params,
+                    "completed_rounds": summary.completed_rounds,
+                    "best_config": summary.best_config,
+                    "formal_score": summary.formal_score,
+                    "model_description": model_descriptions.get(mt),
                 }
 
                 if cache_entry is None:
@@ -933,14 +958,14 @@ class ResultInterpretationAgent:
                             f"iter_{inp.iteration:03d}",
                         )
                         os.makedirs(archive_dir, exist_ok=True)
-                        archive_path = os.path.join(
-                            archive_dir, f"cache_archive_{mt}.json"
-                        )
+                        archive_path = os.path.join(archive_dir, f"cache_archive_{mt}.json")
                         with open(archive_path, "w", encoding="utf-8") as f:
                             json.dump(archived_items, f, indent=2, default=str)
 
-                print(f"    {mt}: {len(llm_response.get('key_findings', []))} findings, "
-                      f"{len(llm_response.get('bottlenecks', []))} bottlenecks")
+                print(
+                    f"    {mt}: {len(llm_response.get('key_findings', []))} findings, "
+                    f"{len(llm_response.get('bottlenecks', []))} bottlenecks"
+                )
 
             if n_skipped:
                 print(
@@ -952,11 +977,11 @@ class ResultInterpretationAgent:
             # --- Pre-compute enriched fields ---
             # New models: read from inp.summaries.
             # Cached models: read from model_knowledge_cache[mt]["_stats"].
-            per_model_score_tables: Dict[str, ScoreComparisonTable] = {}
-            per_model_params: Dict[str, int] = {}
-            per_model_training_segments: Dict[str, int] = {}
+            per_model_score_tables: dict[str, ScoreComparisonTable] = {}
+            per_model_params: dict[str, int] = {}
+            per_model_training_segments: dict[str, int] = {}
 
-            def _register_score_table(mt: str, table: Optional[ScoreComparisonTable]):
+            def _register_score_table(mt: str, table: ScoreComparisonTable | None):
                 if table is None:
                     return
                 per_model_score_tables[mt] = table
@@ -979,7 +1004,8 @@ class ResultInterpretationAgent:
                 cached_table_data = stats.get("best_score_table")
                 cached_table = (
                     ScoreComparisonTable.model_validate(cached_table_data)
-                    if cached_table_data is not None else None
+                    if cached_table_data is not None
+                    else None
                 )
                 _register_score_table(mt, cached_table)
                 if stats.get("best_model_params") is not None:
@@ -994,8 +1020,9 @@ class ResultInterpretationAgent:
             # replacing the V12 "concatenate every cache entry verbatim"
             # behaviour with a windowed view.
             from nodes.interpretation_helpers import compress_model_summary
-            per_model_summaries_for_prompt: Dict[str, Dict] = {}
-            compressed_set: Set[str] = set()
+
+            per_model_summaries_for_prompt: dict[str, dict] = {}
+            compressed_set: set[str] = set()
             for mt, entry in model_knowledge_cache.items():
                 if mt in active_set:
                     per_model_summaries_for_prompt[mt] = _flatten_entry_for_prompt(entry)
@@ -1014,6 +1041,7 @@ class ResultInterpretationAgent:
             # before Phase 2 synthesis so the LLM can see the research trajectory so far.
             # The updated metrics (post-Phase-C) are computed after vocab is rebuilt below.
             from nodes.interpretation_helpers import compute_vocab_diversity_ratio as _cvdr
+
             prior_vocab_diversity_ratio = _cvdr(list(inp.runtime_vocab))
             prior_cumulative_info_gain = inp.cumulative_information_gain
 
@@ -1025,9 +1053,10 @@ class ResultInterpretationAgent:
                 llm_take_home = (
                     f"The {single_mt} model shows: "
                     + summary.get("score_trend", "unclear trend")
-                    + ". " + (summary.get("best_config_analysis", "") or "")
+                    + ". "
+                    + (summary.get("best_config_analysis", "") or "")
                 )
-                print(f"  Phase 2: Single model — skipping synthesis.")
+                print("  Phase 2: Single model — skipping synthesis.")
             else:
                 print(f"  Phase 2: Synthesizing across {len(effective_types)} models...")
                 synthesis_prompt = _build_synthesis_prompt(
@@ -1050,7 +1079,8 @@ class ResultInterpretationAgent:
                     workspace=inp.storage.local.workspace,
                 )
                 synthesis_response = self.bridge.generate(
-                    SYNTHESIS_SYSTEM_PROMPT, synthesis_prompt,
+                    SYNTHESIS_SYSTEM_PROMPT,
+                    synthesis_prompt,
                     label="interpretation.synthesis",
                 )
                 llm_findings = synthesis_response.get("key_findings", [])
@@ -1059,8 +1089,11 @@ class ResultInterpretationAgent:
 
             # --- Phase C: Vocabulary feedback loop ---
             from nodes.interpretation_helpers import (
-                evaluate_prediction, generate_discoveries, build_runtime_vocab,
-                promote_candidates, update_vocab_link_confirmations,
+                build_runtime_vocab,
+                evaluate_prediction,
+                generate_discoveries,
+                promote_candidates,
+                update_vocab_link_confirmations,
             )
 
             prediction_evaluation = None
@@ -1084,10 +1117,7 @@ class ResultInterpretationAgent:
                     # existing shape while the upstream dict stores a
                     # ScoreComparisonTable.
                     prev_table = (per_model_score_tables or {}).get(prev_model_type)
-                    prev_fv = (
-                        [r.model for r in prev_table.rows]
-                        if prev_table is not None else None
-                    )
+                    prev_fv = [r.model for r in prev_table.rows] if prev_table is not None else None
 
                     actual_results = {
                         "best_denoising_score": prev_best,
@@ -1102,9 +1132,11 @@ class ResultInterpretationAgent:
                         actual_results,
                         current_sota=sota_at_proposal,
                     )
-                    print(f"  Prediction evaluation: {prediction_evaluation.get('outcome', '?')} "
-                          f"(delta_from_sota={prediction_evaluation.get('delta_from_sota')}, "
-                          f"actual={prediction_evaluation.get('actual_value')})")
+                    print(
+                        f"  Prediction evaluation: {prediction_evaluation.get('outcome', '?')} "
+                        f"(delta_from_sota={prediction_evaluation.get('delta_from_sota')}, "
+                        f"actual={prediction_evaluation.get('actual_value')})"
+                    )
 
                 # Generate discoveries from the evaluation
                 prev_summary = per_model_summary_input.get(prev_model_type)
@@ -1159,30 +1191,37 @@ class ResultInterpretationAgent:
                 runtime_vocab, merge_changes = self._dedup_promoted(promoted_names, runtime_vocab)
                 vocab_changes.extend(merge_changes)
 
-            print(f"  Runtime vocab: {len(runtime_vocab)} entries "
-                  f"({sum(1 for v in runtime_vocab if (v.kind if hasattr(v, 'kind') else v.get('kind')) == 'discovery')} discoveries, "
-                  f"{sum(1 for v in runtime_vocab if (v.tier if hasattr(v, 'tier') else v.get('tier')) == 'canonical')} canonical)")
+            print(
+                f"  Runtime vocab: {len(runtime_vocab)} entries "
+                f"({sum(1 for v in runtime_vocab if (v.kind if hasattr(v, 'kind') else v.get('kind')) == 'discovery')} discoveries, "
+                f"{sum(1 for v in runtime_vocab if (v.tier if hasattr(v, 'tier') else v.get('tier')) == 'canonical')} canonical)"
+            )
 
             # --- Phase E.7: Update ProposedVocabLink confirmation tracking ---
             # When prediction is confirmed, each proposed link from the previous run
             # gains one confirmation. Links confirmed in >= min_runs distinct runs
             # are promoted to VocabEntry.related_to (feature gains capability as established fact).
-            prev_vocab_links: List[Dict[str, Any]] = (
+            prev_vocab_links: list[dict[str, Any]] = (
                 inp.previous_proposal.get("proposed_vocab_links", [])
-                if inp.previous_proposal else []
+                if inp.previous_proposal
+                else []
             )
-            link_confirmations, runtime_vocab, promoted_link_pairs = update_vocab_link_confirmations(
-                prev_vocab_links=prev_vocab_links,
-                prediction_outcome=(
-                    prediction_evaluation.get("outcome") if prediction_evaluation else None
-                ),
-                run_name=prev_model_type if inp.previous_proposal else "",
-                existing_confirmations=inp.vocab_link_confirmations,
-                runtime_vocab=runtime_vocab,
-                min_runs=3,
+            link_confirmations, runtime_vocab, promoted_link_pairs = (
+                update_vocab_link_confirmations(
+                    prev_vocab_links=prev_vocab_links,
+                    prediction_outcome=(
+                        prediction_evaluation.get("outcome") if prediction_evaluation else None
+                    ),
+                    run_name=prev_model_type if inp.previous_proposal else "",
+                    existing_confirmations=inp.vocab_link_confirmations,
+                    runtime_vocab=runtime_vocab,
+                    min_runs=3,
+                )
             )
             if promoted_link_pairs:
-                print(f"  Vocab link promotions ({len(promoted_link_pairs)}): {promoted_link_pairs}")
+                print(
+                    f"  Vocab link promotions ({len(promoted_link_pairs)}): {promoted_link_pairs}"
+                )
                 for pair in promoted_link_pairs:
                     feature, _, capability = pair.partition(":")
                     vocab_changes.append(
@@ -1200,23 +1239,24 @@ class ResultInterpretationAgent:
                         new_outcomes_history.get(outcome_label, 0) + 1
                     )
             total_preds = sum(new_outcomes_history.values())
-            scientific_accuracy: Optional[Dict[str, float]] = (
+            scientific_accuracy: dict[str, float] | None = (
                 {k: round(v / total_preds, 4) for k, v in new_outcomes_history.items()}
-                if total_preds > 0 else None
+                if total_preds > 0
+                else None
             )
             if scientific_accuracy:
-                print(f"  Scientific accuracy: {scientific_accuracy} "
-                      f"(n={total_preds})")
+                print(f"  Scientific accuracy: {scientific_accuracy} (n={total_preds})")
 
             # --- Centrifugal health metrics (post-Phase-C, on the updated vocab) ---
             vocab_diversity_ratio = _cvdr(runtime_vocab)
             this_info_gain = (
-                prediction_evaluation.get("information_gain", 0.0)
-                if prediction_evaluation else 0.0
+                prediction_evaluation.get("information_gain", 0.0) if prediction_evaluation else 0.0
             )
             cumulative_information_gain = inp.cumulative_information_gain + this_info_gain
-            print(f"  Vocab diversity ratio: {vocab_diversity_ratio:.3f} "
-                  f"(cumulative info gain: {cumulative_information_gain:.4f})")
+            print(
+                f"  Vocab diversity ratio: {vocab_diversity_ratio:.3f} "
+                f"(cumulative info gain: {cumulative_information_gain:.4f})"
+            )
 
             # --- V8 Domain 3 — evolution stats (healthy path) ---
             # Snapshot vocab counts + promotion count + degraded flag now,
@@ -1230,43 +1270,47 @@ class ResultInterpretationAgent:
             )
 
             # --- Build and validate output ---
-            output = InterpretationOutput.model_validate({
-                "model_types":           effective_types,
-                "model_descriptions":    model_descriptions,
-                "total_experiments":     total_experiments,
-                "per_model_best":        per_model_best,
-                "per_model_worst":       per_model_worst,
-                "best_denoising_score":  overall_best_score,
-                "worst_denoising_score": overall_worst_score,
-                "best_config":           overall_best_config,
-                "model_knowledge_cache":  model_knowledge_cache,
-                "key_findings":          llm_findings,
-                "bottlenecks":           llm_bottlenecks,
-                # Enriched fields
-                "per_model_score_tables":      per_model_score_tables or None,
-                "per_model_params":            per_model_params or None,
-                "per_model_training_segments": per_model_training_segments or None,
-                "take_home_message":     llm_take_home,
-                # Phase C: vocabulary feedback
-                "runtime_vocab":         [v.model_dump() if hasattr(v, "model_dump") else v for v in runtime_vocab],
-                "prediction_evaluation": prediction_evaluation,
-                "new_discoveries":       [d.model_dump() for d in new_discoveries],
-                "vocab_changes":         vocab_changes,
-                # Centrifugal health metrics
-                "vocab_diversity_ratio":        vocab_diversity_ratio,
-                "cumulative_information_gain":  cumulative_information_gain,
-                # Phase E: scientific accuracy + vocab link promotion
-                "scientific_accuracy":           scientific_accuracy,
-                "prediction_outcomes_history":   new_outcomes_history,
-                "vocab_link_confirmations":      link_confirmations,
-                # V8 Domain 3 — evolution observability
-                "evolution_stats":               evolution_stats,
-            })
+            output = InterpretationOutput.model_validate(
+                {
+                    "model_types": effective_types,
+                    "model_descriptions": model_descriptions,
+                    "total_experiments": total_experiments,
+                    "per_model_best": per_model_best,
+                    "per_model_worst": per_model_worst,
+                    "best_denoising_score": overall_best_score,
+                    "worst_denoising_score": overall_worst_score,
+                    "best_config": overall_best_config,
+                    "model_knowledge_cache": model_knowledge_cache,
+                    "key_findings": llm_findings,
+                    "bottlenecks": llm_bottlenecks,
+                    # Enriched fields
+                    "per_model_score_tables": per_model_score_tables or None,
+                    "per_model_params": per_model_params or None,
+                    "per_model_training_segments": per_model_training_segments or None,
+                    "take_home_message": llm_take_home,
+                    # Phase C: vocabulary feedback
+                    "runtime_vocab": [
+                        v.model_dump() if hasattr(v, "model_dump") else v for v in runtime_vocab
+                    ],
+                    "prediction_evaluation": prediction_evaluation,
+                    "new_discoveries": [d.model_dump() for d in new_discoveries],
+                    "vocab_changes": vocab_changes,
+                    # Centrifugal health metrics
+                    "vocab_diversity_ratio": vocab_diversity_ratio,
+                    "cumulative_information_gain": cumulative_information_gain,
+                    # Phase E: scientific accuracy + vocab link promotion
+                    "scientific_accuracy": scientific_accuracy,
+                    "prediction_outcomes_history": new_outcomes_history,
+                    "vocab_link_confirmations": link_confirmations,
+                    # V8 Domain 3 — evolution observability
+                    "evolution_stats": evolution_stats,
+                }
+            )
 
             # --- Persist ---
             if inp.storage.backend == "local" and inp.storage.local:
                 workspace = inp.storage.local.workspace
-                run_name  = inp.storage.local.run_name
+                run_name = inp.storage.local.run_name
                 os.makedirs(workspace, exist_ok=True)
                 out_path = os.path.join(workspace, f"interpretation_{run_name}.json")
                 with open(out_path, "w", encoding="utf-8") as f:
@@ -1280,19 +1324,16 @@ class ResultInterpretationAgent:
                 _append_evolution_log(
                     workspace_root=_resolve_evolution_log_root(workspace),
                     payload={
-                        "iteration":          inp.iteration,
-                        "evolution_stats":    evolution_stats,
-                        "best_score_so_far":  output.best_denoising_score,
-                        "take_home_message":  output.take_home_message,
+                        "iteration": inp.iteration,
+                        "evolution_stats": evolution_stats,
+                        "best_score_so_far": output.best_denoising_score,
+                        "take_home_message": output.take_home_message,
                     },
                 )
 
             return output
         except Exception as e:
-            print(
-                f"  [DEGRADED] Interpretation LLM flow failed: "
-                f"{type(e).__name__}: {e}"
-            )
+            print(f"  [DEGRADED] Interpretation LLM flow failed: {type(e).__name__}: {e}")
             print(
                 f"  [DEGRADED] Carrying forward incoming runtime_vocab "
                 f"({len(inp.runtime_vocab)} entries) unchanged. "
@@ -1307,41 +1348,40 @@ class ResultInterpretationAgent:
                 promoted_this_iter=0,
                 is_degraded=True,
             )
-            output = InterpretationOutput.model_validate({
-                "model_types":           effective_types,
-                "model_descriptions":    model_descriptions,
-                "total_experiments":     total_experiments,
-                "per_model_best":        per_model_best,
-                "per_model_worst":       per_model_worst,
-                "best_denoising_score":  overall_best_score,
-                "worst_denoising_score": overall_worst_score,
-                "best_config":           overall_best_config,
-                "model_knowledge_cache": dict(inp.model_knowledge_cache),
-                "key_findings":          [],
-                "bottlenecks":           [],
-                "take_home_message": (
-                    f"DEGRADED: interpreter LLM failed "
-                    f"({type(e).__name__}). Vocab carried forward unchanged."
-                ),
-                "runtime_vocab": [
-                    v.model_dump() if hasattr(v, "model_dump") else v
-                    for v in inp.runtime_vocab
-                ],
-                "new_discoveries":              [],
-                "vocab_changes":                [],
-                "prediction_outcomes_history":  dict(inp.prediction_outcomes_history),
-                "vocab_link_confirmations":     dict(inp.vocab_link_confirmations),
-                "cumulative_information_gain":  inp.cumulative_information_gain,
-                "is_degraded":                  True,
-                "evolution_stats":              degraded_stats,
-            })
+            output = InterpretationOutput.model_validate(
+                {
+                    "model_types": effective_types,
+                    "model_descriptions": model_descriptions,
+                    "total_experiments": total_experiments,
+                    "per_model_best": per_model_best,
+                    "per_model_worst": per_model_worst,
+                    "best_denoising_score": overall_best_score,
+                    "worst_denoising_score": overall_worst_score,
+                    "best_config": overall_best_config,
+                    "model_knowledge_cache": dict(inp.model_knowledge_cache),
+                    "key_findings": [],
+                    "bottlenecks": [],
+                    "take_home_message": (
+                        f"DEGRADED: interpreter LLM failed "
+                        f"({type(e).__name__}). Vocab carried forward unchanged."
+                    ),
+                    "runtime_vocab": [
+                        v.model_dump() if hasattr(v, "model_dump") else v for v in inp.runtime_vocab
+                    ],
+                    "new_discoveries": [],
+                    "vocab_changes": [],
+                    "prediction_outcomes_history": dict(inp.prediction_outcomes_history),
+                    "vocab_link_confirmations": dict(inp.vocab_link_confirmations),
+                    "cumulative_information_gain": inp.cumulative_information_gain,
+                    "is_degraded": True,
+                    "evolution_stats": degraded_stats,
+                }
+            )
             if inp.storage.backend == "local" and inp.storage.local:
                 workspace = inp.storage.local.workspace
-                run_name  = inp.storage.local.run_name
+                run_name = inp.storage.local.run_name
                 os.makedirs(workspace, exist_ok=True)
-                out_path = os.path.join(
-                    workspace, f"interpretation_{run_name}.json"
-                )
+                out_path = os.path.join(workspace, f"interpretation_{run_name}.json")
                 with open(out_path, "w", encoding="utf-8") as f:
                     f.write(output.model_dump_json(indent=4))
                 print(f"  [DEGRADED] Interpretation saved -> {out_path}")
@@ -1349,20 +1389,19 @@ class ResultInterpretationAgent:
                 _append_evolution_log(
                     workspace_root=_resolve_evolution_log_root(workspace),
                     payload={
-                        "iteration":          inp.iteration,
-                        "evolution_stats":    degraded_stats,
-                        "best_score_so_far":  output.best_denoising_score,
-                        "take_home_message":  output.take_home_message,
+                        "iteration": inp.iteration,
+                        "evolution_stats": degraded_stats,
+                        "best_score_so_far": output.best_denoising_score,
+                        "take_home_message": output.take_home_message,
                     },
                 )
             return output
 
-
     def _dedup_promoted(
         self,
-        promoted_names: List[str],
-        vocab: List["VocabEntry"],
-    ) -> tuple[List["VocabEntry"], List[str]]:
+        promoted_names: list[str],
+        vocab: list["VocabEntry"],
+    ) -> tuple[list["VocabEntry"], list[str]]:
         """
         Semantic deduplication of newly promoted canonical entries (C.6).
 
@@ -1382,26 +1421,26 @@ class ResultInterpretationAgent:
             (updated_vocab, merge_changes) — updated vocab and human-readable
             log strings for each merge (e.g. "Merged 'x' into 'y' as alias.").
         """
-        from agent.schemas.proposal import VocabEntry as _VocabEntry
 
         if not promoted_names:
             return vocab, []
 
-        vocab_by_name: Dict[str, Any] = {
+        vocab_by_name: dict[str, Any] = {
             (e.name if hasattr(e, "name") else e["name"]): e for e in vocab
         }
-        merge_changes: List[str] = []
+        merge_changes: list[str] = []
 
         for name in promoted_names:
             if name not in vocab_by_name:
                 continue  # already removed by a prior merge this loop
 
             entry = vocab_by_name[name]
-            kind  = entry.kind if hasattr(entry, "kind") else entry.get("kind", "")
+            kind = entry.kind if hasattr(entry, "kind") else entry.get("kind", "")
 
             # Only compare against existing canonicals of the same kind
             existing = [
-                e for n, e in vocab_by_name.items()
+                e
+                for n, e in vocab_by_name.items()
                 if n != name
                 and (e.tier if hasattr(e, "tier") else e.get("tier")) == "canonical"
                 and (e.kind if hasattr(e, "kind") else e.get("kind")) == kind
@@ -1410,9 +1449,10 @@ class ResultInterpretationAgent:
                 print(f"  Dedup: '{name}' — no existing canonicals of kind='{kind}', keeping.")
                 continue
 
-            prompt   = _build_dedup_prompt(entry, existing)
+            prompt = _build_dedup_prompt(entry, existing)
             response = self.bridge.generate(
-                DEDUP_SYSTEM_PROMPT, prompt,
+                DEDUP_SYSTEM_PROMPT,
+                prompt,
                 label="interpretation.dedup",
             )
 
@@ -1423,7 +1463,8 @@ class ResultInterpretationAgent:
             if is_dup and dup_of and dup_of in vocab_by_name:
                 existing_entry = vocab_by_name[dup_of]
                 current_aliases = (
-                    existing_entry.aliases if hasattr(existing_entry, "aliases")
+                    existing_entry.aliases
+                    if hasattr(existing_entry, "aliases")
                     else existing_entry.get("aliases", [])
                 )
                 vocab_by_name[dup_of] = existing_entry.model_copy(
@@ -1443,16 +1484,26 @@ class ResultInterpretationAgent:
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(description="SIDERIUS result_interpretation_agent")
-    parser.add_argument("--workspace",   type=str, default="./siderius_workspace",
-                        help="Root directory for reading summaries and writing output")
-    parser.add_argument("--run_name",    type=str, default="v1",
-                        help="Run name — reads summary_{run_name}.json, writes interpretation_{run_name}.json")
-    parser.add_argument("--model_type",  type=str, required=True,
-                        help="Model architecture (e.g. 'punet').")
-    parser.add_argument("--provider",    type=str, default="gemini", choices=["gemini", "openai"])
-    parser.add_argument("--model_id",    type=str, default="gemini-3.1-flash-lite-preview")
+    parser.add_argument(
+        "--workspace",
+        type=str,
+        default="./siderius_workspace",
+        help="Root directory for reading summaries and writing output",
+    )
+    parser.add_argument(
+        "--run_name",
+        type=str,
+        default="v1",
+        help="Run name — reads summary_{run_name}.json, writes interpretation_{run_name}.json",
+    )
+    parser.add_argument(
+        "--model_type", type=str, required=True, help="Model architecture (e.g. 'punet')."
+    )
+    parser.add_argument("--provider", type=str, default="gemini", choices=["gemini", "openai"])
+    parser.add_argument("--model_id", type=str, default="gemini-3.1-flash-lite-preview")
     args = parser.parse_args()
 
     # Load run output from workspace
@@ -1462,45 +1513,52 @@ def main():
             f"Run output not found: {output_path}\n"
             f"Run tune_ml_hyperparam_agent first, or check --workspace and --run_name."
         )
-    with open(output_path, "r", encoding="utf-8") as f:
+    with open(output_path, encoding="utf-8") as f:
         run_data = json.load(f)
 
     # Build ModelRunSummary from run output
     from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
+
     tune_output = HyperparamTuningOutput.model_validate(run_data)
     summary = tuning_output_to_model_run_summary(tune_output)
 
     agent_input = InterpretationInput(
         summaries=[summary],
-        storage={"backend": "local", "local": {"workspace": args.workspace, "run_name": args.run_name}},
+        storage={
+            "backend": "local",
+            "local": {"workspace": args.workspace, "run_name": args.run_name},
+        },
     )
     print(f"Input validated: model={args.model_type} | rounds={summary.completed_rounds}")
 
     agent = ResultInterpretationAgent(provider=args.provider, model_id=args.model_id)
     output = agent.run(agent_input)
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  Interpretation — {output.model_types}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"  Total experiments : {output.total_experiments}")
     print(f"  Overall best      : {output.best_denoising_score}")
     print(f"  Overall worst     : {output.worst_denoising_score}")
     for mt in output.model_types:
-        print(f"  {mt}: best={output.per_model_best.get(mt)} worst={output.per_model_worst.get(mt)}")
-    print(f"\n  Key findings:")
+        print(
+            f"  {mt}: best={output.per_model_best.get(mt)} worst={output.per_model_worst.get(mt)}"
+        )
+    print("\n  Key findings:")
     for f in output.key_findings:
         print(f"    - {f}")
-    print(f"\n  Bottlenecks:")
+    print("\n  Bottlenecks:")
     for b in output.bottlenecks:
         print(f"    - {b}")
-    print(f"\n  Take-home message:")
+    print("\n  Take-home message:")
     print(f"    {output.take_home_message}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
 
 # ---------------------------------------------------------------------------
 # Utility: convert HyperparamTuningOutput → ModelRunSummary
 # ---------------------------------------------------------------------------
+
 
 def tuning_output_to_model_run_summary(
     output: "HyperparamTuningOutput",
@@ -1515,10 +1573,10 @@ def tuning_output_to_model_run_summary(
     records = output.all_records
 
     # Per-round extraction
-    round_scores: List[Optional[float]] = []
-    round_conclusions: List[str] = []
-    round_trial_portions: List[Optional[float]] = []
-    round_model_params: List[Optional[int]] = []
+    round_scores: list[float | None] = []
+    round_conclusions: list[str] = []
+    round_trial_portions: list[float | None] = []
+    round_model_params: list[int | None] = []
 
     for r in records:
         rec = r.model_dump() if hasattr(r, "model_dump") else r
@@ -1537,7 +1595,8 @@ def tuning_output_to_model_run_summary(
         (r.model_dump() if hasattr(r, "model_dump") else r)
         for r in records
         if (r.status if hasattr(r, "status") else r.get("status")) == "success"
-        and (r.denoising_score if hasattr(r, "denoising_score") else r.get("denoising_score")) is not None
+        and (r.denoising_score if hasattr(r, "denoising_score") else r.get("denoising_score"))
+        is not None
     ]
     best_rec = max(success, key=lambda r: r["denoising_score"]) if success else None
 
@@ -1558,7 +1617,7 @@ def tuning_output_to_model_run_summary(
     # is a fallback in case the top-level field is None but the record carries
     # one. formal_score_table comes from the tuning output's top-level field
     # directly — it points at the last successful formal round's table.
-    def _as_table(value) -> Optional[ScoreComparisonTable]:
+    def _as_table(value) -> ScoreComparisonTable | None:
         if value is None:
             return None
         if isinstance(value, ScoreComparisonTable):

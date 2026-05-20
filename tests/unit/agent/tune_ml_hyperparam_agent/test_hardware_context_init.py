@@ -11,6 +11,7 @@ so the whole run must agree on one snapshot.
 Tests exercise the full ``agent.run()`` path with LLM, sandbox, skill,
 and reference-score calls mocked — only ``get_or_create`` is real.
 """
+
 from __future__ import annotations
 
 import tempfile
@@ -23,7 +24,6 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from core.hardware_context import HardwareContext, load_manifest
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from nodes.scoring_reference import ReferenceScores
-
 
 # ── Canned responses (mirror test_tuning_agent.py so this file stays
 #    hermetic — no import coupling across test modules) ─────────────────────
@@ -85,9 +85,7 @@ def _synth_reference() -> ReferenceScores:
 
 
 def _mock_run_skill(skill_folder, sandbox, **params):
-    return _FAKE_SKILL_RESULTS.get(
-        skill_folder, {"status": "error", "message": "unknown skill"}
-    )
+    return _FAKE_SKILL_RESULTS.get(skill_folder, {"status": "error", "message": "unknown skill"})
 
 
 def _make_input(tmp_path) -> HyperparamTuningInput:
@@ -111,18 +109,21 @@ def _make_input(tmp_path) -> HyperparamTuningInput:
 
 # ── Fixture ────────────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def agent_run(tmp_path):
     """Run the agent once under mocks; yield (tmp_path, agent, agent_input)
     with mocks still live so tests can invoke ``agent.run()`` a second time."""
-    with patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge, \
-         patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox, \
-         patch("nodes.ml_hyperparameter_tune_agent._run_skill",
-               side_effect=_mock_run_skill), \
-         patch("nodes.ml_hyperparameter_tune_agent.load_reference_scores",
-               return_value=_synth_reference()), \
-         tempfile.TemporaryDirectory() as configs_dir:
-
+    with (
+        patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
+        patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
+        patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill),
+        patch(
+            "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
+            return_value=_synth_reference(),
+        ),
+        tempfile.TemporaryDirectory() as configs_dir,
+    ):
         mock_brain = MockBridge.return_value
         mock_brain.plan.return_value = _FAKE_PLAN
         mock_brain.reflect.return_value = _FAKE_REFLECT
@@ -141,6 +142,7 @@ def agent_run(tmp_path):
 
 
 # ── Tests ─────────────────────────────────────────────────────────────────
+
 
 def test_manifest_written_on_run(agent_run):
     """After the first run(), the manifest file must exist at

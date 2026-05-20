@@ -47,6 +47,7 @@ def _make_output(expert_advice, **baseline_overrides):
 
 # ---- segmentation_size divisor rule ----
 
+
 def test_valid_segmentation_size_passes(expert_advice):
     """16000 is a valid divisor of 10_000_000."""
     out = _make_output(expert_advice, model_config={"segmentation_size": 16000})

@@ -3,10 +3,11 @@
 Uses ``tmp_path`` for filesystem isolation and monkeypatches ``discover``
 wherever we need a deterministic ctx without touching real hardware.
 """
+
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 
 import pytest
 
@@ -22,7 +23,7 @@ from core.hardware_context import (
 def _ctx(
     device_name: str = "NVIDIA GeForce RTX 5090",
     hostname: str = "ligroup",
-    total_memory_bytes: int = 32 * 1024 ** 3,
+    total_memory_bytes: int = 32 * 1024**3,
 ) -> HardwareContext:
     return HardwareContext(
         device_name=device_name,
@@ -33,11 +34,12 @@ def _ctx(
         torch_version="2.10.0+cu128",
         hostname=hostname,
         device_available=True,
-        discovered_at=datetime(2026, 4, 23, 12, 0, tzinfo=timezone.utc),
+        discovered_at=datetime(2026, 4, 23, 12, 0, tzinfo=UTC),
     )
 
 
 # ── write/load round-trip ───────────────────────────────────────────────────
+
 
 def test_write_manifest_creates_parents(tmp_path):
     ctx = _ctx()
@@ -53,7 +55,7 @@ def test_write_manifest_is_valid_json(tmp_path):
     write_manifest(ctx, path)
     raw = json.loads(path.read_text())
     assert raw["device_name"] == "NVIDIA GeForce RTX 5090"
-    assert raw["total_memory_bytes"] == 32 * 1024 ** 3
+    assert raw["total_memory_bytes"] == 32 * 1024**3
     assert raw["compute_capability"] == [12, 0]  # tuple → JSON list
     assert isinstance(raw["discovered_at"], str)  # ISO-8601
 
@@ -87,6 +89,7 @@ def test_load_manifest_raises_on_missing_fields(tmp_path):
 
 
 # ── get_or_create lifecycle ─────────────────────────────────────────────────
+
 
 def test_get_or_create_creates_missing_manifest(tmp_path, monkeypatch):
     fresh = _ctx()
@@ -131,7 +134,7 @@ def test_get_or_create_regenerates_on_device_mismatch(tmp_path, monkeypatch, cap
     fresh = _ctx(
         device_name="NVIDIA A100-SXM4-80GB",
         hostname="expanse-09",
-        total_memory_bytes=80 * 1024 ** 3,
+        total_memory_bytes=80 * 1024**3,
     )
     monkeypatch.setattr(hc, "discover", lambda: fresh)
 
@@ -142,8 +145,10 @@ def test_get_or_create_regenerates_on_device_mismatch(tmp_path, monkeypatch, cap
     assert result.hostname == "expanse-09"
     # File on disk must reflect the fresh ctx now:
     assert load_manifest(path) == fresh
-    assert any("regenerating" in rec.message.lower() or
-               "regenerating" in rec.message for rec in caplog.records)
+    assert any(
+        "regenerating" in rec.message.lower() or "regenerating" in rec.message
+        for rec in caplog.records
+    )
 
 
 def test_get_or_create_regenerates_on_hostname_mismatch(tmp_path, monkeypatch):

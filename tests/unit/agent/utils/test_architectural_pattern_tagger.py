@@ -24,7 +24,6 @@ from agent.utils.architectural_pattern_tagger import (
     tag_architecture,
 )
 
-
 # ── the three v1 tags against the observed failure configs ──────────────────
 
 
@@ -38,9 +37,7 @@ def test_iter2_selective_scan_gets_scan_over_T():
         "ssm_dt_rank": 8,
         "hidden_channels": 128,
     }
-    assert tag_architecture("selective_bidirectional_scan_conv", model_config) == [
-        "scan_over_T"
-    ]
+    assert tag_architecture("selective_bidirectional_scan_conv", model_config) == ["scan_over_T"]
 
 
 def test_iter3_gru_stack_gets_recurrent_over_T():
@@ -52,9 +49,7 @@ def test_iter3_gru_stack_gets_recurrent_over_T():
         "gru_hidden_size": 128,
         "hidden_channels": 128,
     }
-    assert tag_architecture("dual_path_gated_gru_stack", model_config) == [
-        "recurrent_over_T"
-    ]
+    assert tag_architecture("dual_path_gated_gru_stack", model_config) == ["recurrent_over_T"]
 
 
 def test_iter4_fourier_tcn_gets_no_tags():
@@ -81,9 +76,7 @@ def test_transformer_without_window_gets_dense_attention_over_T():
         "num_heads": 8,
         "hidden_channels": 128,
     }
-    assert tag_architecture("transformer_base", model_config) == [
-        "dense_attention_over_T"
-    ]
+    assert tag_architecture("transformer_base", model_config) == ["dense_attention_over_T"]
 
 
 def test_transformer_with_window_is_not_flagged():
@@ -135,17 +128,15 @@ def test_none_model_config_is_handled_gracefully():
 def test_recurrent_config_key_alone_triggers_tag_even_if_name_hides_it():
     """If the model_type name hides the recurrence (e.g., a custom
     wrapper), a ``*_hidden_size`` key in the config still catches it."""
-    assert tag_architecture("custom_block_stack", {"lstm_hidden_size": 64}) == [
-        "recurrent_over_T"
-    ]
+    assert tag_architecture("custom_block_stack", {"lstm_hidden_size": 64}) == ["recurrent_over_T"]
 
 
 def test_state_dim_plus_ssm_key_triggers_scan_tag():
     """Conjunctive trigger: both ``state_dim`` AND any ``ssm_*`` key must
     be present. Either alone should not fire."""
-    assert tag_architecture(
-        "custom_block_stack", {"state_dim": 16, "ssm_dt_rank": 8}
-    ) == ["scan_over_T"]
+    assert tag_architecture("custom_block_stack", {"state_dim": 16, "ssm_dt_rank": 8}) == [
+        "scan_over_T"
+    ]
 
 
 def test_state_dim_alone_does_not_trigger_scan_tag():

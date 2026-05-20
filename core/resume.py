@@ -16,14 +16,15 @@ There is no "resume" branch in the Python — the contract is just
 
 See ``docs/phase68_orchestrator_memory_and_resume.md`` §3.3 for the design.
 """
+
 from __future__ import annotations
 
 import json
 import os
 import re
 import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Dict, List, Sequence
 
 from agent.schemas.hyperparam_tuning import (
     GateExhaustionInfo,
@@ -33,7 +34,6 @@ from agent.schemas.hyperparam_tuning import (
 from agent.schemas.proposal import VocabEntry
 from core.sandbox_executor import get_plugin_dir
 from workflows.model_exploration import _add_plugin_to_registries
-
 
 # ---------------------------------------------------------------------------
 # Cross-iter negative-feedback retention caps (V8 hardening §1).
@@ -50,6 +50,7 @@ _MAX_ACCUMULATED_GATE_EXHAUSTIONS = 10
 # ---------------------------------------------------------------------------
 # Public types
 # ---------------------------------------------------------------------------
+
 
 class ResumeError(RuntimeError):
     """Raised when the workspace state is incompatible with resuming.
@@ -145,20 +146,22 @@ class RestoredState:
             (Rev 8.3 changelog) for the audit that found the persistence /
             restoration asymmetry.
     """
-    resolved_source_paths: List[str] = field(default_factory=list)
-    restored_plugins: List[str] = field(default_factory=list)
-    committed_iters: List[int] = field(default_factory=list)
-    runtime_vocab: List[VocabEntry] = field(default_factory=list)
-    accumulated_key_findings: List[str] = field(default_factory=list)
-    accumulated_physical_rejections: List[PhysicalRejection] = field(default_factory=list)
-    accumulated_gate_exhaustions: List[GateExhaustionInfo] = field(default_factory=list)
+
+    resolved_source_paths: list[str] = field(default_factory=list)
+    restored_plugins: list[str] = field(default_factory=list)
+    committed_iters: list[int] = field(default_factory=list)
+    runtime_vocab: list[VocabEntry] = field(default_factory=list)
+    accumulated_key_findings: list[str] = field(default_factory=list)
+    accumulated_physical_rejections: list[PhysicalRejection] = field(default_factory=list)
+    accumulated_gate_exhaustions: list[GateExhaustionInfo] = field(default_factory=list)
     previous_proposal_data: dict | None = None
-    model_knowledge_cache: Dict[str, Dict] = field(default_factory=dict)
+    model_knowledge_cache: dict[str, dict] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _iter_run_name(iter_idx: int) -> str:
     """Chain-mode ``run_name`` convention.
@@ -182,9 +185,7 @@ def _read_manifest(workspace: str, iter_idx: int) -> dict:
     ``status == "failed"`` (true crash → halt), unknown status, or
     ``status == "completed"`` with a missing ``output_path``.
     """
-    manifest_path = os.path.join(
-        workspace, _iter_run_name(iter_idx), "manifest.json"
-    )
+    manifest_path = os.path.join(workspace, _iter_run_name(iter_idx), "manifest.json")
     if not os.path.isfile(manifest_path):
         raise ResumeError(
             f"iter {iter_idx:03d}: manifest.json not found at "
@@ -197,8 +198,7 @@ def _read_manifest(workspace: str, iter_idx: int) -> dict:
             manifest = json.load(f)
     except json.JSONDecodeError as e:
         raise ResumeError(
-            f"iter {iter_idx:03d}: manifest.json is malformed at "
-            f"{manifest_path}: {e}"
+            f"iter {iter_idx:03d}: manifest.json is malformed at {manifest_path}: {e}"
         ) from e
 
     status = manifest.get("status")
@@ -214,15 +214,13 @@ def _read_manifest(workspace: str, iter_idx: int) -> dict:
         )
     output_path = manifest.get("output_path")
     if not output_path:
-        raise ResumeError(
-            f"iter {iter_idx:03d}: manifest has no output_path: "
-            f"{manifest_path}"
-        )
+        raise ResumeError(f"iter {iter_idx:03d}: manifest has no output_path: {manifest_path}")
     return manifest
 
 
 def _validate_run_output(
-    output_path: str, iter_idx: int,
+    output_path: str,
+    iter_idx: int,
 ) -> HyperparamTuningOutput:
     """Validate the run_output JSON against ``HyperparamTuningOutput``.
 
@@ -237,21 +235,19 @@ def _validate_run_output(
     try:
         text = open(output_path, encoding="utf-8").read()
     except OSError as e:
-        raise ResumeError(
-            f"iter {iter_idx:03d}: cannot read run_output {output_path}: {e}"
-        ) from e
+        raise ResumeError(f"iter {iter_idx:03d}: cannot read run_output {output_path}: {e}") from e
     try:
         return HyperparamTuningOutput.model_validate_json(text)
     except Exception as e:  # pydantic ValidationError or json parse
         raise ResumeError(
-            f"iter {iter_idx:03d}: run_output failed validation at "
-            f"{output_path}: {e}"
+            f"iter {iter_idx:03d}: run_output failed validation at {output_path}: {e}"
         ) from e
 
 
 # ---------------------------------------------------------------------------
 # Knowledge carry-over (cross-iter vocab + findings persistence)
 # ---------------------------------------------------------------------------
+
 
 def _interpretation_path(workspace: str, iter_idx: int) -> str:
     """Path convention for the chain-mode interpretation digest.
@@ -275,7 +271,9 @@ def _interpretation_path(workspace: str, iter_idx: int) -> str:
     """
     run_name = _iter_run_name(iter_idx)
     return os.path.join(
-        workspace, run_name, f"iteration_{iter_idx:03d}",
+        workspace,
+        run_name,
+        f"iteration_{iter_idx:03d}",
         f"interpretation_{run_name}.json",
     )
 
@@ -284,7 +282,7 @@ def load_latest_knowledge(
     workspace: str,
     current_iter: int,
     committed_iters: Sequence[int],
-) -> tuple[List[VocabEntry], List[str]]:
+) -> tuple[list[VocabEntry], list[str]]:
     """Read prior iters' interpretation digests; return knowledge carry-over.
 
     Args:
@@ -312,8 +310,8 @@ def load_latest_knowledge(
     if current_iter <= 1 or not committed_iters:
         return [], []
 
-    runtime_vocab: List[VocabEntry] = []
-    findings: List[str] = []
+    runtime_vocab: list[VocabEntry] = []
+    findings: list[str] = []
     seen: set[str] = set()
 
     for iter_idx in committed_iters:  # already ascending per restore_prior_state
@@ -322,7 +320,8 @@ def load_latest_knowledge(
             warnings.warn(
                 f"[resume] iter {iter_idx:03d}: interpretation digest not "
                 f"found at {path}. Skipping for knowledge carry-over.",
-                UserWarning, stacklevel=2,
+                UserWarning,
+                stacklevel=2,
             )
             continue
         try:
@@ -332,7 +331,8 @@ def load_latest_knowledge(
             warnings.warn(
                 f"[resume] iter {iter_idx:03d}: cannot read interpretation "
                 f"digest {path}: {e}. Skipping for knowledge carry-over.",
-                UserWarning, stacklevel=2,
+                UserWarning,
+                stacklevel=2,
             )
             continue
 
@@ -344,7 +344,7 @@ def load_latest_knowledge(
         # Latest parseable digest wins for runtime_vocab. Validate each entry
         # individually to drop malformed records without losing the rest.
         raw_vocab = data.get("runtime_vocab") or []
-        validated: List[VocabEntry] = []
+        validated: list[VocabEntry] = []
         for entry in raw_vocab:
             try:
                 validated.append(VocabEntry.model_validate(entry))
@@ -352,7 +352,8 @@ def load_latest_knowledge(
                 warnings.warn(
                     f"[resume] iter {iter_idx:03d}: dropped malformed "
                     f"runtime_vocab entry {entry!r}: {e}",
-                    UserWarning, stacklevel=2,
+                    UserWarning,
+                    stacklevel=2,
                 )
         if validated:
             runtime_vocab = validated  # overwrite: only LAST iter's wins
@@ -364,7 +365,7 @@ def load_latest_knowledge_cache(
     workspace: str,
     current_iter: int,
     committed_iters: Sequence[int],
-) -> Dict[str, Dict]:
+) -> dict[str, dict]:
     """Read prior iters' interpretation digests; return the latest committed
     iter's ``model_knowledge_cache`` for cross-subprocess restoration.
 
@@ -406,7 +407,7 @@ def load_latest_knowledge_cache(
     if current_iter <= 1 or not committed_iters:
         return {}
 
-    cache: Dict[str, Dict] = {}
+    cache: dict[str, dict] = {}
 
     for iter_idx in committed_iters:  # ascending per restore_prior_state
         path = _interpretation_path(workspace, iter_idx)
@@ -414,7 +415,8 @@ def load_latest_knowledge_cache(
             warnings.warn(
                 f"[resume] iter {iter_idx:03d}: interpretation digest not "
                 f"found at {path}. Skipping for knowledge-cache carry-over.",
-                UserWarning, stacklevel=2,
+                UserWarning,
+                stacklevel=2,
             )
             continue
         try:
@@ -424,7 +426,8 @@ def load_latest_knowledge_cache(
             warnings.warn(
                 f"[resume] iter {iter_idx:03d}: cannot read interpretation "
                 f"digest {path}: {e}. Skipping for knowledge-cache carry-over.",
-                UserWarning, stacklevel=2,
+                UserWarning,
+                stacklevel=2,
             )
             continue
 
@@ -442,6 +445,7 @@ def load_latest_knowledge_cache(
 # Proposal carry-over (G1 bridge — proposed_vocab_candidates persistence).
 # See docs/Consistent_growing_vocab_list.md §10.
 # ---------------------------------------------------------------------------
+
 
 def _proposal_path(workspace: str, iter_idx: int) -> str | None:
     """Resolve the proposal JSON path for a committed iter.
@@ -466,7 +470,9 @@ def _proposal_path(workspace: str, iter_idx: int) -> str | None:
 
     run_name = _iter_run_name(iter_idx)
     iteration_dir = os.path.join(
-        workspace, run_name, f"iteration_{iter_idx:03d}",
+        workspace,
+        run_name,
+        f"iteration_{iter_idx:03d}",
     )
     if not os.path.isdir(iteration_dir):
         return None
@@ -540,7 +546,8 @@ def load_latest_proposal(
                 f"[resume] iter {iter_idx:03d}: cannot read proposal "
                 f"JSON {path}: {e}. Falling back to the next-older "
                 f"committed iter for proposal carry-over.",
-                UserWarning, stacklevel=2,
+                UserWarning,
+                stacklevel=2,
             )
             continue
         # Loader contract: latest parseable wins. Return immediately —
@@ -553,6 +560,7 @@ def load_latest_proposal(
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
 
 def restore_prior_state(
     workspace: str,
@@ -599,9 +607,7 @@ def restore_prior_state(
         class, and the chain never re-trains prior iters.
     """
     if current_iter < 1:
-        raise ResumeError(
-            f"current_iter must be >= 1, got {current_iter}"
-        )
+        raise ResumeError(f"current_iter must be >= 1, got {current_iter}")
 
     state = RestoredState(
         resolved_source_paths=list(seed_paths),
@@ -617,9 +623,7 @@ def restore_prior_state(
 
     abs_workspace = os.path.abspath(workspace)
     if not os.path.isdir(abs_workspace):
-        raise ResumeError(
-            f"workspace does not exist: {abs_workspace}"
-        )
+        raise ResumeError(f"workspace does not exist: {abs_workspace}")
 
     # Strict ascending order — prior iters must be processed chronologically
     # so the source_paths list mirrors what an in-process run would build,
@@ -694,20 +698,22 @@ def restore_prior_state(
     # head so the *latest* signals win — older rejections become stale once
     # the architecture/budget combo evolves past them.
     if len(state.accumulated_physical_rejections) > _MAX_ACCUMULATED_REJECTIONS:
-        state.accumulated_physical_rejections = (
-            state.accumulated_physical_rejections[-_MAX_ACCUMULATED_REJECTIONS:]
-        )
+        state.accumulated_physical_rejections = state.accumulated_physical_rejections[
+            -_MAX_ACCUMULATED_REJECTIONS:
+        ]
     if len(state.accumulated_gate_exhaustions) > _MAX_ACCUMULATED_GATE_EXHAUSTIONS:
-        state.accumulated_gate_exhaustions = (
-            state.accumulated_gate_exhaustions[-_MAX_ACCUMULATED_GATE_EXHAUSTIONS:]
-        )
+        state.accumulated_gate_exhaustions = state.accumulated_gate_exhaustions[
+            -_MAX_ACCUMULATED_GATE_EXHAUSTIONS:
+        ]
 
     # Cross-iter knowledge carry-over. Without this, every chain iter's
     # interp node sees only the static seed (empirically: 5 iters × 21
     # entries on the V7 explore workspace before this patch landed). See
     # docs/Consistent_growing_vocab_list.md §1.2 for the bug evidence.
     state.runtime_vocab, state.accumulated_key_findings = load_latest_knowledge(
-        abs_workspace, current_iter, state.committed_iters,
+        abs_workspace,
+        current_iter,
+        state.committed_iters,
     )
     if state.runtime_vocab or state.accumulated_key_findings:
         print(
@@ -723,7 +729,9 @@ def restore_prior_state(
     # cache-hit branch at nodes/result_interpretation_agent.py:687-693 is
     # unreachable in chain mode. See Rev 8.3 changelog.
     state.model_knowledge_cache = load_latest_knowledge_cache(
-        abs_workspace, current_iter, state.committed_iters,
+        abs_workspace,
+        current_iter,
+        state.committed_iters,
     )
     if state.model_knowledge_cache:
         n = len(state.model_knowledge_cache)
@@ -739,12 +747,11 @@ def restore_prior_state(
     # in iter N never accumulates `seen_in_runs` evidence at iter N+1.
     # See docs/Consistent_growing_vocab_list.md §10.
     state.previous_proposal_data = load_latest_proposal(
-        abs_workspace, state.committed_iters,
+        abs_workspace,
+        state.committed_iters,
     )
     if state.previous_proposal_data is not None:
-        n_candidates = len(
-            state.previous_proposal_data.get("proposed_vocab_candidates") or []
-        )
+        n_candidates = len(state.previous_proposal_data.get("proposed_vocab_candidates") or [])
         print(
             f"[resume] proposal carry-over: latest proposal restored "
             f"({n_candidates} proposed_vocab_candidates)"
@@ -763,6 +770,7 @@ def restore_prior_state(
 # ---------------------------------------------------------------------------
 # Workspace layout guard (Phase 6.8 §3.9)
 # ---------------------------------------------------------------------------
+
 
 def validate_workspace_layout(workspace: str) -> None:
     """Detect legacy workspace layout and refuse to start.
@@ -784,7 +792,8 @@ def validate_workspace_layout(workspace: str) -> None:
     # Chain layout also has iteration_001/ but under iter_NNN/ — exclude those.
     matches = _glob.glob(os.path.join(workspace, "*", "iteration_001", ""))
     legacy_matches = [
-        m for m in matches
+        m
+        for m in matches
         if not re.match(r"iter_\d{3}$", os.path.basename(os.path.dirname(os.path.dirname(m))))
     ]
     if legacy_matches:

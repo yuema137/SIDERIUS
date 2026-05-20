@@ -16,8 +16,8 @@ output file from storage. All required data is mapped explicitly by this protoco
 """
 
 from agent.schemas.implementor import ImplementorOutput
-from agent.schemas.validator import ValidatorInput
 from agent.schemas.storage import StorageConfig
+from agent.schemas.validator import ValidatorInput
 
 
 def local_all_fields(
@@ -66,6 +66,5 @@ def database_all_fields(
     a fully populated ValidatorInput.
     """
     raise NotImplementedError(
-        "database_all_fields is not yet implemented. "
-        "Wire a Postgres StorageConfig backend first."
+        "database_all_fields is not yet implemented. Wire a Postgres StorageConfig backend first."
     )

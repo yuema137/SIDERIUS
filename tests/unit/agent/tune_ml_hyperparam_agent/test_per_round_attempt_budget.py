@@ -23,6 +23,7 @@ pre-Phase-L ``max_rounds * 3`` shared attempt pool:
 See ``docs/resource_estimator_implement.md`` §11.7 row 7 for the
 sub-case spec, and §11.5 for the budget semantics.
 """
+
 import tempfile
 from unittest.mock import patch
 
@@ -32,7 +33,7 @@ from agent.schemas.hyperparam_tuning import (
     HyperparamTuningInput,
     HyperparamTuningOutput,
 )
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from nodes.scoring_reference import ReferenceScores
 
@@ -180,14 +181,17 @@ def agent_with_scripted_skill():
     schedule. The factory is the unit of parameterisation — each
     sub-case calls it with its own ``vram_verdicts`` list.
     """
+
     def make(vram_verdicts):
         side_effect, counter = _make_scripted_skill(vram_verdicts)
         cm = (
             patch("nodes.ml_hyperparameter_tune_agent.LLMBridge"),
             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox"),
             patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=side_effect),
-            patch("nodes.ml_hyperparameter_tune_agent.load_reference_scores",
-                  return_value=_synth_reference_stub()),
+            patch(
+                "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
+                return_value=_synth_reference_stub(),
+            ),
             tempfile.TemporaryDirectory(),
         )
         return cm, counter
@@ -236,6 +240,7 @@ def _round_records(saved, round_index):
 # (a) Trial round succeeds within attempts_per_round attempts
 # ===========================================================================
 
+
 class TestTrialRoundSucceedsWithinBudget:
     """Round 1 (trial) burns 2 of its 3-attempt budget on OOM-skips,
     then attempt 3 succeeds. Round 2 (formal) succeeds first try.
@@ -248,17 +253,23 @@ class TestTrialRoundSucceedsWithinBudget:
 
     def test_succeeds_within_budget(self, agent_with_scripted_skill, tmp_path):
         # 2 OOMs then OK in round 1; OK in round 2 (formal).
-        verdicts = [FAKE_VRAM_OOM, FAKE_VRAM_OOM, FAKE_VRAM_OK,  # round 1
-                    FAKE_VRAM_OK]                                # round 2 (formal)
+        verdicts = [
+            FAKE_VRAM_OOM,
+            FAKE_VRAM_OOM,
+            FAKE_VRAM_OK,  # round 1
+            FAKE_VRAM_OK,
+        ]  # round 2 (formal)
         agent, saved, counter, cleanup = _setup(agent_with_scripted_skill, verdicts)
         try:
-            output = agent.run(_make_input(
-                tmp_path,
-                max_rounds=2,
-                attempts_per_round=3,
-                attempts_per_formal_round=3,
-                max_fail_rounds=3,
-            ))
+            output = agent.run(
+                _make_input(
+                    tmp_path,
+                    max_rounds=2,
+                    attempts_per_round=3,
+                    attempts_per_formal_round=3,
+                    max_fail_rounds=3,
+                )
+            )
         finally:
             cleanup()
 
@@ -282,6 +293,7 @@ class TestTrialRoundSucceedsWithinBudget:
 # ===========================================================================
 # (b) Trial fail-round increments consecutive_fails; success resets it
 # ===========================================================================
+
 
 class TestConsecutiveFailsIncrementsThenResets:
     """Schedule [OOM, OK, OOM, OOM] with ``max_fail_rounds=2``,
@@ -309,19 +321,21 @@ class TestConsecutiveFailsIncrementsThenResets:
         verdicts = [FAKE_VRAM_OOM, FAKE_VRAM_OK, FAKE_VRAM_OOM, FAKE_VRAM_OOM]
         agent, saved, counter, cleanup = _setup(agent_with_scripted_skill, verdicts)
         try:
-            output = agent.run(_make_input(
-                tmp_path,
-                max_rounds=3,
-                attempts_per_round=1,
-                attempts_per_formal_round=1,
-                max_fail_rounds=2,
-            ))
+            output = agent.run(
+                _make_input(
+                    tmp_path,
+                    max_rounds=3,
+                    attempts_per_round=1,
+                    attempts_per_formal_round=1,
+                    max_fail_rounds=2,
+                )
+            )
         finally:
             cleanup()
 
         assert output.status == "partial"
-        assert output.completed_rounds == 1   # only iter 2 advanced it
-        assert output.total_attempts == 4     # the load-bearing proof
+        assert output.completed_rounds == 1  # only iter 2 advanced it
+        assert output.total_attempts == 4  # the load-bearing proof
         assert output.termination_reason == "aborted_fail_rounds"
         assert output.consecutive_fail_rounds_at_exit == 2
 
@@ -337,6 +351,7 @@ class TestConsecutiveFailsIncrementsThenResets:
 # (c) max_fail_rounds consecutive failures abort the loop
 # ===========================================================================
 
+
 class TestMaxFailRoundsAborts:
     """All attempts OOM. With ``max_rounds=5`` and ``max_fail_rounds=2``,
     the outer loop must abort after 2 consecutive fail-rounds rather
@@ -350,13 +365,15 @@ class TestMaxFailRoundsAborts:
         verdicts = [FAKE_VRAM_OOM] * 4  # 2 fail-rounds × 2 attempts each
         agent, saved, counter, cleanup = _setup(agent_with_scripted_skill, verdicts)
         try:
-            output = agent.run(_make_input(
-                tmp_path,
-                max_rounds=5,
-                attempts_per_round=2,
-                attempts_per_formal_round=2,
-                max_fail_rounds=2,
-            ))
+            output = agent.run(
+                _make_input(
+                    tmp_path,
+                    max_rounds=5,
+                    attempts_per_round=2,
+                    attempts_per_formal_round=2,
+                    max_fail_rounds=2,
+                )
+            )
         finally:
             cleanup()
 
@@ -373,6 +390,7 @@ class TestMaxFailRoundsAborts:
 # (d) Formal-round promotion fires only when completed_rounds == max_rounds-1
 # ===========================================================================
 
+
 class TestFormalPromotionFiresOnLastRound:
     """``max_rounds=3`` with ``attempts_per_round=2`` and
     ``attempts_per_formal_round=4``. Schedule: rounds 1 + 2 succeed
@@ -388,18 +406,25 @@ class TestFormalPromotionFiresOnLastRound:
     """
 
     def test_only_last_round_uses_formal_budget(self, agent_with_scripted_skill, tmp_path):
-        verdicts = [FAKE_VRAM_OK,                                            # round 1
-                    FAKE_VRAM_OK,                                            # round 2
-                    FAKE_VRAM_OOM, FAKE_VRAM_OOM, FAKE_VRAM_OOM, FAKE_VRAM_OK]  # round 3 (formal)
+        verdicts = [
+            FAKE_VRAM_OK,  # round 1
+            FAKE_VRAM_OK,  # round 2
+            FAKE_VRAM_OOM,
+            FAKE_VRAM_OOM,
+            FAKE_VRAM_OOM,
+            FAKE_VRAM_OK,
+        ]  # round 3 (formal)
         agent, saved, counter, cleanup = _setup(agent_with_scripted_skill, verdicts)
         try:
-            output = agent.run(_make_input(
-                tmp_path,
-                max_rounds=3,
-                attempts_per_round=2,
-                attempts_per_formal_round=4,
-                max_fail_rounds=3,
-            ))
+            output = agent.run(
+                _make_input(
+                    tmp_path,
+                    max_rounds=3,
+                    attempts_per_round=2,
+                    attempts_per_formal_round=4,
+                    max_fail_rounds=3,
+                )
+            )
         finally:
             cleanup()
 
@@ -414,13 +439,17 @@ class TestFormalPromotionFiresOnLastRound:
         assert len(r3) == 4
         assert [r["memory"]["attempt_in_round"] for r in r3] == [1, 2, 3, 4]
         assert [r["status"] for r in r3] == [
-            "skipped_oom_risk", "skipped_oom_risk", "skipped_oom_risk", "success",
+            "skipped_oom_risk",
+            "skipped_oom_risk",
+            "skipped_oom_risk",
+            "success",
         ]
 
 
 # ===========================================================================
 # (e) Formal round uses attempts_per_formal_round (asymmetry vs trial)
 # ===========================================================================
+
 
 class TestFormalBudgetDistinctFromTrial:
     """``attempts_per_round=1`` / ``attempts_per_formal_round=3``.
@@ -439,17 +468,23 @@ class TestFormalBudgetDistinctFromTrial:
     """
 
     def test_formal_budget_asymmetry(self, agent_with_scripted_skill, tmp_path):
-        verdicts = [FAKE_VRAM_OK,                                # round 1 (trial, 1-budget)
-                    FAKE_VRAM_OOM, FAKE_VRAM_OOM, FAKE_VRAM_OK]  # round 2 (formal, 3-budget)
+        verdicts = [
+            FAKE_VRAM_OK,  # round 1 (trial, 1-budget)
+            FAKE_VRAM_OOM,
+            FAKE_VRAM_OOM,
+            FAKE_VRAM_OK,
+        ]  # round 2 (formal, 3-budget)
         agent, saved, counter, cleanup = _setup(agent_with_scripted_skill, verdicts)
         try:
-            output = agent.run(_make_input(
-                tmp_path,
-                max_rounds=2,
-                attempts_per_round=1,
-                attempts_per_formal_round=3,
-                max_fail_rounds=3,
-            ))
+            output = agent.run(
+                _make_input(
+                    tmp_path,
+                    max_rounds=2,
+                    attempts_per_round=1,
+                    attempts_per_formal_round=3,
+                    max_fail_rounds=3,
+                )
+            )
         finally:
             cleanup()
 
@@ -470,5 +505,7 @@ class TestFormalBudgetDistinctFromTrial:
         r2 = _round_records(saved, 2)
         assert len(r2) == 3
         assert [r["status"] for r in r2] == [
-            "skipped_oom_risk", "skipped_oom_risk", "success",
+            "skipped_oom_risk",
+            "skipped_oom_risk",
+            "success",
         ]

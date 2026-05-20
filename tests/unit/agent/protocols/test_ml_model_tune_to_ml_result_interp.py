@@ -23,20 +23,21 @@ Tests cover:
   database_all_records
     - Raises NotImplementedError (placeholder, not yet implemented)
 """
+
 import pytest
 
-from agent.schemas.hyperparam_tuning import HyperparamTuningOutput, ExperimentRecord
+from agent.schemas.hyperparam_tuning import ExperimentRecord, HyperparamTuningOutput
 from agent.schemas.interpretation import InterpretationInput, ModelRunSummary
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from agent.schemas.protocols.ml_model_tune_to_ml_result_interp import (
-    local_all_records,
     database_all_records,
+    local_all_records,
 )
-
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def storage():
@@ -58,8 +59,28 @@ def record_success():
         denoising_score=1.5,
         final_loss=0.5,
         model_params=50000,
-        file_vector=[0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 5.0, 78.0, 1.5, 2.5,
-                     3.0, 7.0, 1.3, 0.9, 40.0, 21.0, 5.0, 5.0, 3.0, 0.8],
+        file_vector=[
+            0.001,
+            0.01,
+            0.1,
+            0.5,
+            1.0,
+            2.0,
+            5.0,
+            78.0,
+            1.5,
+            2.5,
+            3.0,
+            7.0,
+            1.3,
+            0.9,
+            40.0,
+            21.0,
+            5.0,
+            5.0,
+            3.0,
+            0.8,
+        ],
         training_psd_segments=200,
         eval_psd_segments=200,
         is_trial=True,
@@ -86,8 +107,28 @@ def record_formal():
         denoising_score=1.2,
         final_loss=0.4,
         model_params=50000,
-        file_vector=[0.002, 0.02, 0.15, 0.6, 1.1, 2.2, 5.5, 80.0, 1.6, 2.6,
-                     3.1, 7.5, 1.4, 1.0, 41.0, 22.0, 5.2, 5.1, 3.2, 0.9],
+        file_vector=[
+            0.002,
+            0.02,
+            0.15,
+            0.6,
+            1.1,
+            2.2,
+            5.5,
+            80.0,
+            1.6,
+            2.6,
+            3.1,
+            7.5,
+            1.4,
+            1.0,
+            41.0,
+            22.0,
+            5.2,
+            5.1,
+            3.2,
+            0.9,
+        ],
         training_psd_segments=4000,
         eval_psd_segments=4000,
         is_trial=False,
@@ -136,10 +177,12 @@ def make_tuning_output(model_type, run_name, records, best_score=None, best_conf
 # local_all_records
 # ---------------------------------------------------------------------------
 
-class TestLocalAllRecords:
 
+class TestLocalAllRecords:
     def test_single_record_baseline_extracts_all_summary_fields(
-        self, storage, record_success,
+        self,
+        storage,
+        record_success,
     ):
         """One canonical success record -> the protocol must populate every
         documented single-record field on ModelRunSummary. Replaces 12 flat
@@ -152,7 +195,10 @@ class TestLocalAllRecords:
         With only one success record, worst == best (single-element set),
         and there is no formal round so formal_* fields stay None."""
         output = make_tuning_output(
-            "fcnet", "my_run", [record_success], best_score=1.5,
+            "fcnet",
+            "my_run",
+            [record_success],
+            best_score=1.5,
         )
         result = local_all_records(output, storage)
 
@@ -189,7 +235,10 @@ class TestLocalAllRecords:
         assert result.storage.local.run_name == "r1"
 
     def test_round_lists_extracted_across_mixed_records(
-        self, storage, record_success, record_oom,
+        self,
+        storage,
+        record_success,
+        record_oom,
     ):
         """Two records (success + OOM-skip) -> every per-round list on
         ModelRunSummary must carry both entries in order, with the OOM
@@ -198,7 +247,10 @@ class TestLocalAllRecords:
         (round_scores_extracted, round_conclusions_extracted,
         round_trial_portions_extracted, round_model_params_extracted)."""
         output = make_tuning_output(
-            "punet", "v1", [record_success, record_oom], best_score=1.5,
+            "punet",
+            "v1",
+            [record_success, record_oom],
+            best_score=1.5,
         )
         summary = local_all_records(output, storage).summaries[0]
 
@@ -229,14 +281,20 @@ class TestLocalAllRecords:
         assert summary.round_model_params == []
 
     def test_formal_round_surfaces_formal_score_and_vector(
-        self, storage, record_success, record_formal,
+        self,
+        storage,
+        record_success,
+        record_formal,
     ):
         """When a formal (is_trial=False) record exists alongside trial
         rounds, the protocol must extract formal_score + formal_file_vector
         from it. Kept separate from the single-record baseline because the
         formal-round path is a distinct branch in the protocol code."""
         output = make_tuning_output(
-            "punet", "v1", [record_success, record_formal], best_score=1.5,
+            "punet",
+            "v1",
+            [record_success, record_formal],
+            best_score=1.5,
         )
         summary = local_all_records(output, storage).summaries[0]
 
@@ -249,8 +307,8 @@ class TestLocalAllRecords:
 # database_all_records
 # ---------------------------------------------------------------------------
 
-class TestDatabaseAllRecords:
 
+class TestDatabaseAllRecords:
     def test_raises_not_implemented(self, storage):
         output = make_tuning_output("punet", "v1", [])
         with pytest.raises(NotImplementedError):

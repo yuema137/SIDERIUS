@@ -15,6 +15,7 @@ The helper's contract:
 * Kept attempts contribute tags via ``tag_architecture``; the returned
   list is the sorted, deduplicated union.
 """
+
 from __future__ import annotations
 
 from agent.utils.architectural_pattern_tagger import (
@@ -25,7 +26,6 @@ from nodes.ml_hyperparameter_tune_agent import (
     _build_gate_exhaustion,
     _collect_disallowed_patterns,
 )
-
 
 # ---------------------------------------------------------------------------
 # Factories — record shapes mirror the live tuner output.
@@ -92,7 +92,6 @@ def _tcn_cfg():
 
 
 class TestCollectDisallowedPatternsThresholds:
-
     def test_iter2_style_9_scan_attempts_at_huge_factor_yields_scan_tag(self):
         """iter 2 of explore_novel_v3_0420 — 9 × selective-scan attempts at
         factor≈18,772×. Structural infeasibility; must contribute ``scan_over_T``."""
@@ -105,9 +104,7 @@ class TestCollectDisallowedPatternsThresholds:
             )
             for _ in range(9)
         ]
-        out = _collect_disallowed_patterns(
-            records, vram_budget_gb=None, time_budget_minutes=20.0
-        )
+        out = _collect_disallowed_patterns(records, vram_budget_gb=None, time_budget_minutes=20.0)
         assert out == ["scan_over_T"]
 
     def test_iter3_style_9_gru_attempts_at_moderate_factor_yields_recurrent_tag(self):
@@ -122,9 +119,7 @@ class TestCollectDisallowedPatternsThresholds:
             )
             for _ in range(9)
         ]
-        out = _collect_disallowed_patterns(
-            records, vram_budget_gb=None, time_budget_minutes=20.0
-        )
+        out = _collect_disallowed_patterns(records, vram_budget_gb=None, time_budget_minutes=20.0)
         assert out == ["recurrent_over_T"]
 
     def test_mixed_scan_and_gru_records_yield_both_tags_sorted(self):
@@ -140,9 +135,7 @@ class TestCollectDisallowedPatternsThresholds:
                 time_estimate_minutes=500.0,
             ),
         ]
-        out = _collect_disallowed_patterns(
-            records, vram_budget_gb=None, time_budget_minutes=20.0
-        )
+        out = _collect_disallowed_patterns(records, vram_budget_gb=None, time_budget_minutes=20.0)
         assert out == ["recurrent_over_T", "scan_over_T"]
 
     def test_marginal_overshoot_under_threshold_yields_no_tags(self):
@@ -156,9 +149,7 @@ class TestCollectDisallowedPatternsThresholds:
                 time_budget_minutes=20.0,
             )
         ]
-        out = _collect_disallowed_patterns(
-            records, vram_budget_gb=None, time_budget_minutes=20.0
-        )
+        out = _collect_disallowed_patterns(records, vram_budget_gb=None, time_budget_minutes=20.0)
         assert out == []
 
     def test_threshold_exactly_at_boundary_is_not_banned(self):
@@ -174,9 +165,7 @@ class TestCollectDisallowedPatternsThresholds:
                 time_budget_minutes=20.0,
             )
         ]
-        out = _collect_disallowed_patterns(
-            records, vram_budget_gb=None, time_budget_minutes=20.0
-        )
+        out = _collect_disallowed_patterns(records, vram_budget_gb=None, time_budget_minutes=20.0)
         assert out == []
 
     def test_vram_factor_alone_can_trigger_ban(self):
@@ -190,9 +179,7 @@ class TestCollectDisallowedPatternsThresholds:
                 vram_budget_gb=8.0,
             )
         ]
-        out = _collect_disallowed_patterns(
-            records, vram_budget_gb=8.0, time_budget_minutes=None
-        )
+        out = _collect_disallowed_patterns(records, vram_budget_gb=8.0, time_budget_minutes=None)
         assert out == ["recurrent_over_T"]
 
     def test_non_gate_failures_never_contribute_tags(self):
@@ -215,9 +202,7 @@ class TestCollectDisallowedPatternsThresholds:
                 "memory": {},
             },
         ]
-        out = _collect_disallowed_patterns(
-            records, vram_budget_gb=8.0, time_budget_minutes=20.0
-        )
+        out = _collect_disallowed_patterns(records, vram_budget_gb=8.0, time_budget_minutes=20.0)
         assert out == []
 
     def test_successful_arch_is_never_banned(self):
@@ -232,15 +217,11 @@ class TestCollectDisallowedPatternsThresholds:
                 time_estimate_minutes=5000.0,
             )
         ]
-        out = _collect_disallowed_patterns(
-            records, vram_budget_gb=None, time_budget_minutes=20.0
-        )
+        out = _collect_disallowed_patterns(records, vram_budget_gb=None, time_budget_minutes=20.0)
         assert out == []
 
     def test_empty_records_yields_empty(self):
-        assert _collect_disallowed_patterns(
-            [], vram_budget_gb=8.0, time_budget_minutes=20.0
-        ) == []
+        assert _collect_disallowed_patterns([], vram_budget_gb=8.0, time_budget_minutes=20.0) == []
 
     def test_none_budgets_yield_empty(self):
         """If budgets are unknown, factors can't be computed — no bans."""
@@ -251,9 +232,7 @@ class TestCollectDisallowedPatternsThresholds:
                 time_estimate_minutes=1000.0,
             )
         ]
-        out = _collect_disallowed_patterns(
-            records, vram_budget_gb=None, time_budget_minutes=None
-        )
+        out = _collect_disallowed_patterns(records, vram_budget_gb=None, time_budget_minutes=None)
         assert out == []
 
 
@@ -263,7 +242,6 @@ class TestCollectDisallowedPatternsThresholds:
 
 
 class TestBuildGateExhaustionPopulatesPatterns:
-
     def test_trigger_a_iter2_scan_records_produce_scan_tag_on_info(self):
         """End-to-end: 9 scan attempts at factor≈18,772× → Trigger A fires →
         returned GateExhaustionInfo carries ``disallowed_architectural_patterns

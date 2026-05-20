@@ -25,6 +25,7 @@ Exit codes:
             didn't fire).
     Any other — unexpected exception (bug; surfaced in test stderr).
 """
+
 from __future__ import annotations
 
 import os
@@ -65,7 +66,9 @@ def main() -> None:
         # Construct a minimal SDK-shape response so ``response.usage``
         # parses (we only need to reach the pre-write validation step).
         fake_usage = SimpleNamespace(
-            prompt_tokens=10, completion_tokens=5, total_tokens=15,
+            prompt_tokens=10,
+            completion_tokens=5,
+            total_tokens=15,
         )
         fake_response = SimpleNamespace(usage=fake_usage)
         bridge._record_usage(
@@ -77,16 +80,14 @@ def main() -> None:
             provider="openai",
         )
         # If we reach this line, the first-row check failed silently.
-        print("HARNESS: bridge wrote without raising — test should fail.",
-              file=sys.stderr)
+        print("HARNESS: bridge wrote without raising — test should fail.", file=sys.stderr)
         sys.exit(0)
     except LLMBridgeContextError as e:
         # The exact wording mirrors the chain runner's top-level handler
         # in sdsc_submission_scripts/run_one_iteration.py so a single
         # grep catches drift.
         print(
-            f"[FATAL] LLMBridgeContextError: {e} — aborting run to "
-            f"prevent telemetry corruption.",
+            f"[FATAL] LLMBridgeContextError: {e} — aborting run to prevent telemetry corruption.",
             file=sys.stderr,
         )
         sys.exit(2)

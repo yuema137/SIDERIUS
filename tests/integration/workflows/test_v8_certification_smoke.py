@@ -67,13 +67,15 @@ Per the §5.2 plan and the user's directive, this test writes to
 smoke artifacts (records, evolution_log) can be inspected afterwards.
 The directory is wiped at the start of each run.
 """
+
 from __future__ import annotations
 
 import json
 import os
 import shutil
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from agent.schemas.hyperparam_tuning import (
     ExperimentRecord,
@@ -84,14 +86,6 @@ from nodes.result_interpretation_agent import (
     _append_evolution_log,
     _compute_evolution_stats,
 )
-from workflows.llm_config import (
-    NodeLLMConfig,
-    ProposalLLMConfig,
-    TunerLLMConfig,
-    WorkflowLLMConfig,
-)
-from workflows.model_exploration import run_workflow
-
 from tests.unit.workflows.test_model_exploration import (
     _make_implementor_output,
     _make_proposal_output,
@@ -99,7 +93,13 @@ from tests.unit.workflows.test_model_exploration import (
     _make_validator_output,
     _write_tuning_output,
 )
-
+from workflows.llm_config import (
+    NodeLLMConfig,
+    ProposalLLMConfig,
+    TunerLLMConfig,
+    WorkflowLLMConfig,
+)
+from workflows.model_exploration import run_workflow
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -118,32 +118,30 @@ def _error_scoring_record_dict(exp_id: str, model_type: str, file_index: int) ->
     (TestExperimentRecordErrorScoringStatus._error_scoring_record).
     """
     return {
-        "exp_id":          exp_id,
-        "status":          "error_scoring",
-        "model_type":      model_type,
-        "timestamp":       "2026-04-30 17:00:00",
-        "file_index":      file_index,
-        "params":          {"model_config": {}, "train_config": {}, "loss_config": {}},
+        "exp_id": exp_id,
+        "status": "error_scoring",
+        "model_type": model_type,
+        "timestamp": "2026-04-30 17:00:00",
+        "file_index": file_index,
+        "params": {"model_config": {}, "train_config": {}, "loss_config": {}},
         "denoising_score": None,
         "timing": {
-            "train_time_s":     45.0,
+            "train_time_s": 45.0,
             "inference_time_s": 12.0,
-            "scoring_time_s":   2.0,
+            "scoring_time_s": 2.0,
         },
         "memory": {
             "expert_advice_followed": "iter002 expert advice",
             "hypothesis": "deeper net with focal loss",
             "conclusion": (
-                "Scoring crashed: RuntimeError: simulated anchor_map "
-                "mismatch in iter 002"
+                "Scoring crashed: RuntimeError: simulated anchor_map mismatch in iter 002"
             ),
             "discovery": (
                 "Training and inference completed but scoring raised "
                 "RuntimeError. Checkpoint may be reusable."
             ),
             "memory_update": (
-                "Scoring failure — investigate scoring path before "
-                "retrying this exact config."
+                "Scoring failure — investigate scoring path before retrying this exact config."
             ),
         },
     }
@@ -160,13 +158,13 @@ def _make_iter002_tune_output(model_type: str) -> HyperparamTuningOutput:
     branch).
     """
     success_rec_dict = {
-        "exp_id":          f"{model_type}_iter2_001",
-        "status":          "success",
-        "model_type":      model_type,
-        "timestamp":       "2026-04-30 16:55:00",
-        "file_index":      6,
-        "params":          {"model_config": {}, "train_config": {}, "loss_config": {}},
-        "results":         {"denoising_score": 1.55},
+        "exp_id": f"{model_type}_iter2_001",
+        "status": "success",
+        "model_type": model_type,
+        "timestamp": "2026-04-30 16:55:00",
+        "file_index": 6,
+        "params": {"model_config": {}, "train_config": {}, "loss_config": {}},
+        "results": {"denoising_score": 1.55},
         "denoising_score": 1.55,
     }
     error_rec_dict = _error_scoring_record_dict(
@@ -205,17 +203,19 @@ def _make_interpretation_output_for_iter(iter_n: int) -> InterpretationOutput:
         key_findings=[f"iter {iter_n} finding"],
         bottlenecks=[f"iter {iter_n} bottleneck"],
         take_home_message=f"iter {iter_n} take home",
-        model_knowledge_cache={"punet": {
-            "key_findings": [f"iter {iter_n} finding"],
-            "bottlenecks":  [f"iter {iter_n} bottleneck"],
-            "_stats":       {"best_denoising_score": 1.5, "completed_rounds": 1},
-        }},
+        model_knowledge_cache={
+            "punet": {
+                "key_findings": [f"iter {iter_n} finding"],
+                "bottlenecks": [f"iter {iter_n} bottleneck"],
+                "_stats": {"best_denoising_score": 1.5, "completed_rounds": 1},
+            }
+        },
         evolution_stats={
-            "vocab_total":         0,
-            "vocab_canonical":     0,
-            "vocab_candidate":     0,
-            "promoted_this_iter":  0,
-            "is_degraded":         False,
+            "vocab_total": 0,
+            "vocab_canonical": 0,
+            "vocab_candidate": 0,
+            "promoted_this_iter": 0,
+            "is_degraded": False,
         },
         is_degraded=False,
     )
@@ -224,6 +224,7 @@ def _make_interpretation_output_for_iter(iter_n: int) -> InterpretationOutput:
 # ---------------------------------------------------------------------------
 # Test
 # ---------------------------------------------------------------------------
+
 
 def test_iter003_inherits_iter002_scoring_crash_evidence(monkeypatch):
     """Smoke test §5.2 — full V8 certification.
@@ -251,6 +252,7 @@ def test_iter003_inherits_iter002_scoring_crash_evidence(monkeypatch):
     os.makedirs(data_dir, exist_ok=True)
     # _write_tuning_output expects a Path-like with /data/ subdir convention.
     from pathlib import Path
+
     seed_root = Path(workspace_root) / RUN_NAME / "_seed"
     seed_root.mkdir(parents=True, exist_ok=True)
     _write_tuning_output(seed_root, "punet", run="v1", score=1.5)
@@ -294,22 +296,27 @@ def test_iter003_inherits_iter002_scoring_crash_evidence(monkeypatch):
         # which we set above; pass the agent's own workspace as the
         # fallback so the helper picks up the env var.
         from nodes.result_interpretation_agent import _resolve_evolution_log_root
+
         log_root = _resolve_evolution_log_root(getattr(inp, "agent_workspace", chain_root))
-        _append_evolution_log(log_root, {
-            "iteration":       inp.iteration,
-            "evolution_stats": stats,
-            "is_degraded":     False,
-            "_smoke_marker":   f"iter_{i}",
-        })
+        _append_evolution_log(
+            log_root,
+            {
+                "iteration": inp.iteration,
+                "evolution_stats": stats,
+                "is_degraded": False,
+                "_smoke_marker": f"iter_{i}",
+            },
+        )
         return _make_interpretation_output_for_iter(i)
 
     # --- Patch all 5 agents at the workflow boundary ---
-    with patch("workflows.model_exploration.ResultInterpretationAgent") as MockInterp, \
-         patch("workflows.model_exploration.MLModelImplementor") as MockImpl, \
-         patch("workflows.model_exploration.MLCodeValidatorAgent") as MockValid, \
-         patch("workflows.model_exploration.HyperparamTuningAgent") as MockTune, \
-         patch("workflows.model_exploration.MLModelProposalAgent") as MockPropose:
-
+    with (
+        patch("workflows.model_exploration.ResultInterpretationAgent") as MockInterp,
+        patch("workflows.model_exploration.MLModelImplementor") as MockImpl,
+        patch("workflows.model_exploration.MLCodeValidatorAgent") as MockValid,
+        patch("workflows.model_exploration.HyperparamTuningAgent") as MockTune,
+        patch("workflows.model_exploration.MLModelProposalAgent") as MockPropose,
+    ):
         # Interpretation: real C3 helpers via side_effect
         MockInterp.return_value.run.side_effect = _interp_run_side_effect
 
@@ -323,8 +330,8 @@ def test_iter003_inherits_iter002_scoring_crash_evidence(monkeypatch):
         # Proposer: per-iter unique model_name to keep workflow's
         # existing_model_types bookkeeping happy.
         proposal_names = iter(["punet_v1", "m_iter2", "m_iter3"])
-        MockPropose.return_value.run.side_effect = (
-            lambda inp: _make_proposal_output(next(proposal_names))
+        MockPropose.return_value.run.side_effect = lambda inp: _make_proposal_output(
+            next(proposal_names)
         )
 
         llm_config = WorkflowLLMConfig(
@@ -361,10 +368,10 @@ def test_iter003_inherits_iter002_scoring_crash_evidence(monkeypatch):
     iter3_interp_input = captured_interp_inputs[2]
     iter3_summaries = iter3_interp_input.summaries
     assert len(iter3_summaries) >= 1, (
-        f"V8 CERTIFICATION FAILED — iter 003's interpreter input has no "
-        f"new summary from iter 002. The workflow's tune → summary → "
-        f"interp carry-forward is broken; iter 003 cannot see iter 002 "
-        f"happened at all."
+        "V8 CERTIFICATION FAILED — iter 003's interpreter input has no "
+        "new summary from iter 002. The workflow's tune → summary → "
+        "interp carry-forward is broken; iter 003 cannot see iter 002 "
+        "happened at all."
     )
     iter2_summary = iter3_summaries[0]
     # Whole-iteration status: the C2-hardened tuner produces "partial"
@@ -378,8 +385,7 @@ def test_iter003_inherits_iter002_scoring_crash_evidence(monkeypatch):
     # string verbatim — preserved through tuning_output_to_model_run_summary
     # at nodes/result_interpretation_agent.py:1241-1251.
     crash_conclusions = [
-        c for c in iter2_summary.round_conclusions
-        if isinstance(c, str) and "Scoring crashed" in c
+        c for c in iter2_summary.round_conclusions if isinstance(c, str) and "Scoring crashed" in c
     ]
     assert len(crash_conclusions) >= 1, (
         f"V8 CERTIFICATION FAILED — iter 003's interpreter input "
@@ -406,7 +412,8 @@ def test_iter003_inherits_iter002_scoring_crash_evidence(monkeypatch):
     # against the post-hotfix schema. Belt-and-braces against the C2
     # commit + b34b085 hotfix combo.
     raw_error_record = next(
-        r for r in iter2_tune.all_records
+        r
+        for r in iter2_tune.all_records
         if (r.get("status") if isinstance(r, dict) else r.status) == "error_scoring"
     )
     rehydrated = ExperimentRecord.model_validate(raw_error_record)
@@ -418,14 +425,9 @@ def test_iter003_inherits_iter002_scoring_crash_evidence(monkeypatch):
         f"V8 CERTIFICATION FAILED — evolution_log.jsonl missing at "
         f"{log_path}. The C3 writer is not wired into the workflow."
     )
-    lines = [
-        json.loads(line)
-        for line in open(log_path, "r", encoding="utf-8")
-        if line.strip()
-    ]
+    lines = [json.loads(line) for line in open(log_path, encoding="utf-8") if line.strip()]
     assert len(lines) == 3, (
-        f"Expected 3 evolution_log lines (one per iter); got {len(lines)}.\n"
-        f"Lines: {lines}"
+        f"Expected 3 evolution_log lines (one per iter); got {len(lines)}.\nLines: {lines}"
     )
     iters_seen = sorted(line["iteration"] for line in lines)
     assert iters_seen == [1, 2, 3], (
@@ -445,9 +447,9 @@ def test_iter003_inherits_iter002_scoring_crash_evidence(monkeypatch):
     print("V8 CERTIFICATION SMOKE TEST — PASSED")
     print("=" * 70)
     print(f"  iter 003 interp.summaries[0].status:           {iter2_summary.status!r}")
-    print(f"  iter 003 inherited 'Scoring crashed' detail:   YES")
+    print("  iter 003 inherited 'Scoring crashed' detail:   YES")
     print(f"     conclusion excerpt: {inherited_conclusion[:80]}...")
-    print(f"  iter 003 round_scores show None for crashed:   YES")
+    print("  iter 003 round_scores show None for crashed:   YES")
     print(f"  evolution_log.jsonl lines:                     {len(lines)}")
     print(f"  iter 002 evolution_log is_degraded:            {iter2_line['is_degraded']}")
     print(f"  Workspace artifacts at:                        {chain_root}")

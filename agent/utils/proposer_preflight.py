@@ -33,13 +33,12 @@ See ``docs/reliable_resource_proposer.md`` §7 Decision 3 + §9 Commit 5.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from agent.skills.training_skill        import estimator as _training_est
-from agent.skills.inference_skill       import estimator as _inference_est
 from agent.skills.denoising_score_skill import estimator as _scoring_est
+from agent.skills.inference_skill import estimator as _inference_est
+from agent.skills.training_skill import estimator as _training_est
 from execute_tools.sample_set_builder import build_sample_set
-
 
 # The synthesised default ``sample_set`` mirrors the tuner's trial-mode
 # snapshot at ``trial_portion=0.1`` — the most common active scope. Seed
@@ -53,7 +52,7 @@ def _synthesise_default_sample_set(
     *,
     trial_portion: float = _DEFAULT_TRIAL_PORTION,
     seed: int = _DEFAULT_SAMPLING_SEED,
-) -> Dict[int, List[int]]:
+) -> dict[int, list[int]]:
     """Build a representative sample_set without touching disk.
 
     20 files × ceil(trial_portion × 200) segments each. Matches what the
@@ -69,24 +68,21 @@ def _synthesise_default_sample_set(
 
 def _verdict_phrase(feasible: bool, estimated_min: float, budget_min: float) -> str:
     label = "FITS" if feasible else "OVER BUDGET"
-    return (
-        f"{label} — pre-flight estimate {estimated_min:.1f} min "
-        f"vs budget {budget_min:.1f} min"
-    )
+    return f"{label} — pre-flight estimate {estimated_min:.1f} min vs budget {budget_min:.1f} min"
 
 
 def estimate_proposal_time(
     *,
     model_type: str,
-    model_config: Dict[str, Any],
-    train_config: Dict[str, Any],
-    loss_config: Dict[str, Any],
+    model_config: dict[str, Any],
+    train_config: dict[str, Any],
+    loss_config: dict[str, Any],
     num_params: int,
     time_budget_minutes: float,
-    sample_set: Optional[Dict[Any, List[int]]] = None,
+    sample_set: dict[Any, list[int]] | None = None,
     train_portion: float = _DEFAULT_TRAIN_PORTION,
     trial_portion: float = _DEFAULT_TRIAL_PORTION,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Estimate wall-time for a draft proposal, CPU-only.
 
     Args:
@@ -140,9 +136,7 @@ def estimate_proposal_time(
             "caller should skip the gate rather than invoke it with 0."
         )
     if time_budget_minutes <= 0:
-        raise ValueError(
-            f"time_budget_minutes must be positive; got {time_budget_minutes!r}."
-        )
+        raise ValueError(f"time_budget_minutes must be positive; got {time_budget_minutes!r}.")
 
     if sample_set is None:
         sample_set = _synthesise_default_sample_set(trial_portion=trial_portion)
@@ -152,7 +146,10 @@ def estimate_proposal_time(
     # All three estimators run in static-formula mode: ms_per_step=None
     # + gpu_name=None → training estimator skips MODEL_REGISTRY.
     training = _training_est.estimate_wall_time_seconds(
-        model_type, model_config, train_config, sample_set,
+        model_type,
+        model_config,
+        train_config,
+        sample_set,
         train_portion=train_portion,
         ms_per_step=None,
         gpu_name=None,
@@ -160,7 +157,9 @@ def estimate_proposal_time(
         loss_type=loss_type,
     )
     inference = _inference_est.estimate_wall_time_seconds(
-        model_type, model_config, sample_set,
+        model_type,
+        model_config,
+        sample_set,
         inference_ms_per_step=None,
         num_params=num_params,
     )
@@ -173,7 +172,7 @@ def estimate_proposal_time(
 
     return {
         "estimated_minutes": round(total_min, 2),
-        "factor":            round(factor, 3),
-        "verdict":           _verdict_phrase(feasible, total_min, time_budget_minutes),
-        "feasible":          feasible,
+        "factor": round(factor, 3),
+        "verdict": _verdict_phrase(feasible, total_min, time_budget_minutes),
+        "feasible": feasible,
     }

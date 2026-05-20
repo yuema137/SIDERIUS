@@ -9,7 +9,9 @@ Run with:
 
 DO NOT run in CI.
 """
+
 import os
+
 import pytest
 from dotenv import load_dotenv
 
@@ -25,6 +27,7 @@ SYSTEM_PROMPT = "You are a helpful assistant. Follow instructions exactly."
 # Skip guards
 # ---------------------------------------------------------------------------
 
+
 def _skip_if_no_key(provider: str):
     key = "GEMINI_API_KEY" if provider == "gemini" else "OPENAI_API_KEY"
     if not os.getenv(key):
@@ -35,8 +38,8 @@ def _skip_if_no_key(provider: str):
 # generate() — structured JSON output
 # ---------------------------------------------------------------------------
 
-class TestGenerateRealAPI:
 
+class TestGenerateRealAPI:
     def test_gemini_returns_non_empty_dict(self):
         _skip_if_no_key("gemini")
         bridge = LLMBridge(provider="gemini", model_id="gemini-3.1-flash-lite-preview")
@@ -62,8 +65,8 @@ class TestGenerateRealAPI:
 # generate_text() — plain-text output
 # ---------------------------------------------------------------------------
 
-class TestGenerateTextRealAPI:
 
+class TestGenerateTextRealAPI:
     def test_gemini_returns_non_empty_str(self):
         _skip_if_no_key("gemini")
         bridge = LLMBridge(provider="gemini", model_id="gemini-3.1-flash-lite-preview")

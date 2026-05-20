@@ -11,7 +11,7 @@ rationale and §1.4.2 for the ``LLMBridgeContextError`` fail-fast contract.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -51,21 +51,21 @@ class TokenCounts(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    prompt: Optional[int] = Field(
+    prompt: int | None = Field(
         default=None,
         description="Input/prompt tokens reported by the provider. None when "
-                    "the provider did not return a usage object.",
+        "the provider did not return a usage object.",
     )
-    completion: Optional[int] = Field(
+    completion: int | None = Field(
         default=None,
         description="Output/completion tokens. None when usage was missing.",
     )
-    total: Optional[int] = Field(
+    total: int | None = Field(
         default=None,
         description="Total tokens (prompt + completion). May be redundant with "
-                    "the sum of the two above; preserved as the provider "
-                    "reports it because some providers count differently for "
-                    "system / cache / reasoning tokens.",
+        "the sum of the two above; preserved as the provider "
+        "reports it because some providers count differently for "
+        "system / cache / reasoning tokens.",
     )
 
 
@@ -81,14 +81,17 @@ class TokenUsageChars(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     system: int = Field(
-        ge=0, description="len(system_prompt) at call time.",
+        ge=0,
+        description="len(system_prompt) at call time.",
     )
     user: int = Field(
-        ge=0, description="len(user_prompt) at call time.",
+        ge=0,
+        description="len(user_prompt) at call time.",
     )
     total: int = Field(
-        ge=0, description="system + user. Stored explicitly so downstream "
-                          "reports don't have to recompute it per row.",
+        ge=0,
+        description="system + user. Stored explicitly so downstream "
+        "reports don't have to recompute it per row.",
     )
 
 
@@ -103,68 +106,67 @@ class TokenUsageRow(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     ts: str = Field(
-        description="UTC ISO-8601 timestamp at call completion, e.g. "
-                    "'2026-05-04T15:32:11.443Z'.",
+        description="UTC ISO-8601 timestamp at call completion, e.g. '2026-05-04T15:32:11.443Z'.",
     )
     run_id: str = Field(
         description="Immutable identifier of the chain run that owns this log "
-                    "file. Format: '{run_name}-{utc_ts}-{pid}'. The bridge "
-                    "refuses to write to a file whose first-row run_id differs "
-                    "from its own — see LLMBridgeContextError.",
+        "file. Format: '{run_name}-{utc_ts}-{pid}'. The bridge "
+        "refuses to write to a file whose first-row run_id differs "
+        "from its own — see LLMBridgeContextError.",
     )
     run_name: str = Field(
         description="Human-readable run name (e.g. 'exploit_cnn_v12_0504'). "
-                    "Duplicated from run_id for convenience in greppy ad-hoc "
-                    "log queries.",
+        "Duplicated from run_id for convenience in greppy ad-hoc "
+        "log queries.",
     )
-    iter: Optional[int] = Field(
+    iter: int | None = Field(
         default=None,
         description="Iteration index this call belongs to. None only for "
-                    "out-of-iter setup / teardown rows; marker rows always "
-                    "have an iter value.",
+        "out-of-iter setup / teardown rows; marker rows always "
+        "have an iter value.",
     )
     label: str = Field(
         description="Stable call-site identifier, e.g. 'proposer.causal_reasoning', "
-                    "'tuner.planner', 'interpretation.synthesis'. The reserved "
-                    "label '_iter_flush' marks an iteration boundary; the "
-                    "reserved label 'unlabeled' indicates a caller forgot to "
-                    "pass label= and emits a warning.",
+        "'tuner.planner', 'interpretation.synthesis'. The reserved "
+        "label '_iter_flush' marks an iteration boundary; the "
+        "reserved label 'unlabeled' indicates a caller forgot to "
+        "pass label= and emits a warning.",
     )
-    model: Optional[str] = Field(
+    model: str | None = Field(
         default=None,
         description="Provider model id used for the call (e.g. 'gpt-4o-mini'). "
-                    "Optional only for marker rows.",
+        "Optional only for marker rows.",
     )
-    provider: Optional[str] = Field(
+    provider: str | None = Field(
         default=None,
         description="Provider name (e.g. 'openai', 'deepseek', 'gemini'). "
-                    "Optional only for marker rows.",
+        "Optional only for marker rows.",
     )
     tokens: TokenCounts = Field(
         default_factory=TokenCounts,
         description="Provider-reported token counts. Defaults to all-None when "
-                    "the provider did not return a usage object.",
+        "the provider did not return a usage object.",
     )
     chars: TokenUsageChars = Field(
         description="Local char-level counts. Always populated.",
     )
-    components: Dict[str, int] = Field(
+    components: dict[str, int] = Field(
         default_factory=dict,
         description="Optional pre-merge component breakdown of the prompt. "
-                    "Populated by the proposer's _audit_proposer_components hook "
-                    "(see §1.3); empty for non-proposer calls and marker rows. "
-                    "Nine content keys (system_prompt, candidates_markdown, "
-                    "interpretation_json, previous_failures, vocab_block, "
-                    "expert_context_block, agent_cards_block, prior_stage_outputs, "
-                    "recent_gate_block) plus a 10th catch-all key "
-                    "`template_and_scaffolding` injected by LLMBridge._record_usage "
-                    "(§1.5 / Commit 4.2) holding `chars.total - sum(other 9)` so "
-                    "every char is accounted for. Values are char counts; the "
-                    "10th key is non-negative by construction.",
+        "Populated by the proposer's _audit_proposer_components hook "
+        "(see §1.3); empty for non-proposer calls and marker rows. "
+        "Nine content keys (system_prompt, candidates_markdown, "
+        "interpretation_json, previous_failures, vocab_block, "
+        "expert_context_block, agent_cards_block, prior_stage_outputs, "
+        "recent_gate_block) plus a 10th catch-all key "
+        "`template_and_scaffolding` injected by LLMBridge._record_usage "
+        "(§1.5 / Commit 4.2) holding `chars.total - sum(other 9)` so "
+        "every char is accounted for. Values are char counts; the "
+        "10th key is non-negative by construction.",
     )
-    extra: Dict[str, Any] = Field(
+    extra: dict[str, Any] = Field(
         default_factory=dict,
         description="Free-form caller-supplied context (stage_idx, attempt, "
-                    "marker='iter_end', etc.). Kept loose so callers can add "
-                    "context without a schema migration.",
+        "marker='iter_end', etc.). Kept loose so callers can add "
+        "context without a schema migration.",
     )

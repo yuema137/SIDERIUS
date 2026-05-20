@@ -22,6 +22,7 @@ Allowed places a token may appear:
 Everywhere else — assignment RHS, dict key, conditional check — is a
 Principle 5 violation.
 """
+
 from __future__ import annotations
 
 import re
@@ -44,11 +45,21 @@ _SCAN_DIRS: list[str] = ["core", "agent", "nodes"]
 
 # Allow-list markers that classify a token-bearing line as documentation
 # rather than live code.
-_EXAMPLE_MARKERS    = ("e.g.", "example")
-_PROVENANCE_MARKERS = ("measured on", "measured 2", "captured on", "captured 2",
-                        "observed on", "observed a", "calibrated on",
-                        "verified on", "appendix a", "rtx 5090)",
-                        "lilab rtx", "lilab ",)
+_EXAMPLE_MARKERS = ("e.g.", "example")
+_PROVENANCE_MARKERS = (
+    "measured on",
+    "measured 2",
+    "captured on",
+    "captured 2",
+    "observed on",
+    "observed a",
+    "calibrated on",
+    "verified on",
+    "appendix a",
+    "rtx 5090)",
+    "lilab rtx",
+    "lilab ",
+)
 
 
 def _is_allowed_line(line: str) -> bool:
@@ -85,7 +96,7 @@ def _classify_lines(lines: list[str]) -> list[str]:
 
     # Pass 1 — find docstring regions and their start/end indices.
     regions: list[tuple[int, int]] = []
-    in_docstring    = False
+    in_docstring = False
     docstring_delim = None
     start = 0
     for idx, line in enumerate(lines):
@@ -107,7 +118,7 @@ def _classify_lines(lines: list[str]) -> list[str]:
                 start = idx
 
     # Pass 2 — classify each region by looking for markers or code fences.
-    for (s, e) in regions:
+    for s, e in regions:
         block_text = "\n".join(lines[s : e + 1]).lower()
         has_marker = (
             any(m in block_text for m in _EXAMPLE_MARKERS)
@@ -172,6 +183,6 @@ def test_no_hardcoded_device_literals(scan_dir: str) -> None:
         f"in live code:\n"
         + "\n".join(all_violations)
         + "\n\nRoute the value through core.hardware_context.HardwareContext "
-          "(or annotate the line as an example / calibration provenance if "
-          "it is genuinely documentation)."
+        "(or annotate the line as an example / calibration provenance if "
+        "it is genuinely documentation)."
     )

@@ -34,10 +34,10 @@ import pytest
 
 from agent.llm_bridge import LLMBridge
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _usage(prompt: int, completion: int, total: int) -> SimpleNamespace:
     """Build a fake response.usage matching the OpenAI SDK shape."""
@@ -78,10 +78,9 @@ def _tool_response(name: str, args: dict, usage=None) -> MagicMock:
     return response
 
 
-def _make_bridge_with_path(tmp_path: Path,
-                           run_id: str = "test-run-id",
-                           run_name: str = "test_run",
-                           iteration: int = 1) -> LLMBridge:
+def _make_bridge_with_path(
+    tmp_path: Path, run_id: str = "test-run-id", run_name: str = "test_run", iteration: int = 1
+) -> LLMBridge:
     """Construct a bridge with the OpenAI client mocked + run-context bound."""
     with patch("agent.llm_bridge.OpenAI"):
         bridge = LLMBridge(provider="openai", model_id="gpt-4o-mini")
@@ -102,6 +101,7 @@ def _read_rows(path: Path) -> list[dict]:
 # ---------------------------------------------------------------------------
 # (1) Positive: one row per successful generate() call
 # ---------------------------------------------------------------------------
+
 
 def test_generate_writes_one_row_with_correct_counts(tmp_path):
     bridge = _make_bridge_with_path(tmp_path)
@@ -135,6 +135,7 @@ def test_generate_writes_one_row_with_correct_counts(tmp_path):
 # (2) No-op when run-context unset
 # ---------------------------------------------------------------------------
 
+
 def test_record_usage_noop_when_unbound(tmp_path):
     """With _token_usage_path=None, no row is written anywhere."""
     with patch("agent.llm_bridge.OpenAI"):
@@ -157,6 +158,7 @@ def test_record_usage_noop_when_unbound(tmp_path):
 # (3) Graceful degradation: response.usage is None
 # ---------------------------------------------------------------------------
 
+
 def test_record_usage_handles_missing_usage(tmp_path):
     bridge = _make_bridge_with_path(tmp_path)
     bridge.client.chat.completions.create.return_value = _chat_response(
@@ -164,8 +166,7 @@ def test_record_usage_handles_missing_usage(tmp_path):
         usage=None,  # provider returned no usage object
     )
 
-    out = bridge.generate("sys-prompt", "the-user-prompt",
-                          label="proposer.proposing")
+    out = bridge.generate("sys-prompt", "the-user-prompt", label="proposer.proposing")
     assert out == {"k": "v"}
     rows = _read_rows(bridge._token_usage_path)
     assert len(rows) == 1
@@ -180,6 +181,7 @@ def test_record_usage_handles_missing_usage(tmp_path):
 # ---------------------------------------------------------------------------
 # (4) Per-attempt telemetry — multi-retry produces N rows (Q1)
 # ---------------------------------------------------------------------------
+
 
 def test_chat_json_writes_one_row_per_attempt(tmp_path, monkeypatch):
     """Three attempts (two malformed, one valid) → three rows with
@@ -203,7 +205,9 @@ def test_chat_json_writes_one_row_per_attempt(tmp_path, monkeypatch):
     assert len(rows) == 3, f"expected 3 rows (one per attempt), got {len(rows)}"
     assert [r["extra"]["attempt"] for r in rows] == [0, 1, 2]
     assert [r["extra"]["status"] for r in rows] == [
-        "json_decode_error", "json_decode_error", "ok",
+        "json_decode_error",
+        "json_decode_error",
+        "ok",
     ]
     # Token counts per attempt match the side_effect sequence.
     assert [r["tokens"]["prompt"] for r in rows] == [10, 11, 12]
@@ -231,6 +235,7 @@ def test_chat_json_writes_row_for_empty_content(tmp_path, monkeypatch):
 # (5) generate_text() and tool_call() coverage
 # ---------------------------------------------------------------------------
 
+
 def test_generate_text_writes_one_row(tmp_path):
     bridge = _make_bridge_with_path(tmp_path)
     bridge.client.chat.completions.create.return_value = _chat_response(
@@ -252,10 +257,11 @@ def test_generate_text_writes_one_row(tmp_path):
 def test_tool_call_writes_one_row_on_success(tmp_path):
     bridge = _make_bridge_with_path(tmp_path)
     bridge.client.chat.completions.create.return_value = _tool_response(
-        "do_thing", {"x": 1}, usage=_usage(15, 5, 20),
+        "do_thing",
+        {"x": 1},
+        usage=_usage(15, 5, 20),
     )
-    tools = [{"type": "function", "function": {"name": "do_thing",
-                                               "parameters": {}}}]
+    tools = [{"type": "function", "function": {"name": "do_thing", "parameters": {}}}]
     result = bridge.tool_call("s", "u", tools, label="validator.code_review")
     assert result.name == "do_thing"
     assert result.arguments == {"x": 1}
@@ -273,8 +279,10 @@ def test_tool_call_writes_row_then_raises_when_no_tool_call(tmp_path):
     msg = MagicMock()
     msg.tool_calls = None
     msg.content = "I refuse to call a tool."
-    choice = MagicMock(); choice.message = msg
-    response = MagicMock(); response.choices = [choice]
+    choice = MagicMock()
+    choice.message = msg
+    response = MagicMock()
+    response.choices = [choice]
     response.usage = _usage(8, 4, 12)
     bridge.client.chat.completions.create.return_value = response
 
@@ -290,6 +298,7 @@ def test_tool_call_writes_row_then_raises_when_no_tool_call(tmp_path):
 # (6) Internal labels — plan() / reflect() do not warn (Q2)
 # ---------------------------------------------------------------------------
 
+
 def test_plan_uses_tuner_planner_label(tmp_path, capsys):
     bridge = _make_bridge_with_path(tmp_path)
     bridge.client.chat.completions.create.return_value = _chat_response(
@@ -297,8 +306,7 @@ def test_plan_uses_tuner_planner_label(tmp_path, capsys):
         usage=_usage(30, 10, 40),
     )
     # plan() needs a memory_history; an empty list exercises the prompt path.
-    bridge.plan(memory_history=[], expert_advice="None",
-                current_round=1, max_rounds=3)
+    bridge.plan(memory_history=[], expert_advice="None", current_round=1, max_rounds=3)
 
     rows = _read_rows(bridge._token_usage_path)
     assert len(rows) == 1
@@ -313,9 +321,7 @@ def test_reflect_uses_tuner_reflector_label(tmp_path, capsys):
         '{"updated_memory": []}',
         usage=_usage(25, 8, 33),
     )
-    bridge.reflect(exp_id="exp1",
-                   hypothesis="h",
-                   actual_results={"score": 1.0})
+    bridge.reflect(exp_id="exp1", hypothesis="h", actual_results={"score": 1.0})
 
     rows = _read_rows(bridge._token_usage_path)
     assert len(rows) == 1
@@ -328,10 +334,12 @@ def test_reflect_uses_tuner_reflector_label(tmp_path, capsys):
 # (7) Default label fires the warning
 # ---------------------------------------------------------------------------
 
+
 def test_generate_default_label_emits_warning(tmp_path, capsys):
     bridge = _make_bridge_with_path(tmp_path)
     bridge.client.chat.completions.create.return_value = _chat_response(
-        '{"x": 1}', usage=_usage(1, 1, 2),
+        '{"x": 1}',
+        usage=_usage(1, 1, 2),
     )
     bridge.generate("s", "u")  # no label= → default "unlabeled"
 

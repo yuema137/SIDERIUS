@@ -14,66 +14,73 @@ backward is registered through the saved-tensors machinery. We intercept that
 machinery to get a byte-exact training activation footprint, and use
 torchinfo only for the human-readable layer breakdown.
 """
+
 from __future__ import annotations
 
 import gc
-from typing import Callable, Literal, Sequence
+from collections.abc import Callable, Sequence
+from typing import Literal
 
 import torch
 import torch.nn as nn
 import torchinfo
 from pydantic import BaseModel, ConfigDict, Field
 
-
 # ── Pydantic contracts ──────────────────────────────────────────────────────
+
 
 class LayerReport(BaseModel):
     """One entry from torchinfo's summary_list, normalised for our use."""
+
     model_config = ConfigDict(frozen=True)
 
-    depth:        int
-    var_name:     str
-    class_name:   str
-    input_shape:  list[int]
+    depth: int
+    var_name: str
+    class_name: str
+    input_shape: list[int]
     output_shape: list[int]
-    num_params:   int
-    param_bytes:  int
+    num_params: int
+    param_bytes: int
     output_bytes: int
-    is_leaf:      bool
+    is_leaf: bool
 
 
 class ForwardLayerReport(BaseModel):
     """Aggregated torchinfo view of one nn.Module (model or loss)."""
+
     model_config = ConfigDict(frozen=True)
 
-    module_name:              str
-    layers:                   list[LayerReport]
-    total_param_bytes:        int = Field(description="Sum over leaves only.")
+    module_name: str
+    layers: list[LayerReport]
+    total_param_bytes: int = Field(description="Sum over leaves only.")
     forward_output_bytes_sum: int = Field(description="Sum over leaves only.")
     forward_output_bytes_max: int = Field(description="Max single-leaf output bytes.")
 
 
 class AutogradTapeReport(BaseModel):
     """What the autograd engine retained for backward — byte-exact."""
+
     model_config = ConfigDict(frozen=True)
 
     unique_storage_count: int
-    total_saved_bytes:    int
+    total_saved_bytes: int
 
 
 class ProbeResult(BaseModel):
     """Single object downstream consumers (wrapper, killer_report) read from."""
+
     model_config = ConfigDict(frozen=True)
 
-    mode:          Literal["training", "inference"]
+    mode: Literal["training", "inference"]
     model_forward: ForwardLayerReport
-    loss_forward:  ForwardLayerReport | None = None
+    loss_forward: ForwardLayerReport | None = None
     autograd_tape: AutogradTapeReport | None = None
-    input_bytes:   int
-    output_bytes:  int
+    input_bytes: int
+    output_bytes: int
 
 
 # ── Primitive 1: torchinfo wrapper ──────────────────────────────────────────
+
 
 def _shape_to_list(shape) -> list[int]:
     """Normalise torchinfo's input_size / output_size to a flat list[int].
@@ -157,6 +164,7 @@ def probe_forward_layers(
 
 # ── Primitive 2: autograd-tape walker via saved_tensors_hooks ──────────────
 
+
 def probe_autograd_tape(forward_callable: Callable[[], torch.Tensor]) -> AutogradTapeReport:
     """Invoke `forward_callable()` under saved_tensors_hooks and count what
     autograd retained, deduped by underlying storage.
@@ -209,6 +217,7 @@ def probe_autograd_tape(forward_callable: Callable[[], torch.Tensor]) -> Autogra
 
 # ── Primitive 3: composer ───────────────────────────────────────────────────
 
+
 def _tensor_bytes(t: torch.Tensor) -> int:
     return t.numel() * t.element_size()
 
@@ -243,9 +252,7 @@ def probe_activation_footprint(
 
     if mode == "inference":
         model.eval()
-        model_layers = probe_forward_layers(
-            model, input_sample, module_name=type(model).__name__
-        )
+        model_layers = probe_forward_layers(model, input_sample, module_name=type(model).__name__)
         with torch.no_grad():
             out = model(input_sample)
         return ProbeResult(
@@ -284,9 +291,7 @@ def probe_activation_footprint(
     # torchinfo and the shape forward don't need autograd — disable it to
     # prevent rebuilding a massive graph for sequential-scan architectures.
     with torch.no_grad():
-        model_layers = probe_forward_layers(
-            model, input_sample, module_name=type(model).__name__
-        )
+        model_layers = probe_forward_layers(model, input_sample, module_name=type(model).__name__)
         logits_for_shape = model(input_sample)
         loss_layers = probe_forward_layers(
             loss_module,

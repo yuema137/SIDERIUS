@@ -5,11 +5,11 @@ Parametrized to keep the defensive Pydantic shield intact (required-field
 ValidationError pins) while collapsing one-input-per-function noise into
 single parametrized functions with explicit case IDs.
 """
+
 import pytest
 from pydantic import ValidationError
 
-from agent.schemas.validator import ValidatorInput, ValidatorOutput, LLMCodeReview
-
+from agent.schemas.validator import LLMCodeReview, ValidatorInput, ValidatorOutput
 
 VALID_INPUT_KWARGS = dict(
     model_type="attn_unet",
@@ -56,7 +56,6 @@ def _valid_output_kwargs(**overrides):
 
 
 class TestValidatorInput:
-
     def test_valid_construction_populates_all_documented_fields(self):
         """Sanity baseline: every kwarg lands on the model, plus default
         storage/LLM settings resolve as advertised."""
@@ -93,24 +92,28 @@ class TestValidatorInput:
 
 
 class TestValidatorOutput:
-
     @pytest.mark.parametrize(
         "case_overrides, key_field, key_value",
         [
             pytest.param(
                 {},
-                "passed", True,
+                "passed",
+                True,
                 id="all_passed_no_test_output",
             ),
             pytest.param(
                 {"test_output": "3 passed in 0.5s"},
-                "test_output", "3 passed in 0.5s",
+                "test_output",
+                "3 passed in 0.5s",
                 id="all_passed_with_test_output",
             ),
         ],
     )
     def test_passed_scenarios_construct_and_expose_optional_fields(
-        self, case_overrides, key_field, key_value,
+        self,
+        case_overrides,
+        key_field,
+        key_value,
     ):
         out = ValidatorOutput(**_valid_output_kwargs(**case_overrides))
         assert getattr(out, key_field) == key_value
@@ -124,70 +127,88 @@ class TestValidatorOutput:
         [
             pytest.param(
                 {
-                    "passed": False, "plugin_registered": False, "tests_passed": False,
-                    "instantiation_passed": False, "gradient_check_passed": False,
+                    "passed": False,
+                    "plugin_registered": False,
+                    "tests_passed": False,
+                    "instantiation_passed": False,
+                    "gradient_check_passed": False,
                     "llm_review_passed": False,
                     "error_message": "ImportError: cannot import PLUGIN_MODEL_CLASS",
                 },
-                "passed", False,
+                "passed",
+                False,
                 ("error_message", "ImportError"),
                 id="failed_plugin_import",
             ),
             pytest.param(
                 {
-                    "passed": False, "tests_passed": False,
+                    "passed": False,
+                    "tests_passed": False,
                     "test_output": "FAILED test_forward_shape - AssertionError",
                     "error_message": "1 test failed",
                 },
-                "tests_passed", False,
+                "tests_passed",
+                False,
                 ("test_output", "FAILED"),
                 id="failed_pytest",
             ),
             pytest.param(
                 {
-                    "passed": False, "config_fields_valid": False,
+                    "passed": False,
+                    "config_fields_valid": False,
                     "error_message": "config field 'kernel_sizes' is List[int], not scalar",
                 },
-                "config_fields_valid", False,
+                "config_fields_valid",
+                False,
                 None,
                 id="failed_config_fields",
             ),
             pytest.param(
                 {
-                    "passed": False, "instantiation_passed": False,
+                    "passed": False,
+                    "instantiation_passed": False,
                     "gradient_check_passed": False,
                     "error_message": "Model instantiation failed",
                 },
-                "instantiation_passed", False,
+                "instantiation_passed",
+                False,
                 ("gradient_check_passed", False),
                 id="failed_instantiation",
             ),
             pytest.param(
                 {
-                    "passed": False, "gradient_check_passed": False,
+                    "passed": False,
+                    "gradient_check_passed": False,
                     "error_message": "Backward pass failed",
                 },
-                "gradient_check_passed", False,
+                "gradient_check_passed",
+                False,
                 ("instantiation_passed", True),
                 id="failed_gradient_only",
             ),
             pytest.param(
                 {
-                    "passed": False, "llm_review_passed": False,
+                    "passed": False,
+                    "llm_review_passed": False,
                     "llm_review_spec_alignment": False,
                     "llm_review_trainability_concerns": ["detached tensor in residual"],
                     "llm_review_implementation_issues": [],
                     "llm_review_notes": "Implementation does not match spec.",
                     "error_message": "LLM review did not pass",
                 },
-                "llm_review_passed", False,
+                "llm_review_passed",
+                False,
                 ("llm_review_spec_alignment", False),
                 id="failed_llm_review",
             ),
         ],
     )
     def test_failure_scenarios_preserve_per_stage_flags(
-        self, overrides, expected_field, expected_value, side_check,
+        self,
+        overrides,
+        expected_field,
+        expected_value,
+        side_check,
     ):
         """Each documented failure shape must round-trip through Pydantic
         and surface the right stage flag (plus a documented side-channel
@@ -205,15 +226,17 @@ class TestValidatorOutput:
     def test_failed_llm_review_records_concerns_list(self):
         """Multi-field assertion broken out because the trainability_concerns
         length check is a distinct invariant (list cardinality)."""
-        out = ValidatorOutput(**_valid_output_kwargs(
-            passed=False,
-            llm_review_passed=False,
-            llm_review_spec_alignment=False,
-            llm_review_trainability_concerns=["detached tensor in residual"],
-            llm_review_implementation_issues=[],
-            llm_review_notes="Implementation does not match spec.",
-            error_message="LLM review did not pass",
-        ))
+        out = ValidatorOutput(
+            **_valid_output_kwargs(
+                passed=False,
+                llm_review_passed=False,
+                llm_review_spec_alignment=False,
+                llm_review_trainability_concerns=["detached tensor in residual"],
+                llm_review_implementation_issues=[],
+                llm_review_notes="Implementation does not match spec.",
+                error_message="LLM review did not pass",
+            )
+        )
         assert len(out.llm_review_trainability_concerns) == 1
 
     @pytest.mark.parametrize("missing_field", REQUIRED_OUTPUT_FIELDS)
@@ -228,7 +251,6 @@ class TestValidatorOutput:
 
 
 class TestLLMCodeReview:
-
     @pytest.mark.parametrize(
         "kwargs, expected_passed, expected_concerns_len, expected_issues_len",
         [
@@ -240,7 +262,9 @@ class TestLLMCodeReview:
                     passed=True,
                     notes="Implementation looks correct.",
                 ),
-                True, 0, 0,
+                True,
+                0,
+                0,
                 id="passed",
             ),
             pytest.param(
@@ -251,13 +275,19 @@ class TestLLMCodeReview:
                     passed=False,
                     notes="Does not match spec.",
                 ),
-                False, 1, 1,
+                False,
+                1,
+                1,
                 id="failed",
             ),
         ],
     )
     def test_review_scenarios(
-        self, kwargs, expected_passed, expected_concerns_len, expected_issues_len,
+        self,
+        kwargs,
+        expected_passed,
+        expected_concerns_len,
+        expected_issues_len,
     ):
         review = LLMCodeReview(**kwargs)
         assert review.passed is expected_passed

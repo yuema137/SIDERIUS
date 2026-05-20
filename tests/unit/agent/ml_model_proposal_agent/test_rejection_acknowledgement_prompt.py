@@ -24,12 +24,12 @@ This guard (B.6b-v2) asserts the v4 port's invariants against the
 ``PROPOSAL_REASONING_PROMPT`` is preserved for continuity with the
 pre-v4 test body.
 """
+
 from __future__ import annotations
 
 import re
 
 from agent.prompt_templates.proposal import load_prompt
-
 
 PROPOSAL_REASONING_PROMPT = load_prompt("causal_reasoning_stage.md")
 
@@ -110,16 +110,11 @@ class TestDesignConstraintTreatment:
     the rejection as an input to its design)."""
 
     def test_treat_failure_as_design_constraint(self):
-        assert (
-            "design constraint to be solved alongside"
-            in PROPOSAL_REASONING_PROMPT
-        )
+        assert "design constraint to be solved alongside" in PROPOSAL_REASONING_PROMPT
 
     def test_not_a_historical_footnote(self):
         # The .md wraps "historical" → newline → "footnote" — allow \s+.
-        assert re.search(
-            r"not a historical\s+footnote", PROPOSAL_REASONING_PROMPT
-        ) is not None
+        assert re.search(r"not a historical\s+footnote", PROPOSAL_REASONING_PROMPT) is not None
 
 
 class TestCausalHypothesisIntegrationContract:
@@ -153,14 +148,9 @@ class TestCausalHypothesisIntegrationContract:
         must do both jobs: achieve scientific improvement AND stay under
         the effective cap that defeated the previous proposal."""
         # Tokens may span a line break in the rendered prompt.
-        assert re.search(
-            r"scientific\s+improvement", PROPOSAL_REASONING_PROMPT
-        ) is not None
+        assert re.search(r"scientific\s+improvement", PROPOSAL_REASONING_PROMPT) is not None
         assert "remaining strictly within" in PROPOSAL_REASONING_PROMPT
-        assert (
-            "defeated the previous proposal"
-            in PROPOSAL_REASONING_PROMPT
-        )
+        assert "defeated the previous proposal" in PROPOSAL_REASONING_PROMPT
 
     def test_three_citation_bullets_appear_in_order(self):
         """The three bullet-prefixed requirements must appear in the order:
@@ -189,14 +179,20 @@ class TestClosingConstraintText:
         # Tokens may span line breaks — the .md wraps "with" → newline →
         # "no" in the first phrase and "VRAM" → newline → "cap" in the
         # second, so \s+ sits BETWEEN those pairs.
-        assert re.search(
-            r"only the scientific bottleneck with\s+no mention of the physical rejection",
-            PROPOSAL_REASONING_PROMPT,
-        ) is not None
-        assert re.search(
-            r"only the VRAM\s+cap with no scientific rationale",
-            PROPOSAL_REASONING_PROMPT,
-        ) is not None
+        assert (
+            re.search(
+                r"only the scientific bottleneck with\s+no mention of the physical rejection",
+                PROPOSAL_REASONING_PROMPT,
+            )
+            is not None
+        )
+        assert (
+            re.search(
+                r"only the VRAM\s+cap with no scientific rationale",
+                PROPOSAL_REASONING_PROMPT,
+            )
+            is not None
+        )
         assert "incomplete" in PROPOSAL_REASONING_PROMPT
 
     def test_closing_cite_as_design_constraint(self):
@@ -205,10 +201,13 @@ class TestClosingConstraintText:
         scientific bottlenecks. This sentence is the terminal marker for
         the MANDATORY clause and anchors
         ``test_clause_structure_intact`` below."""
-        assert re.search(
-            r"Cite the previous failure\s+as a design constraint to be solved alongside",
-            PROPOSAL_REASONING_PROMPT,
-        ) is not None
+        assert (
+            re.search(
+                r"Cite the previous failure\s+as a design constraint to be solved alongside",
+                PROPOSAL_REASONING_PROMPT,
+            )
+            is not None
+        )
 
 
 class TestClausePositionInvariant:

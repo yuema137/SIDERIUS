@@ -6,7 +6,6 @@ Calibration constants for the ``ligroup`` server (lilab primary GPU box).
 
 from core.server_configs._base import ServerConfig
 
-
 CONFIG: ServerConfig = ServerConfig(
     hostname="ligroup",
     # Recalibrated 2026-04-30 from V7 formal-round end-to-end timings:

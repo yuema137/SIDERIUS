@@ -36,8 +36,8 @@ def _sample_set(total_segments: int, n_files: int = 20) -> dict:
 # estimate_peak_bytes
 # ---------------------------------------------------------------------------
 
-class TestEstimatePeakBytes:
 
+class TestEstimatePeakBytes:
     def test_zero_vram(self):
         out = est.estimate_peak_bytes()
         assert out["phase"] == "scoring"
@@ -49,38 +49,48 @@ class TestEstimatePeakBytes:
 # estimate_wall_time_seconds
 # ---------------------------------------------------------------------------
 
-class TestEstimateWallTimeSeconds:
 
+class TestEstimateWallTimeSeconds:
     def test_return_shape(self):
         out = est.estimate_wall_time_seconds(_sample_set(400), hostname="ligroup")
         assert set(out.keys()) == {"phase", "seconds", "breakdown"}
         assert out["phase"] == "scoring"
         assert out["seconds"] > 0
         assert set(out["breakdown"].keys()) == {
-            "total_psd_segments", "num_workers",
-            "per_psd_segment_seconds", "hostname",
+            "total_psd_segments",
+            "num_workers",
+            "per_psd_segment_seconds",
+            "hostname",
         }
 
     def test_linear_in_segments(self):
         small = est.estimate_wall_time_seconds(_sample_set(100), hostname="ligroup")
-        big   = est.estimate_wall_time_seconds(_sample_set(400), hostname="ligroup")
+        big = est.estimate_wall_time_seconds(_sample_set(400), hostname="ligroup")
         assert big["seconds"] == pytest.approx(4 * small["seconds"], rel=1e-6)
 
     def test_inverse_in_num_workers(self):
-        few  = est.estimate_wall_time_seconds(
-            _sample_set(400), num_workers=4, hostname="ligroup",
+        few = est.estimate_wall_time_seconds(
+            _sample_set(400),
+            num_workers=4,
+            hostname="ligroup",
         )
         many = est.estimate_wall_time_seconds(
-            _sample_set(400), num_workers=8, hostname="ligroup",
+            _sample_set(400),
+            num_workers=8,
+            hostname="ligroup",
         )
         assert few["seconds"] == pytest.approx(2 * many["seconds"], rel=1e-6)
 
     def test_num_workers_zero_floored_to_one(self):
         zero = est.estimate_wall_time_seconds(
-            _sample_set(100), num_workers=0, hostname="ligroup",
+            _sample_set(100),
+            num_workers=0,
+            hostname="ligroup",
         )
         one = est.estimate_wall_time_seconds(
-            _sample_set(100), num_workers=1, hostname="ligroup",
+            _sample_set(100),
+            num_workers=1,
+            hostname="ligroup",
         )
         assert zero["seconds"] == pytest.approx(one["seconds"])
         assert zero["breakdown"]["num_workers"] == 1
@@ -88,7 +98,9 @@ class TestEstimateWallTimeSeconds:
     def test_ligroup_arithmetic_against_measured_constant(self):
         """400 segments / 8 workers × 2.21 s = 110.5 s."""
         out = est.estimate_wall_time_seconds(
-            _sample_set(400), num_workers=8, hostname="ligroup",
+            _sample_set(400),
+            num_workers=8,
+            hostname="ligroup",
         )
         assert out["seconds"] == pytest.approx(400 * 2.21 / 8, rel=1e-6)
         assert out["breakdown"]["per_psd_segment_seconds"] == pytest.approx(2.21)
@@ -99,7 +111,8 @@ class TestEstimateWallTimeSeconds:
         monkeypatch.setattr(sc, "_WARNED_HOSTS", set())
         with pytest.warns(UserWarning):
             out = est.estimate_wall_time_seconds(
-                _sample_set(400), hostname="fake-host-xyz",
+                _sample_set(400),
+                hostname="fake-host-xyz",
             )
         assert out["breakdown"]["hostname"] == "ligroup"
         assert out["breakdown"]["per_psd_segment_seconds"] == pytest.approx(2.21)

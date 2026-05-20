@@ -21,21 +21,22 @@ Tests cover:
   database_validated_model
     - Raises NotImplementedError.
 """
+
 import pytest
 
-from agent.schemas.validator import ValidatorOutput
+from agent.schemas.hyperparam_tuning import ExpertAdvice, HyperparamTuningInput
 from agent.schemas.proposal import ProposalOutput
-from agent.schemas.hyperparam_tuning import HyperparamTuningInput, ExpertAdvice
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import (
-    local_validated_model,
     database_validated_model,
+    local_validated_model,
 )
-
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from agent.schemas.validator import ValidatorOutput
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def storage():
@@ -86,14 +87,17 @@ def proposal_output():
 # local_validated_model
 # ---------------------------------------------------------------------------
 
-class TestLocalValidatedModel:
 
+class TestLocalValidatedModel:
     def test_returns_hyperparam_tuning_input(self, validator_output, proposal_output, storage):
         result = local_validated_model(validator_output, proposal_output, storage)
         assert isinstance(result, HyperparamTuningInput)
 
     def test_baseline_attributes_from_inputs(
-        self, validator_output, proposal_output, storage,
+        self,
+        validator_output,
+        proposal_output,
+        storage,
     ):
         """Sanity baseline: model_type/expert_advice/storage flow from
         ValidatorOutput + ProposalOutput + the kwarg straight into the
@@ -116,7 +120,12 @@ class TestLocalValidatedModel:
         ],
     )
     def test_default_when_kwarg_omitted(
-        self, validator_output, proposal_output, storage, attr, expected_default,
+        self,
+        validator_output,
+        proposal_output,
+        storage,
+        attr,
+        expected_default,
     ):
         """Defensive shield: caller omits the kwarg → protocol surfaces the
         documented default. Pins regressions where a schema default could
@@ -131,26 +140,42 @@ class TestLocalValidatedModel:
             pytest.param("file_index", 3, "file_index", id="file_index_override"),
             pytest.param("llm_provider", "openai", "llm_provider", id="llm_provider_override"),
             pytest.param("llm_model_id", "gpt-4o", "llm_model_id", id="llm_model_id_override"),
-            pytest.param("cleanup_denoised", True, "cleanup_denoised", id="cleanup_denoised_override"),
+            pytest.param(
+                "cleanup_denoised", True, "cleanup_denoised", id="cleanup_denoised_override"
+            ),
         ],
     )
     def test_custom_kwarg_passes_through(
-        self, validator_output, proposal_output, storage, kwarg, value, attr,
+        self,
+        validator_output,
+        proposal_output,
+        storage,
+        kwarg,
+        value,
+        attr,
     ):
         """Caller supplies the kwarg → it lands verbatim on the downstream input."""
         result = local_validated_model(
-            validator_output, proposal_output, storage, **{kwarg: value},
+            validator_output,
+            proposal_output,
+            storage,
+            **{kwarg: value},
         )
         assert getattr(result, attr) == value
 
     def test_trial_mode_snapshot_kwargs_fan_out(
-        self, validator_output, proposal_output, storage,
+        self,
+        validator_output,
+        proposal_output,
+        storage,
     ):
         """All trial-mode knobs land on the downstream input together —
         kept as a single multi-field assertion because the 8 fields are
         semantically one trial-config payload, not 8 unrelated kwargs."""
         result = local_validated_model(
-            validator_output, proposal_output, storage,
+            validator_output,
+            proposal_output,
+            storage,
             is_trial=True,
             trial_strategy="snapshot",
             trial_portion=0.2,
@@ -172,12 +197,17 @@ class TestLocalValidatedModel:
         assert result.train_base_seed == 99
 
     def test_target_files_in_trial_target_mode(
-        self, validator_output, proposal_output, storage,
+        self,
+        validator_output,
+        proposal_output,
+        storage,
     ):
         """target_files travels with the trial_strategy='target' sub-path
         (distinct payload from snapshot trial config)."""
         result = local_validated_model(
-            validator_output, proposal_output, storage,
+            validator_output,
+            proposal_output,
+            storage,
             is_trial=True,
             trial_strategy="target",
             target_files=[0, 5, 10],
@@ -190,8 +220,8 @@ class TestLocalValidatedModel:
 # to expert_advice so the tuner's planner sees them.
 # ---------------------------------------------------------------------------
 
-class TestDeviationNotePropagation:
 
+class TestDeviationNotePropagation:
     @pytest.mark.parametrize(
         "attr_to_set, note, expected_substr",
         [
@@ -210,8 +240,13 @@ class TestDeviationNotePropagation:
         ],
     )
     def test_single_deviation_prepended_to_serialized_advice(
-        self, validator_output, proposal_output, storage,
-        attr_to_set, note, expected_substr,
+        self,
+        validator_output,
+        proposal_output,
+        storage,
+        attr_to_set,
+        note,
+        expected_substr,
     ):
         """When the validator emits one kind of deviation note, it must be
         prepended to expert_advice as a plain string, with the proposal's
@@ -223,7 +258,10 @@ class TestDeviationNotePropagation:
         assert "receptive field size" in result.expert_advice
 
     def test_both_deviations_prepended_in_order(
-        self, validator_output, proposal_output, storage,
+        self,
+        validator_output,
+        proposal_output,
+        storage,
     ):
         """When both deviation notes are present, spec first then inheritance,
         then the serialized proposal advice."""
@@ -238,7 +276,10 @@ class TestDeviationNotePropagation:
         assert spec_pos < inherit_pos < advice_pos
 
     def test_no_deviation_passes_advice_through_structured(
-        self, validator_output, proposal_output, storage,
+        self,
+        validator_output,
+        proposal_output,
+        storage,
     ):
         """No deviation notes → expert_advice stays as the structured ExpertAdvice."""
         result = local_validated_model(validator_output, proposal_output, storage)
@@ -256,50 +297,67 @@ class TestDeviationNotePropagation:
 # See docs/resource_estimator_implement.md §2.7.2 / Phase I.
 # ---------------------------------------------------------------------------
 
-class TestTimeBudgetFanOut:
 
+class TestTimeBudgetFanOut:
     @pytest.mark.parametrize(
         "kwargs, set_field, set_value, other_fields_must_stay_none",
         [
             pytest.param(
                 {"trial_time_budget_minutes": 45.0},
-                "trial_time_budget_minutes", 45.0,
+                "trial_time_budget_minutes",
+                45.0,
                 ["formal_time_budget_minutes", "data_dir"],
                 id="trial_only_set",
             ),
             pytest.param(
                 {"formal_time_budget_minutes": 240.0},
-                "formal_time_budget_minutes", 240.0,
+                "formal_time_budget_minutes",
+                240.0,
                 ["trial_time_budget_minutes", "data_dir"],
                 id="formal_only_set",
             ),
             pytest.param(
                 {"data_dir": "/mnt/tidmad"},
-                "data_dir", "/mnt/tidmad",
+                "data_dir",
+                "/mnt/tidmad",
                 ["trial_time_budget_minutes", "formal_time_budget_minutes"],
                 id="data_dir_only_set",
             ),
         ],
     )
     def test_individual_budget_passes_through_without_polluting_siblings(
-        self, validator_output, proposal_output, storage,
-        kwargs, set_field, set_value, other_fields_must_stay_none,
+        self,
+        validator_output,
+        proposal_output,
+        storage,
+        kwargs,
+        set_field,
+        set_value,
+        other_fields_must_stay_none,
     ):
         """Phase I invariant: setting one of {trial, formal, data_dir} alone
         leaves the others at their default None — no cross-contamination."""
         result = local_validated_model(
-            validator_output, proposal_output, storage, **kwargs,
+            validator_output,
+            proposal_output,
+            storage,
+            **kwargs,
         )
         assert getattr(result, set_field) == set_value
         for f in other_fields_must_stay_none:
             assert getattr(result, f) is None
 
     def test_all_three_budgets_independent(
-        self, validator_output, proposal_output, storage,
+        self,
+        validator_output,
+        proposal_output,
+        storage,
     ):
         """Two-budget split: caller sets every kwarg — all three survive."""
         result = local_validated_model(
-            validator_output, proposal_output, storage,
+            validator_output,
+            proposal_output,
+            storage,
             trial_time_budget_minutes=30.0,
             formal_time_budget_minutes=240.0,
             data_dir="/data/tidmad",
@@ -309,7 +367,10 @@ class TestTimeBudgetFanOut:
         assert result.data_dir == "/data/tidmad"
 
     def test_defaults_none_when_omitted(
-        self, validator_output, proposal_output, storage,
+        self,
+        validator_output,
+        proposal_output,
+        storage,
     ):
         """When the caller supplies none of the budget kwargs, both modes'
         gates stay disabled (one-time warning per mode). All three fields
@@ -330,45 +391,61 @@ class TestTimeBudgetFanOut:
 # See docs/resource_estimator_implement.md §10.9 / §10.17.
 # ---------------------------------------------------------------------------
 
-class TestVramBudgetFanOut:
 
+class TestVramBudgetFanOut:
     @pytest.mark.parametrize(
         "kwargs, set_field, set_value, sibling_to_check",
         [
             pytest.param(
                 {"trial_vram_budget_gb": 6.0},
-                "trial_vram_budget_gb", 6.0,
+                "trial_vram_budget_gb",
+                6.0,
                 "formal_vram_budget_gb",
                 id="trial_only_set",
             ),
             pytest.param(
                 {"formal_vram_budget_gb": 24.0},
-                "formal_vram_budget_gb", 24.0,
+                "formal_vram_budget_gb",
+                24.0,
                 "trial_vram_budget_gb",
                 id="formal_only_set",
             ),
         ],
     )
     def test_individual_vram_budget_passes_through_without_polluting_sibling(
-        self, validator_output, proposal_output, storage,
-        kwargs, set_field, set_value, sibling_to_check,
+        self,
+        validator_output,
+        proposal_output,
+        storage,
+        kwargs,
+        set_field,
+        set_value,
+        sibling_to_check,
     ):
         """Phase K invariant: setting one of {trial, formal} VRAM budget
         alone leaves the other at None."""
         result = local_validated_model(
-            validator_output, proposal_output, storage, **kwargs,
+            validator_output,
+            proposal_output,
+            storage,
+            **kwargs,
         )
         assert getattr(result, set_field) == set_value
         assert getattr(result, sibling_to_check) is None
 
     def test_both_vram_budgets_set_does_not_touch_time_budgets(
-        self, validator_output, proposal_output, storage,
+        self,
+        validator_output,
+        proposal_output,
+        storage,
     ):
         """Cross-category independence: VRAM kwargs do not bleed into the
         time-budget fields. Both vram fields survive; both time fields
         stay at default None."""
         result = local_validated_model(
-            validator_output, proposal_output, storage,
+            validator_output,
+            proposal_output,
+            storage,
             trial_vram_budget_gb=6.0,
             formal_vram_budget_gb=24.0,
         )
@@ -378,7 +455,10 @@ class TestVramBudgetFanOut:
         assert result.formal_time_budget_minutes is None
 
     def test_vram_defaults_none_when_omitted(
-        self, validator_output, proposal_output, storage,
+        self,
+        validator_output,
+        proposal_output,
+        storage,
     ):
         """When the caller supplies neither VRAM kwarg, both fields default
         to None so the tuner's per-round gate falls back to free×0.8."""
@@ -395,50 +475,67 @@ class TestVramBudgetFanOut:
 # HyperparamTuningInput and otherwise leave the schema defaults (3/5/3).
 # ---------------------------------------------------------------------------
 
-class TestAttemptBudgetFanOut:
 
+class TestAttemptBudgetFanOut:
     @pytest.mark.parametrize(
         "kwargs, set_field, set_value, sibling_defaults",
         [
             pytest.param(
                 {"attempts_per_round": 7},
-                "attempts_per_round", 7,
+                "attempts_per_round",
+                7,
                 {"attempts_per_formal_round": 5, "max_fail_rounds": 3},
                 id="attempts_per_round",
             ),
             pytest.param(
                 {"attempts_per_formal_round": 8},
-                "attempts_per_formal_round", 8,
+                "attempts_per_formal_round",
+                8,
                 {"attempts_per_round": 3, "max_fail_rounds": 3},
                 id="attempts_per_formal_round",
             ),
             pytest.param(
                 {"max_fail_rounds": 5},
-                "max_fail_rounds", 5,
+                "max_fail_rounds",
+                5,
                 {"attempts_per_round": 3, "attempts_per_formal_round": 5},
                 id="max_fail_rounds",
             ),
         ],
     )
     def test_individual_attempt_kwarg_passes_through(
-        self, validator_output, proposal_output, storage,
-        kwargs, set_field, set_value, sibling_defaults,
+        self,
+        validator_output,
+        proposal_output,
+        storage,
+        kwargs,
+        set_field,
+        set_value,
+        sibling_defaults,
     ):
         """Each Phase L knob travels independently — siblings stay at the
         documented schema defaults (3 / 5 / 3)."""
         result = local_validated_model(
-            validator_output, proposal_output, storage, **kwargs,
+            validator_output,
+            proposal_output,
+            storage,
+            **kwargs,
         )
         assert getattr(result, set_field) == set_value
         for sib, sib_default in sibling_defaults.items():
             assert getattr(result, sib) == sib_default
 
     def test_all_three_independent(
-        self, validator_output, proposal_output, storage,
+        self,
+        validator_output,
+        proposal_output,
+        storage,
     ):
         """All three knobs survive together with independent values."""
         result = local_validated_model(
-            validator_output, proposal_output, storage,
+            validator_output,
+            proposal_output,
+            storage,
             attempts_per_round=2,
             attempts_per_formal_round=4,
             max_fail_rounds=1,
@@ -448,7 +545,10 @@ class TestAttemptBudgetFanOut:
         assert result.max_fail_rounds == 1
 
     def test_defaults_match_schema_when_omitted(
-        self, validator_output, proposal_output, storage,
+        self,
+        validator_output,
+        proposal_output,
+        storage,
     ):
         """Caller passes nothing -> protocol surfaces the documented
         Phase L defaults (3/5/3, see §11.5)."""
@@ -470,33 +570,44 @@ class TestAttemptBudgetFanOut:
 # canonicalises them.
 # ---------------------------------------------------------------------------
 
-class TestFormalRoundStrategyFanOut:
 
+class TestFormalRoundStrategyFanOut:
     @pytest.mark.parametrize(
         "kwargs, expected_canonical",
         [
             pytest.param({}, "full_clone", id="default_when_omitted"),
             pytest.param(
-                {"formal_round_strategy": "independent"}, "independent",
+                {"formal_round_strategy": "independent"},
+                "independent",
                 id="canonical_independent_passthrough",
             ),
             pytest.param(
-                {"formal_round_strategy": "inherit_best_trial"}, "full_clone",
+                {"formal_round_strategy": "inherit_best_trial"},
+                "full_clone",
                 id="legacy_inherit_best_trial_canonicalised",
             ),
             pytest.param(
-                {"formal_round_strategy": "llm_propose"}, "independent",
+                {"formal_round_strategy": "llm_propose"},
+                "independent",
                 id="legacy_llm_propose_canonicalised",
             ),
         ],
     )
     def test_value_resolves_to_canonical(
-        self, validator_output, proposal_output, storage, kwargs, expected_canonical,
+        self,
+        validator_output,
+        proposal_output,
+        storage,
+        kwargs,
+        expected_canonical,
     ):
         """Default and every legacy alias collapse to the canonical
         Phase 1 vocabulary on the way through the schema validator."""
         result = local_validated_model(
-            validator_output, proposal_output, storage, **kwargs,
+            validator_output,
+            proposal_output,
+            storage,
+            **kwargs,
         )
         assert result.formal_round_strategy == expected_canonical
 
@@ -510,8 +621,8 @@ class TestFormalRoundStrategyFanOut:
 # HyperparamTuningInput and otherwise leave the schema default (None).
 # ---------------------------------------------------------------------------
 
-class TestDegeneratePenaltyScoreFanOut:
 
+class TestDegeneratePenaltyScoreFanOut:
     @pytest.mark.parametrize(
         "kwargs, expected",
         [
@@ -520,10 +631,18 @@ class TestDegeneratePenaltyScoreFanOut:
         ],
     )
     def test_penalty_resolves(
-        self, validator_output, proposal_output, storage, kwargs, expected,
+        self,
+        validator_output,
+        proposal_output,
+        storage,
+        kwargs,
+        expected,
     ):
         result = local_validated_model(
-            validator_output, proposal_output, storage, **kwargs,
+            validator_output,
+            proposal_output,
+            storage,
+            **kwargs,
         )
         assert result.degenerate_penalty_score == expected
 
@@ -532,8 +651,8 @@ class TestDegeneratePenaltyScoreFanOut:
 # database_validated_model
 # ---------------------------------------------------------------------------
 
-class TestDatabaseValidatedModel:
 
+class TestDatabaseValidatedModel:
     def test_raises_not_implemented(self, validator_output, storage):
         with pytest.raises(NotImplementedError):
             database_validated_model(validator_output, storage)

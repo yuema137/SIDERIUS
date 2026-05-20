@@ -19,6 +19,7 @@ The probes intentionally do not exercise the legacy path — they target
 inputs that an LLM or a brittle upstream consumer could realistically
 produce.
 """
+
 from __future__ import annotations
 
 import math
@@ -39,7 +40,6 @@ from execute_tools.scoring_helpers import (
 )
 from nodes.scoring_reference import ReferenceScores
 
-
 # -----------------------------------------------------------------------------
 # Reference bundle helper — mirror of the one in test_scoring_helpers.py so
 # these two files stay independently runnable (per the "each module testable
@@ -49,8 +49,8 @@ from nodes.scoring_reference import ReferenceScores
 
 def _make_reference(
     *,
-    raw_linear_sum: Optional[List[float]] = None,
-    gt_linear_sum: Optional[List[float]] = None,
+    raw_linear_sum: list[float] | None = None,
+    gt_linear_sum: list[float] | None = None,
     n_segments: int = 200,
     s_max: float = 295_715_680.14,
 ) -> ReferenceScores:
@@ -94,17 +94,25 @@ def _good_row_kwargs(**overrides) -> dict:
     return base
 
 
-def _good_table_dict(fv: List[Optional[float]]) -> dict:
+def _good_table_dict(fv: list[float | None]) -> dict:
     rows = [
-        dict(file_index=i, raw_baseline=0.1, ground_truth=100.0,
-             model=v, gain_vs_raw=None, headroom_vs_gt=None)
+        dict(
+            file_index=i,
+            raw_baseline=0.1,
+            ground_truth=100.0,
+            model=v,
+            gain_vs_raw=None,
+            headroom_vs_gt=None,
+        )
         for i, v in enumerate(fv)
     ]
     return dict(
         rows=rows,
         aggregate=dict(
-            raw_baseline_scalar=0.1, ground_truth_scalar=100.0,
-            model_scalar=5.0, percent_of_ceiling_log=0.05,
+            raw_baseline_scalar=0.1,
+            ground_truth_scalar=100.0,
+            model_scalar=5.0,
+            percent_of_ceiling_log=0.05,
             num_sampled_files=20,
         ),
         s_max_global=1.0,
@@ -201,7 +209,6 @@ class TestScoreComparisonTableValidation:
 
 
 class TestBuildScoreTableEdges:
-
     def test_none_scalar_returns_none(self):
         # Fully-failed run: no scalar, no table. Graceful skip.
         ref = _make_reference()

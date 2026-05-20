@@ -19,22 +19,20 @@ Node contract:
   CLI: --workspace, --run_name, --provider, --model_id
 """
 
-import os
-import json
 import argparse
+import json
+import os
+from typing import Any
 
 from pydantic import ValidationError
 
-from typing import Any, Dict, List, Optional
-
 from agent.llm_bridge import LLMBridge
 from agent.prompts import _format_known_constraints_block
-from agent.schemas.proposal import ProposalInput, ProposalOutput, FalsifiablePrediction
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from agent.schemas.hyperparam_tuning import GateExhaustionInfo, serialize_expert_advice
-from core.hardware_context import HardwareContext
+from agent.schemas.proposal import FalsifiablePrediction, ProposalInput, ProposalOutput
 from agent.utils.architectural_pattern_tagger import ARCHITECTURAL_PATTERNS
 from agent.utils.proposer_preflight import estimate_proposal_time
+from core.hardware_context import HardwareContext
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 
 # Maximum number of retries when the proposing stage produces invalid output.
@@ -283,9 +281,10 @@ Output only the JSON object — no preamble, no markdown fences, no commentary."
 # Prompt builders
 # ---------------------------------------------------------------------------
 
+
 def _render_hardware_context_block(
-    ctx: Optional[HardwareContext],
-    vram_budget_gb: Optional[float],
+    ctx: HardwareContext | None,
+    vram_budget_gb: float | None,
 ) -> str:
     """Render the ``[HARDWARE CONTEXT]`` prompt block.
 
@@ -329,16 +328,10 @@ def _render_hardware_context_block(
             f"Regime:            PHYSICAL — no operator budget set; cap = {effective:.2f} GB."
         )
     elif regime == "BUDGET":
-        lines.append(
-            "Regime:            BUDGET — operator's budget is the binding ceiling."
-        )
+        lines.append("Regime:            BUDGET — operator's budget is the binding ceiling.")
     else:  # PHYSICAL VETO
-        lines.append(
-            "Regime:            PHYSICAL VETO — operator budget exceeds the 80%"
-        )
-        lines.append(
-            "                   physical safety floor; the physical cap wins."
-        )
+        lines.append("Regime:            PHYSICAL VETO — operator budget exceeds the 80%")
+        lines.append("                   physical safety floor; the physical cap wins.")
 
     lines.append("")
     lines.append(
@@ -353,7 +346,7 @@ def _render_hardware_context_block(
 
 
 def _format_recent_gate_exhaustions_block(
-    entries: List[GateExhaustionInfo],
+    entries: list[GateExhaustionInfo],
 ) -> str:
     """Render the [RECENT GATE EXHAUSTIONS] block per §14.N.3.
 
@@ -441,7 +434,7 @@ def _format_recent_gate_exhaustions_block(
     return "\n".join(lines)
 
 
-def _render_stage_user_prompt(accumulated: Dict[str, Any]) -> str:
+def _render_stage_user_prompt(accumulated: dict[str, Any]) -> str:
     """Render a pipeline-stage user prompt: native markdown + clean JSON.
 
     Splits the stage user prompt into two concatenated regions:
@@ -469,7 +462,7 @@ def _render_stage_user_prompt(accumulated: Dict[str, Any]) -> str:
     candidates = accumulated.get("candidates") or []
     markdown_block = build_candidate_markdown_block(candidates)
 
-    cleaned: Dict[str, Any] = dict(accumulated)
+    cleaned: dict[str, Any] = dict(accumulated)
     cleaned["candidates"] = strip_heavy_fields_for_json(candidates)
     interp_summary = cleaned.get("interpretation_summary")
     if isinstance(interp_summary, dict) and "per_model_score_tables" in interp_summary:
@@ -478,10 +471,7 @@ def _render_stage_user_prompt(accumulated: Dict[str, Any]) -> str:
         }
 
     json_region = (
-        "## Accumulated context\n\n"
-        "```json\n"
-        + json.dumps(cleaned, indent=2, default=str)
-        + "\n```"
+        "## Accumulated context\n\n```json\n" + json.dumps(cleaned, indent=2, default=str) + "\n```"
     )
     if markdown_block:
         return f"{markdown_block}\n{json_region}"
@@ -501,7 +491,7 @@ _PROPOSER_INPUT_KEYS = {
 }
 
 
-def _extract_prior_stage_keys(accumulated: Dict[str, Any]) -> Dict[str, Any]:
+def _extract_prior_stage_keys(accumulated: dict[str, Any]) -> dict[str, Any]:
     """Return the subset of ``accumulated`` produced by earlier proposer stages.
 
     Anything not in :data:`_PROPOSER_INPUT_KEYS` is treated as a stage output
@@ -513,13 +503,13 @@ def _extract_prior_stage_keys(accumulated: Dict[str, Any]) -> Dict[str, Any]:
 def _audit_proposer_components(
     *,
     inp: ProposalInput,
-    accumulated: Dict[str, Any],
+    accumulated: dict[str, Any],
     agent_cards_block: str,
     expert_context_block: str,
     vocab_block: str,
     system_prompt: str,
     stage_name: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Pre-merge char-count breakdown of a proposer LLM call (§1.3).
 
     Returns a 10-key ``components`` dict suitable for ``bridge.generate(
@@ -567,12 +557,8 @@ def _audit_proposer_components(
     # → empty JSON object literal "{}", contributing 2 chars.
     interp_summary = accumulated.get("interpretation_summary")
     if isinstance(interp_summary, dict) and "per_model_score_tables" in interp_summary:
-        interp_summary = {
-            k: v for k, v in interp_summary.items() if k != "per_model_score_tables"
-        }
-    interpretation_json_chars = len(
-        json.dumps(interp_summary or {}, default=str)
-    )
+        interp_summary = {k: v for k, v in interp_summary.items() if k != "per_model_score_tables"}
+    interpretation_json_chars = len(json.dumps(interp_summary or {}, default=str))
 
     # ---- non_candidates_overview: list of per-non-candidate-model summary
     # dicts (lines 1010–1034), each carrying full ``description`` from
@@ -586,9 +572,7 @@ def _audit_proposer_components(
     # of the V12 explore run — the dominant contributor (113 % of the Δ)
     # to the false ``template_and_scaffolding`` 11× growth signal.
     non_candidates_overview = accumulated.get("non_candidates_overview")
-    non_candidates_overview_chars = len(
-        json.dumps(non_candidates_overview or [], default=str)
-    )
+    non_candidates_overview_chars = len(json.dumps(non_candidates_overview or [], default=str))
 
     # ---- prior_stage_outputs: stage-produced keys, with heavy candidate
     # fields stripped to mirror what actually lands in the user prompt.
@@ -596,14 +580,10 @@ def _audit_proposer_components(
     # candidates is an input key (handled separately above), but if a stage
     # ever overwrites it the markdown block already reflects that — leave
     # prior_stage_outputs to the actual stage-only keys.
-    prior_stage_chars = len(
-        json.dumps(prior_stage_payload, default=str)
-    )
+    prior_stage_chars = len(json.dumps(prior_stage_payload, default=str))
 
     # ---- previous_failures: sum char count over the list of strings.
-    previous_failures_chars = sum(
-        len(s) for s in (inp.previous_failures or [])
-    )
+    previous_failures_chars = sum(len(s) for s in (inp.previous_failures or []))
 
     # ---- recent_gate_block: rendered via the same helper the prompt uses,
     # so the audit number matches what the LLM actually sees.
@@ -611,17 +591,17 @@ def _audit_proposer_components(
         _format_recent_gate_exhaustions_block(inp.recent_gate_exhaustions or [])
     )
 
-    components: Dict[str, int] = {
-        "system_prompt":            len(system_prompt or ""),
-        "candidates_markdown":      candidates_markdown_chars,
-        "interpretation_json":      interpretation_json_chars,
-        "non_candidates_overview":  non_candidates_overview_chars,
-        "previous_failures":        previous_failures_chars,
-        "vocab_block":              len(vocab_block) if vocab_block else 0,
-        "expert_context_block":     len(expert_context_block) if expert_context_block else 0,
-        "agent_cards_block":        len(agent_cards_block) if agent_cards_block else 0,
-        "prior_stage_outputs":      prior_stage_chars,
-        "recent_gate_block":        recent_gate_chars,
+    components: dict[str, int] = {
+        "system_prompt": len(system_prompt or ""),
+        "candidates_markdown": candidates_markdown_chars,
+        "interpretation_json": interpretation_json_chars,
+        "non_candidates_overview": non_candidates_overview_chars,
+        "previous_failures": previous_failures_chars,
+        "vocab_block": len(vocab_block) if vocab_block else 0,
+        "expert_context_block": len(expert_context_block) if expert_context_block else 0,
+        "agent_cards_block": len(agent_cards_block) if agent_cards_block else 0,
+        "prior_stage_outputs": prior_stage_chars,
+        "recent_gate_block": recent_gate_chars,
     }
     return {
         "stage_name": stage_name,
@@ -660,7 +640,7 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
         "",
     ]
 
-    per_best  = interp.get("per_model_best",  {})
+    per_best = interp.get("per_model_best", {})
     per_worst = interp.get("per_model_worst", {})
     if per_best:
         lines.append("### Per-model scores")
@@ -689,8 +669,8 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
     ]
 
     # Phase E — prediction track record (scientific accuracy + information gain)
-    sci_acc   = interp.get("scientific_accuracy")
-    cum_ig    = interp.get("cumulative_information_gain")
+    sci_acc = interp.get("scientific_accuracy")
+    cum_ig = interp.get("cumulative_information_gain")
     pred_hist = interp.get("prediction_outcomes_history") or {}
     if sci_acc is not None or cum_ig is not None:
         lines.append("### Prediction Track Record")
@@ -699,8 +679,8 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
             lines.append(f"  Cumulative information gain : {cum_ig:.3f}")
         if sci_acc is not None:
             confirmed_pct = sci_acc.get("confirmed", 0.0) * 100
-            partial_pct   = sci_acc.get("partial",   0.0) * 100
-            refuted_pct   = sci_acc.get("refuted",   0.0) * 100
+            partial_pct = sci_acc.get("partial", 0.0) * 100
+            refuted_pct = sci_acc.get("refuted", 0.0) * 100
             lines.append(
                 f"  Scientific accuracy (N={total}) : "
                 f"confirmed={confirmed_pct:.0f}%  "
@@ -849,6 +829,7 @@ def _build_commit_prompt(reasoning: str, existing_model_types: list) -> str:
 # Node
 # ---------------------------------------------------------------------------
 
+
 class MLModelProposalAgent:
     """
     Proposal agent — Node 3 in the SIDERIUS graph.
@@ -866,19 +847,29 @@ class MLModelProposalAgent:
     interface is preserved for backward compat.
     """
 
-    def __init__(self, provider: str = "gemini", model_id: str = "gemini-3.1-flash-lite-preview",
-                 max_retries: int | None = None, bridge_factory=None, **kwargs):
+    def __init__(
+        self,
+        provider: str = "gemini",
+        model_id: str = "gemini-3.1-flash-lite-preview",
+        max_retries: int | None = None,
+        bridge_factory=None,
+        **kwargs,
+    ):
         # **kwargs absorbs per-stage kwargs from ProposalLLMConfig flattening
         # (comparison_provider, reasoning_model_id, etc.) — these are for
         # future per-stage bridge routing, currently unused.
         self._bridge_factory = bridge_factory or LLMBridge
         self.bridge = self._bridge_factory(
-            provider=provider, model_id=model_id, max_retries=max_retries,
+            provider=provider,
+            model_id=model_id,
+            max_retries=max_retries,
         )
 
     def run(self, inp: ProposalInput) -> ProposalOutput:
-        print(f"Proposing new architecture based on interpretation of "
-              f"{inp.interpretation.get('model_types', [])} ...")
+        print(
+            f"Proposing new architecture based on interpretation of "
+            f"{inp.interpretation.get('model_types', [])} ..."
+        )
 
         # Decide: pipeline mode or legacy mode
         has_pipeline = (
@@ -895,7 +886,7 @@ class MLModelProposalAgent:
         # --- Persist ---
         if inp.storage.backend == "local" and inp.storage.local:
             workspace = inp.storage.local.workspace
-            run_name  = inp.storage.local.run_name
+            run_name = inp.storage.local.run_name
             os.makedirs(workspace, exist_ok=True)
             out_path = os.path.join(workspace, f"proposal_{run_name}.json")
             with open(out_path, "w", encoding="utf-8") as f:
@@ -920,7 +911,8 @@ class MLModelProposalAgent:
         reasoning_prompt = _build_reasoning_prompt(inp)
         print(f"    [PROMPT_SIZE] proposer_reasoning: {len(reasoning_prompt)} chars")
         reasoning = self.bridge.generate_text(
-            PROPOSAL_REASONING_PROMPT, reasoning_prompt,
+            PROPOSAL_REASONING_PROMPT,
+            reasoning_prompt,
             label="proposer.legacy_reasoning",
         )
         print(f"   Legacy reasoning complete ({len(reasoning)} chars).")
@@ -933,14 +925,11 @@ class MLModelProposalAgent:
         for preflight_attempt in range(_MAX_PREFLIGHT_ATTEMPTS):
             commit_prompt = base_commit_prompt
             if preflight_errors:
-                commit_prompt = (
-                    base_commit_prompt
-                    + "\n\n---\n\n"
-                    + "\n\n".join(preflight_errors)
-                )
+                commit_prompt = base_commit_prompt + "\n\n---\n\n" + "\n\n".join(preflight_errors)
 
             raw = self.bridge.generate(
-                PROPOSAL_COMMIT_PROMPT, commit_prompt,
+                PROPOSAL_COMMIT_PROMPT,
+                commit_prompt,
                 label="proposer.legacy_commit",
             )
 
@@ -952,15 +941,17 @@ class MLModelProposalAgent:
                     f"Re-run or adjust the constraints."
                 )
 
-            output = ProposalOutput.model_validate({
-                "model_name":               proposed_name,
-                "model_description":        raw.get("model_description", ""),
-                "mathematical_definition":  raw.get("mathematical_definition", ""),
-                "motivation":               raw.get("motivation", ""),
-                "expert_advice":            raw.get("expert_advice", {}),
-                "baseline_config":          raw.get("baseline_config", {}),
-                "parameter_count_estimate": raw.get("parameter_count_estimate"),
-            })
+            output = ProposalOutput.model_validate(
+                {
+                    "model_name": proposed_name,
+                    "model_description": raw.get("model_description", ""),
+                    "mathematical_definition": raw.get("mathematical_definition", ""),
+                    "motivation": raw.get("motivation", ""),
+                    "expert_advice": raw.get("expert_advice", {}),
+                    "baseline_config": raw.get("baseline_config", {}),
+                    "parameter_count_estimate": raw.get("parameter_count_estimate"),
+                }
+            )
 
             factor = _run_preflight_check(inp, output)
             if factor is None or factor <= 1.0:
@@ -1004,21 +995,27 @@ class MLModelProposalAgent:
 
     def _run_pipeline(self, inp: ProposalInput) -> ProposalOutput:
         """Three-stage pipeline: comparison → reasoning → proposing."""
+        from agent.prompt_templates.proposal import (
+            load_stage_prompt,
+            render_agent_cards,
+            render_expert_context,
+        )
         from nodes.proposal_helpers import (
-            select_candidate_models,
-            resolve_exploration_mode,
-            enrich_candidates_with_source,
             build_score_summary_line,
             clamp_and_backstop_accumulated,
+            enrich_candidates_with_source,
+            resolve_exploration_mode,
+            select_candidate_models,
         )
-        from agent.prompt_templates.proposal import load_stage_prompt, render_expert_context, render_agent_cards
 
         pipeline = inp.reasoning_pipeline
         policy = pipeline.policy
 
         # B.16a — resolve exploration mode
         mode = resolve_exploration_mode(inp.interpretation, pipeline)
-        print(f"   Pipeline mode: {mode} | stages: {[s.name for s in pipeline.stages if s.enabled]}")
+        print(
+            f"   Pipeline mode: {mode} | stages: {[s.name for s in pipeline.stages if s.enabled]}"
+        )
 
         # B.10 — pre-filter models
         candidates = select_candidate_models(inp.interpretation, pipeline.model_selection)
@@ -1033,7 +1030,10 @@ class MLModelProposalAgent:
         # what we learned — so it can avoid repeating past failures and build
         # on partial successes.
         _CACHE_TEXT_FIELDS = (
-            "key_findings", "bottlenecks", "score_trend", "strategy_assessment",
+            "key_findings",
+            "bottlenecks",
+            "score_trend",
+            "strategy_assessment",
         )
         candidate_names = {c["model_type"] for c in candidates}
         cache = inp.interpretation.get("model_knowledge_cache") or {}
@@ -1061,9 +1061,11 @@ class MLModelProposalAgent:
                     overview[field] = entry[field]
             non_candidates_overview.append(overview)
 
-        print(f"   Candidates: {[c['model_type'] for c in candidates]} "
-              f"({len(candidates)} models, {source_counts} with source code); "
-              f"non-candidates: {[o['model_type'] for o in non_candidates_overview]}")
+        print(
+            f"   Candidates: {[c['model_type'] for c in candidates]} "
+            f"({len(candidates)} models, {source_counts} with source code); "
+            f"non-candidates: {[o['model_type'] for o in non_candidates_overview]}"
+        )
 
         # Prepare shared context for all stages
         agent_cards_block = render_agent_cards(inp.agent_cards)
@@ -1077,12 +1079,19 @@ class MLModelProposalAgent:
             "interpretation_summary": {
                 k: inp.interpretation.get(k)
                 for k in (
-                    "model_types", "total_experiments", "best_denoising_score",
-                    "worst_denoising_score", "key_findings", "bottlenecks",
-                    "take_home_message", "per_model_best", "per_model_worst",
+                    "model_types",
+                    "total_experiments",
+                    "best_denoising_score",
+                    "worst_denoising_score",
+                    "key_findings",
+                    "bottlenecks",
+                    "take_home_message",
+                    "per_model_best",
+                    "per_model_worst",
                     "per_model_score_tables",
                     # Phase E — prediction track record (surfaced to all stages)
-                    "scientific_accuracy", "cumulative_information_gain",
+                    "scientific_accuracy",
+                    "cumulative_information_gain",
                     "prediction_outcomes_history",
                     # Phase C — vocabulary health metric
                     "vocab_diversity_ratio",
@@ -1096,19 +1105,15 @@ class MLModelProposalAgent:
         # Count confirmed feature→capability links: entries with non-empty related_to.
         def _get_related(entry) -> list:
             if hasattr(entry, "related_to"):
-                return getattr(entry, "related_to") or []
+                return entry.related_to or []
             if isinstance(entry, dict):
                 return entry.get("related_to") or []
             return []
 
-        n_confirmed_links = sum(
-            1 for v in inp.vocab_seed if _get_related(v)
-        )
+        n_confirmed_links = sum(1 for v in inp.vocab_seed if _get_related(v))
         template_vars = {
             "minimum_boldness": str(policy.minimum_boldness),
-            "n_agent_proposed": str(len([
-                c for c in candidates if c.get("source") != "seed"
-            ])),
+            "n_agent_proposed": str(len([c for c in candidates if c.get("source") != "seed"])),
             "n_confirmed_links": str(n_confirmed_links),
             "existing_model_types": ", ".join(inp.existing_model_types),
             # Proposing-stage placeholder. Other stages don't reference it; the
@@ -1160,8 +1165,7 @@ class MLModelProposalAgent:
             if vocab_block:
                 user_prompt += f"\n\n{vocab_block}"
 
-            print(f"   Stage '{stage.name}': calling LLM... "
-                  f"[PROMPT_SIZE] {len(user_prompt)} chars")
+            print(f"   Stage '{stage.name}': calling LLM... [PROMPT_SIZE] {len(user_prompt)} chars")
             stage_audit = _audit_proposer_components(
                 inp=inp,
                 accumulated=clamped_accumulated,
@@ -1174,14 +1178,16 @@ class MLModelProposalAgent:
             stage_label = f"proposer.{stage.name}"
             if stage.output_mode == "text":
                 result = self.bridge.generate_text(
-                    system_prompt, user_prompt,
+                    system_prompt,
+                    user_prompt,
                     label=stage_label,
                     components=stage_audit["components"],
                 )
                 accumulated[stage.name] = result
             else:
                 result = self.bridge.generate(
-                    system_prompt, user_prompt,
+                    system_prompt,
+                    user_prompt,
                     label=stage_label,
                     components=stage_audit["components"],
                 )
@@ -1213,8 +1219,11 @@ class MLModelProposalAgent:
                             f"current and predicted value."
                         )
                         reasoning_stage = next(
-                            (s for s in pipeline.stages
-                             if s.name == "causal_reasoning" and s.enabled),
+                            (
+                                s
+                                for s in pipeline.stages
+                                if s.name == "causal_reasoning" and s.enabled
+                            ),
                             None,
                         )
                         if reasoning_stage is not None:
@@ -1248,7 +1257,8 @@ class MLModelProposalAgent:
                                 stage_name="causal_reasoning",
                             )
                             accumulated["causal_reasoning"] = self.bridge.generate(
-                                retry_system, retry_user,
+                                retry_system,
+                                retry_user,
                                 label="proposer.causal_reasoning",
                                 components=retry_audit["components"],
                             )
@@ -1268,6 +1278,7 @@ class MLModelProposalAgent:
         # EXHAUSTION] block). No-op when the field is None (default).
         if inp.debug_dump_proposing_prompt_path:
             from pathlib import Path
+
             dump_path = Path(inp.debug_dump_proposing_prompt_path)
             dump_path.parent.mkdir(parents=True, exist_ok=True)
             dump_path.write_text(proposing_prompt)
@@ -1340,7 +1351,8 @@ class MLModelProposalAgent:
                     stage_name="proposing",
                 )
                 raw = self.bridge.generate(
-                    proposing_prompt, proposing_user,
+                    proposing_prompt,
+                    proposing_user,
                     label="proposer.proposing",
                     components=proposing_audit["components"],
                 )
@@ -1354,21 +1366,23 @@ class MLModelProposalAgent:
                             f"Choose a different name."
                         )
 
-                    output = ProposalOutput.model_validate({
-                        "model_name":               proposed_name,
-                        "model_description":        raw.get("model_description", ""),
-                        "mathematical_definition":  raw.get("mathematical_definition", ""),
-                        "motivation":               raw.get("motivation", ""),
-                        "expert_advice":            raw.get("expert_advice", {}),
-                        "baseline_config":          raw.get("baseline_config", {}),
-                        "inherited_components":     inherited,
-                        "falsifiable_prediction":   prediction,
-                        "proposed_vocab_links":     vocab_links,
-                        "proposed_vocab_candidates": vocab_candidates,
-                        "proposed_discoveries":     discoveries,
-                        "memo_consistency_notes":   raw.get("memo_consistency_notes", []),
-                        "parameter_count_estimate": raw.get("parameter_count_estimate"),
-                    })
+                    output = ProposalOutput.model_validate(
+                        {
+                            "model_name": proposed_name,
+                            "model_description": raw.get("model_description", ""),
+                            "mathematical_definition": raw.get("mathematical_definition", ""),
+                            "motivation": raw.get("motivation", ""),
+                            "expert_advice": raw.get("expert_advice", {}),
+                            "baseline_config": raw.get("baseline_config", {}),
+                            "inherited_components": inherited,
+                            "falsifiable_prediction": prediction,
+                            "proposed_vocab_links": vocab_links,
+                            "proposed_vocab_candidates": vocab_candidates,
+                            "proposed_discoveries": discoveries,
+                            "memo_consistency_notes": raw.get("memo_consistency_notes", []),
+                            "parameter_count_estimate": raw.get("parameter_count_estimate"),
+                        }
+                    )
                     # Citation discipline — warnings, not hard failures.
                     citation_violations = _check_citation_discipline(
                         citation_sources=reasoning_output.get("citation_sources", []),
@@ -1468,10 +1482,10 @@ class MLModelProposalAgent:
                 return entry.get(key, default)
             return default
 
-        features     = [v for v in vocab_seed if _get(v, "kind") == "feature"]
+        features = [v for v in vocab_seed if _get(v, "kind") == "feature"]
         capabilities = [v for v in vocab_seed if _get(v, "kind") == "capability"]
-        discoveries  = [v for v in vocab_seed if _get(v, "kind") == "discovery"]
-        candidates   = [v for v in vocab_seed if _get(v, "kind") == "candidate"]
+        discoveries = [v for v in vocab_seed if _get(v, "kind") == "discovery"]
+        candidates = [v for v in vocab_seed if _get(v, "kind") == "candidate"]
 
         lines = ["## Vocabulary\n"]
 
@@ -1495,8 +1509,10 @@ class MLModelProposalAgent:
 
         if discoveries:
             lines.append("### Discoveries (empirical outcomes — CONFIRMED/REFUTED/PARTIAL)")
-            lines.append("These are the results of past falsifiable predictions. "
-                         "Use them to avoid repeating failures and to build on confirmed findings.")
+            lines.append(
+                "These are the results of past falsifiable predictions. "
+                "Use them to avoid repeating failures and to build on confirmed findings."
+            )
             for v in discoveries:
                 lines.append(f"- **{_get(v, 'name')}**: {_get(v, 'description')}")
             lines.append("")
@@ -1514,15 +1530,23 @@ class MLModelProposalAgent:
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(description="SIDERIUS ml_model_proposal_agent")
-    parser.add_argument("--workspace", type=str, default="./siderius_workspace",
-                        help="Root directory for reading interpretation output and writing proposal")
-    parser.add_argument("--run_name",  type=str, default="v1",
-                        help="Run name — reads interpretation_{run_name}.json, "
-                             "writes proposal_{run_name}.json")
-    parser.add_argument("--provider",  type=str, default="gemini", choices=["gemini", "openai"])
-    parser.add_argument("--model_id",  type=str, default="gemini-3.1-flash-lite-preview")
+    parser.add_argument(
+        "--workspace",
+        type=str,
+        default="./siderius_workspace",
+        help="Root directory for reading interpretation output and writing proposal",
+    )
+    parser.add_argument(
+        "--run_name",
+        type=str,
+        default="v1",
+        help="Run name — reads interpretation_{run_name}.json, writes proposal_{run_name}.json",
+    )
+    parser.add_argument("--provider", type=str, default="gemini", choices=["gemini", "openai"])
+    parser.add_argument("--model_id", type=str, default="gemini-3.1-flash-lite-preview")
     args = parser.parse_args()
 
     interp_path = os.path.join(args.workspace, f"interpretation_{args.run_name}.json")
@@ -1531,36 +1555,40 @@ def main():
             f"Interpretation file not found: {interp_path}\n"
             f"Run result_interpretation_agent first, or check --workspace and --run_name."
         )
-    with open(interp_path, "r", encoding="utf-8") as f:
+    with open(interp_path, encoding="utf-8") as f:
         interpretation = json.load(f)
 
-    agent_input = ProposalInput.model_validate({
-        "interpretation": interpretation,
-        "storage": {
-            "backend": "local",
-            "local": {"workspace": args.workspace, "run_name": args.run_name},
-        },
-    })
-    print(f"✅ Input validated: models={interpretation.get('model_types')} | "
-          f"experiments={interpretation.get('total_experiments')}")
+    agent_input = ProposalInput.model_validate(
+        {
+            "interpretation": interpretation,
+            "storage": {
+                "backend": "local",
+                "local": {"workspace": args.workspace, "run_name": args.run_name},
+            },
+        }
+    )
+    print(
+        f"✅ Input validated: models={interpretation.get('model_types')} | "
+        f"experiments={interpretation.get('total_experiments')}"
+    )
 
     agent = MLModelProposalAgent(provider=args.provider, model_id=args.model_id)
     output = agent.run(agent_input)
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  Proposal — {output.model_name}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"  Description : {output.model_description}")
     print(f"  Motivation  : {output.motivation}")
-    print(f"\n  Mathematical definition:")
+    print("\n  Mathematical definition:")
     print(f"    {output.mathematical_definition[:500]}...")
-    print(f"\n  Expert advice:")
+    print("\n  Expert advice:")
     print(f"    Focus areas    : {output.expert_advice.focus_areas}")
     print(f"    Constraints    : {output.expert_advice.constraints}")
     print(f"    Suggested dirs : {output.expert_advice.suggested_directions}")
-    print(f"\n  Baseline config:")
+    print("\n  Baseline config:")
     print(f"    {json.dumps(output.baseline_config, indent=4)}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
 
 if __name__ == "__main__":

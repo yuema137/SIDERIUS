@@ -8,6 +8,7 @@ Validates:
   - memory_trace.jsonl WITH iter_001/ (chain workspace) passes cleanly
   - Clean chain layout (iter_001/, iter_002/) passes cleanly
 """
+
 from __future__ import annotations
 
 import os

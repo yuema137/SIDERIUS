@@ -59,9 +59,7 @@ def build_sample_set(
         files = list(ANCHOR_FILES)
     elif trial_strategy == "target":
         if not target_files:
-            raise ValueError(
-                "trial_strategy='target' requires non-empty target_files."
-            )
+            raise ValueError("trial_strategy='target' requires non-empty target_files.")
         files = sorted(set(target_files))
     else:
         raise ValueError(f"Unknown trial_strategy: {trial_strategy!r}")

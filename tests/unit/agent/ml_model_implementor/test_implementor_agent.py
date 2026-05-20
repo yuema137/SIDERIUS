@@ -34,22 +34,23 @@ Tests cover:
   TestHelpers
     - _class_name converts snake_case to CamelCase correctly
 """
+
 import json
 import os
 import textwrap
+from unittest.mock import MagicMock, call, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, call
 
 from agent.schemas.implementor import ImplementorInput, ImplementorOutput
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_model_implementor import (
     MLModelImplementor,
-    _class_name,
-    _check_config_field_consistency,
-    _smoke_test_plugin,
     _build_reasoning_prompt,
+    _check_config_field_consistency,
+    _class_name,
+    _smoke_test_plugin,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -94,7 +95,7 @@ def inp(tmp_path, storage):
         baseline_config={
             "model_config": {"channels": 64, "depth": 4},
             "train_config": {"lr": 1e-4, "epochs": 10, "batch_size": 1, "device": "cuda"},
-            "loss_config":  {"loss_type": "focal", "gamma": 2.0},
+            "loss_config": {"loss_type": "focal", "gamma": 2.0},
         },
         plugin_dir=str(tmp_path / "models"),
         test_dir=str(tmp_path / "tests"),
@@ -115,8 +116,8 @@ def agent_with_mocks(inp):
 # TestHelpers
 # ---------------------------------------------------------------------------
 
-class TestHelpers:
 
+class TestHelpers:
     def test_class_name_single_word(self):
         assert _class_name("tcn") == "Tcn"
 
@@ -134,8 +135,8 @@ class TestHelpers:
 # TestLLMCallStructure
 # ---------------------------------------------------------------------------
 
-class TestLLMCallStructure:
 
+class TestLLMCallStructure:
     def test_generate_text_called_once(self, agent_with_mocks, inp):
         agent_with_mocks.run(inp)
         agent_with_mocks.bridge.generate_text.assert_called_once()
@@ -165,8 +166,8 @@ class TestLLMCallStructure:
 # TestFileAssembly
 # ---------------------------------------------------------------------------
 
-class TestFileAssembly:
 
+class TestFileAssembly:
     def test_plugin_file_written(self, agent_with_mocks, inp):
         agent_with_mocks.run(inp)
         assert os.path.exists(os.path.join(inp.plugin_dir, "gated_dilated_tcn.py"))
@@ -227,8 +228,8 @@ class TestFileAssembly:
 # TestOutputCorrectness
 # ---------------------------------------------------------------------------
 
-class TestOutputCorrectness:
 
+class TestOutputCorrectness:
     def test_output_is_implementor_output(self, agent_with_mocks, inp):
         output = agent_with_mocks.run(inp)
         assert isinstance(output, ImplementorOutput)
@@ -262,8 +263,8 @@ class TestOutputCorrectness:
 # TestDescriptionFile
 # ---------------------------------------------------------------------------
 
-class TestDescriptionFile:
 
+class TestDescriptionFile:
     def test_description_file_written(self, agent_with_mocks, inp, tmp_path):
         agent_with_mocks.run(inp)
         desc_path = tmp_path / "models" / "gated_dilated_tcn" / "description.md"
@@ -279,7 +280,9 @@ class TestDescriptionFile:
         content = (tmp_path / "models" / "gated_dilated_tcn" / "description.md").read_text()
         assert "A gated dilated TCN for signal denoising." in content
 
-    def test_description_file_contains_mathematical_definition(self, agent_with_mocks, inp, tmp_path):
+    def test_description_file_contains_mathematical_definition(
+        self, agent_with_mocks, inp, tmp_path
+    ):
         agent_with_mocks.run(inp)
         content = (tmp_path / "models" / "gated_dilated_tcn" / "description.md").read_text()
         assert "tanh" in content
@@ -301,8 +304,8 @@ class TestDescriptionFile:
 # TestFilePersistence
 # ---------------------------------------------------------------------------
 
-class TestFilePersistence:
 
+class TestFilePersistence:
     def test_output_record_written(self, agent_with_mocks, inp, tmp_path):
         agent_with_mocks.run(inp)
         assert (tmp_path / "implementor_unit_test.json").exists()
@@ -321,6 +324,7 @@ class TestFilePersistence:
 # ---------------------------------------------------------------------------
 # TestConfigFieldConsistency
 # ---------------------------------------------------------------------------
+
 
 class TestConfigFieldConsistency:
     """Tests for _check_config_field_consistency()."""
@@ -401,6 +405,7 @@ class TestConfigFieldConsistency:
 # ---------------------------------------------------------------------------
 # TestSmokeTest
 # ---------------------------------------------------------------------------
+
 
 class TestSmokeTest:
     """Tests for _smoke_test_plugin()."""
@@ -490,6 +495,7 @@ class TestSmokeTest:
 # ---------------------------------------------------------------------------
 # TestSelfCorrection
 # ---------------------------------------------------------------------------
+
 
 class TestSelfCorrection:
     """Tests for the generate → validate → repair loop."""
@@ -589,6 +595,7 @@ class TestSelfCorrection:
 # Expert advice prompt injection tests
 # ---------------------------------------------------------------------------
 
+
 class TestExpertAdviceInPrompt:
     """Verify expert_advice flows into the reasoning prompt."""
 
@@ -616,6 +623,7 @@ class TestExpertAdviceInPrompt:
 
     def test_includes_structured_expert_advice(self):
         from agent.schemas.hyperparam_tuning import ExpertAdvice
+
         inp = self._make_input()
         inp.expert_advice = ExpertAdvice(
             focus_areas=["efficient conv layers"],

@@ -10,10 +10,10 @@ Usage:
 
 import os
 from functools import lru_cache
-from typing import Literal, Optional
+from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 # ---------------------------------------------------------------------------
 # Project root = parent of this file's directory
@@ -25,6 +25,7 @@ DEFAULT_CONFIG_PATH = os.path.join(_PROJECT_ROOT, "dashboard_config.yaml")
 # ---------------------------------------------------------------------------
 # Nested settings models
 # ---------------------------------------------------------------------------
+
 
 class LocalDataSourceSettings(BaseModel):
     root_data_dir: str = ""  # Set via dashboard_config.yaml or tidmad_data_config.yaml
@@ -64,6 +65,7 @@ class DashboardSettings(BaseModel):
     All fields have sensible defaults so the server starts even with a
     minimal or missing config file.
     """
+
     data_source: DataSourceSettings = Field(default_factory=DataSourceSettings)
     server: ServerSettings = Field(default_factory=ServerSettings)
     dashboard: DashboardDisplaySettings = Field(default_factory=DashboardDisplaySettings)
@@ -73,7 +75,8 @@ class DashboardSettings(BaseModel):
 # Loader
 # ---------------------------------------------------------------------------
 
-def load_settings(config_path: Optional[str] = None) -> DashboardSettings:
+
+def load_settings(config_path: str | None = None) -> DashboardSettings:
     """
     Load and validate settings from a YAML file.
 
@@ -92,14 +95,14 @@ def load_settings(config_path: Optional[str] = None) -> DashboardSettings:
         print(f"[dashboard] Config file not found at {path} — using defaults.")
         return DashboardSettings()
 
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
 
     return DashboardSettings.model_validate(raw)
 
 
 @lru_cache(maxsize=1)
-def get_settings(config_path: Optional[str] = None) -> DashboardSettings:
+def get_settings(config_path: str | None = None) -> DashboardSettings:
     """
     Cached settings loader. Returns the same instance on repeated calls.
     Call get_settings.cache_clear() in tests to reload from a different file.

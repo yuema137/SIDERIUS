@@ -20,6 +20,7 @@ What this file pins:
      error_type) tuple — the dedup contract the consolidator relies on.
   6. ``CacheEntry.from_legacy_dict`` is zero-friction for pre-6.3 chains.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -36,10 +37,10 @@ from agent.schemas.cache_entry import (
     ErrorSignature,
 )
 
-
 # ---------------------------------------------------------------------------
 # ConsolidatedFinding
 # ---------------------------------------------------------------------------
+
 
 def test_finding_valid_construction() -> None:
     f = ConsolidatedFinding(
@@ -70,8 +71,11 @@ def test_finding_accepts_max_length_statement() -> None:
             id="empty_statement",
         ),
         pytest.param(
-            dict(statement="x" * (FINDING_STATEMENT_MAX_CHARS + 1),
-                 evidence_iters=[1], strength="moderate"),
+            dict(
+                statement="x" * (FINDING_STATEMENT_MAX_CHARS + 1),
+                evidence_iters=[1],
+                strength="moderate",
+            ),
             id="oversized_statement",
         ),
         pytest.param(
@@ -87,8 +91,7 @@ def test_finding_accepts_max_length_statement() -> None:
             id="unknown_strength",
         ),
         pytest.param(
-            dict(statement="ok", evidence_iters=[1], strength="weak",
-                 unexpected="should fail"),
+            dict(statement="ok", evidence_iters=[1], strength="weak", unexpected="should fail"),
             id="extra_field_forbidden",
         ),
     ],
@@ -104,6 +107,7 @@ def test_finding_rejects_invalid_input(kwargs) -> None:
 # ---------------------------------------------------------------------------
 # ConsolidatedNarrative
 # ---------------------------------------------------------------------------
+
 
 def test_narrative_valid_construction() -> None:
     n = ConsolidatedNarrative(
@@ -127,12 +131,14 @@ def test_narrative_accepts_empty_latest() -> None:
     [
         pytest.param(
             dict(latest="x" * NARRATIVE_LATEST_MAX_CHARS),
-            "latest", NARRATIVE_LATEST_MAX_CHARS,
+            "latest",
+            NARRATIVE_LATEST_MAX_CHARS,
             id="max_length_latest",
         ),
         pytest.param(
             dict(latest="ok", history=[(i, f"n{i}") for i in range(NARRATIVE_HISTORY_MAX_ENTRIES)]),
-            "history", NARRATIVE_HISTORY_MAX_ENTRIES,
+            "history",
+            NARRATIVE_HISTORY_MAX_ENTRIES,
             id="max_history_entries",
         ),
     ],
@@ -151,9 +157,12 @@ def test_narrative_accepts_at_boundary(kwargs, attr, expected_len) -> None:
             id="oversized_latest",
         ),
         pytest.param(
-            dict(latest="ok",
-                 history=[(i, f"narrative iter {i}")
-                          for i in range(NARRATIVE_HISTORY_MAX_ENTRIES + 1)]),
+            dict(
+                latest="ok",
+                history=[
+                    (i, f"narrative iter {i}") for i in range(NARRATIVE_HISTORY_MAX_ENTRIES + 1)
+                ],
+            ),
             id="over_cap_history",
         ),
         pytest.param(
@@ -175,6 +184,7 @@ def test_narrative_rejects_invalid_input(kwargs) -> None:
 # ---------------------------------------------------------------------------
 # ErrorSignature
 # ---------------------------------------------------------------------------
+
 
 def _valid_error_sig(**overrides):
     base = dict(
@@ -200,8 +210,7 @@ def test_error_sig_key_tuple() -> None:
     future refactor cannot silently change the dedup contract and break
     Gate G3 preservation."""
     sig = _valid_error_sig()
-    assert sig.key() == ("vram", "ml_models/foo.py:42 in forward",
-                         "torch.cuda.OutOfMemoryError")
+    assert sig.key() == ("vram", "ml_models/foo.py:42 in forward", "torch.cuda.OutOfMemoryError")
 
 
 def test_error_sig_accepts_empty_last_frames() -> None:
@@ -233,6 +242,7 @@ def test_error_sig_rejects_invalid_input(overrides) -> None:
 # ---------------------------------------------------------------------------
 # CacheEntry — strict construction
 # ---------------------------------------------------------------------------
+
 
 def test_cache_entry_minimal_valid() -> None:
     """Only model_type is required; all 8 LLM-flat fields default to empty
@@ -268,7 +278,8 @@ def test_cache_entry_full_payload_round_trip() -> None:
             ),
         ],
         best_config_analysis=ConsolidatedNarrative(
-            latest="d=6,w=128", history=[(2, "d=4 too shallow")],
+            latest="d=6,w=128",
+            history=[(2, "d=4 too shallow")],
         ),
         error_signatures=[_valid_error_sig()],
         stats={"best_score": 1.23, "completed_rounds": 4},
@@ -300,6 +311,7 @@ def test_cache_entry_rejects_invalid_input(kwargs) -> None:
 # CacheEntry.from_legacy_dict — zero-friction chain resume (Q2(a))
 # ---------------------------------------------------------------------------
 
+
 def _legacy_entry() -> dict:
     """A minimal pre-6.3 flat-dict shape, modelled on what the live
     PER_MODEL_SYSTEM_PROMPT emits."""
@@ -323,7 +335,9 @@ def test_legacy_lifts_list_str_to_findings_with_current_iter() -> None:
     """Q2(a): list[str] -> list[ConsolidatedFinding] with
     evidence_iters=[current_iter]."""
     entry = CacheEntry.from_legacy_dict(
-        _legacy_entry(), model_type="punet", current_iter=7,
+        _legacy_entry(),
+        model_type="punet",
+        current_iter=7,
     )
     assert len(entry.key_findings) == 2
     for f in entry.key_findings:
@@ -337,15 +351,21 @@ def test_legacy_lifts_list_str_to_findings_with_current_iter() -> None:
 def test_legacy_lifts_str_to_narrative_with_empty_history() -> None:
     """Q2(a): str narratives -> ConsolidatedNarrative(latest=str, history=[])."""
     entry = CacheEntry.from_legacy_dict(
-        _legacy_entry(), model_type="punet", current_iter=7,
+        _legacy_entry(),
+        model_type="punet",
+        current_iter=7,
     )
     assert entry.best_config_analysis.latest == "depth=6, width=128 outperforms"
     assert entry.best_config_analysis.history == []
     assert entry.score_trend.latest.startswith("monotone improvement")
     # All 6 narrative fields populated by the lift, none left at default-empty.
     for field in (
-        "best_config_analysis", "score_trend", "per_file_analysis",
-        "data_sensitivity", "efficiency_assessment", "strategy_assessment",
+        "best_config_analysis",
+        "score_trend",
+        "per_file_analysis",
+        "data_sensitivity",
+        "efficiency_assessment",
+        "strategy_assessment",
     ):
         assert getattr(entry, field).latest != ""
 
@@ -357,7 +377,9 @@ def test_legacy_drops_empty_findings_strings() -> None:
     legacy = _legacy_entry()
     legacy["key_findings"] = ["valid finding", "", "   ", "another valid one"]
     entry = CacheEntry.from_legacy_dict(
-        legacy, model_type="punet", current_iter=7,
+        legacy,
+        model_type="punet",
+        current_iter=7,
     )
     assert len(entry.key_findings) == 2
     assert all(f.statement.strip() for f in entry.key_findings)
@@ -383,14 +405,19 @@ def test_legacy_drops_empty_findings_strings() -> None:
     ],
 )
 def test_legacy_truncates_oversized_inputs(
-    legacy_field, overlong_value, target_attr_path, expected_len,
+    legacy_field,
+    overlong_value,
+    target_attr_path,
+    expected_len,
 ) -> None:
     """Adapter truncates legacy strings exceeding the new caps rather than
     raising — zero-friction chain resume."""
     legacy = _legacy_entry()
     legacy[legacy_field] = overlong_value
     entry = CacheEntry.from_legacy_dict(
-        legacy, model_type="punet", current_iter=1,
+        legacy,
+        model_type="punet",
+        current_iter=1,
     )
     # Resolve dotted/indexed path (e.g. "key_findings[0].statement").
     val = entry
@@ -407,11 +434,13 @@ def test_legacy_truncates_oversized_inputs(
     "stats_key, expected",
     [
         pytest.param(
-            "_stats", {"best_score": 0.78, "completed_rounds": 3},
+            "_stats",
+            {"best_score": 0.78, "completed_rounds": 3},
             id="underscored_legacy_key",
         ),
         pytest.param(
-            "stats", {"best_score": 0.99},
+            "stats",
+            {"best_score": 0.99},
             id="forward_canonical_key",
         ),
     ],
@@ -424,7 +453,9 @@ def test_legacy_accepts_stats_key_aliases(stats_key, expected) -> None:
         legacy.pop("_stats")
         legacy["stats"] = expected
     entry = CacheEntry.from_legacy_dict(
-        legacy, model_type="punet", current_iter=1,
+        legacy,
+        model_type="punet",
+        current_iter=1,
     )
     assert entry.stats == expected
 
@@ -448,6 +479,8 @@ def test_legacy_error_signatures_default_empty() -> None:
     """Pre-6.3 chains never wrote error_signatures. The adapter must seed []
     (not None) so the consolidator's set-merge has a valid iterable."""
     entry = CacheEntry.from_legacy_dict(
-        _legacy_entry(), model_type="punet", current_iter=7,
+        _legacy_entry(),
+        model_type="punet",
+        current_iter=7,
     )
     assert entry.error_signatures == []

@@ -6,17 +6,20 @@ in execute_training, execute_inference, and execute_scoring.
 
 Uses unittest.mock to intercept subprocess.run — no GPU, no real data needed.
 """
+
 import json
 import os
 import subprocess
-import pytest
-from unittest.mock import patch, MagicMock, mock_open
-from core.sandbox_executor import TidmadSandbox, get_plugin_dir
+from unittest.mock import MagicMock, mock_open, patch
 
+import pytest
+
+from core.sandbox_executor import TidmadSandbox, get_plugin_dir
 
 # ==========================================
 # Fixtures
 # ==========================================
+
 
 @pytest.fixture
 def sandbox(tmp_path):
@@ -26,6 +29,7 @@ def sandbox(tmp_path):
         progress_bar=False,
     )
 
+
 @pytest.fixture
 def sandbox_progress(tmp_path):
     return TidmadSandbox(
@@ -34,12 +38,13 @@ def sandbox_progress(tmp_path):
         progress_bar=True,
     )
 
+
 # Minimal valid configs that pass Pydantic validation
-MODEL_CFG  = {"model_type": "fcnet", "segmentation_size": 10000, "latent_dims": [100, 10]}
-TRAIN_CFG  = {"lr": 1e-4, "epochs": 1, "batch_size": 1, "device": "cpu"}
-LOSS_CFG   = {"loss_type": "ce"}
-EXP_ID     = "test_exp_001"
-RUN_NAME   = "test_run"
+MODEL_CFG = {"model_type": "fcnet", "segmentation_size": 10000, "latent_dims": [100, 10]}
+TRAIN_CFG = {"lr": 1e-4, "epochs": 1, "batch_size": 1, "device": "cpu"}
+LOSS_CFG = {"loss_type": "ce"}
+EXP_ID = "test_exp_001"
+RUN_NAME = "test_run"
 
 
 def _make_mock_result(returncode=0, stdout="done\n", stderr=""):
@@ -56,12 +61,14 @@ def _make_train_success_side_effect(sandbox, exp_id, stdout="done\n", stderr="")
     before returning success. Required for any ``execute_training`` test
     after Phase 6.7 Commit 4 — without the sentinel, the executor's
     silent-crash check rejects the run as ``error_training``."""
+
     def _side_effect(*args, **kwargs):
         os.makedirs(sandbox.dirs["models"], exist_ok=True)
         sentinel = os.path.join(sandbox.dirs["models"], f"_OK_{exp_id}")
         with open(sentinel, "wb"):
             pass
         return _make_mock_result(returncode=0, stdout=stdout, stderr=stderr)
+
     return _side_effect
 
 
@@ -69,8 +76,8 @@ def _make_train_success_side_effect(sandbox, exp_id, stdout="done\n", stderr="")
 # TidmadSandbox initialisation
 # ==========================================
 
-class TestProgressBarFlag:
 
+class TestProgressBarFlag:
     def test_default_is_false(self, tmp_path):
         sb = TidmadSandbox(run_name="r", workspace=str(tmp_path))
         assert sb.progress_bar is False
@@ -86,8 +93,8 @@ class TestProgressBarFlag:
 # execute_training
 # ==========================================
 
-class TestExecuteTrainingStdout:
 
+class TestExecuteTrainingStdout:
     @patch("core.sandbox_executor.subprocess.run")
     def test_progress_bar_false_captures_stdout(self, mock_run, sandbox):
         mock_run.side_effect = _make_train_success_side_effect(sandbox, EXP_ID)
@@ -121,11 +128,13 @@ class TestExecuteTrainingStdout:
 # execute_inference
 # ==========================================
 
-class TestExecuteInferenceStdout:
 
+class TestExecuteInferenceStdout:
     def _run(self, sandbox, mock_run):
         # Pre-write config files so the method doesn't fail on missing paths
-        import os, json
+        import json
+        import os
+
         cfg_dir = sandbox.dirs["configs"]
         os.makedirs(cfg_dir, exist_ok=True)
         for name in [f"model_config_{EXP_ID}.json", f"loss_config_{EXP_ID}.json"]:
@@ -160,6 +169,7 @@ class TestExecuteInferenceStdout:
 # execute_inference — Phase 6.6 A.10 inference_batch wiring
 # ==========================================
 
+
 class TestExecuteInferenceBatch:
     """A.10: ``execute_inference`` must prefer the explicit ``inference_batch``
     kwarg over the legacy registry. The plumbing is a single CLI argument
@@ -168,7 +178,9 @@ class TestExecuteInferenceBatch:
     receives, not on internal state."""
 
     def _seed_files(self, sandbox):
-        import os, json
+        import json
+        import os
+
         cfg_dir = sandbox.dirs["configs"]
         os.makedirs(cfg_dir, exist_ok=True)
         for name in [f"model_config_{EXP_ID}.json", f"loss_config_{EXP_ID}.json"]:
@@ -192,7 +204,11 @@ class TestExecuteInferenceBatch:
         self._seed_files(sandbox)
         mock_run.return_value = _make_mock_result()
         sandbox.execute_inference(
-            EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, LOSS_CFG,
+            EXP_ID,
+            RUN_NAME,
+            "fcnet",
+            MODEL_CFG,
+            LOSS_CFG,
             inference_batch=8,
         )
         (cmd,), _ = mock_run.call_args
@@ -206,7 +222,11 @@ class TestExecuteInferenceBatch:
         self._seed_files(sandbox)
         mock_run.return_value = _make_mock_result()
         sandbox.execute_inference(
-            EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, LOSS_CFG,
+            EXP_ID,
+            RUN_NAME,
+            "fcnet",
+            MODEL_CFG,
+            LOSS_CFG,
             inference_batch=None,
         )
         (cmd,), _ = mock_run.call_args
@@ -231,19 +251,27 @@ class TestExecuteInferenceBatch:
         self._seed_files(sandbox)
         mock_run.return_value = _make_mock_result()
         # transformer's registry entry is 1; force-pass 4 instead.
-        import os, json
+        import json
+        import os
+
         cfg_dir = sandbox.dirs["configs"]
         for name in [
-            f"model_config_{EXP_ID}.json", f"loss_config_{EXP_ID}.json",
+            f"model_config_{EXP_ID}.json",
+            f"loss_config_{EXP_ID}.json",
         ]:
             with open(os.path.join(cfg_dir, name), "w") as f:
                 json.dump({}, f)
         model_path = os.path.join(
-            sandbox.dirs["models"], f"model_fcnet_{EXP_ID}_agent.pth",
+            sandbox.dirs["models"],
+            f"model_fcnet_{EXP_ID}_agent.pth",
         )
         open(model_path, "w").close()
         sandbox.execute_inference(
-            EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, LOSS_CFG,
+            EXP_ID,
+            RUN_NAME,
+            "fcnet",
+            MODEL_CFG,
+            LOSS_CFG,
             inference_batch=4,
         )
         (cmd,), _ = mock_run.call_args
@@ -253,6 +281,7 @@ class TestExecuteInferenceBatch:
 # ==========================================
 # execute_inference — Commit B: trial-mode timing sidecar
 # ==========================================
+
 
 class TestExecuteInferenceTimingSidecar:
     """Commit B contract: in trial mode, the parent appends ``--timing_out_json``
@@ -279,10 +308,12 @@ class TestExecuteInferenceTimingSidecar:
         """Build a side_effect that writes ``payload`` to the timing sidecar
         path before returning success — mirrors what the real subprocess does."""
         timing_path = self._expected_timing_path(sandbox)
+
         def _side_effect(*args, **kwargs):
             with open(timing_path, "w") as f:
                 json.dump(payload, f)
             return _make_mock_result()
+
         return _side_effect
 
     @patch("core.sandbox_executor.subprocess.run")
@@ -294,7 +325,11 @@ class TestExecuteInferenceTimingSidecar:
         sample_set = {"0": [0, 1], "1": [0]}
         mock_run.return_value = _make_mock_result()
         sandbox.execute_inference(
-            EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, LOSS_CFG,
+            EXP_ID,
+            RUN_NAME,
+            "fcnet",
+            MODEL_CFG,
+            LOSS_CFG,
             sample_set=sample_set,
         )
         (cmd,), _ = mock_run.call_args
@@ -315,9 +350,7 @@ class TestExecuteInferenceTimingSidecar:
         assert "--timing_out_json" not in cmd
 
     @patch("core.sandbox_executor.subprocess.run")
-    def test_success_returns_per_file_timings_and_decomposed_wall(
-        self, mock_run, sandbox
-    ):
+    def test_success_returns_per_file_timings_and_decomposed_wall(self, mock_run, sandbox):
         """On successful trial-mode inference, the return dict must carry
         the parsed sidecar plus the parent-measured wall time, with
         ``process_startup_ms`` = wall − sum(per-file). This is the
@@ -332,7 +365,11 @@ class TestExecuteInferenceTimingSidecar:
         ]
         mock_run.side_effect = self._make_subprocess_writes_sidecar(sandbox, payload)
         result = sandbox.execute_inference(
-            EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, LOSS_CFG,
+            EXP_ID,
+            RUN_NAME,
+            "fcnet",
+            MODEL_CFG,
+            LOSS_CFG,
             sample_set=sample_set,
         )
         assert result["status"] == "success"
@@ -347,9 +384,7 @@ class TestExecuteInferenceTimingSidecar:
         assert result["process_startup_ms"] >= 0.0
 
     @patch("core.sandbox_executor.subprocess.run")
-    def test_success_with_missing_sidecar_returns_empty_timings(
-        self, mock_run, sandbox
-    ):
+    def test_success_with_missing_sidecar_returns_empty_timings(self, mock_run, sandbox):
         """If the subprocess succeeded but no sidecar was written (e.g. the
         subprocess crashed silently between the loop and the write — or the
         feature flag was unset by an external invoker), the parent must not
@@ -361,7 +396,11 @@ class TestExecuteInferenceTimingSidecar:
         # Standard mock — does NOT write the sidecar.
         mock_run.return_value = _make_mock_result()
         result = sandbox.execute_inference(
-            EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, LOSS_CFG,
+            EXP_ID,
+            RUN_NAME,
+            "fcnet",
+            MODEL_CFG,
+            LOSS_CFG,
             sample_set=sample_set,
         )
         assert result["status"] == "success"
@@ -377,10 +416,16 @@ class TestExecuteInferenceTimingSidecar:
         self._seed_files(sandbox)
         sample_set = {"0": [0]}
         mock_run.side_effect = subprocess.CalledProcessError(
-            returncode=1, cmd=["dummy"], stderr="boom",
+            returncode=1,
+            cmd=["dummy"],
+            stderr="boom",
         )
         result = sandbox.execute_inference(
-            EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, LOSS_CFG,
+            EXP_ID,
+            RUN_NAME,
+            "fcnet",
+            MODEL_CFG,
+            LOSS_CFG,
             sample_set=sample_set,
         )
         assert result["status"] in {"error", "oom_host_ram"}
@@ -393,8 +438,8 @@ class TestExecuteInferenceTimingSidecar:
 # execute_scoring
 # ==========================================
 
-class TestExecuteScoringStdout:
 
+class TestExecuteScoringStdout:
     def _run(self, sandbox, mock_run):
         mock_run.return_value = _make_mock_result()
         # Patch open so score_results JSON reads back as valid dict
@@ -454,9 +499,9 @@ class TestSubprocessEnv:
         training subprocess."""
         env = _subprocess_env(plugin_dir=str(tmp_path))
         assert "PYTHONPATH" in env
-        project_root = _os.path.dirname(_os.path.dirname(
-            _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
-        ))
+        project_root = _os.path.dirname(
+            _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+        )
         assert project_root in env["PYTHONPATH"]
         assert _os.path.join(project_root, "ml_models") in env["PYTHONPATH"]
         assert _os.path.join(project_root, "execute_tools") in env["PYTHONPATH"]
@@ -465,6 +510,7 @@ class TestSubprocessEnv:
 # ==========================================
 # TidmadSandbox — run-scoped plugin_dir (Phase 2)
 # ==========================================
+
 
 class TestSandboxPluginDir:
     """The sandbox owns per-run plugin isolation. It creates
@@ -498,6 +544,7 @@ class TestSandboxPluginDir:
 # ==========================================
 # get_plugin_dir helper (Phase 4)
 # ==========================================
+
 
 class TestGetPluginDir:
     """``get_plugin_dir`` is the single source of truth for the workspace-rooted
@@ -538,6 +585,7 @@ class TestGetPluginDir:
 # execute_training — Phase 6.7 Commit 4 silent-crash detection
 # ==========================================
 
+
 class TestExecuteTrainingSilentCrash:
     """Fix 3, producer side. The trainer-side helper writes ``_OK_<exp_id>``
     only after ``torch.save`` returned successfully. If the subprocess exits
@@ -556,7 +604,9 @@ class TestExecuteTrainingSilentCrash:
 
     @patch("core.sandbox_executor.subprocess.run")
     def test_returncode_zero_no_sentinel_returns_error_training(
-        self, mock_run, sandbox,
+        self,
+        mock_run,
+        sandbox,
     ):
         """The smoking-gun case from the v3/v4 forensic logs: the subprocess
         exits cleanly but no sentinel was written. Status is ``error`` with
@@ -569,7 +619,12 @@ class TestExecuteTrainingSilentCrash:
         )
 
         out = sandbox.execute_training(
-            EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG,
+            EXP_ID,
+            RUN_NAME,
+            "fcnet",
+            MODEL_CFG,
+            TRAIN_CFG,
+            LOSS_CFG,
         )
 
         assert out["status"] == "error"
@@ -580,7 +635,9 @@ class TestExecuteTrainingSilentCrash:
 
     @patch("core.sandbox_executor.subprocess.run")
     def test_silent_crash_message_includes_stderr_tail(
-        self, mock_run, sandbox,
+        self,
+        mock_run,
+        sandbox,
     ):
         """The 20-line stderr tail is what the operator (and the tuner's
         reflector) reads to triage the crash. Pin that it actually makes
@@ -588,11 +645,18 @@ class TestExecuteTrainingSilentCrash:
         # 25 stderr lines — only the LAST 20 should appear in the tail.
         stderr_lines = [f"line {i}: noisy warning" for i in range(25)]
         mock_run.return_value = _make_mock_result(
-            returncode=0, stdout="", stderr="\n".join(stderr_lines) + "\n",
+            returncode=0,
+            stdout="",
+            stderr="\n".join(stderr_lines) + "\n",
         )
 
         out = sandbox.execute_training(
-            EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG,
+            EXP_ID,
+            RUN_NAME,
+            "fcnet",
+            MODEL_CFG,
+            TRAIN_CFG,
+            LOSS_CFG,
         )
 
         assert "--- stderr tail (last 20 lines) ---" in out["message"]
@@ -607,7 +671,9 @@ class TestExecuteTrainingSilentCrash:
 
     @patch("core.sandbox_executor.subprocess.run")
     def test_silent_crash_does_not_read_train_results_json(
-        self, mock_run, sandbox,
+        self,
+        mock_run,
+        sandbox,
     ):
         """When the sentinel is missing, the executor must short-circuit
         BEFORE attempting to read ``experiment_results_*.json`` — that
@@ -615,19 +681,27 @@ class TestExecuteTrainingSilentCrash:
         opening it would mask the real cause behind a ``FileNotFoundError``
         / ``JSONDecodeError`` raised inside the executor itself."""
         mock_run.return_value = _make_mock_result(
-            returncode=0, stdout="", stderr="",
+            returncode=0,
+            stdout="",
+            stderr="",
         )
 
         # Confirm no result JSON exists at the expected path — proves the
         # short-circuit isn't accidentally papered over by a prior file.
         train_json = os.path.join(
-            sandbox.dirs["records"], RUN_NAME,
+            sandbox.dirs["records"],
+            RUN_NAME,
             f"experiment_results_fcnet_{EXP_ID}.json",
         )
         assert not os.path.exists(train_json)
 
         out = sandbox.execute_training(
-            EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG,
+            EXP_ID,
+            RUN_NAME,
+            "fcnet",
+            MODEL_CFG,
+            TRAIN_CFG,
+            LOSS_CFG,
         )
 
         # No ``results`` key — that's only on the success path.
@@ -642,7 +716,12 @@ class TestExecuteTrainingSilentCrash:
         false-positive on healthy runs."""
         mock_run.side_effect = _make_train_success_side_effect(sandbox, EXP_ID)
         out = sandbox.execute_training(
-            EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG,
+            EXP_ID,
+            RUN_NAME,
+            "fcnet",
+            MODEL_CFG,
+            TRAIN_CFG,
+            LOSS_CFG,
         )
         assert out["status"] == "success"
         assert "error_training:" not in out.get("message", "")

@@ -15,21 +15,22 @@ Tests cover:
   database_full_spec
     - Raises NotImplementedError
 """
+
 import pytest
 
-from agent.schemas.proposal import ProposalOutput
-from agent.schemas.implementor import ImplementorInput
 from agent.schemas.hyperparam_tuning import ExpertAdvice
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.implementor import ImplementorInput
+from agent.schemas.proposal import ProposalOutput
 from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import (
-    local_full_spec,
     database_full_spec,
+    local_full_spec,
 )
-
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def storage():
@@ -56,7 +57,7 @@ def proposal_output():
         baseline_config={
             "model_config": {"channels": 64, "depth": 6, "kernel_size": 3},
             "train_config": {"lr": 1e-4, "epochs": 10, "batch_size": 1, "device": "cuda"},
-            "loss_config":  {"loss_type": "focal", "gamma": 2.0},
+            "loss_config": {"loss_type": "focal", "gamma": 2.0},
         },
     )
 
@@ -65,8 +66,8 @@ def proposal_output():
 # local_full_spec
 # ---------------------------------------------------------------------------
 
-class TestLocalFullSpec:
 
+class TestLocalFullSpec:
     def test_baseline_pass_through_and_default_dirs(self, proposal_output, storage):
         """Single multi-assertion baseline: every ProposalOutput field must
         thread through to the matching ImplementorInput field, storage
@@ -101,8 +102,8 @@ class TestLocalFullSpec:
 # database_full_spec
 # ---------------------------------------------------------------------------
 
-class TestDatabaseFullSpec:
 
+class TestDatabaseFullSpec:
     def test_raises_not_implemented(self, proposal_output, storage):
         with pytest.raises(NotImplementedError):
             database_full_spec(proposal_output, storage)

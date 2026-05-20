@@ -26,22 +26,22 @@ Used by Commit 5's Top-3 Bloat Report (§1.9) as a pre-flight gate
 before computing aggregate metrics on a JSONL file. A nonzero exit
 code from this linter blocks the report.
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import sys
 from pathlib import Path
-from typing import List, Tuple
 
 # Repo-relative import — script is run from project root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from pydantic import ValidationError  # noqa: E402
+from pydantic import ValidationError
 
-from agent.schemas.telemetry import TokenUsageRow  # noqa: E402
+from agent.schemas.telemetry import TokenUsageRow
 
 
-def lint(path: Path) -> Tuple[List[str], List[str]]:
+def lint(path: Path) -> tuple[list[str], list[str]]:
     """Return (errors, warnings) for the given JSONL file.
 
     Errors signify audit-log corruption (mismatched run_id, post-flush
@@ -49,8 +49,8 @@ def lint(path: Path) -> Tuple[List[str], List[str]]:
     (non-monotonic ts) that don't invalidate the file but should be
     surfaced.
     """
-    errors: List[str] = []
-    warnings: List[str] = []
+    errors: list[str] = []
+    warnings: list[str] = []
 
     if not path.exists():
         return [f"[FILE_MISSING] {path} does not exist"], []
@@ -61,7 +61,7 @@ def lint(path: Path) -> Tuple[List[str], List[str]]:
     flushed_iters: set[int] = set()
     last_ts: str | None = None
 
-    with open(path, "r") as f:
+    with open(path) as f:
         for lineno, raw in enumerate(f, start=1):
             line = raw.rstrip("\n")
             if not line.strip():
@@ -69,9 +69,7 @@ def lint(path: Path) -> Tuple[List[str], List[str]]:
             try:
                 obj = json.loads(line)
             except json.JSONDecodeError as je:
-                errors.append(
-                    f"[BAD_JSON] {path}:{lineno}: {je}"
-                )
+                errors.append(f"[BAD_JSON] {path}:{lineno}: {je}")
                 continue
             try:
                 row = TokenUsageRow.model_validate(obj)
@@ -113,18 +111,15 @@ def lint(path: Path) -> Tuple[List[str], List[str]]:
             # --- ts monotonic (soft) ---
             if last_ts is not None and row.ts < last_ts:
                 warnings.append(
-                    f"[WARN] {path}:{lineno}: non-monotonic ts "
-                    f"({row.ts} < previous {last_ts})"
+                    f"[WARN] {path}:{lineno}: non-monotonic ts ({row.ts} < previous {last_ts})"
                 )
             last_ts = row.ts
 
     return errors, warnings
 
 
-def main(argv: List[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Lint a SIDERIUS token_usage.jsonl audit log."
-    )
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Lint a SIDERIUS token_usage.jsonl audit log.")
     parser.add_argument(
         "path",
         type=Path,
@@ -144,15 +139,12 @@ def main(argv: List[str] | None = None) -> int:
         print(e, file=sys.stderr)
     if errors:
         print(
-            f"[FAIL] {args.path}: {len(errors)} error(s), "
-            f"{len(warnings)} warning(s)",
+            f"[FAIL] {args.path}: {len(errors)} error(s), {len(warnings)} warning(s)",
             file=sys.stderr,
         )
         return 1
     if not args.quiet:
-        print(
-            f"[OK] {args.path}: clean ({len(warnings)} warning(s))"
-        )
+        print(f"[OK] {args.path}: clean ({len(warnings)} warning(s))")
     return 0
 
 

@@ -19,12 +19,11 @@ Covers the outer pre-flight loop wired into both ``_run_legacy`` and
 
 See docs/reliable_resource_proposer.md §9 Commit 6.
 """
+
 from __future__ import annotations
 
 import json
 from unittest.mock import MagicMock
-
-from ._prompt_utils import extract_accumulated_json
 
 from agent.schemas.proposal import (
     ProposalInput,
@@ -38,6 +37,7 @@ from nodes.ml_model_proposal_agent import (
     _build_preflight_rejection_block,
 )
 
+from ._prompt_utils import extract_accumulated_json
 
 # ---------------------------------------------------------------------------
 # Shared fixtures — minimal interpretation + canned stage outputs
@@ -174,10 +174,12 @@ def _pipeline_input(
         reasoning_pipeline=ReasoningPipelineConfig(
             stages=[
                 ReasoningStage(
-                    name="comparison", system_prompt_key="COMPARATIVE_ANALYSIS",
+                    name="comparison",
+                    system_prompt_key="COMPARATIVE_ANALYSIS",
                 ),
                 ReasoningStage(
-                    name="causal_reasoning", system_prompt_key="CAUSAL_REASONING",
+                    name="causal_reasoning",
+                    system_prompt_key="CAUSAL_REASONING",
                 ),
             ],
         ),
@@ -213,7 +215,8 @@ def _legacy_input(
 
 def _agent(bridge: MagicMock) -> MLModelProposalAgent:
     return MLModelProposalAgent(
-        provider="gemini", model_id="test",
+        provider="gemini",
+        model_id="test",
         bridge_factory=lambda **kw: bridge,
     )
 
@@ -260,12 +263,14 @@ class TestPipelineSuccessPath:
         """The revision prompt must carry the prescriptive rejection block."""
         bridge = MagicMock()
         captured: list[str] = []
-        responses = iter([
-            FAKE_COMPARISON_OUTPUT,
-            FAKE_REASONING_OUTPUT,
-            FAKE_BAD_DRAFT,
-            FAKE_GOOD_DRAFT,
-        ])
+        responses = iter(
+            [
+                FAKE_COMPARISON_OUTPUT,
+                FAKE_REASONING_OUTPUT,
+                FAKE_BAD_DRAFT,
+                FAKE_GOOD_DRAFT,
+            ]
+        )
 
         def capturing(system_prompt, user_prompt, **kw):
             captured.append(user_prompt)
@@ -306,8 +311,8 @@ class TestPipelineExhaustionPath:
     def test_emits_best_factor_candidate(self, tmp_path):
         drafts = [
             _proposing_output(num_params=1_000_000_000, epochs=10),  # worst
-            _proposing_output(num_params=500_000_000,   epochs=10),
-            _proposing_output(num_params=100_000_000,   epochs=10),  # best
+            _proposing_output(num_params=500_000_000, epochs=10),
+            _proposing_output(num_params=100_000_000, epochs=10),  # best
         ]
         bridge = MagicMock()
         bridge.generate.side_effect = [
@@ -318,10 +323,7 @@ class TestPipelineExhaustionPath:
         out = _agent(bridge).run(_pipeline_input(tmp_path))
 
         assert out.parameter_count_estimate == 100_000_000
-        assert any(
-            "PREFLIGHT_OVERBUDGET_EMITTED" in n
-            for n in out.memo_consistency_notes
-        )
+        assert any("PREFLIGHT_OVERBUDGET_EMITTED" in n for n in out.memo_consistency_notes)
 
     def test_call_count_equals_reasoning_plus_max_attempts(self, tmp_path):
         drafts = [
@@ -342,8 +344,8 @@ class TestPipelineExhaustionPath:
         """The emitted warning must identify the winning factor explicitly."""
         drafts = [
             _proposing_output(num_params=1_000_000_000, epochs=10),
-            _proposing_output(num_params=500_000_000,   epochs=10),
-            _proposing_output(num_params=100_000_000,   epochs=10),
+            _proposing_output(num_params=500_000_000, epochs=10),
+            _proposing_output(num_params=100_000_000, epochs=10),
         ]
         bridge = MagicMock()
         bridge.generate.side_effect = [
@@ -353,10 +355,7 @@ class TestPipelineExhaustionPath:
         ]
         out = _agent(bridge).run(_pipeline_input(tmp_path))
 
-        note = next(
-            n for n in out.memo_consistency_notes
-            if "PREFLIGHT_OVERBUDGET_EMITTED" in n
-        )
+        note = next(n for n in out.memo_consistency_notes if "PREFLIGHT_OVERBUDGET_EMITTED" in n)
         assert "factor=" in note
         assert "20.0 min budget" in note
 
@@ -367,7 +366,6 @@ class TestPipelineExhaustionPath:
 
 
 class TestPreflightSkipped:
-
     def test_trial_budget_none_skips_gate(self, tmp_path):
         """trial_time_budget_minutes=None → pre-flight disabled entirely."""
         bridge = MagicMock()
@@ -391,9 +389,14 @@ class TestPreflightSkipped:
             FAKE_REASONING_OUTPUT,
             FAKE_BAD_DRAFT,
         ]
-        out = _agent(bridge).run(_pipeline_input(
-            tmp_path, is_trial=False, trial_budget=20.0, formal_budget=None,
-        ))
+        out = _agent(bridge).run(
+            _pipeline_input(
+                tmp_path,
+                is_trial=False,
+                trial_budget=20.0,
+                formal_budget=None,
+            )
+        )
         assert out.preflight_factor is None
         assert bridge.generate.call_count == 3
 
@@ -409,9 +412,7 @@ class TestPreflightSkipped:
 
         assert out.parameter_count_estimate is None
         assert out.preflight_factor is None
-        assert any(
-            "PREFLIGHT_SKIPPED" in n for n in out.memo_consistency_notes
-        )
+        assert any("PREFLIGHT_SKIPPED" in n for n in out.memo_consistency_notes)
         # No revision loop: single proposing call.
         assert bridge.generate.call_count == 3
 
@@ -424,9 +425,7 @@ class TestPreflightSkipped:
             draft,
         ]
         out = _agent(bridge).run(_pipeline_input(tmp_path))
-        assert any(
-            "PREFLIGHT_SKIPPED" in n for n in out.memo_consistency_notes
-        )
+        assert any("PREFLIGHT_SKIPPED" in n for n in out.memo_consistency_notes)
 
     def test_negative_parameter_count_adds_skip_note(self, tmp_path):
         draft = _proposing_output(num_params=-1)
@@ -437,9 +436,7 @@ class TestPreflightSkipped:
             draft,
         ]
         out = _agent(bridge).run(_pipeline_input(tmp_path))
-        assert any(
-            "PREFLIGHT_SKIPPED" in n for n in out.memo_consistency_notes
-        )
+        assert any("PREFLIGHT_SKIPPED" in n for n in out.memo_consistency_notes)
 
 
 # ---------------------------------------------------------------------------
@@ -448,7 +445,6 @@ class TestPreflightSkipped:
 
 
 class TestRejectionBlock:
-
     def test_contains_all_prescriptive_numbers(self):
         block = _build_preflight_rejection_block(
             num_params=10_000_000,
@@ -457,9 +453,9 @@ class TestRejectionBlock:
             budget_minutes=20.0,
         )
         assert "[PRE-FLIGHT REJECTION]" in block
-        assert "10,000,000" in block       # num_params (thousands separator)
-        assert "200.0 min" in block        # estimated_minutes
-        assert "10.0x" in block            # factor multiplier
+        assert "10,000,000" in block  # num_params (thousands separator)
+        assert "200.0 min" in block  # estimated_minutes
+        assert "10.0x" in block  # factor multiplier
         assert "20.0 min budget" in block  # budget
 
     def test_contains_prescriptive_remediation(self):
@@ -480,7 +476,6 @@ class TestRejectionBlock:
 
 
 class TestLegacyMode:
-
     def test_legacy_revises_on_preflight_rejection(self, tmp_path):
         bridge = MagicMock()
         bridge.generate_text.return_value = "reasoning text"
@@ -526,15 +521,12 @@ class TestLegacyMode:
         bridge.generate_text.return_value = "reasoning text"
         bridge.generate.side_effect = [
             _proposing_output(num_params=1_000_000_000, epochs=10),
-            _proposing_output(num_params=500_000_000,   epochs=10),
-            _proposing_output(num_params=100_000_000,   epochs=10),
+            _proposing_output(num_params=500_000_000, epochs=10),
+            _proposing_output(num_params=100_000_000, epochs=10),
         ]
 
         out = _agent(bridge).run(_legacy_input(tmp_path))
 
         assert out.parameter_count_estimate == 100_000_000
-        assert any(
-            "PREFLIGHT_OVERBUDGET_EMITTED" in n
-            for n in out.memo_consistency_notes
-        )
+        assert any("PREFLIGHT_OVERBUDGET_EMITTED" in n for n in out.memo_consistency_notes)
         assert bridge.generate.call_count == _MAX_PREFLIGHT_ATTEMPTS

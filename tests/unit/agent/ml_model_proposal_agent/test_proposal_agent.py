@@ -16,16 +16,20 @@ multi-assertion baselines and pytest.param families. No sovereign math
 lives in this file; all surfaces are LLM-mock-wiring and prompt-string
 assembly contracts.
 """
-import json
-import pytest
-from unittest.mock import MagicMock, patch, call
 
-from agent.schemas.proposal import ProposalInput, ProposalOutput, VocabEntry
+import json
+from unittest.mock import MagicMock, call, patch
+
+import pytest
+
 from agent.schemas.hyperparam_tuning import ExpertAdvice
+from agent.schemas.proposal import ProposalInput, ProposalOutput, VocabEntry
 from agent.schemas.score_table import (
-    AggregateScalars, PerFileRow, ScoreComparisonTable,
+    AggregateScalars,
+    PerFileRow,
+    ScoreComparisonTable,
 )
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_model_proposal_agent import MLModelProposalAgent, _build_reasoning_prompt
 
 
@@ -34,7 +38,9 @@ def _make_score_table_dict(fv):
     carries in production (output.model_dump() through the protocol)."""
     rows = [
         PerFileRow(
-            file_index=i, raw_baseline=0.1, ground_truth=100.0,
+            file_index=i,
+            raw_baseline=0.1,
+            ground_truth=100.0,
             model=v,
             gain_vs_raw=(v - 0.1) if v is not None else None,
             headroom_vs_gt=(100.0 - v) if v is not None else None,
@@ -44,11 +50,14 @@ def _make_score_table_dict(fv):
     return ScoreComparisonTable(
         rows=rows,
         aggregate=AggregateScalars(
-            raw_baseline_scalar=0.1, ground_truth_scalar=100.0,
-            model_scalar=0.5, percent_of_ceiling_log=0.005,
+            raw_baseline_scalar=0.1,
+            ground_truth_scalar=100.0,
+            model_scalar=0.5,
+            percent_of_ceiling_log=0.005,
             num_sampled_files=len([v for v in fv if v is not None]) or 1,
         ),
-        s_max_global=1.0, reference_source="test",
+        s_max_global=1.0,
+        reference_source="test",
         rendered_markdown="(test)",
     ).model_dump()
 
@@ -88,8 +97,12 @@ FAKE_COMMIT_RESPONSE = {
     "baseline_config": {
         "model_config": {"depth": 2, "multi": 32, "nhead": 4},
         "train_config": {
-            "lr": 1e-4, "epochs": 10, "batch_size": 1,
-            "optimizer_type": "adamw", "weight_decay": 1e-5, "device": "cuda",
+            "lr": 1e-4,
+            "epochs": 10,
+            "batch_size": 1,
+            "optimizer_type": "adamw",
+            "weight_decay": 1e-5,
+            "device": "cuda",
         },
         "loss_config": {"loss_type": "focal", "alpha": 0.5, "gamma": 2.0, "reduction": "mean"},
     },
@@ -99,7 +112,7 @@ FAKE_INTERPRETATION = {
     "model_types": ["punet", "fcnet"],
     "model_descriptions": {"punet": "PUNet description...", "fcnet": "FCNet description..."},
     "total_experiments": 20,
-    "per_model_best":  {"punet": 1.8, "fcnet": 0.9},
+    "per_model_best": {"punet": 1.8, "fcnet": 0.9},
     "per_model_worst": {"punet": 1.2, "fcnet": 0.7},
     "best_denoising_score": 1.8,
     "worst_denoising_score": 0.7,
@@ -114,6 +127,7 @@ FAKE_INTERPRETATION = {
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def agent():
     with patch("nodes.ml_model_proposal_agent.LLMBridge") as MockBridge:
@@ -124,8 +138,9 @@ def agent():
         yield a
 
 
-def make_input(workspace, run_name="r1", existing_model_types=None, constraints=None,
-               human_advice=None):
+def make_input(
+    workspace, run_name="r1", existing_model_types=None, constraints=None, human_advice=None
+):
     return ProposalInput(
         interpretation=FAKE_INTERPRETATION,
         existing_model_types=existing_model_types or [],
@@ -139,16 +154,20 @@ def make_input(workspace, run_name="r1", existing_model_types=None, constraints=
 # LLM call structure
 # ---------------------------------------------------------------------------
 
-class TestLLMCallStructure:
 
+class TestLLMCallStructure:
     def test_text_gen_then_commit_gen_each_called_once(self, agent, tmp_path):
         """Single multi-assertion baseline: both LLM methods fire exactly once
         and in the documented order (text reasoning -> commit JSON). Replaces
         three flat tests (generate_text_called_once, generate_called_once,
         generate_text_called_before_generate)."""
         call_order = []
-        agent.bridge.generate_text.side_effect = lambda *a, **kw: call_order.append("text") or FAKE_REASONING
-        agent.bridge.generate.side_effect     = lambda *a, **kw: call_order.append("json") or FAKE_COMMIT_RESPONSE
+        agent.bridge.generate_text.side_effect = lambda *a, **kw: (
+            call_order.append("text") or FAKE_REASONING
+        )
+        agent.bridge.generate.side_effect = lambda *a, **kw: (
+            call_order.append("json") or FAKE_COMMIT_RESPONSE
+        )
         agent.run(make_input(tmp_path))
 
         agent.bridge.generate_text.assert_called_once()
@@ -166,8 +185,8 @@ class TestLLMCallStructure:
 # Output correctness
 # ---------------------------------------------------------------------------
 
-class TestOutputCorrectness:
 
+class TestOutputCorrectness:
     def test_llm_response_threads_through_all_output_fields(self, agent, tmp_path):
         """Single multi-assertion baseline: every field in FAKE_COMMIT_RESPONSE
         must thread through to the corresponding ProposalOutput attribute,
@@ -197,15 +216,15 @@ class TestOutputCorrectness:
         # baseline_config carries the three required sub-blocks.
         assert "model_config" in output.baseline_config
         assert "train_config" in output.baseline_config
-        assert "loss_config"  in output.baseline_config
+        assert "loss_config" in output.baseline_config
 
 
 # ---------------------------------------------------------------------------
 # File persistence
 # ---------------------------------------------------------------------------
 
-class TestFilePersistence:
 
+class TestFilePersistence:
     def test_output_persists_to_disk_with_correct_content(self, agent, tmp_path):
         """Single multi-assertion baseline: the output file lands at the
         documented path, parses as JSON, carries the LLM-supplied model_name,
@@ -225,6 +244,7 @@ class TestFilePersistence:
 # ---------------------------------------------------------------------------
 # Human advice injection
 # ---------------------------------------------------------------------------
+
 
 def _structured_focus_areas_advice():
     return ExpertAdvice(
@@ -247,7 +267,6 @@ def _structured_rationale_only_advice():
 
 
 class TestHumanAdviceInjection:
-
     @pytest.mark.parametrize(
         "advice, expected_substrings",
         [
@@ -274,7 +293,11 @@ class TestHumanAdviceInjection:
         ],
     )
     def test_advice_strings_propagate_into_reasoning_prompt(
-        self, agent, tmp_path, advice, expected_substrings,
+        self,
+        agent,
+        tmp_path,
+        advice,
+        expected_substrings,
     ):
         """Either plain-string or structured ExpertAdvice -> documented
         substrings must surface in the reasoning prompt. Replaces four flat
@@ -295,8 +318,8 @@ class TestHumanAdviceInjection:
 # Duplicate model name guard
 # ---------------------------------------------------------------------------
 
-class TestDuplicateNameGuard:
 
+class TestDuplicateNameGuard:
     @pytest.mark.parametrize(
         "existing, expect_raise",
         [
@@ -323,6 +346,7 @@ class TestDuplicateNameGuard:
 # ---------------------------------------------------------------------------
 # Reasoning prompt enrichment tests
 # ---------------------------------------------------------------------------
+
 
 class TestBuildReasoningPromptEnriched:
     """Tests that _build_reasoning_prompt includes new interpretation fields."""
@@ -366,12 +390,14 @@ class TestBuildReasoningPromptEnriched:
         "interp_field, value, expected_substrings",
         [
             pytest.param(
-                "per_model_params", {"punet": 55000},
+                "per_model_params",
+                {"punet": 55000},
                 ["55,000", "Model Parameters"],
                 id="model_params",
             ),
             pytest.param(
-                "per_model_training_segments", {"punet": 200},
+                "per_model_training_segments",
+                {"punet": 200},
                 ["200", "Training Data Volume"],
                 id="training_segments",
             ),
@@ -390,7 +416,10 @@ class TestBuildReasoningPromptEnriched:
         ],
     )
     def test_prompt_includes_enriched_interpretation_fields(
-        self, interp_field, value, expected_substrings,
+        self,
+        interp_field,
+        value,
+        expected_substrings,
     ):
         """Enriched interpretation fields each surface in the reasoning prompt
         under their documented heading. Replaces four flat tests
@@ -432,7 +461,12 @@ class TestBuildReasoningPromptEnriched:
                     suggested_directions=["try dilated convolutions"],
                     rationale="Files 0-3 consistently weak.",
                 ),
-                ["Expert Guidance", "low-frequency denoising", "VRAM < 8 GB", "dilated convolutions"],
+                [
+                    "Expert Guidance",
+                    "low-frequency denoising",
+                    "VRAM < 8 GB",
+                    "dilated convolutions",
+                ],
                 [],
                 id="structured_advice",
             ),
@@ -466,6 +500,7 @@ class TestBuildReasoningPromptEnriched:
 # F.4 — _render_vocabulary (feedback loop)
 # ---------------------------------------------------------------------------
 
+
 class TestRenderVocabulary:
     """Verify that _render_vocabulary renders all four vocab kinds correctly.
 
@@ -481,27 +516,34 @@ class TestRenderVocabulary:
         "kind, name, description, tier, expected_strings",
         [
             pytest.param(
-                "feature", "dilated_causal_conv",
-                "Causal dilated convolution.", "canonical",
+                "feature",
+                "dilated_causal_conv",
+                "Causal dilated convolution.",
+                "canonical",
                 ["Features", "dilated_causal_conv"],
                 id="feature_kind",
             ),
             pytest.param(
-                "capability", "large_receptive_field",
-                "Receptive field > 10k samples.", "canonical",
+                "capability",
+                "large_receptive_field",
+                "Receptive field > 10k samples.",
+                "canonical",
                 ["Capabilities", "large_receptive_field"],
                 id="capability_kind",
             ),
             pytest.param(
-                "discovery", "prediction_attn_wavenet_refuted",
+                "discovery",
+                "prediction_attn_wavenet_refuted",
                 "REFUTED: attn_wavenet achieved denoising_score=-1.509 (predicted 6.5).",
                 "candidate",
                 ["Discoveries", "REFUTED", "prediction_attn_wavenet_refuted"],
                 id="discovery_kind",
             ),
             pytest.param(
-                "candidate", "ssm_layer",
-                "State-space model layer.", "candidate",
+                "candidate",
+                "ssm_layer",
+                "State-space model layer.",
+                "candidate",
                 ["Candidates", "ssm_layer"],
                 id="candidate_kind",
             ),
@@ -520,10 +562,15 @@ class TestRenderVocabulary:
 
     def test_all_four_kinds_rendered(self):
         vocab = [
-            VocabEntry(name="f1", kind="feature",     description="feat.",    tier="canonical"),
-            VocabEntry(name="c1", kind="capability",  description="cap.",     tier="canonical"),
-            VocabEntry(name="d1", kind="discovery",   description="CONFIRMED: something worked.", tier="candidate"),
-            VocabEntry(name="n1", kind="candidate",   description="proposed.", tier="candidate"),
+            VocabEntry(name="f1", kind="feature", description="feat.", tier="canonical"),
+            VocabEntry(name="c1", kind="capability", description="cap.", tier="canonical"),
+            VocabEntry(
+                name="d1",
+                kind="discovery",
+                description="CONFIRMED: something worked.",
+                tier="candidate",
+            ),
+            VocabEntry(name="n1", kind="candidate", description="proposed.", tier="candidate"),
         ]
         rendered = MLModelProposalAgent._render_vocabulary(vocab)
         assert "Features" in rendered
@@ -538,8 +585,14 @@ class TestRenderVocabulary:
 
     def test_dict_entries_also_work(self):
         """_render_vocabulary must handle plain dicts as well as VocabEntry objects."""
-        vocab = [{"name": "d1", "kind": "discovery",
-                  "description": "REFUTED: something failed.", "tier": "candidate"}]
+        vocab = [
+            {
+                "name": "d1",
+                "kind": "discovery",
+                "description": "REFUTED: something failed.",
+                "tier": "candidate",
+            }
+        ]
         rendered = MLModelProposalAgent._render_vocabulary(vocab)
         assert "Discoveries" in rendered
         assert "REFUTED" in rendered

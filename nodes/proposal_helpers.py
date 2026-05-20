@@ -8,7 +8,8 @@ and no side effects. They prepare context for the reasoning pipeline.
 
 import os
 import re
-from typing import Any, Dict, Iterable, List, Optional
+from collections.abc import Iterable
+from typing import Any
 
 from agent.schemas.proposal import (
     ModelSelectionStrategy,
@@ -23,10 +24,11 @@ _SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # B.10 — Model selection pre-filter
 # ---------------------------------------------------------------------------
 
+
 def select_candidate_models(
-    interpretation: Dict[str, Any],
+    interpretation: dict[str, Any],
     strategy: ModelSelectionStrategy,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Pre-filter past models before the comparison stage.
 
@@ -89,10 +91,7 @@ def select_candidate_models(
     if method == "feature_match":
         # Filter to models whose description mentions the target feature
         feature = params.get("feature", "")
-        return [
-            m for m in all_models
-            if m.get("description") and feature in m["description"]
-        ]
+        return [m for m in all_models if m.get("description") and feature in m["description"]]
 
     # Unknown strategy — return all with a warning
     print(f"[proposal_helpers] Unknown model selection method: {method!r}, returning all models.")
@@ -103,7 +102,7 @@ def select_candidate_models(
 _BUILTIN_MODELS = {"punet", "wavenet", "fcnet", "transformer", "rnn", "gated_fno"}
 
 
-def _guess_source(model_type: str, interpretation: Dict[str, Any]) -> str:
+def _guess_source(model_type: str, interpretation: dict[str, Any]) -> str:
     """Guess whether a model was agent-proposed based on available data."""
     # Simple heuristic: if it's not a built-in, it's agent-proposed
     return "proposed"
@@ -112,6 +111,7 @@ def _guess_source(model_type: str, interpretation: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 # B.16a — Exploration mode resolver
 # ---------------------------------------------------------------------------
+
 
 def load_model_source(model_type: str) -> str | None:
     """
@@ -134,7 +134,7 @@ def load_model_source(model_type: str) -> str | None:
     ]
     for path in plugin_candidates:
         if os.path.isfile(path):
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 return f.read()
 
     # Try built-in models — extract from models_sandbox.py
@@ -156,7 +156,7 @@ def load_model_source(model_type: str) -> str | None:
     if not class_names:
         return None
 
-    with open(sandbox_path, "r", encoding="utf-8") as f:
+    with open(sandbox_path, encoding="utf-8") as f:
         full_source = f.read()
 
     # Extract each class definition (from 'class Name' to the next top-level class or EOF)
@@ -171,7 +171,9 @@ def load_model_source(model_type: str) -> str | None:
                 class_lines = [line]
             elif in_class:
                 # End of class: next top-level class or top-level non-indented code
-                if re.match(r"^class \w", line) or (re.match(r"^[A-Z_]", line) and not line.startswith(" ")):
+                if re.match(r"^class \w", line) or (
+                    re.match(r"^[A-Z_]", line) and not line.startswith(" ")
+                ):
                     in_class = False
                 else:
                     class_lines.append(line)
@@ -181,7 +183,7 @@ def load_model_source(model_type: str) -> str | None:
     return "\n\n".join(extracted) if extracted else None
 
 
-def enrich_candidates_with_source(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def enrich_candidates_with_source(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Add source code to each candidate model summary.
 
@@ -209,7 +211,7 @@ def enrich_candidates_with_source(candidates: List[Dict[str, Any]]) -> List[Dict
 # ---------------------------------------------------------------------------
 
 
-def build_score_summary_line(score_table: Optional[Dict[str, Any]]) -> Optional[str]:
+def build_score_summary_line(score_table: dict[str, Any] | None) -> str | None:
     """One-liner summary for a non-candidate model's score table.
 
     Reads ``aggregate.{model_scalar, raw_baseline_scalar, percent_of_ceiling_log,
@@ -239,21 +241,15 @@ def build_score_summary_line(score_table: Optional[Dict[str, Any]]) -> Optional[
         return None
 
     if raw_baseline is not None and model_scalar < raw_baseline:
-        return (
-            f"log_scalar={model_scalar:.2f}, "
-            f"below raw baseline on {n_files} files"
-        )
+        return f"log_scalar={model_scalar:.2f}, below raw baseline on {n_files} files"
 
     if recovery is None:
         return f"log_scalar={model_scalar:.2f} on {n_files} files"
 
-    return (
-        f"log_scalar={model_scalar:.2f}, "
-        f"recovery={recovery * 100:.1f}% on {n_files} files"
-    )
+    return f"log_scalar={model_scalar:.2f}, recovery={recovery * 100:.1f}% on {n_files} files"
 
 
-def build_candidate_markdown_block(candidates: List[Dict[str, Any]]) -> str:
+def build_candidate_markdown_block(candidates: list[dict[str, Any]]) -> str:
     """Top-level markdown block rendering each candidate's full detail.
 
     For each candidate dict, emits a section:
@@ -279,7 +275,7 @@ def build_candidate_markdown_block(candidates: List[Dict[str, Any]]) -> str:
     if not candidates:
         return ""
 
-    sections: List[str] = ["## Candidate Models — detailed view", ""]
+    sections: list[str] = ["## Candidate Models — detailed view", ""]
     for candidate in candidates:
         mt = candidate.get("model_type", "<unknown>")
         sections.append(f"### Candidate: {mt}")
@@ -309,8 +305,8 @@ def build_candidate_markdown_block(candidates: List[Dict[str, Any]]) -> str:
 
 
 def strip_heavy_fields_for_json(
-    candidates: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
+    candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Shallow copy per candidate with heavy fields removed for JSON dump.
 
     Removes ``score_table``, ``source_code``, and ``source_code_lines`` —
@@ -323,13 +319,12 @@ def strip_heavy_fields_for_json(
     """
     _HEAVY_FIELDS = ("score_table", "source_code", "source_code_lines")
     return [
-        {k: v for k, v in candidate.items() if k not in _HEAVY_FIELDS}
-        for candidate in candidates
+        {k: v for k, v in candidate.items() if k not in _HEAVY_FIELDS} for candidate in candidates
     ]
 
 
 def resolve_exploration_mode(
-    interpretation: Dict[str, Any],
+    interpretation: dict[str, Any],
     pipeline: ReasoningPipelineConfig,
 ) -> str:
     """
@@ -414,9 +409,9 @@ def _iter_index_from_source(source: Any) -> int:
 
 
 def clamp_comparative_analysis(
-    comparative_analysis: List[Dict[str, Any]],
+    comparative_analysis: list[dict[str, Any]],
     top_k: int = 5,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Clamp the comparative_analysis list with a 3-best + 2-recent hybrid.
 
     The audited growth driver in proposer prompts is the unbounded length
@@ -477,7 +472,7 @@ def clamp_comparative_analysis(
     draw_b = by_recency_b[:2]
     draw_b_indices = {it[0] for it in draw_b}
 
-    union: List[tuple] = []
+    union: list[tuple] = []
     seen_model_types: set = set()
     for it in draw_a + draw_b:
         mt = it[1].get("model_type")
@@ -490,9 +485,7 @@ def clamp_comparative_analysis(
     if len(union) < top_k:
         already_indices = draw_a_indices | draw_b_indices
         remaining_pool = [it for it in indexed if it[0] not in already_indices]
-        by_recency_rest = sorted(
-            remaining_pool, key=lambda it: (-_recency(it), it[0])
-        )
+        by_recency_rest = sorted(remaining_pool, key=lambda it: (-_recency(it), it[0]))
         for it in by_recency_rest:
             if len(union) >= top_k:
                 break
@@ -572,7 +565,7 @@ def safe_stage_string_truncator(text: str, max_chars: int = 4000) -> str:
     head_len = remaining // 2
     tail_len = remaining - head_len
     head = text[:head_len]
-    tail = text[len(text) - tail_len:] if tail_len > 0 else ""
+    tail = text[len(text) - tail_len :] if tail_len > 0 else ""
 
     while True:
         candidate = head + marker + tail
@@ -588,7 +581,7 @@ def safe_stage_string_truncator(text: str, max_chars: int = 4000) -> str:
         head_len = remaining // 2
         tail_len = remaining - head_len
         head = text[:head_len]
-        tail = text[len(text) - tail_len:] if tail_len > 0 else ""
+        tail = text[len(text) - tail_len :] if tail_len > 0 else ""
 
 
 def apply_string_backstop(stage_output: Any, max_chars: int = 4000) -> Any:
@@ -620,10 +613,7 @@ def apply_string_backstop(stage_output: Any, max_chars: int = 4000) -> Any:
     string leaves potentially shortened. The input is not mutated.
     """
     if isinstance(stage_output, dict):
-        return {
-            key: apply_string_backstop(value, max_chars)
-            for key, value in stage_output.items()
-        }
+        return {key: apply_string_backstop(value, max_chars) for key, value in stage_output.items()}
     if isinstance(stage_output, list):
         return [apply_string_backstop(item, max_chars) for item in stage_output]
     if isinstance(stage_output, tuple):
@@ -640,13 +630,14 @@ def apply_string_backstop(stage_output: Any, max_chars: int = 4000) -> Any:
 # view consumed by `_render_stage_user_prompt` and `_audit_proposer_components`
 # in `nodes/ml_model_proposal_agent.py`.
 
+
 def clamp_and_backstop_accumulated(
-    accumulated: Dict[str, Any],
+    accumulated: dict[str, Any],
     *,
     top_k: int,
     max_chars: int,
     input_keys: Iterable[str],
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build a clamped + backstopped copy of ``accumulated`` for prompt assembly.
 
     Pure orchestration. The actual algorithms live in the C2 helpers
@@ -708,7 +699,7 @@ def clamp_and_backstop_accumulated(
     clamped-then-backstopped.
     """
     input_keys_set = set(input_keys)
-    result: Dict[str, Any] = {}
+    result: dict[str, Any] = {}
 
     for key, value in accumulated.items():
         if key in input_keys_set:
@@ -716,11 +707,12 @@ def clamp_and_backstop_accumulated(
             continue
 
         if key == "comparison" and isinstance(value, dict):
-            new_comparison: Dict[str, Any] = dict(value)
+            new_comparison: dict[str, Any] = dict(value)
             inner_list = new_comparison.get("comparative_analysis")
             if isinstance(inner_list, list):
                 new_comparison["comparative_analysis"] = clamp_comparative_analysis(
-                    inner_list, top_k=top_k,
+                    inner_list,
+                    top_k=top_k,
                 )
             result[key] = apply_string_backstop(new_comparison, max_chars=max_chars)
             continue

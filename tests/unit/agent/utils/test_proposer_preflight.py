@@ -21,15 +21,15 @@ disk-free static-formula call into the three per-phase estimators
 
 See ``docs/reliable_resource_proposer.md`` §7 Decision 3 + §9 Commit 5.
 """
+
 from __future__ import annotations
 
 import pytest
 
 from agent.utils.proposer_preflight import (
-    estimate_proposal_time,
     _synthesise_default_sample_set,
+    estimate_proposal_time,
 )
-
 
 # ---------------------------------------------------------------------------
 # Config factories — shapes mirror the live proposer/tuner output.
@@ -67,7 +67,6 @@ def _iter4_tcn_model_cfg() -> dict:
 
 
 class TestReturnShape:
-
     def test_returns_four_documented_keys(self):
         out = estimate_proposal_time(
             model_type="gated_fourier_tcn",
@@ -78,7 +77,10 @@ class TestReturnShape:
             time_budget_minutes=20.0,
         )
         assert set(out.keys()) == {
-            "estimated_minutes", "factor", "verdict", "feasible",
+            "estimated_minutes",
+            "factor",
+            "verdict",
+            "feasible",
         }
 
     def test_factor_matches_estimated_over_budget(self):
@@ -130,7 +132,6 @@ class TestReturnShape:
 
 
 class TestFeasibilityGate:
-
     def test_iter2_style_overshoot_flagged_infeasible(self):
         """iter 2's 12-block SSM at seg=40000 × 10 epochs × a typical
         SSM param budget (~50M) must read as ``feasible=False`` with a
@@ -146,9 +147,7 @@ class TestFeasibilityGate:
             time_budget_minutes=20.0,
         )
         assert out["feasible"] is False
-        assert out["factor"] > 10.0, (
-            f"iter-2 overshoot must read ≫1×; got factor={out['factor']}"
-        )
+        assert out["factor"] > 10.0, f"iter-2 overshoot must read ≫1×; got factor={out['factor']}"
 
     def test_iter4_style_tcn_passes_feasibility(self):
         """iter 4's 6-block TCN at a modest ~500k param budget completes
@@ -234,7 +233,6 @@ class TestFeasibilityGate:
 
 
 class TestInvalidInputs:
-
     def test_zero_num_params_raises(self):
         with pytest.raises(ValueError, match="num_params must be positive"):
             estimate_proposal_time(
@@ -312,7 +310,6 @@ class TestUnregisteredModelType:
 
 
 class TestDefaultSampleSet:
-
     def test_default_sample_set_has_twenty_files(self):
         """Snapshot strategy must produce 20 files (matches NUM_FILES in
         dataset_config.py for the TIDMAD dataset)."""
@@ -385,7 +382,7 @@ class TestDefaultSampleSet:
             num_params=1_000_000,
             time_budget_minutes=20.0,
         )
-        out_default = estimate_proposal_time(**kwargs)              # trial_portion=0.1
+        out_default = estimate_proposal_time(**kwargs)  # trial_portion=0.1
         out_small = estimate_proposal_time(**kwargs, trial_portion=0.02)
 
         # ceil(0.1 × 200) = 20 segs/file vs ceil(0.02 × 200) = 4 segs/file → exact 1/5.
@@ -429,13 +426,16 @@ class TestNoGpuNoDisk:
         pure path. We monkeypatch it to raise if called — if this test
         fails, a regression introduced a CUDA touch."""
         import sys
+
         if "torch" in sys.modules:
+
             def _boom():
                 raise AssertionError(
                     "torch.cuda.is_available was called during pre-flight "
                     "— the wrapper must run on CPU-only CI without any "
                     "CUDA probe"
                 )
+
             monkeypatch.setattr(sys.modules["torch"].cuda, "is_available", _boom)
         out = estimate_proposal_time(
             model_type="tcn",

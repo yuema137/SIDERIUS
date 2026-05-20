@@ -16,9 +16,11 @@ Covers:
 All tests are pure-Python / mocked-bridge — no LLM calls, no GPU, no disk I/O beyond
 tmp_path fixture.
 """
+
 import json
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 from agent.schemas.proposal import (
     ProposalInput,
@@ -27,13 +29,13 @@ from agent.schemas.proposal import (
     ReasoningStage,
     VocabEntry,
 )
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_model_proposal_agent import MLModelProposalAgent, _build_reasoning_prompt
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
+
 
 def _minimal_interp(**extra) -> dict:
     """Minimal interpretation dict.  Pass extra= to add Phase E / Phase C fields."""
@@ -119,14 +121,16 @@ def _make_agent_with_mock() -> tuple[MLModelProposalAgent, MagicMock]:
         _FAKE_PROPOSING,
     ]
     agent = MLModelProposalAgent(
-        provider="gemini", model_id="test",
+        provider="gemini",
+        model_id="test",
         bridge_factory=lambda **kw: mock_bridge,
     )
     return agent, mock_bridge
 
 
-def _pipeline_input(tmp_path, interp: dict, vocab_seed=None,
-                    exploration_mode: str = "exploit") -> ProposalInput:
+def _pipeline_input(
+    tmp_path, interp: dict, vocab_seed=None, exploration_mode: str = "exploit"
+) -> ProposalInput:
     """Input wired with a 2-stage pipeline and explicit exploration mode."""
     return ProposalInput(
         interpretation=interp,
@@ -135,10 +139,8 @@ def _pipeline_input(tmp_path, interp: dict, vocab_seed=None,
         reasoning_pipeline=ReasoningPipelineConfig(
             exploration_mode=exploration_mode,
             stages=[
-                ReasoningStage(name="comparison",
-                               system_prompt_key="COMPARATIVE_ANALYSIS"),
-                ReasoningStage(name="causal_reasoning",
-                               system_prompt_key="CAUSAL_REASONING"),
+                ReasoningStage(name="comparison", system_prompt_key="COMPARATIVE_ANALYSIS"),
+                ReasoningStage(name="causal_reasoning", system_prompt_key="CAUSAL_REASONING"),
             ],
         ),
         storage=StorageConfig(
@@ -151,6 +153,7 @@ def _pipeline_input(tmp_path, interp: dict, vocab_seed=None,
 # ===========================================================================
 # Group 1 — _build_reasoning_prompt: Phase E + Phase C prompt sections
 # ===========================================================================
+
 
 class TestBuildReasoningPromptTrackRecord:
     """Phase E prediction track record appears iff scientific_accuracy or
@@ -260,51 +263,82 @@ class TestBuildReasoningPromptVocabHealth:
 # Group 2 — _render_vocabulary: '→ enables:' and '← enabled by:' links
 # ===========================================================================
 
+
 class TestRenderVocabularyLinks:
     """Confirmed feature→capability links appear with directional arrows in the
     vocab block when related_to is non-empty."""
 
     def test_feature_no_related_to_has_no_arrow(self):
-        vocab = [{"name": "dilated_causal_conv", "kind": "feature",
-                  "description": "Causal conv with dilation.",
-                  "related_to": []}]
+        vocab = [
+            {
+                "name": "dilated_causal_conv",
+                "kind": "feature",
+                "description": "Causal conv with dilation.",
+                "related_to": [],
+            }
+        ]
         block = MLModelProposalAgent._render_vocabulary(vocab)
         assert "→ enables" not in block
         assert "← enabled by" not in block
 
     def test_feature_with_single_link_shows_enables(self):
-        vocab = [{"name": "dilated_causal_conv", "kind": "feature",
-                  "description": "Causal conv with dilation.",
-                  "related_to": ["receptive_field"]}]
+        vocab = [
+            {
+                "name": "dilated_causal_conv",
+                "kind": "feature",
+                "description": "Causal conv with dilation.",
+                "related_to": ["receptive_field"],
+            }
+        ]
         block = MLModelProposalAgent._render_vocabulary(vocab)
         assert "→ enables: receptive_field" in block
 
     def test_feature_with_multiple_links_comma_separated(self):
-        vocab = [{"name": "dilated_causal_conv", "kind": "feature",
-                  "description": "Causal conv with dilation.",
-                  "related_to": ["receptive_field", "temporal_context"]}]
+        vocab = [
+            {
+                "name": "dilated_causal_conv",
+                "kind": "feature",
+                "description": "Causal conv with dilation.",
+                "related_to": ["receptive_field", "temporal_context"],
+            }
+        ]
         block = MLModelProposalAgent._render_vocabulary(vocab)
         assert "→ enables: receptive_field, temporal_context" in block
 
     def test_capability_with_single_link_shows_enabled_by(self):
-        vocab = [{"name": "receptive_field", "kind": "capability",
-                  "description": "How far back the model can see.",
-                  "related_to": ["dilated_causal_conv"]}]
+        vocab = [
+            {
+                "name": "receptive_field",
+                "kind": "capability",
+                "description": "How far back the model can see.",
+                "related_to": ["dilated_causal_conv"],
+            }
+        ]
         block = MLModelProposalAgent._render_vocabulary(vocab)
         assert "← enabled by: dilated_causal_conv" in block
 
     def test_capability_no_related_to_has_no_arrow(self):
-        vocab = [{"name": "receptive_field", "kind": "capability",
-                  "description": "How far back the model can see.",
-                  "related_to": []}]
+        vocab = [
+            {
+                "name": "receptive_field",
+                "kind": "capability",
+                "description": "How far back the model can see.",
+                "related_to": [],
+            }
+        ]
         block = MLModelProposalAgent._render_vocabulary(vocab)
         assert "← enabled by" not in block
 
     def test_none_related_to_treated_as_empty(self):
         """related_to=None should behave identically to related_to=[]."""
-        vocab = [{"name": "dilated_causal_conv", "kind": "feature",
-                  "description": "Causal conv.",
-                  "related_to": None}]
+        vocab = [
+            {
+                "name": "dilated_causal_conv",
+                "kind": "feature",
+                "description": "Causal conv.",
+                "related_to": None,
+            }
+        ]
         block = MLModelProposalAgent._render_vocabulary(vocab)
         assert "→ enables" not in block
 
@@ -337,9 +371,12 @@ class TestRenderVocabularyLinks:
             description="FFT conv.",
             related_to=["frequency_resolution"],
         )
-        dict_entry = {"name": "receptive_field", "kind": "capability",
-                      "description": "Temporal coverage.",
-                      "related_to": ["dilated_causal_conv"]}
+        dict_entry = {
+            "name": "receptive_field",
+            "kind": "capability",
+            "description": "Temporal coverage.",
+            "related_to": ["dilated_causal_conv"],
+        }
         block = MLModelProposalAgent._render_vocabulary([pydantic_entry, dict_entry])
         assert "→ enables: frequency_resolution" in block
         assert "← enabled by: dilated_causal_conv" in block
@@ -348,6 +385,7 @@ class TestRenderVocabularyLinks:
 # ===========================================================================
 # Group 3 — n_confirmed_links: template variable computed from vocab_seed
 # ===========================================================================
+
 
 class TestNConfirmedLinksTemplateVar:
     """n_confirmed_links is substituted into the Stage 1 system prompt (exploit mode).
@@ -360,74 +398,107 @@ class TestNConfirmedLinksTemplateVar:
 
     def test_n_confirmed_links_zero_when_no_related_to(self, tmp_path):
         vocab_seed = [
-            {"name": "dilated_causal_conv", "kind": "feature",
-             "description": "Causal conv.", "related_to": []},
-            {"name": "spectral_conv", "kind": "feature",
-             "description": "FFT conv.", "related_to": []},
+            {
+                "name": "dilated_causal_conv",
+                "kind": "feature",
+                "description": "Causal conv.",
+                "related_to": [],
+            },
+            {
+                "name": "spectral_conv",
+                "kind": "feature",
+                "description": "FFT conv.",
+                "related_to": [],
+            },
         ]
         interp = _minimal_interp(
             model_types=["wavenet", "punet", "m1", "m2", "m3", "m4", "m5"],
         )
         agent, mock = _make_agent_with_mock()
-        inp = _pipeline_input(tmp_path, interp, vocab_seed=vocab_seed,
-                              exploration_mode="exploit")
+        inp = _pipeline_input(tmp_path, interp, vocab_seed=vocab_seed, exploration_mode="exploit")
         sys_prompt = self._stage1_system_prompt(agent, mock, inp)
         assert "0 confirmed" in sys_prompt
 
     def test_n_confirmed_links_counts_entries_with_related_to(self, tmp_path):
         vocab_seed = [
             # 2 entries with confirmed links
-            {"name": "dilated_causal_conv", "kind": "feature",
-             "description": "Causal conv.", "related_to": ["receptive_field"]},
-            {"name": "spectral_conv", "kind": "feature",
-             "description": "FFT conv.", "related_to": ["frequency_resolution"]},
+            {
+                "name": "dilated_causal_conv",
+                "kind": "feature",
+                "description": "Causal conv.",
+                "related_to": ["receptive_field"],
+            },
+            {
+                "name": "spectral_conv",
+                "kind": "feature",
+                "description": "FFT conv.",
+                "related_to": ["frequency_resolution"],
+            },
             # 1 entry without links
-            {"name": "gated_activation", "kind": "feature",
-             "description": "Gated activation.", "related_to": []},
+            {
+                "name": "gated_activation",
+                "kind": "feature",
+                "description": "Gated activation.",
+                "related_to": [],
+            },
         ]
         interp = _minimal_interp(
             model_types=["wavenet", "punet", "m1", "m2", "m3", "m4", "m5"],
         )
         agent, mock = _make_agent_with_mock()
-        inp = _pipeline_input(tmp_path, interp, vocab_seed=vocab_seed,
-                              exploration_mode="exploit")
+        inp = _pipeline_input(tmp_path, interp, vocab_seed=vocab_seed, exploration_mode="exploit")
         sys_prompt = self._stage1_system_prompt(agent, mock, inp)
         assert "2 confirmed" in sys_prompt
 
     def test_n_confirmed_links_works_with_pydantic_objects(self, tmp_path):
         """VocabEntry Pydantic objects must be counted correctly."""
         vocab_seed = [
-            VocabEntry(name="spectral_conv", kind="feature",
-                       description="FFT conv.",
-                       related_to=["frequency_resolution"]),
-            VocabEntry(name="dilated_causal_conv", kind="feature",
-                       description="Causal conv.",
-                       related_to=[]),
+            VocabEntry(
+                name="spectral_conv",
+                kind="feature",
+                description="FFT conv.",
+                related_to=["frequency_resolution"],
+            ),
+            VocabEntry(
+                name="dilated_causal_conv",
+                kind="feature",
+                description="Causal conv.",
+                related_to=[],
+            ),
         ]
         interp = _minimal_interp(
             model_types=["wavenet", "punet", "m1", "m2", "m3", "m4", "m5"],
         )
         agent, mock = _make_agent_with_mock()
-        inp = _pipeline_input(tmp_path, interp, vocab_seed=vocab_seed,
-                              exploration_mode="exploit")
+        inp = _pipeline_input(tmp_path, interp, vocab_seed=vocab_seed, exploration_mode="exploit")
         sys_prompt = self._stage1_system_prompt(agent, mock, inp)
         assert "1 confirmed" in sys_prompt
 
     def test_n_confirmed_links_mixed_pydantic_and_dict(self, tmp_path):
         vocab_seed = [
-            VocabEntry(name="spectral_conv", kind="feature",
-                       description="FFT conv.",
-                       related_to=["frequency_resolution"]),
-            {"name": "dilated_causal_conv", "kind": "feature",
-             "description": "Causal conv.", "related_to": ["receptive_field"]},
-            {"name": "gated_activation", "kind": "feature",
-             "description": "Gated.", "related_to": []},
+            VocabEntry(
+                name="spectral_conv",
+                kind="feature",
+                description="FFT conv.",
+                related_to=["frequency_resolution"],
+            ),
+            {
+                "name": "dilated_causal_conv",
+                "kind": "feature",
+                "description": "Causal conv.",
+                "related_to": ["receptive_field"],
+            },
+            {
+                "name": "gated_activation",
+                "kind": "feature",
+                "description": "Gated.",
+                "related_to": [],
+            },
         ]
         interp = _minimal_interp(
             model_types=["wavenet", "punet", "m1", "m2", "m3", "m4", "m5"],
         )
         agent, mock = _make_agent_with_mock()
-        inp = _pipeline_input(tmp_path, interp, vocab_seed=vocab_seed,
-                              exploration_mode="exploit")
+        inp = _pipeline_input(tmp_path, interp, vocab_seed=vocab_seed, exploration_mode="exploit")
         sys_prompt = self._stage1_system_prompt(agent, mock, inp)
         assert "2 confirmed" in sys_prompt

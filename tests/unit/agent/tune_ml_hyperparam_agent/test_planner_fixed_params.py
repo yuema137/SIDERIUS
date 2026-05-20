@@ -14,10 +14,11 @@ Validates:
     - Block present and references the SYSTEM-FIXED PARAMETERS heading when set
     - Override values appear verbatim in the rendered prompt
 """
+
 from agent.prompts import _format_fixed_params_block, get_planner_user_prompt
 
-
 # ---- _format_fixed_params_block ----
+
 
 def test_empty_when_no_overrides_and_no_cap():
     assert _format_fixed_params_block(None, None) == ""
@@ -74,6 +75,7 @@ def test_workflow_default_overrides_render_all_lines():
 
 
 # ---- get_planner_user_prompt integration ----
+
 
 def test_planner_prompt_omits_block_when_no_overrides():
     prompt = get_planner_user_prompt(memory_history=[])

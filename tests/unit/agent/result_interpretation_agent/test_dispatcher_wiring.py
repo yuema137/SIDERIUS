@@ -22,6 +22,7 @@ Covers the four checks from
 LLM calls are mocked via the same fixture pattern as
 ``test_interpretation_agent.py`` (system-prompt-routed dispatcher).
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -33,7 +34,6 @@ from agent.schemas.interpretation import (
     ModelRunSummary,
 )
 from nodes.result_interpretation_agent import ResultInterpretationAgent
-
 
 # ---------------------------------------------------------------------------
 # Fixtures (mirror test_interpretation_agent.py patterns)
@@ -95,8 +95,8 @@ def agent():
 # Cache builders
 # ---------------------------------------------------------------------------
 
-def _make_cache_entry(model_type: str, best_score: float,
-                      completed_rounds: int = 3) -> dict:
+
+def _make_cache_entry(model_type: str, best_score: float, completed_rounds: int = 3) -> dict:
     """A self-sufficient cache entry mimicking what the agent writes after
     a per_model LLM call. Includes ``_stats.model_description`` so the
     description loader's Priority 2 path is taken — no filesystem hit."""
@@ -108,28 +108,23 @@ def _make_cache_entry(model_type: str, best_score: float,
         "bottlenecks": [
             f"{model_type}: capacity ceiling at depth=3",
         ],
-        "best_config_analysis": (
-            f"{model_type}: best at depth=4 with focal loss gamma=2."
-        ),
-        "score_trend": (
-            f"{model_type}: scores improved initially, then plateau."
-        ),
+        "best_config_analysis": (f"{model_type}: best at depth=4 with focal loss gamma=2."),
+        "score_trend": (f"{model_type}: scores improved initially, then plateau."),
         "_stats": {
-            "best_denoising_score":  best_score,
+            "best_denoising_score": best_score,
             "worst_denoising_score": best_score - 0.6,
-            "best_file_vector":      None,
-            "best_score_table":      None,
-            "best_model_params":     None,
-            "completed_rounds":      completed_rounds,
-            "best_config":           {"model_config": {}, "train_config": {}},
-            "formal_score":          None,
-            "model_description":     f"{model_type} description (synthetic).",
+            "best_file_vector": None,
+            "best_score_table": None,
+            "best_model_params": None,
+            "completed_rounds": completed_rounds,
+            "best_config": {"model_config": {}, "train_config": {}},
+            "formal_score": None,
+            "model_description": f"{model_type} description (synthetic).",
         },
     }
 
 
-def _make_summary(model_type: str, best_score: float,
-                  completed_rounds: int) -> ModelRunSummary:
+def _make_summary(model_type: str, best_score: float, completed_rounds: int) -> ModelRunSummary:
     return ModelRunSummary(
         model_type=model_type,
         run_name="vtest",
@@ -144,9 +139,15 @@ def _make_summary(model_type: str, best_score: float,
     )
 
 
-def _make_input(*, cache: dict, summaries: list, workspace: str,
-                top_k: int = 3, last_n: int = 0,
-                score_delta: float = 999.0) -> InterpretationInput:
+def _make_input(
+    *,
+    cache: dict,
+    summaries: list,
+    workspace: str,
+    top_k: int = 3,
+    last_n: int = 0,
+    score_delta: float = 999.0,
+) -> InterpretationInput:
     """Build an InterpretationInput with explicit Stability Filter knobs.
 
     Defaults disable Last-N (``last_n=0``) and Delta-Δ (``score_delta=999``)
@@ -170,6 +171,7 @@ def _make_input(*, cache: dict, summaries: list, workspace: str,
 # (1) per_model call-count regression — axis 2
 # ---------------------------------------------------------------------------
 
+
 def test_per_model_call_count_equals_active_set_size(agent, tmp_path):
     """12-model cache, 9 stable, 3 active → exactly 3 per_model LLM calls.
 
@@ -185,8 +187,7 @@ def test_per_model_call_count_equals_active_set_size(agent, tmp_path):
     ``interpretation.synthesis`` call = 4 total bridge.generate calls.
     """
     cache = {
-        f"m{i:02d}": _make_cache_entry(f"m{i:02d}", best_score=10.0 - i,
-                                       completed_rounds=3)
+        f"m{i:02d}": _make_cache_entry(f"m{i:02d}", best_score=10.0 - i, completed_rounds=3)
         for i in range(12)
     }
     # Pass new summaries ONLY for the top-3 (m00, m01, m02), each with
@@ -202,10 +203,8 @@ def test_per_model_call_count_equals_active_set_size(agent, tmp_path):
 
     # Split the recorded LLM calls by label kwarg.
     calls = agent.bridge.generate.call_args_list
-    per_model_calls = [c for c in calls
-                       if c.kwargs.get("label") == "interpretation.per_model"]
-    synthesis_calls = [c for c in calls
-                       if c.kwargs.get("label") == "interpretation.synthesis"]
+    per_model_calls = [c for c in calls if c.kwargs.get("label") == "interpretation.per_model"]
+    synthesis_calls = [c for c in calls if c.kwargs.get("label") == "interpretation.synthesis"]
 
     assert len(per_model_calls) == 3, (
         f"expected 3 per_model LLM calls (one per active model), "
@@ -218,8 +217,9 @@ def test_per_model_call_count_equals_active_set_size(agent, tmp_path):
     # list-merge for both non-empty list fields (key_findings + bottlenecks)
     # = 2 calls per active model. Total: 3 per_model + 3×2 consolidator + 1
     # synthesis = 10.
-    consolidator_calls = [c for c in calls
-                          if c.kwargs.get("label") == "cache_consolidator.list_merge"]
+    consolidator_calls = [
+        c for c in calls if c.kwargs.get("label") == "cache_consolidator.list_merge"
+    ]
     assert len(consolidator_calls) == 6, (
         f"expected 6 consolidator list-merge calls (2 per active model), "
         f"got {len(consolidator_calls)}"
@@ -231,14 +231,12 @@ def test_per_model_call_count_equals_active_set_size(agent, tmp_path):
 # (2) Audit-log: skipped calls produce countable marker rows
 # ---------------------------------------------------------------------------
 
+
 def test_skipped_calls_emit_audit_marker(agent, tmp_path):
     """Each skipped per_model call must call ``bridge.emit_marker`` with
     label ``interpretation.per_model_skipped`` and the right reason/mt
     extra payload, so build_token_baseline_report.py can count savings."""
-    cache = {
-        f"m{i:02d}": _make_cache_entry(f"m{i:02d}", best_score=10.0 - i)
-        for i in range(12)
-    }
+    cache = {f"m{i:02d}": _make_cache_entry(f"m{i:02d}", best_score=10.0 - i) for i in range(12)}
     active_mts = ["m00", "m01", "m02"]
     summaries = [
         _make_summary(mt, best_score=10.0 - i, completed_rounds=4)
@@ -267,23 +265,23 @@ def test_skipped_calls_emit_audit_marker(agent, tmp_path):
 # (3) Synthesis-prompt size regression — axis 1
 # ---------------------------------------------------------------------------
 
+
 def test_synthesis_prompt_size_under_15k_for_13_models(agent, tmp_path):
     """13-model cache (iter-13 of V12 mimicry): synthesis user prompt < 15 K
     chars. V12 baseline was ~40 K → target is at least a 2.6× compression.
     """
-    cache = {
-        f"m{i:02d}": _make_cache_entry(f"m{i:02d}", best_score=10.0 - i)
-        for i in range(13)
-    }
+    cache = {f"m{i:02d}": _make_cache_entry(f"m{i:02d}", best_score=10.0 - i) for i in range(13)}
     # No current summaries → active set = top-3 by cached score
     # (= {m00, m01, m02}); the other 10 are compressed.
-    inp = _make_input(cache=cache, summaries=[], workspace=str(tmp_path),
-                      top_k=3, last_n=0, score_delta=999.0)
+    inp = _make_input(
+        cache=cache, summaries=[], workspace=str(tmp_path), top_k=3, last_n=0, score_delta=999.0
+    )
     agent.run(inp)
 
     # Find the synthesis call's user prompt.
     synthesis_calls = [
-        c for c in agent.bridge.generate.call_args_list
+        c
+        for c in agent.bridge.generate.call_args_list
         if c.kwargs.get("label") == "interpretation.synthesis"
     ]
     assert len(synthesis_calls) == 1
@@ -303,6 +301,7 @@ def test_synthesis_prompt_size_under_15k_for_13_models(agent, tmp_path):
 # (4) Behavioural — every model_type appears in the synthesis prompt
 # ---------------------------------------------------------------------------
 
+
 def test_synthesis_prompt_mentions_every_model_type(agent, tmp_path):
     """Active = full block; compressed = one-liner under the historical
     header. Either way, every model_type must be visible in the synthesis
@@ -311,21 +310,21 @@ def test_synthesis_prompt_mentions_every_model_type(agent, tmp_path):
         f"arch_{i:02d}": _make_cache_entry(f"arch_{i:02d}", best_score=5.0 - i * 0.1)
         for i in range(13)
     }
-    inp = _make_input(cache=cache, summaries=[], workspace=str(tmp_path),
-                      top_k=3, last_n=0, score_delta=999.0)
+    inp = _make_input(
+        cache=cache, summaries=[], workspace=str(tmp_path), top_k=3, last_n=0, score_delta=999.0
+    )
     agent.run(inp)
 
     synthesis_calls = [
-        c for c in agent.bridge.generate.call_args_list
+        c
+        for c in agent.bridge.generate.call_args_list
         if c.kwargs.get("label") == "interpretation.synthesis"
     ]
     assert len(synthesis_calls) == 1
     user_prompt = synthesis_calls[0].args[1]
 
     missing = [mt for mt in cache if mt not in user_prompt]
-    assert not missing, (
-        f"these model_types are missing from the synthesis prompt: {missing}"
-    )
+    assert not missing, f"these model_types are missing from the synthesis prompt: {missing}"
 
     # The historical-block header is also present (T4 spec: a single line
     # at the top of the historical block).
@@ -334,6 +333,5 @@ def test_synthesis_prompt_mentions_every_model_type(agent, tmp_path):
     # expect 3 of those.
     full_block_count = user_prompt.count("## Model: ")
     assert full_block_count == 3, (
-        f"expected 3 full-block ## Model: headers (one per active), "
-        f"got {full_block_count}"
+        f"expected 3 full-block ## Model: headers (one per active), got {full_block_count}"
     )

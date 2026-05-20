@@ -19,6 +19,7 @@ Design principles (see ``docs/pseudo_test_infra.md`` §4B for the full story):
   * Public ``calls`` list for direct test inspection. No helper methods, no
     convenience assertion DSL — tests assert on ``bridge.calls[i]`` directly.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -39,7 +40,7 @@ class RecordingLLMBridge:
 
     def __init__(
         self,
-        responses: Optional[Dict[str, Any]] = None,
+        responses: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         # **kwargs accepts (and silently ignores) the real LLMBridge constructor
@@ -47,16 +48,16 @@ class RecordingLLMBridge:
         # reflect_model_id, etc. This makes RecordingLLMBridge a drop-in
         # replacement — the agent's `self._bridge_factory(**real_kwargs)` call
         # works without any test-side translation.
-        self._queues: Dict[str, List[Any]] = {}
+        self._queues: dict[str, list[Any]] = {}
         for method, value in (responses or {}).items():
             self._queues[method] = list(value) if isinstance(value, list) else [value]
-        self.calls: List[Tuple[Any, ...]] = []
+        self.calls: list[tuple[Any, ...]] = []
 
     # ------------------------------------------------------------------
     # Public LLM-call interface (mirrors LLMBridge)
     # ------------------------------------------------------------------
 
-    def generate(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
+    def generate(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
         """Mirror of :meth:`LLMBridge.generate`. Returns a parsed-dict response."""
         self.calls.append(("generate", system_prompt, user_prompt))
         return self._pop("generate")
@@ -65,18 +66,27 @@ class RecordingLLMBridge:
         self,
         exp_id: str,
         hypothesis: str,
-        results: Dict[str, Any],
-        context: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        results: dict[str, Any],
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
         """Mirror of :meth:`LLMBridge.reflect`. Returns a parsed-dict reflection."""
         self.calls.append(("reflect", exp_id, hypothesis, results, context))
         return self._pop("reflect")
 
-    def plan(self, memory_history, expert_advice="None", force_model="auto",
-             config_manual=None, model_description=None,
-             exploration_checklist="", plugin_source_excerpt="",
-             current_round=None, max_rounds=None, trial_allowed=True,
-             **kwargs) -> Dict[str, Any]:
+    def plan(
+        self,
+        memory_history,
+        expert_advice="None",
+        force_model="auto",
+        config_manual=None,
+        model_description=None,
+        exploration_checklist="",
+        plugin_source_excerpt="",
+        current_round=None,
+        max_rounds=None,
+        trial_allowed=True,
+        **kwargs,
+    ) -> dict[str, Any]:
         """Mirror of :meth:`LLMBridge.plan`. In the real bridge, ``plan``
         assembles a prompt and calls ``generate``. Here we record the call
         and pop from the ``"generate"`` queue (since the predefined response
@@ -101,9 +111,7 @@ class RecordingLLMBridge:
             "trial_allowed": trial_allowed,
             **kwargs,
         }
-        self.calls.append(
-            ("plan", memory_history, expert_advice, force_model, recorded_kwargs)
-        )
+        self.calls.append(("plan", memory_history, expert_advice, force_model, recorded_kwargs))
         return self._pop("generate")
 
     def generate_text(self, system_prompt: str, user_prompt: str) -> str:
@@ -115,7 +123,7 @@ class RecordingLLMBridge:
         self,
         system_prompt: str,
         user_prompt: str,
-        tools: List[Dict[str, Any]],
+        tools: list[dict[str, Any]],
     ) -> Any:
         """Mirror of :meth:`LLMBridge.tool_call`. Returns whatever the test
         registered (typically a ToolCallResult-shaped object or a dict)."""
@@ -148,7 +156,7 @@ class RecordingLLMBridge:
     # ------------------------------------------------------------------
 
     @classmethod
-    def for_agent(cls, agent_name: str) -> "RecordingLLMBridge":
+    def for_agent(cls, agent_name: str) -> RecordingLLMBridge:
         """Build a bridge pre-loaded with the canned outputs for an agent.
 
         Loads every ``*.json`` file under

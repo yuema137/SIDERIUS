@@ -19,6 +19,7 @@ These tests drive both helpers on hand-computed inputs so any drift in the
 formula (missing/extra round, wrong aggregation, wrong log base, wrong
 ruler, dropped floor) fails loudly.
 """
+
 from __future__ import annotations
 
 import math
@@ -29,14 +30,12 @@ from compute_ground_truth import (
     _global_per_file_ceiling,
 )
 
-
 # =============================================================================
 # _global_per_file_ceiling — per-file ceiling under the global s_max ruler
 # =============================================================================
 
 
 class TestGlobalPerFileCeiling:
-
     def test_hand_computed_scalar(self):
         """Anchors [1, 2, 3, 4], s_max=4:
 
@@ -91,9 +90,7 @@ class TestGlobalPerFileCeiling:
         assert log_small > log_large
         # Match the production formula exactly so the assertion stays
         # bit-tight; the +1e-10 floor shifts the delta by ~1e-11.
-        expected_delta = math.log(
-            (5.0 + 1e-10) / (2.5 + 1e-10), 5.27
-        )
+        expected_delta = math.log((5.0 + 1e-10) / (2.5 + 1e-10), 5.27)
         assert abs((log_small - log_large) - expected_delta) < 1e-12
 
 
@@ -103,7 +100,6 @@ class TestGlobalPerFileCeiling:
 
 
 class TestAnchorNormalizedCeiling:
-
     def test_uniform_files_grand_mean_equals_simple_mean(self):
         """Two files, 2 segments each, s_max = 4.
 
@@ -190,8 +186,8 @@ class TestAnchorNormalizedCeiling:
         expected = math.log(2.0 + 1e-10, 5.27)
         assert abs(scalar - expected) < 1e-12
         # Sanity guards against accidental base swaps:
-        assert abs(scalar - math.log(2.0)) > 1e-3     # not ln
-        assert abs(scalar - math.log10(2.0)) > 1e-3   # not log10
+        assert abs(scalar - math.log(2.0)) > 1e-3  # not ln
+        assert abs(scalar - math.log10(2.0)) > 1e-3  # not log10
 
 
 # =============================================================================
@@ -200,7 +196,6 @@ class TestAnchorNormalizedCeiling:
 
 
 class TestCrossConsistency:
-
     def test_per_file_agrees_with_file_vector(self):
         """Under the Option B global-s_max convention, the per-file log score
         is ``log_{5.27}(file_vector[f] + 1e-10)``. Phase 6.7 dropped the

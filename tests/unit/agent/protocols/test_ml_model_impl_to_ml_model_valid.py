@@ -17,20 +17,21 @@ Tests cover:
   database_all_fields
     - Raises NotImplementedError
 """
+
 import pytest
 
 from agent.schemas.implementor import ImplementorOutput
-from agent.schemas.validator import ValidatorInput
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import (
-    local_all_fields,
     database_all_fields,
+    local_all_fields,
 )
-
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from agent.schemas.validator import ValidatorInput
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def storage():
@@ -57,8 +58,8 @@ def implementor_output():
 # local_all_fields
 # ---------------------------------------------------------------------------
 
-class TestLocalAllFields:
 
+class TestLocalAllFields:
     def test_baseline_all_fields_pass_through(self, implementor_output, storage):
         """Single multi-assertion baseline: every ImplementorOutput field
         must thread through to the matching ValidatorInput field, plus
@@ -89,16 +90,22 @@ class TestLocalAllFields:
     @pytest.mark.parametrize(
         "kwargs, expected_attr, expected_value",
         [
-            pytest.param({}, "llm_provider", "gemini",
-                         id="default_llm_provider_is_gemini"),
-            pytest.param({"llm_provider": "openai"}, "llm_provider", "openai",
-                         id="custom_llm_provider"),
-            pytest.param({"llm_model_id": "gpt-4o"}, "llm_model_id", "gpt-4o",
-                         id="custom_llm_model_id"),
+            pytest.param({}, "llm_provider", "gemini", id="default_llm_provider_is_gemini"),
+            pytest.param(
+                {"llm_provider": "openai"}, "llm_provider", "openai", id="custom_llm_provider"
+            ),
+            pytest.param(
+                {"llm_model_id": "gpt-4o"}, "llm_model_id", "gpt-4o", id="custom_llm_model_id"
+            ),
         ],
     )
     def test_llm_kwargs_default_or_override(
-        self, implementor_output, storage, kwargs, expected_attr, expected_value,
+        self,
+        implementor_output,
+        storage,
+        kwargs,
+        expected_attr,
+        expected_value,
     ):
         """LLM-knob contract: ``llm_provider`` falls back to "gemini" when
         the caller omits it, and both ``llm_provider`` / ``llm_model_id``
@@ -112,8 +119,8 @@ class TestLocalAllFields:
 # database_all_fields
 # ---------------------------------------------------------------------------
 
-class TestDatabaseAllFields:
 
+class TestDatabaseAllFields:
     def test_raises_not_implemented(self, implementor_output, storage):
         with pytest.raises(NotImplementedError):
             database_all_fields(implementor_output, storage)

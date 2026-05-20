@@ -31,9 +31,7 @@ import json
 import os
 import re
 import tempfile
-from datetime import datetime, timezone
-from typing import Optional
-
+from datetime import UTC, datetime
 
 # Asymmetric EMA constants (§2.6.5). α_up > α_down so under-prediction
 # (the expensive failure mode) corrects faster than over-prediction.
@@ -72,9 +70,7 @@ def gpu_slug(gpu_name: str) -> str:
 
 
 def calibration_path(gpu_name: str) -> str:
-    return os.path.join(
-        calibration_dir(), f"time_calibration_{gpu_slug(gpu_name)}.json"
-    )
+    return os.path.join(calibration_dir(), f"time_calibration_{gpu_slug(gpu_name)}.json")
 
 
 def _empty_table(gpu_name: str) -> dict:
@@ -92,7 +88,7 @@ def load_table(gpu_name: str) -> dict:
     if not os.path.isfile(path):
         return _empty_table(gpu_name)
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
     except (json.JSONDecodeError, OSError):
         return _empty_table(gpu_name)
@@ -108,9 +104,7 @@ def save_table(gpu_name: str, table: dict) -> None:
     can never corrupt the on-disk copy."""
     path = calibration_path(gpu_name)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(
-        prefix=os.path.basename(path) + ".", dir=os.path.dirname(path)
-    )
+    fd, tmp_path = tempfile.mkstemp(prefix=os.path.basename(path) + ".", dir=os.path.dirname(path))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(table, f, indent=2, sort_keys=True)
@@ -139,7 +133,7 @@ def lookup_k(table: dict, model_type: str) -> float:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def make_entry(
@@ -154,24 +148,20 @@ def make_entry(
     actual_minutes: float,
 ) -> dict:
     """Build the canonical history-entry dict from a completed run."""
-    ratio = (
-        actual_ms_per_step / warmup_ms_per_step
-        if warmup_ms_per_step > 0
-        else 1.0
-    )
+    ratio = actual_ms_per_step / warmup_ms_per_step if warmup_ms_per_step > 0 else 1.0
     return {
-        "gpu_name":            gpu_name,
-        "model_type":          model_type,
-        "seg_size":            int(seg_size),
-        "batch_size":          int(batch_size),
-        "total_steps":         int(total_steps),
-        "warmup_ms_per_step":  round(float(warmup_ms_per_step), 4),
-        "actual_ms_per_step":  round(float(actual_ms_per_step), 4),
-        "ratio":               round(float(ratio), 4),
-        "estimated_minutes":   round(float(estimated_minutes), 4),
-        "actual_minutes":      round(float(actual_minutes), 4),
-        "estimate_violated":   actual_minutes > estimated_minutes,
-        "timestamp":           _now_iso(),
+        "gpu_name": gpu_name,
+        "model_type": model_type,
+        "seg_size": int(seg_size),
+        "batch_size": int(batch_size),
+        "total_steps": int(total_steps),
+        "warmup_ms_per_step": round(float(warmup_ms_per_step), 4),
+        "actual_ms_per_step": round(float(actual_ms_per_step), 4),
+        "ratio": round(float(ratio), 4),
+        "estimated_minutes": round(float(estimated_minutes), 4),
+        "actual_minutes": round(float(actual_minutes), 4),
+        "estimate_violated": actual_minutes > estimated_minutes,
+        "timestamp": _now_iso(),
     }
 
 
@@ -202,7 +192,7 @@ def update_k(table: dict, entry: dict) -> dict:
     return table
 
 
-def detect_drift(table: dict, last_n: int = 3) -> Optional[str]:
+def detect_drift(table: dict, last_n: int = 3) -> str | None:
     """Warning string when the last ``last_n`` history entries all violated
     their estimates — a signal the EMA can't track smoothly (driver upgrade,
     partition switch, neighboring job hogging the node). User intervention

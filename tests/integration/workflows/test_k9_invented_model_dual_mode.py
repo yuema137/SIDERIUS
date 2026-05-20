@@ -34,9 +34,11 @@ Run with:
   .venv/bin/pytest tests/integration/workflows/test_k9_invented_model_dual_mode.py -v -s
   .venv/bin/pytest tests/integration/workflows/test_k9_invented_model_dual_mode.py -v -s --real-llm
 """
+
 from __future__ import annotations
 
 import os
+
 import pytest
 from dotenv import load_dotenv
 
@@ -44,7 +46,7 @@ from agent.schemas.hyperparam_tuning import (
     HyperparamTuningInput,
     HyperparamTuningOutput,
 )
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 
 load_dotenv()
@@ -71,12 +73,13 @@ def _register_k9_plugin(monkeypatch, request):
     plugin_dir_abs = os.path.abspath(_PLUGIN_DIR_REL)
     monkeypatch.setenv("SIDERIUS_PLUGIN_DIRS", plugin_dir_abs)
 
-    from ml_models.models_sandbox import MODEL_REGISTRY
     from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
+    from ml_models.models_sandbox import MODEL_REGISTRY
     from ml_models.plugin_loader import (
-        extend_registries,
         PLUGIN_OUTPUT_TYPE_REGISTRY,
+        extend_registries,
     )
+
     loaded = extend_registries(MODEL_REGISTRY, PLUGIN_CONFIG_REGISTRY)
 
     def _cleanup():
@@ -98,6 +101,7 @@ def _disable_sleeps(monkeypatch):
     keeps wall-clock under a second.
     """
     import time as _time
+
     monkeypatch.setattr(_time, "sleep", lambda *a, **kw: None)
 
 
@@ -112,18 +116,17 @@ def _mock_cuda(monkeypatch):
     deterministic on machines without a real GPU.
     """
     import torch
+
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(
         torch.cuda,
         "mem_get_info",
-        lambda *a, **kw: (20 * 1024 ** 3, 32 * 1024 ** 3),
+        lambda *a, **kw: (20 * 1024**3, 32 * 1024**3),
     )
 
 
 @pytest.mark.dual_mode
-def test_invented_model_type_triggers_k2_5_8_fallback_path(
-    tmp_path, request, monkeypatch, capsys
-):
+def test_invented_model_type_triggers_k2_5_8_fallback_path(tmp_path, request, monkeypatch, capsys):
     """K.9 — agent runs the 2-round invented-model_type loop end-to-end.
 
     Layered assertions (mirrors the K.8.1 evidence layout):
@@ -143,10 +146,10 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(
                 ``consecutive_fail_rounds_at_exit == 0`` (Phase L);
                 best score populated from the canned sandbox.
     """
+    from agent.llm_bridge import LLMBridge
     from tests.conftest import _is_real_llm, _is_real_training
     from tests.helpers.recording_llm_bridge import RecordingLLMBridge
     from tests.helpers.recording_sandbox import RecordingSandbox
-    from agent.llm_bridge import LLMBridge
 
     _register_k9_plugin(monkeypatch, request)
     _mock_cuda(monkeypatch)
@@ -213,9 +216,7 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(
         )
         sandbox_factory = lambda **kw: sandbox
 
-    agent = HyperparamTuningAgent(
-        bridge_factory=bridge_factory, sandbox_factory=sandbox_factory
-    )
+    agent = HyperparamTuningAgent(bridge_factory=bridge_factory, sandbox_factory=sandbox_factory)
 
     output = agent.run(agent_input)
 
@@ -247,9 +248,7 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(
     assert _PLUGIN_MODEL_TYPE in stdout, (
         f"Warning line should cite the invented model_type {_PLUGIN_MODEL_TYPE!r}."
     )
-    assert "(25)" in stdout, (
-        "Warning should cite the runtime fallback inference_batch (25)."
-    )
+    assert "(25)" in stdout, "Warning should cite the runtime fallback inference_batch (25)."
     # Verdict line printed by the wrapper after the warning. Both 'YES' (round 2
     # fits) and 'NO' (round 1 over budget) outcomes are reachable here.
     assert "Feasible" in stdout, "Gate should print a verdict line after the warning."
@@ -265,12 +264,9 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(
         assert len(output.all_records) == 3
         oom_records = [r for r in output.all_records if r.status == "skipped_oom_risk"]
         success_records = [r for r in output.all_records if r.status == "success"]
-        assert len(oom_records) == 1, (
-            "Round 1 attempt 1 should be the only OOM-skipped record."
-        )
+        assert len(oom_records) == 1, "Round 1 attempt 1 should be the only OOM-skipped record."
         assert len(success_records) == 2, (
-            "Round 1 attempt 2 (trial) and round 2 attempt 1 (formal) "
-            "should both succeed."
+            "Round 1 attempt 2 (trial) and round 2 attempt 1 (formal) should both succeed."
         )
         oom_record = oom_records[0]
         # success_records[0] = round 1 attempt 2 (trial); [1] = round 2 (formal).
@@ -353,8 +349,7 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(
         h_attempt1 = oom_record.params["model_config"]["hidden_dim"]
         h_attempt2 = success_record.params["model_config"]["hidden_dim"]
         assert h_attempt2 < h_attempt1, (
-            f"Attempt 2 should react by lowering hidden_dim; "
-            f"got {h_attempt1} → {h_attempt2}."
+            f"Attempt 2 should react by lowering hidden_dim; got {h_attempt1} → {h_attempt2}."
         )
 
     # ------------------------------------------------------------------

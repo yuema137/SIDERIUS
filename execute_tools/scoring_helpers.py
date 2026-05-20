@@ -24,7 +24,6 @@ Two entry points:
 from __future__ import annotations
 
 import math
-from typing import List, Optional
 
 from agent.schemas.score_table import (
     AggregateScalars,
@@ -34,7 +33,6 @@ from agent.schemas.score_table import (
 from execute_tools.dataset_config import NUM_FILES
 from nodes.scoring_reference import ReferenceScores
 
-
 _LOG_BASE = 5.27
 _LOG_OFFSET = 1e-10
 
@@ -43,12 +41,13 @@ _LOG_OFFSET = 1e-10
 # file_vector_to_log_space
 # ---------------------------------------------------------------------------
 
+
 def file_vector_to_log_space(
-    file_vector_linear: List[Optional[float]],
+    file_vector_linear: list[float | None],
     *,
     base: float = _LOG_BASE,
     offset: float = _LOG_OFFSET,
-) -> List[Optional[float]]:
+) -> list[float | None]:
     """Convert a linear-space per-file vector to log-space.
 
     ``execute_tools.scoring_utils.score_vector`` returns the per-file
@@ -85,7 +84,7 @@ def file_vector_to_log_space(
     expected from the score formula but are clipped defensively) are
     treated as zero before applying the offset.
     """
-    out: List[Optional[float]] = []
+    out: list[float | None] = []
     for v in file_vector_linear:
         if v is None:
             out.append(None)
@@ -99,14 +98,15 @@ def file_vector_to_log_space(
 # build_score_table
 # ---------------------------------------------------------------------------
 
+
 def build_score_table(
-    model_fv_log: List[Optional[float]],
-    model_scalar: Optional[float],
+    model_fv_log: list[float | None],
+    model_scalar: float | None,
     reference: ReferenceScores,
     *,
-    model_fv_linear: Optional[List[Optional[float]]] = None,
+    model_fv_linear: list[float | None] | None = None,
     reference_source: str = "reference_data/raw_and_ground_score.md",
-) -> Optional[ScoreComparisonTable]:
+) -> ScoreComparisonTable | None:
     """Assemble a ``ScoreComparisonTable`` for one run's file_vector.
 
     Parameters
@@ -140,13 +140,9 @@ def build_score_table(
     if model_scalar is None:
         return None
     if len(model_fv_log) != 20:
-        raise ValueError(
-            f"model_fv_log must have length 20, got {len(model_fv_log)}."
-        )
+        raise ValueError(f"model_fv_log must have length 20, got {len(model_fv_log)}.")
     if model_fv_linear is not None and len(model_fv_linear) != 20:
-        raise ValueError(
-            f"model_fv_linear must have length 20, got {len(model_fv_linear)}."
-        )
+        raise ValueError(f"model_fv_linear must have length 20, got {len(model_fv_linear)}.")
 
     sampled_indices = [i for i, v in enumerate(model_fv_log) if v is not None]
     if not sampled_indices:
@@ -163,8 +159,7 @@ def build_score_table(
     # ``file_vector_to_log_space``: ``v_linear = base**v_log - offset``.
     if model_fv_linear is None:
         model_fv_linear = [
-            (float(_LOG_BASE) ** v - _LOG_OFFSET) if v is not None else None
-            for v in model_fv_log
+            (float(_LOG_BASE) ** v - _LOG_OFFSET) if v is not None else None for v in model_fv_log
         ]
 
     weights, impacts = _compute_weight_and_impact(
@@ -195,13 +190,13 @@ def build_score_table(
 
 
 def _build_rows(
-    model_fv_log: List[Optional[float]],
+    model_fv_log: list[float | None],
     reference: ReferenceScores,
     *,
-    weights: Optional[List[Optional[float]]] = None,
-    impacts: Optional[List[Optional[float]]] = None,
-) -> List[PerFileRow]:
-    rows: List[PerFileRow] = []
+    weights: list[float | None] | None = None,
+    impacts: list[float | None] | None = None,
+) -> list[PerFileRow]:
+    rows: list[PerFileRow] = []
     for i in range(NUM_FILES):
         raw = reference.raw_per_file_log[i]
         gt = reference.gt_per_file_log[i]
@@ -222,9 +217,7 @@ def _build_rows(
         # zero so the column means exactly one thing the LLM can act on.
         # The "ceiling reached / dead zone" diagnostic is conveyed
         # separately by P1 (gt-at-floor partition), not by this column.
-        headroom = (
-            max(gt - m, 0.0) if (m is not None and gt is not None) else None
-        )
+        headroom = max(gt - m, 0.0) if (m is not None and gt is not None) else None
         rows.append(
             PerFileRow(
                 file_index=i,
@@ -242,10 +235,10 @@ def _build_rows(
 
 def _compute_weight_and_impact(
     *,
-    sampled_indices: List[int],
-    model_fv_linear: List[Optional[float]],
+    sampled_indices: list[int],
+    model_fv_linear: list[float | None],
     reference: ReferenceScores,
-) -> tuple[List[Optional[float]], List[Optional[float]]]:
+) -> tuple[list[float | None], list[float | None]]:
     """Per-file Linear_Weight and Impact_Score over the sampled subset.
 
     Returns two length-NUM_FILES lists (``weights``, ``impacts``) with
@@ -266,8 +259,8 @@ def _compute_weight_and_impact(
     project ever supports per-run-variable file shapes, the model's own
     n_segments must be threaded in instead.
     """
-    weights: List[Optional[float]] = [None] * NUM_FILES
-    impacts: List[Optional[float]] = [None] * NUM_FILES
+    weights: list[float | None] = [None] * NUM_FILES
+    impacts: list[float | None] = [None] * NUM_FILES
 
     if not sampled_indices:
         return weights, impacts
@@ -276,7 +269,7 @@ def _compute_weight_and_impact(
     # (model linear mean + reference n_segments + reference gt linear sum).
     # Path-A always fills the reference, so this guard exists only for
     # malformed test fixtures or partially-loaded reference bundles.
-    means: List[float] = []
+    means: list[float] = []
     for i in sampled_indices:
         m = model_fv_linear[i]
         n = reference.gt_per_file_n_segments[i]
@@ -306,8 +299,8 @@ def _compute_weight_and_impact(
     # Impact_Score: log-space gain if file f were lifted to its gt ceiling,
     # holding the other sampled files fixed. Computed in linear-sum space
     # to match _aggregate_over_subset's grand-mean denominator.
-    n_per_file_n: List[int] = [0] * NUM_FILES
-    n_per_file_linear_sum: List[float] = [0.0] * NUM_FILES
+    n_per_file_n: list[int] = [0] * NUM_FILES
+    n_per_file_linear_sum: list[float] = [0.0] * NUM_FILES
     for i in sampled_indices:
         n_per_file_n[i] = int(reference.gt_per_file_n_segments[i])
         n_per_file_linear_sum[i] = float(model_fv_linear[i]) * n_per_file_n[i]
@@ -319,7 +312,8 @@ def _compute_weight_and_impact(
 
     grand_mean_current = total_linear / total_n
     log_current = math.log(
-        max(grand_mean_current, 0.0) + _LOG_OFFSET, _LOG_BASE,
+        max(grand_mean_current, 0.0) + _LOG_OFFSET,
+        _LOG_BASE,
     )
 
     for i in sampled_indices:
@@ -328,7 +322,8 @@ def _compute_weight_and_impact(
         swapped = total_linear - n_per_file_linear_sum[i] + gt_sum
         gm_after = swapped / total_n
         log_after = math.log(
-            max(gm_after, 0.0) + _LOG_OFFSET, _LOG_BASE,
+            max(gm_after, 0.0) + _LOG_OFFSET,
+            _LOG_BASE,
         )
         # Clip to non-negative: a model that over-amplifies file i above
         # its gt ceiling would produce a negative raw delta when swapped
@@ -342,22 +337,14 @@ def _compute_weight_and_impact(
 
 def _aggregate_over_subset(
     *,
-    sampled_indices: List[int],
+    sampled_indices: list[int],
     model_scalar: float,
     reference: ReferenceScores,
 ) -> AggregateScalars:
-    raw_total_linear = sum(
-        reference.raw_per_file_linear_sum[i] for i in sampled_indices
-    )
-    raw_total_n = sum(
-        reference.raw_per_file_n_segments[i] for i in sampled_indices
-    )
-    gt_total_linear = sum(
-        reference.gt_per_file_linear_sum[i] for i in sampled_indices
-    )
-    gt_total_n = sum(
-        reference.gt_per_file_n_segments[i] for i in sampled_indices
-    )
+    raw_total_linear = sum(reference.raw_per_file_linear_sum[i] for i in sampled_indices)
+    raw_total_n = sum(reference.raw_per_file_n_segments[i] for i in sampled_indices)
+    gt_total_linear = sum(reference.gt_per_file_linear_sum[i] for i in sampled_indices)
+    gt_total_n = sum(reference.gt_per_file_n_segments[i] for i in sampled_indices)
 
     raw_scalar = _grand_mean_log_scalar(raw_total_linear, raw_total_n)
     gt_scalar = _grand_mean_log_scalar(gt_total_linear, gt_total_n)
@@ -430,31 +417,23 @@ def render_comparison_table(table: ScoreComparisonTable) -> str:
     Pure function (does not mutate the input). The table.rendered_markdown
     field is populated with the output of this function by ``build_score_table``.
     """
-    lines: List[str] = [_HEADER]
+    lines: list[str] = [_HEADER]
     for row in table.rows:
         lines.append(_render_row(row))
 
     lines.append("")
     lines.append(_AGG_HEADER)
     agg = table.aggregate
-    lines.append(
-        f"| ground_truth ceiling | {_fmt_log(agg.ground_truth_scalar):>10} |"
-    )
-    lines.append(
-        f"| **model**            | **{_fmt_log(agg.model_scalar)}** |"
-    )
-    lines.append(
-        f"| raw baseline         | {_fmt_log(agg.raw_baseline_scalar):>10} |"
-    )
+    lines.append(f"| ground_truth ceiling | {_fmt_log(agg.ground_truth_scalar):>10} |")
+    lines.append(f"| **model**            | **{_fmt_log(agg.model_scalar)}** |")
+    lines.append(f"| raw baseline         | {_fmt_log(agg.raw_baseline_scalar):>10} |")
     lines.append("")
     if agg.model_scalar < agg.raw_baseline_scalar:
         # Below-baseline guard: when the model scores worse than the raw
         # baseline, the log-space ratio flips sign and the "% of ceiling"
         # framing is actively misleading (e.g. -108.3% of ceiling). Replace
         # with an honest one-liner the LLM can reason about directly.
-        lines.append(
-            "Recovery: < 0% (Model performance is below raw baseline)."
-        )
+        lines.append("Recovery: < 0% (Model performance is below raw baseline).")
     else:
         lines.append(
             f"Recovery: **{agg.percent_of_ceiling_log * 100:.1f}% of ceiling** "
@@ -476,9 +455,7 @@ def render_comparison_table(table: ScoreComparisonTable) -> str:
 
     if agg.num_sampled_files < 20:
         lines.append("")
-        lines.append(
-            f"_Note: scalars computed over {agg.num_sampled_files} sampled files._"
-        )
+        lines.append(f"_Note: scalars computed over {agg.num_sampled_files} sampled files._")
 
     return "\n".join(lines)
 
@@ -514,27 +491,19 @@ def _render_secondary_row(row: PerFileRow) -> str:
         _fmt_log(row.headroom_vs_gt),
         _fmt_log(row.model),
     ]
-    return (
-        f"| {cells[0]} "
-        f"| {cells[1]:>6} "
-        f"| {cells[2]:>8} "
-        f"| {cells[3]:>14} "
-        f"| {cells[4]:>6} |"
-    )
+    return f"| {cells[0]} | {cells[1]:>6} | {cells[2]:>8} | {cells[3]:>14} | {cells[4]:>6} |"
 
 
-def _fmt_pct(value: Optional[float]) -> str:
+def _fmt_pct(value: float | None) -> str:
     """Render a fraction in [0, 1] as a percent string with one decimal."""
     if value is None:
         return "N/A"
     if not math.isfinite(value):
-        return "NaN" if math.isnan(value) else (
-            "\u2212\u221E" if value < 0 else "\u221E"
-        )
+        return "NaN" if math.isnan(value) else ("\u2212\u221e" if value < 0 else "\u221e")
     return f"{value * 100:.1f}%"
 
 
-def _fmt_log(value: Optional[float]) -> str:
+def _fmt_log(value: float | None) -> str:
     if value is None:
         return "N/A"
     if not math.isfinite(value):
@@ -542,7 +511,7 @@ def _fmt_log(value: Optional[float]) -> str:
         # f-string emit "-inf.0000" garbage.
         if math.isnan(value):
             return "NaN"
-        return "\u2212\u221E" if value < 0 else "\u221E"
+        return "\u2212\u221e" if value < 0 else "\u221e"
     # Render negatives with a Unicode minus so columns align with the
     # reference_data/raw_and_ground_score.md table style.
     if value < 0:

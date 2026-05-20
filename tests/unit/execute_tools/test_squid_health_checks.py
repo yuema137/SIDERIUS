@@ -2,10 +2,10 @@
 
 from execute_tools.squid_health_checks import check_amplitude_collapse
 
-
 # ---------------------------------------------------------------------------
 # 1. Happy paths — the v7 collapse pattern and normal output
 # ---------------------------------------------------------------------------
+
 
 def test_collapse_detected_at_explore_v7_magnitude():
     """The exact collapse magnitudes observed on 2026-04-26 in
@@ -36,6 +36,7 @@ def test_normal_output_passes_through():
 # 2. Threshold semantics — strict <
 # ---------------------------------------------------------------------------
 
+
 def test_threshold_boundary_exactly_at_1pct_does_not_trip():
     """Strict ``<`` comparison: a ratio of exactly threshold_ratio is
     not a collapse. Operator-set thresholds get exact semantics."""
@@ -54,14 +55,16 @@ def test_threshold_just_below_trips():
 def test_custom_threshold_overrides_default():
     """A 5% threshold catches a 4%-of-reference output that the default
     (1%) would miss."""
-    file_vec = [4.0]   # 4% of reference
+    file_vec = [4.0]  # 4% of reference
     ref_vec = [100.0]
     # Default 1% — passes
     is_degen, _ = check_amplitude_collapse(file_vec, ref_vec)
     assert is_degen is False
     # Custom 5% — trips
     is_degen, reason = check_amplitude_collapse(
-        file_vec, ref_vec, threshold_ratio=0.05,
+        file_vec,
+        ref_vec,
+        threshold_ratio=0.05,
     )
     assert is_degen is True
     assert "5%" in reason  # threshold echoed in the reason
@@ -70,6 +73,7 @@ def test_custom_threshold_overrides_default():
 # ---------------------------------------------------------------------------
 # 3. Indeterminate inputs — fail safe to (False, None)
 # ---------------------------------------------------------------------------
+
 
 def test_no_reference_returns_false_safely():
     """Missing reference -> indeterminate -> safe pass-through."""
@@ -118,6 +122,7 @@ def test_none_entries_in_vectors_are_skipped():
 # 4. Failure-reason content — auditable by the operator + the LLM
 # ---------------------------------------------------------------------------
 
+
 def test_failure_reason_includes_actual_and_reference_magnitudes():
     """The failure_reason string must report both magnitudes so the
     operator can audit the call without re-deriving."""
@@ -131,8 +136,10 @@ def test_failure_reason_includes_ratio_and_threshold():
     """The ratio (in %) and the threshold (in %) must surface so the
     LLM understands how far off it was."""
     is_degen, reason = check_amplitude_collapse(
-        [0.5], [100.0], threshold_ratio=0.01,
+        [0.5],
+        [100.0],
+        threshold_ratio=0.01,
     )
     assert is_degen is True
     assert "0.500%" in reason or "0.5%" in reason  # ratio
-    assert "1%" in reason                          # threshold
+    assert "1%" in reason  # threshold

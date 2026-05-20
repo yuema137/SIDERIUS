@@ -17,20 +17,21 @@ Tests cover:
   database_full_context
     - Raises NotImplementedError (placeholder, not yet implemented)
 """
+
 import pytest
 
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.proposal import ProposalInput
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import (
-    local_full_context,
     database_full_context,
+    local_full_context,
 )
-
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def storage():
@@ -42,7 +43,7 @@ def storage():
 
 def make_interpretation_output(model_types):
     descriptions = {mt: f"{mt} description text" for mt in model_types}
-    per_best  = {mt: 1.5 for mt in model_types}
+    per_best = {mt: 1.5 for mt in model_types}
     per_worst = {mt: 0.8 for mt in model_types}
     return InterpretationOutput(
         model_types=model_types,
@@ -68,8 +69,8 @@ def interp_output():
 # local_full_context — baseline mapping + storage
 # ---------------------------------------------------------------------------
 
-class TestLocalFullContext:
 
+class TestLocalFullContext:
     def test_baseline_serialisation_and_storage_pass_through(self, storage):
         """Single multi-assertion baseline: every documented field of the
         InterpretationOutput must be present in the serialised
@@ -88,9 +89,7 @@ class TestLocalFullContext:
         # Every documented InterpretationOutput field round-trips.
         interp = result.interpretation
         assert interp["model_types"] == ["punet", "fcnet"]
-        assert interp["take_home_message"] == (
-            "A new architecture is needed to break the plateau."
-        )
+        assert interp["take_home_message"] == ("A new architecture is needed to break the plateau.")
         assert "model_descriptions" in interp
         assert "punet" in interp["model_descriptions"]
         assert interp["best_denoising_score"] == 1.5
@@ -128,43 +127,52 @@ class TestLocalFullContext:
 # + target_files=[N] when a single file is wanted.
 # ---------------------------------------------------------------------------
 
-class TestTimeBudgetContextFields:
 
+class TestTimeBudgetContextFields:
     @pytest.mark.parametrize(
         "kwarg, value, expected_attr, expected_value, side_check",
         [
-            pytest.param("is_trial",      True,           "is_trial",      True,            None,
-                         id="is_trial"),
-            pytest.param("trial_strategy", "target",      "trial_strategy", "target",       None,
-                         id="trial_strategy"),
-            pytest.param("trial_portion", 0.25,           "trial_portion", 0.25,            None,
-                         id="trial_portion"),
-            pytest.param("target_files",  [3, 7, 11],     "target_files",  [3, 7, 11],      None,
-                         id="target_files"),
-            pytest.param("train_portion", 0.5,            "train_portion", 0.5,             None,
-                         id="train_portion"),
-            pytest.param("sampling_seed", 1234,           "sampling_seed", 1234,            None,
-                         id="sampling_seed"),
-            pytest.param("data_dir",      "/data/tidmad", "data_dir",      "/data/tidmad",  None,
-                         id="data_dir"),
+            pytest.param("is_trial", True, "is_trial", True, None, id="is_trial"),
+            pytest.param(
+                "trial_strategy", "target", "trial_strategy", "target", None, id="trial_strategy"
+            ),
+            pytest.param("trial_portion", 0.25, "trial_portion", 0.25, None, id="trial_portion"),
+            pytest.param(
+                "target_files", [3, 7, 11], "target_files", [3, 7, 11], None, id="target_files"
+            ),
+            pytest.param("train_portion", 0.5, "train_portion", 0.5, None, id="train_portion"),
+            pytest.param("sampling_seed", 1234, "sampling_seed", 1234, None, id="sampling_seed"),
+            pytest.param(
+                "data_dir", "/data/tidmad", "data_dir", "/data/tidmad", None, id="data_dir"
+            ),
             # Two-budget split: setting one budget leaves the other at None.
             pytest.param(
-                "trial_time_budget_minutes", 45.0,
-                "trial_time_budget_minutes", 45.0,
+                "trial_time_budget_minutes",
+                45.0,
+                "trial_time_budget_minutes",
+                45.0,
                 ("formal_time_budget_minutes", None),
                 id="trial_time_budget_only",
             ),
             pytest.param(
-                "formal_time_budget_minutes", 240.0,
-                "formal_time_budget_minutes", 240.0,
+                "formal_time_budget_minutes",
+                240.0,
+                "formal_time_budget_minutes",
+                240.0,
                 ("trial_time_budget_minutes", None),
                 id="formal_time_budget_only",
             ),
         ],
     )
     def test_single_kwarg_passes_through(
-        self, storage, interp_output, kwarg, value, expected_attr,
-        expected_value, side_check,
+        self,
+        storage,
+        interp_output,
+        kwarg,
+        value,
+        expected_attr,
+        expected_value,
+        side_check,
     ):
         """Each run-level kwarg flows through the protocol untouched. The
         defensive shield: if a future contributor stops mapping any of
@@ -182,7 +190,8 @@ class TestTimeBudgetContextFields:
         protocol mapping with their own values, no cross-contamination.
         Sibling to the two single-budget parametrized cases above."""
         result = local_full_context(
-            interp_output, storage,
+            interp_output,
+            storage,
             trial_time_budget_minutes=30.0,
             formal_time_budget_minutes=240.0,
         )
@@ -195,7 +204,8 @@ class TestTimeBudgetContextFields:
         what the validator->tuner edge will receive for the tuner's per-round
         gate (Phase I two-budget split)."""
         result = local_full_context(
-            interp_output, storage,
+            interp_output,
+            storage,
             is_trial=True,
             trial_strategy="target",
             trial_portion=0.5,
@@ -256,6 +266,7 @@ class TestTimeBudgetContextFields:
 # Replaces K.7.4's singular prior_tune_output test class.
 # ---------------------------------------------------------------------------
 
+
 class TestLocalFullContextRecentGateExhaustionsAggregation:
     """The protocol must iterate ``recent_tune_outputs``, extract each
     non-None ``gate_exhaustion``, and surface the resulting list (oldest
@@ -268,6 +279,7 @@ class TestLocalFullContextRecentGateExhaustionsAggregation:
     @pytest.fixture
     def gate_exhaustion(self):
         from agent.schemas.hyperparam_tuning import GateExhaustionInfo
+
         return GateExhaustionInfo(
             total_attempts=9,
             vram_gated_attempts=9,
@@ -287,6 +299,7 @@ class TestLocalFullContextRecentGateExhaustionsAggregation:
 
     def _second_gate_exhaustion(self):
         from agent.schemas.hyperparam_tuning import GateExhaustionInfo
+
         return GateExhaustionInfo(
             total_attempts=3,
             vram_gated_attempts=0,
@@ -306,6 +319,7 @@ class TestLocalFullContextRecentGateExhaustionsAggregation:
 
     def _make_tune_output(self, gate_exhaustion=None):
         from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
+
         return HyperparamTuningOutput(
             run_name="prev_iter",
             model_type="punet",
@@ -337,7 +351,9 @@ class TestLocalFullContextRecentGateExhaustionsAggregation:
         ],
     )
     def test_empty_aggregation_when_no_populated_gate_exhaustion(
-        self, storage, priors_factory,
+        self,
+        storage,
+        priors_factory,
     ):
         """Two routes to an empty ``recent_gate_exhaustions``: caller omits
         the kwarg entirely, OR caller passes prior outputs that all carry
@@ -359,6 +375,7 @@ class TestLocalFullContextRecentGateExhaustionsAggregation:
         has length 1. Filtering must drop the None entries, not substitute
         placeholders."""
         from agent.schemas.hyperparam_tuning import GateExhaustionInfo
+
         output = make_interpretation_output(["punet"])
         priors = [
             self._make_tune_output(gate_exhaustion=None),
@@ -367,13 +384,8 @@ class TestLocalFullContextRecentGateExhaustionsAggregation:
         ]
         result = local_full_context(output, storage, recent_tune_outputs=priors)
         assert len(result.recent_gate_exhaustions) == 1
-        assert isinstance(
-            result.recent_gate_exhaustions[0], GateExhaustionInfo
-        )
-        assert (
-            result.recent_gate_exhaustions[0].model_dump()
-            == gate_exhaustion.model_dump()
-        )
+        assert isinstance(result.recent_gate_exhaustions[0], GateExhaustionInfo)
+        assert result.recent_gate_exhaustions[0].model_dump() == gate_exhaustion.model_dump()
 
     def test_preserves_oldest_first_order_for_multi_entry_aggregation(
         self, storage, gate_exhaustion
@@ -389,18 +401,10 @@ class TestLocalFullContextRecentGateExhaustionsAggregation:
         ]
         result = local_full_context(output, storage, recent_tune_outputs=priors)
         assert len(result.recent_gate_exhaustions) == 2
-        assert (
-            result.recent_gate_exhaustions[0].model_dump()
-            == gate_exhaustion.model_dump()
-        )
-        assert (
-            result.recent_gate_exhaustions[1].model_dump()
-            == second.model_dump()
-        )
+        assert result.recent_gate_exhaustions[0].model_dump() == gate_exhaustion.model_dump()
+        assert result.recent_gate_exhaustions[1].model_dump() == second.model_dump()
 
-    def test_kwarg_independent_of_other_pass_through_fields(
-        self, storage, gate_exhaustion
-    ):
+    def test_kwarg_independent_of_other_pass_through_fields(self, storage, gate_exhaustion):
         """Surfacing recent gate exhaustions must not silently reset any of
         the other workflow-supplied kwargs — verifies the partial-plumbing
         guarantee documented at the top of the function."""
@@ -423,8 +427,8 @@ class TestLocalFullContextRecentGateExhaustionsAggregation:
 # database_full_context
 # ---------------------------------------------------------------------------
 
-class TestDatabaseFullContext:
 
+class TestDatabaseFullContext:
     def test_raises_not_implemented(self, storage):
         output = make_interpretation_output(["punet"])
         with pytest.raises(NotImplementedError):

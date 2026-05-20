@@ -13,6 +13,7 @@ Pins the contract that drives Commit C of
 
 No torch, no h5py, no subprocess — these tests run in milliseconds.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -36,7 +37,6 @@ def _row(file_index: int, n_psd_segs: int, elapsed_ms: float) -> dict:
 
 
 class TestFallbackBranches:
-
     def test_empty_list_returns_none(self):
         value, bd = agg([])
         assert value is None
@@ -77,7 +77,6 @@ class TestFallbackBranches:
 
 
 class TestWarmupDiscard:
-
     def test_two_files_discards_one(self):
         """The smallest n_files that still produces a measurement.
         ``round(2 × 0.20) = 0`` rounds up via the ``max(1, ...)`` clamp."""
@@ -139,16 +138,15 @@ class TestWarmupDiscard:
 
 
 class TestPerPsdSegNormalisation:
-
     def test_mixed_segment_counts_normalise_correctly(self):
         """File A: 2 segs / 20 ms = 10 ms/seg. File B: 8 segs / 80 ms =
         10 ms/seg. Even though raw elapsed differs by 4×, the per-segment
         cost is identical and the median should report 10."""
         rows = [
-            _row(0, 1, 50.0),    # warmup discarded
-            _row(1, 2, 20.0),    # 10 ms/seg
-            _row(2, 8, 80.0),    # 10 ms/seg
-            _row(3, 4, 40.0),    # 10 ms/seg
+            _row(0, 1, 50.0),  # warmup discarded
+            _row(1, 2, 20.0),  # 10 ms/seg
+            _row(2, 8, 80.0),  # 10 ms/seg
+            _row(3, 4, 40.0),  # 10 ms/seg
         ]
         value, bd = agg(rows)
         # n_warmup = round(4 × 0.20) = 1. timed = files 1-3, all 10 ms/seg.
@@ -160,11 +158,11 @@ class TestPerPsdSegNormalisation:
         sizes, different segment alignment), the median is robust to
         one outlier."""
         rows = [
-            _row(0, 4, 100.0),   # warmup discarded
-            _row(1, 4, 40.0),    # 10 ms/seg
-            _row(2, 4, 50.0),    # 12.5 ms/seg
+            _row(0, 4, 100.0),  # warmup discarded
+            _row(1, 4, 40.0),  # 10 ms/seg
+            _row(2, 4, 50.0),  # 12.5 ms/seg
             _row(3, 4, 1000.0),  # 250 ms/seg — outlier
-            _row(4, 4, 60.0),    # 15 ms/seg
+            _row(4, 4, 60.0),  # 15 ms/seg
         ]
         value, bd = agg(rows)
         # timed = [10, 12.5, 250, 15] sorted = [10, 12.5, 15, 250]
@@ -178,7 +176,7 @@ class TestPerPsdSegNormalisation:
         The cost is conservatively counted as full elapsed (cost / 1)."""
         rows = [
             _row(0, 1, 100.0),
-            _row(1, 0, 50.0),   # would divide by zero without the floor
+            _row(1, 0, 50.0),  # would divide by zero without the floor
             _row(2, 0, 30.0),
         ]
         value, bd = agg(rows)
@@ -193,7 +191,6 @@ class TestPerPsdSegNormalisation:
 
 
 class TestDefensiveConsumption:
-
     def test_missing_n_psd_segs_defaults_to_one(self):
         """If a future or older sidecar omits n_psd_segs, treat each
         file as 1 segment (so the elapsed becomes the per-segment cost).
@@ -234,14 +231,16 @@ class TestDefensiveConsumption:
 
 
 class TestBreakdownShape:
-
     def test_breakdown_has_required_keys(self):
         """The five keys the tuner / audit log consumes."""
         rows = [_row(i, 1, 100.0) for i in range(5)]
         _, bd = agg(rows)
         for key in (
-            "aggregator", "n_warmup_files", "n_timed_files",
-            "warmup_fraction", "timings_ms",
+            "aggregator",
+            "n_warmup_files",
+            "n_timed_files",
+            "warmup_fraction",
+            "timings_ms",
         ):
             assert key in bd, f"breakdown missing required key: {key}"
 

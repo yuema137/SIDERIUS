@@ -22,30 +22,32 @@ LLM calls and skills are mocked — these tests validate:
     - Expert advice (ExpertAdvice) serialized and passed to brain.plan()
     - Run config file written at startup
 """
+
 import json
 import os
 import tempfile
+from unittest.mock import MagicMock, call, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, call
 
 from agent.schemas.hyperparam_tuning import (
+    ExpertAdvice,
     HyperparamTuningInput,
     HyperparamTuningOutput,
-    ExpertAdvice,
 )
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_hyperparameter_tune_agent import (
     HyperparamTuningAgent,
-    _serialize_expert_advice,
     _copy_seed_plugin,
+    _serialize_expert_advice,
 )
 from nodes.scoring_reference import ReferenceScores
-
 
 # ---------------------------------------------------------------------------
 # Synthetic reference-scores bundle — patched into every agent fixture so
 # tests never touch the real on-disk reference JSONs.
 # ---------------------------------------------------------------------------
+
 
 def _synth_reference() -> ReferenceScores:
     """Hand-built 20-file reference bundle for hermetic tests.
@@ -71,8 +73,8 @@ def _synth_reference() -> ReferenceScores:
 # _serialize_expert_advice tests
 # ---------------------------------------------------------------------------
 
-class TestSerializeExpertAdvice:
 
+class TestSerializeExpertAdvice:
     def test_string_passthrough(self):
         assert _serialize_expert_advice("try deeper models") == "try deeper models"
 
@@ -210,17 +212,20 @@ def _mock_run_skill(skill_folder, sandbox, **params):
 # HyperparamTuningAgent.run() tests
 # ---------------------------------------------------------------------------
 
-class TestHyperparamTuningAgentRun:
 
+class TestHyperparamTuningAgentRun:
     @pytest.fixture
     def agent_and_mocks(self):
-        with patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge, \
-             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox, \
-             patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill), \
-             patch("nodes.ml_hyperparameter_tune_agent.load_reference_scores",
-                   return_value=_synth_reference()), \
-             tempfile.TemporaryDirectory() as configs_dir:
-
+        with (
+            patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
+            patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
+            patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill),
+            patch(
+                "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
+                return_value=_synth_reference(),
+            ),
+            tempfile.TemporaryDirectory() as configs_dir,
+        ):
             mock_brain = MockBridge.return_value
             mock_brain.plan.return_value = FAKE_PLAN_RESPONSE
             mock_brain.reflect.return_value = FAKE_REFLECT_RESPONSE
@@ -333,13 +338,16 @@ class TestInferenceTimingPersistedToMemory:
     """
 
     def _saved_records_with_inference_result(self, tmp_path, inference_result):
-        with patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge, \
-             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox, \
-             patch("nodes.ml_hyperparameter_tune_agent._run_skill") as mock_skill, \
-             patch("nodes.ml_hyperparameter_tune_agent.load_reference_scores",
-                   return_value=_synth_reference()), \
-             tempfile.TemporaryDirectory() as configs_dir:
-
+        with (
+            patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
+            patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
+            patch("nodes.ml_hyperparameter_tune_agent._run_skill") as mock_skill,
+            patch(
+                "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
+                return_value=_synth_reference(),
+            ),
+            tempfile.TemporaryDirectory() as configs_dir,
+        ):
             mock_brain = MockBridge.return_value
             mock_brain.plan.return_value = FAKE_PLAN_RESPONSE
             mock_brain.reflect.return_value = FAKE_REFLECT_RESPONSE
@@ -354,6 +362,7 @@ class TestInferenceTimingPersistedToMemory:
                 if skill_folder == "inference_skill":
                     return inference_result
                 return _mock_run_skill(skill_folder, sandbox, **params)
+
             mock_skill.side_effect = dispatch
 
             agent = HyperparamTuningAgent()
@@ -376,9 +385,7 @@ class TestInferenceTimingPersistedToMemory:
             "process_startup_ms": 1234.5,
             "subprocess_wall_ms": 1500.0,
         }
-        saved_records = self._saved_records_with_inference_result(
-            tmp_path, rich_inference
-        )
+        saved_records = self._saved_records_with_inference_result(tmp_path, rich_inference)
         assert saved_records, "expected at least one saved record"
         mem = saved_records[0]["memory"]
         assert mem["inference_per_psd_seg_ms_measured"] == pytest.approx(10.0)
@@ -394,9 +401,7 @@ class TestInferenceTimingPersistedToMemory:
         warmup_fraction is the default ``0.20``. Schema accepts all values so
         back-compat holds."""
         legacy_inference = {"status": "success", "results": {}}
-        saved_records = self._saved_records_with_inference_result(
-            tmp_path, legacy_inference
-        )
+        saved_records = self._saved_records_with_inference_result(tmp_path, legacy_inference)
         mem = saved_records[0]["memory"]
         for key in (
             "inference_per_psd_seg_ms_measured",
@@ -418,13 +423,16 @@ class TestHyperparamTuningAgentOOM:
 
     @pytest.fixture
     def agent_oom(self):
-        with patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge, \
-             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox, \
-             patch("nodes.ml_hyperparameter_tune_agent._run_skill") as mock_skill, \
-             patch("nodes.ml_hyperparameter_tune_agent.load_reference_scores",
-                   return_value=_synth_reference()), \
-             tempfile.TemporaryDirectory() as configs_dir:
-
+        with (
+            patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
+            patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
+            patch("nodes.ml_hyperparameter_tune_agent._run_skill") as mock_skill,
+            patch(
+                "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
+                return_value=_synth_reference(),
+            ),
+            tempfile.TemporaryDirectory() as configs_dir,
+        ):
             mock_brain = MockBridge.return_value
             mock_brain.plan.return_value = FAKE_PLAN_RESPONSE
             mock_brain.reflect.return_value = FAKE_REFLECT_RESPONSE
@@ -502,15 +510,18 @@ class TestDynamicTrialFormal:
 
     @pytest.fixture
     def agent_and_mocks(self):
-        with patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge, \
-             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox, \
-             patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill), \
-             patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map") as mock_anchor, \
-             patch("nodes.ml_hyperparameter_tune_agent.load_reference_scores",
-                   return_value=_synth_reference()), \
-             patch("os.path.exists", return_value=True), \
-             tempfile.TemporaryDirectory() as configs_dir:
-
+        with (
+            patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
+            patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
+            patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill),
+            patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map") as mock_anchor,
+            patch(
+                "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
+                return_value=_synth_reference(),
+            ),
+            patch("os.path.exists", return_value=True),
+            tempfile.TemporaryDirectory() as configs_dir,
+        ):
             mock_brain = MockBridge.return_value
             mock_brain.plan.return_value = FAKE_PLAN_WITH_TRIAL
             mock_brain.reflect.return_value = FAKE_REFLECT_RESPONSE
@@ -603,6 +614,7 @@ class TestDynamicTrialFormal:
         so the skill's cap is consistent across the run and does not re-probe
         ``torch.cuda`` internally."""
         from core.hardware_context import HardwareContext
+
         agent, _, _, _ = agent_and_mocks
         skill_calls = []
         original_mock = _mock_run_skill
@@ -623,7 +635,8 @@ class TestDynamicTrialFormal:
             assert isinstance(params["hardware_context"], HardwareContext)
 
     def test_inference_skill_receives_inference_batch_from_resource_check(
-        self, tmp_path,
+        self,
+        tmp_path,
     ):
         """A.11: ``resource_check["inference_batch"]`` must flow into
         ``active_params`` so the inference skill (and through it,
@@ -645,13 +658,19 @@ class TestDynamicTrialFormal:
                 return FAKE_SCORE_RESULT
             return {"status": "error", "message": "unknown skill"}
 
-        with patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge, \
-             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox, \
-             patch("nodes.ml_hyperparameter_tune_agent._run_skill",
-                   side_effect=resource_check_with_batch), \
-             patch("nodes.ml_hyperparameter_tune_agent.load_reference_scores",
-                   return_value=_synth_reference()), \
-             tempfile.TemporaryDirectory() as configs_dir:
+        with (
+            patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
+            patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
+            patch(
+                "nodes.ml_hyperparameter_tune_agent._run_skill",
+                side_effect=resource_check_with_batch,
+            ),
+            patch(
+                "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
+                return_value=_synth_reference(),
+            ),
+            tempfile.TemporaryDirectory() as configs_dir,
+        ):
             mock_brain = MockBridge.return_value
             mock_brain.plan.return_value = FAKE_PLAN_RESPONSE
             mock_brain.reflect.return_value = FAKE_REFLECT_RESPONSE
@@ -698,8 +717,10 @@ class TestDynamicTrialFormal:
             skill_calls.append((skill_folder, params))
             return original_mock(skill_folder, sandbox, **params)
 
-        with patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=tracking_mock), \
-             patch("nodes.ml_hyperparameter_tune_agent.build_sample_set") as mock_build:
+        with (
+            patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=tracking_mock),
+            patch("nodes.ml_hyperparameter_tune_agent.build_sample_set") as mock_build,
+        ):
             mock_build.return_value = {0: [0, 1], 6: [0, 1]}
 
             agent.run(_make_trial_input(tmp_path, max_rounds=1, is_trial=True))
@@ -709,7 +730,9 @@ class TestDynamicTrialFormal:
             # (snapshot strategy, portion defaults to 1.0 — operator can opt
             # down via formal_eval_portion, Phase R §13).
             build_calls = mock_build.call_args_list
-            assert len(build_calls) == 2, f"Expected 2 build_sample_set calls for formal, got {len(build_calls)}"
+            assert len(build_calls) == 2, (
+                f"Expected 2 build_sample_set calls for formal, got {len(build_calls)}"
+            )
             portions = [c.kwargs.get("trial_portion") for c in build_calls]
             assert 1.0 in portions, f"Expected eval portion=1.0, got {portions}"
 
@@ -810,10 +833,12 @@ class TestTimeBudgetGate:
             return_value=_synth_reference(),
         )
         cm_tmp = tempfile.TemporaryDirectory()
-        cm_anchor = (patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map")
-                     if enable_trial_mode else None)
-        cm_exists = (patch("os.path.exists", return_value=True)
-                     if enable_trial_mode else None)
+        cm_anchor = (
+            patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map")
+            if enable_trial_mode
+            else None
+        )
+        cm_exists = patch("os.path.exists", return_value=True) if enable_trial_mode else None
 
         MockBridge = cm_brain.__enter__()
         MockSandbox = cm_sandbox.__enter__()
@@ -883,13 +908,9 @@ class TestTimeBudgetGate:
     # --- happy path ---------------------------------------------------------
 
     def test_feasible_proceeds_to_training(self, tmp_path):
-        agent, _, _, saved_records, skill_calls, cleanup = self._make_agent(
-            FAKE_TIME_CHECK_OK
-        )
+        agent, _, _, saved_records, skill_calls, cleanup = self._make_agent(FAKE_TIME_CHECK_OK)
         try:
-            output = agent.run(
-                _make_input_with_budget(tmp_path, formal_budget=30.0)
-            )
+            output = agent.run(_make_input_with_budget(tmp_path, formal_budget=30.0))
         finally:
             cleanup()
         assert output.status == "completed"
@@ -905,11 +926,13 @@ class TestTimeBudgetGate:
         time_budget_minutes kwarg carries that value."""
         agent, _, _, _, skill_calls, cleanup = self._make_agent(FAKE_TIME_CHECK_OK)
         try:
-            agent.run(_make_input_with_budget(
-                tmp_path,
-                formal_budget=45.0,
-                data_dir="/mnt/tidmad",
-            ))
+            agent.run(
+                _make_input_with_budget(
+                    tmp_path,
+                    formal_budget=45.0,
+                    data_dir="/mnt/tidmad",
+                )
+            )
         finally:
             cleanup()
         time_calls = [p for s, p in skill_calls if s == "evaluate_time_skill"]
@@ -920,13 +943,9 @@ class TestTimeBudgetGate:
     # --- infeasible path ----------------------------------------------------
 
     def test_infeasible_emits_skipped_record(self, tmp_path):
-        agent, _, _, saved_records, skill_calls, cleanup = self._make_agent(
-            FAKE_TIME_CHECK_OVER
-        )
+        agent, _, _, saved_records, skill_calls, cleanup = self._make_agent(FAKE_TIME_CHECK_OVER)
         try:
-            output = agent.run(_make_input_with_budget(
-                tmp_path, max_rounds=1, formal_budget=30.0
-            ))
+            output = agent.run(_make_input_with_budget(tmp_path, max_rounds=1, formal_budget=30.0))
         finally:
             cleanup()
         # All 3 attempts hit the time gate → 3 skipped_time_risk records, 0 rounds completed
@@ -939,9 +958,7 @@ class TestTimeBudgetGate:
     def test_skipped_record_carries_suggestion(self, tmp_path):
         agent, _, _, saved_records, _, cleanup = self._make_agent(FAKE_TIME_CHECK_OVER)
         try:
-            agent.run(_make_input_with_budget(
-                tmp_path, max_rounds=1, formal_budget=30.0
-            ))
+            agent.run(_make_input_with_budget(tmp_path, max_rounds=1, formal_budget=30.0))
         finally:
             cleanup()
         rec = saved_records[0]
@@ -960,9 +977,7 @@ class TestTimeBudgetGate:
             {"status": "error", "message": "instantiation failed"}
         )
         try:
-            output = agent.run(_make_input_with_budget(
-                tmp_path, max_rounds=1, formal_budget=30.0
-            ))
+            output = agent.run(_make_input_with_budget(tmp_path, max_rounds=1, formal_budget=30.0))
         finally:
             cleanup()
         # The RuntimeError is caught by the loop's try/except → no rounds complete,
@@ -1003,18 +1018,21 @@ class TestTimeBudgetGate:
         first round honours the LLM's is_trial=True so the per-mode pick is
         actually exercised."""
         agent, mock_brain, _, _, skill_calls, cleanup = self._make_agent(
-            FAKE_TIME_CHECK_OK, enable_trial_mode=True,
+            FAKE_TIME_CHECK_OK,
+            enable_trial_mode=True,
         )
         # Override the default plan to return is_trial=True for this round.
         mock_brain.plan.return_value = {**FAKE_PLAN_RESPONSE, "is_trial": True}
         try:
-            agent.run(_make_input_with_budget(
-                tmp_path,
-                max_rounds=2,
-                trial_budget=15.0,
-                formal_budget=240.0,
-                is_trial=True,  # mirrors LLM plan: caller permits trial mode
-            ))
+            agent.run(
+                _make_input_with_budget(
+                    tmp_path,
+                    max_rounds=2,
+                    trial_budget=15.0,
+                    formal_budget=240.0,
+                    is_trial=True,  # mirrors LLM plan: caller permits trial mode
+                )
+            )
         finally:
             cleanup()
         time_calls = [p for s, p in skill_calls if s == "evaluate_time_skill"]
@@ -1029,11 +1047,13 @@ class TestTimeBudgetGate:
         with the formal budget. The trial budget is ignored even when set."""
         agent, _, _, _, skill_calls, cleanup = self._make_agent(FAKE_TIME_CHECK_OK)
         try:
-            agent.run(_make_input_with_budget(
-                tmp_path,
-                trial_budget=15.0,
-                formal_budget=240.0,
-            ))
+            agent.run(
+                _make_input_with_budget(
+                    tmp_path,
+                    trial_budget=15.0,
+                    formal_budget=240.0,
+                )
+            )
         finally:
             cleanup()
         time_calls = [p for s, p in skill_calls if s == "evaluate_time_skill"]
@@ -1056,12 +1076,14 @@ class TestTimeBudgetGate:
         )
         mock_brain.plan.return_value = {**FAKE_PLAN_RESPONSE, "is_trial": True}
         try:
-            output = agent.run(_make_input_with_budget(
-                tmp_path,
-                max_rounds=2,
-                formal_budget=240.0,  # trial_budget left None
-                is_trial=True,
-            ))
+            output = agent.run(
+                _make_input_with_budget(
+                    tmp_path,
+                    max_rounds=2,
+                    formal_budget=240.0,  # trial_budget left None
+                    is_trial=True,
+                )
+            )
         finally:
             cleanup()
         assert output.status == "completed"
@@ -1078,10 +1100,12 @@ class TestTimeBudgetGate:
             FAKE_TIME_CHECK_OVER  # would block if invoked
         )
         try:
-            output = agent.run(_make_input_with_budget(
-                tmp_path,
-                trial_budget=5.0,  # formal_budget left None
-            ))
+            output = agent.run(
+                _make_input_with_budget(
+                    tmp_path,
+                    trial_budget=5.0,  # formal_budget left None
+                )
+            )
         finally:
             cleanup()
         assert output.status == "completed"
@@ -1100,9 +1124,7 @@ class TestTimeBudgetGate:
     def test_success_record_memory_carries_time_fields_formal(self, tmp_path):
         """Gate-pass in formal mode → memory carries the three time fields
         sourced from the time_check dict and time_mode='formal'."""
-        agent, _, _, saved_records, _, cleanup = self._make_agent(
-            FAKE_TIME_CHECK_OK
-        )
+        agent, _, _, saved_records, _, cleanup = self._make_agent(FAKE_TIME_CHECK_OK)
         try:
             agent.run(_make_input_with_budget(tmp_path, formal_budget=30.0))
         finally:
@@ -1110,7 +1132,7 @@ class TestTimeBudgetGate:
         rec = saved_records[0]
         assert rec["status"] == "success"
         mem = rec["memory"]
-        assert mem["time_estimate_minutes"] == 12.0   # FAKE_TIME_CHECK_OK
+        assert mem["time_estimate_minutes"] == 12.0  # FAKE_TIME_CHECK_OK
         assert mem["time_budget_minutes"] == 30.0
         assert mem["time_mode"] == "formal"
 
@@ -1120,17 +1142,20 @@ class TestTimeBudgetGate:
         the agent forces the FINAL round to formal — we assert on the first
         (trial) record."""
         agent, mock_brain, _, saved_records, _, cleanup = self._make_agent(
-            FAKE_TIME_CHECK_OK, enable_trial_mode=True,
+            FAKE_TIME_CHECK_OK,
+            enable_trial_mode=True,
         )
         mock_brain.plan.return_value = {**FAKE_PLAN_RESPONSE, "is_trial": True}
         try:
-            agent.run(_make_input_with_budget(
-                tmp_path,
-                max_rounds=2,
-                trial_budget=15.0,
-                formal_budget=240.0,
-                is_trial=True,
-            ))
+            agent.run(
+                _make_input_with_budget(
+                    tmp_path,
+                    max_rounds=2,
+                    trial_budget=15.0,
+                    formal_budget=240.0,
+                    is_trial=True,
+                )
+            )
         finally:
             cleanup()
         # First saved record is the trial round (FAKE_TIME_CHECK_OK reports
@@ -1146,9 +1171,7 @@ class TestTimeBudgetGate:
         must be ABSENT from the saved record's memory dict (not present with
         None values), so the reflector sees the same shape as pre-Phase-J
         records."""
-        agent, _, _, saved_records, _, cleanup = self._make_agent(
-            FAKE_TIME_CHECK_OK
-        )
+        agent, _, _, saved_records, _, cleanup = self._make_agent(FAKE_TIME_CHECK_OK)
         try:
             agent.run(_make_input_with_budget(tmp_path))  # both None
         finally:
@@ -1164,13 +1187,15 @@ class TestTimeBudgetGate:
         """Phase J §J.3 — the skipped_time_risk record must carry the same
         three time fields as the success record, so the planner sees the
         same shape regardless of pass/fail. Default plan is formal."""
-        agent, _, _, saved_records, _, cleanup = self._make_agent(
-            FAKE_TIME_CHECK_OVER
-        )
+        agent, _, _, saved_records, _, cleanup = self._make_agent(FAKE_TIME_CHECK_OVER)
         try:
-            agent.run(_make_input_with_budget(
-                tmp_path, max_rounds=1, formal_budget=30.0,
-            ))
+            agent.run(
+                _make_input_with_budget(
+                    tmp_path,
+                    max_rounds=1,
+                    formal_budget=30.0,
+                )
+            )
         finally:
             cleanup()
         rec = saved_records[0]
@@ -1226,10 +1251,12 @@ class TestVramBudgetGate:
             return_value=_synth_reference(),
         )
         cm_tmp = tempfile.TemporaryDirectory()
-        cm_anchor = (patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map")
-                     if enable_trial_mode else None)
-        cm_exists = (patch("os.path.exists", return_value=True)
-                     if enable_trial_mode else None)
+        cm_anchor = (
+            patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map")
+            if enable_trial_mode
+            else None
+        )
+        cm_exists = patch("os.path.exists", return_value=True) if enable_trial_mode else None
 
         MockBridge = cm_brain.__enter__()
         MockSandbox = cm_sandbox.__enter__()
@@ -1303,13 +1330,15 @@ class TestVramBudgetGate:
         )
         mock_brain.plan.return_value = {**FAKE_PLAN_RESPONSE, "is_trial": True}
         try:
-            agent.run(_make_input_with_budget(
-                tmp_path,
-                max_rounds=2,
-                trial_vram_budget=6.0,
-                formal_vram_budget=24.0,
-                is_trial=True,
-            ))
+            agent.run(
+                _make_input_with_budget(
+                    tmp_path,
+                    max_rounds=2,
+                    trial_vram_budget=6.0,
+                    formal_vram_budget=24.0,
+                    is_trial=True,
+                )
+            )
         finally:
             cleanup()
         vram_calls = [p for s, p in skill_calls if s == "evaluate_vram_skill"]
@@ -1322,11 +1351,13 @@ class TestVramBudgetGate:
         formal VRAM budget. The trial budget is ignored even when set."""
         agent, _, _, _, skill_calls, cleanup = self._make_agent()
         try:
-            agent.run(_make_input_with_budget(
-                tmp_path,
-                trial_vram_budget=6.0,
-                formal_vram_budget=24.0,
-            ))
+            agent.run(
+                _make_input_with_budget(
+                    tmp_path,
+                    trial_vram_budget=6.0,
+                    formal_vram_budget=24.0,
+                )
+            )
         finally:
             cleanup()
         vram_calls = [p for s, p in skill_calls if s == "evaluate_vram_skill"]
@@ -1355,11 +1386,13 @@ class TestVramBudgetGate:
             vram_check_result=FAKE_RESOURCE_CHECK_OVER,
         )
         try:
-            agent.run(_make_input_with_budget(
-                tmp_path,
-                formal_budget=30.0,
-                formal_vram_budget=8.0,
-            ))
+            agent.run(
+                _make_input_with_budget(
+                    tmp_path,
+                    formal_budget=30.0,
+                    formal_vram_budget=8.0,
+                )
+            )
         finally:
             cleanup()
         called = [s for s, _ in skill_calls]
@@ -1377,16 +1410,19 @@ class TestVramBudgetGate:
         dict (estimated_gb / limit_gb)."""
         agent, _, _, saved_records, _, cleanup = self._make_agent()
         try:
-            agent.run(_make_input_with_budget(
-                tmp_path, formal_vram_budget=8.0,
-            ))
+            agent.run(
+                _make_input_with_budget(
+                    tmp_path,
+                    formal_vram_budget=8.0,
+                )
+            )
         finally:
             cleanup()
         rec = saved_records[0]
         assert rec["status"] == "success"
         mem = rec["memory"]
-        assert mem["vram_estimate_gb"] == 2.5   # FAKE_RESOURCE_CHECK_OK
-        assert mem["vram_budget_gb"] == 6.0     # limit_gb (min of defensive, budget)
+        assert mem["vram_estimate_gb"] == 2.5  # FAKE_RESOURCE_CHECK_OK
+        assert mem["vram_budget_gb"] == 6.0  # limit_gb (min of defensive, budget)
 
     def test_success_record_memory_vram_fields_trial_mode(self, tmp_path):
         """Gate-pass in trial mode → the memory's vram fields carry the
@@ -1397,13 +1433,15 @@ class TestVramBudgetGate:
         )
         mock_brain.plan.return_value = {**FAKE_PLAN_RESPONSE, "is_trial": True}
         try:
-            agent.run(_make_input_with_budget(
-                tmp_path,
-                max_rounds=2,
-                trial_vram_budget=6.0,
-                formal_vram_budget=24.0,
-                is_trial=True,
-            ))
+            agent.run(
+                _make_input_with_budget(
+                    tmp_path,
+                    max_rounds=2,
+                    trial_vram_budget=6.0,
+                    formal_vram_budget=24.0,
+                    is_trial=True,
+                )
+            )
         finally:
             cleanup()
         trial_rec = saved_records[0]
@@ -1436,9 +1474,12 @@ class TestVramBudgetGate:
             vram_check_result=FAKE_RESOURCE_CHECK_OVER,
         )
         try:
-            agent.run(_make_input_with_budget(
-                tmp_path, formal_vram_budget=8.0,
-            ))
+            agent.run(
+                _make_input_with_budget(
+                    tmp_path,
+                    formal_vram_budget=8.0,
+                )
+            )
         finally:
             cleanup()
         rec = saved_records[0]
@@ -1469,6 +1510,7 @@ class TestVramBudgetGate:
 # ---------------------------------------------------------------------------
 # _copy_seed_plugin — Phase 3 of docs/run_scoped_plugins.md
 # ---------------------------------------------------------------------------
+
 
 class TestCopySeedPlugin:
     """The helper stages a validated seed plugin in the run's plugin dir so
@@ -1506,7 +1548,7 @@ class TestCopySeedPlugin:
 
         result = _copy_seed_plugin(src, str(dst_dir))
 
-        with open(result, "r", encoding="utf-8") as f:
+        with open(result, encoding="utf-8") as f:
             assert f.read() == payload
 
     def test_copy_same_file_is_noop(self, tmp_path):
@@ -1531,18 +1573,14 @@ class TestCopySeedPlugin:
         src_dir.mkdir()
         dst_dir.mkdir()
         # Pre-existing stale copy in dst
-        stale = self._make_plugin(
-            str(dst_dir), name="seed.py", content="STALE\n"
-        )
+        stale = self._make_plugin(str(dst_dir), name="seed.py", content="STALE\n")
         # Fresh src with different content
-        src = self._make_plugin(
-            str(src_dir), name="seed.py", content="FRESH\n"
-        )
+        src = self._make_plugin(str(src_dir), name="seed.py", content="FRESH\n")
 
         result = _copy_seed_plugin(src, str(dst_dir))
 
         assert result == stale  # same path
-        with open(result, "r", encoding="utf-8") as f:
+        with open(result, encoding="utf-8") as f:
             assert f.read() == "FRESH\n"
 
 
@@ -1567,15 +1605,18 @@ class TestScoreTablePropagation:
 
     @pytest.fixture
     def agent_and_mocks(self):
-        with patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge, \
-             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox, \
-             patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill), \
-             patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map") as mock_anchor, \
-             patch("nodes.ml_hyperparameter_tune_agent.load_reference_scores",
-                   return_value=_synth_reference()), \
-             patch("os.path.exists", return_value=True), \
-             tempfile.TemporaryDirectory() as configs_dir:
-
+        with (
+            patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
+            patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
+            patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill),
+            patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map") as mock_anchor,
+            patch(
+                "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
+                return_value=_synth_reference(),
+            ),
+            patch("os.path.exists", return_value=True),
+            tempfile.TemporaryDirectory() as configs_dir,
+        ):
             mock_brain = MockBridge.return_value
             mock_brain.plan.return_value = FAKE_PLAN_WITH_TRIAL
             mock_brain.reflect.return_value = FAKE_REFLECT_RESPONSE
@@ -1625,15 +1666,18 @@ class TestScoreTablePropagation:
         """Formal-only mode (no anchor_map → legacy ``denoising_score_skill``
         path) produces a record with no ``file_vector`` — score_table must be
         None, never a phantom table."""
-        with patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge, \
-             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox, \
-             patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill), \
-             patch("nodes.ml_hyperparameter_tune_agent.load_reference_scores",
-                   return_value=_synth_reference()), \
-             tempfile.TemporaryDirectory() as configs_dir:
-
+        with (
+            patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
+            patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
+            patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill),
+            patch(
+                "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
+                return_value=_synth_reference(),
+            ),
+            tempfile.TemporaryDirectory() as configs_dir,
+        ):
             mock_brain = MockBridge.return_value
-            mock_brain.plan.return_value = FAKE_PLAN_RESPONSE   # no is_trial
+            mock_brain.plan.return_value = FAKE_PLAN_RESPONSE  # no is_trial
             mock_brain.reflect.return_value = FAKE_REFLECT_RESPONSE
 
             saved = []
@@ -1682,8 +1726,7 @@ class TestScoreTablePropagation:
         def _boom(*args, **kwargs):
             raise RuntimeError("synthetic rendering failure")
 
-        with patch("nodes.ml_hyperparameter_tune_agent.build_score_table",
-                   side_effect=_boom):
+        with patch("nodes.ml_hyperparameter_tune_agent.build_score_table", side_effect=_boom):
             output = agent.run(_make_trial_input(tmp_path, max_rounds=1, is_trial=True))
 
         assert output.status == "completed"
@@ -1711,20 +1754,25 @@ class TestScoreTablePropagation:
         # Round 2: the single prior record's rendered_markdown is threaded.
         second_kwargs = mock_brain.plan.call_args_list[1].kwargs
         assert second_kwargs.get("score_table_md") is not None
-        assert second_kwargs["score_table_md"] == saved_records[0]["score_table"]["rendered_markdown"]
+        assert (
+            second_kwargs["score_table_md"] == saved_records[0]["score_table"]["rendered_markdown"]
+        )
 
     def test_score_table_md_picks_highest_scoring_record(self, tmp_path):
         """With multiple prior records, the tuner threads the ``rendered_markdown``
         from the record with the highest ``denoising_score``, not the most recent."""
-        with patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge, \
-             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox, \
-             patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill), \
-             patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map") as mock_anchor, \
-             patch("nodes.ml_hyperparameter_tune_agent.load_reference_scores",
-                   return_value=_synth_reference()), \
-             patch("os.path.exists", return_value=True), \
-             tempfile.TemporaryDirectory() as configs_dir:
-
+        with (
+            patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
+            patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
+            patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill),
+            patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map") as mock_anchor,
+            patch(
+                "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
+                return_value=_synth_reference(),
+            ),
+            patch("os.path.exists", return_value=True),
+            tempfile.TemporaryDirectory() as configs_dir,
+        ):
             mock_brain = MockBridge.return_value
             mock_brain.plan.return_value = FAKE_PLAN_WITH_TRIAL
             mock_brain.reflect.return_value = FAKE_REFLECT_RESPONSE
@@ -1735,6 +1783,7 @@ class TestScoreTablePropagation:
             # ScoreComparisonTable validation at run-output assembly, and we
             # can distinguish HIGH vs LOW by the marker string.
             from execute_tools.scoring_helpers import build_score_table
+
             _valid_table = build_score_table(
                 model_fv_log=[1.0] * 20,
                 model_scalar=2.5,

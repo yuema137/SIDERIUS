@@ -13,6 +13,7 @@ Usage:
         --workspace /expanse/lustre/projects/ddp433/ym137/test_output \\
         --run_name test_full_loop_$(date +%m%d_%H%M)
 """
+
 import argparse
 import os
 import shutil
@@ -25,11 +26,12 @@ sys.path.insert(0, SIDERIUS_ROOT)
 sys.path.insert(0, os.path.join(SIDERIUS_ROOT, "ml_models"))
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
-from execute_tools.data_paths import TIDMAD_DATA_DIR, SIDERIUS_DATA_DIR
-from workflows.model_exploration import run_workflow
+from execute_tools.data_paths import SIDERIUS_DATA_DIR, TIDMAD_DATA_DIR
 from workflows.llm_config import WorkflowLLMConfig
+from workflows.model_exploration import run_workflow
 
 # Reuse the validation function from the pytest test file
 sys.path.insert(0, os.path.join(SIDERIUS_ROOT, "tests/integration/workflows"))
@@ -55,7 +57,10 @@ def check_prerequisites(source_models: list[str], source_run_name: str) -> list[
 
     for model in source_models:
         path = os.path.join(
-            SIDERIUS_DATA_DIR, model, source_run_name, "agent",
+            SIDERIUS_DATA_DIR,
+            model,
+            source_run_name,
+            "agent",
             f"run_output_{source_run_name}_agent.json",
         )
         if not os.path.exists(path):
@@ -63,6 +68,7 @@ def check_prerequisites(source_models: list[str], source_run_name: str) -> list[
 
     try:
         import torch
+
         if not torch.cuda.is_available():
             missing.append("CUDA GPU not available")
     except ImportError:
@@ -76,40 +82,50 @@ def main():
         description="SDSC Slurm runner for the Tier 3 5-agent workflow integration test"
     )
     parser.add_argument(
-        "--workspace", type=str, required=True,
-        help="Output directory (use cluster scratch path)"
+        "--workspace", type=str, required=True, help="Output directory (use cluster scratch path)"
     )
     parser.add_argument(
-        "--run_name", type=str, default="test_full_loop",
-        help="Run name for this test execution"
+        "--run_name", type=str, default="test_full_loop", help="Run name for this test execution"
     )
     parser.add_argument(
-        "--llm_model", type=str, default="gemini-3.1-pro-preview",
-        help="Gemini model ID for all 5 agents"
+        "--llm_model",
+        type=str,
+        default="gemini-3.1-pro-preview",
+        help="Gemini model ID for all 5 agents",
     )
     parser.add_argument(
-        "--max_rounds", type=int, default=2,
-        help="Tuning rounds (round 1 = trial, last round = forced formal)"
+        "--max_rounds",
+        type=int,
+        default=2,
+        help="Tuning rounds (round 1 = trial, last round = forced formal)",
     )
     parser.add_argument(
-        "--max_proposal_attempts", type=int, default=3,
-        help="Retry budget for propose→implement→validate"
+        "--max_proposal_attempts",
+        type=int,
+        default=3,
+        help="Retry budget for propose→implement→validate",
     )
     parser.add_argument(
-        "--max_epochs", type=int, default=1,
-        help="Hard cap on epochs per round (test should be fast)"
+        "--max_epochs",
+        type=int,
+        default=1,
+        help="Hard cap on epochs per round (test should be fast)",
     )
     parser.add_argument(
-        "--source_models", type=str, nargs="+", default=["punet", "wavenet"],
-        help="Models to load as historical source data for the interpretation agent"
+        "--source_models",
+        type=str,
+        nargs="+",
+        default=["punet", "wavenet"],
+        help="Models to load as historical source data for the interpretation agent",
     )
     parser.add_argument(
-        "--source_run_name", type=str, default="small_sample_trial_v0",
-        help="Run name to load source data from (lilab default; use 'hpt_full_v1' on SDSC)"
+        "--source_run_name",
+        type=str,
+        default="small_sample_trial_v0",
+        help="Run name to load source data from (lilab default; use 'hpt_full_v1' on SDSC)",
     )
     parser.add_argument(
-        "--no_cleanup", action="store_true",
-        help="Skip plugin cleanup after test (for debugging)"
+        "--no_cleanup", action="store_true", help="Skip plugin cleanup after test (for debugging)"
     )
     args = parser.parse_args()
 

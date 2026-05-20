@@ -32,6 +32,7 @@ integers (``batch_size``, ``segmentation_size``) and returns ``int`` /
 this across the whole VRAM stack; the inline test in
 ``test_compute_intensity.py`` documents the invariant at the module.
 """
+
 from __future__ import annotations
 
 # ── Calibrated constant (Phase 6.5 Stage 2, 20% margin — §3.10.3) ──────────
@@ -40,6 +41,7 @@ _MAX_BATCH_TIMESTEPS: int = 800_000
 
 
 # ── Primitive arithmetic ────────────────────────────────────────────────────
+
 
 def compute_intensity(batch_size: int, segmentation_size: int) -> int:
     """Raw intensity product. Pure multiplication, no state.
@@ -53,6 +55,7 @@ def compute_intensity(batch_size: int, segmentation_size: int) -> int:
 
 # ── Acceptance predicate ────────────────────────────────────────────────────
 
+
 def passes(batch_size: int, segmentation_size: int) -> bool:
     """``True`` iff the config sits **at or below** the heuristic cap.
 
@@ -63,6 +66,7 @@ def passes(batch_size: int, segmentation_size: int) -> bool:
 
 
 # ── Diagnostic message (consumed by killer_report §3.6 + wrapper §3.10.2) ──
+
 
 def describe_violation(batch_size: int, segmentation_size: int) -> str:
     """Human-readable violation message.

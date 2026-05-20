@@ -32,6 +32,7 @@ surfaces are populated end-to-end. This stands in for the full pseudo-
 integration test scheduled for Commit 12 (which exercises the entire
 ``run_workflow`` → manifest → restore loop).
 """
+
 from __future__ import annotations
 
 import json
@@ -45,15 +46,15 @@ import pytest
 from core.resume import (
     RestoredState,
     ResumeError,
-    restore_prior_state,
     _iter_run_name,
+    restore_prior_state,
 )
 from core.sandbox_executor import get_plugin_dir
-
 
 # ---------------------------------------------------------------------------
 # Plugin source — kept in sync with the contract in ml_models/plugin_loader.py
 # ---------------------------------------------------------------------------
+
 
 def _plugin_src(model_type: str) -> str:
     return textwrap.dedent(f'''\
@@ -100,6 +101,7 @@ def _run_output_dict(run_name: str, model_type: str, score: float) -> dict:
 # ---------------------------------------------------------------------------
 # Workspace builder
 # ---------------------------------------------------------------------------
+
 
 def _materialise_iter(
     workspace,
@@ -151,16 +153,19 @@ def _materialise_iter(
 # Registry-snapshot fixture — prevent test pollution
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def isolated_registries():
     """Snapshot every registry surface + clear test model_types after the
     test. Keeps cross-test bleed from masking real bugs."""
-    from ml_models.models_sandbox import MODEL_REGISTRY
     from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
+    from ml_models.models_sandbox import MODEL_REGISTRY
     from ml_models.plugin_loader import PLUGIN_OUTPUT_TYPE_REGISTRY
 
     test_keys = (
-        "resume_test_arch_a", "resume_test_arch_b", "resume_test_arch_c",
+        "resume_test_arch_a",
+        "resume_test_arch_b",
+        "resume_test_arch_c",
         "resume_test_arch_d",
     )
     yield
@@ -180,8 +185,8 @@ def isolated_registries():
 # Trivial paths
 # ===========================================================================
 
-class TestTrivialPaths:
 
+class TestTrivialPaths:
     def test_current_iter_1_returns_seeds_verbatim(self, tmp_path, isolated_registries):
         seeds = ["/seed/punet.json", "/seed/wavenet.json"]
         state = restore_prior_state(str(tmp_path), 1, seeds)
@@ -190,7 +195,9 @@ class TestTrivialPaths:
         assert state.restored_plugins == []
         assert state.committed_iters == []
 
-    def test_current_iter_1_does_not_require_existing_workspace(self, tmp_path, isolated_registries):
+    def test_current_iter_1_does_not_require_existing_workspace(
+        self, tmp_path, isolated_registries
+    ):
         """An iter-1 launch may target a workspace that doesn't exist yet."""
         ws = tmp_path / "nonexistent_yet"
         state = restore_prior_state(str(ws), 1, [])
@@ -210,8 +217,8 @@ class TestTrivialPaths:
 # Clean 3-iter chain — happy path
 # ===========================================================================
 
-class TestCleanThreeIterChain:
 
+class TestCleanThreeIterChain:
     @pytest.fixture
     def workspace(self, tmp_path):
         _materialise_iter(tmp_path, 1, "resume_test_arch_a", 0.71)
@@ -246,14 +253,16 @@ class TestCleanThreeIterChain:
         state = restore_prior_state(str(workspace), 3, [])
         assert state.committed_iters == [1, 2]
         assert state.restored_plugins == [
-            "resume_test_arch_a", "resume_test_arch_b",
+            "resume_test_arch_a",
+            "resume_test_arch_b",
         ]
 
     def test_registry_actually_populated(self, workspace, isolated_registries):
-        from ml_models.models_sandbox import MODEL_REGISTRY
         from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
+        from ml_models.models_sandbox import MODEL_REGISTRY
         from ml_models.plugin_loader import (
-            PLUGIN_OUTPUT_TYPE_REGISTRY, get_output_type,
+            PLUGIN_OUTPUT_TYPE_REGISTRY,
+            get_output_type,
         )
 
         restore_prior_state(str(workspace), 4, [])
@@ -274,8 +283,8 @@ class TestCleanThreeIterChain:
 # Hostile-state branches
 # ===========================================================================
 
-class TestMissingManifest:
 
+class TestMissingManifest:
     def test_missing_manifest_raises(self, tmp_path, isolated_registries):
         _materialise_iter(tmp_path, 1, "resume_test_arch_a")
         # Iter 2's dir exists but no manifest.json.
@@ -291,7 +300,6 @@ class TestMissingManifest:
 
 
 class TestCorruptManifest:
-
     def test_malformed_manifest_json_raises(self, tmp_path, isolated_registries):
         _materialise_iter(tmp_path, 1, "resume_test_arch_a")
         manifest_path = tmp_path / "iter_001" / "manifest.json"
@@ -301,7 +309,9 @@ class TestCorruptManifest:
 
     def test_status_failed_raises(self, tmp_path, isolated_registries):
         _materialise_iter(
-            tmp_path, 1, "resume_test_arch_a",
+            tmp_path,
+            1,
+            "resume_test_arch_a",
             manifest_status="failed",
         )
         with pytest.raises(ResumeError, match="status='failed'"):
@@ -309,7 +319,9 @@ class TestCorruptManifest:
 
     def test_status_partial_raises(self, tmp_path, isolated_registries):
         _materialise_iter(
-            tmp_path, 1, "resume_test_arch_a",
+            tmp_path,
+            1,
+            "resume_test_arch_a",
             manifest_status="partial",
         )
         with pytest.raises(ResumeError, match="status='partial'"):
@@ -326,25 +338,33 @@ class TestCorruptManifest:
         run_name = _iter_run_name(1)
         iter_dir = tmp_path / run_name
         iter_dir.mkdir()
-        (iter_dir / "manifest.json").write_text(json.dumps({
-            "status": "no_records",
-            "iteration_dir": str(iter_dir),
-            "output_path": None,
-            "model_name": None,
-            "best_score": None,
-        }))
+        (iter_dir / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "status": "no_records",
+                    "iteration_dir": str(iter_dir),
+                    "output_path": None,
+                    "model_name": None,
+                    "best_score": None,
+                }
+            )
+        )
 
         # iter_002 also no-records — verify multiple consecutive skips.
         run_name_2 = _iter_run_name(2)
         iter_dir_2 = tmp_path / run_name_2
         iter_dir_2.mkdir()
-        (iter_dir_2 / "manifest.json").write_text(json.dumps({
-            "status": "no_records",
-            "iteration_dir": str(iter_dir_2),
-            "output_path": None,
-            "model_name": None,
-            "best_score": None,
-        }))
+        (iter_dir_2 / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "status": "no_records",
+                    "iteration_dir": str(iter_dir_2),
+                    "output_path": None,
+                    "model_name": None,
+                    "best_score": None,
+                }
+            )
+        )
 
         seeds = ["/seed/punet.json", "/seed/wavenet.json"]
         state = restore_prior_state(str(tmp_path), 3, seeds)
@@ -355,7 +375,9 @@ class TestCorruptManifest:
         assert state.resolved_source_paths == seeds
 
     def test_status_no_records_interleaved_with_completed(
-        self, tmp_path, isolated_registries,
+        self,
+        tmp_path,
+        isolated_registries,
     ):
         """no_records iter sandwiched between two completed iters: the
         completed iters are absorbed normally, the middle iter is skipped."""
@@ -364,13 +386,17 @@ class TestCorruptManifest:
         run_name_2 = _iter_run_name(2)
         iter_dir_2 = tmp_path / run_name_2
         iter_dir_2.mkdir()
-        (iter_dir_2 / "manifest.json").write_text(json.dumps({
-            "status": "no_records",
-            "iteration_dir": str(iter_dir_2),
-            "output_path": None,
-            "model_name": None,
-            "best_score": None,
-        }))
+        (iter_dir_2 / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "status": "no_records",
+                    "iteration_dir": str(iter_dir_2),
+                    "output_path": None,
+                    "model_name": None,
+                    "best_score": None,
+                }
+            )
+        )
         _materialise_iter(tmp_path, 3, "resume_test_arch_c", 0.82)
 
         state = restore_prior_state(str(tmp_path), 4, ["/seed/punet.json"])
@@ -395,18 +421,29 @@ class TestCorruptManifest:
 
 
 class TestCorruptRunOutput:
-
     def test_run_output_file_missing_raises(self, tmp_path, isolated_registries):
         _materialise_iter(tmp_path, 1, "resume_test_arch_a")
         # Delete the run_output file but leave the manifest pointing at it.
-        run_output = tmp_path / "iter_001" / "iteration_001" / "resume_test_arch_a" / "run_output_iter_001.json"
+        run_output = (
+            tmp_path
+            / "iter_001"
+            / "iteration_001"
+            / "resume_test_arch_a"
+            / "run_output_iter_001.json"
+        )
         run_output.unlink()
         with pytest.raises(ResumeError, match="output_path .* does not exist"):
             restore_prior_state(str(tmp_path), 2, [])
 
     def test_malformed_run_output_json_raises(self, tmp_path, isolated_registries):
         _materialise_iter(tmp_path, 1, "resume_test_arch_a")
-        run_output = tmp_path / "iter_001" / "iteration_001" / "resume_test_arch_a" / "run_output_iter_001.json"
+        run_output = (
+            tmp_path
+            / "iter_001"
+            / "iteration_001"
+            / "resume_test_arch_a"
+            / "run_output_iter_001.json"
+        )
         run_output.write_text("{this is not json")
         with pytest.raises(ResumeError, match="run_output failed validation"):
             restore_prior_state(str(tmp_path), 2, [])
@@ -415,8 +452,16 @@ class TestCorruptRunOutput:
         """A JSON object that's structurally valid but missing required
         fields → Pydantic ValidationError → ResumeError."""
         _materialise_iter(tmp_path, 1, "resume_test_arch_a")
-        run_output = tmp_path / "iter_001" / "iteration_001" / "resume_test_arch_a" / "run_output_iter_001.json"
-        run_output.write_text(json.dumps({"run_name": "iter_001"}))  # missing model_type, status, ...
+        run_output = (
+            tmp_path
+            / "iter_001"
+            / "iteration_001"
+            / "resume_test_arch_a"
+            / "run_output_iter_001.json"
+        )
+        run_output.write_text(
+            json.dumps({"run_name": "iter_001"})
+        )  # missing model_type, status, ...
         with pytest.raises(ResumeError, match="run_output failed validation"):
             restore_prior_state(str(tmp_path), 2, [])
 
@@ -425,11 +470,13 @@ class TestCorruptRunOutput:
 # Plugin-file edge cases
 # ===========================================================================
 
-class TestPluginFileEdgeCases:
 
+class TestPluginFileEdgeCases:
     def test_missing_plugin_file_warns_and_continues(self, tmp_path, isolated_registries):
         _materialise_iter(
-            tmp_path, 1, "resume_test_arch_a",
+            tmp_path,
+            1,
+            "resume_test_arch_a",
             write_plugin=False,
         )
         with pytest.warns(UserWarning, match="plugin file not found"):
@@ -445,7 +492,9 @@ class TestPluginFileEdgeCases:
         returns None. Resume should warn loudly and continue, not raise."""
         broken_body = "# I am not a valid plugin\nx = 1\n"
         _materialise_iter(
-            tmp_path, 1, "resume_test_arch_a",
+            tmp_path,
+            1,
+            "resume_test_arch_a",
             plugin_body=broken_body,
         )
         with pytest.warns(UserWarning, match="failed _load_plugin validation"):
@@ -475,13 +524,14 @@ class TestPluginFileEdgeCases:
 # registry surfaces end-to-end, in the exact order a real chain would.
 # ===========================================================================
 
-class TestPseudoIntegrationTwoIterChain:
 
+class TestPseudoIntegrationTwoIterChain:
     def test_two_iter_pseudo_run_repopulates_model_registry(self, tmp_path, isolated_registries):
-        from ml_models.models_sandbox import MODEL_REGISTRY
         from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
+        from ml_models.models_sandbox import MODEL_REGISTRY
         from ml_models.plugin_loader import (
-            PLUGIN_OUTPUT_TYPE_REGISTRY, get_output_type,
+            PLUGIN_OUTPUT_TYPE_REGISTRY,
+            get_output_type,
         )
 
         # Materialise a clean 2-iter chain with two distinct plugins. Mirrors
@@ -573,7 +623,7 @@ def _write_interp_digest(
         return path
     payload = {
         "runtime_vocab": runtime_vocab or [],
-        "key_findings":  key_findings or [],
+        "key_findings": key_findings or [],
     }
     path.write_text(json.dumps(payload))
     return path
@@ -608,12 +658,14 @@ class TestLoadLatestKnowledge:
     def test_picks_latest_runtime_vocab(self, tmp_path):
         """Latest committed iter wins on runtime_vocab (not concatenation)."""
         _write_interp_digest(
-            tmp_path, 1,
+            tmp_path,
+            1,
             runtime_vocab=[_vocab_entry("feat_iter1")],
             key_findings=["finding_iter1"],
         )
         _write_interp_digest(
-            tmp_path, 2,
+            tmp_path,
+            2,
             runtime_vocab=[_vocab_entry("feat_iter2_a"), _vocab_entry("feat_iter2_b")],
             key_findings=["finding_iter2"],
         )
@@ -624,12 +676,14 @@ class TestLoadLatestKnowledge:
     def test_accumulates_findings_chronologically(self, tmp_path):
         """Union across iters; first-occurrence wins on dedup."""
         _write_interp_digest(
-            tmp_path, 1,
+            tmp_path,
+            1,
             runtime_vocab=[_vocab_entry("v")],
             key_findings=["A", "B"],
         )
         _write_interp_digest(
-            tmp_path, 2,
+            tmp_path,
+            2,
             runtime_vocab=[_vocab_entry("v")],
             key_findings=["B", "C"],
         )
@@ -639,7 +693,8 @@ class TestLoadLatestKnowledge:
     def test_skips_missing_digest_with_warning(self, tmp_path):
         """Iter committed but interp digest missing → warn + continue."""
         _write_interp_digest(
-            tmp_path, 1,
+            tmp_path,
+            1,
             runtime_vocab=[_vocab_entry("feat_iter1")],
             key_findings=["finding_iter1"],
         )
@@ -653,7 +708,8 @@ class TestLoadLatestKnowledge:
     def test_skips_malformed_json_with_warning(self, tmp_path):
         """Malformed digest → warn + continue with the rest."""
         _write_interp_digest(
-            tmp_path, 1,
+            tmp_path,
+            1,
             runtime_vocab=[_vocab_entry("feat_iter1")],
             key_findings=["finding_iter1"],
         )
@@ -666,7 +722,8 @@ class TestLoadLatestKnowledge:
     def test_drops_malformed_vocab_entries_with_warning(self, tmp_path):
         """Per-entry validation failure → drop that entry, keep the rest."""
         _write_interp_digest(
-            tmp_path, 1,
+            tmp_path,
+            1,
             runtime_vocab=[
                 _vocab_entry("good_a"),
                 {"name": "bad_entry"},  # missing required fields → ValidationError
@@ -688,10 +745,14 @@ class TestLoadLatestKnowledge:
         channel inside the next iter's interp call.
         """
         _write_interp_digest(
-            tmp_path, 1,
-            runtime_vocab=[_vocab_entry(
-                "carry_me", seen_in_runs=["iter_001"],
-            )],
+            tmp_path,
+            1,
+            runtime_vocab=[
+                _vocab_entry(
+                    "carry_me",
+                    seen_in_runs=["iter_001"],
+                )
+            ],
             key_findings=[],
         )
         vocab, _findings = load_latest_knowledge(str(tmp_path), 2, [1])
@@ -720,12 +781,14 @@ class TestRestorePriorStateKnowledgeCarryOver:
         _materialise_iter(tmp_path, 1, "resume_test_arch_a", 0.71)
         _materialise_iter(tmp_path, 2, "resume_test_arch_b", 0.78)
         _write_interp_digest(
-            tmp_path, 1,
+            tmp_path,
+            1,
             runtime_vocab=[_vocab_entry("feat_iter1", seen_in_runs=["iter_001"])],
             key_findings=["lesson_iter1"],
         )
         _write_interp_digest(
-            tmp_path, 2,
+            tmp_path,
+            2,
             runtime_vocab=[
                 _vocab_entry("feat_iter1", seen_in_runs=["iter_001", "iter_002"]),
                 _vocab_entry("feat_iter2", seen_in_runs=["iter_002"]),
@@ -768,7 +831,7 @@ def _write_interp_digest_with_cache(
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "runtime_vocab": runtime_vocab or [],
-        "key_findings":  key_findings or [],
+        "key_findings": key_findings or [],
     }
     if model_knowledge_cache is not None:
         payload["model_knowledge_cache"] = model_knowledge_cache
@@ -804,13 +867,19 @@ class TestLoadLatestKnowledgeCache:
     def test_picks_latest_cache(self, tmp_path):
         """3-iter chain: iter_003's cache wins (latest-wins, NOT union)."""
         _write_interp_digest_with_cache(
-            tmp_path, 1, model_knowledge_cache={"a": _cache_entry(0.5)},
+            tmp_path,
+            1,
+            model_knowledge_cache={"a": _cache_entry(0.5)},
         )
         _write_interp_digest_with_cache(
-            tmp_path, 2, model_knowledge_cache={"b": _cache_entry(0.6)},
+            tmp_path,
+            2,
+            model_knowledge_cache={"b": _cache_entry(0.6)},
         )
         _write_interp_digest_with_cache(
-            tmp_path, 3, model_knowledge_cache={"c": _cache_entry(0.7)},
+            tmp_path,
+            3,
+            model_knowledge_cache={"c": _cache_entry(0.7)},
         )
         cache = load_latest_knowledge_cache(str(tmp_path), 4, [1, 2, 3])
         assert sorted(cache.keys()) == ["c"]
@@ -821,11 +890,15 @@ class TestLoadLatestKnowledgeCache:
         """Pre-Commit-6.1.a digests have no model_knowledge_cache key — the
         loader must leave the running cache untouched and continue."""
         _write_interp_digest_with_cache(
-            tmp_path, 1, model_knowledge_cache={"early": _cache_entry(0.5)},
+            tmp_path,
+            1,
+            model_knowledge_cache={"early": _cache_entry(0.5)},
         )
         # iter_002 digest exists but lacks the cache key (legacy shape).
         _write_interp_digest_with_cache(
-            tmp_path, 2, model_knowledge_cache=None,
+            tmp_path,
+            2,
+            model_knowledge_cache=None,
         )
         cache = load_latest_knowledge_cache(str(tmp_path), 3, [1, 2])
         # iter_001's cache must survive — iter_002's missing key is treated
@@ -837,10 +910,14 @@ class TestLoadLatestKnowledgeCache:
         evicted everything via _cap_knowledge_cache). Distinguished from a
         missing key per the loader docstring."""
         _write_interp_digest_with_cache(
-            tmp_path, 1, model_knowledge_cache={"early": _cache_entry(0.5)},
+            tmp_path,
+            1,
+            model_knowledge_cache={"early": _cache_entry(0.5)},
         )
         _write_interp_digest_with_cache(
-            tmp_path, 2, model_knowledge_cache={},
+            tmp_path,
+            2,
+            model_knowledge_cache={},
         )
         cache = load_latest_knowledge_cache(str(tmp_path), 3, [1, 2])
         assert cache == {}
@@ -848,7 +925,9 @@ class TestLoadLatestKnowledgeCache:
     def test_skips_missing_digest_with_warning(self, tmp_path):
         """Iter committed but interp digest missing → warn + continue."""
         _write_interp_digest_with_cache(
-            tmp_path, 1, model_knowledge_cache={"a": _cache_entry(0.5)},
+            tmp_path,
+            1,
+            model_knowledge_cache={"a": _cache_entry(0.5)},
         )
         # iter_002 has no digest written.
         with pytest.warns(UserWarning, match="iter 002.*digest not found"):
@@ -859,7 +938,9 @@ class TestLoadLatestKnowledgeCache:
     def test_skips_malformed_json_with_warning(self, tmp_path):
         """Malformed digest → warn + continue with the rest."""
         _write_interp_digest_with_cache(
-            tmp_path, 1, model_knowledge_cache={"a": _cache_entry(0.5)},
+            tmp_path,
+            1,
+            model_knowledge_cache={"a": _cache_entry(0.5)},
         )
         # Write a corrupt iter_002 digest manually.
         bad_path = tmp_path / _interpretation_path("", 2).lstrip(os.sep)
@@ -873,7 +954,9 @@ class TestLoadLatestKnowledgeCache:
         """Mutating the returned dict must not alter on-disk state if
         re-read. Defends against caller-side mutation leaking back."""
         _write_interp_digest_with_cache(
-            tmp_path, 1, model_knowledge_cache={"a": _cache_entry(0.5)},
+            tmp_path,
+            1,
+            model_knowledge_cache={"a": _cache_entry(0.5)},
         )
         cache_a = load_latest_knowledge_cache(str(tmp_path), 2, [1])
         cache_a["mutated"] = {"sentinel": True}
@@ -895,11 +978,13 @@ class TestRestorePriorStateKnowledgeCacheCarryOver:
         _materialise_iter(tmp_path, 1, "resume_cache_arch_a", 0.71)
         _materialise_iter(tmp_path, 2, "resume_cache_arch_b", 0.78)
         _write_interp_digest_with_cache(
-            tmp_path, 1,
+            tmp_path,
+            1,
             model_knowledge_cache={"resume_cache_arch_a": _cache_entry(0.71)},
         )
         _write_interp_digest_with_cache(
-            tmp_path, 2,
+            tmp_path,
+            2,
             model_knowledge_cache={
                 "resume_cache_arch_a": _cache_entry(0.71),
                 "resume_cache_arch_b": _cache_entry(0.78),
@@ -908,7 +993,8 @@ class TestRestorePriorStateKnowledgeCacheCarryOver:
         state = restore_prior_state(str(tmp_path), 3, [])
         assert state.committed_iters == [1, 2]
         assert sorted(state.model_knowledge_cache.keys()) == [
-            "resume_cache_arch_a", "resume_cache_arch_b",
+            "resume_cache_arch_a",
+            "resume_cache_arch_b",
         ]
         # iter_002's entry for arch_b is the latest; spot-check round-trip.
         assert (
@@ -928,8 +1014,9 @@ from core.resume import (
 )
 
 
-def _physical_rejection(model_type: str, *, estimated_gb: float = 14.0,
-                        budget_gb: float = 12.0) -> dict:
+def _physical_rejection(
+    model_type: str, *, estimated_gb: float = 14.0, budget_gb: float = 12.0
+) -> dict:
     """Minimum-required dict that validates as PhysicalRejection."""
     return {
         "attempt_config": {"model_type": model_type, "batch_size": 4},
@@ -943,8 +1030,12 @@ def _physical_rejection(model_type: str, *, estimated_gb: float = 14.0,
     }
 
 
-def _gate_exhaustion(active_mode: str = "trial", *, total_attempts: int = 3,
-                     summary: str = "all attempts gate-rejected") -> dict:
+def _gate_exhaustion(
+    active_mode: str = "trial",
+    *,
+    total_attempts: int = 3,
+    summary: str = "all attempts gate-rejected",
+) -> dict:
     """Minimum-required dict that validates as GateExhaustionInfo."""
     return {
         "total_attempts": total_attempts,
@@ -969,19 +1060,25 @@ class TestRestorePriorStateNegativeFeedbackCarryOver:
     def test_collects_rejections_chronologically(self, tmp_path, isolated_registries):
         """3-iter chain, each with one rejection → all three collected in order."""
         _materialise_iter(
-            tmp_path, 1, "resume_test_arch_a",
+            tmp_path,
+            1,
+            "resume_test_arch_a",
             run_output_overrides={
                 "physical_rejections": [_physical_rejection("arch_a", estimated_gb=15.0)],
             },
         )
         _materialise_iter(
-            tmp_path, 2, "resume_test_arch_b",
+            tmp_path,
+            2,
+            "resume_test_arch_b",
             run_output_overrides={
                 "physical_rejections": [_physical_rejection("arch_b", estimated_gb=18.0)],
             },
         )
         _materialise_iter(
-            tmp_path, 3, "resume_test_arch_c",
+            tmp_path,
+            3,
+            "resume_test_arch_c",
             run_output_overrides={
                 "physical_rejections": [_physical_rejection("arch_c", estimated_gb=20.0)],
             },
@@ -995,15 +1092,21 @@ class TestRestorePriorStateNegativeFeedbackCarryOver:
     def test_collects_gate_exhaustions_chronologically(self, tmp_path, isolated_registries):
         """3-iter chain with gate_exhaustion → all three collected in order."""
         _materialise_iter(
-            tmp_path, 1, "resume_test_arch_a",
+            tmp_path,
+            1,
+            "resume_test_arch_a",
             run_output_overrides={"gate_exhaustion": _gate_exhaustion(summary="iter1")},
         )
         _materialise_iter(
-            tmp_path, 2, "resume_test_arch_b",
+            tmp_path,
+            2,
+            "resume_test_arch_b",
             run_output_overrides={"gate_exhaustion": _gate_exhaustion(summary="iter2")},
         )
         _materialise_iter(
-            tmp_path, 3, "resume_test_arch_c",
+            tmp_path,
+            3,
+            "resume_test_arch_c",
             run_output_overrides={"gate_exhaustion": _gate_exhaustion(summary="iter3")},
         )
         state = restore_prior_state(str(tmp_path), 4, [])
@@ -1016,11 +1119,12 @@ class TestRestorePriorStateNegativeFeedbackCarryOver:
         # iter_001: 4 rejections, iter_002: 4 rejections, iter_003: 4 rejections
         for iter_idx, model in [(1, "arch_a"), (2, "arch_b"), (3, "arch_c")]:
             _materialise_iter(
-                tmp_path, iter_idx, f"resume_test_arch_{chr(96 + iter_idx)}",
+                tmp_path,
+                iter_idx,
+                f"resume_test_arch_{chr(96 + iter_idx)}",
                 run_output_overrides={
                     "physical_rejections": [
-                        _physical_rejection(model, estimated_gb=10.0 + i)
-                        for i in range(4)
+                        _physical_rejection(model, estimated_gb=10.0 + i) for i in range(4)
                     ],
                 },
             )
@@ -1040,7 +1144,9 @@ class TestRestorePriorStateNegativeFeedbackCarryOver:
         the 10 most-recent retained."""
         for iter_idx in range(1, 13):
             _materialise_iter(
-                tmp_path, iter_idx, f"resume_test_arch_{iter_idx:02d}",
+                tmp_path,
+                iter_idx,
+                f"resume_test_arch_{iter_idx:02d}",
                 run_output_overrides={
                     "gate_exhaustion": _gate_exhaustion(summary=f"iter{iter_idx:02d}"),
                 },
@@ -1055,7 +1161,9 @@ class TestRestorePriorStateNegativeFeedbackCarryOver:
     def test_iter_with_no_rejections_contributes_nothing(self, tmp_path, isolated_registries):
         """Iters with empty/missing physical_rejections must not break collection."""
         _materialise_iter(
-            tmp_path, 1, "resume_test_arch_a",
+            tmp_path,
+            1,
+            "resume_test_arch_a",
             run_output_overrides={
                 "physical_rejections": [_physical_rejection("arch_a")],
             },
@@ -1063,7 +1171,9 @@ class TestRestorePriorStateNegativeFeedbackCarryOver:
         # iter_002: no overrides → defaults to empty physical_rejections list.
         _materialise_iter(tmp_path, 2, "resume_test_arch_b")
         _materialise_iter(
-            tmp_path, 3, "resume_test_arch_c",
+            tmp_path,
+            3,
+            "resume_test_arch_c",
             run_output_overrides={
                 "physical_rejections": [_physical_rejection("arch_c")],
             },
@@ -1077,13 +1187,17 @@ class TestRestorePriorStateNegativeFeedbackCarryOver:
     def test_iter_with_none_gate_exhaustion_skipped(self, tmp_path, isolated_registries):
         """Iters with gate_exhaustion=None (the default) must be skipped silently."""
         _materialise_iter(
-            tmp_path, 1, "resume_test_arch_a",
+            tmp_path,
+            1,
+            "resume_test_arch_a",
             run_output_overrides={"gate_exhaustion": _gate_exhaustion(summary="iter1")},
         )
         # iter_002: no override → default gate_exhaustion=None.
         _materialise_iter(tmp_path, 2, "resume_test_arch_b")
         _materialise_iter(
-            tmp_path, 3, "resume_test_arch_c",
+            tmp_path,
+            3,
+            "resume_test_arch_c",
             run_output_overrides={"gate_exhaustion": _gate_exhaustion(summary="iter3")},
         )
         state = restore_prior_state(str(tmp_path), 4, [])
@@ -1094,7 +1208,9 @@ class TestRestorePriorStateNegativeFeedbackCarryOver:
         """A no_records iter (gate-exhaustion that produced no run_output) is
         skipped without affecting the rejection accumulator."""
         _materialise_iter(
-            tmp_path, 1, "resume_test_arch_a",
+            tmp_path,
+            1,
+            "resume_test_arch_a",
             run_output_overrides={
                 "physical_rejections": [_physical_rejection("arch_a")],
             },
@@ -1103,15 +1219,21 @@ class TestRestorePriorStateNegativeFeedbackCarryOver:
         run_name_2 = _iter_run_name(2)
         iter_dir_2 = tmp_path / run_name_2
         iter_dir_2.mkdir()
-        (iter_dir_2 / "manifest.json").write_text(json.dumps({
-            "status": "no_records",
-            "iteration_dir": str(iter_dir_2),
-            "output_path": None,
-            "model_name": None,
-            "best_score": None,
-        }))
+        (iter_dir_2 / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "status": "no_records",
+                    "iteration_dir": str(iter_dir_2),
+                    "output_path": None,
+                    "model_name": None,
+                    "best_score": None,
+                }
+            )
+        )
         _materialise_iter(
-            tmp_path, 3, "resume_test_arch_c",
+            tmp_path,
+            3,
+            "resume_test_arch_c",
             run_output_overrides={
                 "physical_rejections": [_physical_rejection("arch_c")],
             },
@@ -1150,20 +1272,23 @@ def _write_proposal(
     """
     run_name = _iter_run_name(iter_idx)
     attempt_dir = (
-        workspace / run_name / f"iteration_{iter_idx:03d}"
-        / f"attempt_{attempt:03d}_{model_name}"
+        workspace / run_name / f"iteration_{iter_idx:03d}" / f"attempt_{attempt:03d}_{model_name}"
     )
     attempt_dir.mkdir(parents=True, exist_ok=True)
     path = attempt_dir / f"proposal_{run_name}.json"
     if raw_text is not None:
         path.write_text(raw_text)
         return path
-    body = payload if payload is not None else {
-        "proposed_model_type": model_name,
-        "proposed_vocab_candidates": [
-            {"name": f"cand_{run_name}", "kind": "feature"},
-        ],
-    }
+    body = (
+        payload
+        if payload is not None
+        else {
+            "proposed_model_type": model_name,
+            "proposed_vocab_candidates": [
+                {"name": f"cand_{run_name}", "kind": "feature"},
+            ],
+        }
+    )
     path.write_text(json.dumps(body))
     return path
 
@@ -1201,12 +1326,18 @@ class TestLoadLatestProposal:
         """Same iter has attempt_001 + attempt_002 → highest MMM wins."""
         # Older attempt with the rejected proposal:
         _write_proposal(
-            tmp_path, 3, attempt=1, model_name="rejected_arch",
+            tmp_path,
+            3,
+            attempt=1,
+            model_name="rejected_arch",
             payload={"id": "iter3_attempt1_rejected"},
         )
         # Newer attempt that was accepted:
         _write_proposal(
-            tmp_path, 3, attempt=2, model_name="accepted_arch",
+            tmp_path,
+            3,
+            attempt=2,
+            model_name="accepted_arch",
             payload={"id": "iter3_attempt2_accepted"},
         )
         out = load_latest_proposal(str(tmp_path), [3])
@@ -1225,7 +1356,8 @@ class TestLoadLatestProposal:
         assert _proposal_path(str(tmp_path), 5) is None
 
     def test_proposal_path_uses_chain_wide_iter_dir_name_for_iter_above_1(
-        self, tmp_path,
+        self,
+        tmp_path,
     ):
         """Regression for the cc198ad path drift.
 
@@ -1239,7 +1371,8 @@ class TestLoadLatestProposal:
         """
         # Place a proposal under the post-cc198ad layout for iter 5.
         path = _write_proposal(
-            tmp_path, 5,
+            tmp_path,
+            5,
             payload={"id": "iter5_proposal_under_dynamic_dir"},
         )
         # Sanity: writer is honouring the dynamic layout.
@@ -1257,7 +1390,8 @@ class TestLoadLatestProposal:
             assert json.load(f) == {"id": "iter5_proposal_under_dynamic_dir"}
 
     def test_interpretation_path_uses_chain_wide_iter_dir_name_for_iter_above_1(
-        self, tmp_path,
+        self,
+        tmp_path,
     ):
         """Regression for the cc198ad path drift on the knowledge channel.
 
@@ -1267,6 +1401,7 @@ class TestLoadLatestProposal:
         for the digest reader.
         """
         from core.resume import _interpretation_path
+
         path = _interpretation_path(str(tmp_path), 7)
         assert "iter_007" in path and "iteration_007" in path, (
             f"_interpretation_path resolved {path!r} — expected dynamic "
@@ -1282,17 +1417,23 @@ class TestRestorePriorStateProposalCarryOver:
         assert state.previous_proposal_data is None
 
     def test_populates_previous_proposal_data_from_latest_iter(
-        self, tmp_path, isolated_registries,
+        self,
+        tmp_path,
+        isolated_registries,
     ):
         """2-iter workspace with proposals at both iters; latest wins."""
         _materialise_iter(tmp_path, 1, "resume_test_arch_a", 0.71)
         _materialise_iter(tmp_path, 2, "resume_test_arch_b", 0.78)
         _write_proposal(
-            tmp_path, 1, model_name="resume_test_arch_a",
+            tmp_path,
+            1,
+            model_name="resume_test_arch_a",
             payload={"proposed_model_type": "resume_test_arch_a", "id": "p1"},
         )
         _write_proposal(
-            tmp_path, 2, model_name="resume_test_arch_b",
+            tmp_path,
+            2,
+            model_name="resume_test_arch_b",
             payload={"proposed_model_type": "resume_test_arch_b", "id": "p2"},
         )
         state = restore_prior_state(str(tmp_path), 3, [])
@@ -1300,7 +1441,9 @@ class TestRestorePriorStateProposalCarryOver:
         assert state.previous_proposal_data["id"] == "p2"
 
     def test_proposal_field_none_when_no_proposal_files_exist(
-        self, tmp_path, isolated_registries,
+        self,
+        tmp_path,
+        isolated_registries,
     ):
         """Manifests + run_outputs present but no proposal JSON → None."""
         _materialise_iter(tmp_path, 1, "resume_test_arch_a", 0.71)

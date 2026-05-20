@@ -44,6 +44,7 @@ Usage (chain layout, machine view for shell capture):
 
 This is a read-only foundation tool. It does not modify any files.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -52,7 +53,6 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from pydantic import ValidationError
 
@@ -62,7 +62,6 @@ if str(_REPO_ROOT) not in sys.path:
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput  # noqa: E402
 from core.resume import ResumeError, validate_workspace_layout  # noqa: E402
-
 
 _RUN_ITER_RE = re.compile(r"^iteration_(\d+)$")
 _CHAIN_ITER_RE = re.compile(r"^iter_(\d+)$")
@@ -76,19 +75,21 @@ class IterationReport:
     ``model_subdir`` and ``run_output_path`` are only populated by the
     legacy run-layout walk; chain-layout reports leave them ``None``.
     """
+
     iter_idx: int
     iter_dir: Path
-    model_subdir: Optional[Path]
-    run_output_path: Optional[Path]
+    model_subdir: Path | None
+    run_output_path: Path | None
     status: str
-    model_type: Optional[str]
-    best_score: Optional[float]
+    model_type: str | None
+    best_score: float | None
     detail: str
 
 
 # ---------------------------------------------------------------------------
 # Legacy run-layout walk (unchanged behaviour)
 # ---------------------------------------------------------------------------
+
 
 def _find_workspace_root(run_dir: Path, run_name: str) -> Path:
     """Resolve the directory that holds ``iteration_NNN/`` children."""
@@ -101,12 +102,11 @@ def _find_workspace_root(run_dir: Path, run_name: str) -> Path:
         if c.is_dir() and any(_RUN_ITER_RE.match(p.name) for p in c.iterdir()):
             return c
     raise FileNotFoundError(
-        "No iteration_NNN dirs found under any of: "
-        + ", ".join(str(c) for c in candidates)
+        "No iteration_NNN dirs found under any of: " + ", ".join(str(c) for c in candidates)
     )
 
 
-def _find_tuner_subdir(iter_dir: Path) -> Optional[Path]:
+def _find_tuner_subdir(iter_dir: Path) -> Path | None:
     """Return the model-type subdir inside an iteration_NNN/ folder.
 
     Tuner outputs live in ``iteration_NNN/{model_type}/``. Sibling
@@ -124,7 +124,7 @@ def _find_tuner_subdir(iter_dir: Path) -> Optional[Path]:
 
 def _validate_run_output(
     path: Path,
-) -> tuple[Optional[HyperparamTuningOutput], str]:
+) -> tuple[HyperparamTuningOutput | None, str]:
     """Try to load + validate ``run_output_*.json``. Returns (parsed, err)."""
     try:
         text = path.read_text(encoding="utf-8")
@@ -145,7 +145,10 @@ def inspect_iteration(iter_dir: Path, run_name: str) -> IterationReport:
 
     if model_subdir is None:
         return IterationReport(
-            iter_idx, iter_dir, None, None,
+            iter_idx,
+            iter_dir,
+            None,
+            None,
             status="MISSING",
             model_type=None,
             best_score=None,
@@ -155,7 +158,10 @@ def inspect_iteration(iter_dir: Path, run_name: str) -> IterationReport:
     run_output = model_subdir / f"run_output_{run_name}.json"
     if not run_output.exists():
         return IterationReport(
-            iter_idx, iter_dir, model_subdir, None,
+            iter_idx,
+            iter_dir,
+            model_subdir,
+            None,
             status="PARTIAL",
             model_type=model_subdir.name,
             best_score=None,
@@ -165,7 +171,10 @@ def inspect_iteration(iter_dir: Path, run_name: str) -> IterationReport:
     parsed, err = _validate_run_output(run_output)
     if parsed is None:
         return IterationReport(
-            iter_idx, iter_dir, model_subdir, run_output,
+            iter_idx,
+            iter_dir,
+            model_subdir,
+            run_output,
             status="CORRUPT",
             model_type=model_subdir.name,
             best_score=None,
@@ -173,7 +182,10 @@ def inspect_iteration(iter_dir: Path, run_name: str) -> IterationReport:
         )
 
     return IterationReport(
-        iter_idx, iter_dir, model_subdir, run_output,
+        iter_idx,
+        iter_dir,
+        model_subdir,
+        run_output,
         status="COMMITTED",
         model_type=parsed.model_type,
         best_score=parsed.best_denoising_score,
@@ -185,6 +197,7 @@ def inspect_iteration(iter_dir: Path, run_name: str) -> IterationReport:
 # Chain-layout walk (Phase 6.8 Task 2)
 # ---------------------------------------------------------------------------
 
+
 def _find_chain_iter_dirs(workspace: Path) -> list[Path]:
     """Return ``iter_NNN/`` children of ``workspace`` sorted by index.
 
@@ -193,8 +206,7 @@ def _find_chain_iter_dirs(workspace: Path) -> list[Path]:
     if not workspace.is_dir():
         return []
     return sorted(
-        (p for p in workspace.iterdir()
-         if p.is_dir() and _CHAIN_ITER_RE.match(p.name)),
+        (p for p in workspace.iterdir() if p.is_dir() and _CHAIN_ITER_RE.match(p.name)),
         key=lambda p: int(_CHAIN_ITER_RE.match(p.name).group(1)),
     )
 
@@ -211,7 +223,10 @@ def inspect_chain_iteration(iter_dir: Path) -> IterationReport:
 
     if not manifest_path.is_file():
         return IterationReport(
-            iter_idx, iter_dir, None, None,
+            iter_idx,
+            iter_dir,
+            None,
+            None,
             status="MISSING",
             model_type=None,
             best_score=None,
@@ -222,7 +237,10 @@ def inspect_chain_iteration(iter_dir: Path) -> IterationReport:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         return IterationReport(
-            iter_idx, iter_dir, None, None,
+            iter_idx,
+            iter_dir,
+            None,
+            None,
             status="CORRUPT",
             model_type=None,
             best_score=None,
@@ -230,7 +248,10 @@ def inspect_chain_iteration(iter_dir: Path) -> IterationReport:
         )
     except OSError as e:
         return IterationReport(
-            iter_idx, iter_dir, None, None,
+            iter_idx,
+            iter_dir,
+            None,
+            None,
             status="CORRUPT",
             model_type=None,
             best_score=None,
@@ -241,7 +262,10 @@ def inspect_chain_iteration(iter_dir: Path) -> IterationReport:
     model_name = manifest.get("model_name")
     if status != "completed":
         return IterationReport(
-            iter_idx, iter_dir, None, None,
+            iter_idx,
+            iter_dir,
+            None,
+            None,
             status="PARTIAL",
             model_type=model_name,
             best_score=None,
@@ -251,7 +275,10 @@ def inspect_chain_iteration(iter_dir: Path) -> IterationReport:
     output_path_str = manifest.get("output_path")
     if not output_path_str:
         return IterationReport(
-            iter_idx, iter_dir, None, None,
+            iter_idx,
+            iter_dir,
+            None,
+            None,
             status="CORRUPT",
             model_type=model_name,
             best_score=None,
@@ -260,7 +287,10 @@ def inspect_chain_iteration(iter_dir: Path) -> IterationReport:
     output_path = Path(output_path_str)
     if not output_path.is_file():
         return IterationReport(
-            iter_idx, iter_dir, None, output_path,
+            iter_idx,
+            iter_dir,
+            None,
+            output_path,
             status="CORRUPT",
             model_type=model_name,
             best_score=None,
@@ -270,7 +300,10 @@ def inspect_chain_iteration(iter_dir: Path) -> IterationReport:
     parsed, err = _validate_run_output(output_path)
     if parsed is None:
         return IterationReport(
-            iter_idx, iter_dir, None, output_path,
+            iter_idx,
+            iter_dir,
+            None,
+            output_path,
             status="CORRUPT",
             model_type=model_name,
             best_score=None,
@@ -278,7 +311,10 @@ def inspect_chain_iteration(iter_dir: Path) -> IterationReport:
         )
 
     return IterationReport(
-        iter_idx, iter_dir, None, output_path,
+        iter_idx,
+        iter_dir,
+        None,
+        output_path,
         status="COMMITTED",
         model_type=parsed.model_type,
         best_score=parsed.best_denoising_score,
@@ -286,7 +322,7 @@ def inspect_chain_iteration(iter_dir: Path) -> IterationReport:
     )
 
 
-def find_iter_gap(reports: list[IterationReport]) -> Optional[int]:
+def find_iter_gap(reports: list[IterationReport]) -> int | None:
     """Return the first missing iter index in a non-contiguous sequence.
 
     None if the indices form a contiguous ``[1..N]`` (or are empty).
@@ -307,6 +343,7 @@ def find_iter_gap(reports: list[IterationReport]) -> Optional[int]:
 # ---------------------------------------------------------------------------
 # Rendering + summary
 # ---------------------------------------------------------------------------
+
 
 def render_table(reports: list[IterationReport]) -> str:
     """Render the summary table. Plain text, fixed-width columns.
@@ -339,7 +376,8 @@ def render_table(reports: list[IterationReport]) -> str:
 
 
 def compute_next_iter(
-    reports: list[IterationReport], gap: Optional[int],
+    reports: list[IterationReport],
+    gap: int | None,
 ) -> int:
     """Return the index the next chain iter should run as.
 
@@ -379,8 +417,7 @@ def compute_next_iter(
         if r.status != "COMMITTED":
             return r.iter_idx
     raise AssertionError(
-        "unreachable: reports non-empty but no committed AND no "
-        "non-committed entries"
+        "unreachable: reports non-empty but no committed AND no non-committed entries"
     )
 
 
@@ -402,14 +439,14 @@ def find_dangling_broken_iters(
         return []
     max_committed = max(committed_idxs)
     return sorted(
-        r.iter_idx for r in reports
-        if r.status != "COMMITTED" and r.iter_idx < max_committed
+        r.iter_idx for r in reports if r.status != "COMMITTED" and r.iter_idx < max_committed
     )
 
 
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
 
 def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
@@ -420,27 +457,34 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     ap.add_argument(
-        "--layout", choices=("run", "chain"), default="run",
+        "--layout",
+        choices=("run", "chain"),
+        default="run",
         help="Workspace layout to walk. Default 'run' for back-compat; "
-             "chain runners must pass --layout chain. Default flips in Commit 15.",
+        "chain runners must pass --layout chain. Default flips in Commit 15.",
     )
     ap.add_argument(
-        "--run_dir", type=Path,
+        "--run_dir",
+        type=Path,
         help="(--layout run) Parent dir holding exploration_{run_name}/.",
     )
     ap.add_argument(
-        "--run_name", type=str,
+        "--run_name",
+        type=str,
         help="(--layout run) Run identifier matching exploration_{run_name}/.",
     )
     ap.add_argument(
-        "--workspace", type=Path,
+        "--workspace",
+        type=Path,
         help="(--layout chain) Chain workspace root containing iter_NNN/.",
     )
     ap.add_argument(
-        "--next-iter", action="store_true", dest="next_iter",
+        "--next-iter",
+        action="store_true",
+        dest="next_iter",
         help="(--layout chain) Print only the integer index of the next "
-             "iter to run on stdout. Suppresses the table. Used by "
-             "run_chain.sh --auto_resume.",
+        "iter to run on stdout. Suppresses the table. Used by "
+        "run_chain.sh --auto_resume.",
     )
     return ap
 
@@ -477,18 +521,21 @@ def _run_layout_run(args: argparse.Namespace) -> int:
     print(render_table(reports))
     print()
 
-    counts = {s: sum(1 for r in reports if r.status == s)
-              for s in ("COMMITTED", "PARTIAL", "CORRUPT", "MISSING")}
-    print(f"Summary: {len(reports)} iter(s) — "
-          + ", ".join(f"{k}={v}" for k, v in counts.items()))
+    counts = {
+        s: sum(1 for r in reports if r.status == s)
+        for s in ("COMMITTED", "PARTIAL", "CORRUPT", "MISSING")
+    }
+    print(f"Summary: {len(reports)} iter(s) — " + ", ".join(f"{k}={v}" for k, v in counts.items()))
 
     last_committed = max(
         (r.iter_idx for r in reports if r.status == "COMMITTED"),
         default=None,
     )
     if last_committed is not None:
-        print(f"Last committed iteration: {last_committed:03d} "
-              f"(resume would replay state up to and including this iter)")
+        print(
+            f"Last committed iteration: {last_committed:03d} "
+            f"(resume would replay state up to and including this iter)"
+        )
     else:
         print("No committed iteration found — resume would start from scratch.")
 
@@ -538,10 +585,11 @@ def _run_layout_chain(args: argparse.Namespace) -> int:
     print(render_table(reports))
     print()
 
-    counts = {s: sum(1 for r in reports if r.status == s)
-              for s in ("COMMITTED", "PARTIAL", "CORRUPT", "MISSING")}
-    print(f"Summary: {len(reports)} iter(s) — "
-          + ", ".join(f"{k}={v}" for k, v in counts.items()))
+    counts = {
+        s: sum(1 for r in reports if r.status == s)
+        for s in ("COMMITTED", "PARTIAL", "CORRUPT", "MISSING")
+    }
+    print(f"Summary: {len(reports)} iter(s) — " + ", ".join(f"{k}={v}" for k, v in counts.items()))
 
     if gap is not None:
         print(
@@ -560,11 +608,12 @@ def _run_layout_chain(args: argparse.Namespace) -> int:
             default=None,
         )
         if last_committed is not None:
-            print(f"Last committed iter: iter_{last_committed:03d} "
-                  f"(--auto_resume would launch iter_{next_idx:03d} next).")
+            print(
+                f"Last committed iter: iter_{last_committed:03d} "
+                f"(--auto_resume would launch iter_{next_idx:03d} next)."
+            )
         else:
-            print(f"No committed iter — --auto_resume would launch "
-                  f"iter_{next_idx:03d}.")
+            print(f"No committed iter — --auto_resume would launch iter_{next_idx:03d}.")
         if dangling:
             dangling_str = ", ".join(f"iter_{i:03d}" for i in dangling)
             print(
@@ -576,7 +625,7 @@ def _run_layout_chain(args: argparse.Namespace) -> int:
     return 0
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = _build_parser()
     args = ap.parse_args(argv)
     _validate_args(args, ap)

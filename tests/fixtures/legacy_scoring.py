@@ -23,6 +23,7 @@ This module is a **reference fixture only** — tests use it to verify that
 ``execute_tools.scoring_utils`` reproduces the legacy scalar bit-for-bit.
 Do not import it from production code.
 """
+
 # ruff: noqa  — legacy code, preserved verbatim below the patch marker
 # pylint: disable=all
 from __future__ import annotations
@@ -39,8 +40,8 @@ import h5py as h5  # legacy uses ``h5`` alias; keep both bindings for parity
 from tqdm import tqdm
 
 logging.basicConfig(
-    format='%(asctime)s %(levelname)s: %(message)s',
-    datefmt='%m/%d/%Y %I:%M:%S %p',
+    format="%(asctime)s %(levelname)s: %(message)s",
+    datefmt="%m/%d/%Y %I:%M:%S %p",
     level=logging.ERROR,
 )
 
@@ -53,9 +54,9 @@ def GetOneSecPSD(file_path, files, ch, start=0):
             file_list.append(os.path.join(file_path, f))
     elif files.endswith(".h5"):
         file_list = [os.path.join(file_path, files)]
-        logging.info('Getting data from h5 file')
+        logging.info("Getting data from h5 file")
     else:
-        logging.error('Not acceptable data format!')
+        logging.error("Not acceptable data format!")
     N = 10000000
     psd_sum = np.zeros(int(N / 2))
     interfile_data = []
@@ -69,19 +70,19 @@ def GetOneSecPSD(file_path, files, ch, start=0):
     logging.info("Opening file " + file)
     with h5.File(file) as h5f:
         if ch == 1:
-            data = h5f['timeseries']['channel0001']['timeseries'][startIndex:startIndex + N]
+            data = h5f["timeseries"]["channel0001"]["timeseries"][startIndex : startIndex + N]
         elif ch == 2:
-            data = h5f['timeseries']['channel0002']['timeseries'][startIndex:startIndex + N]
+            data = h5f["timeseries"]["channel0002"]["timeseries"][startIndex : startIndex + N]
         else:
             logging.error("Incorrect channel number. Choose 1 or 2")
-        volt_range = (h5f['timeseries']['channel0001']).attrs['voltage_range_mV']
+        volt_range = (h5f["timeseries"]["channel0001"]).attrs["voltage_range_mV"]
         logging.info("Retrieved data from h5.")
 
         scaling = np.float32(volt_range / (2 * 128.0))
         TS = np.array(data, dtype=np.float32) * scaling
         logging.info("Retrieved time series.")
 
-        dt = 1.0 / (h5.File(file)['timeseries']['channel0001']).attrs['sampling_frequency']
+        dt = 1.0 / (h5.File(file)["timeseries"]["channel0001"]).attrs["sampling_frequency"]
 
         # ------------------------------------------------------------------
         # ONE-LINE OPTION B PATCH — .astype(np.float64) added to the rfft
@@ -89,7 +90,11 @@ def GetOneSecPSD(file_path, files, ch, start=0):
         # under which the canonical TIDMAD benchmark numbers were generated.
         # Everything else on this line is verbatim from denoising_score_old.py.
         # ------------------------------------------------------------------
-        psd_chunk = dt / N * (abs(np.fft.rfft(TS.astype(np.float64).reshape(len(TS) // N, N))) ** 2).sum(0)[1:]
+        psd_chunk = (
+            dt
+            / N
+            * (abs(np.fft.rfft(TS.astype(np.float64).reshape(len(TS) // N, N))) ** 2).sum(0)[1:]
+        )
         freq_array = np.linspace(0, 5 * 1e6, int(N / 2))
     del data, TS, dt
     gc.collect()
@@ -99,7 +104,7 @@ def GetOneSecPSD(file_path, files, ch, start=0):
 def findPeak(pwr):
     peakdiff = pwr[1:-1] - pwr[:-2] - pwr[2:]
     peakIndex = int(np.where(peakdiff == np.amax(peakdiff))[0][0]) + 1
-    return (peakIndex)
+    return peakIndex
 
 
 def getSNR(freq, pwr, target=0):
@@ -109,8 +114,8 @@ def getSNR(freq, pwr, target=0):
         center_id = int(np.where(freq == target)[0][0])
     sig_range = 1
     noise_range = 50
-    signal = np.sum(pwr[center_id - sig_range:center_id + sig_range + 1])
-    noise = np.sum(pwr[center_id - noise_range:center_id + noise_range + 1]) - signal
+    signal = np.sum(pwr[center_id - sig_range : center_id + sig_range + 1])
+    noise = np.sum(pwr[center_id - noise_range : center_id + noise_range + 1]) - signal
     if noise == 0:
         noise = 1e-5
     return [signal / noise, freq[center_id]]
@@ -133,8 +138,8 @@ def calculateBenchmark(path, file, args):
     if type(file) == list:
         n = 200 * len(file)
     elif file.endswith(".h5"):
-        with h5py.File(os.path.join(path, file), 'r') as file:
-            dataset = file['/timeseries/channel0001/timeseries']
+        with h5py.File(os.path.join(path, file), "r") as file:
+            dataset = file["/timeseries/channel0001/timeseries"]
             length = dataset.shape[0]
             n = length // 10000000  # use sampling rate to get number of seconds
     else:
@@ -147,7 +152,9 @@ def calculateBenchmark(path, file, args):
         # Initialize the executor
         with concurrent.futures.ProcessPoolExecutor(max_workers=args.num_workers) as executor:
             # Create a list of tasks
-            tasks = [executor.submit(process_iteration, i, path, file, args.coarse) for i in range(n)]
+            tasks = [
+                executor.submit(process_iteration, i, path, file, args.coarse) for i in range(n)
+            ]
 
             # Process the results as they become available
             for future in tqdm(concurrent.futures.as_completed(tasks), total=n):

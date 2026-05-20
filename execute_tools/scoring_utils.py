@@ -30,19 +30,19 @@ scipy.fft is prohibited here: it uses a different pocketfft backend with a
 different butterfly ordering, and does not produce bit-identical output.
 """
 
-import os
 import gc
 import math
+import os
 
-import numpy as np
 import h5py
+import numpy as np
 
-from execute_tools.dataset_config import SEGMENT_LENGTH, SEGMENTS_PER_FILE, NUM_FILES
-
+from execute_tools.dataset_config import NUM_FILES, SEGMENT_LENGTH, SEGMENTS_PER_FILE
 
 # ---------------------------------------------------------------------------
 # Core functions
 # ---------------------------------------------------------------------------
+
 
 def get_one_sec_psd(
     file_path: str,
@@ -90,9 +90,7 @@ def get_one_sec_psd(
     file = file_list[file_num]
     with h5py.File(file, "r") as h5f:
         channel_key = f"channel{ch:04d}"
-        data = h5f["timeseries"][channel_key]["timeseries"][
-            start_index : start_index + N
-        ]
+        data = h5f["timeseries"][channel_key]["timeseries"][start_index : start_index + N]
         volt_range = h5f["timeseries"]["channel0001"].attrs["voltage_range_mV"]
         sampling_freq = h5f["timeseries"]["channel0001"].attrs["sampling_frequency"]
 
@@ -106,9 +104,11 @@ def get_one_sec_psd(
         # implicitly promoted to float64 (returned complex128). The
         # canonical TIDMAD benchmark numbers were produced under the
         # complex128 path, so we force it explicitly here.
-        psd_chunk = dt / N * (
-            abs(np.fft.rfft(TS.astype(np.float64).reshape(len(TS) // N, N))) ** 2
-        ).sum(0)[1:]
+        psd_chunk = (
+            dt
+            / N
+            * (abs(np.fft.rfft(TS.astype(np.float64).reshape(len(TS) // N, N))) ** 2).sum(0)[1:]
+        )
         freq_array = np.linspace(0, 5 * 1e6, int(N / 2))
 
     del data, TS, dt
@@ -152,9 +152,7 @@ def get_snr(
     sig_range = 1
     noise_range = 50
     signal = np.sum(pwr[center_id - sig_range : center_id + sig_range + 1])
-    noise = (
-        np.sum(pwr[center_id - noise_range : center_id + noise_range + 1]) - signal
-    )
+    noise = np.sum(pwr[center_id - noise_range : center_id + noise_range + 1]) - signal
     if noise == 0:
         noise = 1e-5
     return signal / noise, freq[center_id]
@@ -224,7 +222,9 @@ def validate_sample_set(sample_set: dict) -> SampleSet:
         if not (0 <= file_index < NUM_FILES):
             raise ValueError(f"SampleSet file_index {file_index} out of range [0, {NUM_FILES}).")
         if not isinstance(segments, list) or not segments:
-            raise ValueError(f"SampleSet[{file_index}] must be a non-empty list, got {type(segments).__name__}")
+            raise ValueError(
+                f"SampleSet[{file_index}] must be a non-empty list, got {type(segments).__name__}"
+            )
         for seg in segments:
             if not isinstance(seg, int) or seg < 0 or seg >= SEGMENTS_PER_FILE:
                 raise ValueError(
@@ -487,10 +487,15 @@ def score_vector(
     tasks = []
     for file_index, segment_indices in sample_set.items():
         denoised_filename = denoised_filename_fn(file_index)
-        tasks.append((
-            data_dir, denoised_filename, file_index, segment_indices,
-            raw_data_dir,
-        ))
+        tasks.append(
+            (
+                data_dir,
+                denoised_filename,
+                file_index,
+                segment_indices,
+                raw_data_dir,
+            )
+        )
 
     raw_pairs: dict[int, list[tuple[float, float]]] = {}
     if not tasks:
@@ -566,6 +571,7 @@ def score_vector(
     failure_reason: str | None = None
     if reference_file_vector is not None:
         from execute_tools.squid_health_checks import check_amplitude_collapse
+
         is_degenerate, failure_reason = check_amplitude_collapse(
             file_vector=file_vector,
             reference_file_vector=reference_file_vector,
@@ -578,6 +584,7 @@ def score_vector(
 # ---------------------------------------------------------------------------
 # JSON-safety helper
 # ---------------------------------------------------------------------------
+
 
 def coerce_nonfinite_to_none(obj):
     """Recursively replace non-finite floats with ``None`` for JSON output.

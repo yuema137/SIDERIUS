@@ -4,28 +4,28 @@ Tests for ml_models/models_format_sandbox.py
 Verifies that all Pydantic config classes correctly accept valid inputs
 and reject invalid inputs with meaningful errors.
 """
+
 import pytest
 from pydantic import ValidationError
 
 from ml_models.models_format_sandbox import (
-    PUNetConfig,
     AEConfig,
-    TransformerConfig,
-    WaveNetConfig,
-    RNNSeq2SeqConfig,
+    ExperimentConfig,
     GatedFNOConfig,
     LossConfig,
+    PUNetConfig,
+    RNNSeq2SeqConfig,
     TrainConfig,
-    ExperimentConfig,
+    TransformerConfig,
+    WaveNetConfig,
 )
-
 
 # ==========================================
 # PUNetConfig
 # ==========================================
 
-class TestPUNetConfig:
 
+class TestPUNetConfig:
     def test_valid_default(self):
         cfg = PUNetConfig()
         assert cfg.model_type == "punet"
@@ -57,8 +57,8 @@ class TestPUNetConfig:
 # AEConfig
 # ==========================================
 
-class TestAEConfig:
 
+class TestAEConfig:
     def test_valid_default(self):
         cfg = AEConfig()
         assert cfg.model_type == "fcnet"
@@ -81,8 +81,8 @@ class TestAEConfig:
 # TransformerConfig
 # ==========================================
 
-class TestTransformerConfig:
 
+class TestTransformerConfig:
     def test_valid_default(self):
         cfg = TransformerConfig()
         assert cfg.model_type == "transformer"
@@ -105,8 +105,8 @@ class TestTransformerConfig:
 # WaveNetConfig
 # ==========================================
 
-class TestWaveNetConfig:
 
+class TestWaveNetConfig:
     def test_valid_default(self):
         cfg = WaveNetConfig()
         assert cfg.model_type == "wavenet"
@@ -130,8 +130,8 @@ class TestWaveNetConfig:
 # RNNSeq2SeqConfig
 # ==========================================
 
-class TestRNNSeq2SeqConfig:
 
+class TestRNNSeq2SeqConfig:
     def test_valid_default(self):
         cfg = RNNSeq2SeqConfig()
         assert cfg.model_type == "rnn"
@@ -157,8 +157,8 @@ class TestRNNSeq2SeqConfig:
 # LossConfig — parameter nullification
 # ==========================================
 
-class TestLossConfig:
 
+class TestLossConfig:
     def test_focal_nullifies_beta(self):
         cfg = LossConfig(loss_type="focal", alpha=0.25, gamma=2.0, beta=5.0)
         assert cfg.beta is None
@@ -184,14 +184,20 @@ class TestLossConfig:
 # ExperimentConfig — cross-validation
 # ==========================================
 
+
 def _make_experiment(model_type: str, loss_type: str) -> dict:
     """Helper to build a minimal valid ExperimentConfig payload."""
     model_configs = {
-        "punet":       {"model_type": "punet", "segmentation_size": 1000},
-        "fcnet":       {"model_type": "fcnet", "segmentation_size": 1000, "latent_dims": [100, 10]},
-        "transformer": {"model_type": "transformer", "segmentation_size": 1000, "embedding_dim": 32, "nhead": 4},
-        "wavenet":     {"model_type": "wavenet", "segmentation_size": 1000},
-        "rnn":         {"model_type": "rnn", "segmentation_size": 1000},
+        "punet": {"model_type": "punet", "segmentation_size": 1000},
+        "fcnet": {"model_type": "fcnet", "segmentation_size": 1000, "latent_dims": [100, 10]},
+        "transformer": {
+            "model_type": "transformer",
+            "segmentation_size": 1000,
+            "embedding_dim": 32,
+            "nhead": 4,
+        },
+        "wavenet": {"model_type": "wavenet", "segmentation_size": 1000},
+        "rnn": {"model_type": "rnn", "segmentation_size": 1000},
     }
     return {
         "exp_id": "test_exp",
@@ -204,7 +210,6 @@ def _make_experiment(model_type: str, loss_type: str) -> dict:
 
 
 class TestExperimentConfig:
-
     def test_punet_with_focal_passes(self):
         cfg = ExperimentConfig(**_make_experiment("punet", "focal"))
         assert cfg.model_type == "punet"
@@ -254,8 +259,8 @@ class TestExperimentConfig:
 # GatedFNOConfig
 # ==========================================
 
-class TestGatedFNOConfig:
 
+class TestGatedFNOConfig:
     def test_valid_default(self):
         cfg = GatedFNOConfig()
         assert cfg.model_type == "gated_fno"

@@ -39,16 +39,15 @@ to flag degeneracy, and silently passing through is the only safe
 behavior at the task-specific layer. The agent's generic handling layer
 decides what to do with the bool.
 """
-from __future__ import annotations
 
-from typing import Optional
+from __future__ import annotations
 
 
 def check_amplitude_collapse(
-    file_vector: Optional[list[float]],
-    reference_file_vector: Optional[list[float]],
+    file_vector: list[float] | None,
+    reference_file_vector: list[float] | None,
     threshold_ratio: float = 0.01,
-) -> tuple[bool, Optional[str]]:
+) -> tuple[bool, str | None]:
     """Detect mode collapse via PSD output magnitude ratio.
 
     Compares ``mean(|file_vector|)`` against
@@ -104,8 +103,8 @@ def check_amplitude_collapse(
     if ratio < threshold_ratio:
         reason = (
             f"amplitude_collapse: mean|file_vector|={current_mag:.4g} vs "
-            f"reference={reference_mag:.4g} (ratio={ratio*100:.3f}%, "
-            f"threshold={threshold_ratio*100:.0f}%)"
+            f"reference={reference_mag:.4g} (ratio={ratio * 100:.3f}%, "
+            f"threshold={threshold_ratio * 100:.0f}%)"
         )
         return (True, reason)
     return (False, None)

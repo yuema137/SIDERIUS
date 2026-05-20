@@ -24,12 +24,11 @@ Usage:
 """
 
 import argparse
+import concurrent.futures
 import json
 import os
 import sys
-import concurrent.futures
 
-import numpy as np
 from tqdm import tqdm
 
 # Add project root to path so we can import scoring_utils
@@ -78,24 +77,15 @@ def build_anchor_map(
         and ``"anchors"`` (file_index → list of 200 SNR floats).
     """
     # Initialize: 20 files × 200 segments
-    anchors: dict[int, list[float]] = {
-        i: [0.0] * SEGMENTS_PER_FILE for i in range(NUM_FILES)
-    }
+    anchors: dict[int, list[float]] = {i: [0.0] * SEGMENTS_PER_FILE for i in range(NUM_FILES)}
 
     # Build task list: (file_index, segment_index)
-    tasks = [
-        (fi, si)
-        for fi in range(NUM_FILES)
-        for si in range(SEGMENTS_PER_FILE)
-    ]
+    tasks = [(fi, si) for fi in range(NUM_FILES) for si in range(SEGMENTS_PER_FILE)]
     total = len(tasks)
 
     if parallel:
         with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
-            futures = [
-                executor.submit(_compute_ch2_snr, fi, si, data_dir)
-                for fi, si in tasks
-            ]
+            futures = [executor.submit(_compute_ch2_snr, fi, si, data_dir) for fi, si in tasks]
             for future in tqdm(
                 concurrent.futures.as_completed(futures),
                 total=total,
@@ -126,7 +116,7 @@ def load_anchor_map(path: str) -> dict:
     Returns the same dict structure as ``build_anchor_map()``, with
     ``"anchors"`` keys as strings (JSON constraint).
     """
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -135,31 +125,45 @@ def main():
         description="Pre-compute the segment anchor map for physics-anchored scoring.",
     )
     parser.add_argument(
-        "--data_dir", "-d", type=str, default=None,
+        "--data_dir",
+        "-d",
+        type=str,
+        default=None,
         help="Directory containing abra_validation_XXXX.h5 files.",
     )
     parser.add_argument(
-        "--output", "-o", type=str, default=None,
+        "--output",
+        "-o",
+        type=str,
+        default=None,
         help="Output JSON path. Defaults to <data_dir>/segment_anchors.json.",
     )
     parser.add_argument(
-        "-p", "--parallel", action="store_true",
+        "-p",
+        "--parallel",
+        action="store_true",
         help="Use multiprocessing for speed.",
     )
     parser.add_argument(
-        "-n", "--num_workers", type=int, default=8,
+        "-n",
+        "--num_workers",
+        type=int,
+        default=8,
         help="Number of parallel workers.",
     )
     args = parser.parse_args()
 
     if args.data_dir is None:
         from execute_tools.data_paths import TIDMAD_DATA_DIR
+
         args.data_dir = TIDMAD_DATA_DIR
 
     output_path = args.output or os.path.join(args.data_dir, "segment_anchors.json")
 
-    print(f"Scanning {NUM_FILES} files × {SEGMENTS_PER_FILE} segments = "
-          f"{NUM_FILES * SEGMENTS_PER_FILE} total segments")
+    print(
+        f"Scanning {NUM_FILES} files × {SEGMENTS_PER_FILE} segments = "
+        f"{NUM_FILES * SEGMENTS_PER_FILE} total segments"
+    )
     print(f"Data dir: {args.data_dir}")
     print(f"Output:   {output_path}")
     print(f"Parallel: {args.parallel} (workers: {args.num_workers})")

@@ -1,48 +1,58 @@
-import numpy as np
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch import nn, Tensor
-from torch.nn import TransformerEncoder, TransformerEncoderLayer
-from torch.utils.data import dataset
-import math
-from pydantic import BaseModel, Field, field_validator, model_validator 
-from typing import List, Literal, Union
-from models_format_sandbox import PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, RNNSeq2SeqConfig, GatedFNOConfig
+from models_format_sandbox import (
+    AEConfig,
+    GatedFNOConfig,
+    PUNetConfig,
+    RNNSeq2SeqConfig,
+    TransformerConfig,
+    WaveNetConfig,
+)
 
 # Blocks used by networks
 
+
 class DoubleConv(nn.Module):
     """
-    A foundational building block consisting of two consecutive 1D convolutional layers, 
+    A foundational building block consisting of two consecutive 1D convolutional layers,
     each followed by Batch Normalization and LeakyReLU activation.
-    
+
     Agent-Adjustable Parameters:
     - kernel_size: Defines the receptive field. Larger values capture broader wave features.
     - padding: Maintains the temporal resolution. Must be tuned with kernel_size to avoid shape mismatch.
     - bias: Toggles the additive bias. Typically False when used with BatchNorm.
     """
 
-    def __init__(self, in_channels, out_channels, mid_channels=None, kernel_size=9, padding=4, bias=False):
+    def __init__(
+        self, in_channels, out_channels, mid_channels=None, kernel_size=9, padding=4, bias=False
+    ):
         super().__init__()
         if not mid_channels:
             mid_channels = out_channels
         self.double_conv = nn.Sequential(
-            nn.Conv1d(in_channels, mid_channels, kernel_size=kernel_size, padding=padding,bias=bias),
+            nn.Conv1d(
+                in_channels, mid_channels, kernel_size=kernel_size, padding=padding, bias=bias
+            ),
             nn.BatchNorm1d(mid_channels),
             nn.LeakyReLU(inplace=True),
-            nn.Conv1d(mid_channels, out_channels, kernel_size=kernel_size, padding=padding,bias=bias),
+            nn.Conv1d(
+                mid_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=bias
+            ),
             nn.BatchNorm1d(out_channels),
-            nn.LeakyReLU(inplace=True)
+            nn.LeakyReLU(inplace=True),
         )
 
     def forward(self, x):
         return self.double_conv(x)
 
+
 class Down(nn.Module):
     """
     Adjustable parameters for the Agent:
-    - stride: The downsampling factor (default 4). 
+    - stride: The downsampling factor (default 4).
              Larger stride saves memory but may lose signal resolution.
     - kernel_size, padding, bias: Passed to DoubleConv to define feature extraction.
     """
@@ -53,70 +63,87 @@ class Down(nn.Module):
         self.maxpool_conv = nn.Sequential(
             nn.MaxPool1d(kernel_size=stride, stride=stride),
             DoubleConv(
-                in_channels, 
-                out_channels, 
-                kernel_size=kernel_size, 
-                padding=padding, 
-                bias=bias
-            )
+                in_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=bias
+            ),
         )
 
     def forward(self, x):
         return self.maxpool_conv(x)
 
+
 class Up(nn.Module):
     """
     Upsampling block that increases temporal resolution.
-    
+
     Agent-Adjustable Parameters:
     - bilinear: If True, uses Upsample (linear mode). If False, uses ConvTranspose1d.
     - stride: The upsampling factor (default 4).
     - kernel_size: Parameters passed to the DoubleConv layer.
     """
 
-    def __init__(self, in_channels, out_channels, bilinear=True, stride=4, kernel_size=9, padding=4, bias=False):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        bilinear=True,
+        stride=4,
+        kernel_size=9,
+        padding=4,
+        bias=False,
+    ):
         super().__init__()
-        
+
         # Calculate padding to maintain sequence length: p = (k-1)/2
         padding = (kernel_size - 1) // 2
 
         if bilinear:
             # For bilinear, we use nn.Upsample which doesn't change channels.
             # The channel reduction happens inside DoubleConv's mid_channels.
-            self.up = nn.Upsample(scale_factor=stride, mode='linear', align_corners=True)
-            self.conv = DoubleConv(in_channels, out_channels, in_channels // 2, 
-                                   kernel_size=kernel_size, padding=padding, bias=bias)
+            self.up = nn.Upsample(scale_factor=stride, mode="linear", align_corners=True)
+            self.conv = DoubleConv(
+                in_channels,
+                out_channels,
+                in_channels // 2,
+                kernel_size=kernel_size,
+                padding=padding,
+                bias=bias,
+            )
         else:
             # For ConvTranspose1d, it reduces channels by half during the upsampling step.
-            self.up = nn.ConvTranspose1d(in_channels, in_channels // 2, kernel_size=stride, stride=stride)
+            self.up = nn.ConvTranspose1d(
+                in_channels, in_channels // 2, kernel_size=stride, stride=stride
+            )
             # After concatenation with skip connection, the input to DoubleConv returns to in_channels logic
-            self.conv = DoubleConv(in_channels, out_channels, kernel_size=kernel_size, 
-                                   padding=padding, bias=bias)
+            self.conv = DoubleConv(
+                in_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=bias
+            )
 
     def forward(self, x1, x2):
         # x1: incoming feature map from the lower layer
         # x2: skip connection feature map from the downward path
         x1 = self.up(x1)
-        
+
         # Temporal alignment (handling odd lengths or stride mismatches)
         # x.size() -> [Batch, Channel, Length]
         diff = x2.size()[2] - x1.size()[2]
         if diff != 0:
             x1 = F.pad(x1, [diff // 2, diff - diff // 2])
-        
+
         # Concatenate along the channel dimension
         x = torch.cat([x2, x1], dim=1)
         return self.conv(x)
-    
+
+
 class OutConv(nn.Module):
     """
     Final output layer that maps feature channels to the physical ADC channel space (256).
-    
+
     Agent-Adjustable Parameters:
     - bias: Toggles the additive bias for the final projection.
     """
+
     def __init__(self, in_channels, out_channels, bias=True):
-        super(OutConv, self).__init__()
+        super().__init__()
         # We keep kernel_size=1 to perform point-wise classification across channels
         self.conv = nn.Sequential(
             torch.nn.Conv1d(in_channels, out_channels, kernel_size=1, bias=bias),
@@ -124,10 +151,11 @@ class OutConv(nn.Module):
 
     def forward(self, x):
         return self.conv(x)
-    
+
+
 class PositionalEncoding(nn.Module):
     """
-    Injects temporal position information into the latent space. 
+    Injects temporal position information into the latent space.
     Crucial for phase-coherent dark matter signals.
 
     Agent-Adjustable Parameters:
@@ -137,7 +165,7 @@ class PositionalEncoding(nn.Module):
     """
 
     def __init__(self, d_model, max_len, start=0, dropout=0.1, factor=1.0):
-        super(PositionalEncoding, self).__init__()
+        super().__init__()
         self.dropout = nn.Dropout(p=dropout)
         self.factor = factor
         self.start = start
@@ -146,15 +174,15 @@ class PositionalEncoding(nn.Module):
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
         div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
-        
+
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
-        
+
         # Reshape to (1, d_model, max_len) to match Conv1d input format [Batch, Channel, Time]
         pe = pe.unsqueeze(0).transpose(1, 2)
-        
+
         # Register as buffer (fixed during training, moved with model to GPU)
-        self.register_buffer('pe', pe)
+        self.register_buffer("pe", pe)
 
     def forward(self, x):
         """
@@ -165,17 +193,19 @@ class PositionalEncoding(nn.Module):
         x = x + self.factor * self.pe[:, :, self.start : (self.start + x.size(2))]
         x = self.dropout(x)
         return x
-    
+
+
 class PositionalUNet(nn.Module):
     """
     Dynamic Positional U-Net for Agent Sandbox.
-    
+
     The architecture scales automatically based on the 'depth' parameter.
     Agent can optimize: multi, depth, bilinear, pe_factor, etc.
     """
-    def __init__(self, config:PUNetConfig):
-        super(PositionalUNet, self).__init__()
-        
+
+    def __init__(self, config: PUNetConfig):
+        super().__init__()
+
         # visit properties directly, as the input was valudated by pydantic
         self.multi = config.multi
         self.depth = config.depth
@@ -183,21 +213,23 @@ class PositionalUNet(nn.Module):
         self.seg_size = config.segmentation_size
         self.pe_factor = config.pe_factor
         self.kernel_size = config.kernel_size
-        self.padding = int((self.kernel_size-1) / 2)
-        
+        self.padding = int((self.kernel_size - 1) / 2)
+
         adc_channel = 256
         emb_dim = config.embedding_dim
 
         # 1. Input layers
         self.embedding = nn.Embedding(adc_channel, emb_dim, scale_grad_by_freq=True)
         self.pe_in = PositionalEncoding(emb_dim, max_len=self.seg_size, factor=self.pe_factor)
-        self.inc = DoubleConv(emb_dim, self.multi, kernel_size=self.kernel_size, padding=self.padding)
+        self.inc = DoubleConv(
+            emb_dim, self.multi, kernel_size=self.kernel_size, padding=self.padding
+        )
         self.pe_inc = PositionalEncoding(self.multi, max_len=self.seg_size, factor=self.pe_factor)
 
         # 2. Downward Path (Encoder)
         self.downs = nn.ModuleList()
         self.pe_downs = nn.ModuleList()
-        
+
         curr_ch = self.multi
         for i in range(self.depth):
             out_ch = curr_ch * 2
@@ -205,15 +237,19 @@ class PositionalUNet(nn.Module):
             if i == self.depth - 1:
                 factor = 2 if self.bilinear else 1
                 out_ch = out_ch // factor
-            
-            self.downs.append(Down(curr_ch, out_ch, kernel_size=self.kernel_size, padding=self.padding))
-            self.pe_downs.append(PositionalEncoding(out_ch, max_len=self.seg_size, factor=self.pe_factor))
+
+            self.downs.append(
+                Down(curr_ch, out_ch, kernel_size=self.kernel_size, padding=self.padding)
+            )
+            self.pe_downs.append(
+                PositionalEncoding(out_ch, max_len=self.seg_size, factor=self.pe_factor)
+            )
             curr_ch = out_ch
 
         # 3. Upward Path (Decoder)
         self.ups = nn.ModuleList()
         self.pe_ups = nn.ModuleList()
-        
+
         # Up: reversal of down
         for i in range(self.depth):
             up_in_ch = curr_ch * 2
@@ -221,9 +257,19 @@ class PositionalUNet(nn.Module):
             # align the top layer output
             if i == self.depth - 1:
                 up_out_ch = self.multi // (2 if self.bilinear else 1)
-            
-            self.ups.append(Up(up_in_ch, up_out_ch, self.bilinear, kernel_size=self.kernel_size, padding=self.padding))
-            self.pe_ups.append(PositionalEncoding(up_out_ch, max_len=self.seg_size, factor=self.pe_factor))
+
+            self.ups.append(
+                Up(
+                    up_in_ch,
+                    up_out_ch,
+                    self.bilinear,
+                    kernel_size=self.kernel_size,
+                    padding=self.padding,
+                )
+            )
+            self.pe_ups.append(
+                PositionalEncoding(up_out_ch, max_len=self.seg_size, factor=self.pe_factor)
+            )
             curr_ch = up_out_ch
 
         # 4. Output layer
@@ -232,7 +278,7 @@ class PositionalUNet(nn.Module):
     def forward(self, x):
         x = self.embedding(x).transpose(-1, -2)
         x = self.pe_in(x)
-        
+
         # 1. Input layer and first skip
         x1 = self.pe_inc(self.inc(x))
         # store intermediate result for Skip Connection
@@ -240,7 +286,7 @@ class PositionalUNet(nn.Module):
 
         # 2. Downward path
         curr_x = x1
-        for i in range(self.depth - 1): # Only store until the second to last layer
+        for i in range(self.depth - 1):  # Only store until the second to last layer
             curr_x = self.downs[i](curr_x)
             curr_x = self.pe_downs[i](curr_x)
             skip_outputs.append(curr_x)
@@ -256,31 +302,34 @@ class PositionalUNet(nn.Module):
             curr_x = self.pe_ups[i](curr_x)
 
         return self.outc(curr_x)
-    
+
+
 class AE(nn.Module):
     """
     Fully Connected AutoEncoder tailored for the Agent Sandbox.
-    
+
     Architecture:
     - Dynamic encoder/decoder based on 'latent_dims'.
-    - Final output layer projects back to ADC channel space (256) 
+    - Final output layer projects back to ADC channel space (256)
       to match the PositionalUNet's classification behavior.
     """
+
     def __init__(self, config: AEConfig, loss_type: str = "ce"):
         super().__init__()
         self.input_dim = config.segmentation_size
         self.loss_type = loss_type
         dims = config.latent_dims
-        
+
         encoder_modules = []
         last_dim = self.input_dim
         for d in dims:
             encoder_modules.append(nn.Linear(last_dim, d))
             encoder_modules.append(nn.ReLU())
-            if config.dropout > 0: encoder_modules.append(nn.Dropout(config.dropout))
+            if config.dropout > 0:
+                encoder_modules.append(nn.Dropout(config.dropout))
             last_dim = d
         self.encoder = nn.Sequential(*encoder_modules)
-        
+
         decoder_modules = []
         reversed_dims = dims[::-1][1:] + [self.input_dim]
         for d in reversed_dims:
@@ -289,100 +338,109 @@ class AE(nn.Module):
                 decoder_modules.append(nn.ReLU())
             last_dim = d
         self.decoder_base = nn.Sequential(*decoder_modules)
-        
+
         if self.loss_type != "smooth_l1":
             self.outc = nn.Conv1d(1, 256, kernel_size=1)
 
     def forward(self, x):
         x_float = x.float()
         latent = self.encoder(x_float)
-        reconstructed = self.decoder_base(latent) # [Batch, Time]
+        reconstructed = self.decoder_base(latent)  # [Batch, Time]
 
         if self.loss_type == "smooth_l1":
             return reconstructed
-        
+
         return self.outc(reconstructed.unsqueeze(1))
-    
+
+
 class TransformerModel(nn.Module):
     """
     Refactored Transformer based on baseline training script.
     Maintains the same logic but supports dynamic configuration.
     """
+
     def __init__(self, config: TransformerConfig):
         super().__init__()
         self.emb_dim = config.embedding_dim
-        
+
         # Use 256 for ADC classes
         self.embedding = nn.Embedding(256, self.emb_dim, scale_grad_by_freq=True)
-        
-        # Positional encoding: note that your PositionalEncoding class 
+
+        # Positional encoding: note that your PositionalEncoding class
         # expects [Batch, Channel, Time]
         self.pos_encoder = PositionalEncoding(
-            self.emb_dim, 
-            max_len=config.segmentation_size, 
+            self.emb_dim,
+            max_len=config.segmentation_size,
             factor=config.pe_factor,
-            dropout=config.dropout
-        )
-        
-        encoder_layers = nn.TransformerEncoderLayer(
-            d_model=self.emb_dim, 
-            nhead=config.nhead, 
-            dim_feedforward=config.dim_feedforward, 
             dropout=config.dropout,
-            batch_first=True 
         )
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layers, num_layers=config.num_layers)
-        
+
+        encoder_layers = nn.TransformerEncoderLayer(
+            d_model=self.emb_dim,
+            nhead=config.nhead,
+            dim_feedforward=config.dim_feedforward,
+            dropout=config.dropout,
+            batch_first=True,
+        )
+        self.transformer_encoder = nn.TransformerEncoder(
+            encoder_layers, num_layers=config.num_layers
+        )
+
         # Final projection to 256 ADC channels
         self.linear = nn.Linear(self.emb_dim, 256)
 
     def forward(self, x):
         # x: [Batch, Time] -> Long for Embedding
-        x = self.embedding(x.long()) * math.sqrt(self.emb_dim) # [Batch, Time, Emb]
-        
+        x = self.embedding(x.long()) * math.sqrt(self.emb_dim)  # [Batch, Time, Emb]
+
         # Adapt to your PositionalEncoding [Batch, Channel, Time]
-        x = x.transpose(1, 2) 
+        x = x.transpose(1, 2)
         x = self.pos_encoder(x)
-        x = x.transpose(1, 2) # Back to [Batch, Time, Emb]
-        
+        x = x.transpose(1, 2)  # Back to [Batch, Time, Emb]
+
         # Transformer Processing
-        output = self.transformer_encoder(x) # [Batch, Time, Emb]
-        
+        output = self.transformer_encoder(x)  # [Batch, Time, Emb]
+
         # Output Projection: [Batch, Time, 256]
-        output = self.linear(output) 
-        
+        output = self.linear(output)
+
         # Transpose to [Batch, 256, Time] to match Loss requirements
         return output.transpose(1, 2)
-    
+
+
 # ==========================================
 # WaveNet
 # ==========================================
 
+
 class CausalConv1d(nn.Module):
     """Causal convolution — no future information leakage."""
+
     def __init__(self, in_channels, out_channels, kernel_size, dilation=1):
         super().__init__()
         self.padding = (kernel_size - 1) * dilation
-        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size,
-                              padding=self.padding, dilation=dilation)
+        self.conv = nn.Conv1d(
+            in_channels, out_channels, kernel_size, padding=self.padding, dilation=dilation
+        )
 
     def forward(self, x):
         x = self.conv(x)
         if self.padding > 0:
-            x = x[:, :, :-self.padding]
+            x = x[:, :, : -self.padding]
         return x
 
 
 class WaveNetBlock(nn.Module):
     """Single WaveNet residual block with dilated causal convolution."""
+
     def __init__(self, residual_channels, gate_channels, skip_channels, kernel_size, dilation):
         super().__init__()
         self.causal_conv = CausalConv1d(residual_channels, gate_channels, kernel_size, dilation)
         half = gate_channels // 2
-        self.gate_conv   = nn.Conv1d(half, half, 1)
+        self.gate_conv = nn.Conv1d(half, half, 1)
         self.filter_conv = nn.Conv1d(half, half, 1)
         self.residual_conv = nn.Conv1d(half, residual_channels, 1)
-        self.skip_conv     = nn.Conv1d(half, skip_channels, 1)
+        self.skip_conv = nn.Conv1d(half, skip_channels, 1)
 
     def forward(self, x):
         residual = x
@@ -392,7 +450,7 @@ class WaveNetBlock(nn.Module):
         skip = self.skip_conv(x)
         res_out = self.residual_conv(x)
         if res_out.size(-1) != residual.size(-1):
-            residual = residual[:, :, :res_out.size(-1)]
+            residual = residual[:, :, : res_out.size(-1)]
         return residual + res_out, skip
 
 
@@ -402,21 +460,29 @@ class SimpleWaveNet(nn.Module):
     Input:  [B, T]  — integer ADC values (0-255)
     Output: [B, 256, T] — class logits per time step
     """
+
     def __init__(self, config: WaveNetConfig):
         super().__init__()
-        self.embedding   = nn.Embedding(256, config.input_channels)
-        self.input_conv  = nn.Conv1d(config.input_channels, config.residual_channels, 1)
-        self.blocks = nn.ModuleList([
-            WaveNetBlock(config.residual_channels, config.gate_channels,
-                         config.skip_channels, config.kernel_size, 2 ** i)
-            for i in range(config.num_blocks)
-        ])
+        self.embedding = nn.Embedding(256, config.input_channels)
+        self.input_conv = nn.Conv1d(config.input_channels, config.residual_channels, 1)
+        self.blocks = nn.ModuleList(
+            [
+                WaveNetBlock(
+                    config.residual_channels,
+                    config.gate_channels,
+                    config.skip_channels,
+                    config.kernel_size,
+                    2**i,
+                )
+                for i in range(config.num_blocks)
+            ]
+        )
         self.output_conv1 = nn.Conv1d(config.skip_channels, config.skip_channels, 1)
         self.output_conv2 = nn.Conv1d(config.skip_channels, 256, 1)
 
     def forward(self, x):
-        x = self.embedding(x.long())   # [B, T, input_channels]
-        x = x.transpose(1, 2)          # [B, input_channels, T]
+        x = self.embedding(x.long())  # [B, T, input_channels]
+        x = x.transpose(1, 2)  # [B, input_channels, T]
         x = self.input_conv(x)
         skip_sum = None
         for block in self.blocks:
@@ -428,22 +494,27 @@ class SimpleWaveNet(nn.Module):
                 skip_sum = skip_sum[:, :, :min_len] + skip[:, :, :min_len]
         x = F.relu(skip_sum)
         x = F.relu(self.output_conv1(x))
-        return self.output_conv2(x)    # [B, 256, T]
+        return self.output_conv2(x)  # [B, 256, T]
 
 
 # ==========================================
 # RNNSeq2Seq
 # ==========================================
 
+
 class Seq2SeqEncoder(nn.Module):
     """LSTM encoder that processes the full input sequence."""
+
     def __init__(self, embedding_dim, hidden_dim, num_layers, dropout):
         super().__init__()
         self.embedding = nn.Embedding(256, embedding_dim)
         self.lstm = nn.LSTM(
-            input_size=embedding_dim, hidden_size=hidden_dim,
-            num_layers=num_layers, dropout=dropout if num_layers > 1 else 0,
-            batch_first=True, bidirectional=False,
+            input_size=embedding_dim,
+            hidden_size=hidden_dim,
+            num_layers=num_layers,
+            dropout=dropout if num_layers > 1 else 0,
+            batch_first=True,
+            bidirectional=False,
         )
         self.dropout = nn.Dropout(dropout)
 
@@ -455,13 +526,17 @@ class Seq2SeqEncoder(nn.Module):
 
 class Seq2SeqDecoder(nn.Module):
     """LSTM decoder with teacher-forcing support."""
+
     def __init__(self, embedding_dim, hidden_dim, num_layers, dropout):
         super().__init__()
         self.embedding = nn.Embedding(256, embedding_dim)
         self.lstm = nn.LSTM(
-            input_size=embedding_dim, hidden_size=hidden_dim,
-            num_layers=num_layers, dropout=dropout if num_layers > 1 else 0,
-            batch_first=True, bidirectional=False,
+            input_size=embedding_dim,
+            hidden_size=hidden_dim,
+            num_layers=num_layers,
+            dropout=dropout if num_layers > 1 else 0,
+            batch_first=True,
+            bidirectional=False,
         )
         self.output_proj = nn.Linear(hidden_dim, 256)
         self.dropout = nn.Dropout(dropout)
@@ -478,31 +553,36 @@ class RNNSeq2Seq(nn.Module):
     Input:  [B, T]  — integer ADC values (0-255)
     Output: [B, 256, T] — class logits per time step
     """
+
     def __init__(self, config: RNNSeq2SeqConfig):
         super().__init__()
-        self.encoder = Seq2SeqEncoder(config.embedding_dim, config.hidden_dim,
-                                       config.num_layers, config.dropout)
-        self.decoder = Seq2SeqDecoder(config.embedding_dim, config.hidden_dim,
-                                       config.num_layers, config.dropout)
+        self.encoder = Seq2SeqEncoder(
+            config.embedding_dim, config.hidden_dim, config.num_layers, config.dropout
+        )
+        self.decoder = Seq2SeqDecoder(
+            config.embedding_dim, config.hidden_dim, config.num_layers, config.dropout
+        )
 
     def forward(self, x):
         _, hidden, cell = self.encoder(x)
         logits = self.decoder.forward_sequence(x, hidden, cell)  # [B, T, 256]
-        return logits.transpose(1, 2)                             # [B, 256, T]
+        return logits.transpose(1, 2)  # [B, 256, T]
 
 
 # (MODEL_REGISTRY defined after all model classes — see end of file)
 
+
 class FullSpectrumGatedConv1d(nn.Module):
     """
-    Spectral Convolution layer that applies a learnable complex weight 
+    Spectral Convolution layer that applies a learnable complex weight
     and a manual gate across the entire RFFT spectrum.
     """
+
     def __init__(self, in_channels, out_channels, num_bins):
         super().__init__()
         self.num_bins = num_bins
         # R weight matrix: [in_channels, out_channels, num_bins]
-        scale = (1 / (in_channels * out_channels))
+        scale = 1 / (in_channels * out_channels)
         self.weights = nn.Parameter(
             scale * torch.rand(in_channels, out_channels, self.num_bins, dtype=torch.cfloat)
         )
@@ -511,35 +591,37 @@ class FullSpectrumGatedConv1d(nn.Module):
         # x_ft: [Batch, In_Channels, Num_Bins]
         # AI-proposed denoising transformation
         weighted_ft = torch.einsum("bix,iox->box", x_ft, self.weights)
-        
+
         # mask_b: [Batch, 1, Num_Bins] for broadcasting across channels
         mask_b = mask.unsqueeze(1).to(torch.cfloat)
-        
+
         # Manual Attention Routing: Linear mixture of AI proposal and raw bypass
         return (mask_b * weighted_ft) + ((1.0 - mask_b) * x_ft)
+
 
 class GatedFNO(nn.Module):
     """
     Baseline implementation of the Gated Fourier Neural Operator.
     Contract: [B, T] int64 -> [B, 256, T] float32
     """
+
     def __init__(self, config: GatedFNOConfig):
         super().__init__()
         self.width = config.width
         self.num_layers = config.num_layers
         self.seg_size = config.segmentation_size
         self.num_bins = self.seg_size // 2 + 1
-        
+
         # Initial Embedding: [B, T] (0-255) -> [B, T, Width]
         self.embedding = nn.Embedding(256, self.width)
-        
+
         # Gate Expansion: num_gates -> num_bins
         self.num_gates = config.num_gates
         self.gate_mapping = config.gate_mapping
         if config.static_v is not None:
             # Register static_v as a buffer so it moves with the model
             v_tensor = torch.tensor(config.static_v, dtype=torch.float32).view(1, 1, -1)
-            self.register_buffer('v_static', v_tensor)
+            self.register_buffer("v_static", v_tensor)
         else:
             self.v_static = None
 
@@ -556,32 +638,34 @@ class GatedFNO(nn.Module):
             # Avoid log(0): shift by 1
             log_bins = torch.log10(bin_indices + 1)  # range [0, log10(num_bins)]
             gate_indices = (log_bins / log_max * self.num_gates).long().clamp(0, self.num_gates - 1)
-            self.register_buffer('_gate_bin_map', gate_indices)
+            self.register_buffer("_gate_bin_map", gate_indices)
         else:
             # Linear: uniform mapping (same as F.interpolate nearest)
             self._gate_bin_map = None
 
         # Iterative Layers
-        self.fno_layers = nn.ModuleList([
-            FullSpectrumGatedConv1d(self.width, self.width, self.num_bins)
-            for _ in range(self.num_layers)
-        ])
-        self.w_layers = nn.ModuleList([
-            nn.Conv1d(self.width, self.width, 1) # 1x1 Linear Path
-            for _ in range(self.num_layers)
-        ])
+        self.fno_layers = nn.ModuleList(
+            [
+                FullSpectrumGatedConv1d(self.width, self.width, self.num_bins)
+                for _ in range(self.num_layers)
+            ]
+        )
+        self.w_layers = nn.ModuleList(
+            [
+                nn.Conv1d(self.width, self.width, 1)  # 1x1 Linear Path
+                for _ in range(self.num_layers)
+            ]
+        )
 
         # Output projection to 256 logits
         self.projection = nn.Sequential(
-            nn.Conv1d(self.width, 128, 1),
-            nn.GELU(),
-            nn.Conv1d(128, 256, 1)
+            nn.Conv1d(self.width, 128, 1), nn.GELU(), nn.Conv1d(128, 256, 1)
         )
 
     def forward(self, x):
         # x: [B, T]
         batch_size = x.size(0)
-        
+
         # 1. Handle Gating
         if self.v_static is not None:
             if self._gate_bin_map is not None:
@@ -590,26 +674,26 @@ class GatedFNO(nn.Module):
                 mask = mask.unsqueeze(0).expand(batch_size, -1)  # [B, num_bins]
             else:
                 # Linear mapping: uniform nearest-neighbor interpolation
-                v_expanded = F.interpolate(self.v_static, size=self.num_bins, mode='nearest')
+                v_expanded = F.interpolate(self.v_static, size=self.num_bins, mode="nearest")
                 mask = v_expanded.squeeze(1).expand(batch_size, -1)  # [B, num_bins]
         else:
             # Default behavior: AI processes everything
             mask = torch.ones((batch_size, self.num_bins), device=x.device)
 
         # 2. Lifting
-        h = self.embedding(x.long()).transpose(1, 2) # [B, Width, T]
+        h = self.embedding(x.long()).transpose(1, 2)  # [B, Width, T]
 
         # 3. FNO Iterations
         for fno, w in zip(self.fno_layers, self.w_layers):
             h_ft = torch.fft.rfft(h)
-            
+
             # Spectral Path
             h_freq_ft = fno(h_ft, mask)
             h_freq = torch.fft.irfft(h_freq_ft, n=self.seg_size)
-            
+
             # Temporal Path
             h_time = w(h)
-            
+
             # Non-linear Fusion
             h = F.gelu(h_freq + h_time)
 
@@ -645,9 +729,10 @@ BUILTIN_OUTPUT_TYPES = {
 
 # Extend MODEL_REGISTRY with any agent-generated plugin models
 try:
-    import os as _os, sys as _sys
+    import os as _os
+    import sys as _sys
+
     _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
-    from ml_models.plugin_loader import extend_registries as _extend_registries
     # Use the packaged import path (``ml_models.models_format_sandbox``) so the
     # registry we populate here is the *same* module object every downstream
     # caller reads from via ``from ml_models.models_format_sandbox import ...``.
@@ -657,6 +742,8 @@ try:
     # ``get_config_class`` — plugin config classes then silently resolve to
     # ``None`` at tuner time. See docs/improving_validation_awareness.md §D.5.
     from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY as _plugin_cfg_reg
+    from ml_models.plugin_loader import extend_registries as _extend_registries
+
     _extend_registries(MODEL_REGISTRY, _plugin_cfg_reg)
     # Mirror onto the bare-name identity if it was loaded separately. Bare
     # imports (``from models_format_sandbox import ...``) — used by the
@@ -667,8 +754,8 @@ try:
     # identity reads an empty registry and returns ``None`` for every plugin,
     # crashing the training subprocess with ``Unknown model_type``.
     # See docs/improving_validation_awareness.md §D.5.
-    _bare_fmt = _sys.modules.get('models_format_sandbox')
-    _pkg_fmt = _sys.modules.get('ml_models.models_format_sandbox')
+    _bare_fmt = _sys.modules.get("models_format_sandbox")
+    _pkg_fmt = _sys.modules.get("ml_models.models_format_sandbox")
     if _bare_fmt is not None and _pkg_fmt is not None and _bare_fmt is not _pkg_fmt:
         _bare_fmt.PLUGIN_CONFIG_REGISTRY.update(_plugin_cfg_reg)
 except Exception as _e:

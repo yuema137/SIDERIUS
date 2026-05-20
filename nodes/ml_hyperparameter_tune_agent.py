@@ -11,42 +11,29 @@ Node contract:
        --run_name, --workspace, --file_index, --progress_bar
 """
 
-import os
-import gc
-import time
-import json
 import argparse
+import gc
 import importlib
+import json
+import os
+import time
 import traceback
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple, Union
 
 from pydantic import ValidationError
 
-from core.hardware_context import get_or_create
-from core.sandbox_executor import TidmadSandbox
 from agent.llm_bridge import LLMBridge
 from agent.schemas.hyperparam_tuning import (
+    ExperimentPlan,
+    ExperimentRecord,
+    GateExhaustionInfo,
     HyperparamTuningInput,
     HyperparamTuningOutput,
-    ExperimentRecord,
-    ExperimentPlan,
-    ExpertAdvice,
-    GateExhaustionInfo,
     PhysicalRejection,
     TrialConfig,
     serialize_expert_advice,
 )
-from execute_tools.sample_set_builder import build_sample_set
-from execute_tools.scoring_utils import SampleSet, coerce_nonfinite_to_none
-from execute_tools.scoring_helpers import (
-    build_score_table,
-    file_vector_to_log_space,
-)
-from nodes.agent_data_stream import log_score_table
-from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
-from execute_tools.build_anchor_map import load_anchor_map
-from nodes.scoring_reference import load_reference_scores
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.skills.evaluate_time_skill import calibration as time_calibration
 from agent.skills.evaluate_time_skill.wrapper import (
@@ -57,6 +44,18 @@ from agent.utils.architectural_pattern_tagger import (
     VRAM_FACTOR_THRESHOLD,
     tag_architecture,
 )
+from core.hardware_context import get_or_create
+from core.sandbox_executor import TidmadSandbox
+from execute_tools.build_anchor_map import load_anchor_map
+from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
+from execute_tools.sample_set_builder import build_sample_set
+from execute_tools.scoring_helpers import (
+    build_score_table,
+    file_vector_to_log_space,
+)
+from execute_tools.scoring_utils import coerce_nonfinite_to_none
+from nodes.agent_data_stream import log_score_table
+from nodes.scoring_reference import load_reference_scores
 
 
 def _validate_data_config(
@@ -102,7 +101,7 @@ def _validate_data_config(
             )
 
 
-def _best_trial_winner(memory_history: list) -> Optional[dict]:
+def _best_trial_winner(memory_history: list) -> dict | None:
     """Highest-scoring trial-mode success record from ``memory_history``,
     or ``None`` if no eligible record exists.
 
@@ -120,7 +119,8 @@ def _best_trial_winner(memory_history: list) -> Optional[dict]:
     benchmark on formal rounds.
     """
     candidates = [
-        r for r in memory_history
+        r
+        for r in memory_history
         if r.get("status") == "success"
         and r.get("denoising_score") is not None
         and (r.get("memory") or {}).get("time_mode") == "trial"
@@ -130,7 +130,7 @@ def _best_trial_winner(memory_history: list) -> Optional[dict]:
     return max(candidates, key=lambda r: r["denoising_score"])
 
 
-def _latest_trial_inference_marginal(memory_history: list) -> Optional[float]:
+def _latest_trial_inference_marginal(memory_history: list) -> float | None:
     """Return the most recent successful trial round's measured per-PSD-segment
     inference cost in ms, or ``None`` if no qualifying record exists.
 
@@ -174,9 +174,9 @@ def _latest_trial_inference_marginal(memory_history: list) -> Optional[float]:
 # name; this helper is a defensive second pass so unit tests, ad-hoc
 # constructions, and any future internal caller that bypasses the schema
 # still see consistent behavior.
-_LEGACY_STRATEGY_ALIASES: Dict[str, str] = {
+_LEGACY_STRATEGY_ALIASES: dict[str, str] = {
     "inherit_best_trial": "full_clone",
-    "llm_propose":        "independent",
+    "llm_propose": "independent",
 }
 
 
@@ -199,7 +199,8 @@ def _canonical_strategy(name: str) -> str:
 # legacy/sparse records may omit ``epochs``/``batch_size``; in that case
 # the planner's value survives rather than crashing the chain on KeyError.
 
-def _strategy_full_clone(plan: ExperimentPlan, winner: dict) -> List[str]:
+
+def _strategy_full_clone(plan: ExperimentPlan, winner: dict) -> list[str]:
     """Inherit all five fields: model_cfg, loss_cfg, lr, epochs, batch_size.
 
     Production default. Required for the trial→formal inference-time
@@ -223,7 +224,7 @@ def _strategy_full_clone(plan: ExperimentPlan, winner: dict) -> List[str]:
     return inherited
 
 
-def _strategy_hybrid_params(plan: ExperimentPlan, winner: dict) -> List[str]:
+def _strategy_hybrid_params(plan: ExperimentPlan, winner: dict) -> list[str]:
     """Inherit only loss_cfg + lr; planner keeps model_cfg, epochs, batch_size.
 
     Audit/exploration use case — lock the evaluation surface (loss + lr)
@@ -237,7 +238,7 @@ def _strategy_hybrid_params(plan: ExperimentPlan, winner: dict) -> List[str]:
     return ["loss_cfg", "lr"]
 
 
-def _strategy_independent(plan: ExperimentPlan, winner: dict) -> List[str]:
+def _strategy_independent(plan: ExperimentPlan, winner: dict) -> list[str]:
     """No-op. Planner's full plan survives verbatim.
 
     ``winner`` is unused but kept in the signature so the registry can
@@ -246,12 +247,10 @@ def _strategy_independent(plan: ExperimentPlan, winner: dict) -> List[str]:
     return []
 
 
-_FORMAL_STRATEGY_REGISTRY: Dict[
-    str, Callable[[ExperimentPlan, dict], List[str]]
-] = {
-    "full_clone":    _strategy_full_clone,
+_FORMAL_STRATEGY_REGISTRY: dict[str, Callable[[ExperimentPlan, dict], list[str]]] = {
+    "full_clone": _strategy_full_clone,
     "hybrid_params": _strategy_hybrid_params,
-    "independent":   _strategy_independent,
+    "independent": _strategy_independent,
 }
 
 
@@ -262,7 +261,7 @@ def _apply_mode_override_chain(
     is_formal_round: bool,
     force_formal_round: bool,
     formal_round_strategy: str = "full_clone",
-    memory_history: Optional[list] = None,
+    memory_history: list | None = None,
 ) -> ExperimentPlan:
     """Apply the run-level + last-round overrides to ``plan``.
 
@@ -337,11 +336,7 @@ def _apply_mode_override_chain(
 
     print(
         f"  [STRATEGY] formal_round_strategy={canonical}"
-        + (
-            f" (alias_of:{formal_round_strategy})"
-            if canonical != formal_round_strategy
-            else ""
-        )
+        + (f" (alias_of:{formal_round_strategy})" if canonical != formal_round_strategy else "")
     )
 
     winner = _best_trial_winner(memory_history or [])
@@ -350,10 +345,7 @@ def _apply_mode_override_chain(
             # ``independent`` explicitly disclaims inheritance — a missing
             # winner is not a warning condition. Still emit one structured
             # log line so the audit trail is uniform.
-            print(
-                f"  [FORMAL OVERRIDE] strategy={canonical} "
-                f"winner=none inherited=(none)"
-            )
+            print(f"  [FORMAL OVERRIDE] strategy={canonical} winner=none inherited=(none)")
         else:
             print(
                 "  [FORMAL OVERRIDE] WARNING: no successful trial round "
@@ -374,8 +366,8 @@ def _apply_mode_override_chain(
 def _apply_degeneracy_reaction(
     score_results: dict,
     plan: ExperimentPlan,
-    penalty_score: Optional[float],
-) -> Tuple[bool, Optional[str]]:
+    penalty_score: float | None,
+) -> tuple[bool, str | None]:
     """Generic policy reaction to score_vector's task-specific health-check
     signal.
 
@@ -454,26 +446,26 @@ def _resolve_sample_set_cfg(
     if mode == "formal":
         return {
             "trial_strategy": agent_input.formal_strategy,
-            "trial_portion":  agent_input.formal_portion,
-            "train_portion":  agent_input.formal_train_portion,
-            "eval_strategy":  "snapshot",
-            "eval_portion":   agent_input.formal_eval_portion,
+            "trial_portion": agent_input.formal_portion,
+            "train_portion": agent_input.formal_train_portion,
+            "eval_strategy": "snapshot",
+            "eval_portion": agent_input.formal_eval_portion,
         }
     if mode == "trial":
         return {
             "trial_strategy": plan.trial_strategy,
-            "trial_portion":  plan.trial_portion,
-            "train_portion":  plan.train_portion,
-            "eval_strategy":  plan.eval_strategy,
-            "eval_portion":   plan.eval_portion,
+            "trial_portion": plan.trial_portion,
+            "train_portion": plan.train_portion,
+            "eval_strategy": plan.eval_strategy,
+            "eval_portion": plan.eval_portion,
         }
     # single_file
     return {
         "trial_strategy": "snapshot",
-        "trial_portion":  plan.trial_portion,
-        "train_portion":  plan.train_portion,
-        "eval_strategy":  "snapshot",
-        "eval_portion":   1.0,
+        "trial_portion": plan.trial_portion,
+        "train_portion": plan.train_portion,
+        "eval_strategy": "snapshot",
+        "eval_portion": 1.0,
     }
 
 
@@ -492,6 +484,7 @@ def _copy_seed_plugin(src: str, dst_dir: str) -> str:
     See docs/run_scoped_plugins.md (Phase 3).
     """
     import shutil
+
     dst = os.path.join(dst_dir, os.path.basename(src))
     if os.path.abspath(src) == os.path.abspath(dst):
         return dst
@@ -508,7 +501,7 @@ def _run_skill(skill_folder: str, sandbox: TidmadSandbox, **params) -> dict:
         skill_module = importlib.import_module(module_path)
         return skill_module.run_skill(sandbox, **params)
     except Exception as e:
-        print(f"Skill Error [{skill_folder}]: {str(e)}")
+        print(f"Skill Error [{skill_folder}]: {e!s}")
         return {"status": "error", "message": str(e)}
 
 
@@ -524,8 +517,8 @@ _serialize_expert_advice = serialize_expert_advice
 def _collect_disallowed_patterns(
     records: list,
     *,
-    vram_budget_gb: Optional[float],
-    time_budget_minutes: Optional[float],
+    vram_budget_gb: float | None,
+    time_budget_minutes: float | None,
 ) -> list:
     """Return the sorted union of architectural-pattern tags for records that
     exceeded the §7 Decision 2 thresholds.
@@ -577,13 +570,13 @@ def _collect_disallowed_patterns(
 def _build_gate_exhaustion(
     records: list,
     active_mode: str,
-    vram_budget_gb: Optional[float],
-    time_budget_minutes: Optional[float],
+    vram_budget_gb: float | None,
+    time_budget_minutes: float | None,
     *,
     consecutive_fail_rounds_at_exit: int = 0,
     max_fail_rounds: int = 0,
     completed_rounds: int = 0,
-) -> Optional[GateExhaustionInfo]:
+) -> GateExhaustionInfo | None:
     """
     Build the structured gate-exhaustion report for the next iteration's
     proposer (§10.13). Two triggers can fire:
@@ -641,12 +634,12 @@ def _build_gate_exhaustion(
     ):
         burst_round_idx = completed_rounds + 1
         burst_records = [
-            r for r in records
-            if (r.get("memory") or {}).get("round_index") == burst_round_idx
+            r for r in records if (r.get("memory") or {}).get("round_index") == burst_round_idx
         ]
         if burst_records:
             burst_gate = [
-                r for r in burst_records
+                r
+                for r in burst_records
                 if r.get("status") in {"skipped_oom_risk", "skipped_time_risk"}
             ]
             if len(burst_gate) / len(burst_records) >= 0.5:
@@ -655,10 +648,7 @@ def _build_gate_exhaustion(
     # --- Trigger A (Phase K) — no successes at all + budget-gated.
     trigger_a_fired = False
     if not any(r.get("status") == "success" for r in records):
-        if any(
-            r.get("status") in {"skipped_oom_risk", "skipped_time_risk"}
-            for r in records
-        ):
+        if any(r.get("status") in {"skipped_oom_risk", "skipped_time_risk"} for r in records):
             trigger_a_fired = True
 
     if not (trigger_a_fired or trigger_b_fired):
@@ -671,11 +661,12 @@ def _build_gate_exhaustion(
     vram_gated = [r for r in report_records if r.get("status") == "skipped_oom_risk"]
     time_gated = [r for r in report_records if r.get("status") == "skipped_time_risk"]
     other = [
-        r for r in report_records
+        r
+        for r in report_records
         if r.get("status") not in {"skipped_oom_risk", "skipped_time_risk"}
     ]
 
-    baseline_mem = (report_records[0].get("memory") or {})
+    baseline_mem = report_records[0].get("memory") or {}
     baseline_vram = baseline_mem.get("vram_estimate_gb")
     baseline_time = baseline_mem.get("time_estimate_minutes")
 
@@ -751,14 +742,14 @@ def _render_gate_exhaustion_summary(
     time_gated: int,
     other: int,
     active_mode: str,
-    vram_budget_gb: Optional[float],
-    time_budget_minutes: Optional[float],
-    baseline_vram: Optional[float],
-    baseline_vram_factor: Optional[float],
-    baseline_time: Optional[float],
-    baseline_time_factor: Optional[float],
-    worst_vram_factor: Optional[float],
-    worst_time_factor: Optional[float],
+    vram_budget_gb: float | None,
+    time_budget_minutes: float | None,
+    baseline_vram: float | None,
+    baseline_vram_factor: float | None,
+    baseline_time: float | None,
+    baseline_time_factor: float | None,
+    worst_vram_factor: float | None,
+    worst_time_factor: float | None,
 ) -> str:
     """One-paragraph LLM-readable synthesis of the gate-exhaustion state.
 
@@ -845,14 +836,14 @@ def _render_gate_exhaustion_trigger_b_summary(
     time_gated: int,
     other: int,
     active_mode: str,
-    vram_budget_gb: Optional[float],
-    time_budget_minutes: Optional[float],
-    baseline_vram: Optional[float],
-    baseline_vram_factor: Optional[float],
-    baseline_time: Optional[float],
-    baseline_time_factor: Optional[float],
-    worst_vram_factor: Optional[float],
-    worst_time_factor: Optional[float],
+    vram_budget_gb: float | None,
+    time_budget_minutes: float | None,
+    baseline_vram: float | None,
+    baseline_vram_factor: float | None,
+    baseline_time: float | None,
+    baseline_time_factor: float | None,
+    worst_vram_factor: float | None,
+    worst_time_factor: float | None,
     consecutive_fail_rounds_at_exit: int,
     completed_rounds: int,
 ) -> str:
@@ -918,6 +909,7 @@ def _render_gate_exhaustion_trigger_b_summary(
 # Node implementation
 # ---------------------------------------------------------------------------
 
+
 class HyperparamTuningAgent:
     """
     Hyperparameter tuning agent — optimizes model configs over N rounds.
@@ -953,10 +945,9 @@ class HyperparamTuningAgent:
         # newly built brain right after the factory call. Default ``None``
         # preserves the legacy / pseudo-mode behaviour: no bind, brain's
         # bridge writes nothing to ``token_usage.jsonl``.
-        self._pending_run_context: Optional[dict] = None
+        self._pending_run_context: dict | None = None
 
-    def set_run_context(self, *, workspace, iter: int,
-                        run_name: str, run_id: str) -> None:
+    def set_run_context(self, *, workspace, iter: int, run_name: str, run_id: str) -> None:
         """Deposit run-context for the brain that will be built in ``run()``.
 
         Mirrors :meth:`agent.llm_bridge.LLMBridge.set_run_context` keyword
@@ -966,8 +957,10 @@ class HyperparamTuningAgent:
         enforces immutability once it sees them.
         """
         self._pending_run_context = dict(
-            workspace=workspace, iter=iter,
-            run_name=run_name, run_id=run_id,
+            workspace=workspace,
+            iter=iter,
+            run_name=run_name,
+            run_id=run_id,
         )
 
     def run(self, agent_input: HyperparamTuningInput) -> HyperparamTuningOutput:
@@ -1005,11 +998,17 @@ class HyperparamTuningAgent:
         expert_advice_str = _serialize_expert_advice(agent_input.expert_advice)
         if agent_input.human_advice:
             human_section = f"\n[Human Guidance (high priority)]:\n{agent_input.human_advice}"
-            expert_advice_str = (expert_advice_str + human_section) if expert_advice_str else agent_input.human_advice
+            expert_advice_str = (
+                (expert_advice_str + human_section)
+                if expert_advice_str
+                else agent_input.human_advice
+            )
 
-        print(f"Input validated: model={model_type_setting} | rounds={max_rounds} "
-              f"| file_index={file_index} | trial_allowed={trial_allowed} "
-              f"| provider={agent_input.llm_provider}")
+        print(
+            f"Input validated: model={model_type_setting} | rounds={max_rounds} "
+            f"| file_index={file_index} | trial_allowed={trial_allowed} "
+            f"| provider={agent_input.llm_provider}"
+        )
 
         # Per-mode time-budget gate (Phase I). Each mode has its own optional
         # ceiling; the per-round pick happens inside the loop based on
@@ -1021,11 +1020,15 @@ class HyperparamTuningAgent:
         formal_time_budget = agent_input.formal_time_budget_minutes
         time_data_dir = agent_input.data_dir
         if trial_time_budget is None:
-            print("[time-gate disabled / trial] trial_time_budget_minutes is None "
-                  "— evaluate_time_skill will not gate trial-mode rounds.")
+            print(
+                "[time-gate disabled / trial] trial_time_budget_minutes is None "
+                "— evaluate_time_skill will not gate trial-mode rounds."
+            )
         if formal_time_budget is None:
-            print("[time-gate disabled / formal] formal_time_budget_minutes is None "
-                  "— evaluate_time_skill will not gate formal-mode rounds.")
+            print(
+                "[time-gate disabled / formal] formal_time_budget_minutes is None "
+                "— evaluate_time_skill will not gate formal-mode rounds."
+            )
 
         # Per-mode VRAM-budget gate (Phase K). Mirrors the time-gate shape: each
         # mode has its own optional ceiling, per-round pick happens inside the
@@ -1037,13 +1040,17 @@ class HyperparamTuningAgent:
         trial_vram_budget = agent_input.trial_vram_budget_gb
         formal_vram_budget = agent_input.formal_vram_budget_gb
         if trial_vram_budget is None:
-            print("[vram-gate disabled / trial] trial_vram_budget_gb is None "
-                  "— evaluate_vram_skill uses free×0.8 defensive limit for "
-                  "trial-mode rounds.")
+            print(
+                "[vram-gate disabled / trial] trial_vram_budget_gb is None "
+                "— evaluate_vram_skill uses free×0.8 defensive limit for "
+                "trial-mode rounds."
+            )
         if formal_vram_budget is None:
-            print("[vram-gate disabled / formal] formal_vram_budget_gb is None "
-                  "— evaluate_vram_skill uses free×0.8 defensive limit for "
-                  "formal-mode rounds.")
+            print(
+                "[vram-gate disabled / formal] formal_vram_budget_gb is None "
+                "— evaluate_vram_skill uses free×0.8 defensive limit for "
+                "formal-mode rounds."
+            )
 
         # --- Initialize sandbox and brain (via factory for DI / pseudo-mode) ---
         sandbox = self._sandbox_factory(
@@ -1078,11 +1085,9 @@ class HyperparamTuningAgent:
             brain.set_run_context(**self._pending_run_context)
 
         # --- Pre-load anchor map if any round might use trial mode ---
-        anchor_map_data: Optional[dict] = None
+        anchor_map_data: dict | None = None
         if trial_allowed:
-            anchor_map_path = os.path.join(
-                sandbox.dirs["data"], "segment_anchors.json"
-            )
+            anchor_map_path = os.path.join(sandbox.dirs["data"], "segment_anchors.json")
             if os.path.exists(anchor_map_path):
                 anchor_map_data = load_anchor_map(anchor_map_path)
             else:
@@ -1090,7 +1095,7 @@ class HyperparamTuningAgent:
                     f"Trial mode requires segment_anchors.json at {anchor_map_path}. "
                     "Run execute_tools/build_anchor_map.py first."
                 )
-            print(f"Trial mode enabled: anchor map loaded.")
+            print("Trial mode enabled: anchor map loaded.")
 
         # Pre-load reference scores (raw_baseline + ground_truth per-file
         # logs, linear_sums, n_segments, and full-20 scalars). One disk
@@ -1109,26 +1114,26 @@ class HyperparamTuningAgent:
         # Save run configuration once
         started_at = time.strftime("%Y-%m-%d %H:%M:%S")
         run_config = {
-            "provider":       agent_input.llm_provider,
-            "model_id":       agent_input.llm_model_id,
-            "run_name":       run_name,
-            "force_model":    model_type_setting,
-            "max_rounds":     max_rounds,
-            "file_index":     file_index,
-            "trial_allowed":  trial_allowed,
-            "started_at":     started_at,
+            "provider": agent_input.llm_provider,
+            "model_id": agent_input.llm_model_id,
+            "run_name": run_name,
+            "force_model": model_type_setting,
+            "max_rounds": max_rounds,
+            "file_index": file_index,
+            "trial_allowed": trial_allowed,
+            "started_at": started_at,
         }
         run_config_path = os.path.join(workspace, f"run_config_{run_name}.json")
         with open(run_config_path, "w", encoding="utf-8") as f:
             json.dump(run_config, f, indent=4)
 
-        print(f"=== TIDMAD Agent Activated ===")
+        print("=== TIDMAD Agent Activated ===")
         print(f"Provider: {agent_input.llm_provider} | Model: {agent_input.llm_model_id}")
         print(f"Expert Advice: {expert_advice_str}")
         print(f"Max Rounds: {max_rounds} | Strategy: {model_type_setting}")
 
         # --- Get the config manual before starting ---
-        print(f"Reading model configuration manual...")
+        print("Reading model configuration manual...")
         config_manual = _run_skill("check_config_format_skill", sandbox)
         if config_manual["status"] == "success":
             config_manual_data = config_manual["data"]
@@ -1139,8 +1144,11 @@ class HyperparamTuningAgent:
         model_description = None
         try:
             from ml_models.model_descriptions import get_model_description
+
             model_description = get_model_description(model_type_setting)
-            print(f"Loaded model description for '{model_type_setting}' ({len(model_description)} chars)")
+            print(
+                f"Loaded model description for '{model_type_setting}' ({len(model_description)} chars)"
+            )
         except (FileNotFoundError, Exception) as e:
             print(f"No model description found for '{model_type_setting}': {e}")
 
@@ -1169,11 +1177,11 @@ class HyperparamTuningAgent:
         # Pre-initialise so finalisation can safely read `plan` for the
         # gate-exhaustion mode lookup even if the loop never assigns it
         # (e.g. max_rounds=0 or an early-exit path).
-        plan: Optional[ExperimentPlan] = None
+        plan: ExperimentPlan | None = None
 
         while completed_rounds < max_rounds and consecutive_fails < max_fail_rounds_setting:
             round_index = completed_rounds + 1
-            is_formal_round = (completed_rounds == max_rounds - 1)
+            is_formal_round = completed_rounds == max_rounds - 1
             N = attempts_per_formal_round_setting if is_formal_round else attempts_per_round_setting
             round_succeeded = False
 
@@ -1181,19 +1189,22 @@ class HyperparamTuningAgent:
                 total_attempts += 1
                 iteration = round_index  # legacy alias for prints + brain.plan(current_round=...)
                 try:
-                    print(f"\n\n{'='*60}\nROUND {iteration}/{max_rounds} "
-                          f"(attempt {attempt_in_round}/{N}, total {total_attempts}): "
-                          f"Planning...\n{'='*60}")
-    
+                    print(
+                        f"\n\n{'=' * 60}\nROUND {iteration}/{max_rounds} "
+                        f"(attempt {attempt_in_round}/{N}, total {total_attempts}): "
+                        f"Planning...\n{'=' * 60}"
+                    )
+
                     # A. OBSERVE: Retrieve full Research Memory from summary.json
                     memory_history = sandbox.get_summary()
-    
+
                     # Build exploration checklist from config schema + past records
                     from agent.prompts import (
                         build_exploration_checklist,
                         format_plugin_source_excerpt_block,
                     )
                     from ml_models.models_format_sandbox import get_config_class
+
                     config_cls = get_config_class(model_type_setting)
                     config_schema = config_cls.model_json_schema() if config_cls else {}
                     checklist = build_exploration_checklist(
@@ -1205,7 +1216,7 @@ class HyperparamTuningAgent:
                     # that ``model_json_schema()`` drops. See
                     # docs/improving_validation_awareness.md §D.1.
                     plugin_source_excerpt = format_plugin_source_excerpt_block(config_cls)
-    
+
                     # Phase K (K.6) — extract the most recent prior attempt's
                     # resource snapshot so the [ACTIVE RESOURCE BUDGETS] block can
                     # show the LLM a concrete number to react to. Looks at the
@@ -1217,9 +1228,7 @@ class HyperparamTuningAgent:
                     # See docs/resource_estimator_implement.md §10.3 / §10.11.
                     last_record = memory_history[-1] if memory_history else {}
                     last_memory = last_record.get("memory") or {}
-                    last_train_cfg = (
-                        (last_record.get("params") or {}).get("train_config") or {}
-                    )
+                    last_train_cfg = (last_record.get("params") or {}).get("train_config") or {}
                     last_vram_estimate_gb = last_memory.get("vram_estimate_gb")
                     last_time_estimate_minutes = last_memory.get("time_estimate_minutes")
                     last_batch_size = last_train_cfg.get("batch_size")
@@ -1232,9 +1241,10 @@ class HyperparamTuningAgent:
                     # populated score_table → None, which the bridge replaces
                     # with the "no prior round yet" fallback. See
                     # docs/aggregated_score_table_awareness.md §9.1.
-                    best_score_table_md: Optional[str] = None
+                    best_score_table_md: str | None = None
                     _records_with_table = [
-                        r for r in memory_history
+                        r
+                        for r in memory_history
                         if r.get("status") == "success"
                         and r.get("denoising_score") is not None
                         and isinstance(r.get("score_table"), dict)
@@ -1272,10 +1282,10 @@ class HyperparamTuningAgent:
                         last_mode=last_mode,
                         score_table_md=best_score_table_md,
                     )
-    
+
                     # Validate LLM output into ExperimentPlan (with fallback)
                     plan = ExperimentPlan.with_defaults(decision)
-    
+
                     # Apply hard overrides from operator config (before other overrides).
                     # Unknown keys are warned and skipped; invalid values are warned
                     # and skipped — the run continues with the LLM's original value.
@@ -1284,16 +1294,20 @@ class HyperparamTuningAgent:
                         unknown = set(agent_input.plan_overrides) - valid_fields
                         if unknown:
                             print(f"  [WARN] plan_overrides: ignoring unknown keys: {unknown}")
-                        safe_overrides = {k: v for k, v in agent_input.plan_overrides.items() if k in valid_fields}
+                        safe_overrides = {
+                            k: v for k, v in agent_input.plan_overrides.items() if k in valid_fields
+                        }
                         if safe_overrides:
                             try:
                                 merged = plan.model_dump(by_alias=True) | safe_overrides
                                 plan = ExperimentPlan.model_validate(merged)
                                 print(f"  Plan overrides applied: {list(safe_overrides.keys())}")
                             except Exception as e:
-                                print(f"  [WARN] plan_overrides validation failed ({e}); "
-                                      f"using LLM plan as-is")
-    
+                                print(
+                                    f"  [WARN] plan_overrides validation failed ({e}); "
+                                    f"using LLM plan as-is"
+                                )
+
                     # Override chain: trial-allowed lockout + last-round override
                     # + forced-formal hyperparameter inheritance gated on
                     # formal_round_strategy. See _apply_mode_override_chain.
@@ -1305,14 +1319,16 @@ class HyperparamTuningAgent:
                         formal_round_strategy=agent_input.formal_round_strategy,
                         memory_history=memory_history,
                     )
-    
+
                     # Enforce max_epochs hard cap (prevents LLM from choosing excessively long training)
                     if agent_input.max_epochs is not None:
                         planned_epochs = plan.train_cfg.get("epochs", 1)
                         if planned_epochs > agent_input.max_epochs:
-                            print(f"  Clamping epochs: {planned_epochs} → {agent_input.max_epochs} (max_epochs)")
+                            print(
+                                f"  Clamping epochs: {planned_epochs} → {agent_input.max_epochs} (max_epochs)"
+                            )
                             plan.train_cfg["epochs"] = agent_input.max_epochs
-    
+
                     # Build and validate TrialConfig from plan + overrides
                     if plan.is_trial:
                         mode = "trial"
@@ -1320,7 +1336,7 @@ class HyperparamTuningAgent:
                         mode = "formal"
                     else:
                         mode = "single_file"
-    
+
                     # Phase M / Phase R — mode-gated sample-set config. Formal-mode
                     # eval strategy is locked to ``snapshot``; the portion defaults
                     # to 1.0 (production full-clone, §12.2) but is operator-
@@ -1329,23 +1345,32 @@ class HyperparamTuningAgent:
                     # See docs/resource_estimator_implement.md §12 and §13.
                     _cfg = _resolve_sample_set_cfg(mode, agent_input, plan)
                     cfg_trial_strategy = _cfg["trial_strategy"]
-                    cfg_trial_portion  = _cfg["trial_portion"]
-                    cfg_train_portion  = _cfg["train_portion"]
-                    cfg_eval_strategy  = _cfg["eval_strategy"]
-                    cfg_eval_portion   = _cfg["eval_portion"]
-    
+                    cfg_trial_portion = _cfg["trial_portion"]
+                    cfg_train_portion = _cfg["train_portion"]
+                    cfg_eval_strategy = _cfg["eval_strategy"]
+                    cfg_eval_portion = _cfg["eval_portion"]
+
                     # Generate deterministic seeds for reproducibility.
                     import hashlib
+
                     seed_input = f"{run_name}_{total_attempts}".encode()
                     seed_hash = int(hashlib.sha256(seed_input).hexdigest(), 16)
-                    train_sampling_seed = agent_input.sampling_seed if agent_input.sampling_seed is not None else seed_hash % (2**31)
-                    train_base_seed = agent_input.train_base_seed if agent_input.train_base_seed is not None else (seed_hash >> 31) % (2**31)
+                    train_sampling_seed = (
+                        agent_input.sampling_seed
+                        if agent_input.sampling_seed is not None
+                        else seed_hash % (2**31)
+                    )
+                    train_base_seed = (
+                        agent_input.train_base_seed
+                        if agent_input.train_base_seed is not None
+                        else (seed_hash >> 31) % (2**31)
+                    )
                     # Eval seed: same as train when aligned, different otherwise
                     if plan.train_validation_align:
                         eval_sampling_seed = train_sampling_seed
                     else:
                         eval_sampling_seed = (seed_hash >> 62) % (2**31)
-    
+
                     trial_config = TrialConfig(
                         is_trial=plan.is_trial,
                         mode=mode,
@@ -1366,10 +1391,12 @@ class HyperparamTuningAgent:
                         eval_sampling_seed=eval_sampling_seed,
                         train_base_seed=train_base_seed,
                     )
-    
+
                     # Validate integer relationships between dataset, PSD, ML segments
-                    _validate_data_config(trial_config, plan.model_cfg.get("segmentation_size", 10000))
-    
+                    _validate_data_config(
+                        trial_config, plan.model_cfg.get("segmentation_size", 10000)
+                    )
+
                     # Build TWO independent SampleSets — training and validation
                     if trial_config.mode in ("trial", "formal"):
                         train_sample_set = build_sample_set(
@@ -1386,27 +1413,29 @@ class HyperparamTuningAgent:
                             target_files=trial_config.target_files or None,
                             seed=trial_config.eval_sampling_seed,
                         )
-                        print(f"  {trial_config.mode.capitalize()} mode: "
-                              f"train: {trial_config.trial_strategy} portion={trial_config.trial_portion} "
-                              f"| eval: {trial_config.eval_strategy} portion={trial_config.eval_portion} "
-                              f"| train_portion/epoch={trial_config.train_portion} "
-                              f"| align={trial_config.train_validation_align}")
+                        print(
+                            f"  {trial_config.mode.capitalize()} mode: "
+                            f"train: {trial_config.trial_strategy} portion={trial_config.trial_portion} "
+                            f"| eval: {trial_config.eval_strategy} portion={trial_config.eval_portion} "
+                            f"| train_portion/epoch={trial_config.train_portion} "
+                            f"| align={trial_config.train_validation_align}"
+                        )
                     else:
                         train_sample_set = None
                         eval_sample_set = None
                         print(f"  Legacy mode: file_index={file_index}")
-    
+
                     # Segment counts for records and reflector context
                     if train_sample_set:
                         train_psd_segments = sum(len(v) for v in train_sample_set.values())
                     else:
                         train_psd_segments = DATASET_CONFIG.segments_per_file  # legacy single-file
-    
+
                     if eval_sample_set:
                         eval_psd_segments = sum(len(v) for v in eval_sample_set.values())
                     else:
                         eval_psd_segments = DATASET_CONFIG.segments_per_file  # legacy single-file
-    
+
                     # When force_model is set, override the LLM's model_type choice.
                     if model_type_setting != "auto":
                         model_type = model_type_setting
@@ -1414,45 +1443,45 @@ class HyperparamTuningAgent:
                         model_type = plan.model_type
                     exp_id = f"{model_type}_{run_name}_{total_attempts:03d}"
                     hypothesis = plan.hypothesis
-    
+
                     print(f"Action: {model_type.upper()} | ID: {exp_id}")
                     print(f"Hypothesis: {hypothesis}")
                     print(f"Reasoning: {plan.reasoning or 'No reasoning provided.'}")
-    
+
                     # Save validated TrialConfig
                     trial_config_path = os.path.join(
                         sandbox.dirs["configs"], f"trial_config_{exp_id}.json"
                     )
                     with open(trial_config_path, "w", encoding="utf-8") as f:
                         json.dump(trial_config.model_dump(), f, indent=2)
-    
+
                     # C. ACT: Execute the Atomic Skill Pipeline (Train -> Inf -> Score)
                     model_config = plan.model_cfg.copy()
                     # Ensure model_config.model_type matches the forced model type
                     model_config["model_type"] = model_type
                     active_params = {
-                        "exp_id":            exp_id,
-                        "run_name":          run_name,
-                        "model_type":        model_type,
-                        "model_config":      model_config,
-                        "train_config":      plan.train_cfg,
-                        "loss_config":       plan.loss_cfg,
-                        "sample_set":        train_sample_set,    # training data (from training files)
-                        "train_portion":     trial_config.train_portion,
-                        "train_base_seed":   trial_config.train_base_seed,
-                        "eval_sample_set":   eval_sample_set,     # validation data (from validation files)
-                    }
-    
-                    # Clean params for records — exclude bulky SampleSet dicts
-                    record_params = {
-                        "exp_id":       exp_id,
-                        "run_name":     run_name,
-                        "model_type":   model_type,
+                        "exp_id": exp_id,
+                        "run_name": run_name,
+                        "model_type": model_type,
                         "model_config": model_config,
                         "train_config": plan.train_cfg,
-                        "loss_config":  plan.loss_cfg,
+                        "loss_config": plan.loss_cfg,
+                        "sample_set": train_sample_set,  # training data (from training files)
+                        "train_portion": trial_config.train_portion,
+                        "train_base_seed": trial_config.train_base_seed,
+                        "eval_sample_set": eval_sample_set,  # validation data (from validation files)
                     }
-    
+
+                    # Clean params for records — exclude bulky SampleSet dicts
+                    record_params = {
+                        "exp_id": exp_id,
+                        "run_name": run_name,
+                        "model_type": model_type,
+                        "model_config": model_config,
+                        "train_config": plan.train_cfg,
+                        "loss_config": plan.loss_cfg,
+                    }
+
                     # Phase K: per-mode VRAM-budget pick. plan.is_trial decides
                     # which ceiling applies for THIS round; the unselected one is
                     # ignored. When the chosen budget is None the skill still runs
@@ -1460,15 +1489,15 @@ class HyperparamTuningAgent:
                     # ceiling) — the memory's vram_*_gb fields are omitted in that
                     # case so the planner sees "this round wasn't operator-budgeted."
                     # See docs/resource_estimator_implement.md §10.4 / §10.8.
-                    chosen_vram_budget = (trial_vram_budget
-                                          if plan.is_trial
-                                          else formal_vram_budget)
-                    vram_budget_desc = (f"{chosen_vram_budget} GB"
-                                        if chosen_vram_budget is not None
-                                        else "free×0.8")
-                    print(f"\n[Pre-flight 1/2] VRAM check "
-                          f"(mode={'trial' if plan.is_trial else 'formal'}, "
-                          f"budget={vram_budget_desc})...")
+                    chosen_vram_budget = trial_vram_budget if plan.is_trial else formal_vram_budget
+                    vram_budget_desc = (
+                        f"{chosen_vram_budget} GB" if chosen_vram_budget is not None else "free×0.8"
+                    )
+                    print(
+                        f"\n[Pre-flight 1/2] VRAM check "
+                        f"(mode={'trial' if plan.is_trial else 'formal'}, "
+                        f"budget={vram_budget_desc})..."
+                    )
                     # Phase 6.6 A.11 — pass the per-run hardware manifest (from
                     # A.1.6's get_or_create) into the skill so the cap is
                     # physically correct and consistent across the whole run.
@@ -1481,7 +1510,7 @@ class HyperparamTuningAgent:
                     )
                     if resource_check.get("status") == "error":
                         raise RuntimeError(f"Resource check error: {resource_check.get('message')}")
-    
+
                     # Phase D.4 — constraint-aware retry. The wrapper returns
                     # ``status="schema_violation"`` when the plugin's
                     # ``PLUGIN_CONFIG_CLASS(**model_cfg)`` call raised a
@@ -1496,33 +1525,38 @@ class HyperparamTuningAgent:
                     if resource_check.get("status") == "schema_violation":
                         violations = resource_check.get("violations", [])
                         offending = resource_check.get("offending_config", {})
-                        violating_fields = ", ".join(v.get("loc", "?") for v in violations) or "unknown"
-                        print(f"Schema violation — this attempt does NOT count as a round.")
+                        violating_fields = (
+                            ", ".join(v.get("loc", "?") for v in violations) or "unknown"
+                        )
+                        print("Schema violation — this attempt does NOT count as a round.")
                         print(f"   Violating fields : {violating_fields}")
                         for v in violations:
                             print(f"   - {v.get('loc')} ({v.get('type')}): {v.get('msg')}")
-    
-                        violation_summary = "; ".join(
-                            f"{v.get('loc')}={v.get('input')!r} → {v.get('msg')}"
-                            for v in violations
-                        ) or "unspecified schema violation"
+
+                        violation_summary = (
+                            "; ".join(
+                                f"{v.get('loc')}={v.get('input')!r} → {v.get('msg')}"
+                                for v in violations
+                            )
+                            or "unspecified schema violation"
+                        )
                         schema_record = {
-                            "exp_id":          exp_id,
-                            "status":          "skipped_schema_violation",
-                            "model_type":      model_type,
-                            "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
-                            "file_index":      file_index,
-                            "params":          record_params,
+                            "exp_id": exp_id,
+                            "status": "skipped_schema_violation",
+                            "model_type": model_type,
+                            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "file_index": file_index,
+                            "params": record_params,
                             "denoising_score": None,
                             "memory": {
                                 "expert_advice_followed": expert_advice_str,
-                                "hypothesis":    hypothesis,
-                                "conclusion":    (
+                                "hypothesis": hypothesis,
+                                "conclusion": (
                                     f"Skipped: plugin schema rejected the proposed model_config. "
                                     f"Violating fields: {violating_fields}. "
                                     f"Offending values: {offending}."
                                 ),
-                                "discovery":     resource_check.get("verdict", ""),
+                                "discovery": resource_check.get("verdict", ""),
                                 "memory_update": (
                                     f"DO NOT repeat this exact combination — plugin schema requires: "
                                     f"{violation_summary}. Propose a config that satisfies every "
@@ -1536,9 +1570,9 @@ class HyperparamTuningAgent:
                         ExperimentRecord.model_validate(schema_record)
                         sandbox.save_record(schema_record)
                         continue
-    
+
                     if not resource_check.get("feasible", True):
-                        print(f"Resource check FAILED — this attempt does NOT count as a round.")
+                        print("Resource check FAILED — this attempt does NOT count as a round.")
                         print(f"   Verdict   : {resource_check.get('verdict', '')}")
                         print(f"   Suggestion: {resource_check.get('suggestion', '')}")
 
@@ -1551,14 +1585,21 @@ class HyperparamTuningAgent:
                         _binding = _killer.get("binding_cap", "vram")
                         _dom_bytes = _killer.get("dominant_layer_bytes") or 0
                         _attempt_snapshot = {
-                            "model_type":        model_type,
-                            "batch_size":        active_params.get("batch_size"),
+                            "model_type": model_type,
+                            "batch_size": active_params.get("batch_size"),
                             "segmentation_size": active_params.get("segmentation_size"),
                         }
                         # Include architecture knobs if present — the Proposer
                         # reads these to see which dimension overshot.
-                        for _k in ("depth", "width", "hidden_dim", "n_heads",
-                                   "d_model", "kernel_size", "num_layers"):
+                        for _k in (
+                            "depth",
+                            "width",
+                            "hidden_dim",
+                            "n_heads",
+                            "d_model",
+                            "kernel_size",
+                            "num_layers",
+                        ):
                             if _k in active_params:
                                 _attempt_snapshot[_k] = active_params[_k]
                         try:
@@ -1567,9 +1608,7 @@ class HyperparamTuningAgent:
                                     attempt_config=_attempt_snapshot,
                                     binding_cap=_binding,
                                     dominant_layer=_killer.get("dominant_layer") or "",
-                                    dominant_layer_gb=round(
-                                        _dom_bytes / (1024 ** 3), 4
-                                    ),
+                                    dominant_layer_gb=round(_dom_bytes / (1024**3), 4),
                                     dominant_fraction=_killer.get("dominant_fraction") or 0.0,
                                     budget_gb=float(resource_check.get("limit_gb") or 0.0),
                                     estimated_gb=float(resource_check.get("estimated_gb") or 0.0),
@@ -1584,22 +1623,24 @@ class HyperparamTuningAgent:
                             print(f"   [B.3] PhysicalRejection capture skipped: {_rej_err}")
 
                         oom_record = {
-                            "exp_id":          exp_id,
-                            "status":          "skipped_oom_risk",
-                            "model_type":      model_type,
-                            "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
-                            "file_index":      file_index,
-                            "params":          record_params,
+                            "exp_id": exp_id,
+                            "status": "skipped_oom_risk",
+                            "model_type": model_type,
+                            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "file_index": file_index,
+                            "params": record_params,
                             "denoising_score": None,
                             "memory": {
                                 "expert_advice_followed": expert_advice_str,
-                                "hypothesis":    hypothesis,
-                                "conclusion":    (
+                                "hypothesis": hypothesis,
+                                "conclusion": (
                                     f"Skipped: estimated VRAM ({resource_check.get('estimated_gb', '?')} GB) "
                                     f"exceeds 80% safety limit ({resource_check.get('limit_gb', '?')} GB)."
                                 ),
-                                "discovery":     resource_check.get("verdict", ""),
-                                "memory_update": resource_check.get("suggestion", "Reduce batch_size or segmentation_size."),
+                                "discovery": resource_check.get("verdict", ""),
+                                "memory_update": resource_check.get(
+                                    "suggestion", "Reduce batch_size or segmentation_size."
+                                ),
                             },
                         }
                         # Phase K — surface the same two VRAM fields the success
@@ -1610,12 +1651,10 @@ class HyperparamTuningAgent:
                         # where the time gate also ran — no separate vram_mode.
                         # See docs/resource_estimator_implement.md §10.4 / §10.8.
                         if chosen_vram_budget is not None:
-                            oom_record["memory"]["vram_estimate_gb"] = (
-                                resource_check.get("estimated_gb")
+                            oom_record["memory"]["vram_estimate_gb"] = resource_check.get(
+                                "estimated_gb"
                             )
-                            oom_record["memory"]["vram_budget_gb"] = (
-                                resource_check.get("limit_gb")
-                            )
+                            oom_record["memory"]["vram_budget_gb"] = resource_check.get("limit_gb")
                         # K.2.5-8 — soft-fallback flag is independent of the
                         # budget being set; the gate runs unconditionally and the
                         # flag tells us whether the inference estimate was
@@ -1654,9 +1693,7 @@ class HyperparamTuningAgent:
                     # ceiling applies for THIS round; the unselected one is
                     # ignored. The skill itself stays mode-agnostic — it gets a
                     # single time_budget_minutes kwarg.
-                    chosen_time_budget = (trial_time_budget
-                                          if plan.is_trial
-                                          else formal_time_budget)
+                    chosen_time_budget = trial_time_budget if plan.is_trial else formal_time_budget
                     time_check = None
                     if chosen_time_budget is not None:
                         # refine_inference_time_estimator.md Commit D — pull
@@ -1669,15 +1706,15 @@ class HyperparamTuningAgent:
                         # branches. ``memory_history`` is fetched from
                         # ``sandbox.get_summary()`` earlier in this attempt
                         # and is iter-scoped under the chain runner.
-                        inference_hint = _latest_trial_inference_marginal(
-                            memory_history
+                        inference_hint = _latest_trial_inference_marginal(memory_history)
+                        print(
+                            f"\n[Pre-flight 2/2] Time check "
+                            f"(mode={'trial' if plan.is_trial else 'formal'}, "
+                            f"budget={chosen_time_budget} min, "
+                            f"inf_hint="
+                            f"{f'{inference_hint:.2f} ms/psd_seg' if inference_hint else 'none'}"
+                            f")..."
                         )
-                        print(f"\n[Pre-flight 2/2] Time check "
-                              f"(mode={'trial' if plan.is_trial else 'formal'}, "
-                              f"budget={chosen_time_budget} min, "
-                              f"inf_hint="
-                              f"{f'{inference_hint:.2f} ms/psd_seg' if inference_hint else 'none'}"
-                              f")...")
                         time_check = _run_skill(
                             "evaluate_time_skill",
                             sandbox,
@@ -1687,32 +1724,30 @@ class HyperparamTuningAgent:
                             inference_per_psd_seg_ms_hint=inference_hint,
                         )
                         if time_check.get("status") == "error":
-                            raise RuntimeError(
-                                f"Time check error: {time_check.get('message')}"
-                            )
-    
+                            raise RuntimeError(f"Time check error: {time_check.get('message')}")
+
                         if not time_check.get("feasible", True):
-                            print(f"Time check FAILED — this attempt does NOT count as a round.")
+                            print("Time check FAILED — this attempt does NOT count as a round.")
                             print(f"   Verdict   : {time_check.get('verdict', '')}")
                             print(f"   Suggestion: {time_check.get('suggestion', '')}")
-    
+
                             time_record = {
-                                "exp_id":          exp_id,
-                                "status":          "skipped_time_risk",
-                                "model_type":      model_type,
-                                "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
-                                "file_index":      file_index,
-                                "params":          record_params,
+                                "exp_id": exp_id,
+                                "status": "skipped_time_risk",
+                                "model_type": model_type,
+                                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                "file_index": file_index,
+                                "params": record_params,
                                 "denoising_score": None,
                                 "memory": {
                                     "expert_advice_followed": expert_advice_str,
-                                    "hypothesis":    hypothesis,
-                                    "conclusion":    (
+                                    "hypothesis": hypothesis,
+                                    "conclusion": (
                                         f"Skipped: estimated wall-time "
                                         f"({time_check.get('estimated_minutes', '?')} min) "
                                         f"exceeds budget ({time_check.get('limit_minutes', '?')} min)."
                                     ),
-                                    "discovery":     time_check.get("verdict", ""),
+                                    "discovery": time_check.get("verdict", ""),
                                     "memory_update": time_check.get(
                                         "suggestion",
                                         "Reduce model size, batch_size, segmentation_size, or train_portion.",
@@ -1722,16 +1757,17 @@ class HyperparamTuningAgent:
                                     # same shape regardless of pass/fail.
                                     # See docs/resource_estimator_implement.md §J.3.
                                     "time_estimate_minutes": time_check.get("estimated_minutes"),
-                                    "time_budget_minutes":   time_check.get("limit_minutes"),
-                                    "time_mode":             "trial" if plan.is_trial else "formal",
+                                    "time_budget_minutes": time_check.get("limit_minutes"),
+                                    "time_mode": "trial" if plan.is_trial else "formal",
                                     # refine_inference_time_estimator.md Commit D —
                                     # surface the inference-ms branch on skipped
                                     # records too so a verdict that says "skipped"
                                     # under the measured path is distinguishable
                                     # from one under the legacy × 2.7 ratio.
                                     "inference_ms_source": (
-                                        (time_check.get("breakdown") or {})
-                                        .get("inference_ms_source")
+                                        (time_check.get("breakdown") or {}).get(
+                                            "inference_ms_source"
+                                        )
                                     ),
                                 },
                             }
@@ -1746,30 +1782,36 @@ class HyperparamTuningAgent:
                             ExperimentRecord.model_validate(time_record)
                             sandbox.save_record(time_record)
                             continue
-    
-                    print(f"\n[Step 1/3] Training...")
+
+                    print("\n[Step 1/3] Training...")
                     t0 = time.time()
                     train_status = _run_skill("training_skill", sandbox, **active_params)
                     train_time = round(time.time() - t0, 1)
                     if train_status.get("status") == "error":
                         error_msg = train_status.get("message", "Unknown training error")
-                        is_oom = "CUDA out of memory" in error_msg or "OutOfMemoryError" in error_msg
+                        is_oom = (
+                            "CUDA out of memory" in error_msg or "OutOfMemoryError" in error_msg
+                        )
                         # Truncate long tracebacks — keep last 500 chars for the LLM
                         short_msg = error_msg[-500:] if len(error_msg) > 500 else error_msg
                         error_record = {
-                            "exp_id":          exp_id,
-                            "status":          "error_training_oom" if is_oom else "error_training",
-                            "model_type":      model_type,
-                            "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
-                            "file_index":      file_index,
-                            "params":          record_params,
+                            "exp_id": exp_id,
+                            "status": "error_training_oom" if is_oom else "error_training",
+                            "model_type": model_type,
+                            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "file_index": file_index,
+                            "params": record_params,
                             "denoising_score": None,
                             "memory": {
                                 "expert_advice_followed": expert_advice_str,
-                                "hypothesis":    hypothesis,
-                                "conclusion":    f"Training failed: {short_msg}",
-                                "discovery":     "CUDA OOM — reduce model size, batch_size, or segmentation_size." if is_oom else f"Training crashed: {short_msg}",
-                                "memory_update": "This config exceeds GPU memory. Try smaller architecture." if is_oom else "Fix the error before retrying this config.",
+                                "hypothesis": hypothesis,
+                                "conclusion": f"Training failed: {short_msg}",
+                                "discovery": "CUDA OOM — reduce model size, batch_size, or segmentation_size."
+                                if is_oom
+                                else f"Training crashed: {short_msg}",
+                                "memory_update": "This config exceeds GPU memory. Try smaller architecture."
+                                if is_oom
+                                else "Fix the error before retrying this config.",
                             },
                         }
                         error_record["memory"]["round_index"] = round_index
@@ -1778,14 +1820,16 @@ class HyperparamTuningAgent:
                         sandbox.save_record(error_record)
                         print(f"  Saved error record: {error_record['status']}")
                         continue
-    
-                    print(f"[Step 2/3] Inference...")
+
+                    print("[Step 2/3] Inference...")
                     t0 = time.time()
                     inf_status = _run_skill("inference_skill", sandbox, **active_params)
                     inference_time = round(time.time() - t0, 1)
                     if inf_status.get("status") == "error":
                         error_msg = inf_status.get("message", "Unknown inference error")
-                        is_oom = "CUDA out of memory" in error_msg or "OutOfMemoryError" in error_msg
+                        is_oom = (
+                            "CUDA out of memory" in error_msg or "OutOfMemoryError" in error_msg
+                        )
 
                         # Phase 6.7 Fix 3 — when the inference subprocess fails
                         # because the trainer-side sentinel was missing, the
@@ -1813,7 +1857,9 @@ class HyperparamTuningAgent:
                         elif is_oom:
                             status_tag = "error_inference_oom"
                             conclusion = f"Inference failed: {short_msg}"
-                            discovery = "CUDA OOM during inference — reduce batch_size or model size."
+                            discovery = (
+                                "CUDA OOM during inference — reduce batch_size or model size."
+                            )
                             memory_update = "Inference OOM — the model trained but can't infer. Try smaller batch."
                         else:
                             status_tag = "error_inference"
@@ -1822,18 +1868,18 @@ class HyperparamTuningAgent:
                             memory_update = "Fix the inference error before retrying."
 
                         error_record = {
-                            "exp_id":          exp_id,
-                            "status":          status_tag,
-                            "model_type":      model_type,
-                            "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
-                            "file_index":      file_index,
-                            "params":          record_params,
+                            "exp_id": exp_id,
+                            "status": status_tag,
+                            "model_type": model_type,
+                            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "file_index": file_index,
+                            "params": record_params,
                             "denoising_score": None,
                             "memory": {
                                 "expert_advice_followed": expert_advice_str,
-                                "hypothesis":    hypothesis,
-                                "conclusion":    conclusion,
-                                "discovery":     discovery,
+                                "hypothesis": hypothesis,
+                                "conclusion": conclusion,
+                                "discovery": discovery,
                                 "memory_update": memory_update,
                             },
                         }
@@ -1843,16 +1889,18 @@ class HyperparamTuningAgent:
                         sandbox.save_record(error_record)
                         print(f"  Saved error record: {error_record['status']}")
                         continue
-    
-                    print(f"[Step 3/3] Scoring...")
+
+                    print("[Step 3/3] Scoring...")
                     # Fix 4 — memory probe around the scoring block. See
                     # docs/optimize_inference_and_scoring.md §3 Fix 4. The
                     # tuner's ``round_index`` is the iter axis inside the
                     # tuner scope; workflow-scope probes (different
                     # ``scope`` field) give the outer iteration index.
                     from core.memory_probe import probe_memory
-                    probe_memory(iter_idx=round_index, phase="pre_score",
-                                 workspace=workspace, scope="tuner")
+
+                    probe_memory(
+                        iter_idx=round_index, phase="pre_score", workspace=workspace, scope="tuner"
+                    )
                     t0 = time.time()
                     # V8 hardening Domain 2a — wrap the entire scoring block.
                     # Pre-V8, an exception in score_vector / denoising_score_skill
@@ -1868,6 +1916,7 @@ class HyperparamTuningAgent:
                             # Trial: sparse SampleSet. Formal: full SampleSet (all 20 × 200).
                             def _denoised_fn(fi):
                                 return f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_{fi:04d}.h5"
+
                             # Reference vector for the task-specific health check
                             # inside score_vector (commits b1+b2). Only meaningful
                             # on a formal round AND when a trial winner exists in
@@ -1879,12 +1928,14 @@ class HyperparamTuningAgent:
                                 _winner = _best_trial_winner(memory_history)
                                 if _winner is not None:
                                     _ref_fv = _winner.get("file_vector")
-                            file_vector, final_scalar, is_degenerate, failure_reason = sandbox.score_vector(
-                                sample_set=eval_sample_set,
-                                anchor_map=anchor_map_data["anchors"],
-                                s_max=anchor_map_data["s_max"],
-                                denoised_filename_fn=_denoised_fn,
-                                reference_file_vector=_ref_fv,
+                            file_vector, final_scalar, is_degenerate, failure_reason = (
+                                sandbox.score_vector(
+                                    sample_set=eval_sample_set,
+                                    anchor_map=anchor_map_data["anchors"],
+                                    s_max=anchor_map_data["s_max"],
+                                    denoised_filename_fn=_denoised_fn,
+                                    reference_file_vector=_ref_fv,
+                                )
                             )
                             score_res = {
                                 "status": "success",
@@ -1897,31 +1948,37 @@ class HyperparamTuningAgent:
                             }
                         else:
                             # Legacy single-file mode (trial_allowed=False, no anchor map)
-                            score_res = _run_skill("denoising_score_skill", sandbox, **active_params)
+                            score_res = _run_skill(
+                                "denoising_score_skill", sandbox, **active_params
+                            )
                     except Exception as e:
                         scoring_time = round(time.time() - t0, 1)
-                        probe_memory(iter_idx=round_index, phase="post_score",
-                                     workspace=workspace, scope="tuner")
+                        probe_memory(
+                            iter_idx=round_index,
+                            phase="post_score",
+                            workspace=workspace,
+                            scope="tuner",
+                        )
                         error_msg = f"{type(e).__name__}: {e}"
                         short_msg = error_msg[-500:] if len(error_msg) > 500 else error_msg
                         error_record = {
-                            "exp_id":          exp_id,
-                            "status":          "error_scoring",
-                            "model_type":      model_type,
-                            "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
-                            "file_index":      file_index,
-                            "params":          record_params,
+                            "exp_id": exp_id,
+                            "status": "error_scoring",
+                            "model_type": model_type,
+                            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "file_index": file_index,
+                            "params": record_params,
                             "denoising_score": None,
                             "timing": {
-                                "train_time_s":     train_time,
+                                "train_time_s": train_time,
                                 "inference_time_s": inference_time,
-                                "scoring_time_s":   scoring_time,
+                                "scoring_time_s": scoring_time,
                             },
                             "memory": {
                                 "expert_advice_followed": expert_advice_str,
-                                "hypothesis":    hypothesis,
-                                "conclusion":    f"Scoring crashed: {short_msg}",
-                                "discovery":     (
+                                "hypothesis": hypothesis,
+                                "conclusion": f"Scoring crashed: {short_msg}",
+                                "discovery": (
                                     f"Training and inference completed but scoring "
                                     f"raised {type(e).__name__}: {short_msg}"
                                 ),
@@ -1940,9 +1997,10 @@ class HyperparamTuningAgent:
                         print(f"  Saved error record: {error_record['status']}")
                         continue
                     scoring_time = round(time.time() - t0, 1)
-                    probe_memory(iter_idx=round_index, phase="post_score",
-                                 workspace=workspace, scope="tuner")
-    
+                    probe_memory(
+                        iter_idx=round_index, phase="post_score", workspace=workspace, scope="tuner"
+                    )
+
                     # Extract results from each stage
                     train_results = train_status.get("results", {})
                     score_results = score_res.get("results", {})
@@ -1978,7 +2036,7 @@ class HyperparamTuningAgent:
                     # space so it is unit-consistent with the log-space
                     # reference columns. Convert via the project-standard
                     # log_{5.27}(v + 1e-10) helper before handing off.
-                    score_table: Optional[ScoreComparisonTable] = None
+                    score_table: ScoreComparisonTable | None = None
                     _sc_fv = score_results.get("file_vector")
                     _sc_scalar = score_results.get("denoising_score")
                     if _sc_fv is not None and _sc_scalar is not None and not _is_degenerate_formal:
@@ -2021,6 +2079,7 @@ class HyperparamTuningAgent:
                     # Cleanup denoised files to save disk space
                     if agent_input.cleanup_denoised:
                         import glob as _glob
+
                         pattern = os.path.join(
                             sandbox.base_dir,
                             f"abra_validation_denoised_*_{exp_id}_*.h5",
@@ -2030,135 +2089,202 @@ class HyperparamTuningAgent:
                             total_bytes = sum(os.path.getsize(f) for f in denoised_files)
                             for f in denoised_files:
                                 os.remove(f)
-                            print(f"  Cleaned up {len(denoised_files)} denoised files "
-                                  f"({total_bytes / (1024**3):.1f} GB freed)")
-    
+                            print(
+                                f"  Cleaned up {len(denoised_files)} denoised files "
+                                f"({total_bytes / (1024**3):.1f} GB freed)"
+                            )
+
                     # D. REFLECT: Analyze results and generate insights
-                    print(f"\nGenerating Research Memory...")
-    
-                    current_score     = score_results.get("denoising_score")
+                    print("\nGenerating Research Memory...")
+
+                    current_score = score_results.get("denoising_score")
                     current_loss_type = active_params["loss_config"].get("loss_type")
                     successful = [
-                        r for r in memory_history
+                        r
+                        for r in memory_history
                         if r.get("status") == "success" and r.get("denoising_score") is not None
                     ]
                     baseline_record = next(
                         (r for r in memory_history if "baseline" in r.get("exp_id", "")), None
                     )
-                    all_scores   = [r["denoising_score"] for r in successful]
-                    best_score   = max(all_scores) if all_scores else None
-                    best_record  = max(successful, key=lambda r: r["denoising_score"]) if successful else None
+                    all_scores = [r["denoising_score"] for r in successful]
+                    best_score = max(all_scores) if all_scores else None
+                    best_record = (
+                        max(successful, key=lambda r: r["denoising_score"]) if successful else None
+                    )
                     sorted_scores = sorted(all_scores, reverse=True)
-                    rank = sorted_scores.index(current_score) + 1 if current_score in sorted_scores else None
-    
+                    rank = (
+                        sorted_scores.index(current_score) + 1
+                        if current_score in sorted_scores
+                        else None
+                    )
+
                     same_loss_finals = [
                         r["final_loss"]
                         for r in successful
-                        if r.get("params", {}).get("loss_config", {}).get("loss_type") == current_loss_type
+                        if r.get("params", {}).get("loss_config", {}).get("loss_type")
+                        == current_loss_type
                         and r.get("final_loss") is not None
                     ]
                     current_final_loss = train_results.get("final_loss")
                     if current_final_loss is not None:
-                        all_same_loss_finals  = same_loss_finals + [current_final_loss]
-                        sorted_finals         = sorted(all_same_loss_finals)
-                        same_loss_loss_rank   = sorted_finals.index(current_final_loss) + 1
-                        same_loss_total       = len(all_same_loss_finals)
+                        all_same_loss_finals = same_loss_finals + [current_final_loss]
+                        sorted_finals = sorted(all_same_loss_finals)
+                        same_loss_loss_rank = sorted_finals.index(current_final_loss) + 1
+                        same_loss_total = len(all_same_loss_finals)
                     else:
                         same_loss_loss_rank = None
-                        same_loss_total     = len(same_loss_finals)
-    
-                    current_params  = train_results.get("model_params")
-                    current_epochs  = active_params["train_config"].get("epochs")
-                    baseline_params = baseline_record.get("model_params") if baseline_record else None
-                    baseline_epochs = baseline_record.get("params", {}).get("train_config", {}).get("epochs") if baseline_record else None
-                    params_ratio    = round(current_params / baseline_params, 3) if (current_params and baseline_params) else None
-                    epochs_ratio    = round(current_epochs / baseline_epochs, 3) if (current_epochs and baseline_epochs) else None
-    
-                    worst_score     = min(all_scores) if all_scores else None
-                    score_range     = (best_score - worst_score) if (best_score is not None and worst_score is not None and best_score != worst_score) else None
-                    score_threshold = (best_score - 0.05 * score_range) if score_range is not None else best_score
-                    best_params     = best_record.get("model_params") if best_record else None
-                    best_epochs     = best_record.get("params", {}).get("train_config", {}).get("epochs") if best_record else None
+                        same_loss_total = len(same_loss_finals)
+
+                    current_params = train_results.get("model_params")
+                    current_epochs = active_params["train_config"].get("epochs")
+                    baseline_params = (
+                        baseline_record.get("model_params") if baseline_record else None
+                    )
+                    baseline_epochs = (
+                        baseline_record.get("params", {}).get("train_config", {}).get("epochs")
+                        if baseline_record
+                        else None
+                    )
+                    params_ratio = (
+                        round(current_params / baseline_params, 3)
+                        if (current_params and baseline_params)
+                        else None
+                    )
+                    epochs_ratio = (
+                        round(current_epochs / baseline_epochs, 3)
+                        if (current_epochs and baseline_epochs)
+                        else None
+                    )
+
+                    worst_score = min(all_scores) if all_scores else None
+                    score_range = (
+                        (best_score - worst_score)
+                        if (
+                            best_score is not None
+                            and worst_score is not None
+                            and best_score != worst_score
+                        )
+                        else None
+                    )
+                    score_threshold = (
+                        (best_score - 0.05 * score_range) if score_range is not None else best_score
+                    )
+                    best_params = best_record.get("model_params") if best_record else None
+                    best_epochs = (
+                        best_record.get("params", {}).get("train_config", {}).get("epochs")
+                        if best_record
+                        else None
+                    )
                     is_more_efficient = (
                         score_threshold is not None
                         and current_score is not None
                         and current_score >= score_threshold
                         and (
-                            (current_params is not None and best_params is not None and current_params < best_params)
-                            or (current_epochs is not None and best_epochs is not None and current_epochs < best_epochs)
+                            (
+                                current_params is not None
+                                and best_params is not None
+                                and current_params < best_params
+                            )
+                            or (
+                                current_epochs is not None
+                                and best_epochs is not None
+                                and current_epochs < best_epochs
+                            )
                         )
                     )
-    
+
                     reflection_context = {
-                        "baseline_score":           baseline_record.get("denoising_score") if baseline_record else None,
-                        "best_score_so_far":        best_score,
-                        "is_new_best":              current_score is not None and (best_score is None or current_score > best_score),
-                        "rank":                     rank,
-                        "total_experiments":        len(successful),
-                        "best_config_so_far":       best_record.get("params") if best_record else None,
-                        "best_same_loss_final_loss": min(same_loss_finals) if same_loss_finals else None,
-                        "current_loss_type":        current_loss_type,
-                        "same_loss_loss_rank":      same_loss_loss_rank,
-                        "same_loss_total":          same_loss_total,
-                        "baseline_params":          baseline_params,
-                        "baseline_epochs":          baseline_epochs,
-                        "current_params":           current_params,
-                        "current_epochs":           current_epochs,
-                        "params_ratio":             params_ratio,
-                        "epochs_ratio":             epochs_ratio,
-                        "is_more_efficient":        is_more_efficient,
-                        "training_psd_segments":    train_psd_segments,
-                        "eval_psd_segments":        eval_psd_segments,
-                        "baseline_psd_segments":    baseline_record.get("training_psd_segments") if baseline_record else None,
-                        "trial_portion":            trial_config.trial_portion if trial_config.mode != "single_file" else None,
-                        "eval_portion":             trial_config.eval_portion if trial_config.mode != "single_file" else None,
+                        "baseline_score": baseline_record.get("denoising_score")
+                        if baseline_record
+                        else None,
+                        "best_score_so_far": best_score,
+                        "is_new_best": current_score is not None
+                        and (best_score is None or current_score > best_score),
+                        "rank": rank,
+                        "total_experiments": len(successful),
+                        "best_config_so_far": best_record.get("params") if best_record else None,
+                        "best_same_loss_final_loss": min(same_loss_finals)
+                        if same_loss_finals
+                        else None,
+                        "current_loss_type": current_loss_type,
+                        "same_loss_loss_rank": same_loss_loss_rank,
+                        "same_loss_total": same_loss_total,
+                        "baseline_params": baseline_params,
+                        "baseline_epochs": baseline_epochs,
+                        "current_params": current_params,
+                        "current_epochs": current_epochs,
+                        "params_ratio": params_ratio,
+                        "epochs_ratio": epochs_ratio,
+                        "is_more_efficient": is_more_efficient,
+                        "training_psd_segments": train_psd_segments,
+                        "eval_psd_segments": eval_psd_segments,
+                        "baseline_psd_segments": baseline_record.get("training_psd_segments")
+                        if baseline_record
+                        else None,
+                        "trial_portion": trial_config.trial_portion
+                        if trial_config.mode != "single_file"
+                        else None,
+                        "eval_portion": trial_config.eval_portion
+                        if trial_config.mode != "single_file"
+                        else None,
                         # Pre-rendered per-file comparison table (model vs
                         # raw_baseline vs ground_truth) — consumed verbatim
                         # by the reflector prompt in sub-commit C. None on
                         # failed/skipped rounds so the prompt can branch.
-                        "score_comparison_table":   score_table.rendered_markdown if score_table else None,
+                        "score_comparison_table": score_table.rendered_markdown
+                        if score_table
+                        else None,
                     }
-    
+
                     # Pass both training and scoring results to the reflector
                     reflect_results = {**train_results, **score_results}
-                    reflection = brain.reflect(exp_id, hypothesis, reflect_results, reflection_context)
-    
+                    reflection = brain.reflect(
+                        exp_id, hypothesis, reflect_results, reflection_context
+                    )
+
                     # Defensive unwrap: LLM occasionally emits [{...}] instead of {...}.
-                    if isinstance(reflection, list) and len(reflection) == 1 and isinstance(reflection[0], dict):
+                    if (
+                        isinstance(reflection, list)
+                        and len(reflection) == 1
+                        and isinstance(reflection[0], dict)
+                    ):
                         print("[reflect] LLM returned a single-element list — unwrapping to dict.")
                         reflection = reflection[0]
                     if not isinstance(reflection, dict):
-                        print(f"[reflect] LLM returned non-dict ({type(reflection).__name__}); using empty reflection.")
+                        print(
+                            f"[reflect] LLM returned non-dict ({type(reflection).__name__}); using empty reflection."
+                        )
                         reflection = {}
-    
-                    print(f"{'-'*30}")
+
+                    print(f"{'-' * 30}")
                     print(f"RESEARCH REFLECTION for {exp_id}:")
                     print(f"Conclusion  : {reflection.get('conclusion', 'N/A')}")
                     print(f"Key Factor  : {reflection.get('key_factor', 'N/A')}")
                     print(f"Discovery   : {reflection.get('discovery', 'N/A')}")
                     print(f"Memory Update: {reflection.get('memory_update', 'N/A')}")
-                    print(f"{'-'*30}")
-    
+                    print(f"{'-' * 30}")
+
                     # E. COMMIT: Build, validate, and save the finalized record
                     final_record = {
-                        "exp_id":     exp_id,
-                        "status":     "failed_mode_collapse" if _is_degenerate_formal else "success",
+                        "exp_id": exp_id,
+                        "status": "failed_mode_collapse" if _is_degenerate_formal else "success",
                         "model_type": model_type,
-                        "timestamp":  time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                         "file_index": file_index,
-                        "params":     record_params,
+                        "params": record_params,
                         # Training results
-                        "final_loss":    train_results.get("final_loss"),
-                        "loss_history":  train_results.get("loss_history"),
-                        "model_params":  train_results.get("model_params"),
+                        "final_loss": train_results.get("final_loss"),
+                        "loss_history": train_results.get("loss_history"),
+                        "model_params": train_results.get("model_params"),
                         # Scoring results
                         "denoising_score": score_results.get("denoising_score"),
-                        "file_vector":     score_results.get("file_vector"),
+                        "file_vector": score_results.get("file_vector"),
                         # Per-file comparison table enrichment. Stored as a
                         # plain dict on the record (ExperimentRecord.model_validate
                         # coerces it back to ScoreComparisonTable below). None
                         # when scoring failed or no scalar was produced.
-                        "score_table":     score_table.model_dump() if score_table else None,
+                        "score_table": score_table.model_dump() if score_table else None,
                         # Health-check failure reason. None on healthy rounds
                         # and on trial rounds; populated when the task-specific
                         # predicate inside score_vector fired. Surfaced to the
@@ -2167,18 +2293,18 @@ class HyperparamTuningAgent:
                         "failure_reason": failure_reason if _is_degenerate_formal else None,
                         # Data volume
                         "training_psd_segments": train_psd_segments,
-                        "eval_psd_segments":    eval_psd_segments,
+                        "eval_psd_segments": eval_psd_segments,
                         "timing": {
-                            "train_time_s":     train_time,
+                            "train_time_s": train_time,
                             "inference_time_s": inference_time,
-                            "scoring_time_s":   scoring_time,
+                            "scoring_time_s": scoring_time,
                         },
                         "memory": {
                             "expert_advice_followed": expert_advice_str,
-                            "hypothesis":    hypothesis,
-                            "conclusion":    reflection.get("conclusion"),
-                            "key_factor":    reflection.get("key_factor"),
-                            "discovery":     reflection.get("discovery"),
+                            "hypothesis": hypothesis,
+                            "conclusion": reflection.get("conclusion"),
+                            "key_factor": reflection.get("key_factor"),
+                            "discovery": reflection.get("discovery"),
                             "memory_update": reflection.get("memory_update"),
                         },
                     }
@@ -2189,15 +2315,13 @@ class HyperparamTuningAgent:
                     # disabled, so the reflector doesn't have to filter None.
                     # See docs/resource_estimator_implement.md §J.1.
                     if time_check is not None:
-                        final_record["memory"]["time_estimate_minutes"] = (
-                            time_check.get("estimated_minutes")
+                        final_record["memory"]["time_estimate_minutes"] = time_check.get(
+                            "estimated_minutes"
                         )
-                        final_record["memory"]["time_budget_minutes"] = (
-                            time_check.get("limit_minutes")
+                        final_record["memory"]["time_budget_minutes"] = time_check.get(
+                            "limit_minutes"
                         )
-                        final_record["memory"]["time_mode"] = (
-                            "trial" if plan.is_trial else "formal"
-                        )
+                        final_record["memory"]["time_mode"] = "trial" if plan.is_trial else "formal"
                         # refine_inference_time_estimator.md Commit D — record
                         # which branch of the 3-way inference-ms derivation
                         # the gate took. Audit logs distinguish a measured
@@ -2206,8 +2330,8 @@ class HyperparamTuningAgent:
                         # ``static_formula`` paths. Source is None on records
                         # where the breakdown didn't carry it (defensive).
                         final_record["memory"]["inference_ms_source"] = (
-                            (time_check.get("breakdown") or {}).get("inference_ms_source")
-                        )
+                            time_check.get("breakdown") or {}
+                        ).get("inference_ms_source")
                     # Phase K — surface pre-flight VRAM-estimator context to the
                     # planner the same way Phase J surfaces time context. Only
                     # added when the gate ran with a budget (chosen_vram_budget
@@ -2215,12 +2339,10 @@ class HyperparamTuningAgent:
                     # Mode is inferred from `time_mode` above when present.
                     # See docs/resource_estimator_implement.md §10.4.
                     if chosen_vram_budget is not None:
-                        final_record["memory"]["vram_estimate_gb"] = (
-                            resource_check.get("estimated_gb")
+                        final_record["memory"]["vram_estimate_gb"] = resource_check.get(
+                            "estimated_gb"
                         )
-                        final_record["memory"]["vram_budget_gb"] = (
-                            resource_check.get("limit_gb")
-                        )
+                        final_record["memory"]["vram_budget_gb"] = resource_check.get("limit_gb")
                     # K.2.5-8 — soft-fallback flag from the inference estimator.
                     # Independent of vram_budget being set; recorded whenever
                     # the gate reported a substitution so post-hoc audit can
@@ -2242,23 +2364,21 @@ class HyperparamTuningAgent:
                     # for all six (Optional[T] = None), so nothing breaks for
                     # legacy or fallback rounds.
                     inf_per_file = inf_status.get("per_file_timings_ms", []) or []
-                    inf_per_psd_seg_ms, inf_breakdown = (
-                        _aggregate_inference_file_timings(inf_per_file)
+                    inf_per_psd_seg_ms, inf_breakdown = _aggregate_inference_file_timings(
+                        inf_per_file
                     )
-                    final_record["memory"]["inference_per_psd_seg_ms_measured"] = (
-                        inf_per_psd_seg_ms
+                    final_record["memory"]["inference_per_psd_seg_ms_measured"] = inf_per_psd_seg_ms
+                    final_record["memory"]["inference_warmup_aggregator"] = inf_breakdown.get(
+                        "aggregator"
                     )
-                    final_record["memory"]["inference_warmup_aggregator"] = (
-                        inf_breakdown.get("aggregator")
+                    final_record["memory"]["inference_n_timed_files"] = inf_breakdown.get(
+                        "n_timed_files"
                     )
-                    final_record["memory"]["inference_n_timed_files"] = (
-                        inf_breakdown.get("n_timed_files")
+                    final_record["memory"]["inference_warmup_fraction"] = inf_breakdown.get(
+                        "warmup_fraction"
                     )
-                    final_record["memory"]["inference_warmup_fraction"] = (
-                        inf_breakdown.get("warmup_fraction")
-                    )
-                    final_record["memory"]["inference_process_startup_ms"] = (
-                        inf_status.get("process_startup_ms")
+                    final_record["memory"]["inference_process_startup_ms"] = inf_status.get(
+                        "process_startup_ms"
                     )
                     # Phase L — round bookkeeping for the per-round budget audit.
                     final_record["memory"]["round_index"] = round_index
@@ -2273,10 +2393,10 @@ class HyperparamTuningAgent:
                         final_record["train_portion"] = trial_config.train_portion
                         if trial_config.trial_strategy == "target":
                             final_record["target_files"] = trial_config.target_files
-    
+
                     ExperimentRecord.model_validate(final_record)
                     sandbox.save_record(final_record)
-    
+
                     # Phase F post-flight: update per-GPU calibration from this
                     # successful run. Only runs when the gate used the real-dataset
                     # warmup path (the static formula has no warmup signal to
@@ -2293,12 +2413,20 @@ class HyperparamTuningAgent:
                                     entry = time_calibration.make_entry(
                                         gpu_name=gpu_name,
                                         model_type=model_type,
-                                        seg_size=int(active_params["model_config"].get("segmentation_size", 0)),
-                                        batch_size=int(active_params["train_config"].get("batch_size", 1)),
+                                        seg_size=int(
+                                            active_params["model_config"].get(
+                                                "segmentation_size", 0
+                                            )
+                                        ),
+                                        batch_size=int(
+                                            active_params["train_config"].get("batch_size", 1)
+                                        ),
                                         total_steps=total_steps,
                                         warmup_ms_per_step=warmup_ms,
                                         actual_ms_per_step=actual_ms,
-                                        estimated_minutes=float(time_check.get("estimated_minutes") or 0.0),
+                                        estimated_minutes=float(
+                                            time_check.get("estimated_minutes") or 0.0
+                                        ),
                                         actual_minutes=train_time / 60.0,
                                     )
                                     table = time_calibration.load_table(gpu_name)
@@ -2315,19 +2443,21 @@ class HyperparamTuningAgent:
                                         )
                                 except Exception as cal_exc:  # pragma: no cover — defensive
                                     print(f"  [time-calibration skipped] {cal_exc}")
-    
+
                     # Phase L — success path: mark the round landed, reset the
                     # consecutive-failure counter, and break out of the inner
                     # attempt loop so the outer while moves on to the next round.
                     round_succeeded = True
                     completed_rounds += 1
                     consecutive_fails = 0
-                    print(f"Round {completed_rounds}/{max_rounds} Complete. "
-                          f"Score: {score_results.get('denoising_score', 'N/A')}")
-    
+                    print(
+                        f"Round {completed_rounds}/{max_rounds} Complete. "
+                        f"Score: {score_results.get('denoising_score', 'N/A')}"
+                    )
+
                     time.sleep(2)  # Cool-down to avoid API rate limits
                     break
-    
+
                 except Exception as e:
                     print(f"Loop Error: {e}")
                     traceback.print_exc()
@@ -2351,20 +2481,34 @@ class HyperparamTuningAgent:
             # NameError-guarded because early-exit paths (gate skip,
             # training crash before score) leave some names unbound.
             # See docs/phase68_task1_memory_diagnostic_20260427.md §2 Commit 4.
-            try: del train_results
-            except NameError: pass
-            try: del score_results
-            except NameError: pass
-            try: del score_table
-            except NameError: pass
-            try: del file_vector
-            except NameError: pass
-            try: del final_scalar
-            except NameError: pass
-            try: del reflect_results
-            except NameError: pass
-            try: del memory_history
-            except NameError: pass
+            try:
+                del train_results
+            except NameError:
+                pass
+            try:
+                del score_results
+            except NameError:
+                pass
+            try:
+                del score_table
+            except NameError:
+                pass
+            try:
+                del file_vector
+            except NameError:
+                pass
+            try:
+                del final_scalar
+            except NameError:
+                pass
+            try:
+                del reflect_results
+            except NameError:
+                pass
+            try:
+                del memory_history
+            except NameError:
+                pass
             gc.collect()
 
         # --- Build, validate, and save the run output ---
@@ -2387,10 +2531,15 @@ class HyperparamTuningAgent:
             termination_reason = "completed"
         all_records = sandbox.get_summary()
         successful_records = [
-            r for r in all_records
+            r
+            for r in all_records
             if r.get("status") == "success" and r.get("denoising_score") is not None
         ]
-        top_record = max(successful_records, key=lambda r: r["denoising_score"]) if successful_records else None
+        top_record = (
+            max(successful_records, key=lambda r: r["denoising_score"])
+            if successful_records
+            else None
+        )
 
         # Dual-track best-record selection for score_table propagation:
         #   best_*  — highest denoising_score across all successful records
@@ -2400,24 +2549,17 @@ class HyperparamTuningAgent:
         #             key (it's set to True only when trial_config.is_trial);
         #             absence == formal. Surfaces the "canonical" table to
         #             downstream nodes without the trial-mode subset caveat.
-        formal_records = [
-            r for r in successful_records if not r.get("is_trial", False)
-        ]
+        formal_records = [r for r in successful_records if not r.get("is_trial", False)]
         formal_top_record = (
-            max(formal_records, key=lambda r: r["denoising_score"])
-            if formal_records else None
+            max(formal_records, key=lambda r: r["denoising_score"]) if formal_records else None
         )
 
         # Phase K.7 — gate-exhaustion feedback for the next iteration's
         # proposer (§10.13). active_mode comes from the most recent plan;
         # the helper returns None unless the trigger criterion fires.
         gate_active_mode = "trial" if (plan is not None and plan.is_trial) else "formal"
-        gate_vram_budget = (
-            trial_vram_budget if gate_active_mode == "trial" else formal_vram_budget
-        )
-        gate_time_budget = (
-            trial_time_budget if gate_active_mode == "trial" else formal_time_budget
-        )
+        gate_vram_budget = trial_vram_budget if gate_active_mode == "trial" else formal_vram_budget
+        gate_time_budget = trial_time_budget if gate_active_mode == "trial" else formal_time_budget
         gate_exhaustion = _build_gate_exhaustion(
             records=all_records,
             active_mode=gate_active_mode,
@@ -2437,33 +2579,35 @@ class HyperparamTuningAgent:
             )
 
         agent_output_dict = {
-            "run_name":                          run_name,
-            "model_type":                        model_type_setting,
-            "file_index":                        file_index,
-            "status":                            run_status,
-            "completed_rounds":                  completed_rounds,
-            "total_attempts":                    total_attempts,
-            "best_exp_id":                       top_record.get("exp_id") if top_record else None,
-            "best_denoising_score":              top_record.get("denoising_score") if top_record else None,
-            "best_config":                       top_record.get("params") if top_record else None,
-            "best_file_vector":                  top_record.get("file_vector") if top_record else None,
-            "best_score_table":                  top_record.get("score_table") if top_record else None,
-            "formal_score_table":                formal_top_record.get("score_table") if formal_top_record else None,
-            "all_records":                       all_records,
-            "started_at":                        started_at,
-            "finished_at":                       finished_at,
-            "gate_exhaustion":                   gate_exhaustion,
+            "run_name": run_name,
+            "model_type": model_type_setting,
+            "file_index": file_index,
+            "status": run_status,
+            "completed_rounds": completed_rounds,
+            "total_attempts": total_attempts,
+            "best_exp_id": top_record.get("exp_id") if top_record else None,
+            "best_denoising_score": top_record.get("denoising_score") if top_record else None,
+            "best_config": top_record.get("params") if top_record else None,
+            "best_file_vector": top_record.get("file_vector") if top_record else None,
+            "best_score_table": top_record.get("score_table") if top_record else None,
+            "formal_score_table": formal_top_record.get("score_table")
+            if formal_top_record
+            else None,
+            "all_records": all_records,
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "gate_exhaustion": gate_exhaustion,
             # Phase 6.6 WS-B B.3 — flush per-attempt VRAM-gate rejections.
             # Empty list when every attempt was feasible. Orchestrator
             # aggregates (worst-offender per architecture) before rendering
             # into the next Proposer's previous_failures.
-            "physical_rejections":               physical_rejections_buffer,
+            "physical_rejections": physical_rejections_buffer,
             # Phase L (§11) — echo budget settings + termination metadata.
-            "attempts_per_round":                attempts_per_round_setting,
-            "attempts_per_formal_round":         attempts_per_formal_round_setting,
-            "max_fail_rounds":                   max_fail_rounds_setting,
-            "consecutive_fail_rounds_at_exit":   consecutive_fails,
-            "termination_reason":                termination_reason,
+            "attempts_per_round": attempts_per_round_setting,
+            "attempts_per_formal_round": attempts_per_formal_round_setting,
+            "max_fail_rounds": max_fail_rounds_setting,
+            "consecutive_fail_rounds_at_exit": consecutive_fails,
+            "termination_reason": termination_reason,
         }
 
         output_path = os.path.join(workspace, f"run_output_{run_name}.json")
@@ -2491,16 +2635,16 @@ class HyperparamTuningAgent:
                 f"{type(e).__name__}: {e}. Writing best-effort partial output."
             )
             partial_dict = {
-                "run_name":         run_name,
-                "model_type":       model_type_setting,
-                "file_index":       file_index,
-                "status":           "failed",
+                "run_name": run_name,
+                "model_type": model_type_setting,
+                "file_index": file_index,
+                "status": "failed",
                 "completed_rounds": completed_rounds,
-                "total_attempts":   total_attempts,
-                "started_at":       started_at,
-                "finished_at":      finished_at,
+                "total_attempts": total_attempts,
+                "started_at": started_at,
+                "finished_at": finished_at,
                 "termination_reason": termination_reason,
-                "_partial_reason":  f"{type(e).__name__}: {e}",
+                "_partial_reason": f"{type(e).__name__}: {e}",
             }
             with open(output_path, "w", encoding="utf-8") as f:
                 json.dump(partial_dict, f, indent=4, default=str)
@@ -2534,6 +2678,7 @@ class HyperparamTuningAgent:
 # CLI entry point
 # ---------------------------------------------------------------------------
 
+
 def main():
     """Thin CLI wrapper — parses args, builds HyperparamTuningInput, calls run()."""
     # Import MODEL_REGISTRY here (not at module level) because it depends on
@@ -2542,20 +2687,46 @@ def main():
 
     parser = argparse.ArgumentParser(description="TIDMAD Autonomous Agent Kernel")
 
-    parser.add_argument("--provider", type=str, choices=["gemini", "openai"], default="gemini",
-                        help="LLM provider for the planner sub-call (default for reflector when not overridden).")
-    parser.add_argument("--model_id", type=str, default="gemini-3.1-flash-lite-preview",
-                        help="Model ID for the planner sub-call (default for reflector when not overridden).")
-    parser.add_argument("--reflect_provider", type=str, choices=["gemini", "openai"], default=None,
-                        help="Optional separate provider for the reflector sub-call. "
-                             "When None, the reflector uses --provider.")
-    parser.add_argument("--reflect_model_id", type=str, default=None,
-                        help="Optional separate model for the reflector sub-call (e.g., gemini-2.5-flash). "
-                             "When None, the reflector uses --model_id.")
-    parser.add_argument("--expert_advice", type=str, default="None",
-                        help="Initial advice from a human expert to guide exploration.")
-    parser.add_argument("--max_rounds", type=int, default=10,
-                        help="Maximum number of experiment rounds to prevent token drain.")
+    parser.add_argument(
+        "--provider",
+        type=str,
+        choices=["gemini", "openai"],
+        default="gemini",
+        help="LLM provider for the planner sub-call (default for reflector when not overridden).",
+    )
+    parser.add_argument(
+        "--model_id",
+        type=str,
+        default="gemini-3.1-flash-lite-preview",
+        help="Model ID for the planner sub-call (default for reflector when not overridden).",
+    )
+    parser.add_argument(
+        "--reflect_provider",
+        type=str,
+        choices=["gemini", "openai"],
+        default=None,
+        help="Optional separate provider for the reflector sub-call. "
+        "When None, the reflector uses --provider.",
+    )
+    parser.add_argument(
+        "--reflect_model_id",
+        type=str,
+        default=None,
+        help="Optional separate model for the reflector sub-call (e.g., gemini-2.5-flash). "
+        "When None, the reflector uses --model_id.",
+    )
+    parser.add_argument(
+        "--expert_advice",
+        type=str,
+        default="None",
+        help="Initial advice from a human expert to guide exploration.",
+    )
+    parser.add_argument(
+        "--max_rounds",
+        type=int,
+        default=10,
+        help="Maximum number of experiment rounds to prevent token drain.",
+    )
 
     # ``--force_model`` accepts any string (not just MODEL_REGISTRY keys),
     # because plugin models seeded via ``--seed_plugin_path`` are not in the
@@ -2564,122 +2735,220 @@ def main():
     # (docs/run_scoped_plugins.md, Phase 3/4). The schema validator and the
     # planner reject unknown model_types at runtime with a clearer error.
     builtin_choices = list(MODEL_REGISTRY.keys()) + ["auto"]
-    parser.add_argument("--force_model", type=str, default="auto",
-                        help=(
-                            "Force a specific architecture or let the agent decide "
-                            "('auto'). Built-in choices: "
-                            f"{', '.join(builtin_choices)}. Plugin model_types are "
-                            "also accepted when paired with --seed_plugin_path."
-                        ))
-    parser.add_argument("--seed_plugin_path", type=str, default=None,
-                        help=(
-                            "Path to a plugin .py file used as the seed model "
-                            "for this run. Required when --force_model is a "
-                            "plugin model_type (i.e. not a built-in). The file's "
-                            "PLUGIN_MODEL_TYPE must equal --force_model. The "
-                            "tuner copies the file into "
-                            "<workspace>/plugins/<run_name>/ at run start so "
-                            "the training subprocess sees it via "
-                            "SIDERIUS_PLUGIN_DIRS. See "
-                            "docs/run_scoped_plugins.md (Phase 3)."
-                        ))
+    parser.add_argument(
+        "--force_model",
+        type=str,
+        default="auto",
+        help=(
+            "Force a specific architecture or let the agent decide "
+            "('auto'). Built-in choices: "
+            f"{', '.join(builtin_choices)}. Plugin model_types are "
+            "also accepted when paired with --seed_plugin_path."
+        ),
+    )
+    parser.add_argument(
+        "--seed_plugin_path",
+        type=str,
+        default=None,
+        help=(
+            "Path to a plugin .py file used as the seed model "
+            "for this run. Required when --force_model is a "
+            "plugin model_type (i.e. not a built-in). The file's "
+            "PLUGIN_MODEL_TYPE must equal --force_model. The "
+            "tuner copies the file into "
+            "<workspace>/plugins/<run_name>/ at run start so "
+            "the training subprocess sees it via "
+            "SIDERIUS_PLUGIN_DIRS. See "
+            "docs/run_scoped_plugins.md (Phase 3)."
+        ),
+    )
 
-    parser.add_argument("--run_name", type=str, default="test_run",
-                        help="Run name for the auto-exploration.")
-    parser.add_argument("--workspace", type=str, default="./siderius_workspace",
-                        help="Root directory for all agent-generated outputs.")
-    parser.add_argument("--progress_bar", action="store_true",
-                        help="Stream live tqdm progress bars from training/inference subprocesses.")
-    parser.add_argument("--file_index", type=int, default=6,
-                        help="Validation/training file index (default: 6). Ignored when --is_trial.")
+    parser.add_argument(
+        "--run_name", type=str, default="test_run", help="Run name for the auto-exploration."
+    )
+    parser.add_argument(
+        "--workspace",
+        type=str,
+        default="./siderius_workspace",
+        help="Root directory for all agent-generated outputs.",
+    )
+    parser.add_argument(
+        "--progress_bar",
+        action="store_true",
+        help="Stream live tqdm progress bars from training/inference subprocesses.",
+    )
+    parser.add_argument(
+        "--file_index",
+        type=int,
+        default=6,
+        help="Validation/training file index (default: 6). Ignored when --is_trial.",
+    )
 
     # Trial mode arguments
-    parser.add_argument("--is_trial", action="store_true",
-                        help="Enable trial-explore mode with multi-file sparse sampling.")
-    parser.add_argument("--trial_strategy", type=str, default="snapshot",
-                        choices=["snapshot", "anchors", "target"],
-                        help="Training sampling strategy (default: snapshot).")
-    parser.add_argument("--trial_portion", type=float, default=0.1,
-                        help="Fraction of segments per file for training scope (default: 0.1).")
-    parser.add_argument("--eval_strategy", type=str, default="snapshot",
-                        choices=["snapshot", "anchors", "target"],
-                        help="Validation sampling strategy (default: snapshot).")
-    parser.add_argument("--eval_portion", type=float, default=0.1,
-                        help="Fraction of segments per file for validation (default: 0.1).")
-    parser.add_argument("--train_portion", type=float, default=0.1,
-                        help="Per-epoch subsample from training scope (default: 0.1).")
+    parser.add_argument(
+        "--is_trial",
+        action="store_true",
+        help="Enable trial-explore mode with multi-file sparse sampling.",
+    )
+    parser.add_argument(
+        "--trial_strategy",
+        type=str,
+        default="snapshot",
+        choices=["snapshot", "anchors", "target"],
+        help="Training sampling strategy (default: snapshot).",
+    )
+    parser.add_argument(
+        "--trial_portion",
+        type=float,
+        default=0.1,
+        help="Fraction of segments per file for training scope (default: 0.1).",
+    )
+    parser.add_argument(
+        "--eval_strategy",
+        type=str,
+        default="snapshot",
+        choices=["snapshot", "anchors", "target"],
+        help="Validation sampling strategy (default: snapshot).",
+    )
+    parser.add_argument(
+        "--eval_portion",
+        type=float,
+        default=0.1,
+        help="Fraction of segments per file for validation (default: 0.1).",
+    )
+    parser.add_argument(
+        "--train_portion",
+        type=float,
+        default=0.1,
+        help="Per-epoch subsample from training scope (default: 0.1).",
+    )
 
     # Formal-mode training levers (Phase M). Eval scope defaults to full
     # snapshot (formal_eval_portion=1.0) for production score comparability,
     # but is now operator-configurable for smoke / CI runs that need to fit
     # a tight budget — Phase R, docs/resource_estimator_implement.md §13.
-    parser.add_argument("--formal_strategy", type=str, default="snapshot",
-                        choices=["snapshot", "anchors", "target"],
-                        help="Training-side sampling strategy in formal mode (default: snapshot).")
-    parser.add_argument("--formal_portion", type=float, default=0.1,
-                        help="Fraction of segments per file for formal training scope (default: 0.1).")
-    parser.add_argument("--formal_train_portion", type=float, default=1.0,
-                        help="Per-epoch iteration fraction for formal training (default: 1.0).")
-    parser.add_argument("--formal_eval_portion", type=float, default=1.0,
-                        help="Fraction of segments per file for the formal-mode eval "
-                             "scope (snapshot strategy). Default 1.0 = legacy full-clone "
-                             "behaviour. Lower (e.g. 0.05) for smoke / CI runs that need "
-                             "to fit the formal_time_budget_minutes gate.")
+    parser.add_argument(
+        "--formal_strategy",
+        type=str,
+        default="snapshot",
+        choices=["snapshot", "anchors", "target"],
+        help="Training-side sampling strategy in formal mode (default: snapshot).",
+    )
+    parser.add_argument(
+        "--formal_portion",
+        type=float,
+        default=0.1,
+        help="Fraction of segments per file for formal training scope (default: 0.1).",
+    )
+    parser.add_argument(
+        "--formal_train_portion",
+        type=float,
+        default=1.0,
+        help="Per-epoch iteration fraction for formal training (default: 1.0).",
+    )
+    parser.add_argument(
+        "--formal_eval_portion",
+        type=float,
+        default=1.0,
+        help="Fraction of segments per file for the formal-mode eval "
+        "scope (snapshot strategy). Default 1.0 = legacy full-clone "
+        "behaviour. Lower (e.g. 0.05) for smoke / CI runs that need "
+        "to fit the formal_time_budget_minutes gate.",
+    )
 
-    parser.add_argument("--human_advice", type=str, default=None,
-                        help="Human guidance for the agent (injected alongside expert_advice).")
-    parser.add_argument("--cleanup_denoised", action="store_true",
-                        help="Delete denoised HDF5 files after scoring each round to save disk space.")
+    parser.add_argument(
+        "--human_advice",
+        type=str,
+        default=None,
+        help="Human guidance for the agent (injected alongside expert_advice).",
+    )
+    parser.add_argument(
+        "--cleanup_denoised",
+        action="store_true",
+        help="Delete denoised HDF5 files after scoring each round to save disk space.",
+    )
 
     # evaluate_time_skill gate (Phase E1, Phase I two-budget split). Each
     # default is None, which keeps that mode's gate off — matches the
     # chain-runner CLI defaults.
-    parser.add_argument("--trial_time_budget_minutes", type=float, default=None,
-                        help="Wall-time budget (minutes) for the evaluate_time_skill "
-                             "gate on rounds where plan.is_trial=True. None disables "
-                             "the trial gate.")
-    parser.add_argument("--formal_time_budget_minutes", type=float, default=None,
-                        help="Wall-time budget (minutes) for the evaluate_time_skill "
-                             "gate on rounds where plan.is_trial=False. None disables "
-                             "the formal gate. Sized independently from the trial "
-                             "budget because formal runs use the full dataset and "
-                             "are 50–100x longer.")
-    parser.add_argument("--data_dir", type=str, default=None,
-                        help="TIDMAD data directory used by evaluate_time_skill's real-dataset "
-                             "warmup. None makes the skill fall back to its static formula.")
+    parser.add_argument(
+        "--trial_time_budget_minutes",
+        type=float,
+        default=None,
+        help="Wall-time budget (minutes) for the evaluate_time_skill "
+        "gate on rounds where plan.is_trial=True. None disables "
+        "the trial gate.",
+    )
+    parser.add_argument(
+        "--formal_time_budget_minutes",
+        type=float,
+        default=None,
+        help="Wall-time budget (minutes) for the evaluate_time_skill "
+        "gate on rounds where plan.is_trial=False. None disables "
+        "the formal gate. Sized independently from the trial "
+        "budget because formal runs use the full dataset and "
+        "are 50–100x longer.",
+    )
+    parser.add_argument(
+        "--data_dir",
+        type=str,
+        default=None,
+        help="TIDMAD data directory used by evaluate_time_skill's real-dataset "
+        "warmup. None makes the skill fall back to its static formula.",
+    )
 
     # evaluate_vram_skill gate (Phase K two-budget split). Each default is
     # None which keeps that mode's budget disabled — skill falls back to the
     # defensive free×0.8 limit. Matches the chain-runner CLI defaults.
-    parser.add_argument("--trial_vram_budget_gb", type=float, default=None,
-                        help="Per-mode VRAM ceiling (GB) for the evaluate_vram_skill "
-                             "gate on rounds where plan.is_trial=True. None → "
-                             "skill uses free×0.8 defensive limit.")
-    parser.add_argument("--formal_vram_budget_gb", type=float, default=None,
-                        help="Per-mode VRAM ceiling (GB) for the evaluate_vram_skill "
-                             "gate on rounds where plan.is_trial=False. None → "
-                             "skill uses free×0.8 defensive limit. Sized "
-                             "independently from the trial budget because formal "
-                             "rounds often use larger batch_size / segmentation_size.")
+    parser.add_argument(
+        "--trial_vram_budget_gb",
+        type=float,
+        default=None,
+        help="Per-mode VRAM ceiling (GB) for the evaluate_vram_skill "
+        "gate on rounds where plan.is_trial=True. None → "
+        "skill uses free×0.8 defensive limit.",
+    )
+    parser.add_argument(
+        "--formal_vram_budget_gb",
+        type=float,
+        default=None,
+        help="Per-mode VRAM ceiling (GB) for the evaluate_vram_skill "
+        "gate on rounds where plan.is_trial=False. None → "
+        "skill uses free×0.8 defensive limit. Sized "
+        "independently from the trial budget because formal "
+        "rounds often use larger batch_size / segmentation_size.",
+    )
 
     # Per-round attempt budget (Phase L, §11). All three default to the
     # schema defaults so the CLI surface matches the schema-only path.
-    parser.add_argument("--attempts_per_round", type=int, default=3,
-                        help="Inner attempt budget for trial rounds (default 3). "
-                             "Each round runs up to N attempts; success → break + "
-                             "reset the consecutive-fail counter, exhaustion → "
-                             "bump it. See docs/resource_estimator_implement.md §11.")
-    parser.add_argument("--attempts_per_formal_round", type=int, default=5,
-                        help="Inner attempt budget for the formal-promotion round "
-                             "(default 5, intentionally higher than --attempts_per_round). "
-                             "Formal is the only cross-architecture comparable "
-                             "measurement, so an iteration with no formal score is "
-                             "wasted entirely — extra attempts are worth the cost.")
-    parser.add_argument("--max_fail_rounds", type=int, default=3,
-                        help="Consecutive-failure brake (default 3). The outer "
-                             "loop aborts with termination_reason='aborted_fail_rounds' "
-                             "after this many consecutive rounds exhaust their inner "
-                             "attempt budget.")
+    parser.add_argument(
+        "--attempts_per_round",
+        type=int,
+        default=3,
+        help="Inner attempt budget for trial rounds (default 3). "
+        "Each round runs up to N attempts; success → break + "
+        "reset the consecutive-fail counter, exhaustion → "
+        "bump it. See docs/resource_estimator_implement.md §11.",
+    )
+    parser.add_argument(
+        "--attempts_per_formal_round",
+        type=int,
+        default=5,
+        help="Inner attempt budget for the formal-promotion round "
+        "(default 5, intentionally higher than --attempts_per_round). "
+        "Formal is the only cross-architecture comparable "
+        "measurement, so an iteration with no formal score is "
+        "wasted entirely — extra attempts are worth the cost.",
+    )
+    parser.add_argument(
+        "--max_fail_rounds",
+        type=int,
+        default=3,
+        help="Consecutive-failure brake (default 3). The outer "
+        "loop aborts with termination_reason='aborted_fail_rounds' "
+        "after this many consecutive rounds exhaust their inner "
+        "attempt budget.",
+    )
 
     args = parser.parse_args()
 
@@ -2700,48 +2969,50 @@ def main():
         )
 
     input_dict = {
-        "model_type":      args.force_model,
+        "model_type": args.force_model,
         "seed_plugin_path": args.seed_plugin_path,
-        "file_index":      args.file_index,
-        "max_rounds":      args.max_rounds,
-        "expert_advice":   args.expert_advice,
-        "llm_provider":    args.provider,
-        "llm_model_id":    args.model_id,
+        "file_index": args.file_index,
+        "max_rounds": args.max_rounds,
+        "expert_advice": args.expert_advice,
+        "llm_provider": args.provider,
+        "llm_model_id": args.model_id,
         "reflect_provider": args.reflect_provider,
         "reflect_model_id": args.reflect_model_id,
         "storage": {
             "backend": "local",
             "local": {"workspace": args.workspace, "run_name": args.run_name},
         },
-        "progress_bar":      args.progress_bar,
-        "cleanup_denoised":  args.cleanup_denoised,
-        "is_trial":          args.is_trial,
+        "progress_bar": args.progress_bar,
+        "cleanup_denoised": args.cleanup_denoised,
+        "is_trial": args.is_trial,
     }
     if args.is_trial:
-        input_dict.update({
-            "trial_strategy":  args.trial_strategy,
-            "trial_portion":   args.trial_portion,
-            "eval_strategy":   args.eval_strategy,
-            "eval_portion":    args.eval_portion,
-            "train_portion":   args.train_portion,
-        })
+        input_dict.update(
+            {
+                "trial_strategy": args.trial_strategy,
+                "trial_portion": args.trial_portion,
+                "eval_strategy": args.eval_strategy,
+                "eval_portion": args.eval_portion,
+                "train_portion": args.train_portion,
+            }
+        )
         # Clamp the LLM's per-round ExperimentPlan portions to the operator's
         # CLI values. Without this, the top-level trial_portion only sizes the
         # sample set; the LLM is still free to pick its own ExperimentPlan
         # portions, which can blow past the time-budget gate. Mirrors the
         # chain runner's plan_overrides wiring.
         input_dict["plan_overrides"] = {
-            "is_trial":      True,
+            "is_trial": True,
             "trial_portion": args.trial_portion,
             "train_portion": args.train_portion,
-            "eval_portion":  args.eval_portion,
+            "eval_portion": args.eval_portion,
         }
     # Phase M — formal-mode training levers. Always forwarded (trial or not)
     # because they apply whenever a round is promoted to formal.
-    input_dict["formal_strategy"]      = args.formal_strategy
-    input_dict["formal_portion"]       = args.formal_portion
+    input_dict["formal_strategy"] = args.formal_strategy
+    input_dict["formal_portion"] = args.formal_portion
     input_dict["formal_train_portion"] = args.formal_train_portion
-    input_dict["formal_eval_portion"]  = args.formal_eval_portion
+    input_dict["formal_eval_portion"] = args.formal_eval_portion
 
     if args.human_advice:
         input_dict["human_advice"] = args.human_advice

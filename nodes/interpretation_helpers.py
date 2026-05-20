@@ -7,17 +7,17 @@ They evaluate predictions, generate discoveries, and build the runtime vocabular
 """
 
 import math
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
-from agent.schemas.proposal import VocabEntry, ProposedVocabLink, FalsifiablePrediction
+from agent.schemas.proposal import VocabEntry
 
 
 def evaluate_prediction(
-    prediction: Dict[str, Any],
-    actual_results: Dict[str, Any],
-    current_sota: Optional[float] = None,
+    prediction: dict[str, Any],
+    actual_results: dict[str, Any],
+    current_sota: float | None = None,
     partial_margin: float = 0.05,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Evaluate whether this model beat the current SOTA.
 
@@ -80,11 +80,7 @@ def evaluate_prediction(
         outcome = "refuted"
 
     # Boldness: how ambitious was the LLM's prediction relative to SOTA?
-    boldness = (
-        abs(predicted - sota) / max(abs(sota), 1e-6)
-        if predicted is not None
-        else 0.0
-    )
+    boldness = abs(predicted - sota) / max(abs(sota), 1e-6) if predicted is not None else 0.0
     # Information gain: positive only when the architecture actually beat SOTA
     information_gain = delta if outcome == "confirmed" else 0.0
 
@@ -108,7 +104,7 @@ _DENOISING_SCORE_ALIASES = {
 }
 
 
-def _compute_metric(metric: str, results: Dict[str, Any]) -> Optional[float]:
+def _compute_metric(metric: str, results: dict[str, Any]) -> float | None:
     """
     Compute a metric value from tuning results.
 
@@ -126,12 +122,16 @@ def _compute_metric(metric: str, results: Dict[str, Any]) -> Optional[float]:
 
     # Parse mean(file_vector[N:M])
     if metric.startswith("mean(file_vector[") and metric.endswith("])"):
-        inner = metric[len("mean(file_vector["):-len("])")].strip()
+        inner = metric[len("mean(file_vector[") : -len("])")].strip()
         try:
             parts = inner.split(":")
             start = int(parts[0])
             end = int(parts[1]) if len(parts) > 1 else start + 1
-            values = [v for v in fv[start:end] if v is not None and not (isinstance(v, float) and math.isnan(v))]
+            values = [
+                v
+                for v in fv[start:end]
+                if v is not None and not (isinstance(v, float) and math.isnan(v))
+            ]
             return sum(values) / len(values) if values else None
         except (ValueError, IndexError):
             return None
@@ -139,7 +139,7 @@ def _compute_metric(metric: str, results: Dict[str, Any]) -> Optional[float]:
     # Parse file_vector[N]
     if metric.startswith("file_vector[") and metric.endswith("]"):
         try:
-            idx = int(metric[len("file_vector["):-1])
+            idx = int(metric[len("file_vector[") : -1])
             val = fv[idx]
             if val is not None and not (isinstance(val, float) and math.isnan(val)):
                 return val
@@ -151,15 +151,15 @@ def _compute_metric(metric: str, results: Dict[str, Any]) -> Optional[float]:
 
 
 def generate_discoveries(
-    prediction_eval: Optional[Dict[str, Any]],
+    prediction_eval: dict[str, Any] | None,
     model_type: str,
-    best_score: Optional[float],
-    inherited_components: List[Dict[str, Any]],
-    proposed_vocab_links: List[Dict[str, Any]],
-    timing: Optional[Dict[str, Any]] = None,
+    best_score: float | None,
+    inherited_components: list[dict[str, Any]],
+    proposed_vocab_links: list[dict[str, Any]],
+    timing: dict[str, Any] | None = None,
     slow_threshold_s: float = 1800.0,
-    overall_best_score: Optional[float] = None,
-) -> List[VocabEntry]:
+    overall_best_score: float | None = None,
+) -> list[VocabEntry]:
     """
     Generate kind='discovery' VocabEntry entries from this iteration's results.
 
@@ -195,26 +195,34 @@ def generate_discoveries(
         predicted_str = f"{predicted:.4f}" if predicted is not None else "N/A"
 
         if outcome == "confirmed":
-            desc = (f"CONFIRMED: {model_type} achieved {metric}={actual_str} "
-                    f"(predicted {predicted_str}). The hypothesis was supported.")
+            desc = (
+                f"CONFIRMED: {model_type} achieved {metric}={actual_str} "
+                f"(predicted {predicted_str}). The hypothesis was supported."
+            )
         elif outcome == "refuted":
-            desc = (f"REFUTED: {model_type} achieved {metric}={actual_str} "
-                    f"(predicted {predicted_str}). The hypothesis was NOT supported.")
+            desc = (
+                f"REFUTED: {model_type} achieved {metric}={actual_str} "
+                f"(predicted {predicted_str}). The hypothesis was NOT supported."
+            )
         else:
-            desc = (f"PARTIAL: {model_type} achieved {metric}={actual_str} "
-                    f"(predicted {predicted_str}). Results are inconclusive.")
+            desc = (
+                f"PARTIAL: {model_type} achieved {metric}={actual_str} "
+                f"(predicted {predicted_str}). Results are inconclusive."
+            )
 
         # Related features from inherited components
         related = [ic.get("component", "") for ic in inherited_components if ic.get("component")]
 
-        discoveries.append(VocabEntry(
-            name=f"prediction_{model_type}_{outcome}",
-            kind="discovery",
-            description=desc,
-            related_to=related[:5],  # limit related_to length
-            tier="candidate",
-            proposed_by_run=model_type,
-        ))
+        discoveries.append(
+            VocabEntry(
+                name=f"prediction_{model_type}_{outcome}",
+                kind="discovery",
+                description=desc,
+                related_to=related[:5],  # limit related_to length
+                tier="candidate",
+                proposed_by_run=model_type,
+            )
+        )
 
     # Discovery 2: score comparison to SOTA
     if best_score is not None:
@@ -225,25 +233,35 @@ def generate_discoveries(
         if overall_best_score is not None and sota_from_prediction is not None:
             sota_score = max(sota_from_prediction, overall_best_score)
         else:
-            sota_score = sota_from_prediction if sota_from_prediction is not None else overall_best_score
+            sota_score = (
+                sota_from_prediction if sota_from_prediction is not None else overall_best_score
+            )
         if sota_score is not None:
             if best_score > sota_score:
-                desc = (f"{model_type} scored {best_score:.4f}, beating the previous "
-                        f"SOTA of {sota_score:.4f} (+{best_score - sota_score:.4f}).")
+                desc = (
+                    f"{model_type} scored {best_score:.4f}, beating the previous "
+                    f"SOTA of {sota_score:.4f} (+{best_score - sota_score:.4f})."
+                )
             elif best_score > sota_score * 0.95:
-                desc = (f"{model_type} scored {best_score:.4f}, within 5% of "
-                        f"SOTA ({sota_score:.4f}). Competitive but not a clear improvement.")
+                desc = (
+                    f"{model_type} scored {best_score:.4f}, within 5% of "
+                    f"SOTA ({sota_score:.4f}). Competitive but not a clear improvement."
+                )
             else:
-                desc = (f"{model_type} scored {best_score:.4f}, significantly below "
-                        f"SOTA ({sota_score:.4f}). The approach needs revision.")
+                desc = (
+                    f"{model_type} scored {best_score:.4f}, significantly below "
+                    f"SOTA ({sota_score:.4f}). The approach needs revision."
+                )
 
-            discoveries.append(VocabEntry(
-                name=f"score_{model_type}_vs_sota",
-                kind="discovery",
-                description=desc,
-                tier="candidate",
-                proposed_by_run=model_type,
-            ))
+            discoveries.append(
+                VocabEntry(
+                    name=f"score_{model_type}_vs_sota",
+                    kind="discovery",
+                    description=desc,
+                    tier="candidate",
+                    proposed_by_run=model_type,
+                )
+            )
 
     # Discovery 3: timing (architectural resource cost)
     if timing is not None:
@@ -252,25 +270,27 @@ def generate_discoveries(
         total_s = train_s + infer_s
         if total_s >= slow_threshold_s:
             desc = (
-                f"{model_type}: {total_s/60:.1f} min/experiment "
-                f"(train={train_s/60:.1f}, infer={infer_s/60:.1f} min). "
+                f"{model_type}: {total_s / 60:.1f} min/experiment "
+                f"(train={train_s / 60:.1f}, infer={infer_s / 60:.1f} min). "
                 f"High compute cost — reduce segmentation_size or complexity."
             )
-            discoveries.append(VocabEntry(
-                name=f"timing_{model_type}_slow",
-                kind="discovery",
-                description=desc,
-                tier="candidate",
-                proposed_by_run=model_type,
-            ))
+            discoveries.append(
+                VocabEntry(
+                    name=f"timing_{model_type}_slow",
+                    kind="discovery",
+                    description=desc,
+                    tier="candidate",
+                    proposed_by_run=model_type,
+                )
+            )
 
     return discoveries
 
 
 def promote_candidates(
-    vocab: List[VocabEntry],
+    vocab: list[VocabEntry],
     min_runs: int = 3,
-) -> tuple[List[VocabEntry], List[str]]:
+) -> tuple[list[VocabEntry], list[str]]:
     """
     Promote candidate VocabEntry items to canonical tier.
 
@@ -291,8 +311,8 @@ def promote_candidates(
         (updated_vocab, promoted_names) — updated list with tier changes
         applied, and the names of entries promoted this call.
     """
-    updated: List[VocabEntry] = []
-    promoted_names: List[str] = []
+    updated: list[VocabEntry] = []
+    promoted_names: list[str] = []
 
     for entry in vocab:
         if (
@@ -308,7 +328,7 @@ def promote_candidates(
     return updated, promoted_names
 
 
-def compute_vocab_diversity_ratio(vocab: List[VocabEntry]) -> float:
+def compute_vocab_diversity_ratio(vocab: list[VocabEntry]) -> float:
     """
     Compute the vocabulary diversity ratio: candidate features/capabilities
     as a fraction of total vocab entries.
@@ -330,23 +350,25 @@ def compute_vocab_diversity_ratio(vocab: List[VocabEntry]) -> float:
         Returns 0.0 for an empty vocabulary or one with no features/capabilities.
     """
     fc_entries = [
-        v for v in vocab
+        v
+        for v in vocab
         if (v.kind if hasattr(v, "kind") else v.get("kind", "")) in {"feature", "capability"}
     ]
     if not fc_entries:
         return 0.0
     candidates = [
-        v for v in fc_entries
+        v
+        for v in fc_entries
         if (v.tier if hasattr(v, "tier") else v.get("tier", "")) == "candidate"
     ]
     return len(candidates) / len(fc_entries)
 
 
 def build_runtime_vocab(
-    incoming_vocab: List[VocabEntry],
-    new_discoveries: List[VocabEntry],
-    proposed_candidates: List[Dict[str, Any]],
-) -> List[VocabEntry]:
+    incoming_vocab: list[VocabEntry],
+    new_discoveries: list[VocabEntry],
+    proposed_candidates: list[dict[str, Any]],
+) -> list[VocabEntry]:
     """
     Build the updated runtime vocabulary for the next iteration.
 
@@ -363,7 +385,7 @@ def build_runtime_vocab(
         Updated vocabulary list (deduplicated by name).
     """
     # Start with incoming vocab
-    vocab_by_name: Dict[str, VocabEntry] = {}
+    vocab_by_name: dict[str, VocabEntry] = {}
     for entry in incoming_vocab:
         if hasattr(entry, "name"):
             vocab_by_name[entry.name] = entry
@@ -402,13 +424,13 @@ def build_runtime_vocab(
 
 
 def update_vocab_link_confirmations(
-    prev_vocab_links: List[Dict[str, Any]],
-    prediction_outcome: Optional[str],
+    prev_vocab_links: list[dict[str, Any]],
+    prediction_outcome: str | None,
     run_name: str,
-    existing_confirmations: Dict[str, List[str]],
-    runtime_vocab: List[VocabEntry],
+    existing_confirmations: dict[str, list[str]],
+    runtime_vocab: list[VocabEntry],
     min_runs: int = 3,
-) -> tuple[Dict[str, List[str]], List[VocabEntry], List[str]]:
+) -> tuple[dict[str, list[str]], list[VocabEntry], list[str]]:
     """
     Update vocab link confirmation tracking and promote confirmed links to VocabEntry.related_to.
 
@@ -441,7 +463,7 @@ def update_vocab_link_confirmations(
         that were promoted to VocabEntry.related_to in this call.
     """
     # Deep-copy confirmations so we never mutate the caller's dict
-    updated_confs: Dict[str, List[str]] = {k: list(v) for k, v in existing_confirmations.items()}
+    updated_confs: dict[str, list[str]] = {k: list(v) for k, v in existing_confirmations.items()}
 
     # Record confirmations from this run (only when prediction was confirmed)
     if prediction_outcome == "confirmed" and run_name:
@@ -458,12 +480,12 @@ def update_vocab_link_confirmations(
 
     # Promote pairs that have enough confirmations to VocabEntry.related_to
     # Build an index for O(1) feature lookup
-    vocab_by_name: Dict[str, VocabEntry] = {}
+    vocab_by_name: dict[str, VocabEntry] = {}
     for entry in runtime_vocab:
         name = entry.name if hasattr(entry, "name") else entry.get("name", "")
         vocab_by_name[name] = entry
 
-    newly_promoted: List[str] = []
+    newly_promoted: list[str] = []
     for key, run_names in updated_confs.items():
         if len(run_names) < min_runs:
             continue
@@ -471,9 +493,15 @@ def update_vocab_link_confirmations(
         feat_entry = vocab_by_name.get(feature)
         if feat_entry is None:
             continue
-        existing_related = feat_entry.related_to if hasattr(feat_entry, "related_to") else feat_entry.get("related_to", [])
+        existing_related = (
+            feat_entry.related_to
+            if hasattr(feat_entry, "related_to")
+            else feat_entry.get("related_to", [])
+        )
         if capability not in existing_related:
-            updated = feat_entry.model_copy(update={"related_to": list(existing_related) + [capability]})
+            updated = feat_entry.model_copy(
+                update={"related_to": list(existing_related) + [capability]}
+            )
             vocab_by_name[feature] = updated
             newly_promoted.append(key)
 
@@ -501,12 +529,14 @@ def update_vocab_link_confirmations(
 
 
 def select_active_models(
-    cache_entries: Dict[str, Dict[str, Any]],
-    current_iter_summaries: List[Any],  # List[ModelRunSummary]; loose-typed to avoid circular import
+    cache_entries: dict[str, dict[str, Any]],
+    current_iter_summaries: list[
+        Any
+    ],  # List[ModelRunSummary]; loose-typed to avoid circular import
     top_k: int = 3,
     last_n: int = 2,
     score_delta_threshold: float = 0.05,
-) -> Set[str]:
+) -> set[str]:
     """Pick the active model_types as the union of three sets.
 
     The active set is the union of:
@@ -550,7 +580,7 @@ def select_active_models(
             f"top_k={top_k}, last_n={last_n}, score_delta_threshold={score_delta_threshold}"
         )
 
-    active: Set[str] = set()
+    active: set[str] = set()
 
     # (1) Top-K by best_denoising_score across cache_entries.
     scored = [
@@ -583,9 +613,9 @@ def select_active_models(
 
 def compress_model_summary(
     model_type: str,
-    cache_entry: Dict[str, Any],
+    cache_entry: dict[str, Any],
     max_takeaway_chars: int = 150,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compact a frozen cache entry into a one-line summary for the synthesis prompt.
 
     The returned dict is meant to slot into the synthesis prompt's per-model
@@ -652,9 +682,9 @@ def compress_model_summary(
 
 def should_recall_per_model(
     model_type: str,
-    cache_entry: Optional[Dict[str, Any]],
-    current_iter_summary: Optional[Any],  # Optional[ModelRunSummary]
-    active_set: Set[str],
+    cache_entry: dict[str, Any] | None,
+    current_iter_summary: Any | None,  # Optional[ModelRunSummary]
+    active_set: set[str],
     score_delta_threshold: float = 0.05,
 ) -> bool:
     """Decide whether to issue a fresh ``interpretation.per_model`` LLM call.
@@ -708,7 +738,7 @@ def should_recall_per_model(
     if current_iter_summary is None:
         return False  # no new tuning data this iter
 
-    cached_stats = (cache_entry.get("_stats") or {})
+    cached_stats = cache_entry.get("_stats") or {}
     cached_rounds = cached_stats.get("completed_rounds", 0) or 0
     new_rounds = getattr(current_iter_summary, "completed_rounds", 0) or 0
     if new_rounds > cached_rounds:

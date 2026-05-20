@@ -20,6 +20,7 @@ Phase estimators are monkeypatched to return controllable seconds so
 the slack-rule tests can hit each window precisely without exercising
 torch / model code.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -92,9 +93,7 @@ def _patch_phases(
             capture["inference_ms_per_step"] = kw.get("inference_ms_per_step")
         return _stub_phase("inference", inf_sec)
 
-    monkeypatch.setattr(
-        ts._inference_est, "estimate_wall_time_seconds", _inf_stub
-    )
+    monkeypatch.setattr(ts._inference_est, "estimate_wall_time_seconds", _inf_stub)
     monkeypatch.setattr(
         ts._scoring_est,
         "estimate_wall_time_seconds",
@@ -112,7 +111,6 @@ def _patch_phases(
 
 
 class TestHintBranch:
-
     def test_hint_present_sets_source_trial_inference_warmup(self, monkeypatch):
         _patch_phases(monkeypatch, train_sec=600, inf_sec=120, score_sec=60)
         result = ts.run_skill(
@@ -129,7 +127,10 @@ class TestHintBranch:
         estimator — NOT the inverted ``hint × ml_per_psd / inf_batch``."""
         capture: dict = {}
         _patch_phases(
-            monkeypatch, train_sec=600, inf_sec=120, score_sec=60,
+            monkeypatch,
+            train_sec=600,
+            inf_sec=120,
+            score_sec=60,
             capture=capture,
         )
         seg_size = 16000
@@ -183,26 +184,29 @@ class TestHintBranch:
 
 
 class TestFallbackBranches:
-
     def test_no_hint_no_warmup_lands_static_formula(self, monkeypatch):
         """No hint, no ``data_dir`` → no training warmup → branch 3."""
         _patch_phases(monkeypatch, train_sec=600, inf_sec=120, score_sec=60)
         result = ts.run_skill(FakeSandbox(), **_base_kwargs())
         assert result["breakdown"]["inference_ms_source"] == "static_formula"
 
-    def test_no_hint_with_training_warmup_lands_x27_fallback(
-        self, monkeypatch
-    ):
+    def test_no_hint_with_training_warmup_lands_x27_fallback(self, monkeypatch):
         """No hint, but training warmup measured ms/step → branch 2."""
         _patch_phases(monkeypatch, train_sec=600, inf_sec=120, score_sec=60)
         # Force the warmup helper to return a synthetic measurement so the
         # "elif measured > 0" branch fires without a real torch run.
         monkeypatch.setattr(
-            ts, "_measure_ms_per_step",
-            lambda **kwargs: (5.0, {
-                "n_warmup_batches": 1, "n_timed_batches": 4,
-                "timings_ms": [], "aggregator": "median",
-            }),
+            ts,
+            "_measure_ms_per_step",
+            lambda **kwargs: (
+                5.0,
+                {
+                    "n_warmup_batches": 1,
+                    "n_timed_batches": 4,
+                    "timings_ms": [],
+                    "aggregator": "median",
+                },
+            ),
         )
         result = ts.run_skill(
             FakeSandbox(),
@@ -218,7 +222,6 @@ class TestFallbackBranches:
 
 
 class TestSlackRule:
-
     def test_measured_path_within_slack_window_is_feasible(self, monkeypatch):
         """``total_min == 63`` with ``budget == 60`` (105% of budget) →
         strict check would say infeasible, but slack window
@@ -286,11 +289,17 @@ class TestSlackRule:
         path has the precision to justify it."""
         _patch_phases(monkeypatch, train_sec=3500, inf_sec=200, score_sec=80)
         monkeypatch.setattr(
-            ts, "_measure_ms_per_step",
-            lambda **kwargs: (5.0, {
-                "n_warmup_batches": 1, "n_timed_batches": 4,
-                "timings_ms": [], "aggregator": "median",
-            }),
+            ts,
+            "_measure_ms_per_step",
+            lambda **kwargs: (
+                5.0,
+                {
+                    "n_warmup_batches": 1,
+                    "n_timed_batches": 4,
+                    "timings_ms": [],
+                    "aggregator": "median",
+                },
+            ),
         )
         result = ts.run_skill(
             FakeSandbox(),
@@ -308,13 +317,19 @@ class TestSlackRule:
 
 
 class TestBreakdownShape:
-
-    @pytest.mark.parametrize("hint,data_dir,expected_source", [
-        (50.0, None, "trial_inference_warmup"),
-        (None, None, "static_formula"),
-    ])
+    @pytest.mark.parametrize(
+        "hint,data_dir,expected_source",
+        [
+            (50.0, None, "trial_inference_warmup"),
+            (None, None, "static_formula"),
+        ],
+    )
     def test_breakdown_carries_required_keys(
-        self, monkeypatch, hint, data_dir, expected_source,
+        self,
+        monkeypatch,
+        hint,
+        data_dir,
+        expected_source,
     ):
         """Every successful gate verdict must surface the three new
         breakdown keys so the tuner / audit log can record them

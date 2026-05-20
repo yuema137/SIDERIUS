@@ -11,6 +11,7 @@ production under load (e.g. unretried 503 from a transient API outage).
 
 This test fails fast in CI if anyone bypasses the bridge.
 """
+
 import re
 from pathlib import Path
 
@@ -32,7 +33,7 @@ def _scan_for_openai_constructors() -> list[tuple[Path, int, str]]:
         for py in root.rglob("*.py"):
             if py == ALLOWED_FILE:
                 continue
-            with open(py, "r", encoding="utf-8") as f:
+            with open(py, encoding="utf-8") as f:
                 for lineno, line in enumerate(f, start=1):
                     # Skip comments and string-only matches
                     stripped = line.lstrip()
@@ -66,7 +67,7 @@ def test_only_llm_bridge_constructs_openai_client():
 def test_llm_bridge_itself_still_constructs_openai():
     """Sanity: the bridge file itself MUST contain OpenAI() (else the
     singleton check is meaningless)."""
-    with open(ALLOWED_FILE, "r", encoding="utf-8") as f:
+    with open(ALLOWED_FILE, encoding="utf-8") as f:
         text = f.read()
     assert PATTERN.search(text), (
         f"{ALLOWED_FILE} no longer constructs an OpenAI client — "

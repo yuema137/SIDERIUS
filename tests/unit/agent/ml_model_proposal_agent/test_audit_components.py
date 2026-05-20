@@ -21,6 +21,7 @@ Coverage:
    ``build_candidate_markdown_block`` actually produces for the same
    list, so we trust the audit number when blaming a row.
 """
+
 from __future__ import annotations
 
 import json
@@ -28,7 +29,6 @@ from typing import Any, Dict
 
 from agent.schemas.proposal import ProposalInput
 from nodes.ml_model_proposal_agent import _audit_proposer_components
-
 
 _EXPECTED_KEYS = {
     "system_prompt",
@@ -51,7 +51,7 @@ def _make_input(**overrides: Any) -> ProposalInput:
     their schema defaults. Tests pass overrides for the specific fields
     they care about.
     """
-    base: Dict[str, Any] = {
+    base: dict[str, Any] = {
         "interpretation": {"unused_by_audit": True},
         "existing_model_types": ["existing_a", "existing_b"],
         "previous_failures": [],
@@ -63,7 +63,7 @@ def _make_input(**overrides: Any) -> ProposalInput:
 
 def test_audit_components_returns_all_10_keys_with_full_payload():
     inp = _make_input(previous_failures=["err one", "err two longer"])
-    accumulated: Dict[str, Any] = {
+    accumulated: dict[str, Any] = {
         "candidates": [],  # empty list → markdown helper returns ""
         "interpretation_summary": {
             "foo": "bar",
@@ -94,7 +94,7 @@ def test_audit_components_returns_all_10_keys_with_full_payload():
 def test_audit_components_handles_empty_blocks():
     """Negative path: empty/missing blocks must yield value 0 keys, not KeyErrors."""
     inp = _make_input()  # empty previous_failures, recent_gate_exhaustions
-    accumulated: Dict[str, Any] = {}  # no candidates, no stage outputs
+    accumulated: dict[str, Any] = {}  # no candidates, no stage outputs
     result = _audit_proposer_components(
         inp=inp,
         accumulated=accumulated,

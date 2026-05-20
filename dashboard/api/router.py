@@ -6,13 +6,12 @@ Mounted at /api by main.py. The router depends only on the DataSource ABC
 and Pydantic response models — no storage-specific code lives here.
 """
 
-import os
 import glob
 import json
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+import os
 
-from dashboard.data_sources.base import DataSource
+from fastapi import APIRouter, HTTPException, Query
+
 from dashboard.api.models import (
     ExperimentRecord,
     FrontendConfig,
@@ -27,6 +26,7 @@ from dashboard.api.models import (
     RunSummary,
     StatusCounts,
 )
+from dashboard.data_sources.base import DataSource
 
 router = APIRouter()
 
@@ -39,8 +39,8 @@ router = APIRouter()
 # or by passing them through a shared app state. We use a module-level
 # holder pattern so tests can swap implementations without a running server.
 
-_data_source: Optional[DataSource] = None
-_frontend_config: Optional[FrontendConfig] = None
+_data_source: DataSource | None = None
+_frontend_config: FrontendConfig | None = None
 
 
 def set_data_source(ds: DataSource) -> None:
@@ -55,19 +55,24 @@ def set_frontend_config(cfg: FrontendConfig) -> None:
 
 def get_data_source() -> DataSource:
     if _data_source is None:
-        raise RuntimeError("DataSource has not been initialised. Call set_data_source() at startup.")
+        raise RuntimeError(
+            "DataSource has not been initialised. Call set_data_source() at startup."
+        )
     return _data_source
 
 
 def get_frontend_cfg() -> FrontendConfig:
     if _frontend_config is None:
-        raise RuntimeError("FrontendConfig has not been initialised. Call set_frontend_config() at startup.")
+        raise RuntimeError(
+            "FrontendConfig has not been initialised. Call set_frontend_config() at startup."
+        )
     return _frontend_config
 
 
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
+
 
 @router.get("/health", response_model=HealthResponse, tags=["meta"])
 def health():
@@ -86,6 +91,7 @@ def health():
 # Config (frontend bootstrap)
 # ---------------------------------------------------------------------------
 
+
 @router.get("/config", response_model=FrontendConfig, tags=["meta"])
 def config():
     """
@@ -98,6 +104,7 @@ def config():
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
+
 
 @router.get("/models", response_model=ModelListResponse, tags=["models"])
 def list_models():
@@ -133,6 +140,7 @@ def model_overview(model: str):
 # Runs
 # ---------------------------------------------------------------------------
 
+
 @router.get("/models/{model}/runs", response_model=RunListResponse, tags=["runs"])
 def list_runs(model: str):
     """List all run names for a model, including 'baseline'."""
@@ -148,9 +156,11 @@ def list_runs(model: str):
 def get_run(
     model: str,
     run_name: str,
-    limit: int  = Query(default=200, ge=1, le=1000),
+    limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
-    status: Optional[str] = Query(default=None, description="Filter by status: success | skipped_oom_risk"),
+    status: str | None = Query(
+        default=None, description="Filter by status: success | skipped_oom_risk"
+    ),
 ):
     """
     Paginated experiment records for a model/run combination.
@@ -163,11 +173,16 @@ def get_run(
     ds = get_data_source()
     try:
         records, total = ds.get_run_records(
-            model, run_name,
-            limit=limit, offset=offset, status_filter=status,
+            model,
+            run_name,
+            limit=limit,
+            offset=offset,
+            status_filter=status,
         )
     except KeyError:
-        raise HTTPException(status_code=404, detail=f"Run '{run_name}' not found for model '{model}'.")
+        raise HTTPException(
+            status_code=404, detail=f"Run '{run_name}' not found for model '{model}'."
+        )
 
     parsed = [ExperimentRecord.model_validate(r) for r in records]
     return RunSummary(
@@ -183,6 +198,7 @@ def get_run(
 # ---------------------------------------------------------------------------
 # Experiments
 # ---------------------------------------------------------------------------
+
 
 @router.get(
     "/models/{model}/runs/{run_name}/experiments/{exp_id}",
@@ -206,6 +222,7 @@ def get_experiment(model: str, run_name: str, exp_id: str):
 # Leaderboard
 # ---------------------------------------------------------------------------
 
+
 @router.get("/models/{model}/leaderboard", response_model=LeaderboardResponse, tags=["leaderboard"])
 def leaderboard(
     model: str,
@@ -223,6 +240,7 @@ def leaderboard(
         raise HTTPException(status_code=404, detail=f"Model '{model}' not found.")
 
     from dashboard.api.models import LeaderboardEntry
+
     return LeaderboardResponse(
         model=model,
         top_n=top_n,
@@ -259,6 +277,7 @@ def leaderboard(
 # identical. Only the discovery step differs.
 # ---------------------------------------------------------------------------
 
+
 def _is_chain_workspace(d: str) -> bool:
     """A dir is a chain workspace if it has at least one iter_NNN/ subdir.
 
@@ -272,7 +291,7 @@ def _is_chain_workspace(d: str) -> bool:
     return bool(glob.glob(os.path.join(d, "iter_[0-9][0-9][0-9]")))
 
 
-def _resolve_run_dir(root: str, run_name: str) -> Optional[tuple[str, str]]:
+def _resolve_run_dir(root: str, run_name: str) -> tuple[str, str] | None:
     """Resolve a run_name to (run_dir, layout) where layout is 'legacy' or 'chain'.
 
     Returns None if the run does not exist.
@@ -299,8 +318,7 @@ def list_exploration_runs():
     legacy_root = os.path.join(ds.root, "exploration")
     if os.path.isdir(legacy_root):
         runs.extend(
-            d for d in os.listdir(legacy_root)
-            if os.path.isdir(os.path.join(legacy_root, d))
+            d for d in os.listdir(legacy_root) if os.path.isdir(os.path.join(legacy_root, d))
         )
 
     # Chain: any top-level dir under root that contains iter_*/manifest.json
@@ -314,7 +332,7 @@ def list_exploration_runs():
                 runs.append(d)
                 continue
             if d.startswith("exploration_"):
-                candidate = d[len("exploration_"):]
+                candidate = d[len("exploration_") :]
                 if candidate and os.path.isdir(os.path.join(full, candidate)):
                     runs.append(candidate)
 
@@ -335,7 +353,11 @@ def list_exploration_models(run_name: str):
         for iter_dir in sorted(glob.glob(os.path.join(run_dir, "iteration_*"))):
             for entry in os.listdir(iter_dir):
                 full = os.path.join(iter_dir, entry)
-                if os.path.isdir(full) and not entry.startswith("attempt_") and entry != "__pycache__":
+                if (
+                    os.path.isdir(full)
+                    and not entry.startswith("attempt_")
+                    and entry != "__pycache__"
+                ):
                     summary = os.path.join(full, f"summary_{run_name}.json")
                     if os.path.isfile(summary):
                         models.append(entry)
@@ -345,7 +367,11 @@ def list_exploration_models(run_name: str):
             for inner in glob.glob(os.path.join(chain_iter_dir, "iteration_*")):
                 for entry in os.listdir(inner):
                     full = os.path.join(inner, entry)
-                    if os.path.isdir(full) and not entry.startswith("attempt_") and entry != "__pycache__":
+                    if (
+                        os.path.isdir(full)
+                        and not entry.startswith("attempt_")
+                        and entry != "__pycache__"
+                    ):
                         summary = os.path.join(full, f"summary_{iter_name}.json")
                         if os.path.isfile(summary):
                             models.append(entry)
@@ -359,7 +385,7 @@ def get_exploration_records(
     run_name: str,
     model_name: str,
     limit: int = Query(default=200, ge=1, le=1000),
-    status: Optional[str] = Query(default=None),
+    status: str | None = Query(default=None),
 ):
     """Get experiment records for an agent-generated model in an exploration run."""
     ds = get_data_source()
@@ -373,7 +399,7 @@ def get_exploration_records(
         for iter_dir in sorted(glob.glob(os.path.join(run_dir, "iteration_*"))):
             summary_path = os.path.join(iter_dir, model_name, f"summary_{run_name}.json")
             if os.path.isfile(summary_path):
-                with open(summary_path, "r") as f:
+                with open(summary_path) as f:
                     records = json.load(f)
                 break
     else:  # chain — concatenate records from every chain iteration that ran this model
@@ -382,11 +408,14 @@ def get_exploration_records(
             for inner in sorted(glob.glob(os.path.join(chain_iter_dir, "iteration_*"))):
                 summary_path = os.path.join(inner, model_name, f"summary_{iter_name}.json")
                 if os.path.isfile(summary_path):
-                    with open(summary_path, "r") as f:
+                    with open(summary_path) as f:
                         records.extend(json.load(f))
 
     if not records:
-        raise HTTPException(status_code=404, detail=f"Model '{model_name}' not found in exploration run '{run_name}'.")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Model '{model_name}' not found in exploration run '{run_name}'.",
+        )
 
     if status:
         records = [r for r in records if r.get("status") == status]
@@ -409,7 +438,8 @@ def get_exploration_records(
 # Exploration iteration-summary table
 # ---------------------------------------------------------------------------
 
-def _model_dir_in_iteration(iter_dir: str) -> Optional[str]:
+
+def _model_dir_in_iteration(iter_dir: str) -> str | None:
     """Find the successful (non-attempt) model dir inside an iteration dir.
 
     Returns the dir name or None. If only `attempt_*` dirs exist, returns
@@ -425,7 +455,7 @@ def _model_dir_in_iteration(iter_dir: str) -> Optional[str]:
     return None
 
 
-def _attempt_model_name(iter_dir: str) -> Optional[str]:
+def _attempt_model_name(iter_dir: str) -> str | None:
     """Recover model name from `attempt_NNN_<modelname>` dirs as a fallback.
 
     Used when an iteration produced no successful run_output_*.json — the
@@ -444,7 +474,7 @@ def _attempt_model_name(iter_dir: str) -> Optional[str]:
 
 def _row_from_run_output(
     iter_label: str,
-    model_name: Optional[str],
+    model_name: str | None,
     run_output: dict,
 ) -> IterationTableRow:
     """Pivot one run_output_*.json into an iteration table row.
@@ -454,16 +484,14 @@ def _row_from_run_output(
     ``exp_id``). Skipped/error attempts are dropped — they carry no signal
     worth a column.
     """
+
     def _exp_index(exp_id: str) -> int:
         try:
             return int(exp_id.rsplit("_", 1)[-1])
         except (ValueError, AttributeError):
             return 0
 
-    successful = [
-        r for r in run_output.get("all_records", [])
-        if r.get("status") == "success"
-    ]
+    successful = [r for r in run_output.get("all_records", []) if r.get("status") == "success"]
     successful.sort(key=lambda r: _exp_index(r.get("exp_id", "")))
 
     rounds = [
@@ -514,29 +542,33 @@ def iteration_table(run_name: str):
         for iter_dir in sorted(glob.glob(os.path.join(run_dir, "iteration_*"))):
             iter_label = os.path.basename(iter_dir)
             model_name = _model_dir_in_iteration(iter_dir)
-            ro_path: Optional[str] = None
+            ro_path: str | None = None
             if model_name:
                 candidate = os.path.join(iter_dir, model_name, f"run_output_{run_name}.json")
                 if os.path.isfile(candidate):
                     ro_path = candidate
             if ro_path is None:
                 # No successful run_output. Surface the iteration with attempt-derived model name.
-                rows.append(IterationTableRow(
-                    iteration=iter_label,
-                    model_name=model_name or _attempt_model_name(iter_dir),
-                ))
+                rows.append(
+                    IterationTableRow(
+                        iteration=iter_label,
+                        model_name=model_name or _attempt_model_name(iter_dir),
+                    )
+                )
                 continue
             try:
-                with open(ro_path, "r") as f:
+                with open(ro_path) as f:
                     run_output = json.load(f)
             except (json.JSONDecodeError, OSError):
                 # Partial / corrupt run_output (common after disk-full or
                 # mid-write crash). Don't let one bad file 500 the table —
                 # surface the row with a placeholder so the rest still loads.
-                rows.append(IterationTableRow(
-                    iteration=iter_label,
-                    model_name=model_name or _attempt_model_name(iter_dir),
-                ))
+                rows.append(
+                    IterationTableRow(
+                        iteration=iter_label,
+                        model_name=model_name or _attempt_model_name(iter_dir),
+                    )
+                )
                 continue
             rows.append(_row_from_run_output(iter_label, model_name, run_output))
 
@@ -545,8 +577,8 @@ def iteration_table(run_name: str):
         # sibling files like iter_NNN_hardware.json that share the prefix.
         for chain_iter_dir in sorted(glob.glob(os.path.join(run_dir, "iter_[0-9][0-9][0-9]"))):
             iter_label = os.path.basename(chain_iter_dir)  # "iter_001"
-            ro_path: Optional[str] = None
-            model_name: Optional[str] = None
+            ro_path: str | None = None
+            model_name: str | None = None
             for inner in sorted(glob.glob(os.path.join(chain_iter_dir, "iteration_*"))):
                 model_name = _model_dir_in_iteration(inner)
                 if model_name:
@@ -560,7 +592,7 @@ def iteration_table(run_name: str):
                 rows.append(IterationTableRow(iteration=iter_label, model_name=model_name))
                 continue
             try:
-                with open(ro_path, "r") as f:
+                with open(ro_path) as f:
                     run_output = json.load(f)
             except (json.JSONDecodeError, OSError):
                 # Partial / corrupt run_output (common after disk-full or

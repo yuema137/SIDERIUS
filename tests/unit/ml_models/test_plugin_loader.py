@@ -7,21 +7,22 @@ and callable in the same way as core models.
 All tests use a temporary plugin written to a tmp_path directory — no real
 agent_generated/ files are created or modified.
 """
-import os
-import sys
-import subprocess
-import textwrap
+
 import importlib
+import os
+import subprocess
+import sys
+import textwrap
+
 import pytest
 import torch
 
 from ml_models.plugin_loader import (
-    extend_registries,
+    _PLUGIN_DIRS_ENV_VAR,
     _load_plugin,
     _resolve_plugin_dirs,
-    _PLUGIN_DIRS_ENV_VAR,
+    extend_registries,
 )
-
 
 # ---------------------------------------------------------------------------
 # Shared plugin source used across tests
@@ -67,8 +68,8 @@ def plugin_file(tmp_path):
 # _load_plugin
 # ---------------------------------------------------------------------------
 
-class TestLoadPlugin:
 
+class TestLoadPlugin:
     def test_valid_plugin_returns_dict(self, plugin_file):
         result = _load_plugin(plugin_file)
         assert result is not None
@@ -114,8 +115,8 @@ class TestLoadPlugin:
 # extend_registries
 # ---------------------------------------------------------------------------
 
-class TestExtendRegistries:
 
+class TestExtendRegistries:
     def test_plugin_added_to_both_registries(self, tmp_path, plugin_file):
         # Rename so it lives inside tmp_path/models/
         models_dir = tmp_path / "models"
@@ -123,11 +124,12 @@ class TestExtendRegistries:
         dst = models_dir / "test_plugin_model.py"
         dst.write_text(VALID_PLUGIN_SRC)
 
-        model_reg  = {}
+        model_reg = {}
         config_reg = {}
 
         # Patch the loader's AGENT_GENERATED_DIR to point at our tmp models dir
         import ml_models.plugin_loader as pl
+
         original_dir = pl.AGENT_GENERATED_DIR
         pl.AGENT_GENERATED_DIR = str(models_dir)
         try:
@@ -145,9 +147,10 @@ class TestExtendRegistries:
         (models_dir / "__init__.py").write_text("")
         (models_dir / "_private.py").write_text(VALID_PLUGIN_SRC)
 
-        model_reg  = {}
+        model_reg = {}
         config_reg = {}
         import ml_models.plugin_loader as pl
+
         original_dir = pl.AGENT_GENERATED_DIR
         pl.AGENT_GENERATED_DIR = str(models_dir)
         try:
@@ -158,9 +161,10 @@ class TestExtendRegistries:
         assert loaded == []
 
     def test_missing_directory_returns_empty(self, tmp_path):
-        model_reg  = {}
+        model_reg = {}
         config_reg = {}
         import ml_models.plugin_loader as pl
+
         original_dir = pl.AGENT_GENERATED_DIR
         pl.AGENT_GENERATED_DIR = str(tmp_path / "nonexistent")
         try:
@@ -176,8 +180,8 @@ class TestExtendRegistries:
 # End-to-end: plugin model is callable like a core model
 # ---------------------------------------------------------------------------
 
-class TestPluginModelCallable:
 
+class TestPluginModelCallable:
     @pytest.fixture
     def loaded_plugin(self, tmp_path):
         """Load the valid plugin and return (model_class, config_class)."""
@@ -185,9 +189,10 @@ class TestPluginModelCallable:
         models_dir.mkdir()
         (models_dir / "test_plugin_model.py").write_text(VALID_PLUGIN_SRC)
 
-        model_reg  = {}
+        model_reg = {}
         config_reg = {}
         import ml_models.plugin_loader as pl
+
         original_dir = pl.AGENT_GENERATED_DIR
         pl.AGENT_GENERATED_DIR = str(models_dir)
         try:
@@ -212,11 +217,11 @@ class TestPluginModelCallable:
         """Plugin forward must return [B, 256, T] — same contract as core models."""
         ModelClass, ConfigClass = loaded_plugin
         seg_size = 1000
-        batch    = 2
-        cfg   = ConfigClass(segmentation_size=seg_size)
+        batch = 2
+        cfg = ConfigClass(segmentation_size=seg_size)
         model = ModelClass(cfg)
         model.eval()
-        x   = torch.randint(0, 256, (batch, seg_size))
+        x = torch.randint(0, 256, (batch, seg_size))
         out = model(x)
         assert out.shape == (batch, 256, seg_size), (
             f"Expected ({batch}, 256, {seg_size}), got {tuple(out.shape)}"
@@ -226,7 +231,7 @@ class TestPluginModelCallable:
         ModelClass, ConfigClass = loaded_plugin
         cfg = ConfigClass(segmentation_size=500)
         model = ModelClass(cfg)
-        x   = torch.randint(0, 256, (1, 500))
+        x = torch.randint(0, 256, (1, 500))
         out = model(x)
         assert out.dtype == torch.float32
 
@@ -234,7 +239,7 @@ class TestPluginModelCallable:
         ModelClass, ConfigClass = loaded_plugin
         cfg = ConfigClass(segmentation_size=500)
         model = ModelClass(cfg)
-        x   = torch.randint(0, 256, (1, 500))
+        x = torch.randint(0, 256, (1, 500))
         out = model(x)
         assert not torch.isnan(out).any()
 
@@ -242,6 +247,7 @@ class TestPluginModelCallable:
 # ---------------------------------------------------------------------------
 # _resolve_plugin_dirs — env var precedence and parsing
 # ---------------------------------------------------------------------------
+
 
 class TestResolvePluginDirs:
     """Phase 1 of docs/run_scoped_plugins.md — env var drives the scan list,
@@ -251,6 +257,7 @@ class TestResolvePluginDirs:
     def test_env_unset_falls_back_to_agent_generated_dir(self, monkeypatch):
         monkeypatch.delenv(_PLUGIN_DIRS_ENV_VAR, raising=False)
         import ml_models.plugin_loader as pl
+
         assert _resolve_plugin_dirs() == [pl.AGENT_GENERATED_DIR]
 
     def test_empty_env_falls_back_to_agent_generated_dir(self, monkeypatch):
@@ -259,6 +266,7 @@ class TestResolvePluginDirs:
         would silently disable plugin loading."""
         monkeypatch.setenv(_PLUGIN_DIRS_ENV_VAR, "")
         import ml_models.plugin_loader as pl
+
         assert _resolve_plugin_dirs() == [pl.AGENT_GENERATED_DIR]
 
         monkeypatch.setenv(_PLUGIN_DIRS_ENV_VAR, "   ")
@@ -293,6 +301,7 @@ class TestResolvePluginDirs:
 # extend_registries — multi-directory scanning (Phase 1)
 # ---------------------------------------------------------------------------
 
+
 def _make_plugin_src(model_type: str) -> str:
     """Return VALID_PLUGIN_SRC rewritten for a different PLUGIN_MODEL_TYPE.
 
@@ -304,7 +313,6 @@ def _make_plugin_src(model_type: str) -> str:
 
 
 class TestExtendRegistriesMultiDir:
-
     def test_env_var_overrides_legacy_dir(self, tmp_path, monkeypatch):
         """When SIDERIUS_PLUGIN_DIRS is set, the loader must scan ONLY that
         dir — not AGENT_GENERATED_DIR. We prove this by pointing
@@ -321,6 +329,7 @@ class TestExtendRegistriesMultiDir:
         (run_dir / "run_plugin.py").write_text(_make_plugin_src("run_plugin"))
 
         import ml_models.plugin_loader as pl
+
         monkeypatch.setattr(pl, "AGENT_GENERATED_DIR", str(legacy_dir))
         monkeypatch.setenv(_PLUGIN_DIRS_ENV_VAR, str(run_dir))
 
@@ -361,6 +370,7 @@ class TestExtendRegistriesMultiDir:
         (run_dir / "run_plugin.py").write_text(_make_plugin_src("run_only_plugin"))
 
         import ml_models.plugin_loader as pl
+
         monkeypatch.setattr(pl, "AGENT_GENERATED_DIR", str(tmp_path / "does_not_exist"))
         monkeypatch.setenv(_PLUGIN_DIRS_ENV_VAR, str(run_dir))
 
@@ -465,8 +475,9 @@ class TestBootstrapRegistryMirror:
         (models_dir / "test_plugin_model.py").write_text(VALID_PLUGIN_SRC)
 
         import ml_models.plugin_loader as pl
+
         ml_models_dir = os.path.dirname(os.path.abspath(pl.__file__))
-        project_root  = os.path.dirname(ml_models_dir)
+        project_root = os.path.dirname(ml_models_dir)
 
         # Mirror the training subprocess PYTHONPATH: project root + ml_models/.
         env = dict(os.environ)

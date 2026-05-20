@@ -33,12 +33,13 @@ Run with:
   .venv/bin/pytest tests/integration/workflows/test_vram_awareness.py -v -s --real-llm
   .venv/bin/pytest tests/integration/workflows/test_vram_awareness.py -v -s --real-llm --real-training
 """
+
 from __future__ import annotations
 
 import os
 import re
 from contextlib import ExitStack
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -49,14 +50,6 @@ from agent.schemas.hyperparam_tuning import (
     PhysicalRejection,
 )
 from core.hardware_context import HardwareContext
-from workflows.llm_config import (
-    NodeLLMConfig,
-    ProposalLLMConfig,
-    TunerLLMConfig,
-    WorkflowLLMConfig,
-)
-from workflows.model_exploration import run_workflow
-
 from tests.unit.workflows.test_model_exploration import (
     _make_implementor_output,
     _make_interpretation_output,
@@ -64,7 +57,13 @@ from tests.unit.workflows.test_model_exploration import (
     _make_validator_output,
     _write_tuning_output,
 )
-
+from workflows.llm_config import (
+    NodeLLMConfig,
+    ProposalLLMConfig,
+    TunerLLMConfig,
+    WorkflowLLMConfig,
+)
+from workflows.model_exploration import run_workflow
 
 pytestmark = pytest.mark.dual_mode
 
@@ -74,7 +73,7 @@ pytestmark = pytest.mark.dual_mode
 # renders identically on CPU-only dev boxes and GPU hosts alike.
 # ---------------------------------------------------------------------------
 
-_STUB_TOTAL_BYTES = 32 * 1024 ** 3
+_STUB_TOTAL_BYTES = 32 * 1024**3
 # §5.3.1 multi-config stress. Phase A covers 10 + 20 GB against the stubbed
 # 32 GB device (both below the 0.80 * 32 = 25.6 GB physical cap → BUDGET
 # regime). Phase B (v9) runs **0.5 GB only** against the real RTX 5090 — a
@@ -122,7 +121,7 @@ def _stub_hardware_context() -> HardwareContext:
         torch_version="2.5.1",
         hostname="test-host",
         device_available=True,
-        discovered_at=datetime(2026, 4, 23, tzinfo=timezone.utc),
+        discovered_at=datetime(2026, 4, 23, tzinfo=UTC),
     )
 
 
@@ -208,9 +207,7 @@ _FAKE_COMPARISON = {
     "sota_mechanism": "baseline",
 }
 _FAKE_REASONING = {
-    "proposed_change": (
-        "Replace the depth-9 attention stack with a depth-4 dilated TCN."
-    ),
+    "proposed_change": ("Replace the depth-9 attention stack with a depth-4 dilated TCN."),
     "causal_hypothesis": (
         "Iter-1 ran out of VRAM because attention at hidden_dim=1024 busted "
         "the budget. Shrinking the per-layer capacity keeps the model within "
@@ -227,6 +224,8 @@ _FAKE_REASONING = {
     "inherited_components": [],
     "proposed_vocab_candidates": [],
 }
+
+
 def _make_fake_proposing(model_name: str) -> dict:
     return {
         "model_name": model_name,
@@ -253,6 +252,7 @@ def _make_canned_bridge_factory(model_name: str):
     """Each iteration gets a unique model_name so the workflow's
     duplicate-arch guard does not reject iter 2 (which would prevent
     the emitted_proposals capture the real-mode branch relies on)."""
+
     def _factory(**kwargs):
         bridge = MagicMock()
         # Pad the proposing stage so the internal pre-flight/structural
@@ -265,12 +265,14 @@ def _make_canned_bridge_factory(model_name: str):
             _make_fake_proposing(model_name),
         ]
         return bridge
+
     return _factory
 
 
 # ---------------------------------------------------------------------------
 # Test
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("vram_budget_gb", _BUDGETS_GB)
 def test_vram_awareness_e2e_physical_rejection_reaches_iter2_proposer(
@@ -299,6 +301,7 @@ def test_vram_awareness_e2e_physical_rejection_reaches_iter2_proposer(
                 f"skipping {vram_budget_gb} GB."
             )
         import torch
+
         if not torch.cuda.is_available():
             pytest.skip("Phase B requires CUDA (RTX 5090).")
         if not Path(_TIDMAD_DATA_DIR).exists():
@@ -334,8 +337,7 @@ def test_vram_awareness_e2e_physical_rejection_reaches_iter2_proposer(
     if real_training:
         data_dir = _TIDMAD_DATA_DIR
         source_paths: list[str] | None = [
-            str(tmp_path / "data" / "punet" / "v1" / "agent"
-                / "run_output_v1_agent.json")
+            str(tmp_path / "data" / "punet" / "v1" / "agent" / "run_output_v1_agent.json")
         ]
         source_run_name_arg: str | None = None
     else:
@@ -380,8 +382,7 @@ def test_vram_awareness_e2e_physical_rejection_reaches_iter2_proposer(
             if real_training and inp.previous_failures:
                 inp.human_advice = None
                 inp.expert_context = [
-                    item for item in inp.expert_context
-                    if getattr(item, "source", None) != "human"
+                    item for item in inp.expert_context if getattr(item, "source", None) != "human"
                 ]
             captured_inputs.append(inp)
             out = super().run(inp, *args, **kwargs)
@@ -394,11 +395,13 @@ def test_vram_awareness_e2e_physical_rejection_reaches_iter2_proposer(
 
         def _capturing_generate(*args, **kwargs):
             result = original_generate(*args, **kwargs)
-            captured_bridge_calls.append({
-                "args": args,
-                "kwargs": kwargs,
-                "result": result,
-            })
+            captured_bridge_calls.append(
+                {
+                    "args": args,
+                    "kwargs": kwargs,
+                    "result": result,
+                }
+            )
             return result
 
         bridge.generate = _capturing_generate
@@ -409,9 +412,7 @@ def test_vram_awareness_e2e_physical_rejection_reaches_iter2_proposer(
         if real_mode:
             kwargs["bridge_factory"] = _real_capturing_bridge_factory
         else:
-            kwargs["bridge_factory"] = _make_canned_bridge_factory(
-                f"b5_arch_iter{iter_counter[0]}"
-            )
+            kwargs["bridge_factory"] = _make_canned_bridge_factory(f"b5_arch_iter{iter_counter[0]}")
         return _CapturingProposer(**kwargs)
 
     # Conditional patch stack (§5.3.7 B.6f). MLModelProposalAgent stays
@@ -420,23 +421,21 @@ def test_vram_awareness_e2e_physical_rejection_reaches_iter2_proposer(
     # Phase B every other node is the real thing so iter-1 can actually OOM
     # on the RTX 5090 and iter-2 can actually train to 'succeeded'.
     with ExitStack() as stack:
-        MockPropose = stack.enter_context(
-            patch("workflows.model_exploration.MLModelProposalAgent")
-        )
+        MockPropose = stack.enter_context(patch("workflows.model_exploration.MLModelProposalAgent"))
         MockPropose.side_effect = _proposer_ctor
 
         if not real_training:
             # Phase A — full mock stack.
-            stack.enter_context(patch(
-                "workflows.model_exploration.get_or_create_hardware_context",
-                return_value=_stub_hardware_context(),
-            ))
+            stack.enter_context(
+                patch(
+                    "workflows.model_exploration.get_or_create_hardware_context",
+                    return_value=_stub_hardware_context(),
+                )
+            )
             MockInterp = stack.enter_context(
                 patch("workflows.model_exploration.ResultInterpretationAgent")
             )
-            MockImpl = stack.enter_context(
-                patch("workflows.model_exploration.MLModelImplementor")
-            )
+            MockImpl = stack.enter_context(patch("workflows.model_exploration.MLModelImplementor"))
             MockValid = stack.enter_context(
                 patch("workflows.model_exploration.MLCodeValidatorAgent")
             )
@@ -496,8 +495,7 @@ def test_vram_awareness_e2e_physical_rejection_reaches_iter2_proposer(
     # Layer 1 - captured iter-2 ProposalInput
     # ------------------------------------------------------------------
     assert len(captured_inputs) >= 2, (
-        f"Expected >=2 proposer invocations (iter 1 + iter 2); "
-        f"got {len(captured_inputs)}."
+        f"Expected >=2 proposer invocations (iter 1 + iter 2); got {len(captured_inputs)}."
     )
     iter2_input = captured_inputs[1]
 
@@ -512,9 +510,7 @@ def test_vram_awareness_e2e_physical_rejection_reaches_iter2_proposer(
     #       without earning a formal rejection, producing a valid trial
     #       score. Iter-2 then builds on that score normally.
     # Either path passes; failing both is the regression signal.
-    rejection_strings = [
-        s for s in iter2_input.previous_failures if "[PHYSICAL REJECTION]" in s
-    ]
+    rejection_strings = [s for s in iter2_input.previous_failures if "[PHYSICAL REJECTION]" in s]
     iter1_auto_shrunk = False
     if real_training:
         iter1_tuning = iteration_results[0] if iteration_results else None
@@ -576,8 +572,7 @@ def test_vram_awareness_e2e_physical_rejection_reaches_iter2_proposer(
     else:
         # Phase A — synthetic rejection content is known; assert verbatim.
         assert _REJECTED_MODEL_TYPE in rej_str, (
-            f"Rejection string must cite iter-1 arch {_REJECTED_MODEL_TYPE!r}; "
-            f"got: {rej_str!r}"
+            f"Rejection string must cite iter-1 arch {_REJECTED_MODEL_TYPE!r}; got: {rej_str!r}"
         )
         assert _REJECTED_DOMINANT_LAYER in rej_str, (
             f"Rejection string must cite the dominant attention layer "
@@ -602,6 +597,7 @@ def test_vram_awareness_e2e_physical_rejection_reaches_iter2_proposer(
     # rejection (skipped on the auto-shrink path).
     # ------------------------------------------------------------------
     from nodes.ml_model_proposal_agent import _build_reasoning_prompt
+
     rendered = _build_reasoning_prompt(iter2_input)
     assert "[HARDWARE CONTEXT]" in rendered, (
         "Iter-2 reasoning prompt must carry a [HARDWARE CONTEXT] block. "
@@ -609,8 +605,7 @@ def test_vram_awareness_e2e_physical_rejection_reaches_iter2_proposer(
     )
     if vram_budget_gb < 25.6:
         assert "BUDGET" in rendered, (
-            f"Regime line should read BUDGET (budget={vram_budget_gb} GB "
-            f"< usable_cap=25.6 GB)."
+            f"Regime line should read BUDGET (budget={vram_budget_gb} GB < usable_cap=25.6 GB)."
         )
     assert f"{vram_budget_gb:.2f} GB" in rendered, (
         f"Effective-cap line must render the parametrized budget "
@@ -638,8 +633,7 @@ def test_vram_awareness_e2e_physical_rejection_reaches_iter2_proposer(
     # ------------------------------------------------------------------
     if real_mode:
         assert len(emitted_proposals) >= 2, (
-            f"Real-mode: expected >=2 emitted proposals; "
-            f"got {len(emitted_proposals)}."
+            f"Real-mode: expected >=2 emitted proposals; got {len(emitted_proposals)}."
         )
         iter2_proposal = emitted_proposals[1]
         model_cfg = iter2_proposal.baseline_config.get("model_config", {})
@@ -660,12 +654,8 @@ def test_vram_awareness_e2e_physical_rejection_reaches_iter2_proposer(
 
         # §5.3.5 param-count gate.
         iter2_params = iter2_proposal.parameter_count_estimate
-        param_ceiling = int(
-            _REJECTED_PARAM_COUNT_ESTIMATE * _ITER2_PARAM_CEILING_FRAC
-        )
-        param_count_ok = (
-            iter2_params is not None and iter2_params < param_ceiling
-        )
+        param_ceiling = int(_REJECTED_PARAM_COUNT_ESTIMATE * _ITER2_PARAM_CEILING_FRAC)
+        param_count_ok = iter2_params is not None and iter2_params < param_ceiling
 
         # §5.3.6 keyword-audit gate (case-insensitive, WORD-BOUNDARY regex).
         # Substring matching was a false-positive farm: "cap" hit "capture",
@@ -674,7 +664,8 @@ def test_vram_awareness_e2e_physical_rejection_reaches_iter2_proposer(
         causal_text = str(iter2_reasoning.get("causal_hypothesis", ""))
         causal_lower = causal_text.lower()
         keyword_hits = [
-            kw for kw in _REJECTION_ACK_KEYWORDS
+            kw
+            for kw in _REJECTION_ACK_KEYWORDS
             if re.search(rf"\b{re.escape(kw.lower())}\b", causal_lower)
         ]
         keyword_ok = len(keyword_hits) >= 1
@@ -695,10 +686,7 @@ def test_vram_awareness_e2e_physical_rejection_reaches_iter2_proposer(
         # rejection - the audit requirement of directive Step 4.
         with capsys.disabled():
             print("\n" + "=" * 72)
-            print(
-                f"B.5 Phase A - ITER-2 REASONING SNIPPET "
-                f"(budget={vram_budget_gb} GB)"
-            )
+            print(f"B.5 Phase A - ITER-2 REASONING SNIPPET (budget={vram_budget_gb} GB)")
             print("=" * 72)
             print(f"model_name:        {iter2_proposal.model_name}")
             print("-" * 72)
@@ -731,8 +719,7 @@ def test_vram_awareness_e2e_physical_rejection_reaches_iter2_proposer(
             )
             print(f"iter-2 param estimate:     {iter2_params:,}")
             print(
-                f"param ceiling (50%):       {param_ceiling:,}  "
-                f"-> param_count_ok={param_count_ok}"
+                f"param ceiling (50%):       {param_ceiling:,}  -> param_count_ok={param_count_ok}"
             )
             print(f"effective cap:             {vram_budget_gb:.2f} GB (BUDGET regime)")
             print(f"keyword hits:              {keyword_hits}  -> keyword_ok={keyword_ok}")
@@ -775,10 +762,7 @@ def test_vram_awareness_e2e_physical_rejection_reaches_iter2_proposer(
 
         with capsys.disabled():
             print("\n" + "=" * 72)
-            print(
-                f"B.5 Phase B - ITER-2 REAL TRAINING SUMMARY "
-                f"(budget={vram_budget_gb} GB)"
-            )
+            print(f"B.5 Phase B - ITER-2 REAL TRAINING SUMMARY (budget={vram_budget_gb} GB)")
             print("=" * 72)
             print(f"model_type:           {iter2_tuning.model_type}")
             print(f"status:               {iter2_tuning.status}")

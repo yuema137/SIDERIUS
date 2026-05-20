@@ -13,6 +13,7 @@ mutation. Trial rounds must never be penalized (no benchmark exists);
 formal rounds must respect the operator-supplied
 ``degenerate_penalty_score`` (None → null score, float → use verbatim).
 """
+
 from __future__ import annotations
 
 from agent.schemas.hyperparam_tuning import ExperimentPlan
@@ -55,7 +56,9 @@ def test_degenerate_formal_with_none_penalty_nulls_score():
         "failure_reason": "amplitude collapse: 0.0005% of reference",
     }
     is_degen, reason = _apply_degeneracy_reaction(
-        score_results, plan, penalty_score=None,
+        score_results,
+        plan,
+        penalty_score=None,
     )
     assert is_degen is True
     assert reason == "amplitude collapse: 0.0005% of reference"
@@ -80,7 +83,9 @@ def test_degenerate_formal_with_float_penalty_uses_penalty():
         "failure_reason": "amplitude collapse",
     }
     is_degen, reason = _apply_degeneracy_reaction(
-        score_results, plan, penalty_score=-2.5,
+        score_results,
+        plan,
+        penalty_score=-2.5,
     )
     assert is_degen is True
     assert reason == "amplitude collapse"
@@ -105,7 +110,9 @@ def test_degenerate_trial_round_is_no_op():
         "failure_reason": "spurious",
     }
     is_degen, reason = _apply_degeneracy_reaction(
-        score_results, plan, penalty_score=None,
+        score_results,
+        plan,
+        penalty_score=None,
     )
     # Helper still returns the raw signal (so caller can log/audit)
     assert is_degen is True
@@ -130,7 +137,9 @@ def test_non_degenerate_formal_preserves_score():
         "failure_reason": None,
     }
     is_degen, reason = _apply_degeneracy_reaction(
-        score_results, plan, penalty_score=-2.5,
+        score_results,
+        plan,
+        penalty_score=-2.5,
     )
     assert is_degen is False
     assert reason is None
@@ -152,7 +161,9 @@ def test_non_degenerate_trial_preserves_score():
         "failure_reason": None,
     }
     is_degen, reason = _apply_degeneracy_reaction(
-        score_results, plan, penalty_score=-9.9,
+        score_results,
+        plan,
+        penalty_score=-9.9,
     )
     assert is_degen is False
     assert reason is None
@@ -171,7 +182,9 @@ def test_missing_keys_default_to_false_none():
     plan = _make_plan(is_trial=False)
     score_results = {"denoising_score": 1.0, "file_vector": [1.0] * 20}
     is_degen, reason = _apply_degeneracy_reaction(
-        score_results, plan, penalty_score=None,
+        score_results,
+        plan,
+        penalty_score=None,
     )
     assert is_degen is False
     assert reason is None

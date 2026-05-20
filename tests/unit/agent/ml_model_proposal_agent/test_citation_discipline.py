@@ -9,8 +9,10 @@ Group 2 — pipeline integration: violations produced by the check are appended
 
 No LLM calls in either group — bridge.generate is mocked where needed.
 """
-import pytest
+
 from unittest.mock import MagicMock
+
+import pytest
 
 from agent.schemas.proposal import (
     ProposalInput,
@@ -18,16 +20,15 @@ from agent.schemas.proposal import (
     ReasoningPipelineConfig,
     ReasoningStage,
 )
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_model_proposal_agent import MLModelProposalAgent, _check_citation_discipline
-
 
 # ===========================================================================
 # Group 1 — pure function tests
 # ===========================================================================
 
-class TestCheckCitationDiscipline:
 
+class TestCheckCitationDiscipline:
     def test_empty_citation_list_returns_no_violations(self):
         violations = _check_citation_discipline(
             citation_sources=[],
@@ -120,6 +121,7 @@ class TestCheckCitationDiscipline:
 # Group 2 — pipeline integration
 # ===========================================================================
 
+
 def _make_pipeline_input(tmp_path, reasoning_output: dict) -> ProposalInput:
     return ProposalInput(
         interpretation={
@@ -135,10 +137,8 @@ def _make_pipeline_input(tmp_path, reasoning_output: dict) -> ProposalInput:
         reasoning_pipeline=ReasoningPipelineConfig(
             exploration_mode="exploit",
             stages=[
-                ReasoningStage(name="comparison",
-                               system_prompt_key="COMPARATIVE_ANALYSIS"),
-                ReasoningStage(name="causal_reasoning",
-                               system_prompt_key="CAUSAL_REASONING"),
+                ReasoningStage(name="comparison", system_prompt_key="COMPARATIVE_ANALYSIS"),
+                ReasoningStage(name="causal_reasoning", system_prompt_key="CAUSAL_REASONING"),
             ],
         ),
         storage=StorageConfig(
@@ -185,14 +185,14 @@ def _make_agent(responses: list) -> tuple[MLModelProposalAgent, MagicMock]:
     mock = MagicMock()
     mock.generate.side_effect = responses
     agent = MLModelProposalAgent(
-        provider="gemini", model_id="test",
+        provider="gemini",
+        model_id="test",
         bridge_factory=lambda **kw: mock,
     )
     return agent, mock
 
 
 class TestCitationDisciplinePipelineIntegration:
-
     def test_violations_appended_to_memo_consistency_notes(self, tmp_path):
         """When a cite_id is not referenced in the reasoning text, the violation
         is appended to output.memo_consistency_notes (not a hard failure)."""
@@ -211,16 +211,19 @@ class TestCitationDisciplinePipelineIntegration:
             "inherited_components": [],
             "proposed_vocab_candidates": [],
         }
-        agent, _ = _make_agent([
-            _make_comparison_output(),
-            reasoning,
-            _make_proposing_output(),
-        ])
+        agent, _ = _make_agent(
+            [
+                _make_comparison_output(),
+                reasoning,
+                _make_proposing_output(),
+            ]
+        )
         output = agent.run(_make_pipeline_input(tmp_path, reasoning))
 
         assert isinstance(output, ProposalOutput)
-        violation_notes = [n for n in output.memo_consistency_notes
-                           if "CITATION_NOT_REFERENCED" in n]
+        violation_notes = [
+            n for n in output.memo_consistency_notes if "CITATION_NOT_REFERENCED" in n
+        ]
         assert len(violation_notes) == 1
         assert "data_psd_50hz" in violation_notes[0]
 
@@ -242,15 +245,18 @@ class TestCitationDisciplinePipelineIntegration:
             "inherited_components": [],
             "proposed_vocab_candidates": [],
         }
-        agent, _ = _make_agent([
-            _make_comparison_output(),
-            reasoning,
-            _make_proposing_output(),
-        ])
+        agent, _ = _make_agent(
+            [
+                _make_comparison_output(),
+                reasoning,
+                _make_proposing_output(),
+            ]
+        )
         output = agent.run(_make_pipeline_input(tmp_path, reasoning))
 
-        violation_notes = [n for n in output.memo_consistency_notes
-                           if "CITATION_NOT_REFERENCED" in n]
+        violation_notes = [
+            n for n in output.memo_consistency_notes if "CITATION_NOT_REFERENCED" in n
+        ]
         assert violation_notes == []
 
     def test_existing_memo_consistency_notes_preserved(self, tmp_path):
@@ -271,18 +277,21 @@ class TestCitationDisciplinePipelineIntegration:
             "inherited_components": [],
             "proposed_vocab_candidates": [],
         }
-        agent, _ = _make_agent([
-            _make_comparison_output(),
-            reasoning,
-            _make_proposing_output(
-                memo_consistency_notes=["LLM noted: slight deviation from memo."]
-            ),
-        ])
+        agent, _ = _make_agent(
+            [
+                _make_comparison_output(),
+                reasoning,
+                _make_proposing_output(
+                    memo_consistency_notes=["LLM noted: slight deviation from memo."]
+                ),
+            ]
+        )
         output = agent.run(_make_pipeline_input(tmp_path, reasoning))
 
         assert "LLM noted: slight deviation from memo." in output.memo_consistency_notes
-        violation_notes = [n for n in output.memo_consistency_notes
-                           if "CITATION_NOT_REFERENCED" in n]
+        violation_notes = [
+            n for n in output.memo_consistency_notes if "CITATION_NOT_REFERENCED" in n
+        ]
         assert len(violation_notes) == 1
 
     def test_empty_citation_sources_no_notes_added(self, tmp_path):
@@ -302,13 +311,16 @@ class TestCitationDisciplinePipelineIntegration:
             "inherited_components": [],
             "proposed_vocab_candidates": [],
         }
-        agent, _ = _make_agent([
-            _make_comparison_output(),
-            reasoning,
-            _make_proposing_output(),
-        ])
+        agent, _ = _make_agent(
+            [
+                _make_comparison_output(),
+                reasoning,
+                _make_proposing_output(),
+            ]
+        )
         output = agent.run(_make_pipeline_input(tmp_path, reasoning))
 
-        violation_notes = [n for n in output.memo_consistency_notes
-                           if "CITATION_NOT_REFERENCED" in n]
+        violation_notes = [
+            n for n in output.memo_consistency_notes if "CITATION_NOT_REFERENCED" in n
+        ]
         assert violation_notes == []

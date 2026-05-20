@@ -63,6 +63,7 @@ Run with::
     uv run pytest -m real_run \\
         tests/integration/workflows/test_cognitive_alignment_smoke.py -v -s
 """
+
 from __future__ import annotations
 
 import math
@@ -106,7 +107,8 @@ pytestmark = pytest.mark.real_run
 # Constants
 # ---------------------------------------------------------------------------
 
-def _load_tier_models() -> Tuple[str, str]:
+
+def _load_tier_models() -> tuple[str, str]:
     """Pull the production-tier model IDs for the two slots Gate 1 exercises.
 
     Gate 1 used to pin the recording bridge to ``gpt-4o-mini`` so the test
@@ -122,11 +124,11 @@ def _load_tier_models() -> Tuple[str, str]:
     re-routing is picked up automatically.
     """
     from pathlib import Path
+
     from workflows.llm_config import WorkflowLLMConfig
+
     repo_root = Path(__file__).resolve().parents[3]
-    cfg = WorkflowLLMConfig.from_json(
-        str(repo_root / "llm_configs" / "openai_tiered_v1.json")
-    )
+    cfg = WorkflowLLMConfig.from_json(str(repo_root / "llm_configs" / "openai_tiered_v1.json"))
     return cfg.interpret.model_id, cfg.propose.proposing.model_id
 
 
@@ -174,6 +176,7 @@ ITER2_LEVER = 14  # iter_2 suppresses this file (and recovers ITER1_LEVER)
 # Gate 1 contract — "real OpenAI + capture" — requires this subclass.
 # ---------------------------------------------------------------------------
 
+
 class RecordingOpenAIBridge(LLMBridge):
     """Real OpenAI bridge that records every prompt + response.
 
@@ -198,7 +201,7 @@ class RecordingOpenAIBridge(LLMBridge):
         return resp
 
 
-def _make_recording_factory(model_id: str) -> Tuple[list, "callable"]:
+def _make_recording_factory(model_id: str) -> tuple[list, callable]:
     """Return (shared-call-log, bridge-factory-that-appends-to-it).
 
     ``model_id`` is read from the production tier config — see
@@ -209,7 +212,9 @@ def _make_recording_factory(model_id: str) -> Tuple[list, "callable"]:
 
     def factory(**ignored) -> RecordingOpenAIBridge:
         bridge = RecordingOpenAIBridge(
-            provider="openai", model_id=model_id, max_retries=3,
+            provider="openai",
+            model_id=model_id,
+            max_retries=3,
         )
         bridge.calls = shared
         return bridge
@@ -227,10 +232,12 @@ def _make_recording_factory(model_id: str) -> Tuple[list, "callable"]:
 # fraction of the ceiling on each file.
 # ---------------------------------------------------------------------------
 
+
 def _build_model_fv_linear(
-    reference, recovery_per_file: List[float],
-) -> List[float]:
-    fv: List[float] = []
+    reference,
+    recovery_per_file: list[float],
+) -> list[float]:
+    fv: list[float] = []
     for i in range(20):
         gt_lin_sum = reference.gt_per_file_linear_sum[i]
         n = reference.gt_per_file_n_segments[i]
@@ -239,7 +246,7 @@ def _build_model_fv_linear(
     return fv
 
 
-def _model_fv_log_from_linear(model_fv_linear: List[float]) -> List[float]:
+def _model_fv_log_from_linear(model_fv_linear: list[float]) -> list[float]:
     """log_5.27(v + 1e-10) — mirrors execute_tools/scoring_helpers."""
     return [math.log(v + 1e-10) / math.log(5.27) for v in model_fv_linear]
 
@@ -248,7 +255,7 @@ def _make_summary(
     model_type: str,
     iter_label: str,
     score_table: ScoreComparisonTable,
-    fv_log: List[float],
+    fv_log: list[float],
     scalar_log: float,
     description: str,
 ) -> ModelRunSummary:
@@ -277,24 +284,30 @@ def _make_summary(
 
 
 def _build_summary(
-    model_type: str, iter_label: str, recovery: List[float],
-    reference, description: str,
-) -> Tuple[ModelRunSummary, ScoreComparisonTable, float]:
+    model_type: str,
+    iter_label: str,
+    recovery: list[float],
+    reference,
+    description: str,
+) -> tuple[ModelRunSummary, ScoreComparisonTable, float]:
     fv_lin = _build_model_fv_linear(reference, recovery)
     fv_log = _model_fv_log_from_linear(fv_lin)
     scalar_lin = sum(fv_lin) / len(fv_lin)
     scalar_log = math.log(scalar_lin + 1e-10) / math.log(5.27)
     table = build_score_table(
-        model_fv_log=fv_log, model_scalar=scalar_log,
-        reference=reference, model_fv_linear=fv_lin,
+        model_fv_log=fv_log,
+        model_scalar=scalar_log,
+        reference=reference,
+        model_fv_linear=fv_lin,
         reference_source=f"4zh_{model_type}_{iter_label}_fixture",
     )
-    assert table is not None, (
-        f"build_score_table returned None for {model_type}/{iter_label}."
-    )
+    assert table is not None, f"build_score_table returned None for {model_type}/{iter_label}."
     summary = _make_summary(
-        model_type=model_type, iter_label=iter_label,
-        score_table=table, fv_log=fv_log, scalar_log=scalar_log,
+        model_type=model_type,
+        iter_label=iter_label,
+        score_table=table,
+        fv_log=fv_log,
+        scalar_log=scalar_log,
         description=description,
     )
     return summary, table, scalar_log
@@ -350,16 +363,18 @@ _SATURATION_CUES = [
 # Vocab-diff helper. Ported from test_score_table_pseudo_smoke.py:328.
 # ---------------------------------------------------------------------------
 
+
 def _vocab_diff(
-    before: List[VocabEntry], after: List[VocabEntry],
-) -> Tuple[List[str], List[str], List[str]]:
+    before: list[VocabEntry],
+    after: list[VocabEntry],
+) -> tuple[list[str], list[str], list[str]]:
     before_names = {v.name for v in before}
     after_names = {v.name for v in after}
     added = sorted(after_names - before_names)
     removed = sorted(before_names - after_names)
 
     before_by_name = {v.name: v for v in before}
-    refined: List[str] = []
+    refined: list[str] = []
     for v in after:
         prev = before_by_name.get(v.name)
         if prev is None:
@@ -367,10 +382,8 @@ def _vocab_diff(
         if (
             getattr(prev, "description", None) != getattr(v, "description", None)
             or getattr(prev, "tier", None) != getattr(v, "tier", None)
-            or sorted(getattr(prev, "seen_in_runs", []))
-                != sorted(getattr(v, "seen_in_runs", []))
-            or sorted(getattr(prev, "related_to", []))
-                != sorted(getattr(v, "related_to", []))
+            or sorted(getattr(prev, "seen_in_runs", [])) != sorted(getattr(v, "seen_in_runs", []))
+            or sorted(getattr(prev, "related_to", [])) != sorted(getattr(v, "related_to", []))
         ):
             refined.append(v.name)
     refined = sorted(refined)
@@ -382,6 +395,7 @@ def _vocab_diff(
 # read from the score table itself (never hardcoded into the assertion);
 # pre-LLM sanity then verifies the index matches the suppressed file.
 # ---------------------------------------------------------------------------
+
 
 def _top_impact_file(table: ScoreComparisonTable) -> int:
     best = -1.0
@@ -412,6 +426,7 @@ def _file_idx_cited(text: str, target_idx: int) -> bool:
 # The Gate 1 test.
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.real_run
 def test_cognitive_alignment_gate_one(tmp_path, capsys):
     if not os.getenv("OPENAI_API_KEY"):
@@ -425,14 +440,14 @@ def test_cognitive_alignment_gate_one(tmp_path, capsys):
 
     rec_iter2 = [_BASE_RECOVERY] * 20
     rec_iter2[ITER1_LEVER] = _SATURATED_RECOVERY  # recovered
-    rec_iter2[ITER2_LEVER] = _LEVER_RECOVERY      # newly suppressed
+    rec_iter2[ITER2_LEVER] = _LEVER_RECOVERY  # newly suppressed
 
     rec_iter3 = [_SATURATED_RECOVERY] * 20
 
     iter_recoveries = [rec_iter1, rec_iter2, rec_iter3]
-    iter_tables: List[ScoreComparisonTable] = []  # candidate tables (cognitive_smoke_arch)
-    iter_candidate_summaries: List[ModelRunSummary] = []
-    iter_baseline_summaries: List[ModelRunSummary] = []
+    iter_tables: list[ScoreComparisonTable] = []  # candidate tables (cognitive_smoke_arch)
+    iter_candidate_summaries: list[ModelRunSummary] = []
+    iter_baseline_summaries: list[ModelRunSummary] = []
 
     candidate_desc = (
         "Smoke-test architecture for 4-zh Gate 1. Identity-style transform with "
@@ -449,8 +464,11 @@ def test_cognitive_alignment_gate_one(tmp_path, capsys):
 
     for k, rec in enumerate(iter_recoveries, start=1):
         cand_summary, cand_table, _ = _build_summary(
-            model_type="cognitive_smoke_arch", iter_label=f"iter{k}",
-            recovery=rec, reference=reference, description=candidate_desc,
+            model_type="cognitive_smoke_arch",
+            iter_label=f"iter{k}",
+            recovery=rec,
+            reference=reference,
+            description=candidate_desc,
         )
         iter_tables.append(cand_table)
         iter_candidate_summaries.append(cand_summary)
@@ -459,13 +477,13 @@ def test_cognitive_alignment_gate_one(tmp_path, capsys):
         # to [0, 1] so an aggressive lever (e.g. 0.30 - 0.05 = 0.25) stays
         # well-formed and a saturated cell (0.97 - 0.05 = 0.92) doesn't
         # exceed bounds.
-        baseline_recovery = [
-            max(0.0, min(1.0, c - _BASELINE_OFFSET)) for c in rec
-        ]
+        baseline_recovery = [max(0.0, min(1.0, c - _BASELINE_OFFSET)) for c in rec]
 
         base_summary, _, _ = _build_summary(
-            model_type="weak_baseline_arch", iter_label=f"iter{k}",
-            recovery=baseline_recovery, reference=reference,
+            model_type="weak_baseline_arch",
+            iter_label=f"iter{k}",
+            recovery=baseline_recovery,
+            reference=reference,
             description=baseline_desc,
         )
         iter_baseline_summaries.append(base_summary)
@@ -504,22 +522,20 @@ def test_cognitive_alignment_gate_one(tmp_path, capsys):
     )
 
     # --- Iterate the cognitive loop --------------------------------------
-    interp_outputs: List[InterpretationOutput] = []
-    proposal_outputs: List[ProposalOutput] = []
-    interp_call_logs: List[list] = []  # one shared list per iter (Metric 5)
+    interp_outputs: list[InterpretationOutput] = []
+    proposal_outputs: list[ProposalOutput] = []
+    interp_call_logs: list[list] = []  # one shared list per iter (Metric 5)
 
     pipeline = ReasoningPipelineConfig(
         stages=[
-            ReasoningStage(name="comparison",
-                           system_prompt_key="COMPARATIVE_ANALYSIS"),
-            ReasoningStage(name="causal_reasoning",
-                           system_prompt_key="CAUSAL_REASONING"),
+            ReasoningStage(name="comparison", system_prompt_key="COMPARATIVE_ANALYSIS"),
+            ReasoningStage(name="causal_reasoning", system_prompt_key="CAUSAL_REASONING"),
         ],
         model_selection=ModelSelectionStrategy(method="top_n", params={"n": 1}),
     )
 
-    prev_runtime_vocab: List[VocabEntry] = []
-    prev_proposal_dict: Optional[Dict[str, Any]] = None
+    prev_runtime_vocab: list[VocabEntry] = []
+    prev_proposal_dict: dict[str, Any] | None = None
 
     for k, (cand_summary, base_summary) in enumerate(
         zip(iter_candidate_summaries, iter_baseline_summaries), start=1
@@ -527,7 +543,8 @@ def test_cognitive_alignment_gate_one(tmp_path, capsys):
         storage = StorageConfig(
             backend="local",
             local=LocalStorageConfig(
-                workspace=str(tmp_path), run_name=f"4zh_iter{k}",
+                workspace=str(tmp_path),
+                run_name=f"4zh_iter{k}",
             ),
         )
 
@@ -558,7 +575,9 @@ def test_cognitive_alignment_gate_one(tmp_path, capsys):
         # contributes via build_runtime_vocab in the NEXT iter's interp.
         _, proposer_factory = _make_recording_factory(_PROPOSER_MODEL)
         proposer_inp = local_full_context(
-            interp_out, storage, reasoning_pipeline=pipeline,
+            interp_out,
+            storage,
+            reasoning_pipeline=pipeline,
         )
         proposer_agent = MLModelProposalAgent(bridge_factory=proposer_factory)
         prop_out = proposer_agent.run(proposer_inp)
@@ -567,8 +586,7 @@ def test_cognitive_alignment_gate_one(tmp_path, capsys):
         prev_runtime_vocab = interp_out.runtime_vocab
         prev_proposal_dict = prop_out.model_dump()
 
-        expected_top = (iter1_top if k == 1
-                        else iter2_top if k == 2 else None)
+        expected_top = iter1_top if k == 1 else iter2_top if k == 2 else None
         print("=" * 78, flush=True)
         print(
             f"ITER {k}  (interp {interp_elapsed:.1f}s; "
@@ -603,9 +621,7 @@ def test_cognitive_alignment_gate_one(tmp_path, capsys):
     # The agent may say a file is *currently* at its ceiling — that is a
     # reading of the data, not a permanence classification.
     # ====================================================================
-    all_msgs_lower = " ".join(
-        m.lower() for m in (iter1_msg, iter2_msg, iter3_msg)
-    )
+    all_msgs_lower = " ".join(m.lower() for m in (iter1_msg, iter2_msg, iter3_msg))
     for phrase in _FORBIDDEN_PERMANENCE_PHRASES:
         assert phrase not in all_msgs_lower, (
             f"M2: forbidden permanence phrase {phrase!r} appears in one of "
@@ -678,20 +694,14 @@ def test_cognitive_alignment_gate_one(tmp_path, capsys):
     for k, calls in enumerate(interp_call_logs, start=1):
         assert calls, f"M5: iter_{k} captured zero interp calls."
         all_user_prompts = "\n".join(c[2] for c in calls)
-        impact_present = (
-            "Impact_Score" in all_user_prompts
-            or "| Impact |" in all_user_prompts
-        )
+        impact_present = "Impact_Score" in all_user_prompts or "| Impact |" in all_user_prompts
         assert impact_present, (
             f"M5: iter_{k} interp prompt missing Impact column "
             f"(neither 'Impact_Score' nor '| Impact |' found). "
             f"Captured {len(calls)} calls; total prompt length="
             f"{len(all_user_prompts)}."
         )
-        weight_present = (
-            "Linear_Weight" in all_user_prompts
-            or "| Weight % |" in all_user_prompts
-        )
+        weight_present = "Linear_Weight" in all_user_prompts or "| Weight % |" in all_user_prompts
         assert weight_present, (
             f"M5: iter_{k} interp prompt missing Linear-Weight column "
             f"(neither 'Linear_Weight' nor '| Weight % |' found). "
@@ -719,12 +729,9 @@ def test_cognitive_alignment_gate_one(tmp_path, capsys):
         f"M6: iter_2 dropped vocab entries from iter_1: {removed_12}. "
         f"build_runtime_vocab must preserve carry-forward entries."
     )
-    assert not removed_23, (
-        f"M6: iter_3 dropped vocab entries from iter_2: {removed_23}."
-    )
+    assert not removed_23, f"M6: iter_3 dropped vocab entries from iter_2: {removed_23}."
     assert not removed_13, (
-        f"M6: iter_3 dropped vocab entries from iter_1 (cross-iter): "
-        f"{removed_13}."
+        f"M6: iter_3 dropped vocab entries from iter_1 (cross-iter): {removed_13}."
     )
 
     grew = len(v3) > len(v1)
@@ -739,12 +746,10 @@ def test_cognitive_alignment_gate_one(tmp_path, capsys):
     # --- Final report ---------------------------------------------------
     print("=" * 78, flush=True)
     print("4-zh Gate 1: ALL 6 METRICS PASSED.", flush=True)
-    print(f"  M1 levers cited: iter_1=file{ITER1_LEVER}, iter_2=file{ITER2_LEVER}",
-          flush=True)
+    print(f"  M1 levers cited: iter_1=file{ITER1_LEVER}, iter_2=file{ITER2_LEVER}", flush=True)
     print(f"  M3 saturation cues hit: {saturation_hits}", flush=True)
-    print(f"  M4 Jaccard pairs: "
-          f"{ {k: round(v, 3) for k, v in pairs.items()} }", flush=True)
-    print(f"  M5 prompt columns visible in all 3 iters", flush=True)
+    print(f"  M4 Jaccard pairs: { {k: round(v, 3) for k, v in pairs.items()} }", flush=True)
+    print("  M5 prompt columns visible in all 3 iters", flush=True)
     print(
         f"  M6 vocab sizes: {len(v1)} → {len(v2)} → {len(v3)}; "
         f"added(1→3)={added_13}; refined(1→3)={refined_13}",

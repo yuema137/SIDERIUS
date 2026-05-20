@@ -64,22 +64,26 @@ ARCHITECTURAL_PATTERNS: dict[str, str] = {
 # ── per-tag heuristics ──────────────────────────────────────────────────────
 
 _RECURRENT_NAME_HINTS: tuple[str, ...] = ("rnn", "gru", "lstm", "recurrent")
-_RECURRENT_CONFIG_KEYS: frozenset[str] = frozenset({
-    "gru_hidden_size",
-    "lstm_hidden_size",
-    "rnn_hidden_size",
-    "recurrent_hidden",
-})
+_RECURRENT_CONFIG_KEYS: frozenset[str] = frozenset(
+    {
+        "gru_hidden_size",
+        "lstm_hidden_size",
+        "rnn_hidden_size",
+        "recurrent_hidden",
+    }
+)
 
 _SCAN_NAME_HINTS: tuple[str, ...] = ("scan", "ssm", "mamba", "s4", "s5")
 
 _ATTENTION_NAME_HINTS: tuple[str, ...] = ("transformer", "attention")
-_WINDOWING_CONFIG_KEYS: frozenset[str] = frozenset({
-    "window_size",
-    "chunk_size",
-    "attention_window",
-    "local_window",
-})
+_WINDOWING_CONFIG_KEYS: frozenset[str] = frozenset(
+    {
+        "window_size",
+        "chunk_size",
+        "attention_window",
+        "local_window",
+    }
+)
 
 
 def _contains_any(haystack: str, needles: tuple[str, ...]) -> bool:
@@ -98,7 +102,7 @@ def _is_scan_over_T(model_type_lower: str, model_config: dict) -> bool:
     # Conjunctive config-key trigger: state_dim + any ssm_* key together
     # mean the model is building an SSM even if its name hides it.
     has_state_dim = "state_dim" in model_config
-    has_ssm_key = any(k.startswith("ssm_") for k in model_config.keys())
+    has_ssm_key = any(k.startswith("ssm_") for k in model_config)
     return has_state_dim and has_ssm_key
 
 
@@ -111,8 +115,8 @@ def _is_dense_attention_over_T(model_type_lower: str, model_config: dict) -> boo
 
 # Registry: adding a new tag is one line here + one entry in ARCHITECTURAL_PATTERNS.
 _TAGGERS: dict[str, callable] = {
-    "recurrent_over_T":       _is_recurrent_over_T,
-    "scan_over_T":            _is_scan_over_T,
+    "recurrent_over_T": _is_recurrent_over_T,
+    "scan_over_T": _is_scan_over_T,
     "dense_attention_over_T": _is_dense_attention_over_T,
 }
 

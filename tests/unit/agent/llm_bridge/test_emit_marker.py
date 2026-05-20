@@ -15,6 +15,7 @@ Covers Commit 6.1 (Stability Filter) audit-log support:
 These are pure-bridge tests — no LLM call, no agent. The OpenAI client
 is patched out because ``LLMBridge.__init__`` instantiates it.
 """
+
 from __future__ import annotations
 
 import json
@@ -26,10 +27,9 @@ import pytest
 from agent.llm_bridge import LLMBridge
 
 
-def _make_bridge_with_path(tmp_path: Path,
-                           run_id: str = "marker-run-id",
-                           run_name: str = "marker_run",
-                           iteration: int = 1) -> LLMBridge:
+def _make_bridge_with_path(
+    tmp_path: Path, run_id: str = "marker-run-id", run_name: str = "marker_run", iteration: int = 1
+) -> LLMBridge:
     """Construct a bridge with the OpenAI client mocked + run-context bound.
 
     Mirrors the helper in ``test_record_usage.py`` so the two suites share
@@ -51,6 +51,7 @@ def _read_rows(path: Path) -> list[dict]:
 # ---------------------------------------------------------------------------
 # (1) Successful emit — one zeroed row
 # ---------------------------------------------------------------------------
+
 
 def test_emit_marker_writes_zeroed_row(tmp_path):
     bridge = _make_bridge_with_path(tmp_path)
@@ -82,6 +83,7 @@ def test_emit_marker_writes_zeroed_row(tmp_path):
 # (2) Silent no-op when run-context is unset
 # ---------------------------------------------------------------------------
 
+
 def test_emit_marker_noop_when_unbound(tmp_path):
     """With ``_token_usage_path=None``, emit_marker writes nothing."""
     with patch("agent.llm_bridge.OpenAI"):
@@ -101,6 +103,7 @@ def test_emit_marker_noop_when_unbound(tmp_path):
 # (3) Empty label rejected
 # ---------------------------------------------------------------------------
 
+
 def test_emit_marker_rejects_empty_label(tmp_path):
     bridge = _make_bridge_with_path(tmp_path)
 
@@ -114,6 +117,7 @@ def test_emit_marker_rejects_empty_label(tmp_path):
 # ---------------------------------------------------------------------------
 # (4) extra dict round-trips intact
 # ---------------------------------------------------------------------------
+
 
 def test_emit_marker_extra_round_trips(tmp_path):
     bridge = _make_bridge_with_path(tmp_path)
@@ -136,6 +140,7 @@ def test_emit_marker_extra_round_trips(tmp_path):
 # ---------------------------------------------------------------------------
 # (5) JSONL ordering preserved across multiple emits
 # ---------------------------------------------------------------------------
+
 
 def test_emit_marker_jsonl_ordering(tmp_path):
     bridge = _make_bridge_with_path(tmp_path)
@@ -160,6 +165,7 @@ def test_emit_marker_jsonl_ordering(tmp_path):
 # ---------------------------------------------------------------------------
 # (6) None extra is allowed and serialises to {}
 # ---------------------------------------------------------------------------
+
 
 def test_emit_marker_accepts_none_extra(tmp_path):
     bridge = _make_bridge_with_path(tmp_path)

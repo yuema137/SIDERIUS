@@ -23,6 +23,7 @@ That runner was retired in Commit 4.3.4; the chain runner uses
 ``tests/unit/scripts/test_chain_run_id_sidecar.py::test_fresh_workspace_generates_id_with_expected_shape``.
 The format-contract block was therefore removed here, not duplicated.
 """
+
 from __future__ import annotations
 
 import io
@@ -36,10 +37,10 @@ import pytest
 
 from sdsc_submission_scripts.run_one_iteration import _emit_token_iter_rollup
 
-
 # ---------------------------------------------------------------------------
 # 1. Per-iter rollup emission
 # ---------------------------------------------------------------------------
+
 
 def _seed_jsonl(path: Path, rows: list[dict]) -> None:
     with open(path, "w", encoding="utf-8") as f:
@@ -51,12 +52,11 @@ def test_emit_rollup_aggregates_by_node_prefix(tmp_path):
     """Rows are grouped by ``label.split('.')[0]`` and summed."""
     rows = [
         {"iter": 1, "label": "proposer.comparison", "tokens": {"total": 100}},
-        {"iter": 1, "label": "proposer.proposing",  "tokens": {"total": 200}},
-        {"iter": 1, "label": "tuner.planner",       "tokens": {"total": 50}},
-        {"iter": 1, "label": "interpretation.synthesis",
-                                                    "tokens": {"total": 30}},
+        {"iter": 1, "label": "proposer.proposing", "tokens": {"total": 200}},
+        {"iter": 1, "label": "tuner.planner", "tokens": {"total": 50}},
+        {"iter": 1, "label": "interpretation.synthesis", "tokens": {"total": 30}},
         # _iter_flush is the synthetic boundary marker — must be skipped.
-        {"iter": 1, "label": "_iter_flush",          "tokens": {"total": 0}},
+        {"iter": 1, "label": "_iter_flush", "tokens": {"total": 0}},
         # iter=2 must not bleed into the iter=1 rollup.
         {"iter": 2, "label": "proposer.comparison", "tokens": {"total": 999}},
     ]
@@ -65,7 +65,8 @@ def test_emit_rollup_aggregates_by_node_prefix(tmp_path):
     buf = io.StringIO()
     with redirect_stdout(buf):
         new_total = _emit_token_iter_rollup(
-            workspace=str(tmp_path), iteration=1,
+            workspace=str(tmp_path),
+            iteration=1,
         )
     out = buf.getvalue()
 
@@ -88,7 +89,8 @@ def test_emit_rollup_handles_missing_file(tmp_path):
     is a clean zero — not "preserve the input cumulative".
     """
     new_total = _emit_token_iter_rollup(
-        workspace=str(tmp_path), iteration=1,
+        workspace=str(tmp_path),
+        iteration=1,
     )
     assert new_total == 0
 
@@ -100,19 +102,24 @@ def test_emit_rollup_recomputes_cumulative_from_prior_iters(tmp_path):
     ``token_usage.jsonl``. For iter=N, ``cumulative_total = sum(rows where
     iter < N) + sum(rows where iter == N)`` — no parameter is threaded in.
     """
-    _seed_jsonl(tmp_path / "token_usage.jsonl", [
-        {"iter": 1, "label": "proposer.x", "tokens": {"total": 50}},
-        {"iter": 2, "label": "proposer.y", "tokens": {"total": 70}},
-    ])
+    _seed_jsonl(
+        tmp_path / "token_usage.jsonl",
+        [
+            {"iter": 1, "label": "proposer.x", "tokens": {"total": 50}},
+            {"iter": 2, "label": "proposer.y", "tokens": {"total": 70}},
+        ],
+    )
     buf = io.StringIO()
     with redirect_stdout(buf):
         after_1 = _emit_token_iter_rollup(
-            workspace=str(tmp_path), iteration=1,
+            workspace=str(tmp_path),
+            iteration=1,
         )
         after_2 = _emit_token_iter_rollup(
-            workspace=str(tmp_path), iteration=2,
+            workspace=str(tmp_path),
+            iteration=2,
         )
-    assert after_1 == 50,  f"iter=1 cumulative should be 50, got {after_1}"
+    assert after_1 == 50, f"iter=1 cumulative should be 50, got {after_1}"
     assert after_2 == 120, f"iter=2 cumulative should be 50+70=120, got {after_2}"
     out = buf.getvalue()
     assert "cumulative_total=50" in out
@@ -123,15 +130,12 @@ def test_emit_rollup_skips_malformed_jsonl_rows(tmp_path):
     """A garbage line in the middle of the file does not crash the rollup."""
     path = tmp_path / "token_usage.jsonl"
     with open(path, "w", encoding="utf-8") as f:
-        f.write(json.dumps(
-            {"iter": 1, "label": "proposer.x", "tokens": {"total": 10}}
-        ) + "\n")
+        f.write(json.dumps({"iter": 1, "label": "proposer.x", "tokens": {"total": 10}}) + "\n")
         f.write("THIS IS NOT JSON\n")
-        f.write(json.dumps(
-            {"iter": 1, "label": "proposer.y", "tokens": {"total": 20}}
-        ) + "\n")
+        f.write(json.dumps({"iter": 1, "label": "proposer.y", "tokens": {"total": 20}}) + "\n")
     new_total = _emit_token_iter_rollup(
-        workspace=str(tmp_path), iteration=1,
+        workspace=str(tmp_path),
+        iteration=1,
     )
     assert new_total == 30  # malformed row skipped, both valid ones counted
 
@@ -171,7 +175,9 @@ def test_runner_aborts_on_runid_mismatch(tmp_path):
 
     proc = subprocess.run(
         [str(_VENV_PYTHON), str(_HARNESS), str(tmp_path), "FRESH-RUN-ID"],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
 
     assert proc.returncode == 2, (

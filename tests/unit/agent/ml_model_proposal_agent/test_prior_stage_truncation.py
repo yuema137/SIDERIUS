@@ -25,7 +25,6 @@ from agent.schemas.proposal import ResearchPolicy
 from nodes.ml_model_proposal_agent import _PROPOSER_INPUT_KEYS
 from nodes.proposal_helpers import clamp_and_backstop_accumulated
 
-
 # String long enough to trip the 4000-char backstop floor with margin —
 # 5000 chars > default ``ResearchPolicy.prior_stage_max_chars`` (4000).
 _LONG_TEXT = "x" * 5000
@@ -41,7 +40,7 @@ def _comparison_entry(
     best_score: float,
     *,
     key_mechanism: str = _LONG_TEXT,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build one ``ModelComparison``-shaped dict with a long key_mechanism.
 
     The default 5000-char ``key_mechanism`` ensures the backstop has work
@@ -59,7 +58,7 @@ def _comparison_entry(
     }
 
 
-def _make_v12_iter13_accumulated() -> Dict[str, Any]:
+def _make_v12_iter13_accumulated() -> dict[str, Any]:
     """Synthetic iter-13 envelope: shape mimics what a real V12 chain saw.
 
     Score pattern is chosen so the 3-best + 2-recent hybrid produces a
@@ -93,12 +92,10 @@ def _make_v12_iter13_accumulated() -> Dict[str, Any]:
         5.65,  # m11
         5.55,  # m12
     ]
-    comparative_analysis: List[Dict[str, Any]] = []
+    comparative_analysis: list[dict[str, Any]] = []
     for idx, score in enumerate(scores):
         source = "seed" if idx == 0 else f"proposed_iter_{idx}"
-        comparative_analysis.append(
-            _comparison_entry(f"m{idx:02d}", source, score)
-        )
+        comparative_analysis.append(_comparison_entry(f"m{idx:02d}", source, score))
 
     return {
         # ---- input-side keys (must pass through verbatim) ----
@@ -157,8 +154,7 @@ class TestIterEnvelopeClampDrop:
         )
 
         assert (
-            len(clamped["comparison"]["comparative_analysis"])
-            == policy.comparative_analysis_top_k
+            len(clamped["comparison"]["comparative_analysis"]) == policy.comparative_analysis_top_k
         )
 
     # ------------------------------------------------------------------
@@ -185,8 +181,7 @@ class TestIterEnvelopeClampDrop:
         )
 
         selected_types = {
-            entry["model_type"]
-            for entry in clamped["comparison"]["comparative_analysis"]
+            entry["model_type"] for entry in clamped["comparison"]["comparative_analysis"]
         }
         assert selected_types == {"m00", "m03", "m10", "m11", "m12"}
 

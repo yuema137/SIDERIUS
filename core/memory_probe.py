@@ -39,22 +39,24 @@ The JSONL is append-only and parseable by any downstream plotter. Missing
 with ``rss_gb=None``, so a workflow on a host without ``psutil`` still
 runs (just without the probe data).
 """
+
 from __future__ import annotations
 
 import datetime
 import json
 import os
-from typing import Any, Optional
+from typing import Any
 
 try:
     import psutil  # type: ignore
+
     _PSUTIL_AVAILABLE = True
 except ImportError:
     psutil = None  # type: ignore
     _PSUTIL_AVAILABLE = False
 
 
-_GIB = 1024 ** 3
+_GIB = 1024**3
 
 TRACE_FILENAME = "memory_trace.jsonl"
 
@@ -62,7 +64,7 @@ TRACE_FILENAME = "memory_trace.jsonl"
 def probe_memory(
     iter_idx: Any,
     phase: str,
-    workspace: Optional[str] = None,
+    workspace: str | None = None,
     scope: str = "workflow",
 ) -> dict:
     """Record a parent-process memory snapshot.
@@ -91,12 +93,7 @@ def probe_memory(
         The dict that was printed + appended. Exposed so callers (and
         tests) can inspect the row without re-reading the file.
     """
-    timestamp = (
-        datetime.datetime.now(datetime.timezone.utc)
-        .replace(tzinfo=None)
-        .isoformat()
-        + "Z"
-    )
+    timestamp = datetime.datetime.now(datetime.UTC).replace(tzinfo=None).isoformat() + "Z"
 
     if not _PSUTIL_AVAILABLE:
         row = {
@@ -109,8 +106,7 @@ def probe_memory(
             "note": "psutil_unavailable",
         }
         print(
-            f"[MEM] scope={scope} iter={iter_idx} phase={phase} "
-            "rss=NA vms=NA (psutil unavailable)"
+            f"[MEM] scope={scope} iter={iter_idx} phase={phase} rss=NA vms=NA (psutil unavailable)"
         )
     else:
         mem = psutil.Process(os.getpid()).memory_info()

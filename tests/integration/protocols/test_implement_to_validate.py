@@ -17,17 +17,19 @@ Run with:
 
 DO NOT run in CI.
 """
-import os
+
 import json
+import os
+
 import pytest
 from dotenv import load_dotenv
 
 from agent.schemas.implementor import ImplementorInput, ImplementorOutput
-from agent.schemas.validator import ValidatorOutput
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_all_fields
-from nodes.ml_model_implementor import MLModelImplementor
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from agent.schemas.validator import ValidatorOutput
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
+from nodes.ml_model_implementor import MLModelImplementor
 
 load_dotenv()
 
@@ -37,6 +39,7 @@ pytestmark = pytest.mark.real_run
 # ---------------------------------------------------------------------------
 # Skip guard
 # ---------------------------------------------------------------------------
+
 
 def _skip_if_no_key(provider: str):
     key = "GEMINI_API_KEY" if provider == "gemini" else "OPENAI_API_KEY"
@@ -98,6 +101,7 @@ def _make_implementor_input(provider: str, tmp_path) -> ImplementorInput:
 # Assertions
 # ---------------------------------------------------------------------------
 
+
 def _assert_validator_output(out: ValidatorOutput, model_type: str, tmp_path):
     assert isinstance(out, ValidatorOutput)
     assert out.model_type == model_type
@@ -111,24 +115,18 @@ def _assert_validator_output(out: ValidatorOutput, model_type: str, tmp_path):
     assert out.config_fields_valid is True, (
         f"Config fields invalid. error_message: {out.error_message}"
     )
-    assert out.tests_passed is True, (
-        f"Pytest tests failed.\n\ntest_output:\n{out.test_output}"
-    )
+    assert out.tests_passed is True, f"Pytest tests failed.\n\ntest_output:\n{out.test_output}"
     assert out.instantiation_passed is True, (
         f"In-process instantiation failed. error_message: {out.error_message}"
     )
     assert out.gradient_check_passed is True, (
         f"Gradient check failed. error_message: {out.error_message}"
     )
-    assert out.llm_review_passed is True, (
-        f"LLM review failed. notes: {out.llm_review_notes}"
-    )
+    assert out.llm_review_passed is True, f"LLM review failed. notes: {out.llm_review_notes}"
     assert out.llm_review_spec_alignment is True, (
         f"LLM found spec misalignment. notes: {out.llm_review_notes}"
     )
-    assert out.passed is True, (
-        f"Validation did not pass. error_message: {out.error_message}"
-    )
+    assert out.passed is True, f"Validation did not pass. error_message: {out.error_message}"
     assert out.error_message is None
 
     # Output record written
@@ -142,8 +140,8 @@ def _assert_validator_output(out: ValidatorOutput, model_type: str, tmp_path):
 # Tests
 # ---------------------------------------------------------------------------
 
-class TestImplementToValidateGemini:
 
+class TestImplementToValidateGemini:
     def setup_method(self):
         _skip_if_no_key("gemini")
 
@@ -153,7 +151,7 @@ class TestImplementToValidateGemini:
         """
         provider = "gemini"
         model_id = "gemini-3.1-flash-lite-preview"
-        storage  = StorageConfig(
+        storage = StorageConfig(
             backend="local",
             local=LocalStorageConfig(workspace=str(tmp_path), run_name="impl_to_valid"),
         )
@@ -174,7 +172,9 @@ class TestImplementToValidateGemini:
         assert val_input.mathematical_definition == impl_output.mathematical_definition
 
         # Step 3: run validator (with LLM review)
-        val_output = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(val_input)
+        val_output = MLCodeValidatorAgent(
+            provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+        ).run(val_input)
 
         # Step 4: validate
         _assert_validator_output(val_output, "gated_dilated_tcn", tmp_path)
@@ -187,7 +187,6 @@ class TestImplementToValidateGemini:
 
 
 class TestImplementToValidateOpenAI:
-
     def setup_method(self):
         _skip_if_no_key("openai")
 
@@ -197,7 +196,7 @@ class TestImplementToValidateOpenAI:
         """
         provider = "openai"
         model_id = "gpt-5-mini"
-        storage  = StorageConfig(
+        storage = StorageConfig(
             backend="local",
             local=LocalStorageConfig(workspace=str(tmp_path), run_name="impl_to_valid"),
         )

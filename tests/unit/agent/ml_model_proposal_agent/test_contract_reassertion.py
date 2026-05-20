@@ -9,6 +9,7 @@ Golden-Paragraph drift.
 
 See docs/phase66_ws_b_proposer_hardening.md §3.3 / §5.2.
 """
+
 from __future__ import annotations
 
 import re
@@ -17,10 +18,10 @@ import pytest
 
 from nodes.ml_model_proposal_agent import PROPOSAL_COMMIT_PROMPT
 
-
 # ---------------------------------------------------------------------------
 # Extract the mathematical_definition field spec
 # ---------------------------------------------------------------------------
+
 
 def _extract_mathematical_definition_spec() -> str:
     """Pull the string value of the ``mathematical_definition`` field from
@@ -49,6 +50,7 @@ def spec() -> str:
 # Citation 1 — forward contract verbatim
 # ---------------------------------------------------------------------------
 
+
 class TestForwardContractCitation:
     """The field spec must cite the forward I/O contract verbatim —
     ``[B, T] int64`` on the input side and ``[B, 256, T] float32`` on
@@ -72,6 +74,7 @@ class TestForwardContractCitation:
 # Citation 2 — segmentation semantics
 # ---------------------------------------------------------------------------
 
+
 class TestSegmentationSemanticsCitation:
     """Second Golden-Paragraph citation: the body must be labelled as
     segment-local or segment-cross, and causal-masking must be named as
@@ -91,6 +94,7 @@ class TestSegmentationSemanticsCitation:
 # Citation 3 — fixed-dimension clause
 # ---------------------------------------------------------------------------
 
+
 class TestFixedDimensionCitation:
     """Third Golden-Paragraph citation: the 256 denoising bins must be
     called out as contract-fixed (not a tunable hyperparameter)."""
@@ -105,11 +109,14 @@ class TestFixedDimensionCitation:
         """The two tokens must co-occur in the same clause — a future
         rewrite that names '256 denoising bins' somewhere and
         'contract-fixed' somewhere else would defeat the intent."""
-        assert re.search(
-            r"256 denoising bins[^\"]{0,60}contract-fixed",
-            spec,
-            re.DOTALL,
-        ) is not None, (
+        assert (
+            re.search(
+                r"256 denoising bins[^\"]{0,60}contract-fixed",
+                spec,
+                re.DOTALL,
+            )
+            is not None
+        ), (
             "'256 denoising bins' and 'contract-fixed' must co-occur in "
             "the same clause. Spec:\n" + spec
         )
@@ -118,6 +125,7 @@ class TestFixedDimensionCitation:
 # ---------------------------------------------------------------------------
 # Preserved guardrails from the pre-Golden-Paragraph prompt
 # ---------------------------------------------------------------------------
+
 
 class TestPreservedGuardrails:
     """The WS-B rewrite must preserve the constraints that the pre-WS-B
@@ -135,8 +143,8 @@ class TestPreservedGuardrails:
 # Meta — the field spec itself must exist and be non-trivial
 # ---------------------------------------------------------------------------
 
-class TestFieldSpecPresence:
 
+class TestFieldSpecPresence:
     def test_golden_paragraph_header_literal_present(self, spec):
         """The spec explicitly names 'Golden Paragraph' so the LLM knows
         the three-sentence opening is a contract, not a style request."""
@@ -153,7 +161,4 @@ class TestFieldSpecPresence:
     def test_commit_prompt_still_carries_io_contract_line(self):
         """Hard-constraint block — separate from the field spec — must
         still carry the I/O contract statement."""
-        assert (
-            "The forward contract is fixed: input [B, T] int64"
-            in PROPOSAL_COMMIT_PROMPT
-        )
+        assert "The forward contract is fixed: input [B, T] int64" in PROPOSAL_COMMIT_PROMPT

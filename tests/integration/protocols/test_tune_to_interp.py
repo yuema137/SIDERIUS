@@ -15,18 +15,22 @@ Run with:
 
 DO NOT remove the dual_mode marker — this test runs in CI in pseudo mode.
 """
+
 import pytest
 from dotenv import load_dotenv
 
 from agent.schemas.hyperparam_tuning import (
-    HyperparamTuningOutput, ExperimentRecord,
+    ExperimentRecord,
+    HyperparamTuningOutput,
 )
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.protocols.ml_model_tune_to_ml_result_interp import local_all_records
 from agent.schemas.score_table import (
-    AggregateScalars, PerFileRow, ScoreComparisonTable,
+    AggregateScalars,
+    PerFileRow,
+    ScoreComparisonTable,
 )
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from execute_tools.scoring_helpers import render_comparison_table
 from nodes.result_interpretation_agent import ResultInterpretationAgent
 
@@ -38,9 +42,26 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 
 _WAVENET_BEST_FV = [
-    0.1, 0.1, 0.1, 0.1, 0.1,       # files 0-4:  low-freq, near zero
-    4.2, 4.5, 5.1, 5.8, 6.2, 6.7,  # files 5-10: mid-freq, rising
-    7.1, 7.5, 7.9, 8.2, 8.5, 8.7, 8.9, 9.0, 9.1,  # files 11-19: high-freq
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    0.1,  # files 0-4:  low-freq, near zero
+    4.2,
+    4.5,
+    5.1,
+    5.8,
+    6.2,
+    6.7,  # files 5-10: mid-freq, rising
+    7.1,
+    7.5,
+    7.9,
+    8.2,
+    8.5,
+    8.7,
+    8.9,
+    9.0,
+    9.1,  # files 11-19: high-freq
 ]
 
 
@@ -96,10 +117,14 @@ _WAVENET_TUNING_OUTPUT = HyperparamTuningOutput(
     best_score_table=_WAVENET_BEST_SCORE_TABLE,
     formal_score_table=_WAVENET_FORMAL_SCORE_TABLE,
     best_config={
-        "model_config": {"model_type": "wavenet", "segmentation_size": 10000,
-                         "residual_channels": 16, "num_blocks": 3},
+        "model_config": {
+            "model_type": "wavenet",
+            "segmentation_size": 10000,
+            "residual_channels": 16,
+            "num_blocks": 3,
+        },
         "train_config": {"lr": 1e-4, "epochs": 5},
-        "loss_config":  {"loss_type": "focal"},
+        "loss_config": {"loss_type": "focal"},
     },
     all_records=[
         ExperimentRecord(
@@ -109,21 +134,27 @@ _WAVENET_TUNING_OUTPUT = HyperparamTuningOutput(
             timestamp="2026-04-14 00:00:00",
             file_index=6,
             params={
-                "model_config": {"model_type": "wavenet", "segmentation_size": 10000,
-                                 "residual_channels": 8, "num_blocks": 2},
+                "model_config": {
+                    "model_type": "wavenet",
+                    "segmentation_size": 10000,
+                    "residual_channels": 8,
+                    "num_blocks": 2,
+                },
                 "train_config": {"lr": 1e-4, "epochs": 5},
-                "loss_config":  {"loss_type": "ce"},
+                "loss_config": {"loss_type": "ce"},
             },
             denoising_score=5.21,
             file_vector=_WAVENET_BEST_FV,
             final_loss=0.41,
             model_params=2_100_000,
-            memory={"expert_advice_followed": "n/a",
-                    "hypothesis": "CE loss will provide a reasonable baseline.",
-                    "conclusion": "CE baseline is reasonable but focal should improve.",
-                    "key_factor": "Low-freq blind spot already visible.",
-                    "discovery": "Files 0-4 near zero regardless of loss.",
-                    "memory_update": "Switch to focal loss next."},
+            memory={
+                "expert_advice_followed": "n/a",
+                "hypothesis": "CE loss will provide a reasonable baseline.",
+                "conclusion": "CE baseline is reasonable but focal should improve.",
+                "key_factor": "Low-freq blind spot already visible.",
+                "discovery": "Files 0-4 near zero regardless of loss.",
+                "memory_update": "Switch to focal loss next.",
+            },
         ),
         ExperimentRecord(
             exp_id="wavenet_001_002",
@@ -132,21 +163,27 @@ _WAVENET_TUNING_OUTPUT = HyperparamTuningOutput(
             timestamp="2026-04-14 01:00:00",
             file_index=6,
             params={
-                "model_config": {"model_type": "wavenet", "segmentation_size": 10000,
-                                 "residual_channels": 16, "num_blocks": 3},
+                "model_config": {
+                    "model_type": "wavenet",
+                    "segmentation_size": 10000,
+                    "residual_channels": 16,
+                    "num_blocks": 3,
+                },
                 "train_config": {"lr": 1e-4, "epochs": 5},
-                "loss_config":  {"loss_type": "focal"},
+                "loss_config": {"loss_type": "focal"},
             },
             denoising_score=5.576,
             file_vector=_WAVENET_BEST_FV,
             final_loss=0.289,
             model_params=4_123_456,
-            memory={"expert_advice_followed": "Switch to focal loss.",
-                    "hypothesis": "Focal loss will improve score by reducing easy-example dominance.",
-                    "conclusion": "Focal loss improved score to 5.576. High-freq strong, low-freq blind.",
-                    "key_factor": "Focal loss and deeper residual stack.",
-                    "discovery": "Low-freq blindness is structural — not fixable by loss tuning alone.",
-                    "memory_update": "Next: spectral processing to address low-freq gap."},
+            memory={
+                "expert_advice_followed": "Switch to focal loss.",
+                "hypothesis": "Focal loss will improve score by reducing easy-example dominance.",
+                "conclusion": "Focal loss improved score to 5.576. High-freq strong, low-freq blind.",
+                "key_factor": "Focal loss and deeper residual stack.",
+                "discovery": "Low-freq blindness is structural — not fixable by loss tuning alone.",
+                "memory_update": "Next: spectral processing to address low-freq gap.",
+            },
         ),
     ],
     started_at="2026-04-14 00:00:00",
@@ -157,6 +194,7 @@ _WAVENET_TUNING_OUTPUT = HyperparamTuningOutput(
 # ---------------------------------------------------------------------------
 # F.9 — Dual-mode Tier 2 test
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.dual_mode
 def test_tune_to_interp_protocol_and_node(tmp_path, request):
@@ -191,7 +229,7 @@ def test_tune_to_interp_protocol_and_node(tmp_path, request):
     assert summary.worst_denoising_score == pytest.approx(5.21, abs=0.001)
     assert summary.best_file_vector is not None
     assert len(summary.best_file_vector) == 20
-    assert summary.best_file_vector[0] < 1.0,  "low-freq file 0 should be weak"
+    assert summary.best_file_vector[0] < 1.0, "low-freq file 0 should be weak"
     assert summary.best_file_vector[19] > 7.0, "high-freq file 19 should be strong"
     assert len(summary.round_scores) == 2
     assert len(summary.round_conclusions) == 2
@@ -259,9 +297,7 @@ def test_tune_to_interp_protocol_and_node(tmp_path, request):
     # Low/high-frequency sanity — synthesized from rows[i].model. Now
     # unconditional because the table itself is required above.
     fv = [r.model for r in table.rows]
-    assert fv[0] is not None and fv[0] < 1.0, (
-        "low-freq file 0 should be weak in output score table"
-    )
+    assert fv[0] is not None and fv[0] < 1.0, "low-freq file 0 should be weak in output score table"
     assert fv[19] is not None and fv[19] > 7.0, (
         "high-freq file 19 should be strong in output score table"
     )
@@ -269,6 +305,8 @@ def test_tune_to_interp_protocol_and_node(tmp_path, request):
     # Storage: output file written
     assert (tmp_path / "interpretation_tune_to_interp.json").exists()
 
-    print(f"\n  [tune→interp] wavenet best={output.best_denoising_score:.4f} "
-          f"rounds={output.total_experiments} "
-          f"findings={len(output.key_findings)}")
+    print(
+        f"\n  [tune→interp] wavenet best={output.best_denoising_score:.4f} "
+        f"rounds={output.total_experiments} "
+        f"findings={len(output.key_findings)}"
+    )

@@ -14,18 +14,19 @@ Run with:
 
 DO NOT run in CI.
 """
+
 import json
 import os
 import textwrap
+
 import pytest
 from dotenv import load_dotenv
 
 load_dotenv()
 
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.validator import ValidatorInput, ValidatorOutput
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
-
 
 pytestmark = pytest.mark.real_run
 
@@ -33,6 +34,7 @@ pytestmark = pytest.mark.real_run
 # ---------------------------------------------------------------------------
 # Skip guard
 # ---------------------------------------------------------------------------
+
 
 def _skip_if_no_key(provider: str = "gemini"):
     key = "GEMINI_API_KEY" if provider == "gemini" else "OPENAI_API_KEY"
@@ -176,17 +178,21 @@ def _make_input(tmp_path, **overrides) -> ValidatorInput:
 # All-pass case
 # ---------------------------------------------------------------------------
 
-class TestMLCodeValidatorAgentAllPass:
 
+class TestMLCodeValidatorAgentAllPass:
     def setup_method(self):
         _skip_if_no_key("gemini")
 
     def test_passed_is_true(self, tmp_path):
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(_make_input(tmp_path))
+        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            _make_input(tmp_path)
+        )
         assert out.passed is True
 
     def test_all_individual_checks_true(self, tmp_path):
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(_make_input(tmp_path))
+        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            _make_input(tmp_path)
+        )
         assert out.plugin_registered is True
         assert out.tests_passed is True
         assert out.description_valid is True
@@ -196,32 +202,46 @@ class TestMLCodeValidatorAgentAllPass:
         assert out.llm_review_passed is True
 
     def test_output_is_validator_output(self, tmp_path):
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(_make_input(tmp_path))
+        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            _make_input(tmp_path)
+        )
         assert isinstance(out, ValidatorOutput)
 
     def test_model_type_set(self, tmp_path):
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(_make_input(tmp_path))
+        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            _make_input(tmp_path)
+        )
         assert out.model_type == "integration_test_model"
 
     def test_error_message_is_none(self, tmp_path):
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(_make_input(tmp_path))
+        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            _make_input(tmp_path)
+        )
         assert out.error_message is None
 
     def test_test_output_captured(self, tmp_path):
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(_make_input(tmp_path))
+        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            _make_input(tmp_path)
+        )
         assert out.test_output is not None
         assert "passed" in out.test_output
 
     def test_llm_review_spec_alignment(self, tmp_path):
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(_make_input(tmp_path))
+        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            _make_input(tmp_path)
+        )
         assert out.llm_review_spec_alignment is True
 
     def test_output_file_written(self, tmp_path):
-        MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(_make_input(tmp_path))
+        MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            _make_input(tmp_path)
+        )
         assert (tmp_path / "validation_node_test.json").exists()
 
     def test_output_file_content(self, tmp_path):
-        MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(_make_input(tmp_path))
+        MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            _make_input(tmp_path)
+        )
         data = json.loads((tmp_path / "validation_node_test.json").read_text())
         assert data["passed"] is True
         assert data["model_type"] == "integration_test_model"
@@ -234,8 +254,8 @@ class TestMLCodeValidatorAgentAllPass:
 # Plugin load failure
 # ---------------------------------------------------------------------------
 
-class TestMLCodeValidatorAgentPluginFailure:
 
+class TestMLCodeValidatorAgentPluginFailure:
     def setup_method(self):
         _skip_if_no_key("gemini")
 
@@ -243,7 +263,9 @@ class TestMLCodeValidatorAgentPluginFailure:
         plugin_path = tmp_path / "broken.py"
         plugin_path.write_text("import nonexistent_library_xyz\n")
         inp = _make_input(tmp_path, model_file_path=str(plugin_path))
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(inp)
+        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            inp
+        )
         assert out.plugin_registered is False
         assert out.passed is False
 
@@ -251,14 +273,18 @@ class TestMLCodeValidatorAgentPluginFailure:
         plugin_path = tmp_path / "incomplete.py"
         plugin_path.write_text("PLUGIN_MODEL_TYPE = 'test'\n")
         inp = _make_input(tmp_path, model_file_path=str(plugin_path))
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(inp)
+        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            inp
+        )
         assert out.plugin_registered is False
 
     def test_error_message_present_on_plugin_failure(self, tmp_path):
         plugin_path = tmp_path / "broken.py"
         plugin_path.write_text("import nonexistent_library_xyz\n")
         inp = _make_input(tmp_path, model_file_path=str(plugin_path))
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(inp)
+        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            inp
+        )
         assert out.error_message is not None
 
 
@@ -266,8 +292,8 @@ class TestMLCodeValidatorAgentPluginFailure:
 # Test suite failure
 # ---------------------------------------------------------------------------
 
-class TestMLCodeValidatorAgentTestFailure:
 
+class TestMLCodeValidatorAgentTestFailure:
     def setup_method(self):
         _skip_if_no_key("gemini")
 
@@ -275,7 +301,9 @@ class TestMLCodeValidatorAgentTestFailure:
         test_path = tmp_path / "test_fail.py"
         test_path.write_text("def test_always_fails(): assert False\n")
         inp = _make_input(tmp_path, test_file_path=str(test_path))
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(inp)
+        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            inp
+        )
         assert out.tests_passed is False
         assert out.passed is False
 
@@ -283,7 +311,9 @@ class TestMLCodeValidatorAgentTestFailure:
         test_path = tmp_path / "test_fail.py"
         test_path.write_text("def test_always_fails(): assert False\n")
         inp = _make_input(tmp_path, test_file_path=str(test_path))
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(inp)
+        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            inp
+        )
         assert out.test_output is not None
         assert "FAILED" in out.test_output or "failed" in out.test_output
 
@@ -292,8 +322,8 @@ class TestMLCodeValidatorAgentTestFailure:
 # Description failure
 # ---------------------------------------------------------------------------
 
-class TestMLCodeValidatorAgentDescriptionFailure:
 
+class TestMLCodeValidatorAgentDescriptionFailure:
     def setup_method(self):
         _skip_if_no_key("gemini")
 
@@ -302,7 +332,9 @@ class TestMLCodeValidatorAgentDescriptionFailure:
             tmp_path,
             description_file_path=str(tmp_path / "nonexistent.md"),
         )
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(inp)
+        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            inp
+        )
         assert out.description_valid is False
         assert out.passed is False
 
@@ -310,7 +342,9 @@ class TestMLCodeValidatorAgentDescriptionFailure:
         short_desc = tmp_path / "short.md"
         short_desc.write_text("Too short.")
         inp = _make_input(tmp_path, description_file_path=str(short_desc))
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(inp)
+        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            inp
+        )
         assert out.description_valid is False
 
 
@@ -318,18 +352,22 @@ class TestMLCodeValidatorAgentDescriptionFailure:
 # Config fields failure
 # ---------------------------------------------------------------------------
 
-class TestMLCodeValidatorAgentConfigFailure:
 
+class TestMLCodeValidatorAgentConfigFailure:
     def setup_method(self):
         _skip_if_no_key("gemini")
 
     def test_list_config_field_sets_config_fields_valid_false(self, tmp_path):
         inp = _make_input(tmp_path, config_fields={"depth": 2, "kernel_sizes": [3, 5, 7]})
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(inp)
+        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            inp
+        )
         assert out.config_fields_valid is False
         assert out.passed is False
 
     def test_dict_config_field_sets_config_fields_valid_false(self, tmp_path):
         inp = _make_input(tmp_path, config_fields={"nested": {"a": 1}})
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(inp)
+        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            inp
+        )
         assert out.config_fields_valid is False

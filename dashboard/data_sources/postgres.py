@@ -12,7 +12,6 @@ from dashboard.data_sources.base import DataSource
 
 
 class PostgresDataSource(DataSource):
-
     def __init__(self, connection_string: str, schema: str = "public"):
         self.connection_string = connection_string
         self.schema = schema

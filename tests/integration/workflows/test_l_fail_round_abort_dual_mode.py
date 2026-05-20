@@ -38,9 +38,11 @@ Run with:
   .venv/bin/pytest tests/integration/workflows/test_l_fail_round_abort_dual_mode.py -v -s
   .venv/bin/pytest tests/integration/workflows/test_l_fail_round_abort_dual_mode.py -v -s --real-llm
 """
+
 from __future__ import annotations
 
 import os
+
 import pytest
 from dotenv import load_dotenv
 
@@ -48,7 +50,7 @@ from agent.schemas.hyperparam_tuning import (
     HyperparamTuningInput,
     HyperparamTuningOutput,
 )
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 
 load_dotenv()
@@ -71,12 +73,13 @@ def _register_plugin(monkeypatch, request):
     plugin_dir_abs = os.path.abspath(_PLUGIN_DIR_REL)
     monkeypatch.setenv("SIDERIUS_PLUGIN_DIRS", plugin_dir_abs)
 
-    from ml_models.models_sandbox import MODEL_REGISTRY
     from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
+    from ml_models.models_sandbox import MODEL_REGISTRY
     from ml_models.plugin_loader import (
-        extend_registries,
         PLUGIN_OUTPUT_TYPE_REGISTRY,
+        extend_registries,
     )
+
     loaded = extend_registries(MODEL_REGISTRY, PLUGIN_CONFIG_REGISTRY)
 
     def _cleanup():
@@ -96,6 +99,7 @@ def _disable_sleeps(monkeypatch):
     is needed — but neutralising sleeps keeps wall-clock under a second.
     """
     import time as _time
+
     monkeypatch.setattr(_time, "sleep", lambda *a, **kw: None)
 
 
@@ -108,18 +112,17 @@ def _mock_cuda(monkeypatch):
     a real GPU.
     """
     import torch
+
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(
         torch.cuda,
         "mem_get_info",
-        lambda *a, **kw: (20 * 1024 ** 3, 32 * 1024 ** 3),
+        lambda *a, **kw: (20 * 1024**3, 32 * 1024**3),
     )
 
 
 @pytest.mark.dual_mode
-def test_fail_round_abort_triggers_phase_l_termination(
-    tmp_path, request, monkeypatch, capsys
-):
+def test_fail_round_abort_triggers_phase_l_termination(tmp_path, request, monkeypatch, capsys):
     """L.8 — agent runs the 4-round fail-burst loop end-to-end.
 
     Layered assertions:
@@ -133,10 +136,10 @@ def test_fail_round_abort_triggers_phase_l_termination(
                 successful round").
       Layer 4 — best score still populated from the canned round 1 success.
     """
+    from agent.llm_bridge import LLMBridge
     from tests.conftest import _is_real_llm, _is_real_training
     from tests.helpers.recording_llm_bridge import RecordingLLMBridge
     from tests.helpers.recording_sandbox import RecordingSandbox
-    from agent.llm_bridge import LLMBridge
 
     _register_plugin(monkeypatch, request)
     _mock_cuda(monkeypatch)
@@ -199,9 +202,7 @@ def test_fail_round_abort_triggers_phase_l_termination(
         )
         sandbox_factory = lambda **kw: sandbox
 
-    agent = HyperparamTuningAgent(
-        bridge_factory=bridge_factory, sandbox_factory=sandbox_factory
-    )
+    agent = HyperparamTuningAgent(bridge_factory=bridge_factory, sandbox_factory=sandbox_factory)
 
     output = agent.run(agent_input)
 
@@ -227,8 +228,7 @@ def test_fail_round_abort_triggers_phase_l_termination(
         f"consecutive_fail_rounds_at_exit={output.consecutive_fail_rounds_at_exit}."
     )
     assert output.termination_reason == "aborted_fail_rounds", (
-        f"Should abort on fail-round burst; got "
-        f"termination_reason={output.termination_reason!r}."
+        f"Should abort on fail-round burst; got termination_reason={output.termination_reason!r}."
     )
 
     # ------------------------------------------------------------------
@@ -237,8 +237,7 @@ def test_fail_round_abort_triggers_phase_l_termination(
     # ------------------------------------------------------------------
     if bridge is not None:
         assert len(output.all_records) == 10, (
-            f"Expected 10 records (1 success + 9 OOM-skip); "
-            f"got {len(output.all_records)}."
+            f"Expected 10 records (1 success + 9 OOM-skip); got {len(output.all_records)}."
         )
         success_records = [r for r in output.all_records if r.status == "success"]
         oom_records = [r for r in output.all_records if r.status == "skipped_oom_risk"]
@@ -280,8 +279,7 @@ def test_fail_round_abort_triggers_phase_l_termination(
         f"Summary should cite consecutive_fail_rounds_at_exit=3; got: {summary!r}"
     )
     assert "after 1 successful round" in summary, (
-        f"Summary should cite completed_rounds=1 in singular form; "
-        f"got: {summary!r}"
+        f"Summary should cite completed_rounds=1 in singular form; got: {summary!r}"
     )
 
     # ------------------------------------------------------------------

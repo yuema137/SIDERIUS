@@ -1,5 +1,3 @@
-from core.sandbox_executor import TidmadSandbox
-
 def run_skill(sandbox, **kwargs):
     print(f"\n>>> [Skill: Training] Initiating training for {kwargs.get('exp_id')}...")
 

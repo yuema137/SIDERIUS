@@ -23,6 +23,7 @@ Covers the three layers that make up the fix:
 
 See ``docs/improving_validation_awareness.md`` §D.4.
 """
+
 import tempfile
 from unittest.mock import patch
 
@@ -32,32 +33,31 @@ from pydantic import BaseModel, Field, ValidationError, model_validator
 from agent.schemas.hyperparam_tuning import (
     HyperparamTuningInput,
 )
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.skills.evaluate_vram_skill.wrapper import (
-    run_skill,
     _extract_schema_violations,
+    run_skill,
 )
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
-
 
 # ---------------------------------------------------------------------------
 # Mock config classes that exercise each error type the wrapper must handle
 # ---------------------------------------------------------------------------
 
+
 class _MockMonotoneCfg(BaseModel):
     """Mirrors ``dual_path_skip_fusion_cnn``'s ``@model_validator(mode='after')``
     cross-field invariant — the exact rule that blew up iter-1 of
     ``exploit_cnn_v1`` on 2026-04-17."""
+
     a: int = Field(default=1, ge=1)
     b: int = Field(default=2, ge=1)
     c: int = Field(default=3, ge=1)
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def check_mono(self):
         if not (self.a <= self.b <= self.c):
-            raise ValueError(
-                f"values must be nondecreasing, got {self.a}, {self.b}, {self.c}"
-            )
+            raise ValueError(f"values must be nondecreasing, got {self.a}, {self.b}, {self.c}")
         return self
 
 
@@ -66,11 +66,13 @@ class _MockMultOfCfg(BaseModel):
     both representable in ``model_json_schema()`` (unlike ``@model_validator``)
     but the wrapper must handle them uniformly so the tuner's record
     machinery is format-agnostic."""
+
     channels: int = Field(default=8, ge=1, multiple_of=8)
 
 
 class FakeSandbox:
     """Minimal stand-in — ``evaluate_vram_skill`` never calls sandbox methods."""
+
     pass
 
 
@@ -82,8 +84,8 @@ CE_LOSS = {"loss_type": "ce"}
 # _extract_schema_violations — extractor unit tests
 # ===========================================================================
 
-class TestExtractor:
 
+class TestExtractor:
     def test_model_validator_violation_loc_is_root(self):
         """``@model_validator(mode='after')`` errors carry an empty ``loc`` — the
         extractor normalizes that to ``'__root__'`` so the downstream prompt
@@ -111,14 +113,14 @@ class TestExtractor:
             _MockMultOfCfg(channels=0)
         violations = _extract_schema_violations(ei.value)
         assert any(
-            v["type"] == "greater_than_equal" and v["loc"] == "channels"
-            for v in violations
+            v["type"] == "greater_than_equal" and v["loc"] == "channels" for v in violations
         ), f"expected ge violation, got {violations}"
 
 
 # ===========================================================================
 # run_skill — wrapper-level behavior
 # ===========================================================================
+
 
 class TestWrapperSchemaViolation:
     """``run_skill`` must return ``status='schema_violation'`` with structured
@@ -288,11 +290,12 @@ class TestTunerSchemaViolationBehavior:
 
     @pytest.fixture
     def agent_and_saved(self):
-        with patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge, \
-             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox, \
-             patch("nodes.ml_hyperparameter_tune_agent._run_skill") as mock_skill, \
-             tempfile.TemporaryDirectory() as configs_dir:
-
+        with (
+            patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
+            patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
+            patch("nodes.ml_hyperparameter_tune_agent._run_skill") as mock_skill,
+            tempfile.TemporaryDirectory() as configs_dir,
+        ):
             mock_brain = MockBridge.return_value
             mock_brain.plan.return_value = FAKE_PLAN
             mock_brain.reflect.return_value = FAKE_REFLECT
@@ -307,6 +310,7 @@ class TestTunerSchemaViolationBehavior:
                 if skill_folder == "check_config_format_skill":
                     return FAKE_CONFIG_MANUAL
                 return FAKE_SCHEMA_VIOLATION
+
             mock_skill.side_effect = all_schema_violation
 
             agent = HyperparamTuningAgent()

@@ -18,12 +18,12 @@ _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-import uvicorn
 from contextlib import asynccontextmanager
+
+import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from dashboard.api.models import FrontendConfig
@@ -42,6 +42,7 @@ _STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 # App factory
 # ---------------------------------------------------------------------------
 
+
 def create_app(settings: DashboardSettings) -> FastAPI:
     """
     Build and configure the FastAPI application from a DashboardSettings object.
@@ -58,7 +59,9 @@ def create_app(settings: DashboardSettings) -> FastAPI:
         print(f"[dashboard] Models      : {frontend_cfg.models}")
         print(f"[dashboard] Default run : {_settings.dashboard.default_run_name}")
         print(f"[dashboard] Refresh     : {_settings.dashboard.refresh_interval_seconds}s")
-        print(f"[dashboard] API docs    : http://{_settings.server.host}:{_settings.server.port}/api/docs")
+        print(
+            f"[dashboard] API docs    : http://{_settings.server.host}:{_settings.server.port}/api/docs"
+        )
         print(f"[dashboard] Dashboard   : http://{_settings.server.host}:{_settings.server.port}/")
         yield
 
@@ -140,22 +143,30 @@ app = create_app(get_settings())
 # CLI entrypoint
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(description="SIDERIUS Dashboard Server")
     parser.add_argument(
-        "--config", type=str, default=None,
+        "--config",
+        type=str,
+        default=None,
         help="Path to dashboard_config.yaml (default: project root).",
     )
     parser.add_argument(
-        "--host", type=str, default=None,
+        "--host",
+        type=str,
+        default=None,
         help="Override server host from config.",
     )
     parser.add_argument(
-        "--port", type=int, default=None,
+        "--port",
+        type=int,
+        default=None,
         help="Override server port from config.",
     )
     parser.add_argument(
-        "--reload", action="store_true",
+        "--reload",
+        action="store_true",
         help="Enable auto-reload for development.",
     )
     args = parser.parse_args()

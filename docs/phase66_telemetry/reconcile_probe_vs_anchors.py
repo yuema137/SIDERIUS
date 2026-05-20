@@ -23,13 +23,14 @@ Intended to be run after A.1 (torchinfo installed) and A.2 (structural_probe
 implemented). Zero production-code blast radius — purely a measurement
 reconciliation artefact.
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import socket
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -45,28 +46,27 @@ from agent.skills.evaluate_vram_skill.structural_probe import (
 from ml_models.loss_models_sandbox import FocalLoss1D
 from ml_models.models_format_sandbox import LossConfig
 
-
 # ── Stage 2 iter_001 attempt_003 configs (inlined, same as telemetry) ─────
 
 MODEL_CONFIG = {
-    "model_type":         "dynamic_depth_simple",
-    "segmentation_size":  10000,
-    "batch_size":         8,
-    "input_channels":     16,
-    "residual_channels":  32,
-    "gate_channels":      64,
-    "kernel_size":        5,
-    "skip_channels":      32,
-    "embed_dim":          64,
-    "num_blocks":         2,
+    "model_type": "dynamic_depth_simple",
+    "segmentation_size": 10000,
+    "batch_size": 8,
+    "input_channels": 16,
+    "residual_channels": 32,
+    "gate_channels": 64,
+    "kernel_size": 5,
+    "skip_channels": 32,
+    "embed_dim": 64,
+    "num_blocks": 2,
 }
 TRAIN_CONFIG = {"batch_size": 8}
 LOSS_CONFIG = {
-    "loss_type":         "focal",
-    "alpha":             0.25,
-    "gamma":             2.0,
-    "beta":              None,
-    "reduction":         "mean",
+    "loss_type": "focal",
+    "alpha": 0.25,
+    "gamma": 2.0,
+    "beta": None,
+    "reduction": "mean",
     "use_class_weights": False,
 }
 INFERENCE_BATCH = 25
@@ -74,15 +74,20 @@ INFERENCE_BATCH = 25
 
 class DynamicDepthSimple(nn.Module):
     """Stage 2 iter_001 attempt_003 plugin, verbatim."""
+
     def __init__(self, cfg: dict):
         super().__init__()
         self.embedding = nn.Embedding(256, cfg["embed_dim"])
         self.causal_conv = nn.Conv1d(
-            cfg["embed_dim"], cfg["gate_channels"],
-            cfg["kernel_size"], padding=cfg["kernel_size"] // 2,
+            cfg["embed_dim"],
+            cfg["gate_channels"],
+            cfg["kernel_size"],
+            padding=cfg["kernel_size"] // 2,
         )
         self.skip_conv = nn.Conv1d(
-            cfg["gate_channels"] // 2, cfg["skip_channels"], 1,
+            cfg["gate_channels"] // 2,
+            cfg["skip_channels"],
+            1,
         )
         self.output_conv = nn.Conv1d(cfg["skip_channels"], 256, 1)
         self.gate_channels = cfg["gate_channels"]
@@ -99,12 +104,13 @@ class DynamicDepthSimple(nn.Module):
 
 # ── Reconciliation ──────────────────────────────────────────────────────────
 
+
 def _mb(bytes_: int) -> str:
-    return f"{bytes_ / (1024 ** 2):.1f} MB"
+    return f"{bytes_ / (1024**2):.1f} MB"
 
 
 def _gb(bytes_: int) -> str:
-    return f"{bytes_ / (1024 ** 3):.4f} GB"
+    return f"{bytes_ / (1024**3):.4f} GB"
 
 
 def _pct(delta: int, anchor: int) -> str:
@@ -127,9 +133,12 @@ def reconcile(device: str, anchor_path: Path) -> dict:
     y_tr = torch.randint(0, 256, (B, T), dtype=torch.long)
 
     tr = probe_activation_footprint(
-        model=model_tr, loss_module=loss_tr,
-        input_sample=x_tr, target_sample=y_tr,
-        mode="training", device=device,
+        model=model_tr,
+        loss_module=loss_tr,
+        input_sample=x_tr,
+        target_sample=y_tr,
+        mode="training",
+        device=device,
     )
 
     # Probe's contribution to training-phase VRAM:
@@ -149,9 +158,12 @@ def reconcile(device: str, anchor_path: Path) -> dict:
     x_inf = torch.randint(0, 256, (INFERENCE_BATCH, T), dtype=torch.long)
 
     inf = probe_activation_footprint(
-        model=model_inf, loss_module=None,
-        input_sample=x_inf, target_sample=None,
-        mode="inference", device=device,
+        model=model_inf,
+        loss_module=None,
+        input_sample=x_inf,
+        target_sample=None,
+        mode="inference",
+        device=device,
     )
 
     # Inference: no autograd tape. Peak ≈ final output (the largest tensor)
@@ -160,14 +172,8 @@ def reconcile(device: str, anchor_path: Path) -> dict:
     # using both double-counts. We take the larger; any pre-output
     # intermediate is much smaller in the Stage 2 config and is folded into
     # the overhead residual that A.3 will close.
-    inf_peak_activation = max(
-        inf.output_bytes, inf.model_forward.forward_output_bytes_max
-    )
-    probe_inf_bytes = (
-        inf.input_bytes
-        + inf_peak_activation
-        + inf.model_forward.total_param_bytes
-    )
+    inf_peak_activation = max(inf.output_bytes, inf.model_forward.forward_output_bytes_max)
+    probe_inf_bytes = inf.input_bytes + inf_peak_activation + inf.model_forward.total_param_bytes
     infer_residual = infer_anchor_bytes - probe_inf_bytes
 
     # ── Report ─────────────────────────────────────────────────────────────
@@ -185,10 +191,16 @@ def reconcile(device: str, anchor_path: Path) -> dict:
     print(f"  input_bytes                     : {_mb(tr.input_bytes):>10s}")
     print(f"  output_bytes (logits)           : {_mb(tr.output_bytes):>10s}")
     print(f"  total_param_bytes               : {_mb(tr.model_forward.total_param_bytes):>10s}")
-    print(f"  -------------------------------- ")
-    print(f"  probe_predicted_bytes           : {_mb(probe_tr_bytes):>10s}  ({_gb(probe_tr_bytes)})")
-    print(f"  anchor_bytes (A.13)             : {_mb(train_anchor_bytes):>10s}  ({_gb(train_anchor_bytes)})")
-    print(f"  residual for A.3                : {_mb(train_residual):>10s}  ({_pct(train_residual, train_anchor_bytes)})")
+    print("  -------------------------------- ")
+    print(
+        f"  probe_predicted_bytes           : {_mb(probe_tr_bytes):>10s}  ({_gb(probe_tr_bytes)})"
+    )
+    print(
+        f"  anchor_bytes (A.13)             : {_mb(train_anchor_bytes):>10s}  ({_gb(train_anchor_bytes)})"
+    )
+    print(
+        f"  residual for A.3                : {_mb(train_residual):>10s}  ({_pct(train_residual, train_anchor_bytes)})"
+    )
 
     print()
     print("── INFERENCE MODE ────────────────────────────────────────────────")
@@ -197,22 +209,32 @@ def reconcile(device: str, anchor_path: Path) -> dict:
     print(f"     max_layer_output={_mb(inf.model_forward.forward_output_bytes_max)})")
     print(f"  input_bytes                     : {_mb(inf.input_bytes):>10s}")
     print(f"  total_param_bytes               : {_mb(inf.model_forward.total_param_bytes):>10s}")
-    print(f"  -------------------------------- ")
-    print(f"  probe_predicted_bytes           : {_mb(probe_inf_bytes):>10s}  ({_gb(probe_inf_bytes)})")
-    print(f"  anchor_bytes (A.13)             : {_mb(infer_anchor_bytes):>10s}  ({_gb(infer_anchor_bytes)})")
-    print(f"  residual for A.3                : {_mb(infer_residual):>10s}  ({_pct(infer_residual, infer_anchor_bytes)})")
+    print("  -------------------------------- ")
+    print(
+        f"  probe_predicted_bytes           : {_mb(probe_inf_bytes):>10s}  ({_gb(probe_inf_bytes)})"
+    )
+    print(
+        f"  anchor_bytes (A.13)             : {_mb(infer_anchor_bytes):>10s}  ({_gb(infer_anchor_bytes)})"
+    )
+    print(
+        f"  residual for A.3                : {_mb(infer_residual):>10s}  ({_pct(infer_residual, infer_anchor_bytes)})"
+    )
 
     print()
     print("── LOSS ATTRIBUTION (torchinfo, for Memory Killer report) ─────────")
     if tr.loss_forward is not None:
         for li in tr.loss_forward.layers:
             if li.is_leaf:
-                print(f"    {li.var_name or li.class_name:20s}  out={li.output_shape}  "
-                      f"{_mb(li.output_bytes)}")
-        print(f"  loss.forward_output_bytes_sum   : {_mb(tr.loss_forward.forward_output_bytes_sum):>10s}")
-        print(f"    (note: torchinfo only sees submodules — FocalLoss1D has none,")
-        print(f"     so forward_output_bytes_sum is the scalar loss output. The")
-        print(f"     400 MB delta is visible only via the autograd tape above.)")
+                print(
+                    f"    {li.var_name or li.class_name:20s}  out={li.output_shape}  "
+                    f"{_mb(li.output_bytes)}"
+                )
+        print(
+            f"  loss.forward_output_bytes_sum   : {_mb(tr.loss_forward.forward_output_bytes_sum):>10s}"
+        )
+        print("    (note: torchinfo only sees submodules — FocalLoss1D has none,")
+        print("     so forward_output_bytes_sum is the scalar loss output. The")
+        print("     400 MB delta is visible only via the autograd tape above.)")
 
     print()
     print("── VERDICT ───────────────────────────────────────────────────────")
@@ -229,28 +251,28 @@ def reconcile(device: str, anchor_path: Path) -> dict:
         print("     contribution we have not accounted for yet.")
 
     out = {
-        "captured_at_utc": datetime.now(timezone.utc).isoformat(),
+        "captured_at_utc": datetime.now(UTC).isoformat(),
         "hostname": socket.gethostname(),
         "device_name": torch.cuda.get_device_name() if torch.cuda.is_available() else "cpu",
         "training": {
-            "probe_predicted_bytes":      probe_tr_bytes,
-            "anchor_bytes":               train_anchor_bytes,
-            "residual_bytes":             train_residual,
-            "autograd_tape_bytes":        tr.autograd_tape.total_saved_bytes,
-            "autograd_unique_storages":   tr.autograd_tape.unique_storage_count,
-            "input_bytes":                tr.input_bytes,
-            "output_bytes":               tr.output_bytes,
-            "param_bytes":                tr.model_forward.total_param_bytes,
+            "probe_predicted_bytes": probe_tr_bytes,
+            "anchor_bytes": train_anchor_bytes,
+            "residual_bytes": train_residual,
+            "autograd_tape_bytes": tr.autograd_tape.total_saved_bytes,
+            "autograd_unique_storages": tr.autograd_tape.unique_storage_count,
+            "input_bytes": tr.input_bytes,
+            "output_bytes": tr.output_bytes,
+            "param_bytes": tr.model_forward.total_param_bytes,
         },
         "inference": {
-            "probe_predicted_bytes":      probe_inf_bytes,
-            "anchor_bytes":               infer_anchor_bytes,
-            "residual_bytes":             infer_residual,
-            "peak_activation_bytes":      inf_peak_activation,
-            "forward_output_bytes_max":   inf.model_forward.forward_output_bytes_max,
-            "input_bytes":                inf.input_bytes,
-            "output_bytes":               inf.output_bytes,
-            "param_bytes":                inf.model_forward.total_param_bytes,
+            "probe_predicted_bytes": probe_inf_bytes,
+            "anchor_bytes": infer_anchor_bytes,
+            "residual_bytes": infer_residual,
+            "peak_activation_bytes": inf_peak_activation,
+            "forward_output_bytes_max": inf.model_forward.forward_output_bytes_max,
+            "input_bytes": inf.input_bytes,
+            "output_bytes": inf.output_bytes,
+            "param_bytes": inf.model_forward.total_param_bytes,
         },
     }
     return out
@@ -259,16 +281,21 @@ def reconcile(device: str, anchor_path: Path) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser(description="Phase 6.6 A.2 reconciliation")
     ap.add_argument(
-        "--device", type=str, default="cuda",
+        "--device",
+        type=str,
+        default="cuda",
         help="torch device for probing. Must be CUDA to match A.13 anchors.",
     )
     ap.add_argument(
-        "--anchor-path", type=Path,
+        "--anchor-path",
+        type=Path,
         default=_REPO_ROOT / "docs" / "phase66_telemetry" / "stage2_iter_001_telemetry.json",
         help="Path to the A.13 ground-truth JSON.",
     )
     ap.add_argument(
-        "--output", type=Path, default=None,
+        "--output",
+        type=Path,
+        default=None,
         help="Optional JSON output path for the reconciliation result.",
     )
     args = ap.parse_args()

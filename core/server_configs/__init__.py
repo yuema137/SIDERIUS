@@ -23,14 +23,13 @@ from typing import Optional
 
 from core.server_configs._base import ServerConfig
 
-
 # Track hosts we've already warned about so each unknown host warns
 # at most once per Python process (mirrors Phase F's unknown-GPU
 # pattern). Tests monkeypatch this back to empty.
 _WARNED_HOSTS: set[str] = set()
 
 
-def get_server_config(hostname: Optional[str] = None) -> ServerConfig:
+def get_server_config(hostname: str | None = None) -> ServerConfig:
     """Return the ``ServerConfig`` for a hostname.
 
     Resolution:
@@ -64,6 +63,7 @@ def get_server_config(hostname: Optional[str] = None) -> ServerConfig:
                 stacklevel=2,
             )
         from core.server_configs import ligroup
+
         return ligroup.CONFIG
 
     return mod.CONFIG

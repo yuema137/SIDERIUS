@@ -23,14 +23,16 @@ Note on synthetic vs real data
 - Real (--real-data): actual TIDMAD abra_training_0000.h5, seg_size=40000.
   Purpose: verify the full pipeline with realistic data distribution. Slow.
 """
-import os
-import numpy as np
-import h5py
-import pytest
 
+import os
+
+import h5py
+import numpy as np
+import pytest
 
 try:
     from execute_tools.data_paths import TIDMAD_DATA_DIR
+
     REAL_DATA_DIR = TIDMAD_DATA_DIR
 except (FileNotFoundError, ImportError):
     REAL_DATA_DIR = "/home/klz/Data/TIDMAD/"
@@ -44,6 +46,7 @@ SYNTH_SAMPLE_SIZE = 1
 # ---------------------------------------------------------------------------
 # CLI option
 # ---------------------------------------------------------------------------
+
 
 def pytest_addoption(parser):
     parser.addoption(
@@ -104,6 +107,7 @@ def pytest_configure(config):
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def synthetic_h5(tmp_path):
     """
@@ -117,6 +121,7 @@ def synthetic_h5(tmp_path):
         def test_foo(synthetic_h5):
             data_dir, fname = synthetic_h5(seg_size=model_cfg.segmentation_size)
     """
+
     def _make(seg_size: int):
         fpath = tmp_path / REAL_DATA_FILE
         n_samples = SYNTH_SAMPLE_SIZE * seg_size
@@ -154,8 +159,10 @@ def h5_source(request, synthetic_h5):
         if not os.path.exists(real_path):
             pytest.skip(f"Real data not found at {real_path}")
         request.node.add_marker(pytest.mark.real_data)
+
         def _real(seg_size: int):
             return REAL_DATA_DIR, REAL_DATA_FILE
+
         return _real
     return synthetic_h5
 
@@ -174,16 +181,17 @@ def h5_source(request, synthetic_h5):
 #   --real-api-call  deprecated alias: sets both of the above
 # ---------------------------------------------------------------------------
 
+
 def _is_real_llm(request) -> bool:
     """True when the test should use a real LLM API call."""
-    return (request.config.getoption("--real-llm") or
-            request.config.getoption("--real-api-call"))
+    return request.config.getoption("--real-llm") or request.config.getoption("--real-api-call")
 
 
 def _is_real_training(request) -> bool:
     """True when the test should use real subprocess execution."""
-    return (request.config.getoption("--real-training") or
-            request.config.getoption("--real-api-call"))
+    return request.config.getoption("--real-training") or request.config.getoption(
+        "--real-api-call"
+    )
 
 
 def make_bridge_factory(request, agent_name: str):
@@ -208,8 +216,10 @@ def make_bridge_factory(request, agent_name: str):
         if not os.getenv("GEMINI_API_KEY"):
             pytest.skip("--real-llm requires GEMINI_API_KEY")
         from agent.llm_bridge import LLMBridge
+
         return LLMBridge
     from tests.helpers.recording_llm_bridge import RecordingLLMBridge
+
     bridge = RecordingLLMBridge.for_agent(agent_name)
     return lambda **kw: bridge
 
@@ -238,7 +248,9 @@ def make_sandbox_factory(request, model_type: str, base_dir: str, run_name: str)
         if not os.path.exists(real_path):
             pytest.skip(f"--real-training requires TIDMAD data at {real_path}")
         from core.sandbox_executor import TidmadSandbox
+
         return TidmadSandbox
     from tests.helpers.recording_sandbox import RecordingSandbox
+
     sandbox = RecordingSandbox.for_model(model_type, base_dir=base_dir, run_name=run_name)
     return lambda **kw: sandbox

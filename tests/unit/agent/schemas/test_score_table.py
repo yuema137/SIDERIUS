@@ -4,6 +4,7 @@ round-trip invariants for ``PerFileRow``, ``AggregateScalars``, and
 ``ScoreComparisonTable``. No table-math logic here — that lives in
 ``tests/unit/execute_tools/test_scoring_helpers.py``.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -15,14 +16,12 @@ from agent.schemas.score_table import (
     ScoreComparisonTable,
 )
 
-
 # =============================================================================
 # PerFileRow
 # =============================================================================
 
 
 class TestPerFileRow:
-
     def test_fully_populated_row(self):
         row = PerFileRow(
             file_index=12,
@@ -51,17 +50,21 @@ class TestPerFileRow:
     def test_file_index_range(self):
         with pytest.raises(ValidationError):
             PerFileRow(
-                file_index=20,   # out of 0..19
+                file_index=20,  # out of 0..19
                 raw_baseline=0.0,
                 ground_truth=0.0,
-                model=None, gain_vs_raw=None, headroom_vs_gt=None,
+                model=None,
+                gain_vs_raw=None,
+                headroom_vs_gt=None,
             )
         with pytest.raises(ValidationError):
             PerFileRow(
                 file_index=-1,
                 raw_baseline=0.0,
                 ground_truth=0.0,
-                model=None, gain_vs_raw=None, headroom_vs_gt=None,
+                model=None,
+                gain_vs_raw=None,
+                headroom_vs_gt=None,
             )
 
     def test_extra_fields_forbidden(self):
@@ -70,7 +73,9 @@ class TestPerFileRow:
                 file_index=0,
                 raw_baseline=0.0,
                 ground_truth=0.0,
-                model=None, gain_vs_raw=None, headroom_vs_gt=None,
+                model=None,
+                gain_vs_raw=None,
+                headroom_vs_gt=None,
                 whatever="nope",
             )
 
@@ -129,7 +134,6 @@ class TestPerFileRow:
 
 
 class TestAggregateScalars:
-
     def test_full_run_aggregate(self):
         agg = AggregateScalars(
             raw_baseline_scalar=1.0011,
@@ -201,7 +205,6 @@ def _agg(n: int = 20) -> AggregateScalars:
 
 
 class TestScoreComparisonTable:
-
     def test_happy_path_20_rows(self):
         rows = [_row(i, model=float(i)) for i in range(20)]
         tbl = ScoreComparisonTable(
@@ -386,6 +389,7 @@ class TestLinearWeightTotalInvariant:
         for i in (3, 7, 9, 11, 14):
             weights[i] = 0.2
         tbl = self._build_table(
-            weights=weights, stored_total=sum(0.2 for _ in range(5)),
+            weights=weights,
+            stored_total=sum(0.2 for _ in range(5)),
         )
         assert tbl.linear_weight_total == pytest.approx(1.0, abs=1e-9)

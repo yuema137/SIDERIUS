@@ -1,18 +1,19 @@
 # skills/check_config_format_skill/wrapper.py
 
-import json
-from typing import Dict, Any
+from typing import Any
+
 import ml_models.models_format_sandbox as fmt
 
-def run_skill(sandbox, **kwargs) -> Dict[str, Any]:
+
+def run_skill(sandbox, **kwargs) -> dict[str, Any]:
     try:
         # 1. Add Transformer to the schema list
         schemas = {
             "PUNetConfig": fmt.PUNetConfig.model_json_schema(),
             "AEConfig": fmt.AEConfig.model_json_schema(),
-            "TransformerConfig": fmt.TransformerConfig.model_json_schema(), # Added
+            "TransformerConfig": fmt.TransformerConfig.model_json_schema(),  # Added
             "LossConfig": fmt.LossConfig.model_json_schema(),
-            "TrainConfig": fmt.TrainConfig.model_json_schema()
+            "TrainConfig": fmt.TrainConfig.model_json_schema(),
         }
 
         # 2. Update constraints with the CRITICAL matching rule
@@ -31,13 +32,7 @@ def run_skill(sandbox, **kwargs) -> Dict[str, Any]:
         return {
             "status": "success",
             "message": "Configuration schemas and ARCHITECTURE MATCHING RULES retrieved.",
-            "data": {
-                "schemas": schemas,
-                "quick_notes": constraints_summary
-            }
+            "data": {"schemas": schemas, "quick_notes": constraints_summary},
         }
     except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Failed to parse Pydantic models: {str(e)}"
-        }
+        return {"status": "error", "message": f"Failed to parse Pydantic models: {e!s}"}

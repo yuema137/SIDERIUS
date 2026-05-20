@@ -36,20 +36,15 @@ Light scope per §14.N.4:
 Run with:
   .venv/bin/pytest tests/integration/workflows/test_n_recent_gate_exhaustions_dual_mode.py -v
 """
+
 from __future__ import annotations
 
 import os
-import pytest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from agent.schemas.hyperparam_tuning import GateExhaustionInfo
-from workflows.llm_config import (
-    NodeLLMConfig,
-    ProposalLLMConfig,
-    TunerLLMConfig,
-    WorkflowLLMConfig,
-)
-from workflows.model_exploration import run_workflow
 
 # Reuse the unit-test factories — they produce schema-valid outputs with
 # the minimum fields needed for the workflow to complete without errors.
@@ -61,7 +56,13 @@ from tests.unit.workflows.test_model_exploration import (
     _make_validator_output,
     _write_tuning_output,
 )
-
+from workflows.llm_config import (
+    NodeLLMConfig,
+    ProposalLLMConfig,
+    TunerLLMConfig,
+    WorkflowLLMConfig,
+)
+from workflows.model_exploration import run_workflow
 
 # ---------------------------------------------------------------------------
 # Canned bridge output for the real proposer's 3-stage pipeline
@@ -95,11 +96,16 @@ _FAKE_PROPOSING = {
     "mathematical_definition": "x",
     "motivation": "x",
     "expert_advice": {
-        "focus_areas": [], "constraints": ["VRAM<10", "params<50M"],
-        "known_failures": [], "suggested_directions": [], "rationale": "x",
+        "focus_areas": [],
+        "constraints": ["VRAM<10", "params<50M"],
+        "known_failures": [],
+        "suggested_directions": [],
+        "rationale": "x",
     },
     "baseline_config": {
-        "model_config": {}, "train_config": {}, "loss_config": {},
+        "model_config": {},
+        "train_config": {},
+        "loss_config": {},
     },
     "memo_consistency_notes": [],
 }
@@ -112,6 +118,7 @@ def _make_canned_bridge_factory():
     The workflow creates a new ``MLModelProposalAgent`` (and therefore a
     new bridge) once per iteration. Each bridge needs exactly 3 generate
     calls' worth of preset data — comparison, reasoning, proposing."""
+
     def _factory(**kwargs):
         bridge = MagicMock()
         bridge.generate.side_effect = [
@@ -120,6 +127,7 @@ def _make_canned_bridge_factory():
             _FAKE_PROPOSING,
         ]
         return bridge
+
     return _factory
 
 
@@ -127,9 +135,7 @@ def _make_canned_bridge_factory():
 # Gate-exhaustion sentinels
 # ---------------------------------------------------------------------------
 
-_ITER1_SENTINEL = (
-    "ITER1-VRAM-GATE-EXHAUSTED: all 9 attempts fell outside the 4 GB budget."
-)
+_ITER1_SENTINEL = "ITER1-VRAM-GATE-EXHAUSTED: all 9 attempts fell outside the 4 GB budget."
 
 
 def _iter1_gate_exhaustion() -> GateExhaustionInfo:
@@ -187,12 +193,13 @@ def test_iter3_prompt_carries_iter1_summary_through_succeeding_iter2(tmp_path):
     proposal_factory = lambda inp: _make_proposal_output(next(proposal_names))
 
     # Patch 4 agents + wire the real proposer with a canned bridge.
-    with patch("workflows.model_exploration.ResultInterpretationAgent") as MockInterp, \
-         patch("workflows.model_exploration.MLModelImplementor") as MockImpl, \
-         patch("workflows.model_exploration.MLCodeValidatorAgent") as MockValid, \
-         patch("workflows.model_exploration.HyperparamTuningAgent") as MockTune, \
-         patch("workflows.model_exploration.MLModelProposalAgent") as MockPropose:
-
+    with (
+        patch("workflows.model_exploration.ResultInterpretationAgent") as MockInterp,
+        patch("workflows.model_exploration.MLModelImplementor") as MockImpl,
+        patch("workflows.model_exploration.MLCodeValidatorAgent") as MockValid,
+        patch("workflows.model_exploration.HyperparamTuningAgent") as MockTune,
+        patch("workflows.model_exploration.MLModelProposalAgent") as MockPropose,
+    ):
         MockInterp.return_value.run.return_value = _make_interpretation_output()
         MockImpl.return_value.run.return_value = _make_implementor_output()
         MockValid.return_value.run.return_value = _make_validator_output(passed=True)
@@ -243,7 +250,9 @@ def test_iter3_prompt_carries_iter1_summary_through_succeeding_iter2(tmp_path):
     # The workflow writes to {workspace}/{run_name}/debug/
     # iter{iter:03d}_attempt{attempt:03d}_proposing_system_prompt.md
     dump_path = os.path.join(
-        workspace, run_name, "debug",
+        workspace,
+        run_name,
+        "debug",
         "iter003_attempt001_proposing_system_prompt.md",
     )
     assert os.path.exists(dump_path), (
@@ -252,7 +261,7 @@ def test_iter3_prompt_carries_iter1_summary_through_succeeding_iter2(tmp_path):
         f"proposer ran in pipeline mode (requires ProposalLLMConfig)."
     )
 
-    prompt = open(dump_path, "r", encoding="utf-8").read()
+    prompt = open(dump_path, encoding="utf-8").read()
 
     # Primary assertion (§14.N.4): iter 1's gate_exhaustion summary must
     # reach iter 3's proposer prompt even though iter 2 succeeded. This
@@ -280,14 +289,15 @@ def test_iter3_prompt_carries_iter1_summary_through_succeeding_iter2(tmp_path):
     # Sanity: iter 1 should NOT have seen a gate-exhaustion block (no
     # prior iterations).
     iter1_dump = os.path.join(
-        workspace, run_name, "debug",
+        workspace,
+        run_name,
+        "debug",
         "iter001_attempt001_proposing_system_prompt.md",
     )
     if os.path.exists(iter1_dump):
-        iter1_prompt = open(iter1_dump, "r", encoding="utf-8").read()
+        iter1_prompt = open(iter1_dump, encoding="utf-8").read()
         assert "[RECENT GATE EXHAUSTIONS" not in iter1_prompt, (
-            "iter 1 has no prior iterations — its prompt must not carry "
-            "the gate-exhaustion block."
+            "iter 1 has no prior iterations — its prompt must not carry the gate-exhaustion block."
         )
 
 
@@ -318,8 +328,7 @@ def test_iter3_prompt_carries_iter1_summary_through_succeeding_iter2(tmp_path):
 # The ~460× spread gives deterministic verdict flips with wide headroom.
 
 _SCAN_OVER_T_ENGLISH = (
-    "Avoid selective-scan / SSM / Mamba-style sequential state "
-    "recurrence over the time dimension"
+    "Avoid selective-scan / SSM / Mamba-style sequential state recurrence over the time dimension"
 )
 
 _PREFLIGHT_TRIAL_BUDGET_MIN = 20.0
@@ -358,12 +367,17 @@ def _make_fake_proposing(
         "baseline_config": {
             "model_config": {"segmentation_size": 40000},
             "train_config": {
-                "lr": 1e-4, "epochs": 10, "batch_size": 1,
-                "optimizer_type": "adamw", "weight_decay": 1e-5,
+                "lr": 1e-4,
+                "epochs": 10,
+                "batch_size": 1,
+                "optimizer_type": "adamw",
+                "weight_decay": 1e-5,
                 "device": "cuda",
             },
             "loss_config": {
-                "loss_type": "focal", "alpha": 0.5, "gamma": 2.0,
+                "loss_type": "focal",
+                "alpha": 0.5,
+                "gamma": 2.0,
                 "reduction": "mean",
             },
         },
@@ -409,6 +423,7 @@ def test_iter2_triple_guard_blacklist_and_preflight(tmp_path):
         current iteration. Iter 1 has 3 outputs (standard single-draft run);
         iter 2 has 4 outputs (one over-budget draft + one feasible retry),
         proving Stages 1–2 are invoked exactly once per iteration."""
+
         def _factory(**kwargs):
             bridge = MagicMock()
             if iter_n == 1:
@@ -425,19 +440,19 @@ def test_iter2_triple_guard_blacklist_and_preflight(tmp_path):
                     _make_fake_proposing("arch_iter2_draft2", _FEASIBLE_PARAM_COUNT),
                 ]
             else:
-                raise AssertionError(
-                    f"triple-guard test only expects 2 iterations; got {iter_n}"
-                )
+                raise AssertionError(f"triple-guard test only expects 2 iterations; got {iter_n}")
             bridges_by_iter[iter_n] = bridge
             return bridge
+
         return _factory
 
-    with patch("workflows.model_exploration.ResultInterpretationAgent") as MockInterp, \
-         patch("workflows.model_exploration.MLModelImplementor") as MockImpl, \
-         patch("workflows.model_exploration.MLCodeValidatorAgent") as MockValid, \
-         patch("workflows.model_exploration.HyperparamTuningAgent") as MockTune, \
-         patch("workflows.model_exploration.MLModelProposalAgent") as MockPropose:
-
+    with (
+        patch("workflows.model_exploration.ResultInterpretationAgent") as MockInterp,
+        patch("workflows.model_exploration.MLModelImplementor") as MockImpl,
+        patch("workflows.model_exploration.MLCodeValidatorAgent") as MockValid,
+        patch("workflows.model_exploration.HyperparamTuningAgent") as MockTune,
+        patch("workflows.model_exploration.MLModelProposalAgent") as MockPropose,
+    ):
         MockInterp.return_value.run.return_value = _make_interpretation_output()
         MockImpl.return_value.run.return_value = _make_implementor_output()
         MockValid.return_value.run.return_value = _make_validator_output(passed=True)
@@ -449,6 +464,7 @@ def test_iter2_triple_guard_blacklist_and_preflight(tmp_path):
             """Thin wrapper capturing every emitted ProposalOutput so the
             test can assert on audit fields (preflight_factor etc.) after
             the workflow finishes."""
+
             def run(self, *args, **kwargs):
                 out = super().run(*args, **kwargs)
                 emitted_proposals.append(out)
@@ -489,14 +505,16 @@ def test_iter2_triple_guard_blacklist_and_preflight(tmp_path):
     # Also serves as the [DISALLOWED PATTERNS] host block; both are rendered
     # into the SYSTEM prompt via the proposer's template_vars.
     dump_path = os.path.join(
-        workspace, run_name, "debug",
+        workspace,
+        run_name,
+        "debug",
         "iter002_attempt001_proposing_system_prompt.md",
     )
     assert os.path.exists(dump_path), (
         f"iter-2 prompt dump not found at {dump_path}; debug_dump_prompts "
         "did not fire or the proposer did not reach iter 2."
     )
-    iter2_prompt = open(dump_path, "r", encoding="utf-8").read()
+    iter2_prompt = open(dump_path, encoding="utf-8").read()
 
     assert "[RECENT GATE EXHAUSTIONS" in iter2_prompt, (
         "Narrative channel broken: iter-2 system prompt must carry "
@@ -550,8 +568,7 @@ def test_iter2_triple_guard_blacklist_and_preflight(tmp_path):
 
     # === Emitted ProposalOutput — audit fields + success-path sanity ===
     assert len(emitted_proposals) == 2, (
-        f"expected 2 proposer emissions (iter 1 + iter 2), got "
-        f"{len(emitted_proposals)}."
+        f"expected 2 proposer emissions (iter 1 + iter 2), got {len(emitted_proposals)}."
     )
     iter2_proposal = emitted_proposals[1]
     assert iter2_proposal.model_name == "arch_iter2_draft2", (
@@ -566,13 +583,12 @@ def test_iter2_triple_guard_blacklist_and_preflight(tmp_path):
         f"Emitted draft should be feasible (factor <= 1.0); got "
         f"preflight_factor={iter2_proposal.preflight_factor}."
     )
-    assert (iter2_proposal.preflight_estimated_minutes is not None
-            and iter2_proposal.preflight_estimated_minutes > 0), (
-        "Audit broken: preflight_estimated_minutes not populated."
-    )
+    assert (
+        iter2_proposal.preflight_estimated_minutes is not None
+        and iter2_proposal.preflight_estimated_minutes > 0
+    ), "Audit broken: preflight_estimated_minutes not populated."
     assert not any(
-        "PREFLIGHT_OVERBUDGET_EMITTED" in note
-        for note in iter2_proposal.memo_consistency_notes
+        "PREFLIGHT_OVERBUDGET_EMITTED" in note for note in iter2_proposal.memo_consistency_notes
     ), (
         "Success path (not exhaustion) — memo_consistency_notes must NOT "
         f"carry PREFLIGHT_OVERBUDGET_EMITTED. Got: "

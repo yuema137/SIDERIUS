@@ -7,13 +7,14 @@ including the vocabulary stagnation centrifugal force (Concern #1).
 """
 
 import pytest
-from nodes.proposal_helpers import resolve_exploration_mode
-from agent.schemas.proposal import ReasoningPipelineConfig, ResearchPolicy
 
+from agent.schemas.proposal import ReasoningPipelineConfig, ResearchPolicy
+from nodes.proposal_helpers import resolve_exploration_mode
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _pipeline(mode="auto", vocab_stagnation_threshold=0.1):
     policy = ResearchPolicy(vocab_stagnation_threshold=vocab_stagnation_threshold)
@@ -37,8 +38,8 @@ def _interp(model_types=None, agent_proposed_count=0, vocab_diversity_ratio=None
 # Manual override (exploration_mode != "auto")
 # ---------------------------------------------------------------------------
 
-class TestManualOverride:
 
+class TestManualOverride:
     def test_explicit_explore_bypasses_all_signals(self):
         interp = _interp(vocab_diversity_ratio=0.0)
         pipeline = _pipeline(mode="explore")
@@ -54,8 +55,8 @@ class TestManualOverride:
 # Evidence-depth signal
 # ---------------------------------------------------------------------------
 
-class TestEvidenceDepth:
 
+class TestEvidenceDepth:
     def test_fewer_than_5_proposed_models_triggers_explore(self):
         # 3 built-in + 2 proposed = 2 agent-proposed → explore
         interp = _interp(model_types=["punet", "wavenet", "fcnet", "model_a", "model_b"])
@@ -77,13 +78,13 @@ class TestEvidenceDepth:
 # Vocabulary stagnation signal (Concern #1 centrifugal force)
 # ---------------------------------------------------------------------------
 
-class TestVocabStagnation:
 
+class TestVocabStagnation:
     def test_stagnating_vocab_forces_explore(self):
         """Diversity ratio below threshold → explore, even with many proposed models."""
         interp = _interp(
-            model_types=[f"m{i}" for i in range(10)],   # would normally trigger exploit
-            vocab_diversity_ratio=0.05,                  # below default threshold 0.1
+            model_types=[f"m{i}" for i in range(10)],  # would normally trigger exploit
+            vocab_diversity_ratio=0.05,  # below default threshold 0.1
         )
         pipeline = _pipeline(vocab_stagnation_threshold=0.1)
         assert resolve_exploration_mode(interp, pipeline) == "explore"
@@ -92,7 +93,7 @@ class TestVocabStagnation:
         """Ratio above threshold → stagnation check passes, evidence depth decides."""
         interp = _interp(
             model_types=[f"m{i}" for i in range(10)],
-            vocab_diversity_ratio=0.3,   # healthy — above threshold
+            vocab_diversity_ratio=0.3,  # healthy — above threshold
         )
         pipeline = _pipeline(vocab_stagnation_threshold=0.1)
         assert resolve_exploration_mode(interp, pipeline) == "exploit"
@@ -101,7 +102,7 @@ class TestVocabStagnation:
         """Ratio exactly at threshold → NOT stagnating (stagnation requires < threshold)."""
         interp = _interp(
             model_types=[f"m{i}" for i in range(10)],
-            vocab_diversity_ratio=0.1,   # exactly at default threshold
+            vocab_diversity_ratio=0.1,  # exactly at default threshold
         )
         pipeline = _pipeline(vocab_stagnation_threshold=0.1)
         # 0.1 is not < 0.1 → no stagnation trigger → exploit (evidence depth)
@@ -110,8 +111,8 @@ class TestVocabStagnation:
     def test_stagnation_checked_before_evidence_depth(self):
         """Stagnation is Priority 1 — it fires even when evidence depth would say explore."""
         interp = _interp(
-            model_types=["punet"],           # < 5 proposed → evidence depth says explore
-            vocab_diversity_ratio=0.05,      # < threshold → stagnation also says explore
+            model_types=["punet"],  # < 5 proposed → evidence depth says explore
+            vocab_diversity_ratio=0.05,  # < threshold → stagnation also says explore
         )
         # Both signals agree here, but the stagnation check runs first
         pipeline = _pipeline(vocab_stagnation_threshold=0.1)
@@ -127,7 +128,7 @@ class TestVocabStagnation:
         """Policy threshold is configurable."""
         interp = _interp(
             model_types=[f"m{i}" for i in range(10)],
-            vocab_diversity_ratio=0.25,   # above default (0.1) but below custom (0.3)
+            vocab_diversity_ratio=0.25,  # above default (0.1) but below custom (0.3)
         )
         pipeline = _pipeline(vocab_stagnation_threshold=0.3)
         assert resolve_exploration_mode(interp, pipeline) == "explore"
@@ -231,9 +232,7 @@ class TestClampComparativeAnalysis:
         for i in range(13):
             # Older iter -> higher best_score. So top-3-by-score = iters 0,1,2,
             # top-2-by-recency = iters 12,11.
-            entries.append(
-                _entry(f"m{i:02d}", f"proposed_iter_{i}", 1.0 - i * 0.01)
-            )
+            entries.append(_entry(f"m{i:02d}", f"proposed_iter_{i}", 1.0 - i * 0.01))
         out = clamp_comparative_analysis(entries, top_k=5)
         out_mts = [e["model_type"] for e in out]
         assert len(out) == 5
@@ -248,9 +247,7 @@ class TestClampComparativeAnalysis:
         """top_k=3 -> the 3 best-score winners survive (truncate path)."""
         entries = []
         for i in range(8):
-            entries.append(
-                _entry(f"m{i}", f"proposed_iter_{i}", 1.0 - i * 0.01)
-            )
+            entries.append(_entry(f"m{i}", f"proposed_iter_{i}", 1.0 - i * 0.01))
         out = clamp_comparative_analysis(entries, top_k=3)
         assert len(out) == 3
         # m0/m1/m2 have the top best_scores.
@@ -260,9 +257,7 @@ class TestClampComparativeAnalysis:
         """top_k=10 -> draws 3 best + 2 recent + 5 backfilled by recency."""
         entries = []
         for i in range(13):
-            entries.append(
-                _entry(f"m{i:02d}", f"proposed_iter_{i}", 1.0 - i * 0.01)
-            )
+            entries.append(_entry(f"m{i:02d}", f"proposed_iter_{i}", 1.0 - i * 0.01))
         out = clamp_comparative_analysis(entries, top_k=10)
         assert len(out) == 10
         out_mts = {e["model_type"] for e in out}
@@ -291,9 +286,7 @@ class TestClampComparativeAnalysis:
         entries = [
             _entry("seed_a", "seed", 0.1),
             _entry("seed_b", "seed", 0.2),
-        ] + [
-            _entry(f"p{i}", f"proposed_iter_{i}", 0.05) for i in range(1, 10)
-        ]
+        ] + [_entry(f"p{i}", f"proposed_iter_{i}", 0.05) for i in range(1, 10)]
         out = clamp_comparative_analysis(entries, top_k=5)
         out_mts = [e["model_type"] for e in out]
         # Recency draws come from p9, p8 (highest iter indices), not from seeds.
@@ -318,28 +311,21 @@ class TestClampComparativeAnalysis:
 
     def test_input_not_mutated(self):
         """Input list is not modified — caller's data is safe."""
-        entries = [
-            _entry(f"m{i}", f"proposed_iter_{i}", float(i)) for i in range(10)
-        ]
+        entries = [_entry(f"m{i}", f"proposed_iter_{i}", float(i)) for i in range(10)]
         snapshot = copy.deepcopy(entries)
         _ = clamp_comparative_analysis(entries, top_k=3)
         assert entries == snapshot
 
     def test_independent_top_k_alters_density(self):
         """Knob sweep: top_k ∈ {2,5,10} produces the expected output sizes."""
-        entries = [
-            _entry(f"m{i:02d}", f"proposed_iter_{i}", 1.0 - i * 0.01)
-            for i in range(13)
-        ]
+        entries = [_entry(f"m{i:02d}", f"proposed_iter_{i}", 1.0 - i * 0.01) for i in range(13)]
         for k in (2, 3, 5, 7, 10):
             out = clamp_comparative_analysis(entries, top_k=k)
             assert len(out) == k, f"top_k={k} expected {k} entries, got {len(out)}"
 
     def test_missing_best_score_treated_as_negative_infinity(self):
         """An entry missing best_score doesn't crash the sort — it falls last."""
-        entries = [
-            _entry(f"m{i}", f"proposed_iter_{i}", float(i)) for i in range(4)
-        ] + [
+        entries = [_entry(f"m{i}", f"proposed_iter_{i}", float(i)) for i in range(4)] + [
             {"model_type": "noscore", "source": "proposed_iter_99"},  # no best_score
             _entry("filler", "seed", 0.5),
         ]
@@ -422,8 +408,13 @@ class TestApplyStringBackstop:
                 id="all_short_strings",
             ),
             pytest.param(
-                {"int": 42, "float": 3.14, "bool": True, "none": None,
-                 "list": [1, 2.0, False, None]},
+                {
+                    "int": 42,
+                    "float": 3.14,
+                    "bool": True,
+                    "none": None,
+                    "list": [1, 2.0, False, None],
+                },
                 id="non_string_scalars",
             ),
             pytest.param({}, id="empty_dict"),

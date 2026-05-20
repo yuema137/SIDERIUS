@@ -14,68 +14,69 @@ Parametrized to keep the defensive Pydantic shield (required-field
 rejections, closed-Literal rejections, range bounds) intact via explicit
 case IDs while collapsing one-input-per-function noise.
 """
+
 import json
 
 import pytest
 from pydantic import ValidationError
 
 from agent.schemas.hyperparam_tuning import (
-    ExpertAdvice,
+    ExperimentMemory,
     ExperimentPlan,
-    TrialConfig,
+    ExperimentRecord,
+    ExperimentTiming,
+    ExpertAdvice,
     GateExhaustionInfo,
     HyperparamTuningInput,
     HyperparamTuningOutput,
-    ExperimentRecord,
-    ExperimentMemory,
-    ExperimentTiming,
+    TrialConfig,
 )
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def valid_input_dict():
     return {
-        "model_type":    "punet",
-        "file_index":    6,
-        "max_rounds":    10,
+        "model_type": "punet",
+        "file_index": 6,
+        "max_rounds": 10,
         "expert_advice": "try deeper architectures",
-        "llm_provider":  "gemini",
-        "llm_model_id":  "gemini-3.1-flash-lite-preview",
+        "llm_provider": "gemini",
+        "llm_model_id": "gemini-3.1-flash-lite-preview",
         "storage": {
             "backend": "local",
             "local": {"workspace": "./workspace", "run_name": "v1"},
         },
-        "progress_bar":  False,
+        "progress_bar": False,
     }
 
 
 @pytest.fixture
 def valid_success_record():
     return {
-        "exp_id":     "punet_v1_001",
-        "status":     "success",
+        "exp_id": "punet_v1_001",
+        "status": "success",
         "model_type": "punet",
-        "timestamp":  "2026-03-11 10:00:00",
+        "timestamp": "2026-03-11 10:00:00",
         "file_index": 6,
-        "params":     {"model_config": {}, "train_config": {}, "loss_config": {}},
-        "final_loss":       0.5,
-        "loss_history":     [0.8, 0.6, 0.5],
-        "model_params":     50000,
-        "denoising_score":  1.23,
+        "params": {"model_config": {}, "train_config": {}, "loss_config": {}},
+        "final_loss": 0.5,
+        "loss_history": [0.8, 0.6, 0.5],
+        "model_params": 50000,
+        "denoising_score": 1.23,
         "timing": {
-            "train_time_s":     120.0,
+            "train_time_s": 120.0,
             "inference_time_s": 30.0,
-            "scoring_time_s":   10.0,
+            "scoring_time_s": 10.0,
         },
         "memory": {
             "expert_advice_followed": "try deeper architectures",
-            "hypothesis":    "deeper encoder improves SNR",
-            "conclusion":    "score improved by 0.3",
-            "discovery":     "depth > 3 helps",
+            "hypothesis": "deeper encoder improves SNR",
+            "conclusion": "score improved by 0.3",
+            "discovery": "depth > 3 helps",
             "memory_update": "try depth=4 next",
         },
     }
@@ -84,18 +85,18 @@ def valid_success_record():
 @pytest.fixture
 def valid_oom_record():
     return {
-        "exp_id":          "punet_v1_002",
-        "status":          "skipped_oom_risk",
-        "model_type":      "punet",
-        "timestamp":       "2026-03-11 10:05:00",
-        "file_index":      6,
-        "params":          {"model_config": {}, "train_config": {}, "loss_config": {}},
+        "exp_id": "punet_v1_002",
+        "status": "skipped_oom_risk",
+        "model_type": "punet",
+        "timestamp": "2026-03-11 10:05:00",
+        "file_index": 6,
+        "params": {"model_config": {}, "train_config": {}, "loss_config": {}},
         "denoising_score": None,
         "memory": {
             "expert_advice_followed": "try deeper architectures",
-            "hypothesis":    "large batch might help",
-            "conclusion":    "Skipped: estimated VRAM (28.0 GB) exceeds limit (25.6 GB).",
-            "discovery":     "batch_size=512 is too large",
+            "hypothesis": "large batch might help",
+            "conclusion": "Skipped: estimated VRAM (28.0 GB) exceeds limit (25.6 GB).",
+            "discovery": "batch_size=512 is too large",
             "memory_update": "Reduce batch_size or segmentation_size.",
         },
     }
@@ -104,18 +105,18 @@ def valid_oom_record():
 @pytest.fixture
 def valid_output_dict(valid_success_record):
     return {
-        "run_name":             "v1",
-        "model_type":           "punet",
-        "file_index":           6,
-        "status":               "completed",
-        "completed_rounds":     10,
-        "total_attempts":       12,
-        "best_exp_id":          "punet_v1_001",
+        "run_name": "v1",
+        "model_type": "punet",
+        "file_index": 6,
+        "status": "completed",
+        "completed_rounds": 10,
+        "total_attempts": 12,
+        "best_exp_id": "punet_v1_001",
         "best_denoising_score": 1.23,
-        "best_config":          {"model_config": {}, "train_config": {}, "loss_config": {}},
-        "all_records":          [valid_success_record],
-        "started_at":           "2026-03-11 10:00:00",
-        "finished_at":          "2026-03-11 12:00:00",
+        "best_config": {"model_config": {}, "train_config": {}, "loss_config": {}},
+        "all_records": [valid_success_record],
+        "started_at": "2026-03-11 10:00:00",
+        "finished_at": "2026-03-11 12:00:00",
     }
 
 
@@ -123,8 +124,8 @@ def valid_output_dict(valid_success_record):
 # 1. Entry validation — HyperparamTuningInput
 # ---------------------------------------------------------------------------
 
-class TestHyperparamTuningInput:
 
+class TestHyperparamTuningInput:
     @pytest.mark.parametrize(
         "advice_value, expected_check",
         [
@@ -135,11 +136,11 @@ class TestHyperparamTuningInput:
             ),
             pytest.param(
                 {
-                    "focus_areas":          ["increase depth"],
-                    "constraints":          ["VRAM < 10 GB"],
-                    "known_failures":       ["latent_dims=[4000,400,40] with focal"],
+                    "focus_areas": ["increase depth"],
+                    "constraints": ["VRAM < 10 GB"],
+                    "known_failures": ["latent_dims=[4000,400,40] with focal"],
                     "suggested_directions": ["try focal gamma=3"],
-                    "rationale":            "architecture plateau detected",
+                    "rationale": "architecture plateau detected",
                 },
                 lambda inp: (
                     isinstance(inp.expert_advice, ExpertAdvice)
@@ -165,16 +166,17 @@ class TestHyperparamTuningInput:
     @pytest.mark.parametrize(
         "override_key, override_value, named_in_error",
         [
-            pytest.param("llm_provider", "anthropic", "llm_provider",
-                         id="invalid_provider"),
-            pytest.param("max_rounds", 0, "max_rounds",
-                         id="zero_max_rounds"),
-            pytest.param("file_index", -1, "file_index",
-                         id="negative_file_index"),
+            pytest.param("llm_provider", "anthropic", "llm_provider", id="invalid_provider"),
+            pytest.param("max_rounds", 0, "max_rounds", id="zero_max_rounds"),
+            pytest.param("file_index", -1, "file_index", id="negative_file_index"),
         ],
     )
     def test_field_rejections_raise(
-        self, valid_input_dict, override_key, override_value, named_in_error,
+        self,
+        valid_input_dict,
+        override_key,
+        override_value,
+        named_in_error,
     ):
         """Defensive shield: each business-rule rejection (closed-Literal
         provider, ge=1 max_rounds, ge=0 file_index) must surface as a
@@ -215,22 +217,27 @@ class TestHyperparamTuningInput:
     @pytest.mark.parametrize(
         "overrides, expected_provider, expected_model_id",
         [
-            pytest.param({}, None, None,
-                         id="both_default_to_none"),
+            pytest.param({}, None, None, id="both_default_to_none"),
             pytest.param(
                 {"reflect_model_id": "gemini-2.5-flash"},
-                None, "gemini-2.5-flash",
+                None,
+                "gemini-2.5-flash",
                 id="model_id_only_same_provider",
             ),
             pytest.param(
                 {"reflect_provider": "openai", "reflect_model_id": "gpt-4o-mini"},
-                "openai", "gpt-4o-mini",
+                "openai",
+                "gpt-4o-mini",
                 id="provider_and_model_id_cross_provider",
             ),
         ],
     )
     def test_reflect_field_shapes(
-        self, valid_input_dict, overrides, expected_provider, expected_model_id,
+        self,
+        valid_input_dict,
+        overrides,
+        expected_provider,
+        expected_model_id,
     ):
         """When the reflect_* fields are omitted both default to None (legacy
         behavior: reflector uses planner's provider+model). Setting model_id
@@ -254,13 +261,18 @@ class TestHyperparamTuningInput:
             pytest.param({}, None, None, id="default_none_round_trip"),
             pytest.param(
                 {"reflect_provider": "openai", "reflect_model_id": "gpt-4o-mini"},
-                "openai", "gpt-4o-mini",
+                "openai",
+                "gpt-4o-mini",
                 id="populated_round_trip",
             ),
         ],
     )
     def test_reflect_fields_round_trip_through_json(
-        self, valid_input_dict, overrides, expected_provider, expected_model_id,
+        self,
+        valid_input_dict,
+        overrides,
+        expected_provider,
+        expected_model_id,
     ):
         """reflect_provider and reflect_model_id survive a full
         model_dump_json -> model_validate_json round-trip — for both the
@@ -279,29 +291,38 @@ class TestHyperparamTuningInput:
 # See docs/resource_estimator_implement.md §10.4.
 # ---------------------------------------------------------------------------
 
-class TestVramBudgetFields:
 
+class TestVramBudgetFields:
     @pytest.mark.parametrize(
         "overrides, expected_trial, expected_formal",
         [
             pytest.param({}, None, None, id="both_default_none"),
             pytest.param(
-                {"trial_vram_budget_gb": 4.0}, 4.0, None,
+                {"trial_vram_budget_gb": 4.0},
+                4.0,
+                None,
                 id="trial_alone_leaves_formal_none",
             ),
             pytest.param(
-                {"formal_vram_budget_gb": 8.0}, None, 8.0,
+                {"formal_vram_budget_gb": 8.0},
+                None,
+                8.0,
                 id="formal_alone_leaves_trial_none",
             ),
             pytest.param(
                 {"trial_vram_budget_gb": 4.0, "formal_vram_budget_gb": 8.0},
-                4.0, 8.0,
+                4.0,
+                8.0,
                 id="both_set_independently",
             ),
         ],
     )
     def test_budget_split_shapes(
-        self, valid_input_dict, overrides, expected_trial, expected_formal,
+        self,
+        valid_input_dict,
+        overrides,
+        expected_trial,
+        expected_formal,
     ):
         """Phase K two-budget split — setting one budget must NOT touch the
         other; both can coexist; both default to None. Mirrors the Phase I
@@ -317,13 +338,18 @@ class TestVramBudgetFields:
             pytest.param({}, None, None, id="round_trip_when_unset"),
             pytest.param(
                 {"trial_vram_budget_gb": 4.0, "formal_vram_budget_gb": 8.0},
-                4.0, 8.0,
+                4.0,
+                8.0,
                 id="round_trip_when_set",
             ),
         ],
     )
     def test_budgets_round_trip_through_json(
-        self, valid_input_dict, overrides, expected_trial, expected_formal,
+        self,
+        valid_input_dict,
+        overrides,
+        expected_trial,
+        expected_formal,
     ):
         valid_input_dict.update(overrides)
         inp = HyperparamTuningInput.model_validate(valid_input_dict)
@@ -342,8 +368,8 @@ class TestVramBudgetFields:
 # 2. Per-record validation — ExperimentRecord
 # ---------------------------------------------------------------------------
 
-class TestExperimentRecordSuccess:
 
+class TestExperimentRecordSuccess:
     def test_valid_success_record_baseline(self, valid_success_record):
         """Single baseline pinning every documented field of a success
         record: top-level status / score / memory pass-through plus the
@@ -374,7 +400,10 @@ class TestExperimentRecordSuccess:
         ],
     )
     def test_missing_required_field_raises(
-        self, valid_success_record, drop_path, named_in_error,
+        self,
+        valid_success_record,
+        drop_path,
+        named_in_error,
     ):
         """Defensive shield: dropping any required scalar from the success
         record (top-level or inside memory) must surface as a
@@ -403,6 +432,7 @@ class TestExperimentRecordSuccess:
 # V8 hardening Domain 2a — error_scoring status (commit e247e1d Fix 2a)
 # ---------------------------------------------------------------------------
 
+
 class TestExperimentRecordErrorScoringStatus:
     """The Fix 2a scoring-crash handler in ml_hyperparameter_tune_agent.py
     builds an ExperimentRecord with status='error_scoring' and validates it
@@ -416,22 +446,22 @@ class TestExperimentRecordErrorScoringStatus:
         """Mirror the exact dict shape built by Fix 2a in
         ml_hyperparameter_tune_agent.py at the scoring crash branch."""
         return {
-            "exp_id":          "punet_v1_007",
-            "status":          "error_scoring",
-            "model_type":      "punet",
-            "timestamp":       "2026-04-30 16:00:00",
-            "file_index":      6,
-            "params":          {"model_config": {}, "train_config": {}, "loss_config": {}},
+            "exp_id": "punet_v1_007",
+            "status": "error_scoring",
+            "model_type": "punet",
+            "timestamp": "2026-04-30 16:00:00",
+            "file_index": 6,
+            "params": {"model_config": {}, "train_config": {}, "loss_config": {}},
             "denoising_score": None,
             "timing": {
-                "train_time_s":     45.0,
+                "train_time_s": 45.0,
                 "inference_time_s": 12.0,
-                "scoring_time_s":   2.0,
+                "scoring_time_s": 2.0,
             },
             "memory": {
                 "expert_advice_followed": "try focal loss",
-                "hypothesis":    "focal loss with depth=4",
-                "conclusion":    "Scoring crashed: RuntimeError: anchor_map mismatch",
+                "hypothesis": "focal loss with depth=4",
+                "conclusion": "Scoring crashed: RuntimeError: anchor_map mismatch",
                 "discovery": (
                     "Training and inference completed but scoring "
                     "raised RuntimeError: anchor_map mismatch"
@@ -478,6 +508,7 @@ class TestExperimentRecordErrorScoringStatus:
 # Phase J — ExperimentMemory time fields (planner-feedback channel)
 # ---------------------------------------------------------------------------
 
+
 class TestExperimentMemoryTimeFields:
     """The three optional time fields on ExperimentMemory carry pre-flight
     estimator context to the next planner round via experiment_history.
@@ -495,17 +526,26 @@ class TestExperimentMemoryTimeFields:
             pytest.param({}, None, None, None, id="defaults_all_none"),
             pytest.param(
                 {"time_estimate_minutes": 2.3, "time_budget_minutes": 5.0, "time_mode": "trial"},
-                2.3, 5.0, "trial",
+                2.3,
+                5.0,
+                "trial",
                 id="concrete_values_trial",
             ),
             pytest.param(
-                {"time_mode": "formal"}, None, None, "formal",
+                {"time_mode": "formal"},
+                None,
+                None,
+                "formal",
                 id="time_mode_formal_accepted",
             ),
         ],
     )
     def test_time_field_shapes(
-        self, overrides, expected_estimate, expected_budget, expected_mode,
+        self,
+        overrides,
+        expected_estimate,
+        expected_budget,
+        expected_mode,
     ):
         """All three time fields default to None; concrete values pass
         through; both Literal['trial', 'formal'] entries are accepted."""
@@ -517,10 +557,12 @@ class TestExperimentMemoryTimeFields:
     def test_time_mode_rejects_other_strings(self):
         """Literal["trial", "formal"] — anything else must fail validation."""
         with pytest.raises(ValidationError) as exc:
-            ExperimentMemory.model_validate({
-                **self._base_memory(),
-                "time_mode": "snapshot",
-            })
+            ExperimentMemory.model_validate(
+                {
+                    **self._base_memory(),
+                    "time_mode": "snapshot",
+                }
+            )
         assert "time_mode" in str(exc.value)
 
     def test_existing_record_round_trip_unchanged(self, valid_success_record):
@@ -538,6 +580,7 @@ class TestExperimentMemoryTimeFields:
 # separate vram_mode. See docs/resource_estimator_implement.md §10.4.
 # ---------------------------------------------------------------------------
 
+
 class TestExperimentMemoryVramFields:
     """The two optional VRAM fields on ExperimentMemory carry pre-flight
     estimator context to the next planner round via experiment_history,
@@ -553,7 +596,8 @@ class TestExperimentMemoryVramFields:
             pytest.param({}, None, None, id="defaults_both_none"),
             pytest.param(
                 {"vram_estimate_gb": 2.3, "vram_budget_gb": 4.0},
-                2.3, 4.0,
+                2.3,
+                4.0,
                 id="concrete_values",
             ),
         ],
@@ -567,11 +611,13 @@ class TestExperimentMemoryVramFields:
         """Setting VRAM fields alone must not force the time fields — the two
         gates are independent. The per-round tuner populates whichever the
         gate saw."""
-        mem = ExperimentMemory.model_validate({
-            **self._base_memory(),
-            "vram_estimate_gb": 1.7,
-            "vram_budget_gb": 4.0,
-        })
+        mem = ExperimentMemory.model_validate(
+            {
+                **self._base_memory(),
+                "vram_estimate_gb": 1.7,
+                "vram_budget_gb": 4.0,
+            }
+        )
         assert mem.time_estimate_minutes is None
         assert mem.time_budget_minutes is None
         assert mem.time_mode is None
@@ -591,8 +637,8 @@ class TestExperimentMemoryVramFields:
 # records where the gate did not run still validate. See §10.14 K.2.5-8.
 # ---------------------------------------------------------------------------
 
-class TestExperimentMemoryInferenceBatchUncalibrated:
 
+class TestExperimentMemoryInferenceBatchUncalibrated:
     def _base_memory(self):
         return {"expert_advice_followed": "test", "hypothesis": "test"}
 
@@ -609,10 +655,12 @@ class TestExperimentMemoryInferenceBatchUncalibrated:
         assert mem.inference_batch_uncalibrated == expected
 
     def test_field_round_trips_through_json(self):
-        mem = ExperimentMemory.model_validate({
-            **self._base_memory(),
-            "inference_batch_uncalibrated": True,
-        })
+        mem = ExperimentMemory.model_validate(
+            {
+                **self._base_memory(),
+                "inference_batch_uncalibrated": True,
+            }
+        )
         reloaded = ExperimentMemory.model_validate_json(mem.model_dump_json())
         assert reloaded.inference_batch_uncalibrated is True
 
@@ -631,8 +679,8 @@ class TestExperimentMemoryInferenceBatchUncalibrated:
 # See docs/resource_estimator_implement.md §10.13.2.
 # ---------------------------------------------------------------------------
 
-class TestGateExhaustionInfo:
 
+class TestGateExhaustionInfo:
     def _full_kwargs(self):
         """One realistic populated instance — VRAM-bound trial-mode failure
         mirroring the §10.13.3 example: 9 attempts, all VRAM-gated, baseline
@@ -672,14 +720,16 @@ class TestGateExhaustionInfo:
         """Only counts + active_mode + summary_message are required — all
         budget/factor fields default to None so a gate-exhaustion record can
         be built even when one axis is fully disabled."""
-        info = GateExhaustionInfo.model_validate({
-            "total_attempts": 3,
-            "vram_gated_attempts": 0,
-            "time_gated_attempts": 3,
-            "other_failure_attempts": 0,
-            "active_mode": "formal",
-            "summary_message": "All 3 attempts were rejected by the time gate.",
-        })
+        info = GateExhaustionInfo.model_validate(
+            {
+                "total_attempts": 3,
+                "vram_gated_attempts": 0,
+                "time_gated_attempts": 3,
+                "other_failure_attempts": 0,
+                "active_mode": "formal",
+                "summary_message": "All 3 attempts were rejected by the time gate.",
+            }
+        )
         assert info.vram_budget_gb is None
         assert info.time_budget_minutes is None
         assert info.baseline_vram_estimate_gb is None
@@ -723,7 +773,8 @@ class TestGateExhaustionInfo:
         "patterns, expected",
         [
             pytest.param(
-                None, [],
+                None,
+                [],
                 id="default_empty_when_omitted",
             ),
             pytest.param(
@@ -819,7 +870,6 @@ class TestHyperparamTuningOutputGateExhaustion:
 
 
 class TestExperimentRecordOOM:
-
     def test_valid_oom_record(self, valid_oom_record):
         rec = ExperimentRecord.model_validate(valid_oom_record)
         assert rec.status == "skipped_oom_risk"
@@ -849,22 +899,22 @@ class TestExperimentRecordSchemaViolation:
 
     def _base_record(self):
         return {
-            "exp_id":          "dual_path_skip_fusion_cnn_run_007",
-            "status":          "skipped_schema_violation",
-            "model_type":      "dual_path_skip_fusion_cnn",
-            "timestamp":       "2026-04-17 14:00:00",
-            "file_index":      6,
-            "params":          {"model_config": {}, "train_config": {}, "loss_config": {}},
+            "exp_id": "dual_path_skip_fusion_cnn_run_007",
+            "status": "skipped_schema_violation",
+            "model_type": "dual_path_skip_fusion_cnn",
+            "timestamp": "2026-04-17 14:00:00",
+            "file_index": 6,
+            "params": {"model_config": {}, "train_config": {}, "loss_config": {}},
             "denoising_score": None,
             "memory": {
                 "expert_advice_followed": "",
-                "hypothesis":    "widen bottleneck",
-                "conclusion":    (
+                "hypothesis": "widen bottleneck",
+                "conclusion": (
                     "Skipped: config violated plugin schema. "
                     "Violating fields: context_bottleneck_channels. "
                     "Offending values: stem=32, l2=96, l3=128, bottleneck=96."
                 ),
-                "discovery":     "nondecreasing channels rule enforced by plugin",
+                "discovery": "nondecreasing channels rule enforced by plugin",
                 "memory_update": (
                     "DO NOT repeat context_bottleneck_channels=96 with "
                     "context_level3_channels=128. Plugin requires "
@@ -938,8 +988,8 @@ class TestExperimentRecordExecutionErrors:
 # 3. Exit validation — HyperparamTuningOutput
 # ---------------------------------------------------------------------------
 
-class TestHyperparamTuningOutput:
 
+class TestHyperparamTuningOutput:
     def test_valid_completed_output_baseline(self, valid_output_dict):
         out = HyperparamTuningOutput.model_validate(valid_output_dict)
         assert out.status == "completed"
@@ -957,13 +1007,18 @@ class TestHyperparamTuningOutput:
                     "best_denoising_score": None,
                     "best_config": None,
                 },
-                "failed", None,
+                "failed",
+                None,
                 id="failed",
             ),
         ],
     )
     def test_valid_status_variants(
-        self, valid_output_dict, overrides, expected_status, expected_best_score,
+        self,
+        valid_output_dict,
+        overrides,
+        expected_status,
+        expected_best_score,
     ):
         """The two non-completed valid status Literals (partial, failed)
         validate and surface the right scalar pass-throughs."""
@@ -987,7 +1042,10 @@ class TestHyperparamTuningOutput:
         assert missing_field in str(exc.value)
 
     def test_all_records_validated_as_experiment_records(
-        self, valid_output_dict, valid_success_record, valid_oom_record,
+        self,
+        valid_output_dict,
+        valid_success_record,
+        valid_oom_record,
     ):
         valid_output_dict["all_records"] = [valid_success_record, valid_oom_record]
         out = HyperparamTuningOutput.model_validate(valid_output_dict)
@@ -1004,6 +1062,7 @@ class TestHyperparamTuningOutput:
 # ---------------------------------------------------------------------------
 # Trial-mode fields — backward compatibility and new behavior
 # ---------------------------------------------------------------------------
+
 
 class TestTrialFieldsInput:
     """Verify trial fields on HyperparamTuningInput are optional and default
@@ -1056,7 +1115,8 @@ class TestTrialFieldsInput:
         "overrides, error_match",
         [
             pytest.param(
-                {"trial_strategy": "invalid_strategy"}, None,
+                {"trial_strategy": "invalid_strategy"},
+                None,
                 id="invalid_trial_strategy",
             ),
             pytest.param(
@@ -1065,7 +1125,8 @@ class TestTrialFieldsInput:
                 id="target_strategy_with_empty_files",
             ),
             pytest.param(
-                {"trial_portion": 1.5}, None,
+                {"trial_portion": 1.5},
+                None,
                 id="trial_portion_out_of_range",
             ),
         ],
@@ -1103,15 +1164,17 @@ class TestTrialFieldsExperimentRecord:
         assert rec.eval_psd_segments is None
 
     def test_record_with_trial_context(self, valid_success_record):
-        valid_success_record.update({
-            "is_trial":       True,
-            "trial_strategy": "snapshot",
-            "trial_portion":  0.1,
-            "eval_strategy":  "snapshot",
-            "eval_portion":   0.1,
-            "train_portion":  0.1,
-            "file_vector":    [float("nan")] * 20,
-        })
+        valid_success_record.update(
+            {
+                "is_trial": True,
+                "trial_strategy": "snapshot",
+                "trial_portion": 0.1,
+                "eval_strategy": "snapshot",
+                "eval_portion": 0.1,
+                "train_portion": 0.1,
+                "file_vector": [float("nan")] * 20,
+            }
+        )
         valid_success_record["file_vector"][6] = 0.85
         rec = ExperimentRecord.model_validate(valid_success_record)
         assert rec.is_trial is True
@@ -1119,11 +1182,13 @@ class TestTrialFieldsExperimentRecord:
         assert rec.file_vector[6] == 0.85
 
     def test_record_with_target_strategy(self, valid_success_record):
-        valid_success_record.update({
-            "is_trial":       True,
-            "trial_strategy": "target",
-            "target_files":   [0, 10, 19],
-        })
+        valid_success_record.update(
+            {
+                "is_trial": True,
+                "trial_strategy": "target",
+                "target_files": [0, 10, 19],
+            }
+        )
         rec = ExperimentRecord.model_validate(valid_success_record)
         assert rec.target_files == [0, 10, 19]
 
@@ -1149,23 +1214,26 @@ class TestTrialFieldsOutput:
 # ExperimentPlan validation
 # ---------------------------------------------------------------------------
 
+
 class TestExperimentPlan:
     """Verify ExperimentPlan schema validates brain.plan() output correctly."""
 
     def test_valid_full_plan(self):
         """All fields present — validates correctly."""
-        plan = ExperimentPlan.model_validate({
-            "model_type": "punet",
-            "hypothesis": "Deeper architecture should help.",
-            "reasoning": "Previous runs showed depth matters.",
-            "model_config": {"depth": 4},
-            "train_config": {"lr": 1e-4, "epochs": 5},
-            "loss_config": {"loss_type": "focal"},
-            "is_trial": True,
-            "trial_strategy": "snapshot",
-            "trial_portion": 0.2,
-            "train_validation_align": False,
-        })
+        plan = ExperimentPlan.model_validate(
+            {
+                "model_type": "punet",
+                "hypothesis": "Deeper architecture should help.",
+                "reasoning": "Previous runs showed depth matters.",
+                "model_config": {"depth": 4},
+                "train_config": {"lr": 1e-4, "epochs": 5},
+                "loss_config": {"loss_type": "focal"},
+                "is_trial": True,
+                "trial_strategy": "snapshot",
+                "trial_portion": 0.2,
+                "train_validation_align": False,
+            }
+        )
         assert plan.model_type == "punet"
         assert plan.is_trial is True
         assert plan.trial_portion == 0.2
@@ -1173,12 +1241,14 @@ class TestExperimentPlan:
 
     def test_defaults_when_trial_fields_omitted(self):
         """Only experiment fields provided — trial fields get defaults."""
-        plan = ExperimentPlan.model_validate({
-            "model_type": "fcnet",
-            "model_config": {"depth": 2},
-            "train_config": {"lr": 1e-3},
-            "loss_config": {"loss_type": "ce"},
-        })
+        plan = ExperimentPlan.model_validate(
+            {
+                "model_type": "fcnet",
+                "model_config": {"depth": 2},
+                "train_config": {"lr": 1e-3},
+                "loss_config": {"loss_type": "ce"},
+            }
+        )
         assert plan.is_trial is True  # default favors trial
         assert plan.trial_strategy == "snapshot"
         assert plan.trial_portion == 0.02
@@ -1196,15 +1266,18 @@ class TestExperimentPlan:
         "overrides, error_match",
         [
             pytest.param(
-                {"model_type": "punet", "trial_portion": 5.0}, None,
+                {"model_type": "punet", "trial_portion": 5.0},
+                None,
                 id="trial_portion_above_max",
             ),
             pytest.param(
-                {"model_type": "punet", "trial_portion": 0.0}, None,
+                {"model_type": "punet", "trial_portion": 0.0},
+                None,
                 id="trial_portion_below_min",
             ),
             pytest.param(
-                {"trial_strategy": "nonexistent"}, None,
+                {"trial_strategy": "nonexistent"},
+                None,
                 id="invalid_strategy_literal",
             ),
             pytest.param(
@@ -1237,17 +1310,20 @@ class TestExperimentPlan:
                     "loss_config": {"loss_type": "focal"},
                     "trial_portion": 5.0,  # invalid
                 },
-                "trial_portion", 0.02,
+                "trial_portion",
+                0.02,
                 id="invalid_field_falls_back_to_default",
             ),
             pytest.param(
                 {"model_type": "punet", "trial_portion": 0.3, "trial_strategy": "anchors"},
-                "trial_portion", 0.3,
+                "trial_portion",
+                0.3,
                 id="valid_input_passes_through",
             ),
             pytest.param(
                 [{"model_type": "punet", "hypothesis": "Wrapped in list", "trial_portion": 0.3}],
-                "trial_portion", 0.3,
+                "trial_portion",
+                0.3,
                 id="single_element_list_unwrapped",
             ),
         ],
@@ -1264,11 +1340,14 @@ class TestExperimentPlan:
         [
             pytest.param(
                 [{"model_type": "punet"}, {"model_type": "wavenet"}],
-                TypeError, "list of length 2",
+                TypeError,
+                "list of length 2",
                 id="multi_element_list_rejected",
             ),
             pytest.param(
-                "not a dict", TypeError, "expected a dict",
+                "not a dict",
+                TypeError,
+                "expected a dict",
                 id="non_dict_rejected",
             ),
         ],
@@ -1278,11 +1357,13 @@ class TestExperimentPlan:
             ExperimentPlan.with_defaults(bad_input)
 
     def test_target_strategy_with_files(self):
-        plan = ExperimentPlan.model_validate({
-            "is_trial": True,
-            "trial_strategy": "target",
-            "target_files": [0, 10, 19],
-        })
+        plan = ExperimentPlan.model_validate(
+            {
+                "is_trial": True,
+                "trial_strategy": "target",
+                "target_files": [0, 10, 19],
+            }
+        )
         assert plan.target_files == [0, 10, 19]
 
     def test_formal_plan(self):
@@ -1295,6 +1376,7 @@ class TestExperimentPlan:
 # TrialConfig validation
 # ---------------------------------------------------------------------------
 
+
 class TestTrialConfig:
     """Verify TrialConfig schema validates trial/formal decisions correctly."""
 
@@ -1305,8 +1387,13 @@ class TestTrialConfig:
         "kwargs, key_check",
         [
             pytest.param(
-                dict(is_trial=True, mode="trial", trial_strategy="snapshot",
-                     trial_portion=0.05, train_portion=0.1),
+                dict(
+                    is_trial=True,
+                    mode="trial",
+                    trial_strategy="snapshot",
+                    trial_portion=0.05,
+                    train_portion=0.1,
+                ),
                 lambda cfg: (
                     cfg.is_trial is True
                     and cfg.mode == "trial"
@@ -1328,8 +1415,9 @@ class TestTrialConfig:
                 id="single_file_mode",
             ),
             pytest.param(
-                dict(is_trial=True, mode="trial", trial_strategy="target",
-                     target_files=[0, 10, 19]),
+                dict(
+                    is_trial=True, mode="trial", trial_strategy="target", target_files=[0, 10, 19]
+                ),
                 lambda cfg: cfg.target_files == [0, 10, 19],
                 id="trial_target_with_files",
             ),
@@ -1348,8 +1436,7 @@ class TestTrialConfig:
                 id="single_file_without_file_index",
             ),
             pytest.param(
-                dict(is_trial=True, mode="trial", trial_strategy="target",
-                     target_files=[]),
+                dict(is_trial=True, mode="trial", trial_strategy="target", target_files=[]),
                 "target_files required",
                 id="trial_target_with_empty_files",
             ),
@@ -1394,6 +1481,7 @@ class TestTrialConfig:
 # Phase L — per-round attempt budget + fail-round abort schema fields
 # See docs/resource_estimator_implement.md §11.3.
 # ---------------------------------------------------------------------------
+
 
 class TestPhaseLAttemptBudgetInput:
     """Three new HyperparamTuningInput fields wired with schema defaults."""
@@ -1449,7 +1537,8 @@ class TestPhaseLAttemptBudgetOutput:
                     "consecutive_fail_rounds_at_exit": 0,
                     "termination_reason": "completed",
                 },
-                "completed", 0,
+                "completed",
+                0,
                 id="explicit_completed_run",
             ),
             pytest.param(
@@ -1457,13 +1546,18 @@ class TestPhaseLAttemptBudgetOutput:
                     "consecutive_fail_rounds_at_exit": 3,
                     "termination_reason": "aborted_fail_rounds",
                 },
-                "aborted_fail_rounds", 3,
+                "aborted_fail_rounds",
+                3,
                 id="aborted_fail_rounds_run",
             ),
         ],
     )
     def test_terminal_state_shapes(
-        self, valid_output_dict, overrides, expected_reason, expected_fail_rounds,
+        self,
+        valid_output_dict,
+        overrides,
+        expected_reason,
+        expected_fail_rounds,
     ):
         valid_output_dict.update(overrides)
         out = HyperparamTuningOutput.model_validate(valid_output_dict)
@@ -1473,10 +1567,8 @@ class TestPhaseLAttemptBudgetOutput:
     @pytest.mark.parametrize(
         "field, value",
         [
-            pytest.param("termination_reason", "max_attempts",
-                         id="invalid_termination_reason"),
-            pytest.param("consecutive_fail_rounds_at_exit", -1,
-                         id="negative_fail_rounds"),
+            pytest.param("termination_reason", "max_attempts", id="invalid_termination_reason"),
+            pytest.param("consecutive_fail_rounds_at_exit", -1, id="negative_fail_rounds"),
         ],
     )
     def test_invalid_terminal_state_rejected(self, valid_output_dict, field, value):
@@ -1521,11 +1613,11 @@ def _make_score_table_dict(num_sampled: int = 20):
     """Build a minimal but schema-valid ScoreComparisonTable dict."""
     rows = [
         {
-            "file_index":     i,
-            "raw_baseline":   0.1 * i,
-            "ground_truth":   0.5 * i,
-            "model":          0.3 * i,
-            "gain_vs_raw":    0.2 * i,
+            "file_index": i,
+            "raw_baseline": 0.1 * i,
+            "ground_truth": 0.5 * i,
+            "model": 0.3 * i,
+            "gain_vs_raw": 0.2 * i,
             "headroom_vs_gt": 0.2 * i,
         }
         for i in range(20)
@@ -1533,14 +1625,14 @@ def _make_score_table_dict(num_sampled: int = 20):
     return {
         "rows": rows,
         "aggregate": {
-            "raw_baseline_scalar":   1.0,
-            "ground_truth_scalar":   10.0,
-            "model_scalar":          5.0,
+            "raw_baseline_scalar": 1.0,
+            "ground_truth_scalar": 10.0,
+            "model_scalar": 5.0,
             "percent_of_ceiling_log": 0.5,
-            "num_sampled_files":     num_sampled,
+            "num_sampled_files": num_sampled,
         },
-        "s_max_global":      2.957e8,
-        "reference_source":  "reference_data/raw_and_ground_score.md",
+        "s_max_global": 2.957e8,
+        "reference_source": "reference_data/raw_and_ground_score.md",
         "rendered_markdown": "### stub table\n",
     }
 
@@ -1584,7 +1676,10 @@ class TestHyperparamTuningOutputScoreTables:
         ],
     )
     def test_single_score_table_populated(
-        self, valid_output_dict, field, num_sampled,
+        self,
+        valid_output_dict,
+        field,
+        num_sampled,
     ):
         valid_output_dict[field] = _make_score_table_dict(num_sampled=num_sampled)
         out = HyperparamTuningOutput.model_validate(valid_output_dict)

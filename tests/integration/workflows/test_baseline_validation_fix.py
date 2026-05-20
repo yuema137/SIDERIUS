@@ -29,6 +29,7 @@ Run with:
 
 DO NOT run in CI.
 """
+
 from __future__ import annotations
 
 import json
@@ -46,9 +47,7 @@ pytestmark = pytest.mark.real_run
 # Paths and constants
 # ---------------------------------------------------------------------------
 
-SIDERIUS_ROOT = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "..")
-)
+SIDERIUS_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 try:
     from execute_tools.data_paths import SIDERIUS_DATA_DIR
@@ -60,7 +59,10 @@ SEED_MODELS = ["wavenet", "punet"]
 
 SEED_PATHS = [
     os.path.join(
-        SIDERIUS_DATA_DIR, m, SEED_RUN_NAME, "agent",
+        SIDERIUS_DATA_DIR,
+        m,
+        SEED_RUN_NAME,
+        "agent",
         f"run_output_{SEED_RUN_NAME}_agent.json",
     )
     for m in SEED_MODELS
@@ -74,6 +76,7 @@ ADVICE_EXPLORE = os.path.join(SIDERIUS_ROOT, "tuner_advice", "explore_novel_v1.j
 # ---------------------------------------------------------------------------
 # Skip guards
 # ---------------------------------------------------------------------------
+
 
 def _skip_if_no_key():
     if not os.getenv("OPENAI_API_KEY"):
@@ -90,27 +93,27 @@ def _skip_if_no_seeds():
 # Helpers — load advice + LLM config the same way the chain runner does
 # ---------------------------------------------------------------------------
 
+
 def _load_advice(path: str) -> dict:
     """Load an advice JSON; list values get joined into one string (matches
     the chain runner's handling)."""
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         raw = json.load(f)
-    return {
-        k: ("\n".join(v) if isinstance(v, list) else v)
-        for k, v in raw.items()
-    }
+    return {k: ("\n".join(v) if isinstance(v, list) else v) for k, v in raw.items()}
 
 
 def _valid_seg_divisors() -> list[int]:
     """Valid segmentation_size divisors of psd_segment_length. Used to assert
     the proposer's emitted value passes the Phase A gate."""
     from execute_tools.dataset_config import TIDMAD
+
     return list(TIDMAD.valid_segmentation_sizes())
 
 
 # ---------------------------------------------------------------------------
 # Core runner — propose → implement → validate, no tuner
 # ---------------------------------------------------------------------------
+
 
 def _run_propose_implement_validate(
     *,
@@ -129,28 +132,28 @@ def _run_propose_implement_validate(
     Returns:
         tuple ``(proposal, impl_output, validation)`` for the test to inspect.
     """
-    from workflows.model_exploration import (
-        load_tuning_outputs_from_paths,
-        tuning_outputs_to_summaries,
-        _make_storage,
-        _load_vocab_seed,
-        _get_reasoning_pipeline,
-    )
-    from workflows.llm_config import WorkflowLLMConfig
     from agent.schemas.interpretation import InterpretationInput
-    from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import (
-        local_full_context,
+    from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import (
+        local_all_fields,
     )
     from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import (
         local_full_spec,
     )
-    from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import (
-        local_all_fields,
+    from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import (
+        local_full_context,
     )
-    from nodes.result_interpretation_agent import ResultInterpretationAgent
-    from nodes.ml_model_proposal_agent import MLModelProposalAgent
-    from nodes.ml_model_implementor import MLModelImplementor
     from nodes.ml_code_validator_agent import MLCodeValidatorAgent
+    from nodes.ml_model_implementor import MLModelImplementor
+    from nodes.ml_model_proposal_agent import MLModelProposalAgent
+    from nodes.result_interpretation_agent import ResultInterpretationAgent
+    from workflows.llm_config import WorkflowLLMConfig
+    from workflows.model_exploration import (
+        _get_reasoning_pipeline,
+        _load_vocab_seed,
+        _make_storage,
+        load_tuning_outputs_from_paths,
+        tuning_outputs_to_summaries,
+    )
 
     # --- Setup ---
     run_dir = tmp_path / run_name
@@ -194,7 +197,8 @@ def _run_propose_implement_validate(
     # --- Step 2: Propose ---
     attempt_storage = _make_storage(str(attempt_dir), run_name)
     propose_input = local_full_context(
-        interpretation, attempt_storage,
+        interpretation,
+        attempt_storage,
         vocab_seed=vocab_seed,
         reasoning_pipeline=reasoning_pipeline,
         human_advice=advice.get("propose"),
@@ -217,8 +221,10 @@ def _run_propose_implement_validate(
         **llm_config.get("propose"),
     ).run(propose_input)
     print(f"  Proposed model: {proposal.model_name}")
-    print(f"  baseline_config.model_config: "
-          f"{json.dumps(proposal.baseline_config.get('model_config', {}), indent=2)}")
+    print(
+        f"  baseline_config.model_config: "
+        f"{json.dumps(proposal.baseline_config.get('model_config', {}), indent=2)}"
+    )
 
     # --- Step 3: Implement ---
     impl_input = local_full_spec(proposal, attempt_storage)
@@ -238,7 +244,8 @@ def _run_propose_implement_validate(
     # --- Step 4: Validate ---
     valid_llm = llm_config.get("validate")
     valid_input = local_all_fields(
-        impl_output, attempt_storage,
+        impl_output,
+        attempt_storage,
         llm_provider=valid_llm.get("provider", "openai"),
         llm_model_id=valid_llm.get("model_id", "gpt-5.4-mini"),
     )
@@ -259,6 +266,7 @@ def _run_propose_implement_validate(
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestBaselineValidationFix:
     """Replays the two iter-1 failure modes from 2026-04-16.
@@ -353,8 +361,10 @@ class TestBaselineValidationFix:
         # baseline values ourselves, mimicking what the tuner will do. This
         # is a direct test of the B.2a contract.
         import importlib.util
+
         spec = importlib.util.spec_from_file_location(
-            proposal.model_name, impl_output.model_file_path,
+            proposal.model_name,
+            impl_output.model_file_path,
         )
         assert spec is not None and spec.loader is not None
         mod = importlib.util.module_from_spec(spec)

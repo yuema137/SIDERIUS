@@ -24,6 +24,7 @@ Usage (from repo root, on a GPU host — lilab or SDSC):
 Output: JSON payload + rendered Appendix A.2 row to stdout. Also writes
 ``docs/phase66_telemetry/evidence_gate_result.json`` for the doc-sync step.
 """
+
 from __future__ import annotations
 
 import json
@@ -47,45 +48,43 @@ os.environ["SIDERIUS_PLUGIN_DIRS"] = _PLUGIN_DIR
 
 import torch  # noqa: E402
 
-from ml_models.loss_models_sandbox    import get_criterion  # noqa: E402
-from ml_models.models_format_sandbox  import LossConfig, PLUGIN_CONFIG_REGISTRY  # noqa: E402
-from ml_models.models_sandbox         import MODEL_REGISTRY  # noqa: E402
-from ml_models.plugin_loader          import extend_registries  # noqa: E402
+from ml_models.loss_models_sandbox import get_criterion  # noqa: E402
+from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY, LossConfig  # noqa: E402
+from ml_models.models_sandbox import MODEL_REGISTRY  # noqa: E402
+from ml_models.plugin_loader import extend_registries  # noqa: E402
 
 # Force plugin registration — ``evaluate_vram_skill`` reads MODEL_REGISTRY
 # directly, so the plugin must already be loaded before we call run_skill.
 _loaded = extend_registries(MODEL_REGISTRY, PLUGIN_CONFIG_REGISTRY)
 assert "dynamic_depth_simple" in _loaded, (
-    f"Expected dynamic_depth_simple plugin to load from {_PLUGIN_DIR}; "
-    f"loaded={_loaded}"
+    f"Expected dynamic_depth_simple plugin to load from {_PLUGIN_DIR}; loaded={_loaded}"
 )
 
+from agent.skills.evaluate_vram_skill.structural_probe import (  # noqa: E402
+    probe_activation_footprint,
+)
 from agent.skills.evaluate_vram_skill.wrapper import (  # noqa: E402
     _build_model,
     _compose_inference_peak,
     _compose_training_peak,
     run_skill,
 )
-from agent.skills.evaluate_vram_skill.structural_probe import (  # noqa: E402
-    probe_activation_footprint,
-)
 from core.hardware_context import discover  # noqa: E402
-
 
 # ── Telemetry to compare against (from stage2_iter_001_telemetry.json) ──────
 
 MEASURED = {
     "training": {
-        "batch_size":           8,
-        "segmentation_size":    10000,
+        "batch_size": 8,
+        "segmentation_size": 10000,
         "peak_allocated_bytes": 883_782_656,
-        "peak_allocated_gb":    0.8231,
+        "peak_allocated_gb": 0.8231,
     },
     "inference": {
-        "inference_batch":      25,
-        "segmentation_size":    10000,
+        "inference_batch": 25,
+        "segmentation_size": 10000,
         "peak_allocated_bytes": 452_210_176,
-        "peak_allocated_gb":    0.4212,
+        "peak_allocated_gb": 0.4212,
     },
 }
 
@@ -93,39 +92,40 @@ MEASURED = {
 # with capture_stage2_vram_telemetry.py on purpose — diverging them would
 # invalidate the apples-to-apples comparison.
 MODEL_CONFIG = {
-    "model_type":         "dynamic_depth_simple",
-    "segmentation_size":  10000,
-    "batch_size":         8,
-    "input_channels":     16,
-    "residual_channels":  32,
-    "gate_channels":      64,
-    "kernel_size":        5,
-    "skip_channels":      32,
-    "embed_dim":          64,
-    "num_blocks":         2,
+    "model_type": "dynamic_depth_simple",
+    "segmentation_size": 10000,
+    "batch_size": 8,
+    "input_channels": 16,
+    "residual_channels": 32,
+    "gate_channels": 64,
+    "kernel_size": 5,
+    "skip_channels": 32,
+    "embed_dim": 64,
+    "num_blocks": 2,
 }
 TRAIN_CONFIG = {
-    "lr":             0.0003,
-    "epochs":         1,
-    "batch_size":     8,
+    "lr": 0.0003,
+    "epochs": 1,
+    "batch_size": 8,
     "optimizer_type": "adamw",  # overhead primitive normalises adamw → adam
-    "weight_decay":   1e-05,
-    "device":         "cuda",
+    "weight_decay": 1e-05,
+    "device": "cuda",
 }
 LOSS_CONFIG = {
-    "loss_type":         "focal",
-    "alpha":             0.25,
-    "gamma":             2.0,
-    "beta":              None,
-    "reduction":         "mean",
+    "loss_type": "focal",
+    "alpha": 0.25,
+    "gamma": 2.0,
+    "beta": None,
+    "reduction": "mean",
     "use_class_weights": False,
 }
 
 
-_GB = 1024 ** 3
+_GB = 1024**3
 
 
 # ── Apples-to-apples probes at the measured batch sizes ──────────────────────
+
 
 def _apples_training_peak() -> tuple[int, dict]:
     """Compose the training peak at the exact (B=8, T=10000) the telemetry
@@ -137,8 +137,10 @@ def _apples_training_peak() -> tuple[int, dict]:
     # Focal loss uses CE-family target shape (class indices).
     tgt = torch.zeros((B, T), dtype=torch.long)
     probe = probe_activation_footprint(
-        model=model, loss_module=loss_module,
-        input_sample=inp, target_sample=tgt,
+        model=model,
+        loss_module=loss_module,
+        input_sample=inp,
+        target_sample=tgt,
         mode="training",
     )
     # adamw normalises to adam in overhead.training_overhead_bytes — the
@@ -156,8 +158,10 @@ def _apples_inference_peak() -> tuple[int, dict]:
     T = MEASURED["inference"]["segmentation_size"]
     inp = torch.zeros((B, T), dtype=torch.long)
     probe = probe_activation_footprint(
-        model=model, loss_module=None,
-        input_sample=inp, target_sample=None,
+        model=model,
+        loss_module=None,
+        input_sample=inp,
+        target_sample=None,
         mode="inference",
     )
     peak, breakdown = _compose_inference_peak(probe)
@@ -165,6 +169,7 @@ def _apples_inference_peak() -> tuple[int, dict]:
 
 
 # ── Skill-path invocation (records what the tuner will see at runtime) ──────
+
 
 def _skill_path_result() -> dict:
     ctx = discover()
@@ -180,6 +185,7 @@ def _skill_path_result() -> dict:
 
 # ── Tolerance check + pretty output ──────────────────────────────────────────
 
+
 def _delta(predicted: int, measured: int) -> tuple[float, bool]:
     """Return (signed relative delta, within-±10%)."""
     rel = (predicted - measured) / measured
@@ -188,44 +194,44 @@ def _delta(predicted: int, measured: int) -> tuple[float, bool]:
 
 def main() -> None:
     train_peak, train_bd = _apples_training_peak()
-    inf_peak,   inf_bd   = _apples_inference_peak()
-    skill_result         = _skill_path_result()
+    inf_peak, inf_bd = _apples_inference_peak()
+    skill_result = _skill_path_result()
 
     train_delta, train_ok = _delta(train_peak, MEASURED["training"]["peak_allocated_bytes"])
-    inf_delta,   inf_ok   = _delta(inf_peak,   MEASURED["inference"]["peak_allocated_bytes"])
+    inf_delta, inf_ok = _delta(inf_peak, MEASURED["inference"]["peak_allocated_bytes"])
     gate_pass = train_ok and inf_ok
 
     payload = {
         "phases": {
             "training": {
-                "batch_size":           MEASURED["training"]["batch_size"],
-                "segmentation_size":    MEASURED["training"]["segmentation_size"],
-                "measured_peak_bytes":  MEASURED["training"]["peak_allocated_bytes"],
-                "measured_peak_gb":     MEASURED["training"]["peak_allocated_gb"],
+                "batch_size": MEASURED["training"]["batch_size"],
+                "segmentation_size": MEASURED["training"]["segmentation_size"],
+                "measured_peak_bytes": MEASURED["training"]["peak_allocated_bytes"],
+                "measured_peak_gb": MEASURED["training"]["peak_allocated_gb"],
                 "predicted_peak_bytes": train_peak,
-                "predicted_peak_gb":    round(train_peak / _GB, 4),
-                "relative_delta":       round(train_delta, 4),
-                "within_10pct":         train_ok,
-                "breakdown":            train_bd,
+                "predicted_peak_gb": round(train_peak / _GB, 4),
+                "relative_delta": round(train_delta, 4),
+                "within_10pct": train_ok,
+                "breakdown": train_bd,
             },
             "inference": {
-                "inference_batch":      MEASURED["inference"]["inference_batch"],
-                "segmentation_size":    MEASURED["inference"]["segmentation_size"],
-                "measured_peak_bytes":  MEASURED["inference"]["peak_allocated_bytes"],
-                "measured_peak_gb":     MEASURED["inference"]["peak_allocated_gb"],
+                "inference_batch": MEASURED["inference"]["inference_batch"],
+                "segmentation_size": MEASURED["inference"]["segmentation_size"],
+                "measured_peak_bytes": MEASURED["inference"]["peak_allocated_bytes"],
+                "measured_peak_gb": MEASURED["inference"]["peak_allocated_gb"],
                 "predicted_peak_bytes": inf_peak,
-                "predicted_peak_gb":    round(inf_peak / _GB, 4),
-                "relative_delta":       round(inf_delta, 4),
-                "within_10pct":         inf_ok,
-                "breakdown":            inf_bd,
+                "predicted_peak_gb": round(inf_peak / _GB, 4),
+                "relative_delta": round(inf_delta, 4),
+                "within_10pct": inf_ok,
+                "breakdown": inf_bd,
             },
         },
         "gate_pass": gate_pass,
         "skill_path_snapshot": {
-            "status":          skill_result.get("status"),
-            "feasible":        skill_result.get("feasible"),
-            "estimated_gb":    skill_result.get("estimated_gb"),
-            "dominant_phase":  skill_result.get("dominant_phase"),
+            "status": skill_result.get("status"),
+            "feasible": skill_result.get("feasible"),
+            "estimated_gb": skill_result.get("estimated_gb"),
+            "dominant_phase": skill_result.get("dominant_phase"),
             "inference_batch": skill_result.get("inference_batch"),
             "phase_breakdown": {
                 k: {"total_bytes": v["total_bytes"]}
@@ -245,20 +251,30 @@ def main() -> None:
             f"| Δ {delta:+.2%} | {flag}"
         )
 
-    print(_row(
-        "training",
-        MEASURED["training"]["peak_allocated_gb"],
-        train_peak / _GB, train_delta, train_ok,
-    ))
-    print(_row(
-        "inference",
-        MEASURED["inference"]["peak_allocated_gb"],
-        inf_peak / _GB, inf_delta, inf_ok,
-    ))
+    print(
+        _row(
+            "training",
+            MEASURED["training"]["peak_allocated_gb"],
+            train_peak / _GB,
+            train_delta,
+            train_ok,
+        )
+    )
+    print(
+        _row(
+            "inference",
+            MEASURED["inference"]["peak_allocated_gb"],
+            inf_peak / _GB,
+            inf_delta,
+            inf_ok,
+        )
+    )
     print(f"\n  Gate: {'PASS' if gate_pass else 'FAIL'} (tolerance ±10%)")
-    print(f"\n  Skill-path snapshot: estimated_gb={skill_result.get('estimated_gb')}, "
-          f"dominant={skill_result.get('dominant_phase')}, "
-          f"inference_batch={skill_result.get('inference_batch')}")
+    print(
+        f"\n  Skill-path snapshot: estimated_gb={skill_result.get('estimated_gb')}, "
+        f"dominant={skill_result.get('dominant_phase')}, "
+        f"inference_batch={skill_result.get('inference_batch')}"
+    )
     print("=" * 72 + "\n")
 
     out_path = _REPO_ROOT / "docs" / "phase66_telemetry" / "evidence_gate_result.json"

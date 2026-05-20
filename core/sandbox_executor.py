@@ -1,17 +1,24 @@
 # core/sandbox_executor.py
-import os
-import re
-import sys
 import json
-import time
+import os
 import random
+import re
 import subprocess
-import datetime
-from typing import Callable, Dict, Any, List, Optional
-from ml_models.models_format_sandbox import get_config_class, TrainConfig, LossConfig, ExperimentConfig, PLUGIN_CONFIG_REGISTRY
-from execute_tools.scoring_utils import coerce_nonfinite_to_none, validate_sample_set
-from execute_tools.data_paths import TIDMAD_DATA_DIR
+import sys
+import time
+from collections.abc import Callable
+from typing import Any
+
 from core.inference_defaults import inference_batch_for
+from execute_tools.data_paths import TIDMAD_DATA_DIR
+from execute_tools.scoring_utils import coerce_nonfinite_to_none, validate_sample_set
+from ml_models.models_format_sandbox import (
+    PLUGIN_CONFIG_REGISTRY,
+    ExperimentConfig,
+    LossConfig,
+    TrainConfig,
+    get_config_class,
+)
 
 
 def _tidmad_data_dir() -> str:
@@ -67,9 +74,9 @@ def _tidmad_data_dir() -> str:
 # code, and that was the exact codepath the 2026-04-20 incident hit.
 
 _ROLE_DEFAULT_RSS_GB = {
-    "training":  40,   # CUDA — 20 (static) + 16 (working VRAM) + 4 (safety)
-    "inference": 40,   # CUDA — same breakdown as training
-    "scoring":   24,   # CPU-only — kept at original value, protects the 2026-04-20 incident path
+    "training": 40,  # CUDA — 20 (static) + 16 (working VRAM) + 4 (safety)
+    "inference": 40,  # CUDA — same breakdown as training
+    "scoring": 24,  # CPU-only — kept at original value, protects the 2026-04-20 incident path
 }
 
 
@@ -107,7 +114,7 @@ def _subprocess_rss_gb(role: str) -> int:
     return v if v >= 0 else _ROLE_DEFAULT_RSS_GB[role]
 
 
-def _limited_preexec(gb: int) -> Optional[Callable[[], None]]:
+def _limited_preexec(gb: int) -> Callable[[], None] | None:
     """Return a ``preexec_fn`` that caps the child's virtual address space.
 
     The callable is invoked by ``subprocess`` after ``fork`` and before
@@ -128,7 +135,7 @@ def _limited_preexec(gb: int) -> Optional[Callable[[], None]]:
         import resource as _resource
     except ImportError:
         return None
-    limit_bytes = gb * (1024 ** 3)
+    limit_bytes = gb * (1024**3)
 
     def _apply_limit() -> None:
         _resource.setrlimit(_resource.RLIMIT_AS, (limit_bytes, limit_bytes))
@@ -223,7 +230,7 @@ def get_plugin_dir(workspace: str, run_name: str) -> str:
     return os.path.join(os.path.abspath(workspace), "plugins", run_name)
 
 
-def _subprocess_env(plugin_dir: Optional[str] = None) -> dict:
+def _subprocess_env(plugin_dir: str | None = None) -> dict:
     """
     Returns an env dict for subprocesses with ml_models and execute_tools
     added to PYTHONPATH, so flat imports in those scripts resolve correctly
@@ -252,24 +259,29 @@ def _subprocess_env(plugin_dir: Optional[str] = None) -> dict:
         env["SIDERIUS_PLUGIN_DIRS"] = plugin_dir
     return env
 
+
 # --- Storage Strategies ---
+
 
 class BaseRecorder:
     """Base class for experiment recording."""
-    def save_record(self, record: Dict[str, Any]):
+
+    def save_record(self, record: dict[str, Any]):
         raise NotImplementedError
 
     def get_summary(self) -> list:
         raise NotImplementedError
 
+
 class LocalRecorder(BaseRecorder):
     """File-based recording for persistent agent memory."""
+
     def __init__(self, record_dir: str, summary_file: str, run_name: str):
         self.summary_file = summary_file
         self.record_dir = os.path.join(record_dir, run_name)
         _ensure_dir(self.record_dir)
 
-    def save_record(self, record: Dict[str, Any]):
+    def save_record(self, record: dict[str, Any]):
         exp_id = record["exp_id"]
 
         # Coerce float('-inf') no-signal sentinels to JSON null so the on-disk
@@ -278,38 +290,43 @@ class LocalRecorder(BaseRecorder):
 
         # every detail json should stay in the run_name folder
         detail_path = os.path.join(self.record_dir, f"{exp_id}.json")
-        with open(detail_path, 'w', encoding='utf-8') as f:
+        with open(detail_path, "w", encoding="utf-8") as f:
             json.dump(safe_record, f, indent=4, ensure_ascii=False)
 
         summary = self.get_summary()
-        existing_idx = next((i for i, item in enumerate(summary) if item.get("exp_id") == exp_id), None)
+        existing_idx = next(
+            (i for i, item in enumerate(summary) if item.get("exp_id") == exp_id), None
+        )
 
         if existing_idx is not None:
             summary[existing_idx] = safe_record
         else:
             summary.append(safe_record)
 
-        with open(self.summary_file, 'w', encoding='utf-8') as f:
+        with open(self.summary_file, "w", encoding="utf-8") as f:
             json.dump(summary, f, indent=4, ensure_ascii=False)
 
     def get_summary(self) -> list:
         if os.path.exists(self.summary_file):
             try:
-                with open(self.summary_file, 'r', encoding='utf-8') as f:
+                with open(self.summary_file, encoding="utf-8") as f:
                     return json.load(f)
             except:
                 return []
         return []
 
+
 class MongoRecorder(BaseRecorder):
     """MongoDB-based recording for robust development."""
+
     def __init__(self, uri: str, db_name: str):
         from pymongo import MongoClient
+
         self.client = MongoClient(uri)
         self.db = self.client[db_name]
         self.collection = self.db["experiments"]
 
-    def save_record(self, record: Dict[str, Any]):
+    def save_record(self, record: dict[str, Any]):
         self.collection.update_one({"exp_id": record["exp_id"]}, {"$set": record}, upsert=True)
 
     def get_summary(self) -> list:
@@ -317,7 +334,9 @@ class MongoRecorder(BaseRecorder):
         cursor = self.collection.find({}, {"_id": 0})
         return list(cursor)
 
+
 # --- Main Executor ---
+
 
 def _ensure_dir(path: str) -> None:
     """Create directory if it does not exist. Raises RuntimeError with a clear message on failure."""
@@ -339,16 +358,23 @@ def _ensure_dir(path: str) -> None:
             "Check filesystem permissions."
         )
 
+
 class TidmadSandbox:
-    def __init__(self, metadata_source: str = "local", mongodb_uri: Optional[str] = None,
-                 run_name: str = "test_run", workspace: str = "./siderius_workspace",
-                 progress_bar: bool = False, file_index: int = 6):
+    def __init__(
+        self,
+        metadata_source: str = "local",
+        mongodb_uri: str | None = None,
+        run_name: str = "test_run",
+        workspace: str = "./siderius_workspace",
+        progress_bar: bool = False,
+        file_index: int = 6,
+    ):
         self.base_dir = os.path.abspath(workspace)
         self.dirs = {
             "configs": os.path.join(self.base_dir, "configs", run_name),
             "models": os.path.join(self.base_dir, "cached_models"),
             "records": os.path.join(self.base_dir, "records"),
-            "data": _tidmad_data_dir()
+            "data": _tidmad_data_dir(),
         }
         for key, d in self.dirs.items():
             if key != "data":  # data dir is read-only input, not agent-generated output
@@ -375,12 +401,12 @@ class TidmadSandbox:
             self.recorder = MongoRecorder(mongodb_uri, "tidmad_db")
         else:
             self.recorder = LocalRecorder(
-                self.dirs["records"], 
+                self.dirs["records"],
                 os.path.join(self.base_dir, f"summary_{self.run_name}.json"),
-                self.run_name
+                self.run_name,
             )
 
-    def save_record(self, record: Dict[str, Any]):
+    def save_record(self, record: dict[str, Any]):
         """Direct access for ml_hyperparameter_tune_agent to save finalized research records."""
         self.recorder.save_record(record)
 
@@ -388,7 +414,9 @@ class TidmadSandbox:
         """Retrieves experiment history for the Agent's planning phase."""
         return self.recorder.get_summary()
 
-    def _validate_configs(self, model_type: str, m_cfg: Dict, t_cfg: Dict, l_cfg: Dict, exp_id: str, run_name: str):
+    def _validate_configs(
+        self, model_type: str, m_cfg: dict, t_cfg: dict, l_cfg: dict, exp_id: str, run_name: str
+    ):
         """Internal helper to validate dicts using the appropriate config schema.
 
         Plugin models bypass ExperimentConfig (which has hardcoded Literals for core
@@ -405,7 +433,7 @@ class TidmadSandbox:
                 validated_l = LossConfig(**l_cfg).model_dump()
                 return validated_m, validated_t, validated_l
             except Exception as e:
-                raise ValueError(f"Plugin Experiment Configuration Rejected: {str(e)}")
+                raise ValueError(f"Plugin Experiment Configuration Rejected: {e!s}")
 
         # Core model: use the strict ExperimentConfig with cross-validation
         try:
@@ -424,11 +452,20 @@ class TidmadSandbox:
                 exp_config.loss_config.model_dump(),
             )
         except Exception as e:
-            raise ValueError(f"Experiment Configuration Rejected: {str(e)}")
+            raise ValueError(f"Experiment Configuration Rejected: {e!s}")
 
-    def execute_training(self, exp_id: str, run_name: str, model_type: str, m_cfg: Dict, t_cfg: Dict, l_cfg: Dict,
-                         sample_set: Optional[Dict] = None, train_portion: Optional[float] = None,
-                         train_base_seed: Optional[int] = None):
+    def execute_training(
+        self,
+        exp_id: str,
+        run_name: str,
+        model_type: str,
+        m_cfg: dict,
+        t_cfg: dict,
+        l_cfg: dict,
+        sample_set: dict | None = None,
+        train_portion: float | None = None,
+        train_base_seed: int | None = None,
+    ):
         """Executes the training physical script.
 
         Args:
@@ -443,27 +480,46 @@ class TidmadSandbox:
             vm, vt, vl = self._validate_configs(model_type, m_cfg, t_cfg, l_cfg, exp_id, run_name)
 
             paths = {
-                "m": os.path.abspath(os.path.join(self.dirs["configs"], f"model_config_{exp_id}.json")),
-                "t": os.path.abspath(os.path.join(self.dirs["configs"], f"train_config_{exp_id}.json")),
-                "l": os.path.abspath(os.path.join(self.dirs["configs"], f"loss_config_{exp_id}.json"))
+                "m": os.path.abspath(
+                    os.path.join(self.dirs["configs"], f"model_config_{exp_id}.json")
+                ),
+                "t": os.path.abspath(
+                    os.path.join(self.dirs["configs"], f"train_config_{exp_id}.json")
+                ),
+                "l": os.path.abspath(
+                    os.path.join(self.dirs["configs"], f"loss_config_{exp_id}.json")
+                ),
             }
             for k, v in zip(["m", "t", "l"], [vm, vt, vl]):
-                with open(paths[k], 'w') as f: json.dump(v, f)
+                with open(paths[k], "w") as f:
+                    json.dump(v, f)
 
-            cmd = [sys.executable, "execute_tools/train_engine_sandbox.py",
-                    "--model_cfg", paths["m"],
-                    "--train_cfg", paths["t"],
-                    "--loss_cfg", paths["l"],
-                    "--exp_id", exp_id,
-                    "--run_name", run_name,
-                    "--sandbox_dir", self.base_dir,
-                    "--file_index", str(self.file_index)]
+            cmd = [
+                sys.executable,
+                "execute_tools/train_engine_sandbox.py",
+                "--model_cfg",
+                paths["m"],
+                "--train_cfg",
+                paths["t"],
+                "--loss_cfg",
+                paths["l"],
+                "--exp_id",
+                exp_id,
+                "--run_name",
+                run_name,
+                "--sandbox_dir",
+                self.base_dir,
+                "--file_index",
+                str(self.file_index),
+            ]
 
             # Validate and write data scope SampleSet to JSON
             if sample_set is not None:
                 sample_set = validate_sample_set(sample_set)
-                ss_path = os.path.abspath(os.path.join(self.dirs["configs"], f"train_sample_set_{exp_id}.json"))
-                with open(ss_path, 'w') as f:
+                ss_path = os.path.abspath(
+                    os.path.join(self.dirs["configs"], f"train_sample_set_{exp_id}.json")
+                )
+                with open(ss_path, "w") as f:
                     json.dump(sample_set, f)
                 cmd.extend(["--sample_set_json", ss_path])
                 if train_portion is not None:
@@ -473,15 +529,15 @@ class TidmadSandbox:
 
             print(f">>> [Executor] Running training for {exp_id}...")
             result = subprocess.run(
-                    cmd,
-                    check=True,
-                    stdout=None if self.progress_bar else subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    cwd=os.getcwd(),
-                    env=_subprocess_env(plugin_dir=self.plugin_dir),
-                    preexec_fn=_limited_preexec(_subprocess_rss_gb("training")),
-                )
+                cmd,
+                check=True,
+                stdout=None if self.progress_bar else subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=os.getcwd(),
+                env=_subprocess_env(plugin_dir=self.plugin_dir),
+                preexec_fn=_limited_preexec(_subprocess_rss_gb("training")),
+            )
 
             if not self.progress_bar and result.stdout:
                 print(f"--- Train Script Output ---\n{result.stdout}")
@@ -497,13 +553,14 @@ class TidmadSandbox:
             # otherwise raise on the missing .pth and the failure would be
             # misclassified as ``error_inference``. The ``error_training:``
             # prefix is the contract the tuner pattern-matches against.
-            sentinel_path = os.path.abspath(os.path.join(
-                self.dirs["models"], f"_OK_{exp_id}",
-            ))
-            if not os.path.exists(sentinel_path):
-                stderr_tail = "\n".join(
-                    (result.stderr or "").splitlines()[-20:]
+            sentinel_path = os.path.abspath(
+                os.path.join(
+                    self.dirs["models"],
+                    f"_OK_{exp_id}",
                 )
+            )
+            if not os.path.exists(sentinel_path):
+                stderr_tail = "\n".join((result.stderr or "").splitlines()[-20:])
                 silent_msg = (
                     f"error_training: subprocess returned 0 but no _OK_ "
                     f"sentinel for exp_id={exp_id} "
@@ -515,13 +572,16 @@ class TidmadSandbox:
 
             # Read the training-result JSON written by train_engine_sandbox.py
             # so the caller gets final_loss / loss_history / model_params.
-            train_json_path = os.path.abspath(os.path.join(
-                self.dirs["records"], run_name,
-                f"experiment_results_{model_type}_{exp_id}.json",
-            ))
+            train_json_path = os.path.abspath(
+                os.path.join(
+                    self.dirs["records"],
+                    run_name,
+                    f"experiment_results_{model_type}_{exp_id}.json",
+                )
+            )
             results = {}
             if os.path.isfile(train_json_path):
-                with open(train_json_path, "r") as f:
+                with open(train_json_path) as f:
                     results = json.load(f)
             return {"status": "success", "message": "Training finished.", "results": results}
 
@@ -531,10 +591,10 @@ class TidmadSandbox:
             status = "oom_host_ram" if _is_oom_failure(e) else "error"
             return {"status": status, "message": error_msg}
         except Exception as e:
-            print(f"!!! [Executor Internal Error] !!!: {str(e)}") 
+            print(f"!!! [Executor Internal Error] !!!: {e!s}")
             return {"status": "error", "message": str(e)}
 
-    def _validate_model_and_loss(self, model_type: str, m_cfg: Dict, l_cfg: Dict):
+    def _validate_model_and_loss(self, model_type: str, m_cfg: dict, l_cfg: dict):
         """Validate model and loss configs via Pydantic. Used by inference."""
         if model_type in PLUGIN_CONFIG_REGISTRY:
             validated_m = PLUGIN_CONFIG_REGISTRY[model_type](**m_cfg).model_dump()
@@ -547,9 +607,16 @@ class TidmadSandbox:
         validated_l = LossConfig(**l_cfg).model_dump()
         return validated_m, validated_l
 
-    def execute_inference(self, exp_id: str, run_name: str, model_type: str, m_cfg: Dict, l_cfg: Dict,
-                          sample_set: Optional[Dict] = None,
-                          inference_batch: Optional[int] = None):
+    def execute_inference(
+        self,
+        exp_id: str,
+        run_name: str,
+        model_type: str,
+        m_cfg: dict,
+        l_cfg: dict,
+        sample_set: dict | None = None,
+        inference_batch: int | None = None,
+    ):
         """Executes the inference physical script.
 
         Args:
@@ -569,12 +636,15 @@ class TidmadSandbox:
         validated_m, validated_l = self._validate_model_and_loss(model_type, m_cfg, l_cfg)
         m_path = os.path.abspath(os.path.join(self.dirs["configs"], f"model_config_{exp_id}.json"))
         l_path = os.path.abspath(os.path.join(self.dirs["configs"], f"loss_config_{exp_id}.json"))
-        with open(m_path, 'w') as f: json.dump(validated_m, f)
-        with open(l_path, 'w') as f: json.dump(validated_l, f)
-        model_path = os.path.abspath(os.path.join(self.dirs["models"], f"model_{model_type}_{exp_id}_agent.pth"))
+        with open(m_path, "w") as f:
+            json.dump(validated_m, f)
+        with open(l_path, "w") as f:
+            json.dump(validated_l, f)
+        model_path = os.path.abspath(
+            os.path.join(self.dirs["models"], f"model_{model_type}_{exp_id}_agent.pth")
+        )
         inf_bs = str(
-            inference_batch if inference_batch is not None
-            else inference_batch_for(model_type)
+            inference_batch if inference_batch is not None else inference_batch_for(model_type)
         )
 
         # Per-iter sidecar path. Iteration scoping comes from ``run_name`` (the
@@ -584,17 +654,38 @@ class TidmadSandbox:
             os.path.join(self.dirs["configs"], f"inference_timing_{exp_id}.json")
         )
 
-        cmd = [sys.executable, "execute_tools/inference_single.py", "--mode", "agent", "-m", model_type,
-               "--model_cfg", m_path, "--loss_cfg", l_path,
-               "--model_path", model_path, "--exp_id", exp_id, "--run_name", run_name,
-               "--output_dir", self.base_dir, "--inference_batch_size", inf_bs,
-               "--file_index", str(self.file_index)]
+        cmd = [
+            sys.executable,
+            "execute_tools/inference_single.py",
+            "--mode",
+            "agent",
+            "-m",
+            model_type,
+            "--model_cfg",
+            m_path,
+            "--loss_cfg",
+            l_path,
+            "--model_path",
+            model_path,
+            "--exp_id",
+            exp_id,
+            "--run_name",
+            run_name,
+            "--output_dir",
+            self.base_dir,
+            "--inference_batch_size",
+            inf_bs,
+            "--file_index",
+            str(self.file_index),
+        ]
 
         # Validate and write eval SampleSet to JSON
         if sample_set is not None:
             sample_set = validate_sample_set(sample_set)
-            ss_path = os.path.abspath(os.path.join(self.dirs["configs"], f"eval_sample_set_{exp_id}.json"))
-            with open(ss_path, 'w') as f:
+            ss_path = os.path.abspath(
+                os.path.join(self.dirs["configs"], f"eval_sample_set_{exp_id}.json")
+            )
+            with open(ss_path, "w") as f:
                 json.dump(sample_set, f)
             cmd.extend(["--sample_set_json", ss_path])
             # Trial-mode only — the subprocess emits per-file timings to
@@ -610,7 +701,8 @@ class TidmadSandbox:
                 check=True,
                 stdout=None if self.progress_bar else subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True, cwd=os.getcwd(),
+                text=True,
+                cwd=os.getcwd(),
                 env=_subprocess_env(plugin_dir=self.plugin_dir),
                 preexec_fn=_limited_preexec(_subprocess_rss_gb("inference")),
             )
@@ -630,9 +722,7 @@ class TidmadSandbox:
                 try:
                     with open(timing_out) as f:
                         per_file_timings_ms = json.load(f)
-                    sum_per_file = sum(
-                        float(t.get("elapsed_ms", 0.0)) for t in per_file_timings_ms
-                    )
+                    sum_per_file = sum(float(t.get("elapsed_ms", 0.0)) for t in per_file_timings_ms)
                     process_startup_ms = max(0.0, subprocess_wall_ms - sum_per_file)
                 except Exception as exc:
                     print(f"[execute_inference] sidecar parse failed: {exc}")
@@ -656,8 +746,9 @@ class TidmadSandbox:
                 "subprocess_wall_ms": None,
             }
 
-    def score_vector(self, sample_set, anchor_map: dict, s_max: float,
-                     denoised_filename_fn: callable, **kwargs) -> tuple:
+    def score_vector(
+        self, sample_set, anchor_map: dict, s_max: float, denoised_filename_fn: callable, **kwargs
+    ) -> tuple:
         """Anchor-normalised multi-file scoring. Delegates to execute_tools.scoring_utils.score_vector.
 
         Wraps the module-level function so that the agent's scoring path goes
@@ -676,6 +767,7 @@ class TidmadSandbox:
             (file_vector, final_scalar_score)
         """
         from execute_tools.scoring_utils import score_vector as _score_vector
+
         return _score_vector(
             data_dir=self.base_dir,
             sample_set=sample_set,
@@ -686,28 +778,50 @@ class TidmadSandbox:
             **kwargs,
         )
 
-    def execute_scoring(self, exp_id: str, run_name: str, model_type: str, m_cfg: Dict, t_cfg: Dict, l_cfg: Dict):
+    def execute_scoring(
+        self, exp_id: str, run_name: str, model_type: str, m_cfg: dict, t_cfg: dict, l_cfg: dict
+    ):
         """Calculates score and returns results to Skill layer."""
         result_dir = os.path.join(self.dirs["records"], run_name)
         _ensure_dir(result_dir)
-        
-        train_json_path = os.path.abspath(os.path.join(result_dir, f"experiment_results_{model_type}_{exp_id}.json"))
-        score_json_path = os.path.abspath(os.path.join(result_dir, f"score_results_{model_type}_{exp_id}.json"))
+
+        train_json_path = os.path.abspath(
+            os.path.join(result_dir, f"experiment_results_{model_type}_{exp_id}.json")
+        )
+        score_json_path = os.path.abspath(
+            os.path.join(result_dir, f"score_results_{model_type}_{exp_id}.json")
+        )
 
         try:
             # Pre-create the scoring JSON so the script can write to it
-            with open(score_json_path, 'w') as f:
+            with open(score_json_path, "w") as f:
                 json.dump({}, f)
 
             print(f">>> [Executor] Running scoring for {exp_id}...")
             result = subprocess.run(
-                [sys.executable, "execute_tools/denoising_score_single.py", "--mode", "agent", "-m", model_type,
-                 "--exp_id", exp_id, "--run_name", run_name, "--output_json", score_json_path,
-                 "--data_dir", self.base_dir, "--file_index", str(self.file_index)],
+                [
+                    sys.executable,
+                    "execute_tools/denoising_score_single.py",
+                    "--mode",
+                    "agent",
+                    "-m",
+                    model_type,
+                    "--exp_id",
+                    exp_id,
+                    "--run_name",
+                    run_name,
+                    "--output_json",
+                    score_json_path,
+                    "--data_dir",
+                    self.base_dir,
+                    "--file_index",
+                    str(self.file_index),
+                ],
                 check=True,
                 stdout=None if self.progress_bar else subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True, cwd=os.getcwd(),
+                text=True,
+                cwd=os.getcwd(),
                 env=_subprocess_env(plugin_dir=self.plugin_dir),
                 preexec_fn=_limited_preexec(_subprocess_rss_gb("scoring")),
             )
@@ -715,12 +829,13 @@ class TidmadSandbox:
             # Merge training results (loss history) with scoring results
             results = {}
             if os.path.exists(train_json_path):
-                with open(train_json_path, 'r') as f:
+                with open(train_json_path) as f:
                     results.update(json.load(f))
-            with open(score_json_path, 'r') as f:
+            with open(score_json_path) as f:
                 results.update(json.load(f))
 
-            if os.path.exists(score_json_path): os.remove(score_json_path)
+            if os.path.exists(score_json_path):
+                os.remove(score_json_path)
 
             # Note: We NO LONGER call self.recorder.save_record(record) here.
             # We return results to ml_hyperparameter_tune_agent.py, which adds LLM memory and then saves.
@@ -731,7 +846,7 @@ class TidmadSandbox:
             status = "oom_host_ram" if _is_oom_failure(e) else "error"
             return {"status": status, "message": error_msg}
         except Exception as e:
-            print(f"--- Scoring Internal Error ---\n{str(e)}")
+            print(f"--- Scoring Internal Error ---\n{e!s}")
             return {"status": "error", "message": str(e)}
 
 
@@ -778,12 +893,12 @@ class StubSandbox(TidmadSandbox):
     def __init__(
         self,
         metadata_source: str = "local",
-        mongodb_uri: Optional[str] = None,
+        mongodb_uri: str | None = None,
         run_name: str = "test_run",
         workspace: str = "./siderius_workspace",
         progress_bar: bool = False,
         file_index: int = 6,
-        run_id: Optional[str] = None,
+        run_id: str | None = None,
     ):
         super().__init__(
             metadata_source=metadata_source,
@@ -795,11 +910,11 @@ class StubSandbox(TidmadSandbox):
         )
         self._run_id: str = run_id or run_name
         self._rng = random.Random(self._run_id)
-        self.saved_records: List[Dict[str, Any]] = []
+        self.saved_records: list[dict[str, Any]] = []
         # Cache training results so ``execute_scoring`` can merge them like
         # prod does (the prod path reads ``experiment_results_*.json`` from
         # disk; the stub keeps an in-memory analogue keyed by ``exp_id``).
-        self._train_results_cache: Dict[str, Dict[str, Any]] = {}
+        self._train_results_cache: dict[str, dict[str, Any]] = {}
 
     def set_run_context(self, run_id: str) -> None:
         """Re-seed the RNG with a new run_id.
@@ -816,13 +931,13 @@ class StubSandbox(TidmadSandbox):
         exp_id: str,
         run_name: str,
         model_type: str,
-        m_cfg: Dict,
-        t_cfg: Dict,
-        l_cfg: Dict,
-        sample_set: Optional[Dict] = None,
-        train_portion: Optional[float] = None,
-        train_base_seed: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        m_cfg: dict,
+        t_cfg: dict,
+        l_cfg: dict,
+        sample_set: dict | None = None,
+        train_portion: float | None = None,
+        train_base_seed: int | None = None,
+    ) -> dict[str, Any]:
         """Synthesise a successful training result. No subprocess launch."""
         final_loss = self._rng.uniform(0.5, 5.0)
         results = {
@@ -842,11 +957,11 @@ class StubSandbox(TidmadSandbox):
         exp_id: str,
         run_name: str,
         model_type: str,
-        m_cfg: Dict,
-        l_cfg: Dict,
-        sample_set: Optional[Dict] = None,
-        inference_batch: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        m_cfg: dict,
+        l_cfg: dict,
+        sample_set: dict | None = None,
+        inference_batch: int | None = None,
+    ) -> dict[str, Any]:
         """Synthesise a successful inference result. No subprocess launch."""
         return {
             "status": "success",
@@ -861,10 +976,10 @@ class StubSandbox(TidmadSandbox):
         exp_id: str,
         run_name: str,
         model_type: str,
-        m_cfg: Dict,
-        t_cfg: Dict,
-        l_cfg: Dict,
-    ) -> Dict[str, Any]:
+        m_cfg: dict,
+        t_cfg: dict,
+        l_cfg: dict,
+    ) -> dict[str, Any]:
         """Synthesise scoring + merge cached training results.
 
         Mirrors the prod merge order in ``TidmadSandbox.execute_scoring``:
@@ -872,12 +987,10 @@ class StubSandbox(TidmadSandbox):
         ``loss_history`` / ``model_params`` from the cached trainer output
         appear alongside the synthetic ``denoising_score`` etc.).
         """
-        results: Dict[str, Any] = {}
+        results: dict[str, Any] = {}
         results.update(self._train_results_cache.get(exp_id, {}))
         results["denoising_score"] = self._rng.uniform(-3.0, -2.0)
-        results["file_vector"] = [
-            self._rng.uniform(-3.0, -2.0) for _ in range(9)
-        ]
+        results["file_vector"] = [self._rng.uniform(-3.0, -2.0) for _ in range(9)]
         results["is_degenerate"] = False
         results["failure_reason"] = None
         return {"status": "success", "results": results}
@@ -916,7 +1029,7 @@ class StubSandbox(TidmadSandbox):
         final_scalar = self._rng.uniform(-3.0, -2.0)
         return file_vector, final_scalar, False, None
 
-    def save_record(self, record: Dict[str, Any]) -> None:
+    def save_record(self, record: dict[str, Any]) -> None:
         """Stamp ``_pseudo_origin`` audit marker, persist via parent, mirror in-memory.
 
         ``ExperimentRecord`` (Pydantic v2 default) silently ignores extra

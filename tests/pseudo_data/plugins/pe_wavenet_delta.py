@@ -14,10 +14,10 @@ trained for real in pseudo mode — RecordingSandbox returns a canned result
 instead — so correctness is required only for the plugin contract
 (forward shape [B, T] int -> [B, 256, T] float) and Pydantic validation.
 """
+
 import torch
 import torch.nn as nn
 from pydantic import BaseModel, Field
-
 
 PLUGIN_MODEL_TYPE = "pe_wavenet_delta"
 

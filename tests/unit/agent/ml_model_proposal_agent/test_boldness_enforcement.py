@@ -11,9 +11,11 @@ The proposing stage then sees the error in the accumulated context and the
 
 No LLM calls — bridge.generate is mocked throughout.
 """
+
 import json
-import pytest
 from unittest.mock import MagicMock, call
+
+import pytest
 
 from agent.schemas.proposal import (
     ProposalInput,
@@ -22,15 +24,15 @@ from agent.schemas.proposal import (
     ReasoningStage,
     ResearchPolicy,
 )
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
 
 from ._prompt_utils import extract_accumulated_json
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_comparison_output():
     return {
@@ -98,10 +100,8 @@ def _make_pipeline_input(tmp_path, policy: ResearchPolicy | None = None) -> Prop
         reasoning_pipeline=ReasoningPipelineConfig(
             exploration_mode="exploit",
             stages=[
-                ReasoningStage(name="comparison",
-                               system_prompt_key="COMPARATIVE_ANALYSIS"),
-                ReasoningStage(name="causal_reasoning",
-                               system_prompt_key="CAUSAL_REASONING"),
+                ReasoningStage(name="comparison", system_prompt_key="COMPARATIVE_ANALYSIS"),
+                ReasoningStage(name="causal_reasoning", system_prompt_key="CAUSAL_REASONING"),
             ],
             policy=policy or ResearchPolicy(),  # default minimum_boldness=0.05
         ),
@@ -116,7 +116,8 @@ def _make_agent(bridge_responses: list) -> tuple[MLModelProposalAgent, MagicMock
     mock_bridge = MagicMock()
     mock_bridge.generate.side_effect = bridge_responses
     agent = MLModelProposalAgent(
-        provider="gemini", model_id="test",
+        provider="gemini",
+        model_id="test",
         bridge_factory=lambda **kw: mock_bridge,
     )
     return agent, mock_bridge
@@ -126,16 +127,18 @@ def _make_agent(bridge_responses: list) -> tuple[MLModelProposalAgent, MagicMock
 # Tests
 # ---------------------------------------------------------------------------
 
-class TestBoldnessEnforcement:
 
+class TestBoldnessEnforcement:
     def test_boldness_passes_when_above_threshold(self, tmp_path):
         """Bold prediction (boldness > 0.05) — no retry, 3 total LLM calls."""
         # current=5.5, predicted=6.5 → boldness = 1.0/5.5 ≈ 0.18 > 0.05
-        agent, mock = _make_agent([
-            _make_comparison_output(),
-            _make_reasoning_output(current=5.5, predicted=6.5),  # bold
-            _make_proposing_output(),
-        ])
+        agent, mock = _make_agent(
+            [
+                _make_comparison_output(),
+                _make_reasoning_output(current=5.5, predicted=6.5),  # bold
+                _make_proposing_output(),
+            ]
+        )
         inp = _make_pipeline_input(tmp_path)
         output = agent.run(inp)
 
@@ -149,12 +152,14 @@ class TestBoldnessEnforcement:
         The retry returns a bold prediction (predicted=6.5 → boldness ≈ 0.18).
         Total LLM calls: comparison(1) + reasoning_timid(1) + reasoning_retry(1) + proposing(1) = 4.
         """
-        agent, mock = _make_agent([
-            _make_comparison_output(),
-            _make_reasoning_output(current=5.5, predicted=5.75),  # timid: boldness ≈ 0.045
-            _make_reasoning_output(current=5.5, predicted=6.5),   # bold on retry
-            _make_proposing_output(),
-        ])
+        agent, mock = _make_agent(
+            [
+                _make_comparison_output(),
+                _make_reasoning_output(current=5.5, predicted=5.75),  # timid: boldness ≈ 0.045
+                _make_reasoning_output(current=5.5, predicted=6.5),  # bold on retry
+                _make_proposing_output(),
+            ]
+        )
         inp = _make_pipeline_input(tmp_path)
         output = agent.run(inp)
 
@@ -163,12 +168,14 @@ class TestBoldnessEnforcement:
 
     def test_boldness_error_injected_into_accumulated(self, tmp_path):
         """BOLDNESS_TOO_LOW message appears in the retry call's user prompt."""
-        agent, mock = _make_agent([
-            _make_comparison_output(),
-            _make_reasoning_output(current=5.5, predicted=5.75),  # timid
-            _make_reasoning_output(current=5.5, predicted=6.5),   # bold on retry
-            _make_proposing_output(),
-        ])
+        agent, mock = _make_agent(
+            [
+                _make_comparison_output(),
+                _make_reasoning_output(current=5.5, predicted=5.75),  # timid
+                _make_reasoning_output(current=5.5, predicted=6.5),  # bold on retry
+                _make_proposing_output(),
+            ]
+        )
         inp = _make_pipeline_input(tmp_path)
         agent.run(inp)
 
@@ -182,12 +189,14 @@ class TestBoldnessEnforcement:
 
     def test_boldness_error_carries_current_and_predicted_values(self, tmp_path):
         """The error message includes the actual current and predicted values."""
-        agent, mock = _make_agent([
-            _make_comparison_output(),
-            _make_reasoning_output(current=5.5, predicted=5.75),
-            _make_reasoning_output(current=5.5, predicted=6.5),
-            _make_proposing_output(),
-        ])
+        agent, mock = _make_agent(
+            [
+                _make_comparison_output(),
+                _make_reasoning_output(current=5.5, predicted=5.75),
+                _make_reasoning_output(current=5.5, predicted=6.5),
+                _make_proposing_output(),
+            ]
+        )
         inp = _make_pipeline_input(tmp_path)
         agent.run(inp)
 
@@ -195,7 +204,7 @@ class TestBoldnessEnforcement:
         retry_context = extract_accumulated_json(retry_user_prompt)
         errors = retry_context.get("proposing_stage_errors", [])
         boldness_error = next(e for e in errors if "BOLDNESS_TOO_LOW" in e)
-        assert "5.5" in boldness_error   # current_value
+        assert "5.5" in boldness_error  # current_value
         assert "5.75" in boldness_error  # predicted_value
 
     def test_tiny_delta_rejected(self, tmp_path):
@@ -203,12 +212,14 @@ class TestBoldnessEnforcement:
 
         current=5.5, predicted=5.501 → boldness = 0.001/5.5 ≈ 0.000182 < 0.05.
         """
-        agent, mock = _make_agent([
-            _make_comparison_output(),
-            _make_reasoning_output(current=5.5, predicted=5.501),  # near-zero delta
-            _make_reasoning_output(current=5.5, predicted=6.5),    # bold on retry
-            _make_proposing_output(),
-        ])
+        agent, mock = _make_agent(
+            [
+                _make_comparison_output(),
+                _make_reasoning_output(current=5.5, predicted=5.501),  # near-zero delta
+                _make_reasoning_output(current=5.5, predicted=6.5),  # bold on retry
+                _make_proposing_output(),
+            ]
+        )
         inp = _make_pipeline_input(tmp_path)
         agent.run(inp)
 
@@ -220,12 +231,14 @@ class TestBoldnessEnforcement:
         current=5.5, predicted=6.5 → boldness = 1.0/5.5 ≈ 0.18, rejected at 0.20.
         """
         policy = ResearchPolicy(minimum_boldness=0.20)
-        agent, mock = _make_agent([
-            _make_comparison_output(),
-            _make_reasoning_output(current=5.5, predicted=6.5),   # boldness ≈ 0.18 < 0.20
-            _make_reasoning_output(current=5.5, predicted=7.5),   # boldness ≈ 0.36 > 0.20
-            _make_proposing_output(),
-        ])
+        agent, mock = _make_agent(
+            [
+                _make_comparison_output(),
+                _make_reasoning_output(current=5.5, predicted=6.5),  # boldness ≈ 0.18 < 0.20
+                _make_reasoning_output(current=5.5, predicted=7.5),  # boldness ≈ 0.36 > 0.20
+                _make_proposing_output(),
+            ]
+        )
         inp = _make_pipeline_input(tmp_path, policy=policy)
         agent.run(inp)
 
@@ -237,11 +250,13 @@ class TestBoldnessEnforcement:
         current=5.5, predicted=4.5 → boldness = abs(4.5-5.5)/5.5 = 1.0/5.5 ≈ 0.18 > 0.05.
         Even though the prediction is pessimistic (lower), boldness passes.
         """
-        agent, mock = _make_agent([
-            _make_comparison_output(),
-            _make_reasoning_output(current=5.5, predicted=4.5),  # negative delta, bold
-            _make_proposing_output(),
-        ])
+        agent, mock = _make_agent(
+            [
+                _make_comparison_output(),
+                _make_reasoning_output(current=5.5, predicted=4.5),  # negative delta, bold
+                _make_proposing_output(),
+            ]
+        )
         inp = _make_pipeline_input(tmp_path)
         output = agent.run(inp)
 
@@ -251,10 +266,12 @@ class TestBoldnessEnforcement:
     def test_no_retry_when_causal_reasoning_stage_absent(self, tmp_path):
         """If pipeline has no causal_reasoning stage, boldness check skips the retry
         gracefully and proceeds to the proposing stage."""
-        agent, mock = _make_agent([
-            _make_comparison_output(),  # only comparison stage
-            _make_proposing_output(),
-        ])
+        agent, mock = _make_agent(
+            [
+                _make_comparison_output(),  # only comparison stage
+                _make_proposing_output(),
+            ]
+        )
         inp = _make_pipeline_input(tmp_path)
         # Override pipeline to have only comparison stage
         inp.reasoning_pipeline.stages = [
@@ -276,11 +293,13 @@ class TestBoldnessEnforcement:
             "inherited_components": [],
             "proposed_vocab_candidates": [],
         }
-        agent, mock = _make_agent([
-            _make_comparison_output(),
-            reasoning_no_pred,
-            _make_proposing_output(),
-        ])
+        agent, mock = _make_agent(
+            [
+                _make_comparison_output(),
+                reasoning_no_pred,
+                _make_proposing_output(),
+            ]
+        )
         inp = _make_pipeline_input(tmp_path)
         output = agent.run(inp)
 

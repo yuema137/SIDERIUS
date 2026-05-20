@@ -2,6 +2,7 @@
 
 Phase 6.6 §3.10. Pure-Python arithmetic — no torch, no CUDA, no filesystem.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,8 +17,8 @@ from agent.skills.evaluate_vram_skill.compute_intensity import (
     passes,
 )
 
-
 # ── Calibrated constant (regression against §3.10.3 sign-off) ───────────────
+
 
 def test_cap_matches_calibration():
     """800,000 = Phase 6.5 Stage 2 failure point (1,000,000) × 20% margin.
@@ -26,6 +27,7 @@ def test_cap_matches_calibration():
 
 
 # ── Primitive arithmetic ────────────────────────────────────────────────────
+
 
 @pytest.mark.parametrize(
     "B, T",
@@ -42,14 +44,15 @@ def test_compute_intensity_is_pure():
 
 # ── Acceptance predicate: below / at / above the cap ───────────────────────
 
+
 @pytest.mark.parametrize(
     "B, T",
     [
         (1, 1),
         (1, 40_000),
-        (10, 40_000),     # 400k
-        (20, 40_000),     # 800k — exactly the cap, <= accepts
-        (4, 100_000),     # 400k
+        (10, 40_000),  # 400k
+        (20, 40_000),  # 800k — exactly the cap, <= accepts
+        (4, 100_000),  # 400k
     ],
 )
 def test_passes_at_or_below_cap(B, T):
@@ -62,15 +65,15 @@ def test_passes_at_exact_boundary_accepts():
     assert passes(1, _MAX_BATCH_TIMESTEPS) is True
     assert passes(_MAX_BATCH_TIMESTEPS, 1) is True
     # Other factorisations that land exactly on the cap:
-    assert passes(800, 1000) is True     # 800 * 1000 == 800_000
-    assert passes(100, 8000) is True     # 100 * 8000 == 800_000
+    assert passes(800, 1000) is True  # 800 * 1000 == 800_000
+    assert passes(100, 8000) is True  # 100 * 8000 == 800_000
 
 
 @pytest.mark.parametrize(
     "B, T",
     [
-        (25, 40_000),   # 1,000,000 — the actual Phase 6.5 Stage 2 failure
-        (21, 40_000),   # 840,000 — just over cap
+        (25, 40_000),  # 1,000,000 — the actual Phase 6.5 Stage 2 failure
+        (21, 40_000),  # 840,000 — just over cap
         (_MAX_BATCH_TIMESTEPS + 1, 1),
         (1, _MAX_BATCH_TIMESTEPS + 1),
     ],
@@ -87,6 +90,7 @@ def test_passes_at_stage2_failure_point_rejects():
 
 
 # ── Violation message ───────────────────────────────────────────────────────
+
 
 def test_describe_violation_names_dimensions_verbatim():
     """The message names config levers the Proposer can actually tune."""
@@ -117,15 +121,21 @@ def test_describe_violation_has_no_architecture_names():
     layer type, or op class."""
     msg = describe_violation(25, 40_000).lower()
     for banned in [
-        "wavenet", "punet", "fcnet", "transformer", "rnn",
-        "attention", "conv", "unet", "lstm",
+        "wavenet",
+        "punet",
+        "fcnet",
+        "transformer",
+        "rnn",
+        "attention",
+        "conv",
+        "unet",
+        "lstm",
     ]:
-        assert banned not in msg, (
-            f"architecture term {banned!r} leaked into violation message"
-        )
+        assert banned not in msg, f"architecture term {banned!r} leaked into violation message"
 
 
 # ── Principle 2 module-source spot-check ───────────────────────────────────
+
 
 def test_module_source_has_no_architecture_literals():
     """Spot-check that this module's own source contains no model-family

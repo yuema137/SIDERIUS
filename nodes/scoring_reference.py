@@ -19,11 +19,9 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Optional
 
 from execute_tools.data_paths import SIDERIUS_DATA_DIR
 from execute_tools.dataset_config import NUM_FILES
-
 
 _FINE_INDICES = tuple(range(NUM_FILES))
 
@@ -42,6 +40,7 @@ _REGEN_HINT = (
 # Immutable reference-data bundle
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class ReferenceScores:
     """Frozen bundle of on-disk reference data for the score-comparison table.
@@ -53,27 +52,27 @@ class ReferenceScores:
     exactly when all 20 files are sampled.
     """
 
-    raw_per_file_log:        list[float]
-    gt_per_file_log:         list[float]
+    raw_per_file_log: list[float]
+    gt_per_file_log: list[float]
     raw_per_file_linear_sum: list[float]
     raw_per_file_n_segments: list[int]
-    gt_per_file_linear_sum:  list[float]
-    gt_per_file_n_segments:  list[int]
-    raw_scalar_full:         float
-    gt_scalar_full:          float
-    s_max:                   float
+    gt_per_file_linear_sum: list[float]
+    gt_per_file_n_segments: list[int]
+    raw_scalar_full: float
+    gt_scalar_full: float
+    s_max: float
 
 
 # ---------------------------------------------------------------------------
 # Loader (module-level cache)
 # ---------------------------------------------------------------------------
 
-_CACHE: Optional[ReferenceScores] = None
+_CACHE: ReferenceScores | None = None
 
 
 def load_reference_scores(
-    raw_dir: Optional[str] = None,
-    gt_dir: Optional[str] = None,
+    raw_dir: str | None = None,
+    gt_dir: str | None = None,
     *,
     use_cache: bool = True,
 ) -> ReferenceScores:
@@ -134,15 +133,9 @@ def load_reference_scores(
 
     for field in ("scalar_score", "s_max"):
         if field not in raw_scalar_doc:
-            raise KeyError(
-                f"Raw scalar file {raw_scalar_path} is missing '{field}'. "
-                f"{_REGEN_HINT}"
-            )
+            raise KeyError(f"Raw scalar file {raw_scalar_path} is missing '{field}'. {_REGEN_HINT}")
         if field not in gt_scalar_doc:
-            raise KeyError(
-                f"Ceiling file {gt_scalar_path} is missing '{field}'. "
-                f"{_REGEN_HINT}"
-            )
+            raise KeyError(f"Ceiling file {gt_scalar_path} is missing '{field}'. {_REGEN_HINT}")
 
     raw_smax = float(raw_scalar_doc["s_max"])
     gt_smax = float(gt_scalar_doc["s_max"])
@@ -177,8 +170,6 @@ def _reset_cache() -> None:
 
 def _read_json(path: str) -> dict:
     if not os.path.exists(path):
-        raise FileNotFoundError(
-            f"Reference data file not found: {path}. {_REGEN_HINT}"
-        )
-    with open(path, "r") as f:
+        raise FileNotFoundError(f"Reference data file not found: {path}. {_REGEN_HINT}")
+    with open(path) as f:
         return json.load(f)

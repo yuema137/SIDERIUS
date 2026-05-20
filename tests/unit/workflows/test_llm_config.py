@@ -8,19 +8,20 @@ Covers:
   - WorkflowLLMConfig: per-slot typing, get() flattening for the tuner,
     uniform() with and without reflect overrides, partial JSON loading
 """
+
 import json
+
 import pytest
 from pydantic import ValidationError
 
 from workflows.llm_config import NodeLLMConfig, TunerLLMConfig, WorkflowLLMConfig
 
-
 # ---------------------------------------------------------------------------
 # NodeLLMConfig — leaf type
 # ---------------------------------------------------------------------------
 
-class TestNodeLLMConfig:
 
+class TestNodeLLMConfig:
     def test_defaults(self):
         """No args → falls back to gemini / flash-lite-preview defaults."""
         c = NodeLLMConfig()
@@ -47,8 +48,8 @@ class TestNodeLLMConfig:
 # TunerLLMConfig — nested per-sub-call NodeLLMConfig
 # ---------------------------------------------------------------------------
 
-class TestTunerLLMConfig:
 
+class TestTunerLLMConfig:
     def test_defaults(self):
         """No args → planner = gemini-3.1-pro-preview, reflector = gemini-2.5-flash."""
         c = TunerLLMConfig()
@@ -101,9 +102,11 @@ class TestTunerLLMConfig:
     def test_partial_dict_loads_with_planner_default(self):
         """A dict that omits the planner field should load cleanly, with
         planner taking its default_factory value."""
-        loaded = TunerLLMConfig.model_validate({
-            "reflector": {"provider": "gemini", "model_id": "gemini-2.5-flash"},
-        })
+        loaded = TunerLLMConfig.model_validate(
+            {
+                "reflector": {"provider": "gemini", "model_id": "gemini-2.5-flash"},
+            }
+        )
         assert loaded.planner.model_id == "gemini-3.1-pro-preview"  # default
         assert loaded.reflector.model_id == "gemini-2.5-flash"
 
@@ -118,8 +121,8 @@ class TestTunerLLMConfig:
 # WorkflowLLMConfig — top-level per-agent config
 # ---------------------------------------------------------------------------
 
-class TestWorkflowLLMConfig:
 
+class TestWorkflowLLMConfig:
     def test_default_all_slots_none(self):
         """Default WorkflowLLMConfig has all 5 slots set to None."""
         cfg = WorkflowLLMConfig()
@@ -162,8 +165,8 @@ class TestWorkflowLLMConfig:
         )
         result = cfg.get("tune")
         assert result == {
-            "provider":         "gemini",
-            "model_id":         "gemini-3.1-pro-preview",
+            "provider": "gemini",
+            "model_id": "gemini-3.1-pro-preview",
             "reflect_provider": "openai",
             "reflect_model_id": "gpt-4o-mini",
         }
@@ -182,8 +185,8 @@ class TestWorkflowLLMConfig:
 # WorkflowLLMConfig.uniform() — convenience constructor
 # ---------------------------------------------------------------------------
 
-class TestWorkflowLLMConfigUniform:
 
+class TestWorkflowLLMConfigUniform:
     def test_no_reflect_overrides_planner_equals_reflector(self):
         """Default behavior (legacy): planner and reflector use the same
         provider+model on every slot."""
@@ -205,7 +208,8 @@ class TestWorkflowLLMConfigUniform:
     def test_reflect_model_id_only_same_provider(self):
         """Just override the reflector's model — same provider for both."""
         cfg = WorkflowLLMConfig.uniform(
-            "gemini", "gemini-3.1-pro-preview",
+            "gemini",
+            "gemini-3.1-pro-preview",
             reflect_model_id="gemini-2.5-flash",
         )
         assert cfg.tune.planner.model_id == "gemini-3.1-pro-preview"
@@ -216,7 +220,8 @@ class TestWorkflowLLMConfigUniform:
     def test_reflect_provider_and_model_cross_provider(self):
         """Override both provider and model for the reflector."""
         cfg = WorkflowLLMConfig.uniform(
-            "gemini", "gemini-3.1-pro-preview",
+            "gemini",
+            "gemini-3.1-pro-preview",
             reflect_provider="openai",
             reflect_model_id="gpt-4o-mini",
         )
@@ -235,7 +240,8 @@ class TestWorkflowLLMConfigUniform:
         uses the new provider with the main model name (which may or
         may not exist on that provider — uniform() doesn't validate)."""
         cfg = WorkflowLLMConfig.uniform(
-            "gemini", "shared-model-name",
+            "gemini",
+            "shared-model-name",
             reflect_provider="openai",
         )
         assert cfg.tune.reflector.provider == "openai"
@@ -245,7 +251,8 @@ class TestWorkflowLLMConfigUniform:
         """End-to-end: uniform() with overrides → get('tune') → flat dict
         with the right provider+model split."""
         cfg = WorkflowLLMConfig.uniform(
-            "gemini", "gemini-3.1-pro-preview",
+            "gemini",
+            "gemini-3.1-pro-preview",
             reflect_provider="openai",
             reflect_model_id="gpt-4o-mini",
         )
@@ -260,18 +267,18 @@ class TestWorkflowLLMConfigUniform:
 # JSON config file loading (the user-facing nested format)
 # ---------------------------------------------------------------------------
 
-class TestWorkflowLLMConfigJSON:
 
+class TestWorkflowLLMConfigJSON:
     def test_full_nested_config_loads(self):
         """The user-facing JSON shape with nested planner/reflector slots
         must load cleanly."""
         data = {
             "interpret": {"provider": "gemini", "model_id": "gemini-3.1-pro-preview"},
-            "propose":   {"provider": "gemini", "model_id": "gemini-3.1-pro-preview"},
+            "propose": {"provider": "gemini", "model_id": "gemini-3.1-pro-preview"},
             "implement": {"provider": "gemini", "model_id": "gemini-3.1-pro-preview"},
-            "validate":  {"provider": "gemini", "model_id": "gemini-3.1-flash-lite-preview"},
+            "validate": {"provider": "gemini", "model_id": "gemini-3.1-flash-lite-preview"},
             "tune": {
-                "planner":   {"provider": "gemini", "model_id": "gemini-3.1-pro-preview"},
+                "planner": {"provider": "gemini", "model_id": "gemini-3.1-pro-preview"},
                 "reflector": {"provider": "gemini", "model_id": "gemini-2.5-flash"},
             },
         }
@@ -286,7 +293,7 @@ class TestWorkflowLLMConfigJSON:
         """A config that puts the reflector on a different provider."""
         data = {
             "tune": {
-                "planner":   {"provider": "gemini", "model_id": "gemini-3.1-pro-preview"},
+                "planner": {"provider": "gemini", "model_id": "gemini-3.1-pro-preview"},
                 "reflector": {"provider": "openai", "model_id": "gpt-4o-mini"},
             },
         }
@@ -308,7 +315,8 @@ class TestWorkflowLLMConfigJSON:
 
     def test_round_trip_via_model_dump_and_validate(self):
         cfg = WorkflowLLMConfig.uniform(
-            "gemini", "gemini-3.1-pro-preview",
+            "gemini",
+            "gemini-3.1-pro-preview",
             reflect_model_id="gemini-2.5-flash",
         )
         dumped = json.loads(cfg.model_dump_json(by_alias=True))

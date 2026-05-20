@@ -24,13 +24,16 @@ from core.inference_defaults import (
 class TestInferenceBatchFor:
     """``inference_batch_for`` — silent fallback behaviour."""
 
-    @pytest.mark.parametrize("model_type,expected", [
-        ("punet",       25),
-        ("wavenet",     25),
-        ("fcnet",       25),
-        ("rnn",         10),
-        ("transformer", 1),
-    ])
+    @pytest.mark.parametrize(
+        "model_type,expected",
+        [
+            ("punet", 25),
+            ("wavenet", 25),
+            ("fcnet", 25),
+            ("rnn", 10),
+            ("transformer", 1),
+        ],
+    )
     def test_known_model_types_return_table_values(self, model_type, expected):
         """Each core model_type maps to the original TIDMAD-paper batch size."""
         assert inference_batch_for(model_type) == expected
@@ -48,9 +51,16 @@ class TestInferenceBatchFor:
 class TestAssertInferenceBatchRegistered:
     """``assert_inference_batch_registered`` — loud raise on unknown."""
 
-    @pytest.mark.parametrize("model_type", [
-        "punet", "wavenet", "fcnet", "rnn", "transformer",
-    ])
+    @pytest.mark.parametrize(
+        "model_type",
+        [
+            "punet",
+            "wavenet",
+            "fcnet",
+            "rnn",
+            "transformer",
+        ],
+    )
     def test_known_model_types_do_not_raise(self, model_type):
         """Registered types pass the assertion silently (returns None)."""
         assert assert_inference_batch_registered(model_type) is None

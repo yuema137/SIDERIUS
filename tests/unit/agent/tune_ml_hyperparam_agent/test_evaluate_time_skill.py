@@ -25,7 +25,6 @@ import pytest
 
 from agent.skills.evaluate_time_skill import wrapper as ts
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -67,15 +66,11 @@ def _base_kwargs(**overrides) -> dict:
 
 
 def test_suggest_lever_high_ms_per_step_recommends_shrinking_model():
-    assert "model depth/width" in ts._suggest_lever(
-        ms_per_step=80.0, seg_size=1000, batch_size=1
-    )
+    assert "model depth/width" in ts._suggest_lever(ms_per_step=80.0, seg_size=1000, batch_size=1)
 
 
 def test_suggest_lever_small_seg_bs1_recommends_raising_batch():
-    assert "batch_size" in ts._suggest_lever(
-        ms_per_step=2.0, seg_size=1000, batch_size=1
-    )
+    assert "batch_size" in ts._suggest_lever(ms_per_step=2.0, seg_size=1000, batch_size=1)
 
 
 def test_suggest_lever_otherwise_recommends_raising_seg_size():
@@ -90,9 +85,15 @@ def test_suggest_lever_otherwise_recommends_raising_seg_size():
 
 
 _EXPECTED_KEYS = {
-    "status", "feasible", "verdict", "suggestion",
-    "estimated_minutes", "limit_minutes", "breakdown",
-    "dominant_phase", "phase_breakdown",
+    "status",
+    "feasible",
+    "verdict",
+    "suggestion",
+    "estimated_minutes",
+    "limit_minutes",
+    "breakdown",
+    "dominant_phase",
+    "phase_breakdown",
     "inference_batch_uncalibrated",  # K.2.5-8 — soft-fallback flag (always present, True/False)
 }
 
@@ -105,9 +106,14 @@ def test_run_skill_returns_contract_shape(monkeypatch):
     # Flat breakdown preserves the pre-K.2.5 keys used by
     # nodes/ml_hyperparameter_tune_agent.py (source + gpu_name for Phase F).
     assert set(result["breakdown"].keys()) >= {
-        "total_train_steps", "ms_per_step_warmup", "k_correction",
-        "safety_multiplier", "train_minutes", "num_params",
-        "source", "gpu_name",
+        "total_train_steps",
+        "ms_per_step_warmup",
+        "k_correction",
+        "safety_multiplier",
+        "train_minutes",
+        "num_params",
+        "source",
+        "gpu_name",
     }
 
 
@@ -191,17 +197,14 @@ def test_run_skill_safety_multiplier_surfaced_in_breakdown(monkeypatch):
     _patch_count_params(monkeypatch, 1_000_000)
     result = ts.run_skill(FakeSandbox(), **_base_kwargs(time_budget_minutes=60.0))
     from agent.skills.training_skill import estimator as te
+
     assert result["breakdown"]["safety_multiplier"] == te.SAFETY_MULTIPLIER
     train_bd = result["phase_breakdown"]["training"]["breakdown"]
     assert train_bd["safety_multiplier"] == te.SAFETY_MULTIPLIER
 
     # Training phase seconds == total_steps × ms/step × k × safety / 1000.
     train_minutes = result["phase_breakdown"]["training"]["seconds"] / 60.0
-    raw = (
-        train_bd["total_train_steps"]
-        * train_bd["ms_per_step"]
-        / 60_000.0
-    )
+    raw = train_bd["total_train_steps"] * train_bd["ms_per_step"] / 60_000.0
     assert train_minutes == pytest.approx(
         raw * train_bd["k_correction"] * te.SAFETY_MULTIPLIER, rel=1e-3
     )
@@ -288,9 +291,7 @@ def test_warmup_scales_inference_ms_by_ratio(monkeypatch):
     result = ts.run_skill(FakeSandbox(), **_base_kwargs(data_dir="/any/path"))
     inf_bd = result["phase_breakdown"]["inference"]["breakdown"]
     assert inf_bd["ms_source"] == "derived_from_training_warmup"
-    assert inf_bd["ms_per_step"] == pytest.approx(
-        measured * _INFERENCE_VS_TRAINING_RATIO, rel=1e-6
-    )
+    assert inf_bd["ms_per_step"] == pytest.approx(measured * _INFERENCE_VS_TRAINING_RATIO, rel=1e-6)
 
 
 # ---------------------------------------------------------------------------
@@ -302,10 +303,12 @@ def test_warmup_scales_inference_ms_by_ratio(monkeypatch):
 # See docs/resource_estimator_implement.md §10.14 K.2.5-8.
 # ---------------------------------------------------------------------------
 
-class TestUnregisteredModelTypeFallback:
 
+class TestUnregisteredModelTypeFallback:
     def test_unregistered_model_type_emits_warning_and_flags_breakdown(
-        self, monkeypatch, capsys,
+        self,
+        monkeypatch,
+        capsys,
     ):
         """An invented model_type (the K.8.1 ``pe_wavenet_delta`` case) must
         not crash the time gate, must emit a prominent ``!!! [evaluate_time_skill]``
@@ -325,7 +328,9 @@ class TestUnregisteredModelTypeFallback:
         assert "uncalibrated" in captured.out.lower()
 
     def test_registered_model_type_does_not_emit_warning(
-        self, monkeypatch, capsys,
+        self,
+        monkeypatch,
+        capsys,
     ):
         """Regression: the warning must fire ONLY for unregistered model_types
         — otherwise every seed-model gate call (rnn/wavenet/punet/...) would
@@ -348,7 +353,6 @@ class TestUnregisteredModelTypeFallback:
 
 
 class TestAggregateWarmupTimings:
-
     def test_empty_list_returns_none_and_aggregator_none(self):
         ms, bd = ts._aggregate_warmup_timings([], n_warmup_batches=3)
         assert ms is None
@@ -378,7 +382,8 @@ class TestAggregateWarmupTimings:
         # pins the contract: changes to _WARMUP_FAST_FAIL_MS automatically
         # propagate through the aggregator without test churn.
         ms, bd = ts._aggregate_warmup_timings(
-            [ts._WARMUP_FAST_FAIL_MS + 1.0], n_warmup_batches=1,
+            [ts._WARMUP_FAST_FAIL_MS + 1.0],
+            n_warmup_batches=1,
         )
         assert ms == ts._WARMUP_FAST_FAIL_MS + 1.0
         assert bd["aggregator"] == "fast_fail"
@@ -386,8 +391,15 @@ class TestAggregateWarmupTimings:
     def test_median_branch_discards_warmup_then_takes_median(self):
         # Three warmup steps (high) + four timed steps with a clear median.
         ms, bd = ts._aggregate_warmup_timings(
-            [50.0, 40.0, 30.0,  # warmup
-             10.0, 12.0, 14.0, 16.0],  # timed → median 13.0
+            [
+                50.0,
+                40.0,
+                30.0,  # warmup
+                10.0,
+                12.0,
+                14.0,
+                16.0,
+            ],  # timed → median 13.0
             n_warmup_batches=3,
         )
         assert ms == pytest.approx(13.0)
@@ -433,13 +445,17 @@ class TestBreakdownSurfacesWarmupAggregator:
     def test_median_aggregator_surfaces_on_breakdown(self, monkeypatch):
         _patch_count_params(monkeypatch, 100_000)
         monkeypatch.setattr(
-            ts, "_measure_ms_per_step",
-            lambda **kw: (3.5, {
-                "n_warmup_batches": 3,
-                "n_timed_batches": 7,
-                "timings_ms": [3.5] * 10,
-                "aggregator": "median",
-            }),
+            ts,
+            "_measure_ms_per_step",
+            lambda **kw: (
+                3.5,
+                {
+                    "n_warmup_batches": 3,
+                    "n_timed_batches": 7,
+                    "timings_ms": [3.5] * 10,
+                    "aggregator": "median",
+                },
+            ),
         )
         result = ts.run_skill(FakeSandbox(), **_base_kwargs(data_dir="/any/path"))
         bd = result["breakdown"]
@@ -454,13 +470,17 @@ class TestBreakdownSurfacesWarmupAggregator:
         # genuinely slow-but-finished steady-state estimate.
         _patch_count_params(monkeypatch, 100_000)
         monkeypatch.setattr(
-            ts, "_measure_ms_per_step",
-            lambda **kw: (7000.0, {
-                "n_warmup_batches": 3,
-                "n_timed_batches": 0,  # short-circuited before any timed step
-                "timings_ms": [7000.0],
-                "aggregator": "fast_fail",
-            }),
+            ts,
+            "_measure_ms_per_step",
+            lambda **kw: (
+                7000.0,
+                {
+                    "n_warmup_batches": 3,
+                    "n_timed_batches": 0,  # short-circuited before any timed step
+                    "timings_ms": [7000.0],
+                    "aggregator": "fast_fail",
+                },
+            ),
         )
         result = ts.run_skill(FakeSandbox(), **_base_kwargs(data_dir="/any/path"))
         bd = result["breakdown"]
@@ -484,17 +504,28 @@ class TestBreakdownSurfacesWarmupAggregator:
         # keys must coexist with these — not replace them.
         _patch_count_params(monkeypatch, 100_000)
         monkeypatch.setattr(
-            ts, "_measure_ms_per_step",
-            lambda **kw: (3.5, {
-                "n_warmup_batches": 3, "n_timed_batches": 7,
-                "timings_ms": [3.5] * 10, "aggregator": "median",
-            }),
+            ts,
+            "_measure_ms_per_step",
+            lambda **kw: (
+                3.5,
+                {
+                    "n_warmup_batches": 3,
+                    "n_timed_batches": 7,
+                    "timings_ms": [3.5] * 10,
+                    "aggregator": "median",
+                },
+            ),
         )
         result = ts.run_skill(FakeSandbox(), **_base_kwargs(data_dir="/any/path"))
         legacy_keys = {
-            "total_train_steps", "ms_per_step_warmup", "k_correction",
-            "safety_multiplier", "train_minutes", "num_params",
-            "source", "gpu_name",
+            "total_train_steps",
+            "ms_per_step_warmup",
+            "k_correction",
+            "safety_multiplier",
+            "train_minutes",
+            "num_params",
+            "source",
+            "gpu_name",
         }
         assert legacy_keys.issubset(set(result["breakdown"].keys()))
 
@@ -506,6 +537,7 @@ class TestMeasureMsPerStepDefaults:
 
     def test_defaults_are_3_warmup_7_timed(self):
         import inspect
+
         sig = inspect.signature(ts._measure_ms_per_step)
         assert sig.parameters["n_warmup_batches"].default == 3
         assert sig.parameters["n_timed_batches"].default == 7
@@ -515,6 +547,7 @@ class TestMeasureMsPerStepDefaults:
         # future caller) reads against. Pin that the function advertises
         # ``tuple[float | None, dict]`` rather than the legacy bare scalar.
         import inspect
+
         sig = inspect.signature(ts._measure_ms_per_step)
         ret = sig.return_annotation
         # Either as the typing.Tuple form or the PEP 604 ``tuple[...]``.

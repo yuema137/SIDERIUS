@@ -25,9 +25,7 @@ def chain_workspace(tmp_path: Path, monkeypatch) -> Path:
     return workspace
 
 
-def _write_plugin_description(
-    workspace: Path, run_name: str, model_type: str, body: str
-) -> Path:
+def _write_plugin_description(workspace: Path, run_name: str, model_type: str, body: str) -> Path:
     dest = workspace / "plugins" / run_name / model_type / "description.md"
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(body, encoding="utf-8")
@@ -44,36 +42,23 @@ def test_finds_chain_plugin_with_run_scoped_dirname(chain_workspace):
     that doesn't match the legacy ``iter_NNN`` regex must still be
     discoverable under the chain plugin tree."""
     body = "# positional_gated_tcn\nGate 2 plugin description.\n"
-    _write_plugin_description(
-        chain_workspace, "stage2_iter_001", "positional_gated_tcn", body
-    )
+    _write_plugin_description(chain_workspace, "stage2_iter_001", "positional_gated_tcn", body)
     assert model_descriptions.get_model_description("positional_gated_tcn") == body
 
 
 def test_finds_chain_plugin_with_iter_dirname(chain_workspace):
     """Production V9 chain naming (``iter_001``) must still resolve."""
     body = "# spectral_skip_cyclic_tcn\nV9 chain plugin description.\n"
-    _write_plugin_description(
-        chain_workspace, "iter_002", "spectral_skip_cyclic_tcn", body
-    )
-    assert (
-        model_descriptions.get_model_description("spectral_skip_cyclic_tcn") == body
-    )
+    _write_plugin_description(chain_workspace, "iter_002", "spectral_skip_cyclic_tcn", body)
+    assert model_descriptions.get_model_description("spectral_skip_cyclic_tcn") == body
 
 
 def test_newest_run_wins_when_model_registered_in_multiple_runs(chain_workspace):
     """If a model is re-registered across runs, the highest-sorted dir
     name wins — this lets a later iter override an earlier definition."""
-    _write_plugin_description(
-        chain_workspace, "iter_001", "shared_model", "old description\n"
-    )
-    _write_plugin_description(
-        chain_workspace, "iter_005", "shared_model", "new description\n"
-    )
-    assert (
-        model_descriptions.get_model_description("shared_model")
-        == "new description\n"
-    )
+    _write_plugin_description(chain_workspace, "iter_001", "shared_model", "old description\n")
+    _write_plugin_description(chain_workspace, "iter_005", "shared_model", "new description\n")
+    assert model_descriptions.get_model_description("shared_model") == "new description\n"
 
 
 def test_missing_model_raises_with_searched_paths(chain_workspace):

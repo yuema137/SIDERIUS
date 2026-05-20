@@ -18,12 +18,13 @@ if os.path.exists(_CONFIG_PATH):
     # Use yaml if available, fall back to simple parsing
     try:
         import yaml
-        with open(_CONFIG_PATH, "r") as f:
+
+        with open(_CONFIG_PATH) as f:
             _config = yaml.safe_load(f)
     except ImportError:
         # Minimal YAML parsing for simple key: value files
         _config = {}
-        with open(_CONFIG_PATH, "r") as f:
+        with open(_CONFIG_PATH) as f:
             for line in f:
                 line = line.strip()
                 if not line or line.startswith("#"):

@@ -24,6 +24,7 @@ Design principles (see ``docs/pseudo_test_infra.md`` §4B):
   * Public ``calls`` and ``saved_records`` lists for direct test
     inspection. No helper methods.
 """
+
 from __future__ import annotations
 
 import json
@@ -57,7 +58,7 @@ class RecordingSandbox:
         self,
         base_dir: str,
         run_name: str = "test",
-        canned: Optional[Dict[str, Any]] = None,
+        canned: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         # **kwargs accepts (and silently ignores) the real TidmadSandbox
@@ -66,11 +67,11 @@ class RecordingSandbox:
         # without test-side translation.
         self.base_dir = base_dir
         self.run_name = run_name
-        self.dirs: Dict[str, str] = {
+        self.dirs: dict[str, str] = {
             "configs": os.path.join(base_dir, "configs", run_name),
-            "models":  os.path.join(base_dir, "cached_models"),
+            "models": os.path.join(base_dir, "cached_models"),
             "records": os.path.join(base_dir, "records"),
-            "data":    os.path.join(base_dir, "data"),
+            "data": os.path.join(base_dir, "data"),
         }
         for path in self.dirs.values():
             os.makedirs(path, exist_ok=True)
@@ -86,20 +87,21 @@ class RecordingSandbox:
             json.dump(stub_anchors, f)
 
         # Per-method FIFO queue of predefined results
-        self._queues: Dict[str, List[Any]] = {}
+        self._queues: dict[str, list[Any]] = {}
         for method, value in (canned or {}).items():
             self._queues[method] = list(value) if isinstance(value, list) else [value]
 
         # Public attributes for test assertions
-        self.calls: List[Tuple[Any, ...]] = []
-        self.saved_records: List[Dict[str, Any]] = []
+        self.calls: list[tuple[Any, ...]] = []
+        self.saved_records: list[dict[str, Any]] = []
 
     # ------------------------------------------------------------------
     # Subprocess-execution methods (mirror TidmadSandbox)
     # ------------------------------------------------------------------
 
-    def score_vector(self, sample_set, anchor_map: dict, s_max: float,
-                     denoised_filename_fn, **kwargs):
+    def score_vector(
+        self, sample_set, anchor_map: dict, s_max: float, denoised_filename_fn, **kwargs
+    ):
         """Mirror of :meth:`TidmadSandbox.score_vector`. Returns
         ``(file_vector, scalar, is_degenerate, failure_reason)`` from the
         next predefined result. The trailing two fields default to
@@ -119,11 +121,11 @@ class RecordingSandbox:
         exp_id: str,
         run_name: str,
         model_type: str,
-        m_cfg: Dict[str, Any],
-        t_cfg: Dict[str, Any],
-        l_cfg: Dict[str, Any],
+        m_cfg: dict[str, Any],
+        t_cfg: dict[str, Any],
+        l_cfg: dict[str, Any],
         **kwargs: Any,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Mirror of :meth:`TidmadSandbox.execute_training`. Returns the next
         predefined result and ALSO writes it to the same disk path the real
         subprocess would have written, so any code that reads it back works
@@ -134,9 +136,7 @@ class RecordingSandbox:
 
         result_dir = os.path.join(self.dirs["records"], run_name)
         os.makedirs(result_dir, exist_ok=True)
-        result_path = os.path.join(
-            result_dir, f"experiment_results_{model_type}_{exp_id}.json"
-        )
+        result_path = os.path.join(result_dir, f"experiment_results_{model_type}_{exp_id}.json")
         with open(result_path, "w") as f:
             json.dump(result.get("results", {}), f)
         return result
@@ -146,10 +146,10 @@ class RecordingSandbox:
         exp_id: str,
         run_name: str,
         model_type: str,
-        m_cfg: Dict[str, Any],
-        l_cfg: Dict[str, Any],
+        m_cfg: dict[str, Any],
+        l_cfg: dict[str, Any],
         **kwargs: Any,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Mirror of :meth:`TidmadSandbox.execute_inference`. Returns the
         next predefined result. Real inference produces ``.h5`` denoised
         files; we skip writing those because scoring is also predefined and
@@ -165,7 +165,7 @@ class RecordingSandbox:
         run_name: str,
         model_type: str,
         **kwargs: Any,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Mirror of :meth:`TidmadSandbox.execute_scoring`. Returns the next
         predefined result and writes it to the same disk path the real
         scoring subprocess would have written.
@@ -175,9 +175,7 @@ class RecordingSandbox:
 
         result_dir = os.path.join(self.dirs["records"], run_name)
         os.makedirs(result_dir, exist_ok=True)
-        score_path = os.path.join(
-            result_dir, f"score_results_{model_type}_{exp_id}.json"
-        )
+        score_path = os.path.join(result_dir, f"score_results_{model_type}_{exp_id}.json")
         with open(score_path, "w") as f:
             json.dump(result.get("results", {}), f)
         return result
@@ -186,13 +184,13 @@ class RecordingSandbox:
     # Persistence (mirror TidmadSandbox.save_record)
     # ------------------------------------------------------------------
 
-    def get_summary(self) -> List[Dict[str, Any]]:
+    def get_summary(self) -> list[dict[str, Any]]:
         """Mirror of :meth:`TidmadSandbox.get_summary`. Returns all records
         saved so far, in order. Reads from the in-memory list (identical to
         what's on disk in ``summary_{run_name}.json``)."""
         return list(self.saved_records)
 
-    def save_record(self, record: Dict[str, Any]) -> None:
+    def save_record(self, record: dict[str, Any]) -> None:
         """Mirror of :meth:`TidmadSandbox.save_record`. Appends to the
         in-memory ``saved_records`` list AND to the on-disk
         ``summary_{run_name}.json`` file (creating it if absent), exactly
@@ -202,7 +200,7 @@ class RecordingSandbox:
         self.saved_records.append(record)
 
         summary_path = os.path.join(self.base_dir, f"summary_{self.run_name}.json")
-        existing: List[Dict[str, Any]] = []
+        existing: list[dict[str, Any]] = []
         if os.path.exists(summary_path):
             with open(summary_path) as f:
                 try:
@@ -244,7 +242,7 @@ class RecordingSandbox:
         base_dir: str,
         run_name: str = "test",
         **kwargs: Any,
-    ) -> "RecordingSandbox":
+    ) -> RecordingSandbox:
         """Build a sandbox pre-loaded with canned outputs for a built-in model.
 
         Loads every ``*.json`` file under

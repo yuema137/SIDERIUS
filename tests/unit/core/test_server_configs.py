@@ -17,13 +17,12 @@ import pytest
 import core.server_configs as sc
 from core.server_configs import ServerConfig, get_server_config
 
-
 # ---------------------------------------------------------------------------
 # get_server_config
 # ---------------------------------------------------------------------------
 
-class TestGetServerConfig:
 
+class TestGetServerConfig:
     def test_ligroup_returns_measured_config(self):
         cfg = get_server_config("ligroup")
         assert isinstance(cfg, ServerConfig)
@@ -72,8 +71,8 @@ class TestGetServerConfig:
 # ServerConfig schema
 # ---------------------------------------------------------------------------
 
-class TestServerConfigSchema:
 
+class TestServerConfigSchema:
     def test_rejects_nonpositive_per_segment(self):
         with pytest.raises(Exception):
             ServerConfig(hostname="x", per_psd_segment_seconds=0.0)
@@ -89,7 +88,8 @@ class TestServerConfigSchema:
         silently ignored."""
         with pytest.raises(Exception):
             ServerConfig(
-                hostname="x", per_psd_segment_seconds=0.5,
+                hostname="x",
+                per_psd_segment_seconds=0.5,
                 per_segment_seconds=0.5,  # wrong field name
             )
 

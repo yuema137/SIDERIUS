@@ -8,6 +8,7 @@ This test verifies that:
 
 We mock torch/CUDA to avoid needing real hardware.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -18,6 +19,7 @@ import pytest
 def test_warmup_skipped_when_data_dir_is_none():
     """_measure_ms_per_step returns (None, ...) when data_dir is None."""
     from agent.skills.evaluate_time_skill.wrapper import _measure_ms_per_step
+
     ms, breakdown = _measure_ms_per_step(
         model_type="punet",
         model_config={"segmentation_size": 1000},
@@ -33,6 +35,7 @@ def test_warmup_skipped_when_data_dir_is_none():
 def test_warmup_skipped_when_data_dir_is_empty_string():
     """Empty string should also skip warmup."""
     from agent.skills.evaluate_time_skill.wrapper import _measure_ms_per_step
+
     ms, breakdown = _measure_ms_per_step(
         model_type="punet",
         model_config={"segmentation_size": 1000},
@@ -47,6 +50,7 @@ def test_warmup_skipped_when_data_dir_is_empty_string():
 def test_warmup_skipped_when_data_dir_does_not_exist():
     """Non-existent data_dir should skip warmup."""
     from agent.skills.evaluate_time_skill.wrapper import _measure_ms_per_step
+
     ms, breakdown = _measure_ms_per_step(
         model_type="punet",
         model_config={"segmentation_size": 1000},
@@ -64,8 +68,8 @@ def test_static_formula_uses_patched_constants():
     multiplier from 1.1 to 2.0; it was subsequently relaxed to 1.3 once
     novel-arch overshoot data showed 2.0 was over-conservative."""
     from agent.skills.training_skill.estimator import (
-        SAFETY_MULTIPLIER,
         _STATIC_MS_PER_FLOP,
+        SAFETY_MULTIPLIER,
         estimate_wall_time_seconds,
     )
 

@@ -12,6 +12,7 @@ that satisfies ``HyperparamTuningOutput``. This keeps the tests
 predicate-equivalent to the runtime contract — anything the inspector
 calls "COMMITTED" must also pass ``core.resume._validate_run_output``.
 """
+
 from __future__ import annotations
 
 import io
@@ -29,14 +30,14 @@ if str(_REPO_ROOT) not in sys.path:
 
 from scripts import inspect_run_state as ins  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Fixture builders
 # ---------------------------------------------------------------------------
 
-def _minimal_run_output(*, run_name: str, model_type: str,
-                       best_score: float = -1.0,
-                       status_value: str = "completed") -> dict:
+
+def _minimal_run_output(
+    *, run_name: str, model_type: str, best_score: float = -1.0, status_value: str = "completed"
+) -> dict:
     """Smallest dict that validates against ``HyperparamTuningOutput``."""
     return {
         "run_name": run_name,
@@ -52,9 +53,9 @@ def _minimal_run_output(*, run_name: str, model_type: str,
     }
 
 
-def _write_clean_chain_iter(workspace: Path, iter_idx: int, *,
-                            model_type: str = "wavenet",
-                            best_score: float = -1.0) -> Path:
+def _write_clean_chain_iter(
+    workspace: Path, iter_idx: int, *, model_type: str = "wavenet", best_score: float = -1.0
+) -> Path:
     """Write iter_NNN/manifest.json + the run_output it points at.
 
     Returns the iter_NNN/ Path. The manifest's ``output_path`` is an
@@ -66,8 +67,11 @@ def _write_clean_chain_iter(workspace: Path, iter_idx: int, *,
     sub = iter_dir / "iteration_001" / model_type
     sub.mkdir(parents=True)
     output_path = sub / f"run_output_{run_name}.json"
-    output_path.write_text(json.dumps(_minimal_run_output(
-        run_name=run_name, model_type=model_type, best_score=best_score)))
+    output_path.write_text(
+        json.dumps(
+            _minimal_run_output(run_name=run_name, model_type=model_type, best_score=best_score)
+        )
+    )
     manifest = {
         "status": "completed",
         "iteration_dir": str(iter_dir),
@@ -91,12 +95,16 @@ def _write_chain_iter_failed_manifest(workspace: Path, iter_idx: int) -> Path:
     """Manifest exists but ``status != 'completed'``."""
     iter_dir = workspace / f"iter_{iter_idx:03d}"
     iter_dir.mkdir(parents=True)
-    (iter_dir / "manifest.json").write_text(json.dumps({
-        "status": "failed",
-        "iteration_dir": str(iter_dir),
-        "output_path": str(iter_dir / "missing.json"),
-        "model_name": None,
-    }))
+    (iter_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "status": "failed",
+                "iteration_dir": str(iter_dir),
+                "output_path": str(iter_dir / "missing.json"),
+                "model_name": None,
+            }
+        )
+    )
     return iter_dir
 
 
@@ -121,19 +129,25 @@ def _run_main(argv: list[str]) -> tuple[int, str, str]:
 # Test cases (numbered per the §3 plan)
 # ---------------------------------------------------------------------------
 
+
 def test_1_chain_three_clean_iters_next_iter_prints_4(tmp_path: Path) -> None:
     """3 clean iters → --next-iter prints 4, exit 0, only an int on stdout."""
     for i in (1, 2, 3):
         _write_clean_chain_iter(tmp_path, i, best_score=float(-i))
 
-    rc, stdout, stderr = _run_main([
-        "--layout", "chain", "--workspace", str(tmp_path), "--next-iter",
-    ])
+    rc, stdout, stderr = _run_main(
+        [
+            "--layout",
+            "chain",
+            "--workspace",
+            str(tmp_path),
+            "--next-iter",
+        ]
+    )
 
     assert rc == 0
     assert stdout.strip() == "4"
-    assert stdout.strip().isdigit(), \
-        "machine view must emit nothing but the integer"
+    assert stdout.strip().isdigit(), "machine view must emit nothing but the integer"
     assert stderr == ""
 
 
@@ -145,9 +159,15 @@ def test_2_chain_two_clean_one_missing_manifest_next_iter_prints_3(
     _write_clean_chain_iter(tmp_path, 2)
     _write_chain_iter_missing_manifest(tmp_path, 3)
 
-    rc, stdout, stderr = _run_main([
-        "--layout", "chain", "--workspace", str(tmp_path), "--next-iter",
-    ])
+    rc, stdout, stderr = _run_main(
+        [
+            "--layout",
+            "chain",
+            "--workspace",
+            str(tmp_path),
+            "--next-iter",
+        ]
+    )
 
     assert rc == 0
     assert stdout.strip() == "3"
@@ -160,9 +180,15 @@ def test_3_chain_one_clean_one_failed_manifest_next_iter_prints_2(
     _write_clean_chain_iter(tmp_path, 1)
     _write_chain_iter_failed_manifest(tmp_path, 2)
 
-    rc, stdout, stderr = _run_main([
-        "--layout", "chain", "--workspace", str(tmp_path), "--next-iter",
-    ])
+    rc, stdout, stderr = _run_main(
+        [
+            "--layout",
+            "chain",
+            "--workspace",
+            str(tmp_path),
+            "--next-iter",
+        ]
+    )
 
     assert rc == 0
     assert stdout.strip() == "2"
@@ -175,9 +201,15 @@ def test_4_chain_one_clean_one_malformed_json_next_iter_prints_2(
     _write_clean_chain_iter(tmp_path, 1)
     _write_chain_iter_malformed_manifest(tmp_path, 2)
 
-    rc, stdout, stderr = _run_main([
-        "--layout", "chain", "--workspace", str(tmp_path), "--next-iter",
-    ])
+    rc, stdout, stderr = _run_main(
+        [
+            "--layout",
+            "chain",
+            "--workspace",
+            str(tmp_path),
+            "--next-iter",
+        ]
+    )
 
     assert rc == 0
     assert stdout.strip() == "2"
@@ -185,9 +217,15 @@ def test_4_chain_one_clean_one_malformed_json_next_iter_prints_2(
 
 def test_5_chain_empty_workspace_next_iter_prints_1(tmp_path: Path) -> None:
     """No iter dirs at all → next-iter prints 1 (clean chain start)."""
-    rc, stdout, stderr = _run_main([
-        "--layout", "chain", "--workspace", str(tmp_path), "--next-iter",
-    ])
+    rc, stdout, stderr = _run_main(
+        [
+            "--layout",
+            "chain",
+            "--workspace",
+            str(tmp_path),
+            "--next-iter",
+        ]
+    )
 
     assert rc == 0
     assert stdout.strip() == "1"
@@ -198,9 +236,15 @@ def test_6_chain_non_contiguous_gap_exits_nonzero(tmp_path: Path) -> None:
     _write_clean_chain_iter(tmp_path, 1)
     _write_clean_chain_iter(tmp_path, 3)
 
-    rc, stdout, stderr = _run_main([
-        "--layout", "chain", "--workspace", str(tmp_path), "--next-iter",
-    ])
+    rc, stdout, stderr = _run_main(
+        [
+            "--layout",
+            "chain",
+            "--workspace",
+            str(tmp_path),
+            "--next-iter",
+        ]
+    )
 
     assert rc != 0
     assert "iter_002" in stderr
@@ -215,9 +259,15 @@ def test_7_chain_legacy_layout_guard_rejects(tmp_path: Path) -> None:
     # Pattern 2 from validate_workspace_layout: workflow_*.json file.
     (tmp_path / "workflow_old_run.json").write_text("{}")
 
-    rc, stdout, stderr = _run_main([
-        "--layout", "chain", "--workspace", str(tmp_path), "--next-iter",
-    ])
+    rc, stdout, stderr = _run_main(
+        [
+            "--layout",
+            "chain",
+            "--workspace",
+            str(tmp_path),
+            "--next-iter",
+        ]
+    )
 
     assert rc != 0
     assert "Legacy workspace layout" in stderr
@@ -232,14 +282,18 @@ def test_8_run_layout_back_compat_renders_table(tmp_path: Path) -> None:
     model_dir = iter_dir / "wavenet"
     model_dir.mkdir(parents=True)
     output = model_dir / f"run_output_{run_name}.json"
-    output.write_text(json.dumps(_minimal_run_output(
-        run_name=run_name, model_type="wavenet")))
+    output.write_text(json.dumps(_minimal_run_output(run_name=run_name, model_type="wavenet")))
 
-    rc, stdout, stderr = _run_main([
-        "--layout", "run",
-        "--run_dir", str(tmp_path),
-        "--run_name", run_name,
-    ])
+    rc, stdout, stderr = _run_main(
+        [
+            "--layout",
+            "run",
+            "--run_dir",
+            str(tmp_path),
+            "--run_name",
+            run_name,
+        ]
+    )
 
     assert rc == 0
     assert "Iter" in stdout and "Model" in stdout and "Status" in stdout
@@ -256,13 +310,16 @@ def test_9_default_layout_resolves_to_run(tmp_path: Path) -> None:
     model_dir = iter_dir / "wavenet"
     model_dir.mkdir(parents=True)
     output = model_dir / f"run_output_{run_name}.json"
-    output.write_text(json.dumps(_minimal_run_output(
-        run_name=run_name, model_type="wavenet")))
+    output.write_text(json.dumps(_minimal_run_output(run_name=run_name, model_type="wavenet")))
 
-    rc, stdout, stderr = _run_main([
-        "--run_dir", str(tmp_path),
-        "--run_name", run_name,
-    ])
+    rc, stdout, stderr = _run_main(
+        [
+            "--run_dir",
+            str(tmp_path),
+            "--run_name",
+            run_name,
+        ]
+    )
 
     assert rc == 0
     assert "COMMITTED" in stdout
@@ -275,23 +332,33 @@ def test_9_default_layout_resolves_to_run(tmp_path: Path) -> None:
 # Bonus coverage: human-view chain table includes Model + Best Score
 # ---------------------------------------------------------------------------
 
+
 def test_chain_human_view_includes_model_and_best_score(tmp_path: Path) -> None:
     """The chain-layout table must populate Model + Best Score columns
     just like the legacy table — operators reading the view should see
     enrichment from the parsed run_output, not just the manifest stub.
     """
     _write_clean_chain_iter(
-        tmp_path, 1, model_type="posenc_causal_dilated_stack",
+        tmp_path,
+        1,
+        model_type="posenc_causal_dilated_stack",
         best_score=-3.221148,
     )
     _write_clean_chain_iter(
-        tmp_path, 2, model_type="spectral_skip_residual_stack",
+        tmp_path,
+        2,
+        model_type="spectral_skip_residual_stack",
         best_score=4.524,
     )
 
-    rc, stdout, stderr = _run_main([
-        "--layout", "chain", "--workspace", str(tmp_path),
-    ])
+    rc, stdout, stderr = _run_main(
+        [
+            "--layout",
+            "chain",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
 
     assert rc == 0
     assert "posenc_causal_dilated_stack" in stdout
@@ -306,6 +373,7 @@ def test_chain_human_view_includes_model_and_best_score(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 # Regression: partial iter sandwiched between committed iters
 # ---------------------------------------------------------------------------
+
 
 def test_chain_partial_below_committed_advances_past_max_committed(
     tmp_path: Path,
@@ -325,9 +393,15 @@ def test_chain_partial_below_committed_advances_past_max_committed(
     _write_chain_iter_failed_manifest(tmp_path, 4)
     _write_clean_chain_iter(tmp_path, 5, best_score=5.560566)
 
-    rc, stdout, stderr = _run_main([
-        "--layout", "chain", "--workspace", str(tmp_path), "--next-iter",
-    ])
+    rc, stdout, stderr = _run_main(
+        [
+            "--layout",
+            "chain",
+            "--workspace",
+            str(tmp_path),
+            "--next-iter",
+        ]
+    )
 
     assert rc == 0
     assert stdout.strip() == "6"
@@ -344,9 +418,14 @@ def test_chain_dangling_warning_in_human_view(tmp_path: Path) -> None:
     _write_chain_iter_failed_manifest(tmp_path, 2)
     _write_clean_chain_iter(tmp_path, 3)
 
-    rc, stdout, stderr = _run_main([
-        "--layout", "chain", "--workspace", str(tmp_path),
-    ])
+    rc, stdout, stderr = _run_main(
+        [
+            "--layout",
+            "chain",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
 
     assert rc == 0
     assert "Last committed iter: iter_003" in stdout
@@ -368,9 +447,15 @@ def test_chain_no_dangling_warning_when_partial_is_at_top(
     _write_clean_chain_iter(tmp_path, 2)
     _write_chain_iter_failed_manifest(tmp_path, 3)
 
-    rc, stdout, stderr = _run_main([
-        "--layout", "chain", "--workspace", str(tmp_path), "--next-iter",
-    ])
+    rc, stdout, stderr = _run_main(
+        [
+            "--layout",
+            "chain",
+            "--workspace",
+            str(tmp_path),
+            "--next-iter",
+        ]
+    )
 
     assert rc == 0
     assert stdout.strip() == "3"
@@ -385,10 +470,17 @@ def test_chain_invalid_arg_combinations_rejected(tmp_path: Path) -> None:
     error path (which calls sys.exit(2)).
     """
     with pytest.raises(SystemExit):
-        _run_main([
-            "--layout", "run", "--run_dir", str(tmp_path),
-            "--run_name", "x", "--next-iter",
-        ])
+        _run_main(
+            [
+                "--layout",
+                "run",
+                "--run_dir",
+                str(tmp_path),
+                "--run_name",
+                "x",
+                "--next-iter",
+            ]
+        )
     with pytest.raises(SystemExit):
         _run_main(["--layout", "run"])
     with pytest.raises(SystemExit):

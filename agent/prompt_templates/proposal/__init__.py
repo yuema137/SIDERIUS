@@ -21,15 +21,15 @@ _PROMPT_DIR = os.path.dirname(os.path.abspath(__file__))
 def load_prompt(filename: str) -> str:
     """Load a prompt template from this directory."""
     path = os.path.join(_PROMPT_DIR, filename)
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return f.read()
 
 
 def load_stage_prompt(
     stage_name: str,
     exploration_mode: str = "explore",
-    template_vars: Optional[dict] = None,
-    mindset: Optional[str] = None,
+    template_vars: dict | None = None,
+    mindset: str | None = None,
 ) -> str:
     """
     Load and assemble a stage's full system prompt.

@@ -9,12 +9,13 @@ Validates:
     via the larger _STATIC_MS_PER_FLOP and 2.0 ms _MIN_MS_PER_STEP floor).
   - _static_ms_per_step applies the floor
 """
+
 from __future__ import annotations
 
 from agent.skills.training_skill.estimator import (
-    SAFETY_MULTIPLIER,
     _MIN_MS_PER_STEP,
     _STATIC_MS_PER_FLOP,
+    SAFETY_MULTIPLIER,
     _static_ms_per_step,
 )
 

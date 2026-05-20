@@ -11,16 +11,17 @@ Both are accepted wherever ExpertAdviceInput is used.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Literal, Union
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from agent.schemas.score_table import ScoreComparisonTable
-
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 
 # ---------------------------------------------------------------------------
 # Expert advice — two protocols
 # ---------------------------------------------------------------------------
+
 
 class ExpertAdvice(BaseModel):
     """
@@ -30,19 +31,20 @@ class ExpertAdvice(BaseModel):
     Each field is a list of concrete, actionable statements — not free prose.
     The agent serializes this into its LLM prompt automatically.
     """
-    focus_areas: List[str] = Field(
+
+    focus_areas: list[str] = Field(
         default_factory=list,
         description="Aspects to prioritize during exploration (e.g. 'increase depth before width').",
     )
-    constraints: List[str] = Field(
+    constraints: list[str] = Field(
         default_factory=list,
         description="Hard limits that must not be violated (e.g. 'VRAM < 10 GB', 'epochs <= 30').",
     )
-    known_failures: List[str] = Field(
+    known_failures: list[str] = Field(
         default_factory=list,
         description="Configs or approaches already shown to fail — avoid repeating them.",
     )
-    suggested_directions: List[str] = Field(
+    suggested_directions: list[str] = Field(
         default_factory=list,
         description="Concrete things to try (e.g. 'try focal loss with gamma=3', 'reduce batch_size to 4').",
     )
@@ -50,7 +52,7 @@ class ExpertAdvice(BaseModel):
         default="",
         description="Why this guidance was given — context for the agent's planning phase.",
     )
-    freeform_notes: Optional[str] = Field(
+    freeform_notes: str | None = Field(
         default=None,
         description=(
             "Catch-all slot for unstructured advice text. Used by legacy entry "
@@ -97,6 +99,7 @@ def serialize_expert_advice(advice: ExpertAdviceInput) -> str:
 # Per-experiment record (mirrors what is written to summary_{run_name}.json)
 # ---------------------------------------------------------------------------
 
+
 class ExperimentTiming(BaseModel):
     train_time_s: float
     inference_time_s: float
@@ -106,25 +109,25 @@ class ExperimentTiming(BaseModel):
 class ExperimentMemory(BaseModel):
     expert_advice_followed: str
     hypothesis: str
-    conclusion: Optional[str] = None
-    key_factor: Optional[str] = None
-    discovery: Optional[str] = None
-    memory_update: Optional[str] = None
+    conclusion: str | None = None
+    key_factor: str | None = None
+    discovery: str | None = None
+    memory_update: str | None = None
 
     # Phase J — pre-flight time-budget context surfaced to the planner via the
     # next round's experiment_history. Populated only when the time gate ran
     # (i.e. the active mode's budget was set); absent on records produced with
     # the gate disabled, so the reflector doesn't have to filter None values.
     # See docs/resource_estimator_implement.md §J.1.
-    time_estimate_minutes: Optional[float] = Field(
+    time_estimate_minutes: float | None = Field(
         default=None,
         description="Pre-flight wall-time prediction from evaluate_time_skill (minutes).",
     )
-    time_budget_minutes: Optional[float] = Field(
+    time_budget_minutes: float | None = Field(
         default=None,
         description="Active mode's time ceiling that the estimate was checked against (minutes).",
     )
-    time_mode: Optional[Literal["trial", "formal"]] = Field(
+    time_mode: Literal["trial", "formal"] | None = Field(
         default=None,
         description="Which budget was active for this round — 'trial' or 'formal'.",
     )
@@ -136,11 +139,11 @@ class ExperimentMemory(BaseModel):
     # side. Mode is inferred from `time_mode` (the two gates run in the same
     # round) — no separate vram_mode is stored.
     # See docs/resource_estimator_implement.md §10.4.
-    vram_estimate_gb: Optional[float] = Field(
+    vram_estimate_gb: float | None = Field(
         default=None,
         description="Pre-flight VRAM prediction from evaluate_vram_skill (GB).",
     )
-    vram_budget_gb: Optional[float] = Field(
+    vram_budget_gb: float | None = Field(
         default=None,
         description="Active mode's VRAM ceiling the estimate was checked against (GB).",
     )
@@ -153,7 +156,7 @@ class ExperimentMemory(BaseModel):
     # gate verdict (or K.7's gate_exhaustion summary) can use this flag to
     # discount estimates from rounds that ran on a guess. Default None
     # keeps pre-K.2.5-8 records valid. See §10.14 K.2.5-8.
-    inference_batch_uncalibrated: Optional[bool] = Field(
+    inference_batch_uncalibrated: bool | None = Field(
         default=None,
         description=(
             "True when the inference estimator substituted the runtime "
@@ -171,7 +174,7 @@ class ExperimentMemory(BaseModel):
     # gate as a hint, replacing the hand-calibrated × 2.7 ratio that
     # over-predicts for archs whose true ratio is lower. All optional so
     # pre-Commit-C records still validate.
-    inference_per_psd_seg_ms_measured: Optional[float] = Field(
+    inference_per_psd_seg_ms_measured: float | None = Field(
         default=None,
         description=(
             "Median per-PSD-segment inference cost (ms) measured during the "
@@ -179,7 +182,7 @@ class ExperimentMemory(BaseModel):
             "rounds with too few timed files (n_files < 2) or zero elapsed."
         ),
     )
-    inference_warmup_aggregator: Optional[Literal["median"]] = Field(
+    inference_warmup_aggregator: Literal["median"] | None = Field(
         default=None,
         description=(
             "Which aggregator produced ``inference_per_psd_seg_ms_measured``. "
@@ -188,14 +191,14 @@ class ExperimentMemory(BaseModel):
             "migration."
         ),
     )
-    inference_n_timed_files: Optional[int] = Field(
+    inference_n_timed_files: int | None = Field(
         default=None,
         description=(
             "Number of files contributing to the median (n_files − n_warmup). "
             "0 when the aggregator returned None."
         ),
     )
-    inference_warmup_fraction: Optional[float] = Field(
+    inference_warmup_fraction: float | None = Field(
         default=None,
         description=(
             "Fraction of leading files discarded as warmup (default 0.20). "
@@ -203,7 +206,7 @@ class ExperimentMemory(BaseModel):
             "``[1, n_files−1]``."
         ),
     )
-    inference_process_startup_ms: Optional[float] = Field(
+    inference_process_startup_ms: float | None = Field(
         default=None,
         description=(
             "Parent-measured fixed cost per inference call: subprocess wall "
@@ -213,7 +216,7 @@ class ExperimentMemory(BaseModel):
             "per-file marginal). None if the sidecar was missing."
         ),
     )
-    inference_ms_source: Optional[str] = Field(
+    inference_ms_source: str | None = Field(
         default=None,
         description=(
             "Provenance tag set by the time gate when the inference-ms "
@@ -234,14 +237,14 @@ class ExperimentMemory(BaseModel):
     # record was the 2nd attempt of round 1 (which still landed on attempt
     # 3)". Optional with default None for backward compat with pre-L
     # records. See docs/resource_estimator_implement.md §11.3.
-    round_index: Optional[int] = Field(
+    round_index: int | None = Field(
         default=None,
         description=(
             "Which logical round this attempt belonged to (1-indexed). "
             "Same value across all attempts of the same round."
         ),
     )
-    attempt_in_round: Optional[int] = Field(
+    attempt_in_round: int | None = Field(
         default=None,
         description=(
             "Attempt counter within the round (1..N). N = "
@@ -268,33 +271,36 @@ class ExperimentRecord(BaseModel):
     ]
     model_type: str
     timestamp: str
-    file_index: int = Field(default=6, description="Training/validation file index. Defaults to the standard split used in the TIDMAD paper.")
-    params: Dict[str, Any]
+    file_index: int = Field(
+        default=6,
+        description="Training/validation file index. Defaults to the standard split used in the TIDMAD paper.",
+    )
+    params: dict[str, Any]
 
     # --- Training results ---
-    final_loss: Optional[float] = Field(
+    final_loss: float | None = Field(
         default=None,
         description="Final training loss (last epoch). Comparable only across same loss_type.",
     )
-    loss_history: Optional[List[float]] = Field(
+    loss_history: list[float] | None = Field(
         default=None,
         description="Training loss per epoch.",
     )
-    model_params: Optional[int] = Field(
+    model_params: int | None = Field(
         default=None,
         description="Number of trainable model parameters.",
     )
 
     # --- Scoring results ---
-    denoising_score: Optional[float] = Field(
+    denoising_score: float | None = Field(
         default=None,
         description="Anchor-normalized denoising score (validation).",
     )
-    file_vector: Optional[List[Optional[float]]] = Field(
+    file_vector: list[float | None] | None = Field(
         default=None,
         description="Length-20 score vector. None for files not included in the run.",
     )
-    score_table: Optional[ScoreComparisonTable] = Field(
+    score_table: ScoreComparisonTable | None = Field(
         default=None,
         description=(
             "Per-file comparison table (model vs raw_baseline vs ground_truth) "
@@ -305,7 +311,7 @@ class ExperimentRecord(BaseModel):
             "See docs/aggregated_score_table_awareness.md §7.1."
         ),
     )
-    failure_reason: Optional[str] = Field(
+    failure_reason: str | None = Field(
         default=None,
         description=(
             "Human-readable health-check failure message when the task-specific "
@@ -319,48 +325,48 @@ class ExperimentRecord(BaseModel):
     )
 
     # --- Data volume ---
-    training_psd_segments: Optional[int] = Field(
+    training_psd_segments: int | None = Field(
         default=None,
         description="Number of PSD segments used for training.",
     )
-    eval_psd_segments: Optional[int] = Field(
+    eval_psd_segments: int | None = Field(
         default=None,
         description="Number of PSD segments used for evaluation.",
     )
 
-    timing: Optional[ExperimentTiming] = None
-    memory: Optional[ExperimentMemory] = None
+    timing: ExperimentTiming | None = None
+    memory: ExperimentMemory | None = None
 
     # --- Trial context (optional — absent or default in normal mode) ---
     is_trial: bool = Field(
         default=False,
         description="Whether this experiment ran in trial-explore mode with sparse sampling.",
     )
-    trial_strategy: Optional[Literal["snapshot", "anchors", "target"]] = Field(
+    trial_strategy: Literal["snapshot", "anchors", "target"] | None = Field(
         default=None,
         description="Sampling strategy used for training.",
     )
-    trial_portion: Optional[float] = Field(
+    trial_portion: float | None = Field(
         default=None,
         description="Fraction of segments per file for training scope.",
     )
-    eval_strategy: Optional[Literal["snapshot", "anchors", "target"]] = Field(
+    eval_strategy: Literal["snapshot", "anchors", "target"] | None = Field(
         default=None,
         description="Sampling strategy used for validation.",
     )
-    eval_portion: Optional[float] = Field(
+    eval_portion: float | None = Field(
         default=None,
         description="Fraction of segments per file for validation scope.",
     )
-    train_portion: Optional[float] = Field(
+    train_portion: float | None = Field(
         default=None,
         description="Per-epoch subsample from training scope.",
     )
-    target_files: Optional[List[int]] = Field(
+    target_files: list[int] | None = Field(
         default=None,
         description="File indices sampled (only for 'target' strategy).",
     )
-    file_vector: Optional[List[Optional[float]]] = Field(
+    file_vector: list[float | None] | None = Field(
         default=None,
         description="Length-20 score vector. None for files not included in the run.",
     )
@@ -369,6 +375,7 @@ class ExperimentRecord(BaseModel):
 # ---------------------------------------------------------------------------
 # Trial config (validated trial/formal decision per round)
 # ---------------------------------------------------------------------------
+
 
 class TrialConfig(BaseModel):
     """
@@ -419,7 +426,7 @@ class TrialConfig(BaseModel):
         le=1.0,
         description="Per-epoch subsample from the training scope (speed optimization).",
     )
-    target_files: List[int] = Field(
+    target_files: list[int] = Field(
         default_factory=list,
         description="File indices for 'target' strategy (training).",
     )
@@ -443,7 +450,7 @@ class TrialConfig(BaseModel):
     )
 
     # --- Legacy ---
-    file_index: Optional[int] = Field(
+    file_index: int | None = Field(
         default=None,
         description="Training/validation file index. Only used in single_file mode.",
     )
@@ -454,7 +461,7 @@ class TrialConfig(BaseModel):
     )
     eval_sampling_seed: int = Field(
         description="Seed for build_sample_set() to select validation PSD segments. "
-                    "Same as train_sampling_seed when train_validation_align=True.",
+        "Same as train_sampling_seed when train_validation_align=True.",
     )
     train_base_seed: int = Field(
         description="Base seed for per-epoch training subsampling. Epoch n uses seed = train_base_seed + n.",
@@ -466,7 +473,9 @@ class TrialConfig(BaseModel):
         if self.mode == "single_file" and self.file_index is None:
             raise ValueError("file_index required when mode='single_file'.")
         if self.is_trial and self.trial_strategy == "target" and not self.target_files:
-            raise ValueError("target_files required when is_trial=True and trial_strategy='target'.")
+            raise ValueError(
+                "target_files required when is_trial=True and trial_strategy='target'."
+            )
         if self.train_validation_align and self.train_sampling_seed != self.eval_sampling_seed:
             raise ValueError(
                 "train_validation_align=True but seeds differ: "
@@ -478,6 +487,7 @@ class TrialConfig(BaseModel):
 # ---------------------------------------------------------------------------
 # Experiment plan (validated output from brain.plan())
 # ---------------------------------------------------------------------------
+
 
 class ExperimentPlan(BaseModel):
     """
@@ -513,17 +523,17 @@ class ExperimentPlan(BaseModel):
         default="",
         description="How this experiment aligns with expert advice and past memory.",
     )
-    model_cfg: Dict[str, Any] = Field(
+    model_cfg: dict[str, Any] = Field(
         default_factory=dict,
         alias="model_config",
         description="Architecture-specific hyperparameters.",
     )
-    train_cfg: Dict[str, Any] = Field(
+    train_cfg: dict[str, Any] = Field(
         default_factory=dict,
         alias="train_config",
         description="Training hyperparameters (lr, epochs, batch_size, device).",
     )
-    loss_cfg: Dict[str, Any] = Field(
+    loss_cfg: dict[str, Any] = Field(
         default_factory=dict,
         alias="loss_config",
         description="Loss function specification (loss_type, etc.).",
@@ -546,7 +556,7 @@ class ExperimentPlan(BaseModel):
         le=1.0,
         description="Fraction of segments per file for the training scope.",
     )
-    target_files: List[int] = Field(
+    target_files: list[int] = Field(
         default_factory=list,
         description="File indices for 'target' strategy.",
     )
@@ -585,7 +595,7 @@ class ExperimentPlan(BaseModel):
         return self
 
     @classmethod
-    def with_defaults(cls, raw: Dict[str, Any]) -> "ExperimentPlan":
+    def with_defaults(cls, raw: dict[str, Any]) -> ExperimentPlan:
         """
         Validate raw LLM output, falling back to defaults on invalid trial fields.
 
@@ -599,8 +609,7 @@ class ExperimentPlan(BaseModel):
         """
         if isinstance(raw, list):
             if len(raw) == 1 and isinstance(raw[0], dict):
-                print("[ExperimentPlan] LLM returned a single-element list — "
-                      "unwrapping to dict.")
+                print("[ExperimentPlan] LLM returned a single-element list — unwrapping to dict.")
                 raw = raw[0]
             else:
                 raise TypeError(
@@ -608,9 +617,7 @@ class ExperimentPlan(BaseModel):
                     f"{len(raw)}. LLM output is malformed."
                 )
         if not isinstance(raw, dict):
-            raise TypeError(
-                f"ExperimentPlan expected a dict, got {type(raw).__name__}."
-            )
+            raise TypeError(f"ExperimentPlan expected a dict, got {type(raw).__name__}.")
         try:
             return cls.model_validate(raw)
         except Exception:
@@ -618,18 +625,25 @@ class ExperimentPlan(BaseModel):
             # Use alias names (model_config, train_config, loss_config) since
             # that's what the LLM outputs.
             _EXPERIMENT_KEYS = {
-                "model_type", "hypothesis", "reasoning",
-                "model_config", "train_config", "loss_config",
+                "model_type",
+                "hypothesis",
+                "reasoning",
+                "model_config",
+                "train_config",
+                "loss_config",
             }
             safe = {k: v for k, v in raw.items() if k in _EXPERIMENT_KEYS}
-            print(f"[ExperimentPlan] LLM returned invalid trial fields — "
-                  f"falling back to defaults. Kept keys: {list(safe.keys())}")
+            print(
+                f"[ExperimentPlan] LLM returned invalid trial fields — "
+                f"falling back to defaults. Kept keys: {list(safe.keys())}"
+            )
             return cls.model_validate(safe)
 
 
 # ---------------------------------------------------------------------------
 # Agent input
 # ---------------------------------------------------------------------------
+
 
 class HyperparamTuningInput(BaseModel):
     """
@@ -652,7 +666,7 @@ class HyperparamTuningInput(BaseModel):
     model_type: str = Field(
         description="Architecture to tune. One of the registered model keys, or 'auto' to let the agent decide.",
     )
-    seed_plugin_path: Optional[str] = Field(
+    seed_plugin_path: str | None = Field(
         default=None,
         description=(
             "Optional path to a plugin .py file used as the seed model for "
@@ -735,7 +749,7 @@ class HyperparamTuningInput(BaseModel):
         le=1.0,
         description="Fraction of segments per file for the training scope.",
     )
-    target_files: List[int] = Field(
+    target_files: list[int] = Field(
         default_factory=list,
         description="File indices to sample from. Required when trial_strategy='target'.",
     )
@@ -829,7 +843,7 @@ class HyperparamTuningInput(BaseModel):
         "hybrid_params",
         "independent",
         "inherit_best_trial",  # legacy alias of full_clone
-        "llm_propose",         # legacy alias of independent
+        "llm_propose",  # legacy alias of independent
     ] = Field(
         default="full_clone",
         description=(
@@ -885,12 +899,13 @@ class HyperparamTuningInput(BaseModel):
         """
         legacy = {
             "inherit_best_trial": "full_clone",
-            "llm_propose":        "independent",
+            "llm_propose": "independent",
         }
         if isinstance(v, str):
             return legacy.get(v, v)
         return v
-    degenerate_penalty_score: Optional[float] = Field(
+
+    degenerate_penalty_score: float | None = Field(
         default=None,
         description=(
             "Operator policy for the agent's reaction when "
@@ -911,7 +926,7 @@ class HyperparamTuningInput(BaseModel):
     )
 
     # --- Reproducibility seeds (optional — auto-generated when not provided) ---
-    sampling_seed: Optional[int] = Field(
+    sampling_seed: int | None = Field(
         default=None,
         description=(
             "Seed for build_sample_set() — determines which PSD segments form the "
@@ -920,7 +935,7 @@ class HyperparamTuningInput(BaseModel):
             "Read from a previous trial_config_{exp_id}.json."
         ),
     )
-    train_base_seed: Optional[int] = Field(
+    train_base_seed: int | None = Field(
         default=None,
         description=(
             "Base seed for per-epoch training subsampling. Epoch n uses "
@@ -937,7 +952,7 @@ class HyperparamTuningInput(BaseModel):
     # the validator→tuner protocol. Each is independently optional: setting
     # only the trial budget gates trial rounds and skips formal rounds, and
     # vice versa. The tuner picks the right one each round via plan.is_trial.
-    trial_time_budget_minutes: Optional[float] = Field(
+    trial_time_budget_minutes: float | None = Field(
         default=None,
         description=(
             "Wall-time budget in minutes against which evaluate_time_skill "
@@ -949,7 +964,7 @@ class HyperparamTuningInput(BaseModel):
             "estimates."
         ),
     )
-    formal_time_budget_minutes: Optional[float] = Field(
+    formal_time_budget_minutes: float | None = Field(
         default=None,
         description=(
             "Wall-time budget in minutes against which evaluate_time_skill "
@@ -968,7 +983,7 @@ class HyperparamTuningInput(BaseModel):
     # and vice versa. The budget here acts as an operator-defined ceiling; the
     # skill compares vram_estimate against min(defensive_floor, budget).
     # See docs/resource_estimator_implement.md §10.4 / §10.5.
-    trial_vram_budget_gb: Optional[float] = Field(
+    trial_vram_budget_gb: float | None = Field(
         default=None,
         description=(
             "VRAM budget in GB against which evaluate_vram_skill gates rounds "
@@ -979,7 +994,7 @@ class HyperparamTuningInput(BaseModel):
             "models that exceed it even when raw free-VRAM is plentiful."
         ),
     )
-    formal_vram_budget_gb: Optional[float] = Field(
+    formal_vram_budget_gb: float | None = Field(
         default=None,
         description=(
             "VRAM budget in GB against which evaluate_vram_skill gates rounds "
@@ -990,7 +1005,7 @@ class HyperparamTuningInput(BaseModel):
             "use larger batch sizes or full-dataset sampling."
         ),
     )
-    data_dir: Optional[str] = Field(
+    data_dir: str | None = Field(
         default=None,
         description=(
             "Filesystem path to the TIDMAD data directory. Forwarded to "
@@ -1001,7 +1016,7 @@ class HyperparamTuningInput(BaseModel):
     )
 
     # --- Hard constraints on LLM plan output (enforced after plan, not by the LLM) ---
-    max_epochs: Optional[int] = Field(
+    max_epochs: int | None = Field(
         default=None,
         ge=1,
         description=(
@@ -1011,7 +1026,7 @@ class HyperparamTuningInput(BaseModel):
             "or resource-constrained environments."
         ),
     )
-    plan_overrides: Dict[str, Any] = Field(
+    plan_overrides: dict[str, Any] = Field(
         default_factory=dict,
         description=(
             "Hard overrides applied to every ExperimentPlan after the LLM "
@@ -1049,19 +1064,15 @@ class HyperparamTuningInput(BaseModel):
 
         path = self.seed_plugin_path
         if not _os.path.isfile(path):
-            raise ValueError(
-                f"seed_plugin_path does not exist or is not a file: {path}"
-            )
+            raise ValueError(f"seed_plugin_path does not exist or is not a file: {path}")
 
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 tree = ast.parse(f.read(), filename=path)
         except SyntaxError as e:
-            raise ValueError(
-                f"seed_plugin_path is not valid Python ({path}): {e}"
-            )
+            raise ValueError(f"seed_plugin_path is not valid Python ({path}): {e}")
 
-        declared_type: Optional[str] = None
+        declared_type: str | None = None
         for node in tree.body:
             if not isinstance(node, ast.Assign):
                 continue
@@ -1100,7 +1111,7 @@ class HyperparamTuningInput(BaseModel):
             "Populated by the validate→tune protocol; not intended for direct human input."
         ),
     )
-    human_advice: Optional[str] = Field(
+    human_advice: str | None = Field(
         default=None,
         description=(
             "Optional human-provided guidance for the tuning agent. "
@@ -1110,7 +1121,7 @@ class HyperparamTuningInput(BaseModel):
     )
 
     # --- Seeding ---
-    seed_records: List[Dict[str, Any]] = Field(
+    seed_records: list[dict[str, Any]] = Field(
         default_factory=list,
         description=(
             "Pre-existing experiment records injected into the agent's memory before round 1. "
@@ -1141,7 +1152,7 @@ class HyperparamTuningInput(BaseModel):
     # a different model than the planner — see docs/break_tuner_agent.md.
     # When both reflect_* fields are None (default), the reflector uses the
     # planner's provider and model (legacy behavior).
-    reflect_provider: Optional[Literal["gemini", "openai", "deepseek"]] = Field(
+    reflect_provider: Literal["gemini", "openai", "deepseek"] | None = Field(
         default=None,
         description=(
             "Optional separate provider for the reflector sub-call. "
@@ -1150,7 +1161,7 @@ class HyperparamTuningInput(BaseModel):
             "vendor than the planner — the bridge will hold two clients."
         ),
     )
-    reflect_model_id: Optional[str] = Field(
+    reflect_model_id: str | None = Field(
         default=None,
         description=(
             "Optional separate model ID for the reflector sub-call. "
@@ -1159,7 +1170,7 @@ class HyperparamTuningInput(BaseModel):
             "the main provider's quota for the reasoning-heavy planner."
         ),
     )
-    max_retries: Optional[int] = Field(
+    max_retries: int | None = Field(
         default=None,
         description=(
             "Maximum retry attempts for transient API errors (429, 5xx). "
@@ -1176,7 +1187,7 @@ class HyperparamTuningInput(BaseModel):
             local=LocalStorageConfig(workspace="./siderius_workspace", run_name="v1"),
         ),
         description="Where this node reads its inputs and writes its outputs. "
-                    "Supports local filesystem now; postgres backend is a placeholder.",
+        "Supports local filesystem now; postgres backend is a placeholder.",
     )
     cleanup_denoised: bool = Field(
         default=False,
@@ -1196,6 +1207,7 @@ class HyperparamTuningInput(BaseModel):
 # Phase K (K.7) — iteration-boundary gate-exhaustion feedback
 # See docs/resource_estimator_implement.md §10.13.
 # ---------------------------------------------------------------------------
+
 
 class GateExhaustionInfo(BaseModel):
     """
@@ -1236,33 +1248,32 @@ class GateExhaustionInfo(BaseModel):
             "plan.is_trial of the most recent plan."
         ),
     )
-    vram_budget_gb: Optional[float] = Field(
+    vram_budget_gb: float | None = Field(
         default=None,
         description="Active mode's VRAM ceiling. None when the VRAM gate was disabled.",
     )
-    time_budget_minutes: Optional[float] = Field(
+    time_budget_minutes: float | None = Field(
         default=None,
         description="Active mode's time ceiling. None when the time gate was disabled.",
     )
 
     # --- Baseline (round-0) factors — diagnoses whether the proposer's own
     # baseline was already over budget vs the tuner mutating it heavier. ---
-    baseline_vram_estimate_gb: Optional[float] = Field(
+    baseline_vram_estimate_gb: float | None = Field(
         default=None,
         description="round-0 record's vram_estimate_gb (memory.vram_estimate_gb).",
     )
-    baseline_vram_factor: Optional[float] = Field(
+    baseline_vram_factor: float | None = Field(
         default=None,
         description=(
-            "baseline_vram_estimate_gb / vram_budget_gb. None when either "
-            "side is missing."
+            "baseline_vram_estimate_gb / vram_budget_gb. None when either side is missing."
         ),
     )
-    baseline_time_estimate_minutes: Optional[float] = Field(
+    baseline_time_estimate_minutes: float | None = Field(
         default=None,
         description="round-0 record's time_estimate_minutes (memory.time_estimate_minutes).",
     )
-    baseline_time_factor: Optional[float] = Field(
+    baseline_time_factor: float | None = Field(
         default=None,
         description=(
             "baseline_time_estimate_minutes / time_budget_minutes. None when "
@@ -1271,14 +1282,14 @@ class GateExhaustionInfo(BaseModel):
     )
 
     # --- Worst-case factors — bounds how much lighter the next baseline must be. ---
-    worst_vram_factor: Optional[float] = Field(
+    worst_vram_factor: float | None = Field(
         default=None,
         description=(
             "max(vram_estimate_gb / vram_budget_gb) across all records that "
             "carry a vram_estimate_gb. None when no record carries one."
         ),
     )
-    worst_time_factor: Optional[float] = Field(
+    worst_time_factor: float | None = Field(
         default=None,
         description=(
             "max(time_estimate_minutes / time_budget_minutes) across all "
@@ -1302,7 +1313,7 @@ class GateExhaustionInfo(BaseModel):
     # exceeds the configured thresholds; read by the next iteration's proposer
     # as a hard DO-NOT-PROPOSE list surfaced into the [DISALLOWED PATTERNS]
     # prompt block. Empty by default so pre-Fix-1 records round-trip unchanged.
-    disallowed_architectural_patterns: List[str] = Field(
+    disallowed_architectural_patterns: list[str] = Field(
         default_factory=list,
         description=(
             "Structured architectural-class tags the tuner has marked as "
@@ -1327,6 +1338,7 @@ class GateExhaustionInfo(BaseModel):
 # See docs/phase66_ws_b_proposer_hardening.md §2.3.
 # ---------------------------------------------------------------------------
 
+
 class PhysicalRejection(BaseModel):
     """
     One VRAM-gate rejection, captured at the moment evaluate_vram_skill
@@ -1338,9 +1350,10 @@ class PhysicalRejection(BaseModel):
     Frozen: the tuner appends fully-constructed rejections to its run-level
     buffer; no post-append mutation is supported by design.
     """
+
     model_config = ConfigDict(frozen=True)
 
-    attempt_config: Dict[str, Any] = Field(
+    attempt_config: dict[str, Any] = Field(
         description=(
             "Compact snapshot of the tuner's active_params at rejection "
             "time — enough to identify which hyperparameters drove the "
@@ -1349,9 +1362,7 @@ class PhysicalRejection(BaseModel):
             "orchestrator may prune further before rendering."
         ),
     )
-    binding_cap: Literal[
-        "vram", "compute_intensity", "vram+compute_intensity"
-    ] = Field(
+    binding_cap: Literal["vram", "compute_intensity", "vram+compute_intensity"] = Field(
         description=(
             "Which cap the attempt violated. Mirrors "
             "MemoryKillerDetails.binding_cap from the VRAM skill — the "
@@ -1371,7 +1382,8 @@ class PhysicalRejection(BaseModel):
         description="Dominant layer's contribution in GB.",
     )
     dominant_fraction: float = Field(
-        ge=0.0, le=1.0,
+        ge=0.0,
+        le=1.0,
         description=(
             "Dominant layer's share of the predicted peak (0.0–1.0). "
             "Feeds the Proposer prompt's percentage rendering "
@@ -1401,6 +1413,7 @@ class PhysicalRejection(BaseModel):
 # Agent output
 # ---------------------------------------------------------------------------
 
+
 class HyperparamTuningOutput(BaseModel):
     """
     Full report produced by a completed tune_ml_hyperparam_agent run.
@@ -1426,23 +1439,23 @@ class HyperparamTuningOutput(BaseModel):
     total_attempts: int
 
     # --- Best result ---
-    best_exp_id: Optional[str] = Field(
+    best_exp_id: str | None = Field(
         default=None,
         description="exp_id of the experiment with the highest denoising_score.",
     )
-    best_denoising_score: Optional[float] = Field(
+    best_denoising_score: float | None = Field(
         default=None,
         description="Highest denoising_score achieved across all completed rounds.",
     )
-    best_config: Optional[Dict[str, Any]] = Field(
+    best_config: dict[str, Any] | None = Field(
         default=None,
         description="model_config + train_config + loss_config that produced best_denoising_score.",
     )
-    best_file_vector: Optional[List[Optional[float]]] = Field(
+    best_file_vector: list[float | None] | None = Field(
         default=None,
         description="Length-20 score vector from the best experiment. None for files not included.",
     )
-    best_score_table: Optional[ScoreComparisonTable] = Field(
+    best_score_table: ScoreComparisonTable | None = Field(
         default=None,
         description=(
             "Score comparison table from the experiment with the highest "
@@ -1452,7 +1465,7 @@ class HyperparamTuningOutput(BaseModel):
             "proposer prompts consume. None when no round succeeded."
         ),
     )
-    formal_score_table: Optional[ScoreComparisonTable] = Field(
+    formal_score_table: ScoreComparisonTable | None = Field(
         default=None,
         description=(
             "Score comparison table from the most recent successful formal "
@@ -1464,7 +1477,7 @@ class HyperparamTuningOutput(BaseModel):
     )
 
     # --- Full history ---
-    all_records: List[ExperimentRecord] = Field(
+    all_records: list[ExperimentRecord] = Field(
         default_factory=list,
         description=(
             "Complete experiment history including successful, failed, and OOM-skipped rounds. "
@@ -1473,7 +1486,7 @@ class HyperparamTuningOutput(BaseModel):
     )
 
     # --- Phase K (K.7) — iteration-boundary feedback to the next proposer ---
-    gate_exhaustion: Optional[GateExhaustionInfo] = Field(
+    gate_exhaustion: GateExhaustionInfo | None = Field(
         default=None,
         description=(
             "Populated only when the iteration ended without ever training "
@@ -1491,7 +1504,7 @@ class HyperparamTuningOutput(BaseModel):
     # architecture (worst offender) and renders [PHYSICAL REJECTION]
     # strings into the next iteration's ProposalInput.previous_failures.
     # See docs/phase66_ws_b_proposer_hardening.md §2.3 / §2.4.
-    physical_rejections: List[PhysicalRejection] = Field(
+    physical_rejections: list[PhysicalRejection] = Field(
         default_factory=list,
         description=(
             "One entry per VRAM-gate rejection in this run. Empty list "

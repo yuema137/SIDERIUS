@@ -21,6 +21,7 @@ Agent → call shape (kwargs the factory receives):
   * ``HyperparamTuningAgent``      → provider, model_id, reflect_provider,
                                      reflect_model_id, max_retries
 """
+
 from __future__ import annotations
 
 from agent.llm_bridge import StubLLMBridge

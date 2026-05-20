@@ -20,8 +20,10 @@ Field numeric-to-string rendering (``n/a`` for disabled axes, factor
 two-decimal ``×`` suffix, etc.) is inherited from the K.7.6 helper and
 not re-tested here — see §14.N.4.
 """
-import pytest
+
 from unittest.mock import MagicMock
+
+import pytest
 
 from agent.prompt_templates.proposal import load_stage_prompt
 from agent.schemas.hyperparam_tuning import GateExhaustionInfo
@@ -38,10 +40,10 @@ from nodes.ml_model_proposal_agent import (
     _format_recent_gate_exhaustions_block,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _gate_exhaustion(**overrides) -> GateExhaustionInfo:
     """Concise factory for a fully-populated GateExhaustionInfo."""
@@ -97,10 +99,8 @@ def _pipeline_input(tmp_path, gate_infos=None) -> ProposalInput:
         reasoning_pipeline=ReasoningPipelineConfig(
             exploration_mode="exploit",
             stages=[
-                ReasoningStage(name="comparison",
-                               system_prompt_key="COMPARATIVE_ANALYSIS"),
-                ReasoningStage(name="causal_reasoning",
-                               system_prompt_key="CAUSAL_REASONING"),
+                ReasoningStage(name="comparison", system_prompt_key="COMPARATIVE_ANALYSIS"),
+                ReasoningStage(name="causal_reasoning", system_prompt_key="CAUSAL_REASONING"),
             ],
         ),
         storage=StorageConfig(
@@ -113,6 +113,7 @@ def _pipeline_input(tmp_path, gate_infos=None) -> ProposalInput:
 # ---------------------------------------------------------------------------
 # Helper truth-table — §14.N.4: 0 / 1 / 2 / 3 entries
 # ---------------------------------------------------------------------------
+
 
 class TestFormatRecentGateExhaustionsBlock:
     """Per-entry-count baselines. Each multi-assertion test pins every
@@ -155,10 +156,7 @@ class TestFormatRecentGateExhaustionsBlock:
         assert block.count("-" * 68) == 1
         assert "OLDER: VRAM gate hit." in block
         assert "NEWER: time gate hit." in block
-        assert (
-            block.index("OLDER: VRAM gate hit.")
-            < block.index("NEWER: time gate hit.")
-        )
+        assert block.index("OLDER: VRAM gate hit.") < block.index("NEWER: time gate hit.")
 
     def test_three_entry_block_shape(self):
         """3 entries → header mentions ``3 iterations``, all three
@@ -191,8 +189,8 @@ class TestFormatRecentGateExhaustionsBlock:
 # Legacy mode — _build_reasoning_prompt
 # ---------------------------------------------------------------------------
 
-class TestLegacyReasoningPromptInjection:
 
+class TestLegacyReasoningPromptInjection:
     def test_block_absent_when_list_empty(self, tmp_path):
         """Default ProposalInput → empty list → header must not appear in
         the legacy reasoning prompt."""
@@ -249,6 +247,7 @@ class TestLegacyReasoningPromptInjection:
 # Pipeline mode — proposing-stage template substitution
 # ---------------------------------------------------------------------------
 
+
 class TestPipelineProposingStageInjection:
     """The proposing-stage template (.md file) carries a
     ``{recent_gate_exhaustions_block}`` placeholder; the pipeline populates
@@ -285,7 +284,10 @@ class TestPipelineProposingStageInjection:
         ],
     )
     def test_placeholder_substitution(
-        self, gate_infos, expects_header, expects_summary,
+        self,
+        gate_infos,
+        expects_header,
+        expects_summary,
     ):
         """Round-trip contract: helper output is spliced into the
         proposing-stage template via ``template_vars``. Populated list →
@@ -354,11 +356,16 @@ class TestPipelineTemplateVarsCarryBlock:
         "mathematical_definition": "x",
         "motivation": "x",
         "expert_advice": {
-            "focus_areas": [], "constraints": ["VRAM<10", "params<50M"],
-            "known_failures": [], "suggested_directions": [], "rationale": "x",
+            "focus_areas": [],
+            "constraints": ["VRAM<10", "params<50M"],
+            "known_failures": [],
+            "suggested_directions": [],
+            "rationale": "x",
         },
         "baseline_config": {
-            "model_config": {}, "train_config": {}, "loss_config": {},
+            "model_config": {},
+            "train_config": {},
+            "loss_config": {},
         },
         "memo_consistency_notes": [],
     }
@@ -371,7 +378,8 @@ class TestPipelineTemplateVarsCarryBlock:
             self._FAKE_PROPOSING,
         ]
         agent = MLModelProposalAgent(
-            provider="gemini", model_id="test",
+            provider="gemini",
+            model_id="test",
             bridge_factory=lambda **kw: bridge,
         )
         return agent, bridge
@@ -399,7 +407,11 @@ class TestPipelineTemplateVarsCarryBlock:
         ],
     )
     def test_proposing_system_prompt_block_inclusion(
-        self, tmp_path, gate_infos_factory, expects_header, expects_summary,
+        self,
+        tmp_path,
+        gate_infos_factory,
+        expects_header,
+        expects_summary,
     ):
         """End-to-end via ``agent.run``: the proposing-stage system prompt
         the LLM actually sees carries the rendered block when the input
@@ -448,7 +460,8 @@ class TestDebugDumpProposingPrompt:
             TestPipelineTemplateVarsCarryBlock._FAKE_PROPOSING,
         ]
         agent = MLModelProposalAgent(
-            provider="gemini", model_id="test",
+            provider="gemini",
+            model_id="test",
             bridge_factory=lambda **kw: bridge,
         )
         return agent, bridge
@@ -458,9 +471,7 @@ class TestDebugDumpProposingPrompt:
         dump_path = tmp_path / "debug" / "iter002_proposing.md"
         inp = _pipeline_input(
             tmp_path,
-            gate_infos=[
-                _gate_exhaustion(summary_message="All attempts hit the VRAM gate.")
-            ],
+            gate_infos=[_gate_exhaustion(summary_message="All attempts hit the VRAM gate.")],
         )
         inp.debug_dump_proposing_prompt_path = str(dump_path)
         agent.run(inp)
@@ -474,9 +485,7 @@ class TestDebugDumpProposingPrompt:
         inp = _pipeline_input(tmp_path, gate_infos=[])
         agent.run(inp)
         debug_dir = tmp_path / "debug"
-        assert not debug_dir.exists(), (
-            "no debug dir should be created when path is None"
-        )
+        assert not debug_dir.exists(), "no debug dir should be created when path is None"
 
 
 # ---------------------------------------------------------------------------
@@ -503,7 +512,6 @@ class TestDebugDumpProposingPrompt:
 
 
 class TestDisallowedPatternsSubBlock:
-
     def test_empty_patterns_produces_no_disallowed_block(self):
         """Zero-noise: default empty list must NOT render the banner — the
         aggregate-window block should look exactly as it did pre-Fix-1 for
@@ -539,8 +547,8 @@ class TestDisallowedPatternsSubBlock:
         # All three tag→description pairs present
         for tag, desc in [
             ("dense_attention_over_T", ARCHITECTURAL_PATTERNS["dense_attention_over_T"]),
-            ("recurrent_over_T",       ARCHITECTURAL_PATTERNS["recurrent_over_T"]),
-            ("scan_over_T",            ARCHITECTURAL_PATTERNS["scan_over_T"]),
+            ("recurrent_over_T", ARCHITECTURAL_PATTERNS["recurrent_over_T"]),
+            ("scan_over_T", ARCHITECTURAL_PATTERNS["scan_over_T"]),
         ]:
             assert f"- {tag}: {desc}" in block
         # Order preserved: dense_attention_over_T → recurrent_over_T → scan_over_T
@@ -573,9 +581,7 @@ class TestDisallowedPatternsSubBlock:
             summary_message="newer: marginal overshoot, no ban",
             disallowed_architectural_patterns=[],
         )
-        block = _format_recent_gate_exhaustions_block(
-            [older_with_ban, newer_clean]
-        )
+        block = _format_recent_gate_exhaustions_block([older_with_ban, newer_clean])
         # Exactly one banner
         assert block.count("[DISALLOWED PATTERNS] DO NOT PROPOSE:") == 1
         # Banner belongs to the older entry (appears between iter N-2 and iter N-1)

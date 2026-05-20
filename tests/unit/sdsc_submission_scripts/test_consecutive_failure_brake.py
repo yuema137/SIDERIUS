@@ -22,6 +22,7 @@ T5 matrix recap:
 Plus 2 fail-open guards (T7 — the brake must never halt on its own flaky
 reads) for missing manifest.json and malformed JSON.
 """
+
 from __future__ import annotations
 
 import json
@@ -45,13 +46,17 @@ def _write_manifest(workspace: Path, iter_num: int, status: str) -> None:
     """
     iter_dir = workspace / f"iter_{iter_num:03d}"
     iter_dir.mkdir(parents=True, exist_ok=True)
-    (iter_dir / "manifest.json").write_text(json.dumps({
-        "status": status,
-        "iteration_dir": str(iter_dir),
-        "output_path": None,
-        "model_name": None,
-        "best_score": None,
-    }))
+    (iter_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "status": status,
+                "iteration_dir": str(iter_dir),
+                "output_path": None,
+                "model_name": None,
+                "best_score": None,
+            }
+        )
+    )
 
 
 # ---------------------------------------------------------------------

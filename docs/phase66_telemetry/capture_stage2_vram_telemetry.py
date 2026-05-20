@@ -36,6 +36,7 @@ Single-phase mode (for debugging):
     .venv/bin/python docs/phase66_telemetry/capture_stage2_vram_telemetry.py \\
         --phase inference
 """
+
 from __future__ import annotations
 
 import argparse
@@ -44,7 +45,7 @@ import os
 import socket
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 # SIDERIUS's sandbox model modules use flat (non-packaged) imports among
@@ -64,37 +65,36 @@ import torch.nn as nn
 from ml_models.loss_models_sandbox import FocalLoss1D
 from ml_models.models_format_sandbox import LossConfig
 
-
 # ── Stage 2 iter_001 attempt 003 configs (copied verbatim from saved JSONs) ──
 
 MODEL_CONFIG = {
-    "model_type":         "dynamic_depth_simple",
-    "segmentation_size":  10000,
-    "batch_size":         8,
-    "input_channels":     16,
-    "residual_channels":  32,
-    "gate_channels":      64,
-    "kernel_size":        5,
-    "skip_channels":      32,
-    "embed_dim":          64,
-    "num_blocks":         2,
+    "model_type": "dynamic_depth_simple",
+    "segmentation_size": 10000,
+    "batch_size": 8,
+    "input_channels": 16,
+    "residual_channels": 32,
+    "gate_channels": 64,
+    "kernel_size": 5,
+    "skip_channels": 32,
+    "embed_dim": 64,
+    "num_blocks": 2,
 }
 
 TRAIN_CONFIG = {
-    "lr":             0.0003,
-    "epochs":         1,
-    "batch_size":     8,
+    "lr": 0.0003,
+    "epochs": 1,
+    "batch_size": 8,
     "optimizer_type": "adamw",
-    "weight_decay":   1e-05,
-    "device":         "cuda",
+    "weight_decay": 1e-05,
+    "device": "cuda",
 }
 
 LOSS_CONFIG = {
-    "loss_type":         "focal",
-    "alpha":             0.25,
-    "gamma":             2.0,
-    "beta":              None,
-    "reduction":         "mean",
+    "loss_type": "focal",
+    "alpha": 0.25,
+    "gamma": 2.0,
+    "beta": None,
+    "reduction": "mean",
     "use_class_weights": False,
 }
 
@@ -106,6 +106,7 @@ INFERENCE_BATCH = 25
 
 
 # ── Plugin code: Stage 2 iter_001 attempt_003 (inlined) ─────────────────────
+
 
 class DynamicDepthSimple(nn.Module):
     """Stage 2 iter_001 attempt_003 model. Copied verbatim from the passing
@@ -142,7 +143,8 @@ class DynamicDepthSimple(nn.Module):
 
 # ── Phase runners ────────────────────────────────────────────────────────────
 
-def _resolve_device_index(override: "str | None") -> int:
+
+def _resolve_device_index(override: str | None) -> int:
     """Return an integer CUDA device index.
 
     Priority: explicit ``--device`` arg → ``torch.cuda.current_device()`` (which
@@ -153,9 +155,7 @@ def _resolve_device_index(override: "str | None") -> int:
     the resolved device.
     """
     if not torch.cuda.is_available():
-        raise RuntimeError(
-            "CUDA not available. This telemetry MUST run on a GPU host."
-        )
+        raise RuntimeError("CUDA not available. This telemetry MUST run on a GPU host.")
     if override is None or override == "":
         idx = torch.cuda.current_device()
     elif override.startswith("cuda:"):
@@ -181,19 +181,19 @@ def _resolve_device_index(override: "str | None") -> int:
 def _device_info(idx: int) -> dict:
     props = torch.cuda.get_device_properties(idx)
     return {
-        "device_index":         idx,
-        "device_name":          torch.cuda.get_device_name(idx),
-        "device_total_bytes":   props.total_memory,
-        "compute_capability":   [props.major, props.minor],
+        "device_index": idx,
+        "device_name": torch.cuda.get_device_name(idx),
+        "device_total_bytes": props.total_memory,
+        "compute_capability": [props.major, props.minor],
         "multiprocessor_count": props.multi_processor_count,
-        "torch_version":        torch.__version__,
+        "torch_version": torch.__version__,
         "cuda_runtime_version": torch.version.cuda,
-        "hostname":             socket.gethostname(),
-        "captured_at_utc":      datetime.now(timezone.utc).isoformat(),
+        "hostname": socket.gethostname(),
+        "captured_at_utc": datetime.now(UTC).isoformat(),
     }
 
 
-def capture_training_phase(device_override: "str | None" = None) -> dict:
+def capture_training_phase(device_override: str | None = None) -> dict:
     """Instantiate, run 5 training steps, return peak bytes.
 
     5 steps is ample: the PyTorch allocator grabs its working set on the
@@ -234,23 +234,23 @@ def capture_training_phase(device_override: "str | None" = None) -> dict:
     peak_reserved = torch.cuda.max_memory_reserved(idx)
 
     out = {
-        "phase":                "training",
+        "phase": "training",
         "peak_allocated_bytes": peak_alloc,
-        "peak_reserved_bytes":  peak_reserved,
-        "peak_allocated_gb":    round(peak_alloc / (1024 ** 3), 4),
-        "peak_reserved_gb":     round(peak_reserved / (1024 ** 3), 4),
-        "steps":                STEPS,
-        "batch_size":           B,
-        "segmentation_size":    T,
-        "num_params":           sum(p.numel() for p in model.parameters()),
-        "optimizer":            TRAIN_CONFIG["optimizer_type"],
-        "loss":                 LOSS_CONFIG["loss_type"],
+        "peak_reserved_bytes": peak_reserved,
+        "peak_allocated_gb": round(peak_alloc / (1024**3), 4),
+        "peak_reserved_gb": round(peak_reserved / (1024**3), 4),
+        "steps": STEPS,
+        "batch_size": B,
+        "segmentation_size": T,
+        "num_params": sum(p.numel() for p in model.parameters()),
+        "optimizer": TRAIN_CONFIG["optimizer_type"],
+        "loss": LOSS_CONFIG["loss_type"],
     }
     out.update(_device_info(idx))
     return out
 
 
-def capture_inference_phase(device_override: "str | None" = None) -> dict:
+def capture_inference_phase(device_override: str | None = None) -> dict:
     """Instantiate, run a single no_grad forward at the runtime fallback
     inference batch (25), return peak bytes."""
     idx = _resolve_device_index(device_override)
@@ -273,14 +273,14 @@ def capture_inference_phase(device_override: "str | None" = None) -> dict:
     peak_reserved = torch.cuda.max_memory_reserved(idx)
 
     out = {
-        "phase":                "inference",
+        "phase": "inference",
         "peak_allocated_bytes": peak_alloc,
-        "peak_reserved_bytes":  peak_reserved,
-        "peak_allocated_gb":    round(peak_alloc / (1024 ** 3), 4),
-        "peak_reserved_gb":     round(peak_reserved / (1024 ** 3), 4),
-        "inference_batch":      B,
-        "segmentation_size":    T,
-        "num_params":           sum(p.numel() for p in model.parameters()),
+        "peak_reserved_bytes": peak_reserved,
+        "peak_allocated_gb": round(peak_alloc / (1024**3), 4),
+        "peak_reserved_gb": round(peak_reserved / (1024**3), 4),
+        "inference_batch": B,
+        "segmentation_size": T,
+        "num_params": sum(p.numel() for p in model.parameters()),
     }
     out.update(_device_info(idx))
     return out
@@ -291,7 +291,7 @@ def capture_inference_phase(device_override: "str | None" = None) -> dict:
 _CHILD_MARKER = "--__child"
 
 
-def _spawn_child(phase: str, device_override: "str | None" = None) -> dict:
+def _spawn_child(phase: str, device_override: str | None = None) -> dict:
     cmd = [sys.executable, __file__, "--phase", phase, _CHILD_MARKER]
     if device_override:
         cmd.extend(["--device", device_override])
@@ -319,29 +319,34 @@ def _spawn_child(phase: str, device_override: "str | None" = None) -> dict:
     )
 
 
-def run_end_to_end(device_override: "str | None" = None) -> dict:
+def run_end_to_end(device_override: str | None = None) -> dict:
     training = _spawn_child("training", device_override)
     inference = _spawn_child("inference", device_override)
     max_peak = max(training["peak_allocated_bytes"], inference["peak_allocated_bytes"])
-    dominant = "training" if training["peak_allocated_bytes"] >= inference["peak_allocated_bytes"] else "inference"
+    dominant = (
+        "training"
+        if training["peak_allocated_bytes"] >= inference["peak_allocated_bytes"]
+        else "inference"
+    )
     return {
         "phases": {
-            "training":  training,
+            "training": training,
             "inference": inference,
         },
-        "max_peak_bytes":   max_peak,
-        "max_peak_gb":      round(max_peak / (1024 ** 3), 4),
-        "dominant_phase":   dominant,
-        "device_name":      training["device_name"],
+        "max_peak_bytes": max_peak,
+        "max_peak_gb": round(max_peak / (1024**3), 4),
+        "dominant_phase": dominant,
+        "device_name": training["device_name"],
         "device_total_bytes": training["device_total_bytes"],
-        "device_total_gb":  round(training["device_total_bytes"] / (1024 ** 3), 4),
-        "captured_at_utc":  datetime.now(timezone.utc).isoformat(),
-        "hostname":         socket.gethostname(),
-        "source_artefact":  "/tmp/pytest-of-yuema137/pytest-811/test_two_iterations_under_budg0/stage2_smoke/stage2_iter_001/iteration_001/attempt_003_dynamic_depth_simple",
+        "device_total_gb": round(training["device_total_bytes"] / (1024**3), 4),
+        "captured_at_utc": datetime.now(UTC).isoformat(),
+        "hostname": socket.gethostname(),
+        "source_artefact": "/tmp/pytest-of-yuema137/pytest-811/test_two_iterations_under_budg0/stage2_smoke/stage2_iter_001/iteration_001/attempt_003_dynamic_depth_simple",
     }
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
+
 
 def _emit(payload: dict, output_path: Path | None) -> None:
     as_json = json.dumps(payload, indent=2)

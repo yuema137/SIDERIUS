@@ -33,6 +33,7 @@ import json
 import math
 import os
 import shutil
+
 import pytest
 from dotenv import load_dotenv
 
@@ -40,21 +41,26 @@ from dotenv import load_dotenv
 # Single source of truth — edit one file to retune both environments.
 SHARED_ADVICE_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
-    "..", "..", "..", "sdsc_submission_scripts", "human_advice_chain_test.json",
+    "..",
+    "..",
+    "..",
+    "sdsc_submission_scripts",
+    "human_advice_chain_test.json",
 )
 
 
 def _load_shared_advice() -> dict:
     """Load the shared human-advice JSON; missing keys default to empty string."""
-    with open(SHARED_ADVICE_FILE, "r", encoding="utf-8") as f:
+    with open(SHARED_ADVICE_FILE, encoding="utf-8") as f:
         d = json.load(f)
     return {
         "interpret": d.get("interpret", "") or "",
-        "propose":   d.get("propose",   "") or "",
+        "propose": d.get("propose", "") or "",
         "implement": d.get("implement", "") or "",
-        "validate":  d.get("validate",  "") or "",
-        "tune":      d.get("tune",      "") or "",
+        "validate": d.get("validate", "") or "",
+        "tune": d.get("tune", "") or "",
     }
+
 
 load_dotenv()
 
@@ -65,7 +71,7 @@ pytestmark = pytest.mark.real_run
 # ---------------------------------------------------------------------------
 
 try:
-    from execute_tools.data_paths import TIDMAD_DATA_DIR, SIDERIUS_DATA_DIR
+    from execute_tools.data_paths import SIDERIUS_DATA_DIR, TIDMAD_DATA_DIR
 except (FileNotFoundError, ImportError):
     TIDMAD_DATA_DIR = "/home/klz/Data/TIDMAD/"
     SIDERIUS_DATA_DIR = "/home/klz/Data/SIDEREIS_DATA/"
@@ -80,6 +86,7 @@ ANCHOR_MAP_PATH = os.path.join(TIDMAD_DATA_DIR, "segment_anchors.json")
 # ---------------------------------------------------------------------------
 # Skip guards
 # ---------------------------------------------------------------------------
+
 
 def _skip_if_no_key():
     if not os.getenv("GEMINI_API_KEY"):
@@ -101,7 +108,10 @@ def _skip_if_no_anchor_map():
 def _skip_if_no_tuning_outputs():
     for model in SOURCE_MODELS:
         path = os.path.join(
-            SIDERIUS_DATA_DIR, model, SOURCE_RUN_NAME, "agent",
+            SIDERIUS_DATA_DIR,
+            model,
+            SOURCE_RUN_NAME,
+            "agent",
             f"run_output_{SOURCE_RUN_NAME}_agent.json",
         )
         if not os.path.exists(path):
@@ -110,6 +120,7 @@ def _skip_if_no_tuning_outputs():
 
 def _skip_if_no_cuda():
     import torch
+
     if not torch.cuda.is_available():
         pytest.skip("CUDA GPU not available")
 
@@ -117,6 +128,7 @@ def _skip_if_no_cuda():
 # ---------------------------------------------------------------------------
 # Validation helpers (shared — reusable by Slurm mode)
 # ---------------------------------------------------------------------------
+
 
 def validate_workflow_outputs(
     run_dir: str,
@@ -144,7 +156,8 @@ def validate_workflow_outputs(
 
     # Find the attempt directory (named attempt_001_{model_name})
     attempt_dirs = [
-        d for d in os.listdir(iter_dir)
+        d
+        for d in os.listdir(iter_dir)
         if d.startswith("attempt_") and os.path.isdir(os.path.join(iter_dir, d))
     ]
     assert len(attempt_dirs) >= 1, f"No attempt directories found in {iter_dir}"
@@ -163,8 +176,10 @@ def validate_workflow_outputs(
     assert len(interp["key_findings"]) > 0, "key_findings is empty"
     assert len(interp["take_home_message"]) > 0, "take_home_message is empty"
     assert interp["best_denoising_score"] is not None, "best_denoising_score is None"
-    print(f"  [PASS] Interpretation: {len(interp['key_findings'])} findings, "
-          f"best_score={interp['best_denoising_score']}")
+    print(
+        f"  [PASS] Interpretation: {len(interp['key_findings'])} findings, "
+        f"best_score={interp['best_denoising_score']}"
+    )
 
     # --- 2. Proposal ---
     proposal_path = os.path.join(attempt_dir, f"proposal_{run_name}.json")
@@ -218,12 +233,17 @@ def validate_workflow_outputs(
         f"Validation failed: {validation.get('error_message', 'unknown')}"
     )
     for check in [
-        "plugin_registered", "tests_passed", "description_valid",
-        "config_fields_valid", "instantiation_passed",
-        "gradient_check_passed", "output_type_valid", "llm_review_passed",
+        "plugin_registered",
+        "tests_passed",
+        "description_valid",
+        "config_fields_valid",
+        "instantiation_passed",
+        "gradient_check_passed",
+        "output_type_valid",
+        "llm_review_passed",
     ]:
         assert validation[check] is True, f"Validation check '{check}' failed"
-    print(f"  [PASS] Validation: all 8 checks passed")
+    print("  [PASS] Validation: all 8 checks passed")
 
     # --- 5. Tuning ---
     from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
@@ -245,9 +265,7 @@ def validate_workflow_outputs(
     for i, rec in enumerate(tune_output.all_records):
         if rec.status != "success":
             continue
-        assert rec.file_vector is not None, (
-            f"Record {i} missing file_vector"
-        )
+        assert rec.file_vector is not None, f"Record {i} missing file_vector"
         assert len(rec.file_vector) == 20, (
             f"Record {i} file_vector has {len(rec.file_vector)} entries, expected 20"
         )
@@ -265,8 +283,10 @@ def validate_workflow_outputs(
             f"Formal record has {len(non_nan)}/20 non-NaN file_vector entries"
         )
 
-    print(f"  [PASS] Tuning: {tune_output.completed_rounds} rounds, "
-          f"best_score={tune_output.best_denoising_score}")
+    print(
+        f"  [PASS] Tuning: {tune_output.completed_rounds} rounds, "
+        f"best_score={tune_output.best_denoising_score}"
+    )
 
     return model_name
 
@@ -275,8 +295,8 @@ def validate_workflow_outputs(
 # Test class
 # ---------------------------------------------------------------------------
 
-class TestFullExplorationLoop:
 
+class TestFullExplorationLoop:
     def setup_method(self):
         _skip_if_no_key()
         _skip_if_no_data()
@@ -289,8 +309,8 @@ class TestFullExplorationLoop:
         Run the complete 5-agent workflow: interpret → propose → implement →
         validate → tune (2 rounds: trial + forced formal).
         """
-        from workflows.model_exploration import run_workflow
         from workflows.llm_config import WorkflowLLMConfig
+        from workflows.model_exploration import run_workflow
 
         workspace = str(tmp_path / "workflow_output")
         run_name = "test_full_loop"
@@ -302,15 +322,16 @@ class TestFullExplorationLoop:
         # silently miss bugs like an invalid model ID. Always pass the
         # override here so E8 mirrors the SDSC E9 production config.
         llm_config = WorkflowLLMConfig.uniform(
-            "gemini", "gemini-3.1-pro-preview",
+            "gemini",
+            "gemini-3.1-pro-preview",
             reflect_model_id="gemini-2.5-flash",
         )
 
-        print(f"\n{'='*60}")
-        print(f"  TIER 3 INTEGRATION TEST: Full 5-Agent Workflow")
+        print(f"\n{'=' * 60}")
+        print("  TIER 3 INTEGRATION TEST: Full 5-Agent Workflow")
         print(f"  Workspace: {workspace}")
-        print(f"  LLM: gemini-3.1-pro-preview")
-        print(f"{'='*60}\n")
+        print("  LLM: gemini-3.1-pro-preview")
+        print(f"{'=' * 60}\n")
 
         results = run_workflow(
             data_dir=SIDERIUS_DATA_DIR,
@@ -344,9 +365,9 @@ class TestFullExplorationLoop:
         # plugin dir (which lives under ``tmp_path``) instead of the legacy
         # ``<repo>/agent_generated/models/``. tmp_path teardown handles it.
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"  TIER 3 TEST PASSED — model '{model_name}' explored successfully")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
     def test_chained_iterations(self, tmp_path):
         """
@@ -363,8 +384,8 @@ class TestFullExplorationLoop:
         Uses very aggressive size constraints to keep total runtime under
         ~1 hour (vs ~2.5 hours for the default Tier 3 test).
         """
-        from workflows.model_exploration import run_workflow
         from workflows.llm_config import WorkflowLLMConfig
+        from workflows.model_exploration import run_workflow
 
         workspace = str(tmp_path / "workflow_output")
         llm_config = WorkflowLLMConfig.uniform("gemini", "gemini-3.1-pro-preview")
@@ -376,7 +397,10 @@ class TestFullExplorationLoop:
         seed_paths = []
         for model in SOURCE_MODELS:
             path = os.path.join(
-                SIDERIUS_DATA_DIR, model, SOURCE_RUN_NAME, "agent",
+                SIDERIUS_DATA_DIR,
+                model,
+                SOURCE_RUN_NAME,
+                "agent",
                 f"run_output_{SOURCE_RUN_NAME}_agent.json",
             )
             seed_paths.append(path)
@@ -385,9 +409,9 @@ class TestFullExplorationLoop:
 
         try:
             # --- ITERATION 1 ---
-            print(f"\n{'='*60}")
+            print(f"\n{'=' * 60}")
             print(f"  ITERATION 1: source = seeds only ({len(seed_paths)} files)")
-            print(f"{'='*60}\n")
+            print(f"{'=' * 60}\n")
 
             results_1 = run_workflow(
                 source_paths=seed_paths,
@@ -413,20 +437,18 @@ class TestFullExplorationLoop:
             registered_models.append(iter1_model)
             # run_workflow wraps each iteration in {run_name}/iteration_001/...
             iter1_output_path = os.path.join(
-                workspace, "iter_001", "iteration_001", iter1_model,
-                "run_output_iter_001.json"
+                workspace, "iter_001", "iteration_001", iter1_model, "run_output_iter_001.json"
             )
             assert os.path.exists(iter1_output_path), (
                 f"Iteration 1 output not found at expected path: {iter1_output_path}"
             )
-            print(f"\n[ITER 1 DONE] Model: {iter1_model}, "
-                  f"Output: {iter1_output_path}")
+            print(f"\n[ITER 1 DONE] Model: {iter1_model}, Output: {iter1_output_path}")
 
             # --- ITERATION 2: seed + iteration 1's output ---
             iter2_sources = seed_paths + [iter1_output_path]
-            print(f"\n{'='*60}")
+            print(f"\n{'=' * 60}")
             print(f"  ITERATION 2: source = seeds + iter_001 ({len(iter2_sources)} files)")
-            print(f"{'='*60}\n")
+            print(f"{'=' * 60}\n")
 
             results_2 = run_workflow(
                 source_paths=iter2_sources,
@@ -466,14 +488,13 @@ class TestFullExplorationLoop:
                 f"Iteration 2 should see {expected_in_iter2}, "
                 f"but interpretation has {iter2_seen_models}"
             )
-            print(f"\n[ITER 2 DONE] Model: {iter2_model}, "
-                  f"Saw models: {iter2_seen_models}")
+            print(f"\n[ITER 2 DONE] Model: {iter2_model}, Saw models: {iter2_seen_models}")
 
-            print(f"\n{'='*60}")
-            print(f"  CHAINED ITERATIONS TEST PASSED")
+            print(f"\n{'=' * 60}")
+            print("  CHAINED ITERATIONS TEST PASSED")
             print(f"  iter_001 → {iter1_model}")
             print(f"  iter_002 → {iter2_model} (saw {len(iter2_seen_models)} models)")
-            print(f"{'='*60}")
+            print(f"{'=' * 60}")
 
         finally:
             # Clean up registered plugins from both iterations

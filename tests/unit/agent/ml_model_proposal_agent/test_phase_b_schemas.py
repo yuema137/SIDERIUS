@@ -11,27 +11,28 @@ Tests validators and cross-field checks for:
   - ReasoningStage, ModelSelectionStrategy, ReasoningPipelineConfig
   - VocabEntry
 """
+
 import pytest
 from pydantic import ValidationError
 
 from agent.schemas.proposal import (
+    DiscoveryMemo,
+    ExpertContextItem,
     FalsifiablePrediction,
     InheritedComponent,
-    ExpertContextItem,
     ModelComparison,
-    DiscoveryMemo,
-    ProposedVocabLink,
-    ReasoningStage,
     ModelSelectionStrategy,
+    ProposedVocabLink,
     ReasoningPipelineConfig,
+    ReasoningStage,
     ResearchPolicy,
     VocabEntry,
 )
 
-
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def valid_prediction():
@@ -79,8 +80,8 @@ def valid_memo(valid_prediction, valid_comparison):
 # FalsifiablePrediction
 # ---------------------------------------------------------------------------
 
-class TestFalsifiablePrediction:
 
+class TestFalsifiablePrediction:
     def test_valid(self, valid_prediction):
         fp = FalsifiablePrediction.model_validate(valid_prediction)
         assert fp.predicted_value == 2.0
@@ -108,23 +109,27 @@ class TestFalsifiablePrediction:
 
     def test_boldness_with_zero_current(self):
         """When current_value is near zero, boldness uses 1e-6 as floor."""
-        fp = FalsifiablePrediction.model_validate({
-            "metric": "score",
-            "current_value": 0.0,
-            "predicted_value": 0.5,
-            "threshold_for_refutation": -0.1,
-            "rationale": "test",
-        })
+        fp = FalsifiablePrediction.model_validate(
+            {
+                "metric": "score",
+                "current_value": 0.0,
+                "predicted_value": 0.5,
+                "threshold_for_refutation": -0.1,
+                "rationale": "test",
+            }
+        )
         assert fp.boldness == 0.5 / 1e-6  # very bold
 
     def test_boldness_timid_prediction(self):
-        fp = FalsifiablePrediction.model_validate({
-            "metric": "score",
-            "current_value": 10.0,
-            "predicted_value": 10.01,
-            "threshold_for_refutation": 9.9,
-            "rationale": "test",
-        })
+        fp = FalsifiablePrediction.model_validate(
+            {
+                "metric": "score",
+                "current_value": 10.0,
+                "predicted_value": 10.01,
+                "threshold_for_refutation": 9.9,
+                "rationale": "test",
+            }
+        )
         assert fp.boldness < 0.01  # timid
 
 
@@ -132,107 +137,125 @@ class TestFalsifiablePrediction:
 # InheritedComponent
 # ---------------------------------------------------------------------------
 
-class TestInheritedComponent:
 
+class TestInheritedComponent:
     def test_valid_minimal(self):
-        ic = InheritedComponent.model_validate({
-            "component": "dilated_causal_conv",
-            "from_model_type": "wavenet",
-            "contribution_evidence": "Gave wavenet a +0.15 lift on low_freq.",
-        })
+        ic = InheritedComponent.model_validate(
+            {
+                "component": "dilated_causal_conv",
+                "from_model_type": "wavenet",
+                "contribution_evidence": "Gave wavenet a +0.15 lift on low_freq.",
+            }
+        )
         assert ic.from_run is None
         assert ic.citation_source is None
 
     def test_valid_full(self):
-        ic = InheritedComponent.model_validate({
-            "component": "gated_activation",
-            "from_model_type": "wavenet",
-            "from_run": "hpt_full_v1",
-            "contribution_evidence": "Gating improved selectivity by 20%.",
-            "citation_source": "human_advice_001",
-        })
+        ic = InheritedComponent.model_validate(
+            {
+                "component": "gated_activation",
+                "from_model_type": "wavenet",
+                "from_run": "hpt_full_v1",
+                "contribution_evidence": "Gating improved selectivity by 20%.",
+                "citation_source": "human_advice_001",
+            }
+        )
         assert ic.from_run == "hpt_full_v1"
         assert ic.citation_source == "human_advice_001"
 
     def test_missing_component_raises(self):
         with pytest.raises(ValidationError):
-            InheritedComponent.model_validate({
-                "from_model_type": "wavenet",
-                "contribution_evidence": "something",
-            })
+            InheritedComponent.model_validate(
+                {
+                    "from_model_type": "wavenet",
+                    "contribution_evidence": "something",
+                }
+            )
 
     def test_evidence_max_length(self):
         """contribution_evidence has max_length=1000."""
         with pytest.raises(ValidationError):
-            InheritedComponent.model_validate({
-                "component": "test",
-                "from_model_type": "wavenet",
-                "contribution_evidence": "x" * 1001,
-            })
+            InheritedComponent.model_validate(
+                {
+                    "component": "test",
+                    "from_model_type": "wavenet",
+                    "contribution_evidence": "x" * 1001,
+                }
+            )
 
 
 # ---------------------------------------------------------------------------
 # ExpertContextItem
 # ---------------------------------------------------------------------------
 
-class TestExpertContextItem:
 
+class TestExpertContextItem:
     def test_valid(self):
-        eci = ExpertContextItem.model_validate({
-            "source": "human",
-            "kind": "human",
-            "content": "Focus on low-frequency recovery.",
-            "cite_id": "human_001",
-        })
+        eci = ExpertContextItem.model_validate(
+            {
+                "source": "human",
+                "kind": "human",
+                "content": "Focus on low-frequency recovery.",
+                "cite_id": "human_001",
+            }
+        )
         assert eci.confidence is None
         assert eci.produced_at is None
 
     def test_all_kinds_accepted(self):
         for kind in ["empirical", "theoretical", "literature", "human", "narrative", "findings"]:
-            eci = ExpertContextItem.model_validate({
-                "source": "test",
-                "kind": kind,
-                "content": "test content",
-                "cite_id": f"test_{kind}",
-            })
+            eci = ExpertContextItem.model_validate(
+                {
+                    "source": "test",
+                    "kind": kind,
+                    "content": "test content",
+                    "cite_id": f"test_{kind}",
+                }
+            )
             assert eci.kind == kind
 
     def test_invalid_kind_raises(self):
         with pytest.raises(ValidationError):
-            ExpertContextItem.model_validate({
-                "source": "test",
-                "kind": "invalid_kind",
-                "content": "test",
-                "cite_id": "test_001",
-            })
+            ExpertContextItem.model_validate(
+                {
+                    "source": "test",
+                    "kind": "invalid_kind",
+                    "content": "test",
+                    "cite_id": "test_001",
+                }
+            )
 
     def test_confidence_range(self):
         """confidence must be 0.0-1.0 when provided."""
         with pytest.raises(ValidationError):
-            ExpertContextItem.model_validate({
-                "source": "test",
-                "kind": "empirical",
-                "content": "test",
-                "cite_id": "test_001",
-                "confidence": 1.5,
-            })
+            ExpertContextItem.model_validate(
+                {
+                    "source": "test",
+                    "kind": "empirical",
+                    "content": "test",
+                    "cite_id": "test_001",
+                    "confidence": 1.5,
+                }
+            )
 
     def test_content_max_length(self):
         with pytest.raises(ValidationError):
-            ExpertContextItem.model_validate({
-                "source": "test",
-                "kind": "human",
-                "content": "x" * 100001,
-                "cite_id": "test_001",
-            })
+            ExpertContextItem.model_validate(
+                {
+                    "source": "test",
+                    "kind": "human",
+                    "content": "x" * 100001,
+                    "cite_id": "test_001",
+                }
+            )
 
 
 # ---------------------------------------------------------------------------
 # ModelComparison
 # ---------------------------------------------------------------------------
 
-class TestModelComparison:
 
+class TestModelComparison:
     def test_valid(self, valid_comparison):
         mc = ModelComparison.model_validate(valid_comparison)
         assert mc.model_type == "wavenet"
@@ -254,8 +277,8 @@ class TestModelComparison:
 # DiscoveryMemo
 # ---------------------------------------------------------------------------
 
-class TestDiscoveryMemo:
 
+class TestDiscoveryMemo:
     def test_valid(self, valid_memo):
         memo = DiscoveryMemo.model_validate(valid_memo)
         assert memo.sota_model_type == "wavenet"
@@ -284,27 +307,35 @@ class TestDiscoveryMemo:
         assert memo.citation_sources == []
 
     def test_with_inherited_components(self, valid_memo):
-        valid_memo["inherited_components"] = [{
-            "component": "dilated_causal_conv",
-            "from_model_type": "wavenet",
-            "contribution_evidence": "Core mechanism of wavenet's success.",
-        }]
+        valid_memo["inherited_components"] = [
+            {
+                "component": "dilated_causal_conv",
+                "from_model_type": "wavenet",
+                "contribution_evidence": "Core mechanism of wavenet's success.",
+            }
+        ]
         memo = DiscoveryMemo.model_validate(valid_memo)
         assert len(memo.inherited_components) == 1
         assert memo.inherited_components[0].component == "dilated_causal_conv"
 
     def test_with_vocab_candidates(self, valid_memo):
         valid_memo["proposed_vocab_candidates"] = [
-            {"name": "log_spaced_fno_gates", "kind": "feature",
-             "description": "Gated FNO with log-spaced frequency bins."},
+            {
+                "name": "log_spaced_fno_gates",
+                "kind": "feature",
+                "description": "Gated FNO with log-spaced frequency bins.",
+            },
         ]
         memo = DiscoveryMemo.model_validate(valid_memo)
         assert len(memo.proposed_vocab_candidates) == 1
 
     def test_with_proposed_vocab_links(self, valid_memo):
         valid_memo["proposed_vocab_links"] = [
-            {"feature": "dilated_causal_conv", "capability": "receptive_field",
-             "evidence": "Wavenet uses dilated convs and scores well on high-freq files."},
+            {
+                "feature": "dilated_causal_conv",
+                "capability": "receptive_field",
+                "evidence": "Wavenet uses dilated convs and scores well on high-freq files.",
+            },
         ]
         memo = DiscoveryMemo.model_validate(valid_memo)
         assert len(memo.proposed_vocab_links) == 1
@@ -345,67 +376,79 @@ class TestDiscoveryMemo:
 # ProposedVocabLink
 # ---------------------------------------------------------------------------
 
-class TestProposedVocabLink:
 
+class TestProposedVocabLink:
     def test_valid(self):
-        link = ProposedVocabLink.model_validate({
-            "feature": "dilated_causal_conv",
-            "capability": "receptive_field",
-            "evidence": "Wavenet scores well on high-freq files and uses dilated convs.",
-        })
+        link = ProposedVocabLink.model_validate(
+            {
+                "feature": "dilated_causal_conv",
+                "capability": "receptive_field",
+                "evidence": "Wavenet scores well on high-freq files and uses dilated convs.",
+            }
+        )
         assert link.status == "proposed"  # default
 
     def test_confirmed_status(self):
-        link = ProposedVocabLink.model_validate({
-            "feature": "spectral_conv",
-            "capability": "frequency_resolution",
-            "evidence": "Confirmed in rounds 2 and 4.",
-            "status": "confirmed",
-        })
+        link = ProposedVocabLink.model_validate(
+            {
+                "feature": "spectral_conv",
+                "capability": "frequency_resolution",
+                "evidence": "Confirmed in rounds 2 and 4.",
+                "status": "confirmed",
+            }
+        )
         assert link.status == "confirmed"
 
     def test_refuted_status(self):
-        link = ProposedVocabLink.model_validate({
-            "feature": "bottleneck_compression",
-            "capability": "parameter_efficiency",
-            "evidence": "Smaller bottleneck did not improve score.",
-            "status": "refuted",
-        })
+        link = ProposedVocabLink.model_validate(
+            {
+                "feature": "bottleneck_compression",
+                "capability": "parameter_efficiency",
+                "evidence": "Smaller bottleneck did not improve score.",
+                "status": "refuted",
+            }
+        )
         assert link.status == "refuted"
 
     def test_invalid_status_coerced_to_proposed(self):
         """Unknown LLM-invented status values are coerced to 'proposed' (not rejected)."""
-        link = ProposedVocabLink.model_validate({
-            "feature": "test",
-            "capability": "test",
-            "evidence": "test",
-            "status": "maybe",
-        })
+        link = ProposedVocabLink.model_validate(
+            {
+                "feature": "test",
+                "capability": "test",
+                "evidence": "test",
+                "status": "maybe",
+            }
+        )
         assert link.status == "proposed"
 
     def test_evidence_max_length(self):
         """evidence has max_length=1000."""
         with pytest.raises(ValidationError):
-            ProposedVocabLink.model_validate({
-                "feature": "test",
-                "capability": "test",
-                "evidence": "x" * 1001,
-            })
+            ProposedVocabLink.model_validate(
+                {
+                    "feature": "test",
+                    "capability": "test",
+                    "evidence": "x" * 1001,
+                }
+            )
 
     def test_missing_feature_raises(self):
         with pytest.raises(ValidationError):
-            ProposedVocabLink.model_validate({
-                "capability": "receptive_field",
-                "evidence": "test",
-            })
+            ProposedVocabLink.model_validate(
+                {
+                    "capability": "receptive_field",
+                    "evidence": "test",
+                }
+            )
 
 
 # ---------------------------------------------------------------------------
 # ReasoningStage / ModelSelectionStrategy / ReasoningPipelineConfig
 # ---------------------------------------------------------------------------
 
-class TestReasoningPipelineConfig:
 
+class TestReasoningPipelineConfig:
     def test_default_pipeline_empty(self):
         """Default stages = empty (legacy 2-call mode). Pipeline stages are
         configured at the workflow level, not defaulted on the schema."""
@@ -414,17 +457,21 @@ class TestReasoningPipelineConfig:
         assert config.exploration_mode == "auto"
 
     def test_custom_stages(self):
-        config = ReasoningPipelineConfig(stages=[
-            ReasoningStage(name="physics_check", system_prompt_key="PHYSICS_REVIEW"),
-        ])
+        config = ReasoningPipelineConfig(
+            stages=[
+                ReasoningStage(name="physics_check", system_prompt_key="PHYSICS_REVIEW"),
+            ]
+        )
         assert len(config.stages) == 1
         assert config.stages[0].name == "physics_check"
 
     def test_disable_stage(self):
-        config = ReasoningPipelineConfig(stages=[
-            ReasoningStage(name="comparison", system_prompt_key="COMP", enabled=False),
-            ReasoningStage(name="reasoning", system_prompt_key="REASON"),
-        ])
+        config = ReasoningPipelineConfig(
+            stages=[
+                ReasoningStage(name="comparison", system_prompt_key="COMP", enabled=False),
+                ReasoningStage(name="reasoning", system_prompt_key="REASON"),
+            ]
+        )
         enabled = [s for s in config.stages if s.enabled]
         assert len(enabled) == 1
 
@@ -467,8 +514,8 @@ class TestReasoningPipelineConfig:
 # ProposalOutput — memo_consistency_notes (B.26)
 # ---------------------------------------------------------------------------
 
-class TestProposalOutputConsistencyNotes:
 
+class TestProposalOutputConsistencyNotes:
     def _make_output(self, **overrides):
         base = {
             "model_name": "test_model",
@@ -476,8 +523,11 @@ class TestProposalOutputConsistencyNotes:
             "mathematical_definition": "Linear layers.",
             "motivation": "Testing.",
             "expert_advice": {
-                "focus_areas": [], "constraints": [], "known_failures": [],
-                "suggested_directions": [], "rationale": "",
+                "focus_areas": [],
+                "constraints": [],
+                "known_failures": [],
+                "suggested_directions": [],
+                "rationale": "",
             },
             "baseline_config": {"model_config": {}, "train_config": {}, "loss_config": {}},
         }
@@ -486,17 +536,21 @@ class TestProposalOutputConsistencyNotes:
 
     def test_default_empty(self):
         from agent.schemas.proposal import ProposalOutput
+
         out = ProposalOutput.model_validate(self._make_output())
         assert out.memo_consistency_notes == []
 
     def test_with_notes(self):
         from agent.schemas.proposal import ProposalOutput
-        out = ProposalOutput.model_validate(self._make_output(
-            memo_consistency_notes=[
-                "DiscoveryMemo claims FNO spectral layer but model uses only convolutions.",
-                "Proposed receptive field exceeds segmentation_size.",
-            ],
-        ))
+
+        out = ProposalOutput.model_validate(
+            self._make_output(
+                memo_consistency_notes=[
+                    "DiscoveryMemo claims FNO spectral layer but model uses only convolutions.",
+                    "Proposed receptive field exceeds segmentation_size.",
+                ],
+            )
+        )
         assert len(out.memo_consistency_notes) == 2
 
 
@@ -508,8 +562,8 @@ class TestProposalOutputConsistencyNotes:
 # ResearchPolicy
 # ---------------------------------------------------------------------------
 
-class TestResearchPolicy:
 
+class TestResearchPolicy:
     def test_defaults(self):
         policy = ResearchPolicy()
         assert policy.minimum_boldness == 0.05
@@ -575,65 +629,77 @@ class TestResearchPolicy:
 # VocabEntry
 # ---------------------------------------------------------------------------
 
-class TestVocabEntry:
 
+class TestVocabEntry:
     def test_valid_feature(self):
-        ve = VocabEntry.model_validate({
-            "name": "dilated_causal_conv",
-            "kind": "feature",
-            "description": "Causal convolution with exponentially increasing dilation.",
-            "related_to": ["receptive_field"],
-            "tier": "canonical",
-            "pattern": r"dilation\s*=",
-        })
+        ve = VocabEntry.model_validate(
+            {
+                "name": "dilated_causal_conv",
+                "kind": "feature",
+                "description": "Causal convolution with exponentially increasing dilation.",
+                "related_to": ["receptive_field"],
+                "tier": "canonical",
+                "pattern": r"dilation\s*=",
+            }
+        )
         assert ve.tier == "canonical"
         assert ve.pattern is not None
 
     def test_valid_capability(self):
-        ve = VocabEntry.model_validate({
-            "name": "receptive_field",
-            "kind": "capability",
-            "description": "How far back in time the model can see per layer.",
-            "related_to": ["dilated_causal_conv", "depth"],
-        })
+        ve = VocabEntry.model_validate(
+            {
+                "name": "receptive_field",
+                "kind": "capability",
+                "description": "How far back in time the model can see per layer.",
+                "related_to": ["dilated_causal_conv", "depth"],
+            }
+        )
         assert ve.tier == "candidate"  # default
         assert ve.pattern is None  # capabilities don't have patterns
 
     def test_candidate_with_run(self):
-        ve = VocabEntry.model_validate({
-            "name": "log_spaced_fno_gates",
-            "kind": "feature",
-            "description": "Gated FNO with log-spaced frequency bins.",
-            "proposed_by_run": "exploration_v3_iter_5",
-            "seen_in_runs": ["exploration_v3_iter_5", "exploration_v3_iter_7"],
-        })
+        ve = VocabEntry.model_validate(
+            {
+                "name": "log_spaced_fno_gates",
+                "kind": "feature",
+                "description": "Gated FNO with log-spaced frequency bins.",
+                "proposed_by_run": "exploration_v3_iter_5",
+                "seen_in_runs": ["exploration_v3_iter_5", "exploration_v3_iter_7"],
+            }
+        )
         assert ve.tier == "candidate"
         assert len(ve.seen_in_runs) == 2
 
     def test_description_max_length(self):
         """description has max_length=1000."""
         with pytest.raises(ValidationError):
-            VocabEntry.model_validate({
-                "name": "test",
-                "kind": "feature",
-                "description": "x" * 1001,
-            })
+            VocabEntry.model_validate(
+                {
+                    "name": "test",
+                    "kind": "feature",
+                    "description": "x" * 1001,
+                }
+            )
 
     def test_invalid_tier_raises(self):
         with pytest.raises(ValidationError):
-            VocabEntry.model_validate({
+            VocabEntry.model_validate(
+                {
+                    "name": "test",
+                    "kind": "feature",
+                    "description": "test",
+                    "tier": "promoted",  # not a valid tier
+                }
+            )
+
+    def test_aliases_default_empty(self):
+        ve = VocabEntry.model_validate(
+            {
                 "name": "test",
                 "kind": "feature",
                 "description": "test",
-                "tier": "promoted",  # not a valid tier
-            })
-
-    def test_aliases_default_empty(self):
-        ve = VocabEntry.model_validate({
-            "name": "test",
-            "kind": "feature",
-            "description": "test",
-        })
+            }
+        )
         assert ve.aliases == []
         assert ve.related_to == []
         assert ve.seen_in_runs == []

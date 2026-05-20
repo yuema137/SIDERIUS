@@ -18,6 +18,7 @@ docs/optimize_inference_and_scoring.md §3 Fix 1:
 
 All tests mock ``subprocess.run`` — no GPU, no real process spawning.
 """
+
 import os
 import subprocess
 from unittest.mock import MagicMock, patch
@@ -25,14 +26,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from core.sandbox_executor import (
-    TidmadSandbox,
     _ROLE_DEFAULT_RSS_GB,
+    TidmadSandbox,
     _format_subprocess_error,
     _is_oom_failure,
     _limited_preexec,
     _subprocess_rss_gb,
 )
-
 
 # ==========================================
 # Fixtures
@@ -68,16 +68,20 @@ def _train_success_side_effect(sandbox, exp_id=EXP_ID, stdout="done\n", stderr="
     to ``sandbox.dirs['models']`` before returning. Without this, the
     executor's silent-crash check rejects the run as ``error_training``
     even though the mocked subprocess returncode is 0."""
+
     def _side_effect(*args, **kwargs):
         os.makedirs(sandbox.dirs["models"], exist_ok=True)
         sentinel = os.path.join(sandbox.dirs["models"], f"_OK_{exp_id}")
         with open(sentinel, "wb"):
             pass
         return _ok_result(stdout=stdout, stderr=stderr)
+
     return _side_effect
 
 
-def _called_process_error(returncode: int, stderr: str = "", stdout: str = "") -> subprocess.CalledProcessError:
+def _called_process_error(
+    returncode: int, stderr: str = "", stdout: str = ""
+) -> subprocess.CalledProcessError:
     e = subprocess.CalledProcessError(returncode, ["dummy"])
     e.stderr = stderr
     e.stdout = stdout
@@ -88,8 +92,8 @@ def _called_process_error(returncode: int, stderr: str = "", stdout: str = "") -
 # _subprocess_rss_gb — role-aware defaults + env-var resolution
 # ==========================================
 
-class TestSubprocessRssGb:
 
+class TestSubprocessRssGb:
     def test_scoring_default_is_24(self, monkeypatch):
         """Scoring (CPU-only) keeps the original 24 GiB ceiling — this is the
         codepath the 2026-04-20 incident hit, so we don't loosen it."""
@@ -147,8 +151,8 @@ class TestSubprocessRssGb:
 # _limited_preexec — callable returned, limit applied
 # ==========================================
 
-class TestLimitedPreexec:
 
+class TestLimitedPreexec:
     def test_returns_callable_for_positive_gb(self):
         fn = _limited_preexec(8)
         assert callable(fn)
@@ -166,8 +170,9 @@ class TestLimitedPreexec:
         test runner, so we patch ``resource`` and check the call args.
         """
         import resource as _resource_mod
+
         gb = 7
-        expected_bytes = gb * (1024 ** 3)
+        expected_bytes = gb * (1024**3)
 
         with patch.object(_resource_mod, "setrlimit") as mock_setrlimit:
             fn = _limited_preexec(gb)
@@ -183,8 +188,8 @@ class TestLimitedPreexec:
 # _is_oom_failure — signatures we recognise
 # ==========================================
 
-class TestIsOomFailure:
 
+class TestIsOomFailure:
     def test_sigkill_returncode_is_oom(self):
         e = _called_process_error(returncode=-9)
         assert _is_oom_failure(e) is True
@@ -219,7 +224,7 @@ class TestIsOomFailure:
         """
         stderr = (
             "Traceback (most recent call last):\n"
-            "  File \"train.py\", line 465, in run_experiment_streaming\n"
+            '  File "train.py", line 465, in run_experiment_streaming\n'
             "    loss = criterion(output, target_seq)\n"
             "torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 314.00 MiB.\n"
         )
@@ -253,8 +258,8 @@ class TestIsOomFailure:
 # _format_subprocess_error — oom_host_ram tag
 # ==========================================
 
-class TestFormatSubprocessErrorOomTag:
 
+class TestFormatSubprocessErrorOomTag:
     def test_memory_error_stderr_gets_oom_tag(self):
         e = _called_process_error(returncode=1, stderr="MemoryError\n")
         msg = _format_subprocess_error(e, "Train")
@@ -291,6 +296,7 @@ class TestFormatSubprocessErrorOomTag:
 # ==========================================
 # TidmadSandbox — preexec_fn threaded through subprocess.run
 # ==========================================
+
 
 class TestSandboxPreexecWiring:
     """Every subprocess.run in the sandbox must receive preexec_fn, and the
@@ -370,8 +376,8 @@ class TestSandboxPreexecWiring:
 # TidmadSandbox — OOM-class failures surface status="oom_host_ram"
 # ==========================================
 
-class TestSandboxOomStatus:
 
+class TestSandboxOomStatus:
     @patch("core.sandbox_executor.subprocess.run")
     def test_training_memory_error_returns_oom_status(self, mock_run, sandbox):
         mock_run.side_effect = _called_process_error(

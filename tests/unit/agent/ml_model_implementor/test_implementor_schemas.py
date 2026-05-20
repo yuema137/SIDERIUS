@@ -1,6 +1,7 @@
 """
 Tests for agent/schemas/implementor.py
 """
+
 import pytest
 from pydantic import ValidationError
 
@@ -8,7 +9,6 @@ from agent.schemas.implementor import ImplementorInput, ImplementorOutput
 
 
 class TestImplementorInput:
-
     def test_valid(self):
         inp = ImplementorInput(
             model_name="attn_unet",
@@ -65,7 +65,6 @@ class TestImplementorInput:
 
 
 class TestImplementorOutput:
-
     def test_valid(self):
         out = ImplementorOutput(
             model_type="attn_unet",

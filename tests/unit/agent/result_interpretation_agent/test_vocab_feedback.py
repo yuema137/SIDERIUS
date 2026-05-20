@@ -7,21 +7,23 @@ compute_vocab_diversity_ratio (centrifugal health metric),
 update_vocab_link_confirmations (E.7), and scientific_accuracy
 accumulation helpers (E.4).
 """
+
 import pytest
+
+from agent.schemas.proposal import VocabEntry
 from nodes.interpretation_helpers import (
+    build_runtime_vocab,
+    compute_vocab_diversity_ratio,
     evaluate_prediction,
     generate_discoveries,
-    build_runtime_vocab,
     promote_candidates,
-    compute_vocab_diversity_ratio,
     update_vocab_link_confirmations,
 )
-from agent.schemas.proposal import VocabEntry
-
 
 # ---------------------------------------------------------------------------
 # evaluate_prediction
 # ---------------------------------------------------------------------------
+
 
 class TestEvaluatePrediction:
     """
@@ -129,8 +131,9 @@ class TestEvaluatePrediction:
     def test_boldness_uses_sota_baseline(self):
         """boldness = |predicted - sota| / |sota|."""
         # predicted=6.0, sota=5.0 → boldness = 1.0/5.0 = 0.2
-        result = evaluate_prediction(self._pred(current_value=5.0, predicted_value=6.0),
-                                     {"best_denoising_score": 5.5})
+        result = evaluate_prediction(
+            self._pred(current_value=5.0, predicted_value=6.0), {"best_denoising_score": 5.5}
+        )
         assert abs(result["boldness"] - 0.2) < 1e-4
 
     def test_boldness_zero_when_no_predicted_value(self):
@@ -164,8 +167,8 @@ class TestEvaluatePrediction:
 # generate_discoveries
 # ---------------------------------------------------------------------------
 
-class TestGenerateDiscoveries:
 
+class TestGenerateDiscoveries:
     def test_confirmed_prediction(self):
         eval_result = {
             "outcome": "confirmed",
@@ -316,8 +319,8 @@ class TestGenerateDiscoveries:
 # build_runtime_vocab
 # ---------------------------------------------------------------------------
 
-class TestBuildRuntimeVocab:
 
+class TestBuildRuntimeVocab:
     def test_seed_only(self):
         seed = [
             VocabEntry(name="dilated_causal_conv", kind="feature", description="test"),
@@ -353,7 +356,8 @@ class TestBuildRuntimeVocab:
         # Iteration 1: seed only
         vocab = build_runtime_vocab(
             [VocabEntry(name="f1", kind="feature", description="feature 1")],
-            [], [],
+            [],
+            [],
         )
         assert len(vocab) == 1
 
@@ -380,16 +384,18 @@ class TestBuildRuntimeVocab:
 # promote_candidates (C.11)
 # ---------------------------------------------------------------------------
 
+
 def _make_candidate(name, kind="feature", seen_in_runs=None, tier="candidate"):
     return VocabEntry(
-        name=name, kind=kind, description="test",
+        name=name,
+        kind=kind,
+        description="test",
         tier=tier,
         seen_in_runs=seen_in_runs or [],
     )
 
 
 class TestPromoteCandidates:
-
     def test_feature_with_enough_runs_promoted(self):
         entry = _make_candidate("log_fno", kind="feature", seen_in_runs=["r1", "r2", "r3"])
         vocab, promoted = promote_candidates([entry])
@@ -397,7 +403,9 @@ class TestPromoteCandidates:
         assert vocab[0].tier == "canonical"
 
     def test_capability_with_enough_runs_promoted(self):
-        entry = _make_candidate("freq_selectivity", kind="capability", seen_in_runs=["r1", "r2", "r3"])
+        entry = _make_candidate(
+            "freq_selectivity", kind="capability", seen_in_runs=["r1", "r2", "r3"]
+        )
         vocab, promoted = promote_candidates([entry])
         assert promoted == ["freq_selectivity"]
         assert vocab[0].tier == "canonical"
@@ -409,7 +417,9 @@ class TestPromoteCandidates:
         assert vocab[0].tier == "candidate"
 
     def test_discovery_never_promoted_regardless_of_runs(self):
-        entry = _make_candidate("disc_finding", kind="discovery", seen_in_runs=["r1", "r2", "r3", "r4", "r5"])
+        entry = _make_candidate(
+            "disc_finding", kind="discovery", seen_in_runs=["r1", "r2", "r3", "r4", "r5"]
+        )
         vocab, promoted = promote_candidates([entry])
         assert promoted == []
         assert vocab[0].tier == "candidate"
@@ -460,10 +470,15 @@ class TestPromoteCandidates:
 # seen_in_runs tracking in build_runtime_vocab (C.5-3)
 # ---------------------------------------------------------------------------
 
-class TestSeenInRunsTracking:
 
+class TestSeenInRunsTracking:
     def test_new_candidate_gets_proposed_by_run(self):
-        candidate = {"name": "gated_fno", "kind": "feature", "description": "test", "proposed_by_run": "wavenet_v2"}
+        candidate = {
+            "name": "gated_fno",
+            "kind": "feature",
+            "description": "test",
+            "proposed_by_run": "wavenet_v2",
+        }
         result = build_runtime_vocab([], [], [candidate])
         entry = next(e for e in result if e.name == "gated_fno")
         assert entry.seen_in_runs == ["wavenet_v2"]
@@ -474,7 +489,14 @@ class TestSeenInRunsTracking:
         vocab = build_runtime_vocab(
             [],
             [],
-            [{"name": "gated_fno", "kind": "feature", "description": "test", "proposed_by_run": "model_a"}],
+            [
+                {
+                    "name": "gated_fno",
+                    "kind": "feature",
+                    "description": "test",
+                    "proposed_by_run": "model_a",
+                }
+            ],
         )
         assert next(e for e in vocab if e.name == "gated_fno").seen_in_runs == ["model_a"]
 
@@ -482,14 +504,26 @@ class TestSeenInRunsTracking:
         vocab = build_runtime_vocab(
             vocab,
             [],
-            [{"name": "gated_fno", "kind": "feature", "description": "test", "proposed_by_run": "model_b"}],
+            [
+                {
+                    "name": "gated_fno",
+                    "kind": "feature",
+                    "description": "test",
+                    "proposed_by_run": "model_b",
+                }
+            ],
         )
         entry = next(e for e in vocab if e.name == "gated_fno")
         assert set(entry.seen_in_runs) == {"model_a", "model_b"}
 
     def test_same_run_not_duplicated_in_seen_in_runs(self):
         """If the same run proposes the same candidate twice, seen_in_runs stays deduplicated."""
-        candidate = {"name": "gated_fno", "kind": "feature", "description": "test", "proposed_by_run": "model_a"}
+        candidate = {
+            "name": "gated_fno",
+            "kind": "feature",
+            "description": "test",
+            "proposed_by_run": "model_a",
+        }
         vocab = build_runtime_vocab([], [], [candidate])
         # Same run again
         vocab = build_runtime_vocab(vocab, [], [candidate])
@@ -510,7 +544,8 @@ class TestSeenInRunsTracking:
         vocab = []
         for run in ["model_a", "model_b", "model_c"]:
             vocab = build_runtime_vocab(
-                vocab, [],
+                vocab,
+                [],
                 [{**candidate_base, "proposed_by_run": run}],
             )
 
@@ -527,8 +562,8 @@ class TestSeenInRunsTracking:
 # compute_vocab_diversity_ratio (centrifugal health metric)
 # ---------------------------------------------------------------------------
 
-class TestComputeVocabDiversityRatio:
 
+class TestComputeVocabDiversityRatio:
     def test_empty_vocab_returns_zero(self):
         assert compute_vocab_diversity_ratio([]) == 0.0
 
@@ -588,9 +623,9 @@ class TestComputeVocabDiversityRatio:
 # update_vocab_link_confirmations (Phase E.7)
 # ---------------------------------------------------------------------------
 
+
 def _feat(name="dilated_causal_conv", related_to=None):
-    return VocabEntry(name=name, kind="feature", description="test",
-                      related_to=related_to or [])
+    return VocabEntry(name=name, kind="feature", description="test", related_to=related_to or [])
 
 
 def _cap(name="receptive_field"):
@@ -602,7 +637,6 @@ def _link(feature="dilated_causal_conv", capability="receptive_field"):
 
 
 class TestUpdateVocabLinkConfirmations:
-
     # --- Confirmation counting ---
 
     def test_confirmed_outcome_increments_count(self):
@@ -726,7 +760,9 @@ class TestUpdateVocabLinkConfirmations:
         """Link referencing a feature not in runtime_vocab is silently skipped."""
         existing = {"unknown_feat:receptive_field": ["run_a", "run_b"]}
         _, vocab, promoted = update_vocab_link_confirmations(
-            prev_vocab_links=[{"feature": "unknown_feat", "capability": "receptive_field", "evidence": "x"}],
+            prev_vocab_links=[
+                {"feature": "unknown_feat", "capability": "receptive_field", "evidence": "x"}
+            ],
             prediction_outcome="confirmed",
             run_name="run_c",
             existing_confirmations=existing,

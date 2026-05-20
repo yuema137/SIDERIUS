@@ -9,17 +9,21 @@ Mocks the unified openai.OpenAI client to verify:
   - tool_call()    returns a ToolCallResult with parsed arguments
   - All methods are provider-agnostic (single code path)
 """
+
 import json
-import pytest
 from typing import Optional
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, PropertyMock, patch
+
+import pytest
 
 from agent.llm_bridge import (
-    LLMBridge, ToolCallResult, _KNOWN_PROVIDERS,
-    _PLANNER_SCORE_TABLE_FALLBACK, _REFLECTOR_SCORE_TABLE_FALLBACK,
+    _KNOWN_PROVIDERS,
+    _PLANNER_SCORE_TABLE_FALLBACK,
+    _REFLECTOR_SCORE_TABLE_FALLBACK,
+    LLMBridge,
+    ToolCallResult,
 )
 from agent.prompts import PLANNER_PROMPT, REFLECTOR_PROMPT
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -65,8 +69,8 @@ def _tool_call_response(name: str, arguments: dict, call_id: str = "call_abc123"
 # __init__ — provider resolution
 # ---------------------------------------------------------------------------
 
-class TestInit:
 
+class TestInit:
     def test_known_provider_gemini(self):
         with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
             bridge = LLMBridge(provider="gemini", model_id="test-model")
@@ -135,8 +139,8 @@ class TestInit:
 # list_models
 # ---------------------------------------------------------------------------
 
-class TestListModels:
 
+class TestListModels:
     def test_returns_sorted_ids(self):
         with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
             m1 = MagicMock()
@@ -155,11 +159,13 @@ class TestListModels:
 # generate() — JSON mode
 # ---------------------------------------------------------------------------
 
-class TestGenerate:
 
+class TestGenerate:
     def test_returns_dict(self):
         with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
-            MockOpenAI.return_value.chat.completions.create.return_value = _chat_response(VALID_JSON_STR)
+            MockOpenAI.return_value.chat.completions.create.return_value = _chat_response(
+                VALID_JSON_STR
+            )
             bridge = LLMBridge(provider="gemini", model_id="test-model")
             result = bridge.generate(SYSTEM_PROMPT, USER_PROMPT)
         assert result == VALID_JSON_DICT
@@ -186,8 +192,7 @@ class TestGenerate:
     def test_malformed_json_raises_value_error(self):
         """_chat_json retries on unparseable JSON and surfaces ValueError after
         the bounded budget is exhausted (does not silently return {})."""
-        with patch("agent.llm_bridge.OpenAI") as MockOpenAI, \
-             patch("agent.llm_bridge.time.sleep"):
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI, patch("agent.llm_bridge.time.sleep"):
             mock_create = MockOpenAI.return_value.chat.completions.create
             mock_create.return_value = _chat_response("not valid json {{")
             bridge = LLMBridge(provider="gemini", model_id="test-model")
@@ -224,8 +229,7 @@ class TestGenerate:
         violates the caller contract (which expects a dict/list). The bridge
         retries the bounded budget and then surfaces ValueError so downstream
         code never receives a primitive."""
-        with patch("agent.llm_bridge.OpenAI") as MockOpenAI, \
-             patch("agent.llm_bridge.time.sleep"):
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI, patch("agent.llm_bridge.time.sleep"):
             mock_create = MockOpenAI.return_value.chat.completions.create
             mock_create.return_value = _chat_response('"just a string"')
             bridge = LLMBridge(provider="openai", model_id="gpt-4o")
@@ -237,8 +241,7 @@ class TestGenerate:
         """Reproduces the deepseek-v4-pro failure mode: HTTP 200 with empty
         content body. The bridge must retry and eventually surface the valid
         response on a later attempt rather than crash the whole chain."""
-        with patch("agent.llm_bridge.OpenAI") as MockOpenAI, \
-             patch("agent.llm_bridge.time.sleep"):
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI, patch("agent.llm_bridge.time.sleep"):
             mock_create = MockOpenAI.return_value.chat.completions.create
             # First two calls return empty, third returns valid JSON.
             mock_create.side_effect = [
@@ -253,8 +256,7 @@ class TestGenerate:
 
     def test_malformed_then_valid_succeeds(self):
         """Transient JSON-decode failure on the first call recovers via retry."""
-        with patch("agent.llm_bridge.OpenAI") as MockOpenAI, \
-             patch("agent.llm_bridge.time.sleep"):
+        with patch("agent.llm_bridge.OpenAI") as MockOpenAI, patch("agent.llm_bridge.time.sleep"):
             mock_create = MockOpenAI.return_value.chat.completions.create
             mock_create.side_effect = [
                 _chat_response("garbage {{"),
@@ -289,11 +291,13 @@ class TestGenerate:
 # generate_text() — plain text mode
 # ---------------------------------------------------------------------------
 
-class TestGenerateText:
 
+class TestGenerateText:
     def test_returns_str(self):
         with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
-            MockOpenAI.return_value.chat.completions.create.return_value = _chat_response(PLAIN_TEXT)
+            MockOpenAI.return_value.chat.completions.create.return_value = _chat_response(
+                PLAIN_TEXT
+            )
             bridge = LLMBridge(provider="gemini", model_id="test-model")
             result = bridge.generate_text(SYSTEM_PROMPT, USER_PROMPT)
         assert isinstance(result, str)
@@ -310,7 +314,9 @@ class TestGenerateText:
 
     def test_strips_whitespace(self):
         with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
-            MockOpenAI.return_value.chat.completions.create.return_value = _chat_response("  hello  \n")
+            MockOpenAI.return_value.chat.completions.create.return_value = _chat_response(
+                "  hello  \n"
+            )
             bridge = LLMBridge(provider="gemini", model_id="test-model")
             result = bridge.generate_text(SYSTEM_PROMPT, USER_PROMPT)
         assert result == "hello"
@@ -350,7 +356,6 @@ SAMPLE_TOOLS = [
 
 
 class TestToolCall:
-
     def test_returns_tool_call_result(self):
         with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
             mock_create = MockOpenAI.return_value.chat.completions.create
@@ -413,6 +418,7 @@ class TestToolCall:
 # Reflect/planner model split (separate model for reflect() vs generate())
 # ---------------------------------------------------------------------------
 
+
 class TestReflectModelSplit:
     """
     Verify that LLMBridge can route reflect() to a different model than
@@ -436,15 +442,14 @@ class TestReflectModelSplit:
     def test_explicit_none_falls_back_to_main_model(self):
         """Passing reflect_model_id=None explicitly is equivalent to
         not passing it (the parameter is optional with default None)."""
-        bridge = LLMBridge(provider="gemini", model_id="planner-model",
-                           reflect_model_id=None)
+        bridge = LLMBridge(provider="gemini", model_id="planner-model", reflect_model_id=None)
         assert bridge.reflect_model_name == "planner-model"
 
     def test_reflect_model_id_separates_planner_from_reflector(self):
         """When reflect_model_id is set, the two attributes diverge."""
-        bridge = LLMBridge(provider="gemini",
-                           model_id="planner-model",
-                           reflect_model_id="reflector-model")
+        bridge = LLMBridge(
+            provider="gemini", model_id="planner-model", reflect_model_id="reflector-model"
+        )
         assert bridge.model_name == "planner-model"
         assert bridge.reflect_model_name == "reflector-model"
 
@@ -454,9 +459,9 @@ class TestReflectModelSplit:
         with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
             mock_create = MockOpenAI.return_value.chat.completions.create
             mock_create.return_value = _chat_response(VALID_JSON_STR)
-            bridge = LLMBridge(provider="gemini",
-                               model_id="planner-model",
-                               reflect_model_id="reflector-model")
+            bridge = LLMBridge(
+                provider="gemini", model_id="planner-model", reflect_model_id="reflector-model"
+            )
             bridge.generate(SYSTEM_PROMPT, USER_PROMPT)
             assert mock_create.call_args.kwargs["model"] == "planner-model"
 
@@ -466,9 +471,9 @@ class TestReflectModelSplit:
         with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
             mock_create = MockOpenAI.return_value.chat.completions.create
             mock_create.return_value = _chat_response(VALID_JSON_STR)
-            bridge = LLMBridge(provider="gemini",
-                               model_id="planner-model",
-                               reflect_model_id="reflector-model")
+            bridge = LLMBridge(
+                provider="gemini", model_id="planner-model", reflect_model_id="reflector-model"
+            )
             bridge.reflect(
                 exp_id="exp_001",
                 hypothesis="test hypothesis",
@@ -497,9 +502,9 @@ class TestReflectModelSplit:
         with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
             mock_create = MockOpenAI.return_value.chat.completions.create
             mock_create.return_value = _chat_response(VALID_JSON_STR)
-            bridge = LLMBridge(provider="gemini",
-                               model_id="planner-model",
-                               reflect_model_id="reflector-model")
+            bridge = LLMBridge(
+                provider="gemini", model_id="planner-model", reflect_model_id="reflector-model"
+            )
             bridge.reflect(
                 exp_id="exp_001",
                 hypothesis="test hypothesis",
@@ -517,9 +522,9 @@ class TestReflectModelSplit:
         with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
             mock_create = MockOpenAI.return_value.chat.completions.create
             mock_create.return_value = _chat_response(VALID_JSON_STR)
-            bridge = LLMBridge(provider="gemini",
-                               model_id="planner-model",
-                               reflect_model_id="reflector-model")
+            bridge = LLMBridge(
+                provider="gemini", model_id="planner-model", reflect_model_id="reflector-model"
+            )
             bridge.generate(SYSTEM_PROMPT, USER_PROMPT)
             bridge.reflect(
                 exp_id="exp_001",
@@ -537,6 +542,7 @@ class TestReflectModelSplit:
 # ---------------------------------------------------------------------------
 # Cross-provider reflect support (Phase A.2)
 # ---------------------------------------------------------------------------
+
 
 class TestReflectProviderSplit:
     """
@@ -556,10 +562,12 @@ class TestReflectProviderSplit:
     def test_explicit_same_provider_reuses_client(self):
         """When reflect_provider equals provider, the bridge reuses the
         main client (no duplicate connection)."""
-        bridge = LLMBridge(provider="gemini",
-                           model_id="planner-model",
-                           reflect_provider="gemini",
-                           reflect_model_id="reflector-model")
+        bridge = LLMBridge(
+            provider="gemini",
+            model_id="planner-model",
+            reflect_provider="gemini",
+            reflect_model_id="reflector-model",
+        )
         assert bridge.client is bridge.reflect_client
         assert bridge.provider == "gemini"
         assert bridge.reflect_provider == "gemini"
@@ -570,14 +578,15 @@ class TestReflectProviderSplit:
         objects (verified by `is not` identity check)."""
         with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
             # Each call to OpenAI(...) returns a different mock instance
-            instances = [MagicMock(name="main_client"),
-                         MagicMock(name="reflect_client")]
+            instances = [MagicMock(name="main_client"), MagicMock(name="reflect_client")]
             MockOpenAI.side_effect = instances
 
-            bridge = LLMBridge(provider="gemini",
-                               model_id="planner-model",
-                               reflect_provider="openai",
-                               reflect_model_id="reflector-model")
+            bridge = LLMBridge(
+                provider="gemini",
+                model_id="planner-model",
+                reflect_provider="openai",
+                reflect_model_id="reflector-model",
+            )
             assert bridge.client is not bridge.reflect_client
             assert bridge.client is instances[0]
             assert bridge.reflect_client is instances[1]
@@ -597,10 +606,12 @@ class TestReflectProviderSplit:
             reflect_client.chat.completions.create.return_value = _chat_response(VALID_JSON_STR)
             MockOpenAI.side_effect = [main_client, reflect_client]
 
-            bridge = LLMBridge(provider="gemini",
-                               model_id="planner-model",
-                               reflect_provider="openai",
-                               reflect_model_id="reflector-model")
+            bridge = LLMBridge(
+                provider="gemini",
+                model_id="planner-model",
+                reflect_provider="openai",
+                reflect_model_id="reflector-model",
+            )
 
             # generate() must hit the main client
             bridge.generate(SYSTEM_PROMPT, USER_PROMPT)
@@ -618,7 +629,10 @@ class TestReflectProviderSplit:
 
             # And verify each client got the right model name
             assert main_client.chat.completions.create.call_args.kwargs["model"] == "planner-model"
-            assert reflect_client.chat.completions.create.call_args.kwargs["model"] == "reflector-model"
+            assert (
+                reflect_client.chat.completions.create.call_args.kwargs["model"]
+                == "reflector-model"
+            )
 
     def test_reflect_provider_only_no_model_override(self):
         """reflect_provider can be set without reflect_model_id. In that
@@ -627,9 +641,9 @@ class TestReflectProviderSplit:
         bridge does not validate)."""
         with patch("agent.llm_bridge.OpenAI") as MockOpenAI:
             MockOpenAI.side_effect = [MagicMock(), MagicMock()]
-            bridge = LLMBridge(provider="gemini",
-                               model_id="shared-model-name",
-                               reflect_provider="openai")
+            bridge = LLMBridge(
+                provider="gemini", model_id="shared-model-name", reflect_provider="openai"
+            )
             assert bridge.reflect_model_name == "shared-model-name"
             assert bridge.client is not bridge.reflect_client
 
@@ -637,18 +651,22 @@ class TestReflectProviderSplit:
         """An unknown reflect_provider should fail-fast at construction
         time with a clear error pointing at the known providers list."""
         with pytest.raises(ValueError, match="Unknown reflect_provider"):
-            LLMBridge(provider="gemini",
-                      model_id="planner-model",
-                      reflect_provider="nonexistent",
-                      reflect_model_id="reflector-model")
+            LLMBridge(
+                provider="gemini",
+                model_id="planner-model",
+                reflect_provider="nonexistent",
+                reflect_model_id="reflector-model",
+            )
 
     def test_reflect_provider_is_lowercased(self):
         """Like the main provider, reflect_provider should be normalized
         to lowercase for consistency."""
-        bridge = LLMBridge(provider="gemini",
-                           model_id="planner-model",
-                           reflect_provider="GEMINI",
-                           reflect_model_id="reflector-model")
+        bridge = LLMBridge(
+            provider="gemini",
+            model_id="planner-model",
+            reflect_provider="GEMINI",
+            reflect_model_id="reflector-model",
+        )
         assert bridge.reflect_provider == "gemini"
         # And same-after-lowercase should still reuse the client
         assert bridge.client is bridge.reflect_client
@@ -658,23 +676,32 @@ class TestReflectProviderSplit:
 # _parse_retry_delay — extract retryDelay from Google 429 error body
 # ---------------------------------------------------------------------------
 
-class TestParseRetryDelay:
 
+class TestParseRetryDelay:
     def _make_exc(self, body: dict) -> MagicMock:
         exc = MagicMock()
         exc.body = body
         return exc
 
     def test_parses_seconds_string(self):
-        exc = self._make_exc({"error": {"details": [
-            {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "28890s"}
-        ]}})
+        exc = self._make_exc(
+            {
+                "error": {
+                    "details": [
+                        {
+                            "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                            "retryDelay": "28890s",
+                        }
+                    ]
+                }
+            }
+        )
         assert LLMBridge._parse_retry_delay(exc) == 28890.0
 
     def test_returns_none_when_no_retry_info(self):
-        exc = self._make_exc({"error": {"details": [
-            {"@type": "type.googleapis.com/google.rpc.Help"}
-        ]}})
+        exc = self._make_exc(
+            {"error": {"details": [{"@type": "type.googleapis.com/google.rpc.Help"}]}}
+        )
         assert LLMBridge._parse_retry_delay(exc) is None
 
     def test_returns_none_when_details_missing(self):
@@ -687,9 +714,15 @@ class TestParseRetryDelay:
         assert LLMBridge._parse_retry_delay(exc) is None
 
     def test_returns_none_when_delay_not_seconds_format(self):
-        exc = self._make_exc({"error": {"details": [
-            {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "1h30m"}
-        ]}})
+        exc = self._make_exc(
+            {
+                "error": {
+                    "details": [
+                        {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "1h30m"}
+                    ]
+                }
+            }
+        )
         assert LLMBridge._parse_retry_delay(exc) is None
 
 
@@ -697,18 +730,29 @@ class TestParseRetryDelay:
 # _call_with_retry — retry delay behavior
 # ---------------------------------------------------------------------------
 
-class TestCallWithRetryDelay:
 
+class TestCallWithRetryDelay:
     def _make_bridge(self):
         with patch("agent.llm_bridge.OpenAI"):
             return LLMBridge(provider="gemini", model_id="test-model")
 
-    def _make_429(self, retry_delay_s: Optional[float] = None):
+    def _make_429(self, retry_delay_s: float | None = None):
         from openai import APIStatusError
-        body = {"error": {"details": [
-            {"@type": "type.googleapis.com/google.rpc.RetryInfo",
-             "retryDelay": f"{int(retry_delay_s)}s"}
-        ]}} if retry_delay_s is not None else {"error": {}}
+
+        body = (
+            {
+                "error": {
+                    "details": [
+                        {
+                            "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                            "retryDelay": f"{int(retry_delay_s)}s",
+                        }
+                    ]
+                }
+            }
+            if retry_delay_s is not None
+            else {"error": {}}
+        )
 
         class Fake429(APIStatusError):
             status_code = 429

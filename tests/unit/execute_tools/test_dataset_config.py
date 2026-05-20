@@ -6,8 +6,8 @@ proposer-side schema validator and the planner prompt's known-constraints block.
 
 from execute_tools.dataset_config import TIDMAD, DatasetConfig
 
-
 # ---- valid_segmentation_sizes ----
+
 
 def test_returns_sorted_divisors_within_default_window():
     sizes = TIDMAD.valid_segmentation_sizes()

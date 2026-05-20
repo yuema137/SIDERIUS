@@ -19,6 +19,7 @@ tuner is the primary tuner-scope consumer of the probe (see
 ``nodes/ml_hyperparameter_tune_agent.py``'s ``[Step 3/3] Scoring``
 block); the helper itself is re-exported from ``core.memory_probe``.
 """
+
 from __future__ import annotations
 
 import json
@@ -30,13 +31,12 @@ import pytest
 from core import memory_probe
 from core.memory_probe import TRACE_FILENAME, probe_memory
 
-
 # ==========================================
 # Stdout formatting
 # ==========================================
 
-class TestProbeStdoutFormat:
 
+class TestProbeStdoutFormat:
     def test_emits_mem_line_with_canonical_fields(self, capsys):
         probe_memory(iter_idx=3, phase="start", scope="workflow")
         out = capsys.readouterr().out
@@ -58,12 +58,10 @@ class TestProbeStdoutFormat:
 # JSONL persistence
 # ==========================================
 
-class TestProbeJsonlPersistence:
 
+class TestProbeJsonlPersistence:
     def test_appends_row_when_workspace_given(self, tmp_path):
-        probe_memory(
-            iter_idx=1, phase="start", workspace=str(tmp_path), scope="workflow"
-        )
+        probe_memory(iter_idx=1, phase="start", workspace=str(tmp_path), scope="workflow")
         trace_path = tmp_path / TRACE_FILENAME
         assert trace_path.exists()
         rows = [json.loads(line) for line in trace_path.read_text().splitlines()]
@@ -71,8 +69,10 @@ class TestProbeJsonlPersistence:
 
     def test_row_has_required_fields(self, tmp_path):
         row = probe_memory(
-            iter_idx=2, phase="post_score",
-            workspace=str(tmp_path), scope="tuner",
+            iter_idx=2,
+            phase="post_score",
+            workspace=str(tmp_path),
+            scope="tuner",
         )
         for key in ("scope", "iter", "phase", "rss_gb", "vms_gb", "timestamp"):
             assert key in row, f"missing key: {key}"
@@ -94,16 +94,11 @@ class TestProbeJsonlPersistence:
 
     def test_multiple_calls_append_not_overwrite(self, tmp_path):
         probe_memory(iter_idx=1, phase="start", workspace=str(tmp_path))
-        probe_memory(iter_idx=1, phase="pre_score",
-                     workspace=str(tmp_path), scope="tuner")
-        probe_memory(iter_idx=1, phase="post_score",
-                     workspace=str(tmp_path), scope="tuner")
+        probe_memory(iter_idx=1, phase="pre_score", workspace=str(tmp_path), scope="tuner")
+        probe_memory(iter_idx=1, phase="post_score", workspace=str(tmp_path), scope="tuner")
         probe_memory(iter_idx=1, phase="end", workspace=str(tmp_path))
 
-        rows = [
-            json.loads(line)
-            for line in (tmp_path / TRACE_FILENAME).read_text().splitlines()
-        ]
+        rows = [json.loads(line) for line in (tmp_path / TRACE_FILENAME).read_text().splitlines()]
         assert len(rows) == 4
         assert [r["phase"] for r in rows] == ["start", "pre_score", "post_score", "end"]
 
@@ -119,8 +114,8 @@ class TestProbeJsonlPersistence:
 # No workspace → stdout only
 # ==========================================
 
-class TestProbeNoWorkspace:
 
+class TestProbeNoWorkspace:
     def test_no_workspace_does_not_create_file(self, tmp_path, capsys):
         """Changing cwd confirms: workspace=None writes nothing anywhere."""
         cwd = os.getcwd()
@@ -137,14 +132,12 @@ class TestProbeNoWorkspace:
 # psutil unavailable → graceful degradation
 # ==========================================
 
-class TestProbePsutilUnavailable:
 
+class TestProbePsutilUnavailable:
     def test_missing_psutil_emits_sentinel_row(self, tmp_path, capsys):
         """When psutil is unreachable, the probe logs NA and a note."""
         with patch.object(memory_probe, "_PSUTIL_AVAILABLE", False):
-            row = probe_memory(
-                iter_idx=1, phase="start", workspace=str(tmp_path)
-            )
+            row = probe_memory(iter_idx=1, phase="start", workspace=str(tmp_path))
         assert row["rss_gb"] is None
         assert row["vms_gb"] is None
         assert row.get("note") == "psutil_unavailable"
@@ -158,6 +151,7 @@ class TestProbePsutilUnavailable:
 # Two-iteration mini-workflow (integration-ish)
 # ==========================================
 
+
 class TestTwoIterTrace:
     """Drive a scripted sequence and check the JSONL is well-ordered.
 
@@ -167,19 +161,12 @@ class TestTwoIterTrace:
 
     def test_ordered_probes_produce_monotonic_trace(self, tmp_path):
         for it in (1, 2):
-            probe_memory(iter_idx=it, phase="start",
-                         workspace=str(tmp_path), scope="workflow")
-            probe_memory(iter_idx=it, phase="pre_score",
-                         workspace=str(tmp_path), scope="tuner")
-            probe_memory(iter_idx=it, phase="post_score",
-                         workspace=str(tmp_path), scope="tuner")
-            probe_memory(iter_idx=it, phase="end",
-                         workspace=str(tmp_path), scope="workflow")
+            probe_memory(iter_idx=it, phase="start", workspace=str(tmp_path), scope="workflow")
+            probe_memory(iter_idx=it, phase="pre_score", workspace=str(tmp_path), scope="tuner")
+            probe_memory(iter_idx=it, phase="post_score", workspace=str(tmp_path), scope="tuner")
+            probe_memory(iter_idx=it, phase="end", workspace=str(tmp_path), scope="workflow")
 
-        rows = [
-            json.loads(line)
-            for line in (tmp_path / TRACE_FILENAME).read_text().splitlines()
-        ]
+        rows = [json.loads(line) for line in (tmp_path / TRACE_FILENAME).read_text().splitlines()]
         assert len(rows) == 8
         # Iteration indices should be non-decreasing across the trace
         iters = [r["iter"] for r in rows]
@@ -194,6 +181,7 @@ class TestTwoIterTrace:
 # Phase 6.8 §2 Commit 2 — post_gc phase round-trip
 # ==========================================
 
+
 class TestPostGcPhase:
     """The workflow emits ``phase="post_gc"`` immediately after the
     per-iteration ``del`` + ``gc.collect()`` block. The probe must
@@ -202,8 +190,10 @@ class TestPostGcPhase:
 
     def test_post_gc_round_trip(self, tmp_path):
         row = probe_memory(
-            iter_idx=1, phase="post_gc",
-            workspace=str(tmp_path), scope="workflow",
+            iter_idx=1,
+            phase="post_gc",
+            workspace=str(tmp_path),
+            scope="workflow",
         )
         assert row["phase"] == "post_gc"
         assert row["scope"] == "workflow"
@@ -212,13 +202,8 @@ class TestPostGcPhase:
 
     def test_end_then_post_gc_pair_writes_two_rows(self, tmp_path):
         """Mirrors the production sequence: ``end`` then ``post_gc``."""
-        probe_memory(iter_idx=1, phase="end",
-                     workspace=str(tmp_path), scope="workflow")
-        probe_memory(iter_idx=1, phase="post_gc",
-                     workspace=str(tmp_path), scope="workflow")
-        rows = [
-            json.loads(line)
-            for line in (tmp_path / TRACE_FILENAME).read_text().splitlines()
-        ]
+        probe_memory(iter_idx=1, phase="end", workspace=str(tmp_path), scope="workflow")
+        probe_memory(iter_idx=1, phase="post_gc", workspace=str(tmp_path), scope="workflow")
+        rows = [json.loads(line) for line in (tmp_path / TRACE_FILENAME).read_text().splitlines()]
         assert [r["phase"] for r in rows] == ["end", "post_gc"]
         assert [r["iter"] for r in rows] == [1, 1]

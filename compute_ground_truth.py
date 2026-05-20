@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 compute_ground_truth.py
 
@@ -53,16 +52,14 @@ from datetime import datetime
 # coercion helper without requiring ``-m``. (compute_raw_baseline does the
 # same.)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from execute_tools.scoring_utils import coerce_nonfinite_to_none  # noqa: E402
+from execute_tools.scoring_utils import coerce_nonfinite_to_none
 
 # ---------------------------------------------------------------------------
 # Core formulas — all use the global s_max from the anchor map.
 # ---------------------------------------------------------------------------
 
 
-def _global_per_file_ceiling(
-    anchors_f: list[float], s_max: float
-) -> tuple[float, float, int]:
+def _global_per_file_ceiling(anchors_f: list[float], s_max: float) -> tuple[float, float, int]:
     """Perfect-denoiser per-file ceiling under the global-s_max ruler.
 
         per_segment     = anchor[i]² / s_max_GLOBAL
@@ -142,80 +139,84 @@ def _anchor_normalized_ceiling(
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Compute theoretical ground-truth (perfect-denoiser) "
-                    "scores under the Option B global-s_max convention.",
+        "scores under the Option B global-s_max convention.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
     parser.add_argument(
-        "--anchor_map", "-a", type=str, default=None,
-        help="Path to segment_anchors.json. Default: "
-             "{TIDMAD_DATA_DIR}/segment_anchors.json.",
+        "--anchor_map",
+        "-a",
+        type=str,
+        default=None,
+        help="Path to segment_anchors.json. Default: {TIDMAD_DATA_DIR}/segment_anchors.json.",
     )
     parser.add_argument(
-        "--output_dir", "-o", type=str, default=None,
-        help="Directory to write ground-truth JSONs. "
-             "Default: {SIDERIUS_DATA_DIR}/ground_truth.",
+        "--output_dir",
+        "-o",
+        type=str,
+        default=None,
+        help="Directory to write ground-truth JSONs. Default: {SIDERIUS_DATA_DIR}/ground_truth.",
     )
     parser.add_argument(
-        "--override", action="store_true",
+        "--override",
+        action="store_true",
         help="Recompute even if output JSONs already exist.",
     )
     args = parser.parse_args()
 
     if args.anchor_map is None:
         from execute_tools.data_paths import TIDMAD_DATA_DIR
+
         args.anchor_map = os.path.join(TIDMAD_DATA_DIR, "segment_anchors.json")
     if args.output_dir is None:
         from execute_tools.data_paths import SIDERIUS_DATA_DIR
+
         args.output_dir = os.path.join(SIDERIUS_DATA_DIR, "ground_truth")
 
     if not os.path.exists(args.anchor_map):
         raise FileNotFoundError(f"Anchor map not found: {args.anchor_map}")
     os.makedirs(args.output_dir, exist_ok=True)
 
-    with open(args.anchor_map, "r") as f:
+    with open(args.anchor_map) as f:
         am = json.load(f)
     anchors: dict[str, list[float]] = am["anchors"]
     s_max: float = am["s_max"]
     num_files: int = am.get("num_files", len(anchors))
 
-    print(f"\n{'='*60}")
-    print(f"  compute_ground_truth.py")
+    print(f"\n{'=' * 60}")
+    print("  compute_ground_truth.py")
     print(f"  anchor_map : {args.anchor_map}")
     print(f"  output_dir : {args.output_dir}")
     print(f"  num_files  : {num_files}")
     print(f"  s_max      : {s_max:.6g}  (global, from anchor map)")
     print(f"  override   : {args.override}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     # --- 1. Per-file ceiling under global s_max ---
     computed = 0
     skipped = 0
     for f_str in sorted(anchors, key=int):
         f_idx = int(f_str)
-        out_path = os.path.join(
-            args.output_dir, f"ground_truth_score_file_{f_idx:04d}.json"
-        )
+        out_path = os.path.join(args.output_dir, f"ground_truth_score_file_{f_idx:04d}.json")
         if os.path.exists(out_path) and not args.override:
             print(f"[SKIP] index={f_idx:02d}  {out_path} already exists.")
             skipped += 1
             continue
 
-        score, linear_sum, n_segments = _global_per_file_ceiling(
-            anchors[f_str], s_max
-        )
+        score, linear_sum, n_segments = _global_per_file_ceiling(anchors[f_str], s_max)
         result = {
-            "file_index":  f_idx,
-            "score":       score,
-            "linear_sum":  linear_sum,
-            "n_segments":  n_segments,
-            "mode":        "fine",
-            "s_max":       s_max,
-            "formula":     "option_b_global_s_max_ceiling",
-            "source":      os.path.basename(args.anchor_map),
+            "file_index": f_idx,
+            "score": score,
+            "linear_sum": linear_sum,
+            "n_segments": n_segments,
+            "mode": "fine",
+            "s_max": s_max,
+            "formula": "option_b_global_s_max_ceiling",
+            "source": os.path.basename(args.anchor_map),
             "computed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
         with open(out_path, "w") as f:
@@ -227,23 +228,23 @@ def main():
     fv, scalar = _anchor_normalized_ceiling(anchors, s_max)
     scalar_path = os.path.join(args.output_dir, "ceiling_anchor_normalized.json")
     scalar_result = {
-        "scalar_score":     scalar,
-        "file_vector":      fv,
-        "formula":          "anchor_normalized_ceiling",
-        "s_max":            s_max,
-        "num_files":        num_files,
-        "source":           os.path.basename(args.anchor_map),
-        "computed_at":      datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "scalar_score": scalar,
+        "file_vector": fv,
+        "formula": "anchor_normalized_ceiling",
+        "s_max": s_max,
+        "num_files": num_files,
+        "source": os.path.basename(args.anchor_map),
+        "computed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
     with open(scalar_path, "w") as f:
         json.dump(coerce_nonfinite_to_none(scalar_result), f, indent=2)
     print(f"\n[COMPUTE] anchor-normalized scalar ceiling = {scalar:.6f}")
     print(f"          -> {scalar_path}")
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  Done.  per-file computed={computed}  skipped={skipped}")
     print(f"         scalar ceiling (global s_max) = {scalar:.4f}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
 
 if __name__ == "__main__":

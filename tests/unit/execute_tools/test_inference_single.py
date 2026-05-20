@@ -20,6 +20,7 @@ Targets the two contracts introduced by Commit 2 of
    buffers reachable. The placement is structural, so this is asserted by
    AST inspection rather than runtime mocking.
 """
+
 from __future__ import annotations
 
 import ast
@@ -30,12 +31,7 @@ import pytest
 
 from execute_tools.inference_single import _assert_training_sentinel
 
-
-_INFERENCE_SOURCE = (
-    Path(__file__).resolve().parents[3]
-    / "execute_tools"
-    / "inference_single.py"
-)
+_INFERENCE_SOURCE = Path(__file__).resolve().parents[3] / "execute_tools" / "inference_single.py"
 
 
 # =============================================================================
@@ -57,9 +53,7 @@ class TestAssertTrainingSentinel:
         msg = str(exc_info.value)
         # The orchestrator greps for this exact prefix to classify the
         # failure category — the prefix is the contract.
-        assert msg.startswith("error_training:"), (
-            f"Expected 'error_training:' prefix; got: {msg!r}"
-        )
+        assert msg.startswith("error_training:"), f"Expected 'error_training:' prefix; got: {msg!r}"
         # The model_path must be in the message so the operator can locate
         # the orphaned trial directory.
         assert model_path in msg
@@ -98,9 +92,7 @@ class TestAssertTrainingSentinel:
             _assert_training_sentinel(model_path, "exp_001")
         msg = str(exc_info.value).lower()
         for forbidden in ("retry", "retrying", "backoff", "will try again"):
-            assert forbidden not in msg, (
-                f"Message must not promise a retry; got: {msg!r}"
-            )
+            assert forbidden not in msg, f"Message must not promise a retry; got: {msg!r}"
 
 
 # =============================================================================
@@ -128,9 +120,7 @@ def _find_trial_loop(tree: ast.Module) -> ast.For:
     test stays robust under ordinary refactors."""
     for node in ast.walk(tree):
         if isinstance(node, ast.For) and isinstance(node.target, ast.Tuple):
-            names = [
-                t.id for t in node.target.elts if isinstance(t, ast.Name)
-            ]
+            names = [t.id for t in node.target.elts if isinstance(t, ast.Name)]
             if names == ["file_index_str", "psd_segment_indices"]:
                 return node
     raise AssertionError("Could not locate trial-mode for-loop in inference_single.py")
@@ -147,9 +137,7 @@ class TestTrialModeDelPlacement:
         create_call_idx = None
         for i, stmt in enumerate(loop.body):
             if isinstance(stmt, ast.Delete):
-                names = {
-                    t.id for t in stmt.targets if isinstance(t, ast.Name)
-                }
+                names = {t.id for t in stmt.targets if isinstance(t, ast.Name)}
                 if _CANONICAL_TRIAL_FREE_NAMES.issubset(names):
                     canonical_del_idx = i
             if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
@@ -180,9 +168,7 @@ class TestTrialModeDelPlacement:
         loop = _find_trial_loop(_parse_inference_module())
         for stmt in loop.body:
             if isinstance(stmt, ast.Delete):
-                names = {
-                    t.id for t in stmt.targets if isinstance(t, ast.Name)
-                }
+                names = {t.id for t in stmt.targets if isinstance(t, ast.Name)}
                 if _CANONICAL_TRIAL_FREE_NAMES.issubset(names):
                     # The set must include BOTH view handles, not just the
                     # owners. (Owners alone are insufficient — the views
@@ -206,9 +192,7 @@ class TestTrialModeDelPlacement:
         canonical_del_idx = None
         for i, stmt in enumerate(body):
             if isinstance(stmt, ast.Delete):
-                names = {
-                    t.id for t in stmt.targets if isinstance(t, ast.Name)
-                }
+                names = {t.id for t in stmt.targets if isinstance(t, ast.Name)}
                 if _CANONICAL_TRIAL_FREE_NAMES.issubset(names):
                     canonical_del_idx = i
                     break
@@ -274,7 +258,8 @@ class TestTimingFlagAndInstrumentation:
         timing that the parent sums into ``process_startup_ms``."""
         loop = _find_trial_loop(_parse_inference_module())
         perf_counter_calls = [
-            node for node in ast.walk(loop)
+            node
+            for node in ast.walk(loop)
             if isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
             and node.func.attr == "perf_counter"
@@ -301,18 +286,12 @@ class TestTimingFlagAndInstrumentation:
                 and node.args
                 and isinstance(node.args[0], ast.Dict)
             ):
-                keys = {
-                    k.value for k in node.args[0].keys
-                    if isinstance(k, ast.Constant)
-                }
+                keys = {k.value for k in node.args[0].keys if isinstance(k, ast.Constant)}
                 assert {"file_index", "n_psd_segs", "elapsed_ms"}.issubset(keys), (
-                    f"per_file_timings_ms.append payload missing required keys; "
-                    f"got: {sorted(keys)}"
+                    f"per_file_timings_ms.append payload missing required keys; got: {sorted(keys)}"
                 )
                 return
-        raise AssertionError(
-            "No per_file_timings_ms.append({...}) call found in trial loop"
-        )
+        raise AssertionError("No per_file_timings_ms.append({...}) call found in trial loop")
 
     def test_sidecar_written_when_flag_set(self):
         """After the loop, ``args.timing_out_json`` must gate a JSON dump
