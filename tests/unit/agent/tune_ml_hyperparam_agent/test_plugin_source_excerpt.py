@@ -255,7 +255,11 @@ class TestBrainPlanRendering:
             bridge = LLMBridge()
         captured = {}
 
-        def fake_generate(system_prompt, user_prompt):
+        # ``LLMBridge.plan`` now forwards a ``label`` kwarg (per-call-site
+        # token telemetry, e.g. ``label="tuner.planner"``) into
+        # ``self.generate``. Accept **kwargs so the fake stays compatible
+        # without coupling the test to telemetry plumbing.
+        def fake_generate(system_prompt, user_prompt, **kwargs):
             captured["system_prompt"] = system_prompt
             captured["user_prompt"] = user_prompt
             return {}
