@@ -91,7 +91,7 @@ class TestSnapshotStrategy:
             trial_portion=1.0,
             seed=42,
         )
-        for fi, segs in ss.items():
+        for _fi, segs in ss.items():
             assert len(segs) == SEGMENTS_PER_FILE
 
     def test_deterministic_with_seed(self):
@@ -125,7 +125,7 @@ class TestAnchorsStrategy:
             seed=42,
         )
         expected = max(1, round(0.1 * SEGMENTS_PER_FILE))
-        for fi, segs in ss.items():
+        for _fi, segs in ss.items():
             assert len(segs) == expected
 
 
@@ -153,7 +153,7 @@ class TestTargetStrategy:
             seed=42,
         )
         expected = max(1, round(0.5 * SEGMENTS_PER_FILE))  # 100
-        for fi, segs in ss.items():
+        for _fi, segs in ss.items():
             assert len(segs) == expected
 
     def test_deduplicates_target_files(self):
@@ -198,7 +198,7 @@ class TestEdgeCases:
             trial_portion=0.001,
             seed=42,
         )
-        for fi, segs in ss.items():
+        for _fi, segs in ss.items():
             assert len(segs) >= 1
 
     def test_no_duplicate_segments(self):

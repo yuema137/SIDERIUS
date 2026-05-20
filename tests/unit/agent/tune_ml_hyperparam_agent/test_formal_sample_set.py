@@ -148,7 +148,7 @@ def test_formal_training_override_respected():
         seed=0,
     )
     expected_per_file = round(0.5 * SEGMENTS_PER_FILE)  # 100
-    for fi, segs in sample_set.items():
+    for _fi, segs in sample_set.items():
         assert len(segs) == expected_per_file
 
 
