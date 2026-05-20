@@ -1,14 +1,24 @@
 """
 Unit tests for agent/schemas/protocols/ml_model_tune_to_ml_result_interp.py
 
+Parametrized to collapse one-attribute-per-test extraction noise into
+multi-assertion baselines. Each baseline pins a distinct contract:
+single-record extraction, round-list extraction, empty-records defaults,
+formal-round handoff, and storage pass-through.
+
 Tests cover:
   local_all_records
-    - Returns a valid InterpretationInput
-    - summaries contains exactly one ModelRunSummary
-    - ModelRunSummary has correct model_type, run_name, scores
-    - round_scores and round_conclusions extracted from records
+    - Returns a valid InterpretationInput with exactly one ModelRunSummary
+    - All single-record attributes (model_type, run_name, scores,
+      best_file_vector, best_model_params, psd segment counts,
+      trial_portion) extracted from the canonical success record
+    - Round-list attributes (round_scores, round_conclusions,
+      round_trial_portions, round_model_params) extracted across mixed
+      success + skipped records
+    - Empty all_records yields ModelRunSummary with None / [] defaults
+    - Formal-round record is recognised and surfaces formal_score +
+      formal_file_vector
     - storage is passed through correctly
-    - works with empty all_records
 
   database_all_records
     - Raises NotImplementedError (placeholder, not yet implemented)
@@ -128,123 +138,111 @@ def make_tuning_output(model_type, run_name, records, best_score=None, best_conf
 
 class TestLocalAllRecords:
 
-    def test_returns_interpretation_input(self, storage, record_success):
-        output = make_tuning_output("punet", "v1", [record_success], best_score=1.5)
+    def test_single_record_baseline_extracts_all_summary_fields(
+        self, storage, record_success,
+    ):
+        """One canonical success record -> the protocol must populate every
+        documented single-record field on ModelRunSummary. Replaces 12 flat
+        single-assertion tests (returns_interpretation_input, single_summary,
+        model_type_passed, run_name_passed, best_score_passed,
+        worst_score_computed, best_file_vector_extracted,
+        best_model_params_extracted, training_psd_segments_extracted,
+        trial_portion_extracted, storage_passed_through, no_formal_round).
+
+        With only one success record, worst == best (single-element set),
+        and there is no formal round so formal_* fields stay None."""
+        output = make_tuning_output(
+            "fcnet", "my_run", [record_success], best_score=1.5,
+        )
         result = local_all_records(output, storage)
+
         assert isinstance(result, InterpretationInput)
-
-    def test_single_summary(self, storage, record_success):
-        output = make_tuning_output("punet", "v1", [record_success], best_score=1.5)
-        result = local_all_records(output, storage)
         assert len(result.summaries) == 1
-        assert isinstance(result.summaries[0], ModelRunSummary)
-
-    def test_model_type_passed(self, storage, record_success):
-        output = make_tuning_output("fcnet", "run2", [record_success], best_score=1.5)
-        result = local_all_records(output, storage)
-        assert result.summaries[0].model_type == "fcnet"
-
-    def test_run_name_passed(self, storage, record_success):
-        output = make_tuning_output("punet", "my_run", [record_success], best_score=1.5)
-        result = local_all_records(output, storage)
-        assert result.summaries[0].run_name == "my_run"
-
-    def test_best_score_passed(self, storage, record_success):
-        output = make_tuning_output("punet", "v1", [record_success], best_score=1.5)
-        result = local_all_records(output, storage)
-        assert result.summaries[0].best_denoising_score == 1.5
-
-    def test_worst_score_computed(self, storage, record_success):
-        output = make_tuning_output("punet", "v1", [record_success], best_score=1.5)
-        result = local_all_records(output, storage)
-        assert result.summaries[0].worst_denoising_score == 1.5
-
-    def test_round_scores_extracted(self, storage, record_success, record_oom):
-        output = make_tuning_output("punet", "v1", [record_success, record_oom], best_score=1.5)
-        result = local_all_records(output, storage)
-        assert result.summaries[0].round_scores == [1.5, None]
-
-    def test_round_conclusions_extracted(self, storage, record_success, record_oom):
-        output = make_tuning_output("punet", "v1", [record_success, record_oom], best_score=1.5)
-        result = local_all_records(output, storage)
-        assert result.summaries[0].round_conclusions[0] == "Improved score to 1.5."
-        assert "OOM" in result.summaries[0].round_conclusions[1]
-
-    def test_empty_records(self, storage):
-        output = make_tuning_output("punet", "v1", [])
-        result = local_all_records(output, storage)
-        assert result.summaries[0].round_scores == []
-        assert result.summaries[0].completed_rounds == 0
-
-    def test_storage_passed_through(self, storage, record_success):
-        output = make_tuning_output("punet", "v1", [record_success], best_score=1.5)
-        result = local_all_records(output, storage)
-        assert result.storage.local.workspace == "/tmp/proto_test"
-        assert result.storage.local.run_name == "r1"
-
-    def test_best_file_vector_extracted(self, storage, record_success):
-        output = make_tuning_output("punet", "v1", [record_success], best_score=1.5)
-        result = local_all_records(output, storage)
         summary = result.summaries[0]
+        assert isinstance(summary, ModelRunSummary)
+
+        # Identity / score pass-through.
+        assert summary.model_type == "fcnet"
+        assert summary.run_name == "my_run"
+        assert summary.best_denoising_score == 1.5
+        assert summary.worst_denoising_score == 1.5
+
+        # File-vector + model-size pass-through.
         assert summary.best_file_vector is not None
         assert len(summary.best_file_vector) == 20
         assert summary.best_file_vector[7] == 78.0  # highest value
+        assert summary.best_model_params == 50000
 
-    def test_best_model_params_extracted(self, storage, record_success):
-        output = make_tuning_output("punet", "v1", [record_success], best_score=1.5)
-        result = local_all_records(output, storage)
-        assert result.summaries[0].best_model_params == 50000
+        # PSD segment counts pass through.
+        assert summary.training_psd_segments == 200
+        assert summary.eval_psd_segments == 200
 
-    def test_training_psd_segments_extracted(self, storage, record_success):
-        output = make_tuning_output("punet", "v1", [record_success], best_score=1.5)
-        result = local_all_records(output, storage)
-        assert result.summaries[0].training_psd_segments == 200
-        assert result.summaries[0].eval_psd_segments == 200
+        # Trial-mode metadata pass-through.
+        assert summary.trial_portion == 0.05
 
-    def test_trial_portion_extracted(self, storage, record_success):
-        output = make_tuning_output("punet", "v1", [record_success], best_score=1.5)
-        result = local_all_records(output, storage)
-        assert result.summaries[0].trial_portion == 0.05
-
-    def test_round_trial_portions_extracted(self, storage, record_success, record_oom):
-        output = make_tuning_output("punet", "v1", [record_success, record_oom], best_score=1.5)
-        result = local_all_records(output, storage)
-        assert result.summaries[0].round_trial_portions == [0.05, None]
-
-    def test_round_model_params_extracted(self, storage, record_success, record_oom):
-        output = make_tuning_output("punet", "v1", [record_success, record_oom], best_score=1.5)
-        result = local_all_records(output, storage)
-        assert result.summaries[0].round_model_params == [50000, None]
-
-    def test_formal_round_extracted(self, storage, record_success, record_formal):
-        """When a formal round exists, extract formal_score and formal_file_vector."""
-        output = make_tuning_output("punet", "v1",
-                                    [record_success, record_formal], best_score=1.5)
-        result = local_all_records(output, storage)
-        summary = result.summaries[0]
-        assert summary.formal_score == 1.2
-        assert summary.formal_file_vector is not None
-        assert len(summary.formal_file_vector) == 20
-
-    def test_no_formal_round(self, storage, record_success):
-        """When no formal round exists, formal fields are None."""
-        output = make_tuning_output("punet", "v1", [record_success], best_score=1.5)
-        result = local_all_records(output, storage)
-        summary = result.summaries[0]
+        # No formal round in this fixture.
         assert summary.formal_score is None
         assert summary.formal_file_vector is None
 
-    def test_empty_records_new_fields(self, storage):
-        """Empty records produce None for all new fields."""
+        # Storage round-trips intact.
+        assert result.storage.local.workspace == "/tmp/proto_test"
+        assert result.storage.local.run_name == "r1"
+
+    def test_round_lists_extracted_across_mixed_records(
+        self, storage, record_success, record_oom,
+    ):
+        """Two records (success + OOM-skip) -> every per-round list on
+        ModelRunSummary must carry both entries in order, with the OOM
+        record contributing None for numeric fields and a conclusion
+        string mentioning 'OOM'. Replaces four flat single-assertion tests
+        (round_scores_extracted, round_conclusions_extracted,
+        round_trial_portions_extracted, round_model_params_extracted)."""
+        output = make_tuning_output(
+            "punet", "v1", [record_success, record_oom], best_score=1.5,
+        )
+        summary = local_all_records(output, storage).summaries[0]
+
+        assert summary.round_scores == [1.5, None]
+        assert summary.round_conclusions[0] == "Improved score to 1.5."
+        assert "OOM" in summary.round_conclusions[1]
+        assert summary.round_trial_portions == [0.05, None]
+        assert summary.round_model_params == [50000, None]
+
+    def test_empty_records_yields_default_summary(self, storage):
+        """Zero records -> the ModelRunSummary still exists (one per
+        tuning output) but every per-round list is empty and every
+        per-record scalar is None. Replaces two flat tests
+        (empty_records + empty_records_new_fields)."""
         output = make_tuning_output("punet", "v1", [])
-        result = local_all_records(output, storage)
-        summary = result.summaries[0]
+        summary = local_all_records(output, storage).summaries[0]
+
+        # Scalar fields default to None / 0.
+        assert summary.completed_rounds == 0
         assert summary.best_file_vector is None
         assert summary.best_model_params is None
         assert summary.training_psd_segments is None
         assert summary.formal_score is None
+
+        # List fields default to [].
+        assert summary.round_scores == []
         assert summary.round_trial_portions == []
         assert summary.round_model_params == []
+
+    def test_formal_round_surfaces_formal_score_and_vector(
+        self, storage, record_success, record_formal,
+    ):
+        """When a formal (is_trial=False) record exists alongside trial
+        rounds, the protocol must extract formal_score + formal_file_vector
+        from it. Kept separate from the single-record baseline because the
+        formal-round path is a distinct branch in the protocol code."""
+        output = make_tuning_output(
+            "punet", "v1", [record_success, record_formal], best_score=1.5,
+        )
+        summary = local_all_records(output, storage).summaries[0]
+
+        assert summary.formal_score == 1.2
+        assert summary.formal_file_vector is not None
+        assert len(summary.formal_file_vector) == 20
 
 
 # ---------------------------------------------------------------------------
