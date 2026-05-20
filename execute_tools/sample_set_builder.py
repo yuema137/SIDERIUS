@@ -38,7 +38,7 @@ def build_sample_set(
         is_trial:        If False, return normal mode (all segments of ``file_index``).
         file_index:      File to use in normal mode. Ignored when ``is_trial=True``.
         trial_strategy:  One of ``"snapshot"``, ``"anchors"``, ``"target"``.
-        trial_portion:   Fraction of segments to sample per file (0.0–1.0).
+        trial_portion:   Fraction of segments to sample per file (0.0-1.0).
         target_files:    File indices to sample from (required for ``"target"`` strategy).
         seed:            Random seed for reproducible sampling. ``None`` = non-deterministic.
 

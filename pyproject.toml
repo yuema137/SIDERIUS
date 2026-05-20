@@ -64,6 +64,14 @@ ignore = [
     # f-strings that legitimately run long aren't constant friction.
     "E501",
 ]
+# Math notation we use deliberately in docstrings, prompts, and comments.
+# RUF001/RUF002/RUF003 stay enabled for every OTHER confusable (this is
+# narrow scope calibration, not blanket muting):
+#   ×  U+00D7 MULTIPLICATION SIGN  — ratios like "1.60×", dimensions T²×B
+#   −  U+2212 MINUS SIGN           — math equations
+#   α  U+03B1 GREEK SMALL ALPHA    — loss / hyperparameter notation
+#   ∪  U+222A UNION                — set notation (e.g. Best-3 ∪ Last-2)
+allowed-confusables = ["×", "−", "α", "∪"]
 
 [tool.ruff.lint.per-file-ignores]
 # Tests legitimately use bare asserts, longer fixtures, and unused

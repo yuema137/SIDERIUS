@@ -586,7 +586,7 @@ class ProposalInput(BaseModel):
         "gates the baseline config when inp.is_trial=False. None = "
         "formal gate disabled. Sized independently from the trial "
         "budget because formal runs use the full dataset and have a "
-        "wall-time scale 50–100× longer.",
+        "wall-time scale 50-100× longer.",
     )
     data_dir: str | None = Field(
         default=None,

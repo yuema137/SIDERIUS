@@ -204,7 +204,7 @@ def _strategy_full_clone(plan: ExperimentPlan, winner: dict) -> list[str]:
     """Inherit all five fields: model_cfg, loss_cfg, lr, epochs, batch_size.
 
     Production default. Required for the trial→formal inference-time
-    measurement reuse landed in commits B–D of
+    measurement reuse landed in commits B-D of
     ``docs/refine_inference_time_estimator.md`` — the timing measurement
     must be for the same architecture the formal round runs.
     """
@@ -2887,7 +2887,7 @@ def main():
         "gate on rounds where plan.is_trial=False. None disables "
         "the formal gate. Sized independently from the trial "
         "budget because formal runs use the full dataset and "
-        "are 50–100x longer.",
+        "are 50-100x longer.",
     )
     parser.add_argument(
         "--data_dir",

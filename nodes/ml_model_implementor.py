@@ -309,9 +309,9 @@ Your task: given a mathematical description of a new neural architecture and its
 baseline configuration, plan the PyTorch implementation in detail before writing code.
 
 Background on the task:
-- Input data: TIDMAD SQUID magnetometry time-series, integer ADC values 0–255.
+- Input data: TIDMAD SQUID magnetometry time-series, integer ADC values 0-255.
 - The model must satisfy this forward contract (non-negotiable):
-    input:  [B, T]       int64   — raw signal, integer class indices (0–255)
+    input:  [B, T]       int64   — raw signal, integer class indices (0-255)
     output: [B, 256, T]  float32 — per-timestep logits over 256 denoising classes
 - ADC values must be embedded: the model receives integer indices, not floats.
   Use nn.Embedding(256, embed_dim) to convert [B, T] int64 → [B, T, embed_dim],

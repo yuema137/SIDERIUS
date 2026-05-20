@@ -11,10 +11,10 @@ Output format (segment_anchors.json):
         "segments_per_file": 200,
         "num_files": 20,
         "anchors": {
-            "0": [snr_0, snr_1, ..., snr_199],    # file 0, segments 0–199
-            "1": [snr_0, snr_1, ..., snr_199],    # file 1, segments 0–199
+            "0": [snr_0, snr_1, ..., snr_199],    # file 0, segments 0-199
+            "1": [snr_0, snr_1, ..., snr_199],    # file 1, segments 0-199
             ...
-            "19": [snr_0, snr_1, ..., snr_199],   # file 19, segments 0–199
+            "19": [snr_0, snr_1, ..., snr_199],   # file 19, segments 0-199
         }
     }
 

@@ -16,8 +16,8 @@ where ``snr_squid_raw`` is the raw CH1 SNR at the CH2 peak frequency
 (``get_one_sec_psd`` upcasts to ``float64`` before ``np.fft.rfft``).
 
 File index mapping:
-  0 – 19  : fine scoring   (abra_validation_0000.h5 … 0019.h5, 200 segments)
-  20 – 39 : coarse scoring (abra_validation_0020.h5 … 0039.h5, 20 segments
+  0 - 19  : fine scoring   (abra_validation_0000.h5 … 0019.h5, 200 segments)
+  20 - 39 : coarse scoring (abra_validation_0020.h5 … 0039.h5, 20 segments
                             — every 10th segment; uses the same global s_max
                             so coarse scores are directly comparable to fine)
 
@@ -146,7 +146,7 @@ def _calculate_score(
 # run renders as the same soft floor (~−13.854) at every aggregation level
 # instead of producing ``-inf`` here while per-file rows show finite floors.
 #
-# Only fine files (0–19) contribute — coarse files are a sparse sampling of
+# Only fine files (0-19) contribute — coarse files are a sparse sampling of
 # the same physical signal and would bias the grand mean if mixed in. See
 # Decision 13 in ``docs/aggregated_score_table_awareness.md``.
 # ---------------------------------------------------------------------------
@@ -257,7 +257,7 @@ def main():
         type=int,
         nargs="+",
         default=list(range(40)),
-        help="File indices to process (default: 0–39).",
+        help="File indices to process (default: 0-39).",
     )
     parser.add_argument(
         "--override",
@@ -313,7 +313,7 @@ def main():
 
     for idx in args.indices:
         if idx < 0 or idx > 39:
-            print(f"[WARN] Index {idx} out of range 0–39, skipping.")
+            print(f"[WARN] Index {idx} out of range 0-39, skipping.")
             continue
 
         coarse = idx >= 20

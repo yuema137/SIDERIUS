@@ -1142,7 +1142,7 @@ class LLMBridge:
         # (section headers like "## Interpretation Summary", key-value preludes
         # like "Models analysed: [...]", stage-specific instructions) that
         # `_build_*_prompt` injects around them. Gate T1 (2026-05-04) measured
-        # the wrapper gap at ~7.5–8.3 K chars per proposer call (~22 % of each
+        # the wrapper gap at ~7.5-8.3 K chars per proposer call (~22 % of each
         # user prompt under the 9-key audit). To make the audit lossless, we
         # inject a catch-all key
         # `template_and_scaffolding = chars.total - sum(content components)`.

@@ -412,7 +412,7 @@ def render_baseline_report(
         "",
         f"**Workspace**: `{workspace}`  ",
         f"**run_id**: `{run_id}`  ",
-        f"**Iters captured**: {iters_sorted[0]}–{iters_sorted[-1]} ({len(iters_sorted)} total)  ",
+        f"**Iters captured**: {iters_sorted[0]}-{iters_sorted[-1]} ({len(iters_sorted)} total)  ",
         f"**USD rates**: ${rate_prompt:.2f}/1M prompt + ${rate_completion:.2f}/1M completion (placeholder gpt-5.4)  ",
         f"**[BLOAT_ALERT] threshold**: {_fmt_usd(bloat_usd_threshold)}/iter (post-dehydration North Star)  ",
         f"**[CONTEXT_EXPLOSION] threshold**: {_fmt_int(context_prompt_threshold)} prompt tokens/call  ",
@@ -526,7 +526,7 @@ def render_top3_bloat_report(
         "",
         f"**Workspace**: `{workspace}`  ",
         f"**run_id**: `{run_id}`  ",
-        f"**Iters analyzed**: {iter1}–{iters_sorted[-1]}  ",
+        f"**Iters analyzed**: {iter1}-{iters_sorted[-1]}  ",
         "",
         "---",
         "",
@@ -734,7 +734,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[OK] wrote {baseline_path}")
     print(f"[OK] wrote {top3_path}")
     print(f"     verdict: {verdict}")
-    print(f"     iters: {min(aggs)}–{max(aggs)} ({len(aggs)} total)")
+    print(f"     iters: {min(aggs)}-{max(aggs)} ({len(aggs)} total)")
     print(f"     [BLOAT_ALERT]: {len(bloats)} iter(s) over {_fmt_usd(args.bloat_usd_threshold)}")
     print(
         f"     [CONTEXT_EXPLOSION]: {len(explosions)} call(s) over "

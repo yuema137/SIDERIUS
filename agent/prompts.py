@@ -27,10 +27,10 @@ Do not change hyperparameters until this reference is set.
 ### PROGRESSIVE RESEARCH STRATEGY:
 Plan your experiments across rounds, not just one at a time:
 - **Phase 1: Screening** (first 25% of rounds): Broad exploration with low trial_portion
-  (0.02–0.05) and low epochs (1–3). Test different loss types and learning rates quickly.
+  (0.02-0.05) and low epochs (1-3). Test different loss types and learning rates quickly.
   Discard configs that fail to converge. Goal: find 2-3 promising directions.
 - **Phase 2: Refinement** (middle 50% of rounds): Pick the top performing configs from
-  Phase 1. Increase trial_portion to 0.1–0.3 and epochs to 5–10. Fine-tune lr,
+  Phase 1. Increase trial_portion to 0.1-0.3 and epochs to 5-10. Fine-tune lr,
   loss_type, and regularization. Goal: maximize score with sufficient data.
 - **Phase 3: Solidification** (last 25% of rounds): Select the best candidate. Increase
   trial_portion to 0.5+ or switch to formal mode for definitive validation.
@@ -109,17 +109,17 @@ give deep coverage on fewer files. Consult the per-file score table below — if
 `Impact_Score` is roughly uniform across files, snapshot is efficient. If a small subset
 of files dominates the `Impact_Score` ranking, target those files.
 
-`trial_portion` (0.01–1.0): fraction of segments per file for the **training scope**.
+`trial_portion` (0.01-1.0): fraction of segments per file for the **training scope**.
 This determines how much data the model trains on. More data = better model but slower.
-Start small (0.02–0.05) for fast hyperparameter exploration. If scores are consistently
-poor, **increase trial_portion** (0.1–0.5) before changing hyperparameters — low scores
+Start small (0.02-0.05) for fast hyperparameter exploration. If scores are consistently
+poor, **increase trial_portion** (0.1-0.5) before changing hyperparameters — low scores
 often mean insufficient training data, not bad hyperparameters.
 
-`eval_portion` (0.01–1.0): fraction of segments per file for **validation** (inference +
+`eval_portion` (0.01-1.0): fraction of segments per file for **validation** (inference +
 scoring). Controls score fidelity. Can match trial_portion for fast checks, or be larger
 for more reliable scores. In formal mode this is always 1.0.
 
-`train_portion` (0.01–1.0): per-epoch subsample from the training scope. Default 0.1.
+`train_portion` (0.01-1.0): per-epoch subsample from the training scope. Default 0.1.
 Each epoch sees a different random 10% of the training scope. Over multiple epochs the
 model sees diverse data without loading everything at once.
 
@@ -414,7 +414,7 @@ def build_exploration_checklist(
 
 # Maximum characters to emit for the config-class source excerpt. Keeps the
 # planner prompt bounded when a plugin config class grows large. Real-world
-# plugin config bodies (validators + fields) typically run 500–1500 chars, so
+# plugin config bodies (validators + fields) typically run 500-1500 chars, so
 # 4000 gives ~2-3x headroom before truncation kicks in.
 _PLUGIN_SOURCE_EXCERPT_MAX_CHARS = 4000
 
@@ -1019,10 +1019,10 @@ def get_planner_user_prompt(
     "hypothesis": "Specific prediction for this run",
     "is_trial": "true | false (choose based on confidence in config)",
     "trial_strategy": "snapshot | anchors | target",
-    "trial_portion": "0.02–1.0 (increase if scores are poor — more data helps)",
+    "trial_portion": "0.02-1.0 (increase if scores are poor — more data helps)",
     "train_portion": "0.1 (rarely change)",
     "eval_strategy": "snapshot | anchors | target",
-    "eval_portion": "0.02–1.0 (match trial_portion or larger for reliable scores)",
+    "eval_portion": "0.02-1.0 (match trial_portion or larger for reliable scores)",
     "train_validation_align": "true | false",
     "model_config": {{ ... }},
     "train_config": {{ "lr": ..., "epochs": ..., "batch_size": ..., "device": "cuda" }},

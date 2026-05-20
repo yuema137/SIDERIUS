@@ -262,7 +262,7 @@ def score_segments(
         data_dir:           Directory containing the denoised HDF5 file.
         denoised_filename:  Filename of the denoised file (e.g.
                             ``"abra_validation_denoised_punet_0006.h5"``).
-        file_index:         Which validation file (0–19) this corresponds to.
+        file_index:         Which validation file (0-19) this corresponds to.
         segment_indices:    Which segments to score (0-based, original indices
                             within the full validation file). Order must match
                             the packing order used by inference_single.py.
@@ -506,7 +506,7 @@ def score_vector(
         # processes do NOT copy-on-write the parent's ~8 GB heap. Default
         # ``fork`` on Linux caused a +15 GB transient on 2026-04-27 that
         # OOM-killed the v5 explore parent. ``_collect_raw_pairs`` is
-        # module-level (picklable), so spawn is safe; cost is ~1–2 s of
+        # module-level (picklable), so spawn is safe; cost is ~1-2 s of
         # worker import warmup on each call. See
         # docs/phase68_task1_memory_diagnostic_20260427.md §2 Commit 1.
         with concurrent.futures.ProcessPoolExecutor(

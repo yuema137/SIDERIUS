@@ -446,7 +446,7 @@ def run_experiment_streaming(
         data_dir:          Directory containing ``abra_training_XXXX.h5`` files.
         sandbox_dirs:      ``{"models": ..., "results": ...}`` for saving outputs.
         exp_id:            Experiment identifier for file naming.
-        train_portion:     Fraction of each file's segments to use per epoch (0.01–1.0).
+        train_portion:     Fraction of each file's segments to use per epoch (0.01-1.0).
                            When None or 1.0, all segments in the scope are used.
         freeze_subsample:  When True, every epoch uses the same subsample (same seed).
                            When False (default), each epoch draws a different subsample.

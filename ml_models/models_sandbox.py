@@ -59,7 +59,7 @@ class Down(nn.Module):
 
     def __init__(self, in_channels, out_channels, stride=4, kernel_size=9, padding=4, bias=False):
         super().__init__()
-        # pass stride to MaxPool1d，pass kernel size and padding to DoubleConv
+        # pass stride to MaxPool1d,pass kernel size and padding to DoubleConv
         self.maxpool_conv = nn.Sequential(
             nn.MaxPool1d(kernel_size=stride, stride=stride),
             DoubleConv(

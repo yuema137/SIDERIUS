@@ -627,7 +627,7 @@ class TidmadSandbox:
             inference_batch: Phase 6.6 A.10 — explicit batch chosen by the
                              pre-flight ``evaluate_vram_skill``. When provided,
                              it is the authoritative runtime batch. When ``None``
-                             (legacy path and during the A.6–A.11 landing window),
+                             (legacy path and during the A.6-A.11 landing window),
                              fall back to ``inference_batch_for(model_type)`` so
                              callers not yet wired through the tuner keep running.
                              A.9 will remove the fallback once every caller has

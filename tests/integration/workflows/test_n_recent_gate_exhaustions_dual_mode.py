@@ -396,7 +396,7 @@ def test_iter2_triple_guard_blacklist_and_preflight(tmp_path):
     user prompt (Fix 2); the eventually-emitted proposal must carry
     audit fields proving the gate ran and passed on the retry.
 
-    Per Decision 6 (design doc §9 Commit 6): Stages 1–2 must NOT be re-run
+    Per Decision 6 (design doc §9 Commit 6): Stages 1-2 must NOT be re-run
     on pre-flight rejection. Bridge call count for iter-2 is therefore
     exactly 4 — comparison + reasoning + draft-1 + draft-2."""
     # Seed tuning data so the workflow can bootstrap iteration 1.
@@ -422,7 +422,7 @@ def test_iter2_triple_guard_blacklist_and_preflight(tmp_path):
         """Return a bridge_factory that emits a schedule tailored to the
         current iteration. Iter 1 has 3 outputs (standard single-draft run);
         iter 2 has 4 outputs (one over-budget draft + one feasible retry),
-        proving Stages 1–2 are invoked exactly once per iteration."""
+        proving Stages 1-2 are invoked exactly once per iteration."""
 
         def _factory(**kwargs):
             bridge = MagicMock()

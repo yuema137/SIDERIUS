@@ -182,7 +182,7 @@ _WAVENET_SUMMARY = ModelRunSummary(
     round_scores=[5.45, 5.52, _WAVENET_SCALAR],
     round_conclusions=[
         "Baseline established on high-frequency files.",
-        "Low-frequency files 0–4 remain near zero despite loss tuning.",
+        "Low-frequency files 0-4 remain near zero despite loss tuning.",
         "Structural blind spot — low-freq scores unchanged at <0.2.",
     ],
     model_description=(

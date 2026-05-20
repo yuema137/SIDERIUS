@@ -24,7 +24,7 @@ def _make_card(**kwargs) -> AgentCard:
         agent_name="ml_literature_review",
         role="Scans ML papers for architectural techniques.",
         expertise_domain="Signal processing, deep learning for time-series.",
-        coverage="arXiv + OpenReview 2018–present.",
+        coverage="arXiv + OpenReview 2018-present.",
         limitations="Cannot assess physics feasibility.",
         trust_guidance="Treat as promising priors — only experiment runs confirm applicability.",
     )

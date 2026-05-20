@@ -176,7 +176,7 @@ across one or more model architectures, reason deeply about what new neural
 architecture could best overcome the identified bottlenecks.
 
 Background on the task:
-- Input data: TIDMAD SQUID magnetometry time-series, integer ADC values 0–255,
+- Input data: TIDMAD SQUID magnetometry time-series, integer ADC values 0-255,
   signal length up to 40000 timesteps per segment.
 - The model must satisfy this forward contract (non-negotiable):
     input:  [B, T]       int64   — raw signal, integer class indices
@@ -539,7 +539,7 @@ def _audit_proposer_components(
     payloads injected into the user prompt, but not the template wrapper
     text (section headers, key-value preludes, stage instructions) added
     by the ``_build_*_prompt`` builders. Gate T1 measured that wrapper
-    overhead at ~7.5–8.3 K chars per proposer call. To keep the row-level
+    overhead at ~7.5-8.3 K chars per proposer call. To keep the row-level
     audit lossless, ``LLMBridge._record_usage`` augments the dict on
     write with a catch-all key ``template_and_scaffolding``
     (= ``chars.total - sum(this hook's 10)``). The hook itself is
@@ -561,7 +561,7 @@ def _audit_proposer_components(
     interpretation_json_chars = len(json.dumps(interp_summary or {}, default=str))
 
     # ---- non_candidates_overview: list of per-non-candidate-model summary
-    # dicts (lines 1010–1034), each carrying full ``description`` from
+    # dicts (lines 1010-1034), each carrying full ``description`` from
     # ``model_descriptions`` plus 4 cache fields (``key_findings``,
     # ``bottlenecks``, ``score_trend``, ``strategy_assessment``) drawn from
     # ``model_knowledge_cache``. Sized via the same compact serialization

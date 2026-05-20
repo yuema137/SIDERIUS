@@ -216,7 +216,7 @@ class TestExecuteInferenceBatch:
 
     @patch("core.sandbox_executor.subprocess.run")
     def test_none_falls_back_to_registry(self, mock_run, sandbox):
-        """Back-compat: callers not yet wired through the tuner (A.6–A.11
+        """Back-compat: callers not yet wired through the tuner (A.6-A.11
         landing window) pass no batch. The executor falls through to
         ``inference_batch_for('fcnet')`` which is 25."""
         self._seed_files(sandbox)

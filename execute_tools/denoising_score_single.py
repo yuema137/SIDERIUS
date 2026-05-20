@@ -15,7 +15,7 @@ in-process).
     score        = log_{5.27}(grand_mean)  if grand_mean > 0 else -inf
 
 where ``s_max`` is read from ``segment_anchors.json`` (built on the fine
-validation files 0–19). This is the same formula and the same global ruler
+validation files 0-19). This is the same formula and the same global ruler
 used by ``scoring_utils.score_vector`` and by the ground-truth ceiling, so
 baseline, model, and ceiling scores are directly comparable.
 
@@ -78,7 +78,7 @@ parser.add_argument(
     "--run_name", type=str, default="test_run", help="Run name for the auto-exploration."
 )
 parser.add_argument(
-    "--file_index", "-i", type=int, default=6, help="Validation file index (0–19 fine)."
+    "--file_index", "-i", type=int, default=6, help="Validation file index (0-19 fine)."
 )
 parser.add_argument(
     "-c", "--coarse", action="store_true", help="(Deprecated no-op; kept for CLI compatibility.)"

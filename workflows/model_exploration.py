@@ -717,7 +717,7 @@ def run_workflow(
             disabled. See docs/resource_estimator_implement.md §2.7.2 / Phase I.
         formal_time_budget_minutes: Same as above, but for formal-mode rounds
             (plan.is_trial=False). Sized independently because formal runs
-            use the full dataset and are 50–100x longer.
+            use the full dataset and are 50-100x longer.
         trial_vram_budget_gb: Per-mode VRAM ceiling (GB) for the
             evaluate_vram_skill gate on trial-mode rounds. Fanned out to
             HyperparamTuningInput only — Phase K has no proposer-side VRAM

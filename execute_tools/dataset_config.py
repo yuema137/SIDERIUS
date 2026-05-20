@@ -72,7 +72,7 @@ class DatasetConfig(BaseModel):
 TIDMAD = DatasetConfig(
     psd_segment_length=10_000_000,  # 1 second at 10 MS/s
     segments_per_file=200,  # usable segments per validation file
-    num_files=20,  # validation files 0–19
+    num_files=20,  # validation files 0-19
     sampling_frequency=10_000_000.0,  # 10 MS/s
     training_file_pattern="abra_training_{file_index:04d}.h5",
     validation_file_pattern="abra_validation_{file_index:04d}.h5",

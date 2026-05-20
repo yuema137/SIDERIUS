@@ -860,7 +860,7 @@ class HyperparamTuningInput(BaseModel):
             "  round is a longer training of the trial winner with full "
             "  eval — not a sandbox for new architectures, losses, or "
             "  hyperparameters. Required for the trial→formal "
-            "  inference-time measurement reuse landed in commits B–D of "
+            "  inference-time measurement reuse landed in commits B-D of "
             "  ``docs/refine_inference_time_estimator.md``.\n"
             "* ``hybrid_params`` — the formal round inherits "
             "  ``loss_config`` and ``train_config.lr`` only; the "
@@ -972,7 +972,7 @@ class HyperparamTuningInput(BaseModel):
             "None = formal gate disabled; the tuner prints a one-time warning "
             "at startup and skips the time check for formal rounds. Sized "
             "independently from the trial budget because formal runs use the "
-            "full dataset and have a wall-time scale 50–100× longer."
+            "full dataset and have a wall-time scale 50-100× longer."
         ),
     )
 
@@ -1385,7 +1385,7 @@ class PhysicalRejection(BaseModel):
         ge=0.0,
         le=1.0,
         description=(
-            "Dominant layer's share of the predicted peak (0.0–1.0). "
+            "Dominant layer's share of the predicted peak (0.0-1.0). "
             "Feeds the Proposer prompt's percentage rendering "
             "('consumed 68% of the peak')."
         ),

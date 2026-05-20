@@ -166,7 +166,7 @@ def get_run(
     Paginated experiment records for a model/run combination.
 
     Query params:
-      - limit:   max records to return (1–1000, default 200)
+      - limit:   max records to return (1-1000, default 200)
       - offset:  records to skip (default 0)
       - status:  filter by status string
     """

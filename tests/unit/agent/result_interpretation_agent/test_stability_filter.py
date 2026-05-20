@@ -1,6 +1,6 @@
 """Unit tests for Commit 6.1 — Active-Model Policy + Stability Filter.
 
-Covers Pre-Commit Checklist items 1–3 from the design doc §8 Commit 6.1:
+Covers Pre-Commit Checklist items 1-3 from the design doc §8 Commit 6.1:
 
   1. ``test_active_set_top_k_plus_last_n_plus_delta`` — given a 7-model
      cache with synthetic scores, recency, and one model with a current-iter

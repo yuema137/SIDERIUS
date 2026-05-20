@@ -1,7 +1,7 @@
 """
 Phase 6.5 Stage 1 — "The Brain" pseudo semantic smoke.
 
-Goal: prove that a real LLM, reading the Phase 3–5 score-table markdown we
+Goal: prove that a real LLM, reading the Phase 3-5 score-table markdown we
 now inject into proposer prompts, actually USES those numerics — without
 spending a single GPU second.
 
@@ -180,7 +180,7 @@ _WAVENET_SUMMARY = ModelRunSummary(
     round_scores=[5.45, 5.52, _WAVENET_SCALAR],
     round_conclusions=[
         "Baseline established on high-frequency files.",
-        "Low-frequency files 0–4 remain near zero despite loss tuning.",
+        "Low-frequency files 0-4 remain near zero despite loss tuning.",
         "Structural blind spot — low-freq scores unchanged at <0.2.",
     ],
     model_description=(
@@ -278,7 +278,7 @@ def _make_recording_factory() -> tuple[list, callable]:
 # A "signature" is evidence that the LLM read the table, not that it
 # hallucinated a number.  We accept ANY of:
 #   * A file index (0..19) in a file-reference context.
-#   * One of our specific injected scalars rendered to 1–2 decimals.
+#   * One of our specific injected scalars rendered to 1-2 decimals.
 #   * A recovery percentage rounded to int (24, 25, 58, 59, 60).
 #   * A canonical column-name token we injected via rendered_markdown.
 # ---------------------------------------------------------------------------
@@ -342,7 +342,7 @@ def _scan_for_signatures(text: str) -> list[str]:
 
     # Also accept "files 0-4" / "0 through 4" style ranges.
     range_re = re.compile(
-        r"\bfiles?\s*(\d{1,2})\s*(?:-|–|to|through)\s*(\d{1,2})\b",
+        r"\bfiles?\s*(\d{1,2})\s*(?:-|-|to|through)\s*(\d{1,2})\b",
         re.IGNORECASE,
     )
     for m in range_re.finditer(text):

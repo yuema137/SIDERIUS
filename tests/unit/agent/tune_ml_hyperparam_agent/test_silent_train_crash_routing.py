@@ -4,7 +4,7 @@ Pins the contract that connects the producer-side sentinel (Commit 3,
 ``execute_tools.train_engine_sandbox._save_with_sentinel``) and the
 orchestrator's error-categorization logic in
 ``nodes.ml_hyperparameter_tune_agent.run`` (the inference-error branch
-around lines 1387–1446).
+around lines 1387-1446).
 
 Concretely: when the inference subprocess fails because the trainer
 crashed silently after ``torch.save`` returned (kernel OOM-kill,

@@ -176,7 +176,7 @@ def main() -> None:
     print(f"  Gate-time prediction at the original run: {memory['time_estimate_minutes']:.1f} min")
     print(f"  Actual realised total:                    {sum(timing.values()) / 60:.1f} min")
     print("  V7 formal budget after hotfix:            120.0 min")
-    print("  User target band:                         90 – 105 min")
+    print("  User target band:                         90 - 105 min")
     print()
     print(f"  Backed-out actual training ms/step: {actual_train_ms_per_step:.1f}")
     print(f"    (train_time_s={timing['train_time_s']:.0f}, total_steps={total_train_steps})")
