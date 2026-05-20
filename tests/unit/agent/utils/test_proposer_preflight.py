@@ -104,20 +104,21 @@ class TestReturnShape:
             num_params=50_000_000,
             time_budget_minutes=20.0,
         )
-        # Budget 60.0 (not 20.0) on the feasible case: under the Phase 6.8
-        # §4.2 conservative constants (SAFETY_MULTIPLIER=2.0,
-        # _STATIC_MS_PER_FLOP=3e-9), the iter4-style 500k-param TCN reads
-        # as ~47 min worst-case. The original 20-min budget was calibrated
-        # against the pre-Phase-6.8 lenient formula; 60 min preserves the
-        # narrative ("config that succeeded in the live run reads as FITS")
-        # without changing the config itself.
+        # Budget 120.0 (not 20.0) on the feasible case: the iter4-style
+        # 500k-param TCN reads as ~82 min worst-case under the current
+        # estimator constants (SAFETY_MULTIPLIER=1.3, _STATIC_MS_PER_FLOP=3e-9,
+        # per_psd_segment_seconds=2.21 — the scoring tail rebaselined
+        # 2026-04-30 from a warm-cache micro-benchmark to a full-validation
+        # measurement, +3.6x). 120 min preserves the test's narrative
+        # ("config that succeeded in the live run reads as FITS") without
+        # changing the model config itself.
         feasible = estimate_proposal_time(
             model_type="gated_fourier_tcn",
             model_config=_iter4_tcn_model_cfg(),
             train_config=_train_cfg(epochs=2),
             loss_config=_loss_cfg(),
             num_params=500_000,
-            time_budget_minutes=60.0,
+            time_budget_minutes=120.0,
         )
         assert "OVER BUDGET" in infeasible["verdict"]
         assert "FITS" in feasible["verdict"]
@@ -154,17 +155,21 @@ class TestFeasibilityGate:
         inside the trial budget. Must not be false-banned — this is the
         pattern that actually succeeded in the live run.
 
-        Budget calibration (Phase 6.8 §4.2): the formula's safety
-        multiplier was raised from 1.1 to 2.0 and the per-FLOP coefficient
+        Budget calibration (current constants): Phase 6.8 §4.2 raised the
+        safety multiplier from 1.1 to 2.0 and the per-FLOP coefficient
         from 6e-10 to 3e-9 to absorb formula error on novel architectures.
-        Under those constants, a 500k-param 6-block TCN at seg=40000 ×
-        2 epochs reads as ~47 min worst-case under the default
-        snapshot-0.1 sample_set. The 60-min budget below preserves the
-        test's intent ("this config that succeeded in the live run reads
-        as feasible") against the new conservative estimator. The live
-        wall-clock for this style of config was ~20 min — the formula is
-        deliberately pessimistic so novel-arch overshoots are caught
-        before they consume the cluster.
+        The multiplier was subsequently relaxed to 1.3 once overshoot data
+        showed 2.0 was over-conservative, and the scoring tail constant
+        ``per_psd_segment_seconds`` was rebaselined 0.613 -> 2.21 on
+        2026-04-30 (warm-cache micro-bench was 3.6x optimistic about the
+        full-validation per-segment cost). Net effect: a 500k-param
+        6-block TCN at seg=40000 x 2 epochs now reads ~82 min worst-case
+        under the default snapshot-0.1 sample_set, dominated by the
+        scoring tail. The 120-min budget below preserves the test's
+        intent ("this config that succeeded in the live run reads as
+        feasible"); the live wall-clock for this style of config was
+        ~20 min — the formula is deliberately pessimistic so novel-arch
+        overshoots are caught before they consume the cluster.
         """
         out = estimate_proposal_time(
             model_type="gated_fourier_tcn",
@@ -172,7 +177,7 @@ class TestFeasibilityGate:
             train_config=_train_cfg(epochs=2),
             loss_config=_loss_cfg(),
             num_params=500_000,
-            time_budget_minutes=60.0,
+            time_budget_minutes=120.0,
         )
         assert out["feasible"] is True
         assert out["factor"] < 5.0
