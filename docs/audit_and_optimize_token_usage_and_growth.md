@@ -2136,7 +2136,35 @@ The new chain's `build_token_baseline_report.py` output replaces V12 as the Phas
     - `TestClampComparativeAnalysis` 11/11 — no-op under cap, no-op exact cap, iter-13 envelope 3+2 ratio integrity, truncate at `top_k=3` favoring best-score winners, backfill at `top_k=10` from recency pool, model_type dedup with best-score winner, seed=0 ordering, unparseable source falls last, input non-mutation, independent `top_k` sweep `{2,3,5,7,10}`, missing best_score gracefully sorted to end.
     - `TestSafeStageStringTruncator` 8/8 — under-cap, exact-cap, over-cap middle-truncate, idempotence, ValueError<40, ValueError=0, at-floor=40, independent `max_chars` sweep `{500,1000,2000,4000}` strictly monotonic.
     - `TestApplyStringBackstop` 10/10 — all-short passthrough, nested-dict truncation, list-element-wise, scalar passthrough, structural invariance (keys + list lengths preserved), non-mutation deep-copy, empty dict, empty list, independent `max_chars` sweep with JSON-shape invariance via round-trip, floor-cap (max_chars=40) behavior.
-- **C6.2-C3** — `feat(proposal): wire clamp + backstop into proposer assembly` — in `nodes/ml_model_proposal_agent.py`, before each call to `_render_stage_user_prompt(accumulated)`, apply (in order): `clamp_comparative_analysis(accumulated.get("comparison", {}), policy.comparative_analysis_top_k)` to produce a clamped comparison dict, then `apply_string_backstop(stage_output, policy.prior_stage_max_chars)` to every non-input stage value. Both operations are **non-mutating** — build a new clamped `accumulated` for prompt rendering only; the real `accumulated` (used by downstream stages) is unchanged. **DoD**: no regression in existing proposer unit/integration tests; new path covered by C4 fixture test.
+- **C6.2-C3** — `feat(proposal): wire clamp + backstop into proposer assembly` — introduces a new public **orchestration helper** `clamp_and_backstop_accumulated(accumulated, *, top_k, max_chars, input_keys) -> Dict[str, Any]` in `nodes/proposal_helpers.py` (Locality A1) and wires it into `nodes/ml_model_proposal_agent.py`. The helper does *not* re-implement the 3-best + 2-recent hybrid — that logic stays in C2's `clamp_comparative_analysis`. The new helper's contract is pure orchestration:
+  1. Extract the inner list `accumulated["comparison"]["comparative_analysis"]` (if present and list-shaped) and pass it to `clamp_comparative_analysis(list, top_k)` — returns the clamped list.
+  2. Rebuild a new `comparison` dict with the clamped list substituted in (the original `accumulated["comparison"]` is never mutated).
+  3. For every key in `accumulated` not in `input_keys`, run `apply_string_backstop(value, max_chars)` to walk + middle-truncate any string leaf above the threshold. Input-side keys (`_PROPOSER_INPUT_KEYS` — `candidates`, `non_candidates_overview`, `interpretation_summary`, `existing_model_types`, `previous_failures`) pass through verbatim.
+  
+  **Wiring sites** in `nodes/ml_model_proposal_agent.py` (three, all inside `ProposalAgent.run()` where `policy = pipeline.policy` is already in scope):
+  - L1148 — main per-stage rendering loop.
+  - L1220 — `causal_reasoning` boldness retry.
+  - L1300 — proposing-stage inner loop (inside the 2-level preflight × structural retry nest).
+  
+  At each site, the wiring is:
+  ```python
+  clamped_accumulated = clamp_and_backstop_accumulated(
+      accumulated,
+      top_k=policy.comparative_analysis_top_k,
+      max_chars=policy.prior_stage_max_chars,
+      input_keys=_PROPOSER_INPUT_KEYS,
+  )
+  user_prompt = _render_stage_user_prompt(clamped_accumulated)
+  # ... _audit_proposer_components(accumulated=clamped_accumulated, ...)
+  ```
+  
+  **Audit symmetry (Decision A2)**: `_audit_proposer_components` MUST be called with the same `clamped_accumulated` as the renderer. Reason: the audit hook computes `prior_stage_chars = len(json.dumps(_extract_prior_stage_keys(accumulated)))` to attribute char usage. If audit reads raw `accumulated` while the LLM sees `clamped_accumulated`, the `prior_stage_outputs` audit row would overstate actually-sent chars and the `template_and_scaffolding` catch-all (= `total_chars − sum(10 components)`) would go negative. Mathematical integrity of the per-call telemetry ledger requires audit↔prompt symmetry.
+  
+  **Variable naming (Decision A3)**: `clamped_accumulated` (not `prompt_accumulated`) — flags the dehydrated, read-only view explicitly and contrasts with the live `accumulated` that stage outputs continue to write into via `accumulated[stage.name] = result`. The raw `accumulated` remains the full-fidelity context the next stage reads; the `clamped_accumulated` view exists only for the duration of one prompt assembly + audit.
+  
+  **Non-mutation contract**: both C2 helpers are pure (proven by `test_input_not_mutated` in C2). The new C3 helper builds: shallow-copied outer dict; new `comparison` sub-dict; `apply_string_backstop` returns new containers (deep-copy semantics from C2). Net: the raw `accumulated` is bit-for-bit unchanged after C3 runs.
+  
+  **DoD**: (a) `pytest tests/unit/agent/ml_model_proposal_agent/` sweep passes with no regressions (baseline 442/442 from C2's `a6edade`); (b) no syntax / import errors; (c) the new path is covered end-to-end by C4's iter-13 fixture (which also carries the ≥30% quantitative-drop gate — Pre-Commit Checklist item 6).
 - **C6.2-C4** — `test(proposal): synthetic iter-13 envelope unit test + doc tickoff` — `tests/unit/agent/proposal/test_prior_stage_truncation.py` builds a synthetic `accumulated` mimicking iter-13 V12 shape (`comparative_analysis` list of 13 `ModelComparison` entries near their per-field caps). Three assertions: (a) post-clamp `len(comparative_analysis) == policy.comparative_analysis_top_k`, (b) selected entries are the 5 most recent, (c) `len(json.dumps(clamped_accumulated)) ≤ 0.7 × len(json.dumps(raw_accumulated))` (≥30% prompt-char drop). Doc tickoff in this commit. **DoD**: test green; doc ledger flipped to ✓ LANDED.
 
 **Pre-Commit Checklist (Rev 8.6)**:

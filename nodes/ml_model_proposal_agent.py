@@ -1009,6 +1009,7 @@ class MLModelProposalAgent:
             resolve_exploration_mode,
             enrich_candidates_with_source,
             build_score_summary_line,
+            clamp_and_backstop_accumulated,
         )
         from agent.prompt_templates.proposal import load_stage_prompt, render_expert_context, render_agent_cards
 
@@ -1145,7 +1146,13 @@ class MLModelProposalAgent:
             )
 
             # Build user prompt: candidate markdown block + JSON region + cards + context + vocab
-            user_prompt = _render_stage_user_prompt(accumulated)
+            clamped_accumulated = clamp_and_backstop_accumulated(
+                accumulated,
+                top_k=policy.comparative_analysis_top_k,
+                max_chars=policy.prior_stage_max_chars,
+                input_keys=_PROPOSER_INPUT_KEYS,
+            )
+            user_prompt = _render_stage_user_prompt(clamped_accumulated)
             if agent_cards_block:
                 user_prompt += f"\n\n{agent_cards_block}"
             if expert_context_block:
@@ -1157,7 +1164,7 @@ class MLModelProposalAgent:
                   f"[PROMPT_SIZE] {len(user_prompt)} chars")
             stage_audit = _audit_proposer_components(
                 inp=inp,
-                accumulated=accumulated,
+                accumulated=clamped_accumulated,
                 agent_cards_block=agent_cards_block,
                 expert_context_block=expert_context_block,
                 vocab_block=vocab_block,
@@ -1217,7 +1224,13 @@ class MLModelProposalAgent:
                                 template_vars=template_vars,
                                 mindset=inp.mindset,
                             )
-                            retry_user = _render_stage_user_prompt(accumulated)
+                            clamped_accumulated = clamp_and_backstop_accumulated(
+                                accumulated,
+                                top_k=policy.comparative_analysis_top_k,
+                                max_chars=policy.prior_stage_max_chars,
+                                input_keys=_PROPOSER_INPUT_KEYS,
+                            )
+                            retry_user = _render_stage_user_prompt(clamped_accumulated)
                             if agent_cards_block:
                                 retry_user += f"\n\n{agent_cards_block}"
                             if expert_context_block:
@@ -1227,7 +1240,7 @@ class MLModelProposalAgent:
                             print("   Stage 'causal_reasoning': retrying (boldness)...")
                             retry_audit = _audit_proposer_components(
                                 inp=inp,
-                                accumulated=accumulated,
+                                accumulated=clamped_accumulated,
                                 agent_cards_block=agent_cards_block,
                                 expert_context_block=expert_context_block,
                                 vocab_block=vocab_block,
@@ -1297,7 +1310,13 @@ class MLModelProposalAgent:
             last_exc: Exception | None = None
 
             for attempt in range(_MAX_PROPOSING_RETRIES + 1):
-                proposing_user = _render_stage_user_prompt(accumulated)
+                clamped_accumulated = clamp_and_backstop_accumulated(
+                    accumulated,
+                    top_k=policy.comparative_analysis_top_k,
+                    max_chars=policy.prior_stage_max_chars,
+                    input_keys=_PROPOSER_INPUT_KEYS,
+                )
+                proposing_user = _render_stage_user_prompt(clamped_accumulated)
                 if agent_cards_block:
                     proposing_user += f"\n\n{agent_cards_block}"
                 if expert_context_block:
@@ -1313,7 +1332,7 @@ class MLModelProposalAgent:
                 # this so component sums match the actual prompt sent.
                 proposing_audit = _audit_proposer_components(
                     inp=inp,
-                    accumulated=accumulated,
+                    accumulated=clamped_accumulated,
                     agent_cards_block=agent_cards_block,
                     expert_context_block=expert_context_block,
                     vocab_block="",

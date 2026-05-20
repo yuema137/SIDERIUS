@@ -8,7 +8,7 @@ and no side effects. They prepare context for the reasoning pipeline.
 
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from agent.schemas.proposal import (
     ModelSelectionStrategy,
@@ -631,3 +631,100 @@ def apply_string_backstop(stage_output: Any, max_chars: int = 4000) -> Any:
     if isinstance(stage_output, str):
         return safe_stage_string_truncator(stage_output, max_chars)
     return stage_output
+
+
+# C6.2-C3: Orchestration helper — glue layer for proposer prompt assembly.
+# The 3-best + 2-recent hybrid logic lives in `clamp_comparative_analysis`
+# above; the middle-truncation logic lives in `apply_string_backstop`.
+# This helper just composes them into the read-only `clamped_accumulated`
+# view consumed by `_render_stage_user_prompt` and `_audit_proposer_components`
+# in `nodes/ml_model_proposal_agent.py`.
+
+def clamp_and_backstop_accumulated(
+    accumulated: Dict[str, Any],
+    *,
+    top_k: int,
+    max_chars: int,
+    input_keys: Iterable[str],
+) -> Dict[str, Any]:
+    """Build a clamped + backstopped copy of ``accumulated`` for prompt assembly.
+
+    Pure orchestration. The actual algorithms live in the C2 helpers
+    :func:`clamp_comparative_analysis` (3-best + 2-recent hybrid) and
+    :func:`apply_string_backstop` (recursive middle truncation). This
+    function composes them into a single non-mutating call suitable for
+    use immediately before :func:`_render_stage_user_prompt` and
+    :func:`_audit_proposer_components` in the proposer agent.
+
+    Behaviour:
+
+    1. Keys in ``input_keys`` (proposer-input fields like ``candidates``,
+       ``interpretation_summary``, ``existing_model_types``,
+       ``non_candidates_overview``, ``previous_failures``) pass through
+       **verbatim** — same object reference, no recursion, no copy.
+       The clamping contract is per-iter; input-side context is the
+       caller's responsibility to size.
+    2. If ``accumulated`` contains a ``"comparison"`` key whose value is
+       a dict containing a list-valued ``"comparative_analysis"`` field,
+       that list is passed through :func:`clamp_comparative_analysis`
+       with the supplied ``top_k``. A *new* comparison dict is built with
+       the clamped list substituted in. The original
+       ``accumulated["comparison"]`` is never mutated.
+    3. Every non-input key (after the comparison clamp above) is passed
+       through :func:`apply_string_backstop` with ``max_chars`` to
+       middle-truncate any string leaf above the threshold.
+
+    The function returns a new outer dict. Original input is bit-for-bit
+    unchanged (verified by C2's ``test_input_not_mutated`` for the inner
+    helpers; this layer only adds shallow-copy + new-comparison-dict
+    construction).
+
+    Parameters
+    ----------
+    accumulated
+        The proposer's per-iter context dict. Mixes input-side keys
+        (carried in from ``ProposalInput``) with stage-output keys
+        (``comparison``, ``causal_reasoning``, ``proposing_stage_errors``,
+        etc.) accumulated as enabled stages run.
+    top_k
+        Forwarded to :func:`clamp_comparative_analysis`. Typically
+        ``policy.comparative_analysis_top_k`` (default 5).
+    max_chars
+        Forwarded to :func:`apply_string_backstop`. Typically
+        ``policy.prior_stage_max_chars`` (default 4000). Must be
+        ``>= 40``; violations raise from the leaf truncator (see
+        :func:`safe_stage_string_truncator`).
+    input_keys
+        Iterable of key names that should bypass both clamp and backstop
+        (input-side context that this layer is not responsible for).
+        Typically ``_PROPOSER_INPUT_KEYS`` from
+        ``nodes.ml_model_proposal_agent``.
+
+    Returns
+    -------
+    A new outer dict with the same keys as ``accumulated``. Input-side
+    values pass through by reference. Stage-output values are either
+    backstopped (string leaves shrunk) or, for ``comparison``,
+    clamped-then-backstopped.
+    """
+    input_keys_set = set(input_keys)
+    result: Dict[str, Any] = {}
+
+    for key, value in accumulated.items():
+        if key in input_keys_set:
+            result[key] = value
+            continue
+
+        if key == "comparison" and isinstance(value, dict):
+            new_comparison: Dict[str, Any] = dict(value)
+            inner_list = new_comparison.get("comparative_analysis")
+            if isinstance(inner_list, list):
+                new_comparison["comparative_analysis"] = clamp_comparative_analysis(
+                    inner_list, top_k=top_k,
+                )
+            result[key] = apply_string_backstop(new_comparison, max_chars=max_chars)
+            continue
+
+        result[key] = apply_string_backstop(value, max_chars=max_chars)
+
+    return result
