@@ -351,13 +351,16 @@ class TestClampComparativeAnalysis:
 class TestSafeStageStringTruncator:
     """The pure middle-truncator primitive."""
 
-    def test_under_cap_passes_through(self):
-        s = "hello world"
-        out = safe_stage_string_truncator(s, max_chars=4000)
-        assert out == s
-
-    def test_exact_cap_passes_through(self):
-        s = "x" * 4000
+    @pytest.mark.parametrize(
+        "s",
+        [
+            pytest.param("hello world", id="under_cap_short_string"),
+            pytest.param("x" * 4000, id="exact_cap_long_string"),
+        ],
+    )
+    def test_passthrough_at_or_under_cap(self, s):
+        """Strings at or below max_chars are returned unchanged. Replaces
+        two flat tests (under_cap_passes_through, exact_cap_passes_through)."""
         out = safe_stage_string_truncator(s, max_chars=4000)
         assert out == s
 
@@ -378,19 +381,25 @@ class TestSafeStageStringTruncator:
         twice = safe_stage_string_truncator(once, max_chars=4000)
         assert once == twice
 
-    def test_value_error_below_floor(self):
-        with pytest.raises(ValueError, match="below defensive floor"):
-            safe_stage_string_truncator("a" * 100, max_chars=39)
-
-    def test_value_error_zero(self):
-        with pytest.raises(ValueError):
-            safe_stage_string_truncator("anything", max_chars=0)
-
-    def test_at_floor_works(self):
-        # max_chars=40 is the lowest legal value.
+    @pytest.mark.parametrize(
+        "max_chars, expected",
+        [
+            pytest.param(39, "raises", id="below_floor_39_raises"),
+            pytest.param(0, "raises", id="zero_raises"),
+            pytest.param(40, "accepts", id="at_floor_40_accepts"),
+        ],
+    )
+    def test_floor_validation(self, max_chars, expected):
+        """Floor contract: max_chars < 40 raises ValueError; max_chars == 40
+        is the lowest legal value. Replaces three flat tests
+        (value_error_below_floor, value_error_zero, at_floor_works)."""
         s = "a" * 200
-        out = safe_stage_string_truncator(s, max_chars=40)
-        assert len(out) <= 40
+        if expected == "raises":
+            with pytest.raises(ValueError):
+                safe_stage_string_truncator(s, max_chars=max_chars)
+        else:
+            out = safe_stage_string_truncator(s, max_chars=max_chars)
+            assert len(out) <= max_chars
 
     def test_independent_max_chars_shifts_trigger_point(self):
         """Knob sweep: same input, different max_chars -> different output sizes."""
@@ -405,8 +414,27 @@ class TestSafeStageStringTruncator:
 class TestApplyStringBackstop:
     """The recursive walker built on top of safe_stage_string_truncator."""
 
-    def test_passthrough_when_all_short(self):
-        payload = {"a": "short", "b": [1, 2, 3], "c": {"d": "also short"}}
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            pytest.param(
+                {"a": "short", "b": [1, 2, 3], "c": {"d": "also short"}},
+                id="all_short_strings",
+            ),
+            pytest.param(
+                {"int": 42, "float": 3.14, "bool": True, "none": None,
+                 "list": [1, 2.0, False, None]},
+                id="non_string_scalars",
+            ),
+            pytest.param({}, id="empty_dict"),
+            pytest.param([], id="empty_list"),
+        ],
+    )
+    def test_passthrough_when_nothing_to_truncate(self, payload):
+        """Walker returns payload unchanged when no string exceeds max_chars.
+        Replaces four flat tests (passthrough_when_all_short,
+        non_string_scalars_passthrough, empty_dict_passthrough,
+        empty_list_passthrough)."""
         out = apply_string_backstop(payload, max_chars=4000)
         assert out == payload
 
@@ -425,11 +453,6 @@ class TestApplyStringBackstop:
         assert out[0] == "short"
         assert len(out[1]) <= 4000
         assert out[2] == "also short"
-
-    def test_non_string_scalars_passthrough(self):
-        payload = {"int": 42, "float": 3.14, "bool": True, "none": None, "list": [1, 2.0, False, None]}
-        out = apply_string_backstop(payload, max_chars=4000)
-        assert out == payload
 
     def test_structural_invariance_keys_and_lengths_preserved(self):
         """Walker preserves dict keys and list lengths regardless of truncation."""
@@ -451,12 +474,6 @@ class TestApplyStringBackstop:
         snapshot = copy.deepcopy(payload)
         _ = apply_string_backstop(payload, max_chars=500)
         assert payload == snapshot
-
-    def test_empty_dict_passthrough(self):
-        assert apply_string_backstop({}, max_chars=4000) == {}
-
-    def test_empty_list_passthrough(self):
-        assert apply_string_backstop([], max_chars=4000) == []
 
     def test_independent_max_chars_does_not_alter_json_structure(self):
         """Knob sweep: max_chars shifts elision-trigger point; JSON shape stays."""
