@@ -648,9 +648,10 @@ def _build_gate_exhaustion(
 
     # --- Trigger A (Phase K) — no successes at all + budget-gated.
     trigger_a_fired = False
-    if not any(r.get("status") == "success" for r in records):
-        if any(r.get("status") in {"skipped_oom_risk", "skipped_time_risk"} for r in records):
-            trigger_a_fired = True
+    if not any(r.get("status") == "success" for r in records) and any(
+        r.get("status") in {"skipped_oom_risk", "skipped_time_risk"} for r in records
+    ):
+        trigger_a_fired = True
 
     if not (trigger_a_fired or trigger_b_fired):
         return None

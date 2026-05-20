@@ -1368,9 +1368,11 @@ def run_workflow(
             )
 
         # --- Check score target ---
-        if tune_output.best_denoising_score is not None:
-            if best_score_overall is None or tune_output.best_denoising_score > best_score_overall:
-                best_score_overall = tune_output.best_denoising_score
+        if tune_output.best_denoising_score is not None and (
+            best_score_overall is None
+            or tune_output.best_denoising_score > best_score_overall
+        ):
+            best_score_overall = tune_output.best_denoising_score
 
         print(
             f"\n  [{iteration}] Complete: {proposal.model_name} "
