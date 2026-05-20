@@ -1070,7 +1070,7 @@ class HyperparamTuningInput(BaseModel):
             with open(path, encoding="utf-8") as f:
                 tree = ast.parse(f.read(), filename=path)
         except SyntaxError as e:
-            raise ValueError(f"seed_plugin_path is not valid Python ({path}): {e}")
+            raise ValueError(f"seed_plugin_path is not valid Python ({path}): {e}") from e
 
         declared_type: str | None = None
         for node in tree.body:

@@ -342,16 +342,16 @@ def _ensure_dir(path: str) -> None:
     """Create directory if it does not exist. Raises RuntimeError with a clear message on failure."""
     try:
         os.makedirs(path, exist_ok=True)
-    except PermissionError:
+    except PermissionError as e:
         raise RuntimeError(
             f"[Sandbox] Permission denied: cannot create directory '{path}'. "
             "Check that you have write access to the workspace."
-        )
+        ) from e
     except OSError as e:
         raise RuntimeError(
             f"[Sandbox] Failed to create directory '{path}': {e}. "
             "Check that the path is valid and the filesystem is accessible."
-        )
+        ) from e
     if not os.access(path, os.W_OK):
         raise RuntimeError(
             f"[Sandbox] Directory '{path}' exists but is not writable. "
@@ -433,7 +433,7 @@ class TidmadSandbox:
                 validated_l = LossConfig(**l_cfg).model_dump()
                 return validated_m, validated_t, validated_l
             except Exception as e:
-                raise ValueError(f"Plugin Experiment Configuration Rejected: {e!s}")
+                raise ValueError(f"Plugin Experiment Configuration Rejected: {e!s}") from e
 
         # Core model: use the strict ExperimentConfig with cross-validation
         try:
@@ -452,7 +452,7 @@ class TidmadSandbox:
                 exp_config.loss_config.model_dump(),
             )
         except Exception as e:
-            raise ValueError(f"Experiment Configuration Rejected: {e!s}")
+            raise ValueError(f"Experiment Configuration Rejected: {e!s}") from e
 
     def execute_training(
         self,

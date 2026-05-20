@@ -60,8 +60,8 @@ def _positive_int(s: str) -> int:
     """
     try:
         v = int(s)
-    except (TypeError, ValueError):
-        raise argparse.ArgumentTypeError(f"expected a positive integer, got {s!r}")
+    except (TypeError, ValueError) as e:
+        raise argparse.ArgumentTypeError(f"expected a positive integer, got {s!r}") from e
     if v < 1:
         raise argparse.ArgumentTypeError(f"expected a positive integer (>= 1), got {v}")
     return v
@@ -80,8 +80,8 @@ def _portion_floor(s: str) -> float:
     """
     try:
         v = float(s)
-    except (TypeError, ValueError):
-        raise argparse.ArgumentTypeError(f"expected a float in [0.01, 1.0], got {s!r}")
+    except (TypeError, ValueError) as e:
+        raise argparse.ArgumentTypeError(f"expected a float in [0.01, 1.0], got {s!r}") from e
     if not (0.01 <= v <= 1.0):
         raise argparse.ArgumentTypeError(
             f"expected a float in [0.01, 1.0], got {v}. The 0.01 floor "

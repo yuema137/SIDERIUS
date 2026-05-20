@@ -217,8 +217,8 @@ def validate_sample_set(sample_set: dict) -> SampleSet:
     for key, segments in sample_set.items():
         try:
             file_index = int(key)
-        except (ValueError, TypeError):
-            raise ValueError(f"SampleSet key must be an integer, got {key!r}")
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"SampleSet key must be an integer, got {key!r}") from e
         if not (0 <= file_index < NUM_FILES):
             raise ValueError(f"SampleSet file_index {file_index} out of range [0, {NUM_FILES}).")
         if not isinstance(segments, list) or not segments:

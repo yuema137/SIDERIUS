@@ -670,11 +670,11 @@ class LLMBridge:
                 if first_line:
                     try:
                         first_row = json.loads(first_line)
-                    except json.JSONDecodeError:
+                    except json.JSONDecodeError as e:
                         raise LLMBridgeContextError(
                             f"first line of {path} is not valid JSON; "
                             f"audit log already corrupted, refusing to write."
-                        )
+                        ) from e
                     file_run_id = first_row.get("run_id")
                     if file_run_id != self._run_id:
                         raise LLMBridgeContextError(

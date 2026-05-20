@@ -122,8 +122,8 @@ def model_overview(model: str):
     ds = get_data_source()
     try:
         raw = ds.get_model_overview(model)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Model '{model}' not found.")
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=f"Model '{model}' not found.") from e
 
     return ModelOverview(
         model=raw["model"],
@@ -147,8 +147,8 @@ def list_runs(model: str):
     ds = get_data_source()
     try:
         runs = ds.list_runs(model)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Model '{model}' not found.")
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=f"Model '{model}' not found.") from e
     return RunListResponse(model=model, runs=runs)
 
 
@@ -179,10 +179,10 @@ def get_run(
             offset=offset,
             status_filter=status,
         )
-    except KeyError:
+    except KeyError as e:
         raise HTTPException(
             status_code=404, detail=f"Run '{run_name}' not found for model '{model}'."
-        )
+        ) from e
 
     parsed = [ExperimentRecord.model_validate(r) for r in records]
     return RunSummary(
@@ -210,11 +210,11 @@ def get_experiment(model: str, run_name: str, exp_id: str):
     ds = get_data_source()
     try:
         raw = ds.get_experiment(model, run_name, exp_id)
-    except KeyError:
+    except KeyError as e:
         raise HTTPException(
             status_code=404,
             detail=f"Experiment '{exp_id}' not found in {model}/{run_name}.",
-        )
+        ) from e
     return ExperimentRecord.model_validate(raw)
 
 
@@ -236,8 +236,8 @@ def leaderboard(
     ds = get_data_source()
     try:
         entries = ds.get_leaderboard(model, top_n=top_n, status_filter=status)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Model '{model}' not found.")
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=f"Model '{model}' not found.") from e
 
     from dashboard.api.models import LeaderboardEntry
 
