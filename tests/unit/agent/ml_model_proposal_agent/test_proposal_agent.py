@@ -10,6 +10,11 @@ LLM calls are mocked — these tests validate:
   - Output file written to the correct path with correct content
   - Duplicate model_name raises ValueError
   - Empty existing_model_types does not block a valid name
+
+Parametrized to collapse one-attribute-per-test scaffolding noise into
+multi-assertion baselines and pytest.param families. No sovereign math
+lives in this file; all surfaces are LLM-mock-wiring and prompt-string
+assembly contracts.
 """
 import json
 import pytest
@@ -136,26 +141,25 @@ def make_input(workspace, run_name="r1", existing_model_types=None, constraints=
 
 class TestLLMCallStructure:
 
-    def test_generate_text_called_once(self, agent, tmp_path):
+    def test_text_gen_then_commit_gen_each_called_once(self, agent, tmp_path):
+        """Single multi-assertion baseline: both LLM methods fire exactly once
+        and in the documented order (text reasoning -> commit JSON). Replaces
+        three flat tests (generate_text_called_once, generate_called_once,
+        generate_text_called_before_generate)."""
+        call_order = []
+        agent.bridge.generate_text.side_effect = lambda *a, **kw: call_order.append("text") or FAKE_REASONING
+        agent.bridge.generate.side_effect     = lambda *a, **kw: call_order.append("json") or FAKE_COMMIT_RESPONSE
         agent.run(make_input(tmp_path))
-        agent.bridge.generate_text.assert_called_once()
 
-    def test_generate_called_once(self, agent, tmp_path):
-        agent.run(make_input(tmp_path))
+        agent.bridge.generate_text.assert_called_once()
         agent.bridge.generate.assert_called_once()
+        assert call_order == ["text", "json"]
 
     def test_reasoning_injected_into_commit_prompt(self, agent, tmp_path):
         agent.run(make_input(tmp_path))
         commit_call_args = agent.bridge.generate.call_args
         user_prompt = commit_call_args[0][1]
         assert FAKE_REASONING in user_prompt
-
-    def test_generate_text_called_before_generate(self, agent, tmp_path):
-        call_order = []
-        agent.bridge.generate_text.side_effect = lambda *a, **kw: call_order.append("text") or FAKE_REASONING
-        agent.bridge.generate.side_effect     = lambda *a, **kw: call_order.append("json") or FAKE_COMMIT_RESPONSE
-        agent.run(make_input(tmp_path))
-        assert call_order == ["text", "json"]
 
 
 # ---------------------------------------------------------------------------
@@ -164,38 +168,33 @@ class TestLLMCallStructure:
 
 class TestOutputCorrectness:
 
-    def test_output_is_valid_proposal_output(self, agent, tmp_path):
+    def test_llm_response_threads_through_all_output_fields(self, agent, tmp_path):
+        """Single multi-assertion baseline: every field in FAKE_COMMIT_RESPONSE
+        must thread through to the corresponding ProposalOutput attribute,
+        expert_advice is coerced to its Pydantic instance, and baseline_config
+        keeps its three required keys. Replaces eight flat single-assertion
+        tests (output_is_valid_proposal_output, model_name_from_llm,
+        model_description_from_llm, mathematical_definition_from_llm,
+        motivation_from_llm, expert_advice_is_expert_advice_instance,
+        expert_advice_fields_populated, baseline_config_has_required_keys)."""
         output = agent.run(make_input(tmp_path))
+
+        # Schema validity.
         assert isinstance(output, ProposalOutput)
 
-    def test_model_name_from_llm(self, agent, tmp_path):
-        output = agent.run(make_input(tmp_path))
+        # Each LLM-supplied scalar threads through.
         assert output.model_name == "attn_unet"
-
-    def test_model_description_from_llm(self, agent, tmp_path):
-        output = agent.run(make_input(tmp_path))
         assert "U-Net" in output.model_description
-
-    def test_mathematical_definition_from_llm(self, agent, tmp_path):
-        output = agent.run(make_input(tmp_path))
         assert "Embedding" in output.mathematical_definition
-
-    def test_motivation_from_llm(self, agent, tmp_path):
-        output = agent.run(make_input(tmp_path))
         assert "take-home message" in output.motivation
 
-    def test_expert_advice_is_expert_advice_instance(self, agent, tmp_path):
-        output = agent.run(make_input(tmp_path))
+        # expert_advice dict is coerced to its Pydantic instance and populated.
         assert isinstance(output.expert_advice, ExpertAdvice)
-
-    def test_expert_advice_fields_populated(self, agent, tmp_path):
-        output = agent.run(make_input(tmp_path))
         assert "VRAM < 10 GB" in output.expert_advice.constraints
         assert len(output.expert_advice.focus_areas) > 0
         assert len(output.expert_advice.suggested_directions) > 0
 
-    def test_baseline_config_has_required_keys(self, agent, tmp_path):
-        output = agent.run(make_input(tmp_path))
+        # baseline_config carries the three required sub-blocks.
         assert "model_config" in output.baseline_config
         assert "train_config" in output.baseline_config
         assert "loss_config"  in output.baseline_config
@@ -207,19 +206,18 @@ class TestOutputCorrectness:
 
 class TestFilePersistence:
 
-    def test_output_written_to_file(self, agent, tmp_path):
-        agent.run(make_input(tmp_path, run_name="myrun"))
-        out_path = tmp_path / "proposal_myrun.json"
+    def test_output_persists_to_disk_with_correct_content(self, agent, tmp_path):
+        """Single multi-assertion baseline: the output file lands at the
+        documented path, parses as JSON, carries the LLM-supplied model_name,
+        and surfaces expert_advice in serialised form. Replaces three flat
+        tests (output_written_to_file, output_file_is_valid_json,
+        output_file_contains_expert_advice)."""
+        agent.run(make_input(tmp_path, run_name="r1"))
+        out_path = tmp_path / "proposal_r1.json"
+
         assert out_path.exists()
-
-    def test_output_file_is_valid_json(self, agent, tmp_path):
-        agent.run(make_input(tmp_path, run_name="r1"))
-        data = json.loads((tmp_path / "proposal_r1.json").read_text())
+        data = json.loads(out_path.read_text())
         assert data["model_name"] == "attn_unet"
-
-    def test_output_file_contains_expert_advice(self, agent, tmp_path):
-        agent.run(make_input(tmp_path, run_name="r1"))
-        data = json.loads((tmp_path / "proposal_r1.json").read_text())
         assert "expert_advice" in data
         assert "constraints" in data["expert_advice"]
 
@@ -228,51 +226,69 @@ class TestFilePersistence:
 # Human advice injection
 # ---------------------------------------------------------------------------
 
+def _structured_focus_areas_advice():
+    return ExpertAdvice(
+        focus_areas=["reduce depth first"],
+        constraints=["VRAM < 8 GB"],
+        known_failures=["large batch_size"],
+        suggested_directions=["try dilated convolutions"],
+        rationale="prior plateau at depth=4",
+    )
+
+
+def _structured_rationale_only_advice():
+    return ExpertAdvice(
+        focus_areas=[],
+        constraints=[],
+        known_failures=[],
+        suggested_directions=[],
+        rationale="plateau at depth=4 confirmed across 3 runs",
+    )
+
+
 class TestHumanAdviceInjection:
 
-    def test_plain_string_advice_injected_into_reasoning_prompt(self, agent, tmp_path):
-        inp = make_input(tmp_path, human_advice="Avoid transformers — too slow on CPU.")
-        agent.run(inp)
-        reasoning_user_prompt = agent.bridge.generate_text.call_args[0][1]
-        assert "Avoid transformers" in reasoning_user_prompt
+    @pytest.mark.parametrize(
+        "advice, expected_substrings",
+        [
+            pytest.param(
+                "Avoid transformers — too slow on CPU.",
+                ["Avoid transformers", "Human Expert Advice"],
+                id="plain_string_advice",
+            ),
+            pytest.param(
+                "Use attention.",
+                ["Human Expert Advice"],
+                id="plain_string_header",
+            ),
+            pytest.param(
+                _structured_focus_areas_advice(),
+                ["reduce depth first"],
+                id="structured_focus_areas",
+            ),
+            pytest.param(
+                _structured_rationale_only_advice(),
+                ["plateau at depth=4 confirmed across 3 runs"],
+                id="structured_rationale",
+            ),
+        ],
+    )
+    def test_advice_strings_propagate_into_reasoning_prompt(
+        self, agent, tmp_path, advice, expected_substrings,
+    ):
+        """Either plain-string or structured ExpertAdvice -> documented
+        substrings must surface in the reasoning prompt. Replaces four flat
+        tests (plain_string_advice_injected, structured_advice_focus_areas,
+        structured_advice_rationale, plain_string_injects_header)."""
+        agent.run(make_input(tmp_path, human_advice=advice))
+        prompt = agent.bridge.generate_text.call_args[0][1]
+        for substr in expected_substrings:
+            assert substr in prompt
 
-    def test_structured_advice_focus_areas_injected(self, agent, tmp_path):
-        adv = ExpertAdvice(
-            focus_areas=["reduce depth first"],
-            constraints=["VRAM < 8 GB"],
-            known_failures=["large batch_size"],
-            suggested_directions=["try dilated convolutions"],
-            rationale="prior plateau at depth=4",
-        )
-        inp = make_input(tmp_path, human_advice=adv)
-        agent.run(inp)
-        reasoning_user_prompt = agent.bridge.generate_text.call_args[0][1]
-        assert "reduce depth first" in reasoning_user_prompt
-
-    def test_structured_advice_rationale_injected(self, agent, tmp_path):
-        adv = ExpertAdvice(
-            focus_areas=[],
-            constraints=[],
-            known_failures=[],
-            suggested_directions=[],
-            rationale="plateau at depth=4 confirmed across 3 runs",
-        )
-        inp = make_input(tmp_path, human_advice=adv)
-        agent.run(inp)
-        reasoning_user_prompt = agent.bridge.generate_text.call_args[0][1]
-        assert "plateau at depth=4 confirmed across 3 runs" in reasoning_user_prompt
-
-    def test_no_advice_does_not_inject_human_section(self, agent, tmp_path):
-        inp = make_input(tmp_path, human_advice=None)
-        agent.run(inp)
-        reasoning_user_prompt = agent.bridge.generate_text.call_args[0][1]
-        assert "Human Expert Advice" not in reasoning_user_prompt
-
-    def test_plain_string_advice_injects_human_section_header(self, agent, tmp_path):
-        inp = make_input(tmp_path, human_advice="Use attention.")
-        agent.run(inp)
-        reasoning_user_prompt = agent.bridge.generate_text.call_args[0][1]
-        assert "Human Expert Advice" in reasoning_user_prompt
+    def test_no_advice_omits_human_section(self, agent, tmp_path):
+        agent.run(make_input(tmp_path, human_advice=None))
+        prompt = agent.bridge.generate_text.call_args[0][1]
+        assert "Human Expert Advice" not in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -281,20 +297,27 @@ class TestHumanAdviceInjection:
 
 class TestDuplicateNameGuard:
 
-    def test_duplicate_model_name_raises(self, agent, tmp_path):
-        inp = make_input(tmp_path, existing_model_types=["attn_unet", "punet", "fcnet"])
-        with pytest.raises(ValueError, match="already exists in existing_model_types"):
-            agent.run(inp)
-
-    def test_empty_existing_model_types_does_not_raise(self, agent, tmp_path):
-        inp = make_input(tmp_path, existing_model_types=[])
-        output = agent.run(inp)
-        assert output.model_name == "attn_unet"
-
-    def test_different_existing_types_do_not_raise(self, agent, tmp_path):
-        inp = make_input(tmp_path, existing_model_types=["punet", "fcnet", "wavenet"])
-        output = agent.run(inp)
-        assert output.model_name == "attn_unet"
+    @pytest.mark.parametrize(
+        "existing, expect_raise",
+        [
+            pytest.param(["attn_unet", "punet", "fcnet"], True, id="duplicate_name_raises"),
+            pytest.param([], False, id="empty_list_accepts"),
+            pytest.param(["punet", "fcnet", "wavenet"], False, id="different_names_accept"),
+        ],
+    )
+    def test_name_collision_guard(self, agent, tmp_path, existing, expect_raise):
+        """The guard rejects an LLM-proposed name that already appears in
+        existing_model_types, and accepts when the list is empty or disjoint.
+        Replaces three flat tests (duplicate_model_name_raises,
+        empty_existing_model_types_does_not_raise,
+        different_existing_types_do_not_raise)."""
+        inp = make_input(tmp_path, existing_model_types=existing)
+        if expect_raise:
+            with pytest.raises(ValueError, match="already exists in existing_model_types"):
+                agent.run(inp)
+        else:
+            output = agent.run(inp)
+            assert output.model_name == "attn_unet"
 
 
 # ---------------------------------------------------------------------------
@@ -339,36 +362,44 @@ class TestBuildReasoningPromptEnriched:
         # sentinel must make it through the legacy renderer verbatim.
         assert "(test)" in prompt
 
-    def test_includes_model_params(self):
-        inp = self._make_enriched_input(
-            per_model_params={"punet": 55000},
-        )
+    @pytest.mark.parametrize(
+        "interp_field, value, expected_substrings",
+        [
+            pytest.param(
+                "per_model_params", {"punet": 55000},
+                ["55,000", "Model Parameters"],
+                id="model_params",
+            ),
+            pytest.param(
+                "per_model_training_segments", {"punet": 200},
+                ["200", "Training Data Volume"],
+                id="training_segments",
+            ),
+            pytest.param(
+                "per_file_comparison",
+                "Cross-model Impact_Score concentrates on the highest-index rows.",
+                ["Per-File Comparison", "Impact_Score"],
+                id="per_file_comparison",
+            ),
+            pytest.param(
+                "efficiency_comparison",
+                "PUNet has best score-per-parameter.",
+                ["Efficiency Comparison"],
+                id="efficiency_comparison",
+            ),
+        ],
+    )
+    def test_prompt_includes_enriched_interpretation_fields(
+        self, interp_field, value, expected_substrings,
+    ):
+        """Enriched interpretation fields each surface in the reasoning prompt
+        under their documented heading. Replaces four flat tests
+        (includes_model_params, includes_training_segments,
+        includes_per_file_comparison, includes_efficiency_comparison)."""
+        inp = self._make_enriched_input(**{interp_field: value})
         prompt = _build_reasoning_prompt(inp)
-        assert "55,000" in prompt
-        assert "Model Parameters" in prompt
-
-    def test_includes_training_segments(self):
-        inp = self._make_enriched_input(
-            per_model_training_segments={"punet": 200},
-        )
-        prompt = _build_reasoning_prompt(inp)
-        assert "200" in prompt
-        assert "Training Data Volume" in prompt
-
-    def test_includes_per_file_comparison(self):
-        inp = self._make_enriched_input(
-            per_file_comparison="Cross-model Impact_Score concentrates on the highest-index rows.",
-        )
-        prompt = _build_reasoning_prompt(inp)
-        assert "Per-File Comparison" in prompt
-        assert "Impact_Score" in prompt
-
-    def test_includes_efficiency_comparison(self):
-        inp = self._make_enriched_input(
-            efficiency_comparison="PUNet has best score-per-parameter.",
-        )
-        prompt = _build_reasoning_prompt(inp)
-        assert "Efficiency Comparison" in prompt
+        for substr in expected_substrings:
+            assert substr in prompt
 
     def test_works_without_enriched_fields(self):
         """Old-style interpretation (no enriched fields) still produces valid prompt."""
@@ -378,34 +409,48 @@ class TestBuildReasoningPromptEnriched:
         assert "test bottleneck" in prompt
         assert "File Vector" not in prompt
 
-    def test_includes_expert_advice_string(self):
+    @pytest.mark.parametrize(
+        "advice, expected_in, expected_not_in",
+        [
+            pytest.param(
+                "Prioritize architectures with skip connections",
+                ["Expert Guidance", "skip connections"],
+                [],
+                id="string_advice",
+            ),
+            pytest.param(
+                "",
+                [],
+                ["Expert Guidance"],
+                id="empty_string_excluded",
+            ),
+            pytest.param(
+                ExpertAdvice(
+                    focus_areas=["low-frequency denoising"],
+                    constraints=["VRAM < 8 GB"],
+                    known_failures=[],
+                    suggested_directions=["try dilated convolutions"],
+                    rationale="Files 0-3 consistently weak.",
+                ),
+                ["Expert Guidance", "low-frequency denoising", "VRAM < 8 GB", "dilated convolutions"],
+                [],
+                id="structured_advice",
+            ),
+        ],
+    )
+    def test_expert_advice_propagation(self, advice, expected_in, expected_not_in):
+        """expert_advice handling: string advice renders under "Expert Guidance",
+        empty string omits the section, and structured ExpertAdvice surfaces
+        every populated field. Replaces three flat tests
+        (includes_expert_advice_string, excludes_expert_when_empty,
+        includes_structured_expert_advice)."""
         inp = self._make_enriched_input()
-        inp.expert_advice = "Prioritize architectures with skip connections"
+        inp.expert_advice = advice
         prompt = _build_reasoning_prompt(inp)
-        assert "Expert Guidance" in prompt
-        assert "skip connections" in prompt
-
-    def test_excludes_expert_when_empty(self):
-        inp = self._make_enriched_input()
-        inp.expert_advice = ""
-        prompt = _build_reasoning_prompt(inp)
-        assert "Expert Guidance" not in prompt
-
-    def test_includes_structured_expert_advice(self):
-        from agent.schemas.hyperparam_tuning import ExpertAdvice
-        inp = self._make_enriched_input()
-        inp.expert_advice = ExpertAdvice(
-            focus_areas=["low-frequency denoising"],
-            constraints=["VRAM < 8 GB"],
-            known_failures=[],
-            suggested_directions=["try dilated convolutions"],
-            rationale="Files 0-3 consistently weak.",
-        )
-        prompt = _build_reasoning_prompt(inp)
-        assert "Expert Guidance" in prompt
-        assert "low-frequency denoising" in prompt
-        assert "VRAM < 8 GB" in prompt
-        assert "dilated convolutions" in prompt
+        for s in expected_in:
+            assert s in prompt
+        for s in expected_not_in:
+            assert s not in prompt
 
     def test_expert_advice_before_human_advice(self):
         inp = self._make_enriched_input()
@@ -425,44 +470,53 @@ class TestRenderVocabulary:
     """Verify that _render_vocabulary renders all four vocab kinds correctly.
 
     Bug 2 (fixed): discoveries were silently dropped — this class would have
-    caught it immediately via test_discovery_entries_rendered.
+    caught it immediately via the discovery_kind case in
+    test_single_kind_entry_rendered.
     """
 
     def test_empty_returns_empty_string(self):
         assert MLModelProposalAgent._render_vocabulary([]) == ""
 
-    def test_feature_entries_rendered(self):
-        vocab = [VocabEntry(name="dilated_causal_conv", kind="feature",
-                            description="Causal dilated convolution.", tier="canonical")]
+    @pytest.mark.parametrize(
+        "kind, name, description, tier, expected_strings",
+        [
+            pytest.param(
+                "feature", "dilated_causal_conv",
+                "Causal dilated convolution.", "canonical",
+                ["Features", "dilated_causal_conv"],
+                id="feature_kind",
+            ),
+            pytest.param(
+                "capability", "large_receptive_field",
+                "Receptive field > 10k samples.", "canonical",
+                ["Capabilities", "large_receptive_field"],
+                id="capability_kind",
+            ),
+            pytest.param(
+                "discovery", "prediction_attn_wavenet_refuted",
+                "REFUTED: attn_wavenet achieved denoising_score=-1.509 (predicted 6.5).",
+                "candidate",
+                ["Discoveries", "REFUTED", "prediction_attn_wavenet_refuted"],
+                id="discovery_kind",
+            ),
+            pytest.param(
+                "candidate", "ssm_layer",
+                "State-space model layer.", "candidate",
+                ["Candidates", "ssm_layer"],
+                id="candidate_kind",
+            ),
+        ],
+    )
+    def test_single_kind_entry_rendered(self, kind, name, description, tier, expected_strings):
+        """Each vocab kind renders under its documented section header and
+        surfaces the entry name (plus the discovery description sentinel).
+        Replaces four flat tests (feature_entries_rendered,
+        capability_entries_rendered, discovery_entries_rendered,
+        candidate_entries_rendered)."""
+        vocab = [VocabEntry(name=name, kind=kind, description=description, tier=tier)]
         rendered = MLModelProposalAgent._render_vocabulary(vocab)
-        assert "Features" in rendered
-        assert "dilated_causal_conv" in rendered
-
-    def test_capability_entries_rendered(self):
-        vocab = [VocabEntry(name="large_receptive_field", kind="capability",
-                            description="Receptive field > 10k samples.", tier="canonical")]
-        rendered = MLModelProposalAgent._render_vocabulary(vocab)
-        assert "Capabilities" in rendered
-        assert "large_receptive_field" in rendered
-
-    def test_discovery_entries_rendered(self):
-        vocab = [VocabEntry(
-            name="prediction_attn_wavenet_refuted",
-            kind="discovery",
-            description="REFUTED: attn_wavenet achieved denoising_score=-1.509 (predicted 6.5).",
-            tier="candidate",
-        )]
-        rendered = MLModelProposalAgent._render_vocabulary(vocab)
-        assert "Discoveries" in rendered
-        assert "REFUTED" in rendered
-        assert "prediction_attn_wavenet_refuted" in rendered
-
-    def test_candidate_entries_rendered(self):
-        vocab = [VocabEntry(name="ssm_layer", kind="candidate",
-                            description="State-space model layer.", tier="candidate")]
-        rendered = MLModelProposalAgent._render_vocabulary(vocab)
-        assert "Candidates" in rendered
-        assert "ssm_layer" in rendered
+        for s in expected_strings:
+            assert s in rendered
 
     def test_all_four_kinds_rendered(self):
         vocab = [
