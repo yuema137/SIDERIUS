@@ -2063,31 +2063,52 @@ The new chain's `build_token_baseline_report.py` output replaces V12 as the Phas
 
 ---
 
-### Commit 6.2: Proposer `prior_stage_outputs` Management (Rev 5 — V12-driven, medium priority)
+### Commit 6.2: Proposer Stage-Output Management — Hybrid Top-K Clamp + JSON-Safe String Backstop (Rev 5 — V12-driven; Rev 8.6 — pivoted from naive middle-truncation to surgical Top-K clamp on the audited growth driver)
 
 **Phase**: 2.
 **§5 step**: 12b (new).
 
 **Why this commit, why second**: V12 data shows proposer grew 68 K → 225 K (3.3×) over 13 iters. Component breakdown of the iter-1 vs iter-late `proposer.proposing` row indicates `prior_stage_outputs` is the dominant growth contributor — at iter 1 it's 13 K chars, by iter 13 it dominates the per-call assembly. The other proposer components are largely flat: `system_prompt` ~7 K (fixed), `vocab_block` ~3.5 K (slow), `template_and_scaffolding` ~8 K (fixed).
 
-**Scope**:
-- `nodes/ml_model_proposal_agent.py` (modify — `prior_stage_outputs` assembly)
-- `tests/unit/agent/proposal/test_prior_stage_truncation.py` (new)
+**Forensic audit (2026-05-19 — C6.2-T1)**: `prior_stage_outputs` is not an assembly variable — it's an *audit measurement bucket* (`nodes/ml_model_proposal_agent.py:495-510`) counting chars contributed by non-input keys in the `accumulated` dict. The actual mechanism: stages 1 (`comparison`) and 2 (`causal_reasoning`) write their LLM outputs into `accumulated[stage.name]`, and the entire dict flows into every downstream stage's user prompt via `json.dumps(cleaned, indent=2)` in `_render_stage_user_prompt` (`ml_model_proposal_agent.py:480-488`). Real G1 chain (iter 1→5) measurements: `prior_stage_outputs` 13.9K→16.9K chars; `proposer.comparison` completion 2.5K→4.4K tokens (~10K-17K chars); `proposer.causal_reasoning` ~700-800 tokens flat. The single growth driver is **`DiscoveryMemo.comparative_analysis: List[ModelComparison]`** (`agent/schemas/proposal.py:271-273`) — each `ModelComparison` entry is per-field bounded (`key_mechanism` and `lesson_for_next_proposal` capped at 1000 chars each by Pydantic) but the **list length scales linearly with experience** (more past models considered). This is why V12 sees 3.3× growth over 13 iters and the stub chain sees only 1.2× over 5 iters (stub scoring keeps the seed best static, suppressing arch proliferation).
 
-**Tasks**:
-- [ ] Audit what `prior_stage_outputs` actually contains today (history of which prior stage's outputs concatenated how). Document in the commit message — we may discover it's already wrong, not just bloated.
-- [ ] Apply a max-chars truncation per stage entry (default 2 K chars per prior stage, configurable). Trim from the middle (keep first 1 K and last 1 K), insert `[... N chars elided ...]` marker. Preserves head + tail, both of which are typically high signal.
-- [ ] Alternative consideration (decide before implementation): semantic compression via a deterministic extractor (e.g., keep only the JSON keys, not values, for prior-stage outputs that are large dicts). Lower risk than LLM-based compression but loses some signal.
-- [ ] Pin the policy in the LLM-config schema; do not hardcode the threshold.
+**Why Rev 8.6 pivot**: the original Rev 5 spec defaulted to naive middle-truncation per stage entry on serialized JSON. The C6.2-T1 audit found this strategy structurally unsound: `_render_stage_user_prompt` serializes the *whole* `accumulated` blob once via `json.dumps`, so middle-truncating the resulting string corrupts JSON the LLM has to parse. Middle-truncating *within* each stage value's serialized form before reassembly works mechanically but silently drops load-bearing list items (an elided `ModelComparison` is just gone — the LLM sees a JSON list with N items instead of N+1, with no visibility into what was lost). Rev 8.6 surgical pivot: **clamp the known growth point (`comparative_analysis` list) by Top-K, and add a JSON-safe string backstop for any future stages that emit large raw strings.** The Top-K clamp handles ≥80% of growth at iter 13; the backstop catches stages we haven't seen yet.
 
-**Pre-Commit Checklist**:
-- [ ] **Positive test**: 4 K input → 2 K output, with first-1 K and last-1 K verbatim and the `[... 2000 chars elided ...]` marker between.
-- [ ] **Idempotence test**: applying truncation to an already-truncated string is a no-op.
-- [ ] **Quantitative metric**: against a synthetic iter-13-shape proposer assembly, `proposer.proposing.tokens.prompt` drops by ≥ 30%. (Don't promise a flat curve here — proposer growth has multiple sources; we're targeting the largest one.)
+**Scope (Rev 8.6)**:
+- `agent/schemas/proposal.py` (modify — add two policy knobs to `ResearchPolicy`).
+- `nodes/proposal_helpers.py` (modify — three new pure helpers).
+- `nodes/ml_model_proposal_agent.py` (modify — apply clamp + backstop to `accumulated` *before* `_render_stage_user_prompt` serializes it).
+- `tests/unit/agent/proposal/test_prior_stage_truncation.py` (new).
 
-**Definition of Done (Gate G1.5b)**: re-run a 5-iter chain post-implementation; verify `proposer.proposing` token growth slope drops by ≥ 30% relative to V12 baseline.
+**Policy knobs (Rev 8.6 — `ResearchPolicy`, not `ProposalInput`)**: the two new knobs live on `ResearchPolicy` because they configure *how the pipeline behaves*, not per-call payload data. They follow the same `ge=` validation pattern as the existing `minimum_boldness` / `max_citations` knobs and inherit the same per-workflow / per-`ExpertContextItem(kind='strategy')` override path.
 
-**Out of Scope**: `vocab_block` compression (separate concern, addressed in Phase 3 if vocab keeps growing); `candidates_markdown` compression (already bounded by gate-block design).
+- `comparative_analysis_top_k: int = Field(default=5, ge=1, description="...")` — Top-K cap on the comparison stage's `comparative_analysis` list.
+- `prior_stage_max_chars: int = Field(default=4000, ge=1, description="...")` — max chars per string value within any stage output; longer strings get middle-truncated by the backstop walker.
+
+**Sub-commit ladder (Rev 8.6)**:
+
+- **C6.2-C1** — `feat(schemas): add stage-output management knobs to ResearchPolicy` — extend `ResearchPolicy` with the two fields above; update the existing `tests/unit/agent/proposal/test_research_policy.py` (or equivalent) to pin `ge=1` validation on both. **DoD**: schema unit tests 100% green.
+- **C6.2-C2** — `feat(proposal): clamp + backstop helpers in proposal_helpers` — three pure helpers in `nodes/proposal_helpers.py`:
+  1. `clamp_comparative_analysis(memo: dict, top_k: int) -> dict` — given a comparison-stage output dict, slice `memo["comparative_analysis"]` to the **top_k most recent entries** (sort by iter index descending; tie-break by `best_score` descending). No-op if the list is already ≤ top_k. Returns a new dict (does not mutate input).
+  2. `safe_stage_string_truncator(text: str, max_chars: int) -> str` — pure middle-truncator: if `len(text) ≤ max_chars` return verbatim; else return `first_half + f"\n[... {elided_chars} chars elided ...]\n" + last_half` where the two halves sum to `max_chars - len(marker)`. Idempotent (already-marked strings are skipped).
+  3. `apply_string_backstop(stage_output: Any, max_chars: int) -> Any` — recursive walker that descends into dicts/lists and applies `safe_stage_string_truncator` to every string leaf exceeding `max_chars`. Preserves all dict keys and list lengths — only string *values* shrink. Returns a new structure (non-mutating).
+  **DoD**: standalone unit tests pass for all three helpers (positive case, idempotence case, edge cases — empty list, list shorter than top_k, dict with no strings, etc.). No proposer-agent changes in this commit.
+- **C6.2-C3** — `feat(proposal): wire clamp + backstop into proposer assembly` — in `nodes/ml_model_proposal_agent.py`, before each call to `_render_stage_user_prompt(accumulated)`, apply (in order): `clamp_comparative_analysis(accumulated.get("comparison", {}), policy.comparative_analysis_top_k)` to produce a clamped comparison dict, then `apply_string_backstop(stage_output, policy.prior_stage_max_chars)` to every non-input stage value. Both operations are **non-mutating** — build a new clamped `accumulated` for prompt rendering only; the real `accumulated` (used by downstream stages) is unchanged. **DoD**: no regression in existing proposer unit/integration tests; new path covered by C4 fixture test.
+- **C6.2-C4** — `test(proposal): synthetic iter-13 envelope unit test + doc tickoff` — `tests/unit/agent/proposal/test_prior_stage_truncation.py` builds a synthetic `accumulated` mimicking iter-13 V12 shape (`comparative_analysis` list of 13 `ModelComparison` entries near their per-field caps). Three assertions: (a) post-clamp `len(comparative_analysis) == policy.comparative_analysis_top_k`, (b) selected entries are the 5 most recent, (c) `len(json.dumps(clamped_accumulated)) ≤ 0.7 × len(json.dumps(raw_accumulated))` (≥30% prompt-char drop). Doc tickoff in this commit. **DoD**: test green; doc ledger flipped to ✓ LANDED.
+
+**Pre-Commit Checklist (Rev 8.6)**:
+- [ ] **Top-K positive test**: 13-entry `comparative_analysis` → 5 entries, the 5 newest by iter index. Tie-break by `best_score` desc verified with a constructed tie.
+- [ ] **Top-K no-op test**: 3-entry list with `top_k=5` returns unchanged (deep-equal, same object identity OK).
+- [ ] **Backstop positive test**: 4 K string in a nested dict → 2 K output, with first-1 K and last-1 K verbatim and the `[... 2000 chars elided ...]` marker between.
+- [ ] **Backstop idempotence test**: applying backstop to an already-truncated structure is a no-op.
+- [ ] **Backstop non-mutation test**: the input dict is bitwise unchanged after the call (deep-copy check).
+- [ ] **Quantitative metric**: against the synthetic iter-13-shape `accumulated` fixture in C4, the rendered user prompt drops by ≥ 30% chars relative to un-clamped.
+
+**Definition of Done (Gate G1.5b — post-merge)**: re-run a 5-iter chain post-merge with real LLM (stub or real training); verify `proposer.proposing` token growth slope drops by ≥ 30% relative to V12 baseline. **This is a separate post-merge measurement**, following the same pattern as Gate G2 for C6.3 (deferred per Rev 8.5 partial-pass attestation) — C4's synthetic-fixture assertion above is the in-commit gate; the real chain measurement is the production attestation.
+
+**Out of Scope**: `vocab_block` compression (separate concern, addressed in Phase 3 if vocab keeps growing); `candidates_markdown` compression (already bounded by gate-block design); LLM-driven semantic compression of stage outputs (Rev 8.6 explicitly chose deterministic Top-K + backstop over an LLM consolidator — the C6.3 consolidator is for *cumulative cache state*, not per-iter pipeline plumbing); changing the existing `_audit_proposer_components` audit measurement (stays as-is — measuring chars after clamp confirms the clamp worked).
+
+**Out of Scope for the Top-K sort**: changing the criterion from recency to score-based selection (deferred to a future Rev if the chain shows recency loses important historical context — the C6.3 consolidator already handles "preserve best discoveries across iters", so C6.2's job is to surface *current-window* signal, where recency is the right cut).
 
 ---
 
