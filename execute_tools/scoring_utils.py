@@ -144,10 +144,7 @@ def get_snr(
     Returns:
         (snr, center_freq) — the SNR value and the frequency of the peak.
     """
-    if target == 0:
-        center_id = find_peak(pwr)
-    else:
-        center_id = int(np.where(freq == target)[0][0])
+    center_id = find_peak(pwr) if target == 0 else int(np.where(freq == target)[0][0])
 
     sig_range = 1
     noise_range = 50

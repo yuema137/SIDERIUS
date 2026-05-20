@@ -389,14 +389,8 @@ def _measure_ms_per_step(
                 break
             x = x.to(device)
             y = y.to(device)
-            if model_type == "fcnet":
-                x = x.float()
-            else:
-                x = x.int()
-            if loss_type in ("ce", "focal", "focal_cw"):
-                y = y.long()
-            else:
-                y = y.float()
+            x = x.float() if model_type == "fcnet" else x.int()
+            y = y.long() if loss_type in ("ce", "focal", "focal_cw") else y.float()
 
             torch.cuda.synchronize()
             t0 = time.perf_counter()

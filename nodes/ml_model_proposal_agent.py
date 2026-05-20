@@ -878,10 +878,7 @@ class MLModelProposalAgent:
             and any(s.enabled for s in inp.reasoning_pipeline.stages)
         )
 
-        if has_pipeline:
-            output = self._run_pipeline(inp)
-        else:
-            output = self._run_legacy(inp)
+        output = self._run_pipeline(inp) if has_pipeline else self._run_legacy(inp)
 
         # --- Persist ---
         if inp.storage.backend == "local" and inp.storage.local:
