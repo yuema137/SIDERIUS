@@ -1,5 +1,9 @@
 """Commit 6.3 / C1 — schema validation tests for the consolidated cache entry.
 
+Parametrized to keep the defensive shield intact (strict-mode rejections,
+length-bound caps, extra='forbid') while contracting one-input-per-test
+fixtures into single parametrized functions with explicit case IDs.
+
 What this file pins:
 
   1. Strict-mode (``extra="forbid"``) is on for every model — unknown keys are
@@ -14,13 +18,7 @@ What this file pins:
      have no meaning for a finding that has never been observed).
   5. ``ErrorSignature.key()`` returns the (failure_class, top_user_frame,
      error_type) tuple — the dedup contract the consolidator relies on.
-  6. ``CacheEntry.from_legacy_dict`` is zero-friction for pre-6.3 chains:
-     legacy ``list[str]`` lifts to ``list[ConsolidatedFinding]`` carrying
-     ``evidence_iters=[current_iter]``, and legacy ``str`` narratives lift
-     to ``ConsolidatedNarrative(latest=str, history=[])`` — even when the
-     legacy strings would individually fail the schema (oversized statements
-     truncate, empty findings drop, both ``_stats`` and ``stats`` keys map
-     to the new ``stats`` field).
+  6. ``CacheEntry.from_legacy_dict`` is zero-friction for pre-6.3 chains.
 """
 from __future__ import annotations
 
@@ -54,23 +52,8 @@ def test_finding_valid_construction() -> None:
     assert f.strength == "strong"
 
 
-def test_finding_rejects_empty_statement() -> None:
-    with pytest.raises(ValidationError):
-        ConsolidatedFinding(statement="", evidence_iters=[1], strength="weak")
-
-
-def test_finding_rejects_oversized_statement() -> None:
-    """Spec line 2515: statement max 500 chars."""
-    with pytest.raises(ValidationError):
-        ConsolidatedFinding(
-            statement="x" * (FINDING_STATEMENT_MAX_CHARS + 1),
-            evidence_iters=[1],
-            strength="moderate",
-        )
-
-
 def test_finding_accepts_max_length_statement() -> None:
-    """Exactly at the boundary must succeed (off-by-one guard)."""
+    """Boundary guard (off-by-one): exactly at the cap must succeed."""
     f = ConsolidatedFinding(
         statement="x" * FINDING_STATEMENT_MAX_CHARS,
         evidence_iters=[1],
@@ -79,35 +62,43 @@ def test_finding_accepts_max_length_statement() -> None:
     assert len(f.statement) == FINDING_STATEMENT_MAX_CHARS
 
 
-def test_finding_rejects_empty_evidence_iters() -> None:
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        pytest.param(
+            dict(statement="", evidence_iters=[1], strength="weak"),
+            id="empty_statement",
+        ),
+        pytest.param(
+            dict(statement="x" * (FINDING_STATEMENT_MAX_CHARS + 1),
+                 evidence_iters=[1], strength="moderate"),
+            id="oversized_statement",
+        ),
+        pytest.param(
+            dict(statement="ok", evidence_iters=[], strength="weak"),
+            id="empty_evidence_iters",
+        ),
+        pytest.param(
+            dict(statement="ok", evidence_iters=[3, -1], strength="weak"),
+            id="negative_iter",
+        ),
+        pytest.param(
+            dict(statement="ok", evidence_iters=[1], strength="extreme"),
+            id="unknown_strength",
+        ),
+        pytest.param(
+            dict(statement="ok", evidence_iters=[1], strength="weak",
+                 unexpected="should fail"),
+            id="extra_field_forbidden",
+        ),
+    ],
+)
+def test_finding_rejects_invalid_input(kwargs) -> None:
+    """Defensive shield: every documented rejection must keep raising
+    ValidationError. Covers empty/oversized text, evidence-iter constraints,
+    closed-enum strength, and extra='forbid' against silent schema drift."""
     with pytest.raises(ValidationError):
-        ConsolidatedFinding(statement="ok", evidence_iters=[], strength="weak")
-
-
-def test_finding_rejects_negative_iter() -> None:
-    with pytest.raises(ValidationError):
-        ConsolidatedFinding(
-            statement="ok", evidence_iters=[3, -1], strength="weak",
-        )
-
-
-def test_finding_rejects_unknown_strength() -> None:
-    with pytest.raises(ValidationError):
-        ConsolidatedFinding(
-            statement="ok", evidence_iters=[1], strength="extreme",  # type: ignore[arg-type]
-        )
-
-
-def test_finding_rejects_extra_field() -> None:
-    """extra='forbid' guards against silent schema drift if the LLM adds a
-    field we did not anticipate."""
-    with pytest.raises(ValidationError):
-        ConsolidatedFinding(
-            statement="ok",
-            evidence_iters=[1],
-            strength="weak",
-            unexpected="should fail",  # type: ignore[call-arg]
-        )
+        ConsolidatedFinding(**kwargs)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -131,47 +122,54 @@ def test_narrative_accepts_empty_latest() -> None:
     assert n.history == []
 
 
-def test_narrative_rejects_oversized_latest() -> None:
-    """Spec checklist line 2591: 'narrative latest over 800 chars' must be
-    rejected by Pydantic."""
+@pytest.mark.parametrize(
+    "kwargs, attr, expected_len",
+    [
+        pytest.param(
+            dict(latest="x" * NARRATIVE_LATEST_MAX_CHARS),
+            "latest", NARRATIVE_LATEST_MAX_CHARS,
+            id="max_length_latest",
+        ),
+        pytest.param(
+            dict(latest="ok", history=[(i, f"n{i}") for i in range(NARRATIVE_HISTORY_MAX_ENTRIES)]),
+            "history", NARRATIVE_HISTORY_MAX_ENTRIES,
+            id="max_history_entries",
+        ),
+    ],
+)
+def test_narrative_accepts_at_boundary(kwargs, attr, expected_len) -> None:
+    """Boundary guards (off-by-one) for both string and list caps."""
+    n = ConsolidatedNarrative(**kwargs)
+    assert len(getattr(n, attr)) == expected_len
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        pytest.param(
+            dict(latest="x" * (NARRATIVE_LATEST_MAX_CHARS + 1)),
+            id="oversized_latest",
+        ),
+        pytest.param(
+            dict(latest="ok",
+                 history=[(i, f"narrative iter {i}")
+                          for i in range(NARRATIVE_HISTORY_MAX_ENTRIES + 1)]),
+            id="over_cap_history",
+        ),
+        pytest.param(
+            dict(latest="ok", history=[(-1, "bad")]),
+            id="negative_history_iter",
+        ),
+        pytest.param(
+            dict(latest="ok", surprise="nope"),
+            id="extra_field_forbidden",
+        ),
+    ],
+)
+def test_narrative_rejects_invalid_input(kwargs) -> None:
+    """Defensive shield: every documented rejection still raises."""
     with pytest.raises(ValidationError):
-        ConsolidatedNarrative(latest="x" * (NARRATIVE_LATEST_MAX_CHARS + 1))
-
-
-def test_narrative_accepts_max_length_latest() -> None:
-    n = ConsolidatedNarrative(latest="x" * NARRATIVE_LATEST_MAX_CHARS)
-    assert len(n.latest) == NARRATIVE_LATEST_MAX_CHARS
-
-
-def test_narrative_rejects_over_cap_history() -> None:
-    """Spec line 2521: history capped to last 3. Schema enforces upper bound;
-    the consolidator is responsible for pruning before construction."""
-    with pytest.raises(ValidationError):
-        ConsolidatedNarrative(
-            latest="ok",
-            history=[
-                (i, f"narrative iter {i}")
-                for i in range(NARRATIVE_HISTORY_MAX_ENTRIES + 1)
-            ],
-        )
-
-
-def test_narrative_accepts_max_history() -> None:
-    n = ConsolidatedNarrative(
-        latest="ok",
-        history=[(i, f"n{i}") for i in range(NARRATIVE_HISTORY_MAX_ENTRIES)],
-    )
-    assert len(n.history) == NARRATIVE_HISTORY_MAX_ENTRIES
-
-
-def test_narrative_rejects_negative_history_iter() -> None:
-    with pytest.raises(ValidationError):
-        ConsolidatedNarrative(latest="ok", history=[(-1, "bad")])
-
-
-def test_narrative_rejects_extra_field() -> None:
-    with pytest.raises(ValidationError):
-        ConsolidatedNarrative(latest="ok", surprise="nope")  # type: ignore[call-arg]
+        ConsolidatedNarrative(**kwargs)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -206,30 +204,6 @@ def test_error_sig_key_tuple() -> None:
                          "torch.cuda.OutOfMemoryError")
 
 
-def test_error_sig_rejects_unknown_failure_class() -> None:
-    """Spec checklist line 2591: unknown failure_class must be rejected."""
-    with pytest.raises(ValidationError):
-        _valid_error_sig(failure_class="cosmic_ray")
-
-
-def test_error_sig_rejects_oversized_short_message() -> None:
-    with pytest.raises(ValidationError):
-        _valid_error_sig(
-            short_message="x" * (ERROR_SHORT_MESSAGE_MAX_CHARS + 1),
-        )
-
-
-def test_error_sig_rejects_empty_evidence_iters() -> None:
-    """An ErrorSignature must have been observed at least once."""
-    with pytest.raises(ValidationError):
-        _valid_error_sig(evidence_iters=[])
-
-
-def test_error_sig_rejects_empty_error_type() -> None:
-    with pytest.raises(ValidationError):
-        _valid_error_sig(error_type="")
-
-
 def test_error_sig_accepts_empty_last_frames() -> None:
     """Spec §2.2: last_frames may be empty for non-Python failure modes."""
     sig = _valid_error_sig(last_frames=[], top_user_frame="")
@@ -237,9 +211,23 @@ def test_error_sig_accepts_empty_last_frames() -> None:
     assert sig.top_user_frame == ""
 
 
-def test_error_sig_rejects_extra_field() -> None:
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param(dict(failure_class="cosmic_ray"), id="unknown_failure_class"),
+        pytest.param(
+            dict(short_message="x" * (ERROR_SHORT_MESSAGE_MAX_CHARS + 1)),
+            id="oversized_short_message",
+        ),
+        pytest.param(dict(evidence_iters=[]), id="empty_evidence_iters"),
+        pytest.param(dict(error_type=""), id="empty_error_type"),
+        pytest.param(dict(unexpected="nope"), id="extra_field_forbidden"),
+    ],
+)
+def test_error_sig_rejects_invalid_input(overrides) -> None:
+    """Defensive shield: every documented rejection still raises."""
     with pytest.raises(ValidationError):
-        _valid_error_sig(unexpected="nope")
+        _valid_error_sig(**overrides)
 
 
 # ---------------------------------------------------------------------------
@@ -257,22 +245,6 @@ def test_cache_entry_minimal_valid() -> None:
     assert e.score_trend.history == []
     assert e.error_signatures == []
     assert e.stats == {}
-
-
-def test_cache_entry_rejects_missing_model_type() -> None:
-    with pytest.raises(ValidationError):
-        CacheEntry()  # type: ignore[call-arg]
-
-
-def test_cache_entry_rejects_empty_model_type() -> None:
-    with pytest.raises(ValidationError):
-        CacheEntry(model_type="")
-
-
-def test_cache_entry_rejects_extra_field() -> None:
-    """Pre-empts the LLM-output schema drift hazard the spec calls out."""
-    with pytest.raises(ValidationError):
-        CacheEntry(model_type="punet", surprise_field=1)  # type: ignore[call-arg]
 
 
 def test_cache_entry_full_payload_round_trip() -> None:
@@ -304,6 +276,24 @@ def test_cache_entry_full_payload_round_trip() -> None:
     dumped = e.model_dump()
     re_parsed = CacheEntry.model_validate(dumped)
     assert re_parsed.error_signatures[0].key() == e.error_signatures[0].key()
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        pytest.param({}, id="missing_model_type"),
+        pytest.param({"model_type": ""}, id="empty_model_type"),
+        pytest.param(
+            {"model_type": "punet", "surprise_field": 1},
+            id="extra_field_forbidden",
+        ),
+    ],
+)
+def test_cache_entry_rejects_invalid_input(kwargs) -> None:
+    """Defensive shield: every documented rejection still raises.
+    Pre-empts the LLM-output schema drift hazard the spec calls out."""
+    with pytest.raises(ValidationError):
+        CacheEntry(**kwargs)  # type: ignore[call-arg]
 
 
 # ---------------------------------------------------------------------------
@@ -373,44 +363,70 @@ def test_legacy_drops_empty_findings_strings() -> None:
     assert all(f.statement.strip() for f in entry.key_findings)
 
 
-def test_legacy_truncates_oversized_finding_statements() -> None:
-    """Legacy entries can carry strings longer than the new 500-char cap.
-    Adapter truncates rather than raises — zero-friction resume."""
+@pytest.mark.parametrize(
+    "legacy_field, overlong_value, target_attr_path, expected_len",
+    [
+        pytest.param(
+            "key_findings",
+            ["x" * (FINDING_STATEMENT_MAX_CHARS + 100)],
+            "key_findings[0].statement",
+            FINDING_STATEMENT_MAX_CHARS,
+            id="oversized_finding_statement",
+        ),
+        pytest.param(
+            "score_trend",
+            "y" * (NARRATIVE_LATEST_MAX_CHARS + 100),
+            "score_trend.latest",
+            NARRATIVE_LATEST_MAX_CHARS,
+            id="oversized_narrative_latest",
+        ),
+    ],
+)
+def test_legacy_truncates_oversized_inputs(
+    legacy_field, overlong_value, target_attr_path, expected_len,
+) -> None:
+    """Adapter truncates legacy strings exceeding the new caps rather than
+    raising — zero-friction chain resume."""
     legacy = _legacy_entry()
-    legacy["key_findings"] = ["x" * (FINDING_STATEMENT_MAX_CHARS + 100)]
+    legacy[legacy_field] = overlong_value
     entry = CacheEntry.from_legacy_dict(
         legacy, model_type="punet", current_iter=1,
     )
-    assert len(entry.key_findings[0].statement) == FINDING_STATEMENT_MAX_CHARS
+    # Resolve dotted/indexed path (e.g. "key_findings[0].statement").
+    val = entry
+    for part in target_attr_path.split("."):
+        if "[" in part:
+            name, idx = part[:-1].split("[")
+            val = getattr(val, name)[int(idx)]
+        else:
+            val = getattr(val, part)
+    assert len(val) == expected_len
 
 
-def test_legacy_truncates_oversized_narrative_latest() -> None:
-    legacy = _legacy_entry()
-    legacy["score_trend"] = "y" * (NARRATIVE_LATEST_MAX_CHARS + 100)
-    entry = CacheEntry.from_legacy_dict(
-        legacy, model_type="punet", current_iter=1,
-    )
-    assert len(entry.score_trend.latest) == NARRATIVE_LATEST_MAX_CHARS
-
-
-def test_legacy_accepts_underscored_stats_key() -> None:
+@pytest.mark.parametrize(
+    "stats_key, expected",
+    [
+        pytest.param(
+            "_stats", {"best_score": 0.78, "completed_rounds": 3},
+            id="underscored_legacy_key",
+        ),
+        pytest.param(
+            "stats", {"best_score": 0.99},
+            id="forward_canonical_key",
+        ),
+    ],
+)
+def test_legacy_accepts_stats_key_aliases(stats_key, expected) -> None:
     """Legacy code wrote ``_stats``; the new schema reads ``stats``. The
     adapter must accept both so we don't silently lose numerical context."""
     legacy = _legacy_entry()
+    if stats_key == "stats":
+        legacy.pop("_stats")
+        legacy["stats"] = expected
     entry = CacheEntry.from_legacy_dict(
         legacy, model_type="punet", current_iter=1,
     )
-    assert entry.stats == {"best_score": 0.78, "completed_rounds": 3}
-
-
-def test_legacy_accepts_forward_stats_key() -> None:
-    legacy = _legacy_entry()
-    legacy.pop("_stats")
-    legacy["stats"] = {"best_score": 0.99}
-    entry = CacheEntry.from_legacy_dict(
-        legacy, model_type="punet", current_iter=1,
-    )
-    assert entry.stats == {"best_score": 0.99}
+    assert entry.stats == expected
 
 
 def test_legacy_defaults_missing_fields() -> None:
