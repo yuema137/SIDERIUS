@@ -882,6 +882,40 @@ class StubSandbox(TidmadSandbox):
         results["failure_reason"] = None
         return {"status": "success", "results": results}
 
+    def score_vector(
+        self,
+        sample_set,
+        anchor_map: dict,
+        s_max: float,
+        denoised_filename_fn,
+        **kwargs,
+    ) -> tuple:
+        """Synthesise the anchor-normalised scoring 4-tuple. No h5 read.
+
+        Production ``TidmadSandbox.score_vector`` delegates to
+        ``execute_tools.scoring_utils.score_vector``, which opens the
+        ``abra_validation_denoised_*.h5`` artefacts produced by inference.
+        Under ``--is_pseudo_training`` those artefacts never get written
+        (inference is stubbed), so calling the inherited implementation
+        crashes with ``FileNotFoundError`` mid-scoring. This override
+        mirrors the synthesis contract of ``execute_scoring`` — same
+        ``denoising_score`` ∈ [-3.0, -2.0] band, length-9 ``file_vector``,
+        and the fixed ``is_degenerate=False / failure_reason=None`` pair —
+        and returns them in the 4-tuple order the tuner unpacks at
+        ``ml_hyperparameter_tune_agent.py`` (``score_vector`` call site).
+
+        Args mirror the production signature for swap-in compatibility;
+        all are accepted but only ``**kwargs`` swallowing matters here
+        (e.g. ``reference_file_vector`` from the tuner's formal-round
+        health check). No anchor lookup, no parallel workers, no disk I/O.
+
+        Returns:
+            (file_vector, final_scalar, is_degenerate, failure_reason)
+        """
+        file_vector = [self._rng.uniform(-3.0, -2.0) for _ in range(9)]
+        final_scalar = self._rng.uniform(-3.0, -2.0)
+        return file_vector, final_scalar, False, None
+
     def save_record(self, record: Dict[str, Any]) -> None:
         """Stamp ``_pseudo_origin`` audit marker, persist via parent, mirror in-memory.
 
