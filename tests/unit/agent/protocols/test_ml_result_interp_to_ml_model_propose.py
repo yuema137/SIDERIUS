@@ -1,14 +1,18 @@
 """
 Unit tests for agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py
 
+Parametrized to collapse one-kwarg-per-test pass-through noise while keeping
+the defensive Pydantic shield + each documented contract explicit via case
+IDs. See test_ml_model_valid_to_ml_model_tune.py for the same shape.
+
 Tests cover:
   local_full_context
     - Returns a valid ProposalInput
     - interpretation is a fully serialised InterpretationOutput dict
     - existing_model_types matches output.model_types
-    - all InterpretationOutput fields are present in the interpretation dict
     - storage is passed through correctly
-    - works with multiple model types
+    - Trial-mode + two-budget time fields + data_dir fan out from kwargs
+    - Phase N recent_tune_outputs -> recent_gate_exhaustions aggregation
 
   database_full_context
     - Raises NotImplementedError (placeholder, not yet implemented)
@@ -55,65 +59,53 @@ def make_interpretation_output(model_types):
     )
 
 
+@pytest.fixture
+def interp_output():
+    return make_interpretation_output(["punet"])
+
+
 # ---------------------------------------------------------------------------
-# local_full_context
+# local_full_context — baseline mapping + storage
 # ---------------------------------------------------------------------------
 
 class TestLocalFullContext:
 
-    def test_returns_proposal_input(self, storage):
-        output = make_interpretation_output(["punet"])
-        result = local_full_context(output, storage)
-        assert isinstance(result, ProposalInput)
-
-    def test_existing_model_types_from_output(self, storage):
+    def test_baseline_serialisation_and_storage_pass_through(self, storage):
+        """Single multi-assertion baseline: every documented field of the
+        InterpretationOutput must be present in the serialised
+        ``interpretation`` dict, ``existing_model_types`` mirrors
+        ``output.model_types``, and storage round-trips intact. Replaces
+        eight flat single-assertion tests that each touched one key."""
         output = make_interpretation_output(["punet", "fcnet"])
         result = local_full_context(output, storage)
-        assert set(result.existing_model_types) == {"punet", "fcnet"}
 
-    def test_interpretation_is_dict(self, storage):
-        output = make_interpretation_output(["punet"])
-        result = local_full_context(output, storage)
+        assert isinstance(result, ProposalInput)
         assert isinstance(result.interpretation, dict)
 
-    def test_interpretation_contains_model_types(self, storage):
-        output = make_interpretation_output(["punet", "fcnet"])
-        result = local_full_context(output, storage)
-        assert result.interpretation["model_types"] == ["punet", "fcnet"]
+        # existing_model_types mirrors output.model_types
+        assert set(result.existing_model_types) == {"punet", "fcnet"}
 
-    def test_interpretation_contains_take_home_message(self, storage):
-        output = make_interpretation_output(["punet"])
-        result = local_full_context(output, storage)
-        assert result.interpretation["take_home_message"] == (
+        # Every documented InterpretationOutput field round-trips.
+        interp = result.interpretation
+        assert interp["model_types"] == ["punet", "fcnet"]
+        assert interp["take_home_message"] == (
             "A new architecture is needed to break the plateau."
         )
+        assert "model_descriptions" in interp
+        assert "punet" in interp["model_descriptions"]
+        assert interp["best_denoising_score"] == 1.5
+        assert interp["worst_denoising_score"] == 0.8
+        assert interp["key_findings"] == ["focal loss outperforms ce"]
+        assert interp["bottlenecks"] == ["architecture capacity ceiling"]
 
-    def test_interpretation_contains_model_descriptions(self, storage):
-        output = make_interpretation_output(["punet"])
-        result = local_full_context(output, storage)
-        assert "model_descriptions" in result.interpretation
-        assert "punet" in result.interpretation["model_descriptions"]
-
-    def test_interpretation_contains_scores(self, storage):
-        output = make_interpretation_output(["punet"])
-        result = local_full_context(output, storage)
-        assert result.interpretation["best_denoising_score"] == 1.5
-        assert result.interpretation["worst_denoising_score"] == 0.8
-
-    def test_interpretation_contains_findings_and_bottlenecks(self, storage):
-        output = make_interpretation_output(["punet"])
-        result = local_full_context(output, storage)
-        assert result.interpretation["key_findings"] == ["focal loss outperforms ce"]
-        assert result.interpretation["bottlenecks"] == ["architecture capacity ceiling"]
-
-    def test_storage_passed_through(self, storage):
-        output = make_interpretation_output(["punet"])
-        result = local_full_context(output, storage)
+        # Storage passthrough.
         assert result.storage.backend == "local"
         assert result.storage.local.workspace == "/tmp/proto_test"
         assert result.storage.local.run_name == "r1"
 
     def test_multiple_model_types(self, storage):
+        """Distinct from the baseline because it pins list cardinality on a
+        three-element model_types input — the baseline uses two."""
         output = make_interpretation_output(["punet", "fcnet", "wavenet"])
         result = local_full_context(output, storage)
         assert len(result.existing_model_types) == 3
@@ -121,11 +113,11 @@ class TestLocalFullContext:
 
 
 # ---------------------------------------------------------------------------
-# Time-budget + trial-mode context fields (Phase E0)
+# Time-budget + trial-mode context fields (Phase E0 / Phase I)
 #
 # The run-level data + time-budget fields originate at the workflow/CLI level
 # and fan out into BOTH ProposalInput (here) and HyperparamTuningInput (via
-# the validator→tuner protocol) so the proposer's baseline gate and the
+# the validator->tuner protocol) so the proposer's baseline gate and the
 # tuner's per-round gate construct the same SampleSet and see the same
 # wall-time budget. See docs/resource_estimator_implement.md §2.7.2/§2.7.5.
 #
@@ -138,79 +130,72 @@ class TestLocalFullContext:
 
 class TestTimeBudgetContextFields:
 
-    # --- individual kwargs ---------------------------------------------------
+    @pytest.mark.parametrize(
+        "kwarg, value, expected_attr, expected_value, side_check",
+        [
+            pytest.param("is_trial",      True,           "is_trial",      True,            None,
+                         id="is_trial"),
+            pytest.param("trial_strategy", "target",      "trial_strategy", "target",       None,
+                         id="trial_strategy"),
+            pytest.param("trial_portion", 0.25,           "trial_portion", 0.25,            None,
+                         id="trial_portion"),
+            pytest.param("target_files",  [3, 7, 11],     "target_files",  [3, 7, 11],      None,
+                         id="target_files"),
+            pytest.param("train_portion", 0.5,            "train_portion", 0.5,             None,
+                         id="train_portion"),
+            pytest.param("sampling_seed", 1234,           "sampling_seed", 1234,            None,
+                         id="sampling_seed"),
+            pytest.param("data_dir",      "/data/tidmad", "data_dir",      "/data/tidmad",  None,
+                         id="data_dir"),
+            # Two-budget split: setting one budget leaves the other at None.
+            pytest.param(
+                "trial_time_budget_minutes", 45.0,
+                "trial_time_budget_minutes", 45.0,
+                ("formal_time_budget_minutes", None),
+                id="trial_time_budget_only",
+            ),
+            pytest.param(
+                "formal_time_budget_minutes", 240.0,
+                "formal_time_budget_minutes", 240.0,
+                ("trial_time_budget_minutes", None),
+                id="formal_time_budget_only",
+            ),
+        ],
+    )
+    def test_single_kwarg_passes_through(
+        self, storage, interp_output, kwarg, value, expected_attr,
+        expected_value, side_check,
+    ):
+        """Each run-level kwarg flows through the protocol untouched. The
+        defensive shield: if a future contributor stops mapping any of
+        these, the matching case ID surfaces the regression. The two
+        time-budget cases also pin the Phase I split — setting one budget
+        must NOT touch the other."""
+        result = local_full_context(interp_output, storage, **{kwarg: value})
+        assert getattr(result, expected_attr) == expected_value
+        if side_check is not None:
+            side_name, side_expected = side_check
+            assert getattr(result, side_name) == side_expected
 
-    def test_is_trial_passed_through(self, storage):
-        output = make_interpretation_output(["punet"])
-        result = local_full_context(output, storage, is_trial=True)
-        assert result.is_trial is True
-
-    def test_trial_strategy_passed_through(self, storage):
-        output = make_interpretation_output(["punet"])
-        result = local_full_context(output, storage, trial_strategy="target")
-        assert result.trial_strategy == "target"
-
-    def test_trial_portion_passed_through(self, storage):
-        output = make_interpretation_output(["punet"])
-        result = local_full_context(output, storage, trial_portion=0.25)
-        assert result.trial_portion == 0.25
-
-    def test_target_files_passed_through(self, storage):
-        output = make_interpretation_output(["punet"])
-        result = local_full_context(output, storage, target_files=[3, 7, 11])
-        assert result.target_files == [3, 7, 11]
-
-    def test_train_portion_passed_through(self, storage):
-        output = make_interpretation_output(["punet"])
-        result = local_full_context(output, storage, train_portion=0.5)
-        assert result.train_portion == 0.5
-
-    def test_sampling_seed_passed_through(self, storage):
-        output = make_interpretation_output(["punet"])
-        result = local_full_context(output, storage, sampling_seed=1234)
-        assert result.sampling_seed == 1234
-
-    def test_trial_time_budget_minutes_passed_through(self, storage):
-        output = make_interpretation_output(["punet"])
-        result = local_full_context(output, storage, trial_time_budget_minutes=45.0)
-        assert result.trial_time_budget_minutes == 45.0
-        # Phase I: setting the trial budget alone must NOT touch the formal one.
-        assert result.formal_time_budget_minutes is None
-
-    def test_formal_time_budget_minutes_passed_through(self, storage):
-        output = make_interpretation_output(["punet"])
-        result = local_full_context(output, storage, formal_time_budget_minutes=240.0)
-        assert result.formal_time_budget_minutes == 240.0
-        # Phase I: setting the formal budget alone must NOT touch the trial one.
-        assert result.trial_time_budget_minutes is None
-
-    def test_both_budgets_independent(self, storage):
+    def test_both_budgets_independent(self, storage, interp_output):
         """Phase I two-budget split: caller sets both — both survive the
-        protocol mapping with their own values, no cross-contamination."""
-        output = make_interpretation_output(["punet"])
+        protocol mapping with their own values, no cross-contamination.
+        Sibling to the two single-budget parametrized cases above."""
         result = local_full_context(
-            output, storage,
+            interp_output, storage,
             trial_time_budget_minutes=30.0,
             formal_time_budget_minutes=240.0,
         )
         assert result.trial_time_budget_minutes == 30.0
         assert result.formal_time_budget_minutes == 240.0
 
-    def test_data_dir_passed_through(self, storage):
-        output = make_interpretation_output(["punet"])
-        result = local_full_context(output, storage, data_dir="/data/tidmad")
-        assert result.data_dir == "/data/tidmad"
-
-    # --- combined fan-out scenarios -----------------------------------------
-
-    def test_full_trial_target_fan_out(self, storage):
+    def test_full_trial_target_fan_out(self, storage, interp_output):
         """Realistic single-file-via-trial workflow plumbing: caller supplies
         the full trial-mode set + both budgets + data_dir together. Mirrors
-        what the validator→tuner edge will receive for the tuner's per-round
+        what the validator->tuner edge will receive for the tuner's per-round
         gate (Phase I two-budget split)."""
-        output = make_interpretation_output(["punet"])
         result = local_full_context(
-            output, storage,
+            interp_output, storage,
             is_trial=True,
             trial_strategy="target",
             trial_portion=0.5,
@@ -231,15 +216,14 @@ class TestTimeBudgetContextFields:
         assert result.formal_time_budget_minutes == 240.0
         assert result.data_dir == "/mnt/tidmad"
 
-    def test_defaults_when_caller_omits(self, storage):
+    def test_defaults_when_caller_omits(self, storage, interp_output):
         """When the caller passes none of the new kwargs, ProposalInput's
         schema defaults must take effect (mirroring HyperparamTuningInput:
         is_trial=False, trial_strategy='snapshot', trial_portion=0.1,
         target_files=[], train_portion=0.1, sampling_seed=None,
         trial_time_budget_minutes=None, formal_time_budget_minutes=None,
         data_dir=None)."""
-        output = make_interpretation_output(["punet"])
-        result = local_full_context(output, storage)
+        result = local_full_context(interp_output, storage)
         assert result.is_trial is False
         assert result.trial_strategy == "snapshot"
         assert result.trial_portion == 0.1
@@ -250,13 +234,12 @@ class TestTimeBudgetContextFields:
         assert result.formal_time_budget_minutes is None
         assert result.data_dir is None
 
-    def test_partial_kwargs_only_overrides_supplied_fields(self, storage):
+    def test_partial_kwargs_only_overrides_supplied_fields(self, storage, interp_output):
         """Caller supplies trial_time_budget_minutes only — every other
         run-level field (including formal_time_budget_minutes) keeps its
         schema default so partial workflow plumbing doesn't accidentally
         reset a field the caller didn't touch."""
-        output = make_interpretation_output(["punet"])
-        result = local_full_context(output, storage, trial_time_budget_minutes=60.0)
+        result = local_full_context(interp_output, storage, trial_time_budget_minutes=60.0)
         assert result.trial_time_budget_minutes == 60.0
         assert result.formal_time_budget_minutes is None
         assert result.is_trial is False
@@ -277,7 +260,7 @@ class TestLocalFullContextRecentGateExhaustionsAggregation:
     """The protocol must iterate ``recent_tune_outputs``, extract each
     non-None ``gate_exhaustion``, and surface the resulting list (oldest
     first) into ``ProposalInput.recent_gate_exhaustions``. Empty sequence
-    or all-None entries → field stays at the schema default ([]).
+    or all-None entries -> field stays at the schema default ([]).
 
     See docs/resource_estimator_implement.md §14.N.
     """
@@ -340,29 +323,39 @@ class TestLocalFullContextRecentGateExhaustionsAggregation:
             gate_exhaustion=gate_exhaustion,
         )
 
-    def test_default_empty_when_kwarg_omitted(self, storage):
-        """No ``recent_tune_outputs`` kwarg → field stays at schema default
-        ([]). Confirms backward compat: existing callers don't need to
-        touch this."""
+    @pytest.mark.parametrize(
+        "priors_factory",
+        [
+            pytest.param(lambda self: None, id="kwarg_omitted"),
+            pytest.param(
+                lambda self: [
+                    self._make_tune_output(gate_exhaustion=None),
+                    self._make_tune_output(gate_exhaustion=None),
+                ],
+                id="all_outputs_no_gate_exhaustion",
+            ),
+        ],
+    )
+    def test_empty_aggregation_when_no_populated_gate_exhaustion(
+        self, storage, priors_factory,
+    ):
+        """Two routes to an empty ``recent_gate_exhaustions``: caller omits
+        the kwarg entirely, OR caller passes prior outputs that all carry
+        ``gate_exhaustion=None`` (the success-path shape). Both must leave
+        the field at the schema default ([]) — filtering must not
+        substitute placeholders."""
         output = make_interpretation_output(["punet"])
-        result = local_full_context(output, storage)
-        assert result.recent_gate_exhaustions == []
-
-    def test_default_empty_when_all_outputs_have_no_gate_exhaustion(self, storage):
-        """Successful prior iterations carry ``gate_exhaustion=None`` — the
-        protocol must skip them and leave the list empty."""
-        output = make_interpretation_output(["punet"])
-        priors = [
-            self._make_tune_output(gate_exhaustion=None),
-            self._make_tune_output(gate_exhaustion=None),
-        ]
-        result = local_full_context(output, storage, recent_tune_outputs=priors)
+        priors = priors_factory(self)
+        if priors is None:
+            result = local_full_context(output, storage)
+        else:
+            result = local_full_context(output, storage, recent_tune_outputs=priors)
         assert result.recent_gate_exhaustions == []
 
     def test_surfaces_single_gate_exhaustion_when_only_one_populated(
         self, storage, gate_exhaustion
     ):
-        """Three recent outputs, only the middle one aborted → output list
+        """Three recent outputs, only the middle one aborted -> output list
         has length 1. Filtering must drop the None entries, not substitute
         placeholders."""
         from agent.schemas.hyperparam_tuning import GateExhaustionInfo
@@ -385,7 +378,7 @@ class TestLocalFullContextRecentGateExhaustionsAggregation:
     def test_preserves_oldest_first_order_for_multi_entry_aggregation(
         self, storage, gate_exhaustion
     ):
-        """Two populated outputs → list contains both in the same order the
+        """Two populated outputs -> list contains both in the same order the
         workflow passed them (oldest first). Order is load-bearing because
         the proposer renders each entry with a relative-iteration label."""
         output = make_interpretation_output(["punet"])
