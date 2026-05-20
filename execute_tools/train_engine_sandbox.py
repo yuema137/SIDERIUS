@@ -44,8 +44,8 @@ class TIDMADDataset(Dataset):
         fname_list: list,
         segmentation_size: int,
         sample_size: int = 20,
-        max_segments: int = None,
-        sample_set: dict = None,
+        max_segments: int | None = None,
+        sample_set: dict | None = None,
     ):
         self.filepath = fpath
         self.filelist = fname_list if isinstance(fname_list, list) else [fname_list]

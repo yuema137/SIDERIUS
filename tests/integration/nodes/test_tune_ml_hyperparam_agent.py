@@ -286,8 +286,8 @@ def run_one_loop(
     model_type: str,
     loss_cfg: dict,
     workspace: str,
-    model_cfg: dict = None,
-    train_cfg: dict = None,
+    model_cfg: dict | None = None,
+    train_cfg: dict | None = None,
 ) -> HyperparamTuningOutput:
     """
     Runs HyperparamTuningAgent.run() for 1 round with the given config.
@@ -596,8 +596,8 @@ def run_trial_to_formal(
     model_type: str,
     loss_cfg: dict,
     workspace: str,
-    model_cfg: dict = None,
-    train_cfg: dict = None,
+    model_cfg: dict | None = None,
+    train_cfg: dict | None = None,
 ) -> HyperparamTuningOutput:
     """
     Runs HyperparamTuningAgent.run() for 2 rounds in trial-allowed mode.

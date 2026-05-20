@@ -368,7 +368,7 @@ def score_vector(
     sample_set: SampleSet,
     anchor_map: dict | None = None,
     s_max: float | None = None,
-    denoised_filename_fn: callable = None,
+    denoised_filename_fn: callable | None = None,
     raw_data_dir: str | None = None,
     parallel: bool = True,
     num_workers: int = 8,
