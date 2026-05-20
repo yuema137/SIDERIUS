@@ -1,15 +1,16 @@
 """
 Unit tests for agent/schemas/protocols/ml_model_propose_to_ml_model_impl.py
 
+Parametrized to collapse one-attribute-per-test pass-through noise into
+a single multi-assertion baseline (matching the shape of the other
+protocols tests in this folder).
+
 Tests cover:
   local_full_spec
-    - Returns a valid ImplementorInput
-    - model_name passed through
-    - model_description passed through
-    - mathematical_definition passed through
-    - baseline_config passed through
-    - storage passed through
-    - plugin_dir and test_dir use ImplementorInput defaults
+    - Returns a valid ImplementorInput with every ProposalOutput field
+      threaded through (model_name, model_description,
+      mathematical_definition, baseline_config) plus storage pass-through
+    - plugin_dir and test_dir take their ImplementorInput schema defaults
 
   database_full_spec
     - Raises NotImplementedError
@@ -66,38 +67,33 @@ def proposal_output():
 
 class TestLocalFullSpec:
 
-    def test_returns_implementor_input(self, proposal_output, storage):
+    def test_baseline_pass_through_and_default_dirs(self, proposal_output, storage):
+        """Single multi-assertion baseline: every ProposalOutput field must
+        thread through to the matching ImplementorInput field, storage
+        round-trips intact, and the plugin_dir / test_dir fall back to
+        their ImplementorInput schema defaults. Replaces eight flat
+        single-assertion tests (returns_implementor_input,
+        model_name_passed_through, model_description_passed_through,
+        mathematical_definition_passed_through,
+        baseline_config_passed_through, storage_passed_through,
+        plugin_dir_is_default, test_dir_is_default)."""
         result = local_full_spec(proposal_output, storage)
+
         assert isinstance(result, ImplementorInput)
 
-    def test_model_name_passed_through(self, proposal_output, storage):
-        result = local_full_spec(proposal_output, storage)
+        # Every ProposalOutput field threads through unchanged.
         assert result.model_name == "gated_dilated_tcn"
-
-    def test_model_description_passed_through(self, proposal_output, storage):
-        result = local_full_spec(proposal_output, storage)
         assert result.model_description == proposal_output.model_description
-
-    def test_mathematical_definition_passed_through(self, proposal_output, storage):
-        result = local_full_spec(proposal_output, storage)
         assert result.mathematical_definition == proposal_output.mathematical_definition
-
-    def test_baseline_config_passed_through(self, proposal_output, storage):
-        result = local_full_spec(proposal_output, storage)
         assert result.baseline_config == proposal_output.baseline_config
 
-    def test_storage_passed_through(self, proposal_output, storage):
-        result = local_full_spec(proposal_output, storage)
+        # Storage round-trips intact.
         assert result.storage.backend == "local"
         assert result.storage.local.workspace == "/tmp/proto_test"
         assert result.storage.local.run_name == "r1"
 
-    def test_plugin_dir_is_default(self, proposal_output, storage):
-        result = local_full_spec(proposal_output, storage)
+        # plugin_dir / test_dir fall back to ImplementorInput schema defaults.
         assert result.plugin_dir == "agent_generated/models"
-
-    def test_test_dir_is_default(self, proposal_output, storage):
-        result = local_full_spec(proposal_output, storage)
         assert result.test_dir == "agent_generated/tests"
 
 
