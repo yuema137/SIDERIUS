@@ -19,7 +19,6 @@ from __future__ import annotations
 import importlib
 import socket
 import warnings
-from typing import Optional
 
 from core.server_configs._base import ServerConfig
 

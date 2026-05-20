@@ -47,15 +47,13 @@ def _is_time_axis_index(slice_node: ast.AST) -> bool:
     """Return True if the subscript index is 1 or -1."""
     if isinstance(slice_node, ast.Constant) and isinstance(slice_node.value, int):
         return slice_node.value in _TIME_AXIS_INDICES
-    if (
+    return (
         isinstance(slice_node, ast.UnaryOp)
         and isinstance(slice_node.op, ast.USub)
         and isinstance(slice_node.operand, ast.Constant)
         and isinstance(slice_node.operand.value, int)
         and -slice_node.operand.value in _TIME_AXIS_INDICES
-    ):
-        return True
-    return False
+    )
 
 
 def _references_time_dim(expr: ast.AST) -> bool:

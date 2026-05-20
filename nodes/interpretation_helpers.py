@@ -746,11 +746,8 @@ def should_recall_per_model(
 
     cached_best = cached_stats.get("best_denoising_score")
     new_best = getattr(current_iter_summary, "best_denoising_score", None)
-    if (
+    return (
         cached_best is not None
         and new_best is not None
         and abs(new_best - cached_best) >= score_delta_threshold
-    ):
-        return True
-
-    return False
+    )

@@ -1,4 +1,4 @@
-from typing import Literal, Union
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -286,9 +286,9 @@ class GatedFNOConfig(BaseConfig):
 
 
 # Update ModelConfigUnion
-ModelConfigUnion = Union[
-    PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, RNNSeq2SeqConfig, GatedFNOConfig
-]
+ModelConfigUnion = (
+    PUNetConfig | AEConfig | TransformerConfig | WaveNetConfig | RNNSeq2SeqConfig | GatedFNOConfig
+)
 
 # Update get_config_class mapping
 # "gated_fno": GatedFNOConfig
@@ -298,9 +298,9 @@ ModelConfigUnion = Union[
 # ==========================================
 
 # Union type for the Agent to choose from
-ModelConfigUnion = Union[
-    PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, RNNSeq2SeqConfig, GatedFNOConfig
-]
+ModelConfigUnion = (
+    PUNetConfig | AEConfig | TransformerConfig | WaveNetConfig | RNNSeq2SeqConfig | GatedFNOConfig
+)
 
 
 def get_config_class(model_type: str) -> type[BaseConfig] | None:

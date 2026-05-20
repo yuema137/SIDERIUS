@@ -37,7 +37,7 @@ def create_abra_file(file_name, array1, array2=None, indexed=True):
         end_idx = min(start_idx + N, len(array1))
 
         indexed_file_name = f"{os.path.splitext(file_name)[0]}_{i}.h5"  # NEW
-        if indexed == False:
+        if not indexed:
             indexed_file_name = f"{os.path.splitext(file_name)[0]}.h5"  # NEW
 
         # Create HDF5 file

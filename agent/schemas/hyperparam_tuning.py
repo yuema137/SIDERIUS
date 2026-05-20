@@ -11,7 +11,7 @@ Both are accepted wherever ExpertAdviceInput is used.
 
 from __future__ import annotations
 
-from typing import Any, Literal, Union
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -64,7 +64,7 @@ class ExpertAdvice(BaseModel):
 
 
 # Union type accepted wherever expert advice is expected
-ExpertAdviceInput = Union[str, ExpertAdvice]
+ExpertAdviceInput = str | ExpertAdvice
 
 
 def serialize_expert_advice(advice: ExpertAdviceInput) -> str:

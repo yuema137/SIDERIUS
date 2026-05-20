@@ -170,9 +170,7 @@ def _is_oom_failure(e: subprocess.CalledProcessError) -> bool:
     """
     if e.returncode == -9:
         return True
-    if e.stderr and _MEMORY_ERROR_RE.search(e.stderr):
-        return True
-    return False
+    return bool(e.stderr and _MEMORY_ERROR_RE.search(e.stderr))
 
 
 def _format_subprocess_error(e: subprocess.CalledProcessError, label: str = "Subprocess") -> str:
