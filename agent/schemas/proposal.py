@@ -404,6 +404,27 @@ class ResearchPolicy(BaseModel):
                     "(positive contribution when present vs absent).",
     )
 
+    # --- Proposer stage-output management (C6.2 / Rev 8.6) ---
+    comparative_analysis_top_k: int = Field(
+        default=5, ge=1,
+        description="Maximum number of ModelComparison entries retained in "
+                    "DiscoveryMemo.comparative_analysis when the comparison "
+                    "stage output is rendered into a downstream proposer "
+                    "user prompt. Entries are sorted by recency desc, "
+                    "tie-broken by best_score desc, then sliced to top_k. "
+                    "Caps the linear growth of prior_stage_outputs across "
+                    "iterations (see audit doc §8 Commit 6.2).",
+    )
+    prior_stage_max_chars: int = Field(
+        default=4000, ge=1,
+        description="Maximum chars per string value inside any non-input "
+                    "stage output dict before the JSON-safe backstop "
+                    "middle-truncates it. Catches future stages that may "
+                    "emit large raw strings; the Top-K clamp on "
+                    "comparative_analysis covers the current dominant "
+                    "growth driver.",
+    )
+
 
 class ReasoningPipelineConfig(BaseModel):
     """Configurable reasoning pipeline. Lives at the workflow level."""

@@ -517,6 +517,24 @@ class TestResearchPolicy:
         assert policy.vocab_stagnation_threshold == 0.1
         assert policy.min_runs_for_promotion == 3
         assert policy.require_positive_delta is True
+        assert policy.comparative_analysis_top_k == 5
+        assert policy.prior_stage_max_chars == 4000
+
+    def test_stage_output_knobs_custom(self):
+        policy = ResearchPolicy(
+            comparative_analysis_top_k=10,
+            prior_stage_max_chars=8000,
+        )
+        assert policy.comparative_analysis_top_k == 10
+        assert policy.prior_stage_max_chars == 8000
+
+    def test_comparative_analysis_top_k_floor(self):
+        with pytest.raises(ValidationError):
+            ResearchPolicy(comparative_analysis_top_k=0)
+
+    def test_prior_stage_max_chars_floor(self):
+        with pytest.raises(ValidationError):
+            ResearchPolicy(prior_stage_max_chars=0)
 
     def test_high_risk_policy(self):
         policy = ResearchPolicy(
