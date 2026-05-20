@@ -57,11 +57,28 @@ FAKE_SYNTHESIS_RESPONSE = {
     "take_home_message": "Synthesised conclusion across all models.",
 }
 
+# Commit 6.3 adds a third LLM call site — the cache consolidator's
+# list-merge. Active-cache-hit dispatch in the agent invokes
+# ``bridge.generate`` with the consolidator's system prompt for each
+# non-empty (prior, new) list field. We return a minimal valid
+# ``_MergeDecision`` JSON: one survivor (the first new statement) and an
+# empty archive. The actual merge semantics are pinned by Commit 6.3's own
+# unit tests; here we just need a schema-valid response so the dispatcher's
+# call-count assertions stay clean.
+FAKE_LIST_MERGE_RESPONSE = {
+    "survivors": [
+        {"statement": "consolidated", "evidence_iters": [1], "strength": "moderate"},
+    ],
+    "archived": [],
+}
+
 
 def _llm_dispatch(system_prompt: str, user_prompt: str, **kwargs) -> dict:
     """Route mock LLM calls to the right fake response."""
     if "ONE model architecture" in system_prompt:
         return FAKE_PER_MODEL_RESPONSE
+    if "semantic merge engine" in system_prompt:
+        return FAKE_LIST_MERGE_RESPONSE
     return FAKE_SYNTHESIS_RESPONSE
 
 
@@ -197,8 +214,17 @@ def test_per_model_call_count_equals_active_set_size(agent, tmp_path):
     assert len(synthesis_calls) == 1, (
         f"expected exactly 1 synthesis call, got {len(synthesis_calls)}"
     )
-    # Defensive: total call count is exactly 4.
-    assert agent.bridge.generate.call_count == 4
+    # Commit 6.3: each active-cache-hit also invokes the consolidator's
+    # list-merge for both non-empty list fields (key_findings + bottlenecks)
+    # = 2 calls per active model. Total: 3 per_model + 3×2 consolidator + 1
+    # synthesis = 10.
+    consolidator_calls = [c for c in calls
+                          if c.kwargs.get("label") == "cache_consolidator.list_merge"]
+    assert len(consolidator_calls) == 6, (
+        f"expected 6 consolidator list-merge calls (2 per active model), "
+        f"got {len(consolidator_calls)}"
+    )
+    assert agent.bridge.generate.call_count == 10
 
 
 # ---------------------------------------------------------------------------
