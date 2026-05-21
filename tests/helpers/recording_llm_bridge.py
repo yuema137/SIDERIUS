@@ -57,8 +57,18 @@ class RecordingLLMBridge:
     # Public LLM-call interface (mirrors LLMBridge)
     # ------------------------------------------------------------------
 
-    def generate(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
-        """Mirror of :meth:`LLMBridge.generate`. Returns a parsed-dict response."""
+    def generate(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Mirror of :meth:`LLMBridge.generate`. Returns a parsed-dict response.
+
+        ``**kwargs`` swallows real-bridge keyword args (``label``, ``components``,
+        and any future optional kwarg) so adding telemetry/labeling parameters
+        to the real bridge doesn't require touching every test fixture.
+        """
         self.calls.append(("generate", system_prompt, user_prompt))
         return self._pop("generate")
 
