@@ -39,6 +39,7 @@ from typing import Any, ClassVar, TypedDict, cast
 
 from dotenv import load_dotenv
 from openai import OpenAI
+from openai.types.chat import ChatCompletionMessageFunctionToolCall
 from pydantic import ValidationError
 
 from agent.prompts import (
@@ -1357,7 +1358,24 @@ class LLMBridge:
                         f"trailing data after valid JSON (model={model_name}).",
                         flush=True,
                     )
-                return decoded
+                # Type-system proof: ``attempt_status == "ok"`` is set
+                # exclusively in the ``isinstance(decoded, (dict, list))``
+                # branch above (L1332-1337), so ``decoded`` is provably
+                # ``dict | list`` here. The assert restates the invariant
+                # for pyright; it cannot fire at runtime under the existing
+                # code flow.
+                #
+                # The trailing ``cast(dict, decoded)`` is a deliberate
+                # type-lie that quarantines a long-standing contract
+                # mismatch: the signature says ``-> dict`` but the runtime
+                # explicitly accepts top-level JSON arrays (the ``list``
+                # branch at L1332). Widening the signature would propagate
+                # the union into every downstream caller of ``generate()``
+                # / ``reflect()`` and create new errors. Identity at
+                # runtime — ``decoded`` is returned verbatim, so lists
+                # still flow through untouched.
+                assert isinstance(decoded, (dict, list))
+                return cast(dict, decoded)
 
             # Content-level failure — retry if budget remains.
             if attempt < self._CONTENT_RETRY_BUDGET:
@@ -1480,7 +1498,15 @@ class LLMBridge:
             components=components,
             extra={"attempt": 0, "status": "ok"},
         )
-        return response.choices[0].message.content.strip()
+        # Pure type-system shim. ``message.content`` is ``Optional[str]``
+        # per the OpenAI SDK; an ``AttributeError`` on a ``None`` payload
+        # is the *intended* fail-fast signal that the workflow-level
+        # ``except Exception`` envelope (model_exploration.py L1211) uses
+        # to mark the proposer/implementor attempt failed and retry with
+        # a fresh proposal. Catching it locally would feed an empty string
+        # downstream and starve that retry signal — see Phase 2b envelope
+        # audit. Cast preserves the existing crash behavior verbatim.
+        return cast(str, response.choices[0].message.content).strip()
 
     def tool_call(
         self,
@@ -1555,10 +1581,18 @@ class LLMBridge:
             )
 
         tc = message.tool_calls[0]
+        # SDK ``tool_calls`` is typed as a union of
+        # ``ChatCompletionMessageFunctionToolCall`` (has ``.function``) and
+        # ``ChatCompletionMessageCustomToolCall`` (has ``.custom`` instead).
+        # SIDERIUS never registers custom tools — every ``tools=`` payload
+        # built by ``SkillSpec.to_openai_tool()`` is function-typed, so the
+        # API always returns the function variant. Cast is a pure
+        # type-system shim — no runtime change.
+        tc_fn = cast(ChatCompletionMessageFunctionToolCall, tc)
         return ToolCallResult(
-            name=tc.function.name,
-            arguments=json.loads(tc.function.arguments),
-            call_id=tc.id,
+            name=tc_fn.function.name,
+            arguments=json.loads(tc_fn.function.arguments),
+            call_id=tc_fn.id,
         )
 
 
