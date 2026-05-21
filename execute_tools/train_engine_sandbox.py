@@ -4,6 +4,7 @@ import json
 import os
 import random
 import sys
+from typing import Any, cast
 
 import h5py
 import numpy as np
@@ -17,6 +18,22 @@ from ml_models.models_format_sandbox import LossConfig, TrainConfig, get_config_
 
 # Import your sandboxed components
 from ml_models.models_sandbox import MODEL_REGISTRY
+
+
+def _h5_dataset(f: h5py.File, *path: str) -> h5py.Dataset:
+    """Type-only helper: walk an HDF5 path and narrow the final node to Dataset.
+
+    h5py stubs declare ``__getitem__`` as ``Group | Dataset | Datatype``,
+    which makes pyright reject chained indexing even though every site here
+    ends on a real Dataset at runtime. The walk uses ``Any`` to short-circuit
+    the union; the final ``cast`` records the invariant the call site relies
+    on. Pure type-system shim — identical runtime semantics to ``f[a][b][c]``.
+    """
+    node: Any = f
+    for k in path:
+        node = node[k]
+    return cast(h5py.Dataset, node)
+
 
 # ==========================================
 # 1. Dataset Logic
@@ -85,8 +102,12 @@ class TIDMADDataset(Dataset):
             if not os.path.exists(file_path):
                 continue
             with h5py.File(file_path, "r") as f:
-                alltrain = np.array(f["timeseries"]["channel0001"]["timeseries"]).astype(np.int8)
-                alltarget = np.array(f["timeseries"]["channel0002"]["timeseries"]).astype(np.int16)
+                alltrain = np.array(
+                    _h5_dataset(f, "timeseries", "channel0001", "timeseries")
+                ).astype(np.int8)
+                alltarget = np.array(
+                    _h5_dataset(f, "timeseries", "channel0002", "timeseries")
+                ).astype(np.int16)
                 num_segments = len(alltrain) // (self.sample_size * self.seg_size)
                 random_offset = np.random.randint(0, self.sample_size)
                 self.idict[filename] = alltrain[
@@ -126,8 +147,12 @@ class TIDMADDataset(Dataset):
                 continue
 
             with h5py.File(file_path, "r") as f:
-                raw_ch1 = np.array(f["timeseries"]["channel0001"]["timeseries"]).astype(np.int8)
-                raw_ch2 = np.array(f["timeseries"]["channel0002"]["timeseries"]).astype(np.int16)
+                raw_ch1 = np.array(
+                    _h5_dataset(f, "timeseries", "channel0001", "timeseries")
+                ).astype(np.int8)
+                raw_ch2 = np.array(
+                    _h5_dataset(f, "timeseries", "channel0002", "timeseries")
+                ).astype(np.int16)
 
             # Extract only the requested PSD segments and reshape to ML segments
             input_chunks = []
@@ -186,8 +211,8 @@ class TIDMADSingleFileDataset(Dataset):
         chunks_ch1, chunks_ch2 = [], []
 
         with h5py.File(file_path, "r") as f:
-            ch1 = f["timeseries"]["channel0001"]["timeseries"]
-            ch2 = f["timeseries"]["channel0002"]["timeseries"]
+            ch1 = _h5_dataset(f, "timeseries", "channel0001", "timeseries")
+            ch2 = _h5_dataset(f, "timeseries", "channel0002", "timeseries")
             for psd_idx in psd_segment_indices:
                 start = psd_idx * PSD_SEGMENT_LENGTH
                 end = start + PSD_SEGMENT_LENGTH
@@ -264,8 +289,8 @@ class TIDMADEpochDataset(Dataset):
                 segments = scope_segments
 
             with h5py.File(file_path, "r") as f:
-                ch1 = f["timeseries"]["channel0001"]["timeseries"]
-                ch2 = f["timeseries"]["channel0002"]["timeseries"]
+                ch1 = _h5_dataset(f, "timeseries", "channel0001", "timeseries")
+                ch2 = _h5_dataset(f, "timeseries", "channel0002", "timeseries")
                 for psd_idx in segments:
                     start = psd_idx * PSD_SEGMENT_LENGTH
                     end = start + PSD_SEGMENT_LENGTH

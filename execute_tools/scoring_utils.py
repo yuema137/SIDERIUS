@@ -34,12 +34,37 @@ import gc
 import math
 import os
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import h5py
 import numpy as np
 
 from execute_tools.dataset_config import NUM_FILES, SEGMENT_LENGTH, SEGMENTS_PER_FILE
+
+
+def _h5_dataset(f: h5py.File, *path: str) -> h5py.Dataset:
+    """Type-only helper: walk an HDF5 path and narrow the final node to Dataset.
+
+    h5py stubs declare ``__getitem__`` as ``Group | Dataset | Datatype``,
+    which makes pyright reject chained indexing even though every site here
+    ends on a real Dataset. Pure type-system shim — identical runtime
+    semantics to ``f[a][b][c]``.
+    """
+    node: Any = f
+    for k in path:
+        node = node[k]
+    return cast(h5py.Dataset, node)
+
+
+def _h5_group(f: h5py.File, *path: str) -> h5py.Group:
+    """Type-only helper: walk an HDF5 path and narrow the final node to Group
+    (used at sites that read ``.attrs[...]`` metadata). Pure type-system shim.
+    """
+    node: Any = f
+    for k in path:
+        node = node[k]
+    return cast(h5py.Group, node)
+
 
 # ---------------------------------------------------------------------------
 # Core functions
@@ -92,9 +117,11 @@ def get_one_sec_psd(
     file = file_list[file_num]
     with h5py.File(file, "r") as h5f:
         channel_key = f"channel{ch:04d}"
-        data = h5f["timeseries"][channel_key]["timeseries"][start_index : start_index + N]
-        volt_range = h5f["timeseries"]["channel0001"].attrs["voltage_range_mV"]
-        sampling_freq = h5f["timeseries"]["channel0001"].attrs["sampling_frequency"]
+        data = _h5_dataset(h5f, "timeseries", channel_key, "timeseries")[
+            start_index : start_index + N
+        ]
+        volt_range = _h5_group(h5f, "timeseries", "channel0001").attrs["voltage_range_mV"]
+        sampling_freq = _h5_group(h5f, "timeseries", "channel0001").attrs["sampling_frequency"]
 
         scaling = np.float32(volt_range / (2 * 128.0))
         TS = np.array(data, dtype=np.float32) * scaling

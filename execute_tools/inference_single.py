@@ -3,6 +3,7 @@ import gc
 import json
 import os
 import time
+from typing import Any, cast
 
 import h5py
 import numpy as np
@@ -17,6 +18,20 @@ from ml_models.models_format_sandbox import get_config_class
 from ml_models.models_sandbox import MODEL_REGISTRY
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+
+def _h5_dataset(f: h5py.File, *path: str) -> h5py.Dataset:
+    """Type-only helper: walk an HDF5 path and narrow the final node to Dataset.
+
+    h5py stubs declare ``__getitem__`` as ``Group | Dataset | Datatype``,
+    which makes pyright reject chained indexing even though every site here
+    ends on a real Dataset at runtime. Pure type-system shim — identical
+    runtime semantics to ``f[a][b][c]``.
+    """
+    node: Any = f
+    for k in path:
+        node = node[k]
+    return cast(h5py.Dataset, node)
 
 
 def _assert_training_sentinel(model_path: str, exp_id: str) -> None:
@@ -221,8 +236,8 @@ def main():
             # array that survives the context exit, which is what we
             # concatenate below.
             with h5py.File(fpath, "r") as ABRAfile:
-                ds_ch1 = ABRAfile["timeseries"]["channel0001"]["timeseries"]
-                ds_ch2 = ABRAfile["timeseries"]["channel0002"]["timeseries"]
+                ds_ch1 = _h5_dataset(ABRAfile, "timeseries", "channel0001", "timeseries")
+                ds_ch2 = _h5_dataset(ABRAfile, "timeseries", "channel0002", "timeseries")
 
                 total_psd_segments = ds_ch1.shape[0] // PSD_SEGMENT_LENGTH
 
@@ -313,8 +328,8 @@ def main():
             raise FileNotFoundError(f"Validation data missing at {fpath}")
 
         with h5py.File(fpath, "r") as ABRAfile:
-            alltrain = np.array(ABRAfile["timeseries"]["channel0001"]["timeseries"])
-            alltarget = np.array(ABRAfile["timeseries"]["channel0002"]["timeseries"])
+            alltrain = np.array(_h5_dataset(ABRAfile, "timeseries", "channel0001", "timeseries"))
+            alltarget = np.array(_h5_dataset(ABRAfile, "timeseries", "channel0002", "timeseries"))
 
             # Reshape according to input_size from config
             train_loader = alltrain.reshape(-1, 1, input_size)
