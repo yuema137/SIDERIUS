@@ -38,6 +38,7 @@ All node calls are mocked — these tests validate:
     - Creates tuning/ directory within iterations
 """
 
+import importlib
 import json
 import os
 from unittest.mock import MagicMock, call, patch
@@ -1291,38 +1292,30 @@ class TestAddPluginToRegistries:
         _add_plugin_to_registries(classifier_plugin_file)
         assert get_output_type("test_classifier_plugin_c6") == "classifier"
 
-    def test_bare_name_mirror_when_both_modules_loaded(
+    def test_no_bare_module_identity_after_package_refactor(
         self, classifier_plugin_file, clean_registries
     ):
-        """When ``ml_models/`` is on sys.path, bare and packaged imports of
-        ``models_format_sandbox`` resolve to distinct module objects with
-        separate registry dicts. The helper must mirror to both."""
-        # workflows/model_exploration.py adds ml_models/ to sys.path at import
-        # time, so the bare identity is already resolvable. Force the bare
-        # module to load if it hasn't yet, then sanity-check identities differ.
-        import importlib
+        """Post-package-refactor invariant: there is no bare
+        ``models_format_sandbox`` module identity to mirror to. The editable
+        install exposes ``ml_models`` as a proper package, so the legacy
+        ``sys.path`` insert that used to surface a duplicate bare module has
+        been removed and ``_add_plugin_to_registries`` no longer needs a
+        dual-mirror branch."""
+        import sys
 
-        bare = importlib.import_module("models_format_sandbox")
+        assert sys.modules.get("models_format_sandbox") is None, (
+            "package refactor invariant violated: a bare "
+            "`models_format_sandbox` module identity was found in "
+            "sys.modules. The dual-module workaround was removed; only the "
+            "fully-qualified `ml_models.models_format_sandbox` should exist."
+        )
+
         pkg = importlib.import_module("ml_models.models_format_sandbox")
-
-        if bare is pkg:
-            pytest.skip(
-                "bare and packaged identities resolved to same module object — "
-                "mirror behaviour is a no-op in this environment"
-            )
-
-        # Wipe the bare side too so we can detect the mirror update.
-        bare.PLUGIN_CONFIG_REGISTRY.pop("test_classifier_plugin_c6", None)
+        pkg.PLUGIN_CONFIG_REGISTRY.pop("test_classifier_plugin_c6", None)
 
         _add_plugin_to_registries(classifier_plugin_file)
 
-        assert "test_classifier_plugin_c6" in bare.PLUGIN_CONFIG_REGISTRY
         assert "test_classifier_plugin_c6" in pkg.PLUGIN_CONFIG_REGISTRY
-        # Same class object on both sides.
-        assert (
-            bare.PLUGIN_CONFIG_REGISTRY["test_classifier_plugin_c6"]
-            is pkg.PLUGIN_CONFIG_REGISTRY["test_classifier_plugin_c6"]
-        )
 
 
 class TestRegisterPluginUsesHelper:

@@ -61,18 +61,10 @@ import gc
 import json
 import os
 import shutil
-import sys
 import time
 from collections import deque
 from collections.abc import Callable
 from contextlib import suppress
-
-# Ensure SIDERIUS root and ml_models/ are importable.
-# ml_models/ uses flat internal imports (e.g. from models_format_sandbox import ...)
-# which require ml_models/ on sys.path.
-SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, SIDERIUS_ROOT)
-sys.path.insert(0, os.path.join(SIDERIUS_ROOT, "ml_models"))
 
 from agent.schemas.hyperparam_tuning import (
     GateExhaustionInfo,
@@ -96,6 +88,8 @@ from nodes.result_interpretation_agent import (
     tuning_output_to_model_run_summary,
 )
 from workflows.llm_config import ProposalLLMConfig, WorkflowLLMConfig
+
+SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _load_vocab_seed() -> list:
@@ -405,30 +399,24 @@ def _cap_knowledge_cache(
 def _add_plugin_to_registries(plugin_path: str) -> str | None:
     """Register a single plugin file in every in-process registry surface.
 
-    Updates four surfaces so the tuner's planner (running in the same process
+    Updates three surfaces so the tuner's planner (running in the same process
     as this workflow) can resolve the new model_type for both training and
     inference without a re-scan:
 
       1. ``ml_models.models_sandbox.MODEL_REGISTRY``
          — model_type → model class
       2. ``ml_models.models_format_sandbox.PLUGIN_CONFIG_REGISTRY``
-         — model_type → config class (packaged identity)
-      3. Bare-name mirror at ``models_format_sandbox.PLUGIN_CONFIG_REGISTRY``
-         — same mapping under the bare module identity used by the training
-         subprocess (``execute_tools/train_engine_sandbox.py``) and inference
-         (``execute_tools/inference_single.py``). When ``ml_models/`` is on
-         ``sys.path``, bare and packaged imports resolve to *distinct* module
-         objects with separate registry dicts; missing this mirror caused
-         silent ``Unknown model_type`` failures pre-Phase-6.8 (see
-         ``ml_models/models_sandbox.py:660-673``).
-      4. ``ml_models.plugin_loader.PLUGIN_OUTPUT_TYPE_REGISTRY``
+         — model_type → config class
+      3. ``ml_models.plugin_loader.PLUGIN_OUTPUT_TYPE_REGISTRY``
          — model_type → "classifier" | "regressor" | "hybrid", driving
          classifier-vs-regressor routing in scoring + inference.
 
-    The pre-Commit-6 implementation (``workflows/model_exploration.py:381-392``)
-    only updated surfaces 1 and 2, leaving 3 and 4 unset. Regressor plugins
-    were therefore miscategorised as classifiers, and any subprocess that
-    imported via the bare module identity could not find the config class.
+    After the 2026-05 package refactor every import resolves through the
+    qualified ``ml_models.*`` path, so there is a single canonical module
+    identity for each registry. The historical bare-name mirror that
+    previously protected the training subprocess from the duplicate-module
+    bug (see ``ml_models/models_sandbox.py`` history pre-package-migration)
+    is no longer required and has been removed.
 
     Args:
         plugin_path: filesystem path to the plugin ``.py`` file.
@@ -450,11 +438,6 @@ def _add_plugin_to_registries(plugin_path: str) -> str | None:
     MODEL_REGISTRY[model_type] = plugin_data["model_class"]
     PLUGIN_CONFIG_REGISTRY[model_type] = plugin_data["config_class"]
     PLUGIN_OUTPUT_TYPE_REGISTRY[model_type] = plugin_data["output_type"]
-
-    bare = sys.modules.get("models_format_sandbox")
-    pkg = sys.modules.get("ml_models.models_format_sandbox")
-    if bare is not None and pkg is not None and bare is not pkg:
-        bare.PLUGIN_CONFIG_REGISTRY[model_type] = plugin_data["config_class"]
 
     return model_type
 
