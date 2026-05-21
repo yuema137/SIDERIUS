@@ -13,6 +13,7 @@ from __future__ import annotations
 import warnings
 
 import pytest
+from pydantic import ValidationError
 
 import core.server_configs as sc
 from core.server_configs import ServerConfig, get_server_config
@@ -74,19 +75,19 @@ class TestGetServerConfig:
 
 class TestServerConfigSchema:
     def test_rejects_nonpositive_per_segment(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ServerConfig(hostname="x", per_psd_segment_seconds=0.0)
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ServerConfig(hostname="x", per_psd_segment_seconds=-0.5)
 
     def test_rejects_empty_hostname(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ServerConfig(hostname="", per_psd_segment_seconds=0.5)
 
     def test_rejects_extra_fields(self):
         """Typos in a server file should be a validation error, not
         silently ignored."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ServerConfig(
                 hostname="x",
                 per_psd_segment_seconds=0.5,
@@ -95,5 +96,5 @@ class TestServerConfigSchema:
 
     def test_frozen(self):
         cfg = ServerConfig(hostname="x", per_psd_segment_seconds=0.5)
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             cfg.hostname = "y"

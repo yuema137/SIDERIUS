@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from pydantic import ValidationError
 
 from core.hardware_context import (
     _SAFETY_FRACTION,
@@ -42,7 +43,7 @@ def _make_ctx(**overrides) -> HardwareContext:
 
 def test_schema_is_frozen():
     ctx = _make_ctx()
-    with pytest.raises(Exception):  # pydantic raises ValidationError on frozen writes
+    with pytest.raises(ValidationError):  # frozen-model attr write
         ctx.device_name = "CHANGED"
 
 

@@ -10,6 +10,7 @@ import json
 from datetime import UTC, datetime, timezone
 
 import pytest
+from pydantic import ValidationError
 
 import core.hardware_context as hc
 from core.hardware_context import (
@@ -84,7 +85,7 @@ def test_load_manifest_raises_on_missing_fields(tmp_path):
     the only caller allowed to swallow this."""
     path = tmp_path / "hw.json"
     path.write_text(json.dumps({"device_name": "only-this-field"}))
-    with pytest.raises(Exception):  # pydantic ValidationError
+    with pytest.raises(ValidationError):
         load_manifest(path)
 
 

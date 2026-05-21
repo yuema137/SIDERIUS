@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from agent.skills.evaluate_vram_skill import killer_report
 from agent.skills.evaluate_vram_skill.compute_intensity import _MAX_BATCH_TIMESTEPS
@@ -339,7 +340,7 @@ def test_combined_suggestion_concatenates_both_halves():
 
 def test_memory_killer_details_is_frozen():
     d = MemoryKillerDetails(binding_cap="vram")
-    with pytest.raises(Exception):  # pydantic ValidationError on frozen write
+    with pytest.raises(ValidationError):  # frozen-model attr write
         d.binding_cap = "compute_intensity"
 
 
@@ -349,7 +350,7 @@ def test_killer_report_is_frozen():
         memory_killer=MemoryKillerDetails(binding_cap="vram"),
         suggestion="y",
     )
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):  # frozen-model attr write
         r.verdict = "z"
 
 

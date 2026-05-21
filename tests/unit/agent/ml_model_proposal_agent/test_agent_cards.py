@@ -9,6 +9,7 @@ dedup and sorting), and F.8 (local_full_context mindset/agent_cards params).
 """
 
 import pytest
+from pydantic import ValidationError
 
 from agent.prompt_templates.proposal import render_agent_cards, render_expert_context
 from agent.schemas.proposal import AgentCard, ProposalInput, VocabEntry
@@ -60,19 +61,19 @@ class TestAgentCard:
         assert card.trust_guidance.startswith("Treat as")
 
     def test_role_max_length_enforced(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             _make_card(role="x" * 201)
 
     def test_expertise_domain_max_length_enforced(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             _make_card(expertise_domain="x" * 301)
 
     def test_trust_guidance_max_length_enforced(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             _make_card(trust_guidance="x" * 401)
 
     def test_missing_required_field_raises(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             AgentCard(
                 role="r",
                 expertise_domain="e",
