@@ -368,8 +368,13 @@ def run_experiment(
         model = model_class(model_cfg).to(device)
 
     # Criterion Setup
+    # `DataLoader.dataset` is typed `Dataset[Unknown]` in torch stubs, but
+    # every caller in this engine wraps a `TIDMADDataset` (the only one
+    # exposing `get_class_weight`). Cast is a pure type-system shim.
     class_weights = (
-        data_loader.dataset.get_class_weight().to(device) if loss_cfg.use_class_weights else None
+        cast(TIDMADDataset, data_loader.dataset).get_class_weight().to(device)
+        if loss_cfg.use_class_weights
+        else None
     )
     criterion = get_criterion(loss_cfg, class_weights)
 

@@ -17,7 +17,7 @@ Node contract:
 import argparse
 import json
 import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import ValidationError
 
@@ -1081,7 +1081,11 @@ class ResultInterpretationAgent:
                     vocab_diversity_ratio=prior_vocab_diversity_ratio,
                     cumulative_information_gain=prior_cumulative_info_gain,
                     compressed_model_types=compressed_set,
-                    workspace=inp.storage.local.workspace,
+                    # Cast is a pure type-system shim: at every caller of
+                    # this synthesis branch, `storage.backend == "local"` and
+                    # `storage.local` is populated. Avoids re-declaring the
+                    # invariant as a runtime guard.
+                    workspace=cast(LocalStorageConfig, inp.storage.local).workspace,
                 )
                 synthesis_response = self.bridge.generate(
                     SYNTHESIS_SYSTEM_PROMPT,

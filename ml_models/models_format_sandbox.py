@@ -8,8 +8,17 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class BaseConfig(BaseModel):
-    """General config"""
+    """General config — abstract base for every concrete model config.
 
+    Every concrete subclass overrides ``model_type`` with a literal string
+    (e.g. ``Literal["punet"] = "punet"``) that doubles as the discriminator
+    for the ``MODEL_REGISTRY`` lookup. ``BaseConfig`` itself is not
+    instantiated directly; the field is declared at the parent so static
+    checkers can resolve ``cfg.model_type`` against an abstract
+    ``BaseConfig`` reference without resorting to ``cast`` or ``getattr``.
+    """
+
+    model_type: str
     segmentation_size: int = Field(default=40000, ge=1000, description="Input time series length")
     batch_size: int = Field(default=1, ge=1)
 
