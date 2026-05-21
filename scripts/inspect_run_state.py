@@ -56,12 +56,8 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
-
-from agent.schemas.hyperparam_tuning import HyperparamTuningOutput  # noqa: E402
-from core.resume import ResumeError, validate_workspace_layout  # noqa: E402
+from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
+from core.resume import ResumeError, validate_workspace_layout
 
 _RUN_ITER_RE = re.compile(r"^iteration_(\d+)$")
 _CHAIN_ITER_RE = re.compile(r"^iter_(\d+)$")

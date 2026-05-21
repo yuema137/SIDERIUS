@@ -17,18 +17,12 @@ from __future__ import annotations
 
 import io
 import json
-import sys
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import pytest
 
-# Ensure the repo root is on sys.path before importing the script under test.
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
-
-from scripts import inspect_run_state as ins  # noqa: E402
+from scripts import inspect_run_state as ins
 
 # ---------------------------------------------------------------------------
 # Fixture builders

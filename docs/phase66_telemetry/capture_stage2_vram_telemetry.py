@@ -48,15 +48,6 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-# SIDERIUS's sandbox model modules use flat (non-packaged) imports among
-# themselves (e.g. loss_models_sandbox.py does ``from models_format_sandbox
-# import LossConfig``). Add both the repo root and ml_models/ to sys.path so
-# our imports resolve whether the script is run from the repo root or from
-# a different cwd.
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(_REPO_ROOT))
-sys.path.insert(0, str(_REPO_ROOT / "ml_models"))
-
 import torch
 import torch.nn as nn
 

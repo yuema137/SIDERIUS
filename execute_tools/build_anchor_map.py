@@ -27,12 +27,8 @@ import argparse
 import concurrent.futures
 import json
 import os
-import sys
 
 from tqdm import tqdm
-
-# Add project root to path so we can import scoring_utils
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from execute_tools.scoring_utils import (
     NUM_FILES,

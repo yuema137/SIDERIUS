@@ -33,12 +33,6 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-# Repo root must be on sys.path before importing agent.* so this harness
-# is runnable as a bare ``python harness.py`` subprocess (no PYTHONPATH
-# inheritance assumed). parents[3] = tests/integration/runner → tests →
-# repo root.
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-
 from agent.llm_bridge import LLMBridge
 from agent.schemas.telemetry import LLMBridgeContextError
 

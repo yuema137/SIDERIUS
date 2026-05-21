@@ -36,20 +36,17 @@ import sys
 import traceback
 import warnings
 from datetime import UTC, datetime
-
-# Ensure SIDERIUS root is importable
-SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, SIDERIUS_ROOT)
-sys.path.insert(0, os.path.join(SIDERIUS_ROOT, "ml_models"))
+from pathlib import Path
 
 from dotenv import load_dotenv
-
-load_dotenv()
 
 from agent.schemas.telemetry import LLMBridgeContextError
 from core.resume import ResumeError, restore_prior_state
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.model_exploration import run_workflow
+
+SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(dotenv_path=Path(SIDERIUS_ROOT) / ".env")
 
 
 def _positive_int(s: str) -> int:

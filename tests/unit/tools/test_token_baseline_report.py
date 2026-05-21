@@ -20,11 +20,8 @@ from typing import Any
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(REPO_ROOT))
-
-from agent.schemas.telemetry import TokenUsageRow  # noqa: E402
-from tools.build_token_baseline_report import (  # noqa: E402
+from agent.schemas.telemetry import TokenUsageRow
+from tools.build_token_baseline_report import (
     DEFAULT_RATE_COMPLETION,
     DEFAULT_RATE_PROMPT,
     BloatAlert,
@@ -39,6 +36,8 @@ from tools.build_token_baseline_report import (  # noqa: E402
     render_baseline_report,
     render_top3_bloat_report,
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # ---------------------------------------------------------------------------
 # Helpers — synthetic row factory

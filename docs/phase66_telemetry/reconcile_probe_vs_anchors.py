@@ -33,10 +33,6 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(_REPO_ROOT))
-sys.path.insert(0, str(_REPO_ROOT / "ml_models"))
-
 import torch
 import torch.nn as nn
 
@@ -45,6 +41,8 @@ from agent.skills.evaluate_vram_skill.structural_probe import (
 )
 from ml_models.loss_models_sandbox import FocalLoss1D
 from ml_models.models_format_sandbox import LossConfig
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # ── Stage 2 iter_001 attempt_003 configs (inlined, same as telemetry) ─────
 

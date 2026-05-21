@@ -40,11 +40,10 @@ from typing import Any
 
 import numpy as np
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT))
+from agent.schemas.telemetry import TokenUsageRow
+from tools.validate_token_usage_jsonl import lint as lint_jsonl
 
-from agent.schemas.telemetry import TokenUsageRow  # noqa: E402
-from tools.validate_token_usage_jsonl import lint as lint_jsonl  # noqa: E402
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 DEFAULT_RATE_PROMPT = 10.0  # USD per 1M prompt tokens (gpt-5.4 placeholder)
 DEFAULT_RATE_COMPLETION = 30.0  # USD per 1M completion tokens

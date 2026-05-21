@@ -45,13 +45,8 @@ import argparse
 import json
 import math
 import os
-import sys
 from datetime import datetime
 
-# Allow ``python compute_ground_truth.py`` from the repo root to import the
-# coercion helper without requiring ``-m``. (compute_raw_baseline does the
-# same.)
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from execute_tools.scoring_utils import coerce_nonfinite_to_none
 
 # ---------------------------------------------------------------------------

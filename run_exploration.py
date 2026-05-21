@@ -12,12 +12,6 @@ Usage:
 """
 
 import os
-import sys
-
-# Ensure SIDERIUS root is importable
-SIDERIUS_ROOT = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, SIDERIUS_ROOT)
-sys.path.insert(0, os.path.join(SIDERIUS_ROOT, "ml_models"))
 
 from execute_tools.data_paths import SIDERIUS_DATA_DIR
 from workflows.llm_config import NodeLLMConfig, WorkflowLLMConfig

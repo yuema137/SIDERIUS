@@ -31,11 +31,6 @@ import os
 import subprocess
 import sys
 import time
-
-# Ensure SIDERIUS root is importable regardless of where script is invoked from
-SIDERIUS_ROOT = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, SIDERIUS_ROOT)
-
 from datetime import UTC
 
 from core.sandbox_executor import TidmadSandbox
@@ -44,6 +39,7 @@ from execute_tools.data_paths import SIDERIUS_DATA_DIR, TIDMAD_DATA_DIR
 from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_utils import score_vector
 
+SIDERIUS_ROOT = os.path.dirname(os.path.abspath(__file__))
 ROOT_DATA_DIR = SIDERIUS_DATA_DIR
 DATA_DIR = TIDMAD_DATA_DIR
 LEGACY_CONFIGS_PATH = os.path.join(SIDERIUS_ROOT, "ml_models", "legacy_baseline_configs.json")

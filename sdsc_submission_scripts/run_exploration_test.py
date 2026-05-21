@@ -19,23 +19,17 @@ import os
 import shutil
 import sys
 import traceback
-
-# Ensure SIDERIUS root is importable
-SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, SIDERIUS_ROOT)
-sys.path.insert(0, os.path.join(SIDERIUS_ROOT, "ml_models"))
+from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
-
 from execute_tools.data_paths import SIDERIUS_DATA_DIR, TIDMAD_DATA_DIR
+from execute_tools.workflow_validation import validate_workflow_outputs
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.model_exploration import run_workflow
 
-# Reuse the validation function from the pytest test file
-sys.path.insert(0, os.path.join(SIDERIUS_ROOT, "tests/integration/workflows"))
-from test_full_exploration_loop import validate_workflow_outputs
+SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(dotenv_path=Path(SIDERIUS_ROOT) / ".env")
 
 
 def check_prerequisites(source_models: list[str], source_run_name: str) -> list[str]:

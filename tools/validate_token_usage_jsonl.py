@@ -34,8 +34,6 @@ import json
 import sys
 from pathlib import Path
 
-# Repo-relative import — script is run from project root.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pydantic import ValidationError
 
 from agent.schemas.telemetry import TokenUsageRow
