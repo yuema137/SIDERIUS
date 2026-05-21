@@ -56,6 +56,9 @@ def _load_plugin(path: str) -> dict | None:
     """
     module_name = _MODULE_NAME_PREFIX + os.path.splitext(os.path.basename(path))[0]
     spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        print(f"[PluginLoader] Could not resolve module spec for {path}")
+        return None
     module = importlib.util.module_from_spec(spec)
     # Register BEFORE exec so the plugin can reference its own module name
     # (via ``__name__``) without surprising downstream inspect calls.
