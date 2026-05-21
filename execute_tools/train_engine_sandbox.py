@@ -134,11 +134,23 @@ class TIDMADDataset(Dataset):
         Each PSD segment (10M samples) is subdivided into ML-level segments
         of size ``self.seg_size``, producing ``PSD_SEGMENT_LENGTH // seg_size``
         ML segments per PSD segment.
+
+        Precondition: ``self.sample_set`` must be populated. The constructor
+        only dispatches here under the ``is not None`` branch (see ``__init__``
+        above), but this method surfaces the contract explicitly so a future
+        caller that bypasses ``__init__`` fails fast instead of crashing inside
+        ``sorted(None.items())``.
         """
+        if self.sample_set is None:
+            raise ValueError(
+                "_pull_events_from_sample_set requires self.sample_set to be set "
+                "(got None) — callers must narrow before dispatching."
+            )
+        sample_set = self.sample_set
         evlist = []
         ml_segs_per_psd = PSD_SEGMENT_LENGTH // self.seg_size
 
-        for file_index, psd_segment_indices in sorted(self.sample_set.items()):
+        for file_index, psd_segment_indices in sorted(sample_set.items()):
             file_index = int(file_index)  # JSON keys may be strings
             filename = f"abra_training_{file_index:04d}.h5"
             file_path = os.path.join(self.filepath, filename)
@@ -271,7 +283,6 @@ class TIDMADEpochDataset(Dataset):
             rng = random.Random()
 
         ml_segs_per_psd = PSD_SEGMENT_LENGTH // seg_size
-        use_subsample = train_portion is not None and train_portion < 1.0
         all_ch1, all_ch2 = [], []
 
         for file_key in sorted(sample_set.keys(), key=int):
@@ -282,7 +293,11 @@ class TIDMADEpochDataset(Dataset):
                 continue
 
             scope_segments = sample_set[file_key]
-            if use_subsample:
+            # Inline the subsample predicate so pyright narrows ``train_portion``
+            # to ``float`` inside this branch (previous ``use_subsample`` helper
+            # broke that narrowing). The else-leg preserves the original
+            # "full-scope when train_portion is None or >= 1.0" semantics.
+            if train_portion is not None and train_portion < 1.0:
                 n_keep = max(1, round(train_portion * len(scope_segments)))
                 segments = rng.sample(scope_segments, n_keep)
             else:
