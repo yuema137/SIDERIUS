@@ -148,10 +148,18 @@ def is_happy_path(row: TokenUsageRow) -> bool:
 
 
 def aggregate_by_iter(rows: list[TokenUsageRow]) -> dict[int, IterAgg]:
-    """Build per-iter aggregates with happy/recovery + per-label split."""
+    """Build per-iter aggregates with happy/recovery + per-label split.
+
+    Rows with ``iter is None`` are setup/teardown calls outside any
+    iteration (see ``TokenUsageRow.iter`` docstring) — they're skipped
+    because downstream consumers ``sorted(aggs)`` and arithmetic on
+    iter indices would crash on a None key.
+    """
     aggs: dict[int, IterAgg] = {}
     for row in rows:
-        it = row.iter  # type: ignore[assignment]
+        if row.iter is None:
+            continue
+        it = row.iter
         agg = aggs.get(it)
         if agg is None:
             agg = IterAgg(
@@ -610,8 +618,11 @@ def render_top3_bloat_report(
 # ---------------------------------------------------------------------------
 
 
+_CLI_DESCRIPTION = "Token-usage baseline + top-3 bloat report builder."
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    p = argparse.ArgumentParser(description=_CLI_DESCRIPTION)
     p.add_argument(
         "--workspace",
         type=Path,
