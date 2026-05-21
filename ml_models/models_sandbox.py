@@ -485,15 +485,17 @@ class SimpleWaveNet(nn.Module):
         x = self.embedding(x.long())  # [B, T, input_channels]
         x = x.transpose(1, 2)  # [B, input_channels, T]
         x = self.input_conv(x)
-        skip_sum = None
-        for block in self.blocks:
+        # WaveNetConfig.num_blocks is constrained ``ge=1`` by Pydantic, so
+        # self.blocks is guaranteed non-empty. Seed skip_sum from the first
+        # block's skip output (instead of None + an in-loop branch) so the
+        # accumulator is unambiguously a Tensor — no Optional, no assert,
+        # identical end state to the previous None-initialised pattern.
+        first_block, *rest_blocks = self.blocks
+        x, skip_sum = first_block(x)
+        for block in rest_blocks:
             x, skip = block(x)
-            if skip_sum is None:
-                skip_sum = skip
-            else:
-                min_len = min(skip_sum.size(-1), skip.size(-1))
-                skip_sum = skip_sum[:, :, :min_len] + skip[:, :, :min_len]
-        assert skip_sum is not None
+            min_len = min(skip_sum.size(-1), skip.size(-1))
+            skip_sum = skip_sum[:, :, :min_len] + skip[:, :, :min_len]
         x = F.relu(skip_sum)
         x = F.relu(self.output_conv1(x))
         return self.output_conv2(x)  # [B, 256, T]
