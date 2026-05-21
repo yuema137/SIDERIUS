@@ -332,7 +332,7 @@ class TestPipelineRunner:
         return agent, mock_bridge
 
     def test_pipeline_produces_valid_output(self, tmp_path):
-        agent, mock = self._make_agent_with_mock()
+        agent, _mock = self._make_agent_with_mock()
         inp = self._make_pipeline_input(tmp_path)
         output = agent.run(inp)
 
@@ -390,7 +390,7 @@ class TestPipelineRunner:
         assert output.model_name == "spectral_wavenet"
 
     def test_output_file_written(self, tmp_path):
-        agent, mock = self._make_agent_with_mock()
+        agent, _mock = self._make_agent_with_mock()
         inp = self._make_pipeline_input(tmp_path)
         agent.run(inp)
 

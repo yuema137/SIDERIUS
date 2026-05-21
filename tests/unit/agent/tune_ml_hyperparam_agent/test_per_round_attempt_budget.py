@@ -259,7 +259,7 @@ class TestTrialRoundSucceedsWithinBudget:
             FAKE_VRAM_OK,  # round 1
             FAKE_VRAM_OK,
         ]  # round 2 (formal)
-        agent, saved, counter, cleanup = _setup(agent_with_scripted_skill, verdicts)
+        agent, saved, _counter, cleanup = _setup(agent_with_scripted_skill, verdicts)
         try:
             output = agent.run(
                 _make_input(
@@ -319,7 +319,7 @@ class TestConsecutiveFailsIncrementsThenResets:
 
     def test_increments_then_resets(self, agent_with_scripted_skill, tmp_path):
         verdicts = [FAKE_VRAM_OOM, FAKE_VRAM_OK, FAKE_VRAM_OOM, FAKE_VRAM_OOM]
-        agent, saved, counter, cleanup = _setup(agent_with_scripted_skill, verdicts)
+        agent, saved, _counter, cleanup = _setup(agent_with_scripted_skill, verdicts)
         try:
             output = agent.run(
                 _make_input(
@@ -363,7 +363,7 @@ class TestMaxFailRoundsAborts:
 
     def test_aborts_at_max_fail_rounds(self, agent_with_scripted_skill, tmp_path):
         verdicts = [FAKE_VRAM_OOM] * 4  # 2 fail-rounds × 2 attempts each
-        agent, saved, counter, cleanup = _setup(agent_with_scripted_skill, verdicts)
+        agent, _saved, counter, cleanup = _setup(agent_with_scripted_skill, verdicts)
         try:
             output = agent.run(
                 _make_input(
@@ -414,7 +414,7 @@ class TestFormalPromotionFiresOnLastRound:
             FAKE_VRAM_OOM,
             FAKE_VRAM_OK,
         ]  # round 3 (formal)
-        agent, saved, counter, cleanup = _setup(agent_with_scripted_skill, verdicts)
+        agent, saved, _counter, cleanup = _setup(agent_with_scripted_skill, verdicts)
         try:
             output = agent.run(
                 _make_input(
@@ -474,7 +474,7 @@ class TestFormalBudgetDistinctFromTrial:
             FAKE_VRAM_OOM,
             FAKE_VRAM_OK,
         ]  # round 2 (formal, 3-budget)
-        agent, saved, counter, cleanup = _setup(agent_with_scripted_skill, verdicts)
+        agent, saved, _counter, cleanup = _setup(agent_with_scripted_skill, verdicts)
         try:
             output = agent.run(
                 _make_input(

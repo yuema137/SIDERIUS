@@ -137,7 +137,7 @@ class TestGetRunRecords:
 
     def test_agent_run_excludes_seeded_baseline(self, data_dir):
         ds = LocalJsonDataSource(data_dir)
-        records, total = ds.get_run_records("punet", "v1")
+        records, _total = ds.get_run_records("punet", "v1")
         exp_ids = [r["exp_id"] for r in records]
         assert "baseline_punet_001" not in exp_ids
 
@@ -154,7 +154,7 @@ class TestGetRunRecords:
 
     def test_status_filter_oom(self, data_dir):
         ds = LocalJsonDataSource(data_dir)
-        records, total = ds.get_run_records("punet", "v1", status_filter="skipped_oom_risk")
+        _records, total = ds.get_run_records("punet", "v1", status_filter="skipped_oom_risk")
         assert total == 1
 
     def test_pagination_limit(self, data_dir):

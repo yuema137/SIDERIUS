@@ -412,7 +412,7 @@ class TestAggregateWarmupTimings:
         # estimate. Mean of [10, 10, 10, 10, 10, 10, 5000] = 722.86 ms →
         # would falsely fail the time budget. Median = 10 ms.
         timed_with_outlier = [10.0] * 6 + [5000.0]
-        ms, bd = ts._aggregate_warmup_timings(
+        ms, _bd = ts._aggregate_warmup_timings(
             [0.0, *timed_with_outlier],  # 1 warmup, 7 timed
             n_warmup_batches=1,
             # Raise threshold so the outlier doesn't trip fast-fail (we're

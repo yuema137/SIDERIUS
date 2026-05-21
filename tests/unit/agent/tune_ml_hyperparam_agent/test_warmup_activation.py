@@ -36,7 +36,7 @@ def test_warmup_skipped_when_data_dir_is_empty_string():
     """Empty string should also skip warmup."""
     from agent.skills.evaluate_time_skill.wrapper import _measure_ms_per_step
 
-    ms, breakdown = _measure_ms_per_step(
+    ms, _breakdown = _measure_ms_per_step(
         model_type="punet",
         model_config={"segmentation_size": 1000},
         train_config={"batch_size": 1, "epochs": 1},
@@ -51,7 +51,7 @@ def test_warmup_skipped_when_data_dir_does_not_exist():
     """Non-existent data_dir should skip warmup."""
     from agent.skills.evaluate_time_skill.wrapper import _measure_ms_per_step
 
-    ms, breakdown = _measure_ms_per_step(
+    ms, _breakdown = _measure_ms_per_step(
         model_type="punet",
         model_config={"segmentation_size": 1000},
         train_config={"batch_size": 1, "epochs": 1},
@@ -116,7 +116,7 @@ def test_warmup_path_entered_with_valid_data_dir(tmp_path):
         # The function will try to import TIDMADEpochDataset etc.,
         # which will fail — that's fine, we just want to verify we got
         # past the data_dir guard.
-        ms, breakdown = _measure_ms_per_step(
+        ms, _breakdown = _measure_ms_per_step(
             model_type="punet",
             model_config={"segmentation_size": 1000},
             train_config={"batch_size": 1, "epochs": 1},

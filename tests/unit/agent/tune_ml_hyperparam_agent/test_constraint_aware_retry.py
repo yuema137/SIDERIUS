@@ -325,7 +325,7 @@ class TestTunerSchemaViolationBehavior:
         is formal) burns its 3-attempt inner budget, ticks
         ``consecutive_fails`` to 1 == ``max_fail_rounds``, and aborts.
         """
-        agent, saved = agent_and_saved
+        agent, _saved = agent_and_saved
         output = agent.run(_make_input(tmp_path, max_rounds=1))
         assert output.status == "partial"
         assert output.completed_rounds == 0

@@ -307,8 +307,8 @@ def test_t0_cognitive_plumbing(tmp_path, capsys):
         local=LocalStorageConfig(workspace=str(tmp_path), run_name=f"{run_name}_iter2"),
     )
 
-    interp_calls, interp_factory = _make_recording_factory()
-    propose_calls, propose_factory = _make_recording_factory()
+    _interp_calls, interp_factory = _make_recording_factory()
+    _propose_calls, propose_factory = _make_recording_factory()
 
     interp_agent = ResultInterpretationAgent(bridge_factory=interp_factory)
     propose_agent = MLModelProposalAgent(bridge_factory=propose_factory)

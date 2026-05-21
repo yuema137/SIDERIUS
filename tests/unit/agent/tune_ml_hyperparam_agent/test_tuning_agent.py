@@ -566,7 +566,7 @@ class TestDynamicTrialFormal:
 
     def test_invalid_trial_fields_fallback(self, agent_and_mocks, tmp_path):
         """LLM returns trial_portion=5.0 → ExperimentPlan.with_defaults falls back."""
-        agent, mock_brain, _, saved_records = agent_and_mocks
+        agent, mock_brain, _, _saved_records = agent_and_mocks
         bad_plan = {**FAKE_PLAN_RESPONSE, "trial_portion": 5.0, "is_trial": True}
         mock_brain.plan.return_value = bad_plan
         # max_rounds=1 → final round → formal anyway, but should not crash
@@ -575,7 +575,7 @@ class TestDynamicTrialFormal:
 
     def test_trial_config_written(self, agent_and_mocks, tmp_path):
         """Verify trial_config_{exp_id}.json is written with correct fields."""
-        agent, mock_brain, mock_sandbox, _ = agent_and_mocks
+        agent, _mock_brain, mock_sandbox, _ = agent_and_mocks
         configs_dir = mock_sandbox.dirs["configs"]
         agent.run(_make_trial_input(tmp_path, max_rounds=1, is_trial=True))
         # Find the trial_config file
@@ -992,7 +992,7 @@ class TestTimeBudgetGate:
     def test_none_budget_skips_skill_entirely(self, tmp_path):
         """Both budgets None → evaluate_time_skill is never called and
         training proceeds (one-time warning per mode printed at startup)."""
-        agent, _, _, saved_records, skill_calls, cleanup = self._make_agent(
+        agent, _, _, _saved_records, skill_calls, cleanup = self._make_agent(
             FAKE_TIME_CHECK_OVER  # would block if invoked
         )
         try:

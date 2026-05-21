@@ -207,7 +207,7 @@ class TestRunTests:
         mock_result.stdout = "3 passed in 0.5s"
         mock_result.stderr = ""
         with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
-            ok, output = _run_tests("/fake/test_file.py")
+            ok, _output = _run_tests("/fake/test_file.py")
         assert ok is True
 
     def test_failing_tests_return_false(self):
@@ -216,7 +216,7 @@ class TestRunTests:
         mock_result.stdout = "FAILED test_forward - AssertionError"
         mock_result.stderr = ""
         with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
-            ok, output = _run_tests("/fake/test_file.py")
+            ok, _output = _run_tests("/fake/test_file.py")
         assert ok is False
 
     def test_stdout_and_stderr_concatenated(self):
@@ -225,7 +225,7 @@ class TestRunTests:
         mock_result.stdout = "stdout content"
         mock_result.stderr = "stderr content"
         with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
-            ok, output = _run_tests("/fake/test_file.py")
+            _ok, output = _run_tests("/fake/test_file.py")
         assert "stdout content" in output
         assert "stderr content" in output
 
@@ -235,7 +235,7 @@ class TestRunTests:
         mock_result.stdout = "3 passed"
         mock_result.stderr = ""
         with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
-            ok, output = _run_tests("/fake/test_file.py")
+            _ok, output = _run_tests("/fake/test_file.py")
         assert "3 passed" in output
 
     def test_output_returned_on_fail(self):
@@ -244,7 +244,7 @@ class TestRunTests:
         mock_result.stdout = "FAILED"
         mock_result.stderr = "error detail"
         with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
-            ok, output = _run_tests("/fake/test_file.py")
+            _ok, output = _run_tests("/fake/test_file.py")
         assert "FAILED" in output
 
 
@@ -276,19 +276,19 @@ class TestCheckDescription:
     def test_exactly_50_chars_returns_false(self, tmp_path):
         path = tmp_path / "description.md"
         path.write_text("x" * 50)
-        ok, err = _check_description(str(path))
+        ok, _err = _check_description(str(path))
         assert ok is False
 
     def test_51_chars_returns_true(self, tmp_path):
         path = tmp_path / "description.md"
         path.write_text("x" * 51)
-        ok, err = _check_description(str(path))
+        ok, _err = _check_description(str(path))
         assert ok is True
 
     def test_empty_file_returns_false(self, tmp_path):
         path = tmp_path / "description.md"
         path.write_text("")
-        ok, err = _check_description(str(path))
+        ok, _err = _check_description(str(path))
         assert ok is False
 
 
@@ -304,15 +304,15 @@ class TestCheckConfigFields:
         assert err is None
 
     def test_all_float_returns_true(self):
-        ok, err = _check_config_fields({"lr": 1e-3, "dropout": 0.1})
+        ok, _err = _check_config_fields({"lr": 1e-3, "dropout": 0.1})
         assert ok is True
 
     def test_bool_returns_true(self):
-        ok, err = _check_config_fields({"use_bias": True, "depth": 3})
+        ok, _err = _check_config_fields({"use_bias": True, "depth": 3})
         assert ok is True
 
     def test_mixed_scalar_returns_true(self):
-        ok, err = _check_config_fields(VALID_CONFIG_FIELDS)
+        ok, _err = _check_config_fields(VALID_CONFIG_FIELDS)
         assert ok is True
 
     def test_list_value_returns_false(self):
@@ -337,7 +337,7 @@ class TestCheckConfigFields:
         assert "bad_dict" in err
 
     def test_empty_dict_returns_true(self):
-        ok, err = _check_config_fields({})
+        ok, _err = _check_config_fields({})
         assert ok is True
 
 
@@ -350,7 +350,7 @@ class TestCheckInstantiationAndGradient:
     def test_valid_plugin_returns_true_true_none(self, tmp_path):
         path = tmp_path / "valid_plugin.py"
         path.write_text(VALID_PLUGIN_SRC)
-        inst_ok, grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
+        inst_ok, grad_ok, _otype_ok, err = _check_instantiation_and_gradient(str(path))
         assert inst_ok is True
         assert grad_ok is True
         assert err is None
@@ -358,7 +358,7 @@ class TestCheckInstantiationAndGradient:
     def test_import_error_returns_false_false_message(self, tmp_path):
         path = tmp_path / "bad_import.py"
         path.write_text("import nonexistent_module_xyz_abc\n")
-        inst_ok, grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
+        inst_ok, grad_ok, _otype_ok, err = _check_instantiation_and_gradient(str(path))
         assert inst_ok is False
         assert grad_ok is False
         assert err is not None
@@ -388,7 +388,7 @@ class TestCheckInstantiationAndGradient:
         """)
         path = tmp_path / "wrong_shape.py"
         path.write_text(wrong_shape_src)
-        inst_ok, grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
+        inst_ok, grad_ok, _otype_ok, err = _check_instantiation_and_gradient(str(path))
         assert inst_ok is False
         assert grad_ok is False
         assert err is not None
@@ -423,7 +423,7 @@ class TestCheckInstantiationAndGradient:
         """)
         path = tmp_path / "no_grad.py"
         path.write_text(no_grad_src)
-        inst_ok, grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
+        inst_ok, grad_ok, _otype_ok, err = _check_instantiation_and_gradient(str(path))
         # instantiation and forward pass succeed (correct shape)
         assert inst_ok is True
         # gradient check fails because output is detached

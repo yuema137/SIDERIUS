@@ -721,8 +721,8 @@ def test_cognitive_alignment_gate_one(tmp_path, capsys):
     v2 = interp_outputs[1].runtime_vocab
     v3 = interp_outputs[2].runtime_vocab
 
-    added_12, refined_12, removed_12 = _vocab_diff(v1, v2)
-    added_23, refined_23, removed_23 = _vocab_diff(v2, v3)
+    _added_12, _refined_12, removed_12 = _vocab_diff(v1, v2)
+    _added_23, _refined_23, removed_23 = _vocab_diff(v2, v3)
     added_13, refined_13, removed_13 = _vocab_diff(v1, v3)
 
     assert not removed_12, (

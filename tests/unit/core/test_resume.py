@@ -669,7 +669,7 @@ class TestLoadLatestKnowledge:
             runtime_vocab=[_vocab_entry("feat_iter2_a"), _vocab_entry("feat_iter2_b")],
             key_findings=["finding_iter2"],
         )
-        vocab, findings = load_latest_knowledge(str(tmp_path), 3, [1, 2])
+        vocab, _findings = load_latest_knowledge(str(tmp_path), 3, [1, 2])
         names = sorted(v.name for v in vocab)
         assert names == ["feat_iter2_a", "feat_iter2_b"]
 

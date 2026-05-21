@@ -159,7 +159,7 @@ def test_2_chain_two_clean_one_missing_manifest_next_iter_prints_3(
     _write_clean_chain_iter(tmp_path, 2)
     _write_chain_iter_missing_manifest(tmp_path, 3)
 
-    rc, stdout, stderr = _run_main(
+    rc, stdout, _stderr = _run_main(
         [
             "--layout",
             "chain",
@@ -180,7 +180,7 @@ def test_3_chain_one_clean_one_failed_manifest_next_iter_prints_2(
     _write_clean_chain_iter(tmp_path, 1)
     _write_chain_iter_failed_manifest(tmp_path, 2)
 
-    rc, stdout, stderr = _run_main(
+    rc, stdout, _stderr = _run_main(
         [
             "--layout",
             "chain",
@@ -201,7 +201,7 @@ def test_4_chain_one_clean_one_malformed_json_next_iter_prints_2(
     _write_clean_chain_iter(tmp_path, 1)
     _write_chain_iter_malformed_manifest(tmp_path, 2)
 
-    rc, stdout, stderr = _run_main(
+    rc, stdout, _stderr = _run_main(
         [
             "--layout",
             "chain",
@@ -217,7 +217,7 @@ def test_4_chain_one_clean_one_malformed_json_next_iter_prints_2(
 
 def test_5_chain_empty_workspace_next_iter_prints_1(tmp_path: Path) -> None:
     """No iter dirs at all → next-iter prints 1 (clean chain start)."""
-    rc, stdout, stderr = _run_main(
+    rc, stdout, _stderr = _run_main(
         [
             "--layout",
             "chain",
@@ -284,7 +284,7 @@ def test_8_run_layout_back_compat_renders_table(tmp_path: Path) -> None:
     output = model_dir / f"run_output_{run_name}.json"
     output.write_text(json.dumps(_minimal_run_output(run_name=run_name, model_type="wavenet")))
 
-    rc, stdout, stderr = _run_main(
+    rc, stdout, _stderr = _run_main(
         [
             "--layout",
             "run",
@@ -312,7 +312,7 @@ def test_9_default_layout_resolves_to_run(tmp_path: Path) -> None:
     output = model_dir / f"run_output_{run_name}.json"
     output.write_text(json.dumps(_minimal_run_output(run_name=run_name, model_type="wavenet")))
 
-    rc, stdout, stderr = _run_main(
+    rc, stdout, _stderr = _run_main(
         [
             "--run_dir",
             str(tmp_path),
@@ -351,7 +351,7 @@ def test_chain_human_view_includes_model_and_best_score(tmp_path: Path) -> None:
         best_score=4.524,
     )
 
-    rc, stdout, stderr = _run_main(
+    rc, stdout, _stderr = _run_main(
         [
             "--layout",
             "chain",

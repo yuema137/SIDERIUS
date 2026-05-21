@@ -303,7 +303,7 @@ class TestSingleRejectionCapture:
         # 1 trial round, 1 attempt — the single attempt is a rejection.
         # Output will be status="partial" (no successful round) but we only
         # care about the rejection buffer being populated.
-        agent, saved, counter, cleanup = _setup(agent_with_scripted_skill, [oom])
+        agent, saved, _counter, cleanup = _setup(agent_with_scripted_skill, [oom])
         try:
             output = agent.run(_make_input(tmp_path, max_rounds=1))
         finally:
@@ -333,7 +333,7 @@ class TestSingleRejectionCapture:
         — the orchestrator groups rejections by model_type for worst-offender
         aggregation."""
         oom = _make_oom_payload()
-        agent, saved, counter, cleanup = _setup(agent_with_scripted_skill, [oom])
+        agent, _saved, _counter, cleanup = _setup(agent_with_scripted_skill, [oom])
         try:
             output = agent.run(_make_input(tmp_path, max_rounds=1))
         finally:
@@ -363,7 +363,7 @@ class TestMultipleRejectionCapture:
         # after the third fail rather than spinning on exhausted-schedule
         # IndexErrors (which the tuner's generic except swallows with a
         # 5s sleep).
-        agent, saved, counter, cleanup = _setup(agent_with_scripted_skill, verdicts)
+        agent, _saved, _counter, cleanup = _setup(agent_with_scripted_skill, verdicts)
         try:
             output = agent.run(
                 _make_input(
@@ -405,7 +405,7 @@ class TestDegenerateKillerPayload:
         tmp_path,
     ):
         oom = _make_oom_payload(include_memory_killer=False)
-        agent, saved, counter, cleanup = _setup(agent_with_scripted_skill, [oom])
+        agent, _saved, _counter, cleanup = _setup(agent_with_scripted_skill, [oom])
         try:
             output = agent.run(_make_input(tmp_path, max_rounds=1))
         finally:
@@ -434,7 +434,7 @@ class TestNoRejectionWhenFeasible:
     ):
         # 2 rounds, both feasible → no rejections.
         verdicts = [FAKE_VRAM_OK, FAKE_VRAM_OK]
-        agent, saved, counter, cleanup = _setup(agent_with_scripted_skill, verdicts)
+        agent, _saved, _counter, cleanup = _setup(agent_with_scripted_skill, verdicts)
         try:
             output = agent.run(
                 _make_input(
@@ -458,7 +458,7 @@ class TestBytesToGbConversion:
 
     def test_one_gb_exact(self, agent_with_scripted_skill, tmp_path):
         oom = _make_oom_payload(dominant_layer_bytes=1 * 1024**3)
-        agent, saved, counter, cleanup = _setup(agent_with_scripted_skill, [oom])
+        agent, _saved, _counter, cleanup = _setup(agent_with_scripted_skill, [oom])
         try:
             output = agent.run(_make_input(tmp_path, max_rounds=1))
         finally:
@@ -472,7 +472,7 @@ class TestBytesToGbConversion:
     ):
         # 2_500_000_000 bytes ≈ 2.3283 GB
         oom = _make_oom_payload(dominant_layer_bytes=2_500_000_000)
-        agent, saved, counter, cleanup = _setup(agent_with_scripted_skill, [oom])
+        agent, _saved, _counter, cleanup = _setup(agent_with_scripted_skill, [oom])
         try:
             output = agent.run(_make_input(tmp_path, max_rounds=1))
         finally:

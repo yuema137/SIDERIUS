@@ -289,7 +289,7 @@ class TestBaselineValidationFix:
         does not divide ``psd_segment_length=10_000_000``. With Phase A, this
         is caught at ``ProposalOutput`` validation time and retried.
         """
-        proposal, impl_output, validation = _run_propose_implement_validate(
+        proposal, _impl_output, validation = _run_propose_implement_validate(
             tmp_path=tmp_path,
             run_name="exploit_cnn_v1_test",
             advice_path=ADVICE_EXPLOIT,

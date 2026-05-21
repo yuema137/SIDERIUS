@@ -533,9 +533,9 @@ def test_narrative_history_overflow_goes_to_archive() -> None:
     """A 5-update sequence puts iter-1 and iter-4 into the archive once the
     history cap is exceeded by the 5th merge."""
     narr = ConsolidatedNarrative(latest="iter-1 narrative")
-    narr, arch1 = _merge_narrative_field(narr, "iter-2", prior_iter=1)
-    narr, arch2 = _merge_narrative_field(narr, "iter-3", prior_iter=2)
-    narr, arch3 = _merge_narrative_field(narr, "iter-4", prior_iter=3)
+    narr, _arch1 = _merge_narrative_field(narr, "iter-2", prior_iter=1)
+    narr, _arch2 = _merge_narrative_field(narr, "iter-3", prior_iter=2)
+    narr, _arch3 = _merge_narrative_field(narr, "iter-4", prior_iter=3)
     narr, arch4 = _merge_narrative_field(narr, "iter-5", prior_iter=4)
 
     assert narr.latest == "iter-5"

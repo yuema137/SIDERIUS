@@ -712,7 +712,7 @@ class TestUpdateVocabLinkConfirmations:
     def test_promotes_to_related_to_at_threshold(self):
         """When count reaches min_runs, capability added to feature.related_to."""
         existing = {"dilated_causal_conv:receptive_field": ["run_a", "run_b"]}
-        confs, vocab, promoted = update_vocab_link_confirmations(
+        _confs, vocab, promoted = update_vocab_link_confirmations(
             prev_vocab_links=[_link()],
             prediction_outcome="confirmed",
             run_name="run_c",  # 3rd confirmation → trigger
@@ -727,7 +727,7 @@ class TestUpdateVocabLinkConfirmations:
     def test_below_threshold_no_promotion(self):
         """Two confirmations with min_runs=3 → no promotion yet."""
         existing = {"dilated_causal_conv:receptive_field": ["run_a"]}
-        confs, vocab, promoted = update_vocab_link_confirmations(
+        _confs, vocab, promoted = update_vocab_link_confirmations(
             prev_vocab_links=[_link()],
             prediction_outcome="confirmed",
             run_name="run_b",  # only 2nd confirmation
@@ -744,7 +744,7 @@ class TestUpdateVocabLinkConfirmations:
         existing = {"dilated_causal_conv:receptive_field": ["run_a", "run_b"]}
         # Feature already has capability in related_to from a previous iteration
         feat_with_link = _feat(related_to=["receptive_field"])
-        confs, vocab, promoted = update_vocab_link_confirmations(
+        _confs, vocab, promoted = update_vocab_link_confirmations(
             prev_vocab_links=[_link()],
             prediction_outcome="confirmed",
             run_name="run_c",
@@ -759,7 +759,7 @@ class TestUpdateVocabLinkConfirmations:
     def test_feature_not_in_vocab_no_crash(self):
         """Link referencing a feature not in runtime_vocab is silently skipped."""
         existing = {"unknown_feat:receptive_field": ["run_a", "run_b"]}
-        _, vocab, promoted = update_vocab_link_confirmations(
+        _, _vocab, promoted = update_vocab_link_confirmations(
             prev_vocab_links=[
                 {"feature": "unknown_feat", "capability": "receptive_field", "evidence": "x"}
             ],
@@ -787,7 +787,7 @@ class TestUpdateVocabLinkConfirmations:
             _link("dilated_causal_conv", "receptive_field"),
             _link("gated_activation", "frequency_resolution"),
         ]
-        confs, updated_vocab, promoted = update_vocab_link_confirmations(
+        _confs, updated_vocab, promoted = update_vocab_link_confirmations(
             prev_vocab_links=links,
             prediction_outcome="confirmed",
             run_name="run_c",

@@ -237,7 +237,7 @@ def test_5_iter_quantitative_and_linter_passes(tmp_path):
     # Linter: file is clean.
     from tools.validate_token_usage_jsonl import lint
 
-    errors, warnings = lint(bridge._token_usage_path)
+    errors, _warnings = lint(bridge._token_usage_path)
     assert errors == [], f"linter found errors on a clean file: {errors}"
 
 

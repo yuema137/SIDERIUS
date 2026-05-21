@@ -149,7 +149,7 @@ class TestScoreVector:
     @patch("execute_tools.scoring_utils.get_one_sec_psd", side_effect=_mock_get_one_sec_psd)
     def test_vector_length_is_20(self, mock_psd, mock_snr):
         sample_set: SampleSet = {0: [0, 1], 6: [0]}
-        vector, scalar, _, _ = score_vector(
+        vector, _scalar, _, _ = score_vector(
             data_dir="/fake",
             sample_set=sample_set,
             anchor_map=MOCK_ANCHOR_MAP,
@@ -266,7 +266,7 @@ class TestScoreVector:
         """Normal mode: single file with all segments — 1 real value, 19 None."""
         all_segments = list(range(SEGMENTS_PER_FILE))
         sample_set: SampleSet = {6: all_segments}
-        vector, scalar, _, _ = score_vector(
+        vector, _scalar, _, _ = score_vector(
             data_dir="/fake",
             sample_set=sample_set,
             anchor_map=MOCK_ANCHOR_MAP,

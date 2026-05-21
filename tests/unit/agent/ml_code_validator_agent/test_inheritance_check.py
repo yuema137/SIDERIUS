@@ -198,7 +198,7 @@ class TestInheritanceCheck:
                 "contribution_evidence": "ADC encoding.",
             },
         ]
-        passed, notes = _check_inherited_components(source, claims, SAMPLE_VOCAB)
+        passed, _notes = _check_inherited_components(source, claims, SAMPLE_VOCAB)
         assert passed is True
 
     def test_simple_source_fails_dilation_claim(self):
@@ -210,5 +210,5 @@ class TestInheritanceCheck:
                 "contribution_evidence": "Claimed but not used.",
             },
         ]
-        passed, notes = _check_inherited_components(SIMPLE_CNN_SOURCE, claims, SAMPLE_VOCAB)
+        passed, _notes = _check_inherited_components(SIMPLE_CNN_SOURCE, claims, SAMPLE_VOCAB)
         assert passed is False

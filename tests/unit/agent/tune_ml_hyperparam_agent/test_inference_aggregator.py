@@ -67,7 +67,7 @@ class TestFallbackBranches:
         """Defensive: a corrupt sidecar with negative elapsed must not
         produce a negative ms estimate. ``all(v <= 0)`` covers this."""
         rows = [_row(i, 2, -10.0) for i in range(5)]
-        value, bd = agg(rows)
+        value, _bd = agg(rows)
         assert value is None
 
 
@@ -100,14 +100,14 @@ class TestWarmupDiscard:
     def test_ten_files_discards_two(self):
         """``round(10 × 0.20) = 2`` exactly."""
         rows = [_row(i, 1, 100.0) for i in range(10)]
-        value, bd = agg(rows)
+        _value, bd = agg(rows)
         assert bd["n_warmup_files"] == 2
         assert bd["n_timed_files"] == 8
 
     def test_twenty_files_discards_four(self):
         """Full eval-volume case (formal eval_portion=1.0 with 20 files)."""
         rows = [_row(i, 1, 100.0) for i in range(20)]
-        value, bd = agg(rows)
+        _value, bd = agg(rows)
         assert bd["n_warmup_files"] == 4
         assert bd["n_timed_files"] == 16
 
@@ -127,7 +127,7 @@ class TestWarmupDiscard:
         discards one file. Reasoning: even with the lowest configured
         warmup, the cold-disk read on file 0 is non-negligible."""
         rows = [_row(i, 1, 100.0) for i in range(5)]
-        value, bd = agg(rows, warmup_fraction=0.0)
+        _value, bd = agg(rows, warmup_fraction=0.0)
         assert bd["n_warmup_files"] == 1
         assert bd["n_timed_files"] == 4
 
@@ -164,7 +164,7 @@ class TestPerPsdSegNormalisation:
             _row(3, 4, 1000.0),  # 250 ms/seg — outlier
             _row(4, 4, 60.0),  # 15 ms/seg
         ]
-        value, bd = agg(rows)
+        value, _bd = agg(rows)
         # timed = [10, 12.5, 250, 15] sorted = [10, 12.5, 15, 250]
         # median (even n) = (12.5 + 15) / 2 = 13.75
         # Mean would be ~72 — the outlier completely takes over.
@@ -179,7 +179,7 @@ class TestPerPsdSegNormalisation:
             _row(1, 0, 50.0),  # would divide by zero without the floor
             _row(2, 0, 30.0),
         ]
-        value, bd = agg(rows)
+        value, _bd = agg(rows)
         # n_warmup = round(3 × 0.20) = 1. timed = files 1-2 with
         # elapsed/max(0,1) = 50.0 and 30.0. median = 40.0.
         assert value == pytest.approx(40.0)
@@ -200,7 +200,7 @@ class TestDefensiveConsumption:
             {"file_index": 1, "elapsed_ms": 50.0},
             {"file_index": 2, "elapsed_ms": 30.0},
         ]
-        value, bd = agg(rows)
+        value, _bd = agg(rows)
         # n_warmup = 1; timed = [50, 30]; median = 40
         assert value == pytest.approx(40.0)
 
@@ -212,7 +212,7 @@ class TestDefensiveConsumption:
             {"file_index": 1, "n_psd_segs": 2},  # no elapsed_ms
             {"file_index": 2, "n_psd_segs": 2},
         ]
-        value, bd = agg(rows)
+        value, _bd = agg(rows)
         assert value is None
 
     def test_breakdown_preserves_input_list_independence(self):
@@ -220,7 +220,7 @@ class TestDefensiveConsumption:
         list — otherwise downstream mutation could clobber the caller's
         data."""
         rows = [_row(i, 1, 100.0) for i in range(3)]
-        value, bd = agg(rows)
+        _value, bd = agg(rows)
         bd["timings_ms"].append({"sentinel": True})
         assert all("sentinel" not in r for r in rows)
 
