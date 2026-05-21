@@ -980,8 +980,17 @@ class HyperparamTuningAgent:
         agent_input = HyperparamTuningInput.model_validate(agent_input)
 
         # --- Extract frequently used fields ---
-        workspace = agent_input.storage.local.workspace
-        run_name = agent_input.storage.local.run_name
+        # StorageConfig.local is Optional (only populated when backend='local').
+        # The tuner only supports the local backend; surface the precondition
+        # explicitly instead of crashing inside the next access.
+        storage_local = agent_input.storage.local
+        if storage_local is None:
+            raise ValueError(
+                f"HyperparamTuningInput requires storage.local to be populated "
+                f"(got backend={agent_input.storage.backend!r}, local=None)"
+            )
+        workspace = storage_local.workspace
+        run_name = storage_local.run_name
 
         # Per-run hardware manifest (Phase 6.6 §3.9) — file IPC with sandbox children.
         hardware_context = get_or_create(Path(workspace), run_name)
