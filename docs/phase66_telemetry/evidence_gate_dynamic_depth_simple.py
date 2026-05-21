@@ -29,16 +29,13 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(_REPO_ROOT))
-sys.path.insert(0, str(_REPO_ROOT / "ml_models"))
-
 # Point the plugin loader at the live Stage 2 attempt_003 plugin dir BEFORE
-# importing anything that walks MODEL_REGISTRY. plugin_loader's env-var scan
-# runs on import when the registry is first extended.
+# any ml_models import — plugin_loader's env-var scan runs on import when
+# the registry is first extended. The matching ml_models / torch / agent
+# imports therefore live inside ``main()`` rather than at module top, so
+# this assignment is guaranteed to precede them at execution time.
 _PLUGIN_DIR = (
     "/tmp/pytest-of-yuema137/pytest-811/test_two_iterations_under_budg0/"
     "stage2_smoke/stage2_iter_001/iteration_001/attempt_003_dynamic_depth_simple/"
@@ -46,30 +43,8 @@ _PLUGIN_DIR = (
 )
 os.environ["SIDERIUS_PLUGIN_DIRS"] = _PLUGIN_DIR
 
-import torch  # noqa: E402
-
-from ml_models.loss_models_sandbox import get_criterion  # noqa: E402
-from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY, LossConfig  # noqa: E402
-from ml_models.models_sandbox import MODEL_REGISTRY  # noqa: E402
-from ml_models.plugin_loader import extend_registries  # noqa: E402
-
-# Force plugin registration — ``evaluate_vram_skill`` reads MODEL_REGISTRY
-# directly, so the plugin must already be loaded before we call run_skill.
-_loaded = extend_registries(MODEL_REGISTRY, PLUGIN_CONFIG_REGISTRY)
-assert "dynamic_depth_simple" in _loaded, (
-    f"Expected dynamic_depth_simple plugin to load from {_PLUGIN_DIR}; loaded={_loaded}"
-)
-
-from agent.skills.evaluate_vram_skill.structural_probe import (  # noqa: E402
-    probe_activation_footprint,
-)
-from agent.skills.evaluate_vram_skill.wrapper import (  # noqa: E402
-    _build_model,
-    _compose_inference_peak,
-    _compose_training_peak,
-    run_skill,
-)
-from core.hardware_context import discover  # noqa: E402
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_GB = 1024**3
 
 # ── Telemetry to compare against (from stage2_iter_001_telemetry.json) ──────
 
@@ -121,69 +96,7 @@ LOSS_CONFIG = {
 }
 
 
-_GB = 1024**3
-
-
-# ── Apples-to-apples probes at the measured batch sizes ──────────────────────
-
-
-def _apples_training_peak() -> tuple[int, dict]:
-    """Compose the training peak at the exact (B=8, T=10000) the telemetry
-    capture used. Bypasses the resolver — the resolver picks its own batch."""
-    model = _build_model("dynamic_depth_simple", MODEL_CONFIG, "focal")
-    loss_module = get_criterion(LossConfig(**LOSS_CONFIG))
-    B, T = MEASURED["training"]["batch_size"], MEASURED["training"]["segmentation_size"]
-    inp = torch.zeros((B, T), dtype=torch.long)
-    # Focal loss uses CE-family target shape (class indices).
-    tgt = torch.zeros((B, T), dtype=torch.long)
-    probe = probe_activation_footprint(
-        model=model,
-        loss_module=loss_module,
-        input_sample=inp,
-        target_sample=tgt,
-        mode="training",
-    )
-    # adamw normalises to adam in overhead.training_overhead_bytes — the
-    # scaling factor is the same (3 × P: grads + optimizer 1st + 2nd moment).
-    peak, breakdown = _compose_training_peak(probe, optimizer="adam")
-    return peak, breakdown
-
-
-def _apples_inference_peak() -> tuple[int, dict]:
-    """Compose the inference peak at the legacy B=25 used by the telemetry.
-    The new resolver will pick a larger batch on a 5090 — that's validated
-    separately via the full skill-path invocation."""
-    model = _build_model("dynamic_depth_simple", MODEL_CONFIG, "focal")
-    B = MEASURED["inference"]["inference_batch"]
-    T = MEASURED["inference"]["segmentation_size"]
-    inp = torch.zeros((B, T), dtype=torch.long)
-    probe = probe_activation_footprint(
-        model=model,
-        loss_module=None,
-        input_sample=inp,
-        target_sample=None,
-        mode="inference",
-    )
-    peak, breakdown = _compose_inference_peak(probe)
-    return peak, breakdown
-
-
-# ── Skill-path invocation (records what the tuner will see at runtime) ──────
-
-
-def _skill_path_result() -> dict:
-    ctx = discover()
-    return run_skill(
-        sandbox=None,
-        model_type="dynamic_depth_simple",
-        model_config=MODEL_CONFIG,
-        train_config=TRAIN_CONFIG,
-        loss_config=LOSS_CONFIG,
-        hardware_context=ctx,
-    )
-
-
-# ── Tolerance check + pretty output ──────────────────────────────────────────
+# ── Tolerance check (pure math, no heavy imports needed) ─────────────────────
 
 
 def _delta(predicted: int, measured: int) -> tuple[float, bool]:
@@ -193,6 +106,84 @@ def _delta(predicted: int, measured: int) -> tuple[float, bool]:
 
 
 def main() -> None:
+    # All ml_models / torch / agent imports happen here so the
+    # ``os.environ["SIDERIUS_PLUGIN_DIRS"] = …`` assignment at module top
+    # is guaranteed to precede the plugin-bootstrap side effect that fires
+    # the first time ``ml_models.models_sandbox`` is imported.
+    import torch
+
+    from agent.skills.evaluate_vram_skill.structural_probe import (
+        probe_activation_footprint,
+    )
+    from agent.skills.evaluate_vram_skill.wrapper import (
+        _build_model,
+        _compose_inference_peak,
+        _compose_training_peak,
+        run_skill,
+    )
+    from core.hardware_context import discover
+    from ml_models.loss_models_sandbox import get_criterion
+    from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY, LossConfig
+    from ml_models.models_sandbox import MODEL_REGISTRY
+    from ml_models.plugin_loader import extend_registries
+
+    # Force plugin registration — ``evaluate_vram_skill`` reads MODEL_REGISTRY
+    # directly, so the plugin must already be loaded before we call run_skill.
+    _loaded = extend_registries(MODEL_REGISTRY, PLUGIN_CONFIG_REGISTRY)
+    assert "dynamic_depth_simple" in _loaded, (
+        f"Expected dynamic_depth_simple plugin to load from {_PLUGIN_DIR}; loaded={_loaded}"
+    )
+
+    def _apples_training_peak() -> tuple[int, dict]:
+        """Compose the training peak at the exact (B=8, T=10000) the telemetry
+        capture used. Bypasses the resolver — the resolver picks its own batch."""
+        model = _build_model("dynamic_depth_simple", MODEL_CONFIG, "focal")
+        loss_module = get_criterion(LossConfig(**LOSS_CONFIG))
+        B, T = MEASURED["training"]["batch_size"], MEASURED["training"]["segmentation_size"]
+        inp = torch.zeros((B, T), dtype=torch.long)
+        # Focal loss uses CE-family target shape (class indices).
+        tgt = torch.zeros((B, T), dtype=torch.long)
+        probe = probe_activation_footprint(
+            model=model,
+            loss_module=loss_module,
+            input_sample=inp,
+            target_sample=tgt,
+            mode="training",
+        )
+        # adamw normalises to adam in overhead.training_overhead_bytes — the
+        # scaling factor is the same (3 × P: grads + optimizer 1st + 2nd moment).
+        peak, breakdown = _compose_training_peak(probe, optimizer="adam")
+        return peak, breakdown
+
+    def _apples_inference_peak() -> tuple[int, dict]:
+        """Compose the inference peak at the legacy B=25 used by the telemetry.
+        The new resolver will pick a larger batch on a 5090 — that's validated
+        separately via the full skill-path invocation."""
+        model = _build_model("dynamic_depth_simple", MODEL_CONFIG, "focal")
+        B = MEASURED["inference"]["inference_batch"]
+        T = MEASURED["inference"]["segmentation_size"]
+        inp = torch.zeros((B, T), dtype=torch.long)
+        probe = probe_activation_footprint(
+            model=model,
+            loss_module=None,
+            input_sample=inp,
+            target_sample=None,
+            mode="inference",
+        )
+        peak, breakdown = _compose_inference_peak(probe)
+        return peak, breakdown
+
+    def _skill_path_result() -> dict:
+        ctx = discover()
+        return run_skill(
+            sandbox=None,
+            model_type="dynamic_depth_simple",
+            model_config=MODEL_CONFIG,
+            train_config=TRAIN_CONFIG,
+            loss_config=LOSS_CONFIG,
+            hardware_context=ctx,
+        )
+
     train_peak, train_bd = _apples_training_peak()
     inf_peak, inf_bd = _apples_inference_peak()
     skill_result = _skill_path_result()
