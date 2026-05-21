@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from models_format_sandbox import LossConfig
+
+from ml_models.models_format_sandbox import LossConfig
 
 
 class FocalLoss1D(nn.Module):

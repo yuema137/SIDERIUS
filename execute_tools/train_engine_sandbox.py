@@ -8,15 +8,15 @@ import sys
 import h5py
 import numpy as np
 import torch
-from loss_models_sandbox import get_criterion
-from models_format_sandbox import LossConfig, TrainConfig, get_config_class
-
-# Import your sandboxed components
-from models_sandbox import MODEL_REGISTRY
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
+from ml_models.loss_models_sandbox import get_criterion
+from ml_models.models_format_sandbox import LossConfig, TrainConfig, get_config_class
+
+# Import your sandboxed components
+from ml_models.models_sandbox import MODEL_REGISTRY
 
 # ==========================================
 # 1. Dataset Logic

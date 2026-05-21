@@ -7,14 +7,14 @@ import time
 import h5py
 import numpy as np
 import torch
-from array2h5 import create_abra_file
-from models_format_sandbox import get_config_class
-
-# Import your sandboxed components for Agent Mode
-from models_sandbox import MODEL_REGISTRY
 from tqdm import tqdm
 
+from execute_tools.array2h5 import create_abra_file
 from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
+from ml_models.models_format_sandbox import get_config_class
+
+# Import your sandboxed components for Agent Mode
+from ml_models.models_sandbox import MODEL_REGISTRY
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 

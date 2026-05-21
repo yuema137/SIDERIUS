@@ -36,7 +36,10 @@ import os
 
 import pytest
 import torch
-from models_format_sandbox import (
+from torch.utils.data import DataLoader
+
+from execute_tools.train_engine_sandbox import TIDMADDataset, run_experiment
+from ml_models.models_format_sandbox import (
     AEConfig,
     LossConfig,
     PUNetConfig,
@@ -45,8 +48,6 @@ from models_format_sandbox import (
     TransformerConfig,
     WaveNetConfig,
 )
-from torch.utils.data import DataLoader
-from train_engine_sandbox import TIDMADDataset, run_experiment
 
 # Segmentation size used for all synthetic tests — small enough to be fast,
 # large enough to satisfy the minimum constraint in model configs (ge=1000).
