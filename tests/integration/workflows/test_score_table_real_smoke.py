@@ -440,7 +440,7 @@ class TestScoreTableRealSmoke:
             # ================================================================
             # ITERATION 2
             # ================================================================
-            iter2_sources = seed_paths + [iter1_output_path]
+            iter2_sources = [*seed_paths, iter1_output_path]
             print(f"\n{'#' * 72}")
             print(f"# ITERATION 2 — seeds + iter_001 ({len(iter2_sources)} files)")
             print(f"{'#' * 72}\n")

@@ -16,6 +16,7 @@ case IDs while collapsing one-input-per-function noise.
 """
 
 import json
+from typing import ClassVar
 
 import pytest
 from pydantic import ValidationError
@@ -1381,7 +1382,11 @@ class TestTrialConfig:
     """Verify TrialConfig schema validates trial/formal decisions correctly."""
 
     # Common seed values for tests
-    _SEEDS = {"train_sampling_seed": 42, "eval_sampling_seed": 42, "train_base_seed": 123}
+    _SEEDS: ClassVar[dict[str, int]] = {
+        "train_sampling_seed": 42,
+        "eval_sampling_seed": 42,
+        "train_base_seed": 123,
+    }
 
     @pytest.mark.parametrize(
         "kwargs, key_check",

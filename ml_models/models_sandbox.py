@@ -331,7 +331,7 @@ class AE(nn.Module):
         self.encoder = nn.Sequential(*encoder_modules)
 
         decoder_modules = []
-        reversed_dims = dims[::-1][1:] + [self.input_dim]
+        reversed_dims = [*dims[::-1][1:], self.input_dim]
         for d in reversed_dims:
             decoder_modules.append(nn.Linear(last_dim, d))
             if d != self.input_dim:

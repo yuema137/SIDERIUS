@@ -13,6 +13,7 @@ LLM calls are mocked — these tests validate:
 """
 
 import json
+from typing import Any, ClassVar
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1100,7 +1101,7 @@ class TestDegradedInterpreterPath:
     load_latest_knowledge() does not skip the iter and regress the vocab.
     """
 
-    INCOMING_VOCAB = [
+    INCOMING_VOCAB: ClassVar[list[dict[str, Any]]] = [
         {
             "name": "dilated_causal_conv",
             "kind": "feature",

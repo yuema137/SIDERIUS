@@ -1472,7 +1472,7 @@ class ResultInterpretationAgent:
                     else existing_entry.get("aliases", [])
                 )
                 vocab_by_name[dup_of] = existing_entry.model_copy(
-                    update={"aliases": current_aliases + [name]}
+                    update={"aliases": [*current_aliases, name]}
                 )
                 del vocab_by_name[name]
                 msg = f"Merged '{name}' into '{dup_of}' as alias. Rationale: {rationale}"

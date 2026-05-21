@@ -445,7 +445,7 @@ class TestFullExplorationLoop:
             print(f"\n[ITER 1 DONE] Model: {iter1_model}, Output: {iter1_output_path}")
 
             # --- ITERATION 2: seed + iteration 1's output ---
-            iter2_sources = seed_paths + [iter1_output_path]
+            iter2_sources = [*seed_paths, iter1_output_path]
             print(f"\n{'=' * 60}")
             print(f"  ITERATION 2: source = seeds + iter_001 ({len(iter2_sources)} files)")
             print(f"{'=' * 60}\n")

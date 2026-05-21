@@ -417,7 +417,7 @@ def build_runtime_vocab(
             existing = vocab_by_name[name]
             if run and run not in existing.seen_in_runs:
                 vocab_by_name[name] = existing.model_copy(
-                    update={"seen_in_runs": existing.seen_in_runs + [run]}
+                    update={"seen_in_runs": [*existing.seen_in_runs, run]}
                 )
 
     return list(vocab_by_name.values())
@@ -500,7 +500,7 @@ def update_vocab_link_confirmations(
         )
         if capability not in existing_related:
             updated = feat_entry.model_copy(
-                update={"related_to": list(existing_related) + [capability]}
+                update={"related_to": [*existing_related, capability]}
             )
             vocab_by_name[feature] = updated
             newly_promoted.append(key)

@@ -21,6 +21,7 @@ two-decimal ``×`` suffix, etc.) is inherited from the K.7.6 helper and
 not re-tested here — see §14.N.4.
 """
 
+from typing import Any, ClassVar
 from unittest.mock import MagicMock
 
 import pytest
@@ -328,7 +329,7 @@ class TestPipelineTemplateVarsCarryBlock:
     to see the substituted system prompt, since the proposing call sits
     behind the comparison + reasoning calls."""
 
-    _FAKE_COMPARISON = {
+    _FAKE_COMPARISON: ClassVar[dict[str, Any]] = {
         "comparisons": [],
         "proposed_vocab_links": [],
         "proposed_vocab_candidates": [],
@@ -336,7 +337,7 @@ class TestPipelineTemplateVarsCarryBlock:
         "sota_score": 5.5,
         "sota_mechanism": "x",
     }
-    _FAKE_REASONING = {
+    _FAKE_REASONING: ClassVar[dict[str, Any]] = {
         "proposed_change": "x",
         "causal_hypothesis": "x",
         "falsifiable_prediction": {
@@ -350,7 +351,7 @@ class TestPipelineTemplateVarsCarryBlock:
         "inherited_components": [],
         "proposed_vocab_candidates": [],
     }
-    _FAKE_PROPOSING = {
+    _FAKE_PROPOSING: ClassVar[dict[str, Any]] = {
         "model_name": "spectral_wavenet",
         "model_description": "x",
         "mathematical_definition": "x",

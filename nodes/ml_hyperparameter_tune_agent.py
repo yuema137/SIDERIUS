@@ -2130,7 +2130,7 @@ class HyperparamTuningAgent:
                     ]
                     current_final_loss = train_results.get("final_loss")
                     if current_final_loss is not None:
-                        all_same_loss_finals = same_loss_finals + [current_final_loss]
+                        all_same_loss_finals = [*same_loss_finals, current_final_loss]
                         sorted_finals = sorted(all_same_loss_finals)
                         same_loss_loss_rank = sorted_finals.index(current_final_loss) + 1
                         same_loss_total = len(all_same_loss_finals)
@@ -2722,7 +2722,7 @@ def main():
     # after the tuner copies it into the run-scoped plugin dir
     # (docs/run_scoped_plugins.md, Phase 3/4). The schema validator and the
     # planner reject unknown model_types at runtime with a clearer error.
-    builtin_choices = list(MODEL_REGISTRY.keys()) + ["auto"]
+    builtin_choices = [*MODEL_REGISTRY.keys(), "auto"]
     parser.add_argument(
         "--force_model",
         type=str,

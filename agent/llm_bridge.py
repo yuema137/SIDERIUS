@@ -35,7 +35,7 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -1584,7 +1584,7 @@ class StubLLMBridge(LLMBridge):
     # --- Dispatch tables (label -> method-name) --------------------------
     # Keyed by string method names rather than method objects so the dict
     # can sit in the class body without forward-referencing each method.
-    _SYNTH_HANDLERS_JSON: dict[str, str] = {
+    _SYNTH_HANDLERS_JSON: ClassVar[dict[str, str]] = {
         # B2a — tuner + interpretation
         "tuner.planner": "_synth_tuner_planner",
         "tuner.reflector": "_synth_tuner_reflector",
@@ -1602,7 +1602,7 @@ class StubLLMBridge(LLMBridge):
         # B2b — validator
         "validator.code_review": "_synth_validator_code_review",
     }
-    _SYNTH_HANDLERS_TEXT: dict[str, str] = {
+    _SYNTH_HANDLERS_TEXT: ClassVar[dict[str, str]] = {
         # B2b — proposer + implementor free-text labels
         "proposer.legacy_reasoning": "_synth_proposer_legacy_reasoning",
         "implementor.reasoning": "_synth_implementor_reasoning",
