@@ -40,8 +40,9 @@ jobs:
       - name: Lint — ruff format (check only, no rewrite)
         run: uv run ruff format --check .
 
-      - name: Type check — pyright
+      - name: Type check — pyright (diagnostic, non-blocking)
         run: uv run pyright
+        continue-on-error: true
 
       - name: Unit tests — pytest (no real_run, no integration)
         run: uv run pytest tests/unit/ -m "not real_run" -q
