@@ -225,8 +225,8 @@ def _check_plugin(model_file_path: str) -> tuple[bool, str | None]:
     Returns (success, error_message_or_None).
     """
     spec = importlib.util.spec_from_file_location("_validator_plugin_load", model_file_path)
-    if spec is None:
-        return False, f"Could not create module spec for {model_file_path}"
+    if spec is None or spec.loader is None:
+        return False, f"Could not create module spec/loader for {model_file_path}"
     module = importlib.util.module_from_spec(spec)
     try:
         spec.loader.exec_module(module)
@@ -305,8 +305,8 @@ def _check_instantiation_and_gradient(
       - output_type_ok:   PLUGIN_OUTPUT_TYPE matches the actual forward output dims.
     """
     spec = importlib.util.spec_from_file_location("_validator_plugin_inst", model_file_path)
-    if spec is None:
-        return False, False, False, f"Could not create module spec for {model_file_path}"
+    if spec is None or spec.loader is None:
+        return False, False, False, f"Could not create module spec/loader for {model_file_path}"
     module = importlib.util.module_from_spec(spec)
     try:
         spec.loader.exec_module(module)
@@ -598,8 +598,17 @@ class MLCodeValidatorAgent:
         return LLMCodeReview.model_validate(raw)
 
     def _save(self, inp: ValidatorInput, out: ValidatorOutput) -> None:
-        workspace = inp.storage.local.workspace
-        run_name = inp.storage.local.run_name
+        # StorageConfig.local is Optional (only set when backend='local').
+        # The validator only writes locally — surface the precondition
+        # explicitly rather than letting it crash on attribute access.
+        storage_local = inp.storage.local
+        if storage_local is None:
+            raise ValueError(
+                f"ValidatorInput requires storage.local to be populated "
+                f"(got backend={inp.storage.backend!r}, local=None)"
+            )
+        workspace = storage_local.workspace
+        run_name = storage_local.run_name
         os.makedirs(workspace, exist_ok=True)
         path = os.path.join(workspace, f"validation_{run_name}.json")
         with open(path, "w") as f:
