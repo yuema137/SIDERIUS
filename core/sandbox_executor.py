@@ -309,7 +309,7 @@ class LocalRecorder(BaseRecorder):
             try:
                 with open(self.summary_file, encoding="utf-8") as f:
                     return json.load(f)
-            except:
+            except (OSError, json.JSONDecodeError):
                 return []
         return []
 
@@ -796,7 +796,7 @@ class TidmadSandbox:
                 json.dump({}, f)
 
             print(f">>> [Executor] Running scoring for {exp_id}...")
-            result = subprocess.run(
+            subprocess.run(
                 [
                     sys.executable,
                     "execute_tools/denoising_score_single.py",

@@ -220,7 +220,7 @@ class TestConstructorDI:
     def test_default_factory_uses_real_bridge(self):
         """Without bridge_factory, the agent constructs a real LLMBridge."""
         with patch("nodes.ml_model_proposal_agent.LLMBridge") as MockBridge:
-            agent = MLModelProposalAgent(provider="gemini", model_id="test")
+            MLModelProposalAgent(provider="gemini", model_id="test")
             MockBridge.assert_called_once()
 
     def test_custom_factory(self):

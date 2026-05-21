@@ -151,10 +151,6 @@ def test_vocab_grows_across_two_iterations(tmp_path, request):
         backend="local",
         local=LocalStorageConfig(workspace=str(tmp_path), run_name="iter1"),
     )
-    storage_iter2 = StorageConfig(
-        backend="local",
-        local=LocalStorageConfig(workspace=str(tmp_path), run_name="iter2"),
-    )
 
     # -----------------------------------------------------------------------
     # Iteration 1: attn_wavenet REFUTED

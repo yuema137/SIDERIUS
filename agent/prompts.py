@@ -390,6 +390,8 @@ def build_exploration_checklist(
         suffix = f" — {status}"
         if bounds:
             suffix += f" — {bounds}"
+        if desc:
+            suffix += f" — {desc}"
         lines.append(f"- {marker} `{field}`: {tried_str}{suffix}")
 
     # Loss config

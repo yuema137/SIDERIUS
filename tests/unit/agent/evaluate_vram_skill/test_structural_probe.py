@@ -349,8 +349,6 @@ def test_pack_hook_returns_none_not_tensor():
     w = nn.Linear(4, 4)
     x = torch.randn(2, 4, requires_grad=True)
 
-    original_pack = None
-
     def spy_pack(t):
         captured.append(t)
         return t

@@ -464,7 +464,7 @@ def test_pydantic_validation_error_maps_to_schema_violation_response():
 def test_vram_budget_gb_further_restricts_cap():
     """``vram_budget_gb`` is an operator-set soft cap. The effective cap
     must be ``min(ctx.usable_cap_bytes, budget)``."""
-    with _Patches() as p:
+    with _Patches():
         # Training peak = 70 bytes with a neutral probe → fits a 32 GB GPU
         # easily. Clamp the budget to 1 byte so the wrapper must refuse.
         out = wrapper.run_skill(
@@ -514,7 +514,7 @@ def test_vram_budget_gb_cannot_exceed_physical_cap():
 
 
 def test_feasible_verdict_mentions_cap_and_dominant_phase():
-    with _Patches() as p:
+    with _Patches():
         out = wrapper.run_skill(sandbox=None, hardware_context=_gpu_ctx(32.0), **_run_kwargs())
     # 32 GB × 0.80 = 25.6 GB cap
     assert "25.6 GB" in out["verdict"] or "25.60 GB" in out["verdict"]
