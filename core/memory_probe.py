@@ -109,6 +109,7 @@ def probe_memory(
             f"[MEM] scope={scope} iter={iter_idx} phase={phase} rss=NA vms=NA (psutil unavailable)"
         )
     else:
+        assert psutil is not None
         mem = psutil.Process(os.getpid()).memory_info()
         rss_gb = mem.rss / _GIB
         vms_gb = mem.vms / _GIB
