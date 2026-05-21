@@ -493,6 +493,7 @@ class SimpleWaveNet(nn.Module):
             else:
                 min_len = min(skip_sum.size(-1), skip.size(-1))
                 skip_sum = skip_sum[:, :, :min_len] + skip[:, :, :min_len]
+        assert skip_sum is not None
         x = F.relu(skip_sum)
         x = F.relu(self.output_conv1(x))
         return self.output_conv2(x)  # [B, 256, T]

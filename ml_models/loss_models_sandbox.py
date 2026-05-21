@@ -46,7 +46,7 @@ class FocalLoss1DCW(nn.Module):
     Class-Weighted Focal Loss, initialized via LossConfig and external class weights.
     """
 
-    def __init__(self, config: LossConfig, class_weights: torch.Tensor):
+    def __init__(self, config: LossConfig, class_weights: torch.Tensor | None):
         super().__init__()
         # Extract from Pydantic config
         self.alpha = config.alpha  # Can be None if using class_weights
