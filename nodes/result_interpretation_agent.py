@@ -31,6 +31,7 @@ from agent.schemas.interpretation import (
     ModelRunSummary,
 )
 from agent.schemas.score_table import ScoreComparisonTable
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from ml_models.model_descriptions import get_model_description
 
 if TYPE_CHECKING:
@@ -742,7 +743,8 @@ class ResultInterpretationAgent:
             total_experiments += s.completed_rounds
 
             if s.best_denoising_score is not None:
-                if per_model_best.get(mt) is None or s.best_denoising_score > per_model_best[mt]:
+                current_best = per_model_best.get(mt)
+                if current_best is None or s.best_denoising_score > current_best:
                     per_model_best[mt] = s.best_denoising_score
                     per_model_best_config[mt] = s.best_config
                 if overall_best_score is None or s.best_denoising_score > overall_best_score:
@@ -750,7 +752,8 @@ class ResultInterpretationAgent:
                     overall_best_config = s.best_config
 
             if s.worst_denoising_score is not None:
-                if per_model_worst.get(mt) is None or s.worst_denoising_score < per_model_worst[mt]:
+                current_worst = per_model_worst.get(mt)
+                if current_worst is None or s.worst_denoising_score < current_worst:
                     per_model_worst[mt] = s.worst_denoising_score
                 if overall_worst_score is None or s.worst_denoising_score < overall_worst_score:
                     overall_worst_score = s.worst_denoising_score
@@ -1195,8 +1198,8 @@ class ResultInterpretationAgent:
 
             print(
                 f"  Runtime vocab: {len(runtime_vocab)} entries "
-                f"({sum(1 for v in runtime_vocab if (v.kind if hasattr(v, 'kind') else v.get('kind')) == 'discovery')} discoveries, "
-                f"{sum(1 for v in runtime_vocab if (v.tier if hasattr(v, 'tier') else v.get('tier')) == 'canonical')} canonical)"
+                f"({sum(1 for v in runtime_vocab if v.kind == 'discovery')} discoveries, "
+                f"{sum(1 for v in runtime_vocab if v.tier == 'canonical')} canonical)"
             )
 
             # --- Phase E.7: Update ProposedVocabLink confirmation tracking ---
@@ -1427,9 +1430,7 @@ class ResultInterpretationAgent:
         if not promoted_names:
             return vocab, []
 
-        vocab_by_name: dict[str, Any] = {
-            (e.name if hasattr(e, "name") else e["name"]): e for e in vocab
-        }
+        vocab_by_name: dict[str, Any] = {e.name: e for e in vocab}
         merge_changes: list[str] = []
 
         for name in promoted_names:
@@ -1526,10 +1527,10 @@ def main():
 
     agent_input = InterpretationInput(
         summaries=[summary],
-        storage={
-            "backend": "local",
-            "local": {"workspace": args.workspace, "run_name": args.run_name},
-        },
+        storage=StorageConfig(
+            backend="local",
+            local=LocalStorageConfig(workspace=args.workspace, run_name=args.run_name),
+        ),
     )
     print(f"Input validated: model={args.model_type} | rounds={summary.completed_rounds}")
 
@@ -1581,31 +1582,29 @@ def tuning_output_to_model_run_summary(
     round_model_params: list[int | None] = []
 
     for r in records:
-        rec = r.model_dump() if hasattr(r, "model_dump") else r
-        round_scores.append(rec.get("denoising_score"))
-        round_trial_portions.append(rec.get("trial_portion"))
-        round_model_params.append(rec.get("model_params"))
-        memory = rec.get("memory") or {}
-        if isinstance(memory, dict):
-            round_conclusions.append(memory.get("conclusion") or "")
+        round_scores.append(r.denoising_score)
+        round_trial_portions.append(r.trial_portion)
+        round_model_params.append(r.model_params)
+        if r.memory is None:
+            round_conclusions.append("")
         else:
-            conclusion = getattr(memory, "conclusion", None) or ""
-            round_conclusions.append(conclusion)
+            round_conclusions.append(r.memory.conclusion or "")
 
     # Find best record (highest denoising_score)
-    success = [
-        (r.model_dump() if hasattr(r, "model_dump") else r)
-        for r in records
-        if (r.status if hasattr(r, "status") else r.get("status")) == "success"
-        and (r.denoising_score if hasattr(r, "denoising_score") else r.get("denoising_score"))
-        is not None
-    ]
-    best_rec = max(success, key=lambda r: r["denoising_score"]) if success else None
+    success = [r for r in records if r.status == "success" and r.denoising_score is not None]
+    best_rec = (
+        max(
+            success,
+            key=lambda r: r.denoising_score if r.denoising_score is not None else float("-inf"),
+        )
+        if success
+        else None
+    )
 
     # Find formal round (last record with is_trial=False)
     formal_rec = None
     for r in reversed(success):
-        if not r.get("is_trial", True):
+        if not r.is_trial:
             formal_rec = r
             break
 
@@ -1628,11 +1627,11 @@ def tuning_output_to_model_run_summary(
 
     best_score_table = _as_table(output.best_score_table)
     if best_score_table is None and best_rec is not None:
-        best_score_table = _as_table(best_rec.get("score_table"))
+        best_score_table = _as_table(best_rec.score_table)
 
     formal_score_table = _as_table(output.formal_score_table)
     if formal_score_table is None and formal_rec is not None:
-        formal_score_table = _as_table(formal_rec.get("score_table"))
+        formal_score_table = _as_table(formal_rec.score_table)
 
     return ModelRunSummary(
         model_type=output.model_type,
@@ -1645,20 +1644,20 @@ def tuning_output_to_model_run_summary(
         round_scores=round_scores,
         round_conclusions=round_conclusions,
         # Per-file performance (raw primitive retained per §7.2 scope note)
-        best_file_vector=best_rec.get("file_vector") if best_rec else None,
-        formal_score=formal_rec.get("denoising_score") if formal_rec else None,
-        formal_file_vector=formal_rec.get("file_vector") if formal_rec else None,
+        best_file_vector=best_rec.file_vector if best_rec else None,
+        formal_score=formal_rec.denoising_score if formal_rec else None,
+        formal_file_vector=formal_rec.file_vector if formal_rec else None,
         # Per-file performance (enriched — Phase 4)
         best_score_table=best_score_table,
         formal_score_table=formal_score_table,
         # Efficiency
-        best_model_params=best_rec.get("model_params") if best_rec else None,
+        best_model_params=best_rec.model_params if best_rec else None,
         # Compute cost
-        best_timing=best_rec.get("timing") if best_rec else None,
+        best_timing=best_rec.timing.model_dump() if best_rec and best_rec.timing else None,
         # Data volume
-        training_psd_segments=best_rec.get("training_psd_segments") if best_rec else None,
-        eval_psd_segments=best_rec.get("eval_psd_segments") if best_rec else None,
-        trial_portion=best_rec.get("trial_portion") if best_rec else None,
+        training_psd_segments=best_rec.training_psd_segments if best_rec else None,
+        eval_psd_segments=best_rec.eval_psd_segments if best_rec else None,
+        trial_portion=best_rec.trial_portion if best_rec else None,
         # Per-round trends
         round_trial_portions=round_trial_portions,
         round_model_params=round_model_params,
