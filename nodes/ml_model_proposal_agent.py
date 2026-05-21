@@ -1398,7 +1398,7 @@ class MLModelProposalAgent:
                     last_exc = exc
                     if isinstance(exc, ValidationError):
                         error_summary = "; ".join(
-                            f"{' → '.join(str(l) for l in e['loc'])}: {e['msg']}"
+                            f"{' → '.join(str(loc_part) for loc_part in e['loc'])}: {e['msg']}"
                             for e in exc.errors()[:5]
                         )
                     else:

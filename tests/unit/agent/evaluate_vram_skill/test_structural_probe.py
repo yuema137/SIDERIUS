@@ -386,7 +386,7 @@ def test_probe_autograd_tape_unpack_raises_on_backward():
     with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
         loss = w(x).sum()
 
-    with pytest.raises(RuntimeError, match="backward.*must not be called"):
+    with pytest.raises(RuntimeError, match=r"backward.*must not be called"):
         loss.backward()
 
 

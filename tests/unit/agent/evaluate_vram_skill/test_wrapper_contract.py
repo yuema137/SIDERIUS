@@ -105,8 +105,8 @@ def _probe(
     mode: str = "training",
 ) -> ProbeResult:
     layers = layers if layers is not None else [_leaf("x", "Y", 1_000_000)]
-    sum_out = sum(l.output_bytes for l in layers if l.is_leaf)
-    max_out = max((l.output_bytes for l in layers if l.is_leaf), default=0)
+    sum_out = sum(layer.output_bytes for layer in layers if layer.is_leaf)
+    max_out = max((layer.output_bytes for layer in layers if layer.is_leaf), default=0)
     return ProbeResult(
         mode=mode,
         model_forward=ForwardLayerReport(

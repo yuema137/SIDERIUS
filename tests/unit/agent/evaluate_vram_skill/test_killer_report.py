@@ -69,9 +69,9 @@ def _non_leaf(var_name: str, class_name: str, output_bytes: int) -> LayerReport:
 
 
 def _probe(layers: list[LayerReport]) -> ProbeResult:
-    total_params = sum(l.param_bytes for l in layers if l.is_leaf)
-    sum_out = sum(l.output_bytes for l in layers if l.is_leaf)
-    max_out = max((l.output_bytes for l in layers if l.is_leaf), default=0)
+    total_params = sum(layer.param_bytes for layer in layers if layer.is_leaf)
+    sum_out = sum(layer.output_bytes for layer in layers if layer.is_leaf)
+    max_out = max((layer.output_bytes for layer in layers if layer.is_leaf), default=0)
     return ProbeResult(
         mode="inference",
         model_forward=ForwardLayerReport(

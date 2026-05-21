@@ -304,7 +304,7 @@ class TestCorruptManifest:
         _materialise_iter(tmp_path, 1, "resume_test_arch_a")
         manifest_path = tmp_path / "iter_001" / "manifest.json"
         manifest_path.write_text("{not valid json")
-        with pytest.raises(ResumeError, match="manifest.json is malformed"):
+        with pytest.raises(ResumeError, match=r"manifest.json is malformed"):
             restore_prior_state(str(tmp_path), 2, [])
 
     def test_status_failed_raises(self, tmp_path, isolated_registries):
@@ -432,7 +432,7 @@ class TestCorruptRunOutput:
             / "run_output_iter_001.json"
         )
         run_output.unlink()
-        with pytest.raises(ResumeError, match="output_path .* does not exist"):
+        with pytest.raises(ResumeError, match=r"output_path .* does not exist"):
             restore_prior_state(str(tmp_path), 2, [])
 
     def test_malformed_run_output_json_raises(self, tmp_path, isolated_registries):

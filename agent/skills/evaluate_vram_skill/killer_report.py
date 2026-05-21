@@ -106,7 +106,7 @@ def _format_bytes(b: int) -> str:
 
 
 def _leaf_layers(probe: ProbeResult) -> list[LayerReport]:
-    return [l for l in probe.model_forward.layers if l.is_leaf]
+    return [layer for layer in probe.model_forward.layers if layer.is_leaf]
 
 
 def _dominant_leaf(probe: ProbeResult) -> LayerReport | None:
@@ -117,18 +117,18 @@ def _dominant_leaf(probe: ProbeResult) -> LayerReport | None:
     leaves = _leaf_layers(probe)
     if not leaves:
         return None
-    return max(leaves, key=lambda l: l.output_bytes)
+    return max(leaves, key=lambda layer: layer.output_bytes)
 
 
 def _per_layer_entries(probe: ProbeResult) -> list[PerLayerEntry]:
     return [
         PerLayerEntry(
-            name=l.var_name,
-            class_name=l.class_name,
-            output_shape=l.output_shape,
-            bytes=l.output_bytes,
+            name=layer.var_name,
+            class_name=layer.class_name,
+            output_shape=layer.output_shape,
+            bytes=layer.output_bytes,
         )
-        for l in _leaf_layers(probe)
+        for layer in _leaf_layers(probe)
     ]
 
 
