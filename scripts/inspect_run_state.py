@@ -136,7 +136,12 @@ def _validate_run_output(
 
 def inspect_iteration(iter_dir: Path, run_name: str) -> IterationReport:
     """Classify a single iteration_NNN/ dir under the legacy run layout."""
-    iter_idx = int(_RUN_ITER_RE.match(iter_dir.name).group(1))
+    m = _RUN_ITER_RE.match(iter_dir.name)
+    if m is None:
+        raise ValueError(
+            f"inspect_iteration: {iter_dir.name!r} does not match {_RUN_ITER_RE.pattern!r}"
+        )
+    iter_idx = int(m.group(1))
     model_subdir = _find_tuner_subdir(iter_dir)
 
     if model_subdir is None:
@@ -201,10 +206,17 @@ def _find_chain_iter_dirs(workspace: Path) -> list[Path]:
     """
     if not workspace.is_dir():
         return []
-    return sorted(
-        (p for p in workspace.iterdir() if p.is_dir() and _CHAIN_ITER_RE.match(p.name)),
-        key=lambda p: int(_CHAIN_ITER_RE.match(p.name).group(1)),
-    )
+    # Match each name once and pair with its extracted index, so the sort
+    # key is plain ``int`` (no second regex pass, no .group() on Optional).
+    matched: list[tuple[int, Path]] = []
+    for p in workspace.iterdir():
+        if not p.is_dir():
+            continue
+        m = _CHAIN_ITER_RE.match(p.name)
+        if m is None:
+            continue
+        matched.append((int(m.group(1)), p))
+    return [p for _, p in sorted(matched)]
 
 
 def inspect_chain_iteration(iter_dir: Path) -> IterationReport:
@@ -214,7 +226,12 @@ def inspect_chain_iteration(iter_dir: Path) -> IterationReport:
     ``_validate_run_output`` so the inspector's "COMMITTED" matches what
     ``restore_prior_state`` will accept.
     """
-    iter_idx = int(_CHAIN_ITER_RE.match(iter_dir.name).group(1))
+    m = _CHAIN_ITER_RE.match(iter_dir.name)
+    if m is None:
+        raise ValueError(
+            f"inspect_chain_iteration: {iter_dir.name!r} does not match {_CHAIN_ITER_RE.pattern!r}"
+        )
+    iter_idx = int(m.group(1))
     manifest_path = iter_dir / "manifest.json"
 
     if not manifest_path.is_file():
@@ -508,10 +525,17 @@ def _run_layout_run(args: argparse.Namespace) -> int:
         return 2
 
     print(f"Workspace root: {ws_root}")
-    iter_dirs = sorted(
-        (p for p in ws_root.iterdir() if p.is_dir() and _RUN_ITER_RE.match(p.name)),
-        key=lambda p: int(_RUN_ITER_RE.match(p.name).group(1)),
-    )
+    # Match each name once and pair with its extracted index — sort key is
+    # then plain ``int``, with no .group() on Optional.
+    matched: list[tuple[int, Path]] = []
+    for p in ws_root.iterdir():
+        if not p.is_dir():
+            continue
+        m = _RUN_ITER_RE.match(p.name)
+        if m is None:
+            continue
+        matched.append((int(m.group(1)), p))
+    iter_dirs = [p for _, p in sorted(matched)]
     reports = [inspect_iteration(d, args.run_name) for d in iter_dirs]
 
     print(render_table(reports))
