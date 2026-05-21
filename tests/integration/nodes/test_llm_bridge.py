@@ -11,13 +11,14 @@ DO NOT run in CI.
 """
 
 import os
+from pathlib import Path
 
 import pytest
 from dotenv import load_dotenv
 
 from agent.llm_bridge import LLMBridge
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
 pytestmark = pytest.mark.real_run
 

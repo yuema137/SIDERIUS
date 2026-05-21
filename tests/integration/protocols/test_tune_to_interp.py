@@ -16,6 +16,8 @@ Run with:
 DO NOT remove the dual_mode marker — this test runs in CI in pseudo mode.
 """
 
+from pathlib import Path
+
 import pytest
 from dotenv import load_dotenv
 
@@ -34,7 +36,7 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from execute_tools.scoring_helpers import render_comparison_table
 from nodes.result_interpretation_agent import ResultInterpretationAgent
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
 
 # ---------------------------------------------------------------------------

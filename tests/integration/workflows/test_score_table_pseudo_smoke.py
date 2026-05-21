@@ -31,6 +31,7 @@ from __future__ import annotations
 import os
 import re
 import time
+from pathlib import Path
 from typing import Optional
 
 import pytest
@@ -62,7 +63,7 @@ from execute_tools.scoring_helpers import render_comparison_table
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
 from nodes.result_interpretation_agent import ResultInterpretationAgent
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
 pytestmark = pytest.mark.real_run
 

@@ -20,6 +20,7 @@ DO NOT run in CI.
 
 import ast
 import os
+from pathlib import Path
 
 import pytest
 from dotenv import load_dotenv
@@ -35,7 +36,7 @@ from nodes.ml_model_proposal_agent import MLModelProposalAgent
 # Reuse the synthetic interpretation from the node integration test
 from tests.integration.nodes.test_ml_model_proposal_agent import SYNTHETIC_INTERPRETATION
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
 pytestmark = pytest.mark.real_run
 

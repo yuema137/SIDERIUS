@@ -34,11 +34,12 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 import pytest
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
 pytestmark = pytest.mark.real_run
 

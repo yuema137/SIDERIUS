@@ -42,6 +42,7 @@ Run with:
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 from dotenv import load_dotenv
@@ -53,7 +54,7 @@ from agent.schemas.hyperparam_tuning import (
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
 pytestmark = pytest.mark.dual_mode
 

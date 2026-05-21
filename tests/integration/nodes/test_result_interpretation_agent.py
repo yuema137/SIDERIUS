@@ -12,6 +12,7 @@ DO NOT run in CI.
 """
 
 import os
+from pathlib import Path
 
 import pytest
 from dotenv import load_dotenv
@@ -19,7 +20,7 @@ from dotenv import load_dotenv
 from agent.schemas.interpretation import InterpretationInput, InterpretationOutput, ModelRunSummary
 from nodes.result_interpretation_agent import ResultInterpretationAgent
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
 pytestmark = pytest.mark.real_run
 

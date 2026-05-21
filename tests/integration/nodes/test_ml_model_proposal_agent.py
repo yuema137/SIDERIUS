@@ -16,6 +16,7 @@ DO NOT run in CI.
 import json
 import os
 import re
+from pathlib import Path
 
 import pytest
 from dotenv import load_dotenv
@@ -25,7 +26,7 @@ from agent.schemas.proposal import ProposalInput, ProposalOutput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
 pytestmark = pytest.mark.real_run
 

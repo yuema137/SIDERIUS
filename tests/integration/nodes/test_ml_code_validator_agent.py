@@ -18,15 +18,16 @@ DO NOT run in CI.
 import json
 import os
 import textwrap
+from pathlib import Path
 
 import pytest
 from dotenv import load_dotenv
 
-load_dotenv()
-
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.validator import ValidatorInput, ValidatorOutput
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
+
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
 pytestmark = pytest.mark.real_run
 

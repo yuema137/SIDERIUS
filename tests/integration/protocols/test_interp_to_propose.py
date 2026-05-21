@@ -20,6 +20,7 @@ DO NOT run in CI.
 
 import os
 import re
+from pathlib import Path
 
 import pytest
 from dotenv import load_dotenv
@@ -56,7 +57,7 @@ from tests.integration.nodes.test_result_interpretation_agent import (
     PUNET_SUMMARY,
 )
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
 pytestmark = pytest.mark.real_run
 

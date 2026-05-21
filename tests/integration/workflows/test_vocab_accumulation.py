@@ -38,6 +38,7 @@ Run with:
 """
 
 import os
+from pathlib import Path
 
 import pytest
 from dotenv import load_dotenv
@@ -54,7 +55,7 @@ from tests.integration.nodes.test_result_interpretation_agent import (
     _SEED_WAVENET,
 )
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
 pytestmark = pytest.mark.dual_mode
 

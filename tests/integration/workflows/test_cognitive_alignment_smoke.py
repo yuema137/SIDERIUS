@@ -70,6 +70,7 @@ import math
 import os
 import re
 import time
+from pathlib import Path
 from typing import Any, Optional
 
 import pytest
@@ -98,7 +99,7 @@ from nodes.ml_model_proposal_agent import MLModelProposalAgent
 from nodes.result_interpretation_agent import ResultInterpretationAgent
 from nodes.scoring_reference import load_reference_scores
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
 pytestmark = pytest.mark.real_run
 

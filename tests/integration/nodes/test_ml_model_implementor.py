@@ -21,6 +21,7 @@ DO NOT run in CI.
 import ast
 import json
 import os
+from pathlib import Path
 
 import pytest
 from dotenv import load_dotenv
@@ -30,7 +31,7 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from ml_models.plugin_loader import _load_plugin
 from nodes.ml_model_implementor import MLModelImplementor
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
 pytestmark = pytest.mark.real_run
 
