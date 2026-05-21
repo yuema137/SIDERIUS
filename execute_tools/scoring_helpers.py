@@ -352,11 +352,7 @@ def _aggregate_over_subset(
     # Ratio is undefined when the ceiling is at log(1) or at the -inf
     # sentinel. Clip to 0.0 — the markdown render guard handles the
     # below-baseline messaging separately.
-    recovery = (
-        0.0
-        if gt_scalar == 0.0 or not math.isfinite(gt_scalar)
-        else model_scalar / gt_scalar
-    )
+    recovery = 0.0 if gt_scalar == 0.0 or not math.isfinite(gt_scalar) else model_scalar / gt_scalar
 
     return AggregateScalars(
         raw_baseline_scalar=raw_scalar,

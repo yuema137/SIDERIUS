@@ -370,9 +370,7 @@ def run_experiment(
             # 1. Input: Based on Architecture
             # The forward contract is [B, T] int64 for all embedding-based models.
             # Only fcnet (AE) uses float input for regression.
-            input_seq = (
-                input_seq.float() if model_cfg.model_type == "fcnet" else input_seq.int()
-            )
+            input_seq = input_seq.float() if model_cfg.model_type == "fcnet" else input_seq.int()
 
             # 2. Target: Based on Loss Type
             if loss_cfg.loss_type in ["ce", "focal", "focal_cw"]:
@@ -507,9 +505,7 @@ def run_experiment_streaming(
             input_seq = input_batch.to(device)
             target_seq = target_batch.to(device)
 
-            input_seq = (
-                input_seq.float() if model_cfg.model_type == "fcnet" else input_seq.int()
-            )
+            input_seq = input_seq.float() if model_cfg.model_type == "fcnet" else input_seq.int()
 
             if loss_cfg.loss_type in ["ce", "focal", "focal_cw"]:
                 target_seq = target_seq.long()

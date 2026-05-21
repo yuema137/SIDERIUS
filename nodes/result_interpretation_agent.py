@@ -776,9 +776,7 @@ class ResultInterpretationAgent:
             if best is not None and (overall_best_score is None or best > overall_best_score):
                 overall_best_score = best
                 overall_best_config = stats.get("best_config")
-            if worst is not None and (
-                overall_worst_score is None or worst < overall_worst_score
-            ):
+            if worst is not None and (overall_worst_score is None or worst < overall_worst_score):
                 overall_worst_score = worst
 
         # Fill None for any model type still missing

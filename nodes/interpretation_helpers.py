@@ -499,9 +499,7 @@ def update_vocab_link_confirmations(
             else feat_entry.get("related_to", [])
         )
         if capability not in existing_related:
-            updated = feat_entry.model_copy(
-                update={"related_to": [*existing_related, capability]}
-            )
+            updated = feat_entry.model_copy(update={"related_to": [*existing_related, capability]})
             vocab_by_name[feature] = updated
             newly_promoted.append(key)
 
