@@ -89,6 +89,12 @@ allowed-confusables = ["×", "−", "α", "∪"]
 # Tests legitimately use bare asserts, longer fixtures, and unused
 # imports for fixture side effects; keep style enforcement off in tests.
 "tests/**" = ["F401", "F811", "B011", "SIM"]
+# Preserve thematic section banners, fixture locality, and local aliasing
+# within unit tests (intentional mid-file imports under section headers).
+"tests/unit/agent/**/test_*.py" = ["E402"]
+"tests/unit/core/test_resume.py" = ["E402"]
+"tests/unit/core/test_sandbox_executor.py" = ["E402"]
+"tests/unit/workflows/test_model_exploration.py" = ["E402"]
 
 [tool.ruff.format]
 quote-style = "double"

@@ -356,7 +356,7 @@ class TestBreakdownShape:
 # that consume it.
 
 
-from nodes.ml_hyperparameter_tune_agent import (  # noqa: E402
+from nodes.ml_hyperparameter_tune_agent import (
     _latest_trial_inference_marginal,
 )
 
