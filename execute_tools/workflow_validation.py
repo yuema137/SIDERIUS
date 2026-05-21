@@ -179,9 +179,11 @@ def validate_workflow_outputs(
         f"Last record should be formal (is_trial=False), got is_trial={last_record.is_trial}"
     )
 
-    # Formal record should have 20 non-NaN entries (all files evaluated)
+    # Formal record should have 20 non-NaN entries (all files evaluated).
+    # ``file_vector`` is ``list[float | None]`` — None entries mean the file
+    # was masked (not evaluated), which is just as invalid here as NaN.
     if last_record.file_vector is not None:
-        non_nan = [v for v in last_record.file_vector if not math.isnan(v)]
+        non_nan = [v for v in last_record.file_vector if v is not None and not math.isnan(v)]
         assert len(non_nan) == 20, (
             f"Formal record has {len(non_nan)}/20 non-NaN file_vector entries"
         )
