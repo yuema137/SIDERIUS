@@ -35,7 +35,7 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TypedDict, cast
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -93,7 +93,21 @@ class ToolCallResult:
 # Known providers — convenience defaults, not a restriction.
 # Any OpenAI-compatible endpoint can be used via base_url/api_key overrides.
 # ---------------------------------------------------------------------------
-_KNOWN_PROVIDERS: dict[str, dict[str, str | None]] = {
+class _ProviderConfig(TypedDict):
+    """Static shape of a `_KNOWN_PROVIDERS` entry.
+
+    ``base_url`` is ``None`` for providers that rely on the OpenAI SDK
+    default endpoint (currently ``openai``); ``api_key_env`` and
+    ``default_model`` are always populated, which lets ``os.getenv`` and
+    ``self.model_name`` resolve as ``str`` without a runtime guard.
+    """
+
+    base_url: str | None
+    api_key_env: str
+    default_model: str
+
+
+_KNOWN_PROVIDERS: dict[str, _ProviderConfig] = {
     "openai": {
         "base_url": None,  # SDK default
         "api_key_env": "OPENAI_API_KEY",
@@ -323,10 +337,14 @@ class LLMBridge:
         # Resolve model: explicit arg > known default (unknown providers must supply model_id)
         if model_id is None and known:
             model_id = known["default_model"]
-        self.model_name = model_id
+        # ``cast`` is a pure type-system shim. If a caller passes an unknown
+        # provider with no ``model_id``, ``model_id`` remains ``None`` and
+        # the existing crash at the API-call site (``client.chat.completions.create``)
+        # is preserved verbatim — no behavior change, no early raise.
+        self.model_name: str = cast(str, model_id)
         # Reflect model defaults to the main model when unset, so existing
         # callers see no behavior change.
-        self.reflect_model_name = reflect_model_id or self.model_name
+        self.reflect_model_name: str = reflect_model_id or self.model_name
 
         # Retry policy: SDK retries are disabled (max_retries=0) and
         # replaced with our own loop in _chat_json that uses a longer
@@ -334,12 +352,26 @@ class LLMBridge:
         # The default SDK schedule (capped at ~8s, ~25s total) gave up
         # too fast on the E9 SDSC iter 47950268 503 (Google "high
         # demand" / per-key QPM saturation under parallel runs).
-        self.client = OpenAI(
-            api_key=self.api_key,
-            max_retries=0,
-            timeout=120.0,
-            **({"base_url": base_url} if base_url else {}),
-        )
+        #
+        # The conditional ``**({"base_url": ...} if base_url else {})``
+        # spread used here previously collapsed pyright's kwarg resolution
+        # into spurious ``default_headers``/``default_query`` complaints.
+        # Branching the call keeps the runtime identical (omitting
+        # ``base_url`` lets the SDK fall back to its default endpoint) while
+        # giving the type-checker concrete keyword arguments to match.
+        if base_url:
+            self.client = OpenAI(
+                api_key=self.api_key,
+                max_retries=0,
+                timeout=120.0,
+                base_url=base_url,
+            )
+        else:
+            self.client = OpenAI(
+                api_key=self.api_key,
+                max_retries=0,
+                timeout=120.0,
+            )
 
         # --- Reflect client setup (Phase A.2: cross-provider support) ---
         # When reflect_provider is None or matches the main provider, the
@@ -1489,7 +1521,11 @@ class LLMBridge:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                tools=tools,
+                # ``tools`` enters as ``list[dict[str, Any]]`` (built by
+                # ``SkillSpec.to_openai_tool``); the SDK signature wants
+                # ``Iterable[ChatCompletionToolUnionParam]``. Cast is a
+                # pure type-system shim — no runtime change.
+                tools=cast(Any, tools),
                 tool_choice="auto",
             ),
             label="tool_call",
