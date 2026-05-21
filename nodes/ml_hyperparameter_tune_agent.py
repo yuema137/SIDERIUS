@@ -1916,7 +1916,11 @@ class HyperparamTuningAgent:
                         if anchor_map_data is not None:
                             # Anchor-normalized scoring (both trial and formal modes).
                             # Trial: sparse SampleSet. Formal: full SampleSet (all 20 × 200).
-                            def _denoised_fn(fi):
+                            # B023 — default-arg locking pins the captured loop
+                            # variables at definition time; without it a future
+                            # refactor that defers the call would hit the last
+                            # iteration's model_type / exp_id.
+                            def _denoised_fn(fi, model_type=model_type, exp_id=exp_id):
                                 return f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_{fi:04d}.h5"
 
                             # Reference vector for the task-specific health check
