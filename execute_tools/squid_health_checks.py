@@ -44,8 +44,8 @@ from __future__ import annotations
 
 
 def check_amplitude_collapse(
-    file_vector: list[float] | None,
-    reference_file_vector: list[float] | None,
+    file_vector: list[float | None] | None,
+    reference_file_vector: list[float | None] | None,
     threshold_ratio: float = 0.01,
 ) -> tuple[bool, str | None]:
     """Detect mode collapse via PSD output magnitude ratio.

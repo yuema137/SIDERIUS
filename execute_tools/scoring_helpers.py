@@ -269,14 +269,23 @@ def _compute_weight_and_impact(
     # (model linear mean + reference n_segments + reference gt linear sum).
     # Path-A always fills the reference, so this guard exists only for
     # malformed test fixtures or partially-loaded reference bundles.
+    #
+    # We capture each validated ``float(m)`` into ``m_floats`` at the guard
+    # site so the two downstream loops (Linear_Weight, Impact_Score) can
+    # reuse the already-narrowed scalar instead of re-indexing the Optional
+    # ``model_fv_linear`` list — pyright cannot propagate "guarded non-None"
+    # across loop boundaries, but the dict lookup is unambiguously ``float``.
     means: list[float] = []
+    m_floats: dict[int, float] = {}
     for i in sampled_indices:
         m = model_fv_linear[i]
         n = reference.gt_per_file_n_segments[i]
         gt_sum = reference.gt_per_file_linear_sum[i]
         if m is None or n is None or gt_sum is None:
             return weights, impacts
-        means.append(float(m))
+        m_float = float(m)
+        m_floats[i] = m_float
+        means.append(m_float)
 
     sigma = sum(means)
     if sigma <= 0 or not math.isfinite(sigma):
@@ -285,7 +294,7 @@ def _compute_weight_and_impact(
     # Linear_Weight: fractional contribution of each sampled file to the
     # subset linear mean. Sums to 1 over the sampled subset.
     for i in sampled_indices:
-        m = float(model_fv_linear[i])
+        m = m_floats[i]
         # Numerical clamp to [0, 1] — under exact arithmetic m/sigma is in
         # [0, 1] by construction, but float round-off can place the result
         # at 1.0 + epsilon, which would then trip the schema's le=1 bound.
@@ -303,7 +312,7 @@ def _compute_weight_and_impact(
     n_per_file_linear_sum: list[float] = [0.0] * NUM_FILES
     for i in sampled_indices:
         n_per_file_n[i] = int(reference.gt_per_file_n_segments[i])
-        n_per_file_linear_sum[i] = float(model_fv_linear[i]) * n_per_file_n[i]
+        n_per_file_linear_sum[i] = m_floats[i] * n_per_file_n[i]
 
     total_n = sum(n_per_file_n[i] for i in sampled_indices)
     total_linear = sum(n_per_file_linear_sum[i] for i in sampled_indices)

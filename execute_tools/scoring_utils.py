@@ -120,8 +120,18 @@ def get_one_sec_psd(
         data = _h5_dataset(h5f, "timeseries", channel_key, "timeseries")[
             start_index : start_index + N
         ]
-        volt_range = _h5_group(h5f, "timeseries", "channel0001").attrs["voltage_range_mV"]
-        sampling_freq = _h5_group(h5f, "timeseries", "channel0001").attrs["sampling_frequency"]
+        # h5py's ``attrs[...]`` stubs return ``Empty | ndarray | ...``, but
+        # both attributes are scalar physics constants per the TIDMAD HDF5
+        # convention. ``cast(float, ...)`` is a pure type-system narrow with
+        # zero runtime cost — preserving the original numpy-scalar return
+        # exactly — and matches the existing h5py boundary pattern used at
+        # ``_h5_dataset`` / ``_h5_group`` (L56, L66) in this file.
+        volt_range = cast(
+            float, _h5_group(h5f, "timeseries", "channel0001").attrs["voltage_range_mV"]
+        )
+        sampling_freq = cast(
+            float, _h5_group(h5f, "timeseries", "channel0001").attrs["sampling_frequency"]
+        )
 
         scaling = np.float32(volt_range / (2 * 128.0))
         TS = np.array(data, dtype=np.float32) * scaling
@@ -563,6 +573,13 @@ def score_vector(
             # (CH2 always has non-zero SNR at the peak).
             s_max_used = 1.0
     else:
+        # Non-legacy mode requires the caller to supply ``s_max``. Surface the
+        # contract explicitly instead of crashing inside ``float(None)``.
+        if s_max is None:
+            raise ValueError(
+                "score_vector: s_max parameter is mandatory when legacy_mode=False "
+                "(got None) — caller must supply the normalizer in non-legacy mode."
+            )
         s_max_used = float(s_max)
 
     total_weighted = 0.0
