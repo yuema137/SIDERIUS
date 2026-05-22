@@ -22,7 +22,7 @@ Node contract:
 import argparse
 import json
 import os
-from typing import Any
+from typing import Any, cast
 
 from pydantic import ValidationError
 
@@ -957,10 +957,28 @@ class MLModelProposalAgent:
 
             candidates.append(output)
             if preflight_attempt < _MAX_PREFLIGHT_ATTEMPTS - 1:
+                # Invariant: factor > 1.0 here means _run_preflight_check did not
+                # take its early-exit paths at L106-107 (budget None) or
+                # L110-115 (num_params None / non-positive), and reached L128
+                # where preflight_estimated_minutes is assigned. Narrow all three
+                # explicitly so any future regression in that invariant surfaces
+                # here with a clear message instead of crashing inside ``:,`` /
+                # ``:.1f`` format on None.
+                num_params = output.parameter_count_estimate
+                est_mins = output.preflight_estimated_minutes
+                if num_params is None or est_mins is None or budget is None:
+                    raise RuntimeError(
+                        "Preflight structural invariants violated: "
+                        f"factor={factor} > 1.0 but one of "
+                        f"(parameter_count_estimate={num_params}, "
+                        f"preflight_estimated_minutes={est_mins}, "
+                        f"budget={budget}) is None — _run_preflight_check "
+                        "should have returned None for skipped pre-flight."
+                    )
                 preflight_errors.append(
                     _build_preflight_rejection_block(
-                        num_params=output.parameter_count_estimate,
-                        estimated_minutes=output.preflight_estimated_minutes,
+                        num_params=num_params,
+                        estimated_minutes=est_mins,
                         factor=factor,
                         budget_minutes=budget,
                     )
@@ -971,7 +989,7 @@ class MLModelProposalAgent:
                     f"{_MAX_PREFLIGHT_ATTEMPTS}."
                 )
 
-        best = min(candidates, key=lambda o: o.preflight_factor)
+        best = min(candidates, key=lambda o: cast(float, o.preflight_factor))
         best.memo_consistency_notes.append(
             f"PREFLIGHT_OVERBUDGET_EMITTED: all {_MAX_PREFLIGHT_ATTEMPTS} "
             f"pre-flight attempts exceeded the {budget:.1f} min budget; "
@@ -1430,9 +1448,24 @@ class MLModelProposalAgent:
 
             preflight_candidates.append(output)
             if preflight_attempt < _MAX_PREFLIGHT_ATTEMPTS - 1:
+                # Same invariant as in _run_legacy: factor > 1.0 implies
+                # _run_preflight_check ran to completion and assigned
+                # preflight_estimated_minutes. Explicit narrow surfaces any
+                # regression with a diagnostic message.
+                num_params = output.parameter_count_estimate
+                est_mins = output.preflight_estimated_minutes
+                if num_params is None or est_mins is None or budget is None:
+                    raise RuntimeError(
+                        "Preflight structural invariants violated: "
+                        f"factor={factor} > 1.0 but one of "
+                        f"(parameter_count_estimate={num_params}, "
+                        f"preflight_estimated_minutes={est_mins}, "
+                        f"budget={budget}) is None — _run_preflight_check "
+                        "should have returned None for skipped pre-flight."
+                    )
                 rejection = _build_preflight_rejection_block(
-                    num_params=output.parameter_count_estimate,
-                    estimated_minutes=output.preflight_estimated_minutes,
+                    num_params=num_params,
+                    estimated_minutes=est_mins,
                     factor=factor,
                     budget_minutes=budget,
                 )
@@ -1445,7 +1478,7 @@ class MLModelProposalAgent:
                     f"{preflight_attempt + 2}/{_MAX_PREFLIGHT_ATTEMPTS}."
                 )
 
-        best = min(preflight_candidates, key=lambda o: o.preflight_factor)
+        best = min(preflight_candidates, key=lambda o: cast(float, o.preflight_factor))
         best.memo_consistency_notes.append(
             f"PREFLIGHT_OVERBUDGET_EMITTED: all {_MAX_PREFLIGHT_ATTEMPTS} "
             f"pre-flight attempts exceeded the {budget:.1f} min budget; "
@@ -1472,7 +1505,7 @@ class MLModelProposalAgent:
             return ""
 
         # Handle both VocabEntry objects and dicts
-        def _get(entry, key, default=""):
+        def _get(entry, key, default: Any = ""):
             if hasattr(entry, key):
                 return getattr(entry, key)
             if isinstance(entry, dict):
