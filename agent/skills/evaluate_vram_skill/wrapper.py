@@ -132,6 +132,11 @@ def _build_model(model_type: str, model_cfg: dict, loss_type: str) -> torch.nn.M
     Callers catch it and emit the Phase D.4 ``schema_violation`` record.
     """
     config_cls = get_config_class(model_type)
+    if config_cls is None:
+        raise ValueError(
+            f"_build_model: unknown model_type={model_type!r} — "
+            f"get_config_class returned None (no plugin or built-in config registered)."
+        )
     config_obj = config_cls(**model_cfg)
     model_cls = MODEL_REGISTRY[model_type]
     # Principle 2: no architecture-family branching. A registered model
@@ -165,7 +170,18 @@ def _build_probe_tensors(
 
 def _compose_training_peak(probe: ProbeResult, optimizer: str) -> tuple[int, dict]:
     """``autograd_tape + input + output + params + training_overhead +
-    cuda_context + cudnn_backward_workspace``."""
+    cuda_context + cudnn_backward_workspace``.
+
+    ``probe.autograd_tape`` is only populated when the probe ran in
+    training-mode (backward-capable). Composing the training peak when
+    it is ``None`` would silently drop the largest term — raise instead
+    so the caller catches the contract violation explicitly.
+    """
+    if probe.autograd_tape is None:
+        raise ValueError(
+            "_compose_training_peak requires probe.autograd_tape to be populated "
+            "(got None) — caller passed an inference-only probe."
+        )
     params_bytes = probe.model_forward.total_param_bytes
     saved_bytes = probe.autograd_tape.total_saved_bytes
     overhead = training_overhead_bytes(params_bytes, optimizer)

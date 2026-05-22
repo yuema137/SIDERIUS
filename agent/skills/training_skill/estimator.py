@@ -171,6 +171,11 @@ def _count_params(model_type: str, model_config: dict, loss_type: str) -> int:
     from ml_models.models_sandbox import MODEL_REGISTRY
 
     config_cls = get_config_class(model_type)
+    if config_cls is None:
+        raise ValueError(
+            f"_count_params: unknown model_type={model_type!r} — "
+            f"get_config_class returned None (no plugin or built-in config registered)."
+        )
     config_obj = config_cls(**model_config)
     if model_type == "fcnet":
         model = MODEL_REGISTRY[model_type](config_obj, loss_type=loss_type)

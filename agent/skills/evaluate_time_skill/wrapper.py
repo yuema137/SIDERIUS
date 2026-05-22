@@ -246,6 +246,11 @@ def _count_params(model_type: str, model_config: dict, loss_type: str) -> int:
     from ml_models.models_sandbox import MODEL_REGISTRY
 
     config_cls = get_config_class(model_type)
+    if config_cls is None:
+        raise ValueError(
+            f"_count_params: unknown model_type={model_type!r} — "
+            f"get_config_class returned None (no plugin or built-in config registered)."
+        )
     config_obj = config_cls(**model_config)
     if model_type == "fcnet":
         model = MODEL_REGISTRY[model_type](config_obj, loss_type=loss_type)
@@ -327,12 +332,14 @@ def _measure_ms_per_step(
         loss_type = loss_config.get("loss_type", "ce")
 
         # Pick a minimal slice of the sample_set large enough for the required batches.
+        # Both early returns must obey the declared ``tuple[float | None, dict]``
+        # signature — bare ``None`` would crash caller unpacking at L496.
         if not sample_set:
-            return None
+            return None, empty_breakdown
         first_key = sorted(sample_set.keys(), key=int)[0]
         first_psds = list(sample_set[first_key])
         if not first_psds:
-            return None
+            return None, empty_breakdown
 
         ml_per_psd = PSD_SEGMENT_LENGTH // seg_size
         required_segs = (n_warmup_batches + n_timed_batches) * batch_size
@@ -358,6 +365,12 @@ def _measure_ms_per_step(
         device = torch.device("cuda")
 
         config_cls = get_config_class(model_type)
+        if config_cls is None:
+            print(
+                f"    [warmup skipped] unknown model_type={model_type!r}; "
+                f"falling back to static formula."
+            )
+            return None, empty_breakdown
         model_cfg_obj = config_cls(**model_config)
         if model_type == "fcnet":
             model = MODEL_REGISTRY[model_type](model_cfg_obj, loss_type=loss_type).to(device)
@@ -450,6 +463,15 @@ def run_skill(sandbox, **kwargs) -> dict:
     phase_breakdown.
     """
     model_type = kwargs.get("model_type")
+    # Required kwarg per docstring contract; downstream helpers (_count_params,
+    # _measure_ms_per_step, _training_est.estimate_wall_time_seconds, …) all
+    # require a concrete ``str``. Fail explicitly here instead of letting the
+    # first internal call crash on a None argument.
+    if not isinstance(model_type, str) or not model_type:
+        raise ValueError(
+            f"evaluate_time_skill.run_skill: 'model_type' kwarg is required "
+            f"and must be a non-empty str (got {model_type!r})."
+        )
     model_config = kwargs.get("model_config", {})
     train_config = kwargs.get("train_config", {})
     loss_config = kwargs.get("loss_config", {})
