@@ -21,6 +21,7 @@ import traceback
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
+from typing import Literal
 
 from pydantic import ValidationError
 
@@ -570,7 +571,7 @@ def _collect_disallowed_patterns(
 
 def _build_gate_exhaustion(
     records: list,
-    active_mode: str,
+    active_mode: Literal["trial", "formal"],
     vram_budget_gb: float | None,
     time_budget_minutes: float | None,
     *,

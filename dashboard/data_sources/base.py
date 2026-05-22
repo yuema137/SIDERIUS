@@ -15,6 +15,20 @@ from abc import ABC, abstractmethod
 
 class DataSource(ABC):
     # ------------------------------------------------------------------
+    # Identity
+    # ------------------------------------------------------------------
+
+    @property
+    @abstractmethod
+    def root(self) -> str:
+        """
+        Concrete identifier of the data source's storage location. For local
+        JSON it is the root data directory; for a future Postgres source it
+        would be a connection string or schema name. The dashboard API
+        renders this verbatim in /api/health diagnostics.
+        """
+
+    # ------------------------------------------------------------------
     # Discovery
     # ------------------------------------------------------------------
 

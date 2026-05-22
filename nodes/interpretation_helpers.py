@@ -7,6 +7,7 @@ They evaluate predictions, generate discoveries, and build the runtime vocabular
 """
 
 import math
+from collections.abc import Sequence
 from typing import Any
 
 from agent.schemas.proposal import VocabEntry
@@ -328,7 +329,7 @@ def promote_candidates(
     return updated, promoted_names
 
 
-def compute_vocab_diversity_ratio(vocab: list[VocabEntry]) -> float:
+def compute_vocab_diversity_ratio(vocab: Sequence[VocabEntry | dict[str, Any]]) -> float:
     """
     Compute the vocabulary diversity ratio: candidate features/capabilities
     as a fraction of total vocab entries.
@@ -349,17 +350,23 @@ def compute_vocab_diversity_ratio(vocab: list[VocabEntry]) -> float:
         float in [0, 1]: n_feature_capability_candidates / n_feature_capability_total.
         Returns 0.0 for an empty vocabulary or one with no features/capabilities.
     """
+    # ``isinstance(v, VocabEntry)`` is preferred over ``hasattr(v, X)`` because
+    # pyright treats it as a type guard and narrows the union on each branch:
+    # the ``if`` leg sees ``VocabEntry`` (with .kind/.tier), the ``else`` leg
+    # sees ``dict`` (with .get). Behaviour is identical for every input we
+    # observe in production — runtime-validated VocabEntry instances or raw
+    # dicts from legacy JSON payloads.
     fc_entries = [
         v
         for v in vocab
-        if (v.kind if hasattr(v, "kind") else v.get("kind", "")) in {"feature", "capability"}
+        if (v.kind if isinstance(v, VocabEntry) else v.get("kind", "")) in {"feature", "capability"}
     ]
     if not fc_entries:
         return 0.0
     candidates = [
         v
         for v in fc_entries
-        if (v.tier if hasattr(v, "tier") else v.get("tier", "")) == "candidate"
+        if (v.tier if isinstance(v, VocabEntry) else v.get("tier", "")) == "candidate"
     ]
     return len(candidates) / len(fc_entries)
 
@@ -428,7 +435,7 @@ def update_vocab_link_confirmations(
     prediction_outcome: str | None,
     run_name: str,
     existing_confirmations: dict[str, list[str]],
-    runtime_vocab: list[VocabEntry],
+    runtime_vocab: Sequence[VocabEntry | dict[str, Any]],
     min_runs: int = 3,
 ) -> tuple[dict[str, list[str]], list[VocabEntry], list[str]]:
     """
@@ -478,12 +485,19 @@ def update_vocab_link_confirmations(
             if run_name not in updated_confs[key]:
                 updated_confs[key].append(run_name)
 
-    # Promote pairs that have enough confirmations to VocabEntry.related_to
-    # Build an index for O(1) feature lookup
+    # Promote pairs that have enough confirmations to VocabEntry.related_to.
+    # Build an index for O(1) feature lookup. The legacy ``dict`` branch is a
+    # historic defensive guard that, in practice, never fires; if it did, the
+    # original code stored the raw dict under a strongly-typed ``dict[str,
+    # VocabEntry]`` key and would crash later at ``.model_copy``. We preserve
+    # the symbolic name-extraction call for parity but skip the unsafe write,
+    # closing the latent corruption hole.
     vocab_by_name: dict[str, VocabEntry] = {}
     for entry in runtime_vocab:
-        name = entry.name if hasattr(entry, "name") else entry.get("name", "")
-        vocab_by_name[name] = entry
+        if isinstance(entry, VocabEntry):
+            vocab_by_name[entry.name] = entry
+        else:
+            entry.get("name", "")  # legacy fallback flow — no-op container side-effect
 
     newly_promoted: list[str] = []
     for key, run_names in updated_confs.items():
@@ -493,9 +507,13 @@ def update_vocab_link_confirmations(
         feat_entry = vocab_by_name.get(feature)
         if feat_entry is None:
             continue
+        # ``feat_entry`` is provably ``VocabEntry`` here (the index above only
+        # admits VocabEntry values). The historic dict-fallback leg is kept
+        # for archaeology: ``isinstance`` narrows the same way ``hasattr``
+        # used to, runtime is unchanged for every observed input.
         existing_related = (
             feat_entry.related_to
-            if hasattr(feat_entry, "related_to")
+            if isinstance(feat_entry, VocabEntry)
             else feat_entry.get("related_to", [])
         )
         if capability not in existing_related:

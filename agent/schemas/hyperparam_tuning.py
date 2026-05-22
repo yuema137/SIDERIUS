@@ -595,7 +595,7 @@ class ExperimentPlan(BaseModel):
         return self
 
     @classmethod
-    def with_defaults(cls, raw: dict[str, Any]) -> ExperimentPlan:
+    def with_defaults(cls, raw: dict[str, Any] | list[Any]) -> ExperimentPlan:
         """
         Validate raw LLM output, falling back to defaults on invalid trial fields.
 
@@ -604,8 +604,9 @@ class ExperimentPlan(BaseModel):
         falling back to safe trial defaults.
 
         Defensive unwrap: LLMs occasionally emit a single-element list
-        ``[{...}]`` instead of ``{...}``. Unwrap that case before validation.
-        Any other non-dict input raises a clear TypeError.
+        ``[{...}]`` instead of ``{...}`` — the input type therefore admits
+        ``list[Any]`` to honestly reflect that runtime contract. Unwrap that
+        case before validation; any other shape raises a clear TypeError.
         """
         if isinstance(raw, list):
             if len(raw) == 1 and isinstance(raw[0], dict):

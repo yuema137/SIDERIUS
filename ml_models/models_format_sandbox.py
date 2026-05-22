@@ -294,20 +294,16 @@ class GatedFNOConfig(BaseConfig):
         return snapped
 
 
-# Update ModelConfigUnion
-ModelConfigUnion = (
-    PUNetConfig | AEConfig | TransformerConfig | WaveNetConfig | RNNSeq2SeqConfig | GatedFNOConfig
-)
-
-# Update get_config_class mapping
-# "gated_fno": GatedFNOConfig
-
 # ==========================================
 # Global Model Registry
 # ==========================================
 
-# Union type for the Agent to choose from
-ModelConfigUnion = (
+# Union type for the Agent to choose from. The PEP 695 ``type`` keyword form
+# is required so pyright accepts the symbol in type positions (e.g.
+# ``network_config: ModelConfigUnion`` on ExperimentConfig); without it
+# pyright treats the symbol as a runtime variable. Pydantic 2.12+ resolves
+# the lazy alias correctly during model rebuild.
+type ModelConfigUnion = (
     PUNetConfig | AEConfig | TransformerConfig | WaveNetConfig | RNNSeq2SeqConfig | GatedFNOConfig
 )
 

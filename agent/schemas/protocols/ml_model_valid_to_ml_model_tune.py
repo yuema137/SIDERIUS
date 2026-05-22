@@ -33,7 +33,7 @@ def local_validated_model(
     storage: StorageConfig,
     max_rounds: int = 50,
     file_index: int = 6,
-    llm_provider: str = "gemini",
+    llm_provider: Literal["gemini", "openai", "deepseek"] = "gemini",
     llm_model_id: str = "gemini-3.1-flash-lite-preview",
     reflect_provider: Literal["gemini", "openai", "deepseek"] | None = None,
     reflect_model_id: str | None = None,

@@ -20,6 +20,12 @@ class PostgresDataSource(DataSource):
             "Set data_source.type=local in dashboard_config.yaml."
         )
 
+    @property
+    def root(self) -> str:
+        raise NotImplementedError(
+            "Postgres backend storage is pending architectural integration."
+        )
+
     def list_models(self) -> list[str]:
         raise NotImplementedError
 

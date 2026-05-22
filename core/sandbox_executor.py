@@ -318,7 +318,7 @@ class MongoRecorder(BaseRecorder):
     """MongoDB-based recording for robust development."""
 
     def __init__(self, uri: str, db_name: str):
-        from pymongo import MongoClient
+        from pymongo import MongoClient  # type: ignore[reportMissingImports]
 
         self.client = MongoClient(uri)
         self.db = self.client[db_name]
@@ -745,7 +745,7 @@ class TidmadSandbox:
             }
 
     def score_vector(
-        self, sample_set, anchor_map: dict, s_max: float, denoised_filename_fn: callable, **kwargs
+        self, sample_set, anchor_map: dict, s_max: float, denoised_filename_fn: Callable, **kwargs
     ) -> tuple:
         """Anchor-normalised multi-file scoring. Delegates to execute_tools.scoring_utils.score_vector.
 

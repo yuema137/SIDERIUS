@@ -31,7 +31,7 @@ accumulator shape (Q2(a) ruling — see commit message).
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -358,10 +358,14 @@ class CacheEntry(BaseModel):
         stats_raw = legacy.get("_stats", legacy.get("stats", {})) or {}
         stats = stats_raw if isinstance(stats_raw, dict) else {}
 
+        # Same disjoint-key story as cache_consolidator.consolidate: pyright
+        # can't prove the two payloads address non-overlapping field sets, so
+        # we cast each unpack to a generic mapping. Runtime no-op; field
+        # validators on CacheEntry still gate the actual values.
         return cls(
             model_type=model_type,
-            **list_payload,
-            **narrative_payload,
+            **cast(dict[str, Any], list_payload),
+            **cast(dict[str, Any], narrative_payload),
             error_signatures=[],
             stats=stats,
         )

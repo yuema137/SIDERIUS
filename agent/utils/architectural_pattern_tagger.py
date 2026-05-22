@@ -30,6 +30,8 @@ See ``docs/reliable_resource_proposer.md`` §7 Decision 1 + §9 Commit 2.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 # ── thresholds (used by the tuner, not by tag_architecture itself) ───────────
 # Only attempts that overshoot the budget by this much contribute tags. A
 # 1.3× overshoot may be recoverable by reducing depth/width, so banning the
@@ -114,7 +116,7 @@ def _is_dense_attention_over_T(model_type_lower: str, model_config: dict) -> boo
 
 
 # Registry: adding a new tag is one line here + one entry in ARCHITECTURAL_PATTERNS.
-_TAGGERS: dict[str, callable] = {
+_TAGGERS: dict[str, Callable] = {
     "recurrent_over_T": _is_recurrent_over_T,
     "scan_over_T": _is_scan_over_T,
     "dense_attention_over_T": _is_dense_attention_over_T,

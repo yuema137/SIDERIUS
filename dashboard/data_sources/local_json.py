@@ -18,6 +18,15 @@ from dashboard.data_sources.base import DataSource
 
 
 class LocalJsonDataSource(DataSource):
+    # Class-level descriptor slot is required because the abstract `root`
+    # property on `DataSource` is checked by ABCMeta during instantiation
+    # (i.e. before `__init__` runs). A plain `self.root = ...` assignment in
+    # `__init__` would not satisfy the abstract contract in time, raising
+    # `TypeError: Can't instantiate abstract class`. The annotated default
+    # below registers `root` on the class itself, fulfilling the contract;
+    # the assignment in `__init__` then overrides it per instance.
+    root: str = ""
+
     def __init__(self, root_data_dir: str, models: list[str] | None = None):
         """
         Args:

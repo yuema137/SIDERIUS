@@ -34,7 +34,7 @@ handled deterministically).
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -783,10 +783,17 @@ def consolidate(
     new_sigs = _extract_new_error_signatures(new_llm_response)
     merged_sigs = _dedupe_error_signatures(prior.error_signatures, new_sigs)
 
+    # ``list_outputs`` and ``narrative_outputs`` carry disjoint key spaces — the
+    # list-typed fields and narrative-typed fields of ``CacheEntry`` respectively
+    # — but pyright cannot prove that disjointness across two separate unpacks
+    # and so rejects the second unpack as a value-type conflict on the first
+    # unpack's keys. The casts are a localized type-system mask: zero runtime
+    # cost, no payload mutation, and CacheEntry's own field validators still
+    # enforce the per-key shape at construction time.
     merged_entry = CacheEntry(
         model_type=prior.model_type,
-        **list_outputs,
-        **narrative_outputs,
+        **cast(dict[str, Any], list_outputs),
+        **cast(dict[str, Any], narrative_outputs),
         error_signatures=merged_sigs,
         stats=dict(new_stats) if new_stats else {},
     )
