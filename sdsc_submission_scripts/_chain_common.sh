@@ -1,25 +1,41 @@
 #!/bin/bash
 # ---------------------------------------------------------------------------
-# SIDERIUS Iteration Chain — shared logic (sourced by both lilab and SDSC)
+# SIDERIUS Iteration Chain — SHARED LIBRARY (source, do not exec)
 # ---------------------------------------------------------------------------
-# Full runbook (lilab + SDSC): docs/running_chain_test.md
+# Role : library, mode-agnostic. Holds everything that is identical between
+#        any execution backend (lilab subprocess, SDSC slurm, future ones).
+# Entry: run_chain.sh sources this file and adds the mode-aware pieces.
+# Files: see sdsc_submission_scripts/README.md for the folder map.
+# Doc  : docs/running_chain_test.md is the operator runbook.
 # ---------------------------------------------------------------------------
-# This file is sourced by run_iteration_chain.sh (SDSC, Slurm) and
-# run_iteration_chain_lilab.sh (lilab, foreground subprocess). It owns
-# everything that should be identical between the two: defaults, argument
-# parsing, human-advice file loading, app-arg construction, source-path
-# building, and the per-iteration loop scaffolding.
+# What lives here:
+#   * Default values for every CLI flag
+#   * parse_chain_args     — unified CLI parser
+#   * load_advice_file     — human-advice JSON validation
+#   * build_source_paths   — per-iter SOURCE_PATHS construction
+#   * build_app_args       — per-iter run_one_iteration.py argv assembly
+#   * print_chain_header   — formatted launch banner
+#   * run_chain            — the iteration loop body
 #
-# Each caller defines a single function:
-#   submit_iteration <ITER>   # given the current iteration number, run
-#                               # one iteration. APP_ARGS and SOURCE_PATHS
-#                               # are already populated in the environment.
-# It then calls `run_chain` to execute all N iterations.
+# What does NOT live here (lives in run_chain.sh instead):
+#   * python interpreter resolution + version guard
+#   * auto-resume inspector call
+#   * mode-specific submit_iteration implementations
+#       - submit_iteration_lilab : foreground subprocess
+#       - submit_iteration_sdsc  : sbatch + afterany dependency chain
+#   * mode dispatcher + final summary
 #
-# Why this exists: keeping a single source of truth for the shared logic
-# means the lilab and SDSC chains can never drift in subtle ways. The only
-# legitimate diff between the two callers is the execution mechanism
-# (sbatch with dependencies vs foreground python3 subprocess).
+# Contract for callers:
+#   1. Source this file.
+#   2. Define a function `submit_iteration <ITER>` that runs ONE iteration
+#      using the already-populated APP_ARGS and SOURCE_PATHS arrays.
+#   3. Call `parse_chain_args "$@"`, then `run_chain`.
+#
+# Why split this from run_chain.sh: the iter loop body must be identical
+# across all backends so lilab and SDSC can never diverge in subtle ways.
+# The split also lets unit tests source this library directly (without a
+# python interpreter or slurm) to exercise the argument-parsing and
+# arg-building logic in isolation.
 
 set -e
 set -o pipefail
