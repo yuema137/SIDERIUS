@@ -435,21 +435,24 @@ class TestReflectModelSplit:
     def test_default_both_methods_use_same_model(self):
         """When reflect_model_id is not passed, planner and reflector
         share self.model_name (no behavior change for existing callers)."""
-        bridge = LLMBridge(provider="gemini", model_id="planner-model")
+        with patch("agent.llm_bridge.OpenAI"):
+            bridge = LLMBridge(provider="gemini", model_id="planner-model")
         assert bridge.model_name == "planner-model"
         assert bridge.reflect_model_name == "planner-model"
 
     def test_explicit_none_falls_back_to_main_model(self):
         """Passing reflect_model_id=None explicitly is equivalent to
         not passing it (the parameter is optional with default None)."""
-        bridge = LLMBridge(provider="gemini", model_id="planner-model", reflect_model_id=None)
+        with patch("agent.llm_bridge.OpenAI"):
+            bridge = LLMBridge(provider="gemini", model_id="planner-model", reflect_model_id=None)
         assert bridge.reflect_model_name == "planner-model"
 
     def test_reflect_model_id_separates_planner_from_reflector(self):
         """When reflect_model_id is set, the two attributes diverge."""
-        bridge = LLMBridge(
-            provider="gemini", model_id="planner-model", reflect_model_id="reflector-model"
-        )
+        with patch("agent.llm_bridge.OpenAI"):
+            bridge = LLMBridge(
+                provider="gemini", model_id="planner-model", reflect_model_id="reflector-model"
+            )
         assert bridge.model_name == "planner-model"
         assert bridge.reflect_model_name == "reflector-model"
 
@@ -555,19 +558,21 @@ class TestReflectProviderSplit:
     def test_default_reflect_provider_falls_back_to_main_provider(self):
         """When reflect_provider is not passed, both methods use the
         same provider. self.reflect_provider equals self.provider."""
-        bridge = LLMBridge(provider="gemini", model_id="planner-model")
+        with patch("agent.llm_bridge.OpenAI"):
+            bridge = LLMBridge(provider="gemini", model_id="planner-model")
         assert bridge.provider == "gemini"
         assert bridge.reflect_provider == "gemini"
 
     def test_explicit_same_provider_reuses_client(self):
         """When reflect_provider equals provider, the bridge reuses the
         main client (no duplicate connection)."""
-        bridge = LLMBridge(
-            provider="gemini",
-            model_id="planner-model",
-            reflect_provider="gemini",
-            reflect_model_id="reflector-model",
-        )
+        with patch("agent.llm_bridge.OpenAI"):
+            bridge = LLMBridge(
+                provider="gemini",
+                model_id="planner-model",
+                reflect_provider="gemini",
+                reflect_model_id="reflector-model",
+            )
         assert bridge.client is bridge.reflect_client
         assert bridge.provider == "gemini"
         assert bridge.reflect_provider == "gemini"
@@ -650,7 +655,9 @@ class TestReflectProviderSplit:
     def test_unknown_reflect_provider_raises(self):
         """An unknown reflect_provider should fail-fast at construction
         time with a clear error pointing at the known providers list."""
-        with pytest.raises(ValueError, match="Unknown reflect_provider"):
+        with patch("agent.llm_bridge.OpenAI"), pytest.raises(
+            ValueError, match="Unknown reflect_provider"
+        ):
             LLMBridge(
                 provider="gemini",
                 model_id="planner-model",
@@ -661,12 +668,13 @@ class TestReflectProviderSplit:
     def test_reflect_provider_is_lowercased(self):
         """Like the main provider, reflect_provider should be normalized
         to lowercase for consistency."""
-        bridge = LLMBridge(
-            provider="gemini",
-            model_id="planner-model",
-            reflect_provider="GEMINI",
-            reflect_model_id="reflector-model",
-        )
+        with patch("agent.llm_bridge.OpenAI"):
+            bridge = LLMBridge(
+                provider="gemini",
+                model_id="planner-model",
+                reflect_provider="GEMINI",
+                reflect_model_id="reflector-model",
+            )
         assert bridge.reflect_provider == "gemini"
         # And same-after-lowercase should still reuse the client
         assert bridge.client is bridge.reflect_client

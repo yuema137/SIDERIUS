@@ -420,9 +420,10 @@ class TestErrorCases:
             ],
             storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
         )
-        agent = ResultInterpretationAgent(provider="gemini", model_id="test-model")
-        with pytest.raises(FileNotFoundError, match="nonexistent_model"):
-            agent.run(inp)
+        with patch("nodes.result_interpretation_agent.LLMBridge"):
+            agent = ResultInterpretationAgent(provider="gemini", model_id="test-model")
+            with pytest.raises(FileNotFoundError, match="nonexistent_model"):
+                agent.run(inp)
 
     def test_no_model_provided_raises(self):
         with pytest.raises(Exception, match="At least one model type"):
