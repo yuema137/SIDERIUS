@@ -39,6 +39,24 @@ from agent.skills.evaluate_vram_skill.wrapper import (
     run_skill,
 )
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
+from nodes.scoring_reference import ReferenceScores
+
+
+def _synth_reference() -> ReferenceScores:
+    """Hermetic 20-file reference bundle — mirrors ``test_tuning_agent._synth_reference``
+    so this fixture does not depend on real on-disk baseline data."""
+    return ReferenceScores(
+        raw_per_file_log=[-2.7] * 20,
+        gt_per_file_log=[7.0] * 20,
+        raw_per_file_linear_sum=[2.0] * 20,
+        raw_per_file_n_segments=[200] * 20,
+        gt_per_file_linear_sum=[2000.0] * 20,
+        gt_per_file_n_segments=[200] * 20,
+        raw_scalar_full=-2.7,
+        gt_scalar_full=7.0,
+        s_max=1.0,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Mock config classes that exercise each error type the wrapper must handle
@@ -294,6 +312,10 @@ class TestTunerSchemaViolationBehavior:
             patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
             patch("nodes.ml_hyperparameter_tune_agent._run_skill") as mock_skill,
+            patch(
+                "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
+                return_value=_synth_reference(),
+            ),
             tempfile.TemporaryDirectory() as configs_dir,
         ):
             mock_brain = MockBridge.return_value

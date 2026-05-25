@@ -27,6 +27,7 @@ dependencies = [
     "uvicorn[standard]>=0.30.0",
     "pyyaml>=6.0.2",
     "torchinfo>=1.8.0",
+    "psutil>=5.9",
 ]
 
 [tool.setuptools.packages.find]
