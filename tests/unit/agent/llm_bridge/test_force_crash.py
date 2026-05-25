@@ -29,6 +29,7 @@ What this file pins:
   5. The ``RuntimeError`` message includes the label — forensic
      visibility when a chain halts mid-run.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -48,7 +49,11 @@ def test_force_crash_default_false_when_env_unset(monkeypatch) -> None:
     # Sanity: a valid label round-trips through _synthesise_json without
     # raising. This guards against accidental always-on regression.
     result = bridge._chat_json(
-        None, "stub_model", "sys", "user", label="tuner.planner",
+        None,
+        "stub_model",
+        "sys",
+        "user",
+        label="tuner.planner",
     )
     assert isinstance(result, dict)
 
@@ -65,7 +70,11 @@ def test_force_crash_raises_on_chat_json(monkeypatch) -> None:
     assert bridge._force_crash is True
     with pytest.raises(RuntimeError, match=r"force_crash.*tuner\.planner"):
         bridge._chat_json(
-            None, "stub_model", "sys", "user", label="tuner.planner",
+            None,
+            "stub_model",
+            "sys",
+            "user",
+            label="tuner.planner",
         )
 
 
@@ -120,7 +129,11 @@ def test_force_crash_only_triggers_on_exact_string_1(monkeypatch, value) -> None
     assert bridge._force_crash is False
     # And a generation call returns normally.
     result = bridge._chat_json(
-        None, "stub_model", "sys", "user", label="tuner.planner",
+        None,
+        "stub_model",
+        "sys",
+        "user",
+        label="tuner.planner",
     )
     assert isinstance(result, dict)
 
@@ -137,7 +150,11 @@ def test_force_crash_error_message_includes_label(monkeypatch) -> None:
     bridge = StubLLMBridge()
     with pytest.raises(RuntimeError) as excinfo:
         bridge._chat_json(
-            None, "stub_model", "sys", "user", label="interpretation.synthesis",
+            None,
+            "stub_model",
+            "sys",
+            "user",
+            label="interpretation.synthesis",
         )
     message = str(excinfo.value)
     assert "interpretation.synthesis" in message

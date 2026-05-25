@@ -51,22 +51,22 @@ Tests cover:
 import json
 import subprocess
 import textwrap
-import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from agent.schemas.validator import ValidatorInput, ValidatorOutput, LLMCodeReview
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
+import pytest
+
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from agent.schemas.validator import LLMCodeReview, ValidatorInput, ValidatorOutput
 from nodes.ml_code_validator_agent import (
     MLCodeValidatorAgent,
-    _check_plugin,
-    _check_description,
-    _check_config_fields,
-    _run_tests,
-    _check_instantiation_and_gradient,
     _build_review_prompt,
+    _check_config_fields,
+    _check_description,
+    _check_instantiation_and_gradient,
+    _check_plugin,
+    _run_tests,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -147,8 +147,8 @@ def make_input(tmp_path: Path, run_name: str = "r1", **overrides) -> ValidatorIn
 # _check_plugin
 # ---------------------------------------------------------------------------
 
-class TestCheckPlugin:
 
+class TestCheckPlugin:
     def test_valid_plugin_returns_true(self, tmp_path):
         path = tmp_path / "plugin.py"
         path.write_text(VALID_PLUGIN_SRC)
@@ -199,15 +199,15 @@ class TestCheckPlugin:
 # _run_tests
 # ---------------------------------------------------------------------------
 
-class TestRunTests:
 
+class TestRunTests:
     def test_passing_tests_return_true(self):
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stdout = "3 passed in 0.5s"
         mock_result.stderr = ""
         with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
-            ok, output = _run_tests("/fake/test_file.py")
+            ok, _output = _run_tests("/fake/test_file.py")
         assert ok is True
 
     def test_failing_tests_return_false(self):
@@ -216,7 +216,7 @@ class TestRunTests:
         mock_result.stdout = "FAILED test_forward - AssertionError"
         mock_result.stderr = ""
         with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
-            ok, output = _run_tests("/fake/test_file.py")
+            ok, _output = _run_tests("/fake/test_file.py")
         assert ok is False
 
     def test_stdout_and_stderr_concatenated(self):
@@ -225,7 +225,7 @@ class TestRunTests:
         mock_result.stdout = "stdout content"
         mock_result.stderr = "stderr content"
         with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
-            ok, output = _run_tests("/fake/test_file.py")
+            _ok, output = _run_tests("/fake/test_file.py")
         assert "stdout content" in output
         assert "stderr content" in output
 
@@ -235,7 +235,7 @@ class TestRunTests:
         mock_result.stdout = "3 passed"
         mock_result.stderr = ""
         with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
-            ok, output = _run_tests("/fake/test_file.py")
+            _ok, output = _run_tests("/fake/test_file.py")
         assert "3 passed" in output
 
     def test_output_returned_on_fail(self):
@@ -244,7 +244,7 @@ class TestRunTests:
         mock_result.stdout = "FAILED"
         mock_result.stderr = "error detail"
         with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
-            ok, output = _run_tests("/fake/test_file.py")
+            _ok, output = _run_tests("/fake/test_file.py")
         assert "FAILED" in output
 
 
@@ -252,8 +252,8 @@ class TestRunTests:
 # _check_description
 # ---------------------------------------------------------------------------
 
-class TestCheckDescription:
 
+class TestCheckDescription:
     def test_valid_description_returns_true(self, tmp_path):
         path = tmp_path / "description.md"
         path.write_text(VALID_DESCRIPTION)
@@ -276,19 +276,19 @@ class TestCheckDescription:
     def test_exactly_50_chars_returns_false(self, tmp_path):
         path = tmp_path / "description.md"
         path.write_text("x" * 50)
-        ok, err = _check_description(str(path))
+        ok, _err = _check_description(str(path))
         assert ok is False
 
     def test_51_chars_returns_true(self, tmp_path):
         path = tmp_path / "description.md"
         path.write_text("x" * 51)
-        ok, err = _check_description(str(path))
+        ok, _err = _check_description(str(path))
         assert ok is True
 
     def test_empty_file_returns_false(self, tmp_path):
         path = tmp_path / "description.md"
         path.write_text("")
-        ok, err = _check_description(str(path))
+        ok, _err = _check_description(str(path))
         assert ok is False
 
 
@@ -296,23 +296,23 @@ class TestCheckDescription:
 # _check_config_fields
 # ---------------------------------------------------------------------------
 
-class TestCheckConfigFields:
 
+class TestCheckConfigFields:
     def test_all_int_returns_true(self):
         ok, err = _check_config_fields({"depth": 2, "channels": 64})
         assert ok is True
         assert err is None
 
     def test_all_float_returns_true(self):
-        ok, err = _check_config_fields({"lr": 1e-3, "dropout": 0.1})
+        ok, _err = _check_config_fields({"lr": 1e-3, "dropout": 0.1})
         assert ok is True
 
     def test_bool_returns_true(self):
-        ok, err = _check_config_fields({"use_bias": True, "depth": 3})
+        ok, _err = _check_config_fields({"use_bias": True, "depth": 3})
         assert ok is True
 
     def test_mixed_scalar_returns_true(self):
-        ok, err = _check_config_fields(VALID_CONFIG_FIELDS)
+        ok, _err = _check_config_fields(VALID_CONFIG_FIELDS)
         assert ok is True
 
     def test_list_value_returns_false(self):
@@ -337,7 +337,7 @@ class TestCheckConfigFields:
         assert "bad_dict" in err
 
     def test_empty_dict_returns_true(self):
-        ok, err = _check_config_fields({})
+        ok, _err = _check_config_fields({})
         assert ok is True
 
 
@@ -345,12 +345,12 @@ class TestCheckConfigFields:
 # _check_instantiation_and_gradient
 # ---------------------------------------------------------------------------
 
-class TestCheckInstantiationAndGradient:
 
+class TestCheckInstantiationAndGradient:
     def test_valid_plugin_returns_true_true_none(self, tmp_path):
         path = tmp_path / "valid_plugin.py"
         path.write_text(VALID_PLUGIN_SRC)
-        inst_ok, grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
+        inst_ok, grad_ok, _otype_ok, err = _check_instantiation_and_gradient(str(path))
         assert inst_ok is True
         assert grad_ok is True
         assert err is None
@@ -358,7 +358,7 @@ class TestCheckInstantiationAndGradient:
     def test_import_error_returns_false_false_message(self, tmp_path):
         path = tmp_path / "bad_import.py"
         path.write_text("import nonexistent_module_xyz_abc\n")
-        inst_ok, grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
+        inst_ok, grad_ok, _otype_ok, err = _check_instantiation_and_gradient(str(path))
         assert inst_ok is False
         assert grad_ok is False
         assert err is not None
@@ -388,7 +388,7 @@ class TestCheckInstantiationAndGradient:
         """)
         path = tmp_path / "wrong_shape.py"
         path.write_text(wrong_shape_src)
-        inst_ok, grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
+        inst_ok, grad_ok, _otype_ok, err = _check_instantiation_and_gradient(str(path))
         assert inst_ok is False
         assert grad_ok is False
         assert err is not None
@@ -423,7 +423,7 @@ class TestCheckInstantiationAndGradient:
         """)
         path = tmp_path / "no_grad.py"
         path.write_text(no_grad_src)
-        inst_ok, grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
+        inst_ok, grad_ok, _otype_ok, err = _check_instantiation_and_gradient(str(path))
         # instantiation and forward pass succeed (correct shape)
         assert inst_ok is True
         # gradient check fails because output is detached
@@ -434,6 +434,7 @@ class TestCheckInstantiationAndGradient:
 # ---------------------------------------------------------------------------
 # Fixtures for full run tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def mock_llm_bridge():
@@ -465,8 +466,8 @@ def passing_mocks(mock_llm_bridge, passing_subprocess):
 # MLCodeValidatorAgent.run — integration of all checks
 # ---------------------------------------------------------------------------
 
-class TestMLCodeValidatorAgentRun:
 
+class TestMLCodeValidatorAgentRun:
     def test_all_pass_returns_passed_true(self, tmp_path, passing_mocks):
         agent = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview")
         out = agent.run(make_input(tmp_path))
@@ -502,15 +503,21 @@ class TestMLCodeValidatorAgentRun:
         bad_plugin = tmp_path / "bad.py"
         bad_plugin.write_text("import broken_import_xyz\n")
         inp = make_input(tmp_path, model_file_path=str(bad_plugin))
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(inp)
+        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            inp
+        )
         assert out.passed is False
         assert out.plugin_registered is False
 
-    def test_plugin_failure_error_message_present(self, tmp_path, passing_subprocess, mock_llm_bridge):
+    def test_plugin_failure_error_message_present(
+        self, tmp_path, passing_subprocess, mock_llm_bridge
+    ):
         bad_plugin = tmp_path / "bad.py"
         bad_plugin.write_text("import broken_import_xyz\n")
         inp = make_input(tmp_path, model_file_path=str(bad_plugin))
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(inp)
+        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            inp
+        )
         assert out.error_message is not None
 
     def test_test_failure_sets_passed_false(self, tmp_path, mock_llm_bridge):
@@ -519,7 +526,9 @@ class TestMLCodeValidatorAgentRun:
         mock_result.stdout = "FAILED test_forward - AssertionError"
         mock_result.stderr = ""
         with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
-            out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(make_input(tmp_path))
+            out = MLCodeValidatorAgent(
+                provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+            ).run(make_input(tmp_path))
         assert out.passed is False
         assert out.tests_passed is False
 
@@ -529,7 +538,9 @@ class TestMLCodeValidatorAgentRun:
         mock_result.stdout = "FAILED test_forward"
         mock_result.stderr = ""
         with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
-            out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(make_input(tmp_path))
+            out = MLCodeValidatorAgent(
+                provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+            ).run(make_input(tmp_path))
         assert out.test_output is not None
         assert "FAILED" in out.test_output
 
@@ -539,13 +550,17 @@ class TestMLCodeValidatorAgentRun:
         desc_path = subdir / "description.md"
         desc_path.write_text("too short")
         inp = make_input(tmp_path, description_file_path=str(desc_path))
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(inp)
+        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            inp
+        )
         assert out.passed is False
         assert out.description_valid is False
 
     def test_config_fields_failure_sets_passed_false(self, tmp_path, passing_mocks):
         inp = make_input(tmp_path, config_fields={"depth": 2, "bad": [1, 2, 3]})
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(inp)
+        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            inp
+        )
         assert out.passed is False
         assert out.config_fields_valid is False
 
@@ -562,19 +577,25 @@ class TestMLCodeValidatorAgentRun:
                 model_file_path=str(bad_plugin),
                 config_fields={"bad": [1, 2]},
             )
-            out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(inp)
+            out = MLCodeValidatorAgent(
+                provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+            ).run(inp)
         assert out.passed is False
         assert out.plugin_registered is False
         assert out.tests_passed is False
         assert out.config_fields_valid is False
 
     def test_test_output_included_on_pass(self, tmp_path, passing_mocks):
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(make_input(tmp_path))
+        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            make_input(tmp_path)
+        )
         assert out.test_output is not None
         assert "passed" in out.test_output
 
     def test_llm_review_fields_in_output(self, tmp_path, passing_mocks):
-        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(make_input(tmp_path))
+        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            make_input(tmp_path)
+        )
         assert out.llm_review_spec_alignment is True
         assert out.llm_review_trainability_concerns == []
         assert out.llm_review_implementation_issues == []
@@ -585,30 +606,42 @@ class TestMLCodeValidatorAgentRun:
 # File persistence
 # ---------------------------------------------------------------------------
 
-class TestFilePersistence:
 
+class TestFilePersistence:
     def test_output_file_written(self, tmp_path, passing_mocks):
-        MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(make_input(tmp_path, run_name="myrun"))
+        MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            make_input(tmp_path, run_name="myrun")
+        )
         assert (tmp_path / "validation_myrun.json").exists()
 
     def test_output_file_is_valid_json(self, tmp_path, passing_mocks):
-        MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(make_input(tmp_path, run_name="r1"))
+        MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            make_input(tmp_path, run_name="r1")
+        )
         data = json.loads((tmp_path / "validation_r1.json").read_text())
         assert "passed" in data
         assert "model_type" in data
 
     def test_output_file_contains_all_check_fields(self, tmp_path, passing_mocks):
-        MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(make_input(tmp_path, run_name="r1"))
+        MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            make_input(tmp_path, run_name="r1")
+        )
         data = json.loads((tmp_path / "validation_r1.json").read_text())
         for field in (
-            "plugin_registered", "tests_passed", "description_valid",
-            "config_fields_valid", "instantiation_passed", "gradient_check_passed",
+            "plugin_registered",
+            "tests_passed",
+            "description_valid",
+            "config_fields_valid",
+            "instantiation_passed",
+            "gradient_check_passed",
             "llm_review_passed",
         ):
             assert field in data
 
     def test_output_file_model_type_correct(self, tmp_path, passing_mocks):
-        MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(make_input(tmp_path, run_name="r1"))
+        MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            make_input(tmp_path, run_name="r1")
+        )
         data = json.loads((tmp_path / "validation_r1.json").read_text())
         assert data["model_type"] == "test_model"
 
@@ -624,13 +657,15 @@ class TestFilePersistence:
 # TestLLMReview
 # ---------------------------------------------------------------------------
 
-class TestLLMReview:
 
+class TestLLMReview:
     def test_llm_bridge_called_with_prompts(self, tmp_path, passing_subprocess):
         with patch("nodes.ml_code_validator_agent.LLMBridge") as MockBridge:
             instance = MockBridge.return_value
             instance.generate.return_value = FAKE_LLM_REVIEW
-            agent = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview")
+            agent = MLCodeValidatorAgent(
+                provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+            )
             inp = make_input(tmp_path)
             agent.run(inp)
             instance.generate.assert_called_once()
@@ -645,7 +680,9 @@ class TestLLMReview:
         with patch("nodes.ml_code_validator_agent.LLMBridge") as MockBridge:
             instance = MockBridge.return_value
             instance.generate.return_value = FAKE_LLM_REVIEW
-            agent = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview")
+            agent = MLCodeValidatorAgent(
+                provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+            )
             out = agent.run(make_input(tmp_path))
             assert out.llm_review_passed is True
             assert out.llm_review_spec_alignment is True
@@ -663,7 +700,9 @@ class TestLLMReview:
         with patch("nodes.ml_code_validator_agent.LLMBridge") as MockBridge:
             instance = MockBridge.return_value
             instance.generate.return_value = failing_review
-            agent = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview")
+            agent = MLCodeValidatorAgent(
+                provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+            )
             out = agent.run(make_input(tmp_path))
             assert out.llm_review_passed is False
             assert out.passed is False
@@ -679,7 +718,9 @@ class TestLLMReview:
             with patch("nodes.ml_code_validator_agent.LLMBridge") as MockBridge:
                 instance = MockBridge.return_value
                 instance.generate.return_value = FAKE_LLM_REVIEW
-                agent = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview")
+                agent = MLCodeValidatorAgent(
+                    provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+                )
                 agent.run(make_input(tmp_path))
                 user_prompt = instance.generate.call_args[0][1]
                 assert "FAILED test_forward" in user_prompt
@@ -690,7 +731,9 @@ class TestLLMReview:
         with patch("nodes.ml_code_validator_agent.LLMBridge") as MockBridge:
             instance = MockBridge.return_value
             instance.generate.return_value = FAKE_LLM_REVIEW
-            agent = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview")
+            agent = MLCodeValidatorAgent(
+                provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+            )
             agent.run(make_input(tmp_path))
             user_prompt = instance.generate.call_args[0][1]
             assert "Pytest Output" not in user_prompt
@@ -723,7 +766,9 @@ class TestLLMReview:
         with patch("nodes.ml_code_validator_agent.LLMBridge") as MockBridge:
             instance = MockBridge.return_value
             instance.generate.return_value = FAKE_LLM_REVIEW
-            agent = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview")
+            agent = MLCodeValidatorAgent(
+                provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+            )
             agent.run(make_input(tmp_path, model_file_path=str(plugin_path)))
             user_prompt = instance.generate.call_args[0][1]
             assert "Runtime Error" in user_prompt
@@ -732,6 +777,7 @@ class TestLLMReview:
 # ---------------------------------------------------------------------------
 # Expert advice prompt injection tests
 # ---------------------------------------------------------------------------
+
 
 class TestExpertAdviceInReviewPrompt:
     """Verify expert_advice flows into the LLM review prompt."""
@@ -763,6 +809,7 @@ class TestExpertAdviceInReviewPrompt:
 
     def test_includes_structured_expert_advice(self):
         from agent.schemas.hyperparam_tuning import ExpertAdvice
+
         inp = self._make_input()
         inp.expert_advice = ExpertAdvice(
             focus_areas=["residual connections"],
@@ -790,6 +837,7 @@ class TestExpertAdviceInReviewPrompt:
 # Inheritance decoupling — inherit_ok does NOT gate `passed`
 # ---------------------------------------------------------------------------
 
+
 class TestInheritanceDecoupledFromPassed:
     """Inheritance check is informational — a regex miss must not block a
     trainable model. Deviations flow downstream via inheritance_deviation_notes
@@ -798,6 +846,7 @@ class TestInheritanceDecoupledFromPassed:
     def test_inheritance_miss_still_passes_when_trainable(self, tmp_path, passing_mocks):
         """All trainability checks pass, one inherited component's regex misses → passed=True."""
         from agent.schemas.proposal import InheritedComponent
+
         # VALID_PLUGIN_SRC has no fft/rfft — claim spectral_conv so it fails to match.
         inp = make_input(
             tmp_path,
@@ -809,20 +858,19 @@ class TestInheritanceDecoupledFromPassed:
                 )
             ],
         )
-        out = MLCodeValidatorAgent(
-            provider="gemini", model_id="gemini-3.1-flash-lite-preview"
-        ).run(inp)
+        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            inp
+        )
         assert out.passed is True
         assert out.inheritance_check_passed is False
         assert out.inheritance_deviation_notes is not None
         assert "spectral_conv" in out.inheritance_deviation_notes
         assert out.unverified_inherited_components == ["spectral_conv"]
 
-    def test_error_message_does_not_mention_inheritance_when_passed(
-        self, tmp_path, passing_mocks
-    ):
+    def test_error_message_does_not_mention_inheritance_when_passed(self, tmp_path, passing_mocks):
         """When only inheritance fails, error_message must remain None."""
         from agent.schemas.proposal import InheritedComponent
+
         inp = make_input(
             tmp_path,
             inherited_components=[
@@ -833,15 +881,16 @@ class TestInheritanceDecoupledFromPassed:
                 )
             ],
         )
-        out = MLCodeValidatorAgent(
-            provider="gemini", model_id="gemini-3.1-flash-lite-preview"
-        ).run(inp)
+        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            inp
+        )
         assert out.error_message is None
 
     def test_inheritance_pass_leaves_deviation_notes_none(self, tmp_path, passing_mocks):
         """When every claimed component matches, deviation_notes stays None and the
         structured list stays empty."""
         from agent.schemas.proposal import InheritedComponent
+
         # VALID_PLUGIN_SRC contains nn.Embedding — this claim will match.
         inp = make_input(
             tmp_path,
@@ -853,9 +902,9 @@ class TestInheritanceDecoupledFromPassed:
                 )
             ],
         )
-        out = MLCodeValidatorAgent(
-            provider="gemini", model_id="gemini-3.1-flash-lite-preview"
-        ).run(inp)
+        out = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
+            inp
+        )
         assert out.inheritance_check_passed is True
         assert out.inheritance_deviation_notes is None
         assert out.unverified_inherited_components == []
@@ -866,6 +915,7 @@ class TestInheritanceDecoupledFromPassed:
         """If pytest fails, the model must still fail overall — inheritance cannot
         rescue a non-trainable model."""
         from agent.schemas.proposal import InheritedComponent
+
         mock_result = MagicMock()
         mock_result.returncode = 1
         mock_result.stdout = "FAILED test_forward"

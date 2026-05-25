@@ -25,7 +25,6 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass
 
-
 _TIME_NAMES: frozenset[str] = frozenset({"seq_len", "T", "time_steps"})
 _TIME_AXIS_INDICES: frozenset[int] = frozenset({1, -1})
 
@@ -48,15 +47,13 @@ def _is_time_axis_index(slice_node: ast.AST) -> bool:
     """Return True if the subscript index is 1 or -1."""
     if isinstance(slice_node, ast.Constant) and isinstance(slice_node.value, int):
         return slice_node.value in _TIME_AXIS_INDICES
-    if (
+    return (
         isinstance(slice_node, ast.UnaryOp)
         and isinstance(slice_node.op, ast.USub)
         and isinstance(slice_node.operand, ast.Constant)
         and isinstance(slice_node.operand.value, int)
         and -slice_node.operand.value in _TIME_AXIS_INDICES
-    ):
-        return True
-    return False
+    )
 
 
 def _references_time_dim(expr: ast.AST) -> bool:
@@ -66,11 +63,18 @@ def _references_time_dim(expr: ast.AST) -> bool:
         return True
     if isinstance(expr, ast.Attribute) and expr.attr in _TIME_NAMES:
         return True
-    if isinstance(expr, ast.Subscript) and isinstance(expr.value, ast.Attribute) \
-            and expr.value.attr == "shape":
+    if (
+        isinstance(expr, ast.Subscript)
+        and isinstance(expr.value, ast.Attribute)
+        and expr.value.attr == "shape"
+    ):
         return _is_time_axis_index(expr.slice)
-    if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Attribute) \
-            and expr.func.attr == "size" and len(expr.args) == 1:
+    if (
+        isinstance(expr, ast.Call)
+        and isinstance(expr.func, ast.Attribute)
+        and expr.func.attr == "size"
+        and len(expr.args) == 1
+    ):
         return _is_time_axis_index(expr.args[0])
     if isinstance(expr, ast.BinOp) and isinstance(expr.op, (ast.Sub, ast.Add)):
         return _references_time_dim(expr.left) or _references_time_dim(expr.right)
@@ -81,8 +85,9 @@ def _is_range_over_time(call: ast.AST) -> bool:
     """Return True if `call` is `range(EXPR)` whose first arg references the
     time dimension. Covers `range(T)`, `range(x.shape[1])`,
     `range(T-1, -1, -1)`, etc."""
-    if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
-            and call.func.id == "range"):
+    if not (
+        isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == "range"
+    ):
         return False
     return any(_references_time_dim(a) for a in call.args)
 
@@ -95,8 +100,10 @@ def _iter_forward_methods(tree: ast.AST):
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
             for item in node.body:
-                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) \
-                        and item.name == "forward":
+                if (
+                    isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and item.name == "forward"
+                ):
                     yield item
 
 
@@ -105,24 +112,36 @@ def scan(source: str) -> list[ForbiddenLoopHit]:
     try:
         tree = ast.parse(source)
     except SyntaxError as e:
-        return [ForbiddenLoopHit(
-            method="<module>", lineno=e.lineno or 0, kind="syntax",
-            snippet=f"SyntaxError: {e.msg}",
-        )]
+        return [
+            ForbiddenLoopHit(
+                method="<module>",
+                lineno=e.lineno or 0,
+                kind="syntax",
+                snippet=f"SyntaxError: {e.msg}",
+            )
+        ]
 
     hits: list[ForbiddenLoopHit] = []
     for forward in _iter_forward_methods(tree):
         for node in ast.walk(forward):
             if isinstance(node, ast.For) and _is_range_over_time(node.iter):
-                hits.append(ForbiddenLoopHit(
-                    method=forward.name, lineno=node.lineno, kind="for",
-                    snippet=ast.unparse(node.iter),
-                ))
+                hits.append(
+                    ForbiddenLoopHit(
+                        method=forward.name,
+                        lineno=node.lineno,
+                        kind="for",
+                        snippet=ast.unparse(node.iter),
+                    )
+                )
             elif isinstance(node, ast.While):
-                hits.append(ForbiddenLoopHit(
-                    method=forward.name, lineno=node.lineno, kind="while",
-                    snippet=ast.unparse(node.test),
-                ))
+                hits.append(
+                    ForbiddenLoopHit(
+                        method=forward.name,
+                        lineno=node.lineno,
+                        kind="while",
+                        snippet=ast.unparse(node.test),
+                    )
+                )
     return hits
 
 
@@ -140,5 +159,5 @@ def check_source(source: str) -> tuple[bool, str | None]:
 
 def check_file(path: str) -> tuple[bool, str | None]:
     """Convenience wrapper that reads `path` and delegates to check_source."""
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return check_source(f.read())

@@ -9,18 +9,18 @@ like." Schema fidelity with the real API is maintained as a project invariant:
 when an output schema changes, the corresponding JSON file must change in the
 same commit.
 """
+
 from __future__ import annotations
 
 import json
 import pathlib
-from typing import Any, Dict
-
+from typing import Any
 
 # tests/helpers/_pseudo_data.py → tests/helpers/ → tests/ → tests/pseudo_data/
 PSEUDO_DATA_ROOT = pathlib.Path(__file__).resolve().parent.parent / "pseudo_data"
 
 
-def load_pseudo_data(category: str, name: str) -> Dict[str, Any]:
+def load_pseudo_data(category: str, name: str) -> dict[str, Any]:
     """Load all ``*.json`` files under ``tests/pseudo_data/{category}/{name}/``.
 
     Args:
@@ -49,7 +49,7 @@ def load_pseudo_data(category: str, name: str) -> Dict[str, Any]:
             f"Add canned outputs there before using for_agent/for_model. "
             f"See tests/pseudo_data/README or docs/pseudo_test_infra.md for the layout."
         )
-    out: Dict[str, Any] = {}
+    out: dict[str, Any] = {}
     for json_file in sorted(target_dir.glob("*.json")):
         with open(json_file) as f:
             out[json_file.stem] = json.load(f)

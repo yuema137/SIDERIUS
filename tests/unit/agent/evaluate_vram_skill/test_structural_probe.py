@@ -3,6 +3,7 @@
 All tests run on CPU — no CUDA dependency. The probe's behaviour is identical
 on CPU and GPU because it reads tensor metadata, not GPU memory counters.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -20,11 +21,12 @@ from agent.skills.evaluate_vram_skill.structural_probe import (
     probe_forward_layers,
 )
 
-
 # ── Fixtures ────────────────────────────────────────────────────────────────
+
 
 class TinyModel(nn.Module):
     """Linear → ReLU → Linear. 3 leaf layers, fully deterministic shapes."""
+
     def __init__(self):
         super().__init__()
         self.fc1 = nn.Linear(8, 16, bias=True)
@@ -37,6 +39,7 @@ class TinyModel(nn.Module):
 
 class LogitsProducer(nn.Module):
     """[B, T] long → [B, C, T] float. Mirrors SIDERIUS plugin contract."""
+
     def __init__(self, embed_dim: int = 8, channels: int = 16, n_classes: int = 32):
         super().__init__()
         self.emb = nn.Embedding(256, embed_dim)
@@ -50,6 +53,7 @@ class LogitsProducer(nn.Module):
 class FocalLikeLoss(nn.Module):
     """Mimics FocalLoss1D's ``[B, 256, T]`` intermediate-tensor pattern. Used
     to prove the tape walker captures what torchinfo cannot see."""
+
     def forward(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         target_oh = F.one_hot(target, logits.size(1)).permute(0, 2, 1).float()
         log_p = F.log_softmax(logits, dim=1)
@@ -58,6 +62,7 @@ class FocalLikeLoss(nn.Module):
 
 
 # ── probe_forward_layers ────────────────────────────────────────────────────
+
 
 def test_probe_forward_layers_returns_pydantic():
     model = TinyModel()
@@ -119,6 +124,7 @@ def test_probe_forward_layers_accepts_multi_input_module():
 
 
 # ── probe_autograd_tape ─────────────────────────────────────────────────────
+
 
 def test_probe_autograd_tape_returns_pydantic():
     w = nn.Linear(4, 4)
@@ -197,12 +203,17 @@ def test_probe_autograd_tape_captures_loss_intermediates_torchinfo_misses():
 
 # ── probe_activation_footprint ─────────────────────────────────────────────
 
+
 def test_probe_activation_footprint_inference_mode_skips_tape():
     model = TinyModel()
     x = torch.randn(2, 8)
     result = probe_activation_footprint(
-        model=model, loss_module=None, input_sample=x, target_sample=None,
-        mode="inference", device="cpu",
+        model=model,
+        loss_module=None,
+        input_sample=x,
+        target_sample=None,
+        mode="inference",
+        device="cpu",
     )
     assert isinstance(result, ProbeResult)
     assert result.mode == "inference"
@@ -217,8 +228,12 @@ def test_probe_activation_footprint_training_mode_requires_loss_and_target():
     x = torch.randn(2, 8)
     with pytest.raises(ValueError, match="training mode requires both loss_module"):
         probe_activation_footprint(
-            model=model, loss_module=None, input_sample=x, target_sample=None,
-            mode="training", device="cpu",
+            model=model,
+            loss_module=None,
+            input_sample=x,
+            target_sample=None,
+            mode="training",
+            device="cpu",
         )
 
 
@@ -230,8 +245,12 @@ def test_probe_activation_footprint_training_populates_loss_and_tape():
     y = torch.randint(0, 16, (B, T), dtype=torch.long)
 
     result = probe_activation_footprint(
-        model=model, loss_module=loss, input_sample=x, target_sample=y,
-        mode="training", device="cpu",
+        model=model,
+        loss_module=loss,
+        input_sample=x,
+        target_sample=y,
+        mode="training",
+        device="cpu",
     )
     assert result.mode == "training"
     assert result.loss_forward is not None
@@ -244,7 +263,7 @@ def test_probe_training_bytes_exceed_inference_bytes_on_same_config():
     """Physical sanity: training must retain more than inference. This is
     the A.13 discovery (0.82 GB train vs 0.42 GB infer) at unit scale."""
     model_inf = LogitsProducer(embed_dim=4, channels=8, n_classes=16)
-    model_tr  = LogitsProducer(embed_dim=4, channels=8, n_classes=16)
+    model_tr = LogitsProducer(embed_dim=4, channels=8, n_classes=16)
     model_tr.load_state_dict(model_inf.state_dict())
     loss = FocalLikeLoss()
     B, T = 2, 20
@@ -252,21 +271,27 @@ def test_probe_training_bytes_exceed_inference_bytes_on_same_config():
     y = torch.randint(0, 16, (B, T), dtype=torch.long)
 
     inf_result = probe_activation_footprint(
-        model=model_inf, loss_module=None, input_sample=x, target_sample=None,
-        mode="inference", device="cpu",
+        model=model_inf,
+        loss_module=None,
+        input_sample=x,
+        target_sample=None,
+        mode="inference",
+        device="cpu",
     )
     tr_result = probe_activation_footprint(
-        model=model_tr, loss_module=loss, input_sample=x, target_sample=y,
-        mode="training", device="cpu",
+        model=model_tr,
+        loss_module=loss,
+        input_sample=x,
+        target_sample=y,
+        mode="training",
+        device="cpu",
     )
 
     # Training must retain substantially more bytes than inference's single-
     # layer-at-a-time footprint.
     inf_peak = inf_result.input_bytes + 2 * inf_result.model_forward.forward_output_bytes_max
     tr_peak = (
-        tr_result.autograd_tape.total_saved_bytes
-        + tr_result.input_bytes
-        + tr_result.output_bytes
+        tr_result.autograd_tape.total_saved_bytes + tr_result.input_bytes + tr_result.output_bytes
     )
     assert tr_peak > inf_peak, (
         f"training peak ({tr_peak}) must exceed inference peak ({inf_peak}); "
@@ -280,14 +305,17 @@ def test_probe_activation_footprint_forward_layer_report_shapes_are_physical():
     model = LogitsProducer(embed_dim=4, channels=8, n_classes=16)
     x = torch.randint(0, 256, (2, 20), dtype=torch.long)
     result = probe_activation_footprint(
-        model=model, loss_module=None, input_sample=x, target_sample=None,
-        mode="inference", device="cpu",
+        model=model,
+        loss_module=None,
+        input_sample=x,
+        target_sample=None,
+        mode="inference",
+        device="cpu",
     )
 
     # Final `out` layer: Conv1d(8, 16) → output [2, 16, 20]
     out_layer = next(
-        li for li in result.model_forward.layers
-        if li.is_leaf and li.var_name == "out"
+        li for li in result.model_forward.layers if li.is_leaf and li.var_name == "out"
     )
     assert out_layer.output_shape == [2, 16, 20]
     assert out_layer.output_bytes == 2 * 16 * 20 * 4
@@ -299,6 +327,7 @@ def test_probe_activation_footprint_forward_layer_report_shapes_are_physical():
 class SequentialModel(nn.Module):
     """Model with a Python-level sequential loop, mimicking SSM scan.
     Each iteration creates tensors retained by autograd in training mode."""
+
     def __init__(self, steps: int = 500, hidden: int = 16):
         super().__init__()
         self.proj = nn.Linear(hidden, hidden)
@@ -319,8 +348,6 @@ def test_pack_hook_returns_none_not_tensor():
 
     w = nn.Linear(4, 4)
     x = torch.randn(2, 4, requires_grad=True)
-
-    original_pack = None
 
     def spy_pack(t):
         captured.append(t)
@@ -359,7 +386,7 @@ def test_probe_autograd_tape_unpack_raises_on_backward():
     with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
         loss = w(x).sum()
 
-    with pytest.raises(RuntimeError, match="backward.*must not be called"):
+    with pytest.raises(RuntimeError, match=r"backward.*must not be called"):
         loss.backward()
 
 
@@ -381,11 +408,16 @@ def test_sequential_model_probe_gc_called_between_phases():
         gc_calls.append(1)
         return original_collect(*args, **kwargs)
 
-    with patch("agent.skills.evaluate_vram_skill.structural_probe.gc.collect",
-               side_effect=counting_collect):
+    with patch(
+        "agent.skills.evaluate_vram_skill.structural_probe.gc.collect", side_effect=counting_collect
+    ):
         result = probe_activation_footprint(
-            model=model, loss_module=loss, input_sample=x, target_sample=y,
-            mode="training", device="cpu",
+            model=model,
+            loss_module=loss,
+            input_sample=x,
+            target_sample=y,
+            mode="training",
+            device="cpu",
         )
 
     assert isinstance(result, ProbeResult)
@@ -410,11 +442,15 @@ def test_sequential_model_training_probe_rss_bounded():
 
     rss_before = psutil.Process().memory_info().rss
     result = probe_activation_footprint(
-        model=model, loss_module=loss, input_sample=x, target_sample=y,
-        mode="training", device="cpu",
+        model=model,
+        loss_module=loss,
+        input_sample=x,
+        target_sample=y,
+        mode="training",
+        device="cpu",
     )
     rss_after = psutil.Process().memory_info().rss
-    delta_mb = (rss_after - rss_before) / (1024 ** 2)
+    delta_mb = (rss_after - rss_before) / (1024**2)
 
     assert isinstance(result, ProbeResult)
     assert result.autograd_tape.total_saved_bytes > 0
@@ -444,8 +480,12 @@ def test_torchinfo_runs_under_no_grad_in_training_mode():
     y = torch.randn(1, 4)
 
     result = probe_activation_footprint(
-        model=model, loss_module=loss, input_sample=x, target_sample=y,
-        mode="training", device="cpu",
+        model=model,
+        loss_module=loss,
+        input_sample=x,
+        target_sample=y,
+        mode="training",
+        device="cpu",
     )
 
     assert isinstance(result, ProbeResult)
@@ -457,6 +497,6 @@ def test_torchinfo_runs_under_no_grad_in_training_mode():
     # Subsequent calls (torchinfo + shape): grad must be False
     for i, gs in enumerate(grad_states[1:], start=1):
         assert gs is False, (
-            f"Forward call {i+1} had grad_enabled={gs}; "
+            f"Forward call {i + 1} had grad_enabled={gs}; "
             f"torchinfo/shape passes must run under torch.no_grad()"
         )

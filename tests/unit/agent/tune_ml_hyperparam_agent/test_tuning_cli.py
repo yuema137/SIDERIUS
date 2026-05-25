@@ -15,13 +15,14 @@ exercise three branches of the preflight check that lives in ``main()``:
 We patch ``HyperparamTuningAgent`` so no real run happens — these tests
 are about argparse + preflight wiring, nothing more.
 """
+
 import sys
 import textwrap
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from nodes.ml_hyperparameter_tune_agent import main
-
 
 _VALID_PLUGIN_BODY = '''
     """Minimal valid plugin fixture for the CLI test."""
@@ -44,17 +45,20 @@ def _write_seed(tmp_path):
 
 
 class TestSeedPluginPathCLI:
-
     def _argv_for(self, force_model: str, workspace, *extra: str):
         """Build a minimal sys.argv for the tuner CLI. ``--max_rounds 1`` and
         ``--workspace=tmp_path`` keep the run footprint trivial; the agent
         is patched anyway so these only matter for parser validation."""
         return [
             "ml_hyperparameter_tune_agent.py",
-            "--force_model", force_model,
-            "--max_rounds", "1",
-            "--workspace", str(workspace),
-            "--run_name", "cli_test",
+            "--force_model",
+            force_model,
+            "--max_rounds",
+            "1",
+            "--workspace",
+            str(workspace),
+            "--run_name",
+            "cli_test",
             *extra,
         ]
 
@@ -97,9 +101,7 @@ class TestSeedPluginPathCLI:
         mock_agent_cls.return_value = mock_agent
         seed_path = _write_seed(tmp_path)
 
-        argv = self._argv_for(
-            "attn_fcnet", tmp_path, "--seed_plugin_path", seed_path
-        )
+        argv = self._argv_for("attn_fcnet", tmp_path, "--seed_plugin_path", seed_path)
         with patch.object(sys, "argv", argv):
             main()
 
@@ -109,9 +111,7 @@ class TestSeedPluginPathCLI:
         assert agent_input.seed_plugin_path == seed_path
 
     @patch("nodes.ml_hyperparameter_tune_agent.HyperparamTuningAgent")
-    def test_plugin_model_with_mismatched_seed_errors(
-        self, mock_agent_cls, tmp_path
-    ):
+    def test_plugin_model_with_mismatched_seed_errors(self, mock_agent_cls, tmp_path):
         """Schema validator catches the case where the seed file declares
         a different PLUGIN_MODEL_TYPE — the CLI surfaces the Pydantic error
         rather than silently registering the seed under the wrong key."""
@@ -120,9 +120,7 @@ class TestSeedPluginPathCLI:
         # the schema validator catches the model_type/PLUGIN_MODEL_TYPE
         # mismatch.
         seed_path = _write_seed(tmp_path)
-        argv = self._argv_for(
-            "some_other_type", tmp_path, "--seed_plugin_path", seed_path
-        )
+        argv = self._argv_for("some_other_type", tmp_path, "--seed_plugin_path", seed_path)
         with patch.object(sys, "argv", argv):
             with pytest.raises(Exception, match="PLUGIN_MODEL_TYPE"):
                 main()

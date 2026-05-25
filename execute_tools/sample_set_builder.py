@@ -38,7 +38,7 @@ def build_sample_set(
         is_trial:        If False, return normal mode (all segments of ``file_index``).
         file_index:      File to use in normal mode. Ignored when ``is_trial=True``.
         trial_strategy:  One of ``"snapshot"``, ``"anchors"``, ``"target"``.
-        trial_portion:   Fraction of segments to sample per file (0.0–1.0).
+        trial_portion:   Fraction of segments to sample per file (0.0-1.0).
         target_files:    File indices to sample from (required for ``"target"`` strategy).
         seed:            Random seed for reproducible sampling. ``None`` = non-deterministic.
 
@@ -59,9 +59,7 @@ def build_sample_set(
         files = list(ANCHOR_FILES)
     elif trial_strategy == "target":
         if not target_files:
-            raise ValueError(
-                "trial_strategy='target' requires non-empty target_files."
-            )
+            raise ValueError("trial_strategy='target' requires non-empty target_files.")
         files = sorted(set(target_files))
     else:
         raise ValueError(f"Unknown trial_strategy: {trial_strategy!r}")

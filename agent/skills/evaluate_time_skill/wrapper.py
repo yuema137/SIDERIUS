@@ -55,12 +55,10 @@ import statistics
 import time
 import traceback
 
-from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
-
-from agent.skills.training_skill        import estimator as _training_est
-from agent.skills.inference_skill       import estimator as _inference_est
 from agent.skills.denoising_score_skill import estimator as _scoring_est
-
+from agent.skills.inference_skill import estimator as _inference_est
+from agent.skills.training_skill import estimator as _training_est
+from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
 
 # Phase 6.7 Fix 1 — fast-fail short-circuit for DOA models. If a single
 # forward+backward+optimizer step at step 0 already takes ≥ this many ms,
@@ -83,10 +81,7 @@ def _suggest_lever(ms_per_step: float, seg_size: int, batch_size: int) -> str:
             "embedding_dim) — per-step cost is dominant."
         )
     if seg_size < 10_000 and batch_size == 1:
-        return (
-            "Raise batch_size (amortises per-step cost without changing "
-            "model capacity)."
-        )
+        return "Raise batch_size (amortises per-step cost without changing model capacity)."
     return (
         "Raise segmentation_size to the next valid divisor of 10,000,000 "
         "so fewer steps cover the same data."
@@ -212,8 +207,7 @@ def _aggregate_inference_file_timings(
         return None, breakdown
 
     per_psd_seg_ms = [
-        float(t.get("elapsed_ms", 0.0)) / max(int(t.get("n_psd_segs", 1)), 1)
-        for t in timed
+        float(t.get("elapsed_ms", 0.0)) / max(int(t.get("n_psd_segs", 1)), 1) for t in timed
     ]
     if not per_psd_seg_ms or all(v <= 0 for v in per_psd_seg_ms):
         return None, breakdown
@@ -248,10 +242,15 @@ def _count_params(model_type: str, model_config: dict, loss_type: str) -> int:
 
     Kept in a function so tests can monkeypatch it without importing torch.
     """
-    from ml_models.models_sandbox import MODEL_REGISTRY
     from ml_models.models_format_sandbox import get_config_class
+    from ml_models.models_sandbox import MODEL_REGISTRY
 
     config_cls = get_config_class(model_type)
+    if config_cls is None:
+        raise ValueError(
+            f"_count_params: unknown model_type={model_type!r} — "
+            f"get_config_class returned None (no plugin or built-in config registered)."
+        )
     config_obj = config_cls(**model_config)
     if model_type == "fcnet":
         model = MODEL_REGISTRY[model_type](config_obj, loss_type=loss_type)
@@ -316,28 +315,31 @@ def _measure_ms_per_step(
 
     try:
         import random
+
         from torch.utils.data import DataLoader
 
         from execute_tools.train_engine_sandbox import TIDMADEpochDataset
-        from ml_models.models_sandbox import MODEL_REGISTRY
+        from ml_models.loss_models_sandbox import get_criterion
         from ml_models.models_format_sandbox import (
             LossConfig,
             TrainConfig,
             get_config_class,
         )
-        from ml_models.loss_models_sandbox import get_criterion
+        from ml_models.models_sandbox import MODEL_REGISTRY
 
         seg_size = int(model_config["segmentation_size"])
         batch_size = int(train_config.get("batch_size", 1))
         loss_type = loss_config.get("loss_type", "ce")
 
         # Pick a minimal slice of the sample_set large enough for the required batches.
+        # Both early returns must obey the declared ``tuple[float | None, dict]``
+        # signature — bare ``None`` would crash caller unpacking at L496.
         if not sample_set:
-            return None
+            return None, empty_breakdown
         first_key = sorted(sample_set.keys(), key=int)[0]
         first_psds = list(sample_set[first_key])
         if not first_psds:
-            return None
+            return None, empty_breakdown
 
         ml_per_psd = PSD_SEGMENT_LENGTH // seg_size
         required_segs = (n_warmup_batches + n_timed_batches) * batch_size
@@ -363,6 +365,12 @@ def _measure_ms_per_step(
         device = torch.device("cuda")
 
         config_cls = get_config_class(model_type)
+        if config_cls is None:
+            print(
+                f"    [warmup skipped] unknown model_type={model_type!r}; "
+                f"falling back to static formula."
+            )
+            return None, empty_breakdown
         model_cfg_obj = config_cls(**model_config)
         if model_type == "fcnet":
             model = MODEL_REGISTRY[model_type](model_cfg_obj, loss_type=loss_type).to(device)
@@ -394,14 +402,8 @@ def _measure_ms_per_step(
                 break
             x = x.to(device)
             y = y.to(device)
-            if model_type == "fcnet":
-                x = x.float()
-            else:
-                x = x.int()
-            if loss_type in ("ce", "focal", "focal_cw"):
-                y = y.long()
-            else:
-                y = y.float()
+            x = x.float() if model_type == "fcnet" else x.int()
+            y = y.long() if loss_type in ("ce", "focal", "focal_cw") else y.float()
 
             torch.cuda.synchronize()
             t0 = time.perf_counter()
@@ -460,11 +462,20 @@ def run_skill(sandbox, **kwargs) -> dict:
     estimated_minutes, limit_minutes, breakdown, dominant_phase,
     phase_breakdown.
     """
-    model_type   = kwargs.get("model_type")
+    model_type = kwargs.get("model_type")
+    # Required kwarg per docstring contract; downstream helpers (_count_params,
+    # _measure_ms_per_step, _training_est.estimate_wall_time_seconds, …) all
+    # require a concrete ``str``. Fail explicitly here instead of letting the
+    # first internal call crash on a None argument.
+    if not isinstance(model_type, str) or not model_type:
+        raise ValueError(
+            f"evaluate_time_skill.run_skill: 'model_type' kwarg is required "
+            f"and must be a non-empty str (got {model_type!r})."
+        )
     model_config = kwargs.get("model_config", {})
     train_config = kwargs.get("train_config", {})
-    loss_config  = kwargs.get("loss_config", {})
-    sample_set   = kwargs.get("sample_set", {})
+    loss_config = kwargs.get("loss_config", {})
+    sample_set = kwargs.get("sample_set", {})
     # eval_sample_set drives inference + scoring projections. Falls back to
     # sample_set for back-compat with callers that haven't been updated to
     # pass both. The bug this guards against: in formal mode train data is
@@ -474,13 +485,13 @@ def run_skill(sandbox, **kwargs) -> dict:
     # inf/score under-projects by ~10×.
     eval_sample_set = kwargs.get("eval_sample_set", sample_set)
     train_portion = float(kwargs.get("train_portion", 1.0))
-    budget_min   = float(kwargs.get("time_budget_minutes", 0.0))
-    data_dir     = kwargs.get("data_dir")
+    budget_min = float(kwargs.get("time_budget_minutes", 0.0))
+    data_dir = kwargs.get("data_dir")
 
-    seg_size   = int(model_config.get("segmentation_size", 1000))
+    seg_size = int(model_config.get("segmentation_size", 1000))
     batch_size = int(train_config.get("batch_size", 1))
-    epochs     = int(train_config.get("epochs", 1))
-    loss_type  = loss_config.get("loss_type", "ce")
+    epochs = int(train_config.get("epochs", 1))
+    loss_type = loss_config.get("loss_type", "ce")
 
     print(
         f"\n>>> [Skill: TimeEval] Checking wall-time for {str(model_type).upper()} "
@@ -515,7 +526,10 @@ def run_skill(sandbox, **kwargs) -> dict:
         gpu_name = _detect_gpu_name()
 
         training = _training_est.estimate_wall_time_seconds(
-            model_type, model_config, train_config, sample_set,
+            model_type,
+            model_config,
+            train_config,
+            sample_set,
             train_portion=train_portion,
             ms_per_step=measured,
             gpu_name=gpu_name,
@@ -547,24 +561,20 @@ def run_skill(sandbox, **kwargs) -> dict:
         inference_per_psd_seg_ms_hint = kwargs.get("inference_per_psd_seg_ms_hint")
         inf_batch = _inference_est.inference_batch_for(model_type)
         ml_per_psd = max(PSD_SEGMENT_LENGTH // max(seg_size, 1), 1)
-        if (inference_per_psd_seg_ms_hint is not None
-                and inference_per_psd_seg_ms_hint > 0):
-            inference_ms = (
-                float(inference_per_psd_seg_ms_hint)
-                * inf_batch / ml_per_psd
-            )
+        if inference_per_psd_seg_ms_hint is not None and inference_per_psd_seg_ms_hint > 0:
+            inference_ms = float(inference_per_psd_seg_ms_hint) * inf_batch / ml_per_psd
             inference_ms_source = "trial_inference_warmup"
         elif measured is not None and measured > 0:
-            inference_ms = (
-                measured * _inference_est._INFERENCE_VS_TRAINING_RATIO
-            )
+            inference_ms = measured * _inference_est._INFERENCE_VS_TRAINING_RATIO
             inference_ms_source = "training_warmup_x2.7_fallback"
         else:
             inference_ms = None
             inference_ms_source = "static_formula"
 
         inference = _inference_est.estimate_wall_time_seconds(
-            model_type, model_config, eval_sample_set,
+            model_type,
+            model_config,
+            eval_sample_set,
             inference_ms_per_step=inference_ms,
             num_params=num_params,
         )
@@ -576,11 +586,11 @@ def run_skill(sandbox, **kwargs) -> dict:
         print(f"!!! [TimeEval] {msg}")
         return {"status": "error", "message": msg}
 
-    phases     = [training, inference, scoring]
-    total_sec  = sum(p["seconds"] for p in phases)
-    total_min  = total_sec / 60.0
+    phases = [training, inference, scoring]
+    total_sec = sum(p["seconds"] for p in phases)
+    total_min = total_sec / 60.0
     phase_breakdown = {p["phase"]: p for p in phases}
-    dominant   = max(phases, key=lambda p: p["seconds"])["phase"]
+    dominant = max(phases, key=lambda p: p["seconds"])["phase"]
 
     # K.2.5-8: surface the inference estimator's soft-fallback flag.
     # Mirror of the warning emitted by evaluate_vram_skill — same flag,
@@ -589,9 +599,7 @@ def run_skill(sandbox, **kwargs) -> dict:
     # warn once per gate so audit logs from either side are
     # self-contained. See docs/resource_estimator_implement.md §10.14
     # K.2.5-8.
-    inference_batch_uncalibrated = bool(
-        inference["breakdown"].get("inference_batch_uncalibrated")
-    )
+    inference_batch_uncalibrated = bool(inference["breakdown"].get("inference_batch_uncalibrated"))
     if inference_batch_uncalibrated:
         print(
             f"!!! [evaluate_time_skill] model_type {model_type!r} has no "
@@ -632,26 +640,25 @@ def run_skill(sandbox, **kwargs) -> dict:
     # 10% slack softened the verdict.
     tbd = training["breakdown"]
     breakdown = {
-        "total_train_steps":  tbd["total_train_steps"],
+        "total_train_steps": tbd["total_train_steps"],
         "ms_per_step_warmup": tbd["ms_per_step"],
-        "k_correction":       tbd["k_correction"],
-        "safety_multiplier":  tbd["safety_multiplier"],
-        "train_minutes":      round(training["seconds"] / 60.0, 2),
-        "num_params":         num_params,
-        "source":             tbd["ms_source"],
-        "gpu_name":           tbd["gpu_name"],
-        "warmup_aggregator":      warmup_breakdown.get("aggregator"),
+        "k_correction": tbd["k_correction"],
+        "safety_multiplier": tbd["safety_multiplier"],
+        "train_minutes": round(training["seconds"] / 60.0, 2),
+        "num_params": num_params,
+        "source": tbd["ms_source"],
+        "gpu_name": tbd["gpu_name"],
+        "warmup_aggregator": warmup_breakdown.get("aggregator"),
         "warmup_n_warmup_batches": warmup_breakdown.get("n_warmup_batches", 0),
-        "warmup_n_timed_batches":  warmup_breakdown.get("n_timed_batches", 0),
-        "warmup_timings_ms":       warmup_breakdown.get("timings_ms", []),
-        "inference_ms_source":     inference_ms_source,
-        "slack_applied":           slack_applied,
+        "warmup_n_timed_batches": warmup_breakdown.get("n_timed_batches", 0),
+        "warmup_timings_ms": warmup_breakdown.get("timings_ms", []),
+        "inference_ms_source": inference_ms_source,
+        "slack_applied": slack_applied,
         "effective_budget_minutes": round(effective_budget_min, 2),
     }
 
     slack_note = (
-        f" (within +{int(SLACK_FRACTION_WHEN_MEASURED * 100)}% slack on "
-        f"measured inference)"
+        f" (within +{int(SLACK_FRACTION_WHEN_MEASURED * 100)}% slack on measured inference)"
         if slack_applied and feasible and total_min > budget_min
         else ""
     )
@@ -662,9 +669,7 @@ def run_skill(sandbox, **kwargs) -> dict:
         f"+ score {scoring['seconds']:.1f}s). Dominant phase: {dominant}."
         f"{slack_note}"
     )
-    suggestion = "" if feasible else _suggest_lever(
-        tbd["ms_per_step"], seg_size, batch_size
-    )
+    suggestion = "" if feasible else _suggest_lever(tbd["ms_per_step"], seg_size, batch_size)
 
     print(f"    Parameters   : {num_params:,}")
     print(f"    Train steps  : {tbd['total_train_steps']:,}")
@@ -673,21 +678,20 @@ def run_skill(sandbox, **kwargs) -> dict:
         f"    Phase sec    : train={training['seconds']:.1f} "
         f"inf={inference['seconds']:.1f} score={scoring['seconds']:.1f}"
     )
-    print(f"    Est minutes  : {total_min:.1f} / budget {budget_min:.1f}  "
-          f"(dominant: {dominant})")
+    print(f"    Est minutes  : {total_min:.1f} / budget {budget_min:.1f}  (dominant: {dominant})")
     print(f"    Feasible     : {'YES' if feasible else 'NO'}")
     if suggestion:
         print(f"    Suggestion   : {suggestion}")
 
     return {
-        "status":            "success",
-        "feasible":          feasible,
-        "verdict":           verdict,
-        "suggestion":        suggestion,
+        "status": "success",
+        "feasible": feasible,
+        "verdict": verdict,
+        "suggestion": suggestion,
         "estimated_minutes": round(total_min, 2),
-        "limit_minutes":     budget_min,
-        "breakdown":         breakdown,
-        "dominant_phase":    dominant,
-        "phase_breakdown":   phase_breakdown,
+        "limit_minutes": budget_min,
+        "breakdown": breakdown,
+        "dominant_phase": dominant,
+        "phase_breakdown": phase_breakdown,
         "inference_batch_uncalibrated": inference_batch_uncalibrated,
     }

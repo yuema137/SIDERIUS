@@ -1,21 +1,37 @@
-import numpy as np
 import argparse
-import torch
-import torch.nn as nn
-import h5py
-from tqdm import tqdm
 import gc
-import os
 import json
+import os
 import time
+from typing import Any, cast
+
+import h5py
+import numpy as np
+import torch
+from tqdm import tqdm
+
+from execute_tools.array2h5 import create_abra_file
+from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
+from ml_models.models_format_sandbox import get_config_class
 
 # Import your sandboxed components for Agent Mode
-from models_sandbox import MODEL_REGISTRY, PositionalUNet, AE
-from models_format_sandbox import PUNetConfig, AEConfig, LossConfig, get_config_class
-from array2h5 import create_abra_file
-from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
+from ml_models.models_sandbox import MODEL_REGISTRY
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+
+def _h5_dataset(f: h5py.File, *path: str) -> h5py.Dataset:
+    """Type-only helper: walk an HDF5 path and narrow the final node to Dataset.
+
+    h5py stubs declare ``__getitem__`` as ``Group | Dataset | Datatype``,
+    which makes pyright reject chained indexing even though every site here
+    ends on a real Dataset at runtime. Pure type-system shim — identical
+    runtime semantics to ``f[a][b][c]``.
+    """
+    node: Any = f
+    for k in path:
+        node = node[k]
+    return cast(h5py.Dataset, node)
 
 
 def _assert_training_sentinel(model_path: str, exp_id: str) -> None:
@@ -32,31 +48,50 @@ def _assert_training_sentinel(model_path: str, exp_id: str) -> None:
             f"(missing sentinel: {sentinel_path})"
         )
 
+
 def get_parser():
     """Defines the argument parser for both Fix and Agent modes."""
     parser = argparse.ArgumentParser(description="Inference with Fixed (Baseline) or Agent mode.")
-    parser.add_argument('--mode', type=str, choices=['fix', 'agent'], default='fix')
-    parser.add_argument('--data_dir', '-d', type=str, default=None)
-    parser.add_argument('--denoising_model', '-m', type=str, default='punet')
-    parser.add_argument('--file_index', '-i', type=int, default=6)
-    
+    parser.add_argument("--mode", type=str, choices=["fix", "agent"], default="fix")
+    parser.add_argument("--data_dir", "-d", type=str, default=None)
+    parser.add_argument("--denoising_model", "-m", type=str, default="punet")
+    parser.add_argument("--file_index", "-i", type=int, default=6)
+
     # Agent Mode Specific Args
-    parser.add_argument('--model_cfg', type=str, help="Path to model config JSON")
-    parser.add_argument('--loss_cfg', type=str, help="Path to loss config JSON")
-    parser.add_argument('--exp_id', type=str, default="default_run")
-    parser.add_argument("--run_name", type=str,  default="test_run",
-                        help="Run name for the auto-exploration.")
-    parser.add_argument('--model_path', type=str, help="Path to the .pth state_dict")
-    parser.add_argument('--output_dir', type=str, default=None,
-                        help="Directory to write denoised H5 output. Defaults to data_dir.")
-    parser.add_argument('--inference_batch_size', type=int, default=10,
-                        help="Number of segments per GPU forward pass. Per-model defaults set in sandbox_executor.py (punet/wavenet/fcnet=25, rnn=10, transformer=1).")
-    parser.add_argument('--sample_set_json', type=str, default=None,
-                        help="Path to SampleSet JSON for trial mode. Overrides --file_index.")
-    parser.add_argument('--timing_out_json', type=str, default=None,
-                        help="If set, write per-file inference timings to this JSON path. "
-                             "Trial-mode only; ignored in --mode fix or normal single-file mode.")
+    parser.add_argument("--model_cfg", type=str, help="Path to model config JSON")
+    parser.add_argument("--loss_cfg", type=str, help="Path to loss config JSON")
+    parser.add_argument("--exp_id", type=str, default="default_run")
+    parser.add_argument(
+        "--run_name", type=str, default="test_run", help="Run name for the auto-exploration."
+    )
+    parser.add_argument("--model_path", type=str, help="Path to the .pth state_dict")
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default=None,
+        help="Directory to write denoised H5 output. Defaults to data_dir.",
+    )
+    parser.add_argument(
+        "--inference_batch_size",
+        type=int,
+        default=10,
+        help="Number of segments per GPU forward pass. Per-model defaults set in sandbox_executor.py (punet/wavenet/fcnet=25, rnn=10, transformer=1).",
+    )
+    parser.add_argument(
+        "--sample_set_json",
+        type=str,
+        default=None,
+        help="Path to SampleSet JSON for trial mode. Overrides --file_index.",
+    )
+    parser.add_argument(
+        "--timing_out_json",
+        type=str,
+        default=None,
+        help="If set, write per-file inference timings to this JSON path. "
+        "Trial-mode only; ignored in --mode fix or normal single-file mode.",
+    )
     return parser
+
 
 def process_batch(index, inputarr, targetarr, model, args, current_loss_type):
     """
@@ -66,7 +101,7 @@ def process_batch(index, inputarr, targetarr, model, args, current_loss_type):
     # 1. Base Pre-processing (ADC Offset)
     inputarr = inputarr.astype(np.int16) + 128
     targetarr = targetarr.astype(np.int16) + 128
-    input_seq = torch.from_numpy(inputarr) # Shape: [1, 1, Time] from main loop
+    input_seq = torch.from_numpy(inputarr)  # Shape: [1, 1, Time] from main loop
 
     # 2. KEY FIX: Standardize Dimensions
     # Both PUNet (Embedding) and FCNet (Linear) expect [Batch, Time].
@@ -84,7 +119,7 @@ def process_batch(index, inputarr, targetarr, model, args, current_loss_type):
 
     with torch.no_grad():
         output = model(input_seq)
-        
+
         # 4. Decoding Output based on Task Type
         if current_loss_type == "smooth_l1":
             # Regression task: Output is already [Batch, Time]
@@ -93,9 +128,10 @@ def process_batch(index, inputarr, targetarr, model, args, current_loss_type):
             # Classification task: Output is [Batch, 256, Time]
             # Convert logits to discrete ADC values via Argmax
             output_seq = output.argmax(dim=1).detach().cpu().numpy()
-            
+
     # Return flattened results for H5 assembly
     return index, (output_seq - 128).flatten(), (targetarr - 128).flatten()
+
 
 def main():
     # 1. Parse arguments locally to avoid NameError scope issues
@@ -104,55 +140,58 @@ def main():
 
     if args.data_dir is None:
         from execute_tools.data_paths import TIDMAD_DATA_DIR
+
         args.data_dir = TIDMAD_DATA_DIR
 
     # 2. Model Loading Logic
-    if args.mode == 'fix':
+    if args.mode == "fix":
         # Baseline / Fixed mode logic remains largely the same
         model_map = {
-            "punet": "PUNet_0_20.pth", 
+            "punet": "PUNet_0_20.pth",
             "fcnet": "FCNet_0_20.pth",
-            "transformer": "Transformer_0_20.pth"
+            "transformer": "Transformer_0_20.pth",
         }
         model_file = model_map.get(args.denoising_model)
         if not model_file or not os.path.exists(model_file):
             raise FileNotFoundError(f"Baseline model file {model_file} not found.")
-            
+
         model = torch.load(model_file, map_location=DEVICE, weights_only=False)
-        input_size = 40000 # Default baseline size
+        input_size = 40000  # Default baseline size
         current_loss_type = "ce"
-    
+
     else:
         # AGENT MODE: Dynamic loading using Registry and Factory
         if not args.model_cfg or not args.model_path:
             raise ValueError("Agent mode requires --model_cfg and --model_path")
-        
+
         # Load Loss Type from Config
         loss_path = args.loss_cfg if args.loss_cfg else args.model_cfg.replace("model", "loss")
-        with open(loss_path, 'r') as f:
+        with open(loss_path) as f:
             l_data = json.load(f)
         current_loss_type = l_data.get("loss_type", "ce")
 
         # Load Model Config
-        with open(args.model_cfg, 'r') as f:
+        with open(args.model_cfg) as f:
             m_data = json.load(f)
 
         # --- MINIMAL CHANGE: Dynamic Initialization ---
         config_class = get_config_class(args.denoising_model)
         model_class = MODEL_REGISTRY.get(args.denoising_model)
-        
+
         if config_class is None or model_class is None:
-            raise ValueError(f"Model type '{args.denoising_model}' is not supported in MODEL_REGISTRY")
+            raise ValueError(
+                f"Model type '{args.denoising_model}' is not supported in MODEL_REGISTRY"
+            )
 
         # Instantiate Pydantic config and then the Model
         m_cfg = config_class(**m_data)
-        
+
         # Special handling for AE (loss_type injection), others use standard config init
         if args.denoising_model == "fcnet":
             model = model_class(m_cfg, loss_type=current_loss_type).to(DEVICE)
         else:
             model = model_class(m_cfg).to(DEVICE)
-            
+
         # Phase 6.7 Fix 3 — preflight the trainer sentinel. No retry loop:
         # the spec explicitly drops it because it would mask, not fix, the
         # silent-crash root cause.
@@ -167,7 +206,7 @@ def main():
     # 3. Load sample set if provided (trial mode)
     sample_set = None
     if args.sample_set_json:
-        with open(args.sample_set_json, 'r') as f:
+        with open(args.sample_set_json) as f:
             sample_set = json.load(f)
 
     # PSD_SEGMENT_LENGTH imported from dataset_config
@@ -196,9 +235,9 @@ def main():
             # ds_ch1/ds_ch2 are invalid. The slice itself returns a numpy
             # array that survives the context exit, which is what we
             # concatenate below.
-            with h5py.File(fpath, 'r') as ABRAfile:
-                ds_ch1 = ABRAfile['timeseries']['channel0001']['timeseries']
-                ds_ch2 = ABRAfile['timeseries']['channel0002']['timeseries']
+            with h5py.File(fpath, "r") as ABRAfile:
+                ds_ch1 = _h5_dataset(ABRAfile, "timeseries", "channel0001", "timeseries")
+                ds_ch2 = _h5_dataset(ABRAfile, "timeseries", "channel0002", "timeseries")
 
                 total_psd_segments = ds_ch1.shape[0] // PSD_SEGMENT_LENGTH
 
@@ -216,8 +255,8 @@ def main():
                     f"{total_psd_segments} total."
                 )
 
-            all_input = np.concatenate(input_chunks)    # flat array
-            all_target = np.concatenate(target_chunks)   # flat array
+            all_input = np.concatenate(input_chunks)  # flat array
+            all_target = np.concatenate(target_chunks)  # flat array
 
             train_loader = all_input.reshape(-1, 1, input_size)
             target_loader = all_target.reshape(-1, 1, input_size)
@@ -227,17 +266,20 @@ def main():
             injected = np.zeros((dim1, input_size), dtype=np.int8)
             bs = args.inference_batch_size
 
-            for i in tqdm(range(0, dim1, bs), desc=f"Inference file {file_index} ({len(psd_segment_indices)} PSD segs)"):
-                batch_in  = train_loader[i:i+bs]
-                batch_tgt = target_loader[i:i+bs]
+            for i in tqdm(
+                range(0, dim1, bs),
+                desc=f"Inference file {file_index} ({len(psd_segment_indices)} PSD segs)",
+            ):
+                batch_in = train_loader[i : i + bs]
+                batch_tgt = target_loader[i : i + bs]
                 _, dn, ij = process_batch(i, batch_in, batch_tgt, model, args, current_loss_type)
                 actual_n = batch_in.shape[0]
-                denoised[i:i+actual_n] = dn.reshape(actual_n, input_size)
-                injected[i:i+actual_n] = ij.reshape(actual_n, input_size)
+                denoised[i : i + actual_n] = dn.reshape(actual_n, input_size)
+                injected[i : i + actual_n] = ij.reshape(actual_n, input_size)
 
             out_name = os.path.join(
                 out_dir,
-                f"abra_validation_denoised_{args.denoising_model}_{args.run_name}_{args.exp_id}_{file_index:04d}.h5"
+                f"abra_validation_denoised_{args.denoising_model}_{args.run_name}_{args.exp_id}_{file_index:04d}.h5",
             )
             if os.path.exists(out_name):
                 os.remove(out_name)
@@ -253,18 +295,25 @@ def main():
             del train_loader, target_loader, all_input, all_target, input_chunks, target_chunks
             gc.collect()
 
-            create_abra_file(out_name, denoised.flatten().astype(np.int8), injected.flatten().astype(np.int8), indexed=False)
+            create_abra_file(
+                out_name,
+                denoised.flatten().astype(np.int8),
+                injected.flatten().astype(np.int8),
+                indexed=False,
+            )
             print(f"Trial inference saved: {out_name}")
 
             del denoised, injected
             gc.collect()
 
             elapsed_ms = (time.perf_counter() - t_file_start) * 1000.0
-            per_file_timings_ms.append({
-                "file_index": file_index,
-                "n_psd_segs": len(psd_segment_indices),
-                "elapsed_ms": elapsed_ms,
-            })
+            per_file_timings_ms.append(
+                {
+                    "file_index": file_index,
+                    "n_psd_segs": len(psd_segment_indices),
+                    "elapsed_ms": elapsed_ms,
+                }
+            )
 
         if args.timing_out_json:
             with open(args.timing_out_json, "w") as f:
@@ -278,9 +327,9 @@ def main():
         if not os.path.exists(fpath):
             raise FileNotFoundError(f"Validation data missing at {fpath}")
 
-        with h5py.File(fpath, 'r') as ABRAfile:
-            alltrain = np.array(ABRAfile['timeseries']['channel0001']['timeseries'])
-            alltarget = np.array(ABRAfile['timeseries']['channel0002']['timeseries'])
+        with h5py.File(fpath, "r") as ABRAfile:
+            alltrain = np.array(_h5_dataset(ABRAfile, "timeseries", "channel0001", "timeseries"))
+            alltarget = np.array(_h5_dataset(ABRAfile, "timeseries", "channel0002", "timeseries"))
 
             # Reshape according to input_size from config
             train_loader = alltrain.reshape(-1, 1, input_size)
@@ -292,12 +341,12 @@ def main():
             bs = args.inference_batch_size
 
             for i in tqdm(range(0, dim1, bs), desc=f"Inference ({args.mode})"):
-                batch_in  = train_loader[i:i+bs]
-                batch_tgt = target_loader[i:i+bs]
+                batch_in = train_loader[i : i + bs]
+                batch_tgt = target_loader[i : i + bs]
                 _, dn, ij = process_batch(i, batch_in, batch_tgt, model, args, current_loss_type)
                 actual_n = batch_in.shape[0]
-                denoised[i:i+actual_n] = dn.reshape(actual_n, input_size)
-                injected[i:i+actual_n] = ij.reshape(actual_n, input_size)
+                denoised[i : i + actual_n] = dn.reshape(actual_n, input_size)
+                injected[i : i + actual_n] = ij.reshape(actual_n, input_size)
 
         # Fix 3 (docs/optimize_inference_and_scoring.md §3) — free the raw
         # int8 buffers before the write phase. create_abra_file below emits
@@ -314,17 +363,28 @@ def main():
         # 4. Save Output
         idx_str = str(args.file_index).zfill(4)
         out_dir = args.output_dir if args.output_dir else args.data_dir
-        if args.mode == 'fix':
-            out_name = os.path.join(out_dir, f"abra_validation_denoised_{args.denoising_model}_{idx_str}.h5")
+        if args.mode == "fix":
+            out_name = os.path.join(
+                out_dir, f"abra_validation_denoised_{args.denoising_model}_{idx_str}.h5"
+            )
         else:
-            out_name = os.path.join(out_dir, f"abra_validation_denoised_{args.denoising_model}_{args.run_name}_{args.exp_id}_{idx_str}.h5")
+            out_name = os.path.join(
+                out_dir,
+                f"abra_validation_denoised_{args.denoising_model}_{args.run_name}_{args.exp_id}_{idx_str}.h5",
+            )
 
         # Clean up old files before writing new one
         if os.path.exists(out_name):
             os.remove(out_name)
 
-        create_abra_file(out_name, denoised.flatten().astype(np.int8), injected.flatten().astype(np.int8), indexed=False)
+        create_abra_file(
+            out_name,
+            denoised.flatten().astype(np.int8),
+            injected.flatten().astype(np.int8),
+            indexed=False,
+        )
         print(f"Inference complete. Saved to: {out_name}")
-    
+
+
 if __name__ == "__main__":
     main()

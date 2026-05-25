@@ -36,23 +36,18 @@ Removed:
     4 GB minimum-free floor      — obsolete under the capacity-based cap.
     Contention log               — belongs to scheduling, not forecasting.
 """
+
 from __future__ import annotations
 
 import gc
 import inspect
 import signal
 from contextlib import contextmanager
-from typing import Optional
 
 import psutil
 import torch
 from pydantic import ValidationError
 
-from ml_models.loss_models_sandbox    import get_criterion
-from ml_models.models_format_sandbox  import LossConfig, get_config_class
-from ml_models.models_sandbox         import MODEL_REGISTRY
-
-from core.hardware_context import HardwareContext, discover
 from agent.skills.evaluate_vram_skill import compute_intensity, killer_report
 from agent.skills.evaluate_vram_skill.batch_resolver import resolve_inference_batch
 from agent.skills.evaluate_vram_skill.overhead import (
@@ -64,11 +59,14 @@ from agent.skills.evaluate_vram_skill.structural_probe import (
     ProbeResult,
     probe_activation_footprint,
 )
-
+from core.hardware_context import HardwareContext, discover
+from ml_models.loss_models_sandbox import get_criterion
+from ml_models.models_format_sandbox import LossConfig, get_config_class
+from ml_models.models_sandbox import MODEL_REGISTRY
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-_GB: int = 1024 ** 3
+_GB: int = 1024**3
 # Training defaults mirror the project-wide pipeline: Adam-family. Proposer
 # configs that use a different optimizer populate ``train_config.optimizer``
 # explicitly; ``overhead.training_overhead_bytes`` hard-errors on anything
@@ -124,6 +122,7 @@ def _forward_pass_timeout(seconds: int, label: str):
 
 # ── Model / loss instantiation helpers ──────────────────────────────────────
 
+
 def _build_model(model_type: str, model_cfg: dict, loss_type: str) -> torch.nn.Module:
     """CPU-instantiate a model by pushing ``model_cfg`` through the plugin's
     config class + registered model class.
@@ -133,8 +132,13 @@ def _build_model(model_type: str, model_cfg: dict, loss_type: str) -> torch.nn.M
     Callers catch it and emit the Phase D.4 ``schema_violation`` record.
     """
     config_cls = get_config_class(model_type)
+    if config_cls is None:
+        raise ValueError(
+            f"_build_model: unknown model_type={model_type!r} — "
+            f"get_config_class returned None (no plugin or built-in config registered)."
+        )
     config_obj = config_cls(**model_cfg)
-    model_cls  = MODEL_REGISTRY[model_type]
+    model_cls = MODEL_REGISTRY[model_type]
     # Principle 2: no architecture-family branching. A registered model
     # class may optionally accept ``loss_type`` (used when the model's
     # head shape depends on the loss — e.g. AE + smooth_l1 regression).
@@ -146,7 +150,9 @@ def _build_model(model_type: str, model_cfg: dict, loss_type: str) -> torch.nn.M
 
 
 def _build_probe_tensors(
-    batch_size: int, seg_size: int, loss_type: str,
+    batch_size: int,
+    seg_size: int,
+    loss_type: str,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Zero-valued ``(input, target)`` pair matching the SIDERIUS forward
     contract. Both tensors live on CPU; the probe will ``.to(device)`` them
@@ -161,27 +167,44 @@ def _build_probe_tensors(
 
 # ── Peak composition (§3.3) ──────────────────────────────────────────────────
 
+
 def _compose_training_peak(probe: ProbeResult, optimizer: str) -> tuple[int, dict]:
     """``autograd_tape + input + output + params + training_overhead +
-    cuda_context + cudnn_backward_workspace``."""
+    cuda_context + cudnn_backward_workspace``.
+
+    ``probe.autograd_tape`` is only populated when the probe ran in
+    training-mode (backward-capable). Composing the training peak when
+    it is ``None`` would silently drop the largest term — raise instead
+    so the caller catches the contract violation explicitly.
+    """
+    if probe.autograd_tape is None:
+        raise ValueError(
+            "_compose_training_peak requires probe.autograd_tape to be populated "
+            "(got None) — caller passed an inference-only probe."
+        )
     params_bytes = probe.model_forward.total_param_bytes
-    saved_bytes  = probe.autograd_tape.total_saved_bytes
-    overhead     = training_overhead_bytes(params_bytes, optimizer)
-    ctx          = cuda_context_bytes()
-    cudnn_bw     = cudnn_backward_workspace_bytes()
+    saved_bytes = probe.autograd_tape.total_saved_bytes
+    overhead = training_overhead_bytes(params_bytes, optimizer)
+    ctx = cuda_context_bytes()
+    cudnn_bw = cudnn_backward_workspace_bytes()
 
     total = (
-        saved_bytes + probe.input_bytes + probe.output_bytes
-        + params_bytes + overhead + ctx + cudnn_bw
+        saved_bytes
+        + probe.input_bytes
+        + probe.output_bytes
+        + params_bytes
+        + overhead
+        + ctx
+        + cudnn_bw
     )
     breakdown = {
-        "autograd_tape_bytes":     saved_bytes,
-        "input_bytes":             probe.input_bytes,
-        "output_bytes":            probe.output_bytes,
-        "param_bytes":             params_bytes,
+        "autograd_tape_bytes": saved_bytes,
+        "input_bytes": probe.input_bytes,
+        "output_bytes": probe.output_bytes,
+        "param_bytes": params_bytes,
         "training_overhead_bytes": overhead,
-        "cuda_context_bytes":      ctx,
-        "cudnn_backward_bytes":    cudnn_bw,
+        "cuda_context_bytes": ctx,
+        "cudnn_backward_bytes": cudnn_bw,
     }
     return total, breakdown
 
@@ -194,14 +217,14 @@ def _compose_inference_peak(probe: ProbeResult) -> tuple[int, dict]:
     be larger. Neither is a sum — the allocator reuses transient
     buffers under ``no_grad``."""
     params_bytes = probe.model_forward.total_param_bytes
-    peak_out     = max(probe.output_bytes, probe.model_forward.forward_output_bytes_max)
-    ctx          = cuda_context_bytes()
+    peak_out = max(probe.output_bytes, probe.model_forward.forward_output_bytes_max)
+    ctx = cuda_context_bytes()
 
     total = probe.input_bytes + peak_out + params_bytes + ctx
     breakdown = {
-        "input_bytes":        probe.input_bytes,
-        "max_output_bytes":   peak_out,
-        "param_bytes":        params_bytes,
+        "input_bytes": probe.input_bytes,
+        "max_output_bytes": peak_out,
+        "param_bytes": params_bytes,
         "cuda_context_bytes": ctx,
     }
     return total, breakdown
@@ -209,18 +232,21 @@ def _compose_inference_peak(probe: ProbeResult) -> tuple[int, dict]:
 
 # ── Schema-violation helpers (preserved from Phase D.4) ─────────────────────
 
+
 def _extract_schema_violations(exc: ValidationError) -> list[dict]:
     """Serialize every pydantic error into a per-field record the tuner's
     planner can read back via the saved ``skipped_schema_violation`` record."""
     out: list[dict] = []
     for err in exc.errors():
         loc = ".".join(str(p) for p in err.get("loc", ())) or "__root__"
-        out.append({
-            "loc":   loc,
-            "type":  err.get("type", "unknown"),
-            "msg":   err.get("msg", ""),
-            "input": err.get("input"),
-        })
+        out.append(
+            {
+                "loc": loc,
+                "type": err.get("type", "unknown"),
+                "msg": err.get("msg", ""),
+                "input": err.get("input"),
+            }
+        )
     return out
 
 
@@ -236,11 +262,11 @@ def _schema_violation_response(violations: list[dict], offending_cfg: dict) -> d
     verdict = _format_schema_violation_verdict(violations)
     print(f"    SCHEMA REJECT: {verdict}")
     return {
-        "status":           "schema_violation",
-        "violations":       violations,
+        "status": "schema_violation",
+        "violations": violations,
         "offending_config": offending_cfg,
-        "message":          verdict,
-        "verdict":          verdict,
+        "message": verdict,
+        "verdict": verdict,
         "suggestion": (
             "Propose a config that satisfies the plugin's schema invariants. "
             "DO NOT repeat the same field/value combination."
@@ -249,6 +275,7 @@ def _schema_violation_response(violations: list[dict], offending_cfg: dict) -> d
 
 
 # ── Killer-report routing ───────────────────────────────────────────────────
+
 
 def _parse_binding_label(exc_msg: str) -> str:
     """``resolve_inference_batch`` raises ``ValueError`` whose message contains
@@ -262,8 +289,14 @@ def _parse_binding_label(exc_msg: str) -> str:
 
 
 def _render_inference_killer(
-    *, binding: str, model_type: str, model_cfg: dict, loss_type: str,
-    seg_size: int, cap_bytes: int, total_memory_bytes: int,
+    *,
+    binding: str,
+    model_type: str,
+    model_cfg: dict,
+    loss_type: str,
+    seg_size: int,
+    cap_bytes: int,
+    total_memory_bytes: int,
 ) -> killer_report.KillerReport:
     """Build a killer report for the inference-resolver-failed case.
 
@@ -276,12 +309,14 @@ def _render_inference_killer(
         # Intensity failure at ``B=1`` means ``1 × T > 800_000`` — a pure
         # ``segmentation_size`` problem, no layer attribution required.
         return killer_report.render_intensity_report(
-            batch_size=1, segmentation_size=seg_size,
+            batch_size=1,
+            segmentation_size=seg_size,
         )
 
     model_tmp = _build_model(model_type, model_cfg, loss_type)
     inf_probe = probe_activation_footprint(
-        model=model_tmp, loss_module=None,
+        model=model_tmp,
+        loss_module=None,
         input_sample=torch.zeros((1, seg_size), dtype=torch.long),
         target_sample=None,
         mode="inference",
@@ -305,12 +340,20 @@ def _render_inference_killer(
 
 
 def _render_killer(
-    *, training_probe: ProbeResult, training_peak: int,
-    training_vram_ok: bool, training_intensity_ok: bool,
-    inference_ok: bool, inference_err: Optional[str],
-    model_type: str, model_cfg: dict, loss_type: str,
-    batch_size: int, seg_size: int,
-    cap_bytes: int, total_memory_bytes: int,
+    *,
+    training_probe: ProbeResult,
+    training_peak: int,
+    training_vram_ok: bool,
+    training_intensity_ok: bool,
+    inference_ok: bool,
+    inference_err: str | None,
+    model_type: str,
+    model_cfg: dict,
+    loss_type: str,
+    batch_size: int,
+    seg_size: int,
+    cap_bytes: int,
+    total_memory_bytes: int,
 ) -> killer_report.KillerReport:
     """Pick the right renderer based on which cap(s) bound the refusal.
 
@@ -340,14 +383,18 @@ def _render_killer(
     if not inference_ok:
         return _render_inference_killer(
             binding=_parse_binding_label(inference_err or ""),
-            model_type=model_type, model_cfg=model_cfg, loss_type=loss_type,
+            model_type=model_type,
+            model_cfg=model_cfg,
+            loss_type=loss_type,
             seg_size=seg_size,
-            cap_bytes=cap_bytes, total_memory_bytes=total_memory_bytes,
+            cap_bytes=cap_bytes,
+            total_memory_bytes=total_memory_bytes,
         )
     raise RuntimeError("_render_killer called with no binding failure")
 
 
 # ── Main entry ──────────────────────────────────────────────────────────────
+
 
 def run_skill(sandbox, **kwargs):
     """Run the VRAM gate against the proposer's config.
@@ -371,20 +418,22 @@ def run_skill(sandbox, **kwargs):
     # ``model_type``, a ``KeyError`` is the right signal — silently
     # defaulting to a specific family would re-introduce exactly the
     # branching this phase is eliminating.
-    model_type     = kwargs["model_type"]
-    model_cfg      = kwargs.get("model_config", {})
-    train_cfg      = kwargs.get("train_config", {})
-    loss_cfg       = kwargs.get("loss_config", {})
-    vram_budget_gb: Optional[float] = kwargs.get("vram_budget_gb")
-    hardware_context: Optional[HardwareContext] = kwargs.get("hardware_context")
+    model_type = kwargs["model_type"]
+    model_cfg = kwargs.get("model_config", {})
+    train_cfg = kwargs.get("train_config", {})
+    loss_cfg = kwargs.get("loss_config", {})
+    vram_budget_gb: float | None = kwargs.get("vram_budget_gb")
+    hardware_context: HardwareContext | None = kwargs.get("hardware_context")
 
-    loss_type  = loss_cfg.get("loss_type", "ce")
+    loss_type = loss_cfg.get("loss_type", "ce")
     batch_size = int(train_cfg.get("batch_size", 1))
-    seg_size   = int(model_cfg.get("segmentation_size", 40000))
-    optimizer  = str(train_cfg.get("optimizer") or _DEFAULT_OPTIMIZER).lower()
+    seg_size = int(model_cfg.get("segmentation_size", 40000))
+    optimizer = str(train_cfg.get("optimizer") or _DEFAULT_OPTIMIZER).lower()
 
-    print(f"\n>>> [Skill: VRAMEval] Pre-flight for {model_type.upper()} "
-          f"(B={batch_size}, T={seg_size}, loss={loss_type})...")
+    print(
+        f"\n>>> [Skill: VRAMEval] Pre-flight for {model_type.upper()} "
+        f"(B={batch_size}, T={seg_size}, loss={loss_type})..."
+    )
 
     try:
         # 1. Hardware context → cap ──────────────────────────────────────
@@ -400,26 +449,28 @@ def run_skill(sandbox, **kwargs):
         # is self-explanatory (the operator should not have to compare
         # numbers to figure out which cap won).
         if vram_budget_gb is None:
-            cap_note = (f"PHYSICAL: 80% of "
-                        f"{hardware_context.total_memory_gb:.1f} GB")
+            cap_note = f"PHYSICAL: 80% of {hardware_context.total_memory_gb:.1f} GB"
         elif int(vram_budget_gb * _GB) > physical_cap_bytes:
-            cap_note = (f"PHYSICAL VETO: budget {vram_budget_gb:.2f} GB "
-                        f"requested exceeds 80% ceiling")
+            cap_note = (
+                f"PHYSICAL VETO: budget {vram_budget_gb:.2f} GB requested exceeds 80% ceiling"
+            )
         else:
-            cap_note = (f"BUDGET: restricted by operator from "
-                        f"{physical_cap_bytes / _GB:.2f} GB")
+            cap_note = f"BUDGET: restricted by operator from {physical_cap_bytes / _GB:.2f} GB"
 
-        print(f"    [Hardware] {hardware_context.device_name} "
-              f"({hardware_context.total_memory_gb:.1f} GB total) "
-              f"| cap={cap_bytes / _GB:.2f} GB ({cap_note})")
+        print(
+            f"    [Hardware] {hardware_context.device_name} "
+            f"({hardware_context.total_memory_gb:.1f} GB total) "
+            f"| cap={cap_bytes / _GB:.2f} GB ({cap_note})"
+        )
 
         # 2. Instantiate model (schema validation happens here) ───────────
         try:
             model_for_train = _build_model(model_type, model_cfg, loss_type)
-            loss_module     = get_criterion(LossConfig(**loss_cfg))
+            loss_module = get_criterion(LossConfig(**loss_cfg))
         except ValidationError as ve:
             return _schema_violation_response(
-                _extract_schema_violations(ve), model_cfg,
+                _extract_schema_violations(ve),
+                model_cfg,
             )
         num_params = sum(p.numel() for p in model_for_train.parameters())
         print(f"    Parameters : {num_params:,}")
@@ -431,19 +482,18 @@ def run_skill(sandbox, **kwargs):
         if not hardware_context.device_available:
             print("    [Hardware] CPU-only host — skipping VRAM gate.")
             return {
-                "status":          "success",
-                "feasible":        True,
-                "verdict":         (f"CPU mode ({hardware_context.device_name}) "
-                                    "— no VRAM constraint."),
-                "suggestion":      "",
-                "num_params":      num_params,
-                "dominant_phase":  "inference",
+                "status": "success",
+                "feasible": True,
+                "verdict": (f"CPU mode ({hardware_context.device_name}) — no VRAM constraint."),
+                "suggestion": "",
+                "num_params": num_params,
+                "dominant_phase": "inference",
                 "phase_breakdown": {},
-                "estimated_gb":    0.0,
-                "limit_gb":        0.0,
-                "vram_budget_gb":  vram_budget_gb,
+                "estimated_gb": 0.0,
+                "limit_gb": 0.0,
+                "vram_budget_gb": vram_budget_gb,
                 "inference_batch": 1,
-                "memory_killer":   None,
+                "memory_killer": None,
             }
 
         # 3. Training-phase probe ─────────────────────────────────────────
@@ -451,14 +501,17 @@ def run_skill(sandbox, **kwargs):
         x_train, y_train = _build_probe_tensors(batch_size, seg_size, loss_type)
         with _forward_pass_timeout(_FORWARD_PASS_TIMEOUT_S, "training_probe"):
             training_probe = probe_activation_footprint(
-                model=model_for_train, loss_module=loss_module,
-                input_sample=x_train, target_sample=y_train,
+                model=model_for_train,
+                loss_module=loss_module,
+                input_sample=x_train,
+                target_sample=y_train,
                 mode="training",
             )
         training_peak, training_breakdown = _compose_training_peak(
-            training_probe, optimizer,
+            training_probe,
+            optimizer,
         )
-        training_vram_ok      = training_peak <= cap_bytes
+        training_vram_ok = training_peak <= cap_bytes
         training_intensity_ok = compute_intensity.passes(batch_size, seg_size)
 
         # Free training-phase objects before building inference models.
@@ -468,9 +521,11 @@ def run_skill(sandbox, **kwargs):
         rss_after = psutil.Process().memory_info().rss
         rss_delta_gb = (rss_after - rss_before) / _GB
         if rss_delta_gb > 8.0:
-            print(f"    [PROBE_MEMORY_WARNING] {model_type}: training probe "
-                  f"RSS delta = {rss_delta_gb:.2f} GB "
-                  f"(before={rss_before / _GB:.2f}, after={rss_after / _GB:.2f})")
+            print(
+                f"    [PROBE_MEMORY_WARNING] {model_type}: training probe "
+                f"RSS delta = {rss_delta_gb:.2f} GB "
+                f"(before={rss_before / _GB:.2f}, after={rss_after / _GB:.2f})"
+            )
         else:
             print(f"    [Probe RSS] delta={rss_delta_gb:.2f} GB")
 
@@ -479,16 +534,18 @@ def run_skill(sandbox, **kwargs):
         #    and enforces both caps simultaneously. We pass a fresh model
         #    instance because the resolver moves tensors around; re-probe
         #    at the chosen B for the breakdown.
-        inference_probe:     Optional[ProbeResult] = None
-        inference_peak:      int = 0
+        inference_probe: ProbeResult | None = None
+        inference_peak: int = 0
         inference_breakdown: dict = {}
-        inference_batch:     Optional[int] = None
-        inference_err:       Optional[str] = None
+        inference_batch: int | None = None
+        inference_err: str | None = None
         try:
             model_for_resolve = _build_model(model_type, model_cfg, loss_type)
             with _forward_pass_timeout(_FORWARD_PASS_TIMEOUT_S, "resolve_inference_batch"):
                 inference_batch = resolve_inference_batch(
-                    model_for_resolve, segmentation_size=seg_size, cap_bytes=cap_bytes,
+                    model_for_resolve,
+                    segmentation_size=seg_size,
+                    cap_bytes=cap_bytes,
                 )
             del model_for_resolve
             gc.collect()
@@ -496,9 +553,11 @@ def run_skill(sandbox, **kwargs):
             model_for_bd = _build_model(model_type, model_cfg, loss_type)
             with _forward_pass_timeout(_FORWARD_PASS_TIMEOUT_S, "inference_probe"):
                 inference_probe = probe_activation_footprint(
-                    model=model_for_bd, loss_module=None,
+                    model=model_for_bd,
+                    loss_module=None,
                     input_sample=torch.zeros(
-                        (inference_batch, seg_size), dtype=torch.long,
+                        (inference_batch, seg_size),
+                        dtype=torch.long,
                     ),
                     target_sample=None,
                     mode="inference",
@@ -516,13 +575,17 @@ def run_skill(sandbox, **kwargs):
 
         # 5. Phase breakdown + dominant phase ─────────────────────────────
         phase_breakdown: dict[str, dict] = {
-            "training": {"phase": "training", "total_bytes": training_peak,
-                         "breakdown": training_breakdown},
-            "scoring":  {"phase": "scoring",  "total_bytes": 0, "breakdown": {}},
+            "training": {
+                "phase": "training",
+                "total_bytes": training_peak,
+                "breakdown": training_breakdown,
+            },
+            "scoring": {"phase": "scoring", "total_bytes": 0, "breakdown": {}},
         }
         if inference_probe is not None:
             phase_breakdown["inference"] = {
-                "phase": "inference", "total_bytes": inference_peak,
+                "phase": "inference",
+                "total_bytes": inference_peak,
                 "breakdown": inference_breakdown,
             }
         dominant_phase = max(phase_breakdown, key=lambda k: phase_breakdown[k]["total_bytes"])
@@ -540,52 +603,59 @@ def run_skill(sandbox, **kwargs):
             )
             print(f"    Estimated  : {total_est / _GB:.2f} GB / cap {cap_bytes / _GB:.2f} GB")
             print(f"    Inference B: {inference_batch}")
-            print(f"    Feasible   : YES")
+            print("    Feasible   : YES")
             return {
-                "status":          "success",
-                "feasible":        True,
-                "verdict":         verdict,
-                "suggestion":      "",
-                "num_params":      num_params,
-                "dominant_phase":  dominant_phase,
+                "status": "success",
+                "feasible": True,
+                "verdict": verdict,
+                "suggestion": "",
+                "num_params": num_params,
+                "dominant_phase": dominant_phase,
                 "phase_breakdown": phase_breakdown,
-                "estimated_gb":    round(total_est / _GB, 3),
-                "limit_gb":        round(cap_bytes / _GB, 3),
-                "vram_budget_gb":  vram_budget_gb,
+                "estimated_gb": round(total_est / _GB, 3),
+                "limit_gb": round(cap_bytes / _GB, 3),
+                "vram_budget_gb": vram_budget_gb,
                 "inference_batch": inference_batch,
-                "memory_killer":   None,
+                "memory_killer": None,
             }
 
         # 6b. Infeasible path: Memory Killer report ──────────────────────
         report = _render_killer(
-            training_probe=training_probe, training_peak=training_peak,
+            training_probe=training_probe,
+            training_peak=training_peak,
             training_vram_ok=training_vram_ok,
             training_intensity_ok=training_intensity_ok,
-            inference_ok=inference_ok, inference_err=inference_err,
-            model_type=model_type, model_cfg=model_cfg, loss_type=loss_type,
-            batch_size=batch_size, seg_size=seg_size,
-            cap_bytes=cap_bytes, total_memory_bytes=total_memory_bytes,
+            inference_ok=inference_ok,
+            inference_err=inference_err,
+            model_type=model_type,
+            model_cfg=model_cfg,
+            loss_type=loss_type,
+            batch_size=batch_size,
+            seg_size=seg_size,
+            cap_bytes=cap_bytes,
+            total_memory_bytes=total_memory_bytes,
         )
         print(f"    Verdict    : {report.verdict}")
-        print(f"    Feasible   : NO")
+        print("    Feasible   : NO")
 
         return {
-            "status":          report.status,        # "schema_violation"
-            "feasible":        False,
-            "verdict":         report.verdict,
-            "suggestion":      report.suggestion,
-            "num_params":      num_params,
-            "dominant_phase":  dominant_phase,
+            "status": report.status,  # "schema_violation"
+            "feasible": False,
+            "verdict": report.verdict,
+            "suggestion": report.suggestion,
+            "num_params": num_params,
+            "dominant_phase": dominant_phase,
             "phase_breakdown": phase_breakdown,
-            "estimated_gb":    round(total_est / _GB, 3),
-            "limit_gb":        round(cap_bytes / _GB, 3),
-            "vram_budget_gb":  vram_budget_gb,
-            "inference_batch": inference_batch,     # None on inference failure
-            "memory_killer":   report.memory_killer.model_dump(),
+            "estimated_gb": round(total_est / _GB, 3),
+            "limit_gb": round(cap_bytes / _GB, 3),
+            "vram_budget_gb": vram_budget_gb,
+            "inference_batch": inference_batch,  # None on inference failure
+            "memory_killer": report.memory_killer.model_dump(),
         }
 
     except Exception as e:
         import traceback
+
         msg = f"VRAMEval runtime error: {e}\n{traceback.format_exc()}"
         print(f"!!! [VRAMEval] {msg}")
         return {"status": "error", "message": msg}

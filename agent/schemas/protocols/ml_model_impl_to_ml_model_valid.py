@@ -15,15 +15,17 @@ Per the inter-node communication principle: the validator never reads the implem
 output file from storage. All required data is mapped explicitly by this protocol.
 """
 
+from typing import Literal
+
 from agent.schemas.implementor import ImplementorOutput
-from agent.schemas.validator import ValidatorInput
 from agent.schemas.storage import StorageConfig
+from agent.schemas.validator import ValidatorInput
 
 
 def local_all_fields(
     output: ImplementorOutput,
     storage: StorageConfig,
-    llm_provider: str = "gemini",
+    llm_provider: Literal["gemini", "openai", "deepseek"] = "gemini",
     llm_model_id: str = "gemini-3.1-flash-lite-preview",
 ) -> ValidatorInput:
     """
@@ -66,6 +68,5 @@ def database_all_fields(
     a fully populated ValidatorInput.
     """
     raise NotImplementedError(
-        "database_all_fields is not yet implemented. "
-        "Wire a Postgres StorageConfig backend first."
+        "database_all_fields is not yet implemented. Wire a Postgres StorageConfig backend first."
     )

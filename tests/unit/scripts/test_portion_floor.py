@@ -20,6 +20,7 @@ Pre-4.3.4 these tests parametrized over both the legacy in-process
 runner and the chain runner. The legacy runner was retired in Commit
 4.3.4; the surviving validator lives only on the chain runner.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -28,6 +29,8 @@ import pytest
 
 from sdsc_submission_scripts.run_one_iteration import (
     _portion_floor as roi_floor,
+)
+from sdsc_submission_scripts.run_one_iteration import (
     build_parser,
 )
 
@@ -80,12 +83,18 @@ def test_roi_argparse_rejects_subfloor_trial_portion():
     """End-to-end: argparse on the chain runner aborts before workflow start."""
     parser = build_parser()
     with pytest.raises(SystemExit) as exc:
-        parser.parse_args([
-            "--workspace", "/tmp/dummy_ws",
-            "--seed_paths", "/tmp/dummy.json",
-            "--start_iteration", "1",
-            "--trial_portion", "0.005",
-        ])
+        parser.parse_args(
+            [
+                "--workspace",
+                "/tmp/dummy_ws",
+                "--seed_paths",
+                "/tmp/dummy.json",
+                "--start_iteration",
+                "1",
+                "--trial_portion",
+                "0.005",
+            ]
+        )
     # argparse error → exit code 2 (Python's argparse default).
     assert exc.value.code == 2
 
@@ -93,10 +102,16 @@ def test_roi_argparse_rejects_subfloor_trial_portion():
 def test_roi_argparse_rejects_subfloor_eval_portion():
     parser = build_parser()
     with pytest.raises(SystemExit) as exc:
-        parser.parse_args([
-            "--workspace", "/tmp/dummy_ws",
-            "--seed_paths", "/tmp/dummy.json",
-            "--start_iteration", "1",
-            "--eval_portion", "0.005",
-        ])
+        parser.parse_args(
+            [
+                "--workspace",
+                "/tmp/dummy_ws",
+                "--seed_paths",
+                "/tmp/dummy.json",
+                "--start_iteration",
+                "1",
+                "--eval_portion",
+                "0.005",
+            ]
+        )
     assert exc.value.code == 2

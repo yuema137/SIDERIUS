@@ -64,6 +64,5 @@ def database_all_records(
     a fully populated InterpretationInput. Raises NotImplementedError until wired.
     """
     raise NotImplementedError(
-        "database_all_records is not yet implemented. "
-        "Wire a Postgres StorageConfig backend first."
+        "database_all_records is not yet implemented. Wire a Postgres StorageConfig backend first."
     )

@@ -11,17 +11,24 @@ LLM calls are mocked — these tests validate:
   - Multi-model mode uses synthesis LLM call
   - Unknown model type raises FileNotFoundError
 """
+
 import json
-import pytest
+from typing import Any, ClassVar
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from agent.schemas.interpretation import (
-    InterpretationInput, InterpretationOutput, ModelRunSummary,
+    InterpretationInput,
+    InterpretationOutput,
+    ModelRunSummary,
 )
 from agent.schemas.score_table import (
-    AggregateScalars, PerFileRow, ScoreComparisonTable,
+    AggregateScalars,
+    PerFileRow,
+    ScoreComparisonTable,
 )
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.result_interpretation_agent import (
     ResultInterpretationAgent,
     _build_per_model_prompt,
@@ -91,17 +98,25 @@ FAKE_SYNTHESIS_RESPONSE = {
 }
 
 PUNET_SUMMARY = ModelRunSummary(
-    model_type="punet", run_name="v1", status="completed",
+    model_type="punet",
+    run_name="v1",
+    status="completed",
     completed_rounds=3,
     best_denoising_score=1.8,
     worst_denoising_score=1.2,
-    best_config={"model_config": {"depth": 4}, "train_config": {"lr": 1e-4}, "loss_config": {"loss_type": "focal"}},
+    best_config={
+        "model_config": {"depth": 4},
+        "train_config": {"lr": 1e-4},
+        "loss_config": {"loss_type": "focal"},
+    },
     round_scores=[1.2, 1.5, 1.8],
     round_conclusions=["Initial baseline.", "Improved with focal loss.", "Best with depth=4."],
 )
 
 FCNET_SUMMARY = ModelRunSummary(
-    model_type="fcnet", run_name="v1", status="completed",
+    model_type="fcnet",
+    run_name="v1",
+    status="completed",
     completed_rounds=2,
     best_denoising_score=0.9,
     worst_denoising_score=0.5,
@@ -144,8 +159,8 @@ def make_input(summary, workspace="/tmp/interp_test", run_name="r1"):
 # Single-model tests
 # ---------------------------------------------------------------------------
 
-class TestSingleModel:
 
+class TestSingleModel:
     def test_best_score_extracted(self, agent, tmp_path):
         inp = make_input(PUNET_SUMMARY, workspace=str(tmp_path))
         output = agent.run(inp)
@@ -178,13 +193,19 @@ class TestSingleModel:
         output = agent.run(inp)
         assert output.key_findings == FAKE_PER_MODEL_RESPONSE["key_findings"]
         assert output.bottlenecks == FAKE_PER_MODEL_RESPONSE["bottlenecks"]
-        assert "punet" in output.take_home_message.lower() or "plateau" in output.take_home_message.lower()
+        assert (
+            "punet" in output.take_home_message.lower()
+            or "plateau" in output.take_home_message.lower()
+        )
 
     def test_per_model_summaries_populated(self, agent, tmp_path):
         inp = make_input(PUNET_SUMMARY, workspace=str(tmp_path))
         output = agent.run(inp)
         assert "punet" in output.model_knowledge_cache
-        assert output.model_knowledge_cache["punet"]["key_findings"] == FAKE_PER_MODEL_RESPONSE["key_findings"]
+        assert (
+            output.model_knowledge_cache["punet"]["key_findings"]
+            == FAKE_PER_MODEL_RESPONSE["key_findings"]
+        )
 
     def test_output_written_to_file(self, agent, tmp_path):
         inp = make_input(PUNET_SUMMARY, workspace=str(tmp_path), run_name="myrun")
@@ -212,8 +233,8 @@ class TestSingleModel:
 # Multi-model tests
 # ---------------------------------------------------------------------------
 
-class TestMultiModel:
 
+class TestMultiModel:
     def test_two_models_both_in_output(self, agent, tmp_path):
         inp = InterpretationInput(
             summaries=[PUNET_SUMMARY, FCNET_SUMMARY],
@@ -285,18 +306,17 @@ class TestMultiModel:
 _PUNET_CACHED_ENTRY = {
     **FAKE_PER_MODEL_RESPONSE,
     "_stats": {
-        "best_denoising_score":  1.8,
+        "best_denoising_score": 1.8,
         "worst_denoising_score": 1.2,
-        "best_file_vector":      None,
-        "best_model_params":     None,
-        "completed_rounds":      3,
-        "best_config":           PUNET_SUMMARY.best_config,
+        "best_file_vector": None,
+        "best_model_params": None,
+        "completed_rounds": 3,
+        "best_config": PUNET_SUMMARY.best_config,
     },
 }
 
 
 class TestModelKnowledgeCache:
-
     def test_cache_miss_calls_llm_and_populates_cache(self, agent, tmp_path):
         """New model (not in cache) → Phase 1 LLM called, cache entry built."""
         inp = make_input(PUNET_SUMMARY, workspace=str(tmp_path))
@@ -305,7 +325,10 @@ class TestModelKnowledgeCache:
         # Phase 1 LLM was called (cache miss)
         assert agent.bridge.generate.call_count > call_count_before
         assert "punet" in output.model_knowledge_cache
-        assert output.model_knowledge_cache["punet"]["key_findings"] == FAKE_PER_MODEL_RESPONSE["key_findings"]
+        assert (
+            output.model_knowledge_cache["punet"]["key_findings"]
+            == FAKE_PER_MODEL_RESPONSE["key_findings"]
+        )
 
     def test_cache_miss_stores_stats(self, agent, tmp_path):
         """Cache entry built from cache miss includes _stats from ModelRunSummary."""
@@ -319,7 +342,7 @@ class TestModelKnowledgeCache:
     def test_cache_hit_skips_llm_call(self, agent, tmp_path):
         """Model already in cache → Phase 1 LLM not called, cached entry reused."""
         inp = InterpretationInput(
-            summaries=[],                                        # no new summaries
+            summaries=[],  # no new summaries
             model_knowledge_cache={"punet": _PUNET_CACHED_ENTRY},
             storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
         )
@@ -345,7 +368,7 @@ class TestModelKnowledgeCache:
     def test_mixed_one_cached_one_new_llm_called_once(self, agent, tmp_path):
         """punet cached, fcnet new → exactly one Phase 1 LLM call (for fcnet only)."""
         inp = InterpretationInput(
-            summaries=[FCNET_SUMMARY],                           # only fcnet is new
+            summaries=[FCNET_SUMMARY],  # only fcnet is new
             model_knowledge_cache={"punet": _PUNET_CACHED_ENTRY},
             storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
         )
@@ -365,8 +388,8 @@ class TestModelKnowledgeCache:
 # model_types only (no summaries)
 # ---------------------------------------------------------------------------
 
-class TestModelTypesOnly:
 
+class TestModelTypesOnly:
     def test_descriptions_only_no_summaries(self, agent, tmp_path):
         inp = InterpretationInput(
             model_types=["punet"],
@@ -383,19 +406,24 @@ class TestModelTypesOnly:
 # Error cases
 # ---------------------------------------------------------------------------
 
-class TestErrorCases:
 
+class TestErrorCases:
     def test_unknown_model_type_raises(self, tmp_path):
         inp = InterpretationInput(
-            summaries=[ModelRunSummary(
-                model_type="nonexistent_model", run_name="v1",
-                status="completed", completed_rounds=0,
-            )],
+            summaries=[
+                ModelRunSummary(
+                    model_type="nonexistent_model",
+                    run_name="v1",
+                    status="completed",
+                    completed_rounds=0,
+                )
+            ],
             storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
         )
-        agent = ResultInterpretationAgent(provider="gemini", model_id="test-model")
-        with pytest.raises(FileNotFoundError, match="nonexistent_model"):
-            agent.run(inp)
+        with patch("nodes.result_interpretation_agent.LLMBridge"):
+            agent = ResultInterpretationAgent(provider="gemini", model_id="test-model")
+            with pytest.raises(FileNotFoundError, match="nonexistent_model"):
+                agent.run(inp)
 
     def test_no_model_provided_raises(self):
         with pytest.raises(Exception, match="At least one model type"):
@@ -406,13 +434,55 @@ class TestErrorCases:
 # Enriched summaries for prompt builder and output computation tests
 # ---------------------------------------------------------------------------
 
-_ENRICHED_BEST_FV = [0.001, 0.01, 0.1, 0.5, 1.0, 2.0, 5.0, 78.0, 1.5, 2.5,
-                     3.0, 7.0, 1.3, 0.9, 40.0, 21.0, 5.0, 5.0, 3.0, 0.8]
-_ENRICHED_FORMAL_FV = [0.002, 0.02, 0.15, 0.6, 1.1, 2.2, 5.5, 80.0, 1.6, 2.6,
-                       3.1, 7.5, 1.4, 1.0, 41.0, 22.0, 5.2, 5.1, 3.2, 0.9]
+_ENRICHED_BEST_FV = [
+    0.001,
+    0.01,
+    0.1,
+    0.5,
+    1.0,
+    2.0,
+    5.0,
+    78.0,
+    1.5,
+    2.5,
+    3.0,
+    7.0,
+    1.3,
+    0.9,
+    40.0,
+    21.0,
+    5.0,
+    5.0,
+    3.0,
+    0.8,
+]
+_ENRICHED_FORMAL_FV = [
+    0.002,
+    0.02,
+    0.15,
+    0.6,
+    1.1,
+    2.2,
+    5.5,
+    80.0,
+    1.6,
+    2.6,
+    3.1,
+    7.5,
+    1.4,
+    1.0,
+    41.0,
+    22.0,
+    5.2,
+    5.1,
+    3.2,
+    0.9,
+]
 
 ENRICHED_SUMMARY = ModelRunSummary(
-    model_type="punet", run_name="v1", status="completed",
+    model_type="punet",
+    run_name="v1",
+    status="completed",
     completed_rounds=3,
     best_denoising_score=1.8,
     worst_denoising_score=0.5,
@@ -439,8 +509,8 @@ ENRICHED_SUMMARY = ModelRunSummary(
 # Prompt builder tests
 # ---------------------------------------------------------------------------
 
-class TestBuildPerModelPrompt:
 
+class TestBuildPerModelPrompt:
     def test_includes_best_score_table_rendered_markdown(self):
         # Phase 5 A: per-model prompt drops the 20-line per-file listing and
         # renders the full ScoreComparisonTable markdown instead. The fixture's
@@ -490,7 +560,6 @@ class TestBuildPerModelPrompt:
 
 
 class TestBuildSynthesisPrompt:
-
     def test_includes_score_table(self):
         # 2-zh: synthesis prompt renders the full ScoreComparisonTable
         # markdown. The pre-V9 threshold-based "Weak Frequency Files
@@ -518,6 +587,7 @@ class TestBuildSynthesisPrompt:
         # so the rendered_markdown is the production output, not a fixture
         # placeholder.
         import math
+
         from execute_tools.scoring_helpers import (
             _LOG_BASE,
             _LOG_OFFSET,
@@ -529,12 +599,8 @@ class TestBuildSynthesisPrompt:
         gt_linear_sum = [20.0] * 20  # gt mean = 0.10 per file
         raw_linear_sum = [2.0] * 20
         ref = ReferenceScores(
-            raw_per_file_log=[
-                math.log(s / n_segments, _LOG_BASE) for s in raw_linear_sum
-            ],
-            gt_per_file_log=[
-                math.log(s / n_segments, _LOG_BASE) for s in gt_linear_sum
-            ],
+            raw_per_file_log=[math.log(s / n_segments, _LOG_BASE) for s in raw_linear_sum],
+            gt_per_file_log=[math.log(s / n_segments, _LOG_BASE) for s in gt_linear_sum],
             raw_per_file_linear_sum=raw_linear_sum,
             raw_per_file_n_segments=[n_segments] * 20,
             gt_per_file_linear_sum=gt_linear_sum,
@@ -554,9 +620,9 @@ class TestBuildSynthesisPrompt:
             model_fv_linear=fv_linear,
         )
         assert impact_table is not None
-        assert any(
-            r.linear_weight is not None for r in impact_table.rows
-        ), "fixture must carry linear_weight on sampled rows"
+        assert any(r.linear_weight is not None for r in impact_table.rows), (
+            "fixture must carry linear_weight on sampled rows"
+        )
 
         prompt = _build_synthesis_prompt(
             per_model_summaries={"punet": FAKE_PER_MODEL_RESPONSE},
@@ -613,6 +679,7 @@ class TestBuildSynthesisPrompt:
 # Bug 3 fix: formal_score in _stats and synthesis prompt
 # ---------------------------------------------------------------------------
 
+
 class TestFormalScore:
     """
     Verify that formal_score is:
@@ -624,7 +691,9 @@ class TestFormalScore:
     def test_formal_score_stored_in_stats_on_cache_miss(self, agent, tmp_path):
         """Cache miss: _stats must include formal_score from ModelRunSummary."""
         summary = ModelRunSummary(
-            model_type="punet", run_name="v1", status="completed",
+            model_type="punet",
+            run_name="v1",
+            status="completed",
             completed_rounds=2,
             best_denoising_score=1.8,
             worst_denoising_score=1.2,
@@ -684,13 +753,13 @@ class TestFormalScore:
         cached_entry = {
             **FAKE_PER_MODEL_RESPONSE,
             "_stats": {
-                "best_denoising_score":  1.8,
+                "best_denoising_score": 1.8,
                 "worst_denoising_score": 1.2,
-                "best_file_vector":      None,
-                "best_model_params":     None,
-                "completed_rounds":      3,
-                "best_config":           PUNET_SUMMARY.best_config,
-                "formal_score":          1.5,
+                "best_file_vector": None,
+                "best_model_params": None,
+                "completed_rounds": 3,
+                "best_config": PUNET_SUMMARY.best_config,
+                "formal_score": 1.5,
             },
         }
         inp = InterpretationInput(
@@ -709,8 +778,8 @@ class TestFormalScore:
 # Output computation tests
 # ---------------------------------------------------------------------------
 
-class TestOutputEnrichedFields:
 
+class TestOutputEnrichedFields:
     def test_per_model_score_tables_populated(self, agent, tmp_path):
         inp = InterpretationInput(
             summaries=[ENRICHED_SUMMARY],
@@ -756,6 +825,7 @@ class TestOutputEnrichedFields:
 # ---------------------------------------------------------------------------
 # Expert advice prompt injection tests
 # ---------------------------------------------------------------------------
+
 
 class TestExpertAdviceInPrompts:
     """Verify expert_advice appears in prompt text when provided."""
@@ -839,15 +909,22 @@ from agent.schemas.proposal import VocabEntry as _VocabEntry
 
 
 def _canon(name, kind="feature", description="test", aliases=None):
-    return _VocabEntry(name=name, kind=kind, description=description, tier="canonical", aliases=aliases or [])
+    return _VocabEntry(
+        name=name, kind=kind, description=description, tier="canonical", aliases=aliases or []
+    )
 
 
 def _promoted(name, kind="feature", description="test"):
-    return _VocabEntry(name=name, kind=kind, description=description, tier="canonical", seen_in_runs=["r1", "r2", "r3"])
+    return _VocabEntry(
+        name=name,
+        kind=kind,
+        description=description,
+        tier="canonical",
+        seen_in_runs=["r1", "r2", "r3"],
+    )
 
 
 class TestDedupPromoted:
-
     def test_no_promotions_skips_llm(self, agent):
         """Empty promoted_names → bridge.generate not called, vocab unchanged."""
         vocab = [_canon("dilated_causal_conv")]
@@ -870,7 +947,9 @@ class TestDedupPromoted:
         """LLM says not a duplicate → promoted entry stays in vocab."""
         agent.bridge.generate.side_effect = None
         agent.bridge.generate.return_value = {
-            "is_duplicate": False, "duplicate_of": None, "rationale": "Distinct concept."
+            "is_duplicate": False,
+            "duplicate_of": None,
+            "rationale": "Distinct concept.",
         }
         vocab = [_canon("dilated_causal_conv"), _promoted("log_fno")]
         updated_vocab, changes = agent._dedup_promoted(["log_fno"], vocab)
@@ -911,7 +990,9 @@ class TestDedupPromoted:
         """Capabilities are not compared against features and vice versa."""
         agent.bridge.generate.side_effect = None
         agent.bridge.generate.return_value = {
-            "is_duplicate": False, "duplicate_of": None, "rationale": "Distinct."
+            "is_duplicate": False,
+            "duplicate_of": None,
+            "rationale": "Distinct.",
         }
         # promoted is a capability; existing canonical is a feature — different kind
         existing_feature = _canon("dilated_causal_conv", kind="feature")
@@ -928,6 +1009,7 @@ class TestDedupPromoted:
 # ---------------------------------------------------------------------------
 # Bug 1 fix: proposed_by_run injection (result_interpretation_agent.run)
 # ---------------------------------------------------------------------------
+
 
 class TestProposedByRunInjection:
     """
@@ -947,8 +1029,11 @@ class TestProposedByRunInjection:
         previous_proposal = {
             "model_name": "attn_wavenet",
             "proposed_vocab_candidates": [
-                {"name": "log_fno_gates", "kind": "feature",
-                 "description": "FNO with log-spaced frequency gates"},
+                {
+                    "name": "log_fno_gates",
+                    "kind": "feature",
+                    "description": "FNO with log-spaced frequency gates",
+                },
             ],
         }
         inp = InterpretationInput(
@@ -973,9 +1058,12 @@ class TestProposedByRunInjection:
         previous_proposal = {
             "model_name": "attn_wavenet",
             "proposed_vocab_candidates": [
-                {"name": "log_fno_gates", "kind": "feature",
-                 "description": "FNO with log-spaced gates",
-                 "proposed_by_run": "earlier_model"},
+                {
+                    "name": "log_fno_gates",
+                    "kind": "feature",
+                    "description": "FNO with log-spaced gates",
+                    "proposed_by_run": "earlier_model",
+                },
             ],
         }
         inp = InterpretationInput(
@@ -1007,13 +1095,14 @@ class TestProposedByRunInjection:
 # V8 hardening Domain 2b — Degraded interpreter path
 # ---------------------------------------------------------------------------
 
+
 class TestDegradedInterpreterPath:
     """When bridge.generate() raises past the 3-retry envelope, the agent
     must still emit a digest with is_degraded=True so the chain's
     load_latest_knowledge() does not skip the iter and regress the vocab.
     """
 
-    INCOMING_VOCAB = [
+    INCOMING_VOCAB: ClassVar[list[dict[str, Any]]] = [
         {
             "name": "dilated_causal_conv",
             "kind": "feature",
@@ -1033,7 +1122,10 @@ class TestDegradedInterpreterPath:
     def _make_input(self, tmp_path, run_name="degraded_r1"):
         return InterpretationInput(
             summaries=[PUNET_SUMMARY],
-            storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": run_name}},
+            storage={
+                "backend": "local",
+                "local": {"workspace": str(tmp_path), "run_name": run_name},
+            },
             runtime_vocab=self.INCOMING_VOCAB,
             cumulative_information_gain=2.5,
             prediction_outcomes_history={"confirmed": 3, "partial": 1, "refuted": 2},
@@ -1102,7 +1194,8 @@ class TestDegradedInterpreterPath:
         data = json.loads(out_path.read_text())
         assert data["is_degraded"] is True
         assert {v["name"] for v in data["runtime_vocab"]} == {
-            "dilated_causal_conv", "receptive_field",
+            "dilated_causal_conv",
+            "receptive_field",
         }
 
     def test_carry_forward_metrics_preserved(self, tmp_path):

@@ -35,22 +35,20 @@ Node contract:
 
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
 import os
 import subprocess
 import sys
 
-from agent.schemas.hyperparam_tuning import serialize_expert_advice
-import argparse
-
 import torch
 
 from agent.llm_bridge import LLMBridge
-from agent.schemas.validator import ValidatorInput, ValidatorOutput, LLMCodeReview
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.hyperparam_tuning import serialize_expert_advice
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from agent.schemas.validator import LLMCodeReview, ValidatorInput, ValidatorOutput
 from agent.skills.forbidden_pattern_skill import check_file as _check_forbidden_patterns
-
 
 # ---------------------------------------------------------------------------
 # LLM prompts
@@ -138,7 +136,9 @@ def _build_review_prompt(
             "Also assess spec alignment and trainability."
         )
     else:
-        parts.append("No runtime errors observed. Review the implementation against the specification above.")
+        parts.append(
+            "No runtime errors observed. Review the implementation against the specification above."
+        )
 
     # --- Expert advice (from upstream agents) ---
     expert_advice_str = serialize_expert_advice(inp.expert_advice) if inp.expert_advice else ""
@@ -155,6 +155,7 @@ def _build_review_prompt(
 # ---------------------------------------------------------------------------
 # Deterministic check helpers
 # ---------------------------------------------------------------------------
+
 
 def _check_inherited_components(
     plugin_source: str,
@@ -184,9 +185,11 @@ def _check_inherited_components(
 
     # Build pattern lookup from vocab seed
     patterns: dict[str, str | None] = {}
-    for entry in (vocab_seed or []):
+    for entry in vocab_seed or []:
         name = entry.get("name") if isinstance(entry, dict) else getattr(entry, "name", None)
-        pattern = entry.get("pattern") if isinstance(entry, dict) else getattr(entry, "pattern", None)
+        pattern = (
+            entry.get("pattern") if isinstance(entry, dict) else getattr(entry, "pattern", None)
+        )
         if name:
             patterns[name] = pattern
 
@@ -222,8 +225,8 @@ def _check_plugin(model_file_path: str) -> tuple[bool, str | None]:
     Returns (success, error_message_or_None).
     """
     spec = importlib.util.spec_from_file_location("_validator_plugin_load", model_file_path)
-    if spec is None:
-        return False, f"Could not create module spec for {model_file_path}"
+    if spec is None or spec.loader is None:
+        return False, f"Could not create module spec/loader for {model_file_path}"
     module = importlib.util.module_from_spec(spec)
     try:
         spec.loader.exec_module(module)
@@ -258,7 +261,8 @@ def _check_description(description_file_path: str) -> tuple[bool, str | None]:
     """
     if not os.path.isfile(description_file_path):
         return False, f"description.md not found at {description_file_path}"
-    content = open(description_file_path).read()
+    with open(description_file_path) as f:
+        content = f.read()
     if len(content.strip()) <= 50:
         return False, (
             f"description.md at {description_file_path} is too short "
@@ -285,6 +289,7 @@ def _check_config_fields(config_fields: dict) -> tuple[bool, str | None]:
 # In-process instantiation + gradient check
 # ---------------------------------------------------------------------------
 
+
 def _check_instantiation_and_gradient(
     model_file_path: str,
 ) -> tuple[bool, bool, bool, str | None]:
@@ -300,8 +305,8 @@ def _check_instantiation_and_gradient(
       - output_type_ok:   PLUGIN_OUTPUT_TYPE matches the actual forward output dims.
     """
     spec = importlib.util.spec_from_file_location("_validator_plugin_inst", model_file_path)
-    if spec is None:
-        return False, False, False, f"Could not create module spec for {model_file_path}"
+    if spec is None or spec.loader is None:
+        return False, False, False, f"Could not create module spec/loader for {model_file_path}"
     module = importlib.util.module_from_spec(spec)
     try:
         spec.loader.exec_module(module)
@@ -321,8 +326,11 @@ def _check_instantiation_and_gradient(
         x = torch.randint(0, 256, (1, 64))
         out = model(x)
         if tuple(out.shape) != (1, 256, 64):
-            return False, False, False, (
-                f"Forward output shape {tuple(out.shape)} does not match expected (1, 256, 64)"
+            return (
+                False,
+                False,
+                False,
+                (f"Forward output shape {tuple(out.shape)} does not match expected (1, 256, 64)"),
             )
     except Exception as e:
         return False, False, False, f"Forward pass failed: {e}"
@@ -331,14 +339,24 @@ def _check_instantiation_and_gradient(
     declared_type = getattr(module, "PLUGIN_OUTPUT_TYPE", "classifier")
     actual_dims = len(out.shape)
     if declared_type == "classifier" and actual_dims != 3:
-        return True, False, False, (
-            f"PLUGIN_OUTPUT_TYPE='classifier' but output has {actual_dims} dims "
-            f"(expected 3: [B, 256, T])"
+        return (
+            True,
+            False,
+            False,
+            (
+                f"PLUGIN_OUTPUT_TYPE='classifier' but output has {actual_dims} dims "
+                f"(expected 3: [B, 256, T])"
+            ),
         )
     if declared_type == "regressor" and actual_dims != 2:
-        return True, False, False, (
-            f"PLUGIN_OUTPUT_TYPE='regressor' but output has {actual_dims} dims "
-            f"(expected 2: [B, T])"
+        return (
+            True,
+            False,
+            False,
+            (
+                f"PLUGIN_OUTPUT_TYPE='regressor' but output has {actual_dims} dims "
+                f"(expected 2: [B, T])"
+            ),
         )
     output_type_ok = True
 
@@ -349,18 +367,17 @@ def _check_instantiation_and_gradient(
     except Exception as e:
         return True, False, output_type_ok, f"Backward pass failed: {e}"
 
-    no_grad = [
-        name for name, p in model.named_parameters()
-        if p.requires_grad and p.grad is None
-    ]
+    no_grad = [name for name, p in model.named_parameters() if p.requires_grad and p.grad is None]
     if no_grad:
         # Dead parameters are a WARNING, not a failure. Some architectures
         # have parameters that participate in the forward pass but are
         # disconnected from the loss (e.g. the last block in a residual
         # chain where only skip connections feed the output). These don't
         # affect training or output quality.
-        print(f"  WARNING (gradient check): {len(no_grad)} parameters with no gradient: "
-              f"{no_grad[:5]}. This is typically harmless.")
+        print(
+            f"  WARNING (gradient check): {len(no_grad)} parameters with no gradient: "
+            f"{no_grad[:5]}. This is typically harmless."
+        )
 
     return True, True, output_type_ok, None
 
@@ -369,16 +386,25 @@ def _check_instantiation_and_gradient(
 # Node
 # ---------------------------------------------------------------------------
 
+
 class MLCodeValidatorAgent:
     """
     Validator node for agent-generated ML model plugins.
     Combines deterministic checks with LLM code review.
     """
 
-    def __init__(self, provider: str = "gemini", model_id: str = "gemini-3.1-flash-lite-preview",
-                 max_retries: int | None = None, bridge_factory=None, **kwargs):
+    def __init__(
+        self,
+        provider: str = "gemini",
+        model_id: str = "gemini-3.1-flash-lite-preview",
+        max_retries: int | None = None,
+        bridge_factory=None,
+        **kwargs,
+    ):
         self._bridge_factory = bridge_factory or LLMBridge
-        self.bridge = self._bridge_factory(provider=provider, model_id=model_id, max_retries=max_retries)
+        self.bridge = self._bridge_factory(
+            provider=provider, model_id=model_id, max_retries=max_retries
+        )
 
     def run(self, inp: ValidatorInput) -> ValidatorOutput:
         # 1. Plugin load
@@ -403,13 +429,21 @@ class MLCodeValidatorAgent:
 
         # 6 + 7 + (output-type). In-process instantiation + gradient + output type (only if plugin loaded)
         if plugin_ok:
-            inst_ok, grad_ok, otype_ok, inst_err = _check_instantiation_and_gradient(inp.model_file_path)
+            inst_ok, grad_ok, otype_ok, inst_err = _check_instantiation_and_gradient(
+                inp.model_file_path
+            )
         else:
-            inst_ok, grad_ok, otype_ok, inst_err = False, False, False, "Skipped — plugin did not load"
+            inst_ok, grad_ok, otype_ok, inst_err = (
+                False,
+                False,
+                False,
+                "Skipped — plugin did not load",
+            )
 
         # 7. LLM code review (only if plugin file is readable)
         if os.path.isfile(inp.model_file_path):
-            plugin_src = open(inp.model_file_path).read()
+            with open(inp.model_file_path) as f:
+                plugin_src = f.read()
             review = self._llm_review(
                 inp,
                 plugin_src,
@@ -418,9 +452,11 @@ class MLCodeValidatorAgent:
             )
             llm_ok = review.passed
             if llm_ok and not review.spec_alignment:
-                print(f"  WARNING (spec alignment): implementation deviates from proposal spec. "
-                      f"Model will train but may not exactly test the proposed hypothesis. "
-                      f"Notes: {review.notes}")
+                print(
+                    f"  WARNING (spec alignment): implementation deviates from proposal spec. "
+                    f"Model will train but may not exactly test the proposed hypothesis. "
+                    f"Notes: {review.notes}"
+                )
         else:
             review = LLMCodeReview(
                 spec_alignment=False,
@@ -435,14 +471,21 @@ class MLCodeValidatorAgent:
         inherit_ok = True
         inherit_notes = None
         if inp.inherited_components and os.path.isfile(inp.model_file_path):
-            inherit_src = plugin_src if 'plugin_src' in dir() else open(inp.model_file_path).read()
+            if "plugin_src" in dir():
+                inherit_src = plugin_src
+            else:
+                with open(inp.model_file_path) as f:
+                    inherit_src = f.read()
             # Load vocab seed for pattern lookup
             vocab_for_check = None
             try:
                 import json as _json
+
                 seed_path = os.path.join(
                     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                    "agent", "schemas", "vocab_seed.json",
+                    "agent",
+                    "schemas",
+                    "vocab_seed.json",
                 )
                 if os.path.exists(seed_path):
                     with open(seed_path) as f:
@@ -451,8 +494,10 @@ class MLCodeValidatorAgent:
                 pass
             inherit_ok, inherit_notes_list = _check_inherited_components(
                 inherit_src,
-                [ic.model_dump() if hasattr(ic, "model_dump") else ic
-                 for ic in inp.inherited_components],
+                [
+                    ic.model_dump() if hasattr(ic, "model_dump") else ic
+                    for ic in inp.inherited_components
+                ],
                 vocab_for_check,
             )
             inherit_notes = inherit_notes_list if inherit_notes_list else None
@@ -463,7 +508,9 @@ class MLCodeValidatorAgent:
         # are too brittle to block a model that otherwise runs and trains). It is surfaced
         # as a deviation note so the tuner/interpretation agents can treat unverified
         # component claims with appropriate skepticism.
-        passed = all([plugin_ok, tests_ok, desc_ok, cfg_ok, forbid_ok, inst_ok, grad_ok, otype_ok, llm_ok])
+        passed = all(
+            [plugin_ok, tests_ok, desc_ok, cfg_ok, forbid_ok, inst_ok, grad_ok, otype_ok, llm_ok]
+        )
 
         errors = [e for e in [plugin_err, desc_err, cfg_err, forbid_err, inst_err] if e is not None]
         if not tests_ok:
@@ -480,9 +527,9 @@ class MLCodeValidatorAgent:
             concerns = review.trainability_concerns or []
             deviation_lines = issues + concerns
             spec_deviation_notes = (
-                f"NOTE: This implementation passes trainability checks but deviates from "
-                f"the proposed mathematical spec. The tuner is optimizing an approximation "
-                f"of the intended architecture. Deviations: "
+                "NOTE: This implementation passes trainability checks but deviates from "
+                "the proposed mathematical spec. The tuner is optimizing an approximation "
+                "of the intended architecture. Deviations: "
                 + (" | ".join(deviation_lines) if deviation_lines else review.notes)
             )
 
@@ -540,16 +587,28 @@ class MLCodeValidatorAgent:
         test_output: str | None = None,
         inst_err: str | None = None,
     ) -> LLMCodeReview:
-        user_prompt = _build_review_prompt(inp, plugin_src, test_output=test_output, inst_err=inst_err)
+        user_prompt = _build_review_prompt(
+            inp, plugin_src, test_output=test_output, inst_err=inst_err
+        )
         raw = self.bridge.generate(
-            VALIDATOR_REVIEW_SYSTEM_PROMPT, user_prompt,
+            VALIDATOR_REVIEW_SYSTEM_PROMPT,
+            user_prompt,
             label="validator.code_review",
         )
         return LLMCodeReview.model_validate(raw)
 
     def _save(self, inp: ValidatorInput, out: ValidatorOutput) -> None:
-        workspace = inp.storage.local.workspace
-        run_name = inp.storage.local.run_name
+        # StorageConfig.local is Optional (only set when backend='local').
+        # The validator only writes locally — surface the precondition
+        # explicitly rather than letting it crash on attribute access.
+        storage_local = inp.storage.local
+        if storage_local is None:
+            raise ValueError(
+                f"ValidatorInput requires storage.local to be populated "
+                f"(got backend={inp.storage.backend!r}, local=None)"
+            )
+        workspace = storage_local.workspace
+        run_name = storage_local.run_name
         os.makedirs(workspace, exist_ok=True)
         path = os.path.join(workspace, f"validation_{run_name}.json")
         with open(path, "w") as f:
@@ -560,13 +619,16 @@ class MLCodeValidatorAgent:
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="ml_code_validator_agent")
     p.add_argument("--model_type", required=True)
     p.add_argument("--model_file_path", required=True)
     p.add_argument("--test_file_path", required=True)
     p.add_argument("--description_file_path", required=True)
-    p.add_argument("--config_fields", required=True, help="JSON dict of field names → default values")
+    p.add_argument(
+        "--config_fields", required=True, help="JSON dict of field names → default values"
+    )
     p.add_argument("--model_description", required=True)
     p.add_argument("--mathematical_definition", required=True)
     p.add_argument("--llm_provider", default="gemini", choices=["gemini", "openai"])

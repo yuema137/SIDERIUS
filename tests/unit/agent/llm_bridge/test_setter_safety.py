@@ -16,6 +16,7 @@ Coverage map:
     - linter — run_id mismatch: test_linter_detects_run_id_mismatch
     - thread-safety:            test_setter_thread_safety
 """
+
 from __future__ import annotations
 
 import json
@@ -29,10 +30,10 @@ import pytest
 from agent.llm_bridge import LLMBridge
 from agent.schemas.telemetry import LLMBridgeContextError
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _usage(p: int, c: int, t: int) -> SimpleNamespace:
     return SimpleNamespace(prompt_tokens=p, completion_tokens=c, total_tokens=t)
@@ -63,10 +64,10 @@ def _read_rows(path: Path) -> list[dict]:
 # Happy path
 # ---------------------------------------------------------------------------
 
+
 def test_setter_happy_path(tmp_path):
     bridge = _make_bridge()
-    bridge.set_run_context(workspace=tmp_path, iter=0,
-                           run_name="r", run_id="r-001")
+    bridge.set_run_context(workspace=tmp_path, iter=0, run_name="r", run_id="r-001")
     assert bridge._token_usage_path == tmp_path / "token_usage.jsonl"
     assert bridge._iter == 0
     assert bridge._run_id == "r-001"
@@ -90,17 +91,14 @@ def test_setter_happy_path(tmp_path):
 # Iter advancement → one _iter_flush marker for the prior iter
 # ---------------------------------------------------------------------------
 
+
 def test_setter_advance_iter_writes_flush_marker(tmp_path):
     bridge = _make_bridge()
-    bridge.set_run_context(workspace=tmp_path, iter=3,
-                           run_name="r", run_id="r-001")
-    bridge.client.chat.completions.create.return_value = _chat_response(
-        '{}', usage=_usage(1, 1, 2)
-    )
+    bridge.set_run_context(workspace=tmp_path, iter=3, run_name="r", run_id="r-001")
+    bridge.client.chat.completions.create.return_value = _chat_response("{}", usage=_usage(1, 1, 2))
     bridge.generate("s", "u", label="lbl")
 
-    bridge.set_run_context(workspace=tmp_path, iter=4,
-                           run_name="r", run_id="r-001")
+    bridge.set_run_context(workspace=tmp_path, iter=4, run_name="r", run_id="r-001")
 
     rows = _read_rows(bridge._token_usage_path)
     assert len(rows) == 2, rows
@@ -116,17 +114,14 @@ def test_setter_advance_iter_writes_flush_marker(tmp_path):
 # Same-iter re-entry: no marker, state-update only
 # ---------------------------------------------------------------------------
 
+
 def test_setter_same_iter_no_flush(tmp_path):
     bridge = _make_bridge()
-    bridge.set_run_context(workspace=tmp_path, iter=2,
-                           run_name="r", run_id="r-001")
-    bridge.client.chat.completions.create.return_value = _chat_response(
-        '{}', usage=_usage(1, 1, 2)
-    )
+    bridge.set_run_context(workspace=tmp_path, iter=2, run_name="r", run_id="r-001")
+    bridge.client.chat.completions.create.return_value = _chat_response("{}", usage=_usage(1, 1, 2))
     bridge.generate("s", "u", label="lbl")
     # Same-iter re-entry — represents a stage retry within iter 2.
-    bridge.set_run_context(workspace=tmp_path, iter=2,
-                           run_name="r", run_id="r-001")
+    bridge.set_run_context(workspace=tmp_path, iter=2, run_name="r", run_id="r-001")
     bridge.generate("s", "u", label="lbl")
 
     rows = _read_rows(bridge._token_usage_path)
@@ -138,13 +133,12 @@ def test_setter_same_iter_no_flush(tmp_path):
 # Negative: run_id mutation
 # ---------------------------------------------------------------------------
 
+
 def test_setter_rejects_run_id_mutation(tmp_path):
     bridge = _make_bridge()
-    bridge.set_run_context(workspace=tmp_path, iter=0,
-                           run_name="r", run_id="r-A")
+    bridge.set_run_context(workspace=tmp_path, iter=0, run_name="r", run_id="r-A")
     with pytest.raises(LLMBridgeContextError, match="run_id mutation forbidden"):
-        bridge.set_run_context(workspace=tmp_path, iter=0,
-                               run_name="r", run_id="r-B")
+        bridge.set_run_context(workspace=tmp_path, iter=0, run_name="r", run_id="r-B")
     # The rejected call leaves the bridge bound to the original run_id.
     assert bridge._run_id == "r-A"
 
@@ -153,13 +147,12 @@ def test_setter_rejects_run_id_mutation(tmp_path):
 # Negative: backwards iter
 # ---------------------------------------------------------------------------
 
+
 def test_setter_rejects_backwards_iter(tmp_path):
     bridge = _make_bridge()
-    bridge.set_run_context(workspace=tmp_path, iter=5,
-                           run_name="r", run_id="r-A")
+    bridge.set_run_context(workspace=tmp_path, iter=5, run_name="r", run_id="r-A")
     with pytest.raises(LLMBridgeContextError, match="backwards iter"):
-        bridge.set_run_context(workspace=tmp_path, iter=3,
-                               run_name="r", run_id="r-A")
+        bridge.set_run_context(workspace=tmp_path, iter=3, run_name="r", run_id="r-A")
     assert bridge._iter == 5
 
 
@@ -167,12 +160,12 @@ def test_setter_rejects_backwards_iter(tmp_path):
 # Negative: workspace dir does not exist (loud OSError, not silent swallow)
 # ---------------------------------------------------------------------------
 
+
 def test_setter_raises_oserror_on_missing_workspace(tmp_path):
     bridge = _make_bridge()
     missing = tmp_path / "doesnotexist"
     with pytest.raises(OSError, match="does not exist"):
-        bridge.set_run_context(workspace=missing, iter=0,
-                               run_name="r", run_id="r-A")
+        bridge.set_run_context(workspace=missing, iter=0, run_name="r", run_id="r-A")
     # Bridge state stays unbound after the failed setter.
     assert bridge._token_usage_path is None
 
@@ -180,13 +173,13 @@ def test_setter_raises_oserror_on_missing_workspace(tmp_path):
 def test_setter_raises_value_error_on_negative_iter(tmp_path):
     bridge = _make_bridge()
     with pytest.raises(ValueError, match="non-negative"):
-        bridge.set_run_context(workspace=tmp_path, iter=-1,
-                               run_name="r", run_id="r-A")
+        bridge.set_run_context(workspace=tmp_path, iter=-1, run_name="r", run_id="r-A")
 
 
 # ---------------------------------------------------------------------------
 # Negative: pre-existing JSONL with a different run_id aborts the write.
 # ---------------------------------------------------------------------------
+
 
 def test_record_usage_aborts_on_runid_mismatch(tmp_path):
     log = tmp_path / "token_usage.jsonl"
@@ -206,11 +199,8 @@ def test_record_usage_aborts_on_runid_mismatch(tmp_path):
     log.write_text(json.dumps(pre_seeded_row) + "\n")
 
     bridge = _make_bridge()
-    bridge.set_run_context(workspace=tmp_path, iter=0,
-                           run_name="r", run_id="r-MINE")
-    bridge.client.chat.completions.create.return_value = _chat_response(
-        '{}', usage=_usage(1, 1, 2)
-    )
+    bridge.set_run_context(workspace=tmp_path, iter=0, run_name="r", run_id="r-MINE")
+    bridge.client.chat.completions.create.return_value = _chat_response("{}", usage=_usage(1, 1, 2))
     with pytest.raises(LLMBridgeContextError, match="run_id mismatch"):
         bridge.generate("s", "u", label="lbl")
     # File is unchanged: still exactly the one pre-seeded row.
@@ -223,14 +213,14 @@ def test_record_usage_aborts_on_runid_mismatch(tmp_path):
 # Quantitative: 5 iters * 12 calls = 60 rows + 4 flush markers (no final flush)
 # ---------------------------------------------------------------------------
 
+
 def test_5_iter_quantitative_and_linter_passes(tmp_path):
     bridge = _make_bridge()
     bridge.client.chat.completions.create.side_effect = [
-        _chat_response('{}', usage=_usage(1, 1, 2)) for _ in range(60)
+        _chat_response("{}", usage=_usage(1, 1, 2)) for _ in range(60)
     ]
     for it in range(5):
-        bridge.set_run_context(workspace=tmp_path, iter=it,
-                               run_name="r", run_id="r-001")
+        bridge.set_run_context(workspace=tmp_path, iter=it, run_name="r", run_id="r-001")
         for _ in range(12):
             bridge.generate("s", "u", label="lbl")
 
@@ -246,13 +236,15 @@ def test_5_iter_quantitative_and_linter_passes(tmp_path):
 
     # Linter: file is clean.
     from tools.validate_token_usage_jsonl import lint
-    errors, warnings = lint(bridge._token_usage_path)
+
+    errors, _warnings = lint(bridge._token_usage_path)
     assert errors == [], f"linter found errors on a clean file: {errors}"
 
 
 # ---------------------------------------------------------------------------
 # Linter: detects post-flush leak
 # ---------------------------------------------------------------------------
+
 
 def _make_row(**overrides) -> dict:
     base = {
@@ -278,7 +270,8 @@ def test_linter_detects_post_flush_leak(tmp_path):
         _make_row(ts="2026-05-04T00:00:01.000Z", iter=4, label="lbl"),
         _make_row(
             ts="2026-05-04T00:00:02.000Z",
-            iter=4, label="_iter_flush",
+            iter=4,
+            label="_iter_flush",
             tokens={"prompt": None, "completion": None, "total": None},
             chars={"system": 0, "user": 0, "total": 0},
             extra={"marker": "iter_end"},
@@ -288,6 +281,7 @@ def test_linter_detects_post_flush_leak(tmp_path):
     log.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
 
     from tools.validate_token_usage_jsonl import lint, main
+
     errors, _ = lint(log)
     assert any("[LEAK]" in e for e in errors), errors
     assert main([str(log)]) == 1
@@ -301,6 +295,7 @@ def test_linter_detects_run_id_mismatch(tmp_path):
     ]
     log.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
     from tools.validate_token_usage_jsonl import lint
+
     errors, _ = lint(log)
     assert any("[RUN_ID_MISMATCH]" in e for e in errors), errors
 
@@ -313,6 +308,7 @@ def test_linter_warns_on_non_monotonic_ts(tmp_path):
     ]
     log.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
     from tools.validate_token_usage_jsonl import lint
+
     errors, warnings = lint(log)
     assert errors == []
     assert any("non-monotonic ts" in w for w in warnings), warnings
@@ -322,17 +318,15 @@ def test_linter_warns_on_non_monotonic_ts(tmp_path):
 # Thread-safety: lock serializes set_run_context vs concurrent _record_usage
 # ---------------------------------------------------------------------------
 
+
 def test_setter_thread_safety_no_duplicate_flush(tmp_path):
     """Eight threads racing on set_run_context(iter=0) (same iter as the
     bridge's current state) must produce zero ``_iter_flush`` markers
     regardless of interleaving — the strict-greater-than guard prevents
     redundant markers."""
     bridge = _make_bridge()
-    bridge.set_run_context(workspace=tmp_path, iter=0,
-                           run_name="r", run_id="r-001")
-    bridge.client.chat.completions.create.return_value = _chat_response(
-        '{}', usage=_usage(1, 1, 2)
-    )
+    bridge.set_run_context(workspace=tmp_path, iter=0, run_name="r", run_id="r-001")
+    bridge.client.chat.completions.create.return_value = _chat_response("{}", usage=_usage(1, 1, 2))
 
     barrier = threading.Barrier(8)
     errors: list[BaseException] = []
@@ -340,10 +334,9 @@ def test_setter_thread_safety_no_duplicate_flush(tmp_path):
     def worker():
         barrier.wait()
         try:
-            bridge.set_run_context(workspace=tmp_path, iter=0,
-                                   run_name="r", run_id="r-001")
+            bridge.set_run_context(workspace=tmp_path, iter=0, run_name="r", run_id="r-001")
             bridge.generate("s", "u", label="lbl")
-        except BaseException as e:  # noqa: BLE001 — capture for assertion
+        except BaseException as e:
             errors.append(e)
 
     threads = [threading.Thread(target=worker) for _ in range(8)]
@@ -356,8 +349,7 @@ def test_setter_thread_safety_no_duplicate_flush(tmp_path):
     rows = _read_rows(bridge._token_usage_path)
     flush_rows = [r for r in rows if r["label"] == "_iter_flush"]
     assert flush_rows == [], (
-        f"expected no flush markers under same-iter contention, got "
-        f"{len(flush_rows)}: {flush_rows}"
+        f"expected no flush markers under same-iter contention, got {len(flush_rows)}: {flush_rows}"
     )
     # Eight threads each wrote one row → eight data rows total.
     assert len([r for r in rows if r["label"] != "_iter_flush"]) == 8

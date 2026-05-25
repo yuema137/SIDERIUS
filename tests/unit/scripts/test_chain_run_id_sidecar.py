@@ -21,7 +21,6 @@ import re
 
 from sdsc_submission_scripts.run_one_iteration import _resolve_chain_run_id
 
-
 _ID_SHAPE = re.compile(r"^[A-Za-z0-9_]+-\d{8}T\d{6}-\d+$")
 
 
@@ -36,9 +35,7 @@ def test_fresh_workspace_generates_id_with_expected_shape(tmp_path):
     rid = _resolve_chain_run_id(workspace, run_name)
 
     assert _ID_SHAPE.match(rid), f"unexpected id shape: {rid!r}"
-    assert rid.startswith(f"{run_name}-"), (
-        f"id should start with run_name prefix, got {rid!r}"
-    )
+    assert rid.startswith(f"{run_name}-"), f"id should start with run_name prefix, got {rid!r}"
     sidecar = os.path.join(workspace, ".token_run_id")
     assert os.path.exists(sidecar), "sidecar must be written"
     assert open(sidecar, encoding="utf-8").read().strip() == rid

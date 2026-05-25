@@ -6,14 +6,14 @@ Covers:
   - PostgresStorageConfig validation (placeholder — schema only)
   - StorageConfig: valid local, valid postgres, default backend, missing sub-config
 """
+
 import pytest
 from pydantic import ValidationError
 
-from agent.schemas.storage import StorageConfig, LocalStorageConfig, PostgresStorageConfig
+from agent.schemas.storage import LocalStorageConfig, PostgresStorageConfig, StorageConfig
 
 
 class TestLocalStorageConfig:
-
     def test_valid(self):
         cfg = LocalStorageConfig(workspace="/data/runs", run_name="v1")
         assert cfg.workspace == "/data/runs"
@@ -30,7 +30,6 @@ class TestLocalStorageConfig:
 
 
 class TestPostgresStorageConfig:
-
     def test_valid(self):
         cfg = PostgresStorageConfig(
             connection_string="postgresql+asyncpg://user:pass@localhost/siderius"
@@ -54,7 +53,6 @@ class TestPostgresStorageConfig:
 
 
 class TestStorageConfig:
-
     def test_valid_local(self):
         cfg = StorageConfig(
             backend="local",
@@ -94,9 +92,11 @@ class TestStorageConfig:
 
     def test_nested_dict_construction(self):
         # Verify that dict-based construction works (used in model_validate calls)
-        cfg = StorageConfig.model_validate({
-            "backend": "local",
-            "local": {"workspace": "/data/runs", "run_name": "v2"},
-        })
+        cfg = StorageConfig.model_validate(
+            {
+                "backend": "local",
+                "local": {"workspace": "/data/runs", "run_name": "v2"},
+            }
+        )
         assert cfg.local.workspace == "/data/runs"
         assert cfg.local.run_name == "v2"

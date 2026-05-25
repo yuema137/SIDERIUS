@@ -46,11 +46,12 @@ import os
 import shutil
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
 pytestmark = pytest.mark.real_run
 
@@ -60,7 +61,7 @@ pytestmark = pytest.mark.real_run
 # ---------------------------------------------------------------------------
 
 try:
-    from execute_tools.data_paths import TIDMAD_DATA_DIR, SIDERIUS_DATA_DIR
+    from execute_tools.data_paths import SIDERIUS_DATA_DIR, TIDMAD_DATA_DIR
 except (FileNotFoundError, ImportError):
     TIDMAD_DATA_DIR = "/home/klz/Data/TIDMAD/"
     SIDERIUS_DATA_DIR = "/home/klz/Data/SIDEREIS_DATA/"
@@ -74,22 +75,23 @@ ANCHOR_MAP_PATH = os.path.join(TIDMAD_DATA_DIR, "segment_anchors.json")
 # Gate thresholds (user directive)
 # ---------------------------------------------------------------------------
 
-VRAM_WARN_GB = 22.0   # >22 GB → "High Pressure"
-VRAM_FAIL_GB = 32.0   # >32 GB → OOM
-FORMAL_TIME_FAIL_S = 1200.0   # 20 min
+VRAM_WARN_GB = 22.0  # >22 GB → "High Pressure"
+VRAM_FAIL_GB = 32.0  # >32 GB → OOM
+FORMAL_TIME_FAIL_S = 1200.0  # 20 min
 
-TRIAL_BUDGET_MIN = 15.0     # 900 s — see Phase Q in docs/resource_estimator_implement.md.
-                            # At trial_portion=0.02 + seg=1250 the PSD micro-segment
-                            # expansion (PSD_SEGMENT_LENGTH//seg = 8000) yields
-                            # ~32k steps/epoch, so the floor is ~7 min for any
-                            # architecture. 1 min was unachievable; 15 min lets
-                            # plausible drafts pass while still gating obvious bloat.
-FORMAL_BUDGET_MIN = 20.0    # 1200 s
+TRIAL_BUDGET_MIN = 15.0  # 900 s — see Phase Q in docs/resource_estimator_implement.md.
+# At trial_portion=0.02 + seg=1250 the PSD micro-segment
+# expansion (PSD_SEGMENT_LENGTH//seg = 8000) yields
+# ~32k steps/epoch, so the floor is ~7 min for any
+# architecture. 1 min was unachievable; 15 min lets
+# plausible drafts pass while still gating obvious bloat.
+FORMAL_BUDGET_MIN = 20.0  # 1200 s
 
 
 # ---------------------------------------------------------------------------
 # Skip guards
 # ---------------------------------------------------------------------------
+
 
 def _skip_if_no_key():
     if not os.getenv("OPENAI_API_KEY"):
@@ -111,7 +113,10 @@ def _skip_if_no_anchor_map():
 def _skip_if_no_tuning_outputs():
     for model in SOURCE_MODELS:
         path = os.path.join(
-            SIDERIUS_DATA_DIR, model, SOURCE_RUN_NAME, "agent",
+            SIDERIUS_DATA_DIR,
+            model,
+            SOURCE_RUN_NAME,
+            "agent",
             f"run_output_{SOURCE_RUN_NAME}_agent.json",
         )
         if not os.path.exists(path):
@@ -120,6 +125,7 @@ def _skip_if_no_tuning_outputs():
 
 def _skip_if_no_cuda():
     import torch
+
     if not torch.cuda.is_available():
         pytest.skip("CUDA GPU not available")
 
@@ -127,6 +133,7 @@ def _skip_if_no_cuda():
 # ---------------------------------------------------------------------------
 # Report dataclass + helpers
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class IterReport:
@@ -142,7 +149,7 @@ class IterReport:
     formal_score_s: float
     best_score: float | None
     best_table_ok: bool
-    statuses: list[str]   # collected fail/warn flags
+    statuses: list[str]  # collected fail/warn flags
 
     @property
     def trial_total_s(self) -> float:
@@ -162,8 +169,12 @@ class IterReport:
 def _extract_timings(tune_output) -> dict:
     """Sum per-phase wall times across trial/formal records."""
     t = {
-        "trial_train": 0.0, "trial_infer": 0.0, "trial_score": 0.0,
-        "formal_train": 0.0, "formal_infer": 0.0, "formal_score": 0.0,
+        "trial_train": 0.0,
+        "trial_infer": 0.0,
+        "trial_score": 0.0,
+        "formal_train": 0.0,
+        "formal_infer": 0.0,
+        "formal_score": 0.0,
     }
     for rec in tune_output.all_records:
         if rec.timing is None:
@@ -200,7 +211,7 @@ def _apply_gates(report: IterReport) -> None:
 
 def _print_report_table(reports: list[IterReport]) -> None:
     """Print the user's requested table:
-         Iter # | Trial Time | Formal Time | Peak VRAM | Status
+    Iter # | Trial Time | Formal Time | Peak VRAM | Status
     """
     print()
     print("=" * 92)
@@ -259,6 +270,7 @@ def _build_llm_config():
     failures that could never reproduce in real chains.
     """
     from pathlib import Path
+
     from workflows.llm_config import WorkflowLLMConfig
 
     repo_root = Path(__file__).resolve().parents[3]
@@ -270,20 +282,25 @@ def _load_shared_advice() -> dict:
     """Reuse the tiny-model advice from the chained-iterations test."""
     advice_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
-        "..", "..", "..", "sdsc_submission_scripts", "human_advice_chain_test.json",
+        "..",
+        "..",
+        "..",
+        "sdsc_submission_scripts",
+        "human_advice_chain_test.json",
     )
-    with open(advice_path, "r", encoding="utf-8") as f:
+    with open(advice_path, encoding="utf-8") as f:
         d = json.load(f)
-    return {k: (d.get(k, "") or "") for k in
-            ("interpret", "propose", "implement", "validate", "tune")}
+    return {
+        k: (d.get(k, "") or "") for k in ("interpret", "propose", "implement", "validate", "tune")
+    }
 
 
 # ---------------------------------------------------------------------------
 # Test
 # ---------------------------------------------------------------------------
 
-class TestScoreTableRealSmoke:
 
+class TestScoreTableRealSmoke:
     def setup_method(self):
         _skip_if_no_key()
         _skip_if_no_data()
@@ -294,6 +311,7 @@ class TestScoreTableRealSmoke:
     def test_two_iterations_under_budget(self, tmp_path):
         """2 chained iterations; gates on VRAM, formal time, and score-table integrity."""
         import torch
+
         from workflows.model_exploration import run_workflow
 
         workspace = str(tmp_path / "stage2_smoke")
@@ -304,20 +322,25 @@ class TestScoreTableRealSmoke:
 
         seed_paths = [
             os.path.join(
-                SIDERIUS_DATA_DIR, model, SOURCE_RUN_NAME, "agent",
+                SIDERIUS_DATA_DIR,
+                model,
+                SOURCE_RUN_NAME,
+                "agent",
                 f"run_output_{SOURCE_RUN_NAME}_agent.json",
             )
             for model in SOURCE_MODELS
         ]
 
-        print(f"\n{'='*72}")
+        print(f"\n{'=' * 72}")
         print("  PHASE 6.5 STAGE 2 — REAL-TRAINING SMOKE")
         print(f"  Workspace: {workspace}")
-        print(f"  LLM: OpenAI tiered (llm_configs/openai_tiered_v1.json — production config)")
-        print(f"  Trial budget: {TRIAL_BUDGET_MIN*60:.0f}s | "
-              f"Formal budget: {FORMAL_BUDGET_MIN*60:.0f}s")
+        print("  LLM: OpenAI tiered (llm_configs/openai_tiered_v1.json — production config)")
+        print(
+            f"  Trial budget: {TRIAL_BUDGET_MIN * 60:.0f}s | "
+            f"Formal budget: {FORMAL_BUDGET_MIN * 60:.0f}s"
+        )
         print(f"  VRAM warn>{VRAM_WARN_GB}GB, fail>{VRAM_FAIL_GB}GB")
-        print(f"{'='*72}\n")
+        print(f"{'=' * 72}\n")
 
         reports: list[IterReport] = []
         registered_models: list[str] = []
@@ -326,9 +349,9 @@ class TestScoreTableRealSmoke:
             # ================================================================
             # ITERATION 1
             # ================================================================
-            print(f"\n{'#'*72}")
+            print(f"\n{'#' * 72}")
             print(f"# ITERATION 1 — seeds only ({len(seed_paths)} files)")
-            print(f"{'#'*72}\n")
+            print(f"{'#' * 72}\n")
 
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
@@ -340,7 +363,7 @@ class TestScoreTableRealSmoke:
                 run_name="stage2_iter_001",
                 llm_config=llm_config,
                 max_iterations=1,
-                max_rounds=2,          # 1 trial + 1 forced formal
+                max_rounds=2,  # 1 trial + 1 forced formal
                 max_proposal_attempts=3,
                 is_trial=True,
                 trial_strategy="snapshot",
@@ -368,7 +391,7 @@ class TestScoreTableRealSmoke:
             )
 
             wall1 = time.perf_counter() - t0
-            peak1_gb = torch.cuda.max_memory_allocated() / (1024 ** 3)
+            peak1_gb = torch.cuda.max_memory_allocated() / (1024**3)
 
             assert len(results_1) == 1, (
                 f"Iteration 1 must produce exactly one tuning output "
@@ -398,25 +421,30 @@ class TestScoreTableRealSmoke:
             reports.append(report1)
 
             iter1_output_path = os.path.join(
-                workspace, "stage2_iter_001", "iteration_001", iter1_model,
+                workspace,
+                "stage2_iter_001",
+                "iteration_001",
+                iter1_model,
                 "run_output_stage2_iter_001.json",
             )
             assert os.path.exists(iter1_output_path), (
                 f"Iteration 1 output not found at expected path: {iter1_output_path}"
             )
 
-            print(f"\n[ITER 1 DONE] model={iter1_model} "
-                  f"wall={wall1:.1f}s peak_vram={peak1_gb:.2f}GB "
-                  f"best_score={tune1.best_denoising_score} "
-                  f"best_table_ok={report1.best_table_ok}")
+            print(
+                f"\n[ITER 1 DONE] model={iter1_model} "
+                f"wall={wall1:.1f}s peak_vram={peak1_gb:.2f}GB "
+                f"best_score={tune1.best_denoising_score} "
+                f"best_table_ok={report1.best_table_ok}"
+            )
 
             # ================================================================
             # ITERATION 2
             # ================================================================
-            iter2_sources = seed_paths + [iter1_output_path]
-            print(f"\n{'#'*72}")
+            iter2_sources = [*seed_paths, iter1_output_path]
+            print(f"\n{'#' * 72}")
             print(f"# ITERATION 2 — seeds + iter_001 ({len(iter2_sources)} files)")
-            print(f"{'#'*72}\n")
+            print(f"{'#' * 72}\n")
 
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
@@ -456,11 +484,10 @@ class TestScoreTableRealSmoke:
             )
 
             wall2 = time.perf_counter() - t0
-            peak2_gb = torch.cuda.max_memory_allocated() / (1024 ** 3)
+            peak2_gb = torch.cuda.max_memory_allocated() / (1024**3)
 
             assert len(results_2) == 1, (
-                f"Iteration 2 must produce exactly one tuning output "
-                f"(got {len(results_2)})."
+                f"Iteration 2 must produce exactly one tuning output (got {len(results_2)})."
             )
             tune2 = results_2[0]
             iter2_model = tune2.model_type
@@ -485,10 +512,12 @@ class TestScoreTableRealSmoke:
             _apply_gates(report2)
             reports.append(report2)
 
-            print(f"\n[ITER 2 DONE] model={iter2_model} "
-                  f"wall={wall2:.1f}s peak_vram={peak2_gb:.2f}GB "
-                  f"best_score={tune2.best_denoising_score} "
-                  f"best_table_ok={report2.best_table_ok}")
+            print(
+                f"\n[ITER 2 DONE] model={iter2_model} "
+                f"wall={wall2:.1f}s peak_vram={peak2_gb:.2f}GB "
+                f"best_score={tune2.best_denoising_score} "
+                f"best_table_ok={report2.best_table_ok}"
+            )
 
             # ================================================================
             # FINAL REPORT + HARD GATE ASSERTIONS
@@ -523,8 +552,9 @@ class TestScoreTableRealSmoke:
             if high_pressure:
                 print(
                     "\n[WARNING] High VRAM pressure detected on "
-                    + ", ".join(f"iter {r.iter_num} ({r.peak_vram_gb:.2f} GB)"
-                                for r in high_pressure)
+                    + ", ".join(
+                        f"iter {r.iter_num} ({r.peak_vram_gb:.2f} GB)" for r in high_pressure
+                    )
                     + ". Headroom is thin on 24 GB cards — consider tightening budgets."
                 )
 

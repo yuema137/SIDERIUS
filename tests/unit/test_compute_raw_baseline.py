@@ -21,6 +21,7 @@ function mocked out.
 See ``docs/align_denoising_score.md`` §4.1 and Decision 13 in
 ``docs/aggregated_score_table_awareness.md``.
 """
+
 from __future__ import annotations
 
 import json
@@ -32,7 +33,6 @@ import pytest
 
 import compute_raw_baseline
 
-
 _TEST_S_MAX = 4.0  # pick a value that divides cleanly into snr_sg for hand math
 
 
@@ -42,7 +42,6 @@ _TEST_S_MAX = 4.0  # pick a value that divides cleanly into snr_sg for hand math
 
 
 class TestCalculateScoreFine:
-
     def test_hand_computed_scalar(self):
         """Constant SNR pairs (snr_sg=2.0, snr_squid=3.0) for all 200 segments,
         s_max=4.0.
@@ -53,15 +52,18 @@ class TestCalculateScoreFine:
         linear_sum  = 1.5 * 200 = 300.0
         n_segments  = 200
         """
+
         def _const_process(i, data_dir, fname, coarse):
             return i, 2.0, 3.0
 
-        with patch.object(compute_raw_baseline, "process_segment",
-                          side_effect=_const_process):
+        with patch.object(compute_raw_baseline, "process_segment", side_effect=_const_process):
             log_score, linear_sum, n_segments = compute_raw_baseline._calculate_score(
-                data_dir="/fake", fname="f.h5",
+                data_dir="/fake",
+                fname="f.h5",
                 s_max=_TEST_S_MAX,
-                coarse=False, parallel=False, num_workers=1,
+                coarse=False,
+                parallel=False,
+                num_workers=1,
             )
 
         # ``+ 1e-10`` mirrors the production soft-floor offset
@@ -87,15 +89,18 @@ class TestCalculateScoreFine:
           log_score  = log_{5.27}(5.0e-4) ≈ -4.575     (NOT -13.854, NOT -2.7708)
           linear_sum = 5.0e-4 * 200 = 0.1              (unrounded, precisely recoverable)
         """
+
         def _const_process(i, data_dir, fname, coarse):
             return i, 0.004, 0.5
 
-        with patch.object(compute_raw_baseline, "process_segment",
-                          side_effect=_const_process):
+        with patch.object(compute_raw_baseline, "process_segment", side_effect=_const_process):
             log_score, linear_sum, n_segments = compute_raw_baseline._calculate_score(
-                data_dir="/fake", fname="f.h5",
+                data_dir="/fake",
+                fname="f.h5",
                 s_max=_TEST_S_MAX,
-                coarse=False, parallel=False, num_workers=1,
+                coarse=False,
+                parallel=False,
+                num_workers=1,
             )
 
         # ``+ 1e-10`` soft floor (see :131) — at mean=5e-4 it shifts the
@@ -118,12 +123,14 @@ class TestCalculateScoreFine:
             collected.append(i)
             return i, 1.0, 1.0
 
-        with patch.object(compute_raw_baseline, "process_segment",
-                          side_effect=_collect):
+        with patch.object(compute_raw_baseline, "process_segment", side_effect=_collect):
             compute_raw_baseline._calculate_score(
-                data_dir="/fake", fname="f.h5",
+                data_dir="/fake",
+                fname="f.h5",
                 s_max=_TEST_S_MAX,
-                coarse=False, parallel=False, num_workers=1,
+                coarse=False,
+                parallel=False,
+                num_workers=1,
             )
 
         assert sorted(collected) == list(range(200))
@@ -135,7 +142,6 @@ class TestCalculateScoreFine:
 
 
 class TestCalculateScoreCoarse:
-
     def test_coarse_stride_uses_20_segments(self):
         """Coarse mode runs exactly 20 iterations (every 10th segment).
 
@@ -149,12 +155,14 @@ class TestCalculateScoreCoarse:
             collected.append((i, coarse))
             return i, 1.0, 1.0
 
-        with patch.object(compute_raw_baseline, "process_segment",
-                          side_effect=_collect):
+        with patch.object(compute_raw_baseline, "process_segment", side_effect=_collect):
             compute_raw_baseline._calculate_score(
-                data_dir="/fake", fname="f.h5",
+                data_dir="/fake",
+                fname="f.h5",
                 s_max=_TEST_S_MAX,
-                coarse=True, parallel=False, num_workers=1,
+                coarse=True,
+                parallel=False,
+                num_workers=1,
             )
 
         assert len(collected) == 20
@@ -172,18 +180,26 @@ class TestCalculateScoreCoarse:
           s_max=8.0  -> per_seg = 0.5·2.0 = 1.0  -> mean=1.0 -> log(1.0)
         Δ = log(2) / log(5.27) — independent of snr values.
         """
+
         def _const_process(i, data_dir, fname, coarse):
             return i, 4.0, 2.0
 
-        with patch.object(compute_raw_baseline, "process_segment",
-                          side_effect=_const_process):
+        with patch.object(compute_raw_baseline, "process_segment", side_effect=_const_process):
             log_small, _, _ = compute_raw_baseline._calculate_score(
-                data_dir="/fake", fname="f.h5",
-                s_max=4.0, coarse=True, parallel=False, num_workers=1,
+                data_dir="/fake",
+                fname="f.h5",
+                s_max=4.0,
+                coarse=True,
+                parallel=False,
+                num_workers=1,
             )
             log_large, _, _ = compute_raw_baseline._calculate_score(
-                data_dir="/fake", fname="f.h5",
-                s_max=8.0, coarse=True, parallel=False, num_workers=1,
+                data_dir="/fake",
+                fname="f.h5",
+                s_max=8.0,
+                coarse=True,
+                parallel=False,
+                num_workers=1,
             )
 
         # smaller s_max -> larger per_segment -> larger score
@@ -191,9 +207,7 @@ class TestCalculateScoreCoarse:
         # Both sides carry the production soft-floor offset (+1e-10);
         # the offset does not cancel exactly because
         # log(a+ε) − log(b+ε) ≠ log(a/b) when ε > 0.
-        expected_delta = (
-            math.log(2.0 + 1e-10, 5.27) - math.log(1.0 + 1e-10, 5.27)
-        )
+        expected_delta = math.log(2.0 + 1e-10, 5.27) - math.log(1.0 + 1e-10, 5.27)
         assert abs((log_small - log_large) - expected_delta) < 1e-12
 
 
@@ -217,24 +231,22 @@ def _write_fine_json(
     n_segments is None, that key is omitted (legacy-without-fields case)."""
     payload: dict = {
         "file_index": idx,
-        "score":      score,
-        "mode":       "fine",
-        "data_file":  f"abra_validation_{idx:04d}.h5",
-        "s_max":      s_max,
-        "formula":    "option_b_global_s_max",
+        "score": score,
+        "mode": "fine",
+        "data_file": f"abra_validation_{idx:04d}.h5",
+        "s_max": s_max,
+        "formula": "option_b_global_s_max",
         "computed_at": "test",
     }
     if linear_sum is not None:
         payload["linear_sum"] = linear_sum
     if n_segments is not None:
         payload["n_segments"] = n_segments
-    with open(os.path.join(output_dir,
-                           f"raw_baseline_score_file_{idx:04d}.json"), "w") as f:
+    with open(os.path.join(output_dir, f"raw_baseline_score_file_{idx:04d}.json"), "w") as f:
         json.dump(payload, f)
 
 
 class TestMaybeWriteAnchorNormalizedScalar:
-
     def test_writes_scalar_when_all_20_fine_present(self, tmp_path):
         """Complete set of 20 fine JSONs with linear_sum + n_segments — the
         aggregator must emit scalar_anchor_normalized.json with the exact
@@ -260,8 +272,13 @@ class TestMaybeWriteAnchorNormalizedScalar:
 
         # Exact key parity with ceiling_anchor_normalized.json.
         assert set(got.keys()) == {
-            "scalar_score", "file_vector", "formula",
-            "s_max", "num_files", "source", "computed_at",
+            "scalar_score",
+            "file_vector",
+            "formula",
+            "s_max",
+            "num_files",
+            "source",
+            "computed_at",
         }
         assert got["num_files"] == 20
         assert got["formula"] == "anchor_normalized_raw_baseline"

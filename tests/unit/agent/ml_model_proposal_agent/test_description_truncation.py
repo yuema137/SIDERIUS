@@ -3,6 +3,7 @@
 Validates that model descriptions are capped at 1500 characters for prompt
 injection while leaving the original disk artifacts intact.
 """
+
 from __future__ import annotations
 
 from nodes.ml_model_proposal_agent import _truncate_description

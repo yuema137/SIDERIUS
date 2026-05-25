@@ -3,15 +3,19 @@
 Validates:
   - _STATIC_MS_PER_FLOP raised from 6e-10 to 3e-9 (5x)
   - _MIN_MS_PER_STEP floor at 2.0 ms
-  - SAFETY_MULTIPLIER raised from 1.1 to 2.0
+  - SAFETY_MULTIPLIER lives at 1.3 (Phase 6.8 raised it from 1.1 to 2.0;
+    subsequently relaxed to 1.3 once novel-arch overshoot data showed 2.0
+    was over-conservative — keeps the absolute estimator pessimism intact
+    via the larger _STATIC_MS_PER_FLOP and 2.0 ms _MIN_MS_PER_STEP floor).
   - _static_ms_per_step applies the floor
 """
+
 from __future__ import annotations
 
 from agent.skills.training_skill.estimator import (
-    SAFETY_MULTIPLIER,
     _MIN_MS_PER_STEP,
     _STATIC_MS_PER_FLOP,
+    SAFETY_MULTIPLIER,
     _static_ms_per_step,
 )
 
@@ -21,7 +25,7 @@ def test_static_ms_per_flop_raised():
 
 
 def test_safety_multiplier_raised():
-    assert SAFETY_MULTIPLIER == 2.0
+    assert SAFETY_MULTIPLIER == 1.3
 
 
 def test_min_ms_per_step_floor():

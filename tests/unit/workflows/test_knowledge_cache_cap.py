@@ -3,6 +3,7 @@
 Validates the top-N eviction policy that keeps model_knowledge_cache bounded
 across iterations.
 """
+
 from __future__ import annotations
 
 from workflows.model_exploration import _cap_knowledge_cache
@@ -89,7 +90,9 @@ def test_none_scores_evicted_first():
 def test_custom_max_entries():
     cache = {f"model_{i}": _make_cache_entry(float(i)) for i in range(10)}
     capped, evicted = _cap_knowledge_cache(
-        cache, current_model="model_0", max_entries=3,
+        cache,
+        current_model="model_0",
+        max_entries=3,
     )
     assert len(capped) == 3
     assert "model_0" in capped  # current

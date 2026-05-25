@@ -30,19 +30,46 @@ scipy.fft is prohibited here: it uses a different pocketfft backend with a
 different butterfly ordering, and does not produce bit-identical output.
 """
 
-import os
 import gc
 import math
+import os
+from collections.abc import Callable
+from typing import Any, cast
 
-import numpy as np
 import h5py
+import numpy as np
 
-from execute_tools.dataset_config import SEGMENT_LENGTH, SEGMENTS_PER_FILE, NUM_FILES
+from execute_tools.dataset_config import NUM_FILES, SEGMENT_LENGTH, SEGMENTS_PER_FILE
+
+
+def _h5_dataset(f: h5py.File, *path: str) -> h5py.Dataset:
+    """Type-only helper: walk an HDF5 path and narrow the final node to Dataset.
+
+    h5py stubs declare ``__getitem__`` as ``Group | Dataset | Datatype``,
+    which makes pyright reject chained indexing even though every site here
+    ends on a real Dataset. Pure type-system shim — identical runtime
+    semantics to ``f[a][b][c]``.
+    """
+    node: Any = f
+    for k in path:
+        node = node[k]
+    return cast(h5py.Dataset, node)
+
+
+def _h5_group(f: h5py.File, *path: str) -> h5py.Group:
+    """Type-only helper: walk an HDF5 path and narrow the final node to Group
+    (used at sites that read ``.attrs[...]`` metadata). Pure type-system shim.
+    """
+    node: Any = f
+    for k in path:
+        node = node[k]
+    return cast(h5py.Group, node)
 
 
 # ---------------------------------------------------------------------------
 # Core functions
 # ---------------------------------------------------------------------------
+
 
 def get_one_sec_psd(
     file_path: str,
@@ -90,11 +117,21 @@ def get_one_sec_psd(
     file = file_list[file_num]
     with h5py.File(file, "r") as h5f:
         channel_key = f"channel{ch:04d}"
-        data = h5f["timeseries"][channel_key]["timeseries"][
+        data = _h5_dataset(h5f, "timeseries", channel_key, "timeseries")[
             start_index : start_index + N
         ]
-        volt_range = h5f["timeseries"]["channel0001"].attrs["voltage_range_mV"]
-        sampling_freq = h5f["timeseries"]["channel0001"].attrs["sampling_frequency"]
+        # h5py's ``attrs[...]`` stubs return ``Empty | ndarray | ...``, but
+        # both attributes are scalar physics constants per the TIDMAD HDF5
+        # convention. ``cast(float, ...)`` is a pure type-system narrow with
+        # zero runtime cost — preserving the original numpy-scalar return
+        # exactly — and matches the existing h5py boundary pattern used at
+        # ``_h5_dataset`` / ``_h5_group`` (L56, L66) in this file.
+        volt_range = cast(
+            float, _h5_group(h5f, "timeseries", "channel0001").attrs["voltage_range_mV"]
+        )
+        sampling_freq = cast(
+            float, _h5_group(h5f, "timeseries", "channel0001").attrs["sampling_frequency"]
+        )
 
         scaling = np.float32(volt_range / (2 * 128.0))
         TS = np.array(data, dtype=np.float32) * scaling
@@ -106,9 +143,11 @@ def get_one_sec_psd(
         # implicitly promoted to float64 (returned complex128). The
         # canonical TIDMAD benchmark numbers were produced under the
         # complex128 path, so we force it explicitly here.
-        psd_chunk = dt / N * (
-            abs(np.fft.rfft(TS.astype(np.float64).reshape(len(TS) // N, N))) ** 2
-        ).sum(0)[1:]
+        psd_chunk = (
+            dt
+            / N
+            * (abs(np.fft.rfft(TS.astype(np.float64).reshape(len(TS) // N, N))) ** 2).sum(0)[1:]
+        )
         freq_array = np.linspace(0, 5 * 1e6, int(N / 2))
 
     del data, TS, dt
@@ -144,17 +183,12 @@ def get_snr(
     Returns:
         (snr, center_freq) — the SNR value and the frequency of the peak.
     """
-    if target == 0:
-        center_id = find_peak(pwr)
-    else:
-        center_id = int(np.where(freq == target)[0][0])
+    center_id = find_peak(pwr) if target == 0 else int(np.where(freq == target)[0][0])
 
     sig_range = 1
     noise_range = 50
     signal = np.sum(pwr[center_id - sig_range : center_id + sig_range + 1])
-    noise = (
-        np.sum(pwr[center_id - noise_range : center_id + noise_range + 1]) - signal
-    )
+    noise = np.sum(pwr[center_id - noise_range : center_id + noise_range + 1]) - signal
     if noise == 0:
         noise = 1e-5
     return signal / noise, freq[center_id]
@@ -219,12 +253,14 @@ def validate_sample_set(sample_set: dict) -> SampleSet:
     for key, segments in sample_set.items():
         try:
             file_index = int(key)
-        except (ValueError, TypeError):
-            raise ValueError(f"SampleSet key must be an integer, got {key!r}")
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"SampleSet key must be an integer, got {key!r}") from e
         if not (0 <= file_index < NUM_FILES):
             raise ValueError(f"SampleSet file_index {file_index} out of range [0, {NUM_FILES}).")
         if not isinstance(segments, list) or not segments:
-            raise ValueError(f"SampleSet[{file_index}] must be a non-empty list, got {type(segments).__name__}")
+            raise ValueError(
+                f"SampleSet[{file_index}] must be a non-empty list, got {type(segments).__name__}"
+            )
         for seg in segments:
             if not isinstance(seg, int) or seg < 0 or seg >= SEGMENTS_PER_FILE:
                 raise ValueError(
@@ -262,7 +298,7 @@ def score_segments(
         data_dir:           Directory containing the denoised HDF5 file.
         denoised_filename:  Filename of the denoised file (e.g.
                             ``"abra_validation_denoised_punet_0006.h5"``).
-        file_index:         Which validation file (0–19) this corresponds to.
+        file_index:         Which validation file (0-19) this corresponds to.
         segment_indices:    Which segments to score (0-based, original indices
                             within the full validation file). Order must match
                             the packing order used by inference_single.py.
@@ -368,7 +404,7 @@ def score_vector(
     sample_set: SampleSet,
     anchor_map: dict | None = None,
     s_max: float | None = None,
-    denoised_filename_fn: callable = None,
+    denoised_filename_fn: Callable[..., Any] | None = None,
     raw_data_dir: str | None = None,
     parallel: bool = True,
     num_workers: int = 8,
@@ -487,10 +523,15 @@ def score_vector(
     tasks = []
     for file_index, segment_indices in sample_set.items():
         denoised_filename = denoised_filename_fn(file_index)
-        tasks.append((
-            data_dir, denoised_filename, file_index, segment_indices,
-            raw_data_dir,
-        ))
+        tasks.append(
+            (
+                data_dir,
+                denoised_filename,
+                file_index,
+                segment_indices,
+                raw_data_dir,
+            )
+        )
 
     raw_pairs: dict[int, list[tuple[float, float]]] = {}
     if not tasks:
@@ -501,7 +542,7 @@ def score_vector(
         # processes do NOT copy-on-write the parent's ~8 GB heap. Default
         # ``fork`` on Linux caused a +15 GB transient on 2026-04-27 that
         # OOM-killed the v5 explore parent. ``_collect_raw_pairs`` is
-        # module-level (picklable), so spawn is safe; cost is ~1–2 s of
+        # module-level (picklable), so spawn is safe; cost is ~1-2 s of
         # worker import warmup on each call. See
         # docs/phase68_task1_memory_diagnostic_20260427.md §2 Commit 1.
         with concurrent.futures.ProcessPoolExecutor(
@@ -532,6 +573,13 @@ def score_vector(
             # (CH2 always has non-zero SNR at the peak).
             s_max_used = 1.0
     else:
+        # Non-legacy mode requires the caller to supply ``s_max``. Surface the
+        # contract explicitly instead of crashing inside ``float(None)``.
+        if s_max is None:
+            raise ValueError(
+                "score_vector: s_max parameter is mandatory when legacy_mode=False "
+                "(got None) — caller must supply the normalizer in non-legacy mode."
+            )
         s_max_used = float(s_max)
 
     total_weighted = 0.0
@@ -566,6 +614,7 @@ def score_vector(
     failure_reason: str | None = None
     if reference_file_vector is not None:
         from execute_tools.squid_health_checks import check_amplitude_collapse
+
         is_degenerate, failure_reason = check_amplitude_collapse(
             file_vector=file_vector,
             reference_file_vector=reference_file_vector,
@@ -578,6 +627,7 @@ def score_vector(
 # ---------------------------------------------------------------------------
 # JSON-safety helper
 # ---------------------------------------------------------------------------
+
 
 def coerce_nonfinite_to_none(obj):
     """Recursively replace non-finite floats with ``None`` for JSON output.

@@ -28,12 +28,12 @@ The ``CacheEntry.from_legacy_dict`` classmethod is the zero-friction
 chain-resume adapter that lifts a pre-6.3 flat-dict cache entry into the
 accumulator shape (Q2(a) ruling — see commit message).
 """
+
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Tuple
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-
 
 # ---------------------------------------------------------------------------
 # Length / enum constants (centralised so tests and consolidator can import
@@ -54,6 +54,7 @@ FindingStrength = Literal["weak", "moderate", "strong"]
 # ConsolidatedFinding
 # ---------------------------------------------------------------------------
 
+
 class ConsolidatedFinding(BaseModel):
     """One ranked observation accumulating evidence across iters.
 
@@ -70,26 +71,26 @@ class ConsolidatedFinding(BaseModel):
         min_length=1,
         max_length=FINDING_STATEMENT_MAX_CHARS,
         description="The observation text. Non-empty; capped at "
-                    f"{FINDING_STATEMENT_MAX_CHARS} chars. Truncation is the "
-                    "consolidator's responsibility — the schema only rejects "
-                    "oversized input.",
+        f"{FINDING_STATEMENT_MAX_CHARS} chars. Truncation is the "
+        "consolidator's responsibility — the schema only rejects "
+        "oversized input.",
     )
-    evidence_iters: List[int] = Field(
+    evidence_iters: list[int] = Field(
         ...,
         min_length=1,
         description="Iters where this finding was surfaced. Grows by set-union "
-                    "during merge. Always non-empty (the iter that introduced "
-                    "the finding is included).",
+        "during merge. Always non-empty (the iter that introduced "
+        "the finding is included).",
     )
     strength: FindingStrength = Field(
         ...,
         description="Subjective strength tag from the LLM. Merge takes the "
-                    "max of (prior, new) under the ordering weak<moderate<strong.",
+        "max of (prior, new) under the ordering weak<moderate<strong.",
     )
 
     @field_validator("evidence_iters")
     @classmethod
-    def _iters_non_negative(cls, v: List[int]) -> List[int]:
+    def _iters_non_negative(cls, v: list[int]) -> list[int]:
         if any(i < 0 for i in v):
             raise ValueError("evidence_iters entries must be >= 0")
         return v
@@ -98,6 +99,7 @@ class ConsolidatedFinding(BaseModel):
 # ---------------------------------------------------------------------------
 # ConsolidatedNarrative
 # ---------------------------------------------------------------------------
+
 
 class ConsolidatedNarrative(BaseModel):
     """A single-string narrative field merged by replacement-with-history.
@@ -114,21 +116,21 @@ class ConsolidatedNarrative(BaseModel):
         ...,
         max_length=NARRATIVE_LATEST_MAX_CHARS,
         description="The current iter's narrative. Empty string is allowed "
-                    "(e.g. when the LLM had no signal for this field this "
-                    f"iter); capped at {NARRATIVE_LATEST_MAX_CHARS} chars.",
+        "(e.g. when the LLM had no signal for this field this "
+        f"iter); capped at {NARRATIVE_LATEST_MAX_CHARS} chars.",
     )
-    history: List[Tuple[int, str]] = Field(
+    history: list[tuple[int, str]] = Field(
         default_factory=list,
         max_length=NARRATIVE_HISTORY_MAX_ENTRIES,
         description="List of (iter_index, prior_narrative) tuples in any "
-                    f"order. Capped to last {NARRATIVE_HISTORY_MAX_ENTRIES} "
-                    "entries by the consolidator; over-cap input is rejected "
-                    "by the schema.",
+        f"order. Capped to last {NARRATIVE_HISTORY_MAX_ENTRIES} "
+        "entries by the consolidator; over-cap input is rejected "
+        "by the schema.",
     )
 
     @field_validator("history")
     @classmethod
-    def _history_iters_non_negative(cls, v: List[Tuple[int, str]]) -> List[Tuple[int, str]]:
+    def _history_iters_non_negative(cls, v: list[tuple[int, str]]) -> list[tuple[int, str]]:
         if any(iter_idx < 0 for iter_idx, _ in v):
             raise ValueError("history iter indices must be >= 0")
         return v
@@ -137,6 +139,7 @@ class ConsolidatedNarrative(BaseModel):
 # ---------------------------------------------------------------------------
 # ErrorSignature (bare footprint — Commit 6 will add extract() + render())
 # ---------------------------------------------------------------------------
+
 
 class ErrorSignature(BaseModel):
     """Forensic primary source for one distinct failure mode.
@@ -164,38 +167,37 @@ class ErrorSignature(BaseModel):
         max_length=ERROR_SHORT_MESSAGE_MAX_CHARS,
         description=f"Bare error message, capped at {ERROR_SHORT_MESSAGE_MAX_CHARS} chars.",
     )
-    last_frames: List[str] = Field(
+    last_frames: list[str] = Field(
         default_factory=list,
         description="Last 3-5 traceback lines naming user code. Empty list "
-                    "is tolerated (the §2.2 skill may produce zero frames for "
-                    "non-Python failure modes).",
+        "is tolerated (the §2.2 skill may produce zero frames for "
+        "non-Python failure modes).",
     )
     failure_class: FailureClass = Field(
         ...,
-        description="Closed enum tagging the failure category. Part of the "
-                    "dedup key tuple.",
+        description="Closed enum tagging the failure category. Part of the dedup key tuple.",
     )
     top_user_frame: str = Field(
         default="",
         description="The first user-code frame from last_frames (or empty if "
-                    "none). Part of the dedup key tuple; the consolidator "
-                    "derives this from last_frames when not pre-populated.",
+        "none). Part of the dedup key tuple; the consolidator "
+        "derives this from last_frames when not pre-populated.",
     )
-    evidence_iters: List[int] = Field(
+    evidence_iters: list[int] = Field(
         ...,
         min_length=1,
         description="Iters where this signature was observed. Grows by "
-                    "set-union during dedup merge. Never pruned.",
+        "set-union during dedup merge. Never pruned.",
     )
 
     @field_validator("evidence_iters")
     @classmethod
-    def _iters_non_negative(cls, v: List[int]) -> List[int]:
+    def _iters_non_negative(cls, v: list[int]) -> list[int]:
         if any(i < 0 for i in v):
             raise ValueError("evidence_iters entries must be >= 0")
         return v
 
-    def key(self) -> Tuple[str, str, str]:
+    def key(self) -> tuple[str, str, str]:
         """The dedup tuple used by the consolidator's set-merge."""
         return (self.failure_class, self.top_user_frame, self.error_type)
 
@@ -207,8 +209,8 @@ class ErrorSignature(BaseModel):
 # The 8 LLM-flat fields the interpretation agent emits today, in iteration
 # order. Centralised so the legacy adapter and the consolidator share one
 # source of truth.
-_LEGACY_LIST_FIELDS: Tuple[str, ...] = ("key_findings", "bottlenecks")
-_LEGACY_NARRATIVE_FIELDS: Tuple[str, ...] = (
+_LEGACY_LIST_FIELDS: tuple[str, ...] = ("key_findings", "bottlenecks")
+_LEGACY_NARRATIVE_FIELDS: tuple[str, ...] = (
     "best_config_analysis",
     "score_trend",
     "per_file_analysis",
@@ -247,11 +249,11 @@ class CacheEntry(BaseModel):
         min_length=1,
         description="Architecture key (e.g. 'punet'). Cache is keyed by this.",
     )
-    key_findings: List[ConsolidatedFinding] = Field(
+    key_findings: list[ConsolidatedFinding] = Field(
         default_factory=list,
         description="Ranked observations. Pruned to <=8 by the consolidator.",
     )
-    bottlenecks: List[ConsolidatedFinding] = Field(
+    bottlenecks: list[ConsolidatedFinding] = Field(
         default_factory=list,
         description="Root-cause observations. Pruned to <=8 by the consolidator.",
     )
@@ -274,15 +276,15 @@ class CacheEntry(BaseModel):
     strategy_assessment: ConsolidatedNarrative = Field(
         default_factory=lambda: ConsolidatedNarrative(latest=""),
     )
-    error_signatures: List[ErrorSignature] = Field(
+    error_signatures: list[ErrorSignature] = Field(
         default_factory=list,
         description="Forensic primary sources. Set-merged on dedup key; NEVER "
-                    "numerically capped or rank-pruned (Gate G3 invariant).",
+        "numerically capped or rank-pruned (Gate G3 invariant).",
     )
-    stats: Dict[str, Any] = Field(
+    stats: dict[str, Any] = Field(
         default_factory=dict,
         description="Passthrough numerical stats (best_score, completed_rounds, "
-                    "etc.). The consolidator does not touch this field.",
+        "etc.). The consolidator does not touch this field.",
     )
 
     # ------------------------------------------------------------------
@@ -292,11 +294,11 @@ class CacheEntry(BaseModel):
     @classmethod
     def from_legacy_dict(
         cls,
-        legacy: Dict[str, Any],
+        legacy: dict[str, Any],
         *,
         model_type: str,
         current_iter: int,
-    ) -> "CacheEntry":
+    ) -> CacheEntry:
         """Lift a pre-6.3 flat-dict cache entry into the accumulator shape.
 
         Pre-6.3 entries have the 8 LLM-flat fields directly (``key_findings:
@@ -323,10 +325,10 @@ class CacheEntry(BaseModel):
         cannot become valid ``ConsolidatedFinding`` instances).
         """
         # ---- List-of-str fields → list[ConsolidatedFinding] ----
-        list_payload: Dict[str, List[ConsolidatedFinding]] = {}
+        list_payload: dict[str, list[ConsolidatedFinding]] = {}
         for field in _LEGACY_LIST_FIELDS:
             raw = legacy.get(field, []) or []
-            lifted: List[ConsolidatedFinding] = []
+            lifted: list[ConsolidatedFinding] = []
             for item in raw:
                 if not isinstance(item, str):
                     continue
@@ -343,7 +345,7 @@ class CacheEntry(BaseModel):
             list_payload[field] = lifted
 
         # ---- Str narrative fields → ConsolidatedNarrative ----
-        narrative_payload: Dict[str, ConsolidatedNarrative] = {}
+        narrative_payload: dict[str, ConsolidatedNarrative] = {}
         for field in _LEGACY_NARRATIVE_FIELDS:
             raw = legacy.get(field, "")
             text = raw if isinstance(raw, str) else ""
@@ -356,10 +358,14 @@ class CacheEntry(BaseModel):
         stats_raw = legacy.get("_stats", legacy.get("stats", {})) or {}
         stats = stats_raw if isinstance(stats_raw, dict) else {}
 
+        # Same disjoint-key story as cache_consolidator.consolidate: pyright
+        # can't prove the two payloads address non-overlapping field sets, so
+        # we cast each unpack to a generic mapping. Runtime no-op; field
+        # validators on CacheEntry still gate the actual values.
         return cls(
             model_type=model_type,
-            **list_payload,
-            **narrative_payload,
+            **cast(dict[str, Any], list_payload),
+            **cast(dict[str, Any], narrative_payload),
             error_signatures=[],
             stats=stats,
         )

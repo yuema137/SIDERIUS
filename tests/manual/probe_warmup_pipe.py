@@ -10,6 +10,7 @@ result here proves the data path is genuinely open end-to-end.
 Run:
     .venv/bin/python tests/manual/probe_warmup_pipe.py
 """
+
 from __future__ import annotations
 
 import json
@@ -69,9 +70,7 @@ def main() -> int:
     pruned = {k: v for k, v in result.items() if k not in ("phase_breakdown",)}
     print(json.dumps(pruned, indent=2, default=str))
 
-    train_breakdown = (
-        result.get("phase_breakdown", {}).get("training", {}).get("breakdown", {})
-    )
+    train_breakdown = result.get("phase_breakdown", {}).get("training", {}).get("breakdown", {})
     ms_source = train_breakdown.get("ms_source")
     ms_per_step = train_breakdown.get("ms_per_step")
 
@@ -91,9 +90,11 @@ def main() -> int:
     ok = ms_source == "real_dataset_warmup"
     print(f"  GATE 1 status : {'PASS' if ok else 'FAIL'}")
     if not ok:
-        print("\n[FAIL DETAIL] expected ms_source == 'real_dataset_warmup' "
-              f"but got {ms_source!r}. The warmup path was NOT entered "
-              "despite data_dir being present — the plumbing is broken.")
+        print(
+            "\n[FAIL DETAIL] expected ms_source == 'real_dataset_warmup' "
+            f"but got {ms_source!r}. The warmup path was NOT entered "
+            "despite data_dir being present — the plumbing is broken."
+        )
         return 2
     return 0
 

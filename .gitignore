@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# setuptools editable-install metadata
+*.egg-info/
+
 # Virtual Environments
 .venv/
 tidmad/

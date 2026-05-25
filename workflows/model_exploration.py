@@ -56,23 +56,15 @@ Usage:
       --max_rounds 10
 """
 
-import os
-import sys
+import argparse
 import gc
 import json
-import glob
+import os
 import shutil
-import argparse
 import time
 from collections import deque
-from typing import Callable, Optional
-
-# Ensure SIDERIUS root and ml_models/ are importable.
-# ml_models/ uses flat internal imports (e.g. from models_format_sandbox import ...)
-# which require ml_models/ on sys.path.
-SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, SIDERIUS_ROOT)
-sys.path.insert(0, os.path.join(SIDERIUS_ROOT, "ml_models"))
+from collections.abc import Callable
+from contextlib import suppress
 
 from agent.schemas.hyperparam_tuning import (
     GateExhaustionInfo,
@@ -80,22 +72,24 @@ from agent.schemas.hyperparam_tuning import (
     PhysicalRejection,
 )
 from agent.schemas.interpretation import InterpretationInput, ModelRunSummary
-from core.hardware_context import get_or_create as get_or_create_hardware_context
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
-from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
-
-from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import local_full_context
-from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full_spec
+from agent.schemas.proposal import ExpertContextItem, VocabEntry
 from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_all_fields
+from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full_spec
 from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import local_validated_model
-
-from nodes.result_interpretation_agent import ResultInterpretationAgent
-from nodes.ml_model_proposal_agent import MLModelProposalAgent
-from nodes.ml_model_implementor import MLModelImplementor
+from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import local_full_context
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from core.hardware_context import get_or_create as get_or_create_hardware_context
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
-from agent.schemas.proposal import ExpertContextItem, VocabEntry
-from workflows.llm_config import WorkflowLLMConfig, ProposalLLMConfig, NodeLLMConfig
+from nodes.ml_model_implementor import MLModelImplementor
+from nodes.ml_model_proposal_agent import MLModelProposalAgent
+from nodes.result_interpretation_agent import (
+    ResultInterpretationAgent,
+    tuning_output_to_model_run_summary,
+)
+from workflows.llm_config import ProposalLLMConfig, WorkflowLLMConfig
+
+SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _load_vocab_seed() -> list:
@@ -109,7 +103,8 @@ def _load_vocab_seed() -> list:
         return []
     try:
         from agent.schemas.proposal import VocabEntry
-        with open(seed_path, "r", encoding="utf-8") as f:
+
+        with open(seed_path, encoding="utf-8") as f:
             raw = json.load(f)
         return [VocabEntry.model_validate(entry) for entry in raw]
     except Exception as e:
@@ -121,7 +116,7 @@ def _get_reasoning_pipeline(
     llm_config: WorkflowLLMConfig,
     exploration_mode: str = "auto",
     minimum_boldness: float = 0.05,
-    n_candidates: Optional[int] = None,
+    n_candidates: int | None = None,
 ):
     """Build a ReasoningPipelineConfig from the workflow's ProposalLLMConfig.
 
@@ -144,9 +139,12 @@ def _get_reasoning_pipeline(
     """
     if llm_config.propose and isinstance(llm_config.propose, ProposalLLMConfig):
         from agent.schemas.proposal import (
-            ModelSelectionStrategy, ReasoningPipelineConfig, ReasoningStage,
+            ModelSelectionStrategy,
+            ReasoningPipelineConfig,
+            ReasoningStage,
             ResearchPolicy,
         )
+
         selection = (
             ModelSelectionStrategy(params={"n": n_candidates})
             if n_candidates is not None
@@ -168,6 +166,7 @@ def _get_reasoning_pipeline(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def load_tuning_outputs_from_paths(
     paths: list[str],
@@ -193,21 +192,20 @@ def load_tuning_outputs_from_paths(
             missing.append(f"  not found: {path}")
             continue
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             output = HyperparamTuningOutput.model_validate(data)
             outputs.append(output)
-            print(f"  Loaded: {path} "
-                  f"({output.model_type}, {len(output.all_records)} records, "
-                  f"best={output.best_denoising_score})")
+            print(
+                f"  Loaded: {path} "
+                f"({output.model_type}, {len(output.all_records)} records, "
+                f"best={output.best_denoising_score})"
+            )
         except Exception as e:
             missing.append(f"  invalid: {path} — {e}")
 
     if missing:
-        raise FileNotFoundError(
-            f"Missing or invalid source files:\n"
-            + "\n".join(missing)
-        )
+        raise FileNotFoundError("Missing or invalid source files:\n" + "\n".join(missing))
     return outputs
 
 
@@ -236,7 +234,10 @@ def load_tuning_outputs(
     """
     paths = [
         os.path.join(
-            data_dir, model_type, source_run_name, "agent",
+            data_dir,
+            model_type,
+            source_run_name,
+            "agent",
             f"run_output_{source_run_name}_agent.json",
         )
         for model_type in model_types
@@ -273,6 +274,7 @@ def _make_storage(workspace: str, run_name: str) -> StorageConfig:
 # See docs/phase66_ws_b_proposer_hardening.md §2.4 / §3.2.
 # ---------------------------------------------------------------------------
 
+
 def _aggregate_worst_offender_rejections(
     rejections: list[PhysicalRejection],
 ) -> list[tuple[PhysicalRejection, int]]:
@@ -289,6 +291,7 @@ def _aggregate_worst_offender_rejections(
         return []
 
     from collections import defaultdict
+
     groups: dict[str, list[PhysicalRejection]] = defaultdict(list)
     for r in rejections:
         mt = str(r.attempt_config.get("model_type", "unknown"))
@@ -296,9 +299,11 @@ def _aggregate_worst_offender_rejections(
 
     out: list[tuple[PhysicalRejection, int]] = []
     for _mt, rejs in groups.items():
+
         def _rank(r: PhysicalRejection) -> tuple[float, float]:
             ratio = (r.estimated_gb / r.budget_gb) if r.budget_gb > 0 else float("inf")
             return (ratio, r.dominant_fraction)
+
         worst = max(rejs, key=_rank)
         out.append((worst, len(rejs)))
     return out
@@ -384,41 +389,34 @@ def _cap_knowledge_cache(
         for mt, entry in cache.items()
         if mt != current_model
     ]
-    scored.sort(key=lambda x: x[1] if x[1] is not None else float("-inf"),
-                reverse=True)
-    keep = {current_model} | {mt for mt, _ in scored[:max_entries - 1]}
+    scored.sort(key=lambda x: x[1] if x[1] is not None else float("-inf"), reverse=True)
+    keep = {current_model} | {mt for mt, _ in scored[: max_entries - 1]}
     evicted = set(cache) - keep
     capped = {mt: entry for mt, entry in cache.items() if mt in keep}
     return capped, evicted
 
 
-def _add_plugin_to_registries(plugin_path: str) -> Optional[str]:
+def _add_plugin_to_registries(plugin_path: str) -> str | None:
     """Register a single plugin file in every in-process registry surface.
 
-    Updates four surfaces so the tuner's planner (running in the same process
+    Updates three surfaces so the tuner's planner (running in the same process
     as this workflow) can resolve the new model_type for both training and
     inference without a re-scan:
 
       1. ``ml_models.models_sandbox.MODEL_REGISTRY``
          — model_type → model class
       2. ``ml_models.models_format_sandbox.PLUGIN_CONFIG_REGISTRY``
-         — model_type → config class (packaged identity)
-      3. Bare-name mirror at ``models_format_sandbox.PLUGIN_CONFIG_REGISTRY``
-         — same mapping under the bare module identity used by the training
-         subprocess (``execute_tools/train_engine_sandbox.py``) and inference
-         (``execute_tools/inference_single.py``). When ``ml_models/`` is on
-         ``sys.path``, bare and packaged imports resolve to *distinct* module
-         objects with separate registry dicts; missing this mirror caused
-         silent ``Unknown model_type`` failures pre-Phase-6.8 (see
-         ``ml_models/models_sandbox.py:660-673``).
-      4. ``ml_models.plugin_loader.PLUGIN_OUTPUT_TYPE_REGISTRY``
+         — model_type → config class
+      3. ``ml_models.plugin_loader.PLUGIN_OUTPUT_TYPE_REGISTRY``
          — model_type → "classifier" | "regressor" | "hybrid", driving
          classifier-vs-regressor routing in scoring + inference.
 
-    The pre-Commit-6 implementation (``workflows/model_exploration.py:381-392``)
-    only updated surfaces 1 and 2, leaving 3 and 4 unset. Regressor plugins
-    were therefore miscategorised as classifiers, and any subprocess that
-    imported via the bare module identity could not find the config class.
+    After the 2026-05 package refactor every import resolves through the
+    qualified ``ml_models.*`` path, so there is a single canonical module
+    identity for each registry. The historical bare-name mirror that
+    previously protected the training subprocess from the duplicate-module
+    bug (see ``ml_models/models_sandbox.py`` history pre-package-migration)
+    is no longer required and has been removed.
 
     Args:
         plugin_path: filesystem path to the plugin ``.py`` file.
@@ -428,9 +426,9 @@ def _add_plugin_to_registries(plugin_path: str) -> Optional[str]:
         plugin file failed to load (validation error, missing required
         attributes, etc — see ``ml_models.plugin_loader._load_plugin``).
     """
-    from ml_models.models_sandbox import MODEL_REGISTRY
     from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
-    from ml_models.plugin_loader import _load_plugin, PLUGIN_OUTPUT_TYPE_REGISTRY
+    from ml_models.models_sandbox import MODEL_REGISTRY
+    from ml_models.plugin_loader import PLUGIN_OUTPUT_TYPE_REGISTRY, _load_plugin
 
     plugin_data = _load_plugin(plugin_path)
     if plugin_data is None:
@@ -440,11 +438,6 @@ def _add_plugin_to_registries(plugin_path: str) -> Optional[str]:
     MODEL_REGISTRY[model_type] = plugin_data["model_class"]
     PLUGIN_CONFIG_REGISTRY[model_type] = plugin_data["config_class"]
     PLUGIN_OUTPUT_TYPE_REGISTRY[model_type] = plugin_data["output_type"]
-
-    bare = sys.modules.get("models_format_sandbox")
-    pkg = sys.modules.get("ml_models.models_format_sandbox")
-    if bare is not None and pkg is not None and bare is not pkg:
-        bare.PLUGIN_CONFIG_REGISTRY[model_type] = plugin_data["config_class"]
 
     return model_type
 
@@ -518,10 +511,7 @@ def _register_plugin(
     try:
         registered = _add_plugin_to_registries(primary_plugin)
         if registered:
-            print(
-                f"    Model '{model_name}' added to registries "
-                f"(model_type='{registered}')"
-            )
+            print(f"    Model '{model_name}' added to registries (model_type='{registered}')")
     except Exception as e:
         print(f"    Warning: could not extend registries: {e}")
 
@@ -529,6 +519,7 @@ def _register_plugin(
 # ---------------------------------------------------------------------------
 # Workflow
 # ---------------------------------------------------------------------------
+
 
 def run_workflow(
     workspace: str,
@@ -584,7 +575,7 @@ def run_workflow(
     force_formal_round: bool = True,
     formal_round_strategy: str = "full_clone",
     # --- Degenerate-output reaction policy (paired with execute_tools.squid_health_checks) ---
-    degenerate_penalty_score: Optional[float] = None,
+    degenerate_penalty_score: float | None = None,
     # --- Per-round attempt budget (Phase L, docs/resource_estimator_implement.md §11) ---
     # Tuner-only fan-out (no proposer-side equivalent). Defaults mirror the
     # schema/protocol defaults so omitting them at the workflow surface yields
@@ -595,7 +586,7 @@ def run_workflow(
     # --- Reasoning pipeline ---
     exploration_mode: str = "auto",
     minimum_boldness: float = 0.05,
-    n_candidates: Optional[int] = None,
+    n_candidates: int | None = None,
     # --- Implementation retry ---
     max_impl_attempts: int = 3,
     # --- Phase K.8 debug instrumentation ---
@@ -656,8 +647,8 @@ def run_workflow(
     # threaded into all 5 agents; ``sandbox_factory`` is threaded only
     # into ``HyperparamTuningAgent`` (the only agent that runs training).
     # See ``docs/audit_and_optimize_token_usage_and_growth.md`` Commit 4.5.
-    bridge_factory: Optional[Callable] = None,
-    sandbox_factory: Optional[Callable] = None,
+    bridge_factory: Callable | None = None,
+    sandbox_factory: Callable | None = None,
 ) -> list[HyperparamTuningOutput]:
     """
     Execute the model exploration workflow for one or more iterations.
@@ -710,7 +701,7 @@ def run_workflow(
             disabled. See docs/resource_estimator_implement.md §2.7.2 / Phase I.
         formal_time_budget_minutes: Same as above, but for formal-mode rounds
             (plan.is_trial=False). Sized independently because formal runs
-            use the full dataset and are 50–100x longer.
+            use the full dataset and are 50-100x longer.
         trial_vram_budget_gb: Per-mode VRAM ceiling (GB) for the
             evaluate_vram_skill gate on trial-mode rounds. Fanned out to
             HyperparamTuningInput only — Phase K has no proposer-side VRAM
@@ -740,8 +731,8 @@ def run_workflow(
     # when unset so chain mode keeps precedence.
     os.environ.setdefault("SIDERIUS_CHAIN_WORKSPACE", os.path.abspath(workspace))
 
-    print(f"\n{'='*60}")
-    print(f"  SIDERIUS Model Exploration Workflow")
+    print(f"\n{'=' * 60}")
+    print("  SIDERIUS Model Exploration Workflow")
     print(f"  Started       : {started_at}")
     if source_paths is not None:
         print(f"  Source paths  : {len(source_paths)} files")
@@ -758,7 +749,7 @@ def run_workflow(
     print(f"  Proposal tries: {max_proposal_attempts} per iteration")
     if target_score is not None:
         print(f"  Target score  : {target_score}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     # --- Phase 6.6 WS-B (B.1) — hardware context for the Proposer ---
     # Discover once per workflow run and thread into every ProposalInput
@@ -768,16 +759,16 @@ def run_workflow(
     # reads the same manifest path — first-caller-writes, later-callers-read.
     # See docs/phase66_ws_b_proposer_hardening.md §4.1.
     from pathlib import Path as _Path
+
     hardware_ctx = get_or_create_hardware_context(
-        _Path(workspace), run_name,
+        _Path(workspace),
+        run_name,
     )
     # Pick the active VRAM budget per WS-B doc §4.2: trial preferred (the
     # Proposer's baseline is almost always trial-sized), fall back to
     # formal, else None (→ PHYSICAL regime rendered from the physical cap).
     active_vram_budget_gb: float | None = (
-        trial_vram_budget_gb
-        if trial_vram_budget_gb is not None
-        else formal_vram_budget_gb
+        trial_vram_budget_gb if trial_vram_budget_gb is not None else formal_vram_budget_gb
     )
     print(
         f"  Hardware      : {hardware_ctx.device_name} "
@@ -794,12 +785,13 @@ def run_workflow(
         tuning_outputs = load_tuning_outputs(data_dir, model_types, source_run_name)
     else:
         raise ValueError(
-            "Must provide either source_paths OR "
-            "(data_dir + model_types + source_run_name)."
+            "Must provide either source_paths OR (data_dir + model_types + source_run_name)."
         )
     seed_summaries = tuning_outputs_to_summaries(tuning_outputs)
-    print(f"  Loaded {len(tuning_outputs)} tuning outputs "
-          f"across {len(set(o.model_type for o in tuning_outputs))} model types.\n")
+    print(
+        f"  Loaded {len(tuning_outputs)} tuning outputs "
+        f"across {len(set(o.model_type for o in tuning_outputs))} model types.\n"
+    )
 
     # Track all model types seen (for duplicate name guard)
     all_model_types = list({o.model_type for o in tuning_outputs})
@@ -815,10 +807,12 @@ def run_workflow(
     if vocab_seed:
         print(f"  Vocab seed: {len(vocab_seed)} entries loaded.")
     if reasoning_pipeline and reasoning_pipeline.stages:
-        print(f"  Reasoning pipeline: {[s.name for s in reasoning_pipeline.stages]} "
-              f"({reasoning_pipeline.exploration_mode} mode)")
+        print(
+            f"  Reasoning pipeline: {[s.name for s in reasoning_pipeline.stages]} "
+            f"({reasoning_pipeline.exploration_mode} mode)"
+        )
     else:
-        print(f"  Reasoning pipeline: legacy 2-call mode (no stages configured).")
+        print("  Reasoning pipeline: legacy 2-call mode (no stages configured).")
 
     # Collect results across iterations
     iteration_results: list[HyperparamTuningOutput] = []
@@ -831,7 +825,9 @@ def run_workflow(
     # survives the subprocess boundary. In-process / first-iter callers
     # pass None and the local update at line ~1217 takes over after iter 1.
     # See docs/Consistent_growing_vocab_list.md §10.3.3.
-    previous_proposal_data: dict | None = restored_previous_proposal  # serialized ProposalOutput from iter N-1
+    previous_proposal_data: dict | None = (
+        restored_previous_proposal  # serialized ProposalOutput from iter N-1
+    )
     # Priority: chain-restored runtime_vocab > static seed. The static seed
     # is the first-iter bootstrap; once any iter has run, the latest
     # committed iter's runtime_vocab is the source of truth (already merged
@@ -868,7 +864,7 @@ def run_workflow(
             f"({_cache_keys_preview}"
             f"{'...' if len(model_knowledge_cache) > 5 else ''})"
         )
-    latest_new_summary = None                    # ModelRunSummary from the most recent tune
+    latest_new_summary = None  # ModelRunSummary from the most recent tune
     # Phase N (§14.N) — bounded FIFO of the last 3 tuner outputs so the
     # interp→propose protocol can surface their gate_exhaustion summaries
     # (oldest-first) to the next proposer as the aggregate-window
@@ -894,8 +890,9 @@ def run_workflow(
         )
 
     # --- Iteration loop ---
-    from core.memory_probe import probe_memory
     from pathlib import Path as _Path
+
+    from core.memory_probe import probe_memory
 
     # Token-usage audit binder (§1.4). Closes over the workflow-local
     # ``chain_run_name`` / ``run_id`` so each agent's bridge writes rows to
@@ -911,8 +908,10 @@ def run_workflow(
         if chain_run_name is None or run_id is None:
             return
         kwargs = dict(
-            workspace=_Path(workspace), iter=iteration,
-            run_name=chain_run_name, run_id=run_id,
+            workspace=_Path(workspace),
+            iter=iteration,
+            run_name=chain_run_name,
+            run_id=run_id,
         )
         if hasattr(agent, "set_run_context") and not hasattr(agent, "bridge"):
             agent.set_run_context(**kwargs)
@@ -930,15 +929,14 @@ def run_workflow(
         os.makedirs(iter_dir, exist_ok=True)
 
         loop_pos = iteration - start_iteration + 1
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"  ITERATION {iteration} ({loop_pos}/{max_iterations})")
         print(f"  Directory: {iter_dir}")
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         # Fix 4 — parent-process memory probe at iteration entry.
         # See docs/optimize_inference_and_scoring.md §3 Fix 4.
-        probe_memory(iter_idx=iteration, phase="start",
-                     workspace=workspace, scope="workflow")
+        probe_memory(iter_idx=iteration, phase="start", workspace=workspace, scope="workflow")
 
         # --- Interpret (once per iteration) ---
         # First iter in this subprocess: all seeds are new (cache is empty).
@@ -996,9 +994,7 @@ def run_workflow(
                 list(accumulated_physical_rejections)
             )
             for _worst, _count in _cross_iter_aggregated:
-                previous_failures.append(
-                    _render_physical_rejection(_worst, _count)
-                )
+                previous_failures.append(_render_physical_rejection(_worst, _count))
             if _cross_iter_aggregated:
                 print(
                     f"  [{iteration}] Seeded {len(_cross_iter_aggregated)} "
@@ -1021,9 +1017,7 @@ def run_workflow(
                 _prior.physical_rejections,
             )
             for _worst, _count in _aggregated:
-                previous_failures.append(
-                    _render_physical_rejection(_worst, _count)
-                )
+                previous_failures.append(_render_physical_rejection(_worst, _count))
             if _aggregated:
                 print(
                     f"  [{iteration}] Seeded {len(_aggregated)} "
@@ -1033,7 +1027,9 @@ def run_workflow(
                 )
 
         for attempt in range(1, max_proposal_attempts + 1):
-            print(f"  [{iteration}.{attempt}] Proposing new model (attempt {attempt}/{max_proposal_attempts})...")
+            print(
+                f"  [{iteration}.{attempt}] Proposing new model (attempt {attempt}/{max_proposal_attempts})..."
+            )
 
             # Create a temporary attempt dir; renamed after model name is known
             attempt_dir = os.path.join(iter_dir, f"attempt_{attempt:03d}")
@@ -1049,9 +1045,7 @@ def run_workflow(
             # docs/Consistent_growing_vocab_list.md §3.3.4.
             expert_context_for_propose: list[ExpertContextItem] = []
             if accumulated_key_findings:
-                bullet_block = "\n".join(
-                    f"- {kf}" for kf in accumulated_key_findings
-                )
+                bullet_block = "\n".join(f"- {kf}" for kf in accumulated_key_findings)
                 expert_context_for_propose.append(
                     ExpertContextItem(
                         source="prior_iters",
@@ -1103,9 +1097,9 @@ def run_workflow(
                 # prompt under {run_dir}/debug/ when the flag is on.
                 if debug_dump_prompts:
                     propose_input.debug_dump_proposing_prompt_path = os.path.join(
-                        run_dir, "debug",
-                        f"iter{iteration:03d}_attempt{attempt:03d}"
-                        "_proposing_system_prompt.md",
+                        run_dir,
+                        "debug",
+                        f"iter{iteration:03d}_attempt{attempt:03d}_proposing_system_prompt.md",
                     )
 
                 _propose_agent = MLModelProposalAgent(
@@ -1125,11 +1119,16 @@ def run_workflow(
                 # --- Implement → Validate (inner retry loop per proposal) ---
                 # Load reference code once (shared across impl attempts for this proposal)
                 ref_code: dict = {}
-                if hasattr(proposal, 'inherited_components') and proposal.inherited_components:
+                if hasattr(proposal, "inherited_components") and proposal.inherited_components:
                     from nodes.proposal_helpers import load_model_source
+
                     ref_models = set()
                     for ic in proposal.inherited_components:
-                        mt = ic.from_model_type if hasattr(ic, 'from_model_type') else ic.get('from_model_type')
+                        mt = (
+                            ic.from_model_type
+                            if hasattr(ic, "from_model_type")
+                            else ic.get("from_model_type")
+                        )
                         if mt:
                             ref_models.add(mt)
                     for mt in ref_models:
@@ -1137,15 +1136,20 @@ def run_workflow(
                         if src:
                             ref_code[mt] = src
                     if ref_code:
-                        print(f"    Reference code: {list(ref_code.keys())} "
-                              f"({sum(len(v.split(chr(10))) for v in ref_code.values())} lines)")
+                        print(
+                            f"    Reference code: {list(ref_code.keys())} "
+                            f"({sum(len(v.split(chr(10))) for v in ref_code.values())} lines)"
+                        )
 
                 valid_llm = llm_config.get("validate")
                 previous_validation_failure: str | None = None
 
                 for impl_attempt in range(1, max_impl_attempts + 1):
-                    impl_suffix = (f" (impl {impl_attempt}/{max_impl_attempts})"
-                                   if max_impl_attempts > 1 else "")
+                    impl_suffix = (
+                        f" (impl {impl_attempt}/{max_impl_attempts})"
+                        if max_impl_attempts > 1
+                        else ""
+                    )
                     print(f"  [{iteration}.{attempt}] Implementing{impl_suffix}...")
                     impl_input = local_full_spec(proposal, attempt_storage)
                     impl_input.plugin_dir = os.path.join(attempt_dir, "models")
@@ -1168,13 +1172,14 @@ def run_workflow(
                     # --- Validate ---
                     print(f"  [{iteration}.{attempt}] Validating...")
                     valid_input = local_all_fields(
-                        impl_output, attempt_storage,
+                        impl_output,
+                        attempt_storage,
                         llm_provider=valid_llm.get("provider", "gemini"),
                         llm_model_id=valid_llm.get("model_id", "gemini-3.1-flash-lite-preview"),
                     )
                     if human_advice_validate is not None:
                         valid_input.human_advice = human_advice_validate
-                    if hasattr(proposal, 'inherited_components') and proposal.inherited_components:
+                    if hasattr(proposal, "inherited_components") and proposal.inherited_components:
                         valid_input.inherited_components = proposal.inherited_components
 
                     _valid_agent = MLCodeValidatorAgent(
@@ -1185,13 +1190,15 @@ def run_workflow(
                     validation = _valid_agent.run(valid_input)
 
                     if validation.passed:
-                        print(f"    All 7 checks passed.\n")
+                        print("    All 7 checks passed.\n")
                         break
 
-                    previous_validation_failure = validation.error_message or "Unknown validation error"
+                    previous_validation_failure = (
+                        validation.error_message or "Unknown validation error"
+                    )
                     print(f"    Validation FAILED: {previous_validation_failure}")
                     if impl_attempt < max_impl_attempts:
-                        print(f"    Retrying implementation with validator feedback...\n")
+                        print("    Retrying implementation with validator feedback...\n")
 
                 if validation and validation.passed:
                     break
@@ -1199,18 +1206,20 @@ def run_workflow(
                 # All impl attempts for this proposal exhausted
                 previous_failures.append(previous_validation_failure or "Unknown error")
                 if attempt < max_proposal_attempts:
-                    print(f"    Retrying with a new proposal...\n")
+                    print("    Retrying with a new proposal...\n")
 
             except Exception as e:
                 error_msg = f"Node error: {type(e).__name__}: {e}"
                 print(f"    ERROR: {error_msg}")
                 previous_failures.append(error_msg)
                 if attempt < max_proposal_attempts:
-                    print(f"    Retrying with failure feedback...\n")
+                    print("    Retrying with failure feedback...\n")
 
         if not validation or not validation.passed:
-            print(f"\n  Iteration {iteration}: exhausted {max_proposal_attempts} proposal "
-                  f"attempts without passing validation. Skipping to next iteration.")
+            print(
+                f"\n  Iteration {iteration}: exhausted {max_proposal_attempts} proposal "
+                f"attempts without passing validation. Skipping to next iteration."
+            )
             continue
 
         # --- Tune (set up storage + run-scoped plugin dir up front) ---
@@ -1235,6 +1244,7 @@ def run_workflow(
         #        walks this tree to resolve agent-generated descriptions
         #        across iterations. Phase 6.8 §3.3.
         from core.sandbox_executor import get_plugin_dir
+
         tuner_plugin_dir = get_plugin_dir(tuning_dir, run_name)
         chain_plugin_dir = get_plugin_dir(workspace, run_name)
         _register_plugin(
@@ -1246,7 +1256,9 @@ def run_workflow(
         print(f"  [{iteration}] Tuning '{proposal.model_name}' for {max_rounds} rounds...")
         tune_llm = llm_config.get("tune")
         tune_input = local_validated_model(
-            validation, proposal, tuning_storage,
+            validation,
+            proposal,
+            tuning_storage,
             max_rounds=max_rounds,
             file_index=file_index,
             llm_provider=tune_llm.get("provider", "gemini"),
@@ -1310,14 +1322,20 @@ def run_workflow(
         latest_new_summary = new_model_summaries[0]
 
         # Update knowledge cache from interpretation output
-        if hasattr(interpretation, "model_knowledge_cache") and interpretation.model_knowledge_cache:
+        if (
+            hasattr(interpretation, "model_knowledge_cache")
+            and interpretation.model_knowledge_cache
+        ):
             model_knowledge_cache = dict(interpretation.model_knowledge_cache)
             model_knowledge_cache, evicted = _cap_knowledge_cache(
-                model_knowledge_cache, current_model=proposal.model_name,
+                model_knowledge_cache,
+                current_model=proposal.model_name,
             )
             if evicted:
-                print(f"  [{iteration}] Cache capped: evicted {sorted(evicted)}, "
-                      f"kept {len(model_knowledge_cache)} entries.")
+                print(
+                    f"  [{iteration}] Cache capped: evicted {sorted(evicted)}, "
+                    f"kept {len(model_knowledge_cache)} entries."
+                )
             print(f"  [{iteration}] Knowledge cache: {len(model_knowledge_cache)} models cached.")
 
         # Update runtime vocab from interpretation output
@@ -1327,23 +1345,27 @@ def run_workflow(
                 v if hasattr(v, "name") else VocabEntry.model_validate(v)
                 for v in interpretation.runtime_vocab
             ]
-            print(f"  [{iteration}] Vocab updated: {len(current_runtime_vocab)} entries "
-                  f"({sum(1 for v in current_runtime_vocab if v.kind == 'discovery')} discoveries)")
+            print(
+                f"  [{iteration}] Vocab updated: {len(current_runtime_vocab)} entries "
+                f"({sum(1 for v in current_runtime_vocab if v.kind == 'discovery')} discoveries)"
+            )
 
         # --- Check score target ---
-        if tune_output.best_denoising_score is not None:
-            if best_score_overall is None or tune_output.best_denoising_score > best_score_overall:
-                best_score_overall = tune_output.best_denoising_score
+        if tune_output.best_denoising_score is not None and (
+            best_score_overall is None or tune_output.best_denoising_score > best_score_overall
+        ):
+            best_score_overall = tune_output.best_denoising_score
 
-        print(f"\n  [{iteration}] Complete: {proposal.model_name} "
-              f"best_score={tune_output.best_denoising_score}")
+        print(
+            f"\n  [{iteration}] Complete: {proposal.model_name} "
+            f"best_score={tune_output.best_denoising_score}"
+        )
 
         # Fix 4 — parent-process memory probe at iteration exit. Fires
         # even on the iteration that triggers the target-score break
         # (placed before the break check) so the last iteration's
         # terminal RSS is always logged.
-        probe_memory(iter_idx=iteration, phase="end",
-                     workspace=workspace, scope="workflow")
+        probe_memory(iter_idx=iteration, phase="end", workspace=workspace, scope="workflow")
 
         # Phase 6.8 §2 Layer B (Commit 3) — per-iteration cleanup. Drop
         # local refs to per-iter agent outputs, force a GC cycle, then
@@ -1354,45 +1376,53 @@ def run_workflow(
         # decrements the local-name refcount. NameError-guarded
         # because early-exit paths may leave some names unbound.
         # See docs/phase68_task1_memory_diagnostic_20260427.md §2 Commit 3.
-        try: del proposal
-        except NameError: pass
-        try: del impl_output
-        except NameError: pass
-        try: del validation
-        except NameError: pass
-        try: del interpretation
-        except NameError: pass
-        try: del interp_input
-        except NameError: pass
-        try: del tune_input
-        except NameError: pass
-        try: del tune_output
-        except NameError: pass
+        with suppress(NameError):
+            del proposal
+        with suppress(NameError):
+            del impl_output
+        with suppress(NameError):
+            del validation
+        with suppress(NameError):
+            del interpretation
+        with suppress(NameError):
+            del interp_input
+        with suppress(NameError):
+            del tune_input
+        with suppress(NameError):
+            del tune_output
         gc.collect()
-        probe_memory(iter_idx=iteration, phase="post_gc",
-                     workspace=workspace, scope="workflow")
+        probe_memory(iter_idx=iteration, phase="post_gc", workspace=workspace, scope="workflow")
 
-        if target_score is not None and best_score_overall is not None and best_score_overall >= target_score:
-            print(f"\n  Target score {target_score} reached "
-                  f"(best={best_score_overall}). Stopping early.")
+        if (
+            target_score is not None
+            and best_score_overall is not None
+            and best_score_overall >= target_score
+        ):
+            print(
+                f"\n  Target score {target_score} reached "
+                f"(best={best_score_overall}). Stopping early."
+            )
             break
 
     # --- Final summary ---
     finished_at = time.strftime("%Y-%m-%d %H:%M:%S")
-    print(f"\n{'='*60}")
-    print(f"  Workflow Complete")
+    print(f"\n{'=' * 60}")
+    print("  Workflow Complete")
     print(f"  Started     : {started_at}")
     print(f"  Finished    : {finished_at}")
     print(f"  Iterations  : {len(iteration_results)}/{max_iterations}")
     print(f"  Best overall: {best_score_overall}")
     for i, result in enumerate(iteration_results, 1):
-        print(f"    Iteration {i}: {result.model_type} "
-              f"score={result.best_denoising_score}")
-    print(f"{'='*60}\n")
+        print(f"    Iteration {i}: {result.model_type} score={result.best_denoising_score}")
+    print(f"{'=' * 60}\n")
 
     _save_workflow_summary(
-        run_dir, run_name, started_at, finished_at,
-        iteration_results, best_score_overall,
+        run_dir,
+        run_name,
+        started_at,
+        finished_at,
+        iteration_results,
+        best_score_overall,
     )
 
     return iteration_results
@@ -1435,96 +1465,135 @@ def _save_workflow_summary(
 # CLI entry point
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="SIDERIUS Model Exploration Workflow — "
-                    "iteratively interpret results, propose new models, implement, "
-                    "validate, and tune.",
+        "iteratively interpret results, propose new models, implement, "
+        "validate, and tune.",
     )
     parser.add_argument(
-        "--data_dir", type=str, default=None,
+        "--data_dir",
+        type=str,
+        default=None,
         help="Root data directory containing existing tuning results.",
     )
     parser.add_argument(
-        "--models", type=str, nargs="+", required=True,
+        "--models",
+        type=str,
+        nargs="+",
+        required=True,
         help="Model types to include in initial interpretation (e.g. punet wavenet rnn).",
     )
     parser.add_argument(
-        "--source_run_name", type=str, required=True,
+        "--source_run_name",
+        type=str,
+        required=True,
         help="Run name to load initial tuning results from (e.g. 'v3_file6'). "
-             "One output per model is loaded from {data_dir}/{model}/{source_run_name}/agent/.",
+        "One output per model is loaded from {data_dir}/{model}/{source_run_name}/agent/.",
     )
     parser.add_argument(
-        "--workspace", type=str, default="./workflow_output",
+        "--workspace",
+        type=str,
+        default="./workflow_output",
         help="Root output directory for this workflow run.",
     )
     parser.add_argument(
-        "--run_name", type=str, default="explore_v1",
+        "--run_name",
+        type=str,
+        default="explore_v1",
         help="Unique name for this workflow run.",
     )
     parser.add_argument(
-        "--max_iterations", type=int, default=1,
+        "--max_iterations",
+        type=int,
+        default=1,
         help="Number of successful iterations (default: 1 = single pass).",
     )
     parser.add_argument(
-        "--max_rounds", type=int, default=10,
+        "--max_rounds",
+        type=int,
+        default=10,
         help="Tuning budget per iteration (default: 10).",
     )
     parser.add_argument(
-        "--max_proposal_attempts", type=int, default=3,
+        "--max_proposal_attempts",
+        type=int,
+        default=3,
         help="Max propose→implement→validate retries per iteration (default: 3).",
     )
     parser.add_argument(
-        "--target_score", type=float, default=None,
+        "--target_score",
+        type=float,
+        default=None,
         help="Optional early stop: halt if best score >= target.",
     )
     parser.add_argument(
-        "--file_index", type=int, default=6,
+        "--file_index",
+        type=int,
+        default=6,
         help="Training/validation file index (default: 6).",
     )
     # LLM configuration
     parser.add_argument(
-        "--llm_config", type=str, default=None,
+        "--llm_config",
+        type=str,
+        default=None,
         help="Path to a JSON file with per-node LLM config. "
-             "Format: {\"interpret\": {\"provider\": \"gemini\", \"model_id\": \"...\"}, ...}. "
-             "Nodes not listed use their built-in defaults.",
+        'Format: {"interpret": {"provider": "gemini", "model_id": "..."}, ...}. '
+        "Nodes not listed use their built-in defaults.",
     )
     parser.add_argument(
-        "--provider", type=str, default=None, choices=["gemini", "openai"],
+        "--provider",
+        type=str,
+        default=None,
+        choices=["gemini", "openai"],
         help="LLM provider for ALL nodes (shorthand — overridden by --llm_config).",
     )
     parser.add_argument(
-        "--model_id", type=str, default=None,
+        "--model_id",
+        type=str,
+        default=None,
         help="LLM model ID for ALL nodes (shorthand — overridden by --llm_config).",
     )
 
     # Human advice per step (all optional)
     parser.add_argument(
-        "--advice_interpret", type=str, default=None,
+        "--advice_interpret",
+        type=str,
+        default=None,
         help="Human guidance for interpretation steps.",
     )
     parser.add_argument(
-        "--advice_propose", type=str, default=None,
+        "--advice_propose",
+        type=str,
+        default=None,
         help="Human guidance for proposal steps "
-             "(e.g. 'propose a lightweight model with < 100K params').",
+        "(e.g. 'propose a lightweight model with < 100K params').",
     )
     parser.add_argument(
-        "--advice_implement", type=str, default=None,
+        "--advice_implement",
+        type=str,
+        default=None,
         help="Human guidance for implementation steps.",
     )
     parser.add_argument(
-        "--advice_validate", type=str, default=None,
+        "--advice_validate",
+        type=str,
+        default=None,
         help="Human guidance for validation steps.",
     )
     parser.add_argument(
-        "--advice_tune", type=str, default=None,
-        help="Human guidance for tuning steps "
-             "(e.g. 'keep epochs <= 3 for quick testing').",
+        "--advice_tune",
+        type=str,
+        default=None,
+        help="Human guidance for tuning steps (e.g. 'keep epochs <= 3 for quick testing').",
     )
     args = parser.parse_args()
 
     if args.data_dir is None:
         from execute_tools.data_paths import SIDERIUS_DATA_DIR
+
         args.data_dir = SIDERIUS_DATA_DIR
 
     # Build LLM config: --llm_config file takes precedence, then --provider/--model_id

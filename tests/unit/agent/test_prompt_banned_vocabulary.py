@@ -12,15 +12,15 @@ the LLM). Test fixtures and free-form code comments are out of scope.
 The runtime field name `denoising_score` and the literal word "denoising"
 (which is the task name in this project) are intentionally NOT banned.
 """
+
 import pytest
 
 from agent.prompts import PLANNER_PROMPT, REFLECTOR_PROMPT
+from nodes.ml_model_proposal_agent import PROPOSAL_REASONING_PROMPT
 from nodes.result_interpretation_agent import (
     PER_MODEL_SYSTEM_PROMPT,
     SYNTHESIS_SYSTEM_PROMPT,
 )
-from nodes.ml_model_proposal_agent import PROPOSAL_REASONING_PROMPT
-
 
 PRODUCTION_PROMPTS = {
     "PLANNER_PROMPT": PLANNER_PROMPT,
@@ -57,10 +57,13 @@ def test_banned_vocabulary_absent(prompt_name, prompt_text, token):
     )
 
 
-@pytest.mark.parametrize("prompt_name,prompt_text", {
-    "PER_MODEL_SYSTEM_PROMPT": PER_MODEL_SYSTEM_PROMPT,
-    "SYNTHESIS_SYSTEM_PROMPT": SYNTHESIS_SYSTEM_PROMPT,
-}.items())
+@pytest.mark.parametrize(
+    "prompt_name,prompt_text",
+    {
+        "PER_MODEL_SYSTEM_PROMPT": PER_MODEL_SYSTEM_PROMPT,
+        "SYNTHESIS_SYSTEM_PROMPT": SYNTHESIS_SYSTEM_PROMPT,
+    }.items(),
+)
 def test_impact_aware_framing_present(prompt_name, prompt_text):
     """The two interpretation prompts must carry the Impact_Score / Linear_Weight
     framing — guards against accidental deletion of the Log-of-Mean trap section."""

@@ -22,11 +22,12 @@ The consolidator mock parses the prompt's PRIOR / NEW items and emits a
 schema-valid ``_MergeDecision`` so the production code path (including the
 strength-ranked overflow cap) is exercised end-to-end.
 """
+
 from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, List
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -41,15 +42,14 @@ from agent.schemas.interpretation import (
 from agent.schemas.proposal import ExpertContextItem
 from nodes.result_interpretation_agent import ResultInterpretationAgent
 
-
 # ---------------------------------------------------------------------------
 # Test constants
 # ---------------------------------------------------------------------------
 
 N_ITERS = 14
 MODEL_TYPES = [f"m{i:02d}" for i in range(12)]
-ACTIVE = MODEL_TYPES[:3]    # top-3 by best_score → always re-summarised
-FROZEN = MODEL_TYPES[3:]    # m03..m11 → cache-miss only at iter 1, frozen after
+ACTIVE = MODEL_TYPES[:3]  # top-3 by best_score → always re-summarised
+FROZEN = MODEL_TYPES[3:]  # m03..m11 → cache-miss only at iter 1, frozen after
 
 # Memory-retention seed (Gate G3 prereq). Must persist from iter 2 to iter 14.
 SEED_FINDING = "SEED2: lr>5e-3 explodes when batch_size<8 (3 confirmed runs)"
@@ -61,6 +61,7 @@ SEED_ERR_MSG = "CUDA OOM at batch_size=64 lr=7e-3"
 MAX_CACHE_BYTES = 60 * 1024
 MAX_EXPERT_CTX_BYTES = 12 * 1024
 MAX_NON_CANDIDATES_BYTES = 30 * 1024
+
 
 # A compact ~280-char fake description per model so non_candidates_overview
 # reconstruction includes a realistic description-size contribution.
@@ -79,9 +80,7 @@ def _fake_description(mt: str) -> str:
 _PRIOR_RE = re.compile(
     r"P\d+\. statement=(\".*?(?<!\\)\") evidence_iters=\[([^\]]*)\] strength='(\w+)'"
 )
-_NEW_RE = re.compile(
-    r"N\d+\. statement=(\".*?(?<!\\)\") current_iter=(\d+)"
-)
+_NEW_RE = re.compile(r"N\d+\. statement=(\".*?(?<!\\)\") current_iter=(\d+)")
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +88,7 @@ _NEW_RE = re.compile(
 # ---------------------------------------------------------------------------
 
 
-def _per_model_response(iter_n: int, mt: str) -> Dict[str, Any]:
+def _per_model_response(iter_n: int, mt: str) -> dict[str, Any]:
     """Mock per_model LLM response for one (iter, mt).
 
     Sizes are kept tight so the cumulative cache stays under the 60 KB budget
@@ -100,8 +99,8 @@ def _per_model_response(iter_n: int, mt: str) -> Dict[str, Any]:
     iters.
     """
     base_finding = f"{mt}-i{iter_n}: minor trial gain"
-    key_findings: List[str] = [base_finding]
-    err_sigs: List[Dict[str, Any]] = []
+    key_findings: list[str] = [base_finding]
+    err_sigs: list[dict[str, Any]] = []
     if iter_n == 2 and mt == "m00":
         # Seed the strong finding (first slot) + the unique error signature.
         key_findings = [SEED_FINDING, base_finding]
@@ -129,7 +128,7 @@ def _per_model_response(iter_n: int, mt: str) -> Dict[str, Any]:
     }
 
 
-def _synthesis_response() -> Dict[str, Any]:
+def _synthesis_response() -> dict[str, Any]:
     return {
         "key_findings": ["cross-model: m00 leads"],
         "bottlenecks": ["cross-model: shared VRAM ceiling"],
@@ -139,7 +138,7 @@ def _synthesis_response() -> Dict[str, Any]:
     }
 
 
-def _consolidator_response(user_prompt: str) -> Dict[str, Any]:
+def _consolidator_response(user_prompt: str) -> dict[str, Any]:
     """Mock the ``cache_consolidator.list_merge`` LLM call.
 
     Strategy: echo every PRIOR item verbatim (preserving its evidence_iters
@@ -149,7 +148,7 @@ def _consolidator_response(user_prompt: str) -> Dict[str, Any]:
     (strength desc, evidence_len desc, recency desc) — the >8 overflow
     cap therefore prunes other items first, never the seed.
     """
-    survivors: List[Dict[str, Any]] = []
+    survivors: list[dict[str, Any]] = []
     for stmt_json, iters_str, strength in _PRIOR_RE.findall(user_prompt):
         stmt = json.loads(stmt_json)
         iters = [int(x) for x in iters_str.split(",") if x.strip()]
@@ -183,7 +182,7 @@ def _build_dispatch(bridge):
     metadata used by the test assertions).
     """
 
-    def _dispatch(system_prompt: str, user_prompt: str, **kwargs) -> Dict[str, Any]:
+    def _dispatch(system_prompt: str, user_prompt: str, **kwargs) -> dict[str, Any]:
         label = kwargs.get("label", "")
         if "semantic merge engine" in system_prompt:
             bridge._call_log.append(
@@ -191,9 +190,7 @@ def _build_dispatch(bridge):
             )
             return _consolidator_response(user_prompt)
         if label == "interpretation.synthesis":
-            bridge._call_log.append(
-                {"kind": "synthesis", "iter": bridge._current_iter}
-            )
+            bridge._call_log.append({"kind": "synthesis", "iter": bridge._current_iter})
             return _synthesis_response()
         if label == "interpretation.per_model":
             # Extract model_type from the prompt's "## Model: {mt}" header.
@@ -234,8 +231,8 @@ def _make_summary(mt: str, best_score: float, completed_rounds: int) -> ModelRun
 
 def _make_input(
     *,
-    summaries: List[ModelRunSummary],
-    cache: Dict[str, Any],
+    summaries: list[ModelRunSummary],
+    cache: dict[str, Any],
     iteration: int,
     workspace: str,
 ) -> InterpretationInput:
@@ -264,17 +261,17 @@ _CACHE_TEXT_FIELDS = ("key_findings", "bottlenecks", "score_trend", "strategy_as
 
 
 def _reconstruct_non_candidates_overview(
-    cache: Dict[str, Any],
-    descriptions: Dict[str, str],
-    per_best: Dict[str, Any],
+    cache: dict[str, Any],
+    descriptions: dict[str, str],
+    per_best: dict[str, Any],
     candidate_names: set,
-) -> List[Dict[str, Any]]:
-    overview: List[Dict[str, Any]] = []
+) -> list[dict[str, Any]]:
+    overview: list[dict[str, Any]] = []
     for mt in MODEL_TYPES:
         if mt in candidate_names:
             continue
         entry = cache.get(mt) or {}
-        item: Dict[str, Any] = {
+        item: dict[str, Any] = {
             "model_type": mt,
             "best_score": per_best.get(mt),
             "description": descriptions.get(mt),
@@ -286,14 +283,14 @@ def _reconstruct_non_candidates_overview(
     return overview
 
 
-def _reconstruct_expert_context_block(cache: Dict[str, Any]) -> str:
+def _reconstruct_expert_context_block(cache: dict[str, Any]) -> str:
     """Build a synthetic expert_context_block from the 12 cache entries' top
     key_finding each. This is the same wiring shape the workflow eventually
     builds — one ExpertContextItem per model surfaced as an empirical finding.
     Source-level dehydration (Commit 6.3) bounds this block by bounding the
     cache itself.
     """
-    items: List[ExpertContextItem] = []
+    items: list[ExpertContextItem] = []
     for mt in MODEL_TYPES:
         entry = cache.get(mt) or {}
         findings = entry.get("key_findings") or []
@@ -336,7 +333,7 @@ def chain_run(tmp_path):
         agent = ResultInterpretationAgent(provider="gemini", model_id="test")
         agent.bridge = bridge
 
-        cache: Dict[str, Any] = {}
+        cache: dict[str, Any] = {}
 
         # Use a stable descending score vector so the active set
         # (top_k=3) is always m00, m01, m02 across all 14 iters.
@@ -391,7 +388,7 @@ def test_frozen_cache_skips_llm_and_consolidator(chain_run):
     and zero consolidator calls across all 14 iters."""
     call_log = chain_run["bridge"]._call_log
 
-    per_model_calls_by_mt: Dict[str, List[int]] = {mt: [] for mt in MODEL_TYPES}
+    per_model_calls_by_mt: dict[str, list[int]] = {mt: [] for mt in MODEL_TYPES}
     for c in call_log:
         if c["kind"] == "per_model":
             per_model_calls_by_mt[c["model_type"]].append(c["iter"])
@@ -418,8 +415,7 @@ def test_frozen_cache_skips_llm_and_consolidator(chain_run):
             continue
         for mt in FROZEN:
             assert f"MODEL_TYPE: {mt}" not in c["prompt"], (
-                f"consolidator unexpectedly invoked for frozen model {mt} "
-                f"at iter {c['iter']}"
+                f"consolidator unexpectedly invoked for frozen model {mt} at iter {c['iter']}"
             )
 
 
@@ -439,9 +435,7 @@ def test_memory_retention_seed_survives_to_iter_14(chain_run):
         f"seed strong finding lost between iter 2 and iter {N_ITERS}; "
         f"surviving key_findings statements: {statements}"
     )
-    seed_idx = next(
-        i for i, f in enumerate(entry.key_findings) if SEED_FINDING in f.statement
-    )
+    seed_idx = next(i for i, f in enumerate(entry.key_findings) if SEED_FINDING in f.statement)
     assert entry.key_findings[seed_idx].strength == "strong", (
         "seed finding lost its strong-strength promotion"
     )
@@ -507,7 +501,7 @@ def test_iter_14_size_targets(chain_run, capsys):
 # ---------------------------------------------------------------------------
 
 
-def _strip_stats(entry: Dict[str, Any]) -> Dict[str, Any]:
+def _strip_stats(entry: dict[str, Any]) -> dict[str, Any]:
     """Remove the legacy ``_stats`` key + the modern ``model_type`` so
     :meth:`CacheEntry.model_validate` accepts the remainder directly. The
     caller re-injects ``model_type``."""

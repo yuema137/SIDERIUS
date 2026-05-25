@@ -23,6 +23,7 @@ canonical gate for Phase D — if it fails, re-run
 
 See ``docs/align_denoising_score.md`` §5.2.
 """
+
 from __future__ import annotations
 
 import json
@@ -51,12 +52,11 @@ _SAMPLE_SEGMENTS = [0, 100, 199]
 def anchor_map():
     if not os.path.exists(_ANCHOR_PATH):
         pytest.skip(f"Anchor map not found at {_ANCHOR_PATH}")
-    with open(_ANCHOR_PATH, "r", encoding="utf-8") as f:
+    with open(_ANCHOR_PATH, encoding="utf-8") as f:
         return json.load(f)
 
 
 class TestAnchorMapConsistency:
-
     def test_stored_s_max_matches_max_over_segments(self, anchor_map):
         """Top-level ``s_max`` must equal the maximum over all stored
         per-segment values — the invariant enforced by

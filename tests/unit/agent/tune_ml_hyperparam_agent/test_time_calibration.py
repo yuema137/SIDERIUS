@@ -11,6 +11,7 @@ Covers:
   - make_entry computes ratio, estimate_violated, ISO timestamp
   - detect_drift triggers only on N consecutive violations
 """
+
 from __future__ import annotations
 
 import json
@@ -19,7 +20,6 @@ import os
 import pytest
 
 from agent.skills.evaluate_time_skill import calibration as cal
-
 
 # ---------------------------------------------------------------------------
 # Path helpers
@@ -164,9 +164,15 @@ def test_make_entry_shape_and_ratio():
 
 def test_make_entry_estimate_not_violated_when_under_budget():
     e = cal.make_entry(
-        gpu_name="g", model_type="m", seg_size=1, batch_size=1,
-        total_steps=1, warmup_ms_per_step=10.0, actual_ms_per_step=5.0,
-        estimated_minutes=20.0, actual_minutes=10.0,
+        gpu_name="g",
+        model_type="m",
+        seg_size=1,
+        batch_size=1,
+        total_steps=1,
+        warmup_ms_per_step=10.0,
+        actual_ms_per_step=5.0,
+        estimated_minutes=20.0,
+        actual_minutes=10.0,
     )
     assert e["estimate_violated"] is False
     assert e["ratio"] == pytest.approx(0.5)
@@ -174,9 +180,15 @@ def test_make_entry_estimate_not_violated_when_under_budget():
 
 def test_make_entry_handles_zero_warmup_safely():
     e = cal.make_entry(
-        gpu_name="g", model_type="m", seg_size=1, batch_size=1,
-        total_steps=1, warmup_ms_per_step=0.0, actual_ms_per_step=5.0,
-        estimated_minutes=1.0, actual_minutes=1.0,
+        gpu_name="g",
+        model_type="m",
+        seg_size=1,
+        batch_size=1,
+        total_steps=1,
+        warmup_ms_per_step=0.0,
+        actual_ms_per_step=5.0,
+        estimated_minutes=1.0,
+        actual_minutes=1.0,
     )
     # Ratio falls back to 1.0 when warmup is zero (avoids div-by-zero).
     assert e["ratio"] == pytest.approx(1.0)
@@ -305,7 +317,9 @@ def test_detect_drift_only_inspects_last_n_entries():
     """Old violations don't trigger drift if recent entries are clean."""
     table = {
         "history": [
-            _hist_entry(True), _hist_entry(True), _hist_entry(True),
+            _hist_entry(True),
+            _hist_entry(True),
+            _hist_entry(True),
             _hist_entry(False),
         ],
         "gpu_name": "g",

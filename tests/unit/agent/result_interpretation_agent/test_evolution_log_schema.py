@@ -23,6 +23,7 @@ the JSONL contract via fast unit tests:
   - missing workspace_root is created (mkdirs(exist_ok=True))
   - IO errors are swallowed — observability never breaks the pipeline
 """
+
 from __future__ import annotations
 
 import json
@@ -32,7 +33,6 @@ from datetime import datetime
 from unittest.mock import patch
 
 from nodes.result_interpretation_agent import _append_evolution_log
-
 
 _ISO_SECONDS = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$")
 
@@ -45,6 +45,7 @@ def _read_lines(path: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 # 1. Basic write contract
 # ---------------------------------------------------------------------------
+
 
 def test_first_call_creates_file_with_one_line(tmp_path):
     """First call lands a single JSONL row at the canonical path."""
@@ -61,9 +62,8 @@ def test_caller_payload_fields_reach_disk(tmp_path):
     ``result_interpretation_agent.py:1177`` and ``:1246``) must round-trip
     through json.dumps unchanged."""
     payload = {
-        "iteration":         3,
-        "evolution_stats":   {"vocab_total": 12, "promoted_this_iter": 2,
-                              "is_degraded": False},
+        "iteration": 3,
+        "evolution_stats": {"vocab_total": 12, "promoted_this_iter": 2, "is_degraded": False},
         "best_score_so_far": -2.4321,
         "take_home_message": "wavelet branch outperforms cnn on iter 3",
     }
@@ -79,9 +79,7 @@ def test_writer_prepends_timestamp(tmp_path):
     _append_evolution_log(str(tmp_path), {"iteration": 1})
     [row] = _read_lines(str(tmp_path / "evolution_log.jsonl"))
     assert "timestamp" in row
-    assert _ISO_SECONDS.match(row["timestamp"]), (
-        f"timestamp shape: {row['timestamp']!r}"
-    )
+    assert _ISO_SECONDS.match(row["timestamp"]), f"timestamp shape: {row['timestamp']!r}"
     # And it is parseable.
     datetime.fromisoformat(row["timestamp"])
 
@@ -106,6 +104,7 @@ def test_caller_supplied_timestamp_is_overwritten(tmp_path):
 # 2. Append-only growth
 # ---------------------------------------------------------------------------
 
+
 def test_repeated_calls_append_distinct_rows(tmp_path):
     """The file is opened in 'a' mode — N calls must produce N rows in
     order, never overwriting prior content."""
@@ -120,11 +119,14 @@ def test_smoke_extension_keys_pass_through(tmp_path):
     ``is_degraded`` and ``_smoke_marker`` alongside the production keys.
     The writer must not filter unknown keys — it is a transparent passthrough.
     """
-    _append_evolution_log(str(tmp_path), {
-        "iteration":     7,
-        "is_degraded":   True,
-        "_smoke_marker": "iter_7",
-    })
+    _append_evolution_log(
+        str(tmp_path),
+        {
+            "iteration": 7,
+            "is_degraded": True,
+            "_smoke_marker": "iter_7",
+        },
+    )
     [row] = _read_lines(str(tmp_path / "evolution_log.jsonl"))
     assert row["is_degraded"] is True
     assert row["_smoke_marker"] == "iter_7"
@@ -133,6 +135,7 @@ def test_smoke_extension_keys_pass_through(tmp_path):
 # ---------------------------------------------------------------------------
 # 3. Workspace bootstrap + IO robustness
 # ---------------------------------------------------------------------------
+
 
 def test_missing_workspace_is_created(tmp_path):
     """The interpretation agent calls this helper before its own iter dir
@@ -152,10 +155,13 @@ def test_default_str_fallback_for_non_json_native_values(tmp_path):
     Pydantic ``EvolutionStats``) that json.dumps cannot serialise natively,
     and we never want the observability layer to raise."""
     when = datetime(2026, 5, 6, 12, 0, 0)
-    _append_evolution_log(str(tmp_path), {
-        "iteration": 1,
-        "started_at": when,
-    })
+    _append_evolution_log(
+        str(tmp_path),
+        {
+            "iteration": 1,
+            "started_at": when,
+        },
+    )
     [row] = _read_lines(str(tmp_path / "evolution_log.jsonl"))
     assert row["started_at"] == str(when)
 

@@ -24,7 +24,8 @@ Usage:
 from __future__ import annotations
 
 import json
-from typing import Literal, Optional
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -54,7 +55,7 @@ class NodeLLMConfig(BaseModel):
         default="gemini-3.1-flash-lite-preview",
         description="Specific model ID passed to the provider.",
     )
-    max_retries: Optional[int] = Field(
+    max_retries: int | None = Field(
         default=None,
         description=(
             "Maximum retry attempts for transient API errors (429, 5xx). "
@@ -176,28 +177,29 @@ class WorkflowLLMConfig(BaseModel):
     Future agents that grow sub-call needs define their own typed config
     class following the same pattern.
     """
+
     model_config = {"populate_by_name": True}
 
-    interpret: Optional[NodeLLMConfig] = Field(
+    interpret: NodeLLMConfig | None = Field(
         default=None,
         description="LLM config for the interpretation agent.",
     )
-    propose: Optional[ProposalLLMConfig] = Field(
+    propose: ProposalLLMConfig | None = Field(
         default=None,
         description="LLM config for the proposal agent's three-stage pipeline. "
-                    "Has nested comparison/reasoning/proposing slots, each a full "
-                    "NodeLLMConfig. None = agent uses its built-in defaults.",
+        "Has nested comparison/reasoning/proposing slots, each a full "
+        "NodeLLMConfig. None = agent uses its built-in defaults.",
     )
-    implement: Optional[NodeLLMConfig] = Field(
+    implement: NodeLLMConfig | None = Field(
         default=None,
         description="LLM config for the implementor agent.",
     )
-    validate_model: Optional[NodeLLMConfig] = Field(
+    validate_model: NodeLLMConfig | None = Field(
         default=None,
         description="LLM config for the validator agent.",
         alias="validate",
     )
-    tune: Optional[TunerLLMConfig] = Field(
+    tune: TunerLLMConfig | None = Field(
         default=None,
         description=(
             "LLM config for the tuning agent. Has nested planner/reflector "
@@ -240,8 +242,8 @@ class WorkflowLLMConfig(BaseModel):
             # Flatten the nested TunerLLMConfig into the legacy flat keys
             # that HyperparamTuningInput / LLMBridge expect.
             result = {
-                "provider":         config.planner.provider,
-                "model_id":         config.planner.model_id,
+                "provider": config.planner.provider,
+                "model_id": config.planner.model_id,
                 "reflect_provider": config.reflector.provider,
                 "reflect_model_id": config.reflector.model_id,
             }
@@ -253,16 +255,16 @@ class WorkflowLLMConfig(BaseModel):
             # Flatten the nested ProposalLLMConfig into per-stage kwargs.
             # The proposal agent reads these to construct per-stage bridges.
             result = {
-                "comparison_provider":  config.comparison.provider,
-                "comparison_model_id":  config.comparison.model_id,
-                "reasoning_provider":   config.reasoning.provider,
-                "reasoning_model_id":   config.reasoning.model_id,
-                "proposing_provider":   config.proposing.provider,
-                "proposing_model_id":   config.proposing.model_id,
+                "comparison_provider": config.comparison.provider,
+                "comparison_model_id": config.comparison.model_id,
+                "reasoning_provider": config.reasoning.provider,
+                "reasoning_model_id": config.reasoning.model_id,
+                "proposing_provider": config.proposing.provider,
+                "proposing_model_id": config.proposing.model_id,
                 # Legacy compat: also provide top-level provider/model_id
                 # from the reasoning stage (the "main" model for the agent).
-                "provider":             config.reasoning.provider,
-                "model_id":             config.reasoning.model_id,
+                "provider": config.reasoning.provider,
+                "model_id": config.reasoning.model_id,
             }
             if config.reasoning.max_retries is not None:
                 result["max_retries"] = config.reasoning.max_retries
@@ -274,16 +276,20 @@ class WorkflowLLMConfig(BaseModel):
         return result
 
     @classmethod
-    def from_json(cls, path: str) -> "WorkflowLLMConfig":
+    def from_json(cls, path: str) -> WorkflowLLMConfig:
         """Load from a JSON file."""
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
         return cls.model_validate(data)
 
     @classmethod
-    def uniform(cls, provider: str, model_id: str,
-                reflect_provider: Optional[str] = None,
-                reflect_model_id: Optional[str] = None) -> "WorkflowLLMConfig":
+    def uniform(
+        cls,
+        provider: str,
+        model_id: str,
+        reflect_provider: str | None = None,
+        reflect_model_id: str | None = None,
+    ) -> WorkflowLLMConfig:
         """
         Create a config that uses the same provider/model for all nodes,
         with optional reflector overrides for the tuner slot only.

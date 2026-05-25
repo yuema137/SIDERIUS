@@ -7,22 +7,25 @@ Covers F.1 (AgentCard schema), F.2 (ProposalInput.agent_cards),
 F.3 (VocabEntry.origin), F.4 (render_agent_cards), F.5 (render_expert_context
 dedup and sorting), and F.8 (local_full_context mindset/agent_cards params).
 """
-import pytest
-from agent.schemas.proposal import AgentCard, ProposalInput, VocabEntry
-from agent.prompt_templates.proposal import render_agent_cards, render_expert_context
-from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import local_full_context
 
+import pytest
+from pydantic import ValidationError
+
+from agent.prompt_templates.proposal import render_agent_cards, render_expert_context
+from agent.schemas.proposal import AgentCard, ProposalInput, VocabEntry
+from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import local_full_context
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _make_card(**kwargs) -> AgentCard:
     defaults = dict(
         agent_name="ml_literature_review",
         role="Scans ML papers for architectural techniques.",
         expertise_domain="Signal processing, deep learning for time-series.",
-        coverage="arXiv + OpenReview 2018–present.",
+        coverage="arXiv + OpenReview 2018-present.",
         limitations="Cannot assess physics feasibility.",
         trust_guidance="Treat as promising priors — only experiment runs confirm applicability.",
     )
@@ -30,8 +33,13 @@ def _make_card(**kwargs) -> AgentCard:
     return AgentCard(**defaults)
 
 
-def _make_item(cite_id: str, kind: str = "empirical",
-               source: str = "ml_lit", confidence=None, content: str = "finding") -> dict:
+def _make_item(
+    cite_id: str,
+    kind: str = "empirical",
+    source: str = "ml_lit",
+    confidence=None,
+    content: str = "finding",
+) -> dict:
     return {
         "cite_id": cite_id,
         "kind": kind,
@@ -45,6 +53,7 @@ def _make_item(cite_id: str, kind: str = "empirical",
 # F.1 — AgentCard schema
 # ---------------------------------------------------------------------------
 
+
 class TestAgentCard:
     def test_valid_card(self):
         card = _make_card()
@@ -52,22 +61,25 @@ class TestAgentCard:
         assert card.trust_guidance.startswith("Treat as")
 
     def test_role_max_length_enforced(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             _make_card(role="x" * 201)
 
     def test_expertise_domain_max_length_enforced(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             _make_card(expertise_domain="x" * 301)
 
     def test_trust_guidance_max_length_enforced(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             _make_card(trust_guidance="x" * 401)
 
     def test_missing_required_field_raises(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             AgentCard(
-                role="r", expertise_domain="e", coverage="c",
-                limitations="l", trust_guidance="t",
+                role="r",
+                expertise_domain="e",
+                coverage="c",
+                limitations="l",
+                trust_guidance="t",
                 # missing agent_name
             )
 
@@ -75,6 +87,7 @@ class TestAgentCard:
 # ---------------------------------------------------------------------------
 # F.2 — ProposalInput.agent_cards field
 # ---------------------------------------------------------------------------
+
 
 class TestProposalInputAgentCards:
     def test_defaults_to_empty_list(self):
@@ -107,6 +120,7 @@ class TestProposalInputAgentCards:
 # F.3 — VocabEntry.origin field
 # ---------------------------------------------------------------------------
 
+
 class TestVocabEntryOrigin:
     def test_origin_defaults_to_none(self):
         entry = VocabEntry(name="dilated_causal_conv", kind="feature", description="DCCs.")
@@ -114,7 +128,9 @@ class TestVocabEntryOrigin:
 
     def test_origin_set_for_external_agent(self):
         entry = VocabEntry(
-            name="learnable_filterbank", kind="feature", description="Filterbank.",
+            name="learnable_filterbank",
+            kind="feature",
+            description="Filterbank.",
             origin="ml_literature_review",
         )
         assert entry.origin == "ml_literature_review"
@@ -124,6 +140,7 @@ class TestVocabEntryOrigin:
 # ---------------------------------------------------------------------------
 # F.4 — render_agent_cards()
 # ---------------------------------------------------------------------------
+
 
 class TestRenderAgentCards:
     def test_empty_list_returns_empty_string(self):
@@ -148,8 +165,9 @@ class TestRenderAgentCards:
 
     def test_two_cards_both_rendered(self):
         card1 = _make_card(agent_name="ml_literature_review")
-        card2 = _make_card(agent_name="physics_literature_review",
-                           role="Extracts physical constraints.")
+        card2 = _make_card(
+            agent_name="physics_literature_review", role="Extracts physical constraints."
+        )
         result = render_agent_cards([card1, card2])
         assert "ml_literature_review" in result
         assert "physics_literature_review" in result
@@ -162,6 +180,7 @@ class TestRenderAgentCards:
 # ---------------------------------------------------------------------------
 # F.5 — render_expert_context(): dedup by cite_id + confidence sorting
 # ---------------------------------------------------------------------------
+
 
 class TestRenderExpertContextDedup:
     def test_duplicate_cite_id_deduplicated(self):
@@ -230,10 +249,12 @@ class TestRenderExpertContextConfidenceSorting:
 # F.8 — local_full_context protocol: mindset and agent_cards params
 # ---------------------------------------------------------------------------
 
+
 class TestLocalFullContextPhaseF:
     def _make_interp_output(self):
         """Minimal InterpretationOutput for protocol tests."""
         from agent.schemas.interpretation import InterpretationOutput
+
         return InterpretationOutput(
             model_types=["wavenet"],
             model_descriptions={"wavenet": "Wavenet model."},
@@ -252,8 +273,11 @@ class TestLocalFullContextPhaseF:
         )
 
     def _make_storage(self):
-        from agent.schemas.storage import StorageConfig, LocalStorageConfig
-        return StorageConfig(backend="local", local=LocalStorageConfig(workspace="/tmp", run_name="test"))
+        from agent.schemas.storage import LocalStorageConfig, StorageConfig
+
+        return StorageConfig(
+            backend="local", local=LocalStorageConfig(workspace="/tmp", run_name="test")
+        )
 
     def test_mindset_passed_through(self):
         output = self._make_interp_output()

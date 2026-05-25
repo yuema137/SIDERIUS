@@ -31,8 +31,10 @@ These tests are explicitly tied to the four Verification Metrics in
    guards the new ``_fmt_log(-inf)`` branch — the legacy code would have
    emitted ``"\u2212inf.0000"`` garbage.
 """
+
 from __future__ import annotations
 
+import itertools
 import json
 import math
 
@@ -45,7 +47,6 @@ from execute_tools.scoring_helpers import (
 )
 from execute_tools.scoring_utils import coerce_nonfinite_to_none
 
-
 # =============================================================================
 # 1. Historical-replay ghost-score killer
 # =============================================================================
@@ -57,12 +58,12 @@ from execute_tools.scoring_utils import coerce_nonfinite_to_none
 # on-disk per-record JSONs and unrolling the file_vector + sample_set
 # linear sums. Old scalar for every entry was -2.7708098959837675.
 _HISTORICAL_GHOST_GRAND_MEANS = {
-    "spectral_skip_tcn rec_003":            0.008939,
-    "spectral_skip_tcn rec_004":            0.008739,
-    "spectral_skip_tcn rec_005":            0.006588,
-    "dual_rate_gated_causal_cnn rec_010":   0.005227,
-    "gated_recycle_skip_tcn rec_011":       0.005091,
-    "fused_spectral_gate_tcn rec_009":      0.005285,
+    "spectral_skip_tcn rec_003": 0.008939,
+    "spectral_skip_tcn rec_004": 0.008739,
+    "spectral_skip_tcn rec_005": 0.006588,
+    "dual_rate_gated_causal_cnn rec_010": 0.005227,
+    "gated_recycle_skip_tcn rec_011": 0.005091,
+    "fused_spectral_gate_tcn rec_009": 0.005285,
     "hierarchical_cycle_fusion_tcn rec_004": 0.005398,
 }
 
@@ -79,8 +80,7 @@ class TestGhostScoreKiller:
 
     def test_seven_records_produce_seven_distinct_scalars(self):
         new_scalars = {
-            label: math.log(gm, _LOG_BASE)
-            for label, gm in _HISTORICAL_GHOST_GRAND_MEANS.items()
+            label: math.log(gm, _LOG_BASE) for label, gm in _HISTORICAL_GHOST_GRAND_MEANS.items()
         }
         # All seven must be pairwise distinct under bit-exact equality.
         assert len(set(new_scalars.values())) == 7, (
@@ -105,10 +105,9 @@ class TestGhostScoreKiller:
 
     def test_min_adjacent_gap_exceeds_noise_floor(self):
         new_scalars = sorted(
-            math.log(gm, _LOG_BASE)
-            for gm in _HISTORICAL_GHOST_GRAND_MEANS.values()
+            math.log(gm, _LOG_BASE) for gm in _HISTORICAL_GHOST_GRAND_MEANS.values()
         )
-        gaps = [b - a for a, b in zip(new_scalars[:-1], new_scalars[1:])]
+        gaps = [b - a for a, b in itertools.pairwise(new_scalars)]
         min_gap = min(gaps)
         assert min_gap > _NOISE_FLOOR_LOG_UNITS, (
             f"Tightest adjacent gap ({min_gap:.6f} log-units) is not "
@@ -123,10 +122,7 @@ class TestGhostScoreKiller:
         )
 
     def test_span_is_physically_meaningful(self):
-        scalars = [
-            math.log(gm, _LOG_BASE)
-            for gm in _HISTORICAL_GHOST_GRAND_MEANS.values()
-        ]
+        scalars = [math.log(gm, _LOG_BASE) for gm in _HISTORICAL_GHOST_GRAND_MEANS.values()]
         span = max(scalars) - min(scalars)
         # Audit observed ~0.34 log-unit span across the seven records.
         assert span > 0.2, (
@@ -256,10 +252,10 @@ class TestFmtLogSentinelHandling:
 
     def test_neg_inf_renders_unicode_minus_infinity(self):
         # Unicode minus + infinity glyph; 4 chars total (no garbage suffix).
-        assert _fmt_log(float("-inf")) == "\u2212\u221E"
+        assert _fmt_log(float("-inf")) == "\u2212\u221e"
 
     def test_pos_inf_renders_infinity(self):
-        assert _fmt_log(float("inf")) == "\u221E"
+        assert _fmt_log(float("inf")) == "\u221e"
 
     def test_nan_renders_explicit_string(self):
         assert _fmt_log(float("nan")) == "NaN"

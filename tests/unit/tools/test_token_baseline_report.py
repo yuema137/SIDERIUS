@@ -9,21 +9,19 @@ Covers the §8 Commit 5 (Rev 6) pre-commit checklist:
 - Pre-flight lint refuses to publish from a corrupted JSONL
 - Verdict line written at the top of the top-3 bloat report
 """
+
 from __future__ import annotations
 
 import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(REPO_ROOT))
-
-from agent.schemas.telemetry import TokenUsageRow  # noqa: E402
-from tools.build_token_baseline_report import (  # noqa: E402
+from agent.schemas.telemetry import TokenUsageRow
+from tools.build_token_baseline_report import (
     DEFAULT_RATE_COMPLETION,
     DEFAULT_RATE_PROMPT,
     BloatAlert,
@@ -39,6 +37,7 @@ from tools.build_token_baseline_report import (  # noqa: E402
     render_top3_bloat_report,
 )
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # ---------------------------------------------------------------------------
 # Helpers — synthetic row factory
@@ -56,25 +55,27 @@ def _make_row(
     chars_total: int = 200,
     attempt: int = 0,
     status: str = "ok",
-    components: Dict[str, int] | None = None,
+    components: dict[str, int] | None = None,
     run_id: str = _RUN_ID,
 ) -> TokenUsageRow:
-    return TokenUsageRow.model_validate({
-        "ts": f"2026-05-05T00:00:{iter_:02d}Z",
-        "run_id": run_id,
-        "run_name": "test",
-        "iter": iter_,
-        "label": label,
-        "model": "gpt-4o-mini",
-        "provider": "openai",
-        "tokens": {"prompt": prompt, "completion": completion, "total": prompt + completion},
-        "chars": {"system": 0, "user": chars_total, "total": chars_total},
-        "components": components or {},
-        "extra": {"attempt": attempt, "status": status},
-    })
+    return TokenUsageRow.model_validate(
+        {
+            "ts": f"2026-05-05T00:00:{iter_:02d}Z",
+            "run_id": run_id,
+            "run_name": "test",
+            "iter": iter_,
+            "label": label,
+            "model": "gpt-4o-mini",
+            "provider": "openai",
+            "tokens": {"prompt": prompt, "completion": completion, "total": prompt + completion},
+            "chars": {"system": 0, "user": chars_total, "total": chars_total},
+            "components": components or {},
+            "extra": {"attempt": attempt, "status": status},
+        }
+    )
 
 
-def _write_jsonl(path: Path, rows: List[TokenUsageRow]) -> None:
+def _write_jsonl(path: Path, rows: list[TokenUsageRow]) -> None:
     with path.open("w") as f:
         for r in rows:
             f.write(json.dumps(r.model_dump()) + "\n")
@@ -83,6 +84,7 @@ def _write_jsonl(path: Path, rows: List[TokenUsageRow]) -> None:
 # ---------------------------------------------------------------------------
 # 1. USD precision
 # ---------------------------------------------------------------------------
+
 
 def test_usd_precision_to_four_decimals():
     """Spec: 100K prompt + 10K completion at default rates = $1.30 exactly."""
@@ -108,6 +110,7 @@ def test_usd_overrides_propagate():
 # ---------------------------------------------------------------------------
 # 2. Happy / Recovery segmentation
 # ---------------------------------------------------------------------------
+
 
 def test_happy_path_classifier():
     happy = _make_row(iter_=1, attempt=0, status="ok")
@@ -142,6 +145,7 @@ def test_segmentation_3_row_jsonl():
 # ---------------------------------------------------------------------------
 # 3. Growth slope — linear regression robust to missing iters
 # ---------------------------------------------------------------------------
+
 
 def test_linear_slope_perfect_line():
     """y = 2x + 1 fit to integer x — slope=2, R²=1."""
@@ -195,13 +199,15 @@ def test_per_label_slopes_skips_missing_iters():
 # 4. Alerts
 # ---------------------------------------------------------------------------
 
+
 def test_bloat_alert_fires_above_threshold():
     """1 iter whose total cost computes to ~$2.00 → [BLOAT_ALERT] fires."""
     # 200_000 prompt + 0 completion = 200_000 * 10 / 1e6 = $2.00
     rows = [_make_row(iter_=1, prompt=200_000, completion=0)]
     aggs = aggregate_by_iter(rows)
     bloats, _ = detect_alerts(
-        rows, aggs,
+        rows,
+        aggs,
         rate_prompt=DEFAULT_RATE_PROMPT,
         rate_completion=DEFAULT_RATE_COMPLETION,
         bloat_usd_threshold=1.50,
@@ -218,7 +224,8 @@ def test_bloat_alert_silent_below_threshold():
     rows = [_make_row(iter_=1, prompt=120_000, completion=0)]
     aggs = aggregate_by_iter(rows)
     bloats, _ = detect_alerts(
-        rows, aggs,
+        rows,
+        aggs,
         rate_prompt=DEFAULT_RATE_PROMPT,
         rate_completion=DEFAULT_RATE_COMPLETION,
         bloat_usd_threshold=1.50,
@@ -232,7 +239,8 @@ def test_context_explosion_alert_fires_above_threshold():
     rows = [_make_row(iter_=1, prompt=60_000, completion=100, label="proposer.proposing")]
     aggs = aggregate_by_iter(rows)
     _, explosions = detect_alerts(
-        rows, aggs,
+        rows,
+        aggs,
         rate_prompt=DEFAULT_RATE_PROMPT,
         rate_completion=DEFAULT_RATE_COMPLETION,
         bloat_usd_threshold=1.50,
@@ -249,7 +257,8 @@ def test_context_explosion_silent_at_threshold():
     rows = [_make_row(iter_=1, prompt=50_000, completion=100)]
     aggs = aggregate_by_iter(rows)
     _, explosions = detect_alerts(
-        rows, aggs,
+        rows,
+        aggs,
         rate_prompt=DEFAULT_RATE_PROMPT,
         rate_completion=DEFAULT_RATE_COMPLETION,
         bloat_usd_threshold=1.50,
@@ -262,25 +271,32 @@ def test_context_explosion_silent_at_threshold():
 # 5. Verdict + top-3 rendering
 # ---------------------------------------------------------------------------
 
+
 def test_verdict_written_at_top_of_top3_report():
     """Spec: §1.9.2 verdict is written explicitly at the top of top3 report."""
     rows = [
         _make_row(
-            iter_=1, label="proposer.proposing",
+            iter_=1,
+            label="proposer.proposing",
             components={"candidates_markdown": 1000, "vocab_block": 500},
         ),
         _make_row(
-            iter_=2, label="proposer.proposing",
+            iter_=2,
+            label="proposer.proposing",
             components={"candidates_markdown": 5000, "vocab_block": 600},
         ),
     ]
     aggs = aggregate_by_iter(rows)
     growth = aggregate_component_growth(aggs)
     from tools.build_token_baseline_report import compute_verdict
+
     verdict = compute_verdict(growth)
     body = render_top3_bloat_report(
-        aggs, growth, verdict,
-        workspace=Path("/tmp/fake"), run_id=_RUN_ID,
+        aggs,
+        growth,
+        verdict,
+        workspace=Path("/tmp/fake"),
+        run_id=_RUN_ID,
     )
     # Verdict line must appear in the first ~5 lines
     head = "\n".join(body.splitlines()[:8])
@@ -292,28 +308,41 @@ def test_verdict_written_at_top_of_top3_report():
 # 6. End-to-end positive (synthetic happy + recovery + components)
 # ---------------------------------------------------------------------------
 
+
 def test_end_to_end_positive_run(tmp_path: Path):
     """Tool runs cleanly on a small synthetic workspace and writes both
     reports. Validates the full pipeline including pre-flight lint."""
     ws = tmp_path / "ws"
     ws.mkdir()
-    rows: List[TokenUsageRow] = []
+    rows: list[TokenUsageRow] = []
     for it in (1, 2, 3):
-        rows.append(_make_row(
-            iter_=it, label="proposer.proposing",
-            prompt=10_000 * it, completion=1_000 * it,
-            components={"candidates_markdown": 800 * it, "vocab_block": 200},
-        ))
-        rows.append(_make_row(
-            iter_=it, label="interpretation.synthesis",
-            prompt=5_000 * it, completion=500 * it,
-        ))
+        rows.append(
+            _make_row(
+                iter_=it,
+                label="proposer.proposing",
+                prompt=10_000 * it,
+                completion=1_000 * it,
+                components={"candidates_markdown": 800 * it, "vocab_block": 200},
+            )
+        )
+        rows.append(
+            _make_row(
+                iter_=it,
+                label="interpretation.synthesis",
+                prompt=5_000 * it,
+                completion=500 * it,
+            )
+        )
     _write_jsonl(ws / "token_usage.jsonl", rows)
     out_dir = tmp_path / "reports"
-    rc = main([
-        "--workspace", str(ws),
-        "--output-dir", str(out_dir),
-    ])
+    rc = main(
+        [
+            "--workspace",
+            str(ws),
+            "--output-dir",
+            str(out_dir),
+        ]
+    )
     assert rc == 0
     baseline = (out_dir / "v12_token_baseline.md").read_text()
     top3 = (out_dir / "v12_top3_bloat.md").read_text()
@@ -328,6 +357,7 @@ def test_end_to_end_positive_run(tmp_path: Path):
 # 7. Negative — corrupted JSONL is rejected
 # ---------------------------------------------------------------------------
 
+
 def test_corrupted_jsonl_blocks_publication(tmp_path: Path):
     """Spec: corrupted log → 'AUDIT LOG CORRUPTION DETECTED' on stderr,
     exit nonzero. We never publish numbers from a corrupted log."""
@@ -341,11 +371,17 @@ def test_corrupted_jsonl_blocks_publication(tmp_path: Path):
         f.write("{this is not json\n")
     out_dir = tmp_path / "reports"
     proc = subprocess.run(
-        [sys.executable,
-         str(REPO_ROOT / "tools" / "build_token_baseline_report.py"),
-         "--workspace", str(ws),
-         "--output-dir", str(out_dir)],
-        capture_output=True, text=True, cwd=str(REPO_ROOT),
+        [
+            sys.executable,
+            str(REPO_ROOT / "tools" / "build_token_baseline_report.py"),
+            "--workspace",
+            str(ws),
+            "--output-dir",
+            str(out_dir),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(REPO_ROOT),
     )
     assert proc.returncode != 0
     assert "AUDIT LOG CORRUPTION DETECTED" in proc.stderr
@@ -361,10 +397,14 @@ def test_skip_lint_bypasses_corruption_block(tmp_path: Path):
     with (ws / "token_usage.jsonl").open("w") as f:
         f.write(json.dumps(valid) + "\n")
     out_dir = tmp_path / "reports"
-    rc = main([
-        "--workspace", str(ws),
-        "--output-dir", str(out_dir),
-        "--skip-lint",
-    ])
+    rc = main(
+        [
+            "--workspace",
+            str(ws),
+            "--output-dir",
+            str(out_dir),
+            "--skip-lint",
+        ]
+    )
     assert rc == 0
     assert (out_dir / "v12_token_baseline.md").exists()

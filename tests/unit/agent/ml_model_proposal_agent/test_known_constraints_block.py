@@ -16,12 +16,13 @@ Validates:
     - When dataset_config is None, the placeholder collapses to empty (no leftover braces)
     - Rendered block precedes the Rules section (high salience near baseline_config)
 """
+
 from agent.prompt_templates.proposal import load_stage_prompt
 from agent.prompts import _format_known_constraints_block
 from execute_tools.dataset_config import TIDMAD
 
-
 # ---- _format_known_constraints_block ----
+
 
 def test_empty_when_dataset_config_none():
     assert _format_known_constraints_block(None) == ""
@@ -61,6 +62,7 @@ def test_block_mentions_recovery_hint():
 
 
 # ---- proposing_stage prompt integration ----
+
 
 def test_proposing_stage_renders_block_when_supplied():
     block = _format_known_constraints_block(TIDMAD)

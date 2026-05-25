@@ -8,7 +8,8 @@ and no side effects. They prepare context for the reasoning pipeline.
 
 import os
 import re
-from typing import Any, Dict, List, Optional
+from collections.abc import Iterable
+from typing import Any
 
 from agent.schemas.proposal import (
     ModelSelectionStrategy,
@@ -23,10 +24,11 @@ _SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # B.10 — Model selection pre-filter
 # ---------------------------------------------------------------------------
 
+
 def select_candidate_models(
-    interpretation: Dict[str, Any],
+    interpretation: dict[str, Any],
     strategy: ModelSelectionStrategy,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Pre-filter past models before the comparison stage.
 
@@ -89,10 +91,7 @@ def select_candidate_models(
     if method == "feature_match":
         # Filter to models whose description mentions the target feature
         feature = params.get("feature", "")
-        return [
-            m for m in all_models
-            if m.get("description") and feature in m["description"]
-        ]
+        return [m for m in all_models if m.get("description") and feature in m["description"]]
 
     # Unknown strategy — return all with a warning
     print(f"[proposal_helpers] Unknown model selection method: {method!r}, returning all models.")
@@ -103,7 +102,7 @@ def select_candidate_models(
 _BUILTIN_MODELS = {"punet", "wavenet", "fcnet", "transformer", "rnn", "gated_fno"}
 
 
-def _guess_source(model_type: str, interpretation: Dict[str, Any]) -> str:
+def _guess_source(model_type: str, interpretation: dict[str, Any]) -> str:
     """Guess whether a model was agent-proposed based on available data."""
     # Simple heuristic: if it's not a built-in, it's agent-proposed
     return "proposed"
@@ -112,6 +111,7 @@ def _guess_source(model_type: str, interpretation: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 # B.16a — Exploration mode resolver
 # ---------------------------------------------------------------------------
+
 
 def load_model_source(model_type: str) -> str | None:
     """
@@ -134,7 +134,7 @@ def load_model_source(model_type: str) -> str | None:
     ]
     for path in plugin_candidates:
         if os.path.isfile(path):
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 return f.read()
 
     # Try built-in models — extract from models_sandbox.py
@@ -156,7 +156,7 @@ def load_model_source(model_type: str) -> str | None:
     if not class_names:
         return None
 
-    with open(sandbox_path, "r", encoding="utf-8") as f:
+    with open(sandbox_path, encoding="utf-8") as f:
         full_source = f.read()
 
     # Extract each class definition (from 'class Name' to the next top-level class or EOF)
@@ -171,7 +171,9 @@ def load_model_source(model_type: str) -> str | None:
                 class_lines = [line]
             elif in_class:
                 # End of class: next top-level class or top-level non-indented code
-                if re.match(r"^class \w", line) or (re.match(r"^[A-Z_]", line) and not line.startswith(" ")):
+                if re.match(r"^class \w", line) or (
+                    re.match(r"^[A-Z_]", line) and not line.startswith(" ")
+                ):
                     in_class = False
                 else:
                     class_lines.append(line)
@@ -181,7 +183,7 @@ def load_model_source(model_type: str) -> str | None:
     return "\n\n".join(extracted) if extracted else None
 
 
-def enrich_candidates_with_source(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def enrich_candidates_with_source(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Add source code to each candidate model summary.
 
@@ -209,7 +211,7 @@ def enrich_candidates_with_source(candidates: List[Dict[str, Any]]) -> List[Dict
 # ---------------------------------------------------------------------------
 
 
-def build_score_summary_line(score_table: Optional[Dict[str, Any]]) -> Optional[str]:
+def build_score_summary_line(score_table: dict[str, Any] | None) -> str | None:
     """One-liner summary for a non-candidate model's score table.
 
     Reads ``aggregate.{model_scalar, raw_baseline_scalar, percent_of_ceiling_log,
@@ -239,21 +241,15 @@ def build_score_summary_line(score_table: Optional[Dict[str, Any]]) -> Optional[
         return None
 
     if raw_baseline is not None and model_scalar < raw_baseline:
-        return (
-            f"log_scalar={model_scalar:.2f}, "
-            f"below raw baseline on {n_files} files"
-        )
+        return f"log_scalar={model_scalar:.2f}, below raw baseline on {n_files} files"
 
     if recovery is None:
         return f"log_scalar={model_scalar:.2f} on {n_files} files"
 
-    return (
-        f"log_scalar={model_scalar:.2f}, "
-        f"recovery={recovery * 100:.1f}% on {n_files} files"
-    )
+    return f"log_scalar={model_scalar:.2f}, recovery={recovery * 100:.1f}% on {n_files} files"
 
 
-def build_candidate_markdown_block(candidates: List[Dict[str, Any]]) -> str:
+def build_candidate_markdown_block(candidates: list[dict[str, Any]]) -> str:
     """Top-level markdown block rendering each candidate's full detail.
 
     For each candidate dict, emits a section:
@@ -279,7 +275,7 @@ def build_candidate_markdown_block(candidates: List[Dict[str, Any]]) -> str:
     if not candidates:
         return ""
 
-    sections: List[str] = ["## Candidate Models — detailed view", ""]
+    sections: list[str] = ["## Candidate Models — detailed view", ""]
     for candidate in candidates:
         mt = candidate.get("model_type", "<unknown>")
         sections.append(f"### Candidate: {mt}")
@@ -309,8 +305,8 @@ def build_candidate_markdown_block(candidates: List[Dict[str, Any]]) -> str:
 
 
 def strip_heavy_fields_for_json(
-    candidates: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
+    candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Shallow copy per candidate with heavy fields removed for JSON dump.
 
     Removes ``score_table``, ``source_code``, and ``source_code_lines`` —
@@ -323,13 +319,12 @@ def strip_heavy_fields_for_json(
     """
     _HEAVY_FIELDS = ("score_table", "source_code", "source_code_lines")
     return [
-        {k: v for k, v in candidate.items() if k not in _HEAVY_FIELDS}
-        for candidate in candidates
+        {k: v for k, v in candidate.items() if k not in _HEAVY_FIELDS} for candidate in candidates
     ]
 
 
 def resolve_exploration_mode(
-    interpretation: Dict[str, Any],
+    interpretation: dict[str, Any],
     pipeline: ReasoningPipelineConfig,
 ) -> str:
     """
@@ -371,3 +366,357 @@ def resolve_exploration_mode(
         return "explore"
 
     return "exploit"
+
+
+# ---------------------------------------------------------------------------
+# C6.2 — Proposer stage-output management (Rev 8.6)
+#
+# Three pure helpers + one private iter-parser used by the proposer agent
+# (C6.2-C3) to clamp DiscoveryMemo.comparative_analysis to the top-K most
+# load-bearing entries and to backstop any unexpectedly large string values
+# inside non-input stage outputs before they reach _render_stage_user_prompt.
+#
+# All four functions are non-mutating and pure. See docs/audit_and_optimize_
+# token_usage_and_growth.md §8 Commit 6.2-C2 for the algorithmic rationale.
+# ---------------------------------------------------------------------------
+
+_PROPOSED_ITER_PATTERN = re.compile(r"^proposed_iter_(\d+)$")
+
+
+def _iter_index_from_source(source: Any) -> int:
+    r"""Parse the iteration index from a ``ModelComparison.source`` string.
+
+    The schema description (``agent/schemas/proposal.py:200-202``) declares
+    source values as ``"seed"`` or ``"proposed_iter_N"``. This parser is the
+    canonical mapping used by ``clamp_comparative_analysis`` to derive a
+    recency signal from the LLM-populated entries.
+
+    Mapping:
+      - ``"seed"`` -> ``0`` (oldest, pre-iteration provenance).
+      - ``"proposed_iter_N"`` -> ``N`` (matched by ``^proposed_iter_(\d+)$``).
+      - anything else (malformed, missing, wrong type) -> ``-1`` so the
+        entry falls last on a descending sort and is most likely to be
+        clamped out when the pool is over-capacity.
+    """
+    if not isinstance(source, str):
+        return -1
+    if source == "seed":
+        return 0
+    match = _PROPOSED_ITER_PATTERN.match(source)
+    if match is None:
+        return -1
+    return int(match.group(1))
+
+
+def clamp_comparative_analysis(
+    comparative_analysis: list[dict[str, Any]],
+    top_k: int = 5,
+) -> list[dict[str, Any]]:
+    """Clamp the comparative_analysis list with a 3-best + 2-recent hybrid.
+
+    The audited growth driver in proposer prompts is the unbounded length
+    of ``DiscoveryMemo.comparative_analysis``. Per-entry caps already exist
+    on ``ModelComparison`` (key_mechanism / lesson_for_next_proposal ≤ 1000
+    chars each); the list itself was unbounded until this commit.
+
+    Algorithm (Rev 8.6 Point 3 ruling):
+      - **Draw A**: top 3 entries by ``best_score`` descending.
+      - **Draw B**: top 2 most-recent (by ``_iter_index_from_source(source)``
+        descending) from the *remainder* (entries not in Draw A).
+      - **Union**: deduplicate by ``model_type`` — first-seen wins, so
+        ``best_score`` winners take precedence over recency on collision.
+      - **Backfill**: if ``len(union) < top_k``, pull more entries from
+        the still-remaining pool sorted by recency descending until length
+        reaches ``top_k`` (or the pool is exhausted).
+      - **Truncate**: if ``len(union) > top_k`` (possible when ``top_k < 5``),
+        keep ``best_score`` winners first, then most-recent, until length
+        equals ``top_k``.
+
+    Parameters
+    ----------
+    comparative_analysis
+        The list value of ``DiscoveryMemo.comparative_analysis`` — a list
+        of dicts with at least ``model_type``, ``source``, and ``best_score``
+        keys. Missing keys are tolerated by the sort fallbacks
+        (``best_score`` missing -> treated as ``-inf``).
+    top_k
+        Maximum number of entries to retain. Independent knob, no relation
+        to the fixed 3+2 draw constants — those are the initial allocation;
+        ``top_k`` is the final cap and backfill target.
+
+    Returns
+    -------
+    A new list of at most ``top_k`` entries. The input list is not mutated;
+    inner dicts are shared by reference (not deep-copied — entries are
+    treated as read-only payload).
+    """
+    n = len(comparative_analysis)
+    if n <= top_k:
+        return list(comparative_analysis)
+
+    indexed = list(enumerate(comparative_analysis))
+
+    def _score(item: tuple) -> float:
+        score = item[1].get("best_score")
+        return score if isinstance(score, (int, float)) else float("-inf")
+
+    def _recency(item: tuple) -> int:
+        return _iter_index_from_source(item[1].get("source"))
+
+    by_score = sorted(indexed, key=lambda it: (-_score(it), it[0]))
+    draw_a = by_score[:3]
+    draw_a_indices = {it[0] for it in draw_a}
+
+    remainder_after_a = [it for it in indexed if it[0] not in draw_a_indices]
+    by_recency_b = sorted(remainder_after_a, key=lambda it: (-_recency(it), it[0]))
+    draw_b = by_recency_b[:2]
+    draw_b_indices = {it[0] for it in draw_b}
+
+    union: list[tuple] = []
+    seen_model_types: set = set()
+    for it in draw_a + draw_b:
+        mt = it[1].get("model_type")
+        if mt is not None and mt in seen_model_types:
+            continue
+        union.append(it)
+        if mt is not None:
+            seen_model_types.add(mt)
+
+    if len(union) < top_k:
+        already_indices = draw_a_indices | draw_b_indices
+        remaining_pool = [it for it in indexed if it[0] not in already_indices]
+        by_recency_rest = sorted(remaining_pool, key=lambda it: (-_recency(it), it[0]))
+        for it in by_recency_rest:
+            if len(union) >= top_k:
+                break
+            mt = it[1].get("model_type")
+            if mt is not None and mt in seen_model_types:
+                continue
+            union.append(it)
+            if mt is not None:
+                seen_model_types.add(mt)
+
+    if len(union) > top_k:
+        union.sort(key=lambda it: (-_score(it), -_recency(it), it[0]))
+        union = union[:top_k]
+
+    return [it[1] for it in union]
+
+
+_ELISION_MARKER_TEMPLATE = "\n[... {n} chars elided ...]\n"
+_ELISION_MARKER_FINGERPRINT = " chars elided ...]"
+_MIN_MAX_CHARS = 40
+
+
+def safe_stage_string_truncator(text: str, max_chars: int = 4000) -> str:
+    """Middle-truncate a string with a high-signal head + tail + marker.
+
+    Used as the leaf operation of :func:`apply_string_backstop`. Kept as a
+    pure string -> string function so the truncation rule can be unit-tested
+    in isolation from the recursive walker.
+
+    Parameters
+    ----------
+    text
+        The raw string value. Returned verbatim if already under cap or if
+        the elision marker fingerprint is already present (idempotence).
+    max_chars
+        Maximum allowed length. Must be ``>= 40`` — the marker template
+        consumes ~32 chars on its own, leaving < 8 chars of head + tail for
+        anything smaller, which would be useless.
+
+    Returns
+    -------
+    Either ``text`` unchanged, or a new string of the form
+    ``first_half + marker + last_half`` with total length ``<= max_chars``.
+
+    Raises
+    ------
+    ValueError
+        If ``max_chars < 40``. Defensive floor — this indicates a
+        configuration error in the caller (likely a misset
+        ``ResearchPolicy.prior_stage_max_chars``).
+    """
+    if max_chars < _MIN_MAX_CHARS:
+        raise ValueError(
+            f"safe_stage_string_truncator: max_chars={max_chars} below "
+            f"defensive floor of {_MIN_MAX_CHARS}. The elision marker "
+            f"alone consumes ~32 chars; anything smaller leaves no useful "
+            f"head/tail. Check ResearchPolicy.prior_stage_max_chars."
+        )
+
+    if len(text) <= max_chars:
+        return text
+
+    if _ELISION_MARKER_FINGERPRINT in text:
+        return text
+
+    elided_chars = len(text) - max_chars
+    marker = _ELISION_MARKER_TEMPLATE.format(n=elided_chars)
+    overhead = len(marker)
+    while overhead >= max_chars:
+        elided_chars += 1
+        marker = _ELISION_MARKER_TEMPLATE.format(n=elided_chars)
+        overhead = len(marker)
+        if elided_chars > len(text):
+            return text
+
+    remaining = max_chars - overhead
+    head_len = remaining // 2
+    tail_len = remaining - head_len
+    head = text[:head_len]
+    tail = text[len(text) - tail_len :] if tail_len > 0 else ""
+
+    while True:
+        candidate = head + marker + tail
+        new_elided = len(text) - len(head) - len(tail)
+        if new_elided == elided_chars:
+            return candidate
+        elided_chars = new_elided
+        marker = _ELISION_MARKER_TEMPLATE.format(n=elided_chars)
+        overhead = len(marker)
+        remaining = max_chars - overhead
+        if remaining < 0:
+            return text
+        head_len = remaining // 2
+        tail_len = remaining - head_len
+        head = text[:head_len]
+        tail = text[len(text) - tail_len :] if tail_len > 0 else ""
+
+
+def apply_string_backstop(stage_output: Any, max_chars: int = 4000) -> Any:
+    """Recursively middle-truncate every string leaf exceeding ``max_chars``.
+
+    Walks ``stage_output`` and rebuilds the structure with the same shape,
+    replacing any string value longer than ``max_chars`` with the output of
+    :func:`safe_stage_string_truncator`. Non-string scalars and short
+    strings pass through verbatim. Containers are recreated (deep-copy
+    semantics for the structure, shallow on string contents which are
+    immutable anyway).
+
+    Parameters
+    ----------
+    stage_output
+        Any JSON-compatible nested structure. Dicts have keys preserved
+        and values recursed into; lists have order preserved and elements
+        recursed into; everything else passes through.
+    max_chars
+        Threshold forwarded to :func:`safe_stage_string_truncator`. Same
+        ``>= 40`` requirement applies; passing a smaller value will raise
+        as soon as the walker encounters a string long enough to trigger
+        truncation. Validation is deferred to the leaf call so empty /
+        all-short structures don't fail under an invalid cap.
+
+    Returns
+    -------
+    A new structure with the same shape as ``stage_output`` and only
+    string leaves potentially shortened. The input is not mutated.
+    """
+    if isinstance(stage_output, dict):
+        return {key: apply_string_backstop(value, max_chars) for key, value in stage_output.items()}
+    if isinstance(stage_output, list):
+        return [apply_string_backstop(item, max_chars) for item in stage_output]
+    if isinstance(stage_output, tuple):
+        return tuple(apply_string_backstop(item, max_chars) for item in stage_output)
+    if isinstance(stage_output, str):
+        return safe_stage_string_truncator(stage_output, max_chars)
+    return stage_output
+
+
+# C6.2-C3: Orchestration helper — glue layer for proposer prompt assembly.
+# The 3-best + 2-recent hybrid logic lives in `clamp_comparative_analysis`
+# above; the middle-truncation logic lives in `apply_string_backstop`.
+# This helper just composes them into the read-only `clamped_accumulated`
+# view consumed by `_render_stage_user_prompt` and `_audit_proposer_components`
+# in `nodes/ml_model_proposal_agent.py`.
+
+
+def clamp_and_backstop_accumulated(
+    accumulated: dict[str, Any],
+    *,
+    top_k: int,
+    max_chars: int,
+    input_keys: Iterable[str],
+) -> dict[str, Any]:
+    """Build a clamped + backstopped copy of ``accumulated`` for prompt assembly.
+
+    Pure orchestration. The actual algorithms live in the C2 helpers
+    :func:`clamp_comparative_analysis` (3-best + 2-recent hybrid) and
+    :func:`apply_string_backstop` (recursive middle truncation). This
+    function composes them into a single non-mutating call suitable for
+    use immediately before :func:`_render_stage_user_prompt` and
+    :func:`_audit_proposer_components` in the proposer agent.
+
+    Behaviour:
+
+    1. Keys in ``input_keys`` (proposer-input fields like ``candidates``,
+       ``interpretation_summary``, ``existing_model_types``,
+       ``non_candidates_overview``, ``previous_failures``) pass through
+       **verbatim** — same object reference, no recursion, no copy.
+       The clamping contract is per-iter; input-side context is the
+       caller's responsibility to size.
+    2. If ``accumulated`` contains a ``"comparison"`` key whose value is
+       a dict containing a list-valued ``"comparative_analysis"`` field,
+       that list is passed through :func:`clamp_comparative_analysis`
+       with the supplied ``top_k``. A *new* comparison dict is built with
+       the clamped list substituted in. The original
+       ``accumulated["comparison"]`` is never mutated.
+    3. Every non-input key (after the comparison clamp above) is passed
+       through :func:`apply_string_backstop` with ``max_chars`` to
+       middle-truncate any string leaf above the threshold.
+
+    The function returns a new outer dict. Original input is bit-for-bit
+    unchanged (verified by C2's ``test_input_not_mutated`` for the inner
+    helpers; this layer only adds shallow-copy + new-comparison-dict
+    construction).
+
+    Parameters
+    ----------
+    accumulated
+        The proposer's per-iter context dict. Mixes input-side keys
+        (carried in from ``ProposalInput``) with stage-output keys
+        (``comparison``, ``causal_reasoning``, ``proposing_stage_errors``,
+        etc.) accumulated as enabled stages run.
+    top_k
+        Forwarded to :func:`clamp_comparative_analysis`. Typically
+        ``policy.comparative_analysis_top_k`` (default 5).
+    max_chars
+        Forwarded to :func:`apply_string_backstop`. Typically
+        ``policy.prior_stage_max_chars`` (default 4000). Must be
+        ``>= 40``; violations raise from the leaf truncator (see
+        :func:`safe_stage_string_truncator`).
+    input_keys
+        Iterable of key names that should bypass both clamp and backstop
+        (input-side context that this layer is not responsible for).
+        Typically ``_PROPOSER_INPUT_KEYS`` from
+        ``nodes.ml_model_proposal_agent``.
+
+    Returns
+    -------
+    A new outer dict with the same keys as ``accumulated``. Input-side
+    values pass through by reference. Stage-output values are either
+    backstopped (string leaves shrunk) or, for ``comparison``,
+    clamped-then-backstopped.
+    """
+    input_keys_set = set(input_keys)
+    result: dict[str, Any] = {}
+
+    for key, value in accumulated.items():
+        if key in input_keys_set:
+            result[key] = value
+            continue
+
+        if key == "comparison" and isinstance(value, dict):
+            new_comparison: dict[str, Any] = dict(value)
+            inner_list = new_comparison.get("comparative_analysis")
+            if isinstance(inner_list, list):
+                new_comparison["comparative_analysis"] = clamp_comparative_analysis(
+                    inner_list,
+                    top_k=top_k,
+                )
+            result[key] = apply_string_backstop(new_comparison, max_chars=max_chars)
+            continue
+
+        result[key] = apply_string_backstop(value, max_chars=max_chars)
+
+    return result

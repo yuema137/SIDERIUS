@@ -12,12 +12,12 @@ We pin:
   - determinism across calls
   - identifier-safe output (so ``importlib`` accepts it)
 """
+
 from __future__ import annotations
 
 import re
 
 from agent.llm_bridge import _synth_stub_model_name
-
 
 _SLUG_PATTERN = re.compile(r"^stub_arch_\d{3}_[a-zA-Z0-9_]+$")
 
@@ -28,9 +28,9 @@ def test_basic_format():
 
 def test_iter_zero_pads_to_three_digits():
     """iter 7 and iter 70 must sort lexically by iter — pads to 3 digits."""
-    assert _synth_stub_model_name(7, "a")  == "stub_arch_007_a"
+    assert _synth_stub_model_name(7, "a") == "stub_arch_007_a"
     assert _synth_stub_model_name(70, "a") == "stub_arch_070_a"
-    assert _synth_stub_model_name(0, "a")  == "stub_arch_000_a"
+    assert _synth_stub_model_name(0, "a") == "stub_arch_000_a"
 
 
 def test_high_iter_does_not_truncate():

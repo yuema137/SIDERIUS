@@ -17,23 +17,26 @@ Run with:
 
 DO NOT run in CI.
 """
+
 import ast
 import os
+from pathlib import Path
+
 import pytest
 from dotenv import load_dotenv
 
-from agent.schemas.proposal import ProposalInput
 from agent.schemas.implementor import ImplementorOutput
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.proposal import ProposalInput
 from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full_spec
-from nodes.ml_model_proposal_agent import MLModelProposalAgent
-from nodes.ml_model_implementor import MLModelImplementor
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from ml_models.plugin_loader import _load_plugin
+from nodes.ml_model_implementor import MLModelImplementor
+from nodes.ml_model_proposal_agent import MLModelProposalAgent
 
 # Reuse the synthetic interpretation from the node integration test
 from tests.integration.nodes.test_ml_model_proposal_agent import SYNTHETIC_INTERPRETATION
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
 pytestmark = pytest.mark.real_run
 
@@ -41,6 +44,7 @@ pytestmark = pytest.mark.real_run
 # ---------------------------------------------------------------------------
 # Skip guard
 # ---------------------------------------------------------------------------
+
 
 def _skip_if_no_key(provider: str):
     key = "GEMINI_API_KEY" if provider == "gemini" else "OPENAI_API_KEY"
@@ -51,6 +55,7 @@ def _skip_if_no_key(provider: str):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _run_proposal(provider: str, model_id: str, tmp_path):
     inp = ProposalInput(
@@ -71,7 +76,7 @@ def _assert_implementor_output(output: ImplementorOutput):
 
     # Files exist
     assert os.path.exists(output.model_file_path), "Plugin file not found"
-    assert os.path.exists(output.test_file_path),  "Test file not found"
+    assert os.path.exists(output.test_file_path), "Test file not found"
 
     # Plugin is syntactically valid Python
     plugin_src = open(output.model_file_path).read()
@@ -94,8 +99,8 @@ def _assert_implementor_output(output: ImplementorOutput):
 # Tests
 # ---------------------------------------------------------------------------
 
-class TestProposeToImplementGemini:
 
+class TestProposeToImplementGemini:
     def setup_method(self):
         _skip_if_no_key("gemini")
 
@@ -105,7 +110,7 @@ class TestProposeToImplementGemini:
         """
         provider = "gemini"
         model_id = "gemini-3.1-flash-lite-preview"
-        storage  = StorageConfig(
+        storage = StorageConfig(
             backend="local",
             local=LocalStorageConfig(workspace=str(tmp_path), run_name="propose_to_impl"),
         )
@@ -121,7 +126,7 @@ class TestProposeToImplementGemini:
 
         # Step 3: run implementor (real API)
         impl_input.plugin_dir = str(tmp_path / "models")
-        impl_input.test_dir   = str(tmp_path / "tests")
+        impl_input.test_dir = str(tmp_path / "tests")
         output = MLModelImplementor(provider=provider, model_id=model_id).run(impl_input)
 
         # Step 4: validate
@@ -136,7 +141,6 @@ class TestProposeToImplementGemini:
 
 
 class TestProposeToImplementOpenAI:
-
     def setup_method(self):
         _skip_if_no_key("openai")
 
@@ -146,7 +150,7 @@ class TestProposeToImplementOpenAI:
         """
         provider = "openai"
         model_id = "gpt-4o-mini"
-        storage  = StorageConfig(
+        storage = StorageConfig(
             backend="local",
             local=LocalStorageConfig(workspace=str(tmp_path), run_name="propose_to_impl"),
         )
@@ -154,7 +158,7 @@ class TestProposeToImplementOpenAI:
         proposal_output = _run_proposal(provider, model_id, tmp_path)
         impl_input = local_full_spec(proposal_output, storage)
         impl_input.plugin_dir = str(tmp_path / "models")
-        impl_input.test_dir   = str(tmp_path / "tests")
+        impl_input.test_dir = str(tmp_path / "tests")
         output = MLModelImplementor(provider=provider, model_id=model_id).run(impl_input)
 
         _assert_implementor_output(output)

@@ -12,7 +12,8 @@
 # This is a Layer 1 building block. Individual nodes will expose SkillSpecs in
 # Layer 2 (skill registry). See docs/architecture.md for the full roadmap.
 
-from typing import Type, Dict, Any
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -38,16 +39,16 @@ class SkillSpec(BaseModel):
         ...,
         description="What this skill does — shown to the LLM in tool-calling mode.",
     )
-    input_schema: Type[BaseModel] = Field(
+    input_schema: type[BaseModel] = Field(
         ...,
         description="Pydantic class defining the skill's input contract.",
     )
-    output_schema: Type[BaseModel] = Field(
+    output_schema: type[BaseModel] = Field(
         ...,
         description="Pydantic class defining the skill's output contract.",
     )
 
-    def to_openai_tool(self) -> Dict[str, Any]:
+    def to_openai_tool(self) -> dict[str, Any]:
         """
         Convert this skill spec to an OpenAI function-calling tool definition.
 

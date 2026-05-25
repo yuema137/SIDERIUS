@@ -17,21 +17,22 @@ The fix is centralised in the pure helper ``_resolve_sample_set_cfg``; these
 tests exercise that helper and confirm its output drives
 ``build_sample_set`` to produce full 20-file coverage in formal mode.
 """
+
 import pytest
 
-from nodes.ml_hyperparameter_tune_agent import _resolve_sample_set_cfg
 from agent.schemas.hyperparam_tuning import (
-    HyperparamTuningInput,
     ExperimentPlan,
+    HyperparamTuningInput,
 )
 from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_utils import NUM_FILES, SEGMENTS_PER_FILE
-
+from nodes.ml_hyperparameter_tune_agent import _resolve_sample_set_cfg
 
 # ---------------------------------------------------------------------------
 # Fixtures — a minimal valid HyperparamTuningInput and planner ExperimentPlan
 # that we can mutate per test.
 # ---------------------------------------------------------------------------
+
 
 def _make_input(**overrides) -> HyperparamTuningInput:
     base = dict(
@@ -74,9 +75,10 @@ def _make_plan(**overrides) -> ExperimentPlan:
 #    / 1.0) and build_sample_set expands to 20 files x 20 segments each.
 # ---------------------------------------------------------------------------
 
+
 def test_formal_default_training_produces_20_file_snapshot():
     agent_input = _make_input()  # formal_* fields use schema defaults
-    plan = _make_plan()           # planner picked anchors / 0.02
+    plan = _make_plan()  # planner picked anchors / 0.02
 
     cfg = _resolve_sample_set_cfg("formal", agent_input, plan)
 
@@ -104,6 +106,7 @@ def test_formal_default_training_produces_20_file_snapshot():
 #    files with all 200 segments each.
 # ---------------------------------------------------------------------------
 
+
 def test_formal_eval_is_locked_to_full_snapshot():
     agent_input = _make_input()
     plan = _make_plan(eval_strategy="anchors", eval_portion=0.02)
@@ -130,6 +133,7 @@ def test_formal_eval_is_locked_to_full_snapshot():
 # 3. Operator override on the formal training side is respected.
 # ---------------------------------------------------------------------------
 
+
 def test_formal_training_override_respected():
     agent_input = _make_input(formal_portion=0.5)
     plan = _make_plan()
@@ -144,7 +148,7 @@ def test_formal_training_override_respected():
         seed=0,
     )
     expected_per_file = round(0.5 * SEGMENTS_PER_FILE)  # 100
-    for fi, segs in sample_set.items():
+    for _fi, segs in sample_set.items():
         assert len(segs) == expected_per_file
 
 
@@ -152,6 +156,7 @@ def test_formal_training_override_respected():
 # 4. Eval lock is immovable — even a planner that emits a tiny eval_portion
 #    cannot narrow the formal eval scope.
 # ---------------------------------------------------------------------------
+
 
 def test_formal_eval_lock_is_immovable_against_plan_overrides():
     agent_input = _make_input()
@@ -178,11 +183,16 @@ def test_formal_eval_lock_is_immovable_against_plan_overrides():
 #    forwards planner values verbatim when mode == "trial".
 # ---------------------------------------------------------------------------
 
+
 def test_trial_mode_still_uses_planner_values():
     agent_input = _make_input()
-    plan = _make_plan(trial_strategy="anchors", trial_portion=0.05,
-                      eval_strategy="anchors", eval_portion=0.05,
-                      train_portion=0.25)
+    plan = _make_plan(
+        trial_strategy="anchors",
+        trial_portion=0.05,
+        eval_strategy="anchors",
+        eval_portion=0.05,
+        train_portion=0.25,
+    )
 
     cfg = _resolve_sample_set_cfg("trial", agent_input, plan)
     assert cfg["trial_strategy"] == "anchors"
@@ -208,10 +218,16 @@ def test_trial_mode_still_uses_planner_values():
 #    through. (Not in the doc's 5-case list, but cheap to guard.)
 # ---------------------------------------------------------------------------
 
+
 def test_single_file_mode_defaults():
     agent_input = _make_input()
-    plan = _make_plan(trial_strategy="anchors", eval_strategy="anchors",
-                      trial_portion=0.03, eval_portion=0.03, train_portion=0.4)
+    plan = _make_plan(
+        trial_strategy="anchors",
+        eval_strategy="anchors",
+        trial_portion=0.03,
+        eval_portion=0.03,
+        train_portion=0.4,
+    )
 
     cfg = _resolve_sample_set_cfg("single_file", agent_input, plan)
     assert cfg["trial_strategy"] == "snapshot"

@@ -17,35 +17,47 @@ Run with:
 
 DO NOT run in CI.
 """
+
 import os
 import re
+from pathlib import Path
+
 import pytest
 from dotenv import load_dotenv
 
+from agent.schemas.hyperparam_tuning import ExpertAdvice
 from agent.schemas.interpretation import (
-    InterpretationInput, InterpretationOutput, ModelRunSummary,
+    InterpretationInput,
+    InterpretationOutput,
+    ModelRunSummary,
 )
 from agent.schemas.proposal import (
     ModelSelectionStrategy,
-    ProposalOutput, ReasoningPipelineConfig, ReasoningStage,
+    ProposalOutput,
+    ReasoningPipelineConfig,
+    ReasoningStage,
 )
-from agent.schemas.hyperparam_tuning import ExpertAdvice
 from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import local_full_context
 from agent.schemas.score_table import (
-    AggregateScalars, PerFileRow, ScoreComparisonTable,
+    AggregateScalars,
+    PerFileRow,
+    ScoreComparisonTable,
 )
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from execute_tools.scoring_helpers import render_comparison_table
-from nodes.result_interpretation_agent import ResultInterpretationAgent
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
+from nodes.result_interpretation_agent import ResultInterpretationAgent
 
 # Reuse the synthetic summaries defined in the node integration test
 from tests.integration.nodes.test_result_interpretation_agent import (
-    PUNET_SUMMARY, FCNET_SUMMARY,
-    _SEED_WAVENET, _SEED_PUNET, _PREVIOUS_PROPOSAL_REFUTED,
+    _PREVIOUS_PROPOSAL_REFUTED,
+    _SEED_PUNET,
+    _SEED_WAVENET,
+    FCNET_SUMMARY,
+    PUNET_SUMMARY,
 )
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
 pytestmark = pytest.mark.real_run
 
@@ -53,6 +65,7 @@ pytestmark = pytest.mark.real_run
 # ---------------------------------------------------------------------------
 # Skip guard
 # ---------------------------------------------------------------------------
+
 
 def _skip_if_no_key(provider: str):
     key = "GEMINI_API_KEY" if provider == "gemini" else "OPENAI_API_KEY"
@@ -63,6 +76,7 @@ def _skip_if_no_key(provider: str):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _run_interpretation(provider: str, model_id: str, tmp_path) -> "InterpretationOutput":
     """Run the interpretation agent over punet + fcnet synthetic summaries."""
@@ -81,7 +95,7 @@ def _assert_proposal_output(output: ProposalOutput, existing_types: list):
 
     # model_name: non-empty, snake_case, not reusing an existing type
     assert len(output.model_name) > 0
-    assert re.match(r'^[a-z][a-z0-9_]*$', output.model_name), (
+    assert re.match(r"^[a-z][a-z0-9_]*$", output.model_name), (
         f"model_name '{output.model_name}' is not snake_case"
     )
     assert output.model_name not in existing_types, (
@@ -104,15 +118,15 @@ def _assert_proposal_output(output: ProposalOutput, existing_types: list):
     # baseline_config has all required keys
     assert "model_config" in output.baseline_config
     assert "train_config" in output.baseline_config
-    assert "loss_config"  in output.baseline_config
+    assert "loss_config" in output.baseline_config
 
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 
-class TestInterpToProposalGemini:
 
+class TestInterpToProposalGemini:
     def setup_method(self):
         _skip_if_no_key("gemini")
 
@@ -120,9 +134,9 @@ class TestInterpToProposalGemini:
         """
         Full edge: interpretation agent → local_full_context protocol → proposal agent.
         """
-        provider  = "gemini"
-        model_id  = "gemini-3.1-flash-lite-preview"
-        storage   = StorageConfig(
+        provider = "gemini"
+        model_id = "gemini-3.1-flash-lite-preview"
+        storage = StorageConfig(
             backend="local",
             local=LocalStorageConfig(workspace=str(tmp_path), run_name="interp_to_propose"),
         )
@@ -152,7 +166,6 @@ class TestInterpToProposalGemini:
 
 
 class TestInterpToProposalOpenAI:
-
     def setup_method(self):
         _skip_if_no_key("openai")
 
@@ -160,9 +173,9 @@ class TestInterpToProposalOpenAI:
         """
         Full edge via OpenAI: interpretation agent → local_full_context → proposal agent.
         """
-        provider  = "openai"
-        model_id  = "gpt-4o-mini"
-        storage   = StorageConfig(
+        provider = "openai"
+        model_id = "gpt-4o-mini"
+        storage = StorageConfig(
             backend="local",
             local=LocalStorageConfig(workspace=str(tmp_path), run_name="interp_to_propose"),
         )
@@ -185,10 +198,12 @@ class TestInterpToProposalOpenAI:
 # ---------------------------------------------------------------------------
 
 # Default pipeline config matching the workflow (2 stages + final proposing call)
-_PIPELINE_CFG = ReasoningPipelineConfig(stages=[
-    ReasoningStage(name="comparison",      system_prompt_key="COMPARATIVE_ANALYSIS"),
-    ReasoningStage(name="causal_reasoning", system_prompt_key="CAUSAL_REASONING"),
-])
+_PIPELINE_CFG = ReasoningPipelineConfig(
+    stages=[
+        ReasoningStage(name="comparison", system_prompt_key="COMPARATIVE_ANALYSIS"),
+        ReasoningStage(name="causal_reasoning", system_prompt_key="CAUSAL_REASONING"),
+    ]
+)
 
 
 @pytest.mark.dual_mode
@@ -224,9 +239,11 @@ def test_interp_to_propose_feedback_loop(tmp_path, request):
         completed_rounds=3,
         best_denoising_score=-1.509,
         worst_denoising_score=-2.509,
-        best_config={"model_config": {"attn_heads": 4},
-                     "train_config": {"lr": 1e-4},
-                     "loss_config": {"loss_type": "focal"}},
+        best_config={
+            "model_config": {"attn_heads": 4},
+            "train_config": {"lr": 1e-4},
+            "loss_config": {"loss_type": "focal"},
+        },
         round_scores=[-2.509, -2.0, -1.509],
         round_conclusions=["unstable", "partial recovery", "best achieved"],
         model_description="Wavenet with multi-head self-attention at the bottleneck.",
@@ -243,17 +260,19 @@ def test_interp_to_propose_feedback_loop(tmp_path, request):
     )
 
     if _is_real_llm(request):
-        interp_bridge  = None
+        interp_bridge = None
         propose_bridge = None
-        interp_agent   = ResultInterpretationAgent(provider="gemini",
-                                                    model_id="gemini-3.1-flash-lite-preview")
-        propose_agent  = MLModelProposalAgent(provider="gemini",
-                                              model_id="gemini-3.1-flash-lite-preview")
+        interp_agent = ResultInterpretationAgent(
+            provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+        )
+        propose_agent = MLModelProposalAgent(
+            provider="gemini", model_id="gemini-3.1-flash-lite-preview"
+        )
     else:
-        interp_bridge  = RecordingLLMBridge.for_agent("result_interpretation_agent")
+        interp_bridge = RecordingLLMBridge.for_agent("result_interpretation_agent")
         propose_bridge = RecordingLLMBridge.for_agent("ml_model_proposal_agent")
-        interp_agent   = ResultInterpretationAgent(bridge_factory=lambda **kw: interp_bridge)
-        propose_agent  = MLModelProposalAgent(bridge_factory=lambda **kw: propose_bridge)
+        interp_agent = ResultInterpretationAgent(bridge_factory=lambda **kw: interp_bridge)
+        propose_agent = MLModelProposalAgent(bridge_factory=lambda **kw: propose_bridge)
 
     # Step 1: run interpretation — produces REFUTED discovery in runtime_vocab
     interp_output = interp_agent.run(interp_inp)
@@ -263,7 +282,9 @@ def test_interp_to_propose_feedback_loop(tmp_path, request):
 
     # Step 2: apply protocol — runtime_vocab (with discovery) flows to vocab_seed
     proposal_input = local_full_context(
-        interp_output, storage, reasoning_pipeline=_PIPELINE_CFG,
+        interp_output,
+        storage,
+        reasoning_pipeline=_PIPELINE_CFG,
     )
     assert proposal_input.vocab_seed, "vocab_seed is empty — discovery not passed to proposer"
 
@@ -280,8 +301,9 @@ def test_interp_to_propose_feedback_loop(tmp_path, request):
 
     # Step 4 (pseudo mode only): assert "REFUTED" appears in a generate() user prompt
     if propose_bridge is not None:
-        generate_calls = [(call[1], call[2]) for call in propose_bridge.calls
-                          if call[0] == "generate"]
+        generate_calls = [
+            (call[1], call[2]) for call in propose_bridge.calls if call[0] == "generate"
+        ]
         user_prompts = [user for _, user in generate_calls]
         discovery_prompt = next((p for p in user_prompts if "Discoveries" in p), None)
         assert discovery_prompt is not None, (
@@ -292,7 +314,7 @@ def test_interp_to_propose_feedback_loop(tmp_path, request):
             "REFUTED discovery text not present in proposer prompt — "
             "feedback loop broken end-to-end"
         )
-        print(f"\n  [pseudo] REFUTED discovery confirmed in proposer prompt ✓")
+        print("\n  [pseudo] REFUTED discovery confirmed in proposer prompt ✓")
         print(f"  [pseudo] vocab_seed entries: {len(proposal_input.vocab_seed)}")
         print(f"  [pseudo] proposed model: {propose_output.model_name}")
 
@@ -300,6 +322,7 @@ def test_interp_to_propose_feedback_loop(tmp_path, request):
 # ---------------------------------------------------------------------------
 # F.6 — Phase 6 B: score_table markdown signature reaches proposer prompt
 # ---------------------------------------------------------------------------
+
 
 def _make_score_table(fv: list[float], model_scalar: float) -> ScoreComparisonTable:
     """Build a realistic ScoreComparisonTable from a length-20 file vector.
@@ -328,8 +351,10 @@ def _make_score_table(fv: list[float], model_scalar: float) -> ScoreComparisonTa
         num_sampled_files=20,
     )
     table = ScoreComparisonTable(
-        rows=rows, aggregate=aggregate,
-        s_max_global=5.27, reference_source="test_fixture",
+        rows=rows,
+        aggregate=aggregate,
+        s_max_global=5.27,
+        reference_source="test_fixture",
         rendered_markdown="",
     )
     return table.model_copy(update={"rendered_markdown": render_comparison_table(table)})
@@ -337,12 +362,72 @@ def _make_score_table(fv: list[float], model_scalar: float) -> ScoreComparisonTa
 
 # Three distinct file vectors so the top_n=2 cut produces a deterministic
 # candidate / non-candidate split (punet + wavenet in, fcnet out).
-_FV_STRONG = [0.1, 0.1, 0.1, 0.1, 0.1, 4.2, 4.5, 5.1, 5.8, 6.2, 6.7,
-              7.1, 7.5, 7.9, 8.2, 8.5, 8.7, 8.9, 9.0, 9.1]
-_FV_MID    = [0.1, 0.1, 0.1, 0.1, 0.1, 3.2, 3.5, 4.1, 4.5, 4.8, 5.0,
-              5.2, 5.4, 5.6, 5.8, 6.0, 6.1, 6.2, 6.3, 6.4]
-_FV_LOW    = [0.1, 0.1, 0.1, 0.1, 0.1, 1.8, 2.0, 2.2, 2.5, 2.7, 2.9,
-              3.0, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8]
+_FV_STRONG = [
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    4.2,
+    4.5,
+    5.1,
+    5.8,
+    6.2,
+    6.7,
+    7.1,
+    7.5,
+    7.9,
+    8.2,
+    8.5,
+    8.7,
+    8.9,
+    9.0,
+    9.1,
+]
+_FV_MID = [
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    3.2,
+    3.5,
+    4.1,
+    4.5,
+    4.8,
+    5.0,
+    5.2,
+    5.4,
+    5.6,
+    5.8,
+    6.0,
+    6.1,
+    6.2,
+    6.3,
+    6.4,
+]
+_FV_LOW = [
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    1.8,
+    2.0,
+    2.2,
+    2.5,
+    2.7,
+    2.9,
+    3.0,
+    3.1,
+    3.2,
+    3.3,
+    3.4,
+    3.5,
+    3.6,
+    3.7,
+    3.8,
+]
 
 
 @pytest.mark.dual_mode
@@ -376,20 +461,22 @@ def test_proposer_prompt_carries_score_tables(tmp_path, request):
         local=LocalStorageConfig(workspace=str(tmp_path), run_name="score_tables_chain"),
     )
 
-    punet_tbl   = _make_score_table(_FV_STRONG, model_scalar=5.6)
-    wavenet_tbl = _make_score_table(_FV_MID,    model_scalar=4.0)
-    fcnet_tbl   = _make_score_table(_FV_LOW,    model_scalar=2.5)
+    punet_tbl = _make_score_table(_FV_STRONG, model_scalar=5.6)
+    wavenet_tbl = _make_score_table(_FV_MID, model_scalar=4.0)
+    fcnet_tbl = _make_score_table(_FV_LOW, model_scalar=2.5)
 
     interp_output = InterpretationOutput(
         model_types=["punet", "wavenet", "fcnet"],
         model_descriptions={
-            "punet":   "Positional U-Net with sinusoidal positional encoding.",
+            "punet": "Positional U-Net with sinusoidal positional encoding.",
             "wavenet": "Causal dilated-conv stack with residual + skip connections.",
-            "fcnet":   "Fully-connected autoencoder with a narrow bottleneck.",
+            "fcnet": "Fully-connected autoencoder with a narrow bottleneck.",
         },
         total_experiments=6,
-        key_findings=["punet dominates mid/high frequencies",
-                      "low-freq bands (files 0-4) weak across all 3"],
+        key_findings=[
+            "punet dominates mid/high frequencies",
+            "low-freq bands (files 0-4) weak across all 3",
+        ],
         bottlenecks=["structural low-freq blindness across model families"],
         take_home_message="Low-freq gap is architectural — needs spectral processing.",
         per_model_best={"punet": 5.6, "wavenet": 4.0, "fcnet": 2.5},
@@ -397,9 +484,9 @@ def test_proposer_prompt_carries_score_tables(tmp_path, request):
         best_denoising_score=5.6,
         worst_denoising_score=2.5,
         per_model_score_tables={
-            "punet":   punet_tbl,
+            "punet": punet_tbl,
             "wavenet": wavenet_tbl,
-            "fcnet":   fcnet_tbl,
+            "fcnet": fcnet_tbl,
         },
     )
 
@@ -407,18 +494,20 @@ def test_proposer_prompt_carries_score_tables(tmp_path, request):
     # non-candidate overview so the score_summary one-liner is exercised.
     pipeline_cfg = ReasoningPipelineConfig(
         stages=[
-            ReasoningStage(name="comparison",       system_prompt_key="COMPARATIVE_ANALYSIS"),
+            ReasoningStage(name="comparison", system_prompt_key="COMPARATIVE_ANALYSIS"),
             ReasoningStage(name="causal_reasoning", system_prompt_key="CAUSAL_REASONING"),
         ],
         model_selection=ModelSelectionStrategy(params={"n": 2}),
     )
 
     proposal_input = local_full_context(
-        interp_output, storage, reasoning_pipeline=pipeline_cfg,
+        interp_output,
+        storage,
+        reasoning_pipeline=pipeline_cfg,
     )
 
     bridge = RecordingLLMBridge.for_agent("ml_model_proposal_agent")
-    agent  = MLModelProposalAgent(bridge_factory=lambda **kw: bridge)
+    agent = MLModelProposalAgent(bridge_factory=lambda **kw: bridge)
     output = agent.run(proposal_input)
 
     assert isinstance(output, ProposalOutput)
@@ -431,8 +520,7 @@ def test_proposer_prompt_carries_score_tables(tmp_path, request):
     )
 
     # --- Visual signature #1: top-level markdown heading ---
-    candidate_prompts = [p for p in user_prompts
-                         if "## Candidate Models — detailed view" in p]
+    candidate_prompts = [p for p in user_prompts if "## Candidate Models — detailed view" in p]
     assert candidate_prompts, (
         "No captured proposer prompt contained the Phase 5-C heading "
         "'## Candidate Models — detailed view'. build_candidate_markdown_block "
@@ -451,8 +539,7 @@ def test_proposer_prompt_carries_score_tables(tmp_path, request):
     # --- Logic check: non-candidate one-liner present in the JSON region ---
     # build_score_summary_line emits 'log_scalar=...' and the overview field
     # is called 'score_summary'. Both must appear for fcnet.
-    summary_prompts = [p for p in user_prompts
-                       if "score_summary" in p and "log_scalar=" in p]
+    summary_prompts = [p for p in user_prompts if "score_summary" in p and "log_scalar=" in p]
     assert summary_prompts, (
         "No captured prompt contains a non-candidate score_summary one-liner. "
         "Either the non-candidates overview is empty (top_n too permissive) or "

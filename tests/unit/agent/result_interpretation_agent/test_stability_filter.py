@@ -1,6 +1,6 @@
 """Unit tests for Commit 6.1 — Active-Model Policy + Stability Filter.
 
-Covers Pre-Commit Checklist items 1–3 from the design doc §8 Commit 6.1:
+Covers Pre-Commit Checklist items 1-3 from the design doc §8 Commit 6.1:
 
   1. ``test_active_set_top_k_plus_last_n_plus_delta`` — given a 7-model
      cache with synthetic scores, recency, and one model with a current-iter
@@ -20,9 +20,10 @@ The helpers under test live in ``nodes/interpretation_helpers.py`` and
 are pure deterministic functions (no LLM call) — they can be tested
 without any API key, GPU, or workspace fixture.
 """
+
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import pytest
 
@@ -33,14 +34,17 @@ from nodes.interpretation_helpers import (
     should_recall_per_model,
 )
 
-
 # ---------------------------------------------------------------------------
 # Test fixtures
 # ---------------------------------------------------------------------------
 
-def _entry(best: Optional[float], rounds: int = 5,
-           findings: Optional[List[str]] = None,
-           best_config_analysis: str = "") -> Dict[str, Any]:
+
+def _entry(
+    best: float | None,
+    rounds: int = 5,
+    findings: list[str] | None = None,
+    best_config_analysis: str = "",
+) -> dict[str, Any]:
     """Build a synthetic cache entry shaped like the live cache.
 
     Mirrors the cache shape produced by ``result_interpretation_agent.py:722-738``:
@@ -64,7 +68,7 @@ def _entry(best: Optional[float], rounds: int = 5,
     }
 
 
-def _summary(model_type: str, best: Optional[float], rounds: int = 1) -> ModelRunSummary:
+def _summary(model_type: str, best: float | None, rounds: int = 1) -> ModelRunSummary:
     """Build a minimal ModelRunSummary for the helper tests."""
     return ModelRunSummary(
         model_type=model_type,
@@ -78,6 +82,7 @@ def _summary(model_type: str, best: Optional[float], rounds: int = 1) -> ModelRu
 # ---------------------------------------------------------------------------
 # select_active_models (Pre-Commit Checklist #1)
 # ---------------------------------------------------------------------------
+
 
 class TestSelectActiveModels:
     """The active set is the union of Top-K + Last-N + Delta-Δ."""
@@ -108,7 +113,11 @@ class TestSelectActiveModels:
         ]
 
         active = select_active_models(
-            cache, current_summaries, top_k=3, last_n=2, score_delta_threshold=0.05,
+            cache,
+            current_summaries,
+            top_k=3,
+            last_n=2,
+            score_delta_threshold=0.05,
         )
 
         # Top-3: mt_e (5.0), mt_d (4.0), mt_c (3.0)
@@ -123,13 +132,12 @@ class TestSelectActiveModels:
             "rank_me": _entry(best=1.0),
             "no_score": _entry(best=None),
         }
-        active = select_active_models(cache, current_iter_summaries=[],
-                                      top_k=2, last_n=0)
+        active = select_active_models(cache, current_iter_summaries=[], top_k=2, last_n=0)
         assert active == {"rank_me"}
 
     def test_last_n_truncates_to_first_n(self):
         """When current_iter_summaries > last_n, take the first N (caller-ordered)."""
-        cache: Dict[str, Dict] = {}
+        cache: dict[str, dict] = {}
         summaries = [_summary(f"mt_{i}", best=1.0) for i in range(5)]
         active = select_active_models(cache, summaries, top_k=0, last_n=2)
         # First two only.
@@ -137,10 +145,11 @@ class TestSelectActiveModels:
 
     def test_delta_path_skipped_for_models_without_prior(self):
         """A current-iter model with no cache entry contributes via Last-N only."""
-        cache: Dict[str, Dict] = {}  # no prior data
+        cache: dict[str, dict] = {}  # no prior data
         summaries = [_summary("brand_new", best=10.0)]
-        active = select_active_models(cache, summaries, top_k=3, last_n=1,
-                                      score_delta_threshold=0.05)
+        active = select_active_models(
+            cache, summaries, top_k=3, last_n=1, score_delta_threshold=0.05
+        )
         assert active == {"brand_new"}  # via Last-N, not Delta
 
     def test_delta_below_threshold_excluded(self):
@@ -148,8 +157,9 @@ class TestSelectActiveModels:
         cache = {"stable": _entry(best=2.0)}
         # Score went 2.0 → 2.01: |Δ|=0.01 < 0.05 threshold.
         summaries = [_summary("stable", best=2.01)]
-        active = select_active_models(cache, summaries, top_k=0, last_n=0,
-                                      score_delta_threshold=0.05)
+        active = select_active_models(
+            cache, summaries, top_k=0, last_n=0, score_delta_threshold=0.05
+        )
         # Top-K=0 disables ranking, Last-N=0 disables recency, Δ below threshold:
         # active set is empty.
         assert active == set()
@@ -162,8 +172,9 @@ class TestSelectActiveModels:
         """
         cache = {"changed": _entry(best=2.0)}
         summaries = [_summary("changed", best=2.5)]  # |Δ|=0.5 == threshold
-        active = select_active_models(cache, summaries, top_k=0, last_n=0,
-                                      score_delta_threshold=0.5)
+        active = select_active_models(
+            cache, summaries, top_k=0, last_n=0, score_delta_threshold=0.5
+        )
         assert active == {"changed"}
 
     def test_lex_tiebreak_determinism(self):
@@ -173,15 +184,13 @@ class TestSelectActiveModels:
             "apple": _entry(best=5.0),
             "mango": _entry(best=5.0),
         }
-        active = select_active_models(cache, current_iter_summaries=[],
-                                      top_k=2, last_n=0)
+        active = select_active_models(cache, current_iter_summaries=[], top_k=2, last_n=0)
         # Ties → sorted lexicographically → "apple", "mango" win Top-2.
         assert active == {"apple", "mango"}
 
     def test_empty_cache_and_no_summaries(self):
-        cache: Dict[str, Dict] = {}
-        active = select_active_models(cache, current_iter_summaries=[],
-                                      top_k=3, last_n=2)
+        cache: dict[str, dict] = {}
+        active = select_active_models(cache, current_iter_summaries=[], top_k=3, last_n=2)
         assert active == set()
 
     def test_negative_thresholds_rejected(self):
@@ -196,6 +205,7 @@ class TestSelectActiveModels:
 # ---------------------------------------------------------------------------
 # compress_model_summary (Pre-Commit Checklist #2)
 # ---------------------------------------------------------------------------
+
 
 class TestCompressModelSummary:
     """Deterministic compressor: cache entry → ≤200 char one-liner."""
@@ -223,8 +233,11 @@ class TestCompressModelSummary:
 
     def test_compress_falls_back_to_best_config_analysis(self):
         """Empty key_findings → fall back to best_config_analysis."""
-        entry = _entry(best=2.0, findings=[],
-                       best_config_analysis="hidden=128, dropout=0.3 was the winning combo")
+        entry = _entry(
+            best=2.0,
+            findings=[],
+            best_config_analysis="hidden=128, dropout=0.3 was the winning combo",
+        )
         result = compress_model_summary("mt", entry)
         assert "hidden=128" in result["one_line_takeaway"]
 
@@ -259,6 +272,7 @@ class TestCompressModelSummary:
 # should_recall_per_model (Pre-Commit Checklist #3)
 # ---------------------------------------------------------------------------
 
+
 class TestShouldRecallPerModel:
     """Decide whether to issue a fresh per_model LLM call.
 
@@ -271,12 +285,15 @@ class TestShouldRecallPerModel:
 
         Cache miss → True regardless of active_set membership.
         """
-        assert should_recall_per_model(
-            model_type="brand_new",
-            cache_entry=None,
-            current_iter_summary=_summary("brand_new", best=1.0),
-            active_set=set(),  # not even active!
-        ) is True
+        assert (
+            should_recall_per_model(
+                model_type="brand_new",
+                cache_entry=None,
+                current_iter_summary=_summary("brand_new", best=1.0),
+                active_set=set(),  # not even active!
+            )
+            is True
+        )
 
     def test_stability_filter_skips_stable_models(self):
         """7-model cache, 5 stable + 2 active → 5 skip, 2 recall.
@@ -298,7 +315,11 @@ class TestShouldRecallPerModel:
             )
         # 5 stable models → False (skip).
         assert skip_decisions == {
-            "mt_0": False, "mt_1": False, "mt_2": False, "mt_3": False, "mt_4": False,
+            "mt_0": False,
+            "mt_1": False,
+            "mt_2": False,
+            "mt_3": False,
+            "mt_4": False,
             "mt_5": False,  # in active set BUT no new data → skip
             "mt_6": False,  # in active set BUT no new data → skip
         }
@@ -307,24 +328,30 @@ class TestShouldRecallPerModel:
         """Active model + more completed rounds → True (re-call)."""
         cache = {"mt": _entry(best=2.0, rounds=5)}
         new_summary = _summary("mt", best=2.0, rounds=8)  # +3 new rounds
-        assert should_recall_per_model(
-            model_type="mt",
-            cache_entry=cache["mt"],
-            current_iter_summary=new_summary,
-            active_set={"mt"},
-        ) is True
+        assert (
+            should_recall_per_model(
+                model_type="mt",
+                cache_entry=cache["mt"],
+                current_iter_summary=new_summary,
+                active_set={"mt"},
+            )
+            is True
+        )
 
     def test_active_with_score_delta_recalls(self):
         """Active model + score delta ≥ threshold → True."""
         cache = {"mt": _entry(best=2.0, rounds=5)}
         new_summary = _summary("mt", best=3.0, rounds=5)  # +1.0 delta, no new rounds
-        assert should_recall_per_model(
-            model_type="mt",
-            cache_entry=cache["mt"],
-            current_iter_summary=new_summary,
-            active_set={"mt"},
-            score_delta_threshold=0.05,
-        ) is True
+        assert (
+            should_recall_per_model(
+                model_type="mt",
+                cache_entry=cache["mt"],
+                current_iter_summary=new_summary,
+                active_set={"mt"},
+                score_delta_threshold=0.05,
+            )
+            is True
+        )
 
     def test_active_with_no_new_evidence_skips(self):
         """In active set BUT no new tuning data → False (skip).
@@ -335,12 +362,15 @@ class TestShouldRecallPerModel:
         """
         cache = {"mt": _entry(best=2.0, rounds=5)}
         new_summary = _summary("mt", best=2.0, rounds=5)  # no change
-        assert should_recall_per_model(
-            model_type="mt",
-            cache_entry=cache["mt"],
-            current_iter_summary=new_summary,
-            active_set={"mt"},
-        ) is False
+        assert (
+            should_recall_per_model(
+                model_type="mt",
+                cache_entry=cache["mt"],
+                current_iter_summary=new_summary,
+                active_set={"mt"},
+            )
+            is False
+        )
 
     def test_inactive_with_new_data_still_skips(self):
         """Not in active set → False, even if there's new training data.
@@ -350,21 +380,27 @@ class TestShouldRecallPerModel:
         """
         cache = {"mt": _entry(best=2.0, rounds=5)}
         new_summary = _summary("mt", best=5.0, rounds=10)  # huge change
-        assert should_recall_per_model(
-            model_type="mt",
-            cache_entry=cache["mt"],
-            current_iter_summary=new_summary,
-            active_set=set(),  # NOT active
-        ) is False
+        assert (
+            should_recall_per_model(
+                model_type="mt",
+                cache_entry=cache["mt"],
+                current_iter_summary=new_summary,
+                active_set=set(),  # NOT active
+            )
+            is False
+        )
 
     def test_below_threshold_delta_skips(self):
         """|Δ| < threshold AND no new rounds → False."""
         cache = {"mt": _entry(best=2.0, rounds=5)}
         new_summary = _summary("mt", best=2.01, rounds=5)  # delta 0.01 < 0.05
-        assert should_recall_per_model(
-            model_type="mt",
-            cache_entry=cache["mt"],
-            current_iter_summary=new_summary,
-            active_set={"mt"},
-            score_delta_threshold=0.05,
-        ) is False
+        assert (
+            should_recall_per_model(
+                model_type="mt",
+                cache_entry=cache["mt"],
+                current_iter_summary=new_summary,
+                active_set={"mt"},
+                score_delta_threshold=0.05,
+            )
+            is False
+        )

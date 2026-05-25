@@ -12,8 +12,8 @@ Naming convention:
   data_scope: full_spec — all fields needed by the implementor
 """
 
-from agent.schemas.proposal import ProposalOutput
 from agent.schemas.implementor import ImplementorInput
+from agent.schemas.proposal import ProposalOutput
 from agent.schemas.storage import StorageConfig
 
 

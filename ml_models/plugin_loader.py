@@ -13,13 +13,14 @@ Plugin interface — each plugin file must define:
     PLUGIN_OUTPUT_TYPE : str   — "classifier" or "regressor" (optional, defaults to "classifier")
 """
 
+import importlib.util
 import os
 import sys
-import importlib.util
 
 AGENT_GENERATED_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "agent_generated", "models",
+    "agent_generated",
+    "models",
 )
 
 # Env var name used to opt into run-scoped plugin directories. When set to a
@@ -55,6 +56,9 @@ def _load_plugin(path: str) -> dict | None:
     """
     module_name = _MODULE_NAME_PREFIX + os.path.splitext(os.path.basename(path))[0]
     spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        print(f"[PluginLoader] Could not resolve module spec for {path}")
+        return None
     module = importlib.util.module_from_spec(spec)
     # Register BEFORE exec so the plugin can reference its own module name
     # (via ``__name__``) without surprising downstream inspect calls.
@@ -76,15 +80,17 @@ def _load_plugin(path: str) -> dict | None:
     # PLUGIN_OUTPUT_TYPE is optional — defaults to "classifier" for backward compat
     output_type = getattr(module, "PLUGIN_OUTPUT_TYPE", "classifier")
     if output_type not in ("classifier", "regressor", "hybrid"):
-        print(f"[PluginLoader] Warning: '{os.path.basename(path)}' has invalid "
-              f"PLUGIN_OUTPUT_TYPE='{output_type}', defaulting to 'classifier'")
+        print(
+            f"[PluginLoader] Warning: '{os.path.basename(path)}' has invalid "
+            f"PLUGIN_OUTPUT_TYPE='{output_type}', defaulting to 'classifier'"
+        )
         output_type = "classifier"
 
     return {
-        "model_type":   module.PLUGIN_MODEL_TYPE,
+        "model_type": module.PLUGIN_MODEL_TYPE,
         "config_class": module.PLUGIN_CONFIG_CLASS,
-        "model_class":  module.PLUGIN_MODEL_CLASS,
-        "output_type":  output_type,
+        "model_class": module.PLUGIN_MODEL_CLASS,
+        "output_type": output_type,
     }
 
 
@@ -136,9 +142,11 @@ def extend_registries(model_registry: dict, config_registry: dict) -> list:
 
             model_type = plugin["model_type"]
             if model_type in model_registry:
-                print(f"[PluginLoader] Warning: plugin '{model_type}' shadows an existing registry entry.")
+                print(
+                    f"[PluginLoader] Warning: plugin '{model_type}' shadows an existing registry entry."
+                )
 
-            model_registry[model_type]  = plugin["model_class"]
+            model_registry[model_type] = plugin["model_class"]
             config_registry[model_type] = plugin["config_class"]
             PLUGIN_OUTPUT_TYPE_REGISTRY[model_type] = plugin["output_type"]
             loaded.append(model_type)
@@ -158,6 +166,7 @@ def get_output_type(model_type: str) -> str:
     """
     # Lazy import to avoid circular dependency (models_sandbox imports plugin_loader)
     from ml_models.models_sandbox import BUILTIN_OUTPUT_TYPES
+
     if model_type in BUILTIN_OUTPUT_TYPES:
         return BUILTIN_OUTPUT_TYPES[model_type]
     if model_type in PLUGIN_OUTPUT_TYPE_REGISTRY:

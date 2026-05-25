@@ -8,16 +8,19 @@ leaderboard, and edge cases (missing files, empty dirs, OOM records).
 
 import json
 import os
+
 import pytest
 
 from dashboard.data_sources.local_json import LocalJsonDataSource
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
-def _make_record(exp_id, status="success", score=None, loss_type="ce", epochs=10, model_type="punet"):
+
+def _make_record(
+    exp_id, status="success", score=None, loss_type="ce", epochs=10, model_type="punet"
+):
     return {
         "exp_id": exp_id,
         "status": status,
@@ -65,7 +68,7 @@ def data_dir(tmp_path):
     _write_json(
         os.path.join(root, "punet", "v1", "agent", "summary_v1_agent.json"),
         [
-            _make_record("baseline_punet_001", score=-2.1),           # seeded, must be excluded
+            _make_record("baseline_punet_001", score=-2.1),  # seeded, must be excluded
             _make_record("punet_v1_agent_001", score=-2.0, loss_type="ce"),
             _make_record("punet_v1_agent_002", score=-1.8, loss_type="focal"),
             _make_record("punet_v1_agent_003", status="skipped_oom_risk", score=None),
@@ -85,6 +88,7 @@ def data_dir(tmp_path):
 # Discovery
 # ---------------------------------------------------------------------------
 
+
 class TestDiscovery:
     def test_list_models_auto_discovers(self, data_dir):
         ds = LocalJsonDataSource(data_dir)
@@ -96,7 +100,7 @@ class TestDiscovery:
 
     def test_list_models_filters_missing_dirs(self, data_dir):
         ds = LocalJsonDataSource(data_dir, models=["punet", "transformer"])
-        assert ds.list_models() == ["punet"]   # transformer dir doesn't exist
+        assert ds.list_models() == ["punet"]  # transformer dir doesn't exist
 
     def test_list_runs_includes_baseline(self, data_dir):
         ds = LocalJsonDataSource(data_dir)
@@ -123,6 +127,7 @@ class TestDiscovery:
 # Record retrieval
 # ---------------------------------------------------------------------------
 
+
 class TestGetRunRecords:
     def test_baseline_returns_one_record(self, data_dir):
         ds = LocalJsonDataSource(data_dir)
@@ -132,14 +137,14 @@ class TestGetRunRecords:
 
     def test_agent_run_excludes_seeded_baseline(self, data_dir):
         ds = LocalJsonDataSource(data_dir)
-        records, total = ds.get_run_records("punet", "v1")
+        records, _total = ds.get_run_records("punet", "v1")
         exp_ids = [r["exp_id"] for r in records]
         assert "baseline_punet_001" not in exp_ids
 
     def test_agent_run_total_count(self, data_dir):
         ds = LocalJsonDataSource(data_dir)
         _, total = ds.get_run_records("punet", "v1")
-        assert total == 3   # 2 success + 1 skipped_oom_risk
+        assert total == 3  # 2 success + 1 skipped_oom_risk
 
     def test_status_filter_success_only(self, data_dir):
         ds = LocalJsonDataSource(data_dir)
@@ -149,7 +154,7 @@ class TestGetRunRecords:
 
     def test_status_filter_oom(self, data_dir):
         ds = LocalJsonDataSource(data_dir)
-        records, total = ds.get_run_records("punet", "v1", status_filter="skipped_oom_risk")
+        _records, total = ds.get_run_records("punet", "v1", status_filter="skipped_oom_risk")
         assert total == 1
 
     def test_pagination_limit(self, data_dir):
@@ -186,6 +191,7 @@ class TestGetExperiment:
 # Aggregates
 # ---------------------------------------------------------------------------
 
+
 class TestModelOverview:
     def test_baseline_score(self, data_dir):
         ds = LocalJsonDataSource(data_dir)
@@ -205,7 +211,7 @@ class TestModelOverview:
     def test_total_experiments_excludes_seeded_baseline(self, data_dir):
         ds = LocalJsonDataSource(data_dir)
         ov = ds.get_model_overview("punet")
-        assert ov["total_experiments"] == 3   # 2 success + 1 skipped
+        assert ov["total_experiments"] == 3  # 2 success + 1 skipped
 
     def test_status_counts(self, data_dir):
         ds = LocalJsonDataSource(data_dir)
@@ -232,6 +238,7 @@ class TestModelOverview:
 # ---------------------------------------------------------------------------
 # Leaderboard
 # ---------------------------------------------------------------------------
+
 
 class TestLeaderboard:
     def test_returns_ranked_entries(self, data_dir):
@@ -271,6 +278,7 @@ class TestLeaderboard:
 # ---------------------------------------------------------------------------
 # Health check
 # ---------------------------------------------------------------------------
+
 
 class TestHealthCheck:
     def test_existing_dir_is_healthy(self, data_dir):

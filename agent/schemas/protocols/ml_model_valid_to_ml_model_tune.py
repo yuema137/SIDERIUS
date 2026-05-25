@@ -19,12 +19,12 @@ Fan-in protocol: consumes ValidatorOutput (adjacent node) and ProposalOutput
 the proposal provides expert_advice and baseline_config for the tuning agent.
 """
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 
-from agent.schemas.validator import ValidatorOutput
-from agent.schemas.proposal import ProposalOutput
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput, serialize_expert_advice
+from agent.schemas.proposal import ProposalOutput
 from agent.schemas.storage import StorageConfig
+from agent.schemas.validator import ValidatorOutput
 
 
 def local_validated_model(
@@ -33,32 +33,32 @@ def local_validated_model(
     storage: StorageConfig,
     max_rounds: int = 50,
     file_index: int = 6,
-    llm_provider: str = "gemini",
+    llm_provider: Literal["gemini", "openai", "deepseek"] = "gemini",
     llm_model_id: str = "gemini-3.1-flash-lite-preview",
-    reflect_provider: Optional[Literal["gemini", "openai", "deepseek"]] = None,
-    reflect_model_id: Optional[str] = None,
+    reflect_provider: Literal["gemini", "openai", "deepseek"] | None = None,
+    reflect_model_id: str | None = None,
     # --- Trial mode (optional — all defaults preserve normal single-file behavior) ---
     is_trial: bool = False,
     trial_strategy: Literal["snapshot", "anchors", "target"] = "snapshot",
     trial_portion: float = 0.1,
-    target_files: Optional[List[int]] = None,
+    target_files: list[int] | None = None,
     train_portion: float = 0.1,
     eval_strategy: Literal["snapshot", "anchors", "target"] = "snapshot",
     eval_portion: float = 0.1,
     train_validation_align: bool = True,
-    sampling_seed: Optional[int] = None,
-    train_base_seed: Optional[int] = None,
+    sampling_seed: int | None = None,
+    train_base_seed: int | None = None,
     cleanup_denoised: bool = False,
-    max_epochs: Optional[int] = None,
-    max_retries: Optional[int] = None,
-    plan_overrides: Optional[Dict[str, Any]] = None,
+    max_epochs: int | None = None,
+    max_retries: int | None = None,
+    plan_overrides: dict[str, Any] | None = None,
     # --- Time-budget gate (evaluate_time_skill, Phase I two-budget split) ---
-    trial_time_budget_minutes: Optional[float] = None,
-    formal_time_budget_minutes: Optional[float] = None,
-    data_dir: Optional[str] = None,
+    trial_time_budget_minutes: float | None = None,
+    formal_time_budget_minutes: float | None = None,
+    data_dir: str | None = None,
     # --- VRAM-budget gate (evaluate_vram_skill, Phase K two-budget split) ---
-    trial_vram_budget_gb: Optional[float] = None,
-    formal_vram_budget_gb: Optional[float] = None,
+    trial_vram_budget_gb: float | None = None,
+    formal_vram_budget_gb: float | None = None,
     # --- Formal-mode training levers (Phase M) + eval-scope (Phase R) ---
     formal_strategy: Literal["snapshot", "anchors", "target"] = "snapshot",
     formal_portion: float = 0.1,
@@ -70,10 +70,10 @@ def local_validated_model(
         "hybrid_params",
         "independent",
         "inherit_best_trial",  # legacy alias of full_clone
-        "llm_propose",         # legacy alias of independent
+        "llm_propose",  # legacy alias of independent
     ] = "full_clone",
     # --- Degenerate-output reaction (paired with execute_tools.squid_health_checks) ---
-    degenerate_penalty_score: Optional[float] = None,
+    degenerate_penalty_score: float | None = None,
     # --- Per-round attempt budget (Phase L, §11) ---
     # Tuner-only fan-out; no proposer-side equivalent. Defaults mirror the
     # schema defaults so omitting them at the workflow/CLI surface yields
@@ -165,10 +165,12 @@ def local_validated_model(
     # is weaker.
     expert_advice = proposal.expert_advice
     deviation_notes = [
-        n for n in (
+        n
+        for n in (
             output.spec_deviation_notes,
             output.inheritance_deviation_notes,
-        ) if n
+        )
+        if n
     ]
     if deviation_notes:
         base = serialize_expert_advice(expert_advice) if expert_advice else ""

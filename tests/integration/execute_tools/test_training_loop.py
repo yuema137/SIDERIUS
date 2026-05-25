@@ -31,14 +31,23 @@ Model configs — two variants per model:
     wavenet    : input_channels=16, residual_channels=32, num_blocks=6
     rnn        : embedding_dim=128, hidden_dim=256, num_layers=2
 """
+
 import os
+
 import pytest
 import torch
 from torch.utils.data import DataLoader
 
-from train_engine_sandbox import TIDMADDataset, run_experiment
-from models_format_sandbox import PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, RNNSeq2SeqConfig, TrainConfig, LossConfig
-
+from execute_tools.train_engine_sandbox import TIDMADDataset, run_experiment
+from ml_models.models_format_sandbox import (
+    AEConfig,
+    LossConfig,
+    PUNetConfig,
+    RNNSeq2SeqConfig,
+    TrainConfig,
+    TransformerConfig,
+    WaveNetConfig,
+)
 
 # Segmentation size used for all synthetic tests — small enough to be fast,
 # large enough to satisfy the minimum constraint in model configs (ge=1000).
@@ -49,6 +58,7 @@ SYNTH_SEG_SIZE = 1000
 # ==========================================
 # Helpers
 # ==========================================
+
 
 def make_train_cfg():
     return TrainConfig(lr=1e-3, epochs=1, batch_size=1, device="cpu")
@@ -70,26 +80,44 @@ def make_model_cfg(model_type, variant="A"):
         elif model_type == "fcnet":
             return AEConfig(segmentation_size=seg_size, latent_dims=[200, 20])
         elif model_type == "transformer":
-            return TransformerConfig(segmentation_size=seg_size, embedding_dim=32, nhead=4, num_layers=2)
+            return TransformerConfig(
+                segmentation_size=seg_size, embedding_dim=32, nhead=4, num_layers=2
+            )
         elif model_type == "wavenet":
-            return WaveNetConfig(segmentation_size=seg_size, input_channels=8, residual_channels=16,
-                                 gate_channels=16, skip_channels=16, num_blocks=3)
+            return WaveNetConfig(
+                segmentation_size=seg_size,
+                input_channels=8,
+                residual_channels=16,
+                gate_channels=16,
+                skip_channels=16,
+                num_blocks=3,
+            )
         elif model_type == "rnn":
-            return RNNSeq2SeqConfig(segmentation_size=seg_size, embedding_dim=16,
-                                    hidden_dim=32, num_layers=1)
+            return RNNSeq2SeqConfig(
+                segmentation_size=seg_size, embedding_dim=16, hidden_dim=32, num_layers=1
+            )
     elif variant == "B":
         if model_type == "punet":
             return PUNetConfig(segmentation_size=seg_size, depth=4, multi=40, kernel_size=9)
         elif model_type == "fcnet":
             return AEConfig(segmentation_size=seg_size, latent_dims=[512, 128, 32])
         elif model_type == "transformer":
-            return TransformerConfig(segmentation_size=seg_size, embedding_dim=64, nhead=8, num_layers=4)
+            return TransformerConfig(
+                segmentation_size=seg_size, embedding_dim=64, nhead=8, num_layers=4
+            )
         elif model_type == "wavenet":
-            return WaveNetConfig(segmentation_size=seg_size, input_channels=16, residual_channels=32,
-                                 gate_channels=32, skip_channels=32, num_blocks=6)
+            return WaveNetConfig(
+                segmentation_size=seg_size,
+                input_channels=16,
+                residual_channels=32,
+                gate_channels=32,
+                skip_channels=32,
+                num_blocks=6,
+            )
         elif model_type == "rnn":
-            return RNNSeq2SeqConfig(segmentation_size=seg_size, embedding_dim=128,
-                                    hidden_dim=256, num_layers=2)
+            return RNNSeq2SeqConfig(
+                segmentation_size=seg_size, embedding_dim=128, hidden_dim=256, num_layers=2
+            )
 
 
 def make_loader(h5_source_fn, model_cfg):
@@ -103,8 +131,9 @@ def make_loader(h5_source_fn, model_cfg):
     max_segments=1: cap at 1 training segment so real-data tests stay fast.
     """
     data_dir, fname = h5_source_fn(model_cfg.segmentation_size)
-    dataset = TIDMADDataset(data_dir, [fname], model_cfg.segmentation_size,
-                            sample_size=1, max_segments=1)
+    dataset = TIDMADDataset(
+        data_dir, [fname], model_cfg.segmentation_size, sample_size=1, max_segments=1
+    )
     return DataLoader(dataset, batch_size=1, shuffle=False, drop_last=True)
 
 
@@ -137,8 +166,8 @@ def run_one(model_type, loss_type, h5_source, tmp_path, variant="A"):
 # punet — classification losses only
 # ==========================================
 
-class TestPUNetTraining:
 
+class TestPUNetTraining:
     @pytest.mark.parametrize("variant", ["A", "B"])
     @pytest.mark.parametrize("loss_type", ["ce", "focal", "focal_cw"])
     def test_punet_trains_and_saves_model(self, loss_type, variant, h5_source, tmp_path):
@@ -146,7 +175,7 @@ class TestPUNetTraining:
 
         assert "final_loss" in results
         assert "loss_history" in results
-        assert len(results["loss_history"]) == 1   # 1 epoch
+        assert len(results["loss_history"]) == 1  # 1 epoch
         assert isinstance(results["final_loss"], float)
         assert os.path.exists(model_path), f"Model not saved at {model_path}"
 
@@ -163,8 +192,8 @@ class TestPUNetTraining:
 # fcnet — classification and regression losses
 # ==========================================
 
-class TestFCNetTraining:
 
+class TestFCNetTraining:
     @pytest.mark.parametrize("variant", ["A", "B"])
     @pytest.mark.parametrize("loss_type", ["ce", "focal", "focal_cw", "smooth_l1"])
     def test_fcnet_trains_and_saves_model(self, loss_type, variant, h5_source, tmp_path):
@@ -189,12 +218,14 @@ class TestFCNetTraining:
 # transformer — classification losses only
 # ==========================================
 
-class TestTransformerTraining:
 
+class TestTransformerTraining:
     @pytest.mark.parametrize("variant", ["A", "B"])
     @pytest.mark.parametrize("loss_type", ["ce", "focal", "focal_cw"])
     def test_transformer_trains_and_saves_model(self, loss_type, variant, h5_source, tmp_path):
-        results, model_path = run_one("transformer", loss_type, h5_source, tmp_path, variant=variant)
+        results, model_path = run_one(
+            "transformer", loss_type, h5_source, tmp_path, variant=variant
+        )
 
         assert "final_loss" in results
         assert "loss_history" in results
@@ -215,8 +246,8 @@ class TestTransformerTraining:
 # wavenet — classification losses only
 # ==========================================
 
-class TestWaveNetTraining:
 
+class TestWaveNetTraining:
     @pytest.mark.parametrize("variant", ["A", "B"])
     @pytest.mark.parametrize("loss_type", ["ce", "focal", "focal_cw"])
     def test_wavenet_trains_and_saves_model(self, loss_type, variant, h5_source, tmp_path):
@@ -241,8 +272,8 @@ class TestWaveNetTraining:
 # rnn — classification losses only
 # ==========================================
 
-class TestRNNSeq2SeqTraining:
 
+class TestRNNSeq2SeqTraining:
     @pytest.mark.parametrize("variant", ["A", "B"])
     @pytest.mark.parametrize("loss_type", ["ce", "focal", "focal_cw"])
     def test_rnn_trains_and_saves_model(self, loss_type, variant, h5_source, tmp_path):

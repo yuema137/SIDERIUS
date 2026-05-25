@@ -7,14 +7,15 @@ Tests:
   - JSON schema is generated from the actual Pydantic input class
   - Output schema is stored but not included in the tool definition
 """
+
 from pydantic import BaseModel, Field
 
 from agent.schemas.skill_spec import SkillSpec
 
-
 # ---------------------------------------------------------------------------
 # Dummy schemas for testing
 # ---------------------------------------------------------------------------
+
 
 class DummyInput(BaseModel):
     query: str = Field(..., description="The search query.")
@@ -30,8 +31,8 @@ class DummyOutput(BaseModel):
 # Construction
 # ---------------------------------------------------------------------------
 
-class TestSkillSpecConstruction:
 
+class TestSkillSpecConstruction:
     def test_basic_creation(self):
         spec = SkillSpec(
             name="search",
@@ -60,8 +61,8 @@ class TestSkillSpecConstruction:
 # to_openai_tool()
 # ---------------------------------------------------------------------------
 
-class TestToOpenAITool:
 
+class TestToOpenAITool:
     def _make_spec(self) -> SkillSpec:
         return SkillSpec(
             name="search",

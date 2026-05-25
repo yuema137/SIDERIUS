@@ -30,5 +30,5 @@ class ServerConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    hostname:                str   = Field(..., min_length=1)
+    hostname: str = Field(..., min_length=1)
     per_psd_segment_seconds: float = Field(..., gt=0.0)

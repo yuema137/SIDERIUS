@@ -27,24 +27,26 @@
 # itself, which would make LLMBridge a pure transport layer. See Open Question
 # 1 in docs/refactor_llm_bridge.md.
 
-import os
 import json
+import os
 import sys
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, List, Dict, Optional
-from openai import OpenAI
+from typing import Any, ClassVar, TypedDict, cast
+
 from dotenv import load_dotenv
+from openai import OpenAI
+from openai.types.chat import ChatCompletionMessageFunctionToolCall
 from pydantic import ValidationError
 
 from agent.prompts import (
     PLANNER_PROMPT,
     REFLECTOR_PROMPT,
     get_planner_user_prompt,
-    get_reflector_user_prompt
+    get_reflector_user_prompt,
 )
 from agent.schemas.telemetry import (
     LLMBridgeContextError,
@@ -52,7 +54,6 @@ from agent.schemas.telemetry import (
     TokenUsageChars,
     TokenUsageRow,
 )
-
 
 # Fallback markdown injected at the {SCORE_COMPARISON_TABLE} token when no
 # per-file table is available. Italicised Markdown so the LLM reads them as
@@ -85,16 +86,31 @@ class ToolCallResult:
     """
 
     name: str
-    arguments: Dict[str, Any]
+    arguments: dict[str, Any]
     call_id: str
+
 
 # ---------------------------------------------------------------------------
 # Known providers — convenience defaults, not a restriction.
 # Any OpenAI-compatible endpoint can be used via base_url/api_key overrides.
 # ---------------------------------------------------------------------------
-_KNOWN_PROVIDERS: Dict[str, Dict[str, Optional[str]]] = {
+class _ProviderConfig(TypedDict):
+    """Static shape of a `_KNOWN_PROVIDERS` entry.
+
+    ``base_url`` is ``None`` for providers that rely on the OpenAI SDK
+    default endpoint (currently ``openai``); ``api_key_env`` and
+    ``default_model`` are always populated, which lets ``os.getenv`` and
+    ``self.model_name`` resolve as ``str`` without a runtime guard.
+    """
+
+    base_url: str | None
+    api_key_env: str
+    default_model: str
+
+
+_KNOWN_PROVIDERS: dict[str, _ProviderConfig] = {
     "openai": {
-        "base_url": None,           # SDK default
+        "base_url": None,  # SDK default
         "api_key_env": "OPENAI_API_KEY",
         "default_model": "gpt-4o",
     },
@@ -179,19 +195,19 @@ _STUB_MOTIVATION = (
 )
 
 
-def _stub_expert_advice_dict() -> Dict:
+def _stub_expert_advice_dict() -> dict:
     """Default ``ExpertAdvice``-validatable dict for stub proposals."""
     return {
-        "focus_areas":           ["Stub mode — exploration is a no-op."],
-        "constraints":           ["Forward contract: [B, T] int -> [B, 256, T] float."],
-        "known_failures":        [],
-        "suggested_directions":  ["Continue with default trial settings."],
-        "rationale":             "Stub bridge in effect; no real guidance.",
-        "freeform_notes":        None,
+        "focus_areas": ["Stub mode — exploration is a no-op."],
+        "constraints": ["Forward contract: [B, T] int -> [B, 256, T] float."],
+        "known_failures": [],
+        "suggested_directions": ["Continue with default trial settings."],
+        "rationale": "Stub bridge in effect; no real guidance.",
+        "freeform_notes": None,
     }
 
 
-def _stub_baseline_config_dict() -> Dict:
+def _stub_baseline_config_dict() -> dict:
     """Minimal ``baseline_config`` with ``model_config`` / ``train_config`` / ``loss_config``.
 
     The only constraint enforced by ``ProposalOutput._validate_baseline_segmentation_size``
@@ -200,15 +216,15 @@ def _stub_baseline_config_dict() -> Dict:
     """
     return {
         "model_config": {
-            "model_type":        "stub_arch",
+            "model_type": "stub_arch",
             "segmentation_size": 40000,
-            "batch_size":        1,
-            "hidden_dim":        8,
+            "batch_size": 1,
+            "hidden_dim": 8,
         },
         "train_config": {
-            "epochs":     1,
+            "epochs": 1,
             "batch_size": 1,
-            "lr":         1e-3,
+            "lr": 1e-3,
         },
         "loss_config": {
             "loss_type": "ce",
@@ -243,12 +259,12 @@ class LLMBridge:
     def __init__(
         self,
         provider: str = "gemini",
-        model_id: Optional[str] = None,
-        base_url: Optional[str] = None,
-        api_key: Optional[str] = None,
-        reflect_provider: Optional[str] = None,
-        reflect_model_id: Optional[str] = None,
-        max_retries: Optional[int] = None,
+        model_id: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        reflect_provider: str | None = None,
+        reflect_model_id: str | None = None,
+        max_retries: int | None = None,
     ):
         """
         Unified LLM bridge — every provider is accessed through ``openai.OpenAI``.
@@ -322,10 +338,14 @@ class LLMBridge:
         # Resolve model: explicit arg > known default (unknown providers must supply model_id)
         if model_id is None and known:
             model_id = known["default_model"]
-        self.model_name = model_id
+        # ``cast`` is a pure type-system shim. If a caller passes an unknown
+        # provider with no ``model_id``, ``model_id`` remains ``None`` and
+        # the existing crash at the API-call site (``client.chat.completions.create``)
+        # is preserved verbatim — no behavior change, no early raise.
+        self.model_name: str = cast(str, model_id)
         # Reflect model defaults to the main model when unset, so existing
         # callers see no behavior change.
-        self.reflect_model_name = reflect_model_id or self.model_name
+        self.reflect_model_name: str = reflect_model_id or self.model_name
 
         # Retry policy: SDK retries are disabled (max_retries=0) and
         # replaced with our own loop in _chat_json that uses a longer
@@ -333,12 +353,26 @@ class LLMBridge:
         # The default SDK schedule (capped at ~8s, ~25s total) gave up
         # too fast on the E9 SDSC iter 47950268 503 (Google "high
         # demand" / per-key QPM saturation under parallel runs).
-        self.client = OpenAI(
-            api_key=self.api_key,
-            max_retries=0,
-            timeout=120.0,
-            **({"base_url": base_url} if base_url else {}),
-        )
+        #
+        # The conditional ``**({"base_url": ...} if base_url else {})``
+        # spread used here previously collapsed pyright's kwarg resolution
+        # into spurious ``default_headers``/``default_query`` complaints.
+        # Branching the call keeps the runtime identical (omitting
+        # ``base_url`` lets the SDK fall back to its default endpoint) while
+        # giving the type-checker concrete keyword arguments to match.
+        if base_url:
+            self.client = OpenAI(
+                api_key=self.api_key,
+                max_retries=0,
+                timeout=120.0,
+                base_url=base_url,
+            )
+        else:
+            self.client = OpenAI(
+                api_key=self.api_key,
+                max_retries=0,
+                timeout=120.0,
+            )
 
         # --- Reflect client setup (Phase A.2: cross-provider support) ---
         # When reflect_provider is None or matches the main provider, the
@@ -383,10 +417,10 @@ class LLMBridge:
         # a row anywhere. This lets unit tests that patch the OpenAI client
         # run without touching disk, and ensures that production runs which
         # never get a setter call do not start writing half-formed rows.
-        self._token_usage_path: Optional[Path] = None
-        self._iter: Optional[int] = None
-        self._run_id: Optional[str] = None
-        self._run_name: Optional[str] = None
+        self._token_usage_path: Path | None = None
+        self._iter: int | None = None
+        self._run_id: str | None = None
+        self._run_name: str | None = None
 
         # --- Setter Safety Protocol state (Commit 2) ---
         # _lock serializes set_run_context with _record_usage so that the
@@ -398,17 +432,17 @@ class LLMBridge:
         self._lock = threading.Lock()
         # Set when set_run_context() is called; copied into rows' extra if
         # callers ask for it. Plain ISO-8601 string for cheap diffing.
-        self._set_at_ts: Optional[str] = None
+        self._set_at_ts: str | None = None
         # Lazy cache of the file's first-row run_id (read once on first write).
         # If the file does not exist or is empty when we first try to write,
         # this is set to our own run_id (we own the file from row 0).
-        self._first_row_run_id_cache: Optional[str] = None
+        self._first_row_run_id_cache: str | None = None
         # Tracks the highest iter value successfully appended (rows + markers).
         # Used to detect backwards-iter leaks per §1.4.1.
-        self._last_logged_iter: Optional[int] = None
+        self._last_logged_iter: int | None = None
         # Tracks the most recent ts string written; used for the soft
         # monotonic-timestamp warning (clock-skew detection — not a raise).
-        self._last_ts: Optional[str] = None
+        self._last_ts: str | None = None
 
     # ------------------------------------------------------------------
     # Setter Safety Protocol (§1.4.1 / §1.4.2 of the design doc)
@@ -432,8 +466,7 @@ class LLMBridge:
     # _flush_iter_marker_locked appends one synthetic row with
     # label='_iter_flush' for the *previous* iter, then state is updated.
     # ------------------------------------------------------------------
-    def set_run_context(self, *, workspace: Path, iter: int,
-                        run_name: str, run_id: str) -> None:
+    def set_run_context(self, *, workspace: Path, iter: int, run_name: str, run_id: str) -> None:
         """Bind run-context state used by ``_record_usage``.
 
         Args:
@@ -481,8 +514,7 @@ class LLMBridge:
                 )
             if not os.access(workspace, os.W_OK):
                 raise OSError(
-                    f"workspace not writable: {workspace}. "
-                    f"Cannot append token_usage.jsonl."
+                    f"workspace not writable: {workspace}. Cannot append token_usage.jsonl."
                 )
             # --- legitimate iter advancement: flush prior iter first ---
             #
@@ -500,9 +532,7 @@ class LLMBridge:
             self._run_name = run_name
             self._run_id = run_id
             self._set_at_ts = (
-                datetime.now(timezone.utc)
-                .isoformat(timespec="milliseconds")
-                .replace("+00:00", "Z")
+                datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
             )
 
     def _flush_iter_marker_locked(self, *, prev_iter: int) -> None:
@@ -521,11 +551,7 @@ class LLMBridge:
         # a prior bind), silently no-op.
         if self._token_usage_path is None:
             return
-        ts = (
-            datetime.now(timezone.utc)
-            .isoformat(timespec="milliseconds")
-            .replace("+00:00", "Z")
-        )
+        ts = datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
         # Run pre-write invariant checks (loud on violation).
         self._validate_pre_write_locked(target_iter=prev_iter, ts=ts)
         try:
@@ -546,7 +572,8 @@ class LLMBridge:
             print(
                 f"[LLMBridge._flush_iter_marker] schema validation failed "
                 f"for iter={prev_iter}: {ve}",
-                file=sys.stderr, flush=True,
+                file=sys.stderr,
+                flush=True,
             )
             return
         # Append (line-buffered). Transient OSError swallowed; structural
@@ -557,9 +584,9 @@ class LLMBridge:
                 f.flush()  # Per concurrency directive: explicit flush in lock
         except OSError as oe:
             print(
-                f"[LLMBridge._flush_iter_marker] append failed for "
-                f"{self._token_usage_path}: {oe}",
-                file=sys.stderr, flush=True,
+                f"[LLMBridge._flush_iter_marker] append failed for {self._token_usage_path}: {oe}",
+                file=sys.stderr,
+                flush=True,
             )
             return
         # Track that this iter has been flushed (for monotonic check).
@@ -580,8 +607,7 @@ class LLMBridge:
     # and extra. See docs/audit_and_optimize_token_usage_and_growth.md
     # Commit 6.1 (T4 wiring + audit-log test).
     # ------------------------------------------------------------------
-    def emit_marker(self, *, label: str,
-                    extra: Optional[Dict[str, Any]] = None) -> None:
+    def emit_marker(self, *, label: str, extra: dict[str, Any] | None = None) -> None:
         """Append a synthetic marker row without an LLM call.
 
         Args:
@@ -605,11 +631,7 @@ class LLMBridge:
         if self._token_usage_path is None:
             return  # context unset — silent no-op
 
-        ts = (
-            datetime.now(timezone.utc)
-            .isoformat(timespec="milliseconds")
-            .replace("+00:00", "Z")
-        )
+        ts = datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
         with self._lock:
             self._validate_pre_write_locked(target_iter=self._iter, ts=ts)
@@ -629,9 +651,9 @@ class LLMBridge:
                 )
             except ValidationError as ve:
                 print(
-                    f"[LLMBridge.emit_marker] schema validation failed "
-                    f"for label={label!r}: {ve}",
-                    file=sys.stderr, flush=True,
+                    f"[LLMBridge.emit_marker] schema validation failed for label={label!r}: {ve}",
+                    file=sys.stderr,
+                    flush=True,
                 )
                 return
             try:
@@ -640,21 +662,19 @@ class LLMBridge:
                     f.flush()
             except OSError as oe:
                 print(
-                    f"[LLMBridge.emit_marker] append failed for "
-                    f"{self._token_usage_path}: {oe}",
-                    file=sys.stderr, flush=True,
+                    f"[LLMBridge.emit_marker] append failed for {self._token_usage_path}: {oe}",
+                    file=sys.stderr,
+                    flush=True,
                 )
                 return
             # Track for monotonic checks (mirrors _flush_iter_marker_locked).
             if self._iter is not None and (
-                self._last_logged_iter is None
-                or self._iter > self._last_logged_iter
+                self._last_logged_iter is None or self._iter > self._last_logged_iter
             ):
                 self._last_logged_iter = self._iter
             self._last_ts = ts
 
-    def _validate_pre_write_locked(self, *, target_iter: Optional[int],
-                                   ts: str) -> None:
+    def _validate_pre_write_locked(self, *, target_iter: int | None, ts: str) -> None:
         """Run the four §1.4.1 pre-write invariant checks. Caller holds lock.
 
         Raises:
@@ -671,27 +691,23 @@ class LLMBridge:
             raise OSError("_validate_pre_write_locked called with no path")
         parent = path.parent
         if not parent.exists():
-            raise OSError(
-                f"token_usage.jsonl parent dir vanished: {parent}"
-            )
+            raise OSError(f"token_usage.jsonl parent dir vanished: {parent}")
         if not os.access(parent, os.W_OK):
-            raise OSError(
-                f"token_usage.jsonl parent dir no longer writable: {parent}"
-            )
+            raise OSError(f"token_usage.jsonl parent dir no longer writable: {parent}")
 
         # --- Row 1: first-row run_id matches (lazy, cached) ---
         if self._first_row_run_id_cache is None:
             if path.exists() and path.stat().st_size > 0:
-                with open(path, "r") as f:
+                with open(path) as f:
                     first_line = f.readline().strip()
                 if first_line:
                     try:
                         first_row = json.loads(first_line)
-                    except json.JSONDecodeError:
+                    except json.JSONDecodeError as e:
                         raise LLMBridgeContextError(
                             f"first line of {path} is not valid JSON; "
                             f"audit log already corrupted, refusing to write."
-                        )
+                        ) from e
                     file_run_id = first_row.get("run_id")
                     if file_run_id != self._run_id:
                         raise LLMBridgeContextError(
@@ -716,8 +732,11 @@ class LLMBridge:
                 )
 
         # --- Row 2: iter not less than last logged ---
-        if (target_iter is not None and self._last_logged_iter is not None
-                and target_iter < self._last_logged_iter):
+        if (
+            target_iter is not None
+            and self._last_logged_iter is not None
+            and target_iter < self._last_logged_iter
+        ):
             raise LLMBridgeContextError(
                 f"backwards iter leak: trying to write iter={target_iter} "
                 f"but last logged iter={self._last_logged_iter}. "
@@ -729,10 +748,11 @@ class LLMBridge:
             print(
                 f"[LLMBridge] WARNING: non-monotonic timestamp "
                 f"({ts} < last {self._last_ts}). Clock skew? Row still written.",
-                file=sys.stderr, flush=True,
+                file=sys.stderr,
+                flush=True,
             )
 
-    def list_models(self) -> List[str]:
+    def list_models(self) -> list[str]:
         """
         List model IDs available from the current provider.
 
@@ -742,30 +762,32 @@ class LLMBridge:
         response = self.client.models.list()
         return sorted(m.id for m in response)
 
-    def plan(self,
-             memory_history: List[Dict],
-             expert_advice: str = "None",
-             force_model: str = "auto",
-             config_manual: Optional[Dict] = None,
-             model_description: Optional[str] = None,
-             exploration_checklist: str = "",
-             plugin_source_excerpt: str = "",
-             current_round: Optional[int] = None,
-             max_rounds: Optional[int] = None,
-             trial_allowed: bool = True,
-             force_formal_round: bool = True,
-             plan_overrides: Optional[Dict] = None,
-             max_epochs: Optional[int] = None,
-             # --- Phase K (K.6) — [ACTIVE RESOURCE BUDGETS] block inputs ---
-             trial_vram_budget_gb: Optional[float] = None,
-             formal_vram_budget_gb: Optional[float] = None,
-             trial_time_budget_minutes: Optional[float] = None,
-             formal_time_budget_minutes: Optional[float] = None,
-             last_vram_estimate_gb: Optional[float] = None,
-             last_time_estimate_minutes: Optional[float] = None,
-             last_batch_size: Optional[int] = None,
-             last_mode: Optional[str] = None,
-             score_table_md: Optional[str] = None) -> Dict:
+    def plan(
+        self,
+        memory_history: list[dict],
+        expert_advice: str = "None",
+        force_model: str = "auto",
+        config_manual: dict | None = None,
+        model_description: str | None = None,
+        exploration_checklist: str = "",
+        plugin_source_excerpt: str = "",
+        current_round: int | None = None,
+        max_rounds: int | None = None,
+        trial_allowed: bool = True,
+        force_formal_round: bool = True,
+        plan_overrides: dict | None = None,
+        max_epochs: int | None = None,
+        # --- Phase K (K.6) — [ACTIVE RESOURCE BUDGETS] block inputs ---
+        trial_vram_budget_gb: float | None = None,
+        formal_vram_budget_gb: float | None = None,
+        trial_time_budget_minutes: float | None = None,
+        formal_time_budget_minutes: float | None = None,
+        last_vram_estimate_gb: float | None = None,
+        last_time_estimate_minutes: float | None = None,
+        last_batch_size: int | None = None,
+        last_mode: str | None = None,
+        score_table_md: str | None = None,
+    ) -> dict:
         """
         Uses the Planner logic to observe Research Memory and decide next steps.
         Incorporates physical constraints from config_manual and architecture
@@ -866,11 +888,15 @@ class LLMBridge:
         # Internal call site: label is fixed (§1.5), wired in Commit 1 so
         # the V12 baseline run is meaningfully labeled and chain_log is
         # clean of "unlabeled" warnings from inside the bridge itself.
-        return self.generate(system_prompt, final_user_prompt,
-                             label="tuner.planner")
+        return self.generate(system_prompt, final_user_prompt, label="tuner.planner")
 
-    def reflect(self, exp_id: str, hypothesis: str, actual_results: Dict,
-                reflection_context: Optional[Dict] = None) -> Dict:
+    def reflect(
+        self,
+        exp_id: str,
+        hypothesis: str,
+        actual_results: dict,
+        reflection_context: dict | None = None,
+    ) -> dict:
         """
         Uses the Reflector logic to transform results into new Memory entries.
         reflection_context provides baseline/best score comparisons so the
@@ -890,22 +916,27 @@ class LLMBridge:
         notice. See docs/aggregated_score_table_awareness.md §9.4.
         """
         score_table_md = (
-            reflection_context.get("score_comparison_table")
-            if reflection_context else None
+            reflection_context.get("score_comparison_table") if reflection_context else None
         )
         system_prompt = REFLECTOR_PROMPT.replace(
             "{SCORE_COMPARISON_TABLE}",
             score_table_md or _REFLECTOR_SCORE_TABLE_FALLBACK,
         )
-        user_prompt = get_reflector_user_prompt(exp_id, hypothesis, actual_results, reflection_context)
+        user_prompt = get_reflector_user_prompt(
+            exp_id, hypothesis, actual_results, reflection_context
+        )
 
         # Internal call site: label is fixed (§1.5). Provider is the
         # reflect provider (may differ from self.provider when cross-
         # provider routing is configured).
-        return self._chat_json(self.reflect_client, self.reflect_model_name,
-                               system_prompt, user_prompt,
-                               label="tuner.reflector",
-                               provider=self.reflect_provider)
+        return self._chat_json(
+            self.reflect_client,
+            self.reflect_model_name,
+            system_prompt,
+            user_prompt,
+            label="tuner.reflector",
+            provider=self.reflect_provider,
+        )
 
     # Retry policy for ALL OpenAI API calls. SDK-level retry is disabled
     # (max_retries=0 in the client constructors), so this helper is the
@@ -941,7 +972,7 @@ class LLMBridge:
     _CONTENT_RETRY_MAX_WAIT = 16.0
 
     @staticmethod
-    def _parse_retry_delay(exc) -> Optional[float]:
+    def _parse_retry_delay(exc) -> float | None:
         """Extract retryDelay seconds from a Google API 429 error body, if present.
 
         Google embeds a RetryInfo detail with a delay string like "28890s".
@@ -960,7 +991,8 @@ class LLMBridge:
 
     def _call_with_retry(self, fn, label: str = "api_call"):
         """Call an OpenAI API function with the bridge's retry policy."""
-        from openai import APIStatusError, APIConnectionError, APITimeoutError
+        from openai import APIConnectionError, APIStatusError, APITimeoutError
+
         last_exc = None
         attempt = 0
         wait = self._RETRY_INITIAL_WAIT
@@ -983,12 +1015,14 @@ class LLMBridge:
             attempt += 1
             # Check if we've exhausted our retry budget
             if self.max_retries is not None and attempt >= self.max_retries:
-                print(f"[LLMBridge.{label}] All {attempt} "
-                      f"attempts failed; raising.", flush=True)
+                print(f"[LLMBridge.{label}] All {attempt} attempts failed; raising.", flush=True)
                 raise last_exc
-            print(f"[LLMBridge.{label}] Attempt {attempt} failed "
-                  f"({type(last_exc).__name__}: {last_exc}); "
-                  f"retrying in {wait}s...", flush=True)
+            print(
+                f"[LLMBridge.{label}] Attempt {attempt} failed "
+                f"({type(last_exc).__name__}: {last_exc}); "
+                f"retrying in {wait}s...",
+                flush=True,
+            )
             time.sleep(wait)
             wait = min(wait * 2, self._RETRY_MAX_WAIT)
 
@@ -1042,10 +1076,10 @@ class LLMBridge:
                 if pos > 0 and text[pos - 1] == "\\":
                     idx = pos - 1  # backslash is before the reported position
                 elif pos < len(text) and text[pos] == "\\":
-                    idx = pos      # backslash is at the reported position
+                    idx = pos  # backslash is at the reported position
                 else:
                     break  # no backslash found near the error site; give up
-                text = text[:idx] + text[idx + 1:]  # drop the backslash
+                text = text[:idx] + text[idx + 1 :]  # drop the backslash
 
         return text
 
@@ -1073,11 +1107,18 @@ class LLMBridge:
     # interleave partial lines. Cross-process safety is not yet
     # required — only the workflow runner writes here.
     # ------------------------------------------------------------------
-    def _record_usage(self, *, response: Any, label: str,
-                      system_prompt: str, user_prompt: str,
-                      model_name: str, provider: str,
-                      components: Optional[Dict[str, int]] = None,
-                      extra: Optional[Dict[str, Any]] = None) -> None:
+    def _record_usage(
+        self,
+        *,
+        response: Any,
+        label: str,
+        system_prompt: str,
+        user_prompt: str,
+        model_name: str,
+        provider: str,
+        components: dict[str, int] | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
         """Append one ``TokenUsageRow`` to ``{workspace}/token_usage.jsonl``.
 
         Silent no-op when ``self._token_usage_path is None`` (run context
@@ -1134,7 +1175,7 @@ class LLMBridge:
         # (section headers like "## Interpretation Summary", key-value preludes
         # like "Models analysed: [...]", stage-specific instructions) that
         # `_build_*_prompt` injects around them. Gate T1 (2026-05-04) measured
-        # the wrapper gap at ~7.5–8.3 K chars per proposer call (~22 % of each
+        # the wrapper gap at ~7.5-8.3 K chars per proposer call (~22 % of each
         # user prompt under the 9-key audit). To make the audit lossless, we
         # inject a catch-all key
         # `template_and_scaffolding = chars.total - sum(content components)`.
@@ -1152,11 +1193,7 @@ class LLMBridge:
                 "template_and_scaffolding": max(0, chars.total - content_sum),
             }
 
-        ts = (
-            datetime.now(timezone.utc)
-            .isoformat(timespec="milliseconds")
-            .replace("+00:00", "Z")
-        )
+        ts = datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
         # --- Lock-protected validate + append + state update.
         # The §1.4.1 pre-write checks must observe the same run-context
@@ -1186,9 +1223,9 @@ class LLMBridge:
                 )
             except ValidationError as ve:
                 print(
-                    f"[LLMBridge._record_usage] schema validation failed for "
-                    f"label={label!r}: {ve}",
-                    file=sys.stderr, flush=True,
+                    f"[LLMBridge._record_usage] schema validation failed for label={label!r}: {ve}",
+                    file=sys.stderr,
+                    flush=True,
                 )
                 return
 
@@ -1203,9 +1240,9 @@ class LLMBridge:
                     f.flush()
             except OSError as oe:
                 print(
-                    f"[LLMBridge._record_usage] append failed for "
-                    f"{self._token_usage_path}: {oe}",
-                    file=sys.stderr, flush=True,
+                    f"[LLMBridge._record_usage] append failed for {self._token_usage_path}: {oe}",
+                    file=sys.stderr,
+                    flush=True,
                 )
                 return
 
@@ -1214,11 +1251,17 @@ class LLMBridge:
                 self._last_logged_iter = self._iter
             self._last_ts = ts
 
-    def _chat_json(self, client: OpenAI, model_name: str,
-                   system_prompt: str, user_prompt: str,
-                   *, label: str = "unlabeled",
-                   provider: Optional[str] = None,
-                   components: Optional[Dict[str, int]] = None) -> Dict:
+    def _chat_json(
+        self,
+        client: OpenAI,
+        model_name: str,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        label: str = "unlabeled",
+        provider: str | None = None,
+        components: dict[str, int] | None = None,
+    ) -> dict:
         """
         Internal helper: send a system+user prompt through a specific client
         to a specific model, and return the parsed JSON response.
@@ -1248,10 +1291,7 @@ class LLMBridge:
         # Provider defaults to self.provider for the main client, falls back
         # to self.reflect_provider when the reflect client is in use.
         if provider is None:
-            provider = (
-                self.reflect_provider if client is self.reflect_client
-                else self.provider
-            )
+            provider = self.reflect_provider if client is self.reflect_client else self.provider
         last_text = ""
         last_err_label = ""
         wait = self._CONTENT_RETRY_INITIAL_WAIT
@@ -1292,9 +1332,7 @@ class LLMBridge:
                 else:
                     if not isinstance(decoded, (dict, list)):
                         attempt_status = "wrong_type"
-                        last_err_label = (
-                            f"wrong_type: decoded to {type(decoded).__name__}"
-                        )
+                        last_err_label = f"wrong_type: decoded to {type(decoded).__name__}"
                         decoded = None
                     else:
                         attempt_status = "ok"
@@ -1320,7 +1358,24 @@ class LLMBridge:
                         f"trailing data after valid JSON (model={model_name}).",
                         flush=True,
                     )
-                return decoded
+                # Type-system proof: ``attempt_status == "ok"`` is set
+                # exclusively in the ``isinstance(decoded, (dict, list))``
+                # branch above (L1332-1337), so ``decoded`` is provably
+                # ``dict | list`` here. The assert restates the invariant
+                # for pyright; it cannot fire at runtime under the existing
+                # code flow.
+                #
+                # The trailing ``cast(dict, decoded)`` is a deliberate
+                # type-lie that quarantines a long-standing contract
+                # mismatch: the signature says ``-> dict`` but the runtime
+                # explicitly accepts top-level JSON arrays (the ``list``
+                # branch at L1332). Widening the signature would propagate
+                # the union into every downstream caller of ``generate()``
+                # / ``reflect()`` and create new errors. Identity at
+                # runtime — ``decoded`` is returned verbatim, so lists
+                # still flow through untouched.
+                assert isinstance(decoded, (dict, list))
+                return cast(dict, decoded)
 
             # Content-level failure — retry if budget remains.
             if attempt < self._CONTENT_RETRY_BUDGET:
@@ -1360,12 +1415,18 @@ class LLMBridge:
             f"[LLMBridge.{method_name}] WARNING: called without label= kwarg "
             f"(label fell back to {self._DEFAULT_LABEL!r}). Pass an explicit "
             f"label per docs/audit_and_optimize_token_usage_and_growth.md §1.5.",
-            file=sys.stderr, flush=True,
+            file=sys.stderr,
+            flush=True,
         )
 
-    def generate(self, system_prompt: str, user_prompt: str,
-                 *, label: str = _DEFAULT_LABEL,
-                 components: Optional[Dict[str, int]] = None) -> Dict:
+    def generate(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        label: str = _DEFAULT_LABEL,
+        components: dict[str, int] | None = None,
+    ) -> dict:
         """
         Call the main LLM (``self.client`` + ``self.model_name``) with a
         system prompt and a user prompt, return a JSON dict.
@@ -1387,14 +1448,24 @@ class LLMBridge:
         """
         if label == self._DEFAULT_LABEL:
             self._warn_default_label("generate")
-        return self._chat_json(self.client, self.model_name,
-                               system_prompt, user_prompt,
-                               label=label, provider=self.provider,
-                               components=components)
+        return self._chat_json(
+            self.client,
+            self.model_name,
+            system_prompt,
+            user_prompt,
+            label=label,
+            provider=self.provider,
+            components=components,
+        )
 
-    def generate_text(self, system_prompt: str, user_prompt: str,
-                      *, label: str = _DEFAULT_LABEL,
-                      components: Optional[Dict[str, int]] = None) -> str:
+    def generate_text(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        label: str = _DEFAULT_LABEL,
+        components: dict[str, int] | None = None,
+    ) -> str:
         """
         Call the LLM with a system prompt and user prompt, return plain text.
 
@@ -1427,16 +1498,24 @@ class LLMBridge:
             components=components,
             extra={"attempt": 0, "status": "ok"},
         )
-        return response.choices[0].message.content.strip()
+        # Pure type-system shim. ``message.content`` is ``Optional[str]``
+        # per the OpenAI SDK; an ``AttributeError`` on a ``None`` payload
+        # is the *intended* fail-fast signal that the workflow-level
+        # ``except Exception`` envelope (model_exploration.py L1211) uses
+        # to mark the proposer/implementor attempt failed and retry with
+        # a fresh proposal. Catching it locally would feed an empty string
+        # downstream and starve that retry signal — see Phase 2b envelope
+        # audit. Cast preserves the existing crash behavior verbatim.
+        return cast(str, response.choices[0].message.content).strip()
 
     def tool_call(
         self,
         system_prompt: str,
         user_prompt: str,
-        tools: List[Dict[str, Any]],
+        tools: list[dict[str, Any]],
         *,
         label: str = _DEFAULT_LABEL,
-        components: Optional[Dict[str, int]] = None,
+        components: dict[str, int] | None = None,
     ) -> ToolCallResult:
         """
         Ask the LLM to select a tool and provide arguments.
@@ -1468,7 +1547,11 @@ class LLMBridge:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                tools=tools,
+                # ``tools`` enters as ``list[dict[str, Any]]`` (built by
+                # ``SkillSpec.to_openai_tool``); the SDK signature wants
+                # ``Iterable[ChatCompletionToolUnionParam]``. Cast is a
+                # pure type-system shim — no runtime change.
+                tools=cast(Any, tools),
                 tool_choice="auto",
             ),
             label="tool_call",
@@ -1498,10 +1581,18 @@ class LLMBridge:
             )
 
         tc = message.tool_calls[0]
+        # SDK ``tool_calls`` is typed as a union of
+        # ``ChatCompletionMessageFunctionToolCall`` (has ``.function``) and
+        # ``ChatCompletionMessageCustomToolCall`` (has ``.custom`` instead).
+        # SIDERIUS never registers custom tools — every ``tools=`` payload
+        # built by ``SkillSpec.to_openai_tool()`` is function-typed, so the
+        # API always returns the function variant. Cast is a pure
+        # type-system shim — no runtime change.
+        tc_fn = cast(ChatCompletionMessageFunctionToolCall, tc)
         return ToolCallResult(
-            name=tc.function.name,
-            arguments=json.loads(tc.function.arguments),
-            call_id=tc.id,
+            name=tc_fn.function.name,
+            arguments=json.loads(tc_fn.function.arguments),
+            call_id=tc_fn.id,
         )
 
 
@@ -1563,38 +1654,38 @@ class StubLLMBridge(LLMBridge):
     # --- Dispatch tables (label -> method-name) --------------------------
     # Keyed by string method names rather than method objects so the dict
     # can sit in the class body without forward-referencing each method.
-    _SYNTH_HANDLERS_JSON: Dict[str, str] = {
+    _SYNTH_HANDLERS_JSON: ClassVar[dict[str, str]] = {
         # B2a — tuner + interpretation
-        "tuner.planner":              "_synth_tuner_planner",
-        "tuner.reflector":            "_synth_tuner_reflector",
-        "interpretation.per_model":   "_synth_interpretation_per_model",
-        "interpretation.synthesis":   "_synth_interpretation_synthesis",
-        "interpretation.dedup":       "_synth_interpretation_dedup",
+        "tuner.planner": "_synth_tuner_planner",
+        "tuner.reflector": "_synth_tuner_reflector",
+        "interpretation.per_model": "_synth_interpretation_per_model",
+        "interpretation.synthesis": "_synth_interpretation_synthesis",
+        "interpretation.dedup": "_synth_interpretation_dedup",
         # B2b — proposer (4 of 5: the 5th, legacy_reasoning, is text)
-        "proposer.legacy_commit":     "_synth_proposer_legacy_commit",
-        "proposer.comparison":        "_synth_proposer_comparison",
-        "proposer.causal_reasoning":  "_synth_proposer_causal_reasoning",
-        "proposer.proposing":         "_synth_proposer_proposing",
+        "proposer.legacy_commit": "_synth_proposer_legacy_commit",
+        "proposer.comparison": "_synth_proposer_comparison",
+        "proposer.causal_reasoning": "_synth_proposer_causal_reasoning",
+        "proposer.proposing": "_synth_proposer_proposing",
         # B2b — implementor (2 of 3: reasoning is text)
-        "implementor.code":           "_synth_implementor_code",
-        "implementor.repair":         "_synth_implementor_repair",
+        "implementor.code": "_synth_implementor_code",
+        "implementor.repair": "_synth_implementor_repair",
         # B2b — validator
-        "validator.code_review":      "_synth_validator_code_review",
+        "validator.code_review": "_synth_validator_code_review",
     }
-    _SYNTH_HANDLERS_TEXT: Dict[str, str] = {
+    _SYNTH_HANDLERS_TEXT: ClassVar[dict[str, str]] = {
         # B2b — proposer + implementor free-text labels
-        "proposer.legacy_reasoning":  "_synth_proposer_legacy_reasoning",
-        "implementor.reasoning":      "_synth_implementor_reasoning",
+        "proposer.legacy_reasoning": "_synth_proposer_legacy_reasoning",
+        "implementor.reasoning": "_synth_implementor_reasoning",
     }
 
     def __init__(
         self,
         *,
-        provider: Optional[str] = None,
-        model_id: Optional[str] = None,
-        reflect_provider: Optional[str] = None,
-        reflect_model_id: Optional[str] = None,
-        max_retries: Optional[int] = 0,
+        provider: str | None = None,
+        model_id: str | None = None,
+        reflect_provider: str | None = None,
+        reflect_model_id: str | None = None,
+        max_retries: int | None = 0,
     ):
         """Initialise stub bridge state without any OpenAI client.
 
@@ -1635,14 +1726,14 @@ class StubLLMBridge(LLMBridge):
         """
         load_dotenv()
         self.provider: str = "stub"
-        self.model_name: Optional[str] = "stub_model"
-        self.api_key: Optional[str] = None
-        self.max_retries: Optional[int] = max_retries
+        self.model_name: str | None = "stub_model"
+        self.api_key: str | None = None
+        self.max_retries: int | None = max_retries
 
         # Reflect-side mirror — same provider/model so cross-provider
         # routing is a no-op in stub mode.
         self.reflect_provider: str = "stub"
-        self.reflect_model_name: Optional[str] = "stub_model"
+        self.reflect_model_name: str | None = "stub_model"
 
         # No OpenAI clients. Both attributes exist so any inherited code
         # that grabs `self.client` / `self.reflect_client` fails fast
@@ -1651,17 +1742,17 @@ class StubLLMBridge(LLMBridge):
         self.reflect_client = None
 
         # --- Run-context state (mirrors LLMBridge.__init__) ---
-        self._token_usage_path: Optional[Path] = None
-        self._iter: Optional[int] = None
-        self._run_id: Optional[str] = None
-        self._run_name: Optional[str] = None
+        self._token_usage_path: Path | None = None
+        self._iter: int | None = None
+        self._run_id: str | None = None
+        self._run_name: str | None = None
 
         # --- Setter Safety Protocol state (mirrors LLMBridge.__init__) ---
         self._lock = threading.Lock()
-        self._set_at_ts: Optional[str] = None
-        self._first_row_run_id_cache: Optional[str] = None
-        self._last_logged_iter: Optional[int] = None
-        self._last_ts: Optional[str] = None
+        self._set_at_ts: str | None = None
+        self._first_row_run_id_cache: str | None = None
+        self._last_logged_iter: int | None = None
+        self._last_ts: str | None = None
 
         # --- Brake-stress hook (Stage 4 / Commit 4.6) ---
         # Captured once at __init__ time; the brake-stress scenario uses a
@@ -1688,7 +1779,7 @@ class StubLLMBridge(LLMBridge):
     # ------------------------------------------------------------------
     # Dispatch helpers — one per response type.
     # ------------------------------------------------------------------
-    def _synthesise_json(self, label: str) -> Dict:
+    def _synthesise_json(self, label: str) -> dict:
         """Return a JSON-mode synthetic response for ``label``."""
         handler_name = self._SYNTH_HANDLERS_JSON.get(label)
         if handler_name is None:
@@ -1732,11 +1823,17 @@ class StubLLMBridge(LLMBridge):
     # ------------------------------------------------------------------
     # Entry-point overrides.
     # ------------------------------------------------------------------
-    def _chat_json(self, client: Any, model_name: str,
-                   system_prompt: str, user_prompt: str,
-                   *, label: str = LLMBridge._DEFAULT_LABEL,
-                   provider: Optional[str] = None,
-                   components: Optional[Dict[str, int]] = None) -> Dict:
+    def _chat_json(
+        self,
+        client: Any,
+        model_name: str,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        label: str = LLMBridge._DEFAULT_LABEL,
+        provider: str | None = None,
+        components: dict[str, int] | None = None,
+    ) -> dict:
         """Bypass HTTP; dispatch to the JSON synthesiser registered for ``label``.
 
         Catches every JSON-mode call: ``generate`` (inherited, calls
@@ -1751,19 +1848,29 @@ class StubLLMBridge(LLMBridge):
             self._warn_default_label("_chat_json")
         return self._synthesise_json(label)
 
-    def generate_text(self, system_prompt: str, user_prompt: str,
-                      *, label: str = LLMBridge._DEFAULT_LABEL,
-                      components: Optional[Dict[str, int]] = None) -> str:
+    def generate_text(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        label: str = LLMBridge._DEFAULT_LABEL,
+        components: dict[str, int] | None = None,
+    ) -> str:
         """Bypass HTTP; dispatch to the text synthesiser registered for ``label``."""
         self._maybe_crash(label)
         if label == self._DEFAULT_LABEL:
             self._warn_default_label("generate_text")
         return self._synthesise_text(label)
 
-    def tool_call(self, system_prompt: str, user_prompt: str,
-                  tools: List[Dict[str, Any]],
-                  *, label: str = LLMBridge._DEFAULT_LABEL,
-                  components: Optional[Dict[str, int]] = None) -> ToolCallResult:
+    def tool_call(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        tools: list[dict[str, Any]],
+        *,
+        label: str = LLMBridge._DEFAULT_LABEL,
+        components: dict[str, int] | None = None,
+    ) -> ToolCallResult:
         """Loud refusal — no production label currently routes through ``tool_call``.
 
         ``validator.code_review`` was suspected to use ``tool_call`` but
@@ -1784,7 +1891,7 @@ class StubLLMBridge(LLMBridge):
     # B2a synthesisers: tuner (2) + interpretation (3)
     # ==================================================================
 
-    def _synth_tuner_planner(self) -> Dict:
+    def _synth_tuner_planner(self) -> dict:
         """Return an ``ExperimentPlan``-validatable dict with stub hyperparameters.
 
         Uses ``_synth_stub_model_name(iter, "a")`` for ``model_type`` so the
@@ -1798,38 +1905,37 @@ class StubLLMBridge(LLMBridge):
         """
         iter_idx = self._iter if self._iter is not None else 0
         return {
-            "model_type":             _synth_stub_model_name(iter_idx, "a"),
-            "hypothesis":             "Stub planner: no-op verdict; the "
-                                      "chain proceeds with default trial mode.",
-            "reasoning":              "Stub mode — no real planning; "
-                                      "minimal viable hyperparameters returned.",
-            "model_config":           {},
-            "train_config":           {"epochs": 1, "batch_size": 1, "lr": 1e-3},
-            "loss_config":            {"loss_type": "ce"},
-            "is_trial":               True,
-            "trial_strategy":         "snapshot",
-            "trial_portion":          0.02,
-            "target_files":           [],
-            "train_portion":          0.1,
-            "eval_strategy":          "snapshot",
-            "eval_portion":           0.02,
+            "model_type": _synth_stub_model_name(iter_idx, "a"),
+            "hypothesis": "Stub planner: no-op verdict; the "
+            "chain proceeds with default trial mode.",
+            "reasoning": "Stub mode — no real planning; minimal viable hyperparameters returned.",
+            "model_config": {},
+            "train_config": {"epochs": 1, "batch_size": 1, "lr": 1e-3},
+            "loss_config": {"loss_type": "ce"},
+            "is_trial": True,
+            "trial_strategy": "snapshot",
+            "trial_portion": 0.02,
+            "target_files": [],
+            "train_portion": 0.1,
+            "eval_strategy": "snapshot",
+            "eval_portion": 0.02,
             "train_validation_align": True,
         }
 
-    def _synth_tuner_reflector(self) -> Dict:
+    def _synth_tuner_reflector(self) -> dict:
         """Return the four reflector keys consumed by the tuner agent.
 
         See ``nodes/ml_hyperparameter_tune_agent.py`` ``reflection.get(...)``
         callsites and ``agent/prompts.py`` REFLECTOR_PROMPT output schema.
         """
         return {
-            "conclusion":    "Stub reflector: neutral verdict — chain continues.",
-            "key_factor":    "(none — stub mode)",
-            "discovery":     "(none — stub mode)",
+            "conclusion": "Stub reflector: neutral verdict — chain continues.",
+            "key_factor": "(none — stub mode)",
+            "discovery": "(none — stub mode)",
             "memory_update": "Continue with default plan; stub mode in effect.",
         }
 
-    def _synth_interpretation_per_model(self) -> Dict:
+    def _synth_interpretation_per_model(self) -> dict:
         """Return all 8 fields specified by ``PER_MODEL_SYSTEM_PROMPT``.
 
         Every key is required so the Knowledge Accumulator's downstream
@@ -1839,17 +1945,17 @@ class StubLLMBridge(LLMBridge):
         for the full contract.
         """
         return {
-            "key_findings":         ["Stub: no real findings."],
-            "bottlenecks":          ["Stub: no real bottlenecks."],
+            "key_findings": ["Stub: no real findings."],
+            "bottlenecks": ["Stub: no real bottlenecks."],
             "best_config_analysis": "Stub: no analysis performed.",
-            "score_trend":          "Stub: no trend computed.",
-            "per_file_analysis":    "Stub: no per-file analysis.",
-            "data_sensitivity":     "Stub: no data-sensitivity analysis.",
-            "efficiency_assessment":"Stub: no efficiency analysis.",
-            "strategy_assessment":  "Stub: no strategy analysis.",
+            "score_trend": "Stub: no trend computed.",
+            "per_file_analysis": "Stub: no per-file analysis.",
+            "data_sensitivity": "Stub: no data-sensitivity analysis.",
+            "efficiency_assessment": "Stub: no efficiency analysis.",
+            "strategy_assessment": "Stub: no strategy analysis.",
         }
 
-    def _synth_interpretation_synthesis(self) -> Dict:
+    def _synth_interpretation_synthesis(self) -> dict:
         """Return all 5 fields specified by ``SYNTHESIS_SYSTEM_PROMPT``.
 
         The synthesis callsite reads only ``key_findings`` / ``bottlenecks`` /
@@ -1858,14 +1964,14 @@ class StubLLMBridge(LLMBridge):
         finds non-empty values.
         """
         return {
-            "key_findings":          ["Stub: no real cross-model findings."],
-            "bottlenecks":           ["Stub: no real cross-model bottlenecks."],
-            "per_file_comparison":   "Stub: no per-file comparison.",
+            "key_findings": ["Stub: no real cross-model findings."],
+            "bottlenecks": ["Stub: no real cross-model bottlenecks."],
+            "per_file_comparison": "Stub: no per-file comparison.",
             "efficiency_comparison": "Stub: no efficiency comparison.",
-            "take_home_message":     "Stub mode — no real synthesis performed.",
+            "take_home_message": "Stub mode — no real synthesis performed.",
         }
 
-    def _synth_interpretation_dedup(self) -> Dict:
+    def _synth_interpretation_dedup(self) -> dict:
         """Return ``is_duplicate=False`` so the dedup pass keeps every term.
 
         See ``DEDUP_SYSTEM_PROMPT`` and the callsite at
@@ -1875,7 +1981,7 @@ class StubLLMBridge(LLMBridge):
         return {
             "is_duplicate": False,
             "duplicate_of": None,
-            "rationale":    "Stub: not a duplicate (default verdict).",
+            "rationale": "Stub: not a duplicate (default verdict).",
         }
 
     # ==================================================================
@@ -1901,7 +2007,7 @@ class StubLLMBridge(LLMBridge):
             "baseline regardless of the upstream interpretation."
         )
 
-    def _synth_proposer_legacy_commit(self) -> Dict:
+    def _synth_proposer_legacy_commit(self) -> dict:
         """``ProposalOutput``-validatable dict for the legacy 2-call commit path.
 
         See the call at ``nodes/ml_model_proposal_agent.py:955``: the
@@ -1912,16 +2018,16 @@ class StubLLMBridge(LLMBridge):
         """
         iter_idx = self._iter if self._iter is not None else 0
         return {
-            "model_name":              _synth_stub_model_name(iter_idx, "a"),
+            "model_name": _synth_stub_model_name(iter_idx, "a"),
             "model_description": _STUB_MODEL_DESCRIPTION,
             "mathematical_definition": _STUB_MATHEMATICAL_DEFINITION,
-            "motivation":              _STUB_MOTIVATION,
-            "expert_advice":           _stub_expert_advice_dict(),
-            "baseline_config":         _stub_baseline_config_dict(),
+            "motivation": _STUB_MOTIVATION,
+            "expert_advice": _stub_expert_advice_dict(),
+            "baseline_config": _stub_baseline_config_dict(),
             "parameter_count_estimate": 4096,
         }
 
-    def _synth_proposer_comparison(self) -> Dict:
+    def _synth_proposer_comparison(self) -> dict:
         """Stage-1 output for the 3-stage pipeline.
 
         Comparison's dict is read at lines 1273+1278 of the proposer
@@ -1932,15 +2038,15 @@ class StubLLMBridge(LLMBridge):
         typed fields render as harmless placeholders.
         """
         return {
-            "comparative_analysis":      [],
-            "sota_model_type":           "stub_arch",
-            "sota_score":                -2.5,
-            "sota_mechanism":            "Stub: token embedding to linear head.",
-            "proposed_vocab_links":      [],
+            "comparative_analysis": [],
+            "sota_model_type": "stub_arch",
+            "sota_score": -2.5,
+            "sota_mechanism": "Stub: token embedding to linear head.",
+            "proposed_vocab_links": [],
             "proposed_vocab_candidates": [],
         }
 
-    def _synth_proposer_causal_reasoning(self) -> Dict:
+    def _synth_proposer_causal_reasoning(self) -> dict:
         """Stage-2 output. ``falsifiable_prediction`` MUST clear the boldness gate.
 
         ``boldness = abs(predicted - current) / max(abs(current), 1e-6)``.
@@ -1957,22 +2063,22 @@ class StubLLMBridge(LLMBridge):
                 "signal; the chain's wiring is the real test surface, "
                 "not the architecture."
             ),
-            "proposed_change":         "Stub: no change vs SOTA — stub baseline.",
-            "inherited_components":    [],
+            "proposed_change": "Stub: no change vs SOTA — stub baseline.",
+            "inherited_components": [],
             "falsifiable_prediction": {
-                "metric":                  "denoising_score",
-                "current_value":           1.0,
-                "predicted_value":         2.0,
+                "metric": "denoising_score",
+                "current_value": 1.0,
+                "predicted_value": 2.0,
                 "threshold_for_refutation": 0.5,
-                "rationale":               "Stub bridge synthetic prediction.",
+                "rationale": "Stub bridge synthetic prediction.",
             },
-            "predicted_failure_modes":   ["Stub mode: failure modes not predicted."],
-            "proposed_vocab_links":      [],
+            "predicted_failure_modes": ["Stub mode: failure modes not predicted."],
+            "proposed_vocab_links": [],
             "proposed_vocab_candidates": [],
-            "citation_sources":          [],
+            "citation_sources": [],
         }
 
-    def _synth_proposer_proposing(self) -> Dict:
+    def _synth_proposer_proposing(self) -> dict:
         """Stage-3 / final output. ``ProposalOutput`` contract — same as legacy_commit.
 
         ``model_name`` from ``_synth_stub_model_name(self._iter or 0, "a")``
@@ -1982,13 +2088,13 @@ class StubLLMBridge(LLMBridge):
         """
         iter_idx = self._iter if self._iter is not None else 0
         return {
-            "model_name":              _synth_stub_model_name(iter_idx, "a"),
-            "model_description":       _STUB_MODEL_DESCRIPTION,
+            "model_name": _synth_stub_model_name(iter_idx, "a"),
+            "model_description": _STUB_MODEL_DESCRIPTION,
             "mathematical_definition": _STUB_MATHEMATICAL_DEFINITION,
-            "motivation":              _STUB_MOTIVATION,
-            "expert_advice":           _stub_expert_advice_dict(),
-            "baseline_config":         _stub_baseline_config_dict(),
-            "memo_consistency_notes":  [],
+            "motivation": _STUB_MOTIVATION,
+            "expert_advice": _stub_expert_advice_dict(),
+            "baseline_config": _stub_baseline_config_dict(),
+            "memo_consistency_notes": [],
             "parameter_count_estimate": 4096,
         }
 
@@ -2005,7 +2111,7 @@ class StubLLMBridge(LLMBridge):
             "produce [B, 256, T]."
         )
 
-    def _synth_implementor_code(self) -> Dict:
+    def _synth_implementor_code(self) -> dict:
         """Snippets that, after ``_assemble_plugin``, produce a plugin
         functionally equivalent to ``agent_generated/_stub_plugin_template.py``.
 
@@ -2027,22 +2133,20 @@ class StubLLMBridge(LLMBridge):
             snippets are written at zero indent for readability.
         """
         return {
-            "extra_imports":          "",
-            "config_fields_code":     "    hidden_dim: int = Field(default=8, ge=1, le=256)",
+            "extra_imports": "",
+            "config_fields_code": "    hidden_dim: int = Field(default=8, ge=1, le=256)",
             "config_validators_code": "",
             "init_body": (
                 "self.embedding = nn.Embedding(256, config.hidden_dim)\n"
                 "self.head = nn.Linear(config.hidden_dim, 256)"
             ),
             "forward_body": (
-                "x = self.embedding(x.long())\n"
-                "x = self.head(x)\n"
-                "return x.transpose(1, 2)"
+                "x = self.embedding(x.long())\nx = self.head(x)\nreturn x.transpose(1, 2)"
             ),
             "config_fields": {"hidden_dim": 8},
         }
 
-    def _synth_implementor_repair(self) -> Dict:
+    def _synth_implementor_repair(self) -> dict:
         """Identical payload to ``implementor.code``.
 
         Under stub training the validator gate passes on the first
@@ -2052,7 +2156,7 @@ class StubLLMBridge(LLMBridge):
         """
         return self._synth_implementor_code()
 
-    def _synth_validator_code_review(self) -> Dict:
+    def _synth_validator_code_review(self) -> dict:
         """``LLMCodeReview``-validatable dict that approves the plugin.
 
         See ``LLMCodeReview`` at ``agent/schemas/validator.py:21``.
@@ -2060,9 +2164,9 @@ class StubLLMBridge(LLMBridge):
         validator gate into the tuner.
         """
         return {
-            "spec_alignment":        True,
+            "spec_alignment": True,
             "trainability_concerns": [],
             "implementation_issues": [],
-            "passed":                True,
-            "notes":                 "Stub validator approval.",
+            "passed": True,
+            "notes": "Stub validator approval.",
         }

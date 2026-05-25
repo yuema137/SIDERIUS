@@ -24,12 +24,11 @@ Scope: ``nodes/`` only. The bridge's own internal call sites (e.g.
 exercised by the bridge's own tests; this guard targets the agent
 layer where new nodes get added.
 """
+
 from __future__ import annotations
 
 import ast
 from pathlib import Path
-from typing import List, Tuple
-
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _NODES_DIR = _REPO_ROOT / "nodes"
@@ -60,12 +59,12 @@ def _is_bridge_call(call: ast.Call) -> bool:
     return parent.attr == "bridge"
 
 
-def _collect_unlabeled_bridge_calls(path: Path) -> List[Tuple[int, str]]:
+def _collect_unlabeled_bridge_calls(path: Path) -> list[tuple[int, str]]:
     """Return [(lineno, method_name)] for every bridge call in ``path``
     that lacks a ``label=`` keyword."""
     src = path.read_text()
     tree = ast.parse(src, filename=str(path))
-    hits: List[Tuple[int, str]] = []
+    hits: list[tuple[int, str]] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -87,7 +86,7 @@ def test_nodes_dir_resolves():
 
 def test_every_bridge_call_in_nodes_has_label_kwarg():
     """No bridge.generate / generate_text / tool_call without label=."""
-    offenders: List[Tuple[Path, int, str]] = []
+    offenders: list[tuple[Path, int, str]] = []
     for py_file in sorted(_NODES_DIR.rglob("*.py")):
         for lineno, method in _collect_unlabeled_bridge_calls(py_file):
             offenders.append((py_file, lineno, method))
@@ -98,8 +97,7 @@ def test_every_bridge_call_in_nodes_has_label_kwarg():
         f"`token_usage.jsonl` rows can be attributed to a specific prompt "
         f"site:\n"
         + "\n".join(
-            f"  {p.relative_to(_REPO_ROOT)}:{ln}: bridge.{m}(...)"
-            for p, ln, m in offenders
+            f"  {p.relative_to(_REPO_ROOT)}:{ln}: bridge.{m}(...)" for p, ln, m in offenders
         )
-        + "\nAdd a stable label string (e.g. `label=\"interpretation.synthesis\"`)."
+        + '\nAdd a stable label string (e.g. `label="interpretation.synthesis"`).'
     )

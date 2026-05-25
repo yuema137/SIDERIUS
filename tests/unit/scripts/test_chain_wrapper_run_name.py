@@ -26,12 +26,17 @@ def _run_dry(extra_args: list[str], tmp_path: Path) -> subprocess.CompletedProce
     seed = tmp_path / "fake_seed.json"
     seed.write_text("{}")
     cmd = [
-        "bash", str(RUN_CHAIN),
-        "--mode", "lilab",
+        "bash",
+        str(RUN_CHAIN),
+        "--mode",
+        "lilab",
         "--dry-run",
-        "--workspace", str(tmp_path / "ws"),
-        "--num_iterations", "1",
-        "--seed_paths", str(seed),
+        "--workspace",
+        str(tmp_path / "ws"),
+        "--num_iterations",
+        "1",
+        "--seed_paths",
+        str(seed),
         *extra_args,
     ]
     return subprocess.run(cmd, capture_output=True, text=True, cwd=REPO_ROOT)
@@ -47,9 +52,7 @@ def test_run_name_required_when_missing(tmp_path):
         "wrapper must exit non-zero when --run_name is missing; "
         f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     )
-    assert "run_name" in proc.stderr, (
-        f"stderr should mention run_name; got: {proc.stderr!r}"
-    )
+    assert "run_name" in proc.stderr, f"stderr should mention run_name; got: {proc.stderr!r}"
 
 
 def test_run_name_threads_through_to_runner_args(tmp_path):
@@ -66,9 +69,7 @@ def test_run_name_threads_through_to_runner_args(tmp_path):
     # raw and shell-quoted forms).
     out = proc.stdout
     assert "--run_name" in out, f"--run_name flag missing in dry-run output:\n{out}"
-    assert "my_chain_v99_test" in out, (
-        f"run_name value missing in dry-run output:\n{out}"
-    )
+    assert "my_chain_v99_test" in out, f"run_name value missing in dry-run output:\n{out}"
 
 
 def test_run_name_distinct_from_workspace_basename(tmp_path):
@@ -81,12 +82,19 @@ def test_run_name_distinct_from_workspace_basename(tmp_path):
     seed = tmp_path / "fake_seed.json"
     seed.write_text("{}")
     cmd = [
-        "bash", str(RUN_CHAIN),
-        "--mode", "lilab", "--dry-run",
-        "--workspace", str(workspace),
-        "--run_name", "operator_chose_beta",
-        "--num_iterations", "1",
-        "--seed_paths", str(seed),
+        "bash",
+        str(RUN_CHAIN),
+        "--mode",
+        "lilab",
+        "--dry-run",
+        "--workspace",
+        str(workspace),
+        "--run_name",
+        "operator_chose_beta",
+        "--num_iterations",
+        "1",
+        "--seed_paths",
+        str(seed),
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO_ROOT)
     assert proc.returncode == 0, proc.stderr
@@ -96,7 +104,7 @@ def test_run_name_distinct_from_workspace_basename(tmp_path):
     out = proc.stdout
     rn_idx = out.find("--run_name")
     assert rn_idx >= 0
-    after = out[rn_idx:rn_idx + 200]
+    after = out[rn_idx : rn_idx + 200]
     assert "operator_chose_beta" in after, (
         f"--run_name must be followed by the operator's value, not "
         f"silently re-derived from workspace; saw: {after!r}"

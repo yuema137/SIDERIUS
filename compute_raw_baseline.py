@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 compute_raw_baseline.py
 
@@ -17,8 +16,8 @@ where ``snr_squid_raw`` is the raw CH1 SNR at the CH2 peak frequency
 (``get_one_sec_psd`` upcasts to ``float64`` before ``np.fft.rfft``).
 
 File index mapping:
-  0 – 19  : fine scoring   (abra_validation_0000.h5 … 0019.h5, 200 segments)
-  20 – 39 : coarse scoring (abra_validation_0020.h5 … 0039.h5, 20 segments
+  0 - 19  : fine scoring   (abra_validation_0000.h5 … 0019.h5, 200 segments)
+  20 - 39 : coarse scoring (abra_validation_0020.h5 … 0039.h5, 20 segments
                             — every 10th segment; uses the same global s_max
                             so coarse scores are directly comparable to fine)
 
@@ -112,10 +111,10 @@ def _calculate_score(
 
     if parallel:
         with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as ex:
-            tasks = [ex.submit(process_segment, i, data_dir, fname, coarse)
-                     for i in range(n)]
-            for fut in tqdm(concurrent.futures.as_completed(tasks), total=n,
-                            desc=f"  scoring {fname}"):
+            tasks = [ex.submit(process_segment, i, data_dir, fname, coarse) for i in range(n)]
+            for fut in tqdm(
+                concurrent.futures.as_completed(tasks), total=n, desc=f"  scoring {fname}"
+            ):
                 i, s_sg, s_squid = fut.result()
                 snr_sg[i] = s_sg
                 snr_squid[i] = s_squid
@@ -147,7 +146,7 @@ def _calculate_score(
 # run renders as the same soft floor (~−13.854) at every aggregation level
 # instead of producing ``-inf`` here while per-file rows show finite floors.
 #
-# Only fine files (0–19) contribute — coarse files are a sparse sampling of
+# Only fine files (0-19) contribute — coarse files are a sparse sampling of
 # the same physical signal and would bias the grand mean if mixed in. See
 # Decision 13 in ``docs/aggregated_score_table_awareness.md``.
 # ---------------------------------------------------------------------------
@@ -171,13 +170,11 @@ def _maybe_write_anchor_normalized_scalar(
     lossy: list[int] = []
 
     for idx in _FINE_INDICES:
-        path = os.path.join(
-            output_dir, f"raw_baseline_score_file_{idx:04d}.json"
-        )
+        path = os.path.join(output_dir, f"raw_baseline_score_file_{idx:04d}.json")
         if not os.path.exists(path):
             missing.append(idx)
             continue
-        with open(path, "r") as f:
+        with open(path) as f:
             payload = json.load(f)
         if "linear_sum" not in payload or "n_segments" not in payload:
             lossy.append(idx)
@@ -188,8 +185,10 @@ def _maybe_write_anchor_normalized_scalar(
         if missing:
             print(f"[SCALAR] skipping — missing fine indices: {missing}")
         if lossy:
-            print(f"[SCALAR] skipping — indices without linear_sum/n_segments "
-                  f"(regenerate with --override): {lossy}")
+            print(
+                f"[SCALAR] skipping — indices without linear_sum/n_segments "
+                f"(regenerate with --override): {lossy}"
+            )
         return
 
     total_linear = sum(p["linear_sum"] for p in per_file)
@@ -206,12 +205,12 @@ def _maybe_write_anchor_normalized_scalar(
     out_path = os.path.join(output_dir, "scalar_anchor_normalized.json")
     result = {
         "scalar_score": scalar,
-        "file_vector":  file_vector_linear,
-        "formula":      "anchor_normalized_raw_baseline",
-        "s_max":        s_max,
-        "num_files":    len(per_file),
-        "source":       anchor_src,
-        "computed_at":  datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "file_vector": file_vector_linear,
+        "formula": "anchor_normalized_raw_baseline",
+        "s_max": s_max,
+        "num_files": len(per_file),
+        "source": anchor_src,
+        "computed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
     with open(out_path, "w") as f:
         json.dump(coerce_nonfinite_to_none(result), f, indent=2)
@@ -223,54 +222,74 @@ def _maybe_write_anchor_normalized_scalar(
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Compute raw (undenoised) baseline denoising scores "
-                    "under the Option B global-s_max convention.",
+        "under the Option B global-s_max convention.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
     parser.add_argument(
-        "--data_dir", "-d", type=str, default=None,
-        help="Directory containing abra_validation_*.h5 files. "
-             "Default: TIDMAD_DATA_DIR.",
+        "--data_dir",
+        "-d",
+        type=str,
+        default=None,
+        help="Directory containing abra_validation_*.h5 files. Default: TIDMAD_DATA_DIR.",
     )
     parser.add_argument(
-        "--anchor_map", type=str, default=None,
+        "--anchor_map",
+        type=str,
+        default=None,
         help="Path to segment_anchors.json (for global s_max). "
-             "Default: {TIDMAD_DATA_DIR}/segment_anchors.json.",
+        "Default: {TIDMAD_DATA_DIR}/segment_anchors.json.",
     )
     parser.add_argument(
-        "--output_dir", "-o", type=str, default=None,
+        "--output_dir",
+        "-o",
+        type=str,
+        default=None,
         help="Directory to write per-file JSON results.",
     )
     parser.add_argument(
-        "--indices", "-i", type=int, nargs="+",
+        "--indices",
+        "-i",
+        type=int,
+        nargs="+",
         default=list(range(40)),
-        help="File indices to process (default: 0–39).",
+        help="File indices to process (default: 0-39).",
     )
     parser.add_argument(
-        "--override", action="store_true",
+        "--override",
+        action="store_true",
         help="Recompute even if the output JSON already exists.",
     )
     parser.add_argument(
-        "--parallel", "-p", action="store_true",
+        "--parallel",
+        "-p",
+        action="store_true",
         help="Use parallel workers for the FFT scoring loop.",
     )
     parser.add_argument(
-        "--num_workers", "-n", type=int, default=8,
+        "--num_workers",
+        "-n",
+        type=int,
+        default=8,
         help="Number of parallel workers (used only with --parallel).",
     )
     args = parser.parse_args()
 
     if args.data_dir is None:
         from execute_tools.data_paths import TIDMAD_DATA_DIR
+
         args.data_dir = TIDMAD_DATA_DIR
     if args.anchor_map is None:
         from execute_tools.data_paths import TIDMAD_DATA_DIR
+
         args.anchor_map = os.path.join(TIDMAD_DATA_DIR, "segment_anchors.json")
     if args.output_dir is None:
         from execute_tools.data_paths import SIDERIUS_DATA_DIR
+
         args.output_dir = os.path.join(SIDERIUS_DATA_DIR, "raw_baseline")
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -278,15 +297,15 @@ def main():
     anchor_data = load_anchor_map(args.anchor_map)
     s_max = float(anchor_data["s_max"])
 
-    print(f"\n{'='*60}")
-    print(f"  compute_raw_baseline.py")
+    print(f"\n{'=' * 60}")
+    print("  compute_raw_baseline.py")
     print(f"  data_dir   : {args.data_dir}")
     print(f"  anchor_map : {args.anchor_map}")
     print(f"  s_max      : {s_max:.6g}  (global, from anchor map)")
     print(f"  output_dir : {args.output_dir}")
     print(f"  indices    : {args.indices}")
     print(f"  override   : {args.override}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     skipped = 0
     computed = 0
@@ -294,18 +313,18 @@ def main():
 
     for idx in args.indices:
         if idx < 0 or idx > 39:
-            print(f"[WARN] Index {idx} out of range 0–39, skipping.")
+            print(f"[WARN] Index {idx} out of range 0-39, skipping.")
             continue
 
         coarse = idx >= 20
         mode = "coarse" if coarse else "fine"
         fname = f"abra_validation_{idx:04d}.h5"
-        out_path = os.path.join(args.output_dir,
-                                f"raw_baseline_score_file_{idx:04d}.json")
+        out_path = os.path.join(args.output_dir, f"raw_baseline_score_file_{idx:04d}.json")
 
         if os.path.exists(out_path) and not args.override:
-            print(f"[SKIP] index={idx:02d}  {out_path} already exists."
-                  f" Use --override to recompute.")
+            print(
+                f"[SKIP] index={idx:02d}  {out_path} already exists. Use --override to recompute."
+            )
             skipped += 1
             continue
 
@@ -326,14 +345,14 @@ def main():
                 num_workers=args.num_workers,
             )
             result = {
-                "file_index":  idx,
-                "score":       score,
-                "linear_sum":  linear_sum,
-                "n_segments":  n_segments,
-                "mode":        mode,
-                "data_file":   fname,
-                "s_max":       s_max,
-                "formula":     "option_b_global_s_max",
+                "file_index": idx,
+                "score": score,
+                "linear_sum": linear_sum,
+                "n_segments": n_segments,
+                "mode": mode,
+                "data_file": fname,
+                "s_max": s_max,
+                "formula": "option_b_global_s_max",
                 "computed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
             with open(out_path, "w") as f:
@@ -344,11 +363,11 @@ def main():
             print(f"[ERROR] index={idx:02d}  {e}")
             errors.append(idx)
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  Done.  computed={computed}  skipped={skipped}  errors={len(errors)}")
     if errors:
         print(f"  Failed indices: {errors}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     # --- Anchor-normalized scalar (fine files only) ---
     _maybe_write_anchor_normalized_scalar(

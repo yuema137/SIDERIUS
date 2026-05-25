@@ -74,11 +74,11 @@ def get_model_description(model_type: str) -> str:
 
     for path in candidates:
         if os.path.isfile(path):
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 return f.read()
 
     raise FileNotFoundError(
         f"No description.md found for model_type '{model_type}'.\n"
         f"Searched:\n" + "\n".join(f"  {p}" for p in candidates) + "\n"
-        f"Each model must have a description.md in its folder."
+        "Each model must have a description.md in its folder."
     )

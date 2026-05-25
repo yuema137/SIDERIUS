@@ -35,38 +35,44 @@ Assertions (all four match §1.5.0 success metrics)
    the *same* monotonic shape holds in iter 2 — proving the in-iter
    chain works AND survives the iter boundary.
 """
+
 from __future__ import annotations
 
 import json
 import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
-from typing import List, Tuple
 
 import pytest
 from dotenv import load_dotenv
 
 from agent.llm_bridge import LLMBridge
 from agent.schemas.interpretation import (
-    InterpretationInput, InterpretationOutput, ModelRunSummary,
+    InterpretationInput,
+    InterpretationOutput,
+    ModelRunSummary,
 )
 from agent.schemas.proposal import (
-    ModelSelectionStrategy, ProposalOutput,
-    ReasoningPipelineConfig, ReasoningStage,
+    ModelSelectionStrategy,
+    ProposalOutput,
+    ReasoningPipelineConfig,
+    ReasoningStage,
 )
 from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import (
     local_full_context,
 )
 from agent.schemas.score_table import (
-    AggregateScalars, PerFileRow, ScoreComparisonTable,
+    AggregateScalars,
+    PerFileRow,
+    ScoreComparisonTable,
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from execute_tools.scoring_helpers import render_comparison_table
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
 from nodes.result_interpretation_agent import ResultInterpretationAgent
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
 pytestmark = pytest.mark.real_run
 
@@ -79,13 +85,18 @@ _GROUND_TRUTH = 9.5
 # Score-table factory — same shape as test_score_table_pseudo_smoke.py.
 # ---------------------------------------------------------------------------
 
-def _make_score_table(fv: List[float], model_scalar: float) -> ScoreComparisonTable:
+
+def _make_score_table(fv: list[float], model_scalar: float) -> ScoreComparisonTable:
     raw = [_RAW_BASELINE] * 20
     gt = [_GROUND_TRUTH] * 20
     rows = [
         PerFileRow(
-            file_index=i, raw_baseline=raw[i], ground_truth=gt[i],
-            model=v, gain_vs_raw=v - raw[i], headroom_vs_gt=gt[i] - v,
+            file_index=i,
+            raw_baseline=raw[i],
+            ground_truth=gt[i],
+            model=v,
+            gain_vs_raw=v - raw[i],
+            headroom_vs_gt=gt[i] - v,
         )
         for i, v in enumerate(fv)
     ]
@@ -97,27 +108,59 @@ def _make_score_table(fv: List[float], model_scalar: float) -> ScoreComparisonTa
         num_sampled_files=20,
     )
     table = ScoreComparisonTable(
-        rows=rows, aggregate=aggregate,
-        s_max_global=5.27, reference_source="t0_pseudo_fixture",
+        rows=rows,
+        aggregate=aggregate,
+        s_max_global=5.27,
+        reference_source="t0_pseudo_fixture",
         rendered_markdown="",
     )
-    return table.model_copy(
-        update={"rendered_markdown": render_comparison_table(table)}
-    )
+    return table.model_copy(update={"rendered_markdown": render_comparison_table(table)})
 
 
 _WAVENET_FV = [
-    0.05, 0.08, 0.12, 0.15, 0.18,
-    4.20, 4.80, 5.30, 5.70, 6.10, 6.40,
-    7.00, 7.40, 7.80, 8.10, 8.30, 8.50, 8.70, 8.90,
+    0.05,
+    0.08,
+    0.12,
+    0.15,
+    0.18,
+    4.20,
+    4.80,
+    5.30,
+    5.70,
+    6.10,
+    6.40,
+    7.00,
+    7.40,
+    7.80,
+    8.10,
+    8.30,
+    8.50,
+    8.70,
+    8.90,
     9.00,
 ]
 _WAVENET_SCALAR = 5.58
 
 _PUNET_FV = [
-    1.50, 1.60, 1.70, 1.80, 1.90,
-    2.00, 2.10, 2.20, 2.30, 2.40, 2.50,
-    2.60, 2.70, 2.80, 2.90, 3.00, 3.10, 3.20, 3.30,
+    1.50,
+    1.60,
+    1.70,
+    1.80,
+    1.90,
+    2.00,
+    2.10,
+    2.20,
+    2.30,
+    2.40,
+    2.50,
+    2.60,
+    2.70,
+    2.80,
+    2.90,
+    3.00,
+    3.10,
+    3.20,
+    3.30,
     3.40,
 ]
 _PUNET_SCALAR = 2.35
@@ -138,7 +181,7 @@ _WAVENET_SUMMARY = ModelRunSummary(
     round_scores=[5.45, 5.52, _WAVENET_SCALAR],
     round_conclusions=[
         "Baseline established on high-frequency files.",
-        "Low-frequency files 0–4 remain near zero despite loss tuning.",
+        "Low-frequency files 0-4 remain near zero despite loss tuning.",
         "Structural blind spot — low-freq scores unchanged at <0.2.",
     ],
     model_description=(
@@ -182,6 +225,7 @@ _PUNET_SUMMARY = ModelRunSummary(
 # Recording bridge — accepts the full keyword surface the agents use.
 # ---------------------------------------------------------------------------
 
+
 class RecordingOpenAIBridge(LLMBridge):
     """Real-OpenAI bridge that also captures (method, label, response).
 
@@ -207,12 +251,14 @@ class RecordingOpenAIBridge(LLMBridge):
         return resp
 
 
-def _make_recording_factory() -> Tuple[list, "callable"]:
+def _make_recording_factory() -> tuple[list, callable]:
     shared: list = []
 
     def factory(**ignored) -> RecordingOpenAIBridge:
         bridge = RecordingOpenAIBridge(
-            provider="openai", model_id=_OPENAI_MODEL, max_retries=3,
+            provider="openai",
+            model_id=_OPENAI_MODEL,
+            max_retries=3,
         )
         bridge.calls = shared
         return bridge
@@ -224,15 +270,17 @@ def _make_recording_factory() -> Tuple[list, "callable"]:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _bind(agent, *, workspace: Path, iter_idx: int,
-          run_name: str, run_id: str) -> None:
+
+def _bind(agent, *, workspace: Path, iter_idx: int, run_name: str, run_id: str) -> None:
     agent.bridge.set_run_context(
-        workspace=workspace, iter=iter_idx,
-        run_name=run_name, run_id=run_id,
+        workspace=workspace,
+        iter=iter_idx,
+        run_name=run_name,
+        run_id=run_id,
     )
 
 
-def _read_rows(path: Path) -> List[dict]:
+def _read_rows(path: Path) -> list[dict]:
     return [json.loads(ln) for ln in path.read_text().splitlines() if ln.strip()]
 
 
@@ -240,50 +288,44 @@ def _read_rows(path: Path) -> List[dict]:
 # The gate
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.real_run
 def test_t0_cognitive_plumbing(tmp_path, capsys):
     if not os.getenv("OPENAI_API_KEY"):
         pytest.skip("OPENAI_API_KEY not set — skipping Gate T0")
 
     run_name = "t0_pseudo_smoke"
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
     run_id = f"{run_name}-{ts}-{os.getpid()}"
 
     storage_iter1 = StorageConfig(
         backend="local",
-        local=LocalStorageConfig(workspace=str(tmp_path),
-                                 run_name=f"{run_name}_iter1"),
+        local=LocalStorageConfig(workspace=str(tmp_path), run_name=f"{run_name}_iter1"),
     )
     storage_iter2 = StorageConfig(
         backend="local",
-        local=LocalStorageConfig(workspace=str(tmp_path),
-                                 run_name=f"{run_name}_iter2"),
+        local=LocalStorageConfig(workspace=str(tmp_path), run_name=f"{run_name}_iter2"),
     )
 
-    interp_calls, interp_factory = _make_recording_factory()
-    propose_calls, propose_factory = _make_recording_factory()
+    _interp_calls, interp_factory = _make_recording_factory()
+    _propose_calls, propose_factory = _make_recording_factory()
 
     interp_agent = ResultInterpretationAgent(bridge_factory=interp_factory)
     propose_agent = MLModelProposalAgent(bridge_factory=propose_factory)
 
     pipeline = ReasoningPipelineConfig(
         stages=[
-            ReasoningStage(name="comparison",
-                           system_prompt_key="COMPARATIVE_ANALYSIS"),
-            ReasoningStage(name="causal_reasoning",
-                           system_prompt_key="CAUSAL_REASONING"),
+            ReasoningStage(name="comparison", system_prompt_key="COMPARATIVE_ANALYSIS"),
+            ReasoningStage(name="causal_reasoning", system_prompt_key="CAUSAL_REASONING"),
         ],
-        model_selection=ModelSelectionStrategy(method="top_n",
-                                               params={"n": 2}),
+        model_selection=ModelSelectionStrategy(method="top_n", params={"n": 2}),
     )
 
     # ===================================================================
     # Iter 1 — bind, interpret, propose
     # ===================================================================
-    _bind(interp_agent, workspace=tmp_path, iter_idx=1,
-          run_name=run_name, run_id=run_id)
-    _bind(propose_agent, workspace=tmp_path, iter_idx=1,
-          run_name=run_name, run_id=run_id)
+    _bind(interp_agent, workspace=tmp_path, iter_idx=1, run_name=run_name, run_id=run_id)
+    _bind(propose_agent, workspace=tmp_path, iter_idx=1, run_name=run_name, run_id=run_id)
 
     iter1_t0 = time.perf_counter()
 
@@ -297,7 +339,9 @@ def test_t0_cognitive_plumbing(tmp_path, capsys):
     assert isinstance(iter1_interp, InterpretationOutput)
 
     iter1_propose_inp = local_full_context(
-        iter1_interp, storage_iter1, reasoning_pipeline=pipeline,
+        iter1_interp,
+        storage_iter1,
+        reasoning_pipeline=pipeline,
     )
     iter1_proposal = propose_agent.run(iter1_propose_inp)
     assert isinstance(iter1_proposal, ProposalOutput)
@@ -307,17 +351,31 @@ def test_t0_cognitive_plumbing(tmp_path, capsys):
     # ===================================================================
     # Iter 2 — bind (triggers _iter_flush for iter 1), feed iter 1 forward
     # ===================================================================
-    _bind(interp_agent, workspace=tmp_path, iter_idx=2,
-          run_name=run_name, run_id=run_id)
-    _bind(propose_agent, workspace=tmp_path, iter_idx=2,
-          run_name=run_name, run_id=run_id)
+    _bind(interp_agent, workspace=tmp_path, iter_idx=2, run_name=run_name, run_id=run_id)
+    _bind(propose_agent, workspace=tmp_path, iter_idx=2, run_name=run_name, run_id=run_id)
 
     iter2_t0 = time.perf_counter()
 
     new_fv = [
-        0.50, 0.80, 1.20, 1.60, 2.00,
-        4.50, 5.10, 5.60, 6.00, 6.40, 6.60,
-        7.10, 7.50, 7.90, 8.20, 8.40, 8.60, 8.80, 9.00,
+        0.50,
+        0.80,
+        1.20,
+        1.60,
+        2.00,
+        4.50,
+        5.10,
+        5.60,
+        6.00,
+        6.40,
+        6.60,
+        7.10,
+        7.50,
+        7.90,
+        8.20,
+        8.40,
+        8.60,
+        8.80,
+        9.00,
         9.10,
     ]
     new_scalar = 5.95
@@ -351,7 +409,9 @@ def test_t0_cognitive_plumbing(tmp_path, capsys):
     assert isinstance(iter2_interp, InterpretationOutput)
 
     iter2_propose_inp = local_full_context(
-        iter2_interp, storage_iter2, reasoning_pipeline=pipeline,
+        iter2_interp,
+        storage_iter2,
+        reasoning_pipeline=pipeline,
     )
     iter2_proposal = propose_agent.run(iter2_propose_inp)
     assert isinstance(iter2_proposal, ProposalOutput)
@@ -374,8 +434,7 @@ def test_t0_cognitive_plumbing(tmp_path, capsys):
 
     # ---- Assertion 2 + 3: proposer row 10-key precision + clamp ------
     proposer_rows = [
-        r for r in rows
-        if isinstance(r.get("label"), str) and r["label"].startswith("proposer.")
+        r for r in rows if isinstance(r.get("label"), str) and r["label"].startswith("proposer.")
     ]
     assert len(proposer_rows) >= 6, (
         f"Expected >= 6 proposer rows (3 stages × 2 iters), got "
@@ -447,14 +506,16 @@ def test_t0_cognitive_plumbing(tmp_path, capsys):
     print("GATE T0 — COGNITIVE PLUMBING (REAL LLM + PSEUDO TRAINING)", flush=True)
     print("=" * 78, flush=True)
     print(f"Total rows         : {len(rows)}", flush=True)
-    print(f"Proposer rows      : {len(proposer_rows)} "
-          f"(iter1={len(iter1_proposer)}, iter2={len(iter2_proposer)})",
-          flush=True)
-    print(f"_iter_flush rows   : "
-          f"{sum(1 for r in rows if r.get('label') == '_iter_flush')}",
-          flush=True)
-    print(f"unlabeled rows     : {len(unlabeled)}  "
-          f"(must be 0)", flush=True)
+    print(
+        f"Proposer rows      : {len(proposer_rows)} "
+        f"(iter1={len(iter1_proposer)}, iter2={len(iter2_proposer)})",
+        flush=True,
+    )
+    print(
+        f"_iter_flush rows   : {sum(1 for r in rows if r.get('label') == '_iter_flush')}",
+        flush=True,
+    )
+    print(f"unlabeled rows     : {len(unlabeled)}  (must be 0)", flush=True)
     print(f"iter1 elapsed      : {iter1_elapsed:.1f} s", flush=True)
     print(f"iter2 elapsed      : {iter2_elapsed:.1f} s", flush=True)
     print(f"iter1 proposed     : {iter1_proposal.model_name}", flush=True)
@@ -466,8 +527,10 @@ def test_t0_cognitive_plumbing(tmp_path, capsys):
     for r in proposer_rows:
         d = r["chars"]["total"] - sum(r["components"].values())
         ts_key = (r.get("iter"), r.get("label"))
-        print(f"  iter={ts_key[0]} {ts_key[1]:<32} Δ={d:+d}  "
-              f"chars.total={r['chars']['total']}  "
-              f"tns={r['components']['template_and_scaffolding']}",
-              flush=True)
+        print(
+            f"  iter={ts_key[0]} {ts_key[1]:<32} Δ={d:+d}  "
+            f"chars.total={r['chars']['total']}  "
+            f"tns={r['components']['template_and_scaffolding']}",
+            flush=True,
+        )
     print("=" * 78, flush=True)

@@ -1,7 +1,7 @@
 """
 Phase 6.5 Stage 1 — "The Brain" pseudo semantic smoke.
 
-Goal: prove that a real LLM, reading the Phase 3–5 score-table markdown we
+Goal: prove that a real LLM, reading the Phase 3-5 score-table markdown we
 now inject into proposer prompts, actually USES those numerics — without
 spending a single GPU second.
 
@@ -25,12 +25,14 @@ Runs as ``real_run`` (not CI).  Requires OPENAI_API_KEY.
 Run with:
   uv run pytest -m real_run tests/integration/workflows/test_score_table_pseudo_smoke.py -v -s
 """
+
 from __future__ import annotations
 
 import os
 import re
 import time
-from typing import List, Optional, Tuple
+from pathlib import Path
+from typing import Optional
 
 import pytest
 from dotenv import load_dotenv
@@ -38,7 +40,9 @@ from dotenv import load_dotenv
 from agent.llm_bridge import LLMBridge
 from agent.schemas.hyperparam_tuning import ExpertAdvice
 from agent.schemas.interpretation import (
-    InterpretationInput, InterpretationOutput, ModelRunSummary,
+    InterpretationInput,
+    InterpretationOutput,
+    ModelRunSummary,
 )
 from agent.schemas.proposal import (
     ModelSelectionStrategy,
@@ -50,14 +54,16 @@ from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import (
     local_full_context,
 )
 from agent.schemas.score_table import (
-    AggregateScalars, PerFileRow, ScoreComparisonTable,
+    AggregateScalars,
+    PerFileRow,
+    ScoreComparisonTable,
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from execute_tools.scoring_helpers import render_comparison_table
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
 from nodes.result_interpretation_agent import ResultInterpretationAgent
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
 pytestmark = pytest.mark.real_run
 
@@ -71,7 +77,7 @@ _RAW_BASELINE = 0.2
 _GROUND_TRUTH = 9.5
 
 
-def _make_score_table(fv: List[float], model_scalar: float) -> ScoreComparisonTable:
+def _make_score_table(fv: list[float], model_scalar: float) -> ScoreComparisonTable:
     raw_baseline_per_file = [_RAW_BASELINE] * 20
     ground_truth_per_file = [_GROUND_TRUTH] * 20
     rows = [
@@ -93,13 +99,13 @@ def _make_score_table(fv: List[float], model_scalar: float) -> ScoreComparisonTa
         num_sampled_files=20,
     )
     table = ScoreComparisonTable(
-        rows=rows, aggregate=aggregate,
-        s_max_global=5.27, reference_source="phase65_pseudo_fixture",
+        rows=rows,
+        aggregate=aggregate,
+        s_max_global=5.27,
+        reference_source="phase65_pseudo_fixture",
         rendered_markdown="",
     )
-    return table.model_copy(
-        update={"rendered_markdown": render_comparison_table(table)}
-    )
+    return table.model_copy(update={"rendered_markdown": render_comparison_table(table)})
 
 
 # ---------------------------------------------------------------------------
@@ -112,17 +118,49 @@ def _make_score_table(fv: List[float], model_scalar: float) -> ScoreComparisonTa
 # ---------------------------------------------------------------------------
 
 _WAVENET_FV = [
-    0.05, 0.08, 0.12, 0.15, 0.18,                      # files 0-4  (blind)
-    4.20, 4.80, 5.30, 5.70, 6.10, 6.40,                # files 5-10 (mid)
-    7.00, 7.40, 7.80, 8.10, 8.30, 8.50, 8.70, 8.90,    # files 11-18 (strong)
-    9.00,                                              # file  19   (strong)
+    0.05,
+    0.08,
+    0.12,
+    0.15,
+    0.18,  # files 0-4  (blind)
+    4.20,
+    4.80,
+    5.30,
+    5.70,
+    6.10,
+    6.40,  # files 5-10 (mid)
+    7.00,
+    7.40,
+    7.80,
+    8.10,
+    8.30,
+    8.50,
+    8.70,
+    8.90,  # files 11-18 (strong)
+    9.00,  # file  19   (strong)
 ]
 _WAVENET_SCALAR = 5.58  # ≈ 58.7% of ceiling (9.5)
 
 _PUNET_FV = [
-    1.50, 1.60, 1.70, 1.80, 1.90,
-    2.00, 2.10, 2.20, 2.30, 2.40, 2.50,
-    2.60, 2.70, 2.80, 2.90, 3.00, 3.10, 3.20, 3.30,
+    1.50,
+    1.60,
+    1.70,
+    1.80,
+    1.90,
+    2.00,
+    2.10,
+    2.20,
+    2.30,
+    2.40,
+    2.50,
+    2.60,
+    2.70,
+    2.80,
+    2.90,
+    3.00,
+    3.10,
+    3.20,
+    3.30,
     3.40,
 ]
 _PUNET_SCALAR = 2.35  # ≈ 24.7% of ceiling
@@ -143,7 +181,7 @@ _WAVENET_SUMMARY = ModelRunSummary(
     round_scores=[5.45, 5.52, _WAVENET_SCALAR],
     round_conclusions=[
         "Baseline established on high-frequency files.",
-        "Low-frequency files 0–4 remain near zero despite loss tuning.",
+        "Low-frequency files 0-4 remain near zero despite loss tuning.",
         "Structural blind spot — low-freq scores unchanged at <0.2.",
     ],
     model_description=(
@@ -219,13 +257,15 @@ class RecordingOpenAIBridge(LLMBridge):
         return resp
 
 
-def _make_recording_factory() -> Tuple[list, "callable"]:
+def _make_recording_factory() -> tuple[list, callable]:
     """Return (shared-call-log, bridge-factory-that-appends-to-it)."""
     shared: list = []
 
     def factory(**ignored) -> RecordingOpenAIBridge:
         bridge = RecordingOpenAIBridge(
-            provider="openai", model_id=_OPENAI_MODEL, max_retries=3,
+            provider="openai",
+            model_id=_OPENAI_MODEL,
+            max_retries=3,
         )
         bridge.calls = shared  # share the list so every bridge logs here
         return bridge
@@ -239,7 +279,7 @@ def _make_recording_factory() -> Tuple[list, "callable"]:
 # A "signature" is evidence that the LLM read the table, not that it
 # hallucinated a number.  We accept ANY of:
 #   * A file index (0..19) in a file-reference context.
-#   * One of our specific injected scalars rendered to 1–2 decimals.
+#   * One of our specific injected scalars rendered to 1-2 decimals.
 #   * A recovery percentage rounded to int (24, 25, 58, 59, 60).
 #   * A canonical column-name token we injected via rendered_markdown.
 # ---------------------------------------------------------------------------
@@ -249,27 +289,43 @@ def _make_recording_factory() -> Tuple[list, "callable"]:
 # weak — the earlier run matched "signal recovery capabilities" which was
 # a false positive.  Drop them from the column scan.
 _COLUMN_TOKENS = (
-    "gain_vs_raw", "raw_baseline", "ground_truth",
-    "log_scalar", "percent_of_ceiling", "model_scalar",
+    "gain_vs_raw",
+    "raw_baseline",
+    "ground_truth",
+    "log_scalar",
+    "percent_of_ceiling",
+    "model_scalar",
     "headroom_vs_gt",
 )
 
 # Specific scalars we put into the fixtures and would expect to see cited.
 _INJECTED_SCALARS = (
-    "5.58", "2.35",                       # model scalars
-    "9.5", "9.50",                        # ground-truth ceiling
-    "0.2", "0.20",                        # raw baseline
-    "9.0", "9.00", "8.9", "8.90",         # wavenet best per-file values
-    "0.05", "0.08", "0.12", "0.15",       # wavenet blind-spot files
-    "1.5", "1.50", "3.4", "3.40",         # punet flat-spread endpoints
+    "5.58",
+    "2.35",  # model scalars
+    "9.5",
+    "9.50",  # ground-truth ceiling
+    "0.2",
+    "0.20",  # raw baseline
+    "9.0",
+    "9.00",
+    "8.9",
+    "8.90",  # wavenet best per-file values
+    "0.05",
+    "0.08",
+    "0.12",
+    "0.15",  # wavenet blind-spot files
+    "1.5",
+    "1.50",
+    "3.4",
+    "3.40",  # punet flat-spread endpoints
 )
 
 _RECOVERY_PCT = ("24", "25", "58", "59", "60")
 
 
-def _scan_for_signatures(text: str) -> List[str]:
+def _scan_for_signatures(text: str) -> list[str]:
     """Return a list of human-readable signature hits found in ``text``."""
-    hits: List[str] = []
+    hits: list[str] = []
 
     # 1. File-index references.  Require 'file' near the number to avoid
     #    picking up dates / counts.  Match things like "file 0", "file #4",
@@ -287,7 +343,7 @@ def _scan_for_signatures(text: str) -> List[str]:
 
     # Also accept "files 0-4" / "0 through 4" style ranges.
     range_re = re.compile(
-        r"\bfiles?\s*(\d{1,2})\s*(?:-|–|to|through)\s*(\d{1,2})\b",
+        r"\bfiles?\s*(\d{1,2})\s*(?:-|-|to|through)\s*(\d{1,2})\b",
         re.IGNORECASE,
     )
     for m in range_re.finditer(text):
@@ -325,7 +381,8 @@ def _scan_for_signatures(text: str) -> List[str]:
 # Vocab-diff helper
 # ---------------------------------------------------------------------------
 
-def _vocab_diff(before, after) -> Tuple[list, list, list]:
+
+def _vocab_diff(before, after) -> tuple[list, list, list]:
     before_names = {v.name for v in before}
     after_names = {v.name for v in after}
     added = sorted(after_names - before_names)
@@ -338,8 +395,9 @@ def _vocab_diff(before, after) -> Tuple[list, list, list]:
         prev = before_by_name.get(v.name)
         if prev is None:
             continue
-        if (getattr(prev, "description", None) != getattr(v, "description", None)
-            or getattr(prev, "status", None) != getattr(v, "status", None)):
+        if getattr(prev, "description", None) != getattr(v, "description", None) or getattr(
+            prev, "status", None
+        ) != getattr(v, "status", None):
             refined.append(v.name)
     refined = sorted(refined)
     return added, refined, removed
@@ -348,6 +406,7 @@ def _vocab_diff(before, after) -> Tuple[list, list, list]:
 # ---------------------------------------------------------------------------
 # The actual smoke test
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.real_run
 def test_stage1_pseudo_semantic_smoke(tmp_path, capsys):
@@ -379,7 +438,9 @@ def test_stage1_pseudo_semantic_smoke(tmp_path, capsys):
     # for that side.
     def _plain_openai_bridge(**ignored):
         return LLMBridge(
-            provider="openai", model_id=_OPENAI_MODEL, max_retries=3,
+            provider="openai",
+            model_id=_OPENAI_MODEL,
+            max_retries=3,
         )
 
     interp_agent = ResultInterpretationAgent(bridge_factory=_plain_openai_bridge)
@@ -396,17 +457,14 @@ def test_stage1_pseudo_semantic_smoke(tmp_path, capsys):
     # --- Iter 1: proposal -----------------------------------------------
     pipeline = ReasoningPipelineConfig(
         stages=[
-            ReasoningStage(name="comparison",
-                           system_prompt_key="COMPARATIVE_ANALYSIS"),
-            ReasoningStage(name="causal_reasoning",
-                           system_prompt_key="CAUSAL_REASONING"),
+            ReasoningStage(name="comparison", system_prompt_key="COMPARATIVE_ANALYSIS"),
+            ReasoningStage(name="causal_reasoning", system_prompt_key="CAUSAL_REASONING"),
         ],
-        model_selection=ModelSelectionStrategy(
-            method="top_n", params={"n": 2}
-        ),
+        model_selection=ModelSelectionStrategy(method="top_n", params={"n": 2}),
     )
     proposal_inp = local_full_context(
-        iter1_interp, storage_iter1,
+        iter1_interp,
+        storage_iter1,
         reasoning_pipeline=pipeline,
     )
 
@@ -426,14 +484,11 @@ def test_stage1_pseudo_semantic_smoke(tmp_path, capsys):
     # loop.  We scan every call's response and also tally the committed
     # fields separately.
     _STAGE_NAMES = ("comparison", "causal_reasoning", "proposing_commit")
-    per_call_hits: List[Tuple[str, int, List[str]]] = []
-    all_stage_text_parts: List[str] = []
+    per_call_hits: list[tuple[str, int, list[str]]] = []
+    all_stage_text_parts: list[str] = []
 
     for idx, (method, _sys, _user, resp) in enumerate(proposer_calls):
-        stage_tag = (
-            _STAGE_NAMES[idx] if idx < len(_STAGE_NAMES)
-            else f"extra_call_{idx}"
-        )
+        stage_tag = _STAGE_NAMES[idx] if idx < len(_STAGE_NAMES) else f"extra_call_{idx}"
         if method == "generate_text":
             resp_text = resp if isinstance(resp, str) else str(resp)
         else:
@@ -442,16 +497,17 @@ def test_stage1_pseudo_semantic_smoke(tmp_path, capsys):
         call_hits = _scan_for_signatures(resp_text)
         per_call_hits.append((stage_tag, len(call_hits), call_hits))
         all_stage_text_parts.append(
-            f"\n── stage[{idx}] {stage_tag} ({method}) ── hits={len(call_hits)}\n"
-            f"{resp_text}"
+            f"\n── stage[{idx}] {stage_tag} ({method}) ── hits={len(call_hits)}\n{resp_text}"
         )
 
     # Committed-fields scan (the final condensed prose).
-    committed_blob = "\n---\n".join([
-        f"[motivation]\n{iter1_proposal.motivation}",
-        f"[mathematical_definition]\n{iter1_proposal.mathematical_definition}",
-        f"[expert_advice.rationale]\n{iter1_proposal.expert_advice.rationale}",
-    ])
+    committed_blob = "\n---\n".join(
+        [
+            f"[motivation]\n{iter1_proposal.motivation}",
+            f"[mathematical_definition]\n{iter1_proposal.mathematical_definition}",
+            f"[expert_advice.rationale]\n{iter1_proposal.expert_advice.rationale}",
+        ]
+    )
     committed_hits = _scan_for_signatures(committed_blob)
 
     total_stage_hits = sum(n for _, n, _ in per_call_hits)
@@ -461,13 +517,11 @@ def test_stage1_pseudo_semantic_smoke(tmp_path, capsys):
     print(f"STAGE 1 / ITER 1  (elapsed {iter1_elapsed_s:.1f} s)", flush=True)
     print("=" * 78, flush=True)
     print(f"Proposed model  : {iter1_proposal.model_name}", flush=True)
-    print(f"Proposer LLM    : {_OPENAI_MODEL} ({len(proposer_calls)} calls)",
-          flush=True)
+    print(f"Proposer LLM    : {_OPENAI_MODEL} ({len(proposer_calls)} calls)", flush=True)
     print(f"Stage hits (sum): {total_stage_hits}", flush=True)
     for tag, n, hits_list in per_call_hits:
         print(f"  • {tag}: {n} — {hits_list}", flush=True)
-    print(f"Committed-field hits: {len(committed_hits)} — {committed_hits}",
-          flush=True)
+    print(f"Committed-field hits: {len(committed_hits)} — {committed_hits}", flush=True)
     print("-" * 78, flush=True)
     print("STAGE-BY-STAGE PROPOSER OUTPUT:", flush=True)
     print("".join(all_stage_text_parts), flush=True)
@@ -488,9 +542,25 @@ def test_stage1_pseudo_semantic_smoke(tmp_path, capsys):
     # Give the new model a slightly-better-than-wavenet scalar so there's
     # something for the interp to react to and grow vocab around.
     new_fv = [
-        0.50, 0.80, 1.20, 1.60, 2.00,              # markedly better than wavenet on low
-        4.50, 5.10, 5.60, 6.00, 6.40, 6.60,
-        7.10, 7.50, 7.90, 8.20, 8.40, 8.60, 8.80, 9.00,
+        0.50,
+        0.80,
+        1.20,
+        1.60,
+        2.00,  # markedly better than wavenet on low
+        4.50,
+        5.10,
+        5.60,
+        6.00,
+        6.40,
+        6.60,
+        7.10,
+        7.50,
+        7.90,
+        8.20,
+        8.40,
+        8.60,
+        8.80,
+        9.00,
         9.10,
     ]
     new_scalar = 5.95
@@ -524,9 +594,7 @@ def test_stage1_pseudo_semantic_smoke(tmp_path, capsys):
         previous_proposal=prev_proposal_dict,
         storage=storage_iter2,
     )
-    iter2_interp_agent = ResultInterpretationAgent(
-        bridge_factory=_plain_openai_bridge
-    )
+    iter2_interp_agent = ResultInterpretationAgent(bridge_factory=_plain_openai_bridge)
     iter2_interp = iter2_interp_agent.run(iter2_inp)
     iter2_elapsed_s = time.perf_counter() - iter2_t0
 
@@ -534,7 +602,8 @@ def test_stage1_pseudo_semantic_smoke(tmp_path, capsys):
 
     # --- Vocab growth assertion -----------------------------------------
     added, refined, removed = _vocab_diff(
-        iter1_interp.runtime_vocab, iter2_interp.runtime_vocab,
+        iter1_interp.runtime_vocab,
+        iter2_interp.runtime_vocab,
     )
 
     print("=" * 78, flush=True)

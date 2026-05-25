@@ -1,0 +1,37 @@
+{
+  "include": [
+    "nodes",
+    "agent",
+    "core",
+    "execute_tools",
+    "ml_models",
+    "dashboard",
+    "env_validation",
+    "tools",
+    "scripts"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "**/.venv",
+    "agent_generated",
+    "notebooks",
+    "reports",
+    "siderius_workspace",
+    "claude",
+    "claude_sdsc_chain_test",
+    "fm-agent-repo",
+    "legacy_repo",
+    "tests"
+  ],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "basic",
+  "useLibraryCodeForTypes": true,
+  "reportMissingImports": "error",
+  "reportMissingTypeStubs": "none",
+  "reportGeneralTypeIssues": "error",
+  "reportOptionalMemberAccess": "warning",
+  "reportOptionalSubscript": "warning",
+  "reportPrivateImportUsage": "none",
+  "reportUnusedImport": "none",
+  "reportUnusedVariable": "none"
+}

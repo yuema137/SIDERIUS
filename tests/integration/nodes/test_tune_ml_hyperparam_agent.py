@@ -16,22 +16,26 @@ Run locally with:
 
 DO NOT run these in CI (GitHub Actions or equivalent).
 """
-import os
+
 import json
+import os
 import time
+from pathlib import Path
+
 import pytest
 from dotenv import load_dotenv
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput, HyperparamTuningOutput
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
 pytestmark = pytest.mark.real_run
 
 try:
     from execute_tools.data_paths import TIDMAD_DATA_DIR
+
     DATA_DIR = TIDMAD_DATA_DIR
 except (FileNotFoundError, ImportError):
     DATA_DIR = "/home/klz/Data/TIDMAD/"
@@ -39,6 +43,7 @@ except (FileNotFoundError, ImportError):
 # ==========================================
 # Shared skip guards
 # ==========================================
+
 
 def _skip_if_no_key(provider: str):
     key = "GEMINI_API_KEY" if provider == "gemini" else "OPENAI_API_KEY"
@@ -105,12 +110,17 @@ MODEL_CONFIGS = {
 }
 
 LOSS_CONFIGS = {
-    "punet":       [{"loss_type": "ce"}, {"loss_type": "focal"}, {"loss_type": "focal_cw"}],
-    "fcnet":       [{"loss_type": "ce"}, {"loss_type": "focal"}, {"loss_type": "focal_cw"}, {"loss_type": "smooth_l1"}],
+    "punet": [{"loss_type": "ce"}, {"loss_type": "focal"}, {"loss_type": "focal_cw"}],
+    "fcnet": [
+        {"loss_type": "ce"},
+        {"loss_type": "focal"},
+        {"loss_type": "focal_cw"},
+        {"loss_type": "smooth_l1"},
+    ],
     "transformer": [{"loss_type": "ce"}, {"loss_type": "focal"}, {"loss_type": "focal_cw"}],
-    "wavenet":     [{"loss_type": "ce"}, {"loss_type": "focal"}, {"loss_type": "focal_cw"}],
-    "rnn":         [{"loss_type": "ce"}, {"loss_type": "focal"}, {"loss_type": "focal_cw"}],
-    "gated_fno":   [{"loss_type": "ce"}, {"loss_type": "focal"}, {"loss_type": "focal_cw"}],
+    "wavenet": [{"loss_type": "ce"}, {"loss_type": "focal"}, {"loss_type": "focal_cw"}],
+    "rnn": [{"loss_type": "ce"}, {"loss_type": "focal"}, {"loss_type": "focal_cw"}],
+    "gated_fno": [{"loss_type": "ce"}, {"loss_type": "focal"}, {"loss_type": "focal_cw"}],
 }
 
 TRAIN_CONFIG = {"lr": 1e-4, "epochs": 1, "batch_size": 1, "device": "cuda"}
@@ -121,81 +131,165 @@ TRAIN_CONFIG = {"lr": 1e-4, "epochs": 1, "batch_size": 1, "device": "cuda"}
 FLEX_CONFIGS = {
     "punet": [
         {
-            "model_cfg":  {"model_type": "punet", "segmentation_size": 10000, "depth": 2, "multi": 8,  "kernel_size": 7, "embedding_dim": 8},
-            "loss_cfg":   {"loss_type": "ce"},
-            "train_cfg":  {"lr": 1e-4, "epochs": 1, "batch_size": 128, "device": "cuda"},
+            "model_cfg": {
+                "model_type": "punet",
+                "segmentation_size": 10000,
+                "depth": 2,
+                "multi": 8,
+                "kernel_size": 7,
+                "embedding_dim": 8,
+            },
+            "loss_cfg": {"loss_type": "ce"},
+            "train_cfg": {"lr": 1e-4, "epochs": 1, "batch_size": 128, "device": "cuda"},
         },
         {
-            "model_cfg":  {"model_type": "punet", "segmentation_size": 10000, "depth": 3, "multi": 16, "kernel_size": 9, "embedding_dim": 16},
-            "loss_cfg":   {"loss_type": "focal"},
-            "train_cfg":  {"lr": 3e-4, "epochs": 1, "batch_size": 256, "device": "cuda"},
+            "model_cfg": {
+                "model_type": "punet",
+                "segmentation_size": 10000,
+                "depth": 3,
+                "multi": 16,
+                "kernel_size": 9,
+                "embedding_dim": 16,
+            },
+            "loss_cfg": {"loss_type": "focal"},
+            "train_cfg": {"lr": 3e-4, "epochs": 1, "batch_size": 256, "device": "cuda"},
         },
     ],
     "fcnet": [
         {
-            "model_cfg":  {"model_type": "fcnet", "segmentation_size": 10000, "latent_dims": [400, 40]},
-            "loss_cfg":   {"loss_type": "ce"},
-            "train_cfg":  {"lr": 1e-4, "epochs": 1, "batch_size": 128, "device": "cuda"},
+            "model_cfg": {
+                "model_type": "fcnet",
+                "segmentation_size": 10000,
+                "latent_dims": [400, 40],
+            },
+            "loss_cfg": {"loss_type": "ce"},
+            "train_cfg": {"lr": 1e-4, "epochs": 1, "batch_size": 128, "device": "cuda"},
         },
         {
-            "model_cfg":  {"model_type": "fcnet", "segmentation_size": 10000, "latent_dims": [200, 50, 20]},
-            "loss_cfg":   {"loss_type": "smooth_l1"},
-            "train_cfg":  {"lr": 3e-4, "epochs": 1, "batch_size": 256, "device": "cuda"},
+            "model_cfg": {
+                "model_type": "fcnet",
+                "segmentation_size": 10000,
+                "latent_dims": [200, 50, 20],
+            },
+            "loss_cfg": {"loss_type": "smooth_l1"},
+            "train_cfg": {"lr": 3e-4, "epochs": 1, "batch_size": 256, "device": "cuda"},
         },
     ],
     "transformer": [
         {
-            "model_cfg":  {"model_type": "transformer", "segmentation_size": 4000, "embedding_dim": 16, "nhead": 4, "num_layers": 1, "dim_feedforward": 64},
-            "loss_cfg":   {"loss_type": "ce"},
-            "train_cfg":  {"lr": 1e-4, "epochs": 1, "batch_size": 128, "device": "cuda"},
+            "model_cfg": {
+                "model_type": "transformer",
+                "segmentation_size": 4000,
+                "embedding_dim": 16,
+                "nhead": 4,
+                "num_layers": 1,
+                "dim_feedforward": 64,
+            },
+            "loss_cfg": {"loss_type": "ce"},
+            "train_cfg": {"lr": 1e-4, "epochs": 1, "batch_size": 128, "device": "cuda"},
         },
         {
-            "model_cfg":  {"model_type": "transformer", "segmentation_size": 4000, "embedding_dim": 32, "nhead": 4, "num_layers": 2, "dim_feedforward": 128},
-            "loss_cfg":   {"loss_type": "focal"},
-            "train_cfg":  {"lr": 3e-4, "epochs": 1, "batch_size": 256, "device": "cuda"},
+            "model_cfg": {
+                "model_type": "transformer",
+                "segmentation_size": 4000,
+                "embedding_dim": 32,
+                "nhead": 4,
+                "num_layers": 2,
+                "dim_feedforward": 128,
+            },
+            "loss_cfg": {"loss_type": "focal"},
+            "train_cfg": {"lr": 3e-4, "epochs": 1, "batch_size": 256, "device": "cuda"},
         },
     ],
     "wavenet": [
         {
-            "model_cfg":  {"model_type": "wavenet", "segmentation_size": 10000, "input_channels": 8,  "residual_channels": 16, "gate_channels": 16, "skip_channels": 16, "num_blocks": 3, "kernel_size": 4},
-            "loss_cfg":   {"loss_type": "ce"},
-            "train_cfg":  {"lr": 1e-4, "epochs": 1, "batch_size": 128, "device": "cuda"},
+            "model_cfg": {
+                "model_type": "wavenet",
+                "segmentation_size": 10000,
+                "input_channels": 8,
+                "residual_channels": 16,
+                "gate_channels": 16,
+                "skip_channels": 16,
+                "num_blocks": 3,
+                "kernel_size": 4,
+            },
+            "loss_cfg": {"loss_type": "ce"},
+            "train_cfg": {"lr": 1e-4, "epochs": 1, "batch_size": 128, "device": "cuda"},
         },
         {
-            "model_cfg":  {"model_type": "wavenet", "segmentation_size": 10000, "input_channels": 16, "residual_channels": 32, "gate_channels": 32, "skip_channels": 32, "num_blocks": 5, "kernel_size": 8},
-            "loss_cfg":   {"loss_type": "focal_cw"},
-            "train_cfg":  {"lr": 3e-4, "epochs": 1, "batch_size": 256, "device": "cuda"},
+            "model_cfg": {
+                "model_type": "wavenet",
+                "segmentation_size": 10000,
+                "input_channels": 16,
+                "residual_channels": 32,
+                "gate_channels": 32,
+                "skip_channels": 32,
+                "num_blocks": 5,
+                "kernel_size": 8,
+            },
+            "loss_cfg": {"loss_type": "focal_cw"},
+            "train_cfg": {"lr": 3e-4, "epochs": 1, "batch_size": 256, "device": "cuda"},
         },
     ],
     "rnn": [
         {
-            "model_cfg":  {"model_type": "rnn", "segmentation_size": 10000, "embedding_dim": 8,  "hidden_dim": 8,  "num_layers": 1},
-            "loss_cfg":   {"loss_type": "ce"},
-            "train_cfg":  {"lr": 1e-4, "epochs": 1, "batch_size": 512, "device": "cuda"},
+            "model_cfg": {
+                "model_type": "rnn",
+                "segmentation_size": 10000,
+                "embedding_dim": 8,
+                "hidden_dim": 8,
+                "num_layers": 1,
+            },
+            "loss_cfg": {"loss_type": "ce"},
+            "train_cfg": {"lr": 1e-4, "epochs": 1, "batch_size": 512, "device": "cuda"},
         },
         {
-            "model_cfg":  {"model_type": "rnn", "segmentation_size": 10000, "embedding_dim": 16, "hidden_dim": 16, "num_layers": 2},
-            "loss_cfg":   {"loss_type": "focal"},
-            "train_cfg":  {"lr": 3e-4, "epochs": 1, "batch_size": 128, "device": "cuda"},
+            "model_cfg": {
+                "model_type": "rnn",
+                "segmentation_size": 10000,
+                "embedding_dim": 16,
+                "hidden_dim": 16,
+                "num_layers": 2,
+            },
+            "loss_cfg": {"loss_type": "focal"},
+            "train_cfg": {"lr": 3e-4, "epochs": 1, "batch_size": 128, "device": "cuda"},
         },
     ],
     "gated_fno": [
         {
-            "model_cfg":  {"model_type": "gated_fno", "segmentation_size": 10000, "width": 16, "num_layers": 1, "num_gates": 32},
-            "loss_cfg":   {"loss_type": "ce"},
-            "train_cfg":  {"lr": 1e-4, "epochs": 1, "batch_size": 128, "device": "cuda"},
+            "model_cfg": {
+                "model_type": "gated_fno",
+                "segmentation_size": 10000,
+                "width": 16,
+                "num_layers": 1,
+                "num_gates": 32,
+            },
+            "loss_cfg": {"loss_type": "ce"},
+            "train_cfg": {"lr": 1e-4, "epochs": 1, "batch_size": 128, "device": "cuda"},
         },
         {
-            "model_cfg":  {"model_type": "gated_fno", "segmentation_size": 10000, "width": 32, "num_layers": 2, "num_gates": 64},
-            "loss_cfg":   {"loss_type": "focal"},
-            "train_cfg":  {"lr": 3e-4, "epochs": 1, "batch_size": 256, "device": "cuda"},
+            "model_cfg": {
+                "model_type": "gated_fno",
+                "segmentation_size": 10000,
+                "width": 32,
+                "num_layers": 2,
+                "num_gates": 64,
+            },
+            "loss_cfg": {"loss_type": "focal"},
+            "train_cfg": {"lr": 3e-4, "epochs": 1, "batch_size": 256, "device": "cuda"},
         },
     ],
 }
 
 
-def run_one_loop(provider: str, model_type: str, loss_cfg: dict, workspace: str,
-                 model_cfg: dict = None, train_cfg: dict = None) -> HyperparamTuningOutput:
+def run_one_loop(
+    provider: str,
+    model_type: str,
+    loss_cfg: dict,
+    workspace: str,
+    model_cfg: dict | None = None,
+    train_cfg: dict | None = None,
+) -> HyperparamTuningOutput:
     """
     Runs HyperparamTuningAgent.run() for 1 round with the given config.
 
@@ -253,6 +347,7 @@ def run_one_loop(provider: str, model_type: str, loss_cfg: dict, workspace: str,
 
     # --- Verify output file was written ---
     import os
+
     output_path = os.path.join(workspace, f"run_output_{run_name}.json")
     assert os.path.exists(output_path), f"Output file not found: {output_path}"
 
@@ -263,8 +358,8 @@ def run_one_loop(provider: str, model_type: str, loss_cfg: dict, workspace: str,
 # Gemini — all model/loss combinations
 # ==========================================
 
-class TestRealRunGemini:
 
+class TestRealRunGemini:
     def setup_method(self):
         _skip_if_no_key("gemini")
         _skip_if_no_data()
@@ -296,32 +391,62 @@ class TestRealRunGemini:
 
     @pytest.mark.parametrize("cfg", FLEX_CONFIGS["punet"])
     def test_punet_flexibility_gemini(self, cfg, tmp_path):
-        output = run_one_loop("gemini", "punet", cfg["loss_cfg"], str(tmp_path),
-                              model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
+        output = run_one_loop(
+            "gemini",
+            "punet",
+            cfg["loss_cfg"],
+            str(tmp_path),
+            model_cfg=cfg["model_cfg"],
+            train_cfg=cfg["train_cfg"],
+        )
         assert output.status == "completed"
 
     @pytest.mark.parametrize("cfg", FLEX_CONFIGS["fcnet"])
     def test_fcnet_flexibility_gemini(self, cfg, tmp_path):
-        output = run_one_loop("gemini", "fcnet", cfg["loss_cfg"], str(tmp_path),
-                              model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
+        output = run_one_loop(
+            "gemini",
+            "fcnet",
+            cfg["loss_cfg"],
+            str(tmp_path),
+            model_cfg=cfg["model_cfg"],
+            train_cfg=cfg["train_cfg"],
+        )
         assert output.status == "completed"
 
     @pytest.mark.parametrize("cfg", FLEX_CONFIGS["transformer"])
     def test_transformer_flexibility_gemini(self, cfg, tmp_path):
-        output = run_one_loop("gemini", "transformer", cfg["loss_cfg"], str(tmp_path),
-                              model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
+        output = run_one_loop(
+            "gemini",
+            "transformer",
+            cfg["loss_cfg"],
+            str(tmp_path),
+            model_cfg=cfg["model_cfg"],
+            train_cfg=cfg["train_cfg"],
+        )
         assert output.status == "completed"
 
     @pytest.mark.parametrize("cfg", FLEX_CONFIGS["wavenet"])
     def test_wavenet_flexibility_gemini(self, cfg, tmp_path):
-        output = run_one_loop("gemini", "wavenet", cfg["loss_cfg"], str(tmp_path),
-                              model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
+        output = run_one_loop(
+            "gemini",
+            "wavenet",
+            cfg["loss_cfg"],
+            str(tmp_path),
+            model_cfg=cfg["model_cfg"],
+            train_cfg=cfg["train_cfg"],
+        )
         assert output.status == "completed"
 
     @pytest.mark.parametrize("cfg", FLEX_CONFIGS["rnn"])
     def test_rnn_flexibility_gemini(self, cfg, tmp_path):
-        output = run_one_loop("gemini", "rnn", cfg["loss_cfg"], str(tmp_path),
-                              model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
+        output = run_one_loop(
+            "gemini",
+            "rnn",
+            cfg["loss_cfg"],
+            str(tmp_path),
+            model_cfg=cfg["model_cfg"],
+            train_cfg=cfg["train_cfg"],
+        )
         assert output.status == "completed"
 
     @pytest.mark.parametrize("loss_cfg", LOSS_CONFIGS["gated_fno"])
@@ -331,8 +456,14 @@ class TestRealRunGemini:
 
     @pytest.mark.parametrize("cfg", FLEX_CONFIGS["gated_fno"])
     def test_gated_fno_flexibility_gemini(self, cfg, tmp_path):
-        output = run_one_loop("gemini", "gated_fno", cfg["loss_cfg"], str(tmp_path),
-                              model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
+        output = run_one_loop(
+            "gemini",
+            "gated_fno",
+            cfg["loss_cfg"],
+            str(tmp_path),
+            model_cfg=cfg["model_cfg"],
+            train_cfg=cfg["train_cfg"],
+        )
         assert output.status == "completed"
 
 
@@ -340,8 +471,8 @@ class TestRealRunGemini:
 # OpenAI — all model/loss combinations
 # ==========================================
 
-class TestRealRunOpenAI:
 
+class TestRealRunOpenAI:
     def setup_method(self):
         _skip_if_no_key("openai")
         _skip_if_no_data()
@@ -373,32 +504,62 @@ class TestRealRunOpenAI:
 
     @pytest.mark.parametrize("cfg", FLEX_CONFIGS["punet"])
     def test_punet_flexibility_openai(self, cfg, tmp_path):
-        output = run_one_loop("openai", "punet", cfg["loss_cfg"], str(tmp_path),
-                              model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
+        output = run_one_loop(
+            "openai",
+            "punet",
+            cfg["loss_cfg"],
+            str(tmp_path),
+            model_cfg=cfg["model_cfg"],
+            train_cfg=cfg["train_cfg"],
+        )
         assert output.status == "completed"
 
     @pytest.mark.parametrize("cfg", FLEX_CONFIGS["fcnet"])
     def test_fcnet_flexibility_openai(self, cfg, tmp_path):
-        output = run_one_loop("openai", "fcnet", cfg["loss_cfg"], str(tmp_path),
-                              model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
+        output = run_one_loop(
+            "openai",
+            "fcnet",
+            cfg["loss_cfg"],
+            str(tmp_path),
+            model_cfg=cfg["model_cfg"],
+            train_cfg=cfg["train_cfg"],
+        )
         assert output.status == "completed"
 
     @pytest.mark.parametrize("cfg", FLEX_CONFIGS["transformer"])
     def test_transformer_flexibility_openai(self, cfg, tmp_path):
-        output = run_one_loop("openai", "transformer", cfg["loss_cfg"], str(tmp_path),
-                              model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
+        output = run_one_loop(
+            "openai",
+            "transformer",
+            cfg["loss_cfg"],
+            str(tmp_path),
+            model_cfg=cfg["model_cfg"],
+            train_cfg=cfg["train_cfg"],
+        )
         assert output.status == "completed"
 
     @pytest.mark.parametrize("cfg", FLEX_CONFIGS["wavenet"])
     def test_wavenet_flexibility_openai(self, cfg, tmp_path):
-        output = run_one_loop("openai", "wavenet", cfg["loss_cfg"], str(tmp_path),
-                              model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
+        output = run_one_loop(
+            "openai",
+            "wavenet",
+            cfg["loss_cfg"],
+            str(tmp_path),
+            model_cfg=cfg["model_cfg"],
+            train_cfg=cfg["train_cfg"],
+        )
         assert output.status == "completed"
 
     @pytest.mark.parametrize("cfg", FLEX_CONFIGS["rnn"])
     def test_rnn_flexibility_openai(self, cfg, tmp_path):
-        output = run_one_loop("openai", "rnn", cfg["loss_cfg"], str(tmp_path),
-                              model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
+        output = run_one_loop(
+            "openai",
+            "rnn",
+            cfg["loss_cfg"],
+            str(tmp_path),
+            model_cfg=cfg["model_cfg"],
+            train_cfg=cfg["train_cfg"],
+        )
         assert output.status == "completed"
 
     @pytest.mark.parametrize("loss_cfg", LOSS_CONFIGS["gated_fno"])
@@ -408,8 +569,14 @@ class TestRealRunOpenAI:
 
     @pytest.mark.parametrize("cfg", FLEX_CONFIGS["gated_fno"])
     def test_gated_fno_flexibility_openai(self, cfg, tmp_path):
-        output = run_one_loop("openai", "gated_fno", cfg["loss_cfg"], str(tmp_path),
-                              model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"])
+        output = run_one_loop(
+            "openai",
+            "gated_fno",
+            cfg["loss_cfg"],
+            str(tmp_path),
+            model_cfg=cfg["model_cfg"],
+            train_cfg=cfg["train_cfg"],
+        )
         assert output.status == "completed"
 
 
@@ -425,9 +592,14 @@ def _skip_if_no_anchor_map():
         pytest.skip(f"segment_anchors.json not found at {ANCHOR_MAP_PATH}")
 
 
-def run_trial_to_formal(provider: str, model_type: str, loss_cfg: dict, workspace: str,
-                        model_cfg: dict = None, train_cfg: dict = None,
-                        ) -> HyperparamTuningOutput:
+def run_trial_to_formal(
+    provider: str,
+    model_type: str,
+    loss_cfg: dict,
+    workspace: str,
+    model_cfg: dict | None = None,
+    train_cfg: dict | None = None,
+) -> HyperparamTuningOutput:
     """
     Runs HyperparamTuningAgent.run() for 2 rounds in trial-allowed mode.
 
@@ -500,6 +672,7 @@ def run_trial_to_formal(provider: str, model_type: str, loss_cfg: dict, workspac
         )
         # Formal round scores all 20 files — no NaN in file_vector
         import math
+
         non_nan = [v for v in last_rec.file_vector if not math.isnan(v)]
         assert len(non_nan) == 20, (
             f"Formal round should score all 20 files, got {len(non_nan)} non-NaN"
@@ -521,9 +694,18 @@ def run_trial_to_formal(provider: str, model_type: str, loss_cfg: dict, workspac
         assert os.path.exists(tc_path), f"trial_config not found: {tc_path}"
         with open(tc_path) as f:
             tc = json.load(f)
-        for required_key in ["is_trial", "mode", "trial_strategy", "trial_portion",
-                               "train_portion", "eval_strategy", "eval_portion",
-                               "train_sampling_seed", "eval_sampling_seed", "train_base_seed"]:
+        for required_key in [
+            "is_trial",
+            "mode",
+            "trial_strategy",
+            "trial_portion",
+            "train_portion",
+            "eval_strategy",
+            "eval_portion",
+            "train_sampling_seed",
+            "eval_sampling_seed",
+            "train_base_seed",
+        ]:
             assert required_key in tc, f"trial_config missing key: {required_key}"
 
         # train and eval sample_set files must exist
@@ -537,7 +719,7 @@ def run_trial_to_formal(provider: str, model_type: str, loss_cfg: dict, workspac
         formal_exp_id = success_records[-1].exp_id
         with open(os.path.join(configs_dir, f"trial_config_{formal_exp_id}.json")) as f:
             formal_tc = json.load(f)
-        assert formal_tc["eval_portion"] == 1.0, f"Formal eval_portion should be 1.0"
+        assert formal_tc["eval_portion"] == 1.0, "Formal eval_portion should be 1.0"
         assert formal_tc["train_portion"] < 1.0, (
             f"Formal train_portion should be < 1.0, got {formal_tc['train_portion']}"
         )
@@ -546,7 +728,6 @@ def run_trial_to_formal(provider: str, model_type: str, loss_cfg: dict, workspac
 
 
 class TestTrialModeGemini:
-
     def setup_method(self):
         _skip_if_no_key("gemini")
         _skip_if_no_data()
@@ -556,14 +737,19 @@ class TestTrialModeGemini:
         """2-round run: trial (round 1) → formal (round 2, forced by code).
         Uses persistent directory so results can be inspected after the test."""
         import tempfile
+
         workspace = os.path.join(
             tempfile.gettempdir(), "siderius_integration_tests", "trial_to_formal"
         )
         os.makedirs(workspace, exist_ok=True)
         cfg = FLEX_CONFIGS["punet"][0]
         output = run_trial_to_formal(
-            "gemini", "punet", cfg["loss_cfg"], workspace,
-            model_cfg=cfg["model_cfg"], train_cfg=cfg["train_cfg"],
+            "gemini",
+            "punet",
+            cfg["loss_cfg"],
+            workspace,
+            model_cfg=cfg["model_cfg"],
+            train_cfg=cfg["train_cfg"],
         )
         print(f"\n  Results saved to: {workspace}")
         assert output.status == "completed"
@@ -573,6 +759,7 @@ class TestTrialModeGemini:
 # ==========================================
 # Dual-mode test (pseudo_full_loop proof-of-concept)
 # ==========================================
+
 
 @pytest.mark.dual_mode
 @pytest.mark.parametrize("is_trial", [False, True], ids=["formal", "trial"])
@@ -592,7 +779,7 @@ def test_punet_one_round_dual_mode(tmp_path, request, is_trial):
 
     See ``docs/pseudo_test_infra.md`` for the full dual-axis design.
     """
-    from tests.conftest import make_bridge_factory, make_sandbox_factory, _is_real_training
+    from tests.conftest import _is_real_training, make_bridge_factory, make_sandbox_factory
 
     if _is_real_training(request) and is_trial:
         _skip_if_no_anchor_map()
@@ -623,11 +810,11 @@ def test_punet_one_round_dual_mode(tmp_path, request, is_trial):
         is_trial=is_trial,
     )
 
+    from agent.llm_bridge import LLMBridge
+    from core.sandbox_executor import TidmadSandbox
     from tests.conftest import _is_real_llm, _is_real_training
     from tests.helpers.recording_llm_bridge import RecordingLLMBridge
     from tests.helpers.recording_sandbox import RecordingSandbox
-    from agent.llm_bridge import LLMBridge
-    from core.sandbox_executor import TidmadSandbox
 
     # Each axis is switched independently.
     bridge = sandbox = None
@@ -636,7 +823,9 @@ def test_punet_one_round_dual_mode(tmp_path, request, is_trial):
         bridge_factory = LLMBridge
     else:
         bridge = RecordingLLMBridge.for_agent("ml_hyperparameter_tune_agent")
-        bridge_factory = lambda **kw: bridge
+
+        def bridge_factory(**kw):
+            return bridge
 
     if _is_real_training(request):
         _skip_if_no_data()
@@ -645,10 +834,11 @@ def test_punet_one_round_dual_mode(tmp_path, request, is_trial):
         sandbox_factory = TidmadSandbox
     else:
         sandbox = RecordingSandbox.for_model("punet", base_dir=workspace, run_name=run_name)
-        sandbox_factory = lambda **kw: sandbox
 
-    agent = HyperparamTuningAgent(bridge_factory=bridge_factory,
-                                   sandbox_factory=sandbox_factory)
+        def sandbox_factory(**kw):
+            return sandbox
+
+    agent = HyperparamTuningAgent(bridge_factory=bridge_factory, sandbox_factory=sandbox_factory)
 
     output = agent.run(agent_input)
 
@@ -763,11 +953,11 @@ def test_wavenet_one_round_dual_mode(tmp_path, request, monkeypatch):
     Validates that the tuner orchestration works correctly for wavenet:
     canned plan, training, scoring, reflection, and record persistence.
     """
+    from agent.llm_bridge import LLMBridge
+    from core.sandbox_executor import TidmadSandbox
     from tests.conftest import _is_real_llm, _is_real_training
     from tests.helpers.recording_llm_bridge import RecordingLLMBridge
     from tests.helpers.recording_sandbox import RecordingSandbox
-    from agent.llm_bridge import LLMBridge
-    from core.sandbox_executor import TidmadSandbox
 
     run_name = f"dual_wavenet_formal_{int(time.time())}"
     workspace = str(tmp_path / "workspace")
@@ -802,21 +992,26 @@ def test_wavenet_one_round_dual_mode(tmp_path, request, monkeypatch):
         bridge_factory = LLMBridge
     else:
         # Wavenet plan is model-specific — inline construction, not for_agent.
-        bridge = RecordingLLMBridge(responses={
-            "generate": _WAVENET_CANNED_PLAN,
-            "reflect":  _WAVENET_CANNED_REFLECT,
-        })
-        bridge_factory = lambda **kw: bridge
+        bridge = RecordingLLMBridge(
+            responses={
+                "generate": _WAVENET_CANNED_PLAN,
+                "reflect": _WAVENET_CANNED_REFLECT,
+            }
+        )
+
+        def bridge_factory(**kw):
+            return bridge
 
     if _is_real_training(request):
         _skip_if_no_data()
         sandbox_factory = TidmadSandbox
     else:
         sandbox = RecordingSandbox.for_model("wavenet", base_dir=workspace, run_name=run_name)
-        sandbox_factory = lambda **kw: sandbox
 
-    agent = HyperparamTuningAgent(bridge_factory=bridge_factory,
-                                   sandbox_factory=sandbox_factory)
+        def sandbox_factory(**kw):
+            return sandbox
+
+    agent = HyperparamTuningAgent(bridge_factory=bridge_factory, sandbox_factory=sandbox_factory)
     output = agent.run(agent_input)
 
     # --- Assertions that hold in BOTH modes ---
@@ -845,11 +1040,13 @@ def test_wavenet_one_round_dual_mode(tmp_path, request, monkeypatch):
         assert record["denoising_score"] == pytest.approx(5.576, abs=0.01)
         assert record["file_vector"] is not None
         assert len(record["file_vector"]) == 20
-        assert record["file_vector"][0] < 1.0,  "Low-freq (file 0) should be weak"
+        assert record["file_vector"][0] < 1.0, "Low-freq (file 0) should be weak"
         assert record["file_vector"][19] > 7.0, "High-freq (file 19) should be strong"
         sandbox_methods = [c[0] for c in sandbox.calls]
         assert "execute_training" in sandbox_methods
         assert "save_record" in sandbox_methods
-        print(f"\n  [wavenet pseudo] score={record['denoising_score']:.4f} "
-              f"file_vec[0]={record['file_vector'][0]:.2f} "
-              f"file_vec[19]={record['file_vector'][19]:.2f}")
+        print(
+            f"\n  [wavenet pseudo] score={record['denoising_score']:.4f} "
+            f"file_vec[0]={record['file_vector'][0]:.2f} "
+            f"file_vec[19]={record['file_vector'][19]:.2f}"
+        )

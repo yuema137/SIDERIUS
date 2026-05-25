@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 denoising_score_single.py — single-file denoising score CLI.
 
@@ -16,7 +15,7 @@ in-process).
     score        = log_{5.27}(grand_mean)  if grand_mean > 0 else -inf
 
 where ``s_max`` is read from ``segment_anchors.json`` (built on the fine
-validation files 0–19). This is the same formula and the same global ruler
+validation files 0-19). This is the same formula and the same global ruler
 used by ``scoring_utils.score_vector`` and by the ground-truth ceiling, so
 baseline, model, and ceiling scores are directly comparable.
 
@@ -24,6 +23,7 @@ The legacy ``--coarse`` and ``--weak`` flags are accepted for CLI backward
 compatibility (sandbox_executor would break without them) but are no-ops;
 a warning is logged when they are used.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -45,41 +45,66 @@ logging.basicConfig(
 parser = argparse.ArgumentParser(
     description="Single-file denoising score (Option B, global s_max).",
 )
-parser.add_argument("--mode", type=str, choices=["fix", "agent"], default="fix",
-                    help="Baseline (fix) or agent-produced (agent) denoised file.")
-parser.add_argument("--data_dir", "-d", type=str, default=None,
-                    help="Directory containing the denoised HDF5 file.")
-parser.add_argument("--raw_data_dir", type=str, default=None,
-                    help="Directory containing the raw abra_validation_XXXX.h5 "
-                         "files (used for CH2 center-freq pickup). "
-                         "Default: TIDMAD_DATA_DIR.")
-parser.add_argument("--anchor_map", type=str, default=None,
-                    help="Path to segment_anchors.json (used for global s_max). "
-                         "Default: {TIDMAD_DATA_DIR}/segment_anchors.json.")
+parser.add_argument(
+    "--mode",
+    type=str,
+    choices=["fix", "agent"],
+    default="fix",
+    help="Baseline (fix) or agent-produced (agent) denoised file.",
+)
+parser.add_argument(
+    "--data_dir", "-d", type=str, default=None, help="Directory containing the denoised HDF5 file."
+)
+parser.add_argument(
+    "--raw_data_dir",
+    type=str,
+    default=None,
+    help="Directory containing the raw abra_validation_XXXX.h5 "
+    "files (used for CH2 center-freq pickup). "
+    "Default: TIDMAD_DATA_DIR.",
+)
+parser.add_argument(
+    "--anchor_map",
+    type=str,
+    default=None,
+    help="Path to segment_anchors.json (used for global s_max). "
+    "Default: {TIDMAD_DATA_DIR}/segment_anchors.json.",
+)
 parser.add_argument("--denoising_model", "-m", type=str, default="punet")
-parser.add_argument("--exp_id", type=str, default="default_run",
-                    help="Experiment ID (required for agent mode).")
-parser.add_argument("--run_name", type=str, default="test_run",
-                    help="Run name for the auto-exploration.")
-parser.add_argument("--file_index", "-i", type=int, default=6,
-                    help="Validation file index (0–19 fine).")
-parser.add_argument("-c", "--coarse", action="store_true",
-                    help="(Deprecated no-op; kept for CLI compatibility.)")
-parser.add_argument("-p", "--parallel", action="store_true",
-                    help="Use parallel workers inside score_vector.")
+parser.add_argument(
+    "--exp_id", type=str, default="default_run", help="Experiment ID (required for agent mode)."
+)
+parser.add_argument(
+    "--run_name", type=str, default="test_run", help="Run name for the auto-exploration."
+)
+parser.add_argument(
+    "--file_index", "-i", type=int, default=6, help="Validation file index (0-19 fine)."
+)
+parser.add_argument(
+    "-c", "--coarse", action="store_true", help="(Deprecated no-op; kept for CLI compatibility.)"
+)
+parser.add_argument(
+    "-p", "--parallel", action="store_true", help="Use parallel workers inside score_vector."
+)
 parser.add_argument("-n", "--num_workers", type=int, default=8)
-parser.add_argument("-w", "--weak", action="store_true",
-                    help="(Deprecated no-op; kept for CLI compatibility.)")
-parser.add_argument("--output_json", type=str,
-                    help="Optional path; denoising_score is merged into this JSON.")
-parser.add_argument("--reference_json", type=str, default=None,
-                    help="Optional path to a JSON file with a top-level "
-                         "'file_vector' key (typically the highest-scoring "
-                         "trial-mode round's score record). When provided, "
-                         "score_vector runs the task-specific amplitude-"
-                         "collapse health check and writes is_degenerate + "
-                         "failure_reason to --output_json. Absent => the "
-                         "health check is skipped (graceful default).")
+parser.add_argument(
+    "-w", "--weak", action="store_true", help="(Deprecated no-op; kept for CLI compatibility.)"
+)
+parser.add_argument(
+    "--output_json", type=str, help="Optional path; denoising_score is merged into this JSON."
+)
+parser.add_argument(
+    "--reference_json",
+    type=str,
+    default=None,
+    help="Optional path to a JSON file with a top-level "
+    "'file_vector' key (typically the highest-scoring "
+    "trial-mode round's score record). When provided, "
+    "score_vector runs the task-specific amplitude-"
+    "collapse health check and writes is_degenerate + "
+    "failure_reason to --output_json. Absent => the "
+    "health check is skipped (graceful default).",
+)
 
 args = parser.parse_args()
 
@@ -163,17 +188,20 @@ print(f"  s_max (global, from anchor map) = {s_max:.4f}")
 reference_file_vector = None
 if args.reference_json:
     if os.path.exists(args.reference_json):
-        with open(args.reference_json, "r") as f:
+        with open(args.reference_json) as f:
             ref_data = json.load(f)
         reference_file_vector = ref_data.get("file_vector")
         if reference_file_vector is not None:
             print(f"  reference file_vector loaded from {args.reference_json}")
         else:
-            print(f"  WARNING: --reference_json {args.reference_json} has no "
-                  f"'file_vector' key; health check disabled.")
+            print(
+                f"  WARNING: --reference_json {args.reference_json} has no "
+                f"'file_vector' key; health check disabled."
+            )
     else:
-        print(f"  WARNING: --reference_json {args.reference_json} not found; "
-              f"health check disabled.")
+        print(
+            f"  WARNING: --reference_json {args.reference_json} not found; health check disabled."
+        )
 
 file_vector, scalar, is_degenerate, failure_reason = score_vector(
     data_dir=args.data_dir,
@@ -197,7 +225,7 @@ if is_degenerate:
 # ---------------------------------------------------------------------------
 
 if args.output_json and os.path.exists(args.output_json):
-    with open(args.output_json, "r") as f:
+    with open(args.output_json) as f:
         data = json.load(f)
     data["denoising_score"] = scalar
     data["file_vector"] = file_vector

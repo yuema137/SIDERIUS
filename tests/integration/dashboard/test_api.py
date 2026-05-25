@@ -7,21 +7,24 @@ synthetic temp directory — no real TIDMAD data required, no network calls.
 
 import json
 import os
+
 import pytest
 from fastapi.testclient import TestClient
 
-from dashboard.data_sources.local_json import LocalJsonDataSource
-from dashboard.api.models import FrontendConfig
 from dashboard.api import router as router_module
+from dashboard.api.models import FrontendConfig
+from dashboard.data_sources.local_json import LocalJsonDataSource
 from dashboard.main import create_app
 from dashboard.settings import DashboardSettings, load_settings
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
-def _make_record(exp_id, status="success", score=None, loss_type="ce", epochs=10, model_type="punet"):
+
+def _make_record(
+    exp_id, status="success", score=None, loss_type="ce", epochs=10, model_type="punet"
+):
     return {
         "exp_id": exp_id,
         "status": status,
@@ -54,7 +57,7 @@ def data_dir(tmp_path):
     _write_json(
         os.path.join(root, "punet", "v1", "agent", "summary_v1_agent.json"),
         [
-            _make_record("baseline_punet_001", score=-2.1),   # seeded
+            _make_record("baseline_punet_001", score=-2.1),  # seeded
             _make_record("punet_v1_agent_001", score=-2.0, loss_type="ce"),
             _make_record("punet_v1_agent_002", score=-1.8, loss_type="focal"),
             _make_record("punet_v1_agent_003", status="skipped_oom_risk", score=None),
@@ -70,16 +73,24 @@ def data_dir(tmp_path):
 @pytest.fixture
 def client(data_dir):
     """TestClient wired to a real LocalJsonDataSource over synthetic data."""
-    import tempfile, textwrap, yaml as _yaml
+    import tempfile
+    import textwrap
+
+    import yaml as _yaml
+
     cfg_path = tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False)
-    _yaml.dump({
-        "data_source": {"type": "local", "local": {"root_data_dir": data_dir, "models": []}},
-        "server": {"host": "127.0.0.1", "port": 8000},
-        "dashboard": {"refresh_interval_seconds": 30, "default_run_name": "v1"},
-    }, cfg_path)
+    _yaml.dump(
+        {
+            "data_source": {"type": "local", "local": {"root_data_dir": data_dir, "models": []}},
+            "server": {"host": "127.0.0.1", "port": 8000},
+            "dashboard": {"refresh_interval_seconds": 30, "default_run_name": "v1"},
+        },
+        cfg_path,
+    )
     cfg_path.close()
 
     from dashboard.settings import load_settings
+
     settings = load_settings(cfg_path.name)
     app = create_app(settings)
     os.unlink(cfg_path.name)
@@ -89,6 +100,7 @@ def client(data_dir):
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
+
 
 class TestHealth:
     def test_ok_status(self, client):
@@ -105,6 +117,7 @@ class TestHealth:
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
+
 
 class TestConfig:
     def test_returns_refresh_interval(self, client):
@@ -124,6 +137,7 @@ class TestConfig:
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
+
 
 class TestModels:
     def test_list_models(self, client):
@@ -148,6 +162,7 @@ class TestModels:
 # ---------------------------------------------------------------------------
 # Runs
 # ---------------------------------------------------------------------------
+
 
 class TestRuns:
     def test_list_runs(self, client):
@@ -192,6 +207,7 @@ class TestRuns:
 # Experiments
 # ---------------------------------------------------------------------------
 
+
 class TestExperiments:
     def test_get_experiment(self, client):
         r = client.get("/api/models/punet/runs/v1/experiments/punet_v1_agent_001")
@@ -210,6 +226,7 @@ class TestExperiments:
 # ---------------------------------------------------------------------------
 # Leaderboard
 # ---------------------------------------------------------------------------
+
 
 class TestLeaderboard:
     def test_ranked_by_score(self, client):

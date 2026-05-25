@@ -30,10 +30,11 @@ invocation — one for ``key_findings``, one for ``bottlenecks``. If either
 list is empty on both sides, that call is skipped (the trivial case is
 handled deterministically).
 """
+
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Tuple
+from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -48,7 +49,6 @@ from agent.schemas.cache_entry import (
     ErrorSignature,
     FindingStrength,
 )
-
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -67,10 +67,10 @@ LIST_FIELD_MAX_SURVIVORS: int = 8
 MAX_PRIOR_SUMMARY_CHARS: int = 80
 
 #: Field names of the two LLM-merged list fields, in stable order.
-LIST_FIELD_NAMES: Tuple[str, ...] = ("key_findings", "bottlenecks")
+LIST_FIELD_NAMES: tuple[str, ...] = ("key_findings", "bottlenecks")
 
 #: Field names of the six replacement-with-history narratives.
-NARRATIVE_FIELD_NAMES: Tuple[str, ...] = (
+NARRATIVE_FIELD_NAMES: tuple[str, ...] = (
     "best_config_analysis",
     "score_trend",
     "per_file_analysis",
@@ -80,7 +80,7 @@ NARRATIVE_FIELD_NAMES: Tuple[str, ...] = (
 )
 
 #: Strength ordering for max() resolution during merge.
-_STRENGTH_RANK: Dict[str, int] = {"weak": 0, "moderate": 1, "strong": 2}
+_STRENGTH_RANK: dict[str, int] = {"weak": 0, "moderate": 1, "strong": 2}
 
 #: LLM call label for telemetry (§1.5 audit / 11-key components).
 _LIST_MERGE_LABEL: str = "cache_consolidator.list_merge"
@@ -103,12 +103,12 @@ class _MergeDecisionItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     statement: str = Field(..., min_length=1)
-    evidence_iters: List[int] = Field(..., min_length=1)
+    evidence_iters: list[int] = Field(..., min_length=1)
     strength: FindingStrength = Field(...)
 
     @field_validator("evidence_iters")
     @classmethod
-    def _non_negative(cls, v: List[int]) -> List[int]:
+    def _non_negative(cls, v: list[int]) -> list[int]:
         if any(i < 0 for i in v):
             raise ValueError("evidence_iters entries must be >= 0")
         return sorted(set(v))
@@ -124,8 +124,8 @@ class _MergeDecision(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    survivors: List[_MergeDecisionItem] = Field(default_factory=list)
-    archived: List[_MergeDecisionItem] = Field(default_factory=list)
+    survivors: list[_MergeDecisionItem] = Field(default_factory=list)
+    archived: list[_MergeDecisionItem] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +139,7 @@ def _max_strength(a: FindingStrength, b: FindingStrength) -> FindingStrength:
     return a if _STRENGTH_RANK[a] >= _STRENGTH_RANK[b] else b
 
 
-def _rank_findings(findings: List[ConsolidatedFinding]) -> List[ConsolidatedFinding]:
+def _rank_findings(findings: list[ConsolidatedFinding]) -> list[ConsolidatedFinding]:
     """Deterministic ranking key for the rank-prune fallback.
 
     Sort key: ``(strength_rank desc, len(evidence_iters) desc, recency desc)``.
@@ -301,7 +301,7 @@ evidence_iters=[5].
 """
 
 
-def _format_prior_for_prompt(findings: List[ConsolidatedFinding]) -> str:
+def _format_prior_for_prompt(findings: list[ConsolidatedFinding]) -> str:
     if not findings:
         return "(none)"
     lines = []
@@ -313,15 +313,12 @@ def _format_prior_for_prompt(findings: List[ConsolidatedFinding]) -> str:
     return "\n".join(lines)
 
 
-def _format_new_for_prompt(statements: List[str], current_iter: int) -> str:
+def _format_new_for_prompt(statements: list[str], current_iter: int) -> str:
     if not statements:
         return "(none)"
     lines = []
     for i, s in enumerate(statements, 1):
-        lines.append(
-            f"  N{i}. statement={json.dumps(s)} "
-            f"current_iter={current_iter}"
-        )
+        lines.append(f"  N{i}. statement={json.dumps(s)} current_iter={current_iter}")
     return "\n".join(lines)
 
 
@@ -329,8 +326,8 @@ def _build_list_merge_user_prompt(
     *,
     model_type: str,
     field_name: str,
-    prior: List[ConsolidatedFinding],
-    new_statements: List[str],
+    prior: list[ConsolidatedFinding],
+    new_statements: list[str],
     current_iter: int,
     max_survivors: int = LIST_FIELD_MAX_SURVIVORS,
     max_prior_summary_chars: int = MAX_PRIOR_SUMMARY_CHARS,
@@ -372,12 +369,7 @@ def _build_list_merge_user_prompt(
 
     closing = "Apply the four rules. Return the structured JSON decision."
 
-    return (
-        f"{policy_params}\n"
-        f"{_LIST_MERGE_POLICY_EXAMPLES}\n"
-        f"{data}\n"
-        f"{closing}"
-    )
+    return f"{policy_params}\n{_LIST_MERGE_POLICY_EXAMPLES}\n{data}\n{closing}"
 
 
 # ---------------------------------------------------------------------------
@@ -386,15 +378,15 @@ def _build_list_merge_user_prompt(
 
 
 def _wrap_new_as_findings(
-    new_statements: List[str], *, current_iter: int
-) -> List[ConsolidatedFinding]:
+    new_statements: list[str], *, current_iter: int
+) -> list[ConsolidatedFinding]:
     """Wrap raw LLM-emitted statement strings as fresh ConsolidatedFinding
     instances tagged with ``current_iter``. Strength defaults to ``"moderate"``
     — the LLM-flat output (`PER_MODEL_SYSTEM_PROMPT`) does not emit per-item
     strength tags; the consolidator's job is structural, not re-classification.
     Empty statements and non-strings are dropped silently.
     """
-    out: List[ConsolidatedFinding] = []
+    out: list[ConsolidatedFinding] = []
     for raw in new_statements:
         if not isinstance(raw, str):
             continue
@@ -424,10 +416,10 @@ def _merge_list_field_llm(
     *,
     model_type: str,
     field_name: str,
-    prior: List[ConsolidatedFinding],
-    new_statements: List[str],
+    prior: list[ConsolidatedFinding],
+    new_statements: list[str],
     current_iter: int,
-) -> Tuple[List[ConsolidatedFinding], List[Dict[str, Any]]]:
+) -> tuple[list[ConsolidatedFinding], list[dict[str, Any]]]:
     """Semantic merge of one list field (``key_findings`` or ``bottlenecks``).
 
     Trivial fast paths (no LLM call):
@@ -491,7 +483,7 @@ def _merge_list_field_llm(
         new_statements=new_statements,
         current_iter=current_iter,
     )
-    raw_response: Dict[str, Any] = bridge.generate(
+    raw_response: dict[str, Any] = bridge.generate(
         _LIST_MERGE_SYSTEM_PROMPT,
         user_prompt,
         label=_LIST_MERGE_LABEL,
@@ -544,7 +536,7 @@ def _merge_narrative_field(
     new_text: str,
     *,
     prior_iter: int,
-) -> Tuple[ConsolidatedNarrative, List[Dict[str, Any]]]:
+) -> tuple[ConsolidatedNarrative, list[dict[str, Any]]]:
     """Replacement-with-history merge for one narrative field.
 
     Rules (Rev 8.2 / 8.5 — unchanged):
@@ -572,13 +564,13 @@ def _merge_narrative_field(
 
     # Build new history: prior's latest pushed to the front (most recent),
     # followed by prior.history (already most-recent-first).
-    new_history: List[Tuple[int, str]] = []
+    new_history: list[tuple[int, str]] = []
     if prior.latest:
         new_history.append((prior_iter, prior.latest))
     new_history.extend(prior.history)
 
     # Trim to cap; overflow goes to the archive list as plain dicts.
-    archived: List[Dict[str, Any]] = []
+    archived: list[dict[str, Any]] = []
     if len(new_history) > NARRATIVE_HISTORY_MAX_ENTRIES:
         overflow = new_history[NARRATIVE_HISTORY_MAX_ENTRIES:]
         new_history = new_history[:NARRATIVE_HISTORY_MAX_ENTRIES]
@@ -601,9 +593,9 @@ def _merge_narrative_field(
 
 
 def _dedupe_error_signatures(
-    prior: List[ErrorSignature],
-    new: List[ErrorSignature],
-) -> List[ErrorSignature]:
+    prior: list[ErrorSignature],
+    new: list[ErrorSignature],
+) -> list[ErrorSignature]:
     """Strict set-merge by :meth:`ErrorSignature.key` tuple.
 
     Gate G3 (§2.9 Trap Test) invariant — NEVER drop a distinct signature,
@@ -614,8 +606,8 @@ def _dedupe_error_signatures(
     Order in the returned list is stable: prior keys first in their original
     order, then new keys that did not collide.
     """
-    by_key: Dict[Tuple[str, str, str], ErrorSignature] = {}
-    order: List[Tuple[str, str, str]] = []
+    by_key: dict[tuple[str, str, str], ErrorSignature] = {}
+    order: list[tuple[str, str, str]] = []
 
     for sig in list(prior) + list(new):
         k = sig.key()
@@ -649,9 +641,9 @@ def _dedupe_error_signatures(
 # ---------------------------------------------------------------------------
 
 
-def _extract_new_list(new_llm_response: Dict[str, Any], field_name: str) -> List[str]:
+def _extract_new_list(new_llm_response: dict[str, Any], field_name: str) -> list[str]:
     raw = new_llm_response.get(field_name, []) or []
-    out: List[str] = []
+    out: list[str] = []
     for item in raw:
         if not isinstance(item, str):
             continue
@@ -661,14 +653,14 @@ def _extract_new_list(new_llm_response: Dict[str, Any], field_name: str) -> List
     return out
 
 
-def _extract_new_narrative(new_llm_response: Dict[str, Any], field_name: str) -> str:
+def _extract_new_narrative(new_llm_response: dict[str, Any], field_name: str) -> str:
     raw = new_llm_response.get(field_name, "")
     if not isinstance(raw, str):
         return ""
     return raw
 
 
-def _extract_new_error_signatures(new_llm_response: Dict[str, Any]) -> List[ErrorSignature]:
+def _extract_new_error_signatures(new_llm_response: dict[str, Any]) -> list[ErrorSignature]:
     """Pull ``error_signatures`` out of a fresh LLM response.
 
     The Phase-2 §2.2 ``error_signature_skill`` will eventually plant these
@@ -679,7 +671,7 @@ def _extract_new_error_signatures(new_llm_response: Dict[str, Any]) -> List[Erro
     cache update path is not the right place to surface §2.2 bugs).
     """
     raw = new_llm_response.get("error_signatures", []) or []
-    out: List[ErrorSignature] = []
+    out: list[ErrorSignature] = []
     for item in raw:
         if isinstance(item, ErrorSignature):
             out.append(item)
@@ -702,11 +694,11 @@ def consolidate(
     bridge: LLMBridge,
     *,
     prior: CacheEntry,
-    new_llm_response: Dict[str, Any],
-    new_stats: Dict[str, Any],
+    new_llm_response: dict[str, Any],
+    new_stats: dict[str, Any],
     current_iter: int,
     prior_iter: int,
-) -> Tuple[CacheEntry, List[Dict[str, Any]]]:
+) -> tuple[CacheEntry, list[dict[str, Any]]]:
     """Merge ``new_llm_response`` into ``prior`` and return the consolidated
     :class:`CacheEntry` plus the archive list.
 
@@ -741,10 +733,10 @@ def consolidate(
       At most 2 LLM calls per invocation — one per list field. Each call
       is skipped when both sides of that field are empty (fast path).
     """
-    archived: List[Dict[str, Any]] = []
+    archived: list[dict[str, Any]] = []
 
     # ---- List fields (LLM-powered) ----
-    list_outputs: Dict[str, List[ConsolidatedFinding]] = {}
+    list_outputs: dict[str, list[ConsolidatedFinding]] = {}
     for field_name in LIST_FIELD_NAMES:
         prior_list = list(getattr(prior, field_name))
         new_list = _extract_new_list(new_llm_response, field_name)
@@ -768,7 +760,7 @@ def consolidate(
             )
 
     # ---- Narrative fields (deterministic) ----
-    narrative_outputs: Dict[str, ConsolidatedNarrative] = {}
+    narrative_outputs: dict[str, ConsolidatedNarrative] = {}
     for field_name in NARRATIVE_FIELD_NAMES:
         prior_narr = getattr(prior, field_name)
         new_text = _extract_new_narrative(new_llm_response, field_name)
@@ -791,10 +783,17 @@ def consolidate(
     new_sigs = _extract_new_error_signatures(new_llm_response)
     merged_sigs = _dedupe_error_signatures(prior.error_signatures, new_sigs)
 
+    # ``list_outputs`` and ``narrative_outputs`` carry disjoint key spaces — the
+    # list-typed fields and narrative-typed fields of ``CacheEntry`` respectively
+    # — but pyright cannot prove that disjointness across two separate unpacks
+    # and so rejects the second unpack as a value-type conflict on the first
+    # unpack's keys. The casts are a localized type-system mask: zero runtime
+    # cost, no payload mutation, and CacheEntry's own field validators still
+    # enforce the per-key shape at construction time.
     merged_entry = CacheEntry(
         model_type=prior.model_type,
-        **list_outputs,
-        **narrative_outputs,
+        **cast(dict[str, Any], list_outputs),
+        **cast(dict[str, Any], narrative_outputs),
         error_signatures=merged_sigs,
         stats=dict(new_stats) if new_stats else {},
     )

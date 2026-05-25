@@ -12,7 +12,6 @@ from dashboard.data_sources.base import DataSource
 
 
 class PostgresDataSource(DataSource):
-
     def __init__(self, connection_string: str, schema: str = "public"):
         self.connection_string = connection_string
         self.schema = schema
@@ -20,6 +19,10 @@ class PostgresDataSource(DataSource):
             "PostgresDataSource is not yet implemented. "
             "Set data_source.type=local in dashboard_config.yaml."
         )
+
+    @property
+    def root(self) -> str:
+        raise NotImplementedError("Postgres backend storage is pending architectural integration.")
 
     def list_models(self) -> list[str]:
         raise NotImplementedError

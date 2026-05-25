@@ -4,12 +4,27 @@ Tests for ml_models/models_sandbox.py
 Verifies that each model's forward pass produces the correct output shape
 on CPU with synthetic inputs. Uses small segmentation_size for speed.
 """
+
 import pytest
 import torch
 
-from ml_models.models_sandbox import PositionalUNet, AE, TransformerModel, SimpleWaveNet, RNNSeq2Seq, GatedFNO, MODEL_REGISTRY
-from ml_models.models_format_sandbox import PUNetConfig, AEConfig, TransformerConfig, WaveNetConfig, RNNSeq2SeqConfig, GatedFNOConfig
-
+from ml_models.models_format_sandbox import (
+    AEConfig,
+    GatedFNOConfig,
+    PUNetConfig,
+    RNNSeq2SeqConfig,
+    TransformerConfig,
+    WaveNetConfig,
+)
+from ml_models.models_sandbox import (
+    AE,
+    MODEL_REGISTRY,
+    GatedFNO,
+    PositionalUNet,
+    RNNSeq2Seq,
+    SimpleWaveNet,
+    TransformerModel,
+)
 
 BATCH = 2
 SEG_SIZE = 1000  # small for speed
@@ -19,8 +34,8 @@ SEG_SIZE = 1000  # small for speed
 # MODEL_REGISTRY
 # ==========================================
 
-class TestModelRegistry:
 
+class TestModelRegistry:
     def test_registry_contains_all_builtin_models(self):
         expected = {"punet", "fcnet", "transformer", "wavenet", "rnn", "gated_fno"}
         assert expected.issubset(set(MODEL_REGISTRY.keys()))
@@ -38,8 +53,8 @@ class TestModelRegistry:
 # PositionalUNet
 # ==========================================
 
-class TestPositionalUNet:
 
+class TestPositionalUNet:
     @pytest.fixture
     def input_tensor(self):
         """[Batch, SeqLen] integer tensor simulating ADC values (0-255)."""
@@ -79,8 +94,8 @@ class TestPositionalUNet:
 # AE (fcnet)
 # ==========================================
 
-class TestAE:
 
+class TestAE:
     @pytest.fixture
     def input_tensor(self):
         """[Batch, SeqLen] float tensor."""
@@ -123,8 +138,8 @@ class TestAE:
 # TransformerModel
 # ==========================================
 
-class TestTransformerModel:
 
+class TestTransformerModel:
     @pytest.fixture
     def input_tensor(self):
         """[Batch, SeqLen] long tensor simulating ADC values (0-255)."""
@@ -132,11 +147,7 @@ class TestTransformerModel:
 
     def _make_model(self, num_layers=2, **kwargs):
         cfg = TransformerConfig(
-            segmentation_size=SEG_SIZE,
-            embedding_dim=32,
-            nhead=4,
-            num_layers=num_layers,
-            **kwargs
+            segmentation_size=SEG_SIZE, embedding_dim=32, nhead=4, num_layers=num_layers, **kwargs
         )
         return TransformerModel(cfg)
 
@@ -165,8 +176,8 @@ class TestTransformerModel:
 # SimpleWaveNet
 # ==========================================
 
-class TestSimpleWaveNet:
 
+class TestSimpleWaveNet:
     @pytest.fixture
     def input_tensor(self):
         """[Batch, SeqLen] integer tensor simulating ADC values (0-255)."""
@@ -180,7 +191,7 @@ class TestSimpleWaveNet:
             gate_channels=16,
             skip_channels=16,
             num_blocks=num_blocks,
-            **kwargs
+            **kwargs,
         )
         return SimpleWaveNet(cfg)
 
@@ -209,8 +220,8 @@ class TestSimpleWaveNet:
 # RNNSeq2Seq
 # ==========================================
 
-class TestRNNSeq2Seq:
 
+class TestRNNSeq2Seq:
     @pytest.fixture
     def input_tensor(self):
         """[Batch, SeqLen] integer tensor simulating ADC values (0-255)."""
@@ -222,7 +233,7 @@ class TestRNNSeq2Seq:
             embedding_dim=16,
             hidden_dim=hidden_dim,
             num_layers=num_layers,
-            **kwargs
+            **kwargs,
         )
         return RNNSeq2Seq(cfg)
 
@@ -251,8 +262,8 @@ class TestRNNSeq2Seq:
 # GatedFNO
 # ==========================================
 
-class TestGatedFNO:
 
+class TestGatedFNO:
     @pytest.fixture
     def input_tensor(self):
         return torch.randint(0, 256, (BATCH, SEG_SIZE))

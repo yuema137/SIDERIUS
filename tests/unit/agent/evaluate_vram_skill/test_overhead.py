@@ -4,6 +4,7 @@ Phase 6.6 §3.3 hybrid design: analytical weight-proportional + calibrated
 fixed residuals. All tests are pure-Python arithmetic — no torch, no CUDA,
 no filesystem. The module's entire surface is bytes + optimizer names.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -21,19 +22,19 @@ from agent.skills.evaluate_vram_skill.overhead import (
     training_overhead_bytes,
 )
 
-
 # ── Calibrated constants (regression: Appendix A.5 numbers are load-bearing) ─
+
 
 def test_cuda_context_bytes_matches_appendix_a5():
     """185 MB — the inference residual measured on RTX 5090 / torch 2.10.0."""
-    assert _CUDA_CONTEXT_BYTES == 185 * 1024 ** 2
-    assert cuda_context_bytes() == 185 * 1024 ** 2
+    assert _CUDA_CONTEXT_BYTES == 185 * 1024**2
+    assert cuda_context_bytes() == 185 * 1024**2
 
 
 def test_cudnn_backward_workspace_matches_appendix_a5():
     """50 MB — the training-minus-inference delta on the same stack."""
-    assert _CUDNN_BACKWARD_WORKSPACE_BYTES == 50 * 1024 ** 2
-    assert cudnn_backward_workspace_bytes() == 50 * 1024 ** 2
+    assert _CUDNN_BACKWARD_WORKSPACE_BYTES == 50 * 1024**2
+    assert cudnn_backward_workspace_bytes() == 50 * 1024**2
 
 
 def test_cuda_context_bytes_is_deterministic():
@@ -43,23 +44,23 @@ def test_cuda_context_bytes_is_deterministic():
 
 # ── Analytical: weight-proportional scaling ─────────────────────────────────
 
-@pytest.mark.parametrize("params_bytes", [0, 1024, 10 * 1024 ** 2, 1 * 1024 ** 3, 50 * 1024 ** 3])
+
+@pytest.mark.parametrize("params_bytes", [0, 1024, 10 * 1024**2, 1 * 1024**3, 50 * 1024**3])
 def test_training_overhead_scales_linearly_with_params_adam(params_bytes):
     """Adam: grads (1×P) + m,v (2×P) = 3 × params_bytes."""
     assert training_overhead_bytes(params_bytes, "adam") == 3 * params_bytes
 
 
-@pytest.mark.parametrize("params_bytes", [0, 1024, 10 * 1024 ** 2, 1 * 1024 ** 3])
+@pytest.mark.parametrize("params_bytes", [0, 1024, 10 * 1024**2, 1 * 1024**3])
 def test_training_overhead_adamw_matches_adam(params_bytes):
     """AdamW has the same state shape as Adam — decoupled weight decay does
     not add new buffers."""
-    assert (
-        training_overhead_bytes(params_bytes, "adamw")
-        == training_overhead_bytes(params_bytes, "adam")
+    assert training_overhead_bytes(params_bytes, "adamw") == training_overhead_bytes(
+        params_bytes, "adam"
     )
 
 
-@pytest.mark.parametrize("params_bytes", [0, 1024, 10 * 1024 ** 2, 1 * 1024 ** 3])
+@pytest.mark.parametrize("params_bytes", [0, 1024, 10 * 1024**2, 1 * 1024**3])
 def test_training_overhead_sgd_is_grads_only(params_bytes):
     """Plain SGD has no momentum state — overhead is exactly the grads."""
     assert training_overhead_bytes(params_bytes, "sgd") == params_bytes
@@ -67,12 +68,13 @@ def test_training_overhead_sgd_is_grads_only(params_bytes):
 
 def test_training_overhead_case_insensitive():
     """'Adam', 'ADAM', 'adam' must all resolve to the same multiplier."""
-    p = 10 * 1024 ** 2
+    p = 10 * 1024**2
     for name in ["adam", "Adam", "ADAM", "AdAm"]:
         assert training_overhead_bytes(p, name) == 3 * p
 
 
 # ── Exception handling: no guessing ─────────────────────────────────────────
+
 
 def test_training_overhead_unknown_optimizer_raises():
     with pytest.raises(ValueError, match="Unknown optimizer"):
@@ -103,9 +105,10 @@ def test_multiplier_table_has_expected_keys():
 
 # ── Mode-switching: per-phase total overhead ────────────────────────────────
 
+
 def test_phase_overhead_inference_ignores_params_and_optimizer():
     """Inference overhead is just the CUDA context — independent of model size."""
-    for params_bytes in [0, 1024, 1 * 1024 ** 3]:
+    for params_bytes in [0, 1024, 1 * 1024**3]:
         assert phase_overhead_bytes(params_bytes, "inference") == _CUDA_CONTEXT_BYTES
 
 
@@ -117,7 +120,7 @@ def test_phase_overhead_inference_accepts_none_optimizer():
 
 def test_phase_overhead_training_sums_three_terms():
     """Training = analytical(params, opt) + cuda_context + cudnn_backward."""
-    params = 100 * 1024 ** 2   # 100 MB of params
+    params = 100 * 1024**2  # 100 MB of params
     expected = (
         training_overhead_bytes(params, "adamw")
         + _CUDA_CONTEXT_BYTES
@@ -129,7 +132,7 @@ def test_phase_overhead_training_sums_three_terms():
 def test_phase_overhead_training_strictly_exceeds_inference():
     """Physical sanity (Appendix A.5 discovery): training overhead must be
     strictly greater than inference for any non-trivial params_bytes."""
-    params = 10 * 1024 ** 2
+    params = 10 * 1024**2
     tr = phase_overhead_bytes(params, "training", optimizer="adam")
     inf = phase_overhead_bytes(params, "inference")
     assert tr > inf
@@ -154,6 +157,7 @@ def test_phase_overhead_rejects_unknown_mode():
 
 
 # ── Principle 2: no architecture names anywhere in the module source ────────
+
 
 def test_module_source_has_no_architecture_names():
     """Principle 2 spot-check on this module specifically. The full

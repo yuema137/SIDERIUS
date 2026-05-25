@@ -13,14 +13,21 @@ Each file is a JSON array of experiment record dicts.
 import glob
 import json
 import os
-from typing import Optional
 
 from dashboard.data_sources.base import DataSource
 
 
 class LocalJsonDataSource(DataSource):
+    # Class-level descriptor slot is required because the abstract `root`
+    # property on `DataSource` is checked by ABCMeta during instantiation
+    # (i.e. before `__init__` runs). A plain `self.root = ...` assignment in
+    # `__init__` would not satisfy the abstract contract in time, raising
+    # `TypeError: Can't instantiate abstract class`. The annotated default
+    # below registers `root` on the class itself, fulfilling the contract;
+    # the assignment in `__init__` then overrides it per instance.
+    root: str = ""
 
-    def __init__(self, root_data_dir: str, models: Optional[list[str]] = None):
+    def __init__(self, root_data_dir: str, models: list[str] | None = None):
         """
         Args:
             root_data_dir: Root directory containing per-model subdirectories.
@@ -37,7 +44,7 @@ class LocalJsonDataSource(DataSource):
     def _model_dir(self, model: str) -> str:
         return os.path.join(self.root, model)
 
-    def _baseline_summary_path(self, model: str) -> Optional[str]:
+    def _baseline_summary_path(self, model: str) -> str | None:
         """
         Glob for the baseline summary file. Returns the first match or None.
         Uses glob because run_comparison.py names the file
@@ -54,14 +61,13 @@ class LocalJsonDataSource(DataSource):
         {model}/{run_name}/agent/summary_{run_name}_agent.json
         """
         return os.path.join(
-            self._model_dir(model), run_name, "agent",
-            f"summary_{run_name}_agent.json"
+            self._model_dir(model), run_name, "agent", f"summary_{run_name}_agent.json"
         )
 
     def _read_json(self, path: str) -> list[dict]:
         """Read a summary JSON file. Returns [] on any error."""
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             return data if isinstance(data, list) else []
         except (OSError, json.JSONDecodeError):
@@ -111,10 +117,7 @@ class LocalJsonDataSource(DataSource):
             return [m for m in self._explicit_models if os.path.isdir(self._model_dir(m))]
         if not os.path.isdir(self.root):
             return []
-        return sorted(
-            e for e in os.listdir(self.root)
-            if os.path.isdir(os.path.join(self.root, e))
-        )
+        return sorted(e for e in os.listdir(self.root) if os.path.isdir(os.path.join(self.root, e)))
 
     def list_runs(self, model: str) -> list[str]:
         if not os.path.isdir(self._model_dir(model)):
@@ -145,16 +148,13 @@ class LocalJsonDataSource(DataSource):
             if not os.path.exists(path):
                 raise KeyError(f"Run '{run_name}' not found for model '{model}'")
             # Exclude the seeded baseline record at position 0
-            records = [
-                r for r in self._read_json(path)
-                if "baseline" not in r.get("exp_id", "")
-            ]
+            records = [r for r in self._read_json(path) if "baseline" not in r.get("exp_id", "")]
 
         if status_filter:
             records = [r for r in records if r.get("status") == status_filter]
 
         total = len(records)
-        return records[offset: offset + limit], total
+        return records[offset : offset + limit], total
 
     def get_experiment(self, model: str, run_name: str, exp_id: str) -> dict:
         records, _ = self.get_run_records(model, run_name, limit=10_000)
@@ -181,8 +181,8 @@ class LocalJsonDataSource(DataSource):
 
         # Agent records across all runs
         status_counts: dict[str, int] = {}
-        best_score: Optional[float] = None
-        best_run_name: Optional[str] = None
+        best_score: float | None = None
+        best_run_name: str | None = None
 
         for run_name in self._list_agent_run_names(model):
             path = self._agent_summary_path(model, run_name)
@@ -229,16 +229,18 @@ class LocalJsonDataSource(DataSource):
                 score = rec.get("denoising_score")
                 if score is None:
                     continue
-                entries.append({
-                    "exp_id":          rec.get("exp_id"),
-                    "run_name":        run_name,
-                    "denoising_score": score,
-                    "final_loss":      rec.get("final_loss"),
-                    "model_params":    rec.get("model_params"),
-                    "loss_type":       rec.get("params", {}).get("loss_config", {}).get("loss_type"),
-                    "epochs":          rec.get("params", {}).get("train_config", {}).get("epochs"),
-                    "timestamp":       rec.get("timestamp"),
-                })
+                entries.append(
+                    {
+                        "exp_id": rec.get("exp_id"),
+                        "run_name": run_name,
+                        "denoising_score": score,
+                        "final_loss": rec.get("final_loss"),
+                        "model_params": rec.get("model_params"),
+                        "loss_type": rec.get("params", {}).get("loss_config", {}).get("loss_type"),
+                        "epochs": rec.get("params", {}).get("train_config", {}).get("epochs"),
+                        "timestamp": rec.get("timestamp"),
+                    }
+                )
 
         entries.sort(key=lambda e: e["denoising_score"], reverse=True)
         for i, entry in enumerate(entries[:top_n], start=1):

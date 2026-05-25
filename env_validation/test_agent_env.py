@@ -1,12 +1,15 @@
 import os
+from pathlib import Path
+
 from dotenv import load_dotenv
+
 from agent.llm_bridge import LLMBridge
 
-# Load the .env file
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
+
 
 def test_openai():
-    print("\n" + "="*10 + " Testing OpenAI " + "="*10)
+    print("\n" + "=" * 10 + " Testing OpenAI " + "=" * 10)
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         print("OPENAI_API_KEY not found in .env")
@@ -33,8 +36,9 @@ def test_openai():
         print(f"OpenAI failed: {e}")
         return False
 
+
 def test_gemini():
-    print("\n" + "="*10 + " Testing Gemini " + "="*10)
+    print("\n" + "=" * 10 + " Testing Gemini " + "=" * 10)
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         print("GEMINI_API_KEY not found in .env")
@@ -61,8 +65,9 @@ def test_gemini():
         print(f"Gemini failed: {e}")
         return False
 
+
 def test_deepseek():
-    print("\n" + "="*10 + " Testing DeepSeek " + "="*10)
+    print("\n" + "=" * 10 + " Testing DeepSeek " + "=" * 10)
     api_key = os.getenv("DEEPSEEK_API_KEY")
     if not api_key:
         print("DEEPSEEK_API_KEY not found in .env")
@@ -106,7 +111,7 @@ if __name__ == "__main__":
         "DeepSeek": test_deepseek(),
     }
 
-    print("\n" + "="*36)
+    print("\n" + "=" * 36)
     passed = sum(results.values())
     if passed == len(results):
         print("RESULT: All brains are online!")

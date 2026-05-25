@@ -42,27 +42,29 @@ This module reads no model-type strings and contains no architecture names.
 It operates on bytes and optimizer identifiers only. The guardrail test
 ``tests/unit/guardrails/test_no_model_name_branches.py`` (A.12) enforces this.
 """
+
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Literal
 
 # ── Calibrated constants (Appendix A.5, RTX 5090 / torch 2.10.0+cu128) ──────
 
-_CUDA_CONTEXT_BYTES:             int = 185 * 1024 ** 2   # 185 MB — both phases
-_CUDNN_BACKWARD_WORKSPACE_BYTES: int = 50  * 1024 ** 2   # 50  MB — training only
+_CUDA_CONTEXT_BYTES: int = 185 * 1024**2  # 185 MB — both phases
+_CUDNN_BACKWARD_WORKSPACE_BYTES: int = 50 * 1024**2  # 50  MB — training only
 
 # ── Analytical multipliers (optimizer algebra, no measurement) ──────────────
 
 _OPTIMIZER_STATE_MULTIPLIER: dict[str, int] = {
-    "adam":  2,   # first + second moment
-    "adamw": 2,   # first + second moment (decoupled weight decay, same state)
-    "sgd":   0,   # plain SGD has no momentum state
+    "adam": 2,  # first + second moment
+    "adamw": 2,  # first + second moment (decoupled weight decay, same state)
+    "sgd": 0,  # plain SGD has no momentum state
     # Add "sgd+momentum": 1 when the project actually uses it. Do not
     # speculate — a silently-wrong multiplier is worse than a hard error.
 }
 
 
 # ── Weight-proportional (analytical) ────────────────────────────────────────
+
 
 def training_overhead_bytes(params_bytes: int, optimizer: str) -> int:
     """Grads + optimizer state. Both scale exactly with ``params_bytes``.
@@ -93,11 +95,12 @@ def training_overhead_bytes(params_bytes: int, optimizer: str) -> int:
             f"to _OPTIMIZER_STATE_MULTIPLIER rather than guessing."
         )
     grad_bytes = params_bytes
-    opt_bytes  = _OPTIMIZER_STATE_MULTIPLIER[key] * params_bytes
+    opt_bytes = _OPTIMIZER_STATE_MULTIPLIER[key] * params_bytes
     return grad_bytes + opt_bytes
 
 
 # ── Fixed residuals (calibrated) ────────────────────────────────────────────
+
 
 def cuda_context_bytes() -> int:
     """Per-process CUDA context + cuDNN forward workspace.
@@ -120,10 +123,11 @@ def cudnn_backward_workspace_bytes() -> int:
 
 # ── Composer: per-phase total overhead (convenience for the estimators) ────
 
+
 def phase_overhead_bytes(
     params_bytes: int,
     mode: Literal["training", "inference"],
-    optimizer: Optional[str] = None,
+    optimizer: str | None = None,
 ) -> int:
     """Sum the right overhead terms for the given phase.
 
@@ -159,6 +163,4 @@ def phase_overhead_bytes(
             + cudnn_backward_workspace_bytes()
         )
 
-    raise ValueError(
-        f"Unknown mode: {mode!r}. Expected 'training' or 'inference'."
-    )
+    raise ValueError(f"Unknown mode: {mode!r}. Expected 'training' or 'inference'.")

@@ -19,13 +19,14 @@ Tests that introspect the ``accumulated`` dict need to pull the JSON
 payload out of the fenced block. The old ``split("\\n\\n")[0]`` trick no
 longer works because the prompt no longer starts with raw JSON.
 """
+
 from __future__ import annotations
 
 import json
-from typing import Any, Dict
+from typing import Any
 
 
-def extract_accumulated_json(user_prompt: str) -> Dict[str, Any]:
+def extract_accumulated_json(user_prompt: str) -> dict[str, Any]:
     """Parse the ``## Accumulated context`` JSON fence from a stage prompt.
 
     Raises ``ValueError`` when the expected fence is missing or
@@ -36,8 +37,7 @@ def extract_accumulated_json(user_prompt: str) -> Dict[str, Any]:
     start = user_prompt.find(marker)
     if start < 0:
         raise ValueError(
-            "No ```json fence found in stage user prompt — has the prompt "
-            "format changed?"
+            "No ```json fence found in stage user prompt — has the prompt format changed?"
         )
     start += len(marker)
     end = user_prompt.find("\n```", start)

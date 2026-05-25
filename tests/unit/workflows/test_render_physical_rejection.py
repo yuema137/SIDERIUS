@@ -15,6 +15,7 @@ Covers:
 
 See docs/phase66_ws_b_proposer_hardening.md §3.2 / §4.3.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -59,8 +60,8 @@ def _mk(
 # Aggregation
 # ---------------------------------------------------------------------------
 
-class TestAggregateWorstOffender:
 
+class TestAggregateWorstOffender:
     def test_empty_input_is_noop(self):
         assert _aggregate_worst_offender_rejections([]) == []
 
@@ -75,7 +76,7 @@ class TestAggregateWorstOffender:
     def test_picks_worst_by_ratio_within_group(self):
         """Two attempts for deep_punet; the higher estimated/budget ratio
         must win."""
-        mild = _mk("deep_punet", estimated_gb=22.0)   # ratio 1.10
+        mild = _mk("deep_punet", estimated_gb=22.0)  # ratio 1.10
         worse = _mk("deep_punet", estimated_gb=29.0)  # ratio 1.45
         out = _aggregate_worst_offender_rejections([mild, worse])
         assert len(out) == 1
@@ -94,9 +95,7 @@ class TestAggregateWorstOffender:
         out = _aggregate_worst_offender_rejections([a1, a2, b1])
         # Two groups
         assert len(out) == 2
-        by_mt = {
-            w.attempt_config["model_type"]: (w, c) for w, c in out
-        }
+        by_mt = {w.attempt_config["model_type"]: (w, c) for w, c in out}
         assert set(by_mt.keys()) == {"deep_punet", "wide_transformer"}
         # deep_punet group: worst is a2 (ratio 1.45 > 1.10), n=2
         assert by_mt["deep_punet"][0] is a2
@@ -147,8 +146,8 @@ class TestAggregateWorstOffender:
 # Render
 # ---------------------------------------------------------------------------
 
-class TestRenderPhysicalRejection:
 
+class TestRenderPhysicalRejection:
     def test_tag_and_model_type_in_header(self):
         r = _mk("deep_punet", estimated_gb=29.0)
         out = _render_physical_rejection(r, n_rejections=2)

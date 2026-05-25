@@ -29,14 +29,14 @@ parent. The manifest file at ``{workspace}/{run_name}_hardware.json`` is the
 IPC: children ``load_manifest`` it instead of re-probing, so the whole run
 shares one cap and one device identity.
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import socket
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 import torch
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 
 _SAFETY_FRACTION: float = 0.80  # §3.9.1: single source of truth for the cap
-_CPU_DEVICE_NAME: str = "cpu"   # stable marker for ``device_available=False``
+_CPU_DEVICE_NAME: str = "cpu"  # stable marker for ``device_available=False``
 
 
 class HardwareContext(BaseModel):
@@ -58,17 +58,15 @@ class HardwareContext(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    device_name:          str
-    total_memory_bytes:   int
-    compute_capability:   tuple[int, int]        # (major, minor)
+    device_name: str
+    total_memory_bytes: int
+    compute_capability: tuple[int, int]  # (major, minor)
     multiprocessor_count: int
-    cuda_runtime_version: Optional[str] = None   # None on CPU-only hosts
-    torch_version:        str
-    hostname:             str
-    device_available:     bool
-    discovered_at:        datetime = Field(
-        description="UTC timestamp of discover() invocation."
-    )
+    cuda_runtime_version: str | None = None  # None on CPU-only hosts
+    torch_version: str
+    hostname: str
+    device_available: bool
+    discovered_at: datetime = Field(description="UTC timestamp of discover() invocation.")
 
     @property
     def usable_cap_bytes(self) -> int:
@@ -81,11 +79,11 @@ class HardwareContext(BaseModel):
 
     @property
     def total_memory_gb(self) -> float:
-        return self.total_memory_bytes / (1024 ** 3)
+        return self.total_memory_bytes / (1024**3)
 
     @property
     def usable_cap_gb(self) -> float:
-        return self.usable_cap_bytes / (1024 ** 3)
+        return self.usable_cap_bytes / (1024**3)
 
 
 def discover() -> HardwareContext:
@@ -97,7 +95,7 @@ def discover() -> HardwareContext:
     Consumers that require GPU must check ``device_available`` and early-return
     a CPU-mode verdict — the VRAM estimator does this today.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     hostname = socket.gethostname()
     torch_version = torch.__version__
 
@@ -179,7 +177,8 @@ def get_or_create(workspace: Path, run_name: str) -> HardwareContext:
     except (ValidationError, json.JSONDecodeError) as err:
         logger.warning(
             "hardware_context: manifest at %s is corrupt (%s); regenerating.",
-            path, err,
+            path,
+            err,
         )
         fresh = discover()
         write_manifest(fresh, path)
@@ -192,8 +191,11 @@ def get_or_create(workspace: Path, run_name: str) -> HardwareContext:
     logger.warning(
         "hardware_context: stored manifest at %s describes device=%r host=%r "
         "but current environment is device=%r host=%r. Regenerating.",
-        path, stored.device_name, stored.hostname,
-        fresh.device_name, fresh.hostname,
+        path,
+        stored.device_name,
+        stored.hostname,
+        fresh.device_name,
+        fresh.hostname,
     )
     write_manifest(fresh, path)
     return fresh

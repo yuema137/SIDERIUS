@@ -26,6 +26,7 @@ Two alerts are reported (informational, exit 0):
 USD cost defaults to ``$10/1M prompt + $30/1M completion`` (placeholder
 gpt-5.4 rates; configurable via ``--rate-prompt`` / ``--rate-completion``).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -35,15 +36,14 @@ import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT))
+from agent.schemas.telemetry import TokenUsageRow
+from tools.validate_token_usage_jsonl import lint as lint_jsonl
 
-from agent.schemas.telemetry import TokenUsageRow  # noqa: E402
-from tools.validate_token_usage_jsonl import lint as lint_jsonl  # noqa: E402
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 DEFAULT_RATE_PROMPT = 10.0  # USD per 1M prompt tokens (gpt-5.4 placeholder)
 DEFAULT_RATE_COMPLETION = 30.0  # USD per 1M completion tokens
@@ -51,7 +51,7 @@ DEFAULT_BLOAT_USD_PER_ITER = 1.50  # post-dehydration North Star
 DEFAULT_CONTEXT_EXPLOSION_PROMPT_TOK = 50_000
 
 # Proposer's 10-key component schema (audit doc §1.5 / Commit 4.2).
-PROPOSER_COMPONENT_KEYS: Tuple[str, ...] = (
+PROPOSER_COMPONENT_KEYS: tuple[str, ...] = (
     "system_prompt",
     "candidates_markdown",
     "interpretation_json",
@@ -68,6 +68,7 @@ PROPOSER_COMPONENT_KEYS: Tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class CallStats:
@@ -87,9 +88,7 @@ class CallStats:
         self.chars_total += row.chars.total
 
     def usd(self, rate_prompt: float, rate_completion: float) -> float:
-        return (
-            self.prompt_tok * rate_prompt + self.completion_tok * rate_completion
-        ) / 1_000_000
+        return (self.prompt_tok * rate_prompt + self.completion_tok * rate_completion) / 1_000_000
 
 
 @dataclass
@@ -99,10 +98,10 @@ class IterAgg:
     iter: int
     happy: CallStats
     recovery: CallStats
-    by_label: Dict[str, CallStats]
-    by_label_happy: Dict[str, CallStats]
-    by_label_recovery: Dict[str, CallStats]
-    proposer_components_chars: Dict[str, int]  # summed across proposer rows
+    by_label: dict[str, CallStats]
+    by_label_happy: dict[str, CallStats]
+    by_label_recovery: dict[str, CallStats]
+    proposer_components_chars: dict[str, int]  # summed across proposer rows
 
     @property
     def total(self) -> CallStats:
@@ -119,10 +118,11 @@ class IterAgg:
 # Loading + segmentation
 # ---------------------------------------------------------------------------
 
-def load_rows(jsonl_path: Path) -> List[TokenUsageRow]:
+
+def load_rows(jsonl_path: Path) -> list[TokenUsageRow]:
     """Load + validate every row. Skips marker rows (label='_iter_flush')
     so they don't pollute aggregates."""
-    rows: List[TokenUsageRow] = []
+    rows: list[TokenUsageRow] = []
     with open(jsonl_path) as f:
         for line in f:
             line = line.strip()
@@ -147,11 +147,19 @@ def is_happy_path(row: TokenUsageRow) -> bool:
     return attempt == 0 and status == "ok"
 
 
-def aggregate_by_iter(rows: List[TokenUsageRow]) -> Dict[int, IterAgg]:
-    """Build per-iter aggregates with happy/recovery + per-label split."""
-    aggs: Dict[int, IterAgg] = {}
+def aggregate_by_iter(rows: list[TokenUsageRow]) -> dict[int, IterAgg]:
+    """Build per-iter aggregates with happy/recovery + per-label split.
+
+    Rows with ``iter is None`` are setup/teardown calls outside any
+    iteration (see ``TokenUsageRow.iter`` docstring) — they're skipped
+    because downstream consumers ``sorted(aggs)`` and arithmetic on
+    iter indices would crash on a None key.
+    """
+    aggs: dict[int, IterAgg] = {}
     for row in rows:
-        it = row.iter  # type: ignore[assignment]
+        if row.iter is None:
+            continue
+        it = row.iter
         agg = aggs.get(it)
         if agg is None:
             agg = IterAgg(
@@ -187,7 +195,8 @@ def aggregate_by_iter(rows: List[TokenUsageRow]) -> Dict[int, IterAgg]:
 # Growth slopes (numpy linear regression — robust to missing iters)
 # ---------------------------------------------------------------------------
 
-def linear_slope(iter_value_pairs: List[Tuple[int, float]]) -> Tuple[float, float]:
+
+def linear_slope(iter_value_pairs: list[tuple[int, float]]) -> tuple[float, float]:
     """Least-squares linear fit y = slope*x + intercept.
 
     Robust to missing iterations (e.g., a crashed iter that never wrote to
@@ -211,20 +220,20 @@ def linear_slope(iter_value_pairs: List[Tuple[int, float]]) -> Tuple[float, floa
 
 
 def per_label_slopes(
-    aggs: Dict[int, IterAgg],
+    aggs: dict[int, IterAgg],
     rate_prompt: float,
     rate_completion: float,
-) -> Dict[str, Dict[str, float]]:
+) -> dict[str, dict[str, float]]:
     """Per-label growth slopes for prompt tokens and USD cost.
 
     Returns ``{label: {"tok_slope", "tok_r2", "usd_slope", "usd_r2"}}``.
     """
     iters_sorted = sorted(aggs)
     label_set = sorted({lbl for it in iters_sorted for lbl in aggs[it].by_label})
-    out: Dict[str, Dict[str, float]] = {}
+    out: dict[str, dict[str, float]] = {}
     for lbl in label_set:
-        tok_pts: List[Tuple[int, float]] = []
-        usd_pts: List[Tuple[int, float]] = []
+        tok_pts: list[tuple[int, float]] = []
+        usd_pts: list[tuple[int, float]] = []
         for it in iters_sorted:
             cs = aggs[it].by_label.get(lbl)
             if cs is None or cs.n_calls == 0:
@@ -234,8 +243,10 @@ def per_label_slopes(
         tok_slope, tok_r2 = linear_slope(tok_pts)
         usd_slope, usd_r2 = linear_slope(usd_pts)
         out[lbl] = {
-            "tok_slope": tok_slope, "tok_r2": tok_r2,
-            "usd_slope": usd_slope, "usd_r2": usd_r2,
+            "tok_slope": tok_slope,
+            "tok_r2": tok_r2,
+            "usd_slope": usd_slope,
+            "usd_r2": usd_r2,
             "n_points": float(len(tok_pts)),
         }
     return out
@@ -245,10 +256,12 @@ def per_label_slopes(
 # Alerts
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class BloatAlert:
     iter: int
     usd: float
+
 
 @dataclass
 class ContextExplosionAlert:
@@ -258,29 +271,32 @@ class ContextExplosionAlert:
     attempt: int
     run_id: str
 
+
 def detect_alerts(
-    rows: List[TokenUsageRow],
-    aggs: Dict[int, IterAgg],
+    rows: list[TokenUsageRow],
+    aggs: dict[int, IterAgg],
     rate_prompt: float,
     rate_completion: float,
     bloat_usd_threshold: float,
     context_prompt_threshold: int,
-) -> Tuple[List[BloatAlert], List[ContextExplosionAlert]]:
-    bloats: List[BloatAlert] = []
+) -> tuple[list[BloatAlert], list[ContextExplosionAlert]]:
+    bloats: list[BloatAlert] = []
     for it, agg in sorted(aggs.items()):
         usd = agg.total.usd(rate_prompt, rate_completion)
         if usd > bloat_usd_threshold:
             bloats.append(BloatAlert(iter=it, usd=usd))
-    explosions: List[ContextExplosionAlert] = []
+    explosions: list[ContextExplosionAlert] = []
     for r in rows:
         if (r.tokens.prompt or 0) > context_prompt_threshold:
-            explosions.append(ContextExplosionAlert(
-                iter=r.iter or -1,  # type: ignore[arg-type]
-                label=r.label,
-                prompt_tok=r.tokens.prompt or 0,
-                attempt=int(r.extra.get("attempt", -1)),
-                run_id=r.run_id,
-            ))
+            explosions.append(
+                ContextExplosionAlert(
+                    iter=r.iter or -1,  # type: ignore[arg-type]
+                    label=r.label,
+                    prompt_tok=r.tokens.prompt or 0,
+                    attempt=int(r.extra.get("attempt", -1)),
+                    run_id=r.run_id,
+                )
+            )
     return bloats, explosions
 
 
@@ -288,10 +304,11 @@ def detect_alerts(
 # Top-3 bloat (audit doc §1.9.1) — proposer-component-keys view
 # ---------------------------------------------------------------------------
 
-def top3_bloat_per_iter(aggs: Dict[int, IterAgg]) -> Dict[int, List[Tuple[str, int]]]:
+
+def top3_bloat_per_iter(aggs: dict[int, IterAgg]) -> dict[int, list[tuple[str, int]]]:
     """For each iter, return up to 3 (component_key, chars) tuples sorted
     descending by chars across all proposer.* rows that iter."""
-    out: Dict[int, List[Tuple[str, int]]] = {}
+    out: dict[int, list[tuple[str, int]]] = {}
     for it, agg in aggs.items():
         sorted_keys = sorted(
             agg.proposer_components_chars.items(),
@@ -302,8 +319,8 @@ def top3_bloat_per_iter(aggs: Dict[int, IterAgg]) -> Dict[int, List[Tuple[str, i
 
 
 def aggregate_component_growth(
-    aggs: Dict[int, IterAgg],
-) -> Dict[str, Dict[str, Any]]:
+    aggs: dict[int, IterAgg],
+) -> dict[str, dict[str, Any]]:
     """Per-component iter1→iterN growth for the 10 canonical proposer keys."""
     iters_sorted = sorted(aggs)
     if not iters_sorted:
@@ -312,7 +329,7 @@ def aggregate_component_growth(
     last_iter = iters_sorted[-1]
     first = aggs[first_iter].proposer_components_chars
     last = aggs[last_iter].proposer_components_chars
-    out: Dict[str, Dict[str, Any]] = {}
+    out: dict[str, dict[str, Any]] = {}
     for key in PROPOSER_COMPONENT_KEYS:
         c0 = first.get(key, 0)
         cn = last.get(key, 0)
@@ -325,8 +342,7 @@ def aggregate_component_growth(
             growth_x = cn / c0
             growth_pct = (cn - c0) / c0
         verdict = (
-            "bloating" if growth_pct > 0.30
-            else ("shrinking" if growth_pct < -0.10 else "bounded")
+            "bloating" if growth_pct > 0.30 else ("shrinking" if growth_pct < -0.10 else "bounded")
         )
         out[key] = {
             "iter1_chars": c0,
@@ -342,7 +358,8 @@ def aggregate_component_growth(
 # Verdict (audit doc §1.9.2)
 # ---------------------------------------------------------------------------
 
-def compute_verdict(component_growth: Dict[str, Dict[str, Any]]) -> str:
+
+def compute_verdict(component_growth: dict[str, dict[str, Any]]) -> str:
     """One of:
     - 'Confirmed Proposer Hypothesis' if top growers are proposer-content keys
     - 'Pivot Required — Tuner' if tuner labels dominate (caller passes per_label growth)
@@ -352,12 +369,14 @@ def compute_verdict(component_growth: Dict[str, Dict[str, Any]]) -> str:
     This function only returns proposer-vs-other; tuner pivot is detected by
     the caller using per_label slopes (tuner.* labels have no components dict)."""
     proposer_content_keys = {
-        "interpretation_json", "candidates_markdown", "previous_failures",
-        "prior_stage_outputs", "vocab_block",
+        "interpretation_json",
+        "candidates_markdown",
+        "previous_failures",
+        "prior_stage_outputs",
+        "vocab_block",
     }
     bloating = [
-        (k, v["growth_pct"]) for k, v in component_growth.items()
-        if v["verdict"] == "bloating"
+        (k, v["growth_pct"]) for k, v in component_growth.items() if v["verdict"] == "bloating"
     ]
     bloating.sort(key=lambda kv: -kv[1])
     top3 = {k for k, _ in bloating[:3]}
@@ -370,17 +389,20 @@ def compute_verdict(component_growth: Dict[str, Dict[str, Any]]) -> str:
 # Renderers
 # ---------------------------------------------------------------------------
 
+
 def _fmt_int(n: float | int) -> str:
     return f"{int(n):,}"
+
 
 def _fmt_usd(d: float) -> str:
     return f"${d:,.2f}"
 
+
 def render_baseline_report(
-    aggs: Dict[int, IterAgg],
-    label_slopes: Dict[str, Dict[str, float]],
-    bloats: List[BloatAlert],
-    explosions: List[ContextExplosionAlert],
+    aggs: dict[int, IterAgg],
+    label_slopes: dict[str, dict[str, float]],
+    bloats: list[BloatAlert],
+    explosions: list[ContextExplosionAlert],
     rate_prompt: float,
     rate_completion: float,
     bloat_usd_threshold: float,
@@ -397,7 +419,7 @@ def render_baseline_report(
         "",
         f"**Workspace**: `{workspace}`  ",
         f"**run_id**: `{run_id}`  ",
-        f"**Iters captured**: {iters_sorted[0]}–{iters_sorted[-1]} ({len(iters_sorted)} total)  ",
+        f"**Iters captured**: {iters_sorted[0]}-{iters_sorted[-1]} ({len(iters_sorted)} total)  ",
         f"**USD rates**: ${rate_prompt:.2f}/1M prompt + ${rate_completion:.2f}/1M completion (placeholder gpt-5.4)  ",
         f"**[BLOAT_ALERT] threshold**: {_fmt_usd(bloat_usd_threshold)}/iter (post-dehydration North Star)  ",
         f"**[CONTEXT_EXPLOSION] threshold**: {_fmt_int(context_prompt_threshold)} prompt tokens/call  ",
@@ -459,19 +481,25 @@ def render_baseline_report(
 
     lines += ["", "---", "", "## 3. Alerts", ""]
     if bloats:
-        lines.append(f"### [BLOAT_ALERT] — iters exceeding {_fmt_usd(bloat_usd_threshold)}/iter "
-                     f"({len(bloats)} of {len(iters_sorted)} iters)")
+        lines.append(
+            f"### [BLOAT_ALERT] — iters exceeding {_fmt_usd(bloat_usd_threshold)}/iter "
+            f"({len(bloats)} of {len(iters_sorted)} iters)"
+        )
         lines.append("")
         for b in bloats:
             mult = b.usd / bloat_usd_threshold
-            lines.append(f"- iter **{b.iter}**: {_fmt_usd(b.usd)} ({mult:.1f}× the {_fmt_usd(bloat_usd_threshold)} ceiling)")
+            lines.append(
+                f"- iter **{b.iter}**: {_fmt_usd(b.usd)} ({mult:.1f}× the {_fmt_usd(bloat_usd_threshold)} ceiling)"
+            )
         lines.append("")
     else:
         lines.append("### [BLOAT_ALERT]\n\n_None — no iter exceeded the threshold._\n")
 
     if explosions:
-        lines.append(f"### [CONTEXT_EXPLOSION] — single calls exceeding {_fmt_int(context_prompt_threshold)} "
-                     f"prompt tokens ({len(explosions)} calls)")
+        lines.append(
+            f"### [CONTEXT_EXPLOSION] — single calls exceeding {_fmt_int(context_prompt_threshold)} "
+            f"prompt tokens ({len(explosions)} calls)"
+        )
         lines.append("")
         lines.append("| iter | label | prompt tok | attempt |")
         lines.append("|---:|---|---:|---:|")
@@ -479,14 +507,16 @@ def render_baseline_report(
             lines.append(f"| {e.iter} | `{e.label}` | {_fmt_int(e.prompt_tok)} | {e.attempt} |")
         lines.append("")
     else:
-        lines.append(f"### [CONTEXT_EXPLOSION]\n\n_None — no single call exceeded {_fmt_int(context_prompt_threshold)} "
-                     f"prompt tokens._\n")
+        lines.append(
+            f"### [CONTEXT_EXPLOSION]\n\n_None — no single call exceeded {_fmt_int(context_prompt_threshold)} "
+            f"prompt tokens._\n"
+        )
     return "\n".join(lines) + "\n"
 
 
 def render_top3_bloat_report(
-    aggs: Dict[int, IterAgg],
-    component_growth: Dict[str, Dict[str, Any]],
+    aggs: dict[int, IterAgg],
+    component_growth: dict[str, dict[str, Any]],
     verdict: str,
     workspace: Path,
     run_id: str,
@@ -503,7 +533,7 @@ def render_top3_bloat_report(
         "",
         f"**Workspace**: `{workspace}`  ",
         f"**run_id**: `{run_id}`  ",
-        f"**Iters analyzed**: {iter1}–{iters_sorted[-1]}  ",
+        f"**Iters analyzed**: {iter1}-{iters_sorted[-1]}  ",
         "",
         "---",
         "",
@@ -521,7 +551,7 @@ def render_top3_bloat_report(
         if not agg.proposer_components_chars:
             continue
         total_proposer_chars = sum(agg.proposer_components_chars.values()) or 1
-        cells: List[str] = []
+        cells: list[str] = []
         top3_chars_sum = 0
         for k, c in top3[it]:
             top3_chars_sum += c
@@ -587,33 +617,64 @@ def render_top3_bloat_report(
 # CLI
 # ---------------------------------------------------------------------------
 
-def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
-    p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    p.add_argument("--workspace", type=Path, required=True,
-                   help="Workspace directory containing token_usage.jsonl.")
-    p.add_argument("--output-dir", type=Path, default=REPO_ROOT / "reports",
-                   help="Where to write the two markdown reports.")
-    p.add_argument("--baseline-name", default="v12_token_baseline.md",
-                   help="Filename for the baseline report.")
-    p.add_argument("--top3-name", default="v12_top3_bloat.md",
-                   help="Filename for the top-3 bloat report.")
-    p.add_argument("--rate-prompt", type=float, default=DEFAULT_RATE_PROMPT,
-                   help=f"USD per 1M prompt tokens (default {DEFAULT_RATE_PROMPT}).")
-    p.add_argument("--rate-completion", type=float, default=DEFAULT_RATE_COMPLETION,
-                   help=f"USD per 1M completion tokens (default {DEFAULT_RATE_COMPLETION}).")
-    p.add_argument("--bloat-usd-threshold", type=float,
-                   default=DEFAULT_BLOAT_USD_PER_ITER,
-                   help=f"USD/iter threshold for [BLOAT_ALERT] (default {DEFAULT_BLOAT_USD_PER_ITER}).")
-    p.add_argument("--context-prompt-threshold", type=int,
-                   default=DEFAULT_CONTEXT_EXPLOSION_PROMPT_TOK,
-                   help=f"prompt-tokens/call threshold for [CONTEXT_EXPLOSION] "
-                        f"(default {DEFAULT_CONTEXT_EXPLOSION_PROMPT_TOK}).")
-    p.add_argument("--skip-lint", action="store_true",
-                   help="Skip the JSONL pre-flight lint (use only for testing).")
+
+_CLI_DESCRIPTION = "Token-usage baseline + top-3 bloat report builder."
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    p = argparse.ArgumentParser(description=_CLI_DESCRIPTION)
+    p.add_argument(
+        "--workspace",
+        type=Path,
+        required=True,
+        help="Workspace directory containing token_usage.jsonl.",
+    )
+    p.add_argument(
+        "--output-dir",
+        type=Path,
+        default=REPO_ROOT / "reports",
+        help="Where to write the two markdown reports.",
+    )
+    p.add_argument(
+        "--baseline-name", default="v12_token_baseline.md", help="Filename for the baseline report."
+    )
+    p.add_argument(
+        "--top3-name", default="v12_top3_bloat.md", help="Filename for the top-3 bloat report."
+    )
+    p.add_argument(
+        "--rate-prompt",
+        type=float,
+        default=DEFAULT_RATE_PROMPT,
+        help=f"USD per 1M prompt tokens (default {DEFAULT_RATE_PROMPT}).",
+    )
+    p.add_argument(
+        "--rate-completion",
+        type=float,
+        default=DEFAULT_RATE_COMPLETION,
+        help=f"USD per 1M completion tokens (default {DEFAULT_RATE_COMPLETION}).",
+    )
+    p.add_argument(
+        "--bloat-usd-threshold",
+        type=float,
+        default=DEFAULT_BLOAT_USD_PER_ITER,
+        help=f"USD/iter threshold for [BLOAT_ALERT] (default {DEFAULT_BLOAT_USD_PER_ITER}).",
+    )
+    p.add_argument(
+        "--context-prompt-threshold",
+        type=int,
+        default=DEFAULT_CONTEXT_EXPLOSION_PROMPT_TOK,
+        help=f"prompt-tokens/call threshold for [CONTEXT_EXPLOSION] "
+        f"(default {DEFAULT_CONTEXT_EXPLOSION_PROMPT_TOK}).",
+    )
+    p.add_argument(
+        "--skip-lint",
+        action="store_true",
+        help="Skip the JSONL pre-flight lint (use only for testing).",
+    )
     return p.parse_args(argv)
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     jsonl = args.workspace / "token_usage.jsonl"
     if not jsonl.exists():
@@ -644,8 +705,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     aggs = aggregate_by_iter(rows)
     label_slopes = per_label_slopes(aggs, args.rate_prompt, args.rate_completion)
     bloats, explosions = detect_alerts(
-        rows, aggs, args.rate_prompt, args.rate_completion,
-        args.bloat_usd_threshold, args.context_prompt_threshold,
+        rows,
+        aggs,
+        args.rate_prompt,
+        args.rate_completion,
+        args.bloat_usd_threshold,
+        args.context_prompt_threshold,
     )
     component_growth = aggregate_component_growth(aggs)
     verdict = compute_verdict(component_growth)
@@ -653,22 +718,38 @@ def main(argv: Optional[List[str]] = None) -> int:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     baseline_path = args.output_dir / args.baseline_name
     top3_path = args.output_dir / args.top3_name
-    baseline_path.write_text(render_baseline_report(
-        aggs, label_slopes, bloats, explosions,
-        args.rate_prompt, args.rate_completion,
-        args.bloat_usd_threshold, args.context_prompt_threshold,
-        args.workspace, run_id,
-    ))
-    top3_path.write_text(render_top3_bloat_report(
-        aggs, component_growth, verdict, args.workspace, run_id,
-    ))
+    baseline_path.write_text(
+        render_baseline_report(
+            aggs,
+            label_slopes,
+            bloats,
+            explosions,
+            args.rate_prompt,
+            args.rate_completion,
+            args.bloat_usd_threshold,
+            args.context_prompt_threshold,
+            args.workspace,
+            run_id,
+        )
+    )
+    top3_path.write_text(
+        render_top3_bloat_report(
+            aggs,
+            component_growth,
+            verdict,
+            args.workspace,
+            run_id,
+        )
+    )
     print(f"[OK] wrote {baseline_path}")
     print(f"[OK] wrote {top3_path}")
     print(f"     verdict: {verdict}")
-    print(f"     iters: {min(aggs)}–{max(aggs)} ({len(aggs)} total)")
+    print(f"     iters: {min(aggs)}-{max(aggs)} ({len(aggs)} total)")
     print(f"     [BLOAT_ALERT]: {len(bloats)} iter(s) over {_fmt_usd(args.bloat_usd_threshold)}")
-    print(f"     [CONTEXT_EXPLOSION]: {len(explosions)} call(s) over "
-          f"{_fmt_int(args.context_prompt_threshold)} tok")
+    print(
+        f"     [CONTEXT_EXPLOSION]: {len(explosions)} call(s) over "
+        f"{_fmt_int(args.context_prompt_threshold)} tok"
+    )
     return 0
 
 

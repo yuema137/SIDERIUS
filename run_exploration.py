@@ -10,17 +10,12 @@ Usage:
     # Monitor:
     tail -f /home/klz/Data/SIDEREIS_DATA/exploration/explore_v1/workflow_log.txt
 """
-import sys
+
 import os
 
-# Ensure SIDERIUS root is importable
-SIDERIUS_ROOT = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, SIDERIUS_ROOT)
-sys.path.insert(0, os.path.join(SIDERIUS_ROOT, "ml_models"))
-
-from workflows.llm_config import WorkflowLLMConfig, NodeLLMConfig
-from workflows.model_exploration import run_workflow
 from execute_tools.data_paths import SIDERIUS_DATA_DIR
+from workflows.llm_config import NodeLLMConfig, WorkflowLLMConfig
+from workflows.model_exploration import run_workflow
 
 llm_config = WorkflowLLMConfig(
     implement=NodeLLMConfig(provider="gemini", model_id="gemini-3.1-pro-preview"),

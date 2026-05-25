@@ -31,15 +31,15 @@ terms in any suggestion string. The guardrail test
 this across the whole VRAM stack; the inline test in
 ``test_killer_report.py`` documents the invariant at the module.
 """
+
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent.skills.evaluate_vram_skill import compute_intensity
 from agent.skills.evaluate_vram_skill.structural_probe import LayerReport, ProbeResult
-
 
 # ── Pydantic contracts ──────────────────────────────────────────────────────
 
@@ -49,12 +49,13 @@ _BindingCap = Literal["vram", "compute_intensity", "vram+compute_intensity"]
 class PerLayerEntry(BaseModel):
     """One row of the ``memory_killer.per_layer`` breakdown. One entry per
     leaf layer in the probed model — non-leaf containers would double-count."""
+
     model_config = ConfigDict(frozen=True)
 
-    name:         str
-    class_name:   str
+    name: str
+    class_name: str
     output_shape: list[int]
-    bytes:        int
+    bytes: int
 
 
 class MemoryKillerDetails(BaseModel):
@@ -63,22 +64,23 @@ class MemoryKillerDetails(BaseModel):
     ``binding_cap``: VRAM branches fill ``dominant_*`` + ``per_layer``,
     intensity branches fill ``batch_size`` / ``segmentation_size`` /
     ``intensity_*``, and the combined branch fills both halves."""
+
     model_config = ConfigDict(frozen=True)
 
     binding_cap: _BindingCap
 
     # ── VRAM attribution (populated when binding_cap includes "vram") ──
-    dominant_layer:       Optional[str]   = None
-    dominant_layer_class: Optional[str]   = None
-    dominant_layer_bytes: Optional[int]   = None
-    dominant_fraction:    Optional[float] = None
-    per_layer:            list[PerLayerEntry] = Field(default_factory=list)
+    dominant_layer: str | None = None
+    dominant_layer_class: str | None = None
+    dominant_layer_bytes: int | None = None
+    dominant_fraction: float | None = None
+    per_layer: list[PerLayerEntry] = Field(default_factory=list)
 
     # ── Intensity attribution (populated when binding_cap includes ↓) ──
-    batch_size:        Optional[int] = None
-    segmentation_size: Optional[int] = None
-    intensity_product: Optional[int] = None
-    intensity_cap:     Optional[int] = None
+    batch_size: int | None = None
+    segmentation_size: int | None = None
+    intensity_product: int | None = None
+    intensity_cap: int | None = None
 
 
 class KillerReport(BaseModel):
@@ -86,23 +88,25 @@ class KillerReport(BaseModel):
     dict via ``.model_dump()`` per §3.7, so ``status`` / ``verdict`` /
     ``memory_killer`` / ``suggestion`` become top-level keys in the
     Proposer-facing response."""
+
     model_config = ConfigDict(frozen=True)
 
-    status:        Literal["schema_violation"] = "schema_violation"
-    verdict:       str
+    status: Literal["schema_violation"] = "schema_violation"
+    verdict: str
     memory_killer: MemoryKillerDetails
-    suggestion:    str
+    suggestion: str
 
 
 # ── Internal helpers ────────────────────────────────────────────────────────
 
+
 def _format_bytes(b: int) -> str:
     """Render a byte count as ``X.Y GB`` for verdict strings."""
-    return f"{b / 1024 ** 3:.1f} GB"
+    return f"{b / 1024**3:.1f} GB"
 
 
 def _leaf_layers(probe: ProbeResult) -> list[LayerReport]:
-    return [l for l in probe.model_forward.layers if l.is_leaf]
+    return [layer for layer in probe.model_forward.layers if layer.is_leaf]
 
 
 def _dominant_leaf(probe: ProbeResult) -> LayerReport | None:
@@ -113,22 +117,23 @@ def _dominant_leaf(probe: ProbeResult) -> LayerReport | None:
     leaves = _leaf_layers(probe)
     if not leaves:
         return None
-    return max(leaves, key=lambda l: l.output_bytes)
+    return max(leaves, key=lambda layer: layer.output_bytes)
 
 
 def _per_layer_entries(probe: ProbeResult) -> list[PerLayerEntry]:
     return [
         PerLayerEntry(
-            name=l.var_name,
-            class_name=l.class_name,
-            output_shape=l.output_shape,
-            bytes=l.output_bytes,
+            name=layer.var_name,
+            class_name=layer.class_name,
+            output_shape=layer.output_shape,
+            bytes=layer.output_bytes,
         )
-        for l in _leaf_layers(probe)
+        for layer in _leaf_layers(probe)
     ]
 
 
 # ── VRAM-over-budget renderer (§3.6) ───────────────────────────────────────
+
 
 def render_vram_report(
     probe: ProbeResult,
@@ -176,15 +181,16 @@ def render_vram_report(
     else:
         details = MemoryKillerDetails(binding_cap="vram", per_layer=per_layer)
         suggestion = (
-            f"No single leaf layer dominates the estimate — the whole model "
-            f"exceeds the cap. Reduce total parameter count or shorten "
-            f"segmentation_size."
+            "No single leaf layer dominates the estimate — the whole model "
+            "exceeds the cap. Reduce total parameter count or shorten "
+            "segmentation_size."
         )
 
     return KillerReport(verdict=verdict, memory_killer=details, suggestion=suggestion)
 
 
 # ── Compute-intensity-over-budget renderer (§3.10.2) ───────────────────────
+
 
 def render_intensity_report(batch_size: int, segmentation_size: int) -> KillerReport:
     """Build the full verdict for a compute-intensity cap failure.
@@ -214,6 +220,7 @@ def render_intensity_report(batch_size: int, segmentation_size: int) -> KillerRe
 
 # ── Combined-binding renderer (both caps) ───────────────────────────────────
 
+
 def render_combined_report(
     probe: ProbeResult,
     predicted_peak_bytes: int,
@@ -230,22 +237,25 @@ def render_combined_report(
     attempt will pass the gate.
     """
     vram_rep = render_vram_report(
-        probe, predicted_peak_bytes, cap_bytes, total_memory_bytes,
+        probe,
+        predicted_peak_bytes,
+        cap_bytes,
+        total_memory_bytes,
     )
     product = compute_intensity.compute_intensity(batch_size, segmentation_size)
     cap = compute_intensity._MAX_BATCH_TIMESTEPS
 
     details = MemoryKillerDetails(
         binding_cap="vram+compute_intensity",
-        dominant_layer       = vram_rep.memory_killer.dominant_layer,
-        dominant_layer_class = vram_rep.memory_killer.dominant_layer_class,
-        dominant_layer_bytes = vram_rep.memory_killer.dominant_layer_bytes,
-        dominant_fraction    = vram_rep.memory_killer.dominant_fraction,
-        per_layer            = vram_rep.memory_killer.per_layer,
-        batch_size           = batch_size,
-        segmentation_size    = segmentation_size,
-        intensity_product    = product,
-        intensity_cap        = cap,
+        dominant_layer=vram_rep.memory_killer.dominant_layer,
+        dominant_layer_class=vram_rep.memory_killer.dominant_layer_class,
+        dominant_layer_bytes=vram_rep.memory_killer.dominant_layer_bytes,
+        dominant_fraction=vram_rep.memory_killer.dominant_fraction,
+        per_layer=vram_rep.memory_killer.per_layer,
+        batch_size=batch_size,
+        segmentation_size=segmentation_size,
+        intensity_product=product,
+        intensity_cap=cap,
     )
     verdict = (
         f"❌ OVER-BUDGET (VRAM + Compute-intensity) — estimated "

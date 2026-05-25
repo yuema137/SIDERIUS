@@ -12,10 +12,11 @@ run is hermetic (no GPU, no API, no HDF5).
 
 See docs/phase66_ws_b_proposer_hardening.md §5.1 item 2 / §3.2.
 """
+
 from __future__ import annotations
 
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from unittest.mock import patch
 
 import pytest
@@ -24,7 +25,7 @@ from agent.schemas.hyperparam_tuning import (
     HyperparamTuningInput,
     PhysicalRejection,
 )
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from core.hardware_context import HardwareContext
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from nodes.scoring_reference import ReferenceScores
@@ -36,14 +37,14 @@ def _stub_hardware_context() -> HardwareContext:
     uses a fresh ``tmp_path`` so sharing a stub across tests is safe."""
     return HardwareContext(
         device_name="stub-cuda-device",
-        total_memory_bytes=32 * 1024 ** 3,
+        total_memory_bytes=32 * 1024**3,
         compute_capability=(9, 0),
         multiprocessor_count=128,
         cuda_runtime_version="12.4",
         torch_version="2.5.1",
         hostname="test-host",
         device_available=True,
-        discovered_at=datetime(2026, 4, 23, tzinfo=timezone.utc),
+        discovered_at=datetime(2026, 4, 23, tzinfo=UTC),
     )
 
 
@@ -51,6 +52,7 @@ def _stub_hardware_context() -> HardwareContext:
 # Reference-score stub — lets the tuner's pre-loop load call succeed without
 # any on-disk JSONs.
 # ---------------------------------------------------------------------------
+
 
 def _synth_reference_stub() -> ReferenceScores:
     return ReferenceScores(
@@ -105,7 +107,7 @@ FAKE_VRAM_OK = {
 def _make_oom_payload(
     *,
     dominant_layer: str = "encoder.block3.conv",
-    dominant_layer_bytes: int = 5 * 1024 ** 3,     # 5.0 GB
+    dominant_layer_bytes: int = 5 * 1024**3,  # 5.0 GB
     dominant_fraction: float = 0.42,
     binding_cap: str = "vram",
     estimated_gb: float = 12.0,
@@ -131,10 +133,10 @@ def _make_oom_payload(
     }
     if include_memory_killer:
         payload["memory_killer"] = {
-            "binding_cap":          binding_cap,
-            "dominant_layer":       dominant_layer,
+            "binding_cap": binding_cap,
+            "dominant_layer": dominant_layer,
             "dominant_layer_bytes": dominant_layer_bytes,
-            "dominant_fraction":    dominant_fraction,
+            "dominant_fraction": dominant_fraction,
         }
     return payload
 
@@ -150,6 +152,7 @@ FAKE_SCORE = {"status": "success", "results": {"denoising_score": 1.75}}
 # ---------------------------------------------------------------------------
 # Agent wiring
 # ---------------------------------------------------------------------------
+
 
 def _make_input(
     tmp_path,
@@ -221,16 +224,19 @@ def agent_with_scripted_skill():
         cm = (
             patch("nodes.ml_hyperparameter_tune_agent.LLMBridge"),
             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox"),
-            patch("nodes.ml_hyperparameter_tune_agent._run_skill",
-                  side_effect=side_effect),
-            patch("nodes.ml_hyperparameter_tune_agent.load_reference_scores",
-                  return_value=_synth_reference_stub()),
+            patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=side_effect),
+            patch(
+                "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
+                return_value=_synth_reference_stub(),
+            ),
             # Skip the real CUDA probe + manifest I/O — it takes ~30s
             # per call and is irrelevant to the capture contract we pin
             # here. See test_hardware_context_init.py for the A.1.6
             # wiring test that does exercise the real path.
-            patch("nodes.ml_hyperparameter_tune_agent.get_or_create",
-                  return_value=_stub_hardware_context()),
+            patch(
+                "nodes.ml_hyperparameter_tune_agent.get_or_create",
+                return_value=_stub_hardware_context(),
+            ),
             tempfile.TemporaryDirectory(),
         )
         return cm, counter
@@ -239,8 +245,8 @@ def agent_with_scripted_skill():
 
 
 def _setup(make_factory, vram_verdicts):
-    (bridge_cm, sandbox_cm, skill_cm, ref_cm, hw_cm, configs_cm), counter = (
-        make_factory(vram_verdicts)
+    (bridge_cm, sandbox_cm, skill_cm, ref_cm, hw_cm, configs_cm), counter = make_factory(
+        vram_verdicts
     )
     MockBridge = bridge_cm.__enter__()
     MockSandbox = sandbox_cm.__enter__()
@@ -274,17 +280,20 @@ def _setup(make_factory, vram_verdicts):
 # Tests
 # ---------------------------------------------------------------------------
 
+
 class TestSingleRejectionCapture:
     """Single VRAM-infeasible attempt → exactly one PhysicalRejection with
     the contract-specified fields (dominant_layer, binding_cap, suggestion)
     populated from the memory_killer payload."""
 
     def test_one_rejection_with_expected_killer_fields(
-        self, agent_with_scripted_skill, tmp_path,
+        self,
+        agent_with_scripted_skill,
+        tmp_path,
     ):
         oom = _make_oom_payload(
             dominant_layer="encoder.attention.block7.mha",
-            dominant_layer_bytes=int(13.4 * 1024 ** 3),
+            dominant_layer_bytes=int(13.4 * 1024**3),
             dominant_fraction=0.46,
             binding_cap="vram",
             estimated_gb=29.1,
@@ -294,7 +303,7 @@ class TestSingleRejectionCapture:
         # 1 trial round, 1 attempt — the single attempt is a rejection.
         # Output will be status="partial" (no successful round) but we only
         # care about the rejection buffer being populated.
-        agent, saved, counter, cleanup = _setup(agent_with_scripted_skill, [oom])
+        agent, saved, _counter, cleanup = _setup(agent_with_scripted_skill, [oom])
         try:
             output = agent.run(_make_input(tmp_path, max_rounds=1))
         finally:
@@ -316,13 +325,15 @@ class TestSingleRejectionCapture:
         assert abs(rej.dominant_layer_gb - 13.4) < 1e-3
 
     def test_attempt_config_carries_model_type(
-        self, agent_with_scripted_skill, tmp_path,
+        self,
+        agent_with_scripted_skill,
+        tmp_path,
     ):
         """The attempt_config snapshot must at minimum carry the model_type
         — the orchestrator groups rejections by model_type for worst-offender
         aggregation."""
         oom = _make_oom_payload()
-        agent, saved, counter, cleanup = _setup(agent_with_scripted_skill, [oom])
+        agent, _saved, _counter, cleanup = _setup(agent_with_scripted_skill, [oom])
         try:
             output = agent.run(_make_input(tmp_path, max_rounds=1))
         finally:
@@ -338,7 +349,9 @@ class TestMultipleRejectionCapture:
     encounter order, each with its own dominant_layer / suggestion."""
 
     def test_three_rejections_preserved_in_order(
-        self, agent_with_scripted_skill, tmp_path,
+        self,
+        agent_with_scripted_skill,
+        tmp_path,
     ):
         verdicts = [
             _make_oom_payload(dominant_layer="layer_A", suggestion="s_A"),
@@ -350,24 +363,30 @@ class TestMultipleRejectionCapture:
         # after the third fail rather than spinning on exhausted-schedule
         # IndexErrors (which the tuner's generic except swallows with a
         # 5s sleep).
-        agent, saved, counter, cleanup = _setup(agent_with_scripted_skill, verdicts)
+        agent, _saved, _counter, cleanup = _setup(agent_with_scripted_skill, verdicts)
         try:
-            output = agent.run(_make_input(
-                tmp_path,
-                max_rounds=3,
-                attempts_per_round=1,
-                attempts_per_formal_round=1,
-                max_fail_rounds=3,
-            ))
+            output = agent.run(
+                _make_input(
+                    tmp_path,
+                    max_rounds=3,
+                    attempts_per_round=1,
+                    attempts_per_formal_round=1,
+                    max_fail_rounds=3,
+                )
+            )
         finally:
             cleanup()
 
         assert len(output.physical_rejections) == 3
         assert [r.dominant_layer for r in output.physical_rejections] == [
-            "layer_A", "layer_B", "layer_C",
+            "layer_A",
+            "layer_B",
+            "layer_C",
         ]
         assert [r.suggestion for r in output.physical_rejections] == [
-            "s_A", "s_B", "s_C",
+            "s_A",
+            "s_B",
+            "s_C",
         ]
 
 
@@ -381,10 +400,12 @@ class TestDegenerateKillerPayload:
     aggregator sees it."""
 
     def test_missing_memory_killer_defaults_applied(
-        self, agent_with_scripted_skill, tmp_path,
+        self,
+        agent_with_scripted_skill,
+        tmp_path,
     ):
         oom = _make_oom_payload(include_memory_killer=False)
-        agent, saved, counter, cleanup = _setup(agent_with_scripted_skill, [oom])
+        agent, _saved, _counter, cleanup = _setup(agent_with_scripted_skill, [oom])
         try:
             output = agent.run(_make_input(tmp_path, max_rounds=1))
         finally:
@@ -407,18 +428,22 @@ class TestNoRejectionWhenFeasible:
     ``HyperparamTuningOutput.physical_rejections`` at ``run()`` exit."""
 
     def test_feasible_run_yields_empty_rejection_buffer(
-        self, agent_with_scripted_skill, tmp_path,
+        self,
+        agent_with_scripted_skill,
+        tmp_path,
     ):
         # 2 rounds, both feasible → no rejections.
         verdicts = [FAKE_VRAM_OK, FAKE_VRAM_OK]
-        agent, saved, counter, cleanup = _setup(agent_with_scripted_skill, verdicts)
+        agent, _saved, _counter, cleanup = _setup(agent_with_scripted_skill, verdicts)
         try:
-            output = agent.run(_make_input(
-                tmp_path,
-                max_rounds=2,
-                attempts_per_round=1,
-                attempts_per_formal_round=1,
-            ))
+            output = agent.run(
+                _make_input(
+                    tmp_path,
+                    max_rounds=2,
+                    attempts_per_round=1,
+                    attempts_per_formal_round=1,
+                )
+            )
         finally:
             cleanup()
 
@@ -432,8 +457,8 @@ class TestBytesToGbConversion:
     numbers — pin it here."""
 
     def test_one_gb_exact(self, agent_with_scripted_skill, tmp_path):
-        oom = _make_oom_payload(dominant_layer_bytes=1 * 1024 ** 3)
-        agent, saved, counter, cleanup = _setup(agent_with_scripted_skill, [oom])
+        oom = _make_oom_payload(dominant_layer_bytes=1 * 1024**3)
+        agent, _saved, _counter, cleanup = _setup(agent_with_scripted_skill, [oom])
         try:
             output = agent.run(_make_input(tmp_path, max_rounds=1))
         finally:
@@ -441,11 +466,13 @@ class TestBytesToGbConversion:
         assert output.physical_rejections[0].dominant_layer_gb == 1.0
 
     def test_non_round_bytes_rounded_to_four_decimals(
-        self, agent_with_scripted_skill, tmp_path,
+        self,
+        agent_with_scripted_skill,
+        tmp_path,
     ):
         # 2_500_000_000 bytes ≈ 2.3283 GB
         oom = _make_oom_payload(dominant_layer_bytes=2_500_000_000)
-        agent, saved, counter, cleanup = _setup(agent_with_scripted_skill, [oom])
+        agent, _saved, _counter, cleanup = _setup(agent_with_scripted_skill, [oom])
         try:
             output = agent.run(_make_input(tmp_path, max_rounds=1))
         finally:

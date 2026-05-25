@@ -15,6 +15,7 @@ detect the cases it happens to exercise. A future refactor that adds
 ``except LLMBridgeContextError`` somewhere new would slip past unit
 tests but be caught here in seconds.
 """
+
 from __future__ import annotations
 
 import ast
@@ -22,15 +23,13 @@ from pathlib import Path
 
 import pytest
 
-
 # Resolve the bridge file relative to this test, so the test still works
 # when pytest is invoked from anywhere.
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _BRIDGE_PATH = _REPO_ROOT / "agent" / "llm_bridge.py"
 
 
-def _collect_handlers_naming(tree: ast.AST,
-                             forbidden_name: str) -> list[tuple[int, str]]:
+def _collect_handlers_naming(tree: ast.AST, forbidden_name: str) -> list[tuple[int, str]]:
     """Return [(lineno, source_excerpt)] for every ExceptHandler whose
     type expression names ``forbidden_name``."""
     hits: list[tuple[int, str]] = []
@@ -87,9 +86,12 @@ def test_bare_except_does_not_swallow_context_error():
     src = _BRIDGE_PATH.read_text()
     tree = ast.parse(src, filename=str(_BRIDGE_PATH))
 
-    risky_methods = {"_record_usage", "set_run_context",
-                     "_validate_pre_write_locked",
-                     "_flush_iter_marker_locked"}
+    risky_methods = {
+        "_record_usage",
+        "set_run_context",
+        "_validate_pre_write_locked",
+        "_flush_iter_marker_locked",
+    }
     bad: list[tuple[int, str]] = []
 
     def _has_risky_call(node: ast.AST) -> str | None:
@@ -108,10 +110,7 @@ def test_bare_except_does_not_swallow_context_error():
         for handler in node.handlers:
             t = handler.type
             is_bare = t is None
-            is_broad_exception = (
-                isinstance(t, ast.Name)
-                and t.id in {"Exception", "BaseException"}
-            )
+            is_broad_exception = isinstance(t, ast.Name) and t.id in {"Exception", "BaseException"}
             if not (is_bare or is_broad_exception):
                 continue
             for stmt in node.body:

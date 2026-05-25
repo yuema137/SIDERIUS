@@ -17,23 +17,27 @@ Run with:
 
 DO NOT run in CI.
 """
+
 import os
+from pathlib import Path
+
 import pytest
 from dotenv import load_dotenv
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput, HyperparamTuningOutput
 from agent.schemas.interpretation import InterpretationOutput, ModelRunSummary
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from agent.schemas.protocols.ml_model_tune_to_ml_result_interp import local_all_records
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from nodes.result_interpretation_agent import ResultInterpretationAgent
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
 pytestmark = pytest.mark.real_run
 
 try:
     from execute_tools.data_paths import TIDMAD_DATA_DIR
+
     DATA_DIR = TIDMAD_DATA_DIR
 except (FileNotFoundError, ImportError):
     DATA_DIR = "/home/klz/Data/TIDMAD/"
@@ -54,8 +58,8 @@ def _skip_if_no_data():
 # Test
 # ---------------------------------------------------------------------------
 
-class TestTuneToInterpret:
 
+class TestTuneToInterpret:
     def setup_method(self):
         _skip_if_no_key("gemini")
         _skip_if_no_data()
@@ -110,7 +114,8 @@ class TestTuneToInterpret:
 
         # --- Step 3: run interpretation agent ---
         interp_agent = ResultInterpretationAgent(
-            provider="gemini", model_id="gemini-3.1-flash-lite-preview",
+            provider="gemini",
+            model_id="gemini-3.1-flash-lite-preview",
         )
         output = interp_agent.run(interp_input)
 

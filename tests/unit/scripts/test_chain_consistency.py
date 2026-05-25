@@ -12,6 +12,7 @@ legacy in-process runner, the chain runner, and the shell entry. Commit
 4.3.4 retired the legacy runner; the surviving contract is shell ↔ chain.
 The §3.2 / §3.8 references in-line below remain authoritative.
 """
+
 from __future__ import annotations
 
 import re
@@ -24,10 +25,10 @@ from sdsc_submission_scripts.run_one_iteration import (
     build_parser as _roi_build_parser,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers — extract (name, default, type, nargs) from ArgumentParser
 # ---------------------------------------------------------------------------
+
 
 def _extract_flags(parser):
     """Return {flag_name: {default, type, nargs}} for every optional action."""
@@ -56,6 +57,7 @@ def _get_roi_flags():
 # TestShellDefaults — pure shell-side checks against _chain_common.sh
 # ---------------------------------------------------------------------------
 
+
 class TestShellDefaults:
     """Verify _chain_common.sh variable defaults match the chain runner."""
 
@@ -67,7 +69,7 @@ class TestShellDefaults:
 
     def test_max_rounds_default(self):
         content = self._read_shell()
-        assert re.search(r'^MAX_ROUNDS=3\b', content, re.MULTILINE), (
+        assert re.search(r"^MAX_ROUNDS=3\b", content, re.MULTILINE), (
             "MAX_ROUNDS default in _chain_common.sh should be 3"
         )
 
@@ -261,8 +263,9 @@ def _normalize_shell_default(raw: str):
     if raw == "()":
         return None
     inner = raw
-    if (inner.startswith('"') and inner.endswith('"')) or \
-       (inner.startswith("'") and inner.endswith("'")):
+    if (inner.startswith('"') and inner.endswith('"')) or (
+        inner.startswith("'") and inner.endswith("'")
+    ):
         inner = inner[1:-1]
     try:
         return int(inner)
@@ -305,21 +308,16 @@ class TestShellPythonConsistency:
         """Every §3.2 flag has a `--<flag>)` arm in parse_chain_args."""
         _, _, shell_arms = self._gather()
         missing = [f for f in CONTRACT_FLAGS if f not in shell_arms]
-        assert not missing, (
-            "Missing parse_chain_args arms in _chain_common.sh:\n"
-            + "\n".join(f"  --{f}" for f in missing)
+        assert not missing, "Missing parse_chain_args arms in _chain_common.sh:\n" + "\n".join(
+            f"  --{f}" for f in missing
         )
 
     def test_shell_default_block_contains_every_var(self):
         """Every §3.2 flag has a top-of-file VAR default declaration."""
         _, shell_defaults, _ = self._gather()
-        missing = [
-            f for f in CONTRACT_FLAGS
-            if _shell_var_name(f) not in shell_defaults
-        ]
-        assert not missing, (
-            "Missing top-of-file defaults in _chain_common.sh:\n"
-            + "\n".join(f"  {_shell_var_name(f)}=  (for --{f})" for f in missing)
+        missing = [f for f in CONTRACT_FLAGS if _shell_var_name(f) not in shell_defaults]
+        assert not missing, "Missing top-of-file defaults in _chain_common.sh:\n" + "\n".join(
+            f"  {_shell_var_name(f)}=  (for --{f})" for f in missing
         )
 
     def test_shell_python_default_parity(self):
@@ -345,12 +343,10 @@ class TestShellPythonConsistency:
                 shell_norm = bool(shell_norm)
             if shell_norm != python_default:
                 diffs.append(
-                    f"--{flag}: python={python_default!r}  "
-                    f"shell={shell_norm!r} (raw={shell_raw!r})"
+                    f"--{flag}: python={python_default!r}  shell={shell_norm!r} (raw={shell_raw!r})"
                 )
-        assert not diffs, (
-            "Default-value drift between chain runner and shell:\n"
-            + "\n".join(f"  {d}" for d in diffs)
+        assert not diffs, "Default-value drift between chain runner and shell:\n" + "\n".join(
+            f"  {d}" for d in diffs
         )
 
     def test_shell_python_type_parity(self):
@@ -377,9 +373,8 @@ class TestShellPythonConsistency:
                     f"(python action={python_action.__class__.__name__}, "
                     f"nargs={python_action.nargs!r})"
                 )
-        assert not diffs, (
-            "Type/shape drift between chain runner and shell:\n"
-            + "\n".join(f"  {d}" for d in diffs)
+        assert not diffs, "Type/shape drift between chain runner and shell:\n" + "\n".join(
+            f"  {d}" for d in diffs
         )
 
 
@@ -395,23 +390,25 @@ class TestShellPythonConsistency:
 #   - workspace dir stays untouched (does not exist after dry-run)
 
 
-_RUN_CHAIN_SH = (
-    _Path(__file__).resolve().parents[3]
-    / "sdsc_submission_scripts"
-    / "run_chain.sh"
-)
+_RUN_CHAIN_SH = _Path(__file__).resolve().parents[3] / "sdsc_submission_scripts" / "run_chain.sh"
 
 
 def _run_dry(mode: str, workspace: _Path, num_iters: int, seed_path: _Path):
     """Invoke run_chain.sh in dry-run mode and return (rc, stdout, stderr)."""
     cmd = [
-        "bash", str(_RUN_CHAIN_SH),
-        "--mode", mode,
+        "bash",
+        str(_RUN_CHAIN_SH),
+        "--mode",
+        mode,
         "--dry-run",
-        "--workspace", str(workspace),
-        "--run_name", "dryrun_test_chain",
-        "--num_iterations", str(num_iters),
-        "--seed_paths", str(seed_path),
+        "--workspace",
+        str(workspace),
+        "--run_name",
+        "dryrun_test_chain",
+        "--num_iterations",
+        str(num_iters),
+        "--seed_paths",
+        str(seed_path),
     ]
     proc = _subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     return proc.returncode, proc.stdout, proc.stderr
@@ -435,9 +432,7 @@ class TestDryRunSmoke:
         # contract is that it stays absent.
         return tmp_path / "dryrun_ws"
 
-    def test_lilab_three_iters_emits_correct_start_iteration(
-        self, workspace, seed_path
-    ):
+    def test_lilab_three_iters_emits_correct_start_iteration(self, workspace, seed_path):
         rc, stdout, stderr = _run_dry("lilab", workspace, 3, seed_path)
         assert rc == 0, f"non-zero exit: stdout={stdout!r}\nstderr={stderr!r}"
 
@@ -454,9 +449,7 @@ class TestDryRunSmoke:
             f"got {stdout.count('[DRY-RUN] would exec')}. stdout=\n{stdout}"
         )
 
-    def test_lilab_dry_run_leaves_workspace_untouched(
-        self, workspace, seed_path
-    ):
+    def test_lilab_dry_run_leaves_workspace_untouched(self, workspace, seed_path):
         assert not workspace.exists(), "fixture invariant: workspace pre-exists"
         rc, _, _ = _run_dry("lilab", workspace, 2, seed_path)
         assert rc == 0
@@ -466,9 +459,7 @@ class TestDryRunSmoke:
             f"{list(workspace.iterdir()) if workspace.exists() else None}"
         )
 
-    def test_sdsc_emits_afterany_dependency_for_iter_two_and_three(
-        self, workspace, seed_path
-    ):
+    def test_sdsc_emits_afterany_dependency_for_iter_two_and_three(self, workspace, seed_path):
         rc, stdout, stderr = _run_dry("sdsc", workspace, 3, seed_path)
         assert rc == 0, f"non-zero exit: stdout={stdout!r}\nstderr={stderr!r}"
 
@@ -481,28 +472,21 @@ class TestDryRunSmoke:
             )
 
         assert "--dependency=afterany:DRYRUN_iter_001" in stdout, (
-            "iter 2 should depend on DRYRUN_iter_001 placeholder. "
-            f"stdout=\n{stdout}"
+            f"iter 2 should depend on DRYRUN_iter_001 placeholder. stdout=\n{stdout}"
         )
         assert "--dependency=afterany:DRYRUN_iter_002" in stdout, (
-            "iter 3 should depend on DRYRUN_iter_002 placeholder. "
-            f"stdout=\n{stdout}"
+            f"iter 3 should depend on DRYRUN_iter_002 placeholder. stdout=\n{stdout}"
         )
         # Iter 1 must NOT carry a --dependency on the first sbatch line.
-        first_submit = stdout.split("[DRY-RUN] would submit:")[1].split(
-            "[DRY-RUN] would submit:"
-        )[0]
+        first_submit = stdout.split("[DRY-RUN] would submit:")[1].split("[DRY-RUN] would submit:")[
+            0
+        ]
         assert "--dependency" not in first_submit, (
-            "iter 1 should not carry any --dependency flag. "
-            f"first_submit_block=\n{first_submit}"
+            f"iter 1 should not carry any --dependency flag. first_submit_block=\n{first_submit}"
         )
 
-    def test_sdsc_dry_run_leaves_workspace_untouched(
-        self, workspace, seed_path
-    ):
+    def test_sdsc_dry_run_leaves_workspace_untouched(self, workspace, seed_path):
         assert not workspace.exists(), "fixture invariant: workspace pre-exists"
         rc, _, _ = _run_dry("sdsc", workspace, 2, seed_path)
         assert rc == 0
-        assert not workspace.exists(), (
-            f"--dry-run --mode sdsc leaked workspace dir {workspace}"
-        )
+        assert not workspace.exists(), f"--dry-run --mode sdsc leaked workspace dir {workspace}"

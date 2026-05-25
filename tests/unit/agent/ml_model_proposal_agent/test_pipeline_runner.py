@@ -8,23 +8,24 @@ Tests:
   - B.11: Pipeline runner (3-stage pipeline with mocked LLM)
   - B.22: Proposing stage retry on validation failure
 """
+
 import json
-import pytest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from agent.schemas.proposal import (
+    ModelSelectionStrategy,
     ProposalInput,
     ProposalOutput,
     ReasoningPipelineConfig,
     ReasoningStage,
-    ModelSelectionStrategy,
 )
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
-from nodes.proposal_helpers import select_candidate_models, resolve_exploration_mode
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
+from nodes.proposal_helpers import resolve_exploration_mode, select_candidate_models
 
 from ._prompt_utils import extract_accumulated_json
-
 
 # ---------------------------------------------------------------------------
 # Shared test data
@@ -83,8 +84,8 @@ FAKE_INTERPRETATION = {
 # B.10 — Model selection pre-filter
 # ---------------------------------------------------------------------------
 
-class TestModelSelection:
 
+class TestModelSelection:
     def test_top_n_default(self):
         strategy = ModelSelectionStrategy()  # default: top_n, n=5
         result = select_candidate_models(FAKE_INTERPRETATION, strategy)
@@ -177,8 +178,8 @@ class TestModelSelection:
 # B.16a — Exploration mode resolver
 # ---------------------------------------------------------------------------
 
-class TestExplorationModeResolver:
 
+class TestExplorationModeResolver:
     def test_explicit_explore(self):
         pipeline = ReasoningPipelineConfig(exploration_mode="explore")
         assert resolve_exploration_mode(FAKE_INTERPRETATION, pipeline) == "explore"
@@ -196,10 +197,17 @@ class TestExplorationModeResolver:
     def test_auto_many_agent_proposed_exploit(self):
         """5+ agent-proposed models → exploit mode."""
         pipeline = ReasoningPipelineConfig(exploration_mode="auto")
-        interp = {"model_types": [
-            "punet", "wavenet",  # built-in
-            "model_a", "model_b", "model_c", "model_d", "model_e",  # agent-proposed
-        ]}
+        interp = {
+            "model_types": [
+                "punet",
+                "wavenet",  # built-in
+                "model_a",
+                "model_b",
+                "model_c",
+                "model_d",
+                "model_e",  # agent-proposed
+            ]
+        }
         assert resolve_exploration_mode(interp, pipeline) == "exploit"
 
 
@@ -207,12 +215,12 @@ class TestExplorationModeResolver:
 # B.13 — Constructor DI
 # ---------------------------------------------------------------------------
 
-class TestConstructorDI:
 
+class TestConstructorDI:
     def test_default_factory_uses_real_bridge(self):
         """Without bridge_factory, the agent constructs a real LLMBridge."""
         with patch("nodes.ml_model_proposal_agent.LLMBridge") as MockBridge:
-            agent = MLModelProposalAgent(provider="gemini", model_id="test")
+            MLModelProposalAgent(provider="gemini", model_id="test")
             MockBridge.assert_called_once()
 
     def test_custom_factory(self):
@@ -220,7 +228,9 @@ class TestConstructorDI:
         fake_bridge = MagicMock()
         factory = MagicMock(return_value=fake_bridge)
         agent = MLModelProposalAgent(
-            provider="gemini", model_id="test", bridge_factory=factory,
+            provider="gemini",
+            model_id="test",
+            bridge_factory=factory,
         )
         factory.assert_called_once()
         assert agent.bridge is fake_bridge
@@ -285,7 +295,6 @@ FAKE_PROPOSING_OUTPUT = {
 
 
 class TestPipelineRunner:
-
     def _make_pipeline_input(self, tmp_path):
         return ProposalInput(
             interpretation=FAKE_INTERPRETATION,
@@ -299,7 +308,8 @@ class TestPipelineRunner:
             storage=StorageConfig(
                 backend="local",
                 local=LocalStorageConfig(
-                    workspace=str(tmp_path), run_name="test",
+                    workspace=str(tmp_path),
+                    run_name="test",
                 ),
             ),
         )
@@ -315,13 +325,14 @@ class TestPipelineRunner:
             FAKE_PROPOSING_OUTPUT,
         ]
         agent = MLModelProposalAgent(
-            provider="gemini", model_id="test",
+            provider="gemini",
+            model_id="test",
             bridge_factory=lambda **kw: mock_bridge,
         )
         return agent, mock_bridge
 
     def test_pipeline_produces_valid_output(self, tmp_path):
-        agent, mock = self._make_agent_with_mock()
+        agent, _mock = self._make_agent_with_mock()
         inp = self._make_pipeline_input(tmp_path)
         output = agent.run(inp)
 
@@ -357,7 +368,8 @@ class TestPipelineRunner:
         mock_bridge.generate_text.return_value = "Some reasoning text."
         mock_bridge.generate.return_value = FAKE_PROPOSING_OUTPUT
         agent = MLModelProposalAgent(
-            provider="gemini", model_id="test",
+            provider="gemini",
+            model_id="test",
             bridge_factory=lambda **kw: mock_bridge,
         )
         inp = ProposalInput(
@@ -365,7 +377,8 @@ class TestPipelineRunner:
             storage=StorageConfig(
                 backend="local",
                 local=LocalStorageConfig(
-                    workspace=str(tmp_path), run_name="test",
+                    workspace=str(tmp_path),
+                    run_name="test",
                 ),
             ),
         )
@@ -377,11 +390,12 @@ class TestPipelineRunner:
         assert output.model_name == "spectral_wavenet"
 
     def test_output_file_written(self, tmp_path):
-        agent, mock = self._make_agent_with_mock()
+        agent, _mock = self._make_agent_with_mock()
         inp = self._make_pipeline_input(tmp_path)
         agent.run(inp)
 
         import os
+
         out_path = os.path.join(str(tmp_path), "proposal_test.json")
         assert os.path.exists(out_path)
         with open(out_path) as f:
@@ -403,7 +417,8 @@ class TestPipelineRunner:
         agent, mock = self._make_agent_with_mock()
         inp = self._make_pipeline_input(tmp_path)
         inp.reasoning_pipeline.model_selection = ModelSelectionStrategy(
-            method="top_n", params={"n": 2},
+            method="top_n",
+            params={"n": 2},
         )
 
         # Capture the user prompt sent to the Stage 1 LLM call.
@@ -412,8 +427,13 @@ class TestPipelineRunner:
 
         def capture_and_delegate(*args, **kwargs):
             captured_prompts.append(args[1] if len(args) > 1 else kwargs.get("user_prompt", ""))
-            result = next(iter(original_generate.__self__._mock_side_effect_iterator
-                               if hasattr(original_generate, '__self__') else []))
+            result = next(
+                iter(
+                    original_generate.__self__._mock_side_effect_iterator
+                    if hasattr(original_generate, "__self__")
+                    else []
+                )
+            )
             return result
 
         # Simpler: intercept at the accumulated dict level by inspecting the
@@ -458,7 +478,8 @@ class TestPipelineRunner:
         inp = self._make_pipeline_input(tmp_path)
         # top_n=10 with only 4 models → all selected
         inp.reasoning_pipeline.model_selection = ModelSelectionStrategy(
-            method="top_n", params={"n": 10},
+            method="top_n",
+            params={"n": 10},
         )
 
         call_args_list = []
@@ -479,6 +500,7 @@ class TestPipelineRunner:
 # ---------------------------------------------------------------------------
 # B.22 — Proposing stage retry on validation failure
 # ---------------------------------------------------------------------------
+
 
 class TestProposingRetry:
     """
@@ -507,7 +529,8 @@ class TestProposingRetry:
 
     def _agent(self, mock_bridge):
         return MLModelProposalAgent(
-            provider="gemini", model_id="test",
+            provider="gemini",
+            model_id="test",
             bridge_factory=lambda **kw: mock_bridge,
         )
 
@@ -518,7 +541,7 @@ class TestProposingRetry:
         mock_bridge.generate.side_effect = [
             FAKE_COMPARISON_OUTPUT,
             FAKE_REASONING_OUTPUT,
-            duplicate_output,       # attempt 1: duplicate name (ValueError)
+            duplicate_output,  # attempt 1: duplicate name (ValueError)
             FAKE_PROPOSING_OUTPUT,  # attempt 2: success
         ]
         output = self._agent(mock_bridge).run(self._make_pipeline_input(tmp_path))
@@ -535,7 +558,7 @@ class TestProposingRetry:
         mock_bridge.generate.side_effect = [
             FAKE_COMPARISON_OUTPUT,
             FAKE_REASONING_OUTPUT,
-            invalid_output,         # attempt 1: ValidationError
+            invalid_output,  # attempt 1: ValidationError
             FAKE_PROPOSING_OUTPUT,  # attempt 2: success
         ]
         output = self._agent(mock_bridge).run(self._make_pipeline_input(tmp_path))
@@ -553,7 +576,7 @@ class TestProposingRetry:
         mock_bridge.generate.side_effect = [
             FAKE_COMPARISON_OUTPUT,
             FAKE_REASONING_OUTPUT,
-            duplicate_output,       # attempt 1: fails
+            duplicate_output,  # attempt 1: fails
             FAKE_PROPOSING_OUTPUT,  # attempt 2: success
         ]
         self._agent(mock_bridge).run(self._make_pipeline_input(tmp_path))
@@ -588,10 +611,9 @@ class TestProposingRetry:
 
         mock_bridge = MagicMock()
         duplicate_output = dict(FAKE_PROPOSING_OUTPUT, model_name="wavenet")
-        mock_bridge.generate.side_effect = (
-            [FAKE_COMPARISON_OUTPUT, FAKE_REASONING_OUTPUT]
-            + [duplicate_output] * (_MAX_PROPOSING_RETRIES + 1)
-        )
+        mock_bridge.generate.side_effect = [FAKE_COMPARISON_OUTPUT, FAKE_REASONING_OUTPUT] + [
+            duplicate_output
+        ] * (_MAX_PROPOSING_RETRIES + 1)
         agent = self._agent(mock_bridge)
 
         with pytest.raises(RuntimeError, match="failed after"):
@@ -604,6 +626,7 @@ class TestProposingRetry:
 # ---------------------------------------------------------------------------
 # Phase A.4 — segmentation_size validator integration with the retry loop
 # ---------------------------------------------------------------------------
+
 
 class TestSegmentationSizeRetryIntegration:
     """
@@ -633,7 +656,8 @@ class TestSegmentationSizeRetryIntegration:
 
     def _agent(self, mock_bridge):
         return MLModelProposalAgent(
-            provider="gemini", model_id="test",
+            provider="gemini",
+            model_id="test",
             bridge_factory=lambda **kw: mock_bridge,
         )
 
@@ -689,10 +713,9 @@ class TestSegmentationSizeRetryIntegration:
         from nodes.ml_model_proposal_agent import _MAX_PROPOSING_RETRIES
 
         mock_bridge = MagicMock()
-        mock_bridge.generate.side_effect = (
-            [FAKE_COMPARISON_OUTPUT, FAKE_REASONING_OUTPUT]
-            + [self._with_seg(16384)] * (_MAX_PROPOSING_RETRIES + 1)
-        )
+        mock_bridge.generate.side_effect = [FAKE_COMPARISON_OUTPUT, FAKE_REASONING_OUTPUT] + [
+            self._with_seg(16384)
+        ] * (_MAX_PROPOSING_RETRIES + 1)
         with pytest.raises(RuntimeError, match="failed after"):
             self._agent(mock_bridge).run(self._make_pipeline_input(tmp_path))
 
@@ -723,6 +746,7 @@ class TestScoreSummaryLine:
 
     def test_normal_recovery_formatting(self):
         from nodes.proposal_helpers import build_score_summary_line
+
         table = {
             "aggregate": {
                 "model_scalar": 5.5763,
@@ -736,6 +760,7 @@ class TestScoreSummaryLine:
 
     def test_below_baseline_honest_line(self):
         from nodes.proposal_helpers import build_score_summary_line
+
         # model_scalar (-7.5) < raw_baseline_scalar (-2.771) — the percent-of-
         # ceiling scalar is mathematically useless (and can even be positive
         # from a double negative) so we must not surface it.
@@ -752,6 +777,7 @@ class TestScoreSummaryLine:
 
     def test_missing_recovery_falls_back_to_no_percent(self):
         from nodes.proposal_helpers import build_score_summary_line
+
         # No percent_of_ceiling_log but model is above baseline — drop the
         # recovery clause rather than lie.
         table = {
@@ -767,18 +793,22 @@ class TestScoreSummaryLine:
 
     def test_none_table_returns_none(self):
         from nodes.proposal_helpers import build_score_summary_line
+
         assert build_score_summary_line(None) is None
 
     def test_missing_aggregate_returns_none(self):
         from nodes.proposal_helpers import build_score_summary_line
+
         assert build_score_summary_line({"rows": []}) is None
 
     def test_missing_model_scalar_returns_none(self):
         from nodes.proposal_helpers import build_score_summary_line
+
         assert build_score_summary_line({"aggregate": {"num_sampled_files": 20}}) is None
 
     def test_missing_num_sampled_files_returns_none(self):
         from nodes.proposal_helpers import build_score_summary_line
+
         assert build_score_summary_line({"aggregate": {"model_scalar": 1.0}}) is None
 
 
@@ -789,13 +819,18 @@ class TestCandidateMarkdownBlock:
 
     def test_renders_heading_per_candidate(self):
         from nodes.proposal_helpers import build_candidate_markdown_block
+
         candidates = [
-            {"model_type": "wavenet",
-             "score_table": {"rendered_markdown": "| wavenet-table |"},
-             "source_code": "class WaveNet: pass"},
-            {"model_type": "punet",
-             "score_table": {"rendered_markdown": "| punet-table |"},
-             "source_code": "class PUNet: pass"},
+            {
+                "model_type": "wavenet",
+                "score_table": {"rendered_markdown": "| wavenet-table |"},
+                "source_code": "class WaveNet: pass",
+            },
+            {
+                "model_type": "punet",
+                "score_table": {"rendered_markdown": "| punet-table |"},
+                "source_code": "class PUNet: pass",
+            },
         ]
         block = build_candidate_markdown_block(candidates)
         assert "## Candidate Models — detailed view" in block
@@ -809,10 +844,12 @@ class TestCandidateMarkdownBlock:
 
     def test_empty_candidates_returns_empty_string(self):
         from nodes.proposal_helpers import build_candidate_markdown_block
+
         assert build_candidate_markdown_block([]) == ""
 
     def test_missing_score_table_falls_back(self):
         from nodes.proposal_helpers import build_candidate_markdown_block
+
         candidates = [{"model_type": "mystery", "source_code": "pass"}]
         block = build_candidate_markdown_block(candidates)
         assert "_Score table unavailable._" in block
@@ -820,19 +857,18 @@ class TestCandidateMarkdownBlock:
 
     def test_missing_source_code_falls_back(self):
         from nodes.proposal_helpers import build_candidate_markdown_block
-        candidates = [{"model_type": "mystery",
-                       "score_table": {"rendered_markdown": "| t |"}}]
+
+        candidates = [{"model_type": "mystery", "score_table": {"rendered_markdown": "| t |"}}]
         block = build_candidate_markdown_block(candidates)
         assert "_Source code unavailable._" in block
         assert "| t |" in block  # table still rendered
 
     def test_separator_between_candidates(self):
         from nodes.proposal_helpers import build_candidate_markdown_block
+
         candidates = [
-            {"model_type": "a", "score_table": {"rendered_markdown": "A"},
-             "source_code": "a"},
-            {"model_type": "b", "score_table": {"rendered_markdown": "B"},
-             "source_code": "b"},
+            {"model_type": "a", "score_table": {"rendered_markdown": "A"}, "source_code": "a"},
+            {"model_type": "b", "score_table": {"rendered_markdown": "B"}, "source_code": "b"},
         ]
         block = build_candidate_markdown_block(candidates)
         # One `---` separator per candidate keeps the LLM from merging sections.
@@ -846,15 +882,18 @@ class TestStripHeavyFieldsForJson:
 
     def test_drops_score_table_and_source_code(self):
         from nodes.proposal_helpers import strip_heavy_fields_for_json
-        candidates = [{
-            "model_type": "wavenet",
-            "best_score": 5.5,
-            "model_params": 120_000,
-            "description": "dilated causal conv",
-            "score_table": {"rendered_markdown": "| t |"},
-            "source_code": "class W: pass",
-            "source_code_lines": 1,
-        }]
+
+        candidates = [
+            {
+                "model_type": "wavenet",
+                "best_score": 5.5,
+                "model_params": 120_000,
+                "description": "dilated causal conv",
+                "score_table": {"rendered_markdown": "| t |"},
+                "source_code": "class W: pass",
+                "source_code_lines": 1,
+            }
+        ]
         stripped = strip_heavy_fields_for_json(candidates)
         assert stripped[0] == {
             "model_type": "wavenet",
@@ -865,15 +904,18 @@ class TestStripHeavyFieldsForJson:
 
     def test_preserves_other_fields(self):
         from nodes.proposal_helpers import strip_heavy_fields_for_json
+
         # Arbitrary scalar/list fields (the pipeline may add new ones) must
         # survive — the helper is a targeted subtraction, not a whitelist.
-        candidates = [{
-            "model_type": "x",
-            "training_segments": 200,
-            "worst_score": 0.1,
-            "source": "seed",
-            "score_table": {"rendered_markdown": "| t |"},
-        }]
+        candidates = [
+            {
+                "model_type": "x",
+                "training_segments": 200,
+                "worst_score": 0.1,
+                "source": "seed",
+                "score_table": {"rendered_markdown": "| t |"},
+            }
+        ]
         stripped = strip_heavy_fields_for_json(candidates)
         assert stripped[0]["training_segments"] == 200
         assert stripped[0]["worst_score"] == 0.1
@@ -882,12 +924,15 @@ class TestStripHeavyFieldsForJson:
 
     def test_does_not_mutate_input(self):
         from nodes.proposal_helpers import strip_heavy_fields_for_json
-        candidates = [{
-            "model_type": "x",
-            "score_table": {"rendered_markdown": "| t |"},
-            "source_code": "pass",
-            "source_code_lines": 1,
-        }]
+
+        candidates = [
+            {
+                "model_type": "x",
+                "score_table": {"rendered_markdown": "| t |"},
+                "source_code": "pass",
+                "source_code_lines": 1,
+            }
+        ]
         strip_heavy_fields_for_json(candidates)
         # Original dict untouched — downstream consumers (e.g. the markdown
         # block builder) still see the heavy fields.
@@ -897,6 +942,7 @@ class TestStripHeavyFieldsForJson:
 
     def test_empty_list_returns_empty_list(self):
         from nodes.proposal_helpers import strip_heavy_fields_for_json
+
         assert strip_heavy_fields_for_json([]) == []
 
 
@@ -907,13 +953,16 @@ class TestStageUserPrompt:
 
     def test_markdown_block_first_then_json_region(self):
         from nodes.ml_model_proposal_agent import _render_stage_user_prompt
+
         accumulated = {
-            "candidates": [{
-                "model_type": "wavenet",
-                "best_score": 5.5,
-                "score_table": {"rendered_markdown": "| wavenet-rendered |"},
-                "source_code": "class W: pass",
-            }],
+            "candidates": [
+                {
+                    "model_type": "wavenet",
+                    "best_score": 5.5,
+                    "score_table": {"rendered_markdown": "| wavenet-rendered |"},
+                    "source_code": "class W: pass",
+                }
+            ],
             "non_candidates_overview": [],
             "interpretation_summary": {"take_home_message": "hi"},
         }
@@ -925,14 +974,17 @@ class TestStageUserPrompt:
 
     def test_json_region_strips_heavy_candidate_fields(self):
         from nodes.ml_model_proposal_agent import _render_stage_user_prompt
+
         accumulated = {
-            "candidates": [{
-                "model_type": "wavenet",
-                "best_score": 5.5,
-                "score_table": {"rendered_markdown": "| wavenet-rendered |"},
-                "source_code": "class W: pass",
-                "source_code_lines": 1,
-            }],
+            "candidates": [
+                {
+                    "model_type": "wavenet",
+                    "best_score": 5.5,
+                    "score_table": {"rendered_markdown": "| wavenet-rendered |"},
+                    "source_code": "class W: pass",
+                    "source_code_lines": 1,
+                }
+            ],
             "non_candidates_overview": [],
             "interpretation_summary": {},
         }
@@ -947,6 +999,7 @@ class TestStageUserPrompt:
 
     def test_drops_per_model_score_tables_from_interpretation_summary(self):
         from nodes.ml_model_proposal_agent import _render_stage_user_prompt
+
         accumulated = {
             "candidates": [],
             "non_candidates_overview": [],
@@ -964,10 +1017,12 @@ class TestStageUserPrompt:
 
     def test_no_candidates_emits_json_only(self):
         from nodes.ml_model_proposal_agent import _render_stage_user_prompt
+
         accumulated = {
             "candidates": [],
-            "non_candidates_overview": [{"model_type": "x",
-                                          "score_summary": "log_scalar=1.0, recovery=10.0% on 20 files"}],
+            "non_candidates_overview": [
+                {"model_type": "x", "score_summary": "log_scalar=1.0, recovery=10.0% on 20 files"}
+            ],
             "interpretation_summary": {},
         }
         prompt = _render_stage_user_prompt(accumulated)
@@ -1006,6 +1061,7 @@ class TestProposerRenderAdversarial:
         positive number, which is exactly why the guard is priority-ordered.
         """
         from nodes.proposal_helpers import build_score_summary_line
+
         table = {
             "aggregate": {
                 "model_scalar": -7.5,
@@ -1028,6 +1084,7 @@ class TestProposerRenderAdversarial:
         no-recovery fallback branch reserved for ``recovery is None``.
         """
         from nodes.proposal_helpers import build_score_summary_line
+
         table = {
             "aggregate": {
                 "model_scalar": 1.0,
@@ -1044,6 +1101,7 @@ class TestProposerRenderAdversarial:
         score_table with a bare string (e.g. ``"N/A"``). The helper must
         not crash."""
         from nodes.proposal_helpers import build_score_summary_line
+
         assert build_score_summary_line("N/A") is None
         assert build_score_summary_line([]) is None
         assert build_score_summary_line(42) is None
@@ -1053,11 +1111,14 @@ class TestProposerRenderAdversarial:
         to the ``_Score table unavailable._`` sentinel — not emit a blank
         region that the LLM would silently ignore."""
         from nodes.proposal_helpers import build_candidate_markdown_block
-        candidates = [{
-            "model_type": "a",
-            "score_table": {"rendered_markdown": ""},
-            "source_code": "pass",
-        }]
+
+        candidates = [
+            {
+                "model_type": "a",
+                "score_table": {"rendered_markdown": ""},
+                "source_code": "pass",
+            }
+        ]
         block = build_candidate_markdown_block(candidates)
         assert "_Score table unavailable._" in block
 
@@ -1065,11 +1126,14 @@ class TestProposerRenderAdversarial:
         """Same contract on the source-code side: empty string → sentinel
         rather than an empty python fence."""
         from nodes.proposal_helpers import build_candidate_markdown_block
-        candidates = [{
-            "model_type": "a",
-            "score_table": {"rendered_markdown": "| t |"},
-            "source_code": "",
-        }]
+
+        candidates = [
+            {
+                "model_type": "a",
+                "score_table": {"rendered_markdown": "| t |"},
+                "source_code": "",
+            }
+        ]
         block = build_candidate_markdown_block(candidates)
         assert "_Source code unavailable._" in block
         # And the empty python fence MUST NOT leak through.
@@ -1080,10 +1144,13 @@ class TestProposerRenderAdversarial:
         should never crash the whole render, but should be visible enough
         that a reader notices the upstream data defect."""
         from nodes.proposal_helpers import build_candidate_markdown_block
-        candidates = [{
-            "score_table": {"rendered_markdown": "| t |"},
-            "source_code": "pass",
-        }]
+
+        candidates = [
+            {
+                "score_table": {"rendered_markdown": "| t |"},
+                "source_code": "pass",
+            }
+        ]
         block = build_candidate_markdown_block(candidates)
         assert "### Candidate: <unknown>" in block
 
@@ -1092,12 +1159,15 @@ class TestProposerRenderAdversarial:
         not crash the markdown block — ``isinstance(table, dict)`` guard
         should catch it and produce the sentinel."""
         from nodes.proposal_helpers import build_candidate_markdown_block
+
         for bad_table in (None, "N/A", [], 42):
-            candidates = [{
-                "model_type": "a",
-                "score_table": bad_table,
-                "source_code": "pass",
-            }]
+            candidates = [
+                {
+                    "model_type": "a",
+                    "score_table": bad_table,
+                    "source_code": "pass",
+                }
+            ]
             block = build_candidate_markdown_block(candidates)
             assert "_Score table unavailable._" in block, f"bad_table={bad_table!r}"
 
@@ -1131,11 +1201,14 @@ class TestProposerGenericity:
         ``build_candidate_markdown_block`` unchanged — heading, rendered
         table, and source code all carry the synthetic name."""
         from nodes.proposal_helpers import build_candidate_markdown_block
-        candidates = [{
-            "model_type": "mystery_model_x",
-            "score_table": {"rendered_markdown": "| mystery_model_x row |"},
-            "source_code": "class MysteryModelX: pass",
-        }]
+
+        candidates = [
+            {
+                "model_type": "mystery_model_x",
+                "score_table": {"rendered_markdown": "| mystery_model_x row |"},
+                "source_code": "class MysteryModelX: pass",
+            }
+        ]
         block = build_candidate_markdown_block(candidates)
         assert "### Candidate: mystery_model_x" in block
         assert "| mystery_model_x row |" in block
@@ -1152,6 +1225,7 @@ class TestProposerGenericity:
         This test pins the contract down: identical aggregates produce
         identical summaries regardless of which model they describe."""
         from nodes.proposal_helpers import build_score_summary_line
+
         agg = {
             "model_scalar": 5.5763,
             "raw_baseline_scalar": -2.771,
@@ -1171,26 +1245,28 @@ class TestProposerGenericity:
         from nodes.ml_model_proposal_agent import _render_stage_user_prompt
 
         accumulated = {
-            "candidates": [{
-                "model_type": "mystery_model_x",
-                "best_score": 4.2,
-                "worst_score": 2.1,
-                "description": "A generic test architecture",
-                "model_params": 123_456,
-                "training_segments": 200,
-                "source": "proposed",
-                "score_table": {
-                    "rendered_markdown": "| mystery_model_x row |",
-                    "aggregate": {
-                        "model_scalar": 4.2,
-                        "raw_baseline_scalar": -2.771,
-                        "percent_of_ceiling_log": 0.63,
-                        "num_sampled_files": 20,
+            "candidates": [
+                {
+                    "model_type": "mystery_model_x",
+                    "best_score": 4.2,
+                    "worst_score": 2.1,
+                    "description": "A generic test architecture",
+                    "model_params": 123_456,
+                    "training_segments": 200,
+                    "source": "proposed",
+                    "score_table": {
+                        "rendered_markdown": "| mystery_model_x row |",
+                        "aggregate": {
+                            "model_scalar": 4.2,
+                            "raw_baseline_scalar": -2.771,
+                            "percent_of_ceiling_log": 0.63,
+                            "num_sampled_files": 20,
+                        },
                     },
-                },
-                "source_code": "class MysteryModelX: pass",
-                "source_code_lines": 1,
-            }],
+                    "source_code": "class MysteryModelX: pass",
+                    "source_code_lines": 1,
+                }
+            ],
             "non_candidates_overview": [],
             "interpretation_summary": {
                 "take_home_message": "Explore novel architectures.",
@@ -1230,10 +1306,12 @@ class TestProposerGenericity:
 
         accumulated = {
             "candidates": [],
-            "non_candidates_overview": [{
-                "model_type": "mystery_model_x",
-                "score_summary": "log_scalar=1.00, recovery=10.0% on 20 files",
-            }],
+            "non_candidates_overview": [
+                {
+                    "model_type": "mystery_model_x",
+                    "score_summary": "log_scalar=1.00, recovery=10.0% on 20 files",
+                }
+            ],
             "interpretation_summary": {},
             "existing_model_types": [],
             "previous_failures": [],
@@ -1254,6 +1332,7 @@ class TestProposerGenericity:
 # count heuristic (~4 chars/token) because tiktoken is not installed.
 # ---------------------------------------------------------------------------
 
+
 class TestStagePromptSizeBudget:
     """Assert the assembled stage user prompt stays well under context limits."""
 
@@ -1265,8 +1344,7 @@ class TestStagePromptSizeBudget:
             "|------|--------------|--------------|-------|\n"
         )
         rows = "\n".join(
-            f"| seg_{i:03d}_{model_type} | 1.00 | 5.50 | 4.20 |"
-            for i in range(self._TABLE_ROWS)
+            f"| seg_{i:03d}_{model_type} | 1.00 | 5.50 | 4.20 |" for i in range(self._TABLE_ROWS)
         )
         return header + rows
 
@@ -1333,8 +1411,7 @@ class TestStagePromptSizeBudget:
             {
                 "model_type": f"tail_model_{i:02d}",
                 "score_summary": (
-                    f"log_scalar=0.50, recovery=15.0% on 20 files "
-                    f"(below raw_baseline on {i} files)"
+                    f"log_scalar=0.50, recovery=15.0% on 20 files (below raw_baseline on {i} files)"
                 ),
             }
             for i in range(5)

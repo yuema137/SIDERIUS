@@ -10,10 +10,11 @@ Covers:
 * ``render_comparison_table`` exact output on hand-computable scenarios
   (header, row rendering, N/A cells, aggregate block, subset footer).
 """
+
 from __future__ import annotations
 
 import math
-from typing import List, Optional
+from typing import Optional
 
 import pytest
 
@@ -27,7 +28,6 @@ from execute_tools.scoring_helpers import (
 )
 from nodes.scoring_reference import ReferenceScores
 
-
 # -----------------------------------------------------------------------------
 # Helpers — build a synthetic ReferenceScores bundle.
 # -----------------------------------------------------------------------------
@@ -35,8 +35,8 @@ from nodes.scoring_reference import ReferenceScores
 
 def _make_reference(
     *,
-    raw_linear_sum: Optional[List[float]] = None,
-    gt_linear_sum: Optional[List[float]] = None,
+    raw_linear_sum: list[float] | None = None,
+    gt_linear_sum: list[float] | None = None,
     n_segments: int = 200,
     s_max: float = 295_715_680.14,
 ) -> ReferenceScores:
@@ -90,22 +90,23 @@ def _make_reference(
 
 
 class TestBuildScoreTableFullRun:
-
     def test_aggregate_matches_on_disk_scalars(self):
         """When every index is sampled, the subset-aware aggregate equals the
         on-disk full-20 scalars by construction (same linear sums, same formula)."""
         ref = _make_reference()
-        model_fv = list(ref.gt_per_file_log)          # perfect denoiser
+        model_fv = list(ref.gt_per_file_log)  # perfect denoiser
         model_scalar = ref.gt_scalar_full
 
         tbl = build_score_table(model_fv, model_scalar, ref)
         assert tbl is not None
         assert tbl.aggregate.num_sampled_files == 20
         assert tbl.aggregate.raw_baseline_scalar == pytest.approx(
-            ref.raw_scalar_full, abs=1e-12,
+            ref.raw_scalar_full,
+            abs=1e-12,
         )
         assert tbl.aggregate.ground_truth_scalar == pytest.approx(
-            ref.gt_scalar_full, abs=1e-12,
+            ref.gt_scalar_full,
+            abs=1e-12,
         )
         assert tbl.aggregate.model_scalar == pytest.approx(model_scalar)
         assert tbl.aggregate.percent_of_ceiling_log == pytest.approx(
@@ -153,20 +154,19 @@ class TestBuildScoreTableFullRun:
 
 
 class TestBuildScoreTableTrialSubset:
-
     def test_aggregate_is_subset_scoped(self):
         """Sample only files 10..14. The subset-scoped raw/gt scalars are
         computed from ΣL[10..14] / ΣN[10..14], NOT the full-20 scalars."""
         raw_ls = [0.0] * 20
         for i in (10, 11, 12, 13, 14):
-            raw_ls[i] = 40.0   # subset mean = 40/200 = 0.20
+            raw_ls[i] = 40.0  # subset mean = 40/200 = 0.20
         gt_ls = [0.0] * 20
         for i in (10, 11, 12, 13, 14):
-            gt_ls[i] = 400.0   # subset mean = 400/200 = 2.00
+            gt_ls[i] = 400.0  # subset mean = 400/200 = 2.00
 
         ref = _make_reference(raw_linear_sum=raw_ls, gt_linear_sum=gt_ls)
 
-        model_fv: list[Optional[float]] = [None] * 20
+        model_fv: list[float | None] = [None] * 20
         for i in (10, 11, 12, 13, 14):
             model_fv[i] = 1.0
         tbl = build_score_table(model_fv, model_scalar=2.5, reference=ref)
@@ -175,10 +175,12 @@ class TestBuildScoreTableTrialSubset:
         expected_raw = math.log(0.20, _LOG_BASE)
         expected_gt = math.log(2.00, _LOG_BASE)
         assert tbl.aggregate.raw_baseline_scalar == pytest.approx(
-            expected_raw, abs=1e-12,
+            expected_raw,
+            abs=1e-12,
         )
         assert tbl.aggregate.ground_truth_scalar == pytest.approx(
-            expected_gt, abs=1e-12,
+            expected_gt,
+            abs=1e-12,
         )
         assert tbl.aggregate.num_sampled_files == 5
         assert tbl.aggregate.model_scalar == pytest.approx(2.5)
@@ -188,7 +190,7 @@ class TestBuildScoreTableTrialSubset:
 
     def test_unsampled_rows_carry_none_for_model_columns(self):
         ref = _make_reference()
-        model_fv: list[Optional[float]] = [None] * 20
+        model_fv: list[float | None] = [None] * 20
         model_fv[5] = 0.7
         tbl = build_score_table(model_fv, model_scalar=0.7, reference=ref)
         assert tbl is not None
@@ -208,7 +210,7 @@ class TestBuildScoreTableTrialSubset:
 
     def test_all_rows_are_always_length_20(self):
         ref = _make_reference()
-        model_fv: list[Optional[float]] = [None] * 20
+        model_fv: list[float | None] = [None] * 20
         model_fv[0] = 0.1
         tbl = build_score_table(model_fv, model_scalar=0.1, reference=ref)
         assert tbl is not None
@@ -221,7 +223,6 @@ class TestBuildScoreTableTrialSubset:
 
 
 class TestBuildScoreTableDegenerate:
-
     def test_returns_none_when_model_scalar_is_none(self):
         ref = _make_reference()
         assert build_score_table([1.0] * 20, model_scalar=None, reference=ref) is None
@@ -243,7 +244,6 @@ class TestBuildScoreTableDegenerate:
 
 
 class TestRenderComparisonTable:
-
     def test_contains_header_and_columns(self):
         ref = _make_reference()
         tbl = build_score_table([1.0] * 20, model_scalar=1.0, reference=ref)
@@ -269,18 +269,20 @@ class TestRenderComparisonTable:
         # block also renders rows beginning with ``|<digit>``.
         lines = md.splitlines()
         secondary_idx = next(
-            i for i, ln in enumerate(lines)
+            i
+            for i, ln in enumerate(lines)
             if ln.startswith("### Sampled files re-ranked by Impact_Score")
         )
         main_body = [
-            ln for ln in lines[:secondary_idx]
+            ln
+            for ln in lines[:secondary_idx]
             if ln.startswith("|") and ln[1:].lstrip()[:1].isdigit()
         ]
         assert len(main_body) == 20
 
     def test_na_cell_rendered_for_unsampled_files(self):
         ref = _make_reference()
-        model_fv: list[Optional[float]] = [None] * 20
+        model_fv: list[float | None] = [None] * 20
         model_fv[4] = 3.0
         tbl = build_score_table(model_fv, model_scalar=3.0, reference=ref)
         md = render_comparison_table(tbl)
@@ -289,7 +291,8 @@ class TestRenderComparisonTable:
         # Locate the MAIN-table row for file 0 — must render N/A in
         # model/gain/headroom/Weight %/Impact (5 unsampled-side columns).
         secondary_idx = next(
-            i for i, ln in enumerate(lines)
+            i
+            for i, ln in enumerate(lines)
             if ln.startswith("### Sampled files re-ranked by Impact_Score")
         )
         main_lines = lines[:secondary_idx]
@@ -303,7 +306,9 @@ class TestRenderComparisonTable:
     def test_aggregate_block_and_recovery(self):
         ref = _make_reference()
         tbl = build_score_table(
-            [2.0] * 20, model_scalar=5.5763, reference=ref,
+            [2.0] * 20,
+            model_scalar=5.5763,
+            reference=ref,
         )
         md = render_comparison_table(tbl)
         assert "| **model**            | **5.5763** |" in md
@@ -317,7 +322,7 @@ class TestRenderComparisonTable:
         assert "scalars computed over" not in full_tbl.rendered_markdown
 
         # Subset table — footer with count.
-        model_fv: list[Optional[float]] = [None] * 20
+        model_fv: list[float | None] = [None] * 20
         for i in range(3):
             model_fv[i] = 0.3
         sub_tbl = build_score_table(model_fv, model_scalar=0.3, reference=ref)
@@ -326,7 +331,7 @@ class TestRenderComparisonTable:
     def test_negative_values_use_unicode_minus(self):
         """Row values rendered with a U+2212 minus for column alignment."""
         ref = _make_reference()
-        model_fv: list[Optional[float]] = [None] * 20
+        model_fv: list[float | None] = [None] * 20
         model_fv[0] = -13.8540
         tbl = build_score_table(model_fv, model_scalar=-13.8540, reference=ref)
         md = render_comparison_table(tbl)
@@ -338,6 +343,7 @@ class TestRenderComparisonTable:
 # =============================================================================
 # file_vector_to_log_space — P0 unit-fix helper
 # =============================================================================
+
 
 class TestFileVectorToLogSpace:
     """Tests for the linear→log conversion that closes the unit-mismatch bug.
@@ -400,6 +406,7 @@ class TestFileVectorToLogSpace:
         assert out_base_e[0] == pytest.approx(math.log(1.0 + 1e-10, math.e), rel=1e-12)
         assert out_no_offset_at_pos[0] == pytest.approx(0.0, abs=1e-9)
 
+
 # =============================================================================
 # P1-Impact (1-zh) — property-based tests for Linear_Weight + Impact_Score
 # =============================================================================
@@ -412,7 +419,7 @@ class TestLinearWeightProperty:
         # Full 20-file run: every row carries a weight that sums to 1.
         ref = _make_reference()
         # Linear file_vector — heterogeneous values stress the math.
-        fv_linear = [0.01 * (i + 1) for i in range(20)]   # 0.01..0.20
+        fv_linear = [0.01 * (i + 1) for i in range(20)]  # 0.01..0.20
         # Pre-converted log column for build_score_table.
         fv_log = [math.log(v + _LOG_OFFSET, _LOG_BASE) for v in fv_linear]
         tbl = build_score_table(
@@ -430,15 +437,17 @@ class TestLinearWeightProperty:
     def test_weights_sum_to_one_trial_subset(self):
         # 5-file trial: sampled rows sum to 1, unsampled rows are None.
         ref = _make_reference()
-        fv_linear: list[Optional[float]] = [None] * 20
-        for i, val in zip((2, 5, 11, 13, 17), (0.05, 0.10, 0.20, 0.15, 0.30)):
+        fv_linear: list[float | None] = [None] * 20
+        for i, val in zip((2, 5, 11, 13, 17), (0.05, 0.10, 0.20, 0.15, 0.30), strict=True):
             fv_linear[i] = val
         fv_log = [
-            (math.log(v + _LOG_OFFSET, _LOG_BASE) if v is not None else None)
-            for v in fv_linear
+            (math.log(v + _LOG_OFFSET, _LOG_BASE) if v is not None else None) for v in fv_linear
         ]
         tbl = build_score_table(
-            fv_log, model_scalar=1.5, reference=ref, model_fv_linear=fv_linear,
+            fv_log,
+            model_scalar=1.5,
+            reference=ref,
+            model_fv_linear=fv_linear,
         )
         assert tbl is not None
 
@@ -447,7 +456,8 @@ class TestLinearWeightProperty:
         assert len(sampled) == 5
         assert len(unsampled) == 15
         assert sum(r.linear_weight for r in sampled) == pytest.approx(
-            1.0, abs=1e-9,
+            1.0,
+            abs=1e-9,
         )
         assert tbl.linear_weight_total == pytest.approx(1.0, abs=1e-9)
         # Unsampled rows must also have impact_score=None (no opportunity
@@ -466,7 +476,9 @@ class TestImpactScoreProperty:
         fv_linear = [0.10] * 20
         fv_log = [math.log(0.10 + _LOG_OFFSET, _LOG_BASE)] * 20
         tbl = build_score_table(
-            fv_log, model_scalar=fv_log[0], reference=ref,
+            fv_log,
+            model_scalar=fv_log[0],
+            reference=ref,
             model_fv_linear=fv_linear,
         )
         assert tbl is not None
@@ -477,7 +489,9 @@ class TestImpactScoreProperty:
         fv_linear_over = [0.20] * 20
         fv_log_over = [math.log(0.20 + _LOG_OFFSET, _LOG_BASE)] * 20
         tbl2 = build_score_table(
-            fv_log_over, model_scalar=fv_log_over[0], reference=ref,
+            fv_log_over,
+            model_scalar=fv_log_over[0],
+            reference=ref,
             model_fv_linear=fv_linear_over,
         )
         assert tbl2 is not None
@@ -490,7 +504,9 @@ class TestImpactScoreProperty:
         fv_linear = [0.001] * 20
         fv_log = [math.log(0.001 + _LOG_OFFSET, _LOG_BASE)] * 20
         tbl = build_score_table(
-            fv_log, model_scalar=fv_log[0], reference=ref,
+            fv_log,
+            model_scalar=fv_log[0],
+            reference=ref,
             model_fv_linear=fv_linear,
         )
         assert tbl is not None
@@ -504,17 +520,15 @@ class TestImpactScoreProperty:
         ref = _make_reference()
         # Heterogeneous fv so impacts span a range.
         base_fv_linear = [0.005 * (i + 1) for i in range(20)]  # 0.005..0.10
-        base_fv_log = [
-            math.log(v + _LOG_OFFSET, _LOG_BASE) for v in base_fv_linear
-        ]
+        base_fv_log = [math.log(v + _LOG_OFFSET, _LOG_BASE) for v in base_fv_linear]
 
         tbl_a = build_score_table(
-            base_fv_log, model_scalar=0.0, reference=ref,
+            base_fv_log,
+            model_scalar=0.0,
+            reference=ref,
             model_fv_linear=base_fv_linear,
         )
-        impacts_a = sorted(
-            r.impact_score for r in tbl_a.rows if r.impact_score is not None
-        )
+        impacts_a = sorted(r.impact_score for r in tbl_a.rows if r.impact_score is not None)
 
         # Permutation: reverse the linear vector AND the reference's per-
         # file linear sums + n_segments together (so each pair stays
@@ -523,6 +537,7 @@ class TestImpactScoreProperty:
         permuted_fv_linear = [base_fv_linear[p] for p in perm]
         permuted_fv_log = [base_fv_log[p] for p in perm]
         from nodes.scoring_reference import ReferenceScores
+
         permuted_ref = ReferenceScores(
             raw_per_file_log=[ref.raw_per_file_log[p] for p in perm],
             gt_per_file_log=[ref.gt_per_file_log[p] for p in perm],
@@ -535,16 +550,16 @@ class TestImpactScoreProperty:
             s_max=ref.s_max,
         )
         tbl_b = build_score_table(
-            permuted_fv_log, model_scalar=0.0, reference=permuted_ref,
+            permuted_fv_log,
+            model_scalar=0.0,
+            reference=permuted_ref,
             model_fv_linear=permuted_fv_linear,
         )
-        impacts_b = sorted(
-            r.impact_score for r in tbl_b.rows if r.impact_score is not None
-        )
+        impacts_b = sorted(r.impact_score for r in tbl_b.rows if r.impact_score is not None)
 
         assert len(impacts_a) == 20
         assert len(impacts_b) == 20
-        for a, b in zip(impacts_a, impacts_b):
+        for a, b in zip(impacts_a, impacts_b, strict=True):
             assert a == pytest.approx(b, abs=1e-12)
 
 
@@ -557,7 +572,9 @@ class TestSecondaryBlock:
         fv_linear = [0.005 * (i + 1) for i in range(20)]
         fv_log = [math.log(v + _LOG_OFFSET, _LOG_BASE) for v in fv_linear]
         tbl = build_score_table(
-            fv_log, model_scalar=0.0, reference=ref,
+            fv_log,
+            model_scalar=0.0,
+            reference=ref,
             model_fv_linear=fv_linear,
         )
         md = render_comparison_table(tbl)
@@ -566,12 +583,14 @@ class TestSecondaryBlock:
         # Slice from the secondary header to the next blank-line break (or
         # the subset footer / EOF).
         sec_idx = next(
-            i for i, ln in enumerate(lines)
+            i
+            for i, ln in enumerate(lines)
             if ln.startswith("### Sampled files re-ranked by Impact_Score")
         )
         # First two lines after header are the table column header + sep.
         body = [
-            ln for ln in lines[sec_idx + 1:]
+            ln
+            for ln in lines[sec_idx + 1 :]
             if ln.startswith("|") and ln[1:].lstrip()[:1].isdigit()
         ]
         assert len(body) == 20
@@ -587,19 +606,19 @@ class TestSecondaryBlock:
 
         impacts_in_render_order = [_impact_from_row(ln) for ln in body]
         assert impacts_in_render_order == sorted(
-            impacts_in_render_order, reverse=True,
+            impacts_in_render_order,
+            reverse=True,
         )
 
         # And: the order matches sorting tbl.rows by impact desc.
         expected_file_order = [
-            r.file_index for r in sorted(
+            r.file_index
+            for r in sorted(
                 (r for r in tbl.rows if r.impact_score is not None),
                 key=lambda r: -r.impact_score,
             )
         ]
-        rendered_file_order = [
-            int(ln.split("|")[1].strip()) for ln in body
-        ]
+        rendered_file_order = [int(ln.split("|")[1].strip()) for ln in body]
         assert rendered_file_order == expected_file_order
 
     def test_secondary_block_omitted_when_no_impact_data(self):
@@ -610,6 +629,7 @@ class TestSecondaryBlock:
             PerFileRow,
             ScoreComparisonTable,
         )
+
         rows = [
             PerFileRow(
                 file_index=i,
@@ -624,8 +644,10 @@ class TestSecondaryBlock:
         tbl = ScoreComparisonTable(
             rows=rows,
             aggregate=AggregateScalars(
-                raw_baseline_scalar=0.0, ground_truth_scalar=10.0,
-                model_scalar=5.0, percent_of_ceiling_log=0.5,
+                raw_baseline_scalar=0.0,
+                ground_truth_scalar=10.0,
+                model_scalar=5.0,
+                percent_of_ceiling_log=0.5,
                 num_sampled_files=20,
             ),
             s_max_global=1.0,
@@ -642,7 +664,6 @@ class TestSecondaryBlock:
 
 
 class TestPostPathAReferenceConsistency:
-
     def test_post_path_a_reference_consistency(self):
         # Load-bearing test: the helper applied to a ground_truth linear
         # file_vector reproduces the on-disk ground_truth per_file_log
@@ -664,7 +685,9 @@ class TestPostPathAReferenceConsistency:
         helper_out = file_vector_to_log_space(gt_linear_fv)
         for i, expected_log in enumerate(helper_out):
             per_file = json.load(
-                open(f"/home/klz/Data/SIDEREIS_DATA/ground_truth/ground_truth_score_file_{i:04d}.json")
+                open(
+                    f"/home/klz/Data/SIDEREIS_DATA/ground_truth/ground_truth_score_file_{i:04d}.json"
+                )
             )
             assert per_file["score"] == pytest.approx(expected_log, rel=1e-9), (
                 f"helper output for file {i} ({expected_log:.6f}) disagrees "

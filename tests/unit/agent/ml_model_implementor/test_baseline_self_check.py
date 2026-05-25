@@ -9,15 +9,15 @@ schema constraints can't silently reject the baseline until tuner-time.
 
 See docs/improving_validation_awareness.md Phase B.2.
 """
+
 import pytest
 from pydantic import ValidationError
 
 from agent.schemas.implementor import ImplementorInput
 from nodes.ml_model_implementor import (
-    _check_baseline_schema_compatibility,
     MLModelImplementor,
+    _check_baseline_schema_compatibility,
 )
-
 
 # ---- Minimal plugin source fixtures ----
 # Each fixture is a complete, importable plugin file containing a
@@ -58,8 +58,8 @@ PLUGIN_CONFIG_CLASS = TestConfig
 # _check_baseline_schema_compatibility — direct unit tests
 # =====================================================================
 
-class TestBaselineCheckNoOp:
 
+class TestBaselineCheckNoOp:
     def test_empty_baseline_config_returns_none(self):
         assert _check_baseline_schema_compatibility(_PLUGIN_NO_CONSTRAINTS, "m", {}) is None
 
@@ -79,7 +79,6 @@ class TestBaselineCheckNoOp:
 
 
 class TestBaselineCheckAccepts:
-
     def test_schema_accepts_baseline_values(self):
         bc = {"model_config": {"channels": 32, "refiner_kernel_size": 4}}
         assert _check_baseline_schema_compatibility(_PLUGIN_MULTIPLE_OF_2, "m", bc) is None
@@ -100,7 +99,6 @@ class TestBaselineCheckAccepts:
 
 
 class TestBaselineCheckRejects:
-
     def test_multiple_of_constraint_violation(self):
         """The canonical explore_novel_v1 failure: kernel_size=5 vs multiple_of=2."""
         bc = {"model_config": {"refiner_kernel_size": 5}}
@@ -136,7 +134,12 @@ class TestBaselineCheckRejects:
         assert "segmentation_size" in err
         # Ownership note mentions it cannot be changed by the implementor
         low = err.lower()
-        assert "not change" in low or "may not change" in low or "not touch" in low or "do not change" in low
+        assert (
+            "not change" in low
+            or "may not change" in low
+            or "not touch" in low
+            or "do not change" in low
+        )
 
 
 class TestBaselineCheckGraceful:
@@ -162,6 +165,7 @@ x = 1
 # =====================================================================
 # Integration with _validate_code — the check fires inside the existing gate
 # =====================================================================
+
 
 class TestValidateCodeIntegration:
     """B.2a: the baseline self-check is wired into _validate_code so the

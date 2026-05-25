@@ -35,11 +35,10 @@ See docs/resource_estimator_implement.md §10.5 + §10.14 Commit 2.
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
 from agent.skills.evaluate_time_skill import calibration
-
+from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
 
 # ── constants (mirror the legacy wrapper verbatim) ───────────────────────────
 
@@ -77,11 +76,11 @@ _MIN_MS_PER_STEP: float = 2.0
 
 def estimate_peak_bytes(
     model_type: str,
-    model_config: Dict[str, Any],
-    train_config: Dict[str, Any],
-    loss_config: Dict[str, Any],
+    model_config: dict[str, Any],
+    train_config: dict[str, Any],
+    loss_config: dict[str, Any],
     num_params: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Estimate peak training-phase VRAM for the given config.
 
     Worst-case float32 training memory:
@@ -102,9 +101,9 @@ def estimate_peak_bytes(
     Returns:
         ``{"phase": "training", "total_bytes": int, "breakdown": {...}}``.
     """
-    seg_size   = model_config.get("segmentation_size", 40000)
+    seg_size = model_config.get("segmentation_size", 40000)
     batch_size = train_config.get("batch_size", 1)
-    loss_type  = loss_config.get("loss_type", "ce")
+    loss_type = loss_config.get("loss_type", "ce")
 
     # weights (4) + grads (4) + Adam m (4) + Adam v (4) = 16 bytes per param.
     model_overhead = num_params * 16 * _BYTES_F32 // 4
@@ -114,28 +113,24 @@ def estimate_peak_bytes(
     act_factor = 1 if model_type == "fcnet" else 2
     activations = act_factor * output_logits
 
-    focal_onehot = (
-        batch_size * 256 * seg_size * _BYTES_I64 if loss_type == "focal" else 0
-    )
+    focal_onehot = batch_size * 256 * seg_size * _BYTES_I64 if loss_type == "focal" else 0
 
     transformer_attn = 0
     if model_type == "transformer":
-        nhead      = model_config.get("nhead", 2)
+        nhead = model_config.get("nhead", 2)
         num_layers = model_config.get("num_layers", 2)
-        transformer_attn = (
-            batch_size * nhead * seg_size * seg_size * _BYTES_F32 * num_layers
-        )
+        transformer_attn = batch_size * nhead * seg_size * seg_size * _BYTES_F32 * num_layers
 
     total = model_overhead + output_logits + activations + focal_onehot + transformer_attn
 
     return {
-        "phase":       "training",
+        "phase": "training",
         "total_bytes": total,
         "breakdown": {
-            "model_overhead_bytes":   model_overhead,
-            "output_logits_bytes":    output_logits,
-            "activations_bytes":      activations,
-            "focal_onehot_bytes":     focal_onehot,
+            "model_overhead_bytes": model_overhead,
+            "output_logits_bytes": output_logits,
+            "activations_bytes": activations,
+            "focal_onehot_bytes": focal_onehot,
             "transformer_attn_bytes": transformer_attn,
         },
     }
@@ -145,7 +140,7 @@ def estimate_peak_bytes(
 
 
 def _total_train_steps(
-    sample_set: Dict[str, List[int]],
+    sample_set: dict[str, list[int]],
     seg_size: int,
     batch_size: int,
     train_portion: float,
@@ -172,10 +167,15 @@ def _count_params(model_type: str, model_config: dict, loss_type: str) -> int:
     to both ``estimate_peak_bytes`` and ``estimate_wall_time_seconds``
     without duplicating the instantiation.
     """
-    from ml_models.models_sandbox import MODEL_REGISTRY
     from ml_models.models_format_sandbox import get_config_class
+    from ml_models.models_sandbox import MODEL_REGISTRY
 
     config_cls = get_config_class(model_type)
+    if config_cls is None:
+        raise ValueError(
+            f"_count_params: unknown model_type={model_type!r} — "
+            f"get_config_class returned None (no plugin or built-in config registered)."
+        )
     config_obj = config_cls(**model_config)
     if model_type == "fcnet":
         model = MODEL_REGISTRY[model_type](config_obj, loss_type=loss_type)
@@ -186,16 +186,16 @@ def _count_params(model_type: str, model_config: dict, loss_type: str) -> int:
 
 def estimate_wall_time_seconds(
     model_type: str,
-    model_config: Dict[str, Any],
-    train_config: Dict[str, Any],
-    sample_set: Dict[str, List[int]],
+    model_config: dict[str, Any],
+    train_config: dict[str, Any],
+    sample_set: dict[str, list[int]],
     *,
     train_portion: float = 1.0,
-    ms_per_step: Optional[float] = None,
-    gpu_name: Optional[str] = None,
-    num_params: Optional[int] = None,
+    ms_per_step: float | None = None,
+    gpu_name: str | None = None,
+    num_params: int | None = None,
     loss_type: str = "ce",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Estimate training-phase wall-time in seconds.
 
     Computes ``total_steps × ms/step × k(gpu, model_type) × SAFETY_MULTIPLIER``
@@ -217,13 +217,11 @@ def estimate_wall_time_seconds(
     Returns:
         ``{"phase": "training", "seconds": float, "breakdown": {...}}``.
     """
-    seg_size   = int(model_config.get("segmentation_size", 1000))
+    seg_size = int(model_config.get("segmentation_size", 1000))
     batch_size = int(train_config.get("batch_size", 1))
-    epochs     = int(train_config.get("epochs", 1))
+    epochs = int(train_config.get("epochs", 1))
 
-    total_steps = _total_train_steps(
-        sample_set, seg_size, batch_size, train_portion, epochs
-    )
+    total_steps = _total_train_steps(sample_set, seg_size, batch_size, train_portion, epochs)
 
     if ms_per_step is not None and ms_per_step > 0:
         ms_source = "real_dataset_warmup"
@@ -243,14 +241,14 @@ def estimate_wall_time_seconds(
     seconds = total_ms / 1000.0
 
     return {
-        "phase":   "training",
+        "phase": "training",
         "seconds": seconds,
         "breakdown": {
-            "total_train_steps":  total_steps,
-            "ms_per_step":        round(ms_per_step, 4),
-            "ms_source":          ms_source,
-            "k_correction":       round(k, 4),
-            "safety_multiplier":  SAFETY_MULTIPLIER,
-            "gpu_name":           gpu_name,
+            "total_train_steps": total_steps,
+            "ms_per_step": round(ms_per_step, 4),
+            "ms_source": ms_source,
+            "k_correction": round(k, 4),
+            "safety_multiplier": SAFETY_MULTIPLIER,
+            "gpu_name": gpu_name,
         },
     }

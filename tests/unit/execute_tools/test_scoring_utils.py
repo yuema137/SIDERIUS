@@ -4,20 +4,20 @@ Unit tests for execute_tools/scoring_utils.py — anchor-normalized scoring func
 Tests score_segments() and score_vector() with mocked SNR computation.
 No real HDF5 files or TIDMAD data required.
 """
+
 import math
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 
 from execute_tools.scoring_utils import (
     NUM_FILES,
     SEGMENTS_PER_FILE,
+    SampleSet,
     score_segments,
     score_vector,
-    SampleSet,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -27,8 +27,7 @@ from execute_tools.scoring_utils import (
 # s_max = 20 * 200 = 4000 (file 19, segment 199)
 MOCK_S_MAX = 4000.0
 MOCK_ANCHOR_MAP = {
-    str(i): [(i + 1) * (j + 1) for j in range(SEGMENTS_PER_FILE)]
-    for i in range(NUM_FILES)
+    str(i): [(i + 1) * (j + 1) for j in range(SEGMENTS_PER_FILE)] for i in range(NUM_FILES)
 }
 
 
@@ -53,8 +52,8 @@ def _mock_get_snr_fixed(freq, pwr, target=0):
 # score_segments
 # ---------------------------------------------------------------------------
 
-class TestScoreSegments:
 
+class TestScoreSegments:
     @patch("execute_tools.scoring_utils.get_snr", side_effect=_mock_get_snr_fixed)
     @patch("execute_tools.scoring_utils.get_one_sec_psd", side_effect=_mock_get_one_sec_psd)
     def test_single_segment(self, mock_psd, mock_snr):
@@ -133,8 +132,8 @@ class TestScoreSegments:
 # score_vector
 # ---------------------------------------------------------------------------
 
-class TestScoreVector:
 
+class TestScoreVector:
     def _filename_fn(self, file_index):
         return f"denoised_{file_index:04d}.h5"
 
@@ -150,7 +149,7 @@ class TestScoreVector:
     @patch("execute_tools.scoring_utils.get_one_sec_psd", side_effect=_mock_get_one_sec_psd)
     def test_vector_length_is_20(self, mock_psd, mock_snr):
         sample_set: SampleSet = {0: [0, 1], 6: [0]}
-        vector, scalar, _, _ = score_vector(
+        vector, _scalar, _, _ = score_vector(
             data_dir="/fake",
             sample_set=sample_set,
             anchor_map=MOCK_ANCHOR_MAP,
@@ -267,7 +266,7 @@ class TestScoreVector:
         """Normal mode: single file with all segments — 1 real value, 19 None."""
         all_segments = list(range(SEGMENTS_PER_FILE))
         sample_set: SampleSet = {6: all_segments}
-        vector, scalar, _, _ = score_vector(
+        vector, _scalar, _, _ = score_vector(
             data_dir="/fake",
             sample_set=sample_set,
             anchor_map=MOCK_ANCHOR_MAP,
@@ -315,6 +314,7 @@ class TestScoreVector:
 # ---------------------------------------------------------------------------
 # score_vector — reference / health-check integration (commit b2)
 # ---------------------------------------------------------------------------
+
 
 class TestScoreVectorHealthCheck:
     """``score_vector`` accepts an optional ``reference_file_vector`` and
@@ -419,17 +419,23 @@ class TestScoreVectorHealthCheck:
         ref[6] = float(fv[6]) * 25.0
         # Default 1% threshold passes
         _, _, is_degen_default, _ = score_vector(
-            data_dir="/fake", sample_set=sample_set,
-            anchor_map=MOCK_ANCHOR_MAP, s_max=MOCK_S_MAX,
-            denoised_filename_fn=self._filename_fn, parallel=False,
+            data_dir="/fake",
+            sample_set=sample_set,
+            anchor_map=MOCK_ANCHOR_MAP,
+            s_max=MOCK_S_MAX,
+            denoised_filename_fn=self._filename_fn,
+            parallel=False,
             reference_file_vector=ref,
         )
         assert is_degen_default is False
         # Custom 5% threshold trips
         _, _, is_degen_custom, reason_custom = score_vector(
-            data_dir="/fake", sample_set=sample_set,
-            anchor_map=MOCK_ANCHOR_MAP, s_max=MOCK_S_MAX,
-            denoised_filename_fn=self._filename_fn, parallel=False,
+            data_dir="/fake",
+            sample_set=sample_set,
+            anchor_map=MOCK_ANCHOR_MAP,
+            s_max=MOCK_S_MAX,
+            denoised_filename_fn=self._filename_fn,
+            parallel=False,
             reference_file_vector=ref,
             degeneracy_threshold_ratio=0.05,
         )

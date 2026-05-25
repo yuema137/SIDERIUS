@@ -20,53 +20,45 @@ level (a leaf) leaves it empty.
 
 from __future__ import annotations
 
-from typing import Dict, List, Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from agent.schemas.hyperparam_tuning import ExpertAdvice
 
-
 # ---------------------------------------------------------------------------
 # Building blocks
 # ---------------------------------------------------------------------------
 
+
 class GitInfo(BaseModel):
     """Snapshot of the git repository state at run start."""
-    commit: Optional[str] = Field(
-        default=None, description="Full SHA of HEAD."
-    )
-    short_commit: Optional[str] = Field(
-        default=None, description="Abbreviated SHA (7 chars)."
-    )
-    branch: Optional[str] = Field(
+
+    commit: str | None = Field(default=None, description="Full SHA of HEAD.")
+    short_commit: str | None = Field(default=None, description="Abbreviated SHA (7 chars).")
+    branch: str | None = Field(
         default=None, description="Active branch name, or detached-HEAD marker."
     )
     dirty: bool = Field(
         default=False,
         description="True if the working tree had uncommitted changes at run start.",
     )
-    remote_url: Optional[str] = Field(
-        default=None, description="Origin remote URL, if configured."
-    )
-    untracked_count: int = Field(
-        default=0, description="Number of untracked files at run start."
-    )
+    remote_url: str | None = Field(default=None, description="Origin remote URL, if configured.")
+    untracked_count: int = Field(default=0, description="Number of untracked files at run start.")
 
 
 class EnvInfo(BaseModel):
     """Snapshot of the host environment at run start."""
+
     hostname: str
     user: str
     cwd: str
-    python_version: str = Field(
-        description="Output of sys.version (full version string)."
-    )
-    cuda_visible_devices: Optional[str] = Field(
+    python_version: str = Field(description="Output of sys.version (full version string).")
+    cuda_visible_devices: str | None = Field(
         default=None,
         description="Value of CUDA_VISIBLE_DEVICES env var, or None if unset.",
     )
-    gpu_name: Optional[str] = Field(
+    gpu_name: str | None = Field(
         default=None,
         description="Name of the visible GPU (best-effort, may be None).",
     )
@@ -82,11 +74,12 @@ class PerAgentAdvice(BaseModel):
                 forward from a legacy free-form preamble (in which case the
                 preamble lives in expert.freeform_notes)
     """
+
     human: str = Field(
         default="",
         description="Free-form advice from a human caller.",
     )
-    expert: Optional[ExpertAdvice] = Field(
+    expert: ExpertAdvice | None = Field(
         default=None,
         description=(
             "Structured expert advice. None if no upstream agent contributed "
@@ -99,6 +92,7 @@ class PerAgentAdvice(BaseModel):
 # Base metadata (shared across all levels)
 # ---------------------------------------------------------------------------
 
+
 class BaseRunMetadata(BaseModel):
     """
     Common fields recorded for any run, at any level of the hierarchy.
@@ -107,6 +101,7 @@ class BaseRunMetadata(BaseModel):
     The `advice` dict's keys are level-specific (one per agent the level
     invokes); subclasses document which keys they use.
     """
+
     schema_version: int = Field(
         default=1,
         description="Bump when the metadata schema changes incompatibly.",
@@ -114,12 +109,10 @@ class BaseRunMetadata(BaseModel):
     level: Literal["tuner", "workflow", "chain"]
 
     run_name: str = Field(description="Human-readable run identifier.")
-    workspace: str = Field(
-        description="Absolute path to the directory holding this run's outputs."
-    )
+    workspace: str = Field(description="Absolute path to the directory holding this run's outputs.")
 
     started_at: str = Field(description="ISO-8601 timestamp with timezone (UTC).")
-    finished_at: Optional[str] = Field(
+    finished_at: str | None = Field(
         default=None,
         description="ISO-8601 timestamp set when the run completes; None while running.",
     )
@@ -127,12 +120,12 @@ class BaseRunMetadata(BaseModel):
     git: GitInfo
     env: EnvInfo
 
-    argv: List[str] = Field(
+    argv: list[str] = Field(
         default_factory=list,
         description="Original sys.argv that launched the run.",
     )
 
-    advice: Dict[str, PerAgentAdvice] = Field(
+    advice: dict[str, PerAgentAdvice] = Field(
         default_factory=dict,
         description=(
             "Per-agent advice this run injected. Keyed by agent name. "
@@ -140,7 +133,7 @@ class BaseRunMetadata(BaseModel):
         ),
     )
 
-    human_advice_file: Optional[str] = Field(
+    human_advice_file: str | None = Field(
         default=None,
         description=(
             "Path to the human advice JSON file the advice was loaded from, "
@@ -148,7 +141,7 @@ class BaseRunMetadata(BaseModel):
         ),
     )
 
-    child_metadata_paths: List[str] = Field(
+    child_metadata_paths: list[str] = Field(
         default_factory=list,
         description=(
             "Paths to lower-level metadata files this run produced. Empty for "
@@ -157,7 +150,7 @@ class BaseRunMetadata(BaseModel):
         ),
     )
 
-    notes: Optional[str] = Field(
+    notes: str | None = Field(
         default=None,
         description="Free-form notes the caller may attach.",
     )
@@ -167,41 +160,43 @@ class BaseRunMetadata(BaseModel):
 # Tuner-level metadata
 # ---------------------------------------------------------------------------
 
+
 class TunerRunMetadata(BaseRunMetadata):
     """
     Metadata for ONE invocation of ml_hyperparameter_tune_agent.
 
     The `advice` dict uses a single key: 'tune'.
     """
+
     level: Literal["tuner"] = "tuner"
 
     model_type: str = Field(description="Model architecture being tuned.")
     llm_provider: str = Field(
         description="LLM provider used by the tuner's planner sub-call. "
-                    "Also the default for the reflector when reflect_provider is None.",
+        "Also the default for the reflector when reflect_provider is None.",
     )
     llm_model_id: str = Field(
         description="LLM model ID used by the tuner's planner sub-call. "
-                    "Also the default for the reflector when reflect_model_id is None.",
+        "Also the default for the reflector when reflect_model_id is None.",
     )
-    reflect_provider: Optional[str] = Field(
+    reflect_provider: str | None = Field(
         default=None,
         description="Optional separate provider for the tuner's reflector "
-                    "sub-call. None means the reflector used llm_provider.",
+        "sub-call. None means the reflector used llm_provider.",
     )
-    reflect_model_id: Optional[str] = Field(
+    reflect_model_id: str | None = Field(
         default=None,
         description="Optional separate model ID for the tuner's reflector "
-                    "sub-call. None means the reflector used llm_model_id.",
+        "sub-call. None means the reflector used llm_model_id.",
     )
 
     max_rounds: int = Field(description="Tuning round budget.")
-    max_proposal_attempts: Optional[int] = Field(
+    max_proposal_attempts: int | None = Field(
         default=None,
         description="Retry budget for proposal validation (None = framework default).",
     )
 
-    file_index: Optional[int] = Field(
+    file_index: int | None = Field(
         default=None,
         description="Validation file index when not in trial mode; None otherwise.",
     )
@@ -210,7 +205,7 @@ class TunerRunMetadata(BaseRunMetadata):
         description="Whether the tuner ran in trial-explore mode.",
     )
 
-    baseline_score: Optional[float] = Field(
+    baseline_score: float | None = Field(
         default=None,
         description="Baseline denoising score the tuner is trying to beat.",
     )
@@ -220,19 +215,23 @@ class TunerRunMetadata(BaseRunMetadata):
 # Capture helpers
 # ---------------------------------------------------------------------------
 
-def capture_git_info(repo_root: Optional[str] = None) -> GitInfo:
+
+def capture_git_info(repo_root: str | None = None) -> GitInfo:
     """Best-effort capture of git state. Returns an empty GitInfo on any error."""
     import subprocess
 
-    def _run(args: List[str]) -> Optional[str]:
+    def _run(args: list[str]) -> str | None:
         try:
             out = subprocess.run(
-                args, cwd=repo_root, capture_output=True, text=True, check=True,
+                args,
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                check=True,
                 timeout=5,
             )
             return out.stdout.strip() or None
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
-                FileNotFoundError):
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
             return None
 
     commit = _run(["git", "rev-parse", "HEAD"])
@@ -267,9 +266,10 @@ def capture_env_info() -> EnvInfo:
     import socket
     import sys
 
-    gpu_name: Optional[str] = None
+    gpu_name: str | None = None
     try:
         import torch
+
         if torch.cuda.is_available():
             gpu_name = torch.cuda.get_device_name(0)
     except Exception:

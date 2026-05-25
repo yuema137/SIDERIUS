@@ -10,6 +10,7 @@ If it does, Commit 9's del+gc / no_grad fix has regressed.
 Run:
     .venv/bin/python tests/manual/probe_ssm_vram.py
 """
+
 from __future__ import annotations
 
 import gc
@@ -37,7 +38,7 @@ def _load_plugin(path: str):
 
 
 def _rss_gb() -> float:
-    return psutil.Process(os.getpid()).memory_info().rss / 1024 ** 3
+    return psutil.Process(os.getpid()).memory_info().rss / 1024**3
 
 
 def _gpu_gb(reset: bool = False) -> tuple[float, float]:
@@ -46,8 +47,8 @@ def _gpu_gb(reset: bool = False) -> tuple[float, float]:
     if reset:
         torch.cuda.reset_peak_memory_stats()
     return (
-        torch.cuda.memory_allocated() / 1024 ** 3,
-        torch.cuda.max_memory_allocated() / 1024 ** 3,
+        torch.cuda.memory_allocated() / 1024**3,
+        torch.cuda.max_memory_allocated() / 1024**3,
     )
 
 
@@ -101,8 +102,12 @@ def main() -> int:
     print("\n[step] running 5 forward+backward steps with synthetic input...")
     samples = []
     for step in range(5):
-        x = torch.randint(0, 256, (cfg.batch_size, cfg.segmentation_size), dtype=torch.int32, device="cuda")
-        y = torch.randint(0, 256, (cfg.batch_size, cfg.segmentation_size), dtype=torch.long, device="cuda")
+        x = torch.randint(
+            0, 256, (cfg.batch_size, cfg.segmentation_size), dtype=torch.int32, device="cuda"
+        )
+        y = torch.randint(
+            0, 256, (cfg.batch_size, cfg.segmentation_size), dtype=torch.long, device="cuda"
+        )
         torch.cuda.synchronize()
         t0 = time.perf_counter()
         optim.zero_grad()
@@ -127,7 +132,7 @@ def main() -> int:
     print(f"  num_params      : {n_params:,}")
     print(f"  GPU peak alloc  : {final_peak_gpu:.2f} GB  (target: < 8 GB)")
     print(f"  RSS peak        : {final_peak_rss:.2f} GB  (target: << 30 GB)")
-    print(f"  median step ms  : {sorted([s[1] for s in samples])[len(samples)//2]:.1f}")
+    print(f"  median step ms  : {sorted([s[1] for s in samples])[len(samples) // 2]:.1f}")
     print(f"  GATE 2 status   : {'PASS' if final_peak_gpu < 8.0 else 'FAIL'}")
 
     del model, optim, crit

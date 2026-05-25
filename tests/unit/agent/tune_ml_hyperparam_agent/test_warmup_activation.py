@@ -8,6 +8,7 @@ This test verifies that:
 
 We mock torch/CUDA to avoid needing real hardware.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -18,6 +19,7 @@ import pytest
 def test_warmup_skipped_when_data_dir_is_none():
     """_measure_ms_per_step returns (None, ...) when data_dir is None."""
     from agent.skills.evaluate_time_skill.wrapper import _measure_ms_per_step
+
     ms, breakdown = _measure_ms_per_step(
         model_type="punet",
         model_config={"segmentation_size": 1000},
@@ -33,7 +35,8 @@ def test_warmup_skipped_when_data_dir_is_none():
 def test_warmup_skipped_when_data_dir_is_empty_string():
     """Empty string should also skip warmup."""
     from agent.skills.evaluate_time_skill.wrapper import _measure_ms_per_step
-    ms, breakdown = _measure_ms_per_step(
+
+    ms, _breakdown = _measure_ms_per_step(
         model_type="punet",
         model_config={"segmentation_size": 1000},
         train_config={"batch_size": 1, "epochs": 1},
@@ -47,7 +50,8 @@ def test_warmup_skipped_when_data_dir_is_empty_string():
 def test_warmup_skipped_when_data_dir_does_not_exist():
     """Non-existent data_dir should skip warmup."""
     from agent.skills.evaluate_time_skill.wrapper import _measure_ms_per_step
-    ms, breakdown = _measure_ms_per_step(
+
+    ms, _breakdown = _measure_ms_per_step(
         model_type="punet",
         model_config={"segmentation_size": 1000},
         train_config={"batch_size": 1, "epochs": 1},
@@ -60,15 +64,17 @@ def test_warmup_skipped_when_data_dir_does_not_exist():
 
 def test_static_formula_uses_patched_constants():
     """estimate_wall_time_seconds with ms_per_step=None uses the 3e-9 coefficient
-    and 2.0 SAFETY_MULTIPLIER from the Phase 6.8 patch."""
+    and the SAFETY_MULTIPLIER currently in force. Phase 6.8 raised the
+    multiplier from 1.1 to 2.0; it was subsequently relaxed to 1.3 once
+    novel-arch overshoot data showed 2.0 was over-conservative."""
     from agent.skills.training_skill.estimator import (
-        SAFETY_MULTIPLIER,
         _STATIC_MS_PER_FLOP,
+        SAFETY_MULTIPLIER,
         estimate_wall_time_seconds,
     )
 
     assert _STATIC_MS_PER_FLOP == 3e-9
-    assert SAFETY_MULTIPLIER == 2.0
+    assert SAFETY_MULTIPLIER == 1.3
 
     num_params = 500_000
     seg = 1000
@@ -89,7 +95,7 @@ def test_static_formula_uses_patched_constants():
 
     bd = result["breakdown"]
     assert bd["ms_source"] == "static_formula_phase_b"
-    assert bd["safety_multiplier"] == 2.0
+    assert bd["safety_multiplier"] == 1.3
     # ms_per_step should be max(num_params * seg * bs * 3e-9, 2.0)
     expected_ms = max(num_params * seg * bs * 3e-9, 2.0)
     assert bd["ms_per_step"] == round(expected_ms, 4)
@@ -110,7 +116,7 @@ def test_warmup_path_entered_with_valid_data_dir(tmp_path):
         # The function will try to import TIDMADEpochDataset etc.,
         # which will fail — that's fine, we just want to verify we got
         # past the data_dir guard.
-        ms, breakdown = _measure_ms_per_step(
+        ms, _breakdown = _measure_ms_per_step(
             model_type="punet",
             model_config={"segmentation_size": 1000},
             train_config={"batch_size": 1, "epochs": 1},

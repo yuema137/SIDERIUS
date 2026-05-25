@@ -20,6 +20,7 @@ Three branches:
    ``execute_tools.inference_single._assert_training_sentinel`` checks
    for and what Commit 4 will check for in the orchestrator.
 """
+
 from __future__ import annotations
 
 import os
@@ -30,7 +31,6 @@ from execute_tools.train_engine_sandbox import _save_with_sentinel
 
 
 class TestSaveWithSentinelAtomicity:
-
     def test_sentinel_written_on_successful_save(self, tmp_path, monkeypatch):
         # Stub torch.save to a plain file write so we don't depend on a
         # real state_dict — we're testing the helper's control flow, not
@@ -42,6 +42,7 @@ class TestSaveWithSentinelAtomicity:
                 f.write(b"\x00" * 16)
 
         import execute_tools.train_engine_sandbox as tes
+
         monkeypatch.setattr(tes.torch, "save", fake_save)
 
         _save_with_sentinel({"w": "stub"}, save_path, "exp_001")
@@ -62,6 +63,7 @@ class TestSaveWithSentinelAtomicity:
             raise RuntimeError("simulated CUDA OOM during save")
 
         import execute_tools.train_engine_sandbox as tes
+
         monkeypatch.setattr(tes.torch, "save", fake_save)
 
         with pytest.raises(RuntimeError, match="simulated CUDA OOM"):
@@ -88,6 +90,7 @@ class TestSaveWithSentinelAtomicity:
                 f.write(b"\x00")
 
         import execute_tools.train_engine_sandbox as tes
+
         monkeypatch.setattr(tes.torch, "save", fake_save)
 
         _save_with_sentinel({"w": "stub"}, save_path, "exp_xyz")
@@ -107,6 +110,7 @@ class TestSaveWithSentinelAtomicity:
                 f.write(b"\x00")
 
         import execute_tools.train_engine_sandbox as tes
+
         monkeypatch.setattr(tes.torch, "save", fake_save)
 
         weird_exp_id = "round_03_explore_punet_v2"

@@ -30,26 +30,26 @@ See docs/resource_estimator_implement.md §10.5 + §10.14 Commit 4.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from core.server_configs import get_server_config
 
 
-def estimate_peak_bytes() -> Dict[str, Any]:
+def estimate_peak_bytes() -> dict[str, Any]:
     """Peak scoring VRAM. Zero by design (CPU-only FFT/SNR)."""
     return {
-        "phase":       "scoring",
+        "phase": "scoring",
         "total_bytes": 0,
-        "breakdown":   {},
+        "breakdown": {},
     }
 
 
 def estimate_wall_time_seconds(
-    sample_set: Dict[Any, List[int]],
+    sample_set: dict[Any, list[int]],
     *,
     num_workers: int = 8,
-    hostname: Optional[str] = None,
-) -> Dict[str, Any]:
+    hostname: str | None = None,
+) -> dict[str, Any]:
     """Estimate scoring wall-time in seconds.
 
     Args:
@@ -71,12 +71,12 @@ def estimate_wall_time_seconds(
     seconds = total_psd_segments * cfg.per_psd_segment_seconds / workers
 
     return {
-        "phase":   "scoring",
+        "phase": "scoring",
         "seconds": seconds,
         "breakdown": {
-            "total_psd_segments":      total_psd_segments,
-            "num_workers":             workers,
+            "total_psd_segments": total_psd_segments,
+            "num_workers": workers,
             "per_psd_segment_seconds": cfg.per_psd_segment_seconds,
-            "hostname":                cfg.hostname,
+            "hostname": cfg.hostname,
         },
     }

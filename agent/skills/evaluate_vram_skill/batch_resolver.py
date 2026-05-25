@@ -32,9 +32,10 @@ it is handed and ranks by bytes and intensity only. The guardrail test
 ``tests/unit/guardrails/test_no_model_name_branches.py`` (A.12) enforces
 the invariant across the whole VRAM stack.
 """
+
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 import torch
 import torch.nn as nn
@@ -46,13 +47,13 @@ from agent.skills.evaluate_vram_skill.structural_probe import (
     probe_activation_footprint,
 )
 
-
 # ── Candidate search space (§3.5 — descending powers of two down to 1) ─────
 
 _DEFAULT_CANDIDATE_BATCHES: tuple[int, ...] = (64, 32, 16, 8, 4, 2, 1)
 
 
 # ── Peak prediction ─────────────────────────────────────────────────────────
+
 
 def _predict_inference_peak_bytes(probe: ProbeResult) -> int:
     """Sum the inference-mode peak components per §3.5.
@@ -83,6 +84,7 @@ def _build_probe_input(batch_size: int, segmentation_size: int) -> torch.Tensor:
 
 
 # ── Public entry point ──────────────────────────────────────────────────────
+
 
 def resolve_inference_batch(
     model: nn.Module,
@@ -116,10 +118,10 @@ def resolve_inference_batch(
     if not candidate_batches:
         raise ValueError("candidate_batches must be non-empty.")
 
-    last_peak:         int = 0
-    last_vram_ok:      bool = False
+    last_peak: int = 0
+    last_vram_ok: bool = False
     last_intensity_ok: bool = False
-    last_B:            int = candidate_batches[-1]
+    last_B: int = candidate_batches[-1]
 
     for B in candidate_batches:
         probe = probe_activation_footprint(
@@ -129,17 +131,17 @@ def resolve_inference_batch(
             target_sample=None,
             mode="inference",
         )
-        peak         = _predict_inference_peak_bytes(probe)
-        vram_ok      = peak <= cap_bytes
+        peak = _predict_inference_peak_bytes(probe)
+        vram_ok = peak <= cap_bytes
         intensity_ok = compute_intensity.passes(B, segmentation_size)
 
         if vram_ok and intensity_ok:
             return B
 
-        last_peak         = peak
-        last_vram_ok      = vram_ok
+        last_peak = peak
+        last_vram_ok = vram_ok
         last_intensity_ok = intensity_ok
-        last_B            = B
+        last_B = B
 
     # Diagnose which cap was binding at the smallest attempted batch. Both
     # can be binding simultaneously (e.g. a huge T both blows VRAM and trips

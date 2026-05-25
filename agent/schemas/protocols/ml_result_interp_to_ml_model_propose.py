@@ -21,8 +21,14 @@ database_full_context   DB-backed transfer: interp agent writes the interpretati
                         StorageConfig backend. Raises NotImplementedError until wired.
 """
 
-from typing import List, Literal, Optional, Sequence
+from collections.abc import Sequence
+from typing import Literal
 
+from agent.schemas.hyperparam_tuning import (
+    ExpertAdviceInput,
+    HyperparamTuningOutput,
+    serialize_expert_advice,
+)
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.proposal import (
     AgentCard,
@@ -31,33 +37,28 @@ from agent.schemas.proposal import (
     ReasoningPipelineConfig,
     VocabEntry,
 )
-from agent.schemas.hyperparam_tuning import (
-    ExpertAdviceInput,
-    HyperparamTuningOutput,
-    serialize_expert_advice,
-)
 from agent.schemas.storage import StorageConfig
 
 
 def local_full_context(
     output: InterpretationOutput,
     storage: StorageConfig,
-    expert_context: Optional[List[ExpertContextItem]] = None,
-    vocab_seed: Optional[List[VocabEntry]] = None,
-    reasoning_pipeline: Optional[ReasoningPipelineConfig] = None,
-    human_advice: Optional[ExpertAdviceInput] = None,
-    mindset: Optional[str] = None,
-    agent_cards: Optional[List[AgentCard]] = None,
+    expert_context: list[ExpertContextItem] | None = None,
+    vocab_seed: list[VocabEntry] | None = None,
+    reasoning_pipeline: ReasoningPipelineConfig | None = None,
+    human_advice: ExpertAdviceInput | None = None,
+    mindset: str | None = None,
+    agent_cards: list[AgentCard] | None = None,
     # --- Run-level data + time-budget context (workflow-supplied) ---
-    is_trial: Optional[bool] = None,
-    trial_strategy: Optional[Literal["snapshot", "anchors", "target"]] = None,
-    trial_portion: Optional[float] = None,
-    target_files: Optional[List[int]] = None,
-    train_portion: Optional[float] = None,
-    sampling_seed: Optional[int] = None,
-    trial_time_budget_minutes: Optional[float] = None,
-    formal_time_budget_minutes: Optional[float] = None,
-    data_dir: Optional[str] = None,
+    is_trial: bool | None = None,
+    trial_strategy: Literal["snapshot", "anchors", "target"] | None = None,
+    trial_portion: float | None = None,
+    target_files: list[int] | None = None,
+    train_portion: float | None = None,
+    sampling_seed: int | None = None,
+    trial_time_budget_minutes: float | None = None,
+    formal_time_budget_minutes: float | None = None,
+    data_dir: str | None = None,
     # --- Cross-iteration feedback (Phase K.7 → Phase N — see §10.13, §14.N) ---
     recent_tune_outputs: Sequence[HyperparamTuningOutput] = (),
 ) -> ProposalInput:
@@ -130,18 +131,20 @@ def local_full_context(
     if human_advice is not None:
         advice_text = serialize_expert_advice(human_advice)
         if advice_text:
-            merged_context.append(ExpertContextItem(
-                source="human",
-                kind="human",
-                content=advice_text,
-                cite_id="human_advice",
-            ))
+            merged_context.append(
+                ExpertContextItem(
+                    source="human",
+                    kind="human",
+                    content=advice_text,
+                    cite_id="human_advice",
+                )
+            )
 
     result = {
-        "interpretation":       output.model_dump(),
+        "interpretation": output.model_dump(),
         "existing_model_types": list(output.model_types),
-        "expert_context":       [c.model_dump() for c in merged_context],
-        "storage":              storage.model_dump(),
+        "expert_context": [c.model_dump() for c in merged_context],
+        "storage": storage.model_dump(),
     }
 
     # Typed mirror of interpretation.per_model_score_tables. Populated only
@@ -157,8 +160,7 @@ def local_full_context(
     # didn't produce runtime_vocab (first iteration or legacy mode).
     if hasattr(output, "runtime_vocab") and output.runtime_vocab:
         result["vocab_seed"] = [
-            v.model_dump() if hasattr(v, "model_dump") else v
-            for v in output.runtime_vocab
+            v.model_dump() if hasattr(v, "model_dump") else v for v in output.runtime_vocab
         ]
     elif vocab_seed:
         result["vocab_seed"] = [v.model_dump() for v in vocab_seed]
@@ -171,8 +173,7 @@ def local_full_context(
 
     if agent_cards:
         result["agent_cards"] = [
-            c.model_dump() if hasattr(c, "model_dump") else c
-            for c in agent_cards
+            c.model_dump() if hasattr(c, "model_dump") else c for c in agent_cards
         ]
 
     # Run-level fields for the proposer's evaluate_time_skill gate. Each is
@@ -240,6 +241,5 @@ def database_full_context(
       - storage              : passed through from the orchestrator
     """
     raise NotImplementedError(
-        "database_full_context is not yet implemented. "
-        "Wire a Postgres StorageConfig backend first."
+        "database_full_context is not yet implemented. Wire a Postgres StorageConfig backend first."
     )

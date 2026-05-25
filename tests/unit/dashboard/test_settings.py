@@ -17,12 +17,12 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from dashboard.settings import DashboardSettings, load_settings, get_settings
-
+from dashboard.settings import DashboardSettings, get_settings, load_settings
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def write_yaml(content: str) -> str:
     """Write a YAML string to a temp file and return the path."""
@@ -35,6 +35,7 @@ def write_yaml(content: str) -> str:
 # ---------------------------------------------------------------------------
 # Missing config file
 # ---------------------------------------------------------------------------
+
 
 class TestMissingConfig:
     def test_missing_file_returns_defaults(self, tmp_path):
@@ -57,6 +58,7 @@ class TestMissingConfig:
 # ---------------------------------------------------------------------------
 # Valid full config
 # ---------------------------------------------------------------------------
+
 
 class TestFullConfig:
     def test_data_source_type(self):
@@ -110,6 +112,7 @@ class TestFullConfig:
 # Partial config — missing fields use defaults
 # ---------------------------------------------------------------------------
 
+
 class TestPartialConfig:
     def test_only_port_overridden(self):
         path = write_yaml("""
@@ -119,8 +122,8 @@ class TestPartialConfig:
         try:
             s = load_settings(path)
             assert s.server.port == 7777
-            assert s.server.host == "0.0.0.0"           # default
-            assert s.data_source.type == "local"         # default
+            assert s.server.host == "0.0.0.0"  # default
+            assert s.data_source.type == "local"  # default
             assert s.dashboard.refresh_interval_seconds == 30  # default
         finally:
             os.unlink(path)
@@ -138,6 +141,7 @@ class TestPartialConfig:
 # ---------------------------------------------------------------------------
 # Validation errors
 # ---------------------------------------------------------------------------
+
 
 class TestValidation:
     def test_invalid_data_source_type_raises(self):
@@ -166,6 +170,7 @@ class TestValidation:
 # ---------------------------------------------------------------------------
 # Caching behaviour
 # ---------------------------------------------------------------------------
+
 
 class TestCaching:
     def test_get_settings_returns_same_instance(self, tmp_path):

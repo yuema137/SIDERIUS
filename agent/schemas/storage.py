@@ -17,14 +17,14 @@ Backend support:
 
 from __future__ import annotations
 
-from typing import Optional
-from pydantic import BaseModel, Field
 from typing import Literal
 
+from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
 # Local filesystem backend
 # ---------------------------------------------------------------------------
+
 
 class LocalStorageConfig(BaseModel):
     """
@@ -50,14 +50,15 @@ class LocalStorageConfig(BaseModel):
     run_name: str = Field(
         default="v1",
         description="Identifier that namespaces output files within the workspace. "
-                    "Use a descriptive name to distinguish runs "
-                    "(e.g. 'baseline', 'attn_unet_v1').",
+        "Use a descriptive name to distinguish runs "
+        "(e.g. 'baseline', 'attn_unet_v1').",
     )
 
 
 # ---------------------------------------------------------------------------
 # Database backend — PLACEHOLDER
 # ---------------------------------------------------------------------------
+
 
 class PostgresStorageConfig(BaseModel):
     """
@@ -71,7 +72,7 @@ class PostgresStorageConfig(BaseModel):
 
     connection_string: str = Field(
         description="SQLAlchemy-compatible PostgreSQL connection string. "
-                    "e.g. 'postgresql+asyncpg://user:pass@localhost:5432/siderius'",
+        "e.g. 'postgresql+asyncpg://user:pass@localhost:5432/siderius'",
     )
     schema_name: str = Field(
         default="public",
@@ -80,13 +81,14 @@ class PostgresStorageConfig(BaseModel):
     run_name: str = Field(
         default="v1",
         description="Identifier that namespaces rows within the database, "
-                    "equivalent to run_name in LocalStorageConfig.",
+        "equivalent to run_name in LocalStorageConfig.",
     )
 
 
 # ---------------------------------------------------------------------------
 # Unified storage config — one field in every node's input schema
 # ---------------------------------------------------------------------------
+
 
 class StorageConfig(BaseModel):
     """
@@ -119,15 +121,15 @@ class StorageConfig(BaseModel):
     backend: Literal["local", "postgres"] = Field(
         default="local",
         description="Storage backend to use. "
-                    "'local' reads/writes JSON files on the filesystem. "
-                    "'postgres' uses a shared PostgreSQL database (not yet implemented).",
+        "'local' reads/writes JSON files on the filesystem. "
+        "'postgres' uses a shared PostgreSQL database (not yet implemented).",
     )
-    local: Optional[LocalStorageConfig] = Field(
+    local: LocalStorageConfig | None = Field(
         default=None,
         description="Local filesystem config. Required when backend='local'.",
     )
-    postgres: Optional[PostgresStorageConfig] = Field(
+    postgres: PostgresStorageConfig | None = Field(
         default=None,
         description="PostgreSQL config. Required when backend='postgres'. "
-                    "PLACEHOLDER — implementation pending.",
+        "PLACEHOLDER — implementation pending.",
     )

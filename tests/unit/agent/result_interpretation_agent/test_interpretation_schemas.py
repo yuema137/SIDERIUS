@@ -1,25 +1,31 @@
 """
 Tests for agent/schemas/interpretation.py
 """
+
 import pytest
 from pydantic import ValidationError
 
 from agent.schemas.interpretation import (
-    InterpretationInput, InterpretationOutput, ModelRunSummary,
+    InterpretationInput,
+    InterpretationOutput,
+    ModelRunSummary,
 )
-
 
 # ---------------------------------------------------------------------------
 # ModelRunSummary
 # ---------------------------------------------------------------------------
 
-class TestModelRunSummary:
 
+class TestModelRunSummary:
     def test_valid(self):
         s = ModelRunSummary(
-            model_type="punet", run_name="v1", status="completed",
-            completed_rounds=10, best_denoising_score=1.5,
-            worst_denoising_score=0.3, best_config={"model_config": {}},
+            model_type="punet",
+            run_name="v1",
+            status="completed",
+            completed_rounds=10,
+            best_denoising_score=1.5,
+            worst_denoising_score=0.3,
+            best_config={"model_config": {}},
             round_scores=[0.3, 0.8, 1.2, 1.5],
             round_conclusions=["Bad", "Better", "Good", "Best"],
         )
@@ -29,7 +35,9 @@ class TestModelRunSummary:
 
     def test_minimal(self):
         s = ModelRunSummary(
-            model_type="fcnet", run_name="v1", status="completed",
+            model_type="fcnet",
+            run_name="v1",
+            status="completed",
             completed_rounds=0,
         )
         assert s.round_scores == []
@@ -40,14 +48,18 @@ class TestModelRunSummary:
 # InterpretationInput
 # ---------------------------------------------------------------------------
 
-class TestInterpretationInput:
 
+class TestInterpretationInput:
     def test_valid_with_summaries(self):
         inp = InterpretationInput(
-            summaries=[ModelRunSummary(
-                model_type="punet", run_name="v1", status="completed",
-                completed_rounds=5,
-            )],
+            summaries=[
+                ModelRunSummary(
+                    model_type="punet",
+                    run_name="v1",
+                    status="completed",
+                    completed_rounds=5,
+                )
+            ],
         )
         assert inp.storage.backend == "local"
 
@@ -58,10 +70,14 @@ class TestInterpretationInput:
 
     def test_valid_with_both(self):
         inp = InterpretationInput(
-            summaries=[ModelRunSummary(
-                model_type="punet", run_name="v1", status="completed",
-                completed_rounds=5,
-            )],
+            summaries=[
+                ModelRunSummary(
+                    model_type="punet",
+                    run_name="v1",
+                    status="completed",
+                    completed_rounds=5,
+                )
+            ],
             model_types=["fcnet"],
         )
         assert len(inp.summaries) == 1
@@ -136,8 +152,8 @@ class TestInterpretationInput:
 # InterpretationOutput
 # ---------------------------------------------------------------------------
 
-class TestInterpretationOutput:
 
+class TestInterpretationOutput:
     def test_valid_full(self):
         out = InterpretationOutput(
             model_types=["punet"],

@@ -1,15 +1,15 @@
 """
 Tests for agent/schemas/proposal.py
 """
+
 import pytest
 from pydantic import ValidationError
 
-from agent.schemas.proposal import ProposalInput, ProposalOutput
 from agent.schemas.hyperparam_tuning import ExpertAdvice, GateExhaustionInfo
+from agent.schemas.proposal import ProposalInput, ProposalOutput
 
 
 class TestProposalInput:
-
     def test_valid_minimal(self):
         inp = ProposalInput(interpretation={"take_home_message": "need new arch"})
         assert inp.existing_model_types == []
@@ -160,9 +160,7 @@ class TestProposalInputRecentGateExhaustions:
             recent_gate_exhaustions=[gate_exhaustion.model_dump()],
         )
         assert isinstance(inp.recent_gate_exhaustions[0], GateExhaustionInfo)
-        assert inp.recent_gate_exhaustions[0].summary_message.startswith(
-            "All 9 attempts"
-        )
+        assert inp.recent_gate_exhaustions[0].summary_message.startswith("All 9 attempts")
 
     def test_round_trip_preserves_entries(self, gate_exhaustion):
         """JSON round-trip must preserve every entry verbatim — the protocol
@@ -173,10 +171,7 @@ class TestProposalInputRecentGateExhaustions:
         )
         round_tripped = ProposalInput.model_validate_json(inp.model_dump_json())
         assert len(round_tripped.recent_gate_exhaustions) == 2
-        assert (
-            round_tripped.recent_gate_exhaustions[0].model_dump()
-            == gate_exhaustion.model_dump()
-        )
+        assert round_tripped.recent_gate_exhaustions[0].model_dump() == gate_exhaustion.model_dump()
         assert (
             round_tripped.recent_gate_exhaustions[1].model_dump()
             == self._second_gate_exhaustion().model_dump()
@@ -212,7 +207,6 @@ class TestProposalInputRecentGateExhaustions:
 
 
 class TestProposalOutput:
-
     @pytest.fixture
     def valid_expert_advice(self):
         return ExpertAdvice(

@@ -30,10 +30,10 @@ from unittest.mock import MagicMock, patch
 
 from agent.llm_bridge import LLMBridge
 
-
 # ---------------------------------------------------------------------------
 # Helpers (mirror tests/unit/agent/llm_bridge/test_record_usage.py)
 # ---------------------------------------------------------------------------
+
 
 def _usage(prompt: int, completion: int, total: int) -> SimpleNamespace:
     return SimpleNamespace(
@@ -69,8 +69,13 @@ def _read_rows(path: Path) -> list[dict]:
     return [json.loads(ln) for ln in path.read_text().splitlines() if ln.strip()]
 
 
-def _record(bridge: LLMBridge, system: str, user: str,
-            components: dict | None, label: str = "proposer.proposing") -> dict:
+def _record(
+    bridge: LLMBridge,
+    system: str,
+    user: str,
+    components: dict | None,
+    label: str = "proposer.proposing",
+) -> dict:
     """Drive the bridge through one generate() call and return the row."""
     bridge.client.chat.completions.create.return_value = _chat_response(
         '{"ok": 1}',
@@ -85,6 +90,7 @@ def _record(bridge: LLMBridge, system: str, user: str,
 # ---------------------------------------------------------------------------
 # (1) Non-empty components → 10th key added; sum(all 10) == chars.total
 # ---------------------------------------------------------------------------
+
 
 def test_non_empty_components_get_template_scaffolding_key(tmp_path):
     """The 9-key components dict is augmented with a 10th catch-all so
@@ -127,13 +133,13 @@ def test_non_empty_components_get_template_scaffolding_key(tmp_path):
 # (2) Empty components → no 10th key (non-proposer rows untouched)
 # ---------------------------------------------------------------------------
 
+
 def test_empty_components_stay_empty(tmp_path):
     """Non-proposer call sites pass no components; the row's components
     dict must remain empty — we do not invent a single-key dict."""
     bridge = _make_bridge(tmp_path)
 
-    row = _record(bridge, "sys", "user", components=None,
-                  label="tuner.planner")
+    row = _record(bridge, "sys", "user", components=None, label="tuner.planner")
 
     assert row["components"] == {}
     assert "template_and_scaffolding" not in row["components"]
@@ -143,8 +149,7 @@ def test_explicit_empty_components_stay_empty(tmp_path):
     """Same contract when the caller passes ``components={}`` explicitly."""
     bridge = _make_bridge(tmp_path)
 
-    row = _record(bridge, "sys", "user", components={},
-                  label="implementor.code")
+    row = _record(bridge, "sys", "user", components={}, label="implementor.code")
 
     assert row["components"] == {}
 
@@ -152,6 +157,7 @@ def test_explicit_empty_components_stay_empty(tmp_path):
 # ---------------------------------------------------------------------------
 # (3) Over-counting components → 10th key clamped to 0 (defensive)
 # ---------------------------------------------------------------------------
+
 
 def test_overcount_clamps_to_zero(tmp_path):
     """If a future audit-hook bug double-counts a payload so that
@@ -183,6 +189,7 @@ def test_overcount_clamps_to_zero(tmp_path):
 # ---------------------------------------------------------------------------
 # (4) Exact-match case → 10th key is 0, key still present (lossless invariant)
 # ---------------------------------------------------------------------------
+
 
 def test_exact_match_yields_zero_value(tmp_path):
     """When the 9 keys exactly cover chars.total (no template wrapper),

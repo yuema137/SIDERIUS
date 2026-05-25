@@ -18,6 +18,7 @@ The PLANNER_PROMPT system text no longer carries the abstract
 
 See docs/resource_estimator_implement.md §10.3 / §10.11.
 """
+
 from agent.prompts import (
     PLANNER_PROMPT,
     RESOURCE_GATE_GUIDANCE_BLOCK,
@@ -25,13 +26,12 @@ from agent.prompts import (
     get_planner_user_prompt,
 )
 
-
 # ---------------------------------------------------------------------------
 # PLANNER_PROMPT — the abstract GPU MEMORY RULES section is gone (K.6 §10.11)
 # ---------------------------------------------------------------------------
 
-class TestPlannerSystemPromptCleanup:
 
+class TestPlannerSystemPromptCleanup:
     def test_gpu_memory_rules_section_removed(self):
         """K.6: the abstract 'GPU MEMORY RULES' header was replaced by the
         per-round numeric block + static guidance. Confirm it no longer
@@ -43,8 +43,8 @@ class TestPlannerSystemPromptCleanup:
 # RESOURCE_GATE_GUIDANCE_BLOCK — static text, verbatim from §10.3
 # ---------------------------------------------------------------------------
 
-class TestStaticGuidanceBlock:
 
+class TestStaticGuidanceBlock:
     def test_header_present(self):
         assert "[RESOURCE GATE — RESOLVING OVER-BUDGET CONFIGS]" in RESOURCE_GATE_GUIDANCE_BLOCK
 
@@ -65,8 +65,8 @@ class TestStaticGuidanceBlock:
 # _format_active_resource_budgets_block — empty when nothing to show
 # ---------------------------------------------------------------------------
 
-class TestActiveBudgetsBlockEmpty:
 
+class TestActiveBudgetsBlockEmpty:
     def test_empty_when_no_budgets_and_no_estimates(self):
         out = _format_active_resource_budgets_block()
         assert out == ""
@@ -90,8 +90,8 @@ class TestActiveBudgetsBlockEmpty:
 # _format_active_resource_budgets_block — full render with both axes
 # ---------------------------------------------------------------------------
 
-class TestActiveBudgetsBlockFull:
 
+class TestActiveBudgetsBlockFull:
     def test_trial_mode_full_render_matches_spec_example(self):
         """Mirror the §10.3 example: round 3, trial mode, VRAM over budget,
         Time under budget, batch_size 4."""
@@ -144,8 +144,8 @@ class TestActiveBudgetsBlockFull:
 # _format_active_resource_budgets_block — disabled-axis handling
 # ---------------------------------------------------------------------------
 
-class TestActiveBudgetsBlockDisabledAxis:
 
+class TestActiveBudgetsBlockDisabledAxis:
     def test_vram_budget_none_renders_disabled_line_no_factor(self):
         """When the active-mode VRAM budget is None, the VRAM line says
         '(no budget — gate disabled)' and no factor is shown for that
@@ -157,7 +157,7 @@ class TestActiveBudgetsBlockDisabledAxis:
             formal_vram_budget_gb=None,
             trial_time_budget_minutes=20.0,
             formal_time_budget_minutes=240.0,
-            last_vram_estimate_gb=5.0,           # ignored — no budget to compare against
+            last_vram_estimate_gb=5.0,  # ignored — no budget to compare against
             last_time_estimate_minutes=8.0,
             last_batch_size=4,
         )
@@ -189,8 +189,8 @@ class TestActiveBudgetsBlockDisabledAxis:
 # _format_active_resource_budgets_block — no prior estimate handling
 # ---------------------------------------------------------------------------
 
-class TestActiveBudgetsBlockNoPriorEstimate:
 
+class TestActiveBudgetsBlockNoPriorEstimate:
     def test_round_1_no_prior_estimate_renders_budget_only(self):
         """Round 1 before any pre-flight has run: budgets are known, but
         last_*_estimate / last_batch_size / last_mode are all None.
@@ -221,8 +221,8 @@ class TestActiveBudgetsBlockNoPriorEstimate:
 # get_planner_user_prompt integration
 # ---------------------------------------------------------------------------
 
-class TestPlannerPromptIntegration:
 
+class TestPlannerPromptIntegration:
     def test_blocks_absent_when_no_budgets_or_estimates(self):
         """No regression on existing callers — the prompt does NOT include
         the [ACTIVE RESOURCE BUDGETS] block when no resource kwargs are

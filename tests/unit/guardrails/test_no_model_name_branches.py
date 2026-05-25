@@ -26,6 +26,7 @@ excluded from the live-code scan via ``xfail`` to keep the guardrail useful
 for the already-clean ``evaluate_vram_skill/`` surface without blocking on
 out-of-pass work.
 """
+
 from __future__ import annotations
 
 import re
@@ -45,10 +46,10 @@ _MODEL_NAME_PATTERN = re.compile(
 # Files / dirs to scan — pinned by §5.4.
 _SCAN_TARGETS: list[tuple[str, str]] = [
     # (label, path — may be a file or a directory)
-    ("evaluate_vram_skill",  "agent/skills/evaluate_vram_skill"),
-    ("training_estimator",   "agent/skills/training_skill/estimator.py"),
-    ("inference_estimator",  "agent/skills/inference_skill/estimator.py"),
-    ("inference_defaults",   "core/inference_defaults.py"),
+    ("evaluate_vram_skill", "agent/skills/evaluate_vram_skill"),
+    ("training_estimator", "agent/skills/training_skill/estimator.py"),
+    ("inference_estimator", "agent/skills/inference_skill/estimator.py"),
+    ("inference_defaults", "core/inference_defaults.py"),
 ]
 
 # Known-dirty targets pending their unblocking refactor. Each entry documents
@@ -57,9 +58,9 @@ _SCAN_TARGETS: list[tuple[str, str]] = [
 # output so a regression (new violation in a file we thought we'd only
 # shrink) is still visible.
 _PENDING_CLEANUP = {
-    "training_estimator":   "A.6 rewrites training_skill/estimator.py",
-    "inference_estimator":  "A.7 rewrites inference_skill/estimator.py",
-    "inference_defaults":   "A.9 deletes core/inference_defaults.py",
+    "training_estimator": "A.6 rewrites training_skill/estimator.py",
+    "inference_estimator": "A.7 rewrites inference_skill/estimator.py",
+    "inference_defaults": "A.9 deletes core/inference_defaults.py",
 }
 
 
@@ -99,7 +100,7 @@ def _scan_file(path: Path) -> list[tuple[int, str]]:
 
     # Pass 1 — find docstring / fenced-code regions to exclude.
     in_fenced_block = False
-    in_docstring    = False
+    in_docstring = False
     docstring_delim = None
     allowed_line_numbers: set[int] = set()
 
@@ -181,5 +182,5 @@ def test_no_model_name_branches(label: str, target_path: str) -> None:
         f"[{label}] Principle 2 violations — model-name branching in live code:\n"
         + "\n".join(all_violations)
         + "\n\nMove to a generic predicate (introspection, metadata flag, "
-          "contract-level dispatch). Do not re-introduce model-family strings."
+        "contract-level dispatch). Do not re-introduce model-family strings."
     )

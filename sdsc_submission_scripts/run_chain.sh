@@ -1,41 +1,67 @@
 #!/bin/bash
 # ---------------------------------------------------------------------------
-# SIDERIUS Iteration Chain — unified orchestrator (Phase 6.8 Commit 13)
+# SIDERIUS Iteration Chain — ENTRY POINT (exec, do not source)
 # ---------------------------------------------------------------------------
-# Full runbook: docs/running_chain_test.md
-# Shared logic: sdsc_submission_scripts/_chain_common.sh
+# Role   : single user-facing entry script for chain runs. Owns the
+#          mode-aware pieces (python resolution, auto-resume, slurm vs
+#          subprocess submission) and delegates the loop body to the
+#          shared library.
+# Library: sources sdsc_submission_scripts/_chain_common.sh, which owns
+#          the mode-agnostic defaults / arg parser / iter loop body.
+# Folder : see sdsc_submission_scripts/README.md for the full file map.
+# Doc    : docs/running_chain_test.md is the operator runbook.
 # ---------------------------------------------------------------------------
-# This is the single user-facing entry point for chain runs. Backend is
-# selected by --mode:
+# What lives here (and not in _chain_common.sh):
+#   * Python interpreter resolution (.venv > uv run > system python3) +
+#     version guard (>= 3.10) + env passthrough for child processes
+#   * --auto_resume — query scripts/inspect_run_state.py for --next-iter
+#   * --force_fresh / stale-fresh safety guard
+#   * --start_iter manual pin + idempotency check
+#   * Mode-specific submit_iteration implementations:
+#       submit_iteration_lilab : foreground subprocess (dev / dev-GPU)
+#       submit_iteration_sdsc  : sbatch + afterany dependency chain (HPC)
+#   * Final summary print (per-iter manifest / per-iter job ID)
 #
+# What does NOT live here (lives in _chain_common.sh instead):
+#   * Default values, CLI parser, advice-file loader
+#   * Per-iter app-arg construction (build_app_args)
+#   * The iteration loop body (run_chain)
+#
+# Mode selection (required):
 #   --mode lilab   foreground subprocess; suitable for dev / dev-GPU
 #   --mode sdsc    sbatch + afterany dependency chain (Slurm HPC)
 #
-# Other behaviour is identical across modes: same flags, same defaults,
-# same per-iter app-arg construction (all in _chain_common.sh).
+# Required flags:
+#   --workspace DIR      chain workspace root
+#   --seed_paths P [P…]  one or more seed run_output JSONs
+#   --run_name NAME      chain-level run name (pins immutable run_id)
 #
-# Useful flags:
-#   --dry-run            walk the chain and print the exact commands
-#                        without touching the workspace or submitting jobs
-#   --workspace DIR      chain workspace root (required)
-#   --num_iterations N   number of iterations to run (default 2)
-#   --seed_paths P [P…]  one or more seed run_output JSONs (required)
+# Frequently-used flags:
+#   --num_iterations N   number of iterations (default 2)
+#   --dry-run            walk the chain, print exact commands, no side effects
+#   --auto_resume        pick up where a partial chain left off (default ON)
+#   --no_auto_resume     force fresh start regardless of workspace state
+#   --start_iter N       manual pin (overrides auto-resume)
 #
 # Usage examples:
 #
 #   bash sdsc_submission_scripts/run_chain.sh --mode lilab \
 #       --workspace /home/klz/Data/SIDEREIS_DATA/lilab_chain_v1 \
+#       --run_name lilab_v1 \
 #       --num_iterations 3 \
 #       --seed_paths /path/to/seed.json
 #
 #   bash sdsc_submission_scripts/run_chain.sh --mode sdsc --dry-run \
 #       --workspace /expanse/.../exploration_v1 \
+#       --run_name expanse_v1 \
 #       --num_iterations 5 \
 #       --seed_paths /scratch/.../seed.json \
 #       --partition gpu-shared --time 06:00:00
 #
-# Auto-resume wiring (--auto_resume) lands in Commit 13.B. This file
-# currently implements Tasks 1, 2, 5, and a basic slice of Task 6.
+# History: introduced in Phase 6.8 Commit 13 to consolidate the legacy
+# run_iteration_chain.sh (SDSC) and run_iteration_chain_lilab.sh (lilab)
+# entries; both legacy stubs now exec this file and emit a deprecation
+# warning. Their removal is tracked under Commit 15.
 
 set -e
 set -o pipefail

@@ -29,14 +29,12 @@ Scenarios covered:
     No iteration_results, failed status, or missing score MUST resolve
     to False - the test is not allowed to silently pass a broken run.
 """
-from __future__ import annotations
 
-from typing import List
+from __future__ import annotations
 
 import pytest
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
-
 
 # ---------------------------------------------------------------------------
 # Predicate under test - copied VERBATIM from
@@ -48,9 +46,10 @@ from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
 # If the integration test changes the predicate, mirror the change here.
 # ---------------------------------------------------------------------------
 
+
 def decide_iter1_auto_shrunk(
     iter1_tuning: HyperparamTuningOutput | None,
-    rejection_strings: List[str],
+    rejection_strings: list[str],
 ) -> bool:
     """Replica of the integration test's inline ``iter1_auto_shrunk`` boolean."""
     return (
@@ -107,8 +106,8 @@ def _make_tuning(
 # assert and Layer-3 param/keyword audits still run on the rejection path.
 # ---------------------------------------------------------------------------
 
-class TestFailureRejectionCorrectionPath:
 
+class TestFailureRejectionCorrectionPath:
     def test_one_rejection_disables_auto_shrink_flag(self):
         iter1 = _make_tuning(status="completed", score=0.91)
         rej = ["[PHYSICAL REJECTION] iter-1 transformer overshot 29.10 GB"]
@@ -137,11 +136,12 @@ class TestFailureRejectionCorrectionPath:
 # (``completed`` and ``partial``) are exercised.
 # ---------------------------------------------------------------------------
 
-class TestSuccessfulAutoShrinkPath:
 
+class TestSuccessfulAutoShrinkPath:
     @pytest.mark.parametrize("status", _SUCCESS_STATUSES)
     def test_zero_rejections_plus_success_status_plus_score_yields_true(
-        self, status: str,
+        self,
+        status: str,
     ):
         iter1 = _make_tuning(status=status, score=0.85)
         rej: list[str] = []
@@ -164,8 +164,8 @@ class TestSuccessfulAutoShrinkPath:
 # Negative gates - the predicate must NOT silently pass a broken run.
 # ---------------------------------------------------------------------------
 
-class TestNegativeGates:
 
+class TestNegativeGates:
     def test_none_iter1_tuning_is_false(self):
         assert decide_iter1_auto_shrunk(None, []) is False
 
@@ -192,8 +192,8 @@ class TestNegativeGates:
 # against the schema so the dual-path design cannot rot silently.
 # ---------------------------------------------------------------------------
 
-class TestPredicateLiteralIsSchemaValid:
 
+class TestPredicateLiteralIsSchemaValid:
     def test_predicate_returns_true_for_at_least_one_schema_valid_status(self):
         """The auto-shrink branch must be reachable by at least one Tuner
         success status the schema actually emits. If this assertion fails,

@@ -1,5 +1,6 @@
 from core.sandbox_executor import TidmadSandbox
 
+
 def run_skill(sandbox: TidmadSandbox, **kwargs):
     """Skill Wrapper for inference.
 

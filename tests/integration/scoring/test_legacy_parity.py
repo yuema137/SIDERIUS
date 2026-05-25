@@ -30,6 +30,7 @@ this patch is necessary on numpy ≥ 2.0.
 Markers: ``@pytest.mark.real_run`` — requires ``abra_validation_0000.h5``
 at ``TIDMAD_DATA_DIR``. Skipped automatically if absent.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -84,14 +85,17 @@ def legacy_fine_score(data_paths):
 
 
 class TestLegacyParity:
-
     def test_calculate_score_coarse(self, data_paths, legacy_coarse_score):
         """``compute_raw_baseline._calculate_score`` — coarse parity."""
         from compute_raw_baseline import _calculate_score
+
         data_dir, fname = data_paths
         score_new = _calculate_score(
-            data_dir=data_dir, fname=fname,
-            coarse=True, parallel=True, num_workers=8,
+            data_dir=data_dir,
+            fname=fname,
+            coarse=True,
+            parallel=True,
+            num_workers=8,
         )
         delta = abs(score_new - legacy_coarse_score)
         assert delta < _PARITY_TOL, (
@@ -102,10 +106,14 @@ class TestLegacyParity:
     def test_calculate_score_fine(self, data_paths, legacy_fine_score):
         """``compute_raw_baseline._calculate_score`` — fine parity (slow)."""
         from compute_raw_baseline import _calculate_score
+
         data_dir, fname = data_paths
         score_new = _calculate_score(
-            data_dir=data_dir, fname=fname,
-            coarse=False, parallel=True, num_workers=8,
+            data_dir=data_dir,
+            fname=fname,
+            coarse=False,
+            parallel=True,
+            num_workers=8,
         )
         delta = abs(score_new - legacy_fine_score)
         assert delta < _PARITY_TOL, (
@@ -125,6 +133,7 @@ class TestLegacyParity:
         — matching legacy's ``process_iteration`` semantics.
         """
         from execute_tools.scoring_utils import score_vector
+
         data_dir, fname = data_paths
         _, score_new, _, _ = score_vector(
             data_dir=data_dir,

@@ -23,6 +23,7 @@ Coverage: all 14 cognitive labels.
     causal_reasoning, proposing} + implementor.{reasoning, code,
     repair} + validator.code_review.
 """
+
 from __future__ import annotations
 
 import ast
@@ -41,10 +42,10 @@ from agent.schemas.proposal import FalsifiablePrediction, ProposalOutput
 from agent.schemas.telemetry import LLMBridgeContextError
 from agent.schemas.validator import LLMCodeReview
 
-
 # ===================================================================
 # Schema round-trip tests — one per B2a label
 # ===================================================================
+
 
 def test_tuner_planner_validates_against_experimentplan():
     """``tuner.planner`` synthetic dict must round-trip through ``ExperimentPlan``.
@@ -113,16 +114,18 @@ def test_interpretation_per_model_has_all_8_fields():
         "efficiency_assessment",
         "strategy_assessment",
     }
-    assert expected_fields.issubset(raw.keys()), (
-        f"missing keys: {expected_fields - raw.keys()}"
-    )
+    assert expected_fields.issubset(raw.keys()), f"missing keys: {expected_fields - raw.keys()}"
     assert isinstance(raw["key_findings"], list)
     assert isinstance(raw["bottlenecks"], list)
     # The scalar string fields must be non-empty so downstream prompt
     # rendering does not fall back to "N/A".
     for f in (
-        "best_config_analysis", "score_trend", "per_file_analysis",
-        "data_sensitivity", "efficiency_assessment", "strategy_assessment",
+        "best_config_analysis",
+        "score_trend",
+        "per_file_analysis",
+        "data_sensitivity",
+        "efficiency_assessment",
+        "strategy_assessment",
     ):
         assert isinstance(raw[f], str) and raw[f], f"empty scalar field: {f!r}"
 
@@ -154,6 +157,7 @@ def test_interpretation_dedup_returns_false_default():
 # Entry-point routing tests — confirm parent methods land in synth dispatch
 # ===================================================================
 
+
 def test_plan_method_routes_to_synthesiser():
     """The inherited ``plan()`` calls ``self.generate(label="tuner.planner")``
     which calls ``self._chat_json(...)``. The stub's ``_chat_json``
@@ -178,7 +182,9 @@ def test_generate_with_known_label_routes_to_synthesiser():
     """``generate(label="interpretation.dedup")`` must dispatch to dedup synth."""
     bridge = StubLLMBridge()
     raw = bridge.generate(
-        "system", "user", label="interpretation.dedup",
+        "system",
+        "user",
+        label="interpretation.dedup",
     )
     assert raw["is_duplicate"] is False
 
@@ -186,6 +192,7 @@ def test_generate_with_known_label_routes_to_synthesiser():
 # ===================================================================
 # Infrastructure tests — must hold for every B2a + B2b label
 # ===================================================================
+
 
 def test_does_not_construct_openai_client():
     """The stub must work with no API key and no network. Both client
@@ -217,13 +224,15 @@ def test_record_usage_is_no_op():
     bridge._run_name = "stub_run"
     bridge._iter = 0
     bridge._record_usage(
-        response=None, label="any.label",
-        system_prompt="x", user_prompt="y",
-        model_name="m", provider="p",
+        response=None,
+        label="any.label",
+        system_prompt="x",
+        user_prompt="y",
+        model_name="m",
+        provider="p",
     )
     assert not bridge._token_usage_path.exists(), (
-        "stub bridge wrote a row to token_usage.jsonl — defensive override "
-        "of _record_usage failed"
+        "stub bridge wrote a row to token_usage.jsonl — defensive override of _record_usage failed"
     )
 
 
@@ -263,7 +272,9 @@ def test_tool_call_raises_not_implemented():
     bridge = StubLLMBridge()
     with pytest.raises(NotImplementedError) as excinfo:
         bridge.tool_call(
-            "system", "user", tools=[],
+            "system",
+            "user",
+            tools=[],
             label="validator.code_review",
         )
     assert "tool_call" in str(excinfo.value)
@@ -274,8 +285,10 @@ def test_set_run_context_works_after_init(tmp_path: Path):
     smoke harness can bind a workspace + iter exactly as a real run."""
     bridge = StubLLMBridge()
     bridge.set_run_context(
-        workspace=tmp_path, iter=0,
-        run_name="stub_smoke", run_id="stub_smoke-x-1",
+        workspace=tmp_path,
+        iter=0,
+        run_name="stub_smoke",
+        run_id="stub_smoke-x-1",
     )
     assert bridge._iter == 0
     assert bridge._run_id == "stub_smoke-x-1"
@@ -289,8 +302,10 @@ def test_emit_marker_still_writes(tmp_path: Path):
     """
     bridge = StubLLMBridge()
     bridge.set_run_context(
-        workspace=tmp_path, iter=0,
-        run_name="stub_smoke", run_id="stub_smoke-y-1",
+        workspace=tmp_path,
+        iter=0,
+        run_name="stub_smoke",
+        run_id="stub_smoke-y-1",
     )
     bridge.emit_marker(
         label="interpretation.per_model_skipped",
@@ -315,6 +330,7 @@ def test_is_subclass_of_llm_bridge():
 # ===================================================================
 # B2b — Schema round-trip tests for proposer / implementor / validator
 # ===================================================================
+
 
 def test_proposer_legacy_reasoning_returns_string():
     """Free-text label: caller at ``ml_model_proposal_agent.py:922`` only
@@ -415,8 +431,8 @@ def test_implementor_code_assembles_to_valid_plugin():
     on this), and (c) survive end-to-end through
     ``MLModelImplementor._validate_code`` — AST parse + smoke-test
     forward pass + baseline schema compatibility, all green."""
-    from nodes.ml_model_implementor import _assemble_plugin, MLModelImplementor
     from agent.schemas.implementor import ImplementorInput
+    from nodes.ml_model_implementor import MLModelImplementor, _assemble_plugin
 
     bridge = StubLLMBridge()
     bridge._iter = 5
@@ -424,8 +440,12 @@ def test_implementor_code_assembles_to_valid_plugin():
 
     # Dict shape contract — every key the assembler reads must be present.
     for key in (
-        "extra_imports", "config_fields_code", "config_validators_code",
-        "init_body", "forward_body", "config_fields",
+        "extra_imports",
+        "config_fields_code",
+        "config_validators_code",
+        "init_body",
+        "forward_body",
+        "config_fields",
     ):
         assert key in code, f"implementor.code missing key: {key!r}"
 
@@ -445,13 +465,13 @@ def test_implementor_code_assembles_to_valid_plugin():
         mathematical_definition="stub mathematical definition",
         baseline_config={
             "model_config": {
-                "model_type":         _synth_stub_model_name(5, "a"),
-                "segmentation_size":  40000,
-                "batch_size":         1,
-                "hidden_dim":         8,
+                "model_type": _synth_stub_model_name(5, "a"),
+                "segmentation_size": 40000,
+                "batch_size": 1,
+                "hidden_dim": 8,
             },
             "train_config": {"epochs": 1, "batch_size": 1, "lr": 1e-3},
-            "loss_config":  {"loss_type": "ce"},
+            "loss_config": {"loss_type": "ce"},
         },
     )
     err = MLModelImplementor._validate_code(code, inp)

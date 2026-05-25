@@ -18,16 +18,16 @@ Validates:
     - 'segmentation_size' key rejected (proposer owns it)
     - mixed dict with one forbidden key raises on that key
 """
+
 import pytest
 from pydantic import ValidationError
 
 from agent.schemas.implementor import (
-    ConfigAdjustment,
-    ImplementorOutput,
     _FORBIDDEN_ADJUSTMENT_FIELDS,
     _MAX_ADJUSTMENT_DELTA,
+    ConfigAdjustment,
+    ImplementorOutput,
 )
-
 
 # ---- minimal valid ImplementorOutput kwargs (used across tests) ----
 
@@ -46,12 +46,13 @@ _BASE_OUTPUT_KW = {
 # ConfigAdjustment — single-entry policy
 # =====================================================================
 
-class TestConfigAdjustmentNumeric:
 
+class TestConfigAdjustmentNumeric:
     def test_within_20pct_passes(self):
         # 100 -> 110 is 10% — well within
         adj = ConfigAdjustment(
-            original_value=100, adjusted_value=110,
+            original_value=100,
+            adjusted_value=110,
             reason="snap to multiple_of=10",
         )
         assert adj.adjusted_value == 110
@@ -59,7 +60,8 @@ class TestConfigAdjustmentNumeric:
     def test_at_exactly_20pct_passes(self):
         # Boundary is inclusive: 100 -> 120 is exactly 20%
         adj = ConfigAdjustment(
-            original_value=100, adjusted_value=120,
+            original_value=100,
+            adjusted_value=120,
             reason="boundary case",
         )
         assert adj.adjusted_value == 120
@@ -67,7 +69,8 @@ class TestConfigAdjustmentNumeric:
     def test_negative_delta_at_boundary_passes(self):
         # 5 -> 4 is exactly 20% down (the canonical kernel-size example)
         adj = ConfigAdjustment(
-            original_value=5, adjusted_value=4,
+            original_value=5,
+            adjusted_value=4,
             reason="5 -> 4 to satisfy multiple_of=2 on refiner_kernel_size",
         )
         assert adj.adjusted_value == 4
@@ -76,7 +79,8 @@ class TestConfigAdjustmentNumeric:
         # 100 -> 80 is 20% but 100 -> 75 is 25% — over the line
         with pytest.raises(ValidationError) as exc:
             ConfigAdjustment(
-                original_value=100, adjusted_value=75,
+                original_value=100,
+                adjusted_value=75,
                 reason="too aggressive",
             )
         msg = str(exc.value)
@@ -86,18 +90,19 @@ class TestConfigAdjustmentNumeric:
     def test_mixed_int_float_within_range(self):
         # 10 -> 10.5 is 5% — fine
         adj = ConfigAdjustment(
-            original_value=10, adjusted_value=10.5,
+            original_value=10,
+            adjusted_value=10.5,
             reason="float snap",
         )
         assert adj.adjusted_value == 10.5
 
 
 class TestConfigAdjustmentCategorical:
-
     def test_bool_original_rejected(self):
         with pytest.raises(ValidationError) as exc:
             ConfigAdjustment(
-                original_value=True, adjusted_value=False,
+                original_value=True,
+                adjusted_value=False,
                 reason="flip flag",
             )
         assert "bool" in str(exc.value).lower()
@@ -106,7 +111,8 @@ class TestConfigAdjustmentCategorical:
         # int -> bool is still categorical — bool subclasses int so check both sides
         with pytest.raises(ValidationError) as exc:
             ConfigAdjustment(
-                original_value=1, adjusted_value=True,
+                original_value=1,
+                adjusted_value=True,
                 reason="weird coerce",
             )
         assert "bool" in str(exc.value).lower()
@@ -114,7 +120,8 @@ class TestConfigAdjustmentCategorical:
     def test_string_rejected(self):
         with pytest.raises(ValidationError) as exc:
             ConfigAdjustment(
-                original_value="relu", adjusted_value="gelu",
+                original_value="relu",
+                adjusted_value="gelu",
                 reason="change activation",
             )
         assert "numeric" in str(exc.value).lower()
@@ -122,25 +129,27 @@ class TestConfigAdjustmentCategorical:
     def test_list_rejected(self):
         with pytest.raises(ValidationError):
             ConfigAdjustment(
-                original_value=[1, 2, 3], adjusted_value=[1, 2],
+                original_value=[1, 2, 3],
+                adjusted_value=[1, 2],
                 reason="shrink list",
             )
 
     def test_dict_rejected(self):
         with pytest.raises(ValidationError):
             ConfigAdjustment(
-                original_value={"a": 1}, adjusted_value={"a": 2},
+                original_value={"a": 1},
+                adjusted_value={"a": 2},
                 reason="nested change",
             )
 
 
 class TestConfigAdjustmentEdgeCases:
-
     def test_zero_original_requires_zero_adjusted(self):
         # 0 -> 5 is an undefined relative delta
         with pytest.raises(ValidationError) as exc:
             ConfigAdjustment(
-                original_value=0, adjusted_value=5,
+                original_value=0,
+                adjusted_value=5,
                 reason="out of thin air",
             )
         assert "undefined" in str(exc.value).lower() or "zero" in str(exc.value).lower()
@@ -148,7 +157,8 @@ class TestConfigAdjustmentEdgeCases:
     def test_zero_original_zero_adjusted_passes(self):
         # 0 -> 0 is a no-op but technically a recorded adjustment (LLM may do this)
         adj = ConfigAdjustment(
-            original_value=0, adjusted_value=0,
+            original_value=0,
+            adjusted_value=0,
             reason="no-op for documentation",
         )
         assert adj.original_value == 0
@@ -156,7 +166,8 @@ class TestConfigAdjustmentEdgeCases:
     def test_reason_required_non_empty(self):
         with pytest.raises(ValidationError) as exc:
             ConfigAdjustment(
-                original_value=100, adjusted_value=110,
+                original_value=100,
+                adjusted_value=110,
                 reason="",
             )
         # Pydantic reports min_length violation
@@ -165,7 +176,8 @@ class TestConfigAdjustmentEdgeCases:
     def test_reason_missing_rejected(self):
         with pytest.raises(ValidationError):
             ConfigAdjustment(
-                original_value=100, adjusted_value=110,
+                original_value=100,
+                adjusted_value=110,
             )
 
 
@@ -173,8 +185,8 @@ class TestConfigAdjustmentEdgeCases:
 # ImplementorOutput.baseline_config_adjustments — ownership check
 # =====================================================================
 
-class TestImplementorOutputAdjustments:
 
+class TestImplementorOutputAdjustments:
     def test_defaults_to_empty_dict(self):
         """Existing tests construct ImplementorOutput without this field — must stay valid."""
         out = ImplementorOutput(**_BASE_OUTPUT_KW)
@@ -185,7 +197,8 @@ class TestImplementorOutputAdjustments:
             **_BASE_OUTPUT_KW,
             baseline_config_adjustments={
                 "refiner_kernel_size": ConfigAdjustment(
-                    original_value=5, adjusted_value=4,
+                    original_value=5,
+                    adjusted_value=4,
                     reason="multiple_of=2",
                 ),
             },
@@ -199,7 +212,8 @@ class TestImplementorOutputAdjustments:
                 **_BASE_OUTPUT_KW,
                 baseline_config_adjustments={
                     "segmentation_size": ConfigAdjustment(
-                        original_value=16384, adjusted_value=16000,
+                        original_value=16384,
+                        adjusted_value=16000,
                         reason="try to fix here",
                     ),
                 },
@@ -215,10 +229,14 @@ class TestImplementorOutputAdjustments:
                 **_BASE_OUTPUT_KW,
                 baseline_config_adjustments={
                     "refiner_kernel_size": ConfigAdjustment(
-                        original_value=5, adjusted_value=4, reason="ok",
+                        original_value=5,
+                        adjusted_value=4,
+                        reason="ok",
                     ),
                     "segmentation_size": ConfigAdjustment(
-                        original_value=16384, adjusted_value=16000, reason="not ok",
+                        original_value=16384,
+                        adjusted_value=16000,
+                        reason="not ok",
                     ),
                 },
             )
@@ -229,10 +247,14 @@ class TestImplementorOutputAdjustments:
             **_BASE_OUTPUT_KW,
             baseline_config_adjustments={
                 "channels": ConfigAdjustment(
-                    original_value=64, adjusted_value=72, reason="multiple_of=8",
+                    original_value=64,
+                    adjusted_value=72,
+                    reason="multiple_of=8",
                 ),
                 "hidden_dim": ConfigAdjustment(
-                    original_value=128, adjusted_value=144, reason="multiple_of=16",
+                    original_value=128,
+                    adjusted_value=144,
+                    reason="multiple_of=16",
                 ),
             },
         )

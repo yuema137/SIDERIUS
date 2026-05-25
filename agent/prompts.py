@@ -27,10 +27,10 @@ Do not change hyperparameters until this reference is set.
 ### PROGRESSIVE RESEARCH STRATEGY:
 Plan your experiments across rounds, not just one at a time:
 - **Phase 1: Screening** (first 25% of rounds): Broad exploration with low trial_portion
-  (0.02–0.05) and low epochs (1–3). Test different loss types and learning rates quickly.
+  (0.02-0.05) and low epochs (1-3). Test different loss types and learning rates quickly.
   Discard configs that fail to converge. Goal: find 2-3 promising directions.
 - **Phase 2: Refinement** (middle 50% of rounds): Pick the top performing configs from
-  Phase 1. Increase trial_portion to 0.1–0.3 and epochs to 5–10. Fine-tune lr,
+  Phase 1. Increase trial_portion to 0.1-0.3 and epochs to 5-10. Fine-tune lr,
   loss_type, and regularization. Goal: maximize score with sufficient data.
 - **Phase 3: Solidification** (last 25% of rounds): Select the best candidate. Increase
   trial_portion to 0.5+ or switch to formal mode for definitive validation.
@@ -109,17 +109,17 @@ give deep coverage on fewer files. Consult the per-file score table below — if
 `Impact_Score` is roughly uniform across files, snapshot is efficient. If a small subset
 of files dominates the `Impact_Score` ranking, target those files.
 
-`trial_portion` (0.01–1.0): fraction of segments per file for the **training scope**.
+`trial_portion` (0.01-1.0): fraction of segments per file for the **training scope**.
 This determines how much data the model trains on. More data = better model but slower.
-Start small (0.02–0.05) for fast hyperparameter exploration. If scores are consistently
-poor, **increase trial_portion** (0.1–0.5) before changing hyperparameters — low scores
+Start small (0.02-0.05) for fast hyperparameter exploration. If scores are consistently
+poor, **increase trial_portion** (0.1-0.5) before changing hyperparameters — low scores
 often mean insufficient training data, not bad hyperparameters.
 
-`eval_portion` (0.01–1.0): fraction of segments per file for **validation** (inference +
+`eval_portion` (0.01-1.0): fraction of segments per file for **validation** (inference +
 scoring). Controls score fidelity. Can match trial_portion for fast checks, or be larger
 for more reliable scores. In formal mode this is always 1.0.
 
-`train_portion` (0.01–1.0): per-epoch subsample from the training scope. Default 0.1.
+`train_portion` (0.01-1.0): per-epoch subsample from the training scope. Default 0.1.
 Each epoch sees a different random 10% of the training scope. Over multiple epochs the
 model sees diverse data without loading everything at once.
 
@@ -320,8 +320,10 @@ def build_exploration_checklist(
 
     # Build checklist lines
     lines = ["### EXPLORATION CHECKLIST"]
-    lines.append("Review which parameters have been explored. Under-explored parameters "
-                 "deserve attention — do not ignore model_config fields.\n")
+    lines.append(
+        "Review which parameters have been explored. Under-explored parameters "
+        "deserve attention — do not ignore model_config fields.\n"
+    )
 
     def _format_bounds(spec: dict) -> str:
         """Render the field's allowed range / enum from a JSON-schema property."""
@@ -333,16 +335,25 @@ def build_exploration_checklist(
         hi_inclusive = spec.get("maximum")
         hi_exclusive = spec.get("exclusiveMaximum")
         lo_str = (
-            f"[{lo_inclusive}" if lo_inclusive is not None
-            else f"({lo_exclusive}" if lo_exclusive is not None
+            f"[{lo_inclusive}"
+            if lo_inclusive is not None
+            else f"({lo_exclusive}"
+            if lo_exclusive is not None
             else "(-inf"
         )
         hi_str = (
-            f"{hi_inclusive}]" if hi_inclusive is not None
-            else f"{hi_exclusive})" if hi_exclusive is not None
+            f"{hi_inclusive}]"
+            if hi_inclusive is not None
+            else f"{hi_exclusive})"
+            if hi_exclusive is not None
             else "+inf)"
         )
-        if lo_inclusive is None and lo_exclusive is None and hi_inclusive is None and hi_exclusive is None:
+        if (
+            lo_inclusive is None
+            and lo_exclusive is None
+            and hi_inclusive is None
+            and hi_exclusive is None
+        ):
             return ""
         return f"range={lo_str},{hi_str}"
 
@@ -379,6 +390,8 @@ def build_exploration_checklist(
         suffix = f" — {status}"
         if bounds:
             suffix += f" — {bounds}"
+        if desc:
+            suffix += f" — {desc}"
         lines.append(f"- {marker} `{field}`: {tried_str}{suffix}")
 
     # Loss config
@@ -403,7 +416,7 @@ def build_exploration_checklist(
 
 # Maximum characters to emit for the config-class source excerpt. Keeps the
 # planner prompt bounded when a plugin config class grows large. Real-world
-# plugin config bodies (validators + fields) typically run 500–1500 chars, so
+# plugin config bodies (validators + fields) typically run 500-1500 chars, so
 # 4000 gives ~2-3x headroom before truncation kicks in.
 _PLUGIN_SOURCE_EXCERPT_MAX_CHARS = 4000
 
@@ -538,14 +551,15 @@ def _format_active_resource_budgets_block(
     See docs/resource_estimator_implement.md §10.3 / §10.11.
     """
     any_budget = any(
-        b is not None for b in (
-            trial_vram_budget_gb, formal_vram_budget_gb,
-            trial_time_budget_minutes, formal_time_budget_minutes,
+        b is not None
+        for b in (
+            trial_vram_budget_gb,
+            formal_vram_budget_gb,
+            trial_time_budget_minutes,
+            formal_time_budget_minutes,
         )
     )
-    any_estimate = any(
-        e is not None for e in (last_vram_estimate_gb, last_time_estimate_minutes)
-    )
+    any_estimate = any(e is not None for e in (last_vram_estimate_gb, last_time_estimate_minutes))
     if not any_budget and not any_estimate:
         return ""
 
@@ -570,10 +584,7 @@ def _format_active_resource_budgets_block(
     if active_vram_budget is None:
         vram_line = "  VRAM:  (no budget — gate disabled)"
     elif last_vram_estimate_gb is None:
-        vram_line = (
-            f"  VRAM:  (no prior estimate)   "
-            f"budget {active_vram_budget:.2f} GB"
-        )
+        vram_line = f"  VRAM:  (no prior estimate)   budget {active_vram_budget:.2f} GB"
     else:
         factor = last_vram_estimate_gb / active_vram_budget
         verdict = "over" if factor > 1.0 else "under"
@@ -587,10 +598,7 @@ def _format_active_resource_budgets_block(
     if active_time_budget is None:
         time_line = "  Time:  (no budget — gate disabled)"
     elif last_time_estimate_minutes is None:
-        time_line = (
-            f"  Time:  (no prior estimate)   "
-            f"budget {active_time_budget:.1f} min"
-        )
+        time_line = f"  Time:  (no prior estimate)   budget {active_time_budget:.1f} min"
     else:
         factor = last_time_estimate_minutes / active_time_budget
         verdict = "over" if factor > 1.0 else "under"
@@ -611,6 +619,7 @@ def _format_active_resource_budgets_block(
 # ==========================================
 # 3. USER PROMPT GENERATORS (The Context)
 # ==========================================
+
 
 def _format_known_constraints_block(dataset_config=None) -> str:
     """
@@ -671,16 +680,21 @@ def _format_fixed_params_block(plan_overrides=None, max_epochs=None):
 
     lines = []
     if "is_trial" in overrides:
-        lines.append(f"  is_trial         = {overrides['is_trial']}   "
-                     f"← trial mode (final round auto-flips to formal)")
+        lines.append(
+            f"  is_trial         = {overrides['is_trial']}   "
+            f"← trial mode (final round auto-flips to formal)"
+        )
     if "trial_portion" in overrides:
         lines.append(f"  trial_portion    = {overrides['trial_portion']}")
     if "train_portion" in overrides:
-        lines.append(f"  train_portion    = {overrides['train_portion']}    "
-                     f"← full per-epoch pass (no per-epoch subsampling)")
+        lines.append(
+            f"  train_portion    = {overrides['train_portion']}    "
+            f"← full per-epoch pass (no per-epoch subsampling)"
+        )
     if "eval_portion" in overrides:
-        lines.append(f"  eval_portion     = {overrides['eval_portion']}    "
-                     f"← formal mode auto-uses 1.0")
+        lines.append(
+            f"  eval_portion     = {overrides['eval_portion']}    ← formal mode auto-uses 1.0"
+        )
     # Render any other override keys generically
     rendered_keys = {"is_trial", "trial_portion", "train_portion", "eval_portion"}
     for k, v in overrides.items():
@@ -710,18 +724,28 @@ since those knobs are frozen — focus your reasoning on architecture, lr, and l
 """
 
 
-_CONDENSED_KEYS = frozenset({
-    "exp_id", "status", "model_type", "denoising_score", "is_trial",
-    # Surface the task-specific health-check message even after a record
-    # falls out of the verbatim window — failure_reason is the primary
-    # learning signal for the planner when a previous formal round
-    # collapsed (e.g. amplitude collapse on SQUID denoising). Defensively
-    # absent on healthy rounds; the comprehension below tolerates it.
-    "failure_reason",
-})
-_CONDENSED_MEMORY_KEYS = frozenset({
-    "hypothesis", "conclusion", "round_index",
-})
+_CONDENSED_KEYS = frozenset(
+    {
+        "exp_id",
+        "status",
+        "model_type",
+        "denoising_score",
+        "is_trial",
+        # Surface the task-specific health-check message even after a record
+        # falls out of the verbatim window — failure_reason is the primary
+        # learning signal for the planner when a previous formal round
+        # collapsed (e.g. amplitude collapse on SQUID denoising). Defensively
+        # absent on healthy rounds; the comprehension below tolerates it.
+        "failure_reason",
+    }
+)
+_CONDENSED_MEMORY_KEYS = frozenset(
+    {
+        "hypothesis",
+        "conclusion",
+        "round_index",
+    }
+)
 
 
 def _truncate_memory_history(
@@ -817,29 +841,32 @@ def get_planner_user_prompt(
             has run. See §10.3 / §10.11.
     """
     windowed = _truncate_memory_history(memory_history) if memory_history else []
-    history_context = json.dumps(windowed, indent=2) if windowed else "No previous experiments recorded."
+    history_context = (
+        json.dumps(windowed, indent=2) if windowed else "No previous experiments recorded."
+    )
 
     # Handle the model constraint message + output type / valid losses
     model_constraint = ""
     if force_model != "auto":
         from ml_models.plugin_loader import get_output_type
+
         output_type = get_output_type(force_model)
         if output_type == "classifier":
             loss_note = (
-                f"- This model is a **CLASSIFIER** (output [B, 256, T]). "
-                f"Valid loss types: **ce, focal, focal_cw**. "
-                f"Do NOT use smooth_l1 (regression only).\n"
+                "- This model is a **CLASSIFIER** (output [B, 256, T]). "
+                "Valid loss types: **ce, focal, focal_cw**. "
+                "Do NOT use smooth_l1 (regression only).\n"
             )
         elif output_type == "regressor":
             loss_note = (
-                f"- This model is a **REGRESSOR** (output [B, T]). "
-                f"Valid loss types: **smooth_l1**. "
-                f"Do NOT use ce, focal, or focal_cw (classification only).\n"
+                "- This model is a **REGRESSOR** (output [B, T]). "
+                "Valid loss types: **smooth_l1**. "
+                "Do NOT use ce, focal, or focal_cw (classification only).\n"
             )
         else:  # hybrid
             loss_note = (
-                f"- This model is a **HYBRID** — it supports ALL loss types: "
-                f"ce, focal, focal_cw, smooth_l1.\n"
+                "- This model is a **HYBRID** — it supports ALL loss types: "
+                "ce, focal, focal_cw, smooth_l1.\n"
             )
 
         model_constraint = (
@@ -867,7 +894,9 @@ def get_planner_user_prompt(
     oom_warning = ""
     if oom_records:
         last_oom = oom_records[-1]
-        fix_hint = last_oom.get("memory", {}).get("memory_update", "Reduce batch_size or segmentation_size.")
+        fix_hint = last_oom.get("memory", {}).get(
+            "memory_update", "Reduce batch_size or segmentation_size."
+        )
         oom_warning = (
             f"\n### ⚠️  OOM WARNING — MANDATORY ACTION REQUIRED:\n"
             f"Your last proposed config was REJECTED due to insufficient GPU memory "
@@ -880,8 +909,7 @@ def get_planner_user_prompt(
     # can judge speed against whatever budget is set in the expert advice.
     slow_warning = ""
     slow_records = [
-        r for r in memory_history
-        if r.get("status") == "success" and r.get("timing") is not None
+        r for r in memory_history if r.get("status") == "success" and r.get("timing") is not None
     ]
     if slow_records:
         last = slow_records[-1]
@@ -892,19 +920,18 @@ def get_planner_user_prompt(
         seg = last.get("params", {}).get("model_config", {}).get("segmentation_size")
         slow_warning = (
             f"\n### ⏱  LAST EXPERIMENT TIMING:\n"
-            f"train={train_s/60:.1f} min, inference={infer_s/60:.1f} min, "
-            f"total={total_s/60:.1f} min"
-            + (f" (segmentation_size={seg})" if seg else "") + ".\n"
-            f"The time budget is a HARD UPPER LIMIT, not a target. If the last "
-            f"run exceeded it, reduce model complexity. If it was well under, "
-            f"do NOT scale up just because there is headroom — smaller "
-            f"experiments are equally valid as long as they test the hypothesis.\n"
+            f"train={train_s / 60:.1f} min, inference={infer_s / 60:.1f} min, "
+            f"total={total_s / 60:.1f} min" + (f" (segmentation_size={seg})" if seg else "") + ".\n"
+            "The time budget is a HARD UPPER LIMIT, not a target. If the last "
+            "run exceeded it, reduce model complexity. If it was well under, "
+            "do NOT scale up just because there is headroom — smaller "
+            "experiments are equally valid as long as they test the hypothesis.\n"
         )
 
     # Round context with phase information (when provided)
     round_context = ""
     if current_round is not None and max_rounds is not None:
-        is_final = (current_round == max_rounds)
+        is_final = current_round == max_rounds
         rounds_left = max_rounds - current_round
         rounds_completed = current_round - 1
 
@@ -989,21 +1016,22 @@ def get_planner_user_prompt(
 
 ### OUTPUT FORMAT (Strict JSON):
 {{
-    "model_type": "{force_model if force_model != 'auto' else 'punet | fcnet | transformer | wavenet | rnn | gated_fno'}",
+    "model_type": "{force_model if force_model != "auto" else "punet | fcnet | transformer | wavenet | rnn | gated_fno"}",
     "reasoning": "How this experiment aligns with expert advice and past memory",
     "hypothesis": "Specific prediction for this run",
     "is_trial": "true | false (choose based on confidence in config)",
     "trial_strategy": "snapshot | anchors | target",
-    "trial_portion": "0.02–1.0 (increase if scores are poor — more data helps)",
+    "trial_portion": "0.02-1.0 (increase if scores are poor — more data helps)",
     "train_portion": "0.1 (rarely change)",
     "eval_strategy": "snapshot | anchors | target",
-    "eval_portion": "0.02–1.0 (match trial_portion or larger for reliable scores)",
+    "eval_portion": "0.02-1.0 (match trial_portion or larger for reliable scores)",
     "train_validation_align": "true | false",
     "model_config": {{ ... }},
     "train_config": {{ "lr": ..., "epochs": ..., "batch_size": ..., "device": "cuda" }},
     "loss_config": {{ "loss_type": "ce/focal/smooth_l1", ... }}
 }}
 """
+
 
 def get_reflector_user_prompt(exp_id, hypothesis, actual_results, reflection_context=None):
     """
@@ -1023,10 +1051,10 @@ def get_reflector_user_prompt(exp_id, hypothesis, actual_results, reflection_con
     context_block = ""
     if reflection_context:
         c = reflection_context
-        loss_type = c.get('current_loss_type', '?')
-        best_same = c.get('best_same_loss_final_loss')
-        loss_rank = c.get('same_loss_loss_rank')
-        loss_total = c.get('same_loss_total')
+        loss_type = c.get("current_loss_type", "?")
+        best_same = c.get("best_same_loss_final_loss")
+        loss_rank = c.get("same_loss_loss_rank")
+        loss_total = c.get("same_loss_total")
         same_loss_block = (
             f"  final_loss rank (loss_type='{loss_type}') : "
             f"{loss_rank} / {loss_total} (1 = lowest = best convergence)"
@@ -1043,26 +1071,26 @@ def get_reflector_user_prompt(exp_id, hypothesis, actual_results, reflection_con
         )
         context_block = f"""
 ### Comparison Context (use this to judge the result):
-  baseline_score        : {c.get('baseline_score', 'N/A')}
-  best_score_so_far     : {c.get('best_score_so_far', 'N/A')}
-  this_experiment_score : {actual_results.get('denoising_score', 'N/A')}
-  is_new_best           : {c.get('is_new_best', 'N/A')}
-  denoising_score rank  : {c.get('rank', 'N/A')} / {c.get('total_experiments', 'N/A')} (1 = best)
-  best_final_loss seen (same loss_type='{loss_type}') : {best_same if best_same is not None else 'N/A (first of this type)'}
+  baseline_score        : {c.get("baseline_score", "N/A")}
+  best_score_so_far     : {c.get("best_score_so_far", "N/A")}
+  this_experiment_score : {actual_results.get("denoising_score", "N/A")}
+  is_new_best           : {c.get("is_new_best", "N/A")}
+  denoising_score rank  : {c.get("rank", "N/A")} / {c.get("total_experiments", "N/A")} (1 = best)
+  best_final_loss seen (same loss_type='{loss_type}') : {best_same if best_same is not None else "N/A (first of this type)"}
 {same_loss_block}
-  best_config_so_far    : {json.dumps(c.get('best_config_so_far'), indent=2) if c.get('best_config_so_far') else 'N/A'}
+  best_config_so_far    : {json.dumps(c.get("best_config_so_far"), indent=2) if c.get("best_config_so_far") else "N/A"}
 ### Efficiency Context:
-  baseline_params       : {c.get('baseline_params', 'N/A')}
-  baseline_epochs       : {c.get('baseline_epochs', 'N/A')}
-  current_params        : {c.get('current_params', 'N/A')}
-  current_epochs        : {c.get('current_epochs', 'N/A')}
+  baseline_params       : {c.get("baseline_params", "N/A")}
+  baseline_epochs       : {c.get("baseline_epochs", "N/A")}
+  current_params        : {c.get("current_params", "N/A")}
+  current_epochs        : {c.get("current_epochs", "N/A")}
 {efficiency_block}
 ### Data Volume Context:
-  training_psd_segments : {c.get('training_psd_segments', 'N/A')}  (PSD segments used for training)
-  eval_psd_segments     : {c.get('eval_psd_segments', 'N/A')}  (PSD segments used for scoring)
-  baseline_psd_segments : {c.get('baseline_psd_segments', 'N/A')}  (baseline trained on this many)
-  trial_portion         : {c.get('trial_portion', 'N/A')}
-  eval_portion          : {c.get('eval_portion', 'N/A')}
+  training_psd_segments : {c.get("training_psd_segments", "N/A")}  (PSD segments used for training)
+  eval_psd_segments     : {c.get("eval_psd_segments", "N/A")}  (PSD segments used for scoring)
+  baseline_psd_segments : {c.get("baseline_psd_segments", "N/A")}  (baseline trained on this many)
+  trial_portion         : {c.get("trial_portion", "N/A")}
+  eval_portion          : {c.get("eval_portion", "N/A")}
   ⚠ If training_psd_segments << baseline_psd_segments, poor scores may be from
      insufficient data, NOT bad hyperparameters. Recommend increasing trial_portion.
 """

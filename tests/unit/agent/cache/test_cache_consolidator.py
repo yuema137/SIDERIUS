@@ -38,17 +38,18 @@ queue of pre-built JSON responses and a call counter. The consolidator's
 ``bridge.generate(...)`` is satisfied by duck-typing — the consolidator
 never inspects anything else on the bridge object.
 """
+
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 import pytest
 
 from agent.cache_consolidator import (
-    LIST_FIELD_MAX_SURVIVORS,
-    MAX_PRIOR_SUMMARY_CHARS,
     _LIST_MERGE_POLICY_EXAMPLES,
     _LIST_MERGE_SYSTEM_PROMPT,
+    LIST_FIELD_MAX_SURVIVORS,
+    MAX_PRIOR_SUMMARY_CHARS,
     _build_list_merge_user_prompt,
     _dedupe_error_signatures,
     _merge_narrative_field,
@@ -62,7 +63,6 @@ from agent.schemas.cache_entry import (
     ConsolidatedNarrative,
     ErrorSignature,
 )
-
 
 # ---------------------------------------------------------------------------
 # Mock bridge — duck-typed; no inheritance from LLMBridge to keep tests light.
@@ -78,10 +78,10 @@ class MockBridge:
     the test anticipated.
     """
 
-    def __init__(self, responses: Optional[List[Dict[str, Any]]] = None) -> None:
-        self._queue: List[Dict[str, Any]] = list(responses or [])
+    def __init__(self, responses: list[dict[str, Any]] | None = None) -> None:
+        self._queue: list[dict[str, Any]] = list(responses or [])
         self.call_count: int = 0
-        self.calls: List[Tuple[str, str, str]] = []
+        self.calls: list[tuple[str, str, str]] = []
 
     def generate(
         self,
@@ -89,8 +89,8 @@ class MockBridge:
         user_prompt: str,
         *,
         label: str = "unlabeled",
-        components: Optional[Dict[str, int]] = None,
-    ) -> Dict[str, Any]:
+        components: dict[str, int] | None = None,
+    ) -> dict[str, Any]:
         self.call_count += 1
         self.calls.append((system_prompt, user_prompt, label))
         if not self._queue:
@@ -110,7 +110,7 @@ def _bare_prior(model_type: str = "punet") -> CacheEntry:
     return CacheEntry(model_type=model_type)
 
 
-def _empty_new_response() -> Dict[str, Any]:
+def _empty_new_response() -> dict[str, Any]:
     """The 8-flat-field LLM response shape with everything blank — used to
     exercise the empty-new fast paths."""
     return {
@@ -147,8 +147,7 @@ def test_both_lists_empty_makes_no_llm_call() -> None:
     )
 
     assert bridge.call_count == 0, (
-        "Empty prior + empty new must skip the LLM merge entirely — there is "
-        "nothing to classify."
+        "Empty prior + empty new must skip the LLM merge entirely — there is nothing to classify."
     )
     assert merged.key_findings == []
     assert merged.bottlenecks == []
@@ -446,9 +445,7 @@ def test_rank_prune_caps_survivors_to_max_with_archive() -> None:
         for j in range(4)
     ]
     mock_response = {"survivors": survivors, "archived": archived_items}
-    bridge = MockBridge(
-        responses=[mock_response, {"survivors": [], "archived": []}]
-    )
+    bridge = MockBridge(responses=[mock_response, {"survivors": [], "archived": []}])
 
     prior_findings = [
         ConsolidatedFinding(
@@ -485,15 +482,11 @@ def test_llm_oversized_survivors_get_deterministic_overflow_trim() -> None:
         for i in range(LIST_FIELD_MAX_SURVIVORS + 3)
     ]
     mock_response = {"survivors": survivors, "archived": []}
-    bridge = MockBridge(
-        responses=[mock_response, {"survivors": [], "archived": []}]
-    )
+    bridge = MockBridge(responses=[mock_response, {"survivors": [], "archived": []}])
     prior = CacheEntry(
         model_type="punet",
         key_findings=[
-            ConsolidatedFinding(
-                statement="prior x", evidence_iters=[1], strength="moderate"
-            )
+            ConsolidatedFinding(statement="prior x", evidence_iters=[1], strength="moderate")
         ],
     )
     new_resp = _empty_new_response()
@@ -540,9 +533,9 @@ def test_narrative_history_overflow_goes_to_archive() -> None:
     """A 5-update sequence puts iter-1 and iter-4 into the archive once the
     history cap is exceeded by the 5th merge."""
     narr = ConsolidatedNarrative(latest="iter-1 narrative")
-    narr, arch1 = _merge_narrative_field(narr, "iter-2", prior_iter=1)
-    narr, arch2 = _merge_narrative_field(narr, "iter-3", prior_iter=2)
-    narr, arch3 = _merge_narrative_field(narr, "iter-4", prior_iter=3)
+    narr, _arch1 = _merge_narrative_field(narr, "iter-2", prior_iter=1)
+    narr, _arch2 = _merge_narrative_field(narr, "iter-3", prior_iter=2)
+    narr, _arch3 = _merge_narrative_field(narr, "iter-4", prior_iter=3)
     narr, arch4 = _merge_narrative_field(narr, "iter-5", prior_iter=4)
 
     assert narr.latest == "iter-5"
@@ -565,9 +558,7 @@ def test_narrative_empty_new_with_empty_prior_is_noop() -> None:
 def test_narrative_idempotent_when_new_equals_prior() -> None:
     """If new_text matches prior.latest byte-for-byte, it's a no-op — no
     history entry created, no archive churn."""
-    narr = ConsolidatedNarrative(
-        latest="identical narrative", history=[(3, "older")]
-    )
+    narr = ConsolidatedNarrative(latest="identical narrative", history=[(3, "older")])
     merged, archived = _merge_narrative_field(narr, "identical narrative", prior_iter=4)
     assert merged is narr
     assert archived == []
@@ -583,7 +574,7 @@ def _make_sig(
     error_type: str,
     failure_class: str,
     top_frame: str,
-    iters: List[int],
+    iters: list[int],
     short_message: str = "msg",
 ) -> ErrorSignature:
     return ErrorSignature(
@@ -671,15 +662,11 @@ def test_consolidate_calls_bridge_at_most_twice_per_invocation() -> None:
     touch the bridge."""
     # Both list fields populated on both sides → 2 LLM calls expected.
     mock_resp_kf = {
-        "survivors": [
-            {"statement": "merged kf", "evidence_iters": [1, 5], "strength": "moderate"}
-        ],
+        "survivors": [{"statement": "merged kf", "evidence_iters": [1, 5], "strength": "moderate"}],
         "archived": [],
     }
     mock_resp_bn = {
-        "survivors": [
-            {"statement": "merged bn", "evidence_iters": [1, 5], "strength": "moderate"}
-        ],
+        "survivors": [{"statement": "merged bn", "evidence_iters": [1, 5], "strength": "moderate"}],
         "archived": [],
     }
     bridge = MockBridge(responses=[mock_resp_kf, mock_resp_bn])
@@ -788,9 +775,7 @@ def test_cache_hit_merge_low_similarity_preserves_both_findings() -> None:
         ],
         "archived": [],
     }
-    bridge = MockBridge(
-        responses=[mock_response, {"survivors": [], "archived": []}]
-    )
+    bridge = MockBridge(responses=[mock_response, {"survivors": [], "archived": []}])
     prior = CacheEntry(
         model_type="punet",
         key_findings=[
@@ -832,9 +817,7 @@ def test_strong_finding_survives_consolidation() -> None:
         ],
         "archived": [],
     }
-    bridge = MockBridge(
-        responses=[mock_response, {"survivors": [], "archived": []}]
-    )
+    bridge = MockBridge(responses=[mock_response, {"survivors": [], "archived": []}])
     prior = CacheEntry(
         model_type="punet",
         key_findings=[
@@ -1015,9 +998,7 @@ def test_malformed_llm_response_raises_with_helpful_message() -> None:
     prior = CacheEntry(
         model_type="punet",
         key_findings=[
-            ConsolidatedFinding(
-                statement="prior", evidence_iters=[1], strength="moderate"
-            )
+            ConsolidatedFinding(statement="prior", evidence_iters=[1], strength="moderate")
         ],
     )
     new_resp = _empty_new_response()

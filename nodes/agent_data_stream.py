@@ -25,11 +25,10 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from agent.schemas.score_table import ScoreComparisonTable
-
 
 _LOG_SUBDIR = "logs"
 _STREAM_FILENAME = "agent_data_stream.jsonl"
@@ -55,17 +54,16 @@ def append_event(
         log_dir = os.path.join(workspace, _LOG_SUBDIR)
         os.makedirs(log_dir, exist_ok=True)
         record = {
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": datetime.now(UTC).isoformat(),
             "event": event_type,
             **payload,
         }
         line = json.dumps(record, ensure_ascii=False)
         with open(_stream_path(workspace), "a", encoding="utf-8") as fh:
             fh.write(line + "\n")
-    except Exception as exc:  # noqa: BLE001 — best-effort audit
+    except Exception as exc:
         print(
-            f"[agent_data_stream] append_event failed "
-            f"({event_type}): {type(exc).__name__}: {exc}"
+            f"[agent_data_stream] append_event failed ({event_type}): {type(exc).__name__}: {exc}"
         )
 
 

@@ -12,18 +12,21 @@ Run with:
 
 DO NOT run in CI.
 """
+
+import json
 import os
 import re
-import json
+from pathlib import Path
+
 import pytest
 from dotenv import load_dotenv
 
-from agent.schemas.proposal import ProposalInput, ProposalOutput
 from agent.schemas.hyperparam_tuning import ExpertAdvice
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.proposal import ProposalInput, ProposalOutput
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
 pytestmark = pytest.mark.real_run
 
@@ -31,6 +34,7 @@ pytestmark = pytest.mark.real_run
 # ---------------------------------------------------------------------------
 # Skip guard
 # ---------------------------------------------------------------------------
+
 
 def _skip_if_no_key(provider: str):
     key = "GEMINI_API_KEY" if provider == "gemini" else "OPENAI_API_KEY"
@@ -61,12 +65,12 @@ SYNTHETIC_INTERPRETATION = {
     "total_experiments": 7,
     "best_denoising_score": 1.57,
     "worst_denoising_score": 0.85,
-    "per_model_best":  {"punet": 1.57, "fcnet": 0.90},
+    "per_model_best": {"punet": 1.57, "fcnet": 0.90},
     "per_model_worst": {"punet": 1.20, "fcnet": 0.85},
     "best_config": {
         "model_config": {"depth": 4, "multi": 16},
         "train_config": {"lr": 3e-4, "epochs": 15, "batch_size": 128},
-        "loss_config":  {"loss_type": "focal", "gamma": 2.0},
+        "loss_config": {"loss_type": "focal", "gamma": 2.0},
     },
     "key_findings": [
         "Focal loss with gamma=2 outperforms CE by +0.35 on punet.",
@@ -102,12 +106,13 @@ def _make_input(tmp_path) -> ProposalInput:
 # Assertions
 # ---------------------------------------------------------------------------
 
+
 def _assert_output(output: ProposalOutput):
     assert isinstance(output, ProposalOutput)
 
     # model_name: snake_case, not reusing an existing type
     assert len(output.model_name) > 0
-    assert re.match(r'^[a-z][a-z0-9_]*$', output.model_name), (
+    assert re.match(r"^[a-z][a-z0-9_]*$", output.model_name), (
         f"model_name '{output.model_name}' is not snake_case"
     )
     assert output.model_name not in ["punet", "fcnet"], (
@@ -134,15 +139,15 @@ def _assert_output(output: ProposalOutput):
     # baseline_config
     assert "model_config" in output.baseline_config
     assert "train_config" in output.baseline_config
-    assert "loss_config"  in output.baseline_config
+    assert "loss_config" in output.baseline_config
 
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 
-class TestMLModelProposalAgentGemini:
 
+class TestMLModelProposalAgentGemini:
     def setup_method(self):
         _skip_if_no_key("gemini")
 
@@ -166,7 +171,6 @@ class TestMLModelProposalAgentGemini:
 
 
 class TestMLModelProposalAgentOpenAI:
-
     def setup_method(self):
         _skip_if_no_key("openai")
 
@@ -184,6 +188,7 @@ class TestMLModelProposalAgentOpenAI:
 # ==========================================
 # Dual-mode test — 3-stage pipeline (B.21)
 # ==========================================
+
 
 @pytest.mark.dual_mode
 def test_proposal_pipeline_dual_mode(tmp_path, request):
@@ -220,8 +225,8 @@ def test_proposal_pipeline_dual_mode(tmp_path, request):
         ),
     )
 
-    from tests.conftest import _is_real_llm
     from agent.llm_bridge import LLMBridge
+    from tests.conftest import _is_real_llm
     from tests.helpers.recording_llm_bridge import RecordingLLMBridge
 
     if _is_real_llm(request):
@@ -229,10 +234,13 @@ def test_proposal_pipeline_dual_mode(tmp_path, request):
         bridge_factory = LLMBridge
     else:
         bridge = RecordingLLMBridge.for_agent("ml_model_proposal_agent")
-        bridge_factory = lambda **kw: bridge
 
-    agent = MLModelProposalAgent(provider="gemini", model_id="gemini-2.5-flash",
-                                  bridge_factory=bridge_factory)
+        def bridge_factory(**kw):
+            return bridge
+
+    agent = MLModelProposalAgent(
+        provider="gemini", model_id="gemini-2.5-flash", bridge_factory=bridge_factory
+    )
 
     output = agent.run(inp)
 
@@ -269,6 +277,6 @@ def test_proposal_pipeline_dual_mode(tmp_path, request):
         assert "dilated" in output.mathematical_definition.lower()
         assert output.memo_consistency_notes == []
 
-        print(f"\n  [pseudo] 3-stage pipeline completed successfully")
+        print("\n  [pseudo] 3-stage pipeline completed successfully")
         print(f"  [pseudo] {len(bridge.calls)} total bridge calls")
         print(f"  [pseudo] proposed: {output.model_name}")

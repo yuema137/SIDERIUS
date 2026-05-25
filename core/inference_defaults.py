@@ -34,30 +34,27 @@ See docs/resource_estimator_implement.md §10.5 (Phase K.2.5) +
 §10.14 K.2.5-8 (soft fallback for unregistered model_type).
 """
 
-from typing import Dict
-
-
 # Inference batch sizes chosen to keep single-process GPU memory under ~2 GB
 # per model on the original TIDMAD evaluation setup. transformer=1 because of
 # O(T²) attention memory; rnn=10 because LSTM hidden states compound across
 # the sequence.
-_INFERENCE_BATCH_SIZES: Dict[str, int] = {
-    "punet":       25,
-    "wavenet":     25,
-    "fcnet":       25,
-    "rnn":         10,
+_INFERENCE_BATCH_SIZES: dict[str, int] = {
+    "punet": 25,
+    "wavenet": 25,
+    "fcnet": 25,
+    "rnn": 10,
     "transformer": 1,
     # V7 calibrated 2026-04-30 from VRAM-gate runtime choices on ligroup.
     # Source: per-arch chosen_inference_batch in successful formal-round
     # records under exploration_{explore_novel,exploit_cnn}_v7_0429/.
-    "lite_dualpath_spectral_tcn":    16,
+    "lite_dualpath_spectral_tcn": 16,
     "calibrated_spectral_gated_tcn": 32,
     "joint_calibrated_spectral_tcn": 32,
-    "gated_context_dualpath_tcn":    16,
-    "spectral_skip_dilated_cnn":     32,
-    "fft_fused_cyclic_tcn":          64,
-    "gated_skip_spectral_tcn":       64,
-    "subband_calibrated_skip_tcn":   64,
+    "gated_context_dualpath_tcn": 16,
+    "spectral_skip_dilated_cnn": 32,
+    "fft_fused_cyclic_tcn": 64,
+    "gated_skip_spectral_tcn": 64,
+    "subband_calibrated_skip_tcn": 64,
 }
 
 _DEFAULT_INFERENCE_BATCH: int = 25

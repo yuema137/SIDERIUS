@@ -62,27 +62,21 @@ Pseudo-only — no real-mode opt-in. The assertion is structural ("foo
 graduates to canonical with seen_in_runs len 3"), not LLM-quality, so
 real-mode would add no signal.
 """
+
 from __future__ import annotations
 
 import glob as _glob
 import json
 import os
-import pytest
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.proposal import VocabEntry
 from core.resume import restore_prior_state
 from nodes.interpretation_helpers import build_runtime_vocab, promote_candidates
-from workflows.llm_config import (
-    NodeLLMConfig,
-    ProposalLLMConfig,
-    TunerLLMConfig,
-    WorkflowLLMConfig,
-)
-from workflows.model_exploration import run_workflow
-
 from tests.unit.workflows.test_model_exploration import (
     _make_implementor_output,
     _make_proposal_output,
@@ -90,7 +84,13 @@ from tests.unit.workflows.test_model_exploration import (
     _make_validator_output,
     _write_tuning_output,
 )
-
+from workflows.llm_config import (
+    NodeLLMConfig,
+    ProposalLLMConfig,
+    TunerLLMConfig,
+    WorkflowLLMConfig,
+)
+from workflows.model_exploration import run_workflow
 
 pytestmark = pytest.mark.dual_mode
 
@@ -136,6 +136,7 @@ def _make_proposal_persist_side_effect(model_name: str):
 
     The persistence step is critical: without it, ``load_latest_proposal``
     has nothing to find on disk and the bridge never gets exercised."""
+
     def _side_effect(inp):
         output = _make_proposal_output(model_name=model_name).model_copy(
             update={"proposed_vocab_candidates": [dict(_FOO_CANDIDATE)]}
@@ -148,6 +149,7 @@ def _make_proposal_persist_side_effect(model_name: str):
             with open(out_path, "w", encoding="utf-8") as f:
                 f.write(output.model_dump_json(indent=4))
         return output
+
     return _side_effect
 
 
@@ -155,11 +157,13 @@ def _make_proposal_persist_counter_side_effect(call_counter: list):
     """Same as above but the model_name advances per call. Used by Test 2's
     single in-process ``run_workflow`` (which fires the proposer 4 times
     in a row, each needing a unique model_name)."""
+
     def _side_effect(inp):
         call_counter[0] += 1
         return _make_proposal_persist_side_effect(
             model_name=f"model_iter_{call_counter[0]:03d}",
         )(inp)
+
     return _side_effect
 
 
@@ -181,6 +185,7 @@ def _make_interp_with_real_vocab_logic_side_effect(
     chain runner's ``load_latest_knowledge`` finds something on the next
     iter (otherwise restored_runtime_vocab arrives empty and seen_in_runs
     cannot accumulate across the boundary)."""
+
     def _side_effect(inp):
         captured_inputs.append(inp)
 
@@ -189,9 +194,7 @@ def _make_interp_with_real_vocab_logic_side_effect(
             model_name = inp.previous_proposal.get("model_name", "")
             raw = inp.previous_proposal.get("proposed_vocab_candidates", []) or []
             proposed_candidates = [
-                {**c, "proposed_by_run": model_name}
-                if not c.get("proposed_by_run")
-                else c
+                {**c, "proposed_by_run": model_name} if not c.get("proposed_by_run") else c
                 for c in raw
             ]
 
@@ -224,11 +227,13 @@ def _make_interp_with_real_vocab_logic_side_effect(
             run_name = inp.storage.local.run_name
             os.makedirs(workspace, exist_ok=True)
             digest_path = os.path.join(
-                workspace, f"interpretation_{run_name}.json",
+                workspace,
+                f"interpretation_{run_name}.json",
             )
             with open(digest_path, "w", encoding="utf-8") as f:
                 f.write(output.model_dump_json(indent=2))
         return output
+
     return _side_effect
 
 
@@ -255,8 +260,8 @@ def _write_chain_iter_artifacts(
         f.write(tune_output.model_dump_json(indent=2))
 
     manifest = {
-        "iteration":   iteration,
-        "status":      "completed",
+        "iteration": iteration,
+        "status": "completed",
         "output_path": output_path,
     }
     with open(os.path.join(iter_dir, "manifest.json"), "w") as f:
@@ -266,6 +271,7 @@ def _write_chain_iter_artifacts(
 # ---------------------------------------------------------------------------
 # Test 1 — chain mode: G1 bridge proves seen_in_runs survives subprocess
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.dual_mode
 def test_chain_bridge_promotes_foo_after_four_iters(tmp_path):
@@ -286,9 +292,7 @@ def test_chain_bridge_promotes_foo_after_four_iters(tmp_path):
     seed_root = tmp_path / "seed"
     seed_root.mkdir(parents=True, exist_ok=True)
     _write_tuning_output(seed_root, "punet", run="v1", score=1.5)
-    seed_path = str(
-        seed_root / "data" / "punet" / "v1" / "agent" / "run_output_v1_agent.json"
-    )
+    seed_path = str(seed_root / "data" / "punet" / "v1" / "agent" / "run_output_v1_agent.json")
 
     captured_interp_inputs: list = []
     captured_interp_outputs: list = []
@@ -306,29 +310,29 @@ def test_chain_bridge_promotes_foo_after_four_iters(tmp_path):
 
         model_name = f"model_iter_{iteration:03d}"
         tune_output = _make_tuning_output(
-            model_type=model_name, run_name=run_name, score=1.5,
+            model_type=model_name,
+            run_name=run_name,
+            score=1.5,
         )
 
-        with patch("workflows.model_exploration.ResultInterpretationAgent") as MockInterp, \
-             patch("workflows.model_exploration.MLModelImplementor") as MockImpl, \
-             patch("workflows.model_exploration.MLCodeValidatorAgent") as MockValid, \
-             patch("workflows.model_exploration.HyperparamTuningAgent") as MockTune, \
-             patch("workflows.model_exploration.MLModelProposalAgent") as MockPropose:
-
+        with (
+            patch("workflows.model_exploration.ResultInterpretationAgent") as MockInterp,
+            patch("workflows.model_exploration.MLModelImplementor") as MockImpl,
+            patch("workflows.model_exploration.MLCodeValidatorAgent") as MockValid,
+            patch("workflows.model_exploration.HyperparamTuningAgent") as MockTune,
+            patch("workflows.model_exploration.MLModelProposalAgent") as MockPropose,
+        ):
             MockInterp.return_value.run.side_effect = (
                 _make_interp_with_real_vocab_logic_side_effect(
-                    captured_interp_inputs, captured_interp_outputs,
+                    captured_interp_inputs,
+                    captured_interp_outputs,
                 )
             )
-            MockImpl.return_value.run.return_value = (
-                _make_implementor_output(model_type=model_name)
-            )
-            MockValid.return_value.run.return_value = (
-                _make_validator_output(passed=True)
-            )
+            MockImpl.return_value.run.return_value = _make_implementor_output(model_type=model_name)
+            MockValid.return_value.run.return_value = _make_validator_output(passed=True)
             MockTune.return_value.run.return_value = tune_output
-            MockPropose.return_value.run.side_effect = (
-                _make_proposal_persist_side_effect(model_name)
+            MockPropose.return_value.run.side_effect = _make_proposal_persist_side_effect(
+                model_name
             )
 
             run_workflow(
@@ -371,8 +375,7 @@ def test_chain_bridge_promotes_foo_after_four_iters(tmp_path):
             f"(should be the LATEST committed iter's proposal)."
         )
         foo_in_restored = [
-            c for c in restored.get("proposed_vocab_candidates", []) or []
-            if c.get("name") == "foo"
+            c for c in restored.get("proposed_vocab_candidates", []) or [] if c.get("name") == "foo"
         ]
         assert len(foo_in_restored) == 1, (
             f"G1 BRIDGE: iter {i + 1} restored proposal lost the foo "
@@ -390,7 +393,9 @@ def test_chain_bridge_promotes_foo_after_four_iters(tmp_path):
         # ``iteration_001``; that legacy assumption is what the original
         # _proposal_path bug rode on.
         proposal_glob = os.path.join(
-            chain_root, run_name, f"iteration_{i:03d}",
+            chain_root,
+            run_name,
+            f"iteration_{i:03d}",
             f"attempt_*_model_iter_{i:03d}",
             f"proposal_{run_name}.json",
         )
@@ -402,21 +407,15 @@ def test_chain_bridge_promotes_foo_after_four_iters(tmp_path):
         with open(matches[0]) as f:
             data = json.load(f)
         assert data["model_name"] == f"model_iter_{i:03d}"
-        foo_match = [
-            c for c in data.get("proposed_vocab_candidates", [])
-            if c.get("name") == "foo"
-        ]
-        assert len(foo_match) == 1, (
-            f"Iter {i}: foo missing from persisted proposal."
-        )
+        foo_match = [c for c in data.get("proposed_vocab_candidates", []) if c.get("name") == "foo"]
+        assert len(foo_match) == 1, f"Iter {i}: foo missing from persisted proposal."
 
     # ---------------------------------------------------------------
     # Assertion 3: foo graduates to canonical with seen_in_runs len 3
     # by the end of iter 4 (the headline G1 bridge contract)
     # ---------------------------------------------------------------
     assert len(captured_interp_outputs) == 4, (
-        f"Expected 4 interp calls (one per iter); "
-        f"got {len(captured_interp_outputs)}."
+        f"Expected 4 interp calls (one per iter); got {len(captured_interp_outputs)}."
     )
     final_vocab = captured_interp_outputs[-1].runtime_vocab
     foo_entries = [v for v in final_vocab if v.name == "foo"]
@@ -440,13 +439,16 @@ def test_chain_bridge_promotes_foo_after_four_iters(tmp_path):
         f"expected={expected_runs}, got={set(foo.seen_in_runs)}"
     )
 
-    print("\n  [G1 chain] 4 disk roundtrips verified: "
-          f"foo.seen_in_runs={foo.seen_in_runs} → tier={foo.tier!r}")
+    print(
+        "\n  [G1 chain] 4 disk roundtrips verified: "
+        f"foo.seen_in_runs={foo.seen_in_runs} → tier={foo.tier!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
 # Test 2 — In-process regression: same outcome via single run_workflow
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.dual_mode
 def test_in_process_run_workflow_promotes_foo_after_four_iters(tmp_path):
@@ -464,9 +466,7 @@ def test_in_process_run_workflow_promotes_foo_after_four_iters(tmp_path):
     seed_root = tmp_path / "seed"
     seed_root.mkdir(parents=True, exist_ok=True)
     _write_tuning_output(seed_root, "punet", run="v1", score=1.5)
-    seed_path = str(
-        seed_root / "data" / "punet" / "v1" / "agent" / "run_output_v1_agent.json"
-    )
+    seed_path = str(seed_root / "data" / "punet" / "v1" / "agent" / "run_output_v1_agent.json")
 
     captured_interp_inputs: list = []
     captured_interp_outputs: list = []
@@ -482,28 +482,24 @@ def test_in_process_run_workflow_promotes_foo_after_four_iters(tmp_path):
             score=1.5,
         )
 
-    with patch("workflows.model_exploration.ResultInterpretationAgent") as MockInterp, \
-         patch("workflows.model_exploration.MLModelImplementor") as MockImpl, \
-         patch("workflows.model_exploration.MLCodeValidatorAgent") as MockValid, \
-         patch("workflows.model_exploration.HyperparamTuningAgent") as MockTune, \
-         patch("workflows.model_exploration.MLModelProposalAgent") as MockPropose:
-
-        MockInterp.return_value.run.side_effect = (
-            _make_interp_with_real_vocab_logic_side_effect(
-                captured_interp_inputs, captured_interp_outputs,
-            )
+    with (
+        patch("workflows.model_exploration.ResultInterpretationAgent") as MockInterp,
+        patch("workflows.model_exploration.MLModelImplementor") as MockImpl,
+        patch("workflows.model_exploration.MLCodeValidatorAgent") as MockValid,
+        patch("workflows.model_exploration.HyperparamTuningAgent") as MockTune,
+        patch("workflows.model_exploration.MLModelProposalAgent") as MockPropose,
+    ):
+        MockInterp.return_value.run.side_effect = _make_interp_with_real_vocab_logic_side_effect(
+            captured_interp_inputs,
+            captured_interp_outputs,
         )
-        MockImpl.return_value.run.side_effect = lambda inp: (
-            _make_implementor_output(
-                model_type=f"model_iter_{propose_call_counter[0]:03d}",
-            )
+        MockImpl.return_value.run.side_effect = lambda inp: _make_implementor_output(
+            model_type=f"model_iter_{propose_call_counter[0]:03d}",
         )
-        MockValid.return_value.run.return_value = (
-            _make_validator_output(passed=True)
-        )
+        MockValid.return_value.run.return_value = _make_validator_output(passed=True)
         MockTune.return_value.run.side_effect = _tune_side_effect
-        MockPropose.return_value.run.side_effect = (
-            _make_proposal_persist_counter_side_effect(propose_call_counter)
+        MockPropose.return_value.run.side_effect = _make_proposal_persist_counter_side_effect(
+            propose_call_counter
         )
 
         run_workflow(
@@ -530,8 +526,7 @@ def test_in_process_run_workflow_promotes_foo_after_four_iters(tmp_path):
         f"tier={foo.tier!r}, seen_in_runs={foo.seen_in_runs!r}"
     )
     assert len(foo.seen_in_runs) == 3, (
-        f"In-process: foo.seen_in_runs should have exactly 3 entries; "
-        f"got {foo.seen_in_runs!r}"
+        f"In-process: foo.seen_in_runs should have exactly 3 entries; got {foo.seen_in_runs!r}"
     )
     expected_runs = {"model_iter_001", "model_iter_002", "model_iter_003"}
     assert set(foo.seen_in_runs) == expected_runs, (
@@ -539,6 +534,8 @@ def test_in_process_run_workflow_promotes_foo_after_four_iters(tmp_path):
         f"expected={expected_runs}, got={set(foo.seen_in_runs)}"
     )
 
-    print("\n  [G1 in-process] foo.seen_in_runs="
-          f"{foo.seen_in_runs} → tier={foo.tier!r} ✓ "
-          "(path-symmetric with chain bridge)")
+    print(
+        "\n  [G1 in-process] foo.seen_in_runs="
+        f"{foo.seen_in_runs} → tier={foo.tier!r} ✓ "
+        "(path-symmetric with chain bridge)"
+    )

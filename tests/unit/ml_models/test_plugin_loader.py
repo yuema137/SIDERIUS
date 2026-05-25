@@ -7,21 +7,22 @@ and callable in the same way as core models.
 All tests use a temporary plugin written to a tmp_path directory — no real
 agent_generated/ files are created or modified.
 """
-import os
-import sys
-import subprocess
-import textwrap
+
 import importlib
+import os
+import subprocess
+import sys
+import textwrap
+
 import pytest
 import torch
 
 from ml_models.plugin_loader import (
-    extend_registries,
+    _PLUGIN_DIRS_ENV_VAR,
     _load_plugin,
     _resolve_plugin_dirs,
-    _PLUGIN_DIRS_ENV_VAR,
+    extend_registries,
 )
-
 
 # ---------------------------------------------------------------------------
 # Shared plugin source used across tests
@@ -67,8 +68,8 @@ def plugin_file(tmp_path):
 # _load_plugin
 # ---------------------------------------------------------------------------
 
-class TestLoadPlugin:
 
+class TestLoadPlugin:
     def test_valid_plugin_returns_dict(self, plugin_file):
         result = _load_plugin(plugin_file)
         assert result is not None
@@ -114,8 +115,8 @@ class TestLoadPlugin:
 # extend_registries
 # ---------------------------------------------------------------------------
 
-class TestExtendRegistries:
 
+class TestExtendRegistries:
     def test_plugin_added_to_both_registries(self, tmp_path, plugin_file):
         # Rename so it lives inside tmp_path/models/
         models_dir = tmp_path / "models"
@@ -123,11 +124,12 @@ class TestExtendRegistries:
         dst = models_dir / "test_plugin_model.py"
         dst.write_text(VALID_PLUGIN_SRC)
 
-        model_reg  = {}
+        model_reg = {}
         config_reg = {}
 
         # Patch the loader's AGENT_GENERATED_DIR to point at our tmp models dir
         import ml_models.plugin_loader as pl
+
         original_dir = pl.AGENT_GENERATED_DIR
         pl.AGENT_GENERATED_DIR = str(models_dir)
         try:
@@ -145,9 +147,10 @@ class TestExtendRegistries:
         (models_dir / "__init__.py").write_text("")
         (models_dir / "_private.py").write_text(VALID_PLUGIN_SRC)
 
-        model_reg  = {}
+        model_reg = {}
         config_reg = {}
         import ml_models.plugin_loader as pl
+
         original_dir = pl.AGENT_GENERATED_DIR
         pl.AGENT_GENERATED_DIR = str(models_dir)
         try:
@@ -158,9 +161,10 @@ class TestExtendRegistries:
         assert loaded == []
 
     def test_missing_directory_returns_empty(self, tmp_path):
-        model_reg  = {}
+        model_reg = {}
         config_reg = {}
         import ml_models.plugin_loader as pl
+
         original_dir = pl.AGENT_GENERATED_DIR
         pl.AGENT_GENERATED_DIR = str(tmp_path / "nonexistent")
         try:
@@ -176,8 +180,8 @@ class TestExtendRegistries:
 # End-to-end: plugin model is callable like a core model
 # ---------------------------------------------------------------------------
 
-class TestPluginModelCallable:
 
+class TestPluginModelCallable:
     @pytest.fixture
     def loaded_plugin(self, tmp_path):
         """Load the valid plugin and return (model_class, config_class)."""
@@ -185,9 +189,10 @@ class TestPluginModelCallable:
         models_dir.mkdir()
         (models_dir / "test_plugin_model.py").write_text(VALID_PLUGIN_SRC)
 
-        model_reg  = {}
+        model_reg = {}
         config_reg = {}
         import ml_models.plugin_loader as pl
+
         original_dir = pl.AGENT_GENERATED_DIR
         pl.AGENT_GENERATED_DIR = str(models_dir)
         try:
@@ -212,11 +217,11 @@ class TestPluginModelCallable:
         """Plugin forward must return [B, 256, T] — same contract as core models."""
         ModelClass, ConfigClass = loaded_plugin
         seg_size = 1000
-        batch    = 2
-        cfg   = ConfigClass(segmentation_size=seg_size)
+        batch = 2
+        cfg = ConfigClass(segmentation_size=seg_size)
         model = ModelClass(cfg)
         model.eval()
-        x   = torch.randint(0, 256, (batch, seg_size))
+        x = torch.randint(0, 256, (batch, seg_size))
         out = model(x)
         assert out.shape == (batch, 256, seg_size), (
             f"Expected ({batch}, 256, {seg_size}), got {tuple(out.shape)}"
@@ -226,7 +231,7 @@ class TestPluginModelCallable:
         ModelClass, ConfigClass = loaded_plugin
         cfg = ConfigClass(segmentation_size=500)
         model = ModelClass(cfg)
-        x   = torch.randint(0, 256, (1, 500))
+        x = torch.randint(0, 256, (1, 500))
         out = model(x)
         assert out.dtype == torch.float32
 
@@ -234,7 +239,7 @@ class TestPluginModelCallable:
         ModelClass, ConfigClass = loaded_plugin
         cfg = ConfigClass(segmentation_size=500)
         model = ModelClass(cfg)
-        x   = torch.randint(0, 256, (1, 500))
+        x = torch.randint(0, 256, (1, 500))
         out = model(x)
         assert not torch.isnan(out).any()
 
@@ -242,6 +247,7 @@ class TestPluginModelCallable:
 # ---------------------------------------------------------------------------
 # _resolve_plugin_dirs — env var precedence and parsing
 # ---------------------------------------------------------------------------
+
 
 class TestResolvePluginDirs:
     """Phase 1 of docs/run_scoped_plugins.md — env var drives the scan list,
@@ -251,6 +257,7 @@ class TestResolvePluginDirs:
     def test_env_unset_falls_back_to_agent_generated_dir(self, monkeypatch):
         monkeypatch.delenv(_PLUGIN_DIRS_ENV_VAR, raising=False)
         import ml_models.plugin_loader as pl
+
         assert _resolve_plugin_dirs() == [pl.AGENT_GENERATED_DIR]
 
     def test_empty_env_falls_back_to_agent_generated_dir(self, monkeypatch):
@@ -259,6 +266,7 @@ class TestResolvePluginDirs:
         would silently disable plugin loading."""
         monkeypatch.setenv(_PLUGIN_DIRS_ENV_VAR, "")
         import ml_models.plugin_loader as pl
+
         assert _resolve_plugin_dirs() == [pl.AGENT_GENERATED_DIR]
 
         monkeypatch.setenv(_PLUGIN_DIRS_ENV_VAR, "   ")
@@ -293,6 +301,7 @@ class TestResolvePluginDirs:
 # extend_registries — multi-directory scanning (Phase 1)
 # ---------------------------------------------------------------------------
 
+
 def _make_plugin_src(model_type: str) -> str:
     """Return VALID_PLUGIN_SRC rewritten for a different PLUGIN_MODEL_TYPE.
 
@@ -304,7 +313,6 @@ def _make_plugin_src(model_type: str) -> str:
 
 
 class TestExtendRegistriesMultiDir:
-
     def test_env_var_overrides_legacy_dir(self, tmp_path, monkeypatch):
         """When SIDERIUS_PLUGIN_DIRS is set, the loader must scan ONLY that
         dir — not AGENT_GENERATED_DIR. We prove this by pointing
@@ -321,6 +329,7 @@ class TestExtendRegistriesMultiDir:
         (run_dir / "run_plugin.py").write_text(_make_plugin_src("run_plugin"))
 
         import ml_models.plugin_loader as pl
+
         monkeypatch.setattr(pl, "AGENT_GENERATED_DIR", str(legacy_dir))
         monkeypatch.setenv(_PLUGIN_DIRS_ENV_VAR, str(run_dir))
 
@@ -361,6 +370,7 @@ class TestExtendRegistriesMultiDir:
         (run_dir / "run_plugin.py").write_text(_make_plugin_src("run_only_plugin"))
 
         import ml_models.plugin_loader as pl
+
         monkeypatch.setattr(pl, "AGENT_GENERATED_DIR", str(tmp_path / "does_not_exist"))
         monkeypatch.setenv(_PLUGIN_DIRS_ENV_VAR, str(run_dir))
 
@@ -389,91 +399,85 @@ class TestExtendRegistriesMultiDir:
 
 
 # ---------------------------------------------------------------------------
-# Bootstrap registry mirror — regression guard for the 2026-04-17 fix
+# Single-identity invariant — regression guard for the package refactor
 # ---------------------------------------------------------------------------
 
-_BOOTSTRAP_MIRROR_SCRIPT = textwrap.dedent("""\
+_NO_BARE_IDENTITY_SCRIPT = textwrap.dedent("""\
     import sys
     import ml_models.plugin_loader as pl
 
     # Redirect the loader at the tmp plugin dir BEFORE triggering bootstrap.
     pl.AGENT_GENERATED_DIR = sys.argv[1]
 
-    # Importing models_sandbox triggers:
-    #   1) line 11: bare ``from models_format_sandbox import ...`` — loads
-    #      the bare module identity because ml_models/ is on sys.path.
-    #   2) the bootstrap at the bottom: loads packaged
-    #      ``ml_models.models_format_sandbox``, populates its registry, then
-    #      mirrors onto the bare identity.
+    # Triggers the plugin bootstrap inside ml_models/models_sandbox.py.
+    # After the package refactor, every internal import uses the qualified
+    # form ``from ml_models.models_format_sandbox import ...``, so the bare
+    # ``models_format_sandbox`` identity must never be created — even when
+    # ``ml_models/`` is on PYTHONPATH (which historically triggered the
+    # duplicate-module bug fixed on 2026-04-17 and structurally eliminated
+    # by the 2026-05 package migration).
     import ml_models.models_sandbox  # noqa: F401
 
     bare = sys.modules.get('models_format_sandbox')
     pkg  = sys.modules.get('ml_models.models_format_sandbox')
 
-    assert bare is not None, "bare models_format_sandbox was not loaded"
     assert pkg is not None, "packaged ml_models.models_format_sandbox was not loaded"
-    assert bare is not pkg, (
-        "bare and packaged should be distinct module objects when ml_models/ "
-        "is on sys.path — if they are the same, this test is no longer "
-        "exercising the duplicate-module scenario"
+    assert bare is None, (
+        "package refactor invariant violated: the bare 'models_format_sandbox' "
+        "module identity was created. Some flat 'from models_format_sandbox "
+        "import ...' has been reintroduced; every import must use the "
+        "qualified 'from ml_models.models_format_sandbox import ...' form. "
+        f"sys.modules['models_format_sandbox'] = {bare!r}"
     )
 
     assert "test_plugin_model" in pkg.PLUGIN_CONFIG_REGISTRY, (
         "plugin missing from packaged registry: "
         + str(list(pkg.PLUGIN_CONFIG_REGISTRY.keys()))
     )
-    assert "test_plugin_model" in bare.PLUGIN_CONFIG_REGISTRY, (
-        "plugin missing from bare registry (mirror regression): "
-        + str(list(bare.PLUGIN_CONFIG_REGISTRY.keys()))
-    )
-
-    # The exact code path the training subprocess takes.
-    cls = bare.get_config_class("test_plugin_model")
+    cls = pkg.get_config_class("test_plugin_model")
     assert cls is not None, (
-        "bare get_config_class('test_plugin_model') returned None — this is "
-        "the exact failure mode fixed on 2026-04-17"
+        "pkg.get_config_class('test_plugin_model') returned None — the "
+        "plugin bootstrap failed to populate the canonical registry"
     )
 
     print("OK")
 """)
 
 
-class TestBootstrapRegistryMirror:
-    """Regression guard for the duplicate-module bootstrap fix (2026-04-17).
+class TestNoBareModuleIdentity:
+    """Regression guard for the 2026-05 package refactor invariant.
 
-    With ``ml_models/`` on sys.path (the training subprocess env), the bare
-    ``models_format_sandbox`` and packaged ``ml_models.models_format_sandbox``
-    resolve to two distinct module objects. The bootstrap in
-    ``ml_models/models_sandbox.py`` mirrors the populated packaged registry
-    onto the bare module so bare-import callers — ``execute_tools/
-    train_engine_sandbox.py``, ``execute_tools/inference_single.py``,
-    ``ml_models/loss_models_sandbox.py`` — see the same plugins.
+    After the migration to a fully-installable setuptools package, every
+    internal import resolves through the qualified ``ml_models.*`` path.
+    The bare ``models_format_sandbox`` / ``models_sandbox`` /
+    ``loss_models_sandbox`` module identities — which previously coexisted
+    with their packaged counterparts when ``ml_models/`` was on sys.path
+    and produced the duplicate-module bug fixed on 2026-04-17 — must no
+    longer be created at all. This guard freezes that invariant.
 
-    Without the mirror, ``get_config_class()`` called through the bare
-    identity reads an empty ``PLUGIN_CONFIG_REGISTRY`` and returns ``None``
-    for every plugin, crashing the training subprocess with
-    ``ValueError: Unknown model_type in config: <plugin>``.
-
-    This must run in a subprocess because pytest's own environment only
-    places the project root on sys.path, so the duplicate-module scenario
-    cannot be reproduced in-process.
+    Runs in a subprocess with a composite PYTHONPATH that puts BOTH the
+    project root and ``ml_models/`` on the search path. Pre-refactor this
+    setup loaded the bare identity; post-refactor it must not, because no
+    code in the import chain references the bare names anymore.
     """
 
-    def test_both_module_identities_carry_plugin_after_bootstrap(self, tmp_path):
+    def test_bare_module_identity_never_created(self, tmp_path):
         models_dir = tmp_path / "models"
         models_dir.mkdir()
         (models_dir / "test_plugin_model.py").write_text(VALID_PLUGIN_SRC)
 
         import ml_models.plugin_loader as pl
-        ml_models_dir = os.path.dirname(os.path.abspath(pl.__file__))
-        project_root  = os.path.dirname(ml_models_dir)
 
-        # Mirror the training subprocess PYTHONPATH: project root + ml_models/.
+        ml_models_dir = os.path.dirname(os.path.abspath(pl.__file__))
+        project_root = os.path.dirname(ml_models_dir)
+
+        # Composite PYTHONPATH that historically triggered the dual-identity
+        # bug. The invariant is that it no longer does.
         env = dict(os.environ)
         env["PYTHONPATH"] = os.pathsep.join([project_root, ml_models_dir])
 
         result = subprocess.run(
-            [sys.executable, "-c", _BOOTSTRAP_MIRROR_SCRIPT, str(models_dir)],
+            [sys.executable, "-c", _NO_BARE_IDENTITY_SCRIPT, str(models_dir)],
             env=env,
             capture_output=True,
             text=True,

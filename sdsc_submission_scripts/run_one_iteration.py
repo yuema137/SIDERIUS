@@ -27,6 +27,7 @@ longer pass prior iters' run_outputs explicitly. The deprecated
 ``--iteration`` alias is still accepted for one release; use
 ``--start_iteration`` for new chains.
 """
+
 import argparse
 import glob
 import json
@@ -34,21 +35,18 @@ import os
 import sys
 import traceback
 import warnings
-from datetime import datetime, timezone
-from typing import List, Optional
-
-# Ensure SIDERIUS root is importable
-SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, SIDERIUS_ROOT)
-sys.path.insert(0, os.path.join(SIDERIUS_ROOT, "ml_models"))
+from datetime import UTC, datetime
+from pathlib import Path
 
 from dotenv import load_dotenv
-load_dotenv()
 
-from workflows.model_exploration import run_workflow
-from workflows.llm_config import WorkflowLLMConfig
-from core.resume import restore_prior_state, ResumeError
 from agent.schemas.telemetry import LLMBridgeContextError
+from core.resume import ResumeError, restore_prior_state
+from workflows.llm_config import WorkflowLLMConfig
+from workflows.model_exploration import run_workflow
+
+SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(dotenv_path=Path(SIDERIUS_ROOT) / ".env")
 
 
 def _positive_int(s: str) -> int:
@@ -59,14 +57,10 @@ def _positive_int(s: str) -> int:
     """
     try:
         v = int(s)
-    except (TypeError, ValueError):
-        raise argparse.ArgumentTypeError(
-            f"expected a positive integer, got {s!r}"
-        )
+    except (TypeError, ValueError) as e:
+        raise argparse.ArgumentTypeError(f"expected a positive integer, got {s!r}") from e
     if v < 1:
-        raise argparse.ArgumentTypeError(
-            f"expected a positive integer (>= 1), got {v}"
-        )
+        raise argparse.ArgumentTypeError(f"expected a positive integer (>= 1), got {v}")
     return v
 
 
@@ -83,10 +77,8 @@ def _portion_floor(s: str) -> float:
     """
     try:
         v = float(s)
-    except (TypeError, ValueError):
-        raise argparse.ArgumentTypeError(
-            f"expected a float in [0.01, 1.0], got {s!r}"
-        )
+    except (TypeError, ValueError) as e:
+        raise argparse.ArgumentTypeError(f"expected a float in [0.01, 1.0], got {s!r}") from e
     if not (0.01 <= v <= 1.0):
         raise argparse.ArgumentTypeError(
             f"expected a float in [0.01, 1.0], got {v}. The 0.01 floor "
@@ -111,12 +103,12 @@ def _resolve_chain_run_id(workspace: str, run_name: str) -> str:
     """
     sidecar = os.path.join(workspace, ".token_run_id")
     if os.path.exists(sidecar):
-        with open(sidecar, "r", encoding="utf-8") as f:
+        with open(sidecar, encoding="utf-8") as f:
             existing = f.read().strip()
         if existing:
             return existing
 
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
     new = f"{run_name}-{ts}-{os.getpid()}"
     os.makedirs(workspace, exist_ok=True)
     with open(sidecar, "w", encoding="utf-8") as f:
@@ -138,8 +130,9 @@ def _check_halt_marker(workspace: str) -> bool:
 
 
 def _check_consecutive_failure_brake(
-    workspace: str, max_failed: int,
-) -> Optional[List[int]]:
+    workspace: str,
+    max_failed: int,
+) -> list[int] | None:
     """Scan the workspace for a ``max_failed``-long streak of consecutive
     ``status="failed"`` manifests (Stage 4 / Commit 4.6).
 
@@ -165,15 +158,11 @@ def _check_consecutive_failure_brake(
     if not os.path.isdir(workspace):
         return None
 
-    iter_numbers: List[int] = []
+    iter_numbers: list[int] = []
     for name in os.listdir(workspace):
         # Match exactly ``iter_<3 digits>`` to avoid sweeping in
         # artefacts like ``iter_001.bak`` or unrelated dirs.
-        if (
-            len(name) == 8
-            and name.startswith("iter_")
-            and name[5:].isdigit()
-        ):
+        if len(name) == 8 and name.startswith("iter_") and name[5:].isdigit():
             iter_numbers.append(int(name[5:]))
     iter_numbers.sort(reverse=True)
 
@@ -182,13 +171,11 @@ def _check_consecutive_failure_brake(
 
     candidate = iter_numbers[:max_failed]
     for n in candidate:
-        manifest_path = os.path.join(
-            workspace, f"iter_{n:03d}", "manifest.json"
-        )
+        manifest_path = os.path.join(workspace, f"iter_{n:03d}", "manifest.json")
         if not os.path.exists(manifest_path):
             return None
         try:
-            with open(manifest_path, "r", encoding="utf-8") as f:
+            with open(manifest_path, encoding="utf-8") as f:
                 manifest = json.load(f)
         except (json.JSONDecodeError, OSError):
             return None
@@ -215,7 +202,7 @@ def _emit_token_iter_rollup(workspace: str, iteration: int) -> int:
     cumulative_prior = 0
     by_node: dict[str, int] = {}
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -265,7 +252,7 @@ def resolve_source_paths(source_paths: list[str]) -> list[str]:
     resolved = []
     for entry in source_paths:
         if entry.startswith("@manifest:"):
-            manifest_path = entry[len("@manifest:"):]
+            manifest_path = entry[len("@manifest:") :]
             if not os.path.exists(manifest_path):
                 raise FileNotFoundError(
                     f"Manifest not found (previous iteration may have failed): {manifest_path}"
@@ -290,7 +277,11 @@ def resolve_source_paths(source_paths: list[str]) -> list[str]:
 
 
 def write_manifest(
-    iter_dir: str, run_name: str, results: list, *, crashed: bool = False,
+    iter_dir: str,
+    run_name: str,
+    results: list,
+    *,
+    crashed: bool = False,
 ) -> dict:
     """
     Write a manifest.json summarizing this iteration's output.
@@ -374,16 +365,20 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run one iteration of the SIDERIUS exploration workflow."
     )
     parser.add_argument(
-        "--workspace", type=str, required=True,
-        help="Root output directory for this exploration (shared across all iterations)."
+        "--workspace",
+        type=str,
+        required=True,
+        help="Root output directory for this exploration (shared across all iterations).",
     )
     parser.add_argument(
-        "--run_name", type=str, required=True,
+        "--run_name",
+        type=str,
+        required=True,
         help="Chain-level run name (e.g. 'explore_v12_0504'). Used as the "
-             "audit-log identity (chain_run_name) and seeded into the "
-             "immutable run_id sidecar at {workspace}/.token_run_id. "
-             "Must remain identical across every iteration of the chain — "
-             "the bridge refuses run_id mutation per §1.4.1."
+        "audit-log identity (chain_run_name) and seeded into the "
+        "immutable run_id sidecar at {workspace}/.token_run_id. "
+        "Must remain identical across every iteration of the chain — "
+        "the bridge refuses run_id mutation per §1.4.1.",
     )
     # Phase 6.8 Task 2 Commit 8 — rename --iteration → --start_iteration so the
     # name matches the unified resume/chain philosophy ("which iter is this
@@ -392,16 +387,21 @@ def build_parser() -> argparse.ArgumentParser:
     # kept as a deprecated alias for one release. See
     # docs/phase68_orchestrator_memory_and_resume.md §3.5 Commit 8.
     parser.add_argument(
-        "--start_iteration", type=int, default=None,
+        "--start_iteration",
+        type=int,
+        default=None,
         help="Iteration number (1-based) to run *now*. When > 1, the runner "
-             "auto-restores plugin classes from iters [1, N-1] via "
-             "core.resume.restore_prior_state. Mutually exclusive with the "
-             "deprecated --iteration alias."
+        "auto-restores plugin classes from iters [1, N-1] via "
+        "core.resume.restore_prior_state. Mutually exclusive with the "
+        "deprecated --iteration alias.",
     )
     parser.add_argument(
-        "--iteration", type=int, default=None, dest="iteration_legacy",
+        "--iteration",
+        type=int,
+        default=None,
+        dest="iteration_legacy",
         help="DEPRECATED — alias for --start_iteration. Will be removed after "
-             "the next stable run. Use --start_iteration instead."
+        "the next stable run. Use --start_iteration instead.",
     )
     # Phase 6.8 Commit 11 — rename --source_paths → --seed_paths so the
     # canonical name reflects what the list actually means: *seed* source
@@ -409,90 +409,120 @@ def build_parser() -> argparse.ArgumentParser:
     # {workspace}/iter_NNN/manifest.json). --source_paths is kept as a
     # deprecated alias for one release. See §3.5 Commit 11.
     parser.add_argument(
-        "--seed_paths", type=str, nargs="+", default=None,
+        "--seed_paths",
+        type=str,
+        nargs="+",
+        default=None,
         help="Explicit list of HyperparamTuningOutput JSON paths to use as "
-             "*seed* source data. Prior iters' run_outputs are auto-discovered "
-             "from {workspace}/iter_NNN/manifest.json by restore_prior_state — "
-             "they no longer need to be listed here for chain runs (back-compat "
-             "still accepts @manifest: indirection in this list). "
-             "Mutually exclusive with the deprecated --source_paths alias."
+        "*seed* source data. Prior iters' run_outputs are auto-discovered "
+        "from {workspace}/iter_NNN/manifest.json by restore_prior_state — "
+        "they no longer need to be listed here for chain runs (back-compat "
+        "still accepts @manifest: indirection in this list). "
+        "Mutually exclusive with the deprecated --source_paths alias.",
     )
     parser.add_argument(
-        "--source_paths", type=str, nargs="+", default=None,
+        "--source_paths",
+        type=str,
+        nargs="+",
+        default=None,
         dest="source_paths_legacy",
         help="DEPRECATED — alias for --seed_paths. Will be removed after "
-             "the next stable run. Use --seed_paths instead."
+        "the next stable run. Use --seed_paths instead.",
+    )
+    parser.add_argument("--max_rounds", type=int, default=3, help="Tuning rounds per iteration.")
+    parser.add_argument(
+        "--max_proposal_attempts",
+        type=int,
+        default=3,
+        help="Retry budget for propose→implement→validate.",
     )
     parser.add_argument(
-        "--max_rounds", type=int, default=3,
-        help="Tuning rounds per iteration."
-    )
-    parser.add_argument(
-        "--max_proposal_attempts", type=int, default=3,
-        help="Retry budget for propose→implement→validate."
-    )
-    parser.add_argument(
-        "--llm_model", type=str, default="gemini-3.1-pro-preview",
+        "--llm_model",
+        type=str,
+        default="gemini-3.1-pro-preview",
         help="Gemini model ID for all 5 agents (the planner sub-call of the "
-             "tuner uses this; the reflector sub-call uses --reflect_model_id "
-             "if set, else falls back to a provider-aware default)."
+        "tuner uses this; the reflector sub-call uses --reflect_model_id "
+        "if set, else falls back to a provider-aware default).",
     )
     parser.add_argument(
-        "--reflect_provider", type=str, default=None, choices=["gemini", "openai"],
+        "--reflect_provider",
+        type=str,
+        default=None,
+        choices=["gemini", "openai"],
         help="Optional separate provider for the tuner's reflector sub-call. "
-             "When unset, the reflector uses the same provider as the planner."
+        "When unset, the reflector uses the same provider as the planner.",
     )
     parser.add_argument(
-        "--reflect_model_id", type=str, default=None,
+        "--reflect_model_id",
+        type=str,
+        default=None,
         help="Optional separate model for the tuner's reflector sub-call. "
-             "When unset for the gemini provider, defaults to 'gemini-2.5-flash' "
-             "(GA model with unlimited daily quota). When unset for other "
-             "providers, falls back to --llm_model (legacy behavior)."
+        "When unset for the gemini provider, defaults to 'gemini-2.5-flash' "
+        "(GA model with unlimited daily quota). When unset for other "
+        "providers, falls back to --llm_model (legacy behavior).",
     )
     parser.add_argument(
-        "--gpu_memory_limit_gb", type=int, default=None,
-        help="Hard cap on GPU memory per process (Phase 2, not yet implemented end-to-end)."
+        "--gpu_memory_limit_gb",
+        type=int,
+        default=None,
+        help="Hard cap on GPU memory per process (Phase 2, not yet implemented end-to-end).",
     )
     parser.add_argument(
-        "--max_epochs", type=_positive_int, default=1,
-        help="Hard cap on epochs per round. Must be >= 1; None forbidden."
+        "--max_epochs",
+        type=_positive_int,
+        default=1,
+        help="Hard cap on epochs per round. Must be >= 1; None forbidden.",
     )
     parser.add_argument(
-        "--is_trial", action="store_true",
-        help="Enable trial mode (default: True for production)."
+        "--is_trial", action="store_true", help="Enable trial mode (default: True for production)."
     )
     parser.add_argument(
-        "--trial_strategy", type=str, default="snapshot",
+        "--trial_strategy",
+        type=str,
+        default="snapshot",
         choices=["snapshot", "anchors", "target"],
     )
     parser.add_argument(
-        "--trial_portion", type=_portion_floor, default=0.1,
-        help="Floor 0.01 (segment-integrity; mirrors Pydantic ge=0.01).")
+        "--trial_portion",
+        type=_portion_floor,
+        default=0.1,
+        help="Floor 0.01 (segment-integrity; mirrors Pydantic ge=0.01).",
+    )
+    parser.add_argument("--train_portion", type=float, default=0.1)
     parser.add_argument(
-        "--train_portion", type=float, default=0.1)
-    parser.add_argument(
-        "--eval_portion", type=_portion_floor, default=0.1,
-        help="Floor 0.01 (segment-integrity; mirrors Pydantic ge=0.01).")
+        "--eval_portion",
+        type=_portion_floor,
+        default=0.1,
+        help="Floor 0.01 (segment-integrity; mirrors Pydantic ge=0.01).",
+    )
     # --- Formal-mode training levers (Phase M, docs §12) + eval scope (Phase R, §13) ---
     # Formal eval strategy is locked to ``snapshot``; the portion defaults to
     # 1.0 (production full-clone for cross-arch comparability, §12.2) and
     # is operator-configurable via ``--formal_eval_portion`` for smoke / CI
     # runs that need to fit a tight ``--formal_time_budget_minutes`` — §13.
     parser.add_argument(
-        "--formal_strategy", type=str, default="snapshot",
+        "--formal_strategy",
+        type=str,
+        default="snapshot",
         choices=["snapshot", "anchors", "target"],
         help="Training-side strategy on formal rounds (default snapshot).",
     )
     parser.add_argument(
-        "--formal_portion", type=float, default=0.1,
+        "--formal_portion",
+        type=float,
+        default=0.1,
         help="Fraction of segments per file for formal training scope (default 0.1).",
     )
     parser.add_argument(
-        "--formal_train_portion", type=float, default=1.0,
+        "--formal_train_portion",
+        type=float,
+        default=1.0,
         help="Per-epoch iteration fraction for formal training (default 1.0).",
     )
     parser.add_argument(
-        "--formal_eval_portion", type=float, default=1.0,
+        "--formal_eval_portion",
+        type=float,
+        default=1.0,
         help=(
             "Fraction of segments per file for the formal-mode eval scope "
             "(snapshot strategy). Default 1.0 = production full-clone for "
@@ -521,8 +551,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--formal_round_strategy",
         type=str,
         choices=[
-            "full_clone", "hybrid_params", "independent",  # canonical
-            "inherit_best_trial", "llm_propose",            # legacy aliases
+            "full_clone",
+            "hybrid_params",
+            "independent",  # canonical
+            "inherit_best_trial",
+            "llm_propose",  # legacy aliases
         ],
         default="full_clone",
         help=(
@@ -553,109 +586,153 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--cleanup_denoised", action="store_true",
-        help="Delete denoised H5 files after scoring (recommended for production)."
+        "--cleanup_denoised",
+        action="store_true",
+        help="Delete denoised H5 files after scoring (recommended for production).",
     )
     parser.add_argument(
-        "--human_advice_file", type=str, default=None,
+        "--human_advice_file",
+        type=str,
+        default=None,
         help="Path to a JSON file with human advice for each agent. "
-             "Schema: {\"interpret\":\"...\", \"propose\":\"...\", "
-             "\"implement\":\"...\", \"validate\":\"...\", \"tune\":\"...\"}. "
-             "Individual --human_advice_* flags override file values."
+        'Schema: {"interpret":"...", "propose":"...", '
+        '"implement":"...", "validate":"...", "tune":"..."}. '
+        "Individual --human_advice_* flags override file values.",
     )
     parser.add_argument(
-        "--human_advice_interpret", type=str, default=None,
-        help="Human guidance for the interpretation agent."
+        "--human_advice_interpret",
+        type=str,
+        default=None,
+        help="Human guidance for the interpretation agent.",
     )
     parser.add_argument(
-        "--human_advice_propose", type=str, default=None,
-        help="Human guidance for the proposal agent."
+        "--human_advice_propose",
+        type=str,
+        default=None,
+        help="Human guidance for the proposal agent.",
     )
     parser.add_argument(
-        "--human_advice_implement", type=str, default=None,
-        help="Human guidance for the implementor agent."
+        "--human_advice_implement",
+        type=str,
+        default=None,
+        help="Human guidance for the implementor agent.",
     )
     parser.add_argument(
-        "--human_advice_validate", type=str, default=None,
-        help="Human guidance for the validator agent."
+        "--human_advice_validate",
+        type=str,
+        default=None,
+        help="Human guidance for the validator agent.",
     )
     parser.add_argument(
-        "--human_advice_tune", type=str, default=None,
-        help="Human guidance for the tuning agent."
+        "--human_advice_tune", type=str, default=None, help="Human guidance for the tuning agent."
     )
     parser.add_argument(
-        "--plan_overrides", type=str, default=None,
+        "--plan_overrides",
+        type=str,
+        default=None,
         help="JSON string of hard overrides for the LLM's ExperimentPlan. "
-             "E.g. '{\"trial_portion\": 0.2, \"train_portion\": 1.0}'. "
-             "Keys must be valid ExperimentPlan fields."
+        'E.g. \'{"trial_portion": 0.2, "train_portion": 1.0}\'. '
+        "Keys must be valid ExperimentPlan fields.",
     )
     # --- Workflow-level CLI flags (Phase 6.8 Commit 11) ---
     parser.add_argument(
-        "--llm_config", type=str, default=None,
+        "--llm_config",
+        type=str,
+        default=None,
         help="Path to a WorkflowLLMConfig JSON file for per-node model routing. "
-             "Overrides --llm_model when provided.",
+        "Overrides --llm_model when provided.",
     )
     parser.add_argument(
-        "--advice", type=str, default=None,
+        "--advice",
+        type=str,
+        default=None,
         help="Path to a JSON advice file (propose/implement/tune/mindset keys). "
-             "Overrides --human_advice_file when provided.",
+        "Overrides --human_advice_file when provided.",
     )
     parser.add_argument(
-        "--max_impl_attempts", type=int, default=3,
+        "--max_impl_attempts",
+        type=int,
+        default=3,
         help="Max implementation retries per proposal when the validator rejects.",
     )
     parser.add_argument(
-        "--target_files", type=int, nargs="+", default=None,
+        "--target_files",
+        type=int,
+        nargs="+",
+        default=None,
         help="File indices for --trial_strategy=target.",
     )
     parser.add_argument(
-        "--sampling_seed", type=int, default=None,
+        "--sampling_seed",
+        type=int,
+        default=None,
         help="Seed for build_sample_set(). None auto-generates per gate.",
     )
     parser.add_argument(
-        "--trial_time_budget_minutes", type=float, default=None,
+        "--trial_time_budget_minutes",
+        type=float,
+        default=None,
         help="Wall-time budget (minutes) for trial-mode time gate. None disables.",
     )
     parser.add_argument(
-        "--formal_time_budget_minutes", type=float, default=None,
+        "--formal_time_budget_minutes",
+        type=float,
+        default=None,
         help="Wall-time budget (minutes) for formal-mode time gate. None disables.",
     )
     parser.add_argument(
-        "--data_dir", type=str, default=None,
+        "--data_dir",
+        type=str,
+        default=None,
         help="TIDMAD data directory for evaluate_time_skill's real-dataset warmup. "
-             "None falls back to the static formula.",
+        "None falls back to the static formula.",
     )
     parser.add_argument(
-        "--trial_vram_budget_gb", type=float, default=None,
+        "--trial_vram_budget_gb",
+        type=float,
+        default=None,
         help="Per-mode VRAM ceiling (GB) for trial rounds. None uses free×0.8.",
     )
     parser.add_argument(
-        "--formal_vram_budget_gb", type=float, default=None,
+        "--formal_vram_budget_gb",
+        type=float,
+        default=None,
         help="Per-mode VRAM ceiling (GB) for formal rounds. None uses free×0.8.",
     )
     parser.add_argument(
-        "--attempts_per_round", type=int, default=3,
+        "--attempts_per_round",
+        type=int,
+        default=3,
         help="Inner attempt budget for trial rounds.",
     )
     parser.add_argument(
-        "--attempts_per_formal_round", type=int, default=5,
+        "--attempts_per_formal_round",
+        type=int,
+        default=5,
         help="Inner attempt budget for the formal-promotion round.",
     )
     parser.add_argument(
-        "--max_fail_rounds", type=int, default=3,
+        "--max_fail_rounds",
+        type=int,
+        default=3,
         help="Consecutive-failure brake for the tuner outer loop.",
     )
     parser.add_argument(
-        "--exploration_mode", type=str, default="auto",
+        "--exploration_mode",
+        type=str,
+        default="auto",
         choices=["auto", "explore", "exploit"],
         help="Reasoning pipeline mode.",
     )
     parser.add_argument(
-        "--minimum_boldness", type=float, default=0.05,
+        "--minimum_boldness",
+        type=float,
+        default=0.05,
         help="Minimum boldness threshold for FalsifiablePrediction.",
     )
     parser.add_argument(
-        "--debug_dump_prompts", action="store_true",
+        "--debug_dump_prompts",
+        action="store_true",
         help="Dump rendered proposing-stage prompts to debug/ for audit.",
     )
     # --- Pseudo-mode flags (Stage 3 / Commit 4.5) ---
@@ -668,26 +745,30 @@ def build_parser() -> argparse.ArgumentParser:
     # production code path bit-for-bit. See
     # ``docs/audit_and_optimize_token_usage_and_growth.md`` Commit 4.5.
     parser.add_argument(
-        "--is_pseudo_llm", action="store_true",
+        "--is_pseudo_llm",
+        action="store_true",
         help="Swap LLMBridge → StubLLMBridge for all 5 agents "
-             "(interpret/propose/implement/validate/tune). Returns canned, "
-             "Pydantic-valid per-label outputs at $0 token cost. Use for "
-             "chain-wiring smoke tests; not for production runs."
+        "(interpret/propose/implement/validate/tune). Returns canned, "
+        "Pydantic-valid per-label outputs at $0 token cost. Use for "
+        "chain-wiring smoke tests; not for production runs.",
     )
     parser.add_argument(
-        "--is_pseudo_training", action="store_true",
+        "--is_pseudo_training",
+        action="store_true",
         help="Swap TidmadSandbox → StubSandbox in the tuner agent. Skips "
-             "real training and returns canned trial / formal scores. Use "
-             "for chain-wiring smoke tests; not for production runs."
+        "real training and returns canned trial / formal scores. Use "
+        "for chain-wiring smoke tests; not for production runs.",
     )
     parser.add_argument(
-        "--max_failed_iterations", type=_positive_int, default=3,
+        "--max_failed_iterations",
+        type=_positive_int,
+        default=3,
         help="Consecutive-failure brake (Stage 4 / Commit 4.6). Halt the "
-             "chain when the most recent N iters all carry "
-             "manifest.status='failed' (default 3). Brake is fail-open: "
-             "missing or malformed manifests count as 'not failed', and "
-             "'no_records' is never counted as a failure. On halt, writes "
-             "{workspace}/.chain_halted and exits 3."
+        "chain when the most recent N iters all carry "
+        "manifest.status='failed' (default 3). Brake is fail-open: "
+        "missing or malformed manifests count as 'not failed', and "
+        "'no_records' is never counted as a failure. On halt, writes "
+        "{workspace}/.chain_halted and exits 3.",
     )
     return parser
 
@@ -718,9 +799,7 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
             "--iteration is the deprecated alias; use --start_iteration only."
         )
     if legacy is None and canonical is None:
-        parser.error(
-            "one of --start_iteration / --iteration is required."
-        )
+        parser.error("one of --start_iteration / --iteration is required.")
     if legacy is not None:
         warnings.warn(
             "--iteration is deprecated; use --start_iteration instead. "
@@ -735,9 +814,7 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
         delattr(args, "iteration_legacy")
 
     if args.start_iteration < 1:
-        parser.error(
-            f"--start_iteration must be >= 1, got {args.start_iteration}"
-        )
+        parser.error(f"--start_iteration must be >= 1, got {args.start_iteration}")
 
     # --seed_paths / --source_paths alias collapse (Phase 6.8 Commit 11).
     # Same pattern as --start_iteration / --iteration above.
@@ -750,9 +827,7 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
             "--source_paths is the deprecated alias; use --seed_paths only."
         )
     if seed_legacy is None and seed_canonical is None:
-        parser.error(
-            "one of --seed_paths / --source_paths is required."
-        )
+        parser.error("one of --seed_paths / --source_paths is required.")
     if seed_legacy is not None:
         warnings.warn(
             "--source_paths is deprecated; use --seed_paths instead. "
@@ -772,8 +847,7 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
         with open(advice_path) as f:
             advice = json.load(f)
         # Normalise list-of-lines form.
-        advice = {k: ("\n".join(v) if isinstance(v, list) else v)
-                  for k, v in advice.items()}
+        advice = {k: ("\n".join(v) if isinstance(v, list) else v) for k, v in advice.items()}
         # 4-key schema: propose, implement, tune, mindset
         # 5-key schema: interpret, propose, implement, validate, tune
         for key in ("interpret", "propose", "implement", "validate", "tune"):
@@ -781,7 +855,7 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
             if getattr(args, attr) is None:
                 setattr(args, attr, advice.get(key) or None)
         # 4-key mindset (not a per-agent key, forwarded as-is)
-        if not hasattr(args, "human_advice_mindset") or getattr(args, "human_advice_mindset") is None:
+        if not hasattr(args, "human_advice_mindset") or args.human_advice_mindset is None:
             args.human_advice_mindset = advice.get("mindset") or None
     else:
         args.human_advice_mindset = None
@@ -818,12 +892,13 @@ def main():
         sys.exit(3)
 
     _failed_streak = _check_consecutive_failure_brake(
-        args.workspace, args.max_failed_iterations,
+        args.workspace,
+        args.max_failed_iterations,
     )
     if _failed_streak is not None:
         halt_path = os.path.join(args.workspace, ".chain_halted")
         halt_payload = {
-            "halted_at": datetime.now(timezone.utc).isoformat(),
+            "halted_at": datetime.now(UTC).isoformat(),
             "workspace": os.path.abspath(args.workspace),
             "max_failed_iterations": args.max_failed_iterations,
             "failed_iters": _failed_streak,
@@ -851,9 +926,11 @@ def main():
     sandbox_factory = None
     if args.is_pseudo_llm:
         from agent.llm_bridge import StubLLMBridge
+
         bridge_factory = StubLLMBridge
     if args.is_pseudo_training:
         from core.sandbox_executor import StubSandbox
+
         sandbox_factory = StubSandbox
     if args.is_pseudo_llm or args.is_pseudo_training:
         modes = []
@@ -904,7 +981,7 @@ def main():
         # Apply gemini-specific default (the chain runner only supports gemini today)
         reflect_model_id = "gemini-2.5-flash"
 
-    print(f"  SIDERIUS PER-ITERATION RUNNER")
+    print("  SIDERIUS PER-ITERATION RUNNER")
     print(f"  Workspace        : {args.workspace}")
     print(f"  Start iteration  : {args.start_iteration}")
     print(f"  Run name         : {run_name}")
@@ -962,23 +1039,18 @@ def main():
         # still communicated to the workflow via the runtime kwarg below; this
         # file is a log, not the channel. See
         # docs/Consistent_growing_vocab_list.md §3.3.5.
-        snapshot_path = os.path.join(
-            iter_dir, f"accumulated_findings_{run_name}.json"
-        )
+        snapshot_path = os.path.join(iter_dir, f"accumulated_findings_{run_name}.json")
         snapshot = {
             "iter_index": args.start_iteration,
             "consumed_by": run_name,
             "source_iters": list(state.committed_iters),
             "count": len(state.accumulated_key_findings),
-            "produced_at": datetime.now(timezone.utc).isoformat(),
+            "produced_at": datetime.now(UTC).isoformat(),
             "findings": list(state.accumulated_key_findings),
         }
         with open(snapshot_path, "w") as f:
             json.dump(snapshot, f, indent=2)
-        print(
-            f"[CHAIN] Wrote {snapshot['count']} accumulated findings "
-            f"→ {snapshot_path}"
-        )
+        print(f"[CHAIN] Wrote {snapshot['count']} accumulated findings → {snapshot_path}")
     resolved_paths = state.resolved_source_paths
 
     if args.llm_config:
@@ -987,10 +1059,12 @@ def main():
         if args.llm_model != "gemini-3.1-pro-preview":
             warnings.warn(
                 "--llm_model is deprecated; use --llm_config instead.",
-                DeprecationWarning, stacklevel=2,
+                DeprecationWarning,
+                stacklevel=2,
             )
         llm_config = WorkflowLLMConfig.uniform(
-            "gemini", args.llm_model,
+            "gemini",
+            args.llm_model,
             reflect_provider=reflect_provider,
             reflect_model_id=reflect_model_id,
         )
@@ -1096,8 +1170,7 @@ def main():
             iteration=args.start_iteration,
         )
     except Exception as e:
-        print(f"  [TOKEN_ITER] WARN: rollup emit failed: "
-              f"{type(e).__name__}: {e}")
+        print(f"  [TOKEN_ITER] WARN: rollup emit failed: {type(e).__name__}: {e}")
 
     if manifest["status"] == "completed":
         print()
@@ -1118,8 +1191,8 @@ def main():
         print()
         print("=" * 60)
         print(
-            f"[CHAIN] No models passed gates this iteration. "
-            f"Writing manifest and exiting gracefully to allow chain to continue."
+            "[CHAIN] No models passed gates this iteration. "
+            "Writing manifest and exiting gracefully to allow chain to continue."
         )
         print(f"  Iteration  : {args.start_iteration}")
         print(f"  Manifest   : {os.path.join(iter_dir, 'manifest.json')} (status=no_records)")

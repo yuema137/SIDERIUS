@@ -11,9 +11,10 @@ Covers the two helpers in ``agent/prompts.py`` that surface
 
 See docs/improving_validation_awareness.md §D.1.
 """
+
 import textwrap
 
-from pydantic import BaseModel, Field, model_validator, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from agent.prompts import (
     _PLUGIN_SOURCE_EXCERPT_MAX_CHARS,
@@ -22,31 +23,30 @@ from agent.prompts import (
 )
 from ml_models.plugin_loader import _load_plugin
 
-
 # ---------------------------------------------------------------------------
 # Fixtures — local classes exercised by inspect.getsource
 # ---------------------------------------------------------------------------
 
+
 class _MonotoneCfg(BaseModel):
     """Mirrors the exact ``dual_path_skip_fusion_cnn`` invariant that blew up
     ``exploit_cnn_v1`` iter-1 on 2026-04-17."""
+
     a: int = Field(default=1, ge=1)
     b: int = Field(default=2, ge=1)
     c: int = Field(default=3, ge=1)
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def check_monotone(self):
         if not (self.a <= self.b <= self.c):
-            raise ValueError(
-                f"values must be nondecreasing, got {self.a}, {self.b}, {self.c}"
-            )
+            raise ValueError(f"values must be nondecreasing, got {self.a}, {self.b}, {self.c}")
         return self
 
 
 class _FieldValidatorCfg(BaseModel):
     kernel_size: int = Field(default=3, ge=1)
 
-    @field_validator('kernel_size')
+    @field_validator("kernel_size")
     @classmethod
     def _odd(cls, v):
         if v % 2 == 0:
@@ -57,6 +57,7 @@ class _FieldValidatorCfg(BaseModel):
 class _PerFieldOnlyCfg(BaseModel):
     """No validators — only per-field bounds. Excerpt should still be emitted
     (cheap) but without any decorator lines."""
+
     channels: int = Field(default=8, ge=1, multiple_of=8)
 
 
@@ -64,8 +65,8 @@ class _PerFieldOnlyCfg(BaseModel):
 # _extract_config_class_source
 # ===========================================================================
 
-class TestExtractor:
 
+class TestExtractor:
     def test_none_returns_empty(self):
         assert _extract_config_class_source(None) == ""
 
@@ -98,6 +99,7 @@ class TestExtractor:
         string — cheaper and more isolated than synthesizing a class with
         a 4000-char body on disk."""
         import agent.prompts as prompts_mod
+
         original = prompts_mod.inspect.getsource
         try:
             prompts_mod.inspect.getsource = lambda _cls: "x = 1\n" * 3000  # ~18000 chars
@@ -120,6 +122,7 @@ class TestExtractor:
         must surface in the excerpt so the planner sees it for built-in
         runs (not only agent-generated plugins)."""
         from ml_models.models_format_sandbox import PUNetConfig
+
         src = _extract_config_class_source(PUNetConfig)
         assert "class PUNetConfig" in src
         assert "@model_validator" in src or "@field_validator" in src
@@ -129,8 +132,8 @@ class TestExtractor:
 # format_plugin_source_excerpt_block
 # ===========================================================================
 
-class TestBlockFormatter:
 
+class TestBlockFormatter:
     def test_none_returns_empty(self):
         assert format_plugin_source_excerpt_block(None) == ""
 
@@ -255,7 +258,11 @@ class TestBrainPlanRendering:
             bridge = LLMBridge()
         captured = {}
 
-        def fake_generate(system_prompt, user_prompt):
+        # ``LLMBridge.plan`` now forwards a ``label`` kwarg (per-call-site
+        # token telemetry, e.g. ``label="tuner.planner"``) into
+        # ``self.generate``. Accept **kwargs so the fake stays compatible
+        # without coupling the test to telemetry plumbing.
+        def fake_generate(system_prompt, user_prompt, **kwargs):
             captured["system_prompt"] = system_prompt
             captured["user_prompt"] = user_prompt
             return {}

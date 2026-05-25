@@ -4,12 +4,12 @@ Tests for ml_models/loss_models_sandbox.py
 Verifies that all loss functions compute correctly on synthetic tensors
 and that get_criterion instantiates the right class for each loss_type.
 """
+
 import pytest
 import torch
 
 from ml_models.loss_models_sandbox import FocalLoss1D, FocalLoss1DCW, get_criterion
 from ml_models.models_format_sandbox import LossConfig
-
 
 # ==========================================
 # Shared fixtures
@@ -58,8 +58,8 @@ def class_weights():
 # FocalLoss1D
 # ==========================================
 
-class TestFocalLoss1D:
 
+class TestFocalLoss1D:
     def test_output_is_scalar(self, classification_inputs, classification_targets):
         cfg = LossConfig(loss_type="focal")
         loss_fn = FocalLoss1D(cfg)
@@ -92,29 +92,35 @@ class TestFocalLoss1D:
     def test_reduction_sum_larger_than_mean(self, classification_inputs, classification_targets):
         loss_mean = FocalLoss1D(LossConfig(loss_type="focal", reduction="mean"))
         loss_sum = FocalLoss1D(LossConfig(loss_type="focal", reduction="sum"))
-        assert loss_sum(classification_inputs, classification_targets).item() > \
-               loss_mean(classification_inputs, classification_targets).item()
+        assert (
+            loss_sum(classification_inputs, classification_targets).item()
+            > loss_mean(classification_inputs, classification_targets).item()
+        )
 
 
 # ==========================================
 # FocalLoss1DCW
 # ==========================================
 
-class TestFocalLoss1DCW:
 
+class TestFocalLoss1DCW:
     def test_output_is_scalar(self, classification_inputs, classification_targets, class_weights):
         cfg = LossConfig(loss_type="focal_cw")
         loss_fn = FocalLoss1DCW(cfg, class_weights)
         loss = loss_fn(classification_inputs, classification_targets)
         assert loss.shape == torch.Size([])
 
-    def test_output_is_non_negative(self, classification_inputs, classification_targets, class_weights):
+    def test_output_is_non_negative(
+        self, classification_inputs, classification_targets, class_weights
+    ):
         cfg = LossConfig(loss_type="focal_cw")
         loss_fn = FocalLoss1DCW(cfg, class_weights)
         loss = loss_fn(classification_inputs, classification_targets)
         assert loss.item() >= 0.0
 
-    def test_none_class_weights_falls_back_gracefully(self, classification_inputs, classification_targets):
+    def test_none_class_weights_falls_back_gracefully(
+        self, classification_inputs, classification_targets
+    ):
         cfg = LossConfig(loss_type="focal_cw")
         loss_fn = FocalLoss1DCW(cfg, class_weights=None)
         loss = loss_fn(classification_inputs, classification_targets)
@@ -125,8 +131,8 @@ class TestFocalLoss1DCW:
 # get_criterion factory
 # ==========================================
 
-class TestGetCriterion:
 
+class TestGetCriterion:
     def test_focal_returns_focal_loss(self):
         cfg = LossConfig(loss_type="focal")
         criterion = get_criterion(cfg)

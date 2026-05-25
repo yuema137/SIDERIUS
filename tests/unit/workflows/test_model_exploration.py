@@ -37,10 +37,13 @@ All node calls are mocked — these tests validate:
     - Creates attempt_NNN directories within iterations
     - Creates tuning/ directory within iterations
 """
+
+import importlib
 import json
 import os
+from unittest.mock import MagicMock, call, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, call
 
 from agent.schemas.hyperparam_tuning import (
     ExpertAdvice,
@@ -48,24 +51,23 @@ from agent.schemas.hyperparam_tuning import (
     HyperparamTuningInput,
     HyperparamTuningOutput,
 )
+from agent.schemas.implementor import ImplementorOutput
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.proposal import ProposalOutput
-from agent.schemas.implementor import ImplementorOutput
 from agent.schemas.validator import ValidatorOutput
-
 from workflows.model_exploration import (
+    _add_plugin_to_registries,
+    _register_plugin,
     load_tuning_outputs,
     load_tuning_outputs_from_paths,
-    tuning_outputs_to_summaries,
     run_workflow,
-    _register_plugin,
-    _add_plugin_to_registries,
+    tuning_outputs_to_summaries,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures — synthetic data
 # ---------------------------------------------------------------------------
+
 
 def _make_tuning_output(model_type="punet", run_name="v1", score=1.5):
     return HyperparamTuningOutput(
@@ -108,11 +110,13 @@ def _make_interpretation_output():
         key_findings=["Finding 1"],
         bottlenecks=["Bottleneck 1"],
         take_home_message="Need a new architecture.",
-        model_knowledge_cache={"punet": {
-            "key_findings": ["Finding 1"],
-            "bottlenecks": ["Bottleneck 1"],
-            "_stats": {"best_denoising_score": 1.5, "completed_rounds": 3},
-        }},
+        model_knowledge_cache={
+            "punet": {
+                "key_findings": ["Finding 1"],
+                "bottlenecks": ["Bottleneck 1"],
+                "_stats": {"best_denoising_score": 1.5, "completed_rounds": 3},
+            }
+        },
     )
 
 
@@ -180,8 +184,8 @@ def _write_tuning_output(tmp_path, model_type="punet", run="v1", score=1.5):
 # load_tuning_outputs tests
 # ---------------------------------------------------------------------------
 
-class TestLoadTuningOutputs:
 
+class TestLoadTuningOutputs:
     def test_loads_valid_json(self, tmp_path):
         _write_tuning_output(tmp_path, "punet")
         results = load_tuning_outputs(str(tmp_path / "data"), ["punet"], "v1")
@@ -231,6 +235,7 @@ class TestLoadTuningOutputsFromPaths:
         iter_dir.mkdir(parents=True)
         # Reuse the punet output as the "iter_001" output
         import shutil
+
         seed_punet = tmp_path / "data" / "punet" / "v1" / "agent" / "run_output_v1_agent.json"
         iter_output = iter_dir / "run_output_iter_001.json"
         shutil.copy(seed_punet, iter_output)
@@ -267,18 +272,20 @@ class TestLoadTuningOutputsFromPaths:
 # tuning_outputs_to_summaries tests
 # ---------------------------------------------------------------------------
 
-class TestTuningOutputsToSummaries:
 
+class TestTuningOutputsToSummaries:
     def test_converts_single_output(self):
         summaries = tuning_outputs_to_summaries([_make_tuning_output()])
         assert len(summaries) == 1
         assert summaries[0].model_type == "punet"
 
     def test_converts_multiple_outputs(self):
-        summaries = tuning_outputs_to_summaries([
-            _make_tuning_output(model_type="punet"),
-            _make_tuning_output(model_type="wavenet", score=1.2),
-        ])
+        summaries = tuning_outputs_to_summaries(
+            [
+                _make_tuning_output(model_type="punet"),
+                _make_tuning_output(model_type="wavenet", score=1.2),
+            ]
+        )
         assert len(summaries) == 2
 
     def test_preserves_best_score(self):
@@ -295,18 +302,20 @@ class TestTuningOutputsToSummaries:
 # run_workflow — shared mock fixture
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def workflow_env(tmp_path):
     """Set up fake data dir and mocked nodes."""
     _write_tuning_output(tmp_path, "punet")
     workspace = str(tmp_path / "workflow_output")
 
-    with patch("workflows.model_exploration.ResultInterpretationAgent") as MockInterp, \
-         patch("workflows.model_exploration.MLModelProposalAgent") as MockPropose, \
-         patch("workflows.model_exploration.MLModelImplementor") as MockImpl, \
-         patch("workflows.model_exploration.MLCodeValidatorAgent") as MockValid, \
-         patch("workflows.model_exploration.HyperparamTuningAgent") as MockTune:
-
+    with (
+        patch("workflows.model_exploration.ResultInterpretationAgent") as MockInterp,
+        patch("workflows.model_exploration.MLModelProposalAgent") as MockPropose,
+        patch("workflows.model_exploration.MLModelImplementor") as MockImpl,
+        patch("workflows.model_exploration.MLCodeValidatorAgent") as MockValid,
+        patch("workflows.model_exploration.HyperparamTuningAgent") as MockTune,
+    ):
         MockInterp.return_value.run.return_value = _make_interpretation_output()
         MockPropose.return_value.run.return_value = _make_proposal_output()
         MockImpl.return_value.run.return_value = _make_implementor_output()
@@ -328,8 +337,8 @@ def workflow_env(tmp_path):
 # run_workflow — single iteration tests
 # ---------------------------------------------------------------------------
 
-class TestRunWorkflowSingleIteration:
 
+class TestRunWorkflowSingleIteration:
     def test_returns_list_with_one_output(self, workflow_env):
         results = run_workflow(
             data_dir=workflow_env["data_dir"],
@@ -422,9 +431,9 @@ class TestRunWorkflowSingleIteration:
         workflow_env["tune"].return_value.run.assert_called_once()
 
     def test_correct_input_types(self, workflow_env):
+        from agent.schemas.implementor import ImplementorInput
         from agent.schemas.interpretation import InterpretationInput
         from agent.schemas.proposal import ProposalInput
-        from agent.schemas.implementor import ImplementorInput
         from agent.schemas.validator import ValidatorInput
 
         run_workflow(
@@ -435,15 +444,14 @@ class TestRunWorkflowSingleIteration:
             run_name="test_run",
         )
         assert isinstance(
-            workflow_env["interp"].return_value.run.call_args[0][0], InterpretationInput)
+            workflow_env["interp"].return_value.run.call_args[0][0], InterpretationInput
+        )
+        assert isinstance(workflow_env["propose"].return_value.run.call_args[0][0], ProposalInput)
+        assert isinstance(workflow_env["impl"].return_value.run.call_args[0][0], ImplementorInput)
+        assert isinstance(workflow_env["valid"].return_value.run.call_args[0][0], ValidatorInput)
         assert isinstance(
-            workflow_env["propose"].return_value.run.call_args[0][0], ProposalInput)
-        assert isinstance(
-            workflow_env["impl"].return_value.run.call_args[0][0], ImplementorInput)
-        assert isinstance(
-            workflow_env["valid"].return_value.run.call_args[0][0], ValidatorInput)
-        assert isinstance(
-            workflow_env["tune"].return_value.run.call_args[0][0], HyperparamTuningInput)
+            workflow_env["tune"].return_value.run.call_args[0][0], HyperparamTuningInput
+        )
 
     def test_fan_in_expert_advice(self, workflow_env):
         run_workflow(
@@ -494,14 +502,17 @@ class TestRunWorkflowSingleIteration:
 # run_workflow — multi-iteration tests
 # ---------------------------------------------------------------------------
 
-class TestRunWorkflowMultiIteration:
 
+class TestRunWorkflowMultiIteration:
     def test_runs_multiple_iterations(self, workflow_env):
         # Each iteration needs a unique model name
         names = iter(["model_a", "model_b", "model_c"])
-        workflow_env["propose"].return_value.run.side_effect = lambda inp: _make_proposal_output(next(names))
+        workflow_env["propose"].return_value.run.side_effect = lambda inp: _make_proposal_output(
+            next(names)
+        )
         workflow_env["tune"].return_value.run.side_effect = lambda inp: _make_tune_output(
-            model_type=inp.model_type, score=1.6)
+            model_type=inp.model_type, score=1.6
+        )
 
         results = run_workflow(
             data_dir=workflow_env["data_dir"],
@@ -517,9 +528,12 @@ class TestRunWorkflowMultiIteration:
         """Iteration 1 passes all seeds as summaries (cache empty).
         Iteration 2 passes only the new model as summaries; seeds are in the cache."""
         names = iter(["model_a", "model_b"])
-        workflow_env["propose"].return_value.run.side_effect = lambda inp: _make_proposal_output(next(names))
+        workflow_env["propose"].return_value.run.side_effect = lambda inp: _make_proposal_output(
+            next(names)
+        )
         workflow_env["tune"].return_value.run.side_effect = lambda inp: _make_tune_output(
-            model_type=inp.model_type, score=1.6)
+            model_type=inp.model_type, score=1.6
+        )
 
         run_workflow(
             data_dir=workflow_env["data_dir"],
@@ -534,12 +548,12 @@ class TestRunWorkflowMultiIteration:
         iter2_inp = interp_calls[1][0][0]
 
         # Iter 1: seeds in summaries, cache empty
-        assert len(iter1_inp.summaries) == 1          # seed punet
+        assert len(iter1_inp.summaries) == 1  # seed punet
         assert iter1_inp.model_knowledge_cache == {}  # no prior cache
 
         # Iter 2: only new model in summaries, seeds in cache
-        assert len(iter2_inp.summaries) == 1                    # new model only
-        assert "punet" in iter2_inp.model_knowledge_cache       # seed carried forward
+        assert len(iter2_inp.summaries) == 1  # new model only
+        assert "punet" in iter2_inp.model_knowledge_cache  # seed carried forward
 
     def test_restored_model_knowledge_cache_seeds_first_iter(self, workflow_env):
         """Commit 6.1.a — chain runner forwards prior iter's cache via the
@@ -561,7 +575,8 @@ class TestRunWorkflowMultiIteration:
         }
         workflow_env["propose"].return_value.run.return_value = _make_proposal_output("model_a")
         workflow_env["tune"].return_value.run.side_effect = lambda inp: _make_tune_output(
-            model_type=inp.model_type, score=1.6,
+            model_type=inp.model_type,
+            score=1.6,
         )
 
         run_workflow(
@@ -576,10 +591,7 @@ class TestRunWorkflowMultiIteration:
         iter1_inp = workflow_env["interp"].return_value.run.call_args_list[0][0][0]
         # Cache must be seeded before per_model loop; verbatim round-trip.
         assert "punet" in iter1_inp.model_knowledge_cache
-        assert (
-            iter1_inp.model_knowledge_cache["punet"]["_stats"]["best_denoising_score"]
-            == 1.42
-        )
+        assert iter1_inp.model_knowledge_cache["punet"]["_stats"]["best_denoising_score"] == 1.42
 
     def test_restored_model_knowledge_cache_defensive_copy(self, workflow_env):
         """The workflow mutates its in-iter cache (writes new entries on
@@ -592,7 +604,8 @@ class TestRunWorkflowMultiIteration:
         }
         workflow_env["propose"].return_value.run.return_value = _make_proposal_output("model_a")
         workflow_env["tune"].return_value.run.side_effect = lambda inp: _make_tune_output(
-            model_type=inp.model_type, score=1.6,
+            model_type=inp.model_type,
+            score=1.6,
         )
 
         run_workflow(
@@ -615,7 +628,8 @@ class TestRunWorkflowMultiIteration:
         breaking pseudo-mode tests that don't pass the new kwarg."""
         workflow_env["propose"].return_value.run.return_value = _make_proposal_output("model_a")
         workflow_env["tune"].return_value.run.side_effect = lambda inp: _make_tune_output(
-            model_type=inp.model_type, score=1.6,
+            model_type=inp.model_type,
+            score=1.6,
         )
         run_workflow(
             data_dir=workflow_env["data_dir"],
@@ -631,9 +645,12 @@ class TestRunWorkflowMultiIteration:
 
     def test_stops_on_target_score(self, workflow_env):
         names = iter(["model_a", "model_b", "model_c"])
-        workflow_env["propose"].return_value.run.side_effect = lambda inp: _make_proposal_output(next(names))
+        workflow_env["propose"].return_value.run.side_effect = lambda inp: _make_proposal_output(
+            next(names)
+        )
         workflow_env["tune"].return_value.run.side_effect = lambda inp: _make_tune_output(
-            model_type=inp.model_type, score=2.5)
+            model_type=inp.model_type, score=2.5
+        )
 
         results = run_workflow(
             data_dir=workflow_env["data_dir"],
@@ -651,6 +668,7 @@ class TestRunWorkflowMultiIteration:
 # ---------------------------------------------------------------------------
 # run_workflow — start_iteration plumbing (Phase 8 P3)
 # ---------------------------------------------------------------------------
+
 
 class TestRunWorkflowStartIteration:
     """Verify the chain-mode iteration-index plumbing.
@@ -698,11 +716,11 @@ class TestRunWorkflowStartIteration:
     def test_start_iteration_with_multi_iter(self, workflow_env):
         """start_iteration=3, max_iterations=2 → iters stamped 3 and 4."""
         names = iter(["model_a", "model_b"])
-        workflow_env["propose"].return_value.run.side_effect = (
-            lambda inp: _make_proposal_output(next(names))
+        workflow_env["propose"].return_value.run.side_effect = lambda inp: _make_proposal_output(
+            next(names)
         )
-        workflow_env["tune"].return_value.run.side_effect = (
-            lambda inp: _make_tune_output(model_type=inp.model_type, score=1.6)
+        workflow_env["tune"].return_value.run.side_effect = lambda inp: _make_tune_output(
+            model_type=inp.model_type, score=1.6
         )
         run_workflow(
             data_dir=workflow_env["data_dir"],
@@ -720,6 +738,7 @@ class TestRunWorkflowStartIteration:
 # ---------------------------------------------------------------------------
 # run_workflow — validation failure + retry tests
 # ---------------------------------------------------------------------------
+
 
 class TestRunWorkflowValidationRetry:
     """Exercise the *outer* propose→implement→validate retry loop.
@@ -813,6 +832,7 @@ class TestRunWorkflowValidationRetry:
 # Phase K.7.5 — gate-exhaustion propagation across iterations (§10.13)
 # ---------------------------------------------------------------------------
 
+
 class TestRunWorkflowGateExhaustionPropagation:
     """The workflow must retain the previous iteration's tuner output and
     pass it as ``prior_tune_output=`` to the next iteration's
@@ -851,8 +871,8 @@ class TestRunWorkflowGateExhaustionPropagation:
         retained-outputs carrier is initialised empty and the protocol
         produces ``[]`` on iteration 1."""
         names = iter(["model_a", "model_b"])
-        workflow_env["propose"].return_value.run.side_effect = (
-            lambda inp: _make_proposal_output(next(names))
+        workflow_env["propose"].return_value.run.side_effect = lambda inp: _make_proposal_output(
+            next(names)
         )
         workflow_env["tune"].return_value.run.side_effect = [
             _make_tune_output(model_type="model_a", score=1.6),
@@ -866,9 +886,7 @@ class TestRunWorkflowGateExhaustionPropagation:
             run_name="test_run",
             max_iterations=2,
         )
-        iter1_propose_input = (
-            workflow_env["propose"].return_value.run.call_args_list[0][0][0]
-        )
+        iter1_propose_input = workflow_env["propose"].return_value.run.call_args_list[0][0][0]
         assert iter1_propose_input.recent_gate_exhaustions == []
 
     def test_iter2_proposal_receives_iter1_gate_exhaustion(self, workflow_env):
@@ -882,8 +900,8 @@ class TestRunWorkflowGateExhaustionPropagation:
         iter2_tune = _make_tune_output(model_type="model_b", score=1.7)
 
         names = iter(["model_a", "model_b"])
-        workflow_env["propose"].return_value.run.side_effect = (
-            lambda inp: _make_proposal_output(next(names))
+        workflow_env["propose"].return_value.run.side_effect = lambda inp: _make_proposal_output(
+            next(names)
         )
         workflow_env["tune"].return_value.run.side_effect = [iter1_tune, iter2_tune]
 
@@ -895,9 +913,7 @@ class TestRunWorkflowGateExhaustionPropagation:
             run_name="test_run",
             max_iterations=2,
         )
-        iter2_propose_input = (
-            workflow_env["propose"].return_value.run.call_args_list[1][0][0]
-        )
+        iter2_propose_input = workflow_env["propose"].return_value.run.call_args_list[1][0][0]
         surfaced = iter2_propose_input.recent_gate_exhaustions
         assert len(surfaced) == 1
         assert isinstance(surfaced[0], GateExhaustionInfo)
@@ -915,8 +931,8 @@ class TestRunWorkflowGateExhaustionPropagation:
         assert iter1_tune.gate_exhaustion is None
 
         names = iter(["model_a", "model_b"])
-        workflow_env["propose"].return_value.run.side_effect = (
-            lambda inp: _make_proposal_output(next(names))
+        workflow_env["propose"].return_value.run.side_effect = lambda inp: _make_proposal_output(
+            next(names)
         )
         workflow_env["tune"].return_value.run.side_effect = [iter1_tune, iter2_tune]
 
@@ -928,9 +944,7 @@ class TestRunWorkflowGateExhaustionPropagation:
             run_name="test_run",
             max_iterations=2,
         )
-        iter2_propose_input = (
-            workflow_env["propose"].return_value.run.call_args_list[1][0][0]
-        )
+        iter2_propose_input = workflow_env["propose"].return_value.run.call_args_list[1][0][0]
         assert iter2_propose_input.recent_gate_exhaustions == []
 
     def test_four_iteration_deque_evicts_oldest(self, workflow_env):
@@ -947,12 +961,19 @@ class TestRunWorkflowGateExhaustionPropagation:
         # Distinct sentinel summaries so we can assert identity + order
         gates = [
             GateExhaustionInfo(
-                total_attempts=1, vram_gated_attempts=1, time_gated_attempts=0,
-                other_failure_attempts=0, active_mode="trial",
-                vram_budget_gb=4.0, time_budget_minutes=20.0,
-                baseline_vram_estimate_gb=6.4, baseline_vram_factor=1.6,
-                baseline_time_estimate_minutes=8.0, baseline_time_factor=0.4,
-                worst_vram_factor=2.0, worst_time_factor=0.6,
+                total_attempts=1,
+                vram_gated_attempts=1,
+                time_gated_attempts=0,
+                other_failure_attempts=0,
+                active_mode="trial",
+                vram_budget_gb=4.0,
+                time_budget_minutes=20.0,
+                baseline_vram_estimate_gb=6.4,
+                baseline_vram_factor=1.6,
+                baseline_time_estimate_minutes=8.0,
+                baseline_time_factor=0.4,
+                worst_vram_factor=2.0,
+                worst_time_factor=0.6,
                 summary_message=f"SENTINEL-iter{i}",
             )
             for i in range(1, 6)
@@ -964,8 +985,8 @@ class TestRunWorkflowGateExhaustionPropagation:
             tunes.append(t)
 
         names = iter(f"model_{i}" for i in range(1, 6))
-        workflow_env["propose"].return_value.run.side_effect = (
-            lambda inp: _make_proposal_output(next(names))
+        workflow_env["propose"].return_value.run.side_effect = lambda inp: _make_proposal_output(
+            next(names)
         )
         workflow_env["tune"].return_value.run.side_effect = tunes
 
@@ -1000,6 +1021,7 @@ class TestRunWorkflowGateExhaustionPropagation:
 # ---------------------------------------------------------------------------
 # _register_plugin tests (Phase 4 — docs/run_scoped_plugins.md)
 # ---------------------------------------------------------------------------
+
 
 class TestRegisterPlugin:
     """Phase 4 contract: ``_register_plugin`` must copy the validated plugin
@@ -1122,8 +1144,7 @@ class TestRegisterPlugin:
 import sys as _sys
 import textwrap as _textwrap
 
-
-_REGRESSOR_PLUGIN_SRC = _textwrap.dedent('''\
+_REGRESSOR_PLUGIN_SRC = _textwrap.dedent("""\
     import torch
     import torch.nn as nn
     from pydantic import BaseModel, Field
@@ -1147,10 +1168,10 @@ _REGRESSOR_PLUGIN_SRC = _textwrap.dedent('''\
 
     PLUGIN_CONFIG_CLASS = TestRegressorConfig
     PLUGIN_MODEL_CLASS  = TestRegressorModel
-''')
+""")
 
 
-_CLASSIFIER_PLUGIN_SRC = _textwrap.dedent('''\
+_CLASSIFIER_PLUGIN_SRC = _textwrap.dedent("""\
     import torch
     import torch.nn as nn
     from pydantic import BaseModel, Field
@@ -1173,7 +1194,7 @@ _CLASSIFIER_PLUGIN_SRC = _textwrap.dedent('''\
 
     PLUGIN_CONFIG_CLASS = TestClassifierConfig
     PLUGIN_MODEL_CLASS  = TestClassifierModel
-''')
+""")
 
 
 @pytest.fixture
@@ -1195,8 +1216,8 @@ def clean_registries():
     """Snapshot + restore every registry surface so cross-test pollution
     cannot mask a real bug. Also wipes the test model_types from any
     leaked sys.modules entries from a prior run."""
-    from ml_models.models_sandbox import MODEL_REGISTRY
     from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
+    from ml_models.models_sandbox import MODEL_REGISTRY
     from ml_models.plugin_loader import PLUGIN_OUTPUT_TYPE_REGISTRY
 
     keys_to_clear = ("test_regressor_plugin_c6", "test_classifier_plugin_c6")
@@ -1247,11 +1268,13 @@ class TestAddPluginToRegistries:
 
     def test_updates_model_registry(self, classifier_plugin_file, clean_registries):
         from ml_models.models_sandbox import MODEL_REGISTRY
+
         _add_plugin_to_registries(classifier_plugin_file)
         assert "test_classifier_plugin_c6" in MODEL_REGISTRY
 
     def test_updates_packaged_config_registry(self, classifier_plugin_file, clean_registries):
         from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
+
         _add_plugin_to_registries(classifier_plugin_file)
         assert "test_classifier_plugin_c6" in PLUGIN_CONFIG_REGISTRY
 
@@ -1259,41 +1282,40 @@ class TestAddPluginToRegistries:
         """The latent-bug regression test: pre-Commit-6, this returned
         'classifier' because PLUGIN_OUTPUT_TYPE_REGISTRY was never updated."""
         from ml_models.plugin_loader import get_output_type
+
         _add_plugin_to_registries(regressor_plugin_file)
         assert get_output_type("test_regressor_plugin_c6") == "regressor"
 
     def test_classifier_default_routes_correctly(self, classifier_plugin_file, clean_registries):
         from ml_models.plugin_loader import get_output_type
+
         _add_plugin_to_registries(classifier_plugin_file)
         assert get_output_type("test_classifier_plugin_c6") == "classifier"
 
-    def test_bare_name_mirror_when_both_modules_loaded(self, classifier_plugin_file, clean_registries):
-        """When ``ml_models/`` is on sys.path, bare and packaged imports of
-        ``models_format_sandbox`` resolve to distinct module objects with
-        separate registry dicts. The helper must mirror to both."""
-        # workflows/model_exploration.py adds ml_models/ to sys.path at import
-        # time, so the bare identity is already resolvable. Force the bare
-        # module to load if it hasn't yet, then sanity-check identities differ.
-        import importlib
-        bare = importlib.import_module("models_format_sandbox")
+    def test_no_bare_module_identity_after_package_refactor(
+        self, classifier_plugin_file, clean_registries
+    ):
+        """Post-package-refactor invariant: there is no bare
+        ``models_format_sandbox`` module identity to mirror to. The editable
+        install exposes ``ml_models`` as a proper package, so the legacy
+        ``sys.path`` insert that used to surface a duplicate bare module has
+        been removed and ``_add_plugin_to_registries`` no longer needs a
+        dual-mirror branch."""
+        import sys
+
+        assert sys.modules.get("models_format_sandbox") is None, (
+            "package refactor invariant violated: a bare "
+            "`models_format_sandbox` module identity was found in "
+            "sys.modules. The dual-module workaround was removed; only the "
+            "fully-qualified `ml_models.models_format_sandbox` should exist."
+        )
+
         pkg = importlib.import_module("ml_models.models_format_sandbox")
-
-        if bare is pkg:
-            pytest.skip(
-                "bare and packaged identities resolved to same module object — "
-                "mirror behaviour is a no-op in this environment"
-            )
-
-        # Wipe the bare side too so we can detect the mirror update.
-        bare.PLUGIN_CONFIG_REGISTRY.pop("test_classifier_plugin_c6", None)
+        pkg.PLUGIN_CONFIG_REGISTRY.pop("test_classifier_plugin_c6", None)
 
         _add_plugin_to_registries(classifier_plugin_file)
 
-        assert "test_classifier_plugin_c6" in bare.PLUGIN_CONFIG_REGISTRY
         assert "test_classifier_plugin_c6" in pkg.PLUGIN_CONFIG_REGISTRY
-        # Same class object on both sides.
-        assert bare.PLUGIN_CONFIG_REGISTRY["test_classifier_plugin_c6"] is \
-               pkg.PLUGIN_CONFIG_REGISTRY["test_classifier_plugin_c6"]
 
 
 class TestRegisterPluginUsesHelper:
@@ -1318,11 +1340,13 @@ class TestRegisterPluginUsesHelper:
         dest = tmp_path / "ws" / "plugins" / "run_x"
         _register_plugin(impl, "test_regressor_plugin_c6", str(dest))
 
-        from ml_models.models_sandbox import MODEL_REGISTRY
         from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
+        from ml_models.models_sandbox import MODEL_REGISTRY
         from ml_models.plugin_loader import (
-            PLUGIN_OUTPUT_TYPE_REGISTRY, get_output_type,
+            PLUGIN_OUTPUT_TYPE_REGISTRY,
+            get_output_type,
         )
+
         assert "test_regressor_plugin_c6" in MODEL_REGISTRY
         assert "test_regressor_plugin_c6" in PLUGIN_CONFIG_REGISTRY
         assert PLUGIN_OUTPUT_TYPE_REGISTRY.get("test_regressor_plugin_c6") == "regressor"
@@ -1366,15 +1390,13 @@ def _tune_input_from_workflow(workflow_env, tmp_path, **workflow_kwargs):
 
 
 class TestOrchestrationParamForwarding:
-
     def test_signature_accepts_formal_round_strategy(self):
         import inspect
+
         sig = inspect.signature(run_workflow)
         assert "formal_round_strategy" in sig.parameters
 
-    def test_formal_round_strategy_default_full_clone(
-        self, workflow_env, tmp_path
-    ):
+    def test_formal_round_strategy_default_full_clone(self, workflow_env, tmp_path):
         """Phase 1 of refactor_formal_round_strategy.md flipped the
         schema default from legacy ``inherit_best_trial`` to canonical
         ``full_clone``. Behavior identical, name normalised."""
@@ -1385,7 +1407,8 @@ class TestOrchestrationParamForwarding:
         self, workflow_env, tmp_path
     ):
         tune_input = _tune_input_from_workflow(
-            workflow_env, tmp_path,
+            workflow_env,
+            tmp_path,
             formal_round_strategy="independent",
         )
         assert tune_input.formal_round_strategy == "independent"
@@ -1396,19 +1419,19 @@ class TestOrchestrationParamForwarding:
         """Phase 2 introduced ``hybrid_params`` (loss_cfg + lr only). The
         workflow must accept it and forward it verbatim to the tuner."""
         tune_input = _tune_input_from_workflow(
-            workflow_env, tmp_path,
+            workflow_env,
+            tmp_path,
             formal_round_strategy="hybrid_params",
         )
         assert tune_input.formal_round_strategy == "hybrid_params"
 
-    def test_formal_round_strategy_legacy_alias_canonicalised(
-        self, workflow_env, tmp_path
-    ):
+    def test_formal_round_strategy_legacy_alias_canonicalised(self, workflow_env, tmp_path):
         """A workflow caller passing the legacy literal must see the
         canonicalised name on ``HyperparamTuningInput`` because the
         schema validator runs after the protocol fan-out."""
         tune_input = _tune_input_from_workflow(
-            workflow_env, tmp_path,
+            workflow_env,
+            tmp_path,
             formal_round_strategy="llm_propose",
         )
         assert tune_input.formal_round_strategy == "independent"
@@ -1420,28 +1443,27 @@ class TestOrchestrationParamForwarding:
         ``inherit_best_trial`` literal must surface as ``full_clone`` on
         the tuning input."""
         tune_input = _tune_input_from_workflow(
-            workflow_env, tmp_path,
+            workflow_env,
+            tmp_path,
             formal_round_strategy="inherit_best_trial",
         )
         assert tune_input.formal_round_strategy == "full_clone"
 
     def test_signature_accepts_degenerate_penalty_score(self):
         import inspect
+
         sig = inspect.signature(run_workflow)
         assert "degenerate_penalty_score" in sig.parameters
         assert sig.parameters["degenerate_penalty_score"].default is None
 
-    def test_degenerate_penalty_score_default_is_none(
-        self, workflow_env, tmp_path
-    ):
+    def test_degenerate_penalty_score_default_is_none(self, workflow_env, tmp_path):
         tune_input = _tune_input_from_workflow(workflow_env, tmp_path)
         assert tune_input.degenerate_penalty_score is None
 
-    def test_degenerate_penalty_score_float_reaches_tuning_input(
-        self, workflow_env, tmp_path
-    ):
+    def test_degenerate_penalty_score_float_reaches_tuning_input(self, workflow_env, tmp_path):
         tune_input = _tune_input_from_workflow(
-            workflow_env, tmp_path,
+            workflow_env,
+            tmp_path,
             degenerate_penalty_score=-2.5,
         )
         assert tune_input.degenerate_penalty_score == -2.5

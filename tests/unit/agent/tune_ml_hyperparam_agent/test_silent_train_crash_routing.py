@@ -4,7 +4,7 @@ Pins the contract that connects the producer-side sentinel (Commit 3,
 ``execute_tools.train_engine_sandbox._save_with_sentinel``) and the
 orchestrator's error-categorization logic in
 ``nodes.ml_hyperparameter_tune_agent.run`` (the inference-error branch
-around lines 1387–1446).
+around lines 1387-1446).
 
 Concretely: when the inference subprocess fails because the trainer
 crashed silently after ``torch.save`` returned (kernel OOM-kill,
@@ -37,16 +37,17 @@ The harness mirrors ``test_physical_rejection_capture.py``: patch
 ``LLMBridge``, ``TidmadSandbox``, ``_run_skill``, ``load_reference_scores``,
 and ``get_or_create`` so the run is hermetic (no GPU, no API, no HDF5).
 """
+
 from __future__ import annotations
 
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from unittest.mock import patch
 
 import pytest
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from core.hardware_context import HardwareContext
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from nodes.scoring_reference import ReferenceScores
@@ -55,14 +56,14 @@ from nodes.scoring_reference import ReferenceScores
 def _stub_hardware_context() -> HardwareContext:
     return HardwareContext(
         device_name="stub-cuda-device",
-        total_memory_bytes=32 * 1024 ** 3,
+        total_memory_bytes=32 * 1024**3,
         compute_capability=(9, 0),
         multiprocessor_count=128,
         cuda_runtime_version="12.4",
         torch_version="2.5.1",
         hostname="test-host",
         device_available=True,
-        discovered_at=datetime(2026, 4, 26, tzinfo=timezone.utc),
+        discovered_at=datetime(2026, 4, 26, tzinfo=UTC),
     )
 
 
@@ -93,7 +94,10 @@ FAKE_PLAN = {
     "loss_config": {"loss_type": "ce"},
 }
 FAKE_REFLECT = {
-    "conclusion": "c", "key_factor": "k", "discovery": "d", "memory_update": "m",
+    "conclusion": "c",
+    "key_factor": "k",
+    "discovery": "d",
+    "memory_update": "m",
 }
 FAKE_CONFIG_MANUAL = {
     "status": "success",
@@ -124,7 +128,7 @@ SILENT_CRASH_INFERENCE_ERROR = {
         "Inference failed with exit code 1\n"
         "--- stderr ---\n"
         "Traceback (most recent call last):\n"
-        "  File \"execute_tools/inference_single.py\", line 47, in main\n"
+        '  File "execute_tools/inference_single.py", line 47, in main\n'
         "    _assert_training_sentinel(model_path, exp_id)\n"
         "RuntimeError: error_training: missing _OK_exp_silent_001 sentinel "
         "next to model checkpoint — trainer crashed silently after save.\n"
@@ -138,7 +142,7 @@ PLAIN_INFERENCE_ERROR = {
         "Inference failed with exit code 1\n"
         "--- stderr ---\n"
         "Traceback (most recent call last):\n"
-        "  File \"execute_tools/inference_single.py\", line 132, in run\n"
+        '  File "execute_tools/inference_single.py", line 132, in run\n'
         "    out = model(x)\n"
         "RuntimeError: shape mismatch in conv layer\n"
     ),
@@ -160,6 +164,7 @@ CUDA_OOM_INFERENCE_ERROR = {
 # Agent wiring
 # ---------------------------------------------------------------------------
 
+
 def _make_input(tmp_path) -> HyperparamTuningInput:
     """1 round, 1 attempt, 1 fail-budget — the moment our single
     inference-side failure lands a record, the outer loop aborts."""
@@ -176,7 +181,8 @@ def _make_input(tmp_path) -> HyperparamTuningInput:
         storage=StorageConfig(
             backend="local",
             local=LocalStorageConfig(
-                workspace=str(tmp_path), run_name="silent_crash_test",
+                workspace=str(tmp_path),
+                run_name="silent_crash_test",
             ),
         ),
         progress_bar=False,
@@ -187,6 +193,7 @@ def _make_scripted_skill(inference_response: dict):
     """Skill router: VRAM OK → training OK → inference returns the
     caller-supplied response. The time-check gate is skipped because
     the input leaves both budget kwargs at their defaults (None)."""
+
     def side_effect(skill_folder, sandbox, **params):
         if skill_folder == "check_config_format_skill":
             return FAKE_CONFIG_MANUAL
@@ -198,6 +205,7 @@ def _make_scripted_skill(inference_response: dict):
             return inference_response
         # The scoring skill should never run — inference fails first.
         return {"status": "error", "message": f"unexpected skill {skill_folder}"}
+
     return side_effect
 
 
@@ -260,6 +268,7 @@ def agent_with_inference_error():
 # Tests
 # ---------------------------------------------------------------------------
 
+
 class TestSilentCrashReroute:
     """The headline contract: an inference-side error carrying the
     ``error_training:`` substring must surface as ``status=error_training``
@@ -267,7 +276,9 @@ class TestSilentCrashReroute:
     Commit 3 sentinel into actionable feedback for the planner."""
 
     def test_inference_error_with_training_prefix_routes_to_error_training(
-        self, agent_with_inference_error, tmp_path,
+        self,
+        agent_with_inference_error,
+        tmp_path,
     ):
         agent, saved, cleanup = agent_with_inference_error(
             SILENT_CRASH_INFERENCE_ERROR,
@@ -281,13 +292,9 @@ class TestSilentCrashReroute:
         # time-skip) won't appear in this scripted path, but we filter
         # by the status family to be robust against future preflight
         # additions that emit their own records.
-        error_records = [
-            r for r in saved
-            if r.get("status", "").startswith("error_")
-        ]
+        error_records = [r for r in saved if r.get("status", "").startswith("error_")]
         assert len(error_records) == 1, (
-            f"expected exactly one error record; saved statuses: "
-            f"{[r.get('status') for r in saved]}"
+            f"expected exactly one error record; saved statuses: {[r.get('status') for r in saved]}"
         )
 
         rec = error_records[0]
@@ -299,7 +306,9 @@ class TestSilentCrashReroute:
         )
 
     def test_silent_crash_record_carries_actionable_memory(
-        self, agent_with_inference_error, tmp_path,
+        self,
+        agent_with_inference_error,
+        tmp_path,
     ):
         """The record's ``memory.discovery`` and ``memory.memory_update``
         must point the planner at the trainer, not at inference. This
@@ -331,7 +340,9 @@ class TestNonSilentCrashStaysAsInference:
     must not over-trigger on every inference error."""
 
     def test_plain_inference_error_routes_to_error_inference(
-        self, agent_with_inference_error, tmp_path,
+        self,
+        agent_with_inference_error,
+        tmp_path,
     ):
         agent, saved, cleanup = agent_with_inference_error(
             PLAIN_INFERENCE_ERROR,
@@ -341,15 +352,14 @@ class TestNonSilentCrashStaysAsInference:
         finally:
             cleanup()
 
-        error_records = [
-            r for r in saved
-            if r.get("status", "").startswith("error_")
-        ]
+        error_records = [r for r in saved if r.get("status", "").startswith("error_")]
         assert len(error_records) == 1
         assert error_records[0]["status"] == "error_inference"
 
     def test_cuda_oom_routes_to_error_inference_oom_not_training(
-        self, agent_with_inference_error, tmp_path,
+        self,
+        agent_with_inference_error,
+        tmp_path,
     ):
         """A CUDA OOM during inference must route to
         ``error_inference_oom``, NOT ``error_training``. This pins
@@ -363,13 +373,9 @@ class TestNonSilentCrashStaysAsInference:
         finally:
             cleanup()
 
-        error_records = [
-            r for r in saved
-            if r.get("status", "").startswith("error_")
-        ]
+        error_records = [r for r in saved if r.get("status", "").startswith("error_")]
         assert len(error_records) == 1
         rec = error_records[0]
         assert rec["status"] == "error_inference_oom", (
-            f"CUDA OOM mis-routed as {rec['status']!r}; the prefix "
-            f"check is over-matching."
+            f"CUDA OOM mis-routed as {rec['status']!r}; the prefix check is over-matching."
         )

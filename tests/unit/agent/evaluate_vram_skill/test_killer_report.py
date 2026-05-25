@@ -5,11 +5,13 @@ torch forward, no CUDA, no filesystem. All probes are hand-built
 ``ProbeResult`` instances so we can pin the layer-attribution outcome per
 test.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from agent.skills.evaluate_vram_skill import killer_report
 from agent.skills.evaluate_vram_skill.compute_intensity import _MAX_BATCH_TIMESTEPS
@@ -27,11 +29,13 @@ from agent.skills.evaluate_vram_skill.structural_probe import (
     ProbeResult,
 )
 
-
 # ── Fixtures: minimal ProbeResult builders ─────────────────────────────────
 
+
 def _leaf(
-    var_name: str, class_name: str, output_bytes: int,
+    var_name: str,
+    class_name: str,
+    output_bytes: int,
     output_shape: list[int] | None = None,
 ) -> LayerReport:
     """Build a single leaf LayerReport. Every field that the killer report
@@ -66,9 +70,9 @@ def _non_leaf(var_name: str, class_name: str, output_bytes: int) -> LayerReport:
 
 
 def _probe(layers: list[LayerReport]) -> ProbeResult:
-    total_params = sum(l.param_bytes for l in layers if l.is_leaf)
-    sum_out = sum(l.output_bytes for l in layers if l.is_leaf)
-    max_out = max((l.output_bytes for l in layers if l.is_leaf), default=0)
+    total_params = sum(layer.param_bytes for layer in layers if layer.is_leaf)
+    sum_out = sum(layer.output_bytes for layer in layers if layer.is_leaf)
+    max_out = max((layer.output_bytes for layer in layers if layer.is_leaf), default=0)
     return ProbeResult(
         mode="inference",
         model_forward=ForwardLayerReport(
@@ -87,18 +91,19 @@ def _probe(layers: list[LayerReport]) -> ProbeResult:
 
 # ── VRAM renderer — layer-level attribution (§3.6) ─────────────────────────
 
+
 def test_vram_report_identifies_dominant_leaf():
     """The leaf with the largest output_bytes wins. Name, class, and
     absolute bytes must all propagate verbatim into memory_killer."""
     layers = [
-        _leaf("head",       "Linear",  1_000_000_000),
-        _leaf("block3_big", "MyBigOp", 8_000_000_000),   # ← dominant
-        _leaf("tail",       "Linear",  500_000_000),
+        _leaf("head", "Linear", 1_000_000_000),
+        _leaf("block3_big", "MyBigOp", 8_000_000_000),  # ← dominant
+        _leaf("tail", "Linear", 500_000_000),
     ]
     probe = _probe(layers)
     peak = 10_000_000_000
-    cap = 5 * 1024 ** 3
-    total = 10 * 1024 ** 3
+    cap = 5 * 1024**3
+    total = 10 * 1024**3
 
     report = render_vram_report(probe, peak, cap, total)
     d = report.memory_killer
@@ -115,7 +120,7 @@ def test_vram_report_suggestion_names_dominant_layer_by_user_name():
     not the class. A user looking at their own code can only grep by
     var_name — naming the class would be useless guidance."""
     layers = [_leaf("my_attn_block", "InternalClassName", 9_000_000_000)]
-    report = render_vram_report(_probe(layers), 10_000_000_000, 5 * 1024 ** 3, 10 * 1024 ** 3)
+    report = render_vram_report(_probe(layers), 10_000_000_000, 5 * 1024**3, 10 * 1024**3)
     assert "my_attn_block" in report.suggestion
     # The class name MUST NOT be surfaced into the suggestion itself:
     assert "InternalClassName" not in report.suggestion
@@ -126,15 +131,20 @@ def test_vram_report_suggestion_has_no_architecture_family_terms():
     mentions 'attention' or 'transformer' even when the layer in question
     is attention. Names a dimension to reduce, not an architecture class."""
     layers = [_leaf("block3_attn", "MultiheadAttention", 9_000_000_000)]
-    report = render_vram_report(_probe(layers), 10_000_000_000, 5 * 1024 ** 3, 10 * 1024 ** 3)
+    report = render_vram_report(_probe(layers), 10_000_000_000, 5 * 1024**3, 10 * 1024**3)
     sugg = report.suggestion.lower()
     for banned in [
-        "multiheadattention", "self-attention", "transformer",
-        "wavenet", "punet", "fcnet", "rnn", "unet", "lstm",
+        "multiheadattention",
+        "self-attention",
+        "transformer",
+        "wavenet",
+        "punet",
+        "fcnet",
+        "rnn",
+        "unet",
+        "lstm",
     ]:
-        assert banned not in sugg, (
-            f"architecture term {banned!r} leaked into VRAM suggestion"
-        )
+        assert banned not in sugg, f"architecture term {banned!r} leaked into VRAM suggestion"
 
 
 def test_vram_report_suggestion_names_a_specific_dimension_to_reduce():
@@ -142,7 +152,7 @@ def test_vram_report_suggestion_names_a_specific_dimension_to_reduce():
     Proposer what to shrink — channel dim, segmentation_size, or a
     complexity-replacement option."""
     layers = [_leaf("x", "Y", 9_000_000_000)]
-    report = render_vram_report(_probe(layers), 10_000_000_000, 5 * 1024 ** 3, 10 * 1024 ** 3)
+    report = render_vram_report(_probe(layers), 10_000_000_000, 5 * 1024**3, 10 * 1024**3)
     sugg = report.suggestion.lower()
     assert "segmentation_size" in sugg
     assert "channel" in sugg
@@ -154,28 +164,28 @@ def test_vram_verdict_format_includes_labels_and_byte_figures():
     cap in GB, and quote the cap-as-percentage-of-total anchor."""
     layers = [_leaf("x", "Y", 1_000_000_000)]
     probe = _probe(layers)
-    peak = 50 * 1024 ** 3
-    cap = 25 * 1024 ** 3
-    total = 32 * 1024 ** 3
+    peak = 50 * 1024**3
+    cap = 25 * 1024**3
+    total = 32 * 1024**3
 
     report = render_vram_report(probe, peak, cap, total)
 
     assert "OVER-BUDGET (VRAM)" in report.verdict
-    assert "50.0 GB" in report.verdict   # peak
-    assert "25.0 GB" in report.verdict   # cap
-    assert "32.0 GB" in report.verdict   # total
-    assert "78% of" in report.verdict    # 25/32 = 78% rounded
+    assert "50.0 GB" in report.verdict  # peak
+    assert "25.0 GB" in report.verdict  # cap
+    assert "32.0 GB" in report.verdict  # total
+    assert "78% of" in report.verdict  # 25/32 = 78% rounded
 
 
 def test_vram_per_layer_only_contains_leaves():
     """Non-leaf containers must be filtered — otherwise the Proposer sees
     double-counted bytes (container + children)."""
     layers = [
-        _non_leaf("stage1",     "Sequential", 5_000_000_000),
-        _leaf   ("stage1.conv", "Conv1d",     2_500_000_000),
-        _leaf   ("stage1.bn",   "BatchNorm",  2_500_000_000),
+        _non_leaf("stage1", "Sequential", 5_000_000_000),
+        _leaf("stage1.conv", "Conv1d", 2_500_000_000),
+        _leaf("stage1.bn", "BatchNorm", 2_500_000_000),
     ]
-    report = render_vram_report(_probe(layers), 5_000_000_000, 1 * 1024 ** 3, 10 * 1024 ** 3)
+    report = render_vram_report(_probe(layers), 5_000_000_000, 1 * 1024**3, 10 * 1024**3)
     names = [p.name for p in report.memory_killer.per_layer]
     assert names == ["stage1.conv", "stage1.bn"]
     assert report.memory_killer.dominant_layer in {"stage1.conv", "stage1.bn"}
@@ -185,7 +195,7 @@ def test_vram_dominant_fraction_is_rounded_to_four_decimals():
     layers = [_leaf("a", "A", 333_333_333)]
     probe = _probe(layers)
     peak = 1_000_000_000
-    report = render_vram_report(probe, peak, 1 * 1024 ** 3, 10 * 1024 ** 3)
+    report = render_vram_report(probe, peak, 1 * 1024**3, 10 * 1024**3)
     # 333.../1_000_... = 0.3333... → 0.3333
     assert report.memory_killer.dominant_fraction == 0.3333
 
@@ -193,14 +203,17 @@ def test_vram_dominant_fraction_is_rounded_to_four_decimals():
 def test_vram_report_handles_empty_layers_gracefully():
     """Edge case: wrapper nn.Module with no submodules. Suggestion falls
     back to whole-model phrasing; no crash."""
-    report = render_vram_report(_probe([]), 50 * 1024 ** 3, 25 * 1024 ** 3, 32 * 1024 ** 3)
+    report = render_vram_report(_probe([]), 50 * 1024**3, 25 * 1024**3, 32 * 1024**3)
     assert report.memory_killer.binding_cap == "vram"
     assert report.memory_killer.dominant_layer is None
     assert report.memory_killer.per_layer == []
-    assert "whole model" in report.suggestion.lower() or "total parameter" in report.suggestion.lower()
+    assert (
+        "whole model" in report.suggestion.lower() or "total parameter" in report.suggestion.lower()
+    )
 
 
 # ── Intensity renderer — config-level attribution (§3.10.2) ────────────────
+
 
 def test_intensity_report_populates_config_fields_only():
     """The VRAM-attribution half must stay empty: intensity is a config
@@ -244,15 +257,21 @@ def test_intensity_suggestion_has_no_architecture_family_terms():
     report = render_intensity_report(25, 40_000)
     sugg = report.suggestion.lower()
     for banned in [
-        "wavenet", "punet", "fcnet", "transformer", "rnn",
-        "attention", "conv", "unet", "lstm",
+        "wavenet",
+        "punet",
+        "fcnet",
+        "transformer",
+        "rnn",
+        "attention",
+        "conv",
+        "unet",
+        "lstm",
     ]:
-        assert banned not in sugg, (
-            f"architecture term {banned!r} leaked into intensity suggestion"
-        )
+        assert banned not in sugg, f"architecture term {banned!r} leaked into intensity suggestion"
 
 
 # ── Combined renderer — both caps binding ──────────────────────────────────
+
 
 def test_combined_report_populates_both_halves():
     """Rare but real: training config with huge params AND huge B×T.
@@ -262,8 +281,8 @@ def test_combined_report_populates_both_halves():
     report = render_combined_report(
         probe=probe,
         predicted_peak_bytes=10_000_000_000,
-        cap_bytes=5 * 1024 ** 3,
-        total_memory_bytes=32 * 1024 ** 3,
+        cap_bytes=5 * 1024**3,
+        total_memory_bytes=32 * 1024**3,
         batch_size=25,
         segmentation_size=40_000,
     )
@@ -284,8 +303,12 @@ def test_combined_report_populates_both_halves():
 def test_combined_verdict_names_both_modes():
     layers = [_leaf("x", "Y", 1_000_000)]
     report = render_combined_report(
-        _probe(layers), 10 * 1024 ** 3, 5 * 1024 ** 3, 32 * 1024 ** 3,
-        batch_size=25, segmentation_size=40_000,
+        _probe(layers),
+        10 * 1024**3,
+        5 * 1024**3,
+        32 * 1024**3,
+        batch_size=25,
+        segmentation_size=40_000,
     )
     assert "VRAM" in report.verdict
     assert "Compute-intensity" in report.verdict
@@ -296,8 +319,12 @@ def test_combined_suggestion_concatenates_both_halves():
     the gate on the next attempt."""
     layers = [_leaf("my_layer", "Any", 9_000_000_000)]
     report = render_combined_report(
-        _probe(layers), 10_000_000_000, 5 * 1024 ** 3, 32 * 1024 ** 3,
-        batch_size=25, segmentation_size=40_000,
+        _probe(layers),
+        10_000_000_000,
+        5 * 1024**3,
+        32 * 1024**3,
+        batch_size=25,
+        segmentation_size=40_000,
     )
     sugg = report.suggestion
     # VRAM half — named layer + dimensional lever:
@@ -310,9 +337,10 @@ def test_combined_suggestion_concatenates_both_halves():
 
 # ── Schema contracts ───────────────────────────────────────────────────────
 
+
 def test_memory_killer_details_is_frozen():
     d = MemoryKillerDetails(binding_cap="vram")
-    with pytest.raises(Exception):  # pydantic ValidationError on frozen write
+    with pytest.raises(ValidationError):  # frozen-model attr write
         d.binding_cap = "compute_intensity"
 
 
@@ -322,7 +350,7 @@ def test_killer_report_is_frozen():
         memory_killer=MemoryKillerDetails(binding_cap="vram"),
         suggestion="y",
     )
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):  # frozen-model attr write
         r.verdict = "z"
 
 
@@ -331,16 +359,23 @@ def test_killer_report_model_dump_matches_wrapper_flatten_contract():
     exact top-level keys so a schema rename here cannot silently break the
     wrapper contract."""
     layers = [_leaf("layer", "Any", 1_000_000)]
-    report = render_vram_report(_probe(layers), 10_000_000_000, 5 * 1024 ** 3, 32 * 1024 ** 3)
+    report = render_vram_report(_probe(layers), 10_000_000_000, 5 * 1024**3, 32 * 1024**3)
     dumped = report.model_dump()
     assert set(dumped.keys()) == {"status", "verdict", "memory_killer", "suggestion"}
     assert dumped["status"] == "schema_violation"
     # memory_killer is a dict (§3.7 declares it dict | null):
     assert isinstance(dumped["memory_killer"], dict)
     assert set(dumped["memory_killer"].keys()) >= {
-        "binding_cap", "dominant_layer", "dominant_layer_class",
-        "dominant_layer_bytes", "dominant_fraction", "per_layer",
-        "batch_size", "segmentation_size", "intensity_product", "intensity_cap",
+        "binding_cap",
+        "dominant_layer",
+        "dominant_layer_class",
+        "dominant_layer_bytes",
+        "dominant_fraction",
+        "per_layer",
+        "batch_size",
+        "segmentation_size",
+        "intensity_product",
+        "intensity_cap",
     }
 
 
@@ -353,6 +388,7 @@ def test_per_layer_entry_field_names_are_the_contract():
 
 
 # ── Principle 2 module-source spot-check ──────────────────────────────────
+
 
 def test_module_source_has_no_architecture_literals():
     """The full guardrail test (A.12) covers the whole tree; this one

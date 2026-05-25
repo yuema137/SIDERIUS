@@ -17,18 +17,21 @@ Run with:
 
 DO NOT run in CI.
 """
+
 import ast
-import os
 import json
+import os
+from pathlib import Path
+
 import pytest
 from dotenv import load_dotenv
 
 from agent.schemas.implementor import ImplementorInput, ImplementorOutput
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
-from nodes.ml_model_implementor import MLModelImplementor
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from ml_models.plugin_loader import _load_plugin
+from nodes.ml_model_implementor import MLModelImplementor
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
 pytestmark = pytest.mark.real_run
 
@@ -36,6 +39,7 @@ pytestmark = pytest.mark.real_run
 # ---------------------------------------------------------------------------
 # Skip guard
 # ---------------------------------------------------------------------------
+
 
 def _skip_if_no_key(provider: str):
     key = "GEMINI_API_KEY" if provider == "gemini" else "OPENAI_API_KEY"
@@ -97,13 +101,14 @@ def _make_input(tmp_path) -> ImplementorInput:
 # Assertions
 # ---------------------------------------------------------------------------
 
+
 def _assert_output(output: ImplementorOutput, tmp_path):
     assert isinstance(output, ImplementorOutput)
     assert output.model_type == "gated_dilated_tcn"
 
     # Files exist
     assert os.path.exists(output.model_file_path), "Plugin file not found"
-    assert os.path.exists(output.test_file_path),  "Test file not found"
+    assert os.path.exists(output.test_file_path), "Test file not found"
 
     # Plugin is syntactically valid Python
     plugin_src = open(output.model_file_path).read()
@@ -115,14 +120,14 @@ def _assert_output(output: ImplementorOutput, tmp_path):
     # Plugin file contains the required plugin constants
     assert 'PLUGIN_MODEL_TYPE = "gated_dilated_tcn"' in plugin_src
     assert "PLUGIN_CONFIG_CLASS" in plugin_src
-    assert "PLUGIN_MODEL_CLASS"  in plugin_src
+    assert "PLUGIN_MODEL_CLASS" in plugin_src
 
     # Plugin loads successfully through the plugin loader
     plugin = _load_plugin(output.model_file_path)
     assert plugin is not None, "plugin_loader._load_plugin() returned None"
-    assert plugin["model_type"]   == "gated_dilated_tcn"
+    assert plugin["model_type"] == "gated_dilated_tcn"
     assert plugin["config_class"] is not None
-    assert plugin["model_class"]  is not None
+    assert plugin["model_class"] is not None
 
     # Config can be instantiated with defaults
     config = plugin["config_class"]()
@@ -147,8 +152,8 @@ def _assert_output(output: ImplementorOutput, tmp_path):
 
     # Test file has the three required test functions
     test_src = open(output.test_file_path).read()
-    assert "def test_forward_shape"        in test_src
-    assert "def test_forward_no_nan"       in test_src
+    assert "def test_forward_shape" in test_src
+    assert "def test_forward_no_nan" in test_src
     assert "def test_config_instantiation" in test_src
 
 
@@ -156,8 +161,8 @@ def _assert_output(output: ImplementorOutput, tmp_path):
 # Tests
 # ---------------------------------------------------------------------------
 
-class TestMLModelImplementorGemini:
 
+class TestMLModelImplementorGemini:
     def setup_method(self):
         _skip_if_no_key("gemini")
 
@@ -174,7 +179,6 @@ class TestMLModelImplementorGemini:
 
 
 class TestMLModelImplementorOpenAI:
-
     def setup_method(self):
         _skip_if_no_key("openai")
 

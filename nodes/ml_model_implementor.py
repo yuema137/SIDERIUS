@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # nodes/ml_model_implementor.py
 """
 ml_model_implementor — Node 4 in the SIDERIUS graph.
@@ -20,25 +19,23 @@ Node contract:
   CLI: --workspace, --run_name, --provider, --model_id
 """
 
-import ast
-import re
-import os
-import sys
-import json
-import types
-import textwrap
 import argparse
+import ast
+import json
+import os
+import re
 import tempfile
+import textwrap
 
 from agent.llm_bridge import LLMBridge
-from agent.schemas.implementor import ImplementorInput, ImplementorOutput
-from agent.schemas.storage import StorageConfig, LocalStorageConfig
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
-
+from agent.schemas.implementor import ImplementorInput, ImplementorOutput
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _class_name(model_name: str) -> str:
     """Convert snake_case model name to CamelCase class name."""
@@ -96,6 +93,7 @@ def _smoke_test_plugin(plugin_src: str, model_name: str) -> str | None:
 
         # Load the module
         import importlib.util
+
         spec = importlib.util.spec_from_file_location(model_name, tmp_path)
         if spec is None or spec.loader is None:
             return f"Could not create import spec for {tmp_path}"
@@ -121,10 +119,7 @@ def _smoke_test_plugin(plugin_src: str, model_name: str) -> str | None:
         # Shape check
         expected = (1, 256, T)
         if out.shape != expected:
-            return (
-                f"Forward pass shape mismatch: expected {expected}, "
-                f"got {tuple(out.shape)}"
-            )
+            return f"Forward pass shape mismatch: expected {expected}, got {tuple(out.shape)}"
 
         # NaN check
         if torch.isnan(out).any():
@@ -189,6 +184,7 @@ def _check_baseline_schema_compatibility(
             f.write(plugin_src)
 
         import importlib.util
+
         spec = importlib.util.spec_from_file_location(model_name, tmp_path)
         if spec is None or spec.loader is None:
             return None  # Smoke/syntax check already covers import failure
@@ -313,9 +309,9 @@ Your task: given a mathematical description of a new neural architecture and its
 baseline configuration, plan the PyTorch implementation in detail before writing code.
 
 Background on the task:
-- Input data: TIDMAD SQUID magnetometry time-series, integer ADC values 0–255.
+- Input data: TIDMAD SQUID magnetometry time-series, integer ADC values 0-255.
 - The model must satisfy this forward contract (non-negotiable):
-    input:  [B, T]       int64   — raw signal, integer class indices (0–255)
+    input:  [B, T]       int64   — raw signal, integer class indices (0-255)
     output: [B, 256, T]  float32 — per-timestep logits over 256 denoising classes
 - ADC values must be embedded: the model receives integer indices, not floats.
   Use nn.Embedding(256, embed_dim) to convert [B, T] int64 → [B, T, embed_dim],
@@ -432,6 +428,7 @@ Output only the JSON object — no preamble, no markdown fences, no commentary."
 # ---------------------------------------------------------------------------
 # Prompt builders
 # ---------------------------------------------------------------------------
+
 
 def _build_reasoning_prompt(inp: ImplementorInput) -> str:
     model_cfg = inp.baseline_config.get("model_config", {})
@@ -591,32 +588,37 @@ def _build_repair_prompt(
 # File assembly
 # ---------------------------------------------------------------------------
 
-def _assemble_plugin(inp: ImplementorInput, code: dict) -> str:
-    model_cfg  = inp.baseline_config.get("model_config", {})
-    train_cfg  = inp.baseline_config.get("train_config", {})
-    seg_size   = model_cfg.get("segmentation_size", train_cfg.get("segmentation_size", 40000))
-    batch_size = model_cfg.get("batch_size", train_cfg.get("batch_size", 1))
-    model_cls  = _class_name(inp.model_name)
 
-    extra_imports      = code.get("extra_imports", "").strip()
+def _assemble_plugin(inp: ImplementorInput, code: dict) -> str:
+    model_cfg = inp.baseline_config.get("model_config", {})
+    train_cfg = inp.baseline_config.get("train_config", {})
+    seg_size = model_cfg.get("segmentation_size", train_cfg.get("segmentation_size", 40000))
+    batch_size = model_cfg.get("batch_size", train_cfg.get("batch_size", 1))
+    model_cls = _class_name(inp.model_name)
+
+    extra_imports = code.get("extra_imports", "").strip()
     config_fields_code = code.get("config_fields_code", "").rstrip()
     config_validators_code = code.get("config_validators_code", "").rstrip()
-    init_body          = code.get("init_body", "        pass").rstrip()
-    forward_body       = code.get("forward_body", "        pass").rstrip()
+    init_body = code.get("init_body", "        pass").rstrip()
+    forward_body = code.get("forward_body", "        pass").rstrip()
 
     # Ensure correct indentation: init_body and forward_body must be indented 8 spaces
-    init_body    = textwrap.indent(textwrap.dedent(init_body), "        ")
+    init_body = textwrap.indent(textwrap.dedent(init_body), "        ")
     forward_body = textwrap.indent(textwrap.dedent(forward_body), "        ")
 
     # Remove imports already present in the fixed template header to avoid duplicates.
     # Also drop any line that is not a valid import statement (must start with 'import'
     # or 'from') — LLMs occasionally emit partial fragments like "torch.nn.functional as F"
     # which would cause a SyntaxError.
-    _already_imported = {"import torch", "import torch.nn as nn",
-                         "import torch.nn.functional as F",
-                         "from pydantic import BaseModel, Field"}
+    _already_imported = {
+        "import torch",
+        "import torch.nn as nn",
+        "import torch.nn.functional as F",
+        "from pydantic import BaseModel, Field",
+    }
     extra_lines = [
-        line for line in extra_imports.splitlines()
+        line
+        for line in extra_imports.splitlines()
         if line.strip()
         and line.strip() not in _already_imported
         and (line.strip().startswith("import ") or line.strip().startswith("from "))
@@ -629,9 +631,7 @@ def _assemble_plugin(inp: ImplementorInput, code: dict) -> str:
 
     # Indent validators with 4 spaces (class body level); dedent first to normalise
     if config_validators_code.strip():
-        config_validators_code = textwrap.indent(
-            textwrap.dedent(config_validators_code), "    "
-        )
+        config_validators_code = textwrap.indent(textwrap.dedent(config_validators_code), "    ")
 
     return PLUGIN_TEMPLATE.format(
         model_name=inp.model_name,
@@ -654,12 +654,20 @@ def _assemble_test(model_name: str) -> str:
 # Node
 # ---------------------------------------------------------------------------
 
-class MLModelImplementor:
 
-    def __init__(self, provider: str = "gemini", model_id: str = "gemini-3.1-pro-preview",
-                 max_retries: int | None = None, bridge_factory=None, **kwargs):
+class MLModelImplementor:
+    def __init__(
+        self,
+        provider: str = "gemini",
+        model_id: str = "gemini-3.1-pro-preview",
+        max_retries: int | None = None,
+        bridge_factory=None,
+        **kwargs,
+    ):
         self._bridge_factory = bridge_factory or LLMBridge
-        self.bridge = self._bridge_factory(provider=provider, model_id=model_id, max_retries=max_retries)
+        self.bridge = self._bridge_factory(
+            provider=provider, model_id=model_id, max_retries=max_retries
+        )
 
     # ------------------------------------------------------------------
     # Validation helpers (used in the generate-validate-repair loop)
@@ -698,7 +706,8 @@ class MLModelImplementor:
         # Check 2: config fields must be scalar (int, float, bool)
         config_fields = code.get("config_fields", {})
         non_scalar = {
-            k: type(v).__name__ for k, v in config_fields.items()
+            k: type(v).__name__
+            for k, v in config_fields.items()
             if not isinstance(v, (int, float, bool))
         }
         if non_scalar:
@@ -732,7 +741,9 @@ class MLModelImplementor:
         # up the error and feeds it to the LLM via _build_repair_prompt.
         # See docs/improving_validation_awareness.md Phase B.2.
         baseline_error = _check_baseline_schema_compatibility(
-            plugin_src, inp.model_name, inp.baseline_config,
+            plugin_src,
+            inp.model_name,
+            inp.baseline_config,
         )
         if baseline_error:
             return baseline_error
@@ -749,7 +760,8 @@ class MLModelImplementor:
         # --- Call 1: reasoning (free text, runs once) ---
         reasoning_prompt = _build_reasoning_prompt(inp)
         reasoning = self.bridge.generate_text(
-            IMPLEMENTOR_REASONING_PROMPT, reasoning_prompt,
+            IMPLEMENTOR_REASONING_PROMPT,
+            reasoning_prompt,
             label="implementor.reasoning",
         )
         print(f"   Reasoning complete ({len(reasoning)} chars).")
@@ -757,7 +769,8 @@ class MLModelImplementor:
         # --- Call 2: code commit (strict JSON) ---
         code_prompt = _build_code_prompt(reasoning, inp)
         code = self.bridge.generate(
-            IMPLEMENTOR_CODE_PROMPT, code_prompt,
+            IMPLEMENTOR_CODE_PROMPT,
+            code_prompt,
             label="implementor.code",
         )
         code = self._patch_common_mistakes(code)
@@ -773,7 +786,8 @@ class MLModelImplementor:
             repair_prompt = _build_repair_prompt(code, error, inp, error_history)
             error_history.append((attempt, error))
             code = self.bridge.generate(
-                IMPLEMENTOR_REPAIR_PROMPT, repair_prompt,
+                IMPLEMENTOR_REPAIR_PROMPT,
+                repair_prompt,
                 label="implementor.repair",
             )
             code = self._patch_common_mistakes(code)
@@ -792,13 +806,11 @@ class MLModelImplementor:
             print(f"   ✅ Self-correction succeeded on attempt {attempt + 1}.")
 
         plugin_src = _assemble_plugin(inp, code)
-        test_src   = _assemble_test(inp.model_name)
+        test_src = _assemble_test(inp.model_name)
 
         # --- Write plugin file ---
         os.makedirs(inp.plugin_dir, exist_ok=True)
-        model_file_path = os.path.abspath(
-            os.path.join(inp.plugin_dir, f"{inp.model_name}.py")
-        )
+        model_file_path = os.path.abspath(os.path.join(inp.plugin_dir, f"{inp.model_name}.py"))
         with open(model_file_path, "w", encoding="utf-8") as f:
             f.write(plugin_src)
         print(f"✅ Plugin written → {model_file_path}")
@@ -806,7 +818,7 @@ class MLModelImplementor:
         # --- Write description.md so result_interpretation_agent can load it ---
         # Mirrors the structure expected by ml_models/model_descriptions.py:
         #   agent_generated/models/{model_name}/description.md
-        desc_dir  = os.path.join(inp.plugin_dir, inp.model_name)
+        desc_dir = os.path.join(inp.plugin_dir, inp.model_name)
         desc_path = os.path.join(desc_dir, "description.md")
         os.makedirs(desc_dir, exist_ok=True)
         description_md = (
@@ -823,9 +835,7 @@ class MLModelImplementor:
 
         # --- Write test file ---
         os.makedirs(inp.test_dir, exist_ok=True)
-        test_file_path = os.path.abspath(
-            os.path.join(inp.test_dir, f"test_{inp.model_name}.py")
-        )
+        test_file_path = os.path.abspath(os.path.join(inp.test_dir, f"test_{inp.model_name}.py"))
         with open(test_file_path, "w", encoding="utf-8") as f:
             f.write(test_src)
         print(f"✅ Test written  → {test_file_path}")
@@ -845,7 +855,7 @@ class MLModelImplementor:
         # --- Persist output record ---
         if inp.storage.backend == "local" and inp.storage.local:
             workspace = inp.storage.local.workspace
-            run_name  = inp.storage.local.run_name
+            run_name = inp.storage.local.run_name
             os.makedirs(workspace, exist_ok=True)
             out_path = os.path.join(workspace, f"implementor_{run_name}.json")
             with open(out_path, "w", encoding="utf-8") as f:
@@ -859,21 +869,21 @@ class MLModelImplementor:
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(description="SIDERIUS ml_model_implementor")
     parser.add_argument("--workspace", type=str, default="./siderius_workspace")
-    parser.add_argument("--run_name",  type=str, default="v1")
-    parser.add_argument("--provider",  type=str, default="gemini", choices=["gemini", "openai"])
-    parser.add_argument("--model_id",  type=str, default="gemini-3.1-pro-preview")
+    parser.add_argument("--run_name", type=str, default="v1")
+    parser.add_argument("--provider", type=str, default="gemini", choices=["gemini", "openai"])
+    parser.add_argument("--model_id", type=str, default="gemini-3.1-pro-preview")
     args = parser.parse_args()
 
     proposal_path = os.path.join(args.workspace, f"proposal_{args.run_name}.json")
     if not os.path.exists(proposal_path):
         raise FileNotFoundError(
-            f"Proposal file not found: {proposal_path}\n"
-            f"Run ml_model_proposal_agent first."
+            f"Proposal file not found: {proposal_path}\nRun ml_model_proposal_agent first."
         )
-    with open(proposal_path, "r", encoding="utf-8") as f:
+    with open(proposal_path, encoding="utf-8") as f:
         proposal = json.load(f)
 
     agent_input = ImplementorInput(
@@ -890,13 +900,13 @@ def main():
     agent = MLModelImplementor(provider=args.provider, model_id=args.model_id)
     output = agent.run(agent_input)
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  Implementor — {output.model_type}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"  Plugin  : {output.model_file_path}")
     print(f"  Tests   : {output.test_file_path}")
     print(f"  Config  : {output.config_fields}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
 
 if __name__ == "__main__":

@@ -6,8 +6,8 @@ proposer-side schema validator and the planner prompt's known-constraints block.
 
 from execute_tools.dataset_config import TIDMAD, DatasetConfig
 
-
 # ---- valid_segmentation_sizes ----
+
 
 def test_returns_sorted_divisors_within_default_window():
     sizes = TIDMAD.valid_segmentation_sizes()
@@ -46,7 +46,6 @@ def test_respects_lo_hi_bounds():
 
 def test_empty_when_window_excludes_all_divisors():
     """A window that misses every divisor returns an empty list, not a crash."""
-    psd = TIDMAD.psd_segment_length
     # Pick a window that no integer divisor of 10_000_000 falls into.
     # Divisors of 10_000_000 near 10003 don't exist (10000 and 10240 don't both fit).
     sizes = TIDMAD.valid_segmentation_sizes(lo=10001, hi=10239)

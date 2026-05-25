@@ -15,6 +15,7 @@ Three surfaces to verify:
    where the LLM kept picking formal mode despite ``--no-force_formal_round``
    because the prompt told it formal was always required on the last round.
 """
+
 from __future__ import annotations
 
 from agent.prompts import get_planner_user_prompt
@@ -27,7 +28,6 @@ from nodes.ml_hyperparameter_tune_agent import (
     _apply_mode_override_chain,
     _best_trial_winner,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -187,6 +187,7 @@ def test_strategy_rejects_unknown_value():
     """Schema must reject anything outside the Literal — opt-in policies
     are added explicitly."""
     import pydantic
+
     try:
         _make_input(formal_round_strategy="freestyle")
     except pydantic.ValidationError:
@@ -421,17 +422,30 @@ def test_force_formal_inherits_full_winner_config():
     plan.loss_cfg = {"loss_type": "focal_cw", "use_class_weights": True}  # bad LLM choice
     plan.train_cfg = {"lr": 1e-3, "epochs": 4, "batch_size": 16}
     plan.model_cfg = {"kernel_size": 2, "use_same_padding": False}  # bad LLM choice (V9 §7)
-    winner_model = {"segmentation_size": 1000, "kernel_size": 3,
-                    "use_same_padding": True, "num_blocks": 4}
+    winner_model = {
+        "segmentation_size": 1000,
+        "kernel_size": 3,
+        "use_same_padding": True,
+        "num_blocks": 4,
+    }
     history = [
         _make_trial_record("r1", score=5.15, loss_type="focal", lr=1e-4),
-        _make_trial_record("r2", score=5.45, loss_type="focal", lr=5e-5,
-                           epochs=1, batch_size=1, model_config=winner_model),  # winner
-        _make_trial_record("r3", score=None, loss_type="ce", lr=5e-5,
-                           status="error_inference"),
+        _make_trial_record(
+            "r2",
+            score=5.45,
+            loss_type="focal",
+            lr=5e-5,
+            epochs=1,
+            batch_size=1,
+            model_config=winner_model,
+        ),  # winner
+        _make_trial_record("r3", score=None, loss_type="ce", lr=5e-5, status="error_inference"),
     ]
     _apply_mode_override_chain(
-        plan, trial_allowed=True, is_formal_round=True, force_formal_round=True,
+        plan,
+        trial_allowed=True,
+        is_formal_round=True,
+        force_formal_round=True,
         memory_history=history,
     )
     assert plan.is_trial is False
@@ -461,7 +475,10 @@ def test_force_formal_inheritance_resilient_to_missing_train_keys():
     history[0]["params"]["train_config"].pop("batch_size", None)
     history[0]["params"]["train_config"].pop("epochs", None)
     _apply_mode_override_chain(
-        plan, trial_allowed=True, is_formal_round=True, force_formal_round=True,
+        plan,
+        trial_allowed=True,
+        is_formal_round=True,
+        force_formal_round=True,
         memory_history=history,
     )
     assert plan.is_trial is False
@@ -481,7 +498,10 @@ def test_force_formal_model_cfg_inheritance_isolated_from_winner():
         _make_trial_record("r1", score=5.45, model_config=winner_model),
     ]
     _apply_mode_override_chain(
-        plan, trial_allowed=True, is_formal_round=True, force_formal_round=True,
+        plan,
+        trial_allowed=True,
+        is_formal_round=True,
+        force_formal_round=True,
         memory_history=history,
     )
     plan.model_cfg["kernel_size"] = 99
@@ -500,7 +520,10 @@ def test_no_trial_winner_falls_back_to_planner_with_warning(capsys):
         _make_trial_record("r1", score=None, status="error_training"),
     ]
     _apply_mode_override_chain(
-        plan, trial_allowed=True, is_formal_round=True, force_formal_round=True,
+        plan,
+        trial_allowed=True,
+        is_formal_round=True,
+        force_formal_round=True,
         memory_history=history,
     )
     assert plan.is_trial is False
@@ -519,7 +542,10 @@ def test_inheritance_skipped_when_force_formal_off():
     plan.train_cfg = {"lr": 1e-3, "epochs": 1}
     history = [_make_trial_record("r1", score=5.45, loss_type="focal", lr=5e-5)]
     _apply_mode_override_chain(
-        plan, trial_allowed=True, is_formal_round=True, force_formal_round=False,
+        plan,
+        trial_allowed=True,
+        is_formal_round=True,
+        force_formal_round=False,
         memory_history=history,
     )
     assert plan.is_trial is True
@@ -535,7 +561,10 @@ def test_inheritance_skipped_on_non_last_rounds():
     plan.train_cfg = {"lr": 1e-3, "epochs": 1}
     history = [_make_trial_record("r1", score=5.45, loss_type="focal", lr=5e-5)]
     _apply_mode_override_chain(
-        plan, trial_allowed=True, is_formal_round=False, force_formal_round=True,
+        plan,
+        trial_allowed=True,
+        is_formal_round=False,
+        force_formal_round=True,
         memory_history=history,
     )
     assert plan.is_trial is True
@@ -550,7 +579,10 @@ def test_inheritance_default_memory_history_none():
     plan.loss_cfg = {"loss_type": "focal_cw"}
     plan.train_cfg = {"lr": 1e-3, "epochs": 1}
     _apply_mode_override_chain(
-        plan, trial_allowed=True, is_formal_round=True, force_formal_round=True,
+        plan,
+        trial_allowed=True,
+        is_formal_round=True,
+        force_formal_round=True,
         # memory_history omitted on purpose
     )
     assert plan.is_trial is False
@@ -573,10 +605,14 @@ def test_inheritance_logs_winner_identity(capsys):
     plan = _make_plan(is_trial=True)
     plan.loss_cfg = {"loss_type": "focal_cw"}
     plan.train_cfg = {"lr": 1e-3, "epochs": 1}
-    history = [_make_trial_record("r2", score=5.4523, loss_type="focal", lr=5e-5,
-                                   epochs=2, batch_size=8)]
+    history = [
+        _make_trial_record("r2", score=5.4523, loss_type="focal", lr=5e-5, epochs=2, batch_size=8)
+    ]
     _apply_mode_override_chain(
-        plan, trial_allowed=True, is_formal_round=True, force_formal_round=True,
+        plan,
+        trial_allowed=True,
+        is_formal_round=True,
+        force_formal_round=True,
         memory_history=history,
     )
     out = capsys.readouterr().out
@@ -606,10 +642,14 @@ def test_strategy_llm_propose_keeps_planner_choices(capsys):
     plan.loss_cfg = {"loss_type": "focal_cw", "experimental_flag": True}
     plan.train_cfg = {"lr": 1e-3, "epochs": 4, "batch_size": 16}
     plan.model_cfg = {"kernel_size": 2, "use_same_padding": False}  # planner's choice
-    history = [_make_trial_record("r2", score=5.45, loss_type="focal", lr=5e-5,
-                                   epochs=1, batch_size=1)]
+    history = [
+        _make_trial_record("r2", score=5.45, loss_type="focal", lr=5e-5, epochs=1, batch_size=1)
+    ]
     _apply_mode_override_chain(
-        plan, trial_allowed=True, is_formal_round=True, force_formal_round=True,
+        plan,
+        trial_allowed=True,
+        is_formal_round=True,
+        force_formal_round=True,
         formal_round_strategy="llm_propose",
         memory_history=history,
     )
@@ -636,7 +676,10 @@ def test_strategy_llm_propose_no_warning_without_winner(capsys):
     plan.loss_cfg = {"loss_type": "focal_cw"}
     plan.train_cfg = {"lr": 1e-3, "epochs": 1}
     _apply_mode_override_chain(
-        plan, trial_allowed=True, is_formal_round=True, force_formal_round=True,
+        plan,
+        trial_allowed=True,
+        is_formal_round=True,
+        force_formal_round=True,
         formal_round_strategy="llm_propose",
         memory_history=[],
     )
@@ -665,13 +708,22 @@ def test_shim_canonical_full_clone_inherits_like_legacy(capsys):
     plan.loss_cfg = {"loss_type": "focal_cw"}
     plan.train_cfg = {"lr": 1e-3, "epochs": 4, "batch_size": 16}
     plan.model_cfg = {"kernel_size": 2}  # planner's wrong choice
-    history = [_make_trial_record(
-        "r1", score=5.45, loss_type="focal", lr=5e-5,
-        epochs=2, batch_size=8,
-        model_config={"kernel_size": 3, "use_same_padding": True, "num_blocks": 4},
-    )]
+    history = [
+        _make_trial_record(
+            "r1",
+            score=5.45,
+            loss_type="focal",
+            lr=5e-5,
+            epochs=2,
+            batch_size=8,
+            model_config={"kernel_size": 3, "use_same_padding": True, "num_blocks": 4},
+        )
+    ]
     _apply_mode_override_chain(
-        plan, trial_allowed=True, is_formal_round=True, force_formal_round=True,
+        plan,
+        trial_allowed=True,
+        is_formal_round=True,
+        force_formal_round=True,
         formal_round_strategy="full_clone",  # canonical, not legacy
         memory_history=history,
     )
@@ -694,7 +746,10 @@ def test_shim_canonical_independent_skips_inheritance(capsys):
     plan.model_cfg = {"kernel_size": 2}
     history = [_make_trial_record("r1", score=5.45)]
     _apply_mode_override_chain(
-        plan, trial_allowed=True, is_formal_round=True, force_formal_round=True,
+        plan,
+        trial_allowed=True,
+        is_formal_round=True,
+        force_formal_round=True,
         formal_round_strategy="independent",  # canonical, not legacy
         memory_history=history,
     )
@@ -719,7 +774,10 @@ def test_shim_legacy_inherit_best_trial_still_works(capsys):
     plan.train_cfg = {"lr": 1e-3, "epochs": 4}
     history = [_make_trial_record("r1", score=5.0, loss_type="focal", lr=5e-5)]
     _apply_mode_override_chain(
-        plan, trial_allowed=True, is_formal_round=True, force_formal_round=True,
+        plan,
+        trial_allowed=True,
+        is_formal_round=True,
+        force_formal_round=True,
         formal_round_strategy="inherit_best_trial",  # legacy literal
         memory_history=history,
     )
@@ -739,8 +797,8 @@ def test_shim_legacy_inherit_best_trial_still_works(capsys):
 # alias-resolution log assertion called for in §7.2 of the design doc.
 
 
-from typing import get_type_hints
 import inspect
+from typing import get_type_hints
 
 from nodes.ml_hyperparameter_tune_agent import (
     _FORMAL_STRATEGY_REGISTRY,
@@ -760,13 +818,27 @@ class TestFullCloneStrategy:
         plan.loss_cfg = {"loss_type": "focal_cw"}
         plan.train_cfg = {"lr": 1e-3, "epochs": 4, "batch_size": 16}
         plan.model_cfg = {"kernel_size": 2}
-        winner_model = {"segmentation_size": 1000, "kernel_size": 3,
-                        "use_same_padding": True, "num_blocks": 4}
-        history = [_make_trial_record("r1", score=5.45, loss_type="focal",
-                                       lr=5e-5, epochs=2, batch_size=8,
-                                       model_config=winner_model)]
+        winner_model = {
+            "segmentation_size": 1000,
+            "kernel_size": 3,
+            "use_same_padding": True,
+            "num_blocks": 4,
+        }
+        history = [
+            _make_trial_record(
+                "r1",
+                score=5.45,
+                loss_type="focal",
+                lr=5e-5,
+                epochs=2,
+                batch_size=8,
+                model_config=winner_model,
+            )
+        ]
         _apply_mode_override_chain(
-            plan, trial_allowed=True, is_formal_round=True,
+            plan,
+            trial_allowed=True,
+            is_formal_round=True,
             force_formal_round=True,
             formal_round_strategy="full_clone",
             memory_history=history,
@@ -783,7 +855,9 @@ class TestFullCloneStrategy:
         plan.train_cfg = {"lr": 1e-3, "epochs": 1}
         plan.model_cfg = {"kernel_size": 2}
         _apply_mode_override_chain(
-            plan, trial_allowed=True, is_formal_round=True,
+            plan,
+            trial_allowed=True,
+            is_formal_round=True,
             force_formal_round=True,
             formal_round_strategy="full_clone",
             memory_history=[],
@@ -807,13 +881,21 @@ class TestHybridParamsStrategy:
         plan.loss_cfg = {"loss_type": "focal_cw"}
         plan.train_cfg = {"lr": 1e-3, "epochs": 4, "batch_size": 16}
         plan.model_cfg = {"kernel_size": 5, "num_blocks": 8}  # planner's pick
-        history = [_make_trial_record(
-            "r1", score=5.45, loss_type="focal", lr=5e-5,
-            epochs=2, batch_size=8,
-            model_config={"kernel_size": 3, "num_blocks": 4},
-        )]
+        history = [
+            _make_trial_record(
+                "r1",
+                score=5.45,
+                loss_type="focal",
+                lr=5e-5,
+                epochs=2,
+                batch_size=8,
+                model_config={"kernel_size": 3, "num_blocks": 4},
+            )
+        ]
         _apply_mode_override_chain(
-            plan, trial_allowed=True, is_formal_round=True,
+            plan,
+            trial_allowed=True,
+            is_formal_round=True,
             force_formal_round=True,
             formal_round_strategy="hybrid_params",
             memory_history=history,
@@ -832,12 +914,17 @@ class TestHybridParamsStrategy:
         ``hybrid_params`` is to let the planner scale capacity."""
         plan = _make_plan(is_trial=True)
         plan.model_cfg = {"untouched": True}
-        history = [_make_trial_record(
-            "r1", score=5.45,
-            model_config={"would_be_inherited_in_full_clone": True},
-        )]
+        history = [
+            _make_trial_record(
+                "r1",
+                score=5.45,
+                model_config={"would_be_inherited_in_full_clone": True},
+            )
+        ]
         _apply_mode_override_chain(
-            plan, trial_allowed=True, is_formal_round=True,
+            plan,
+            trial_allowed=True,
+            is_formal_round=True,
             force_formal_round=True,
             formal_round_strategy="hybrid_params",
             memory_history=history,
@@ -852,7 +939,9 @@ class TestHybridParamsStrategy:
         plan.loss_cfg = {"loss_type": "focal_cw"}
         plan.train_cfg = {"lr": 1e-3, "epochs": 1}
         _apply_mode_override_chain(
-            plan, trial_allowed=True, is_formal_round=True,
+            plan,
+            trial_allowed=True,
+            is_formal_round=True,
             force_formal_round=True,
             formal_round_strategy="hybrid_params",
             memory_history=[],
@@ -870,7 +959,9 @@ class TestHybridParamsStrategy:
         plan = _make_plan(is_trial=True)
         history = [_make_trial_record("r1", score=5.4500)]
         _apply_mode_override_chain(
-            plan, trial_allowed=True, is_formal_round=True,
+            plan,
+            trial_allowed=True,
+            is_formal_round=True,
             force_formal_round=True,
             formal_round_strategy="hybrid_params",
             memory_history=history,
@@ -892,13 +983,21 @@ class TestIndependentStrategy:
         plan.loss_cfg = {"loss_type": "focal_cw"}
         plan.train_cfg = {"lr": 1e-3, "epochs": 4, "batch_size": 16}
         plan.model_cfg = {"kernel_size": 2}
-        history = [_make_trial_record(
-            "r1", score=5.45, loss_type="focal", lr=5e-5,
-            epochs=1, batch_size=1,
-            model_config={"kernel_size": 3},
-        )]
+        history = [
+            _make_trial_record(
+                "r1",
+                score=5.45,
+                loss_type="focal",
+                lr=5e-5,
+                epochs=1,
+                batch_size=1,
+                model_config={"kernel_size": 3},
+            )
+        ]
         _apply_mode_override_chain(
-            plan, trial_allowed=True, is_formal_round=True,
+            plan,
+            trial_allowed=True,
+            is_formal_round=True,
             force_formal_round=True,
             formal_round_strategy="independent",
             memory_history=history,
@@ -916,7 +1015,9 @@ class TestIndependentStrategy:
         surfaces so the audit trail is consistent."""
         plan = _make_plan(is_trial=True)
         _apply_mode_override_chain(
-            plan, trial_allowed=True, is_formal_round=True,
+            plan,
+            trial_allowed=True,
+            is_formal_round=True,
             force_formal_round=True,
             formal_round_strategy="independent",
             memory_history=[],
@@ -942,13 +1043,21 @@ class TestAliasResolution:
         plan.loss_cfg = {"loss_type": "focal_cw"}
         plan.train_cfg = {"lr": 1e-3, "epochs": 4, "batch_size": 16}
         plan.model_cfg = {"kernel_size": 2}
-        history = [_make_trial_record(
-            "r1", score=5.45, loss_type="focal", lr=5e-5,
-            epochs=2, batch_size=8,
-            model_config={"kernel_size": 3, "num_blocks": 4},
-        )]
+        history = [
+            _make_trial_record(
+                "r1",
+                score=5.45,
+                loss_type="focal",
+                lr=5e-5,
+                epochs=2,
+                batch_size=8,
+                model_config={"kernel_size": 3, "num_blocks": 4},
+            )
+        ]
         _apply_mode_override_chain(
-            plan, trial_allowed=True, is_formal_round=True,
+            plan,
+            trial_allowed=True,
+            is_formal_round=True,
             force_formal_round=True,
             formal_round_strategy="inherit_best_trial",  # legacy
             memory_history=history,
@@ -967,7 +1076,9 @@ class TestAliasResolution:
         plan.model_cfg = {"kernel_size": 2}
         history = [_make_trial_record("r1", score=5.45)]
         _apply_mode_override_chain(
-            plan, trial_allowed=True, is_formal_round=True,
+            plan,
+            trial_allowed=True,
+            is_formal_round=True,
             force_formal_round=True,
             formal_round_strategy="llm_propose",  # legacy
             memory_history=history,
@@ -986,7 +1097,9 @@ class TestAliasResolution:
         plan = _make_plan(is_trial=True)
         history = [_make_trial_record("r1", score=5.45)]
         _apply_mode_override_chain(
-            plan, trial_allowed=True, is_formal_round=True,
+            plan,
+            trial_allowed=True,
+            is_formal_round=True,
             force_formal_round=True,
             formal_round_strategy="inherit_best_trial",
             memory_history=history,
@@ -1002,7 +1115,9 @@ class TestRegistryShape:
 
     def test_registry_has_three_canonical_strategies(self):
         assert set(_FORMAL_STRATEGY_REGISTRY.keys()) == {
-            "full_clone", "hybrid_params", "independent"
+            "full_clone",
+            "hybrid_params",
+            "independent",
         }
 
     def test_all_strategies_uniform_signature(self):
@@ -1023,13 +1138,11 @@ class TestRegistryShape:
             winner = _make_trial_record("smoke", score=5.0)
             inherited = handler(plan, winner)
             assert isinstance(inherited, list), (
-                f"Handler {name!r} returned {type(inherited).__name__}, "
-                "expected list[str]"
+                f"Handler {name!r} returned {type(inherited).__name__}, expected list[str]"
             )
             for field in inherited:
                 assert isinstance(field, str), (
-                    f"Handler {name!r} returned non-string in "
-                    f"inherited list: {field!r}"
+                    f"Handler {name!r} returned non-string in inherited list: {field!r}"
                 )
 
     def test_registry_directly_exposes_handler_callables(self):

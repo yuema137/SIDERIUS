@@ -4,16 +4,17 @@ Validates the sliding-window truncation applied to the planner prompt's
 experiment-history JSON.  The full record list is never mutated — only the
 serialised prompt copy is condensed.
 """
+
 from __future__ import annotations
 
 import json
 
 import pytest
 
-from agent.prompts import _truncate_memory_history, _CONDENSED_KEYS, _CONDENSED_MEMORY_KEYS
-
+from agent.prompts import _CONDENSED_KEYS, _CONDENSED_MEMORY_KEYS, _truncate_memory_history
 
 # ── Helpers ───────��────────────────────────────────────────────────────────
+
 
 def _make_record(exp_id: str, score: float = 5.0, **extra) -> dict:
     """Build a minimal but realistic experiment record."""
@@ -46,6 +47,7 @@ def _make_record(exp_id: str, score: float = 5.0, **extra) -> dict:
 
 # ── Tests ────────��─────────────────────────────────────────────────────────
 
+
 def test_fewer_than_window_returns_all_verbatim():
     records = [_make_record(f"exp_{i}") for i in range(2)]
     result = _truncate_memory_history(records, full_window=3)
@@ -57,7 +59,7 @@ def test_exact_window_returns_all_verbatim():
     records = [_make_record(f"exp_{i}") for i in range(3)]
     result = _truncate_memory_history(records, full_window=3)
     assert len(result) == 3
-    for orig, out in zip(records, result):
+    for orig, out in zip(records, result, strict=True):
         assert out == orig
 
 
@@ -105,6 +107,7 @@ def test_condensed_keys_are_exactly_specified():
 def test_non_destructive_original_list_unchanged():
     records = [_make_record(f"exp_{i}") for i in range(5)]
     import copy
+
     original = copy.deepcopy(records)
     _truncate_memory_history(records, full_window=2)
     assert records == original
@@ -116,8 +119,9 @@ def test_empty_list():
 
 def test_missing_memory_key_handled():
     """Records without a 'memory' block should not crash."""
-    records = [{"exp_id": f"exp_{i}", "status": "success", "denoising_score": 1.0}
-               for i in range(5)]
+    records = [
+        {"exp_id": f"exp_{i}", "status": "success", "denoising_score": 1.0} for i in range(5)
+    ]
     result = _truncate_memory_history(records, full_window=2)
     assert len(result) == 5
     for rec in result[:3]:
@@ -132,6 +136,5 @@ def test_json_size_reduction():
     truncated_size = len(json.dumps(truncated, indent=2))
     # Expect at least 50% reduction (7 of 10 records condensed)
     assert truncated_size < full_size * 0.7, (
-        f"truncated={truncated_size}, full={full_size} — "
-        f"expected at least 30% reduction"
+        f"truncated={truncated_size}, full={full_size} — expected at least 30% reduction"
     )

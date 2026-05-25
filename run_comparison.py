@@ -24,24 +24,22 @@ Usage:
   python run_comparison.py --model rnn --provider openai --model_id gpt-4o
 """
 
-import os
-import sys
-import json
-import time
-import glob
 import argparse
+import glob
+import json
+import os
 import subprocess
-
-# Ensure SIDERIUS root is importable regardless of where script is invoked from
-SIDERIUS_ROOT = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, SIDERIUS_ROOT)
+import sys
+import time
+from datetime import UTC
 
 from core.sandbox_executor import TidmadSandbox
+from execute_tools.build_anchor_map import load_anchor_map
+from execute_tools.data_paths import SIDERIUS_DATA_DIR, TIDMAD_DATA_DIR
 from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_utils import score_vector
-from execute_tools.build_anchor_map import load_anchor_map
-from execute_tools.data_paths import TIDMAD_DATA_DIR, SIDERIUS_DATA_DIR
 
+SIDERIUS_ROOT = os.path.dirname(os.path.abspath(__file__))
 ROOT_DATA_DIR = SIDERIUS_DATA_DIR
 DATA_DIR = TIDMAD_DATA_DIR
 LEGACY_CONFIGS_PATH = os.path.join(SIDERIUS_ROOT, "ml_models", "legacy_baseline_configs.json")
@@ -67,16 +65,21 @@ def _agent_env() -> dict:
 # Phase 1: Baseline
 # ==========================================
 
-def run_baseline(model_type: str, baseline_workspace: str, progress_bar: bool = False, file_index: int = 6) -> dict:
+
+def run_baseline(
+    model_type: str, baseline_workspace: str, progress_bar: bool = False, file_index: int = 6
+) -> dict:
     """
     Runs the full pipeline (train -> inference -> score) with the exact legacy config
     from the TIDMAD paper. Returns the final record dict.
     """
-    with open(LEGACY_CONFIGS_PATH, "r") as f:
+    with open(LEGACY_CONFIGS_PATH) as f:
         legacy = json.load(f)
 
     if model_type not in legacy:
-        raise ValueError(f"No legacy config found for model '{model_type}' in {LEGACY_CONFIGS_PATH}")
+        raise ValueError(
+            f"No legacy config found for model '{model_type}' in {LEGACY_CONFIGS_PATH}"
+        )
 
     cfg = legacy[model_type]
     m_cfg = cfg["model_cfg"]
@@ -84,7 +87,7 @@ def run_baseline(model_type: str, baseline_workspace: str, progress_bar: bool = 
     l_cfg = cfg["loss_cfg"]
 
     run_name = f"baseline_{model_type}"
-    exp_id   = f"baseline_{model_type}_{int(time.time())}"
+    exp_id = f"baseline_{model_type}_{int(time.time())}"
 
     sandbox = TidmadSandbox(
         metadata_source="local",
@@ -94,9 +97,9 @@ def run_baseline(model_type: str, baseline_workspace: str, progress_bar: bool = 
         file_index=file_index,
     )
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  PHASE 1 — BASELINE: {model_type.upper()}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"  model_cfg  : {m_cfg}")
     print(f"  train_cfg  : {t_cfg}")
     print(f"  loss_cfg   : {l_cfg}")
@@ -105,8 +108,12 @@ def run_baseline(model_type: str, baseline_workspace: str, progress_bar: bool = 
     # --- Train ---
     t0 = time.time()
     train_result = sandbox.execute_training(
-        exp_id=exp_id, run_name=run_name, model_type=model_type,
-        m_cfg=m_cfg, t_cfg=t_cfg, l_cfg=l_cfg,
+        exp_id=exp_id,
+        run_name=run_name,
+        model_type=model_type,
+        m_cfg=m_cfg,
+        t_cfg=t_cfg,
+        l_cfg=l_cfg,
     )
     train_time = round(time.time() - t0, 1)
     if train_result["status"] != "success":
@@ -115,8 +122,11 @@ def run_baseline(model_type: str, baseline_workspace: str, progress_bar: bool = 
     # --- Inference ---
     t0 = time.time()
     inf_result = sandbox.execute_inference(
-        exp_id=exp_id, run_name=run_name, model_type=model_type,
-        m_cfg=m_cfg, l_cfg=l_cfg,
+        exp_id=exp_id,
+        run_name=run_name,
+        model_type=model_type,
+        m_cfg=m_cfg,
+        l_cfg=l_cfg,
     )
     inference_time = round(time.time() - t0, 1)
     if inf_result["status"] != "success":
@@ -125,8 +135,12 @@ def run_baseline(model_type: str, baseline_workspace: str, progress_bar: bool = 
     # --- Score ---
     t0 = time.time()
     score_result = sandbox.execute_scoring(
-        exp_id=exp_id, run_name=run_name, model_type=model_type,
-        m_cfg=m_cfg, t_cfg=t_cfg, l_cfg=l_cfg,
+        exp_id=exp_id,
+        run_name=run_name,
+        model_type=model_type,
+        m_cfg=m_cfg,
+        t_cfg=t_cfg,
+        l_cfg=l_cfg,
     )
     scoring_time = round(time.time() - t0, 1)
     if score_result["status"] != "success":
@@ -137,34 +151,34 @@ def run_baseline(model_type: str, baseline_workspace: str, progress_bar: bool = 
     score_res = score_result.get("results", {})
 
     record = {
-        "exp_id":       exp_id,
-        "status":       "success",
-        "model_type":   model_type,
-        "timestamp":    time.strftime("%Y-%m-%d %H:%M:%S"),
-        "file_index":   file_index,
+        "exp_id": exp_id,
+        "status": "success",
+        "model_type": model_type,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "file_index": file_index,
         "params": {
-            "exp_id":        exp_id,
-            "run_name":      run_name,
-            "model_type":    model_type,
-            "model_config":  m_cfg,
-            "train_config":  t_cfg,
-            "loss_config":   l_cfg,
+            "exp_id": exp_id,
+            "run_name": run_name,
+            "model_type": model_type,
+            "model_config": m_cfg,
+            "train_config": t_cfg,
+            "loss_config": l_cfg,
         },
-        "final_loss":      train_res.get("final_loss"),
-        "loss_history":    train_res.get("loss_history"),
-        "model_params":    train_res.get("model_params"),
+        "final_loss": train_res.get("final_loss"),
+        "loss_history": train_res.get("loss_history"),
+        "model_params": train_res.get("model_params"),
         "denoising_score": score_res.get("denoising_score"),
         "timing": {
-            "train_time_s":     train_time,
+            "train_time_s": train_time,
             "inference_time_s": inference_time,
-            "scoring_time_s":   scoring_time,
+            "scoring_time_s": scoring_time,
         },
         "memory": {
             "expert_advice_followed": "Legacy TIDMAD paper baseline — no agent involvement.",
             "hypothesis": "Original hardcoded baseline configuration from the TIDMAD paper.",
             "conclusion": (
                 f"Baseline {model_type.upper()} achieved "
-                f"denoising_score={combined.get('denoising_score', 'N/A')}."
+                f"denoising_score={score_res.get('denoising_score', 'N/A')}."
             ),
             "discovery": (
                 "This is the paper's reference result. All subsequent agent experiments "
@@ -172,19 +186,20 @@ def run_baseline(model_type: str, baseline_workspace: str, progress_bar: bool = 
             ),
             "memory_update": (
                 f"Baseline {model_type.upper()} performance established. "
-                f"Score: {combined.get('denoising_score', 'N/A')}. "
+                f"Score: {score_res.get('denoising_score', 'N/A')}. "
                 "Use this as the minimum target for improvement."
             ),
         },
     }
 
     sandbox.save_record(record)
-    print(f"\n  Baseline complete. Denoising score: {combined.get('denoising_score', 'N/A')}")
+    print(f"\n  Baseline complete. Denoising score: {score_res.get('denoising_score', 'N/A')}")
     return record
 
 
-def run_baseline_trial(model_type: str, baseline_workspace: str,
-                       progress_bar: bool = False) -> dict:
+def run_baseline_trial(
+    model_type: str, baseline_workspace: str, progress_bar: bool = False
+) -> dict:
     """
     Runs baseline with the TIDMAD paper config using the trial pipeline:
     - Training: all 20 files, train_portion=0.1 (subsampled per epoch),
@@ -195,11 +210,13 @@ def run_baseline_trial(model_type: str, baseline_workspace: str,
     No LLM call — config is hardcoded from legacy_baseline_configs.json.
     Produces scores on the same anchor-normalized scale as agent trial/formal runs.
     """
-    with open(LEGACY_CONFIGS_PATH, "r") as f:
+    with open(LEGACY_CONFIGS_PATH) as f:
         legacy = json.load(f)
 
     if model_type not in legacy:
-        raise ValueError(f"No legacy config found for model '{model_type}' in {LEGACY_CONFIGS_PATH}")
+        raise ValueError(
+            f"No legacy config found for model '{model_type}' in {LEGACY_CONFIGS_PATH}"
+        )
 
     cfg = legacy[model_type]
     m_cfg = cfg["model_cfg"]
@@ -221,29 +238,39 @@ def run_baseline_trial(model_type: str, baseline_workspace: str,
         file_index=6,  # unused in trial mode but required by TidmadSandbox
     )
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  PHASE 1 — BASELINE (trial pipeline): {model_type.upper()}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"  model_cfg   : {m_cfg}")
     print(f"  train_cfg   : {t_cfg}")
     print(f"  loss_cfg    : {l_cfg}")
-    print(f"  train scope : all 20 files, portion=1.0, train_portion=0.1/epoch")
-    print(f"  eval scope  : all 20 files, all segments")
+    print("  train scope : all 20 files, portion=1.0, train_portion=0.1/epoch")
+    print("  eval scope  : all 20 files, all segments")
     print()
 
     # Build SampleSets — full coverage, deterministic seed
     train_sample_set = build_sample_set(
-        is_trial=True, trial_strategy="snapshot", trial_portion=1.0, seed=0,
+        is_trial=True,
+        trial_strategy="snapshot",
+        trial_portion=1.0,
+        seed=0,
     )
     eval_sample_set = build_sample_set(
-        is_trial=True, trial_strategy="snapshot", trial_portion=1.0, seed=0,
+        is_trial=True,
+        trial_strategy="snapshot",
+        trial_portion=1.0,
+        seed=0,
     )
 
     # --- Train (streaming, all 20 files, 10% subsample/epoch) ---
     t0 = time.time()
     train_result = sandbox.execute_training(
-        exp_id=exp_id, run_name=run_name, model_type=model_type,
-        m_cfg=m_cfg, t_cfg=t_cfg, l_cfg=l_cfg,
+        exp_id=exp_id,
+        run_name=run_name,
+        model_type=model_type,
+        m_cfg=m_cfg,
+        t_cfg=t_cfg,
+        l_cfg=l_cfg,
         sample_set=train_sample_set,
         train_portion=0.1,
         train_base_seed=42,
@@ -255,8 +282,11 @@ def run_baseline_trial(model_type: str, baseline_workspace: str,
     # --- Inference (all 20 files, all segments) ---
     t0 = time.time()
     inf_result = sandbox.execute_inference(
-        exp_id=exp_id, run_name=run_name, model_type=model_type,
-        m_cfg=m_cfg, l_cfg=l_cfg,
+        exp_id=exp_id,
+        run_name=run_name,
+        model_type=model_type,
+        m_cfg=m_cfg,
+        l_cfg=l_cfg,
         sample_set=eval_sample_set,
     )
     inference_time = round(time.time() - t0, 1)
@@ -285,34 +315,34 @@ def run_baseline_trial(model_type: str, baseline_workspace: str,
     train_res = train_result.get("results", {})
 
     record = {
-        "exp_id":       exp_id,
-        "status":       "success",
-        "model_type":   model_type,
-        "timestamp":    time.strftime("%Y-%m-%d %H:%M:%S"),
-        "file_index":   6,
+        "exp_id": exp_id,
+        "status": "success",
+        "model_type": model_type,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "file_index": 6,
         "params": {
-            "exp_id":        exp_id,
-            "run_name":      run_name,
-            "model_type":    model_type,
-            "model_config":  m_cfg,
-            "train_config":  t_cfg,
-            "loss_config":   l_cfg,
+            "exp_id": exp_id,
+            "run_name": run_name,
+            "model_type": model_type,
+            "model_config": m_cfg,
+            "train_config": t_cfg,
+            "loss_config": l_cfg,
         },
-        "final_loss":       train_res.get("final_loss"),
-        "loss_history":     train_res.get("loss_history"),
-        "model_params":     train_res.get("model_params"),
-        "denoising_score":  final_scalar,
-        "file_vector":      file_vector,
-        "is_trial":         False,
-        "trial_strategy":   "snapshot",
-        "trial_portion":    1.0,
-        "train_portion":    0.1,
+        "final_loss": train_res.get("final_loss"),
+        "loss_history": train_res.get("loss_history"),
+        "model_params": train_res.get("model_params"),
+        "denoising_score": final_scalar,
+        "file_vector": file_vector,
+        "is_trial": False,
+        "trial_strategy": "snapshot",
+        "trial_portion": 1.0,
+        "train_portion": 0.1,
         "training_psd_segments": sum(len(v) for v in train_sample_set.values()),
-        "eval_psd_segments":     sum(len(v) for v in eval_sample_set.values()),
+        "eval_psd_segments": sum(len(v) for v in eval_sample_set.values()),
         "timing": {
-            "train_time_s":     train_time,
+            "train_time_s": train_time,
             "inference_time_s": inference_time,
-            "scoring_time_s":   scoring_time,
+            "scoring_time_s": scoring_time,
         },
         "memory": {
             "expert_advice_followed": "Legacy TIDMAD paper baseline — no agent involvement.",
@@ -343,6 +373,7 @@ def run_baseline_trial(model_type: str, baseline_workspace: str,
 # Phase 2: Seed agent memory
 # ==========================================
 
+
 def seed_agent_memory(baseline_record: dict, agent_workspace: str, agent_run_name: str):
     """
     Writes the baseline record into the agent's summary_{run_name}.json so that
@@ -355,9 +386,9 @@ def seed_agent_memory(baseline_record: dict, agent_workspace: str, agent_run_nam
     existing = []
     if os.path.exists(summary_path):
         try:
-            with open(summary_path, "r", encoding="utf-8") as f:
+            with open(summary_path, encoding="utf-8") as f:
                 existing = json.load(f)
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             existing = []
 
     already_seeded = any(r.get("exp_id") == baseline_record.get("exp_id") for r in existing)
@@ -367,21 +398,32 @@ def seed_agent_memory(baseline_record: dict, agent_workspace: str, agent_run_nam
             json.dump(existing, f, indent=4, ensure_ascii=False)
         print(f"\n  Agent memory seeded with baseline record → {summary_path}")
     else:
-        print(f"\n  Agent memory already contains baseline record — skipping seed.")
+        print("\n  Agent memory already contains baseline record — skipping seed.")
 
 
 # ==========================================
 # Phase 3: Agent exploration
 # ==========================================
 
-def run_agent(model_type: str, agent_workspace: str, agent_run_name: str,
-              provider: str, model_id: str, max_rounds: int, progress_bar: bool = False,
-              file_index: int = 6, is_trial: bool = False, human_advice: str = None,
-              cleanup_denoised: bool = False,
-              reflect_provider: str = None, reflect_model_id: str = None,
-              formal_strategy: str = "snapshot",
-              formal_portion: float = 0.1,
-              formal_train_portion: float = 1.0):
+
+def run_agent(
+    model_type: str,
+    agent_workspace: str,
+    agent_run_name: str,
+    provider: str,
+    model_id: str,
+    max_rounds: int,
+    progress_bar: bool = False,
+    file_index: int = 6,
+    is_trial: bool = False,
+    human_advice: str | None = None,
+    cleanup_denoised: bool = False,
+    reflect_provider: str | None = None,
+    reflect_model_id: str | None = None,
+    formal_strategy: str = "snapshot",
+    formal_portion: float = 0.1,
+    formal_train_portion: float = 1.0,
+):
     """
     Launches nodes/ml_hyperparameter_tune_agent.py as a subprocess, locked to
     model_type, for max_rounds rounds.
@@ -402,13 +444,20 @@ def run_agent(model_type: str, agent_workspace: str, agent_run_name: str,
     cmd = [
         sys.executable,
         os.path.join(SIDERIUS_ROOT, "nodes", "ml_hyperparameter_tune_agent.py"),
-        "--provider",    provider,
-        "--model_id",    model_id,
-        "--force_model", model_type,
-        "--max_rounds",  str(max_rounds),
-        "--run_name",    agent_run_name,
-        "--workspace",   agent_workspace,
-        "--expert_advice", expert_advice,
+        "--provider",
+        provider,
+        "--model_id",
+        model_id,
+        "--force_model",
+        model_type,
+        "--max_rounds",
+        str(max_rounds),
+        "--run_name",
+        agent_run_name,
+        "--workspace",
+        agent_workspace,
+        "--expert_advice",
+        expert_advice,
     ]
     if reflect_provider:
         cmd.extend(["--reflect_provider", reflect_provider])
@@ -429,7 +478,7 @@ def run_agent(model_type: str, agent_workspace: str, agent_run_name: str,
     cmd.extend(["--formal_portion", str(formal_portion)])
     cmd.extend(["--formal_train_portion", str(formal_train_portion)])
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  PHASE 3 — AGENT EXPLORATION: {model_type.upper()}")
     print(f"  Rounds:    {max_rounds}")
     print(f"  Workspace: {agent_workspace}")
@@ -439,8 +488,8 @@ def run_agent(model_type: str, agent_workspace: str, agent_run_name: str,
         eff_reflect_model_id = reflect_model_id or model_id
         print(f"  Reflector: {eff_reflect_provider} / {eff_reflect_model_id}")
     else:
-        print(f"  Reflector: (same as planner)")
-    print(f"{'='*60}\n")
+        print("  Reflector: (same as planner)")
+    print(f"{'=' * 60}\n")
 
     subprocess.run(cmd, cwd=SIDERIUS_ROOT, env=_agent_env(), check=True)
 
@@ -449,49 +498,67 @@ def run_agent(model_type: str, agent_workspace: str, agent_run_name: str,
 # Entry point
 # ==========================================
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="SIDERIUS: Compare baseline vs agent-assisted exploration for a TIDMAD model."
     )
     parser.add_argument(
-        "--model", type=str, required=True,
+        "--model",
+        type=str,
+        required=True,
         help="Model architecture to explore (any model in MODEL_REGISTRY or legacy_baseline_configs).",
     )
     parser.add_argument(
-        "--provider", type=str, default="gemini", choices=["gemini", "openai"],
+        "--provider",
+        type=str,
+        default="gemini",
+        choices=["gemini", "openai"],
         help="LLM provider for the planner sub-call (default: gemini). "
-             "Also the default for the reflector when --reflect_provider is unset.",
+        "Also the default for the reflector when --reflect_provider is unset.",
     )
     parser.add_argument(
-        "--model_id", type=str, default="gemini-3.1-flash-lite-preview",
+        "--model_id",
+        type=str,
+        default="gemini-3.1-flash-lite-preview",
         help="Model ID for the planner sub-call (default: gemini-3.1-flash-lite-preview). "
-             "Also the default for the reflector when --reflect_model_id is unset.",
+        "Also the default for the reflector when --reflect_model_id is unset.",
     )
     parser.add_argument(
-        "--reflect_provider", type=str, default=None, choices=["gemini", "openai"],
+        "--reflect_provider",
+        type=str,
+        default=None,
+        choices=["gemini", "openai"],
         help="Optional separate provider for the reflector sub-call. "
-             "When unset, the reflector uses --provider. Set to a different "
-             "vendor (e.g. 'openai') to route the reflector to an entirely "
-             "different provider.",
+        "When unset, the reflector uses --provider. Set to a different "
+        "vendor (e.g. 'openai') to route the reflector to an entirely "
+        "different provider.",
     )
     parser.add_argument(
-        "--reflect_model_id", type=str, default=None,
+        "--reflect_model_id",
+        type=str,
+        default=None,
         help="Optional separate model for the reflector sub-call. "
-             "When unset for the gemini provider, defaults to 'gemini-2.5-flash' "
-             "(unlimited daily quota, GA model, well-suited for the templated "
-             "reflection step). When unset for non-gemini providers, falls "
-             "back to --model_id (legacy behavior).",
+        "When unset for the gemini provider, defaults to 'gemini-2.5-flash' "
+        "(unlimited daily quota, GA model, well-suited for the templated "
+        "reflection step). When unset for non-gemini providers, falls "
+        "back to --model_id (legacy behavior).",
     )
     parser.add_argument(
-        "--max_rounds", type=int, default=50,
+        "--max_rounds",
+        type=int,
+        default=50,
         help="Number of agent exploration rounds (default: 50).",
     )
     parser.add_argument(
-        "--progress_bar", action="store_true",
+        "--progress_bar",
+        action="store_true",
         help="Stream live tqdm progress bars from training/inference/scoring subprocesses.",
     )
     parser.add_argument(
-        "--run_name", type=str, default="v1",
+        "--run_name",
+        type=str,
+        default="v1",
         help=(
             "Name for this comparison run (default: v1). "
             "Use different names (e.g. 'test', 'v1', 'v2') to keep runs isolated. "
@@ -500,37 +567,46 @@ def main():
         ),
     )
     parser.add_argument(
-        "--override_old_run", action="store_true",
+        "--override_old_run",
+        action="store_true",
         help=(
             "Delete any existing data for --run_name and start fresh. "
             "Without this flag the script will error if the run_name already exists."
         ),
     )
     parser.add_argument(
-        "--file_index", type=int, default=6,
+        "--file_index",
+        type=int,
+        default=6,
         help="Validation/training file index (default: 6). Ignored when --is_trial.",
     )
     parser.add_argument(
-        "--is_trial", action="store_true",
+        "--is_trial",
+        action="store_true",
         help="Enable trial-explore mode with multi-file sparse sampling.",
     )
     parser.add_argument(
-        "--human_advice", type=str, default=None,
+        "--human_advice",
+        type=str,
+        default=None,
         help="Human guidance for the agent (free-form string, single value).",
     )
     parser.add_argument(
-        "--human_advice_file", type=str, default=None,
+        "--human_advice_file",
+        type=str,
+        default=None,
         help=(
             "Path to a per-agent human advice JSON file. The file must contain a "
             "single key matching the agent receiving the advice — for the tuner, "
-            "use {\"tune\": \"...\"}. Strict subset of the aggregated advice file "
+            'use {"tune": "..."}. Strict subset of the aggregated advice file '
             "format used at workflow/chain levels (which has all 5 agent keys). "
             "If both --human_advice and --human_advice_file are given, the file "
             "takes precedence."
         ),
     )
     parser.add_argument(
-        "--cleanup_denoised", action="store_true",
+        "--cleanup_denoised",
+        action="store_true",
         help="Delete denoised HDF5 files after scoring each round to save disk space.",
     )
     # --- Formal-mode training levers (Phase M, docs §12) ---
@@ -540,16 +616,22 @@ def main():
     # ``--formal_eval_portion`` (Phase R, §13) — not surfaced here because
     # this script is a baseline benchmark runner, not a chain entry point.
     parser.add_argument(
-        "--formal_strategy", type=str, default="snapshot",
+        "--formal_strategy",
+        type=str,
+        default="snapshot",
         choices=["snapshot", "anchors", "target"],
         help="Training-side strategy on formal rounds (default snapshot).",
     )
     parser.add_argument(
-        "--formal_portion", type=float, default=0.1,
+        "--formal_portion",
+        type=float,
+        default=0.1,
         help="Fraction of segments per file for formal training scope (default 0.1).",
     )
     parser.add_argument(
-        "--formal_train_portion", type=float, default=1.0,
+        "--formal_train_portion",
+        type=float,
+        default=1.0,
         help="Per-epoch iteration fraction for formal training (default 1.0).",
     )
     args = parser.parse_args()
@@ -570,10 +652,8 @@ def main():
     human_advice: str = args.human_advice or ""
     if args.human_advice_file:
         if not os.path.exists(args.human_advice_file):
-            raise SystemExit(
-                f"\n[ERROR] --human_advice_file not found: {args.human_advice_file}"
-            )
-        with open(args.human_advice_file, "r", encoding="utf-8") as f:
+            raise SystemExit(f"\n[ERROR] --human_advice_file not found: {args.human_advice_file}")
+        with open(args.human_advice_file, encoding="utf-8") as f:
             advice_blob = json.load(f)
         if not isinstance(advice_blob, dict) or "tune" not in advice_blob:
             raise SystemExit(
@@ -583,14 +663,14 @@ def main():
         human_advice = advice_blob["tune"] or ""
         print(f"  Loaded human advice from: {args.human_advice_file}")
 
-    model_type         = args.model
-    model_root         = os.path.join(ROOT_DATA_DIR, model_type)
-    run_dir            = os.path.join(model_root, args.run_name)
+    model_type = args.model
+    model_root = os.path.join(ROOT_DATA_DIR, model_type)
+    run_dir = os.path.join(model_root, args.run_name)
     # Trial and single-file baselines are on different scoring scales — keep separate
-    baseline_subdir    = "baseline_trial" if args.is_trial else "baseline"
+    baseline_subdir = "baseline_trial" if args.is_trial else "baseline"
     baseline_workspace = os.path.join(model_root, baseline_subdir)
-    agent_workspace    = os.path.join(run_dir, "agent")
-    agent_run_name     = f"{args.run_name}_agent"
+    agent_workspace = os.path.join(run_dir, "agent")
+    agent_run_name = f"{args.run_name}_agent"
 
     # --- Guard: prevent accidental overwrite of existing run ---
     if os.path.exists(run_dir) and os.listdir(run_dir):
@@ -608,42 +688,49 @@ def main():
             )
         else:
             import shutil
+
             shutil.rmtree(run_dir)
             print(f"  [override] Deleted existing run at: {run_dir}")
 
     os.makedirs(baseline_workspace, exist_ok=True)
     os.makedirs(agent_workspace, exist_ok=True)
 
-    print(f"\n{'#'*60}")
+    print(f"\n{'#' * 60}")
     print(f"  SIDERIUS Comparison Run — {model_type.upper()}")
     print(f"  Baseline  : {baseline_workspace}")
     print(f"  Agent     : {agent_workspace}")
     print(f"  Rounds    : {args.max_rounds}")
-    print(f"{'#'*60}")
+    print(f"{'#' * 60}")
 
     # --- Phase 1: Baseline (computed once, reused across all run_names) ---
     matches = glob.glob(os.path.join(baseline_workspace, "summary_*.json"))
     baseline_done = False
     if matches:
         try:
-            with open(matches[0], "r") as f:
+            with open(matches[0]) as f:
                 history = json.load(f)
             if history:
                 baseline_record = history[0]
                 baseline_done = True
-                print(f"\n  Baseline already computed: {baseline_record.get('exp_id')} "
-                      f"(score={baseline_record.get('denoising_score', 'N/A')}) — skipping.")
-        except (json.JSONDecodeError, IOError):
+                print(
+                    f"\n  Baseline already computed: {baseline_record.get('exp_id')} "
+                    f"(score={baseline_record.get('denoising_score', 'N/A')}) — skipping."
+                )
+        except (OSError, json.JSONDecodeError):
             pass
 
     if not baseline_done:
         if args.is_trial:
             baseline_record = run_baseline_trial(
-                model_type, baseline_workspace, progress_bar=args.progress_bar,
+                model_type,
+                baseline_workspace,
+                progress_bar=args.progress_bar,
             )
         else:
             baseline_record = run_baseline(
-                model_type, baseline_workspace, progress_bar=args.progress_bar,
+                model_type,
+                baseline_workspace,
+                progress_bar=args.progress_bar,
                 file_index=args.file_index,
             )
 
@@ -651,11 +738,15 @@ def main():
     seed_agent_memory(baseline_record, agent_workspace, agent_run_name)
 
     # --- Write tuner-level run metadata before launching the agent ---
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     from agent.schemas.hyperparam_tuning import ExpertAdvice
     from agent.schemas.run_metadata import (
-        TunerRunMetadata, PerAgentAdvice,
-        capture_git_info, capture_env_info, write_metadata,
+        PerAgentAdvice,
+        TunerRunMetadata,
+        capture_env_info,
+        capture_git_info,
+        write_metadata,
     )
 
     # Legacy free-form preamble used by run_agent() — captured here so the
@@ -671,7 +762,7 @@ def main():
     tuner_meta = TunerRunMetadata(
         run_name=agent_run_name,
         workspace=os.path.abspath(agent_workspace),
-        started_at=datetime.now(timezone.utc).isoformat(),
+        started_at=datetime.now(UTC).isoformat(),
         git=capture_git_info(repo_root=SIDERIUS_ROOT),
         env=capture_env_info(),
         argv=list(sys.argv),
@@ -716,11 +807,11 @@ def main():
         formal_train_portion=args.formal_train_portion,
     )
 
-    print(f"\n{'#'*60}")
+    print(f"\n{'#' * 60}")
     print(f"  Comparison run complete for {model_type.upper()}")
     print(f"  Baseline results : {baseline_workspace}")
     print(f"  Agent results    : {agent_workspace}")
-    print(f"{'#'*60}\n")
+    print(f"{'#' * 60}\n")
 
 
 if __name__ == "__main__":
