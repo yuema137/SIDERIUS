@@ -70,6 +70,7 @@ PLAN_OVERRIDES=""
 DATA_DIR="/home/klz/Data/TIDMAD/"
 TRIAL_TIME_BUDGET_MINUTES=""        # §3.2: empty == omit == Python None
 FORMAL_TIME_BUDGET_MINUTES=""       # §3.2: empty == omit == Python None
+FORMAL_EVAL_PORTION=1.0             # Phase R §13: eval-side scope for formal training; default 1.0 = production full-clone (lower for smoke/CI)
 TRIAL_VRAM_BUDGET_GB=""             # §3.2: empty == omit == Python None
 FORMAL_VRAM_BUDGET_GB=""            # §3.2: empty == omit == Python None
 EXPLORATION_MODE="auto"             # §3.2: matches Python default
@@ -159,6 +160,7 @@ parse_chain_args() {
         --data_dir)               DATA_DIR="$2"; shift 2 ;;
         --trial_time_budget_minutes) TRIAL_TIME_BUDGET_MINUTES="$2"; shift 2 ;;
         --formal_time_budget_minutes) FORMAL_TIME_BUDGET_MINUTES="$2"; shift 2 ;;
+        --formal_eval_portion)       FORMAL_EVAL_PORTION="$2"; shift 2 ;;
         --trial_vram_budget_gb)   TRIAL_VRAM_BUDGET_GB="$2"; shift 2 ;;
         --formal_vram_budget_gb)  FORMAL_VRAM_BUDGET_GB="$2"; shift 2 ;;
         --exploration_mode)       EXPLORATION_MODE="$2"; shift 2 ;;
@@ -314,6 +316,7 @@ build_app_args() {
     if [ -n "$FORMAL_TIME_BUDGET_MINUTES" ]; then
         APP_ARGS+=(--formal_time_budget_minutes "$FORMAL_TIME_BUDGET_MINUTES")
     fi
+    APP_ARGS+=(--formal_eval_portion "$FORMAL_EVAL_PORTION")
     if [ -n "$TRIAL_VRAM_BUDGET_GB" ]; then
         APP_ARGS+=(--trial_vram_budget_gb "$TRIAL_VRAM_BUDGET_GB")
     fi
@@ -387,7 +390,7 @@ print_chain_header() {
         echo "    Pseudo-mode    : off (production)"
     fi
     if [ -n "$TRIAL_TIME_BUDGET_MINUTES" ] || [ -n "$FORMAL_TIME_BUDGET_MINUTES" ]; then
-        echo "    Time budgets   : trial=${TRIAL_TIME_BUDGET_MINUTES:-(none)}min, formal=${FORMAL_TIME_BUDGET_MINUTES:-(none)}min"
+        echo "    Time budgets   : trial=${TRIAL_TIME_BUDGET_MINUTES:-(none)}min, formal=${FORMAL_TIME_BUDGET_MINUTES:-(none)}min, eval_portion=$FORMAL_EVAL_PORTION"
     fi
     if [ -n "$TRIAL_VRAM_BUDGET_GB" ] || [ -n "$FORMAL_VRAM_BUDGET_GB" ]; then
         echo "    VRAM budgets   : trial=${TRIAL_VRAM_BUDGET_GB:-(auto)}GB, formal=${FORMAL_VRAM_BUDGET_GB:-(auto)}GB"
