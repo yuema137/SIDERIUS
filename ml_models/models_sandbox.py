@@ -195,7 +195,10 @@ class PositionalEncoding(nn.Module):
         # `cast` is a no-op at runtime; it tells pyright that `self.pe` (which
         # PyTorch's stub returns as `Module` from `register_buffer` lookup) is
         # actually the Tensor we registered above, so `[:, :, ...]` is valid.
-        x = x + self.factor * cast(torch.Tensor, self.pe)[:, :, self.start : (self.start + x.size(2))]
+        x = (
+            x
+            + self.factor * cast(torch.Tensor, self.pe)[:, :, self.start : (self.start + x.size(2))]
+        )
         x = self.dropout(x)
         return x
 
