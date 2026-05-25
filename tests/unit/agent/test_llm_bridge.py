@@ -655,8 +655,9 @@ class TestReflectProviderSplit:
     def test_unknown_reflect_provider_raises(self):
         """An unknown reflect_provider should fail-fast at construction
         time with a clear error pointing at the known providers list."""
-        with patch("agent.llm_bridge.OpenAI"), pytest.raises(
-            ValueError, match="Unknown reflect_provider"
+        with (
+            patch("agent.llm_bridge.OpenAI"),
+            pytest.raises(ValueError, match="Unknown reflect_provider"),
         ):
             LLMBridge(
                 provider="gemini",
