@@ -67,13 +67,6 @@ Operator-advice JSON files (e.g. `human_advice_chain_test.json`,
 `advice/README.md` for the split between single-agent and workflow-level
 advice files.
 
-### Deprecated (kept for muscle memory)
-
-| file | role |
-|---|---|
-| `run_iteration_chain.sh` | Thin wrapper → `run_chain.sh --mode sdsc`. Emits a deprecation warning. Removal tracked under Commit 15. |
-| `run_iteration_chain_lilab.sh` | Thin wrapper → `run_chain.sh --mode lilab`. Same status. |
-
 ### Generated / runtime
 
 | path | what |
