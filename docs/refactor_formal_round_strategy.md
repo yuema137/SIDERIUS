@@ -73,7 +73,7 @@ read the active strategy at a glance.
 | `inherit_best_trial` | `full_clone`      | Pydantic validator on `formal_round_strategy` (canonicalises before validation) |
 | `llm_propose`        | `independent`     | same |
 
-Old `tuner_advice/*.json` and SDSC `_chain_common.sh` defaults continue
+Old `advice/workflow/*.json` and SDSC `_chain_common.sh` defaults continue
 to validate without a code change. The canonicalisation happens once at
 schema validation; downstream code (`_apply_mode_override_chain`,
 registry lookup) only ever sees the canonical name.

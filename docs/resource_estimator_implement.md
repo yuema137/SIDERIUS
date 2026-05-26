@@ -2303,7 +2303,7 @@ PYTHONPATH=.:ml_models .venv/bin/python run_exploration_adaptive.py \
     --trial_strategy target --target_files 6 \
     --trial_vram_budget_gb 4 --formal_vram_budget_gb 8 \
     --trial_time_budget_minutes 5 --formal_time_budget_minutes 30 \
-    --advice tuner_advice/exploration_adaptive_v1.json \
+    --advice advice/workflow/exploration_adaptive_v1.json \
     --llm_config llm_configs/openai_tiered_v1.json \
     --exploration_mode exploit
 ```

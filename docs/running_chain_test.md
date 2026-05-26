@@ -26,7 +26,7 @@ transition; they `exec` into entry 2 unchanged and add nothing of their own.
 whether the previous iteration was a Python subprocess or a Slurm job. This
 keeps the two `--mode`s identical for debugging.
 
-The shared advice file `sdsc_submission_scripts/human_advice_chain_test.json` is the
+The shared advice file `advice/workflow/human_advice_chain_test.json` is the
 single source of truth for human guidance to the 5 agents. **Both lilab and
 SDSC tests load from it** — edit one file to retune both environments.
 
@@ -58,7 +58,7 @@ format.
 
 2. **Inspect / edit shared advice** if needed:
    ```bash
-   cat sdsc_submission_scripts/human_advice_chain_test.json
+   cat advice/workflow/human_advice_chain_test.json
    ```
    Five keys, one per agent: `interpret`, `propose`, `implement`, `validate`,
    `tune`. Any key may be empty (`""`) — empty strings are not forwarded.
@@ -150,7 +150,7 @@ bash sdsc_submission_scripts/run_chain.sh \
     --seed_paths /home/klz/Data/SIDEREIS_DATA/punet/.../run_output_*.json \
                  /home/klz/Data/SIDEREIS_DATA/wavenet/.../run_output_*.json \
     --max_rounds 2 --max_epochs 1 \
-    --human_advice_file sdsc_submission_scripts/human_advice_chain_test.json
+    --human_advice_file advice/workflow/human_advice_chain_test.json
 ```
 
 **Lilab dry-run (verify before committing — produces no side effects):**
@@ -260,7 +260,7 @@ bash sdsc_submission_scripts/run_chain.sh --mode lilab \
     --workspace /home/klz/Data/SIDEREIS_DATA/lilab_chain_v1 \
     --num_iterations 2 \
     --seed_paths <one or more seed JSONs> \
-    --human_advice_file sdsc_submission_scripts/human_advice_chain_test.json
+    --human_advice_file advice/workflow/human_advice_chain_test.json
 ```
 
 The legacy invocation below — using `run_iteration_chain_lilab.sh` —
@@ -284,7 +284,7 @@ bash sdsc_submission_scripts/run_iteration_chain_lilab.sh \
     --max_epochs 1 \
     --trial_portion 0.02 \
     --eval_portion 0.02 \
-    --human_advice_file sdsc_submission_scripts/human_advice_chain_test.json \
+    --human_advice_file advice/workflow/human_advice_chain_test.json \
     2>&1 | tee /tmp/lilab_real_chain.log
 ```
 Detach with `Ctrl-b d`. Reattach with `tmux attach -t lilab_real_chain`.
@@ -377,7 +377,7 @@ bash sdsc_submission_scripts/run_iteration_chain.sh \
     --seed_paths /expanse/lustre/projects/ddp433/ym137/siderius_workspace/punet/hpt_full_v1/agent/run_output_hpt_full_v1_agent.json \
     --max_rounds 2 \
     --max_epochs 1 \
-    --human_advice_file sdsc_submission_scripts/human_advice_chain_test.json \
+    --human_advice_file advice/workflow/human_advice_chain_test.json \
     --time 06:00:00 \
     --mem 48G \
     --cpus 8
@@ -419,7 +419,7 @@ bash sdsc_submission_scripts/run_iteration_chain.sh \
     --max_epochs 1 \
     --llm_model gemini-3.1-pro-preview \
     --reflect_model_id gemini-2.5-flash \
-    --human_advice_file sdsc_submission_scripts/human_advice_chain_test.json \
+    --human_advice_file advice/workflow/human_advice_chain_test.json \
     --time 06:00:00 --cpus 8
 ```
 
@@ -642,7 +642,7 @@ not the formal round. If you want a faster chain run, reduce `--max_rounds` or
 - `sdsc_submission_scripts/run_iteration_chain_lilab.sh` — **deprecated** legacy lilab stub. `exec`s into `run_chain.sh --mode lilab`. Removal tracked under Commit 15.
 - `sdsc_submission_scripts/submit_one_iteration.slurm` — Slurm wrapper for one iteration (SDSC only)
 - `sdsc_submission_scripts/run_one_iteration.py` — Python runner: `run_workflow(max_iterations=1)` + manifest write (used by both lilab and SDSC)
-- `sdsc_submission_scripts/human_advice_chain_test.json` — shared advice file (5 keys: interpret/propose/implement/validate/tune)
+- `advice/workflow/human_advice_chain_test.json` — shared advice file (5 keys: interpret/propose/implement/validate/tune)
 - `tests/integration/workflows/test_full_exploration_loop.py` — lilab Tier 3 pytest tests
 - `workflows/model_exploration.py` — `run_workflow()` implementation
 - `agent/schemas/run_metadata.py` — typed `BaseRunMetadata` hierarchy. Today only `TunerRunMetadata` is implemented (written by `run_comparison.py` to `{agent_workspace}/tuner_run_metadata.json`); workflow-level and chain-level subclasses will land later and reference lower-level metadata files via `child_metadata_paths`.

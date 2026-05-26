@@ -47,7 +47,7 @@ class LocalJsonDataSource(DataSource):
     def _baseline_summary_path(self, model: str) -> str | None:
         """
         Glob for the baseline summary file. Returns the first match or None.
-        Uses glob because run_comparison.py names the file
+        Uses glob because scripts/run_comparison.py names the file
         summary_baseline_{model}.json but a timestamp variant may exist.
         """
         pattern = os.path.join(self._model_dir(model), "baseline", "summary_*.json")
@@ -99,7 +99,7 @@ class LocalJsonDataSource(DataSource):
         for run_name in self._list_agent_run_names(model):
             path = self._agent_summary_path(model, run_name)
             for rec in self._read_json(path):
-                # Skip the seeded baseline record that run_comparison.py
+                # Skip the seeded baseline record that scripts/run_comparison.py
                 # inserts at position 0 of every agent summary to avoid
                 # double-counting it in aggregates.
                 if "baseline" in rec.get("exp_id", ""):

@@ -1,39 +1,59 @@
 #!/bin/bash
-# run_all_models_trial.sh
+# run_all_models.sh
 #
-# Runs the agent in trial mode for all 5 TIDMAD models.
-# Trial mode uses multi-file sparse sampling — no file_index needed.
-# The final round of each run is forced to formal mode (all 20 files).
+# Runs the full baseline + agent comparison for all 5 TIDMAD models.
+# Models are organized into groups. Within a group, all models run in
+# parallel (each in its own screen). Groups run sequentially — the next
+# group only starts after every screen in the current group has exited.
 #
-# Models are organized into groups to balance GPU memory.
-# Within a group, all models run in parallel.
+# Adjust MODEL_GROUPS to balance GPU memory across parallel runs.
+# Estimated baseline VRAM per model (batch_size=1):
+#   punet       0.29 GB   wavenet  0.12 GB   rnn   0.22 GB
+#   fcnet       4.89 GB   transformer  6.06 GB
+#
+# Two-layer structure:
+#   Orchestrator screen  (siderius-orchestrator)
+#     └── Group 1: siderius-punet + siderius-wavenet  (parallel)
+#     └── Group 2: siderius-rnn                       (alone)
+#     └── Group 3: siderius-fcnet                     (alone)
+#     └── Group 4: siderius-transformer               (alone)
 #
 # Usage:
 #   screen -S siderius-orchestrator
-#   bash run_all_models_trial.sh
+#   bash run_all_models.sh
 #   Ctrl+A D   (detach)
+#
+# Monitor a running model:
+#   screen -r siderius-punet-{RUN_NAME}
+#   Ctrl+A D
+#
+# Follow a log live:
+#   tail -f /home/klz/Data/SIDEREIS_DATA/logs/punet_{RUN_NAME}.log
+#
+# Clean a log after run (strip tqdm escape codes):
+#   col -b < punet_v1.log > punet_v1_clean.log
 
 set -euo pipefail
 
 SIDERIUS_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG_DIR="$(grep 'siderius_data_dir' tidmad_data_config.yaml | cut -d: -f2 | tr -d ' ')/logs"
 PYTHON="$SIDERIUS_DIR/.venv/bin/python"
-RUN_NAME="small_sample_trial_v1"
+RUN_NAME="v3_file6"
 MAX_ROUNDS=20
+FILE_INDEX=6
 PROVIDER="gemini"
-MODEL_ID="gemini-3.1-pro-preview"
-CLEANUP_DENOISED=true   # delete denoised H5 files after scoring to save disk
-POLL_INTERVAL=30
+MODEL_ID="gemini-3.1-flash-lite-preview"
+POLL_INTERVAL=30   # seconds between checks for screen exit
 
 # ---------------------------------------------------------------------------
-# Model groups — same as run_all_models.sh
+# Define model groups.
+# Each element is a space-separated list of models that run in parallel.
+# Groups themselves run sequentially.
 # ---------------------------------------------------------------------------
 MODEL_GROUPS=(
-    # "punet wavenet"          # Group 1 — light models (parallel)
-    # "fcnet"                  # Group 2 — large model, needs full memory alone
-    # "transformer"            # Group 3 — attention-heavy (~6 GB), seg_size=20000 → 2× batches
-    # "rnn"                    # Group 4 — separate to avoid concurrent GPU OOM
-    "gated_fno"              # Group 5 — Gated FNO (~328M params, ~5 GB)
+    "punet wavenet fcnet"          # Group 1 — light models (run in parallel)
+    "transformer"     # Group 2 — attention-heavy (~6 GB)
+    "rnn"             # Group 3 — separate to avoid concurrent GPU OOM
 )
 
 mkdir -p "$LOG_DIR"
@@ -41,12 +61,11 @@ declare -A STATUS
 
 echo ""
 echo "############################################################"
-echo "  SIDERIUS — Trial Mode Run (multi-file sparse sampling)"
+echo "  SIDERIUS — Full Comparison Run (grouped parallel)"
 echo "  Started    : $(date)"
-echo "  Run name   : $RUN_NAME"
 echo "  Log dir    : $LOG_DIR"
-echo "  Rounds     : $MAX_ROUNDS per model (final round = formal)"
-echo "  Mode       : trial (is_trial=True)"
+echo "  Rounds     : $MAX_ROUNDS per model"
+echo "  File index : $FILE_INDEX"
 echo "  Provider   : $PROVIDER / $MODEL_ID"
 echo "  Groups     : ${#MODEL_GROUPS[@]}"
 for i in "${!MODEL_GROUPS[@]}"; do
@@ -64,6 +83,7 @@ launch_model() {
     local LOG_FILE="$LOG_DIR/${model}_${RUN_NAME}.log"
     local EXIT_CODE_FILE="/tmp/siderius_${model}_exit"
 
+    # Kill any stale screen with this name
     if screen -list | grep -q "${SCREEN_NAME}"; then
         echo "  [WARN] Stale screen '${SCREEN_NAME}' found — killing it."
         screen -S "${SCREEN_NAME}" -X quit || true
@@ -74,31 +94,30 @@ launch_model() {
     echo "  LAUNCHING : ${model}  |  screen=${SCREEN_NAME}  |  log=${LOG_FILE}"
 
     screen -L -Logfile "${LOG_FILE}" -dmS "${SCREEN_NAME}" bash -c "
-        \"${PYTHON}\" \"${SIDERIUS_DIR}/run_comparison.py\" \
+        \"${PYTHON}\" \"${SIDERIUS_DIR}/scripts/run_comparison.py\" \
             --model \"${model}\" \
             --max_rounds \"${MAX_ROUNDS}\" \
             --run_name \"${RUN_NAME}\" \
-            --is_trial \
-            --override_old_run \
+            --file_index \"${FILE_INDEX}\" \
             --provider \"${PROVIDER}\" \
             --model_id \"${MODEL_ID}\" \
-            --progress_bar \
-            ${CLEANUP_DENOISED:+--cleanup_denoised}
+            --progress_bar
         echo \$? > \"${EXIT_CODE_FILE}\"
     "
 }
 
 # ---------------------------------------------------------------------------
-# Helper: wait for all models in a group to finish
+# Helper: wait for all models in a group to finish, then collect exit codes
 # ---------------------------------------------------------------------------
 wait_for_group() {
     local models=("$@")
 
     echo ""
     echo "  Waiting for group [${models[*]}] to complete..."
-    echo "  (attach to any screen with: screen -r siderius-<model>-${RUN_NAME})"
+    echo "  (attach to any screen with: screen -r siderius-<model>)"
     echo ""
 
+    # Poll until ALL screens in the group have exited
     local all_done=false
     while [ "$all_done" = false ]; do
         all_done=true
@@ -111,6 +130,7 @@ wait_for_group() {
         [ "$all_done" = false ] && sleep "${POLL_INTERVAL}"
     done
 
+    # Collect exit codes
     for model in "${models[@]}"; do
         local EXIT_CODE_FILE="/tmp/siderius_${model}_exit"
         local EXIT_CODE=1
@@ -139,10 +159,12 @@ for i in "${!MODEL_GROUPS[@]}"; do
     echo "  GROUP ${group_num}/${#MODEL_GROUPS[@]}: [${models[*]}]  |  $(date)"
     echo "============================================================"
 
+    # Launch all models in this group in parallel
     for model in "${models[@]}"; do
         launch_model "$model"
     done
 
+    # Wait for the entire group to finish before proceeding
     wait_for_group "${models[@]}"
     echo ""
 done
@@ -151,9 +173,8 @@ done
 # Final summary
 # ---------------------------------------------------------------------------
 echo "############################################################"
-echo "  SIDERIUS — Trial Mode Run Complete"
-echo "  Run name : $RUN_NAME"
-echo "  Finished : $(date)"
+echo "  SIDERIUS — All Groups Complete"
+echo "  Finished: $(date)"
 echo "------------------------------------------------------------"
 for group in "${MODEL_GROUPS[@]}"; do
     IFS=' ' read -r -a models <<< "$group"

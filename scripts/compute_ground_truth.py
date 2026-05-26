@@ -32,13 +32,13 @@ same way.
 
 Usage:
   # Compute everything (skip already-done per-file JSONs):
-  python compute_ground_truth.py
+  python scripts/compute_ground_truth.py
 
   # Point at a specific anchor map:
-  python compute_ground_truth.py --anchor_map /path/to/segment_anchors.json
+  python scripts/compute_ground_truth.py --anchor_map /path/to/segment_anchors.json
 
   # Force recompute:
-  python compute_ground_truth.py --override
+  python scripts/compute_ground_truth.py --override
 """
 
 import argparse

@@ -149,17 +149,22 @@ SIDERIUS/
 │
 ├── sdsc_submission_scripts/          # Slurm wrappers for SDSC Expanse + lilab chain runner
 │   ├── submit_hpt_agent.slurm        # Single-tuner job
-│   ├── run_iteration_chain.sh        # SDSC chain orchestrator (chains via afterany)
-│   ├── run_iteration_chain_lilab.sh  # Lilab chain orchestrator (foreground subprocess)
-│   ├── _chain_common.sh              # Shared bash framework
-│   ├── run_one_iteration.py          # Per-iteration runner (called by both orchestrators)
+│   ├── run_chain.sh                  # Unified chain entry — `--mode {sdsc,lilab}` dispatches to slurm or foreground
+│   ├── _chain_common.sh              # Shared bash framework (sourced by run_chain.sh)
+│   ├── run_one_iteration.py          # Per-iteration runner (called once per iter by both modes)
 │   └── submit_one_iteration.slurm    # Slurm wrapper for one chain iteration
 │
-├── tuner_advice/                     # Human-written JSON advice files for the tuner
-│   └── *.json                        # Per-experiment guidance (e.g. gated_fno_freq_band_aware_v1.json)
+├── advice/                           # Human-written JSON advice files
+│   ├── single_agent/                 # One-key JSON, targets one agent (e.g. tuner-only static_v exploration)
+│   └── workflow/                     # Multi-key JSON, full chain (e.g. human_advice_chain_test.json)
 │
-├── compute_raw_baseline.py           # Raw (undenoised) reference score per file (Option B, global s_max)
-├── compute_ground_truth.py           # Perfect-denoiser ceiling per file + scalar (anchor-only, no HDF5 read)
+├── scripts/                          # Standalone runners (no longer at repo root)
+│   ├── run_comparison.py             # Baseline-vs-agent comparison for a single model
+│   ├── run_exploration.py            # 5-agent exploration workflow launcher
+│   ├── compute_raw_baseline.py       # Raw (undenoised) reference score per file (Option B, global s_max)
+│   ├── compute_ground_truth.py       # Perfect-denoiser ceiling per file + scalar (anchor-only, no HDF5 read)
+│   ├── run_all_models{,_trial}.sh    # Lilab multi-model launchers (parallel/sequential)
+│   └── inspect_run_state.py          # Resume / inspect chain-iter state
 │
 ├── tidmad_data_config.yaml           # Machine-specific data paths (edit when migrating)
 ├── dashboard_config.yaml             # Dashboard config (root path, models, port)
@@ -292,11 +297,11 @@ python nodes/ml_hyperparameter_tune_agent.py \
     --force_model gated_fno \
     --is_trial \
     --max_rounds 20 \
-    --human_advice_file tuner_advice/gated_fno_freq_band_aware_v1.json \
+    --human_advice_file advice/single_agent/gated_fno_freq_band_aware_v1.json \
     --run_name gated_fno_freq_band_aware_v1
 
 # Planner/reflector model split (gemini quota optimization)
-python run_comparison.py \
+python scripts/run_comparison.py \
     --model punet \
     --run_name punet_split_v1 \
     --provider gemini \
@@ -392,27 +397,27 @@ Each iteration runs the **full 5-agent loop** (interpret → propose → impleme
 #### On lilab (foreground, no slurm)
 
 ```bash
-bash sdsc_submission_scripts/run_iteration_chain_lilab.sh \
+bash sdsc_submission_scripts/run_chain.sh --mode lilab \
     --workspace /home/klz/Data/SIDEREIS_DATA/exploration_chain_v1 \
     --num_iterations 5 \
     --seed_paths /home/klz/Data/SIDEREIS_DATA/punet/hpt_full_v1/agent/run_output_hpt_full_v1_agent.json \
                  /home/klz/Data/SIDEREIS_DATA/wavenet/hpt_full_v1/agent/run_output_hpt_full_v1_agent.json \
     --max_rounds 5 \
     --max_epochs 5 \
-    --human_advice_file sdsc_submission_scripts/human_advice_chain_test.json \
+    --human_advice_file advice/workflow/human_advice_chain_test.json \
     --reflect_model_id gemini-2.5-flash
 ```
 
 #### On SDSC (slurm, chained via `afterany`)
 
 ```bash
-bash sdsc_submission_scripts/run_iteration_chain.sh \
+bash sdsc_submission_scripts/run_chain.sh --mode sdsc \
     --workspace /expanse/lustre/projects/ddp433/ym137/siderius_workspace/exploration_chain_v1 \
     --num_iterations 10 \
     --seed_paths /expanse/.../run_output_hpt_full_v2_agent.json \
     --max_rounds 5 \
     --max_epochs 5 \
-    --human_advice_file sdsc_submission_scripts/human_advice_chain_test.json \
+    --human_advice_file advice/workflow/human_advice_chain_test.json \
     --reflect_model_id gemini-2.5-flash \
     --partition gpu-shared \
     --time 04:00:00 \
@@ -530,8 +535,8 @@ scalar_score       = log_{5.27}(round(grand_mean, 2) + 1e-10)
 After the anchor map is built (see Quick start §4), regenerate both reference tables:
 
 ```bash
-python compute_raw_baseline.py       # reads raw CH1, writes raw_baseline/raw_baseline_score_file_XXXX.json
-python compute_ground_truth.py       # anchor-only (no HDF5 read), writes ceiling JSONs in milliseconds
+python scripts/compute_raw_baseline.py   # reads raw CH1, writes raw_baseline/raw_baseline_score_file_XXXX.json
+python scripts/compute_ground_truth.py   # anchor-only (no HDF5 read), writes ceiling JSONs in milliseconds
 ```
 
 Both scripts use the global `s_max` from the anchor map automatically and refuse to overwrite existing JSONs unless `--override` is passed.
@@ -549,8 +554,8 @@ Full derivation, legacy-parity proof, and rationale for Option B are in [`docs/a
 | `dashboard_config.example.yaml` | Template for the dashboard config | yes |
 | `dashboard_config.yaml` | Local copy with the actual root path / port | **no (gitignored)** |
 | `.env` | API keys (`GEMINI_API_KEY`, `OPENAI_API_KEY`) | no (gitignored) |
-| `tuner_advice/*.json` | Per-experiment human advice for the tuner | yes |
-| `sdsc_submission_scripts/human_advice_chain_test.json` | Per-agent human advice for chain runs | yes |
+| `advice/single_agent/*.json` | Per-experiment human advice for a single agent | yes |
+| `advice/workflow/*.json` | Per-agent human advice for full-chain runs | yes |
 | `pyproject.toml` + `uv.lock` | Python dependencies (managed by `uv`) | yes |
 
 The two `*.yaml` files containing machine-specific paths are gitignored: each developer copies them once from the `*.example.yaml` template on first checkout, and `git pull` thereafter never touches them. This is what prevents lilab paths from clobbering SDSC paths and vice versa.
@@ -647,7 +652,7 @@ When deploying SIDERIUS on a new machine:
 |---|---|---|
 | GPU | RTX 5090 (32 GB) | V100 / A100 (`gpu-shared`) |
 | Workspace | `/home/klz/Data/SIDEREIS_DATA/` | `/expanse/lustre/projects/ddp433/ym137/siderius_workspace/` |
-| Chain runner | `run_iteration_chain_lilab.sh` (foreground) | `run_iteration_chain.sh` (slurm `afterany`) |
+| Chain runner | `run_chain.sh --mode lilab` (foreground) | `run_chain.sh --mode sdsc` (slurm `afterany`) |
 | Single tuner | `python nodes/ml_hyperparameter_tune_agent.py ...` | `sbatch sdsc_submission_scripts/submit_hpt_agent.slurm ...` |
 
 More in [`docs/memories/reference_sdsc_workspace_paths.md`](docs/memories/reference_sdsc_workspace_paths.md) (gitignored — read locally).
@@ -705,7 +710,7 @@ More in [`docs/memories/reference_sdsc_workspace_paths.md`](docs/memories/refere
   - SDSC chain `afterany` + 48 GB memory rule
   - SDSC workspace paths reference
   - Design-doc-first workflow preference
-  - Known TODO: GPU-name lie in `run_comparison.py`
+  - Known TODO: GPU-name lie in `scripts/run_comparison.py`
 
 ---
 

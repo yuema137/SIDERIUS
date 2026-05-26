@@ -1225,14 +1225,14 @@ Phase 2 follow-ups (all complete):
 
 **What**: reverted commit `c836904` ("feat(adaptive-proposer): Phase A — regime_scores foundation"). Removed `execute_tools/regime_aggregator.py`, the `regime_scores: Dict[str, float]` field on `ExperimentRecord`, the "REGIME SCORES" planner prompt section, the "REGIME-AWARE DIAGNOSIS" reflector prompt section, and 19 unit tests.
 
-**Why**: the low/mid/high frequency band division (`low_freq_kHz`, `mid_freq_10kHz`, `high_freq_MHz`) is **domain knowledge**, not infrastructure. Hardcoding it into `REGIME_DEFINITIONS` and baking it into `ExperimentRecord` violated the V2 design principle that domain knowledge should come from external expert advice (the `tuner_advice/*.json` files, or the future Data Analysis Agent via `ExpertContextItem`), not from the codebase.
+**Why**: the low/mid/high frequency band division (`low_freq_kHz`, `mid_freq_10kHz`, `high_freq_MHz`) is **domain knowledge**, not infrastructure. Hardcoding it into `REGIME_DEFINITIONS` and baking it into `ExperimentRecord` violated the V2 design principle that domain knowledge should come from external expert advice (the `advice/{single_agent,workflow}/*.json` files, or the future Data Analysis Agent via `ExpertContextItem`), not from the codebase.
 
-The 20-element `file_vector` already contains all the per-file scoring information. The file-to-frequency mapping is already documented in `tuner_advice/gated_fno_freq_band_aware_v1.json` as expert advice — exactly where it belongs. Any frequency-band aggregation the LLM needs can be done by the LLM itself, guided by the expert advice context.
+The 20-element `file_vector` already contains all the per-file scoring information. The file-to-frequency mapping is already documented in `advice/single_agent/gated_fno_freq_band_aware_v1.json` as expert advice — exactly where it belongs. Any frequency-band aggregation the LLM needs can be done by the LLM itself, guided by the expert advice context.
 
 **What stays**:
 - `file_vector` on `ExperimentRecord` — raw data, no domain assumptions
 - The existing "FILE VECTOR AND SCORING" prompt section — explains what file_vector is, without imposing a frequency-band interpretation
-- `tuner_advice/gated_fno_freq_band_aware_v1.json` — the frequency band map as expert advice
+- `advice/single_agent/gated_fno_freq_band_aware_v1.json` — the frequency band map as expert advice
 
 **Impact on the V2 design doc** (`docs/adaptive_new_model_proposer.md`):
 - Phase A sub-tasks A.1–A.7 were marked ☑ but are now reverted. The Phase A section should be updated to reflect this. The `regime_scores` design as a "deliberate extension point for the Data Analysis Agent" is withdrawn — the extension point is now `ExpertContextItem` (§2D), not a hardcoded field on the record.

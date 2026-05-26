@@ -4,7 +4,7 @@ Launch the model exploration workflow with real data.
 
 Usage:
     screen -S siderius-explore
-    python run_exploration.py
+    python scripts/run_exploration.py
     Ctrl+A D  (detach)
 
     # Monitor:

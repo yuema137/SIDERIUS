@@ -60,8 +60,7 @@
 #
 # History: introduced in Phase 6.8 Commit 13 to consolidate the legacy
 # run_iteration_chain.sh (SDSC) and run_iteration_chain_lilab.sh (lilab)
-# entries; both legacy stubs now exec this file and emit a deprecation
-# warning. Their removal is tracked under Commit 15.
+# entries. Those stubs were removed once operators had migrated.
 
 set -e
 set -o pipefail
@@ -172,10 +171,10 @@ submit_iteration_sdsc() {
         --cpus-per-task="$CPUS"
     )
     if [ -n "$PREV_JOB_ID" ]; then
-        # afterany — see run_iteration_chain.sh's commentary for why this is
-        # not afterok. The OOM-tolerant tuner can finish a python-clean run
-        # while Slurm still records OUT_OF_MEMORY in accounting state, which
-        # would falsely cancel the next iter under afterok.
+        # afterany (not afterok): the OOM-tolerant tuner can finish a
+        # python-clean run while Slurm still records OUT_OF_MEMORY in
+        # accounting state, which would falsely cancel the next iter
+        # under afterok.
         sbatch_args+=( --dependency="afterany:${PREV_JOB_ID}" )
     fi
     local cmd=( sbatch "${sbatch_args[@]}" "$SLURM_SCRIPT" "${APP_ARGS[@]}" )

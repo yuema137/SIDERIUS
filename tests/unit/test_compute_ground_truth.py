@@ -24,8 +24,8 @@ from __future__ import annotations
 
 import math
 
-# Root-level script import — pytest runs from repo root.
-from compute_ground_truth import (
+# Script import — pytest runs from repo root and scripts/ is a namespace package.
+from scripts.compute_ground_truth import (
     _anchor_normalized_ceiling,
     _global_per_file_ceiling,
 )

@@ -45,7 +45,8 @@ SHARED_ADVICE_FILE = os.path.join(
     "..",
     "..",
     "..",
-    "sdsc_submission_scripts",
+    "advice",
+    "workflow",
     "human_advice_chain_test.json",
 )
 

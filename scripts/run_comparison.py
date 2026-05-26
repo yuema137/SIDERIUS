@@ -19,9 +19,9 @@ Output structure:
           └── agent/         ← isolated agent workspace per run_name
 
 Usage:
-  python run_comparison.py --model punet
-  python run_comparison.py --model punet --run_name v2 --max_rounds 50
-  python run_comparison.py --model rnn --provider openai --model_id gpt-4o
+  python scripts/run_comparison.py --model punet
+  python scripts/run_comparison.py --model punet --run_name v2 --max_rounds 50
+  python scripts/run_comparison.py --model rnn --provider openai --model_id gpt-4o
 """
 
 import argparse
@@ -32,6 +32,7 @@ import subprocess
 import sys
 import time
 from datetime import UTC
+from typing import cast
 
 from core.sandbox_executor import TidmadSandbox
 from execute_tools.build_anchor_map import load_anchor_map
@@ -146,9 +147,12 @@ def run_baseline(
     if score_result["status"] != "success":
         raise RuntimeError(f"Baseline scoring failed:\n{score_result.get('message')}")
 
-    # Extract results from each stage
-    train_res = train_result.get("results", {})
-    score_res = score_result.get("results", {})
+    # Extract results from each stage. Cast required because the executor's
+    # untyped return dict mixes str (status/message) and dict (results), so
+    # pyright cannot narrow the value at the `results` key. Runtime safety is
+    # guaranteed by the `status != "success"` gates above.
+    train_res = cast(dict, train_result.get("results", {}))
+    score_res = cast(dict, score_result.get("results", {}))
 
     record = {
         "exp_id": exp_id,
@@ -311,8 +315,8 @@ def run_baseline_trial(
     )
     scoring_time = round(time.time() - t0, 1)
 
-    # Extract training results
-    train_res = train_result.get("results", {})
+    # Extract training results. See run_baseline_single for the cast rationale.
+    train_res = cast(dict, train_result.get("results", {}))
 
     record = {
         "exp_id": exp_id,

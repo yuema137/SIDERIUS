@@ -126,7 +126,7 @@ fi
 if [ -n "${HUMAN_ADVICE_FILE}" ]; then
     PY_ARGS+=(--human_advice_file "${HUMAN_ADVICE_FILE}")
 fi
-python run_comparison.py "${PY_ARGS[@]}"
+python scripts/run_comparison.py "${PY_ARGS[@]}"
 PY_EXIT_CODE=$?
 set -e
 

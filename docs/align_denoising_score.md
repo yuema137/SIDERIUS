@@ -863,7 +863,7 @@ In order. Each step gets its own commit for bisectability.
       in `tests/unit/test_compute_raw_baseline.py` (3/3) cover fine
       n=200 iteration count, coarse n=20 stride, and hand-computed
       aggregation. (Regeneration of `raw_baseline/*.json` via
-      `python compute_raw_baseline.py --override` is a downstream
+      `python scripts/compute_raw_baseline.py --override` is a downstream
       artifact step — separate from this commit.)
 - [x] **4.2** Regenerated `raw_baseline/*.json` (20/20 fine files; indices
       20–39 error on missing `abra_validation_00{20..39}.h5` — a

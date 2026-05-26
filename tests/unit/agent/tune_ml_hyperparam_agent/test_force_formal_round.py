@@ -160,7 +160,7 @@ def test_strategy_accepts_canonical_independent():
 
 def test_strategy_legacy_inherit_best_trial_aliases_to_full_clone():
     """Backward-compat: live V9 chains and pre-2026-05-02
-    ``tuner_advice/*.json`` configs still pass ``inherit_best_trial``.
+    ``advice/workflow/*.json`` configs still pass ``inherit_best_trial``.
     The schema validator must canonicalise it to ``full_clone`` so
     downstream code only handles canonical names."""
     inp = _make_input(formal_round_strategy="inherit_best_trial")

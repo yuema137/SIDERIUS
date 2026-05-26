@@ -59,16 +59,13 @@ The shared library is also unit-testable in isolation (see
 
 | file | role |
 |---|---|
-| `submit_hpt_agent.slurm` | Universal slurm dispatcher for ad-hoc agent jobs (legacy; standalone runs of `ml_hyperparameter_tune_agent.py`). |
-| `human_advice_chain_formal.json` | Example operator-advice JSON, full chain. |
-| `human_advice_chain_test.json` | Example operator-advice JSON, smoke/test chain. |
+| `submit_hpt_agent.slurm` | Universal slurm dispatcher for ad-hoc agent jobs (legacy; standalone runs of `ml_hyperparameter_tune_agent.py` via `scripts/run_comparison.py`). |
+| `run_all_models_trial_sdsc.sh` | SDSC-side multi-model trial launcher (sequential per-model invocation of `scripts/run_comparison.py` with `--is_trial`). Distinct from `scripts/run_all_models_trial.sh` which targets lilab. |
 
-### Deprecated (kept for muscle memory)
-
-| file | role |
-|---|---|
-| `run_iteration_chain.sh` | Thin wrapper → `run_chain.sh --mode sdsc`. Emits a deprecation warning. Removal tracked under Commit 15. |
-| `run_iteration_chain_lilab.sh` | Thin wrapper → `run_chain.sh --mode lilab`. Same status. |
+Operator-advice JSON files (e.g. `human_advice_chain_test.json`,
+`human_advice_chain_formal.json`) live in `advice/workflow/` — see
+`advice/README.md` for the split between single-agent and workflow-level
+advice files.
 
 ### Generated / runtime
 

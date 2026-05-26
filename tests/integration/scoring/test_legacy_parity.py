@@ -87,7 +87,7 @@ def legacy_fine_score(data_paths):
 class TestLegacyParity:
     def test_calculate_score_coarse(self, data_paths, legacy_coarse_score):
         """``compute_raw_baseline._calculate_score`` — coarse parity."""
-        from compute_raw_baseline import _calculate_score
+        from scripts.compute_raw_baseline import _calculate_score
 
         data_dir, fname = data_paths
         score_new = _calculate_score(
@@ -105,7 +105,7 @@ class TestLegacyParity:
 
     def test_calculate_score_fine(self, data_paths, legacy_fine_score):
         """``compute_raw_baseline._calculate_score`` — fine parity (slow)."""
-        from compute_raw_baseline import _calculate_score
+        from scripts.compute_raw_baseline import _calculate_score
 
         data_dir, fname = data_paths
         score_new = _calculate_score(
