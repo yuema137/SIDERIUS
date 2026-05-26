@@ -91,11 +91,13 @@ Three reliability mechanisms sit on top of the raw 5-agent loop. They gate what 
 
 ```
 SIDERIUS/
-├── agent/                            # LLM transport + per-node schemas + skill loader
+├── agent/                            # LLM transport + per-node schemas + atomic skills
 │   ├── llm_bridge.py                 # ⭐ Universal API gateway. Retry policy, planner/reflector split.
 │   ├── prompts.py                    # System prompts for planner/reflector/proposal/etc.
 │   ├── tools_schema.py               # Skill loader
-│   ├── schemas/                      # Pydantic schemas for every node
+│   ├── cache_consolidator.py         # Knowledge-cache merge logic for cross-iter memory
+│   ├── prompt_templates/             # Per-stage proposer prompt fragments (explore/exploit/compare)
+│   ├── schemas/                      # Pydantic schemas for every node + transports
 │   │   ├── storage.py                # StorageConfig
 │   │   ├── hyperparam_tuning.py      # HyperparamTuningInput/Output, ExperimentPlan, TrialConfig
 │   │   ├── interpretation.py         # InterpretationInput/Output
@@ -103,31 +105,58 @@ SIDERIUS/
 │   │   ├── implementor.py            # ImplementorInput/Output
 │   │   ├── validator.py              # ValidatorInput/Output
 │   │   ├── run_metadata.py           # TunerRunMetadata (audit trail)
+│   │   ├── cache_entry.py            # Knowledge-cache schema (cross-iter memory)
+│   │   ├── score_table.py            # ScoreComparisonTable (per-file score rows + rendered markdown)
+│   │   ├── skill_spec.py             # Universal SkillSpec descriptor
+│   │   ├── telemetry/                # Token-usage and runtime telemetry schemas
+│   │   ├── vocab_seed.json           # Seed vocabulary for the architectural-pattern tagger
 │   │   └── protocols/                # Typed edge functions (NodeAOutput → NodeBInput)
-│   └── skills/                       # Atomic research tools (training, inference, scoring, resource check)
+│   ├── skills/                       # Atomic research tools
+│   │   ├── training_skill/           # Training subprocess wrapper + time estimator
+│   │   ├── inference_skill/          # Inference subprocess wrapper + time/VRAM estimator
+│   │   ├── denoising_score_skill/    # Scoring subprocess wrapper + time estimator
+│   │   ├── evaluate_time_skill/      # Pre-flight wall-time forecast + per-server calibration
+│   │   ├── evaluate_vram_skill/      # Pre-flight VRAM forecast + Memory Killer verdict
+│   │   ├── check_config_format_skill/# Pydantic-validate a model_config payload
+│   │   └── forbidden_pattern_skill.py# AST static check (no time-loop in nn.Module.forward)
+│   └── utils/                        # Architectural-pattern tagger, proposer preflight helpers
 │
-├── nodes/                            # Runnable node implementations
+├── nodes/                            # Runnable node implementations + per-node helpers
 │   ├── ml_hyperparameter_tune_agent.py
 │   ├── result_interpretation_agent.py
 │   ├── ml_model_proposal_agent.py
 │   ├── ml_model_implementor.py
-│   └── ml_code_validator_agent.py
+│   ├── ml_code_validator_agent.py
+│   ├── proposal_helpers.py           # Pure helpers for proposer prior_stage_outputs assembly
+│   ├── interpretation_helpers.py     # Pure helpers for interpreter record assembly
+│   ├── scoring_reference.py          # Reference-data loader for the per-file score comparison table
+│   └── agent_data_stream.py          # Shared record-stream utilities for chain-mode agents
 │
 ├── workflows/                        # Pre-designed graph traversals (deterministic)
 │   ├── model_exploration.py          # Iterative closed-loop exploration workflow
 │   └── llm_config.py                 # WorkflowLLMConfig + TunerLLMConfig (planner/reflector split)
 │
-├── core/
-│   └── sandbox_executor.py           # TidmadSandbox: config validation, subprocess dispatch
+├── core/                             # Infrastructure shared by every node
+│   ├── sandbox_executor.py           # TidmadSandbox: config validation, subprocess dispatch
+│   ├── hardware_context.py           # Single source of truth for CUDA device facts + VRAM cap
+│   ├── inference_defaults.py         # Canonical inference batch size per model_type
+│   ├── memory_probe.py               # Parent-process RSS probe (post-mortem for OOM-kill incidents)
+│   ├── resume.py                     # Plugin + source-path restoration for chain-mode resume
+│   └── server_configs/               # Per-server calibration constants (lilab, ligroup, …)
 │
 ├── execute_tools/                    # Physical execution scripts (called as subprocesses)
 │   ├── train_engine_sandbox.py       # Training loop (streaming + legacy modes)
 │   ├── inference_single.py           # Inference over validation set
-│   ├── scoring_utils.py              # Anchor-normalized scoring
+│   ├── scoring_utils.py              # Anchor-normalized scoring (FFT + Option B s_max)
+│   ├── scoring_helpers.py            # Pure score-table builder + markdown renderer
+│   ├── denoising_score_single.py     # Per-file scoring subprocess entry point
 │   ├── build_anchor_map.py           # One-time pre-computation of segment SNR anchors
 │   ├── sample_set_builder.py         # SampleSet builder for trial/formal strategies
 │   ├── dataset_config.py             # Physical constants (TIDMAD defaults)
-│   └── data_paths.py                 # Reads tidmad_data_config.yaml
+│   ├── data_paths.py                 # Reads tidmad_data_config.yaml
+│   ├── workflow_validation.py        # Shared 5-agent workflow validation helper
+│   ├── squid_health_checks.py        # SQUID time-series sanity checks
+│   └── array2h5.py                   # Numpy → HDF5 writer used by training output
 │
 ├── ml_models/                        # Built-in model definitions and Pydantic config schemas
 │   ├── models_sandbox.py             # Network architectures + MODEL_REGISTRY
@@ -135,11 +164,13 @@ SIDERIUS/
 │   ├── loss_models_sandbox.py        # Loss functions + get_criterion factory
 │   ├── plugin_loader.py              # Loads agent_generated/models/ into MODEL_REGISTRY
 │   ├── model_descriptions.py         # Loads ml_models/{model_type}/description.md
+│   ├── legacy_baseline_configs.json  # Exact TIDMAD-paper baseline configs per model
 │   └── {punet,fcnet,wavenet,rnn,transformer,gated_fno}/description.md
 │
-├── agent_generated/                  # LLM-generated plugins (gitignored *.py)
+├── agent_generated/                  # LLM-generated plugins (gitignored except .gitkeep)
 │   ├── models/                       # Agent-written model plugins (+ description.md per plugin)
-│   └── tests/                        # Agent-written model tests
+│   ├── tests/                        # Agent-written model tests
+│   └── runs/                         # Per-run plugin staging dirs (gitignored)
 │
 ├── dashboard/                        # FastAPI + uvicorn web dashboard
 │   ├── main.py                       # Entry point
@@ -152,24 +183,43 @@ SIDERIUS/
 │   ├── run_chain.sh                  # Unified chain entry — `--mode {sdsc,lilab}` dispatches to slurm or foreground
 │   ├── _chain_common.sh              # Shared bash framework (sourced by run_chain.sh)
 │   ├── run_one_iteration.py          # Per-iteration runner (called once per iter by both modes)
-│   └── submit_one_iteration.slurm    # Slurm wrapper for one chain iteration
+│   ├── submit_one_iteration.slurm    # Slurm wrapper for one chain iteration
+│   ├── run_exploration_test.py       # Tier-3 integration runner (standalone, no pytest)
+│   ├── submit_exploration_test.slurm # Slurm wrapper for the Tier-3 runner
+│   ├── run_all_models_trial_sdsc.sh  # SDSC multi-model trial launcher
+│   └── README.md                     # Folder map and architectural invariants
 │
 ├── advice/                           # Human-written JSON advice files
 │   ├── single_agent/                 # One-key JSON, targets one agent (e.g. tuner-only static_v exploration)
-│   └── workflow/                     # Multi-key JSON, full chain (e.g. human_advice_chain_test.json)
+│   └── workflow/                     # Multi-key JSON, full chain (e.g. exploit_cnn_v*, explore_novel_v*)
+│
+├── llm_configs/                      # Per-stage LLM routing configs (consumed via --llm_config)
+│   ├── openai_tiered_v1.json         # OpenAI gpt-5.4 / 5.4-mini / 5.4-nano split
+│   ├── openai_tiered_pro.json
+│   ├── deepseek_tiered_pro.json
+│   └── certify_minimal.json
 │
 ├── scripts/                          # Standalone runners (no longer at repo root)
 │   ├── run_comparison.py             # Baseline-vs-agent comparison for a single model
 │   ├── run_exploration.py            # 5-agent exploration workflow launcher
 │   ├── compute_raw_baseline.py       # Raw (undenoised) reference score per file (Option B, global s_max)
 │   ├── compute_ground_truth.py       # Perfect-denoiser ceiling per file + scalar (anchor-only, no HDF5 read)
-│   ├── run_all_models{,_trial}.sh    # Lilab multi-model launchers (parallel/sequential)
-│   └── inspect_run_state.py          # Resume / inspect chain-iter state
+│   ├── run_all_models.sh             # Lilab multi-model parallel launcher
+│   ├── run_all_models_trial.sh       # Lilab multi-model trial launcher
+│   ├── inspect_run_state.py          # Resume / inspect chain-iter state
+│   └── verify_iter005_estimator.py   # Hand-verification harness for the formal-round time estimator
 │
-├── tidmad_data_config.yaml           # Machine-specific data paths (edit when migrating)
-├── dashboard_config.yaml             # Dashboard config (root path, models, port)
+├── tools/                            # Token-usage audit tooling
+│   ├── build_token_baseline_report.py# Builds reports/ token baseline + top-3 bloat report
+│   └── validate_token_usage_jsonl.py # One-pass linter for token_usage.jsonl invariants
+│
+├── env_validation/
+│   └── test_agent_env.py             # Validate Gemini / OpenAI API keys
+│
+├── tidmad_data_config.yaml           # Machine-specific data paths (gitignored)
+├── dashboard_config.yaml             # Dashboard config (gitignored)
 ├── pyproject.toml + uv.lock          # Dependencies (managed by uv)
-│
+├── pyrightconfig.json                # Pyright include/exclude + py312 target
 ├── CLAUDE.md                         # ⭐ Coding standards and architectural rules
 ├── README.md                         # This file
 │
@@ -181,30 +231,38 @@ SIDERIUS/
 │   ├── architecture.md               # Full system design
 │   ├── align_denoising_score.md      # Scoring-ruler derivation + legacy-parity proof (Option B)
 │   ├── reliable_resource_proposer.md # Pre-flight cost-check + up-to-3 revision loop
-│   ├── adaptive_new_model_proposer.md # Cumulative negative-feedback design
+│   ├── adaptive_new_model_proposer.md# Cumulative negative-feedback design
 │   ├── pseudo_test_infra.md          # Dual-mode pseudo/real test infrastructure
 │   ├── running_chain_test.md         # ⭐ Operational runbook for chain runs (lilab + SDSC)
 │   ├── break_tuner_agent.md          # Planner/reflector LLM split
 │   ├── small_sample_trial.md         # Multi-fidelity trial/formal tuning
+│   ├── phase66_…md / phase67_…md / phase68_…md  # In-flight phase design docs
+│   ├── audit/                        # Periodic codebase audit ledgers
 │   ├── ... (more below)
 │   └── memories/                     # Per-developer shared memories (gitignored, see README inside)
 │
-├── tests/
-│   ├── unit/                         # Mocked LLM, no GPU, runs in CI
-│   │   ├── agent/                    # Per-node schema and tool tests
-│   │   ├── core/                     # Sandbox executor and plugin loader tests
-│   │   ├── workflows/                # WorkflowLLMConfig tests
-│   │   ├── dashboard/                # Dashboard route tests
-│   │   └── ml_models/                # Model and loss function tests
-│   └── integration/
-│       ├── nodes/                    # Tier 1 — single node, real API
-│       ├── protocols/                # Tier 2 — one graph edge, real API
-│       ├── workflows/                # Tier 3 — multi-hop workflow, real API + GPU
-│       ├── dashboard/                # Dashboard API integration tests
-│       └── execute_tools/            # Training loop integration tests
-│
-└── env_validation/
-    └── test_agent_env.py             # Validate Gemini / OpenAI API keys
+└── tests/
+    ├── unit/                         # Mocked LLM, no GPU, runs in CI
+    │   ├── agent/                    # Per-node schema, skill, protocol, and utils tests
+    │   ├── agent_generated/          # Stub-plugin template loader tests
+    │   ├── core/                     # Sandbox, hardware_context, resume, server_configs tests
+    │   ├── execute_tools/            # Anchor / sample-set / scoring helper tests
+    │   ├── guardrails/               # Hardcoded-device-literal + model-name-branch guards
+    │   ├── ml_models/                # Model and loss-function tests
+    │   ├── nodes/                    # Node-level helper tests (proposal_helpers, etc.)
+    │   ├── scripts/                  # Chain wrapper, inspect_run_state, portion-floor tests
+    │   ├── sdsc_submission_scripts/  # run_one_iteration + consecutive-failure brake tests
+    │   ├── tools/                    # tools/ utility tests
+    │   └── workflows/                # WorkflowLLMConfig + model_exploration tests
+    └── integration/
+        ├── agent/                    # Token-usage pseudo smoke tests
+        ├── dashboard/                # Dashboard API integration tests
+        ├── execute_tools/            # Training loop integration tests
+        ├── nodes/                    # Tier 1 — single node, real API
+        ├── protocols/                # Tier 2 — one graph edge, real API
+        ├── runner/                   # Token-log + run_id sidecar integration tests
+        ├── scoring/                  # Anchor-map consistency + legacy-parity tests
+        └── workflows/                # Tier 3 — multi-hop workflow, real API + GPU
 ```
 
 ---
@@ -271,7 +329,7 @@ python execute_tools/build_anchor_map.py --parallel -n 8
 uv run pytest tests/unit/ -q
 ```
 
-If all 700+ tests pass, the install is good.
+If the full unit suite passes, the install is good.
 
 ---
 
@@ -399,26 +457,30 @@ Each iteration runs the **full 5-agent loop** (interpret → propose → impleme
 ```bash
 bash sdsc_submission_scripts/run_chain.sh --mode lilab \
     --workspace /home/klz/Data/SIDEREIS_DATA/exploration_chain_v1 \
+    --run_name  exploration_chain_v1 \
     --num_iterations 5 \
     --seed_paths /home/klz/Data/SIDEREIS_DATA/punet/hpt_full_v1/agent/run_output_hpt_full_v1_agent.json \
                  /home/klz/Data/SIDEREIS_DATA/wavenet/hpt_full_v1/agent/run_output_hpt_full_v1_agent.json \
     --max_rounds 5 \
     --max_epochs 5 \
     --human_advice_file advice/workflow/human_advice_chain_test.json \
-    --reflect_model_id gemini-2.5-flash
+    --llm_config llm_configs/openai_tiered_v1.json
 ```
+
+The chain runner also accepts `--auto_resume` (default ON — pick up the next iter from the existing manifests), `--start_iter N` for a manual pin, `--dry-run` to print the exact commands without launching, and per-stage budget flags like `--trial_time_budget_minutes` / `--formal_vram_budget_gb`. See `bash sdsc_submission_scripts/run_chain.sh --help` (or `_chain_common.sh`) for the full list.
 
 #### On SDSC (slurm, chained via `afterany`)
 
 ```bash
 bash sdsc_submission_scripts/run_chain.sh --mode sdsc \
     --workspace /expanse/lustre/projects/ddp433/ym137/siderius_workspace/exploration_chain_v1 \
+    --run_name  exploration_chain_v1 \
     --num_iterations 10 \
     --seed_paths /expanse/.../run_output_hpt_full_v2_agent.json \
     --max_rounds 5 \
     --max_epochs 5 \
     --human_advice_file advice/workflow/human_advice_chain_test.json \
-    --reflect_model_id gemini-2.5-flash \
+    --llm_config llm_configs/openai_tiered_v1.json \
     --partition gpu-shared \
     --time 04:00:00 \
     --mem 48G
@@ -556,7 +618,9 @@ Full derivation, legacy-parity proof, and rationale for Option B are in [`docs/a
 | `.env` | API keys (`GEMINI_API_KEY`, `OPENAI_API_KEY`) | no (gitignored) |
 | `advice/single_agent/*.json` | Per-experiment human advice for a single agent | yes |
 | `advice/workflow/*.json` | Per-agent human advice for full-chain runs | yes |
+| `llm_configs/*.json` | Per-stage LLM routing for workflow runs (consumed by `--llm_config`) | yes |
 | `pyproject.toml` + `uv.lock` | Python dependencies (managed by `uv`) | yes |
+| `pyrightconfig.json` | Pyright `include`/`exclude` + `python 3.12` target | yes |
 
 The two `*.yaml` files containing machine-specific paths are gitignored: each developer copies them once from the `*.example.yaml` template on first checkout, and `git pull` thereafter never touches them. This is what prevents lilab paths from clobbering SDSC paths and vice versa.
 
@@ -692,6 +756,23 @@ More in [`docs/memories/reference_sdsc_workspace_paths.md`](docs/memories/refere
 
 ### Test infrastructure
 - [`docs/pseudo_test_infra.md`](docs/pseudo_test_infra.md) — dual-mode pseudo/real tests, `RecordingLLMBridge`, `RecordingSandbox`, surrogation axes
+- [`docs/audit/unit_tests_rubric_audit.md`](docs/audit/unit_tests_rubric_audit.md) — periodic unit-test classification ledger
+
+### Cross-iteration memory + score-table awareness
+- [`docs/aggregated_score_table_awareness.md`](docs/aggregated_score_table_awareness.md) — per-file score comparison table surfaced to every agent
+- [`docs/Consistent_growing_vocab_list.md`](docs/Consistent_growing_vocab_list.md) — vocabulary seed + growth contract for the architectural-pattern tagger
+- [`docs/chain_skip_unproductive_iters_design.md`](docs/chain_skip_unproductive_iters_design.md) — when and how the chain prunes failed iters from downstream context
+
+### Token-usage audit + cost control
+- [`docs/audit_and_optimize_token_usage_and_growth.md`](docs/audit_and_optimize_token_usage_and_growth.md) — token-usage measurement, Top-3 bloat report, dehydration plan (consumed by `tools/build_token_baseline_report.py`)
+
+### Phase tracks (in-flight design + integration docs)
+- [`docs/phase66_deterministic_vram_and_hardening.md`](docs/phase66_deterministic_vram_and_hardening.md), [`docs/phase66_ws_a_refactor_and_cleanup.md`](docs/phase66_ws_a_refactor_and_cleanup.md), [`docs/phase66_ws_b_proposer_hardening.md`](docs/phase66_ws_b_proposer_hardening.md) — Phase 6.6: hardware-context, deterministic VRAM, proposer hardening
+- [`docs/phase67_infra_hardening_and_feedback_integrity.md`](docs/phase67_infra_hardening_and_feedback_integrity.md) — Phase 6.7: infra hardening + feedback integrity
+- [`docs/phase68_orchestrator_memory_and_resume.md`](docs/phase68_orchestrator_memory_and_resume.md), [`docs/phase68_task1_memory_diagnostic_20260427.md`](docs/phase68_task1_memory_diagnostic_20260427.md) — Phase 6.8: orchestrator memory + auto-resume
+- [`docs/refactor_formal_round_strategy.md`](docs/refactor_formal_round_strategy.md) — formal-round strategy refactor
+- [`docs/refine_inference_time_estimator.md`](docs/refine_inference_time_estimator.md) — inference time-estimator calibration refinement
+- [`docs/V8_Gap_Report.md`](docs/V8_Gap_Report.md) — V8 production cutover gap analysis
 
 ### Plugins and external agents
 - [`docs/run_scoped_plugins.md`](docs/run_scoped_plugins.md) — per-run plugin isolation via `SIDERIUS_PLUGIN_DIRS`; `--seed_plugin_path` for chain runs (PR 53)
@@ -706,11 +787,13 @@ More in [`docs/memories/reference_sdsc_workspace_paths.md`](docs/memories/refere
 
 ### Per-developer memories (gitignored)
 - `docs/memories/` — local-only shared notes. See `docs/memories/README.md` for the format. Currently captures:
-  - Gemini quota and the planner/reflector split rationale
-  - SDSC chain `afterany` + 48 GB memory rule
-  - SDSC workspace paths reference
-  - Design-doc-first workflow preference
-  - Known TODO: GPU-name lie in `scripts/run_comparison.py`
+  - Design-doc-first workflow preference (`feedback_design_first.md`)
+  - Gemini quota and the planner/reflector split rationale (`project_gemini_quota_split.md`)
+  - SDSC chain `afterany` + 48 GB memory rule (`project_sdsc_chain_afterany.md`)
+  - SDSC workspace paths reference (`reference_sdsc_workspace_paths.md`)
+  - Formal-strategy refactor notes (`project_formal_strategy_refactor.md`)
+  - Phase 3b validation report (`project_phase3b_validation_report.md`)
+  - Known TODO: GPU-name lie in `scripts/run_comparison.py` (`project_run_comparison_lies_about_gpu.md`)
 
 ---
 
