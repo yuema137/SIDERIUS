@@ -149,10 +149,9 @@ SIDERIUS/
 │
 ├── sdsc_submission_scripts/          # Slurm wrappers for SDSC Expanse + lilab chain runner
 │   ├── submit_hpt_agent.slurm        # Single-tuner job
-│   ├── run_iteration_chain.sh        # SDSC chain orchestrator (chains via afterany)
-│   ├── run_iteration_chain_lilab.sh  # Lilab chain orchestrator (foreground subprocess)
-│   ├── _chain_common.sh              # Shared bash framework
-│   ├── run_one_iteration.py          # Per-iteration runner (called by both orchestrators)
+│   ├── run_chain.sh                  # Unified chain entry — `--mode {sdsc,lilab}` dispatches to slurm or foreground
+│   ├── _chain_common.sh              # Shared bash framework (sourced by run_chain.sh)
+│   ├── run_one_iteration.py          # Per-iteration runner (called once per iter by both modes)
 │   └── submit_one_iteration.slurm    # Slurm wrapper for one chain iteration
 │
 ├── advice/                           # Human-written JSON advice files
@@ -398,7 +397,7 @@ Each iteration runs the **full 5-agent loop** (interpret → propose → impleme
 #### On lilab (foreground, no slurm)
 
 ```bash
-bash sdsc_submission_scripts/run_iteration_chain_lilab.sh \
+bash sdsc_submission_scripts/run_chain.sh --mode lilab \
     --workspace /home/klz/Data/SIDEREIS_DATA/exploration_chain_v1 \
     --num_iterations 5 \
     --seed_paths /home/klz/Data/SIDEREIS_DATA/punet/hpt_full_v1/agent/run_output_hpt_full_v1_agent.json \
@@ -412,7 +411,7 @@ bash sdsc_submission_scripts/run_iteration_chain_lilab.sh \
 #### On SDSC (slurm, chained via `afterany`)
 
 ```bash
-bash sdsc_submission_scripts/run_iteration_chain.sh \
+bash sdsc_submission_scripts/run_chain.sh --mode sdsc \
     --workspace /expanse/lustre/projects/ddp433/ym137/siderius_workspace/exploration_chain_v1 \
     --num_iterations 10 \
     --seed_paths /expanse/.../run_output_hpt_full_v2_agent.json \
@@ -653,7 +652,7 @@ When deploying SIDERIUS on a new machine:
 |---|---|---|
 | GPU | RTX 5090 (32 GB) | V100 / A100 (`gpu-shared`) |
 | Workspace | `/home/klz/Data/SIDEREIS_DATA/` | `/expanse/lustre/projects/ddp433/ym137/siderius_workspace/` |
-| Chain runner | `run_iteration_chain_lilab.sh` (foreground) | `run_iteration_chain.sh` (slurm `afterany`) |
+| Chain runner | `run_chain.sh --mode lilab` (foreground) | `run_chain.sh --mode sdsc` (slurm `afterany`) |
 | Single tuner | `python nodes/ml_hyperparameter_tune_agent.py ...` | `sbatch sdsc_submission_scripts/submit_hpt_agent.slurm ...` |
 
 More in [`docs/memories/reference_sdsc_workspace_paths.md`](docs/memories/reference_sdsc_workspace_paths.md) (gitignored — read locally).
