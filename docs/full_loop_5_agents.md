@@ -221,9 +221,9 @@ Three layers of enforcement:
 #SBATCH --mem=96G
 
 # Launch 3 explorations with 10 GB VRAM each
-python run_exploration.py --gpu_memory_limit_gb 10 --run_name explore_v1 &
-python run_exploration.py --gpu_memory_limit_gb 10 --run_name explore_v2 &
-python run_exploration.py --gpu_memory_limit_gb 10 --run_name explore_v3 &
+python scripts/run_exploration.py --gpu_memory_limit_gb 10 --run_name explore_v1 &
+python scripts/run_exploration.py --gpu_memory_limit_gb 10 --run_name explore_v2 &
+python scripts/run_exploration.py --gpu_memory_limit_gb 10 --run_name explore_v3 &
 wait
 ```
 
@@ -252,7 +252,7 @@ The workflow runs on two environments:
 | | Local (lilab) | Slurm (SDSC Expanse) |
 |---|---|---|
 | **GPU** | RTX 5090 (32 GB), direct access | V100 (32 GB), via Slurm `gpu-shared` |
-| **Execution** | `python run_exploration.py` in screen/tmux | `sbatch submit_exploration.slurm` |
+| **Execution** | `python scripts/run_exploration.py` in screen/tmux | `sbatch submit_exploration.slurm` |
 | **Data paths** | `/home/klz/Data/TIDMAD/` | `/expanse/lustre/projects/ddp433/ym137/` |
 | **Path config** | `tidmad_data_config.yaml` (per-machine) | Same file, different values |
 | **API keys** | Environment variables | Environment variables in Slurm script |

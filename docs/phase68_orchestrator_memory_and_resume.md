@@ -364,7 +364,7 @@ for iteration in range(start_iter, max_iterations + 1):
 
 ```
 $ python run_exploration_adaptive.py --run_name explore_novel_v5_0426 --resume \
-      --advice tuner_advice/explore_novel_v3.json \
+      --advice advice/workflow/explore_novel_v3.json \
       --llm_config llm_configs/openai_tiered_v1.json \
       ...
 
@@ -920,7 +920,7 @@ real OpenAI calls and minimal compute, completing in **30–45 minutes** wall-ti
   exhausted all attempts on the time gate.
 - `--trial_vram_budget_gb 8 --formal_vram_budget_gb 8`
 - `--llm_config llm_configs/openai_tiered_v1.json` — real OpenAI calls (gpt-5.4 tiered).
-- `--advice tuner_advice/exploration_adaptive_v1.json`
+- `--advice advice/workflow/exploration_adaptive_v1.json`
 
 **Success criteria** (all three must hold):
 

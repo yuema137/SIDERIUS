@@ -2806,7 +2806,7 @@ against the closed phase.
 
 ## §16.1 Problem statement
 
-The V4 advice JSONs (`tuner_advice/{explore_novel,exploit_cnn}_v4.json`) call
+The V4 advice JSONs (`advice/workflow/{explore_novel,exploit_cnn}_v4.json`) call
 for an aggressive paradigm shift — `explore` rejects pure-TCN proposals,
 `exploit` mandates CNN+Global hybrids, both lift segmentation_size to
 80,000–250,000 and pin the VRAM ceiling at 8 GB. A deep audit of the V4
@@ -2857,7 +2857,7 @@ The V4 contract boundary is:
   persistence. No mode-specific or score-specific hardcoded content.
 
 Any file that hardcodes architectural family preferences, parameter scales,
-VRAM ceilings, trial portions, or score thresholds outside `tuner_advice/*.json`
+VRAM ceilings, trial portions, or score thresholds outside `advice/workflow/*.json`
 is a contract violation.
 
 ### §16.1.4 Implementation status (as of 2026-05-03)
@@ -3020,7 +3020,7 @@ operator should re-run immediately before `screen` launch.
 
 - [x] **Argparse defaults V4-aligned** *(verified 2026-05-03)*
   ```
-  python -c "import sys; sys.argv = ['x', '--run_name', 'x', '--workspace', '/tmp/x', '--advice', 'tuner_advice/explore_novel_v4.json', '--llm_config', 'llm_configs/openai_tiered_v1.json']; from run_exploration_adaptive import parse_args; a = parse_args(); print(a.max_iterations, a.max_rounds, a.trial_portion)"
+  python -c "import sys; sys.argv = ['x', '--run_name', 'x', '--workspace', '/tmp/x', '--advice', 'advice/workflow/explore_novel_v4.json', '--llm_config', 'llm_configs/openai_tiered_v1.json']; from run_exploration_adaptive import parse_args; a = parse_args(); print(a.max_iterations, a.max_rounds, a.trial_portion)"
   ```
   Expected: `30 4 0.05`. **Actual: `30 4 0.05`.** ✅
 
@@ -3041,7 +3041,7 @@ operator should re-run immediately before `screen` launch.
 
 - [x] **V4 advice mindset/propose/implement/tune all reference `max_rounds=4`** *(verified 2026-05-03 pre-push)*
   ```
-  grep -n "max_rounds" tuner_advice/{explore_novel,exploit_cnn}_v4.json
+  grep -n "max_rounds" advice/workflow/{explore_novel,exploit_cnn}_v4.json
   ```
   Expected: every occurrence reads `max_rounds=4`.
   **Actual: 2 occurrences in each file, all read `max_rounds=4`** (`explore_novel_v4.json:75–76`, `exploit_cnn_v4.json:60–61`); no stale `max_rounds=6` references. ✅

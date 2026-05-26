@@ -1549,7 +1549,7 @@ all sit in the working tree, ready to be committed at Phase F.
 
 - [ ] **E2.** Argparse smoke test on `run_comparison.py`:
   ```bash
-  uv run python run_comparison.py --help | grep -A2 reflect
+  uv run python scripts/run_comparison.py --help | grep -A2 reflect
   ```
   - **Expected**: shows `--reflect_model_id` with a non-trivial help string.
 
@@ -1592,7 +1592,7 @@ all sit in the working tree, ready to be committed at Phase F.
   end-to-end behavior for the **single-tuner path**. ~5 min, ~3 LLM calls
   (1 plan + 1 reflect, baseline cached). Throwaway run_name:
   ```bash
-  uv run python run_comparison.py \
+  uv run python scripts/run_comparison.py \
       --model gated_fno --run_name reflect_split_smoke_test_v1 \
       --max_rounds 1 --is_trial \
       --override_old_run

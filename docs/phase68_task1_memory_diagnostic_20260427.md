@@ -211,7 +211,7 @@ SIDERIUS_RUN_NAME=phase68_smoke_$(date +%Y%m%d_%H%M%S)
     --run_name "${SIDERIUS_RUN_NAME}" \
     --max_iterations 1 \
     --max_rounds 3 \
-    --advice tuner_advice/exploit_cnn_v3.json \
+    --advice advice/workflow/exploit_cnn_v3.json \
     --llm_config llm_configs/openai_tiered_v1.json \
     --trial_portion 0.05 \
     --eval_portion 0.05 \

@@ -50,7 +50,7 @@ In both cases the **upstream node sent the tuner a baseline that was guaranteed 
 
 ### 1.3 Why the existing prose advice didn't save us
 
-`tuner_advice/exploit_cnn_v1.json` already says:
+`advice/workflow/exploit_cnn_v1.json` already says:
 
 > "NEVER use 4096, 8192, or other powers of 2 unless they appear in this list."
 
@@ -266,7 +266,7 @@ Requires B.3's prompt work first so LLM knows the adjust option exists.
 - [ ] Verify zero attempts wasted on the per-round budget when the upstream gates fire correctly
 
 #### C.2 — Advice file prose updates
-- [ ] `tuner_advice/explore_novel_v1.json` and `tuner_advice/exploit_cnn_v1.json`: prose constraint about `segmentation_size` divisor list becomes secondary defense (machine gate is primary). Keep the prose for LLM context but update wording to "as a sanity reminder, the system also enforces…" rather than "NEVER use…"
+- [ ] `advice/workflow/explore_novel_v1.json` and `advice/workflow/exploit_cnn_v1.json`: prose constraint about `segmentation_size` divisor list becomes secondary defense (machine gate is primary). Keep the prose for LLM context but update wording to "as a sanity reminder, the system also enforces…" rather than "NEVER use…"
 - [ ] No new advice prose needed for `multiple_of` — that's per-model and the implementor handles it locally
 
 #### C.3 — Re-launch the two killed runs

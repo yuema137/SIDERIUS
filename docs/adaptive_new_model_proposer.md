@@ -688,12 +688,12 @@ This section breaks each phase from §5 into concrete sub-tasks, the files they 
 
 **What was built**: a `regime_scores: Dict[str, float]` field on `ExperimentRecord` with hardcoded frequency-band definitions (`low_freq_kHz` = files 0-4, `mid_freq_10kHz` = files 5-10, `high_freq_MHz` = files 11-19, `global` = all). A new `execute_tools/regime_aggregator.py` module computed these from `file_vector`. Planner and reflector prompts were extended with regime-aware sections.
 
-**Why it was reverted**: the low/mid/high frequency band division is **domain knowledge**, not infrastructure. Hardcoding it into `REGIME_DEFINITIONS` and baking it into `ExperimentRecord` violated the V2 design principle: domain knowledge should come from external expert advice (the `tuner_advice/*.json` files, or the future Data Analysis Agent via `ExpertContextItem` in §2D), not from the codebase.
+**Why it was reverted**: the low/mid/high frequency band division is **domain knowledge**, not infrastructure. Hardcoding it into `REGIME_DEFINITIONS` and baking it into `ExperimentRecord` violated the V2 design principle: domain knowledge should come from external expert advice (the `advice/{single_agent,workflow}/*.json` files, or the future Data Analysis Agent via `ExpertContextItem` in §2D), not from the codebase.
 
 **What stays**:
 - `file_vector: Optional[List[Optional[float]]]` on `ExperimentRecord` — the raw 20-element per-file score array. This is the source of truth. The LLM already sees it in the prompt, and it already contains all per-frequency-band information.
 - The existing "FILE VECTOR AND SCORING" prompt section — explains what `file_vector` is without imposing any frequency-band interpretation.
-- `tuner_advice/gated_fno_freq_band_aware_v1.json` — the file-to-frequency mapping as expert advice. This is exactly where domain knowledge belongs: external, editable, per-experiment, not baked into the schema.
+- `advice/single_agent/gated_fno_freq_band_aware_v1.json` — the file-to-frequency mapping as expert advice. This is exactly where domain knowledge belongs: external, editable, per-experiment, not baked into the schema.
 
 **The extension point for the Data Analysis Agent** is now `ExpertContextItem` (§2D), NOT a hardcoded field on `ExperimentRecord`. When the Data Analysis Agent wants to provide aggregated regime scores, it emits them as an `ExpertContextItem` with `kind="empirical"` — the same interface every other upstream agent uses. No schema migration needed.
 
@@ -761,7 +761,7 @@ Key fixes discovered during chain testing:
 - ☑ Source code enrichment: comparison stage receives actual model source code, not just descriptions
 - ☑ Reference code: implementor receives ancestor model code as template via `reference_code` field on `ImplementorInput`
 - ☑ Generic prompts: model-specific knowledge removed from system prompts, moved to advice files
-- ☑ Advice file: `tuner_advice/chain_v2_proposer_advice.json` — external model-specific knowledge for proposer + implementor
+- ☑ Advice file: `advice/workflow/chain_v2_proposer_advice.json` — external model-specific knowledge for proposer + implementor
 
 **Design principle confirmed**: system prompts are generic (the hardware); advice files inject model-specific knowledge (the software). Different model families get different advice files — no prompt changes needed.
 

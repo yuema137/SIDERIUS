@@ -151,7 +151,7 @@ Every fix must justify itself against a **measurable** target. "Vague feelings" 
 
 * **Downstream Audit — who consumes the error classification:**
     * The Tuner planner (`nodes/ml_hyperparameter_tune_agent.py`) reads `record["memory"]["conclusion"]` and `record["status"]` to choose the next round's hyperparameters. An `error_inference: FileNotFoundError` is interpreted as "scoring infrastructure is flaky" → planner retries similar configs. An `error_training` is interpreted as "model + hyperparameters caused training to crash" → planner moves away from this region.
-    * The reflector / tuner-advice JSON (`tuner_advice/explore_novel_v*.json`) groups failure categories — misclassification corrupts the categorical histogram the reflector reasons over.
+    * The reflector / tuner-advice JSON (`advice/workflow/explore_novel_v*.json`) groups failure categories — misclassification corrupts the categorical histogram the reflector reasons over.
     * The dashboard's iteration table panel renders status badges; the `error_training` vs `error_inference` distinction is visible to the human operator.
     * Behaviour change: 7 historical `error_inference` records would have been `error_training` under the new classification. The `_OK_<exp_id>` sentinel file is a new artefact in `cached_models/` (zero-byte, ignored by inference loaders).
 
