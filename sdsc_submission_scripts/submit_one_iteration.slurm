@@ -3,9 +3,10 @@
 # SIDERIUS Per-Iteration Slurm Job
 # ---------------------------------------------------------------------------
 # Runs ONE iteration of the 5-agent exploration workflow as a Slurm job.
-# Designed for chained submission via run_iteration_chain.sh — each job
-# is 1-4 hours (fits gpu-shared partition easily) and writes a manifest.json
-# that the next job uses to discover this iteration's output.
+# Designed for chained submission via run_chain.sh --mode sdsc — each
+# job is 1-4 hours (fits gpu-shared partition easily) and writes a
+# manifest.json that the next job uses to discover this iteration's
+# output.
 #
 # Usage:
 #   sbatch --partition=gpu-shared --nodes=1 --ntasks=1 --gpus=1 --mem=24G \
