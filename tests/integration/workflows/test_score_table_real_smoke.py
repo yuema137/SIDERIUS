@@ -285,7 +285,8 @@ def _load_shared_advice() -> dict:
         "..",
         "..",
         "..",
-        "sdsc_submission_scripts",
+        "advice",
+        "workflow",
         "human_advice_chain_test.json",
     )
     with open(advice_path, encoding="utf-8") as f:

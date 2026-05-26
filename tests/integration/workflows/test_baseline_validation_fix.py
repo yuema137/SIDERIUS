@@ -70,8 +70,8 @@ SEED_PATHS = [
 ]
 
 LLM_CONFIG_PATH = os.path.join(SIDERIUS_ROOT, "llm_configs", "openai_tiered_v1.json")
-ADVICE_EXPLOIT = os.path.join(SIDERIUS_ROOT, "tuner_advice", "exploit_cnn_v1.json")
-ADVICE_EXPLORE = os.path.join(SIDERIUS_ROOT, "tuner_advice", "explore_novel_v1.json")
+ADVICE_EXPLOIT = os.path.join(SIDERIUS_ROOT, "advice", "workflow", "exploit_cnn_v1.json")
+ADVICE_EXPLORE = os.path.join(SIDERIUS_ROOT, "advice", "workflow", "explore_novel_v1.json")
 
 
 # ---------------------------------------------------------------------------
