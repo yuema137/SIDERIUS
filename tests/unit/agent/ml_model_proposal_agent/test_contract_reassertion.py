@@ -47,7 +47,7 @@ def spec() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Golden-Paragraph required tokens (citations 1–3 + guardrails + header)
+# Golden-Paragraph required tokens (citations 1-3 + guardrails + header)
 # ---------------------------------------------------------------------------
 
 
