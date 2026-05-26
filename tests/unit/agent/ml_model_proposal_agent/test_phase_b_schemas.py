@@ -290,13 +290,24 @@ class TestDiscoveryMemo:
         with pytest.raises(ValidationError, match="causal_hypothesis cannot be empty"):
             DiscoveryMemo.model_validate(valid_memo)
 
-    def test_no_failure_modes_raises(self, valid_memo):
-        valid_memo["predicted_failure_modes"] = []
-        with pytest.raises(ValidationError):
-            DiscoveryMemo.model_validate(valid_memo)
-
-    def test_too_many_failure_modes_raises(self, valid_memo):
-        valid_memo["predicted_failure_modes"] = ["a", "b", "c", "d"]
+    @pytest.mark.parametrize(
+        "field,invalid_value",
+        [
+            pytest.param("predicted_failure_modes", [], id="no_failure_modes"),
+            pytest.param(
+                "predicted_failure_modes", ["a", "b", "c", "d"], id="too_many_failure_modes"
+            ),
+            pytest.param(
+                "citation_sources",
+                ["a", "b", "c", "d", "e", "f"],
+                id="citations_over_max_5",
+            ),
+            pytest.param("sota_mechanism", "x" * 1001, id="sota_mechanism_over_max_length"),
+            pytest.param("proposed_change", "x" * 1001, id="proposed_change_over_max_length"),
+        ],
+    )
+    def test_invalid_field_raises(self, valid_memo, field, invalid_value):
+        valid_memo[field] = invalid_value
         with pytest.raises(ValidationError):
             DiscoveryMemo.model_validate(valid_memo)
 
@@ -345,28 +356,10 @@ class TestDiscoveryMemo:
         memo = DiscoveryMemo.model_validate(valid_memo)
         assert memo.proposed_vocab_links == []
 
-    def test_citations_max_5(self, valid_memo):
-        valid_memo["citation_sources"] = ["a", "b", "c", "d", "e", "f"]
-        with pytest.raises(ValidationError):
-            DiscoveryMemo.model_validate(valid_memo)
-
     def test_citations_exactly_5_ok(self, valid_memo):
         valid_memo["citation_sources"] = ["a", "b", "c", "d", "e"]
         memo = DiscoveryMemo.model_validate(valid_memo)
         assert len(memo.citation_sources) == 5
-
-    def test_sota_mechanism_max_length(self, valid_memo):
-        """sota_mechanism has max_length=1000."""
-        valid_memo["sota_mechanism"] = "x" * 1001
-        with pytest.raises(ValidationError):
-            DiscoveryMemo.model_validate(valid_memo)
-
-    def test_proposed_change_max_length(self, valid_memo):
-        """proposed_change has max_length=1000."""
-        valid_memo["proposed_change"] = "x" * 1001
-        with pytest.raises(ValidationError):
-            DiscoveryMemo.model_validate(valid_memo)
-
 
 # ---------------------------------------------------------------------------
 # ReasoningStage / ModelSelectionStrategy / ReasoningPipelineConfig
@@ -378,49 +371,56 @@ class TestDiscoveryMemo:
 
 
 class TestProposedVocabLink:
-    def test_valid(self):
-        link = ProposedVocabLink.model_validate(
-            {
-                "feature": "dilated_causal_conv",
-                "capability": "receptive_field",
-                "evidence": "Wavenet scores well on high-freq files and uses dilated convs.",
-            }
-        )
-        assert link.status == "proposed"  # default
-
-    def test_confirmed_status(self):
-        link = ProposedVocabLink.model_validate(
-            {
-                "feature": "spectral_conv",
-                "capability": "frequency_resolution",
-                "evidence": "Confirmed in rounds 2 and 4.",
-                "status": "confirmed",
-            }
-        )
-        assert link.status == "confirmed"
-
-    def test_refuted_status(self):
-        link = ProposedVocabLink.model_validate(
-            {
-                "feature": "bottleneck_compression",
-                "capability": "parameter_efficiency",
-                "evidence": "Smaller bottleneck did not improve score.",
-                "status": "refuted",
-            }
-        )
-        assert link.status == "refuted"
-
-    def test_invalid_status_coerced_to_proposed(self):
+    @pytest.mark.parametrize(
+        "data_overrides,expected_status",
+        [
+            pytest.param(
+                {
+                    "feature": "dilated_causal_conv",
+                    "capability": "receptive_field",
+                    "evidence": (
+                        "Wavenet scores well on high-freq files and uses dilated convs."
+                    ),
+                },
+                "proposed",
+                id="default_status_is_proposed",
+            ),
+            pytest.param(
+                {
+                    "feature": "spectral_conv",
+                    "capability": "frequency_resolution",
+                    "evidence": "Confirmed in rounds 2 and 4.",
+                    "status": "confirmed",
+                },
+                "confirmed",
+                id="confirmed_status_passthrough",
+            ),
+            pytest.param(
+                {
+                    "feature": "bottleneck_compression",
+                    "capability": "parameter_efficiency",
+                    "evidence": "Smaller bottleneck did not improve score.",
+                    "status": "refuted",
+                },
+                "refuted",
+                id="refuted_status_passthrough",
+            ),
+            pytest.param(
+                {
+                    "feature": "test",
+                    "capability": "test",
+                    "evidence": "test",
+                    "status": "maybe",
+                },
+                "proposed",
+                id="invalid_status_coerced_to_proposed",
+            ),
+        ],
+    )
+    def test_status_resolution(self, data_overrides, expected_status):
         """Unknown LLM-invented status values are coerced to 'proposed' (not rejected)."""
-        link = ProposedVocabLink.model_validate(
-            {
-                "feature": "test",
-                "capability": "test",
-                "evidence": "test",
-                "status": "maybe",
-            }
-        )
-        assert link.status == "proposed"
+        link = ProposedVocabLink.model_validate(data_overrides)
+        assert link.status == expected_status
 
     def test_evidence_max_length(self):
         """evidence has max_length=1000."""
@@ -582,13 +582,20 @@ class TestResearchPolicy:
         assert policy.comparative_analysis_top_k == 10
         assert policy.prior_stage_max_chars == 8000
 
-    def test_comparative_analysis_top_k_floor(self):
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            pytest.param(
+                {"comparative_analysis_top_k": 0}, id="comparative_analysis_top_k_floor"
+            ),
+            pytest.param({"prior_stage_max_chars": 0}, id="prior_stage_max_chars_floor"),
+            pytest.param({"minimum_boldness": 1.5}, id="boldness_above_range"),
+            pytest.param({"min_runs_for_promotion": 1}, id="min_runs_too_low"),
+        ],
+    )
+    def test_invalid_field_raises(self, kwargs):
         with pytest.raises(ValidationError):
-            ResearchPolicy(comparative_analysis_top_k=0)
-
-    def test_prior_stage_max_chars_floor(self):
-        with pytest.raises(ValidationError):
-            ResearchPolicy(prior_stage_max_chars=0)
+            ResearchPolicy(**kwargs)
 
     def test_high_risk_policy(self):
         policy = ResearchPolicy(
@@ -605,14 +612,6 @@ class TestResearchPolicy:
             min_runs_for_promotion=5,
         )
         assert policy.minimum_boldness == 0.02
-
-    def test_boldness_range(self):
-        with pytest.raises(ValidationError):
-            ResearchPolicy(minimum_boldness=1.5)
-
-    def test_min_runs_too_low(self):
-        with pytest.raises(ValidationError):
-            ResearchPolicy(min_runs_for_promotion=1)
 
     def test_pipeline_config_carries_policy(self):
         config = ReasoningPipelineConfig(
