@@ -19,9 +19,9 @@ Output structure:
           └── agent/         ← isolated agent workspace per run_name
 
 Usage:
-  python run_comparison.py --model punet
-  python run_comparison.py --model punet --run_name v2 --max_rounds 50
-  python run_comparison.py --model rnn --provider openai --model_id gpt-4o
+  python scripts/run_comparison.py --model punet
+  python scripts/run_comparison.py --model punet --run_name v2 --max_rounds 50
+  python scripts/run_comparison.py --model rnn --provider openai --model_id gpt-4o
 """
 
 import argparse

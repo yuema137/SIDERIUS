@@ -25,16 +25,16 @@ Output: ``{output_dir}/raw_baseline_score_file_{index:04d}.json``
 
 Usage examples:
   # Compute all 40 files (skip already-done ones):
-  python compute_raw_baseline.py
+  python scripts/compute_raw_baseline.py
 
   # Compute only files 0 and 5:
-  python compute_raw_baseline.py --indices 0 5
+  python scripts/compute_raw_baseline.py --indices 0 5
 
   # Re-compute file 3 even if it already exists:
-  python compute_raw_baseline.py --indices 3 --override
+  python scripts/compute_raw_baseline.py --indices 3 --override
 
   # Use parallel workers for speed:
-  python compute_raw_baseline.py --parallel --num_workers 8
+  python scripts/compute_raw_baseline.py --parallel --num_workers 8
 """
 
 import argparse
