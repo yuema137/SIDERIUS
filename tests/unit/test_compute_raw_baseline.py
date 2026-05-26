@@ -31,7 +31,7 @@ from unittest.mock import patch
 
 import pytest
 
-import compute_raw_baseline
+from scripts import compute_raw_baseline
 
 _TEST_S_MAX = 4.0  # pick a value that divides cleanly into snr_sg for hand math
 

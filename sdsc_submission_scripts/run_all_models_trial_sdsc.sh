@@ -56,7 +56,7 @@ launch_model() {
 
     # Execute the Python node in the background
     # Redirect both stdout and stderr to the specific log file
-    "${PYTHON}" "${SIDERIUS_DIR}/run_comparison.py" \
+    "${PYTHON}" "${SIDERIUS_DIR}/scripts/run_comparison.py" \
         --model "${model}" \
         --max_rounds "${MAX_ROUNDS}" \
         --run_name "${RUN_NAME}" \
