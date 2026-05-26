@@ -361,6 +361,7 @@ class TestDiscoveryMemo:
         memo = DiscoveryMemo.model_validate(valid_memo)
         assert len(memo.citation_sources) == 5
 
+
 # ---------------------------------------------------------------------------
 # ReasoningStage / ModelSelectionStrategy / ReasoningPipelineConfig
 # ---------------------------------------------------------------------------
@@ -378,9 +379,7 @@ class TestProposedVocabLink:
                 {
                     "feature": "dilated_causal_conv",
                     "capability": "receptive_field",
-                    "evidence": (
-                        "Wavenet scores well on high-freq files and uses dilated convs."
-                    ),
+                    "evidence": ("Wavenet scores well on high-freq files and uses dilated convs."),
                 },
                 "proposed",
                 id="default_status_is_proposed",
@@ -585,9 +584,7 @@ class TestResearchPolicy:
     @pytest.mark.parametrize(
         "kwargs",
         [
-            pytest.param(
-                {"comparative_analysis_top_k": 0}, id="comparative_analysis_top_k_floor"
-            ),
+            pytest.param({"comparative_analysis_top_k": 0}, id="comparative_analysis_top_k_floor"),
             pytest.param({"prior_stage_max_chars": 0}, id="prior_stage_max_chars_floor"),
             pytest.param({"minimum_boldness": 1.5}, id="boldness_above_range"),
             pytest.param({"min_runs_for_promotion": 1}, id="min_runs_too_low"),

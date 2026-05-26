@@ -261,12 +261,20 @@ class TestFormatSubprocessErrorOomTag:
         "returncode,stderr,phase_label,expect_oom_tag,extra_substring",
         [
             pytest.param(
-                1, "MemoryError\n", "Train", True, "MemoryError",
+                1,
+                "MemoryError\n",
+                "Train",
+                True,
+                "MemoryError",
                 id="memory_error_stderr_gets_tag",
             ),
             pytest.param(-9, "", "Scoring", True, "SIGKILL", id="sigkill_gets_tag"),
             pytest.param(
-                1, "ValueError: bad", "Inference", False, None,
+                1,
+                "ValueError: bad",
+                "Inference",
+                False,
+                None,
                 id="non_oom_failure_no_tag",
             ),
             pytest.param(
