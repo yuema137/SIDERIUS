@@ -210,49 +210,34 @@ def _make_experiment(model_type: str, loss_type: str) -> dict:
 
 
 class TestExperimentConfig:
-    def test_punet_with_focal_passes(self):
-        cfg = ExperimentConfig(**_make_experiment("punet", "focal"))
-        assert cfg.model_type == "punet"
+    @pytest.mark.parametrize(
+        "model_type,loss_type",
+        [
+            pytest.param("punet", "focal", id="punet_with_focal"),
+            pytest.param("punet", "ce", id="punet_with_ce"),
+            pytest.param("fcnet", "smooth_l1", id="fcnet_with_smooth_l1"),
+            pytest.param("fcnet", "ce", id="fcnet_with_ce"),
+            pytest.param("transformer", "ce", id="transformer_with_ce"),
+            pytest.param("wavenet", "ce", id="wavenet_with_ce"),
+            pytest.param("rnn", "ce", id="rnn_with_ce"),
+        ],
+    )
+    def test_compatible_model_loss_passes(self, model_type, loss_type):
+        cfg = ExperimentConfig(**_make_experiment(model_type, loss_type))
+        assert cfg.model_type == model_type
 
-    def test_punet_with_ce_passes(self):
-        cfg = ExperimentConfig(**_make_experiment("punet", "ce"))
-        assert cfg.model_type == "punet"
-
-    def test_fcnet_with_smooth_l1_passes(self):
-        cfg = ExperimentConfig(**_make_experiment("fcnet", "smooth_l1"))
-        assert cfg.model_type == "fcnet"
-
-    def test_fcnet_with_ce_passes(self):
-        cfg = ExperimentConfig(**_make_experiment("fcnet", "ce"))
-        assert cfg.model_type == "fcnet"
-
-    def test_transformer_with_ce_passes(self):
-        cfg = ExperimentConfig(**_make_experiment("transformer", "ce"))
-        assert cfg.model_type == "transformer"
-
-    def test_punet_with_smooth_l1_raises(self):
+    @pytest.mark.parametrize(
+        "model_type",
+        [
+            pytest.param("punet", id="punet_with_smooth_l1"),
+            pytest.param("transformer", id="transformer_with_smooth_l1"),
+            pytest.param("wavenet", id="wavenet_with_smooth_l1"),
+            pytest.param("rnn", id="rnn_with_smooth_l1"),
+        ],
+    )
+    def test_smooth_l1_with_classification_model_raises(self, model_type):
         with pytest.raises(ValidationError, match="smooth_l1"):
-            ExperimentConfig(**_make_experiment("punet", "smooth_l1"))
-
-    def test_transformer_with_smooth_l1_raises(self):
-        with pytest.raises(ValidationError, match="smooth_l1"):
-            ExperimentConfig(**_make_experiment("transformer", "smooth_l1"))
-
-    def test_wavenet_with_ce_passes(self):
-        cfg = ExperimentConfig(**_make_experiment("wavenet", "ce"))
-        assert cfg.model_type == "wavenet"
-
-    def test_wavenet_with_smooth_l1_raises(self):
-        with pytest.raises(ValidationError, match="smooth_l1"):
-            ExperimentConfig(**_make_experiment("wavenet", "smooth_l1"))
-
-    def test_rnn_with_ce_passes(self):
-        cfg = ExperimentConfig(**_make_experiment("rnn", "ce"))
-        assert cfg.model_type == "rnn"
-
-    def test_rnn_with_smooth_l1_raises(self):
-        with pytest.raises(ValidationError, match="smooth_l1"):
-            ExperimentConfig(**_make_experiment("rnn", "smooth_l1"))
+            ExperimentConfig(**_make_experiment(model_type, "smooth_l1"))
 
 
 # ==========================================
@@ -285,14 +270,14 @@ class TestGatedFNOConfig:
         with pytest.raises(ValidationError, match="static_v length"):
             GatedFNOConfig(num_gates=64, static_v=[0.5] * 32)
 
-    def test_width_below_min_raises(self):
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            pytest.param({"width": 8}, id="width_below_min"),
+            pytest.param({"num_layers": 0}, id="num_layers_below_min"),
+            pytest.param({"num_gates": 4}, id="num_gates_below_min"),
+        ],
+    )
+    def test_field_below_min_raises(self, kwargs):
         with pytest.raises(ValidationError):
-            GatedFNOConfig(width=8)
-
-    def test_num_layers_below_min_raises(self):
-        with pytest.raises(ValidationError):
-            GatedFNOConfig(num_layers=0)
-
-    def test_num_gates_below_min_raises(self):
-        with pytest.raises(ValidationError):
-            GatedFNOConfig(num_gates=4)
+            GatedFNOConfig(**kwargs)

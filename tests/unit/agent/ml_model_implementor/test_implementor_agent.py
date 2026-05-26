@@ -118,17 +118,17 @@ def agent_with_mocks(inp):
 
 
 class TestHelpers:
-    def test_class_name_single_word(self):
-        assert _class_name("tcn") == "Tcn"
-
-    def test_class_name_two_words(self):
-        assert _class_name("attn_unet") == "AttnUnet"
-
-    def test_class_name_three_words(self):
-        assert _class_name("gated_dilated_tcn") == "GatedDilatedTcn"
-
-    def test_class_name_single_char_parts(self):
-        assert _class_name("s4_model") == "S4Model"
+    @pytest.mark.parametrize(
+        "snake_case,expected_camel_case",
+        [
+            pytest.param("tcn", "Tcn", id="single_word"),
+            pytest.param("attn_unet", "AttnUnet", id="two_words"),
+            pytest.param("gated_dilated_tcn", "GatedDilatedTcn", id="three_words"),
+            pytest.param("s4_model", "S4Model", id="single_char_parts"),
+        ],
+    )
+    def test_class_name_snake_to_camel(self, snake_case, expected_camel_case):
+        assert _class_name(snake_case) == expected_camel_case
 
 
 # ---------------------------------------------------------------------------
@@ -176,52 +176,83 @@ class TestFileAssembly:
         agent_with_mocks.run(inp)
         assert os.path.exists(os.path.join(inp.test_dir, "test_gated_dilated_tcn.py"))
 
-    def test_plugin_has_model_type_constant(self, agent_with_mocks, inp):
+    @pytest.mark.parametrize(
+        "dir_attr,filename,expected_substring",
+        [
+            pytest.param(
+                "plugin_dir",
+                "gated_dilated_tcn.py",
+                'PLUGIN_MODEL_TYPE = "gated_dilated_tcn"',
+                id="plugin_model_type_constant",
+            ),
+            pytest.param(
+                "plugin_dir",
+                "gated_dilated_tcn.py",
+                "PLUGIN_CONFIG_CLASS = GatedDilatedTcnConfig",
+                id="plugin_config_class_assignment",
+            ),
+            pytest.param(
+                "plugin_dir",
+                "gated_dilated_tcn.py",
+                "PLUGIN_MODEL_CLASS = GatedDilatedTcn",
+                id="plugin_model_class_assignment",
+            ),
+            pytest.param(
+                "plugin_dir",
+                "gated_dilated_tcn.py",
+                "class GatedDilatedTcnConfig(BaseModel):",
+                id="plugin_config_class_def",
+            ),
+            pytest.param(
+                "plugin_dir",
+                "gated_dilated_tcn.py",
+                "class GatedDilatedTcn(nn.Module):",
+                id="plugin_model_class_def",
+            ),
+            pytest.param(
+                "plugin_dir",
+                "gated_dilated_tcn.py",
+                "channels",
+                id="plugin_has_llm_field_channels",
+            ),
+            pytest.param(
+                "plugin_dir",
+                "gated_dilated_tcn.py",
+                "depth",
+                id="plugin_has_llm_field_depth",
+            ),
+            pytest.param(
+                "test_dir",
+                "test_gated_dilated_tcn.py",
+                "def test_forward_shape",
+                id="test_has_forward_shape",
+            ),
+            pytest.param(
+                "test_dir",
+                "test_gated_dilated_tcn.py",
+                "def test_forward_no_nan",
+                id="test_has_forward_no_nan",
+            ),
+            pytest.param(
+                "test_dir",
+                "test_gated_dilated_tcn.py",
+                "def test_config_instantiation",
+                id="test_has_config_instantiation",
+            ),
+            pytest.param(
+                "test_dir",
+                "test_gated_dilated_tcn.py",
+                "from gated_dilated_tcn import PLUGIN_MODEL_CLASS, PLUGIN_CONFIG_CLASS",
+                id="test_imports_correct_module",
+            ),
+        ],
+    )
+    def test_generated_file_contains_token(
+        self, agent_with_mocks, inp, dir_attr, filename, expected_substring
+    ):
         agent_with_mocks.run(inp)
-        content = open(os.path.join(inp.plugin_dir, "gated_dilated_tcn.py")).read()
-        assert 'PLUGIN_MODEL_TYPE = "gated_dilated_tcn"' in content
-
-    def test_plugin_has_config_class_assignment(self, agent_with_mocks, inp):
-        agent_with_mocks.run(inp)
-        content = open(os.path.join(inp.plugin_dir, "gated_dilated_tcn.py")).read()
-        assert "PLUGIN_CONFIG_CLASS = GatedDilatedTcnConfig" in content
-
-    def test_plugin_has_model_class_assignment(self, agent_with_mocks, inp):
-        agent_with_mocks.run(inp)
-        content = open(os.path.join(inp.plugin_dir, "gated_dilated_tcn.py")).read()
-        assert "PLUGIN_MODEL_CLASS = GatedDilatedTcn" in content
-
-    def test_plugin_has_correct_class_name(self, agent_with_mocks, inp):
-        agent_with_mocks.run(inp)
-        content = open(os.path.join(inp.plugin_dir, "gated_dilated_tcn.py")).read()
-        assert "class GatedDilatedTcnConfig(BaseModel):" in content
-        assert "class GatedDilatedTcn(nn.Module):" in content
-
-    def test_plugin_contains_llm_config_fields(self, agent_with_mocks, inp):
-        agent_with_mocks.run(inp)
-        content = open(os.path.join(inp.plugin_dir, "gated_dilated_tcn.py")).read()
-        assert "channels" in content
-        assert "depth" in content
-
-    def test_test_file_has_shape_test(self, agent_with_mocks, inp):
-        agent_with_mocks.run(inp)
-        content = open(os.path.join(inp.test_dir, "test_gated_dilated_tcn.py")).read()
-        assert "def test_forward_shape" in content
-
-    def test_test_file_has_nan_test(self, agent_with_mocks, inp):
-        agent_with_mocks.run(inp)
-        content = open(os.path.join(inp.test_dir, "test_gated_dilated_tcn.py")).read()
-        assert "def test_forward_no_nan" in content
-
-    def test_test_file_has_config_test(self, agent_with_mocks, inp):
-        agent_with_mocks.run(inp)
-        content = open(os.path.join(inp.test_dir, "test_gated_dilated_tcn.py")).read()
-        assert "def test_config_instantiation" in content
-
-    def test_test_file_imports_correct_module(self, agent_with_mocks, inp):
-        agent_with_mocks.run(inp)
-        content = open(os.path.join(inp.test_dir, "test_gated_dilated_tcn.py")).read()
-        assert "from gated_dilated_tcn import PLUGIN_MODEL_CLASS, PLUGIN_CONFIG_CLASS" in content
+        content = open(os.path.join(getattr(inp, dir_attr), filename)).read()
+        assert expected_substring in content
 
 
 # ---------------------------------------------------------------------------
@@ -270,28 +301,22 @@ class TestDescriptionFile:
         desc_path = tmp_path / "models" / "gated_dilated_tcn" / "description.md"
         assert desc_path.exists(), "description.md not written"
 
-    def test_description_file_contains_model_name(self, agent_with_mocks, inp, tmp_path):
-        agent_with_mocks.run(inp)
-        content = (tmp_path / "models" / "gated_dilated_tcn" / "description.md").read_text()
-        assert "GatedDilatedTcn" in content
-
-    def test_description_file_contains_description(self, agent_with_mocks, inp, tmp_path):
-        agent_with_mocks.run(inp)
-        content = (tmp_path / "models" / "gated_dilated_tcn" / "description.md").read_text()
-        assert "A gated dilated TCN for signal denoising." in content
-
-    def test_description_file_contains_mathematical_definition(
-        self, agent_with_mocks, inp, tmp_path
+    @pytest.mark.parametrize(
+        "expected_substring",
+        [
+            pytest.param("GatedDilatedTcn", id="contains_model_class_name"),
+            pytest.param("A gated dilated TCN for signal denoising.", id="contains_description"),
+            pytest.param("tanh", id="contains_mathematical_definition"),
+            pytest.param("[B, T] int64", id="contains_forward_input_contract"),
+            pytest.param("[B, 256, T] float32", id="contains_forward_output_contract"),
+        ],
+    )
+    def test_description_file_contains_token(
+        self, agent_with_mocks, inp, tmp_path, expected_substring
     ):
         agent_with_mocks.run(inp)
         content = (tmp_path / "models" / "gated_dilated_tcn" / "description.md").read_text()
-        assert "tanh" in content
-
-    def test_description_file_contains_forward_contract(self, agent_with_mocks, inp, tmp_path):
-        agent_with_mocks.run(inp)
-        content = (tmp_path / "models" / "gated_dilated_tcn" / "description.md").read_text()
-        assert "[B, T] int64" in content
-        assert "[B, 256, T] float32" in content
+        assert expected_substring in content
 
     def test_description_file_path_in_output(self, agent_with_mocks, inp, tmp_path):
         output = agent_with_mocks.run(inp)
