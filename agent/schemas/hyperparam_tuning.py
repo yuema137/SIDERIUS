@@ -56,7 +56,7 @@ class ExpertAdvice(BaseModel):
         default=None,
         description=(
             "Catch-all slot for unstructured advice text. Used by legacy entry "
-            "points (e.g. run_comparison.py) that pass a single free-form preamble "
+            "points (e.g. scripts/run_comparison.py) that pass a single free-form preamble "
             "string instead of structured fields. Newer code paths should populate "
             "the structured fields above and leave this None."
         ),
@@ -882,7 +882,7 @@ class HyperparamTuningInput(BaseModel):
             "exists* — it does not change no-winner behavior. ``is_trial`` "
             "is always flipped to ``False`` regardless of strategy.\n\n"
             "Legacy aliases (accepted for backward compat with running "
-            "chains and pre-2026-05-02 ``tuner_advice/*.json`` configs):\n"
+            "chains and pre-2026-05-02 ``advice/workflow/*.json`` configs):\n"
             "* ``inherit_best_trial`` → canonicalised to ``full_clone``.\n"
             "* ``llm_propose`` → canonicalised to ``independent``.\n\n"
             "Has no effect when ``force_formal_round=False`` or on non-last "
