@@ -1,397 +1,549 @@
 # External Agents for the Proposal Pipeline
 
-**Status**: Design only — no implementation started. The proposal agent's receiving end is mostly ready; the gaps and prerequisites described here must be fixed before any external agent is wired.
+**Status**: design active. The proposal agent's receiving end is now in place
+(see §0 below). The first external agent — `ml_literature_review` — is unbuilt;
+this document is the implementation spec.
+
+**Scope**: this revision is focused on building the *first* external agent.
+Earlier drafts of this doc covered `ml_literature_review` and
+`physics_literature_review` as parallel agents; the second agent has been
+intentionally deferred and is referenced only as a future motivator for the
+manager layer (§7). The receiving-end schema work that earlier drafts treated
+as a prerequisite has landed and is summarised in §0.
 
 ---
 
-## §1 Context
+## Document relationships
 
-The proposal agent (`ml_model_proposal_agent`) already supports four incoming channels via its `ProposalInput` schema:
+External agents are governed by three documents, each at a different layer:
 
-| Channel | Schema field | What it carries |
-|---------|-------------|-----------------|
-| Agent identification | `agent_cards: List[AgentCard]` | Who is contributing, their expertise, and how to weight them *(field to be added — see §8)* |
-| Factual findings | `expert_context: List[ExpertContextItem]` | Per-iteration findings with source, kind, confidence, cite_id |
-| New terminology | `vocab_seed: List[VocabEntry]` | Vocabulary candidates from external sources |
-| Strategic direction | `mindset: Optional[str]` | Free-text injected into the causal reasoning prompt |
+- **Vision** — [`external_agents_architecture.md`](external_agents_architecture.md):
+  invariants every external agent must respect (channel hierarchy, `AgentCard`
+  trust calibration, when a manager layer is justified). Slow-moving.
+- **Spec** — [`external_agents_for_proposer.md`](external_agents_for_proposer.md):
+  the design of the first agent, `ml_literature_review` — schemas, verbosity
+  levels, workflow integration. Evolves as implementation reveals reality.
+- **Execution** — [`commit_plan_ml_literature_review.md`](commit_plan_ml_literature_review.md):
+  the live `[ ]`/`[x]` checklist for rolling out `ml_literature_review`,
+  commit by commit. Updates in lockstep with the code.
 
-The proposal agent consumes all four uniformly, regardless of which agent produced them. Adding a new upstream agent requires zero changes to the proposal agent's reasoning logic — only an output schema, a protocol file, and an `AgentCard` definition per directed edge.
+**You are here**: the **Spec** layer (one specific agent: `ml_literature_review`).
+
+**Direction of truth**: when reality contradicts a doc, fix the highest
+layer first (Vision → Spec → Plan), never the reverse.
 
 ---
 
-## §2 Agents to build
+## §0 What's already landed (receiving end)
 
-### 2.1 `ml_literature_review`
+Earlier revisions of this doc described several schema additions as
+"prerequisites." Those are now in `agent/schemas/proposal.py`. Nothing in this
+list blocks the implementation order in §8.
 
-**Purpose**: mine ML papers for architectural techniques relevant to SQUID denoising. Translates paper findings into the four channels above.
+| Item | Where it lives |
+|---|---|
+| `AgentCard` schema (static self-description of contributing agents) | `agent/schemas/proposal.py` |
+| `ProposalInput.agent_cards: list[AgentCard]` | `agent/schemas/proposal.py` |
+| `ProposalInput.mindset: str \| None` | `agent/schemas/proposal.py` |
+| `VocabEntry.origin: str \| None` (decouples external vocab from `seen_in_runs` promotion) | `agent/schemas/proposal.py` |
+| `ExpertContextItem.kind="literature"` literal | `agent/schemas/proposal.py` |
 
-**Data sources**:
-- Semantic Scholar API — structured paper metadata, citation graphs, abstracts
-- OpenReview API — ICLR/NeurIPS/ICML full papers and reviews
+The proposal agent already consumes all four channels (`agent_cards`,
+`expert_context`, `vocab_seed`, `mindset`) uniformly regardless of which
+upstream agent produced them. Adding a new upstream agent requires a new
+output schema, a new protocol file, and a workflow wiring change — but no
+edits to the proposal agent itself.
 
-**Module prefix**: `ml_` (machine learning pipeline — this agent directly informs architectural decisions).
+One residual item to check during Step 5 of §8: the
+`ml_result_interp_to_ml_model_propose` protocol's `local_full_context`
+function may not yet thread `mindset` / `agent_cards` from caller kwargs into
+the constructed `ProposalInput`. If not, that's a one-line addition; flag in
+Step 5 and fix in place.
 
-**Output schema** (`agent/schemas/ml_literature_review.py`):
+---
+
+## §1 Overview and philosophy
+
+The first external agent to implement is **`ml_literature_review`**. It reads
+ML papers and distills findings into structured `ExpertContextItem` entries
+that the proposal agent can use as priors when reasoning about the next
+architectural step.
+
+Two design invariants drive everything below.
+
+**Stateless.** `ml_literature_review` keeps no persistent memory between
+calls. Every run receives the full experiment history as part of its input
+and uses that — not a hidden cache — to avoid re-suggesting directions the
+chain has already explored. The only persisted state is the deterministic
+root-paper extract cache (§4), which is a content-addressed lookup, not a
+conversation history.
+
+**Protocol-driven.** The proposal agent does not know or care which agent
+produced a given `ExpertContextItem`. It receives a validated `ProposalInput`,
+reads the `agent_cards` block to calibrate trust, and treats every finding
+through the same uniform interface. This is the architectural invariant that
+keeps the system extensible: adding a second or third external agent does not
+change the proposal agent's reasoning logic.
+
+---
+
+## §2 First-version interfaces
+
+The first version uses exactly two channels between external agents and the
+proposer. A third is wired but stays empty, and a fourth is pre-identified
+for future use.
+
+### Active in v1
+
+1. **`ExpertContextItem`** — structured findings with `source`, `kind`,
+   `content`, `cite_id`, and optional `confidence`. The primary channel.
+2. **`AgentCard`** — static self-description of the contributing agent
+   (`agent_name`, `role`, `expertise_domain`, `coverage`, `limitations`,
+   `trust_guidance`). Required so the proposal LLM can calibrate trust before
+   reading findings. The card is *defined once in the agent* and emitted on
+   every run.
+
+### Wired but empty in v1
+
+3. **`VocabEntry` injection (via `new_vocab_candidates`).** The `VocabEntry`
+   promotion mechanism is experiment-driven by design ("only things confirmed
+   by real runs count"). Letting external agents seed vocab candidates risks
+   polluting the canonical vocabulary with unvalidated literature priors.
+   The `origin` field already prevents promotion through the run-count
+   criterion (external entries carry `proposed_by_run=None` and never enter
+   `seen_in_runs`), but unvalidated vocab still shifts the proposer's
+   framing. `ml_literature_review` will produce an empty
+   `new_vocab_candidates` list in v1 and revisit once the VocabEntry
+   mechanism itself is more mature.
+
+4. **`mindset`.** The field stays in the output schema, but
+   `ml_literature_review` will leave it as `None` by default. A `mindset`
+   string is a strong directional prior — it overrides the default
+   explore/exploit fallback in the causal-reasoning stage prompt — and is
+   more appropriate for an agent that emits objective constraints (e.g. a
+   future physics agent) than for one that summarises probabilistic
+   literature findings.
+
+### Pre-identified, not yet implemented
+
+5. **`disallowed_patterns`.** For cases where the literature systematically
+   shows a direction fails on similar tasks. Stronger than
+   `ExpertContextItem`, approaches the existing
+   `disallowed_architectural_patterns` mechanism. If the external agent is
+   wrong, the cost is high (entire architectural family ruled out). Design
+   decision: reserve the interface, require human approval to activate, and
+   never allow automatic write-in. No schema field yet — to be specified
+   alongside its human-approval workflow.
+
+### Interface philosophy
+
+The stronger the influence on the proposer, the higher the activation
+threshold:
+
+| Channel | Influence | Activation threshold |
+|---|---|---|
+| `ExpertContextItem` | soft suggestion | always-on |
+| `mindset` | strong directional prior | only when ≥N papers converge |
+| `disallowed_patterns` | hard architectural veto | human approval required |
+
+---
+
+## §3 Knowledge sources: root vs dynamic
+
+Two categories of knowledge feed `ml_literature_review`.
+
+### Root knowledge
+
+Static, human-specified, loaded once per run from
+`configs/lit_review_config.yaml` (new top-level `configs/` directory,
+mirroring `tidmad_data_config.yaml`):
+
+```yaml
+root_papers:
+  - source: arxiv
+    id: "2302.09309"
+    notes: "TIDMAD primary paper"
+    verbosity: 1
+  - source: doi
+    id: "10.1103/PhysRevD.XX"
+    verbosity: 0
+  - source: openreview
+    url: "https://openreview.net/forum?id=XXXX"
+    verbosity: 1
+  - source: local
+    path: "reference_data/domain_notes.pdf"
+    notes: "Expert notes on SQUID noise"
+    # verbosity ignored for local — always resolved at >=1; see §4.
+
+dynamic_search:
+  verbosity: 0     # starting floor for newly retrieved papers; in-loop LLM
+                   # may upgrade individual papers to 1 or 2.
+  max_rounds: 5
+  results_per_query: 10
+```
+
+Supported source types:
+
+| Source | Resolution path |
+|---|---|
+| `arxiv` | Semantic Scholar `/paper/ArXiv:{id}` |
+| `doi` | Semantic Scholar `/paper/DOI:{doi}` |
+| `openreview` | Semantic Scholar `/paper/URL:{url}`, fallback to OpenReview API |
+| `local` | PDF via `pdfplumber` (or plain text if `.txt`/`.md`) |
+
+### Dynamic knowledge
+
+Retrieved at runtime by the agent itself based on task description + full
+experiment history. The LLM-driven search loop (§5) generates queries, the
+resolver skill returns metadata, and the LLM decides which results to
+upgrade to verbosity=1.
+
+Both sources produce the same internal data structure `RetrievedPaper`
+(§4). The only difference is the `is_root: bool` flag.
+
+---
+
+## §4 Unified paper format and verbosity
+
+All retrieved papers, regardless of source, use one internal schema:
 
 ```python
-class MLLiteratureReviewOutput(BaseModel):
+class PaperExtract(BaseModel):
+    key_methods: str
+    architecture_details: str
+    key_results: str
+    limitations: str
+    relevance_to_squid: str
+
+class RetrievedPaper(BaseModel):
+    paper_id: str
+    title: str
+    authors: str
+    year: Optional[int]
+    venue: Optional[str]
+    abstract: str
+    citation_count: Optional[int]
+    open_access_url: Optional[str]
+    source_id: str                  # used as cite_id in ExpertContextItem
+    is_root: bool
+    human_notes: Optional[str]      # root papers only
+    extract: Optional[PaperExtract] # populated at verbosity>=1
+    full_text: Optional[str]        # populated at verbosity==2
+    verbosity_achieved: int         # actual level reached after fallback
+```
+
+### Verbosity levels
+
+| Level | Content | Approx tokens | How produced |
+|---|---|---|---|
+| 0 | Abstract + metadata | ~200 | Semantic Scholar API only |
+| 1 | Structured LLM extract (`PaperExtract`) | ~750 | PDF download + LLM compression via `LLMBridge` |
+| 2 | Full text | ~6 000 – 10 000 | PDF download, no compression |
+
+### Fallback rule
+
+If a higher level is requested but cannot be produced (e.g. no
+`openAccessPdf`, no ArXiv fallback, PDF text extraction fails), the agent
+silently degrades to the highest level it could achieve and records the
+result in `verbosity_achieved`. The downstream `ExpertContextItem` is still
+emitted from whatever level was reached.
+
+### Local source rule
+
+The `verbosity` field on a local-source entry is **ignored**. Local files
+are always resolved at minimum verbosity=1 — a verbosity=0 entry would
+return only a filename, which is useless. If text extraction from the local
+file fails, the fallback rule still applies: `verbosity_achieved=0` and the
+agent carries on with metadata only.
+
+### Cache
+
+Root paper verbosity=1 extracts are cached in
+`reference_data/root_papers_cache/` (e.g. `arxiv_2302.09309_v1.json`).
+This directory **is committed to the repo**: root papers are a stable
+human-curated set, the verbosity=1 extracts are deterministic for a fixed
+LLM, and committing them means CI and all machines work without
+regeneration. Cache files are small JSON; no repo-bloat concern.
+
+The cache is never auto-invalidated. To refresh an extract — for example
+after a meaningful LLMBridge prompt change — delete the cache file
+manually. Dynamic-search results are **never** cached, so the gitignore
+story stays simple.
+
+---
+
+## §5 Component breakdown (Shape A architecture)
+
+Following the existing node/skill split in the project: deterministic HTTP
+and file operations live in the skill, LLM reasoning lives in the node. No
+LLM call ever happens inside the skill.
+
+### `agent/skills/paper_resolver_skill/`
+
+Pure deterministic skill. Folder pattern (`skill_config.json` +
+`wrapper.py`) matching the existing skills under `agent/skills/`.
+
+Responsibilities:
+
+- Parse a `PaperSource` (`arxiv` / `doi` / `openreview` / `local`) and fetch
+  metadata from the Semantic Scholar API.
+- If verbosity ≥ 1: download the PDF. Preference order: S2 `openAccessPdf`
+  → arXiv PDF if `externalIds` carries an ArXiv ID → local file path for
+  local sources.
+- If verbosity = 2: attach raw text to `RetrievedPaper.full_text`.
+- If verbosity = 1: return raw text in the skill response so the **node**
+  can call `LLMBridge` to compress it into a `PaperExtract` — the LLM call
+  stays in the node.
+- On any failure: return `{"status": "error", "message": ...}`. Never
+  raise — the node is responsible for fallback/degradation decisions.
+
+Single-run S2 response caching is the skill's responsibility (see §9 open
+question on rate limits).
+
+### `nodes/ml_literature_review.py` + `agent/schemas/literature_review.py`
+
+LLM-driven node. The schema file holds:
+
+```python
+class ExternalAgentOutput(BaseModel):
+    """Base contract for any external agent feeding the proposer."""
     agent_card: AgentCard
-    # Static self-description — defined once in the agent, passed through every run.
-    # Example:
-    #   AgentCard(
-    #     agent_name="ml_literature_review",
-    #     role="Scans ML papers for architectural techniques applicable to SQUID denoising",
-    #     expertise_domain="Signal processing architectures, deep learning for time-series",
-    #     coverage="arXiv + OpenReview 2018–present, filtered by relevance to SQUID/denoising",
-    #     limitations="Cannot assess physics feasibility; benchmarks may not transfer to TIDMAD",
-    #     trust_guidance="Treat as promising priors — lower exploration cost, but only "
-    #                    "experiment runs confirm applicability.",
-    #   )
-
     findings: List[ExpertContextItem]
-    # kind="literature" entries: paper-specific findings with cite_id=arxiv/openreview ID
-    # Example: "Gated spectral convolution achieves 15% improvement on 1-10 kHz SQUID
-    #   signals. cite_id=arxiv_2024_1234"
+    new_vocab_candidates: List[VocabEntry]   # empty in ml_literature_review v1
+    suggested_mindset: Optional[str]         # None in ml_literature_review v1
 
-    new_vocab_candidates: List[VocabEntry]
-    # Terms recognized in papers that aren't in the current vocab.
-    # Each entry: kind="feature"/"capability", origin="ml_literature_review",
-    #             proposed_by_run=None (NOT set — not an experiment run).
-    # Example: VocabEntry(name="learnable_filterbank", kind="feature",
-    #                     origin="ml_literature_review", ...)
+class LiteratureReviewInput(BaseModel):
+    task_description: str
+    experiment_history: List[ExperimentRecord]
+    root_papers: List[PaperSource]
+    dynamic_search_config: DynamicSearchConfig
 
-    suggested_mindset: Optional[str]
-    # Only populated when ≥N papers converge strongly on a direction.
-    # Example: "5 recent papers use dilated causal conv + spectral normalization for
-    #   low-SNR signal recovery — prioritize this combination."
+class LiteratureReviewOutput(ExternalAgentOutput):
+    retrieved_papers: List[RetrievedPaper]   # full audit trail
 ```
 
-**Protocol file**: `agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py`
+Node responsibilities:
 
-The protocol extracts `agent_card` into `ProposalInput.agent_cards`, merges `findings` into the workflow's accumulated `expert_context` list, extends the `vocab_seed` with `new_vocab_candidates` (setting `origin` correctly), and optionally maps `suggested_mindset` to `ProposalInput.mindset`.
+1. Load `configs/lit_review_config.yaml`, resolve root papers. For each
+   root paper: check `reference_data/root_papers_cache/` first, call the
+   resolver skill on cache miss.
+2. For verbosity=1 root papers: call `LLMBridge` to produce the
+   `PaperExtract`, write to cache.
+3. Run the dynamic-search loop up to `dynamic_search.max_rounds`:
+   - `LLMBridge` generates the next query from task description +
+     experiment history + results-so-far.
+   - Call the resolver skill with the query → list of `RetrievedPaper` at
+     starting verbosity (typically 0).
+   - `LLMBridge` decides: done? upgrade any paper to verbosity=1? next
+     query?
+   - If upgrade requested: resolver-skill round-trip plus `LLMBridge`
+     compression.
+4. Final `LLMBridge` call: synthesise all root + dynamic results into a
+   `LiteratureReviewOutput` — populate `findings` (with stable `cite_id`s
+   matching `RetrievedPaper.source_id`), leave `new_vocab_candidates=[]`
+   and `suggested_mindset=None` per §2.
 
-**Node code** (for protocol file naming): `ml_lit_review`
+### `agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py`
+
+Maps `LiteratureReviewOutput` into `ProposalInput`:
+
+| Source field | Target field |
+|---|---|
+| `agent_card` | appended to `ProposalInput.agent_cards` |
+| `findings` | appended to `ProposalInput.expert_context` |
+| `new_vocab_candidates` | appended to `ProposalInput.vocab_seed` (empty in v1, wired for future) |
+| `suggested_mindset` | `ProposalInput.mindset` (None in v1) |
+
+Per `CLAUDE.md` protocol naming convention: include a `database_*`
+placeholder raising `NotImplementedError` alongside the `local_*` function.
 
 ---
 
-### 2.2 `physics_literature_review`
+## §6 Workflow integration
 
-**Purpose**: read physics papers on SQUID/dark matter detection to extract hard physical constraints and domain knowledge that the ML literature would never contain.
+Two small additions to `workflows/model_exploration.py`.
 
-**Data sources**:
-- arXiv `hep-ex`, `cond-mat.supr-con`, `astro-ph.IM` categories
-- Domain-specific databases (e.g. INSPIRE-HEP)
-- Possibly a curated local corpus of key SQUID papers
-
-**Module prefix**: `phys_` — this agent belongs to a physics domain module, not the ML pipeline. A new prefix is warranted here (analogous to `data_` for data processing). First agent with this prefix; establishes the convention.
-
-**Output schema** (`agent/schemas/phys_literature_review.py`):
+### Merge helper
 
 ```python
-class PhysicsLiteratureReviewOutput(BaseModel):
-    agent_card: AgentCard
-    # Static self-description — defined once in the agent.
-    # Example:
-    #   AgentCard(
-    #     agent_name="physics_literature_review",
-    #     role="Extracts physical constraints on SQUID systems from physics literature",
-    #     expertise_domain="SQUID magnetometry, dark matter detection, superconducting circuits",
-    #     coverage="Physics papers on SQUID/axion detection; curated local corpus + arXiv",
-    #     limitations="Does not evaluate ML feasibility; constraint values assume ideal conditions",
-    #     trust_guidance="Physical constraints are HARD LIMITS — do not override without "
-    #                    "explicit physics justification. Domain knowledge is HIGH confidence.",
-    #   )
-
-    findings: List[ExpertContextItem]
-    # kind="theoretical" entries: physics constraints and domain knowledge
-    # Example: "Axion-photon coupling implies signal amplitude 10⁻¹⁸–10⁻¹⁵ V/Hz^0.5
-    #   at 1–100 kHz. cite_id=phys_review_2023_axion"
-
-    new_vocab_candidates: List[VocabEntry]
-    # Physics-derived concepts that should enter the architectural vocabulary.
-    # Example: VocabEntry(name="thermal_noise_floor", kind="capability",
-    #                     origin="physics_literature_review",
-    #                     description="Physical lower bound on noise achievable for SQUID at T=4K")
-
-    suggested_mindset: Optional[str]
-    # Rarely populated — only for strong domain invariants.
-    # Example: "SQUID signal is strictly causal and band-limited below 500 kHz —
-    #   any architecture with non-causal ops or global frequency mixing will fail."
+def merge_external_agent_outputs(
+    outputs: List[ExternalAgentOutput],
+) -> tuple[List[ExpertContextItem], List[VocabEntry], List[AgentCard], Optional[str]]:
+    all_context, all_vocab, all_cards = [], [], []
+    mindset = None
+    for output in outputs:
+        all_context.extend(output.findings)
+        all_vocab.extend(output.new_vocab_candidates)
+        all_cards.append(output.agent_card)
+        if output.suggested_mindset:
+            mindset = output.suggested_mindset   # last-non-None wins
+    return all_context, all_vocab, all_cards, mindset
 ```
 
-**Protocol file**: `agent/schemas/protocols/phys_literature_review_to_ml_model_propose.py`
+Pure function over `List[ExternalAgentOutput]`. The workflow then folds
+the four returned values into the `ProposalInput` it already constructs
+from the interpretation protocol's output.
 
-**Node code**: `phys_lit_review`
-
----
-
-## §3 Protocol gap to fix before wiring
-
-`local_full_context` (in `ml_result_interp_to_ml_model_propose.py`) currently has no `mindset` or `agent_cards` parameters. When external agents are wired in, the workflow needs to pass both through to `ProposalInput`.
-
-**Changes required**:
-- Add `mindset: Optional[str] = None` parameter — map to `ProposalInput.mindset`.
-- Add `agent_cards: Optional[List[AgentCard]] = None` parameter — map to `ProposalInput.agent_cards`.
-
-Both are one-line additions, backward compatible (default `None`).
-
----
-
-## §4 Trigger conditions
-
-Literature review agents are expensive (API calls, paper parsing). They should not run every iteration.
-
-| Agent | When to call |
-|-------|-------------|
-| `physics_literature_review` | **Once at exploration start**, then cached. Physical constraints on SQUID systems do not change between iterations. |
-| `ml_literature_review` | **Triggered conditionally** — when `vocab_diversity_ratio` drops below threshold (vocabulary stagnation) or when `cumulative_information_gain` is low for N consecutive iterations. Both signals are already computed and present in `InterpretationOutput`. |
-
-The workflow checks these signals after each interpretation run and triggers a fresh literature scan when the condition is met, rather than running every round.
-
----
-
-## §5 Multi-source merging
-
-When both `result_interpretation_agent` and one or more external agents produce context, the workflow aggregates all four channels before calling the protocol.
-
-```
-workflow:
-  # Findings
-  interp_items   = [... from result_interpretation_agent ...]
-  ml_lit_items   = [... from ml_literature_review ...]   # if triggered
-  phys_items     = [... from physics_literature_review ...]  # if triggered
-  all_context    = interp_items + ml_lit_items + phys_items
-
-  # Vocabulary
-  merged_vocab   = vocab from interp_output + ml_lit_candidates + phys_candidates
-  # (each external candidate has origin= set, proposed_by_run=None)
-
-  # Name cards
-  all_cards      = [ml_lit_output.agent_card, phys_output.agent_card]  # if triggered
-
-  # Mindset: last non-None value wins (physics > ml_lit > default)
-  mindset        = phys_output.suggested_mindset or ml_lit_output.suggested_mindset or None
-
-  proposal_input = local_full_context(interp_output, storage,
-                                      expert_context=all_context,
-                                      vocab_seed=merged_vocab,
-                                      agent_cards=all_cards,
-                                      mindset=mindset)
-```
-
-Merging is the workflow's responsibility. The protocol just passes the already-merged inputs through.
-
----
-
-## §6 Implementation checklist (per agent)
-
-Both agents follow the standard 8-step node checklist from `CLAUDE.md`. For reference:
-
-| Step | Artefact |
-|------|----------|
-| 0 | Graph placement — draw edges `ml_lit_review → ml_model_propose` and `phys_lit_review → ml_model_propose` |
-| 1 | Node implementation: `nodes/ml_literature_review.py` / `nodes/physics_literature_review.py` |
-| 2 | Protocol files (one per directed edge): `ml_literature_review_to_ml_model_propose.py`, `phys_literature_review_to_ml_model_propose.py` |
-| 3 | Node unit tests (mocked API calls) |
-| 4 | Protocol unit tests |
-| 5 | Node integration test (Tier 1 — real API, one node in isolation) |
-| 6 | Protocol integration test (Tier 2 — real API, literature agent → proposal agent) |
-| 7 | Connection audit — verify `AgentCard` fields populated, every `ExpertContextItem` has `source`/`cite_id`, vocab candidates have `origin` set and `proposed_by_run=None` |
-
-Prerequisites before either agent is wired (all in §8–§9):
-- `AgentCard` schema added to `agent/schemas/proposal.py`
-- `ProposalInput.agent_cards` field added
-- `render_agent_cards()` implemented in `agent/prompt_templates/proposal/__init__.py`
-- System prompt instructions updated (comparison + causal reasoning stages)
-- `VocabEntry.origin` field added
-- `render_expert_context` dedup + confidence sorting added
-
----
-
-## §7 Open questions
-
-1. **`physical_constraint` as a new `ExpertContextItem.kind`?** Physics constraints (e.g. causality, band limits) are qualitatively different from theoretical findings — they cannot be overridden. Should `ExpertContextItem.kind` have a `physical_constraint` value, and should the proposal agent treat these as hard filters rather than soft guidance? The `trust_guidance` field in `AgentCard` partially handles this, but a distinct `kind` would make it structural rather than advisory.
-
-2. **Caching strategy for physics agent**: run-level JSON file in workspace? Or a shared file in `agent_generated/physics_context/` that persists across runs within an experiment?
-
-3. **Paper corpus for physics agent**: live arXiv API calls per trigger, or a curated local corpus updated periodically? Local corpus is more reproducible but requires maintenance.
-
-4. **Semantic Scholar rate limits**: the free tier allows 100 requests/5 minutes. The ML literature agent must paginate carefully and cache results to avoid quota exhaustion across long chains.
-
-5. **System prompt update scope**: should the name card section and the instruction to read it go into the base system prompt (all runs see it) or only when `agent_cards` is non-empty? Rendering conditionally (only when cards are present) is cleaner — no noise in single-agent runs.
-
----
-
-## §8 Agent name cards
-
-### The problem
-
-Without a name card, the proposal LLM sees `source="ml_literature_review"` on ten `ExpertContextItem` entries but has no idea what that source is — whether it represents a systematic review or a keyword search, whether its domain matches this task, and how much to trust it relative to empirical experiment results. The `kind` field alone (`"literature"`, `"theoretical"`) is not enough: it describes the *type* of finding, not the *epistemic status* of the agent that produced it.
-
-### What a name card is
-
-A name card is the agent's **static self-description** — defined once in the agent, passed through its output schema on every run. It tells the proposal LLM:
-- What this agent is and what it does
-- What domain it covers and how current its knowledge is
-- What it cannot know or do (limitations)
-- How to calibrate trust in its findings
-
-The key principle: **findings are the evidence; the name card is the calibration**. The LLM reads the name cards *before* reading the `ExpertContextItem` list, so it knows how to weight each source before it encounters any specific claim.
-
-### `AgentCard` schema
-
-New schema to add to `agent/schemas/proposal.py`:
+### Trigger hook
 
 ```python
-class AgentCard(BaseModel):
-    """Static self-description of an external contributing agent.
-
-    Defined once in the agent's implementation, emitted on every run.
-    Collected into ProposalInput.agent_cards and rendered as a 'Contributors'
-    section near the top of each stage prompt — before the Expert Context block.
-    """
-    agent_name: str = Field(
-        description="Stable identifier matching ExpertContextItem.source values "
-                    "this agent produces. E.g. 'ml_literature_review'."
-    )
-    role: str = Field(
-        max_length=200,
-        description="One sentence: what this agent does in the pipeline."
-    )
-    expertise_domain: str = Field(
-        max_length=300,
-        description="What this agent knows well — the domain its findings are grounded in."
-    )
-    coverage: str = Field(
-        max_length=300,
-        description="Scope of its knowledge: time range, data sources, filtering criteria."
-    )
-    limitations: str = Field(
-        max_length=300,
-        description="What this agent cannot assess or may get wrong."
-    )
-    trust_guidance: str = Field(
-        max_length=400,
-        description="One or two sentences instructing the proposal LLM how to weight "
-                    "this agent's findings relative to experiment results and other sources. "
-                    "E.g. 'Treat as promising priors — only experiment runs confirm applicability.' "
-                    "For physics agents: 'Physical constraints are HARD LIMITS.'"
-    )
+def should_run_literature_review(interp_output: InterpretationOutput) -> bool:
+    # v1: always run. The S2 free tier (100 requests / 5 min) and the
+    # deterministic root-paper cache keep per-iteration cost low enough
+    # that unconditional execution is acceptable during development and
+    # early production. Future condition will read
+    # interp_output.vocab_diversity_ratio < THRESHOLD.
+    return True
 ```
 
-### `ProposalInput.agent_cards`
-
-New field to add to `ProposalInput` in `agent/schemas/proposal.py`:
-
-```python
-agent_cards: List[AgentCard] = Field(
-    default_factory=list,
-    description="Self-descriptions of all external agents contributing context this round. "
-                "Rendered as a 'Contributors' section before the Expert Context block. "
-                "The proposal LLM reads these first to calibrate trust in each source. "
-                "Empty = no external agents this round (internal-only run).",
-)
-```
-
-### `render_agent_cards()`
-
-New function to add to `agent/prompt_templates/proposal/__init__.py`:
-
-```python
-def render_agent_cards(cards: list) -> str:
-    """
-    Render agent name cards as a labeled 'Contributors' section.
-
-    Called before render_expert_context() so the LLM reads who is
-    contributing before it reads their specific findings.
-    """
-    if not cards:
-        return ""
-    lines = ["## External Contributors\n",
-             "Read each contributor's role and trust guidance before reading their findings.\n"]
-    for card in cards:
-        name = card.get("agent_name") if isinstance(card, dict) else card.agent_name
-        lines.append(f"### {name}")
-        for field in ("role", "expertise_domain", "coverage", "limitations", "trust_guidance"):
-            val = card.get(field) if isinstance(card, dict) else getattr(card, field, "")
-            if val:
-                lines.append(f"  {field.replace('_', ' ').title()}: {val}")
-        lines.append("")
-    return "\n".join(lines)
-```
-
-### System prompt instruction
-
-The comparison stage and causal reasoning stage system prompts (`comparison_stage.md`, `causal_reasoning_stage.md`) need an instruction block added to the "What you receive" section:
-
-```markdown
-- **Contributors** (when present): external agents contributing findings this round.
-  Read the Contributors section before the Expert Context. Each contributor's
-  `Trust guidance` field tells you how to calibrate their findings:
-  - Literature agents: treat as promising priors that lower exploration cost.
-    Only experiment runs confirm applicability to TIDMAD.
-  - Physics agents: physical constraints are HARD LIMITS. Do not propose
-    architectures that violate them without explicit physics justification.
-  - Human directives: always take precedence over agent findings.
-```
-
-### Rendering order in the user prompt
-
-The user prompt passed to each pipeline stage currently concatenates:
-1. `accumulated` context (candidates, interpretation summary, etc.)
-2. `expert_context_block` (from `render_expert_context`)
-3. `vocab_block`
-
-With name cards, the order becomes:
-1. `accumulated` context
-2. **`agent_cards_block`** (from `render_agent_cards`) ← new, before findings
-3. `expert_context_block`
-4. `vocab_block`
-
-This ensures the LLM reads *who is contributing* before it reads *what they found*.
+**Tradeoff acknowledged.** Unconditional execution costs API quota per
+iteration but keeps the v1 implementation small. The conditional-trigger
+field (`vocab_diversity_ratio`) already exists on `InterpretationOutput`,
+so flipping to a real condition later is a body-only change.
 
 ---
 
-## §9 Receiving-end gaps to fix before wiring
+## §7 Extensibility: path to multiple external agents and a manager layer
 
-Three small gaps in the current receiving-end code that would cause problems as soon as external agents are wired.
+> The big-picture vision for *all* external agents — taxonomy, manager
+> layer, channel hierarchy, cross-cutting concerns — lives in
+> [`external_agents_architecture.md`](external_agents_architecture.md).
+> This section is the short version, focused on what is forward-compatible
+> in the current single-agent implementation.
 
-### Gap 1 — `VocabEntry.proposed_by_run` is semantically overloaded
+The current single-agent design is already extensible. Two facts make that
+true:
 
-**Problem**: `proposed_by_run` currently serves two purposes:
-1. Attribution — who first suggested this entry
-2. Promotion counting — its value is injected into `seen_in_runs`, and promotion fires when `len(seen_in_runs) >= 3`
+1. **`ExternalAgentOutput` is the common base.** All external agents
+   produce the same shape; the workflow and protocol layer never need to
+   know which concrete agent produced a given output.
+2. **`merge_external_agent_outputs` is a pure function over
+   `List[ExternalAgentOutput]`.** Adding a second agent is one line:
+   `outputs.append(physics_agent.run(...))`.
+3. **`AgentCard.trust_guidance` carries calibration semantics.** The
+   proposer reads it to know how to weight each source. There is no
+   hardcoded "physics = hard limit, literature = soft prior" logic
+   anywhere in the infrastructure — it lives in the card text.
 
-If an external agent sets `proposed_by_run="ml_literature_review"`, that string enters `seen_in_runs`. After 3 literature review passes, the term gets promoted — without a single experimental validation. Scientifically wrong.
+### When to introduce a manager layer
 
-**Fix**: add `origin: Optional[str] = None` to `VocabEntry`. External agents set `origin="ml_literature_review"` (or `"physics_literature_review"`) and leave `proposed_by_run=None`. The `build_runtime_vocab()` function already only injects `proposed_by_run` into `seen_in_runs` — so as long as external entries don't set `proposed_by_run`, promotion stays experiment-driven. No changes to `promote_candidates()` needed.
-
-The `origin` field also makes it visible in the prompt (via `_render_vocabulary`) where a term came from — the LLM can see "this term was suggested by the literature agent, not yet confirmed experimentally."
+**Not until a second external agent exists.** When it does, extract a thin
+class:
 
 ```python
-# Addition to VocabEntry in agent/schemas/proposal.py
-origin: Optional[str] = Field(
-    default=None,
-    description="Source agent for externally-contributed entries. "
-                "E.g. 'ml_literature_review', 'physics_literature_review'. "
-                "None = proposed during an experiment run (proposed_by_run carries the run name). "
-                "When set, proposed_by_run must be None — external contributions do not "
-                "count toward seen_in_runs and cannot be promoted via the run-count criterion.",
-)
+class ExternalAgentManager:
+    def run(
+        self,
+        task_description: str,
+        experiment_history: List[ExperimentRecord],
+        interp_output: InterpretationOutput,
+    ) -> List[ExternalAgentOutput]:
+        # v1 of manager: just calls lit_review unconditionally.
+        # future: conditional triggering, dependency ordering between agents,
+        # possibly feeding one agent's output into another's input.
+        ...
 ```
 
-### Gap 2 — `render_expert_context` has no deduplication
+The workflow then calls only `ExternalAgentManager.run()`. The manager
+decides which agents to call, in what order, and whether one agent's
+output should inform another's input.
 
-**Problem**: two agents may independently cite the same paper or produce identical findings (same `cite_id`). Currently both appear in the rendered block.
+**The manager is "insertable", not "refactorable".** Because the workflow
+already calls `merge_external_agent_outputs(outputs)` over a list,
+introducing the manager only requires replacing direct agent calls with
+`manager.run()`. The merge helper, the protocol files, and the proposer
+are untouched.
 
-**Fix**: deduplicate by `cite_id` before rendering — last occurrence wins (most recent agent's version is kept). Three lines in `render_expert_context`.
+### Concrete future motivator: a physics agent
 
-### Gap 3 — `render_expert_context` has no confidence-based ordering
+A natural second external agent is a `physics_literature_review` (or
+similar `phys_*`-prefixed) agent emitting hard physical constraints on
+SQUID systems — things ML literature would never cover. Such an agent
+would use the same `ExternalAgentOutput` interface, set `AgentCard.
+trust_guidance` to flag its findings as hard limits, and possibly
+populate `suggested_mindset` when a strong domain invariant applies
+(e.g. strict causality, band-limit). The interesting addition would be
+inter-agent dependency: physics constraints filtering the literature
+agent's search queries. That dependency is what would justify the
+manager layer's existence — and is why the manager is deferred until a
+second agent actually arrives, rather than being built speculatively.
 
-**Problem**: within a `kind` group, items are in insertion order. With 15 literature items from two agents, the most confident ones may be buried.
+---
 
-**Fix**: sort each group by `confidence` descending before rendering. Items with `confidence=None` sort last. Two lines in `render_expert_context`.
+## §8 Implementation order
 
-### Gap 4 — item volume (workflow-level, no code change)
+1. `agent/schemas/literature_review.py` — `RetrievedPaper`,
+   `PaperExtract`, `ExternalAgentOutput`, `LiteratureReviewInput`,
+   `LiteratureReviewOutput`, `DynamicSearchConfig`, `PaperSource`.
+2. `agent/skills/paper_resolver_skill/skill_config.json` +
+   `wrapper.py` — deterministic HTTP / file resolution, no LLM call,
+   per-run S2 response caching.
+3. `nodes/ml_literature_review.py` — LLM-driven root-paper resolution,
+   dynamic-search loop, final synthesis. (No `ProposalInput` schema work
+   needed — §0 already landed it. During wiring, audit
+   `local_full_context` in
+   `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py`
+   and add `mindset` / `agent_cards` kwargs if not already plumbed.)
+4. `agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py`
+   — protocol with `local_*` plus the required `database_*`
+   `NotImplementedError` placeholder.
+5. `workflows/model_exploration.py` — add
+   `merge_external_agent_outputs`, `should_run_literature_review`, and
+   wire the new node into the per-iteration loop.
+6. `configs/lit_review_config.yaml` (new top-level `configs/` directory)
+   + `reference_data/root_papers_cache/` directory with a README
+   explaining cache format and manual invalidation.
+7. Tests:
+   - Unit: `tests/unit/agent/paper_resolver_skill/` (mock HTTP, mock
+     file IO).
+   - Unit: `tests/unit/nodes/ml_literature_review/` (mock LLMBridge,
+     mock skill).
+   - Unit: protocol tests under
+     `tests/unit/agent/protocols/test_ml_literature_review_to_ml_model_propose.py`.
+   - Optional Tier-1 integration: `tests/integration/nodes/test_ml_literature_review.py`
+     (`@real_run`, real LLMBridge + live S2 against the TIDMAD root paper).
+8. Connection audit (step 7 of the standard 8-step node checklist): every
+   field required by `ProposalInput` is populated from
+   `LiteratureReviewOutput` via the protocol; every field required by
+   `LiteratureReviewInput` is populated from the workflow's upstream
+   context (task description + experiment history + config).
 
-**Design decision**: `render_expert_context` renders all items. With many agents producing many items, the prompt grows unbounded. This is intentionally handled at the **workflow level** — the workflow knows the token budget and should trim/prioritize before passing items to the protocol. No change to the renderer. The workflow's curation strategy is TBD when a second external agent is wired.
+---
+
+## §9 Open questions
+
+Resolved since the last revision (see body sections for the resolution):
+
+- **Knowledge source split (root vs dynamic).** Resolved — §3.
+- **Verbosity strategy.** Resolved — §4 (three levels + fallback + local
+  override + cache committed).
+- **Manager-layer timing.** Resolved — defer until second external agent
+  exists, see §7.
+- **`VocabEntry` injection by external agents.** Resolved for v1 —
+  deferred per §2.
+- **Schema prerequisites on the receiving end.** Resolved — §0.
+
+Still open:
+
+1. **Semantic Scholar rate limits.** The free tier is 100 requests /
+   5 min. The resolver skill must cache S2 responses *within a single
+   agent run* to avoid quota exhaustion when the dynamic-search loop
+   re-asks for already-seen papers. Cross-run caching is not in scope.
+2. **Full-text availability rate.** Many papers will not have
+   `openAccessPdf`, even with the arXiv-PDF fallback. The actual
+   fallback rate on the SQUID/denoising paper corpus is unknown —
+   measure it on a representative dynamic-search session before
+   committing to verbosity=1 as the *default* for root papers in
+   `configs/lit_review_config.yaml`. If the rate is high, v=0 may be
+   the right default for everything except hand-picked seminal papers.
+3. **`disallowed_patterns` interface design.** Pre-identified in §2 but
+   not yet specified. Needs a concrete schema field on
+   `ExternalAgentOutput`, a corresponding `ProposalInput` field (or
+   reuse of `disallowed_architectural_patterns`), and a
+   human-approval workflow before any agent is allowed to populate it.
+4. **Item-volume management.** With one external agent this is fine; with
+   two or more, `expert_context` can grow large. The workflow-level
+   curation strategy — token-budgeted trimming, confidence sorting,
+   dedup by `cite_id` — is TBD when a second external agent is wired.
+   Existing renderer-side dedup and confidence sorting in
+   `render_expert_context` are already in place to soften this.
