@@ -145,7 +145,7 @@ class RetrievedPaper(BaseModel):
 
     paper_id: str = Field(
         description="Stable identifier prefixed by source — e.g. "
-        "'arxiv:2302.09309', 'local:reference_data/papers/foo.pdf'. "
+        "'arxiv:2406.04378', 'local:reference_data/papers/foo.pdf'. "
         "Used as cache key and dedup key across rounds.",
     )
     source: PaperSource

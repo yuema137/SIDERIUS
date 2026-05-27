@@ -130,6 +130,24 @@ finding texts; we don't build a precedence resolver in code.
 problem, not the workflow's. Adding a new agent does not require
 rewriting any priority rules — write a clear card and stop.
 
+### Human notes override misleading literature signals
+
+`trust_guidance` calibrates *how strongly* to weight a source, but not *domain
+incompatibilities the LLM cannot see*. A concrete case surfaced in the
+`ml_literature_review` pilot: the TIDMAD paper benchmarks denoising models under
+a **frequency-split** training setting, while SIDERIUS trains **full-spectrum**.
+The paper's rankings therefore do not transfer — yet nothing in the paper *text*
+flags this, so the compressing LLM cannot infer it unaided.
+
+This is why the `notes` field on each root paper in `lit_review_config.yaml` is
+**not optional decoration** — it is the mechanism by which human domain knowledge
+**overrides** potentially misleading literature signals. When a human note
+conflicts with paper content, the note wins. Correspondingly,
+`AgentCard.limitations` for `ml_literature_review` must state explicitly:
+*"findings from root papers reflect the experimental settings described in those
+papers, which may differ from SIDERIUS's training setting; human notes in
+lit_review_config.yaml are authoritative when they conflict with paper content."*
+
 ---
 
 ## §5 The manager layer: when and why

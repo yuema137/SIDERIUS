@@ -35,9 +35,9 @@ commit). A commit is not "done" until both its automated test gate is green
 
 - [x] **Commit 1** — Schema (`literature_review.py` + `external_agents.py`)
   · gate `tests/unit/agent/schemas/test_literature_review_schemas.py` · committed `c8fe641`
-- [ ] **Commit 2** — Paper resolver skill + TIDMAD pilot
-  · gate `tests/unit/agent/skills/test_paper_resolver_skill.py` + `docs/paper_resolver_pilot.md`
-  - [ ] **Checkpoint A** — Raw paper resolution output
+- [x] **Commit 2** — Paper resolver skill + TIDMAD pilot
+  · gate `tests/unit/agent/skills/test_paper_resolver_skill.py` + `docs/paper_resolver_pilot.md` · committed 2a `a2bd97d` (skill+tests+deps) + 2b (docs+ID-fix)
+  - [x] **Checkpoint A** — Raw paper resolution output · signed off 2026-05-26
 - [ ] **Commit 3** — Finalize `PaperExtract` + compression prompt
   · gate `tests/unit/agent/prompt_templates/test_literature_review_prompts.py` + real-run extract reviewed
   - [ ] **Checkpoint B** — Single paper LLM compression quality
@@ -246,7 +246,7 @@ URL switch. **Do not split.**
 - New: `docs/paper_resolver_pilot.md` (the pilot artifact)
 
 **Checklist**:
-- [ ] Write `skill_config.json` matching the
+- [x] Write `skill_config.json` matching the
       `denoising_score_skill/skill_config.json` template. Top-level
       `parameters.properties`:
   - `mode`: `Literal["resolve", "search"]` — required.
@@ -259,53 +259,70 @@ URL switch. **Do not split.**
   - `required`: `["mode"]` plus mode-dependent constraints (documented in
         the wrapper's docstring; Pydantic-style validation lives at the
         node-input boundary, not in `skill_config.json`).
-- [ ] Write `wrapper.py` exporting
+- [x] Write `wrapper.py` exporting
       `run_skill(sandbox, **kwargs) -> dict`. `sandbox` is accepted and
       ignored (consistent with universal skill convention per Q3).
-- [ ] Resolve-mode branch (`mode == "resolve"`):
-  - [ ] `source_type in {"arxiv","doi","openreview"}` → S2 lookup via
+- [x] Resolve-mode branch (`mode == "resolve"`):
+  - [x] `source_type in {"arxiv","doi","openreview"}` → S2 lookup via
         `GET /graph/v1/paper/{id_prefix}:{identifier}` (e.g.
-        `ARXIV:2302.09309`, `DOI:...`, `URL:...`). Parse `openAccessPdf`
+        `ARXIV:2406.04378`, `DOI:...`, `URL:...`). Parse `openAccessPdf`
         and `externalIds`.
-  - [ ] PDF download: prefer `openAccessPdf.url`; fall back to
+  - [x] PDF download: prefer `openAccessPdf.url`; fall back to
         `https://arxiv.org/pdf/{arxiv_id}.pdf` when `externalIds.ArXiv`
-        present. Stream to a temp file (do not buffer in memory).
-  - [ ] Local file branch (`source_type == "local"`): resolve repo-relative
+        present. **v1 deviation**: the PDF is buffered in memory
+        (`resp.content`), not streamed to a temp file — acceptable for papers
+        <10MB; revisit if a larger paper appears.
+  - [x] Local file branch (`source_type == "local"`): resolve repo-relative
         path against project root, read `.pdf` via `pdfplumber`, read
         `.txt` / `.md` directly.
-- [ ] Search-mode branch (`mode == "search"`):
-  - [ ] Build query against `GET /graph/v1/paper/search?query=...&limit=...&offset=...`
+- [x] Search-mode branch (`mode == "search"`):
+  - [x] Build query against `GET /graph/v1/paper/search?query=...&limit=...&offset=...`
         with optional filters mapped to the S2 query params.
-  - [ ] Unwrap `response["data"]` and run each paper object through the
+  - [x] Unwrap `response["data"]` and run each paper object through the
         same per-paper mapping helper used by resolve-mode. Result is a
         `list[RetrievedPaper]`-shaped payload.
-  - [ ] Search defaults to `verbosity=0` (metadata only — no PDF fetch
+  - [x] Search defaults to `verbosity=0` (metadata only — no PDF fetch
         per result, which would be a fan-out cost trap). PDF fetch only
         happens when the lit-review node later requests a specific paper
         at higher verbosity via a follow-up `resolve` call.
-  - [ ] Honour `limit` (default 10, cap at 50 — documented in wrapper).
-- [ ] Shared per-paper mapping helper (private): `_paper_object_to_dict(obj) -> dict`
+  - [x] Honour `limit` (default 10, cap at 50 — documented in wrapper).
+- [x] Shared per-paper mapping helper (private): `_paper_object_to_dict(obj) -> dict`
       returns the fields needed by `RetrievedPaper.s2_metadata` plus an
       `openAccessPdf` and `externalIds` pass-through. Used by both modes.
-- [ ] Per-run in-memory cache: module-level
+- [x] Per-run in-memory cache: module-level
       `_S2_CACHE: dict[tuple, dict]` keyed by the full request shape
       (mode + identifier + filters). A second call with the same shape
       returns the cached S2 response. Documented as **not** thread-safe.
-- [ ] Error contract: every exit path returns
+- [x] Rate limiting (S2 1 req/s): `_s2_get` paces sends via `_throttle_s2`
+      (module-level last-send timestamp; sleeps only the remaining fraction
+      of `S2_MIN_REQUEST_INTERVAL_S=1.1`) **and** retries up to
+      `S2_MAX_RETRIES=3` on 429/5xx, honouring `Retry-After` else exponential
+      backoff (`S2_RETRY_BACKOFF_BASE_S`). Scoped to S2 calls only — PDF
+      downloads (arxiv/publisher) are not S2-throttled. Never raises; not
+      thread-safe (same contract as the cache).
+- [x] URL-encoding fix: `_s2_lookup_id` percent-encodes the lookup id
+      (`safe=":/"`) so an OpenReview forum URL's `?id=...` reaches S2 inside the
+      path instead of being parsed as a query string. arXiv/DOI on-the-wire form
+      unchanged. (Bug found during the pilot; see `docs/paper_resolver_pilot.md`.)
+- [x] Empty-extraction fix: `_extract_pdf_text` treats whitespace-only output
+      (image-only/scanned PDFs) the same as a hard failure — returns
+      `(None, msg)` + `logger.warning`, so callers fall back to
+      `verbosity_achieved=0` instead of silently succeeding with `""`.
+- [x] Error contract: every exit path returns
       `{"status": "ok" | "partial" | "error", "data": ..., "message": ...}`.
       Never raise. `partial` covers e.g. resolve succeeded for S2 metadata
       but PDF download failed.
-- [ ] Run the **resolve-mode pilot** manually:
+- [x] Run the **resolve-mode pilot** manually:
       ```python
       from agent.skills.paper_resolver_skill.wrapper import run_skill
       result = run_skill(
           None, mode="resolve",
-          source_type="arxiv", identifier="2302.09309", verbosity=1,
+          source_type="arxiv", identifier="2406.04378", verbosity=1,
       )
       ```
       Capture: token-count estimate, openAccessPdf-vs-arxiv-fallback path
       taken, structural integrity of equations/sections, signal-to-noise.
-- [ ] Run the **search-mode pilot** manually (sanity, 3-line check —
+- [x] Run the **search-mode pilot** manually (sanity, 3-line check —
       not the design-driving pilot):
       ```python
       result = run_skill(
@@ -318,43 +335,65 @@ URL switch. **Do not split.**
       whether `openAccessPdf` populated on any of them. Just enough to
       prove the endpoint works — Commit 4's dynamic-search loop will
       exercise it in earnest.
-- [ ] Write `docs/paper_resolver_pilot.md` recording both pilots' outputs,
+- [x] Write `docs/paper_resolver_pilot.md` recording both pilots' outputs,
       plus a 200-line excerpt of the TIDMAD extracted text so Commit 3
       can reference it without re-running. **Show the user before
       finalising the file.**
-- [ ] Write `tests/unit/agent/skills/test_paper_resolver_skill.py`:
-  - [ ] resolve / arxiv — mocked S2 response, mocked PDF download, asserts
+- [x] Write `tests/unit/agent/skills/test_paper_resolver_skill.py`:
+  - [x] resolve / arxiv — mocked S2 response, mocked PDF download, asserts
         `openAccessPdf` path is taken.
-  - [ ] resolve / arxiv — S2 returns no `openAccessPdf`, asserts arXiv
+  - [x] resolve / arxiv — S2 returns no `openAccessPdf`, asserts arXiv
         fallback URL is used.
-  - [ ] resolve / arxiv — both paths fail → `verbosity_achieved=0`, S2
+  - [x] resolve / arxiv — both paths fail → `verbosity_achieved=0`, S2
         metadata only, status="partial", no exception.
-  - [ ] resolve / doi — mocked S2 returns metadata, no PDF,
+  - [x] resolve / doi — mocked S2 returns metadata, no PDF,
         verbosity_achieved=0.
-  - [ ] resolve / openreview — mocked S2 returns metadata + openAccessPdf,
+  - [x] resolve / openreview — mocked S2 returns metadata + openAccessPdf,
         verbosity_achieved=2 (full text path).
-  - [ ] resolve / local `.pdf` — `pdfplumber` is mocked to return canned text.
-  - [ ] resolve / local `.md` — direct file read, no pdfplumber.
-  - [ ] resolve / local — absolute path rejected (the `PaperSource` validator
+  - [x] resolve / local `.pdf` — `pdfplumber` is mocked to return canned text.
+  - [x] resolve / local `.md` — direct file read, no pdfplumber.
+  - [x] resolve / local — absolute path rejected (the `PaperSource` validator
         catches it at construction; this test confirms the wrapper also
         defends in-depth).
-  - [ ] **search — happy path**: mocked S2 returns an envelope with 3
+  - [x] **search — happy path**: mocked S2 returns an envelope with 3
         `data` items; wrapper unwraps and returns 3 mapped paper objects.
-  - [ ] **search — empty result**: mocked S2 returns `{"total": 0,
+  - [x] **search — empty result**: mocked S2 returns `{"total": 0,
         "offset": 0, "data": []}` → wrapper returns `status="ok"`,
         empty list, no exception.
-  - [ ] **search — filter passthrough**: `year=2023`, `min_citation_count=10`
+  - [x] **search — filter passthrough**: `year=2023`, `min_citation_count=10`
         appear in the request URL.
-  - [ ] cache hit — two calls with the same arguments (resolve or search)
+  - [x] cache hit — two calls with the same arguments (resolve or search)
         → `requests.get` called once.
-  - [ ] error case — `requests.get` raises → wrapper returns
+  - [x] error case — `requests.get` raises → wrapper returns
         `{"status":"error","message":...}`, does not propagate.
+  - [x] rate limit — `_throttle_s2` sleeps only the remaining interval when
+        called within `S2_MIN_REQUEST_INTERVAL_S`; no sleep once enough time
+        has elapsed.
+  - [x] rate limit — a 429 then 200 is retried to success; a persistent 429
+        exhausts `S2_MAX_RETRIES` then returns `status="error"` (no raise);
+        a non-retryable status (404) returns immediately; `Retry-After` is
+        honoured when present.
+  - [x] url encoding — `_s2_lookup_id` percent-encodes `?`/`=` in an OpenReview
+        URL; arXiv/DOI ids are byte-identical after encoding.
+  - [x] empty extraction — `_extract_pdf_text` returns `(None, msg)` when every
+        page extracts to empty text.
+- [x] **Real-API source-type validation** — opt-in `@real_run` integration tests
+      in `tests/integration/skills/test_paper_resolver_skill.py` (the unit file
+      only covers mocked HTTP/PDF):
+  - [x] resolve / arxiv — live S2 + real pdfplumber on TIDMAD `2406.04378`.
+  - [x] resolve / doi — live S2 on `10.48550/arXiv.2406.04378`; resolves to the
+        same paper (ArXiv-id cross-check).
+  - [x] resolve / openreview — `xfail`: S2 does not index OpenReview URLs and
+        there is no fallback yet (spec §9).
+  - [x] resolve / local `.txt` — offline real read of
+        `reference_data/tidmad_signal_frequencies.txt` (unmarked, no key).
 
 **Test gate**:
 ```
 .venv/bin/python -m pytest tests/unit/agent/skills/test_paper_resolver_skill.py -q
-.venv/bin/python -m ruff check agent/skills/paper_resolver_skill/ tests/unit/agent/skills/test_paper_resolver_skill.py
+.venv/bin/python -m ruff check agent/skills/paper_resolver_skill/ tests/unit/agent/skills/test_paper_resolver_skill.py tests/integration/skills/test_paper_resolver_skill.py
 .venv/bin/python -m pyright agent/skills/paper_resolver_skill/wrapper.py
+.venv/bin/python -m pytest tests/integration/skills/test_paper_resolver_skill.py -m real_run -q   # opt-in: live S2 (3 tests, skip w/o network); local .txt runs offline in the full integration sweep
 ```
 Plus: `docs/paper_resolver_pilot.md` exists with **both** resolve-mode and
 search-mode outputs, reviewed by user.
@@ -374,7 +413,7 @@ from agent.skills.paper_resolver_skill.wrapper import run_skill
 # Full text (verbosity=2) — what compression sees in worst case.
 v2 = run_skill(
     None, mode="resolve", source_type="arxiv",
-    identifier="2302.09309", verbosity=2,
+    identifier="2406.04378", verbosity=2,
 )
 full_text = v2["data"]["full_text"]
 print(full_text[:3000])  # first 3000 chars
@@ -385,7 +424,7 @@ print(f"Total length: {len(full_text)} chars, "
 # Verbosity=1 — what the LLM compression prompt will receive.
 v1 = run_skill(
     None, mode="resolve", source_type="arxiv",
-    identifier="2302.09309", verbosity=1,
+    identifier="2406.04378", verbosity=1,
 )
 print(v1["status"], v1["message"])
 ```
@@ -428,15 +467,34 @@ inspection answers, a representative excerpt of the extracted text (first
 equation handling. Same file also captures the search-mode sanity check
 (per the search-pilot bullet above) — single file, two pilots.
 
-**Open questions / decisions needed**:
-- HTTP library — confirm `requests` is the project default by grepping
-  before writing. If `httpx` is the convention, switch.
-- S2 rate limits — does the agent need to thread an API key from the env?
-  Lean: yes (`S2_API_KEY` if set; degrade silently to unauthenticated
-  shared pool if not). Confirm behaviour during the pilot. Both modes
-  share the same per-key quota — no mode-specific rate-limit code needed.
-- PDF extraction library — `pdfplumber` is the spec default; confirm it's
-  already in `pyproject.toml`. If not, this commit adds it.
+**Open questions / decisions needed** — RESOLVED:
+- HTTP library → `requests` (project default; the only HTTP lib the wrapper
+  imports). ✅
+- S2 rate limits / API key → `S2_API_KEY` env var (silent-degrade to the
+  unauthenticated pool if absent), plus a 1 req/s `_throttle_s2` pace and a
+  429/5xx `Retry-After`-aware retry. ✅
+- PDF extraction library → `pdfplumber 0.11.9` (added to `pyproject.toml`,
+  installed via `uv sync`). ✅
+
+**Verification (Checkpoint A — signed off 2026-05-26)**:
+- Unit gate: `pytest tests/unit/agent/skills/test_paper_resolver_skill.py -q`
+  → **35 passed**; ruff + pyright clean.
+- Real-API source-type validation:
+  `pytest tests/integration/skills/test_paper_resolver_skill.py`
+  → **3 passed, 1 xfailed** (arxiv ✅, doi ✅, openreview xfail [S2 coverage],
+  local ✅).
+- Live pilot vs TIDMAD `2406.04378`: resolve v2 = 73,644 chars ≈ 18.4k tokens
+  (via `arxiv_fallback` — S2 `openAccessPdf.url` was empty), resolve v1, and a
+  search sanity check. Captured in `docs/paper_resolver_pilot.md`.
+- **Decision locked (F3): no `key_equations` field; equations described in
+  prose.** Extraction degrades math (`∑`→`(cid:88)`, subscripts flattened).
+- **Domain caveat (F4): TIDMAD model rankings are frequency-split; SIDERIUS is
+  full-spectrum.** The compression prompt must inject this qualifier — a hard
+  requirement at Checkpoint B.
+- ID correction: `2302.09309` (CVPR *StyleAdv*, wrong) → `2406.04378` (TIDMAD,
+  per the legacy repo README) across docs/code/tests.
+- Bugs found + fixed: URL-encoding truncation (openreview `?id=`) and
+  empty-extraction silent-success.
 
 ---
 
@@ -546,6 +604,11 @@ other_paper_id = search["data"]["results"][0]["externalIds"].get("ArXiv")
   relevant to TIDMAD denoising, or is it a generic "this paper is about
   signal processing"?
 - Are there hallucinations — claims that cannot be found in the source text?
+- Does `architecture_details` correctly qualify all model comparisons with
+  "under frequency-split training", and explicitly identify WaveNet as the only
+  full-spectrum baseline? If the extract presents FCNet/PUNet/Transformer
+  rankings **without** this qualifier, it is a **failed compression** — revise
+  the prompt before Checkpoint B can be signed off.
 - Are the field lengths appropriate? Too short means information loss; too
   long means the compression is not doing its job. Check each field against
   its documented word budget.
@@ -573,6 +636,10 @@ reading **only** the `PaperExtract` (not the original paper) would learn
 something concrete and actionable. If not good enough after one prompt
 revision, escalate to the user before trying a second revision. **Do not
 proceed to Commit 4 until this is signed off.**
+
+- **Hard requirement (domain correctness)**: the frequency-split qualifier check
+  above is mandatory. A compression that omits it **cannot proceed to Commit 4**
+  regardless of other quality criteria.
 
 **Artifact to commit**: `docs/paper_extract_pilot.md` containing the full
 JSON output of both `PaperExtract` instances, the human judgment on each
@@ -708,7 +775,7 @@ interp = InterpretationOutput.model_validate_json(interp_path.read_text())
 lit_in = LiteratureReviewInput(
     experiment_history=interp,
     root_papers=[PaperSource(source_type="arxiv",
-                             identifier="2302.09309", verbosity=1)],
+                             identifier="2406.04378", verbosity=1)],
     dynamic_search=DynamicSearchConfig(
         enabled=True, max_rounds=3,
         initial_verbosity=0, escalation_allowed=True,
@@ -896,7 +963,7 @@ as the always-true trigger.
   ```yaml
   root_papers:
     - source_type: arxiv
-      identifier: "2302.09309"      # TIDMAD
+      identifier: "2406.04378"      # TIDMAD
       verbosity: 1
   dynamic_search:
     enabled: true

@@ -71,13 +71,13 @@ def _make_storage() -> StorageConfig:
 
 class TestPaperSource:
     def test_arxiv_happy_path(self):
-        s = PaperSource(source_type="arxiv", identifier="2302.09309", verbosity=1)
+        s = PaperSource(source_type="arxiv", identifier="2406.04378", verbosity=1)
         assert s.source_type == "arxiv"
-        assert s.identifier == "2302.09309"
+        assert s.identifier == "2406.04378"
         assert s.verbosity == 1
 
     def test_default_verbosity_is_one(self):
-        s = PaperSource(source_type="arxiv", identifier="2302.09309")
+        s = PaperSource(source_type="arxiv", identifier="2406.04378")
         assert s.verbosity == 1
 
     def test_local_repo_relative_ok(self):
@@ -175,8 +175,8 @@ class TestPaperExtract:
 class TestRetrievedPaper:
     def test_verbosity_0_no_extract(self):
         p = RetrievedPaper(
-            paper_id="arxiv:2302.09309",
-            source=PaperSource(source_type="arxiv", identifier="2302.09309"),
+            paper_id="arxiv:2406.04378",
+            source=PaperSource(source_type="arxiv", identifier="2406.04378"),
             s2_metadata={"title": "TIDMAD"},
             extract=None,
             full_text=None,
@@ -189,8 +189,8 @@ class TestRetrievedPaper:
 
     def test_verbosity_2_full_text(self):
         p = RetrievedPaper(
-            paper_id="arxiv:2302.09309",
-            source=PaperSource(source_type="arxiv", identifier="2302.09309"),
+            paper_id="arxiv:2406.04378",
+            source=PaperSource(source_type="arxiv", identifier="2406.04378"),
             s2_metadata={"title": "TIDMAD"},
             extract=PaperExtract(title="TIDMAD"),
             full_text="Long extracted body ...",
@@ -249,7 +249,7 @@ class TestLiteratureReviewInput:
         i = LiteratureReviewInput(
             experiment_history=_make_interp_output(),
             root_papers=[
-                PaperSource(source_type="arxiv", identifier="2302.09309"),
+                PaperSource(source_type="arxiv", identifier="2406.04378"),
             ],
             storage=_make_storage(),
             run_name="lit_v1",
@@ -314,9 +314,9 @@ class TestLiteratureReviewOutput:
             suggested_mindset="explore",
             retrieved_papers=[
                 RetrievedPaper(
-                    paper_id="arxiv:2302.09309",
+                    paper_id="arxiv:2406.04378",
                     source=PaperSource(
-                        source_type="arxiv", identifier="2302.09309"
+                        source_type="arxiv", identifier="2406.04378"
                     ),
                     verbosity_achieved=1,
                     extract=PaperExtract(title="TIDMAD"),

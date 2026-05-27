@@ -161,8 +161,14 @@ mirroring `tidmad_data_config.yaml`):
 ```yaml
 root_papers:
   - source: arxiv
-    id: "2302.09309"
-    notes: "TIDMAD primary paper"
+    id: "2406.04378"
+    notes: >
+      TIDMAD primary paper. Use for: dataset physical characteristics,
+      signal injection protocol, scoring formula, noise floor properties.
+      DO NOT use model performance rankings as architectural guidance —
+      all benchmarked models except WaveNet use frequency-split training,
+      which is incompatible with SIDERIUS's full-spectrum setting.
+      WaveNet is the only directly comparable baseline.
     verbosity: 1
   - source: doi
     id: "10.1103/PhysRevD.XX"
@@ -259,7 +265,7 @@ agent carries on with metadata only.
 ### Cache
 
 Root paper verbosity=1 extracts are cached in
-`reference_data/root_papers_cache/` (e.g. `arxiv_2302.09309_v1.json`).
+`reference_data/root_papers_cache/` (e.g. `arxiv_2406.04378_v1.json`).
 This directory **is committed to the repo**: root papers are a stable
 human-curated set, the verbosity=1 extracts are deterministic for a fixed
 LLM, and committing them means CI and all machines work without
@@ -547,3 +553,11 @@ Still open:
    dedup by `cite_id` — is TBD when a second external agent is wired.
    Existing renderer-side dedup and confidence sorting in
    `render_expert_context` are already in place to soften this.
+5. **OpenReview source type has no fallback when S2 does not index the URL.**
+   S2 coverage of workshop/under-review papers is inconsistent. Until a fallback
+   to the OpenReview API is implemented, `source: openreview` entries in
+   `lit_review_config.yaml` should only be used for papers confirmed to be
+   indexed by S2. (The URL-encoding bug that truncated `?id=…` before it reached
+   S2 is fixed — see `docs/paper_resolver_pilot.md` — so the limiter is genuine
+   S2 coverage, not request construction. Confirmed in the Commit 2 pilot: a
+   correctly-encoded ICLR forum URL still returns 404.)
