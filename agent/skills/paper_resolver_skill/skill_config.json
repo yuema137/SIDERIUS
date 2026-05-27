@@ -1,0 +1,57 @@
+{
+  "name": "paper_resolver_skill",
+  "description": "Resolve a paper identifier (arxiv/doi/openreview/local) to S2 metadata + optional PDF text, or run a Semantic Scholar keyword search. Single skill, two modes: 'resolve' for one known paper, 'search' for keyword lookup. Shared per-paper mapping helper; only URL + envelope-unwrap differ between modes. Never raises — every exit returns a {status, data, message} envelope.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "mode": {
+        "type": "string",
+        "enum": ["resolve", "search"],
+        "description": "Skill dispatch mode. 'resolve' fetches one paper by identifier; 'search' runs an S2 keyword query and returns a list of matched papers (metadata-only by default — no per-result PDF fetch)."
+      },
+      "source_type": {
+        "type": "string",
+        "enum": ["arxiv", "doi", "openreview", "local"],
+        "description": "Resolve-mode only: identifier scheme. Ignored when mode='search'."
+      },
+      "identifier": {
+        "type": "string",
+        "description": "Resolve-mode only: arXiv ID (e.g. '2406.04378'), DOI, OpenReview URL, or repo-relative path. Ignored when mode='search'."
+      },
+      "verbosity": {
+        "type": "integer",
+        "enum": [0, 1, 2],
+        "description": "Depth of resolution. 0 = S2 metadata only (no PDF). 1 = metadata + extracted text snippet (later compressed to PaperExtract by the lit-review node). 2 = full extracted text. Resolve-mode default 1; search-mode default 0 (fan-out cost trap otherwise)."
+      },
+      "query": {
+        "type": "string",
+        "description": "Search-mode only: keyword query string. Ignored when mode='resolve'."
+      },
+      "limit": {
+        "type": "integer",
+        "description": "Search-mode only: maximum results to return. Default 10, hard-capped at 50."
+      },
+      "offset": {
+        "type": "integer",
+        "description": "Search-mode only: pagination offset. Default 0."
+      },
+      "year": {
+        "type": "string",
+        "description": "Search-mode optional filter: publication-year filter as accepted by the S2 search endpoint (e.g. '2020', '2019-2023', '2018-')."
+      },
+      "fields_of_study": {
+        "type": "string",
+        "description": "Search-mode optional filter: comma-separated S2 fieldsOfStudy values (e.g. 'Computer Science,Physics')."
+      },
+      "publication_types": {
+        "type": "string",
+        "description": "Search-mode optional filter: comma-separated S2 publicationTypes values (e.g. 'JournalArticle,Conference')."
+      },
+      "min_citation_count": {
+        "type": "integer",
+        "description": "Search-mode optional filter: minimum citation count, mapped to the S2 minCitationCount query param."
+      }
+    },
+    "required": ["mode"]
+  }
+}
