@@ -39,7 +39,7 @@ commit). A commit is not "done" until both its automated test gate is green
   · gate `tests/unit/agent/skills/test_paper_resolver_skill.py` + `docs/paper_resolver_pilot.md` · committed 2a `a2bd97d` (skill+tests+deps) + 2b `5796cea` (docs+ID-fix); field-name lock `a659b47`
   - [x] **Checkpoint A** — Raw paper resolution output · signed off 2026-05-26
 - [x] **Commit 3** — Finalize `PaperExtract` + compression prompt
-  · gate 42 passed (schema + prompt suites) + real-run extract reviewed · artifact `docs/paper_extract_pilot.md` · committed `<pending>`
+  · gate 42 passed (schema + prompt suites) + real-run extract reviewed · artifact `docs/paper_extract_pilot.md` · committed `879e90e`
   - [x] **Checkpoint B** — Single paper LLM compression quality · signed off 2026-05-26 (hard requirement passes on both papers; one targeted prompt revision applied)
 - [ ] **Commit 4** — `nodes/ml_literature_review.py` core loop
   · gate `tests/unit/agent/ml_literature_review/test_node.py` + real-run output reviewed
