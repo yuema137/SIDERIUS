@@ -38,9 +38,9 @@ commit). A commit is not "done" until both its automated test gate is green
 - [x] **Commit 2** — Paper resolver skill + TIDMAD pilot
   · gate `tests/unit/agent/skills/test_paper_resolver_skill.py` + `docs/paper_resolver_pilot.md` · committed 2a `a2bd97d` (skill+tests+deps) + 2b `5796cea` (docs+ID-fix); field-name lock `a659b47`
   - [x] **Checkpoint A** — Raw paper resolution output · signed off 2026-05-26
-- [ ] **Commit 3** — Finalize `PaperExtract` + compression prompt
-  · gate `tests/unit/agent/prompt_templates/test_literature_review_prompts.py` + real-run extract reviewed
-  - [ ] **Checkpoint B** — Single paper LLM compression quality
+- [x] **Commit 3** — Finalize `PaperExtract` + compression prompt
+  · gate 42 passed (schema + prompt suites) + real-run extract reviewed · artifact `docs/paper_extract_pilot.md` · committed `<pending>`
+  - [x] **Checkpoint B** — Single paper LLM compression quality · signed off 2026-05-26 (hard requirement passes on both papers; one targeted prompt revision applied)
 - [ ] **Commit 4** — `nodes/ml_literature_review.py` core loop
   · gate `tests/unit/agent/ml_literature_review/test_node.py` + real-run output reviewed
   - [ ] **Checkpoint C** — Dynamic search loop behavior
@@ -526,50 +526,69 @@ reviewed**.
       `InterpretationOutput`/`CacheEntry` and must not be reused on
       `PaperExtract`. Gate: `test_literature_review_schemas.py` 25 passed,
       ruff + pyright clean. Committed `a659b47`.
-- [ ] Read `docs/paper_resolver_pilot.md` end-to-end before changing
+- [x] Read `docs/paper_resolver_pilot.md` end-to-end before changing
       `PaperExtract`.
-- [ ] **Stop and ask** if any of these is true after reading the pilot:
-  - PDF text is too noisy for reliable equation capture (no `key_equations`
-    field).
-  - Section structure isn't preserved (`architecture_details` won't work as
-    a free-text field; may need sub-fields).
-  - Domain-name generality — RESOLVED pre-Commit-3: `relevance_to_squid` was
-    renamed to the task-agnostic `relevance_to_task`; the compression prompt
-    injects the concrete task description.
-- [ ] Finalize `PaperExtract` fields based on the pilot. Default candidate
-      list (subject to pilot review): `title`, `authors`, `year`,
-      `core_idea` (≤80 words), `architecture_details` (≤150 words),
-      `key_results` (≤120 words), `relevance_to_task` (≤100 words).
-      Decide via pilot whether to add `key_equations: str` (LaTeX) and
-      `architecture_diagram_md: str`. Document the per-field word budget
-      in the docstring.
-- [ ] Remove the provisional `TODO` comment.
-- [ ] Write `render_paper_extract_prompt(raw_text)`:
-  - System prompt: role = "research-paper summariser for an ML denoising
-    agent"; output **must** be valid JSON matching `PaperExtract`; word
-    budgets per field; missing fields → `""` not `null`.
-  - User prompt: includes the raw paper text (truncated to a documented
-    max-char cap that fits the model's context window — confirm the cap by
-    reading `agent/llm_bridge.py`'s context handling, do not guess).
-- [ ] Unit test: feed a hand-crafted valid JSON string through
-      `bridge.generate(...)` (mocked) and assert `PaperExtract` parses it.
-- [ ] Unit test: feed a malformed JSON string through mocked
-      `bridge.generate(...)` and assert the node falls back to
-      `verbosity_achieved=0` with `extract=None`. (Note: this test will be
-      reused by Commit 4; this commit asserts the validation half only.)
-- [ ] Unit test: prompt-rendering function produces deterministic output
-      for a fixed input (snapshot-style — diff against an inline expected
-      string).
-- [ ] **Real-run test** (`@real_run`): call
-      `bridge.generate(*render_paper_extract_prompt(tidmad_text))` with the
-      TIDMAD paper text from the pilot. Validate the returned JSON parses
-      into `PaperExtract`. **Show the user the actual extract output before
-      closing the commit.**
+- [x] **Stop and ask** — conditions evaluated against the pilot; none forced a
+      hard stop, all resolved:
+  - PDF text too noisy for equations → confirmed (F3): **no `key_equations`
+    field**; math captured in prose.
+  - Section structure preserved (pilot §2) → `architecture_details` works as a
+    single free-text field; no sub-fields needed.
+  - Domain-name generality — already RESOLVED pre-Commit-3: `relevance_to_squid`
+    → task-agnostic `relevance_to_task`; prompt injects the concrete task.
+- [x] Finalize `PaperExtract` fields: locked 7-field set `title`, `authors`,
+      `year`, `core_idea` (≤80), `architecture_details` (≤150),
+      `key_results` (≤120), `relevance_to_task` (≤100). **No `key_equations`
+      / `architecture_diagram_md`** (F3). Word budgets documented in the
+      class docstring + per-field `Field(description=...)`.
+- [x] Remove the provisional notes (class docstring + `architecture_details`)
+      and update the module-level schema docstring.
+- [x] Write `render_paper_extract_prompt(raw_text, task_description=SIDERIUS_TASK)`
+      in `agent/prompt_templates/literature_review/__init__.py`:
+  - System prompt (`paper_extract_system.md`, `{TASK_DESCRIPTION}` placeholder):
+    role, 7-key JSON contract, `""` not `null`, per-field budgets, anti-noise
+    rules (`(cid:NN)`/margin stamp/affiliations/TOC/despacing), math-in-prose,
+    anti-hallucination, and the **generic paper-conditional** frequency-split
+    rule (verbatim; not TIDMAD-specific — see decisions below).
+  - User prompt: raw text truncated to `MAX_RAW_TEXT_CHARS=120_000` chars
+    (~30k tok) with a `[...TRUNCATED...]` marker.
+- [x] Unit test: valid dict from mocked `bridge.generate(...)` parses into
+      `PaperExtract` (all 7 fields round-trip).
+- [x] Unit test: malformed payload (wrong-typed field / non-dict) raises
+      `ValidationError` — the validation half (Commit 4 adds the node-level
+      `verbosity_achieved=0` / `extract=None` fallback).
+- [x] Unit test: `render_paper_extract_prompt` deterministic + content
+      asserts (7 keys, freq-split rule, anti-noise, task injection,
+      truncation behavior).
+- [x] **Real-run test** (`@real_run`): `tests/integration/prompt_templates/test_paper_extract_compression.py`
+      resolves TIDMAD live (verbosity=2), compresses via real `LLMBridge`,
+      validates into `PaperExtract`. **1 passed**; both extracts shown to the
+      user and signed off (Checkpoint B). Artifact: `docs/paper_extract_pilot.md`.
+
+**Implementation notes / decisions (Commit 3):**
+- Code-fact corrections (checked, not guessed): (1) `bridge.generate()` returns
+  a **parsed dict**, not a string → use `PaperExtract.model_validate(...)`, not
+  `model_validate_json`. (2) `llm_bridge.py` imposes **no length cap** — the
+  truncation guard lives in `render_paper_extract_prompt`. (3) **No
+  `LLMBridge.get_instance()`** — construct `LLMBridge(provider=..., model_id=...)`
+  directly. The Checkpoint B snippet below reflects (1)/(3).
+- Decision 1 — frequency-split rule phrased **generically/paper-conditional**
+  (not TIDMAD-specific): the same prompt also compresses non-TIDMAD search
+  papers, where a TIDMAD-named claim would be a hallucination. Generic phrasing
+  fires correctly for TIDMAD (which does describe frequency-split) and stays
+  silent for papers that don't.
+- Decision 2 — truncation cap = **120,000 chars** (~30k tok), `[...TRUNCATED...]`
+  marker.
+- Decision 3 — real-run test under `tests/integration/` (project convention),
+  not the unit folder.
+- Decision 4 — task injected via optional `task_description=SIDERIUS_TASK` param.
+- **Unit gate result (2026-05-26):** `41 passed` (schema + prompt suites),
+  ruff `All checks passed`, pyright `0 errors`.
 
 **Test gate**:
 ```
 .venv/bin/python -m pytest tests/unit/agent/schemas/test_literature_review_schemas.py tests/unit/agent/prompt_templates/test_literature_review_prompts.py -q
-.venv/bin/python -m pytest tests/unit/agent/prompt_templates/test_literature_review_prompts.py -m real_run -q   # opt-in, real LLM call
+.venv/bin/python -m pytest tests/integration/prompt_templates/test_paper_extract_compression.py -m real_run -q -s   # opt-in, real S2+LLM call
 .venv/bin/python -m ruff check agent/schemas/literature_review.py agent/prompt_templates/literature_review/
 .venv/bin/python -m pyright agent/schemas/literature_review.py agent/prompt_templates/literature_review/__init__.py
 ```
@@ -590,12 +609,12 @@ from agent.llm_bridge import LLMBridge  # confirm accessor at implementation tim
 from agent.schemas.literature_review import PaperExtract
 import json
 
-bridge = LLMBridge.get_instance()  # or the actual project pattern
+bridge = LLMBridge(provider="openai", model_id="gpt-4o-mini")  # no get_instance()
 
 # Paper 1: TIDMAD (known root paper)
 sys_prompt, user_prompt = render_paper_extract_prompt(tidmad_full_text)
-raw = bridge.generate(sys_prompt, user_prompt)
-extract_tidmad = PaperExtract.model_validate_json(raw)
+raw = bridge.generate(sys_prompt, user_prompt)  # returns a parsed dict
+extract_tidmad = PaperExtract.model_validate(raw)  # NOT model_validate_json
 print(json.dumps(extract_tidmad.model_dump(), indent=2))
 
 # Paper 2: top hit from a dynamic search to test generalisation.
@@ -655,6 +674,15 @@ proceed to Commit 4 until this is signed off.**
 **Artifact to commit**: `docs/paper_extract_pilot.md` containing the full
 JSON output of both `PaperExtract` instances, the human judgment on each
 inspection bullet, and any prompt changes made as a result.
+
+**Outcome (2026-05-26): SIGNED OFF.** Both papers compressed via real
+`gpt-4o-mini`: TIDMAD (root) + `arxiv:2308.11644` (dynamic-search hit). Hard
+requirement passes on both — the generic frequency-split rule fires for TIDMAD
+(qualifying the 6.43 FC-Net score with "under frequency-split training" and
+naming WaveNet as the full-spectrum baseline) and stays silent on the vibration
+paper (no hallucinated regime). One targeted prompt revision was applied
+(regime-on-every-number + per-model mechanism for benchmark papers); see
+`docs/paper_extract_pilot.md` §4 for the before/after.
 
 **Open questions / decisions needed**:
 - Pilot-dependent (see checklist above): equations field? diagram field?

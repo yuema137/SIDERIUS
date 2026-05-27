@@ -145,6 +145,21 @@ class TestDynamicSearchConfig:
 
 
 class TestPaperExtract:
+    def test_field_set_is_locked(self):
+        # The canonical seven-field set is final (locked after the Commit 2
+        # pilot). This guards against re-adding key_equations/limitations
+        # (the latter conflicts with AgentCard.limitations) or key_findings
+        # (reserved for InterpretationOutput/CacheEntry).
+        assert set(PaperExtract.model_fields) == {
+            "title",
+            "authors",
+            "year",
+            "core_idea",
+            "architecture_details",
+            "key_results",
+            "relevance_to_task",
+        }
+
     def test_all_defaults_empty_string(self):
         # Empty-string defaults are intentional — the compression LLM can
         # produce a partial extract without failing validation.

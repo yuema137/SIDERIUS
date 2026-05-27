@@ -5,8 +5,8 @@ Input and output schemas for nodes/ml_literature_review.py.
 Defines the typed surface for the lit-review node:
   - PaperSource          : a single root paper or search result reference
   - DynamicSearchConfig  : knobs for the per-iteration S2 search loop
-  - PaperExtract         : LLM-compressed view of one paper (PROVISIONAL —
-                           finalized in Commit 3 after the resolver-skill pilot)
+  - PaperExtract         : LLM-compressed view of one paper (field set final;
+                           see docs/paper_resolver_pilot.md)
   - RetrievedPaper       : audit-trail entry per paper the agent looked at
   - LiteratureReviewInput / LiteratureReviewOutput : node boundary schemas
 
@@ -97,17 +97,29 @@ class DynamicSearchConfig(BaseModel):
 
 
 class PaperExtract(BaseModel):
-    """LLM-compressed extract of a single paper.
+    """LLM-compressed extract of a single paper — the verbosity-1 view.
 
-    PROVISIONAL — Commit 3 will finalize the field list after the
-    paper-resolver-skill pilot (docs/paper_resolver_pilot.md). The pilot
-    answers whether equations and architectural diagrams can be reliably
-    captured from PDF text; if so, fields like key_equations and
-    architecture_diagram_md may be added then.
+    Produced by the compression prompt in
+    ``agent/prompt_templates/literature_review`` from a paper's full text.
+    The field set is **final**, locked after the Commit 2 paper-resolver
+    pilot (docs/paper_resolver_pilot.md): seven free-text string fields, no
+    structured equation/diagram fields. Pilot finding F3 showed PDF-extracted
+    equations are too degraded (``∑`` → ``(cid:88)``, flattened sub/super-
+    scripts) to reconstruct as LaTeX, so mathematical methods are captured in
+    prose inside ``key_results`` / ``architecture_details`` rather than a
+    dedicated ``key_equations`` field.
 
-    Fields default to empty string (not None) so the compression LLM can
-    produce a partial extract — Pydantic validation should not fail when a
-    paper genuinely has no architectural content to summarise.
+    All fields default to empty string (not ``None``) so the compression LLM
+    can emit a partial extract — Pydantic validation must not fail when a
+    paper genuinely has no content for a field. The compression prompt
+    instructs the LLM to use ``""`` (never ``null``) for anything it cannot
+    ground in the source text.
+
+    Per-field word budgets (enforced by the prompt, not by Pydantic):
+      - ``core_idea``            ≤ 80 words
+      - ``architecture_details`` ≤ 150 words
+      - ``key_results``          ≤ 120 words
+      - ``relevance_to_task``    ≤ 100 words
     """
 
     title: str = Field(default="", description="Paper title.")
@@ -119,13 +131,15 @@ class PaperExtract(BaseModel):
     )
     architecture_details: str = Field(
         default="",
-        description="Architectural description: layers, blocks, key design "
-        "decisions (≤150 words). PROVISIONAL — pilot may split into "
-        "structured sub-fields.",
+        description="Architectural description: model type, layer/block "
+        "structure, key design choices, and how the approach compares to "
+        "alternatives the paper discusses (≤150 words). Math is described in "
+        "prose, not LaTeX (pilot finding F3).",
     )
     key_results: str = Field(
         default="",
-        description="Headline empirical results (≤120 words).",
+        description="Headline empirical results (≤120 words). Every performance "
+        "ranking must carry the training regime it was measured under.",
     )
     relevance_to_task: str = Field(
         default="",
