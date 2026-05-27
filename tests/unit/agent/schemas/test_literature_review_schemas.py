@@ -40,8 +40,7 @@ def _make_agent_card() -> AgentCard:
             "without empirical confirmation."
         ),
         trust_guidance=(
-            "Treat findings as promising priors; only experiment runs confirm "
-            "applicability."
+            "Treat findings as promising priors; only experiment runs confirm applicability."
         ),
     )
 
@@ -330,9 +329,7 @@ class TestLiteratureReviewOutput:
             retrieved_papers=[
                 RetrievedPaper(
                     paper_id="arxiv:2406.04378",
-                    source=PaperSource(
-                        source_type="arxiv", identifier="2406.04378"
-                    ),
+                    source=PaperSource(source_type="arxiv", identifier="2406.04378"),
                     verbosity_achieved=1,
                     extract=PaperExtract(title="TIDMAD"),
                 ),

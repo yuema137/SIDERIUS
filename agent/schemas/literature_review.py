@@ -63,8 +63,7 @@ class PaperSource(BaseModel):
             )
         if ".." in self.identifier.split("/"):
             raise ValueError(
-                f"source_type='local' path may not contain '..' segments: "
-                f"{self.identifier!r}"
+                f"source_type='local' path may not contain '..' segments: {self.identifier!r}"
             )
         return self
 

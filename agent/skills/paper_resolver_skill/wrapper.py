@@ -46,8 +46,8 @@ S2_SEARCH_LIMIT_CAP = 50
 
 # Rate-limit controls for the Semantic Scholar API (1 req/s ceiling).
 S2_MIN_REQUEST_INTERVAL_S = 1.1  # slight margin over 1.0s for clock skew
-S2_MAX_RETRIES = 3               # retry attempts beyond the first
-S2_RETRY_BACKOFF_BASE_S = 1.0    # exp-backoff base when no Retry-After header
+S2_MAX_RETRIES = 3  # retry attempts beyond the first
+S2_RETRY_BACKOFF_BASE_S = 1.0  # exp-backoff base when no Retry-After header
 
 # Repo root, resolved relative to this file. ``local`` source paths are
 # resolved against this; absolute paths and ``..`` segments are rejected
@@ -155,7 +155,7 @@ def _s2_get(
                 backoff = (
                     retry_after
                     if retry_after is not None
-                    else S2_RETRY_BACKOFF_BASE_S * (2 ** attempt)
+                    else S2_RETRY_BACKOFF_BASE_S * (2**attempt)
                 )
                 time.sleep(backoff)
                 continue
@@ -236,9 +236,7 @@ def _extract_pdf_text(pdf_bytes: bytes) -> tuple[str | None, str | None]:
         # Image-only / scanned PDFs yield no extractable text. Treat empty
         # extraction as a failure so callers fall back to verbosity_achieved=0
         # instead of silently "succeeding" with an empty string.
-        logger.warning(
-            "PDF extraction produced no text (likely an image-only/scanned PDF)"
-        )
+        logger.warning("PDF extraction produced no text (likely an image-only/scanned PDF)")
         return None, "PDF extraction produced no text (likely image-only/scanned PDF)"
     return text, None
 
@@ -298,9 +296,7 @@ def _s2_lookup_id(source_type: str, identifier: str) -> str:
         # S2 accepts URL: for arbitrary URLs; OpenReview links resolve this way.
         raw = f"URL:{identifier}"
     else:
-        raise ValueError(
-            f"_s2_lookup_id called with unsupported source_type: {source_type!r}"
-        )
+        raise ValueError(f"_s2_lookup_id called with unsupported source_type: {source_type!r}")
     return quote(raw, safe=":/")
 
 
@@ -312,9 +308,7 @@ def _arxiv_fallback_url(external_ids: dict[str, Any]) -> str | None:
     return f"https://arxiv.org/pdf/{arxiv_id}.pdf"
 
 
-def _resolve_remote(
-    source_type: str, identifier: str, verbosity: int
-) -> dict[str, Any]:
+def _resolve_remote(source_type: str, identifier: str, verbosity: int) -> dict[str, Any]:
     """Resolve a remote-source paper (arxiv / doi / openreview)."""
     lookup_id = _s2_lookup_id(source_type, identifier)
     url = f"{S2_BASE_URL}/paper/{lookup_id}"
@@ -386,9 +380,7 @@ def _resolve_remote(
     }
 
 
-def _run_resolve_mode(
-    source_type: str, identifier: str, verbosity: int
-) -> dict[str, Any]:
+def _run_resolve_mode(source_type: str, identifier: str, verbosity: int) -> dict[str, Any]:
     """Top-level resolve-mode dispatch."""
     if source_type == "local":
         text, err = _read_local_paper(identifier)

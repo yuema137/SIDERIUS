@@ -40,8 +40,11 @@ OPENREVIEW_URL = "https://openreview.net/forum?id=7oLshfEIC2"
 @pytest.mark.real_run
 def test_resolve_arxiv_real():
     out = run_skill(
-        None, mode="resolve", source_type="arxiv",
-        identifier=TIDMAD_ARXIV, verbosity=1,
+        None,
+        mode="resolve",
+        source_type="arxiv",
+        identifier=TIDMAD_ARXIV,
+        verbosity=1,
     )
     assert out["status"] == "ok", out["message"]
     md = out["data"]["s2_metadata"]
@@ -54,8 +57,11 @@ def test_resolve_arxiv_real():
 @pytest.mark.real_run
 def test_resolve_doi_real():
     out = run_skill(
-        None, mode="resolve", source_type="doi",
-        identifier=TIDMAD_DOI, verbosity=0,
+        None,
+        mode="resolve",
+        source_type="doi",
+        identifier=TIDMAD_DOI,
+        verbosity=0,
     )
     assert out["status"] == "ok", out["message"]
     md = out["data"]["s2_metadata"]
@@ -78,8 +84,11 @@ def test_resolve_doi_real():
 )
 def test_resolve_openreview_real():
     out = run_skill(
-        None, mode="resolve", source_type="openreview",
-        identifier=OPENREVIEW_URL, verbosity=0,
+        None,
+        mode="resolve",
+        source_type="openreview",
+        identifier=OPENREVIEW_URL,
+        verbosity=0,
     )
     assert out["status"] == "ok", out["message"]
     assert out["data"]["s2_metadata"] is not None
@@ -89,8 +98,11 @@ def test_resolve_local_txt_offline():
     # Offline: real file read of a committed fixture; no network/key needed,
     # so this is intentionally NOT marked real_run.
     out = run_skill(
-        None, mode="resolve", source_type="local",
-        identifier="reference_data/tidmad_signal_frequencies.txt", verbosity=1,
+        None,
+        mode="resolve",
+        source_type="local",
+        identifier="reference_data/tidmad_signal_frequencies.txt",
+        verbosity=1,
     )
     assert out["status"] == "ok", out["message"]
     assert out["data"]["s2_metadata"] is None

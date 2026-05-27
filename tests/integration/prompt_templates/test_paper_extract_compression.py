@@ -44,8 +44,11 @@ _HAS_KEYS = bool(os.getenv("S2_API_KEY")) and bool(os.getenv("OPENAI_API_KEY"))
 def test_compress_tidmad_real():
     # 1. Resolve the TIDMAD full text (live S2 + arxiv PDF fallback, F1).
     resolved = run_skill(
-        None, mode="resolve", source_type="arxiv",
-        identifier=TIDMAD_ARXIV, verbosity=2,
+        None,
+        mode="resolve",
+        source_type="arxiv",
+        identifier=TIDMAD_ARXIV,
+        verbosity=2,
     )
     assert resolved["status"] == "ok", resolved["message"]
     full_text = resolved["data"]["full_text"]

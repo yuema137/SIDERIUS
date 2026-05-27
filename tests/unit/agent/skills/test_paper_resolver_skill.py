@@ -140,8 +140,11 @@ class TestResolveArxiv:
             _ok_response({"_": "_"}),
         ]
         out = wrapper.run_skill(
-            None, mode="resolve", source_type="arxiv",
-            identifier="2406.04378", verbosity=1,
+            None,
+            mode="resolve",
+            source_type="arxiv",
+            identifier="2406.04378",
+            verbosity=1,
         )
         assert out["status"] == "ok"
         assert "openAccessPdf" in out["message"]
@@ -159,8 +162,11 @@ class TestResolveArxiv:
             _ok_response({"_": "_"}),
         ]
         out = wrapper.run_skill(
-            None, mode="resolve", source_type="arxiv",
-            identifier="2101.00001", verbosity=1,
+            None,
+            mode="resolve",
+            source_type="arxiv",
+            identifier="2101.00001",
+            verbosity=1,
         )
         assert out["status"] == "ok"
         assert "arxiv_fallback" in out["message"]
@@ -173,8 +179,11 @@ class TestResolveArxiv:
         # S2 returns metadata but no openAccessPdf and no ArXiv external id.
         mock_get.return_value = _ok_response(_paper_metadata_only())
         out = wrapper.run_skill(
-            None, mode="resolve", source_type="arxiv",
-            identifier="some-id", verbosity=1,
+            None,
+            mode="resolve",
+            source_type="arxiv",
+            identifier="some-id",
+            verbosity=1,
         )
         assert out["status"] == "partial"
         assert out["data"]["verbosity_achieved"] == 0
@@ -187,8 +196,11 @@ class TestResolveArxiv:
     def test_verbosity_0_skips_pdf(self, mock_get):
         mock_get.return_value = _ok_response(_paper_with_oap())
         out = wrapper.run_skill(
-            None, mode="resolve", source_type="arxiv",
-            identifier="2406.04378", verbosity=0,
+            None,
+            mode="resolve",
+            source_type="arxiv",
+            identifier="2406.04378",
+            verbosity=0,
         )
         assert out["status"] == "ok"
         assert out["data"]["full_text"] is None
@@ -206,8 +218,11 @@ class TestResolveOtherSchemes:
     def test_doi_metadata_only(self, mock_get):
         mock_get.return_value = _ok_response(_paper_metadata_only())
         out = wrapper.run_skill(
-            None, mode="resolve", source_type="doi",
-            identifier="10.9999/zz", verbosity=0,
+            None,
+            mode="resolve",
+            source_type="doi",
+            identifier="10.9999/zz",
+            verbosity=0,
         )
         assert out["status"] == "ok"
         assert out["data"]["s2_metadata"]["externalIds"]["DOI"] == "10.9999/zz"
@@ -222,7 +237,9 @@ class TestResolveOtherSchemes:
             _ok_response({"_": "_"}),
         ]
         out = wrapper.run_skill(
-            None, mode="resolve", source_type="openreview",
+            None,
+            mode="resolve",
+            source_type="openreview",
             identifier="https://openreview.net/forum?id=abc",
             verbosity=2,
         )
@@ -246,8 +263,11 @@ class TestResolveLocal:
         (tmp_path / "notes").mkdir()
         (tmp_path / "notes" / "paper.md").write_text("# Local paper\nbody.")
         out = wrapper.run_skill(
-            None, mode="resolve", source_type="local",
-            identifier="notes/paper.md", verbosity=1,
+            None,
+            mode="resolve",
+            source_type="local",
+            identifier="notes/paper.md",
+            verbosity=1,
         )
         assert out["status"] == "ok"
         assert "Local paper" in out["data"]["full_text"]
@@ -261,8 +281,11 @@ class TestResolveLocal:
             wrapper, "_extract_pdf_text", return_value=("PDF BODY", None)
         ) as mock_extract:
             out = wrapper.run_skill(
-                None, mode="resolve", source_type="local",
-                identifier="papers/foo.pdf", verbosity=2,
+                None,
+                mode="resolve",
+                source_type="local",
+                identifier="papers/foo.pdf",
+                verbosity=2,
             )
         assert out["status"] == "ok"
         assert out["data"]["full_text"] == "PDF BODY"
@@ -270,16 +293,22 @@ class TestResolveLocal:
 
     def test_local_absolute_path_rejected(self):
         out = wrapper.run_skill(
-            None, mode="resolve", source_type="local",
-            identifier="/etc/passwd", verbosity=0,
+            None,
+            mode="resolve",
+            source_type="local",
+            identifier="/etc/passwd",
+            verbosity=0,
         )
         assert out["status"] == "error"
         assert "absolute" in out["message"]
 
     def test_local_parent_traversal_rejected(self):
         out = wrapper.run_skill(
-            None, mode="resolve", source_type="local",
-            identifier="papers/../../../etc/passwd", verbosity=0,
+            None,
+            mode="resolve",
+            source_type="local",
+            identifier="papers/../../../etc/passwd",
+            verbosity=0,
         )
         assert out["status"] == "error"
         assert ".." in out["message"]
@@ -288,8 +317,11 @@ class TestResolveLocal:
         monkeypatch.setattr(wrapper, "_PROJECT_ROOT", tmp_path)
         (tmp_path / "weird.docx").write_text("nope")
         out = wrapper.run_skill(
-            None, mode="resolve", source_type="local",
-            identifier="weird.docx", verbosity=1,
+            None,
+            mode="resolve",
+            source_type="local",
+            identifier="weird.docx",
+            verbosity=1,
         )
         assert out["status"] == "error"
         assert ".docx" in out["message"]
@@ -316,8 +348,11 @@ class TestSearchMode:
             }
         )
         out = wrapper.run_skill(
-            None, mode="search",
-            query="squid denoising", limit=10, verbosity=0,
+            None,
+            mode="search",
+            query="squid denoising",
+            limit=10,
+            verbosity=0,
         )
         assert out["status"] == "ok"
         assert out["data"]["total"] == 3
@@ -329,11 +364,12 @@ class TestSearchMode:
 
     @patch.object(wrapper.requests, "get")
     def test_search_empty_result(self, mock_get):
-        mock_get.return_value = _ok_response(
-            {"total": 0, "offset": 0, "next": None, "data": []}
-        )
+        mock_get.return_value = _ok_response({"total": 0, "offset": 0, "next": None, "data": []})
         out = wrapper.run_skill(
-            None, mode="search", query="zzz no matches", limit=5,
+            None,
+            mode="search",
+            query="zzz no matches",
+            limit=5,
         )
         assert out["status"] == "ok"
         assert out["data"]["results"] == []
@@ -341,11 +377,10 @@ class TestSearchMode:
 
     @patch.object(wrapper.requests, "get")
     def test_search_filter_passthrough(self, mock_get):
-        mock_get.return_value = _ok_response(
-            {"total": 0, "offset": 0, "data": []}
-        )
+        mock_get.return_value = _ok_response({"total": 0, "offset": 0, "data": []})
         wrapper.run_skill(
-            None, mode="search",
+            None,
+            mode="search",
             query="denoising",
             year="2023",
             min_citation_count=10,
@@ -358,11 +393,12 @@ class TestSearchMode:
 
     @patch.object(wrapper.requests, "get")
     def test_search_limit_cap(self, mock_get):
-        mock_get.return_value = _ok_response(
-            {"total": 0, "offset": 0, "data": []}
-        )
+        mock_get.return_value = _ok_response({"total": 0, "offset": 0, "data": []})
         wrapper.run_skill(
-            None, mode="search", query="x", limit=10_000,
+            None,
+            mode="search",
+            query="x",
+            limit=10_000,
         )
         params = mock_get.call_args.kwargs["params"]
         assert params["limit"] == wrapper.S2_SEARCH_LIMIT_CAP
@@ -379,21 +415,25 @@ class TestCachingAndErrors:
         mock_get.return_value = _ok_response(_paper_metadata_only())
         # Two identical calls — only the first should hit the network.
         out1 = wrapper.run_skill(
-            None, mode="resolve", source_type="doi",
-            identifier="10.9999/zz", verbosity=0,
+            None,
+            mode="resolve",
+            source_type="doi",
+            identifier="10.9999/zz",
+            verbosity=0,
         )
         out2 = wrapper.run_skill(
-            None, mode="resolve", source_type="doi",
-            identifier="10.9999/zz", verbosity=0,
+            None,
+            mode="resolve",
+            source_type="doi",
+            identifier="10.9999/zz",
+            verbosity=0,
         )
         assert out1 == out2
         assert mock_get.call_count == 1
 
     @patch.object(wrapper.requests, "get")
     def test_search_cache_hit_skips_network(self, mock_get):
-        mock_get.return_value = _ok_response(
-            {"total": 0, "offset": 0, "data": []}
-        )
+        mock_get.return_value = _ok_response({"total": 0, "offset": 0, "data": []})
         wrapper.run_skill(None, mode="search", query="x", limit=3)
         wrapper.run_skill(None, mode="search", query="x", limit=3)
         assert mock_get.call_count == 1
@@ -402,8 +442,11 @@ class TestCachingAndErrors:
     def test_s2_network_error_returns_envelope(self, mock_get):
         mock_get.side_effect = requests.ConnectionError("boom")
         out = wrapper.run_skill(
-            None, mode="resolve", source_type="arxiv",
-            identifier="2406.04378", verbosity=1,
+            None,
+            mode="resolve",
+            source_type="arxiv",
+            identifier="2406.04378",
+            verbosity=1,
         )
         assert out["status"] == "error"
         assert "S2 request failed" in out["message"]
@@ -413,8 +456,11 @@ class TestCachingAndErrors:
         # 404 is terminal — no retry, immediate error envelope, single call.
         mock_get.return_value = _http_status_response(404, "not found")
         out = wrapper.run_skill(
-            None, mode="resolve", source_type="arxiv",
-            identifier="x", verbosity=0,
+            None,
+            mode="resolve",
+            source_type="arxiv",
+            identifier="x",
+            verbosity=0,
         )
         assert out["status"] == "error"
         assert "HTTP 404" in out["message"]
@@ -428,8 +474,11 @@ class TestCachingAndErrors:
             _ok_response({"_": "_"}),
         ]
         out = wrapper.run_skill(
-            None, mode="resolve", source_type="arxiv",
-            identifier="2406.04378", verbosity=1,
+            None,
+            mode="resolve",
+            source_type="arxiv",
+            identifier="2406.04378",
+            verbosity=1,
         )
         assert out["status"] == "partial"
         assert "extraction failed" in out["message"]
@@ -483,8 +532,11 @@ class TestRateLimiting:
             _ok_response(_paper_metadata_only()),
         ]
         out = wrapper.run_skill(
-            None, mode="resolve", source_type="doi",
-            identifier="10.9999/zz", verbosity=0,
+            None,
+            mode="resolve",
+            source_type="doi",
+            identifier="10.9999/zz",
+            verbosity=0,
         )
         assert out["status"] == "ok"
         assert mock_get.call_count == 2
@@ -493,8 +545,11 @@ class TestRateLimiting:
     def test_429_exhausts_retries_then_errors(self, mock_get):
         mock_get.return_value = _http_status_response(429, "rate limited")
         out = wrapper.run_skill(
-            None, mode="resolve", source_type="doi",
-            identifier="10.9999/zz", verbosity=0,
+            None,
+            mode="resolve",
+            source_type="doi",
+            identifier="10.9999/zz",
+            verbosity=0,
         )
         assert out["status"] == "error"
         assert "HTTP 429" in out["message"]
@@ -507,15 +562,15 @@ class TestRateLimiting:
         mock_get.side_effect = [resp_429, _ok_response(_paper_metadata_only())]
         with patch.object(wrapper.time, "sleep") as mock_sleep:
             out = wrapper.run_skill(
-                None, mode="resolve", source_type="doi",
-                identifier="10.9999/zz", verbosity=0,
+                None,
+                mode="resolve",
+                source_type="doi",
+                identifier="10.9999/zz",
+                verbosity=0,
             )
         assert out["status"] == "ok"
         # Backoff used the Retry-After value (2s), not the exp-backoff default.
-        assert any(
-            call.args and call.args[0] == 2.0
-            for call in mock_sleep.call_args_list
-        )
+        assert any(call.args and call.args[0] == 2.0 for call in mock_sleep.call_args_list)
 
 
 # ---------------------------------------------------------------------------
@@ -525,9 +580,7 @@ class TestRateLimiting:
 
 class TestUrlEncoding:
     def test_openreview_query_string_is_encoded(self):
-        lookup = wrapper._s2_lookup_id(
-            "openreview", "https://openreview.net/forum?id=ABC123"
-        )
+        lookup = wrapper._s2_lookup_id("openreview", "https://openreview.net/forum?id=ABC123")
         assert "?" not in lookup  # the '?' must be percent-encoded
         assert "%3Fid%3DABC123" in lookup  # the query survives, encoded
         assert lookup.startswith("URL:https://openreview.net/forum")
