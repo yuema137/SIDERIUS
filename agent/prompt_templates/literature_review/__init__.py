@@ -91,3 +91,121 @@ def render_paper_extract_prompt(
 
     user_prompt = _USER_PROMPT_TEMPLATE.replace("{RAW_TEXT}", text)
     return system_prompt, user_prompt
+
+
+def _bullets(items: list[str]) -> str:
+    """Render a list of strings as markdown bullets, or '(none)' when empty."""
+    cleaned = [s.strip() for s in (items or []) if s and s.strip()]
+    if not cleaned:
+        return "(none)"
+    return "\n".join(f"- {s}" for s in cleaned)
+
+
+def render_search_decision_prompt(
+    *,
+    key_findings: list[str],
+    bottlenecks: list[str],
+    take_home_message: str,
+    explored_models: list[str],
+    papers_seen: list[dict],
+    escalation_allowed: bool,
+    task_description: str = SIDERIUS_TASK,
+) -> tuple[str, str]:
+    """Build the (system, user) prompt for one dynamic-search-loop decision.
+
+    The LLM returns one JSON action — ``search`` | ``escalate`` | ``done``.
+    Keyword-only so the node passes already-extracted primitives (the prompt
+    module stays free of schema coupling — it only formats strings).
+
+    Args:
+        key_findings/bottlenecks/take_home_message: pulled from the
+            InterpretationOutput; key_findings + bottlenecks are the primary
+            grounding signal for query generation (Checkpoint C).
+        explored_models: model_types already tried — steers away from
+            rediscovering known architectures.
+        papers_seen: list of ``{paper_id, title, year, verbosity_achieved,
+            snippet}`` for the papers retrieved so far (the escalation menu).
+        escalation_allowed: when False, the prompt tells the LLM to choose
+            ``search`` or ``done`` only.
+    """
+    system_prompt = load_prompt("search_decision_system.md").replace(
+        "{TASK_DESCRIPTION}", task_description
+    )
+
+    explored = ", ".join(m for m in (explored_models or []) if m) or "(none recorded)"
+
+    if papers_seen:
+        lines = []
+        for p in papers_seen:
+            snippet = (p.get("snippet") or "").strip()
+            lines.append(
+                f"- [{p.get('paper_id', '?')}] (v{p.get('verbosity_achieved', 0)}) "
+                f"{p.get('title') or '(untitled)'} ({p.get('year') or 'n.d.'})"
+                + (f" — {snippet}" if snippet else "")
+            )
+        papers_block = "\n".join(lines)
+    else:
+        papers_block = "None yet — this is the first round."
+
+    escalation_note = (
+        ""
+        if escalation_allowed
+        else '\nEscalation is DISABLED this run — choose "search" or "done" only.\n'
+    )
+
+    user_prompt = (
+        "## Current experiment state\n\n"
+        f"Models already explored (do not rediscover): {explored}\n\n"
+        f"Key findings so far:\n{_bullets(key_findings)}\n\n"
+        f"Open bottlenecks:\n{_bullets(bottlenecks)}\n\n"
+        f"Take-home message: {take_home_message or '(none)'}\n\n"
+        "## Papers retrieved so far this run\n"
+        f"{papers_block}\n"
+        f"{escalation_note}\n"
+        "Decide the single best next action as one JSON object."
+    )
+    return system_prompt, user_prompt
+
+
+def render_synthesis_prompt(
+    *,
+    key_findings: list[str],
+    bottlenecks: list[str],
+    take_home_message: str,
+    papers: list[dict],
+    task_description: str = SIDERIUS_TASK,
+) -> tuple[str, str]:
+    """Build the (system, user) prompt for the final findings synthesis.
+
+    The LLM emits ``{"findings": [{content, cite_id, confidence?}]}``. The node
+    wraps each into an ``ExpertContextItem``. ``papers`` is a list of
+    ``{paper_id, title, year, summary}`` where ``summary`` is the compressed
+    extract (preferred) or the abstract.
+    """
+    system_prompt = load_prompt("synthesis_system.md").replace(
+        "{TASK_DESCRIPTION}", task_description
+    )
+
+    if papers:
+        blocks = []
+        for p in papers:
+            summary = (p.get("summary") or "").strip() or "(no extract or abstract available)"
+            blocks.append(
+                f"### [{p.get('paper_id', '?')}] {p.get('title') or '(untitled)'} "
+                f"({p.get('year') or 'n.d.'})\n{summary}"
+            )
+        papers_block = "\n\n".join(blocks)
+    else:
+        papers_block = "(no papers were retrieved this run)"
+
+    user_prompt = (
+        "## Current experiment state (PRIMARY — ground every finding in these)\n\n"
+        f"Open bottlenecks:\n{_bullets(bottlenecks)}\n\n"
+        f"Key findings:\n{_bullets(key_findings)}\n\n"
+        f"Take-home message: {take_home_message or '(none)'}\n\n"
+        "## Papers retrieved this iteration\n\n"
+        f"{papers_block}\n\n"
+        "Produce the findings JSON. Omit any paper that does not address one of "
+        "the bottlenecks above."
+    )
+    return system_prompt, user_prompt

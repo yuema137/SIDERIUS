@@ -21,6 +21,7 @@ from agent.prompt_templates.literature_review import (
     MAX_RAW_TEXT_CHARS,
     SIDERIUS_TASK,
     render_paper_extract_prompt,
+    render_synthesis_prompt,
 )
 from agent.schemas.literature_review import PaperExtract
 
@@ -174,3 +175,36 @@ class TestPaperExtractValidationHalf:
     def test_non_dict_payload_raises(self):
         with pytest.raises(ValidationError):
             PaperExtract.model_validate(["not", "a", "dict"])
+
+
+class TestSynthesisPrompt:
+    def _render(self):
+        return render_synthesis_prompt(
+            key_findings=["high-frequency band overfits"],
+            bottlenecks=["loss saturates after ~5 epochs"],
+            take_home_message="need more temporal depth",
+            papers=[{"paper_id": "arxiv:1", "title": "P", "year": 2023, "summary": "s"}],
+        )
+
+    def test_returns_two_strings(self):
+        system, user = self._render()
+        assert isinstance(system, str) and isinstance(user, str)
+        assert system and user
+
+    def test_system_prompt_content_asserts(self):
+        system, _ = self._render()
+        # (a) bottleneck-grounding instruction
+        assert "bottleneck" in system
+        # (d) omission-over-weak-item rule
+        assert "Omission beats a weak item" in system
+        # (e) cite_id-matching instruction
+        assert "cite_id" in system and "paper_id" in system
+        # task-description injection
+        assert SIDERIUS_TASK in system
+        assert "{TASK_DESCRIPTION}" not in system
+
+    def test_user_prompt_fronts_bottlenecks(self):
+        _, user = self._render()
+        assert "PRIMARY" in user
+        assert "loss saturates after ~5 epochs" in user  # bottleneck present
+        assert "arxiv:1" in user  # paper id available for cite_id matching

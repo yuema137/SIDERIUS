@@ -93,6 +93,24 @@ class DynamicSearchConfig(BaseModel):
         "specific paper mid-loop. When False, all search results stay at "
         "initial_verbosity.",
     )
+    results_per_query: int = Field(
+        default=10,
+        ge=1,
+        description="Number of S2 hits requested per search query. Default 10: "
+        "S2 relevance drops sharply past position ~10, and ~10 abstracts "
+        "(~2k tokens) is a manageable decision surface for the loop LLM. Larger "
+        "values mostly add low-relevance noise and prompt cost.",
+    )
+    max_escalations_per_round: int = Field(
+        default=2,
+        ge=0,
+        description="Cap on verbosity escalations (deep-reads) the LLM may "
+        "request within a single search round. Each escalation costs one PDF "
+        "fetch + one LLM compression call, so an uncapped loop (e.g. 5 rounds "
+        "with many escalations each) can balloon to 25+ extra calls. Escalation "
+        "requests beyond this cap in the same round are logged and dropped. "
+        "0 disables escalation entirely (independent of escalation_allowed).",
+    )
 
 
 class PaperExtract(BaseModel):

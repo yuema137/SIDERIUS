@@ -128,6 +128,18 @@ class TestDynamicSearchConfig:
         assert c.max_rounds == 3
         assert c.initial_verbosity == 0
         assert c.escalation_allowed is True
+        assert c.results_per_query == 10
+        assert c.max_escalations_per_round == 2
+
+    def test_results_per_query_min(self):
+        with pytest.raises(ValidationError):
+            DynamicSearchConfig(results_per_query=0)
+
+    def test_max_escalations_allows_zero(self):
+        # 0 is valid — it disables escalation independently of escalation_allowed.
+        assert DynamicSearchConfig(max_escalations_per_round=0).max_escalations_per_round == 0
+        with pytest.raises(ValidationError):
+            DynamicSearchConfig(max_escalations_per_round=-1)
 
     def test_max_rounds_zero_rejected(self):
         with pytest.raises(ValidationError):

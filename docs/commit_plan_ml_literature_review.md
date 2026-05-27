@@ -42,7 +42,7 @@ commit). A commit is not "done" until both its automated test gate is green
   · gate 42 passed (schema + prompt suites) + real-run extract reviewed · artifact `docs/paper_extract_pilot.md` · committed `879e90e`
   - [x] **Checkpoint B** — Single paper LLM compression quality · signed off 2026-05-26 (hard requirement passes on both papers; one targeted prompt revision applied)
 - [ ] **Commit 4** — `nodes/ml_literature_review.py` core loop
-  · gate `tests/unit/agent/ml_literature_review/test_node.py` + real-run output reviewed
+  · **4a** (node + 2 prompts + unit tests) complete — 23 unit passed, ruff + `ruff format` + pyright clean (commit pending); **4b** (real-run integration + Checkpoint C) next
   - [ ] **Checkpoint C** — Dynamic search loop behavior
 - [ ] **Commit 5** — Protocol `ml_literature_review_to_ml_model_propose.py` (audit-only on `local_full_context`)
   · gate `tests/unit/agent/protocols/test_ml_literature_review_to_ml_model_propose.py`
@@ -706,76 +706,92 @@ paper (no hallucinated regime). One targeted prompt revision was applied
 - New: `tests/unit/agent/ml_literature_review/test_node.py`
 - New: `tests/integration/nodes/test_ml_literature_review.py` (Tier-1, `@real_run`)
 
-**Checklist**:
-- [ ] Read `nodes/ml_hyperparameter_tune_agent.py` (specifically the `_run_skill`
-      helper at L497-507 and the LLMBridge instantiation block) and match the
-      conventions exactly:
-  - Skill import via `importlib.import_module(f"agent.skills.{folder}.wrapper")`.
-  - LLMBridge access as singleton (no new instance — `LLMBridge.get_instance()` or
-      whatever the actual accessor is — confirm by reading).
-  - JSON parsing pattern for `bridge.generate(...)` responses.
-- [ ] Implement the node as `def run(input: LiteratureReviewInput) -> LiteratureReviewOutput`
-      module-level function (match the simpler nodes in the project; if the
-      project convention is a class with `.run()`, follow that — confirm
-      before writing).
-- [ ] Root-paper resolution:
-  - [ ] For each `root_papers[i]`, compute cache path
-        `reference_data/root_papers_cache/{paper_id}.json`.
-  - [ ] Cache hit → load `RetrievedPaper` from JSON. Cache miss → call
-        `paper_resolver_skill.run_skill(None, ...)`, build `RetrievedPaper`,
-        write cache.
-  - [ ] For verbosity=1 root papers without an extract on cache miss: call
-        LLMBridge compression prompt (Commit 3) on the full text, then write
-        the extract back to cache with `verbosity_achieved=1`.
-- [ ] Dynamic search loop:
-  - [ ] At round 0: LLM is asked "given the experiment_history and the
-        root-paper extracts, what should we search S2 for?" (JSON output:
-        `{"query": str, "verbosity": int} | {"done": true}`).
-        Mark with `# TODO(reflector-split): this decision step is the
-        natural future reflector-model candidate (cheap, templated).`
-  - [ ] Each round: call `paper_resolver_skill.run_skill(None, mode="search",
-        query=..., limit=..., verbosity=0)` to get candidate papers as S2
-        metadata. If the LLM then requests verbosity escalation on a
-        specific paper, call `mode="resolve"` for that paper. Append to
-        `retrieved_papers`.
-  - [ ] LLM is asked "another query, escalate verbosity on paper X, or done?"
-        Same TODO marker.
-  - [ ] Terminate when LLM says `{"done": true}` OR when
-        `search_rounds_used >= input.dynamic_search.max_rounds`. The
-        max-rounds branch is the hard safety net.
-- [ ] Final synthesis call: LLM is given the full `retrieved_papers` list +
-      `experiment_history` and produces the four `ExternalAgentOutput`
-      channels (JSON). For v1, `new_vocab_candidates` and `suggested_mindset`
-      are documented in the prompt as "leave empty / null unless you have
-      strong cross-paper convergent evidence."
-- [ ] Build and return `LiteratureReviewOutput` with all fields populated;
-      `started_at`/`finished_at` ISO 8601 UTC.
-- [ ] Write `nodes/ml_literature_review.py` storage: dump the
-      `LiteratureReviewOutput` to
-      `{storage.local.workspace}/ml_literature_review_{run_name}.json` per
-      the inter-node communication invariant in `CLAUDE.md`.
-- [ ] Unit tests (`tests/unit/agent/ml_literature_review/test_node.py`):
-  - [ ] Full run with mocked LLMBridge (returns canned JSON for each call)
-        and mocked `paper_resolver_skill.run_skill` (returns canned
-        `RetrievedPaper` dicts). Asserts `LiteratureReviewOutput` validates
-        and has the expected `agent_card`, `findings`, `retrieved_papers`.
-  - [ ] Dynamic loop terminates at `max_rounds` even when mocked LLM never
-        emits `{"done": true}` — assert `search_rounds_used == max_rounds`.
-  - [ ] Root paper cache hit — file pre-written at the expected path; assert
-        `paper_resolver_skill.run_skill` is NOT called for that paper.
-  - [ ] Root paper cache miss — file absent; assert
-        `paper_resolver_skill.run_skill` IS called and a JSON cache file is
-        written at the expected path with the resolver's result.
-  - [ ] LLM compression fallback: mocked compression call returns malformed
-        JSON → resulting `RetrievedPaper.verbosity_achieved == 0`,
-        `extract is None`, but the node does not raise.
-  - [ ] Storage dump test: `LiteratureReviewOutput` JSON file written at the
-        documented path; round-trips through `model_validate_json`.
-- [ ] Integration test (`tests/integration/nodes/test_ml_literature_review.py`,
+**Sub-commit split** (decided 2026-05-27): **4a** = node + 2 new prompts + all
+unit tests (mocked); **4b** = Tier-1 `@real_run` integration test + Checkpoint C
+trace + `docs/dynamic_search_pilot.md`. Mirrors Commit 2/3 staging.
+
+**Checklist** (4a unless marked 4b):
+- [x] Read existing nodes and match conventions — confirmed by reading
+      `result_interpretation_agent.py` / `ml_model_proposal_agent.py` /
+      `ml_hyperparameter_tune_agent.py`. **Two plan assumptions corrected:**
+  - Node entry is a **class with `.run()`** (all 5 nodes), not a module-level
+    `run()`. Class: `MLLiteratureReviewAgent`. (Checkpoint C snippet below
+    updated to class form.)
+  - **No `LLMBridge.get_instance()`** — the bridge is built lazily in `run()`
+    from `inp.llm_provider`/`inp.llm_model_id` via an injectable
+    `bridge_factory` (the tuner's pattern). `generate()` returns a parsed dict
+    → `model_validate`. Skill via direct `from …paper_resolver_skill.wrapper
+    import run_skill` (single skill → no `importlib` dispatch needed).
+- [x] Implement the node as `MLLiteratureReviewAgent.run(inp) -> LiteratureReviewOutput`.
+- [x] Root-paper resolution:
+  - [x] Cache path `{root_cache_dir}/{sanitized paper_id}.json`
+        (`paper_id = "{source_type}:{identifier}"`, non-`[A-Za-z0-9._-]`→`_`;
+        `root_cache_dir` is an injectable ctor arg, default
+        `reference_data/root_papers_cache`, now gitignored).
+  - [x] Cache hit → load `RetrievedPaper`; miss → `run_skill(None, ...)`, build
+        `RetrievedPaper`, write cache (skip caching hard errors).
+  - [x] verbosity≥1 → compression prompt on full text → `extract`; compression
+        failure degrades to metadata-only (`verbosity_achieved=0`).
+- [x] Dynamic search loop (new prompt `render_search_decision_prompt`):
+  - [x] Each round the LLM emits `{"action": "search"|"escalate"|"done", ...}`
+        grounded in `experiment_history` (key_findings + bottlenecks primary;
+        explored `model_types` + full-spectrum preference injected). TODO marker
+        added at the decision call site.
+  - [x] `search` → `run_skill(mode="search", limit=8, verbosity=0)` (metadata);
+        `escalate` (per-paper, when `escalation_allowed`) → `run_skill(resolve)`
+        + compress that paper. Each non-`done` decision consumes one round.
+  - [x] Terminate on `{"done"}` OR `rounds == max_rounds` (hard safety net).
+- [x] Final synthesis (new prompt `render_synthesis_prompt`): LLM emits
+      `{"findings": [...]}`; node wraps each into `ExpertContextItem`
+      (source/kind set by node). `new_vocab_candidates=[]`,
+      `suggested_mindset=None` for v1.
+- [ ] **Synthesis prompt quality** — revise the 4a `render_synthesis_prompt` +
+      `_synthesize` to meet this *before committing 4a*. Collection-level prompt
+      (reasons across all retrieved papers together, not per-paper). System
+      prompt requirements:
+  - (a) Present `experiment_history.bottlenecks` + `key_findings` as the PRIMARY
+        input — every `ExpertContextItem` grounded in a specific current
+        bottleneck/finding, not a generic paper description.
+  - (b) Each item states the implication for a current bottleneck. "This paper
+        proposes X" is unacceptable; "Given bottleneck Y, finding Z suggests
+        trying W" is the target format.
+  - (c) Each item carries `confidence` (0.0–1.0). `ExpertContextItem` has no
+        rationale field, so the one-line justification for the score is appended
+        to `content`.
+  - (d) A paper with no actionable relevance to the current bottlenecks gets NO
+        item — omission beats a weak/generic item; an empty `findings` list is
+        valid output.
+  - (e) Every item's `cite_id` must exactly match the `paper_id` of a retrieved
+        `RetrievedPaper`; `_synthesize` soft-drops unmatched ids (log + omit
+        that item, keep the rest) — see open questions.
+  - (f) `new_vocab_candidates` / `suggested_mindset` stay empty for v1 (per
+        external_agents §2). The ≥3-paper cross-convergence rule is the
+        criterion for a FUTURE version, not v1.
+- [x] Build/return `LiteratureReviewOutput`; ISO-8601 UTC `started_at`/`finished_at`.
+- [x] Storage dump to `{workspace}/ml_literature_review_{run_name}.json`.
+- [x] Unit tests (`tests/unit/agent/ml_literature_review/test_node.py`): full
+      run; loop terminates at `max_rounds`; cache hit (resolver not called);
+      cache miss (resolver called + cache written); compression fallback
+      (`verbosity_achieved==0`, `extract is None`, no raise); storage round-trip;
+      **plus** an escalation-path test (search hit → deep-read → extract).
+- [ ] Synthesis unit tests (added in the 4a revision):
+  - [ ] mocked synthesis returns a valid `list[ExpertContextItem]` with
+        `confidence` scores — all items validate against the schema.
+  - [ ] papers with no actionable relevance → zero `findings` items (empty list
+        valid, must not raise).
+  - [ ] a `cite_id` not matching any retrieved `paper_id` is soft-dropped —
+        assert the bad item is omitted and the well-cited items remain.
+  - [ ] `render_synthesis_prompt` deterministic content asserts — system prompt
+        contains the bottleneck-grounding instruction, the omission-over-weak-item
+        rule, the cite_id-matching instruction, and the task-description injection.
+- [ ] **(4b)** Integration test (`tests/integration/nodes/test_ml_literature_review.py`,
       `@real_run`): one root paper (TIDMAD), `max_rounds=2`, real S2 + real
       LLMBridge. Asserts `LiteratureReviewOutput` validates and has at least
       one `ExpertContextItem` in `findings`. **Show the user the full output
       before closing the commit.**
+
+**4a gate result (2026-05-27):** 23 unit passed (7 node scenarios + 16 prompt),
+ruff check + `ruff format --check` clean, pyright 0 errors.
 
 **Test gate**:
 ```
@@ -805,7 +821,7 @@ from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.literature_review import (
     LiteratureReviewInput, DynamicSearchConfig, PaperSource,
 )
-from nodes import ml_literature_review
+from nodes.ml_literature_review import MLLiteratureReviewAgent
 
 # Seed: most recent interpretation output from the workspace.
 interp_path = sorted(Path("./workspace").glob("result_interpretation_*.json"))[-1]
@@ -823,7 +839,7 @@ lit_in = LiteratureReviewInput(
     run_name="checkpoint_c",
     llm_provider="openai", llm_model_id="gpt-4o-mini",
 )
-out = ml_literature_review.run(lit_in)
+out = MLLiteratureReviewAgent().run(lit_in)
 
 # Per the node's contract, every round's decision MUST be printed:
 #   - the query string generated for this round
@@ -851,6 +867,12 @@ out = ml_literature_review.run(lit_in)
   `MODEL_REGISTRY` (punet, wavenet, gated_fno, transformer, rnn)? High
   overlap means queries are too generic and rediscovering what we already
   have. Zero overlap across all rounds may mean queries are too narrow.
+- Do the `ExpertContextItem` entries in `findings` reference specific
+  bottlenecks from the `InterpretationOutput`, or are they generic paper
+  summaries that could have been written without reading the experiment
+  history? **This is the most important quality signal for the synthesis
+  call** — items not grounded in the current experimental context will be
+  rationally ignored by the proposer.
 
 **What this decides**: the dynamic search system prompt. Specifically:
 - If queries are too generic → add an explicit instruction to the prompt:
@@ -864,6 +886,10 @@ out = ml_literature_review.run(lit_in)
 - If verbosity=1 selection is poor → add an explicit *"justify your upgrade
   decision by citing the specific finding in the abstract that makes this
   paper worth deep-reading"* instruction.
+- If `findings` items are not grounded in current bottlenecks → the synthesis
+  prompt must more forcefully front-load `bottlenecks` + `key_findings` and
+  explicitly forbid generic paper summaries. Revise the prompt and re-run the
+  checkpoint before proceeding to Commit 5.
 
 **Sign-off requirement**: a human must read the full loop trace and judge
 whether the search behavior is purposeful. "Good enough" means: the queries
@@ -878,12 +904,18 @@ loop trace, a 3-5 line human summary of the `InterpretationOutput` used as
 input (not the full JSON), and the human judgment on each inspection bullet.
 
 **Open questions / decisions needed**:
-- **Node entry shape.** Class-with-`.run()` or module-level `run()`? Check
-  `nodes/ml_hyperparameter_tune_agent.py` and match. If unclear, ask.
-- **Per-round verbosity escalation policy.** The LLM is allowed to ask for
-  a specific paper to be re-fetched at higher verbosity. Should the node
-  cap how many escalations per round, or trust the LLM + `max_rounds`?
-  Lean: trust + `max_rounds`. Document the choice.
+- **Node entry shape.** RESOLVED — class `MLLiteratureReviewAgent` with
+  `.run()` (matches all 5 nodes); the bridge is built lazily in `run()` from the
+  input via an injectable `bridge_factory`.
+- **Synthesis `cite_id` mismatch.** RESOLVED — soft drop (log + omit the item,
+  keep the rest); a single hallucinated id must not discard a useful list.
+- **`results_per_query`.** RESOLVED — add as a `DynamicSearchConfig` field
+  (default 10) with the relevance-drop reasoning in its docstring (S2 relevance
+  drops sharply past position ~10; ~10 abstracts ≈ 2k tokens is a manageable
+  decision surface). Replaces the 4a node constant `SEARCH_LIMIT=8`.
+- **Per-round verbosity escalation cap.** OPEN — the loop currently has no cap
+  (trust LLM + `max_rounds`). Add an explicit cap of N=2 escalations per round
+  to control cost? Lean: yes, cap at 2. **Ask before implementing.**
 
 ---
 
