@@ -28,15 +28,50 @@ layer first (Vision → Spec → Plan), never the reverse.
 
 ## Status board
 
-| # | Commit | State | Test gate |
-|---|---|---|---|
-| 1 | Schema (`literature_review.py` + `external_agents.py`) | `[x]` | `tests/unit/agent/schemas/test_literature_review_schemas.py` |
-| 2 | Paper resolver skill + TIDMAD pilot | `[ ]` | `tests/unit/agent/skills/test_paper_resolver_skill.py` + committed `docs/paper_resolver_pilot.md` |
-| 3 | Finalize `PaperExtract` + compression prompt | `[ ]` | `tests/unit/agent/prompt_templates/test_literature_review_prompts.py` + real-run extract reviewed |
-| 4 | `nodes/ml_literature_review.py` core loop | `[ ]` | `tests/unit/agent/ml_literature_review/test_node.py` + real-run output reviewed |
-| 5 | Protocol `ml_literature_review_to_ml_model_propose.py` (audit-only on `local_full_context`) | `[ ]` | `tests/unit/agent/protocols/test_ml_literature_review_to_ml_model_propose.py` |
-| 6 | Workflow integration (`merge_external_agent_outputs`, `should_run_literature_review`) | `[ ]` | `tests/unit/workflows/test_model_exploration_lit_review_wiring.py` + Tier-0 dual-mode |
-| 7 | Configs, cache dir README, full connection audit | `[ ]` | full `tests/unit/` + `tests/integration/` green |
+The board mixes **code commits** (the seven `[ ]`/`[x]` checklists below) with
+**behavioral checkpoints** (human review gates indented under their owning
+commit). A commit is not "done" until both its automated test gate is green
+**and** any attached checkpoint has been reviewed and signed off.
+
+- [x] **Commit 1** — Schema (`literature_review.py` + `external_agents.py`)
+  · gate `tests/unit/agent/schemas/test_literature_review_schemas.py` · committed `c8fe641`
+- [ ] **Commit 2** — Paper resolver skill + TIDMAD pilot
+  · gate `tests/unit/agent/skills/test_paper_resolver_skill.py` + `docs/paper_resolver_pilot.md`
+  - [ ] **Checkpoint A** — Raw paper resolution output
+- [ ] **Commit 3** — Finalize `PaperExtract` + compression prompt
+  · gate `tests/unit/agent/prompt_templates/test_literature_review_prompts.py` + real-run extract reviewed
+  - [ ] **Checkpoint B** — Single paper LLM compression quality
+- [ ] **Commit 4** — `nodes/ml_literature_review.py` core loop
+  · gate `tests/unit/agent/ml_literature_review/test_node.py` + real-run output reviewed
+  - [ ] **Checkpoint C** — Dynamic search loop behavior
+- [ ] **Commit 5** — Protocol `ml_literature_review_to_ml_model_propose.py` (audit-only on `local_full_context`)
+  · gate `tests/unit/agent/protocols/test_ml_literature_review_to_ml_model_propose.py`
+- [ ] **Commit 6** — Workflow integration (`merge_external_agent_outputs`, `should_run_literature_review`)
+  · gate `tests/unit/workflows/test_model_exploration_lit_review_wiring.py` + Tier-0 dual-mode
+  - [ ] **Checkpoint D** — End-to-end proposer behavior change
+- [ ] **Commit 7** — Configs, cache dir README, full connection audit
+  · gate full `tests/unit/` + `tests/integration/` green
+
+---
+
+## Behavioral checkpoints
+
+The automated test gates above answer *"does the code run correctly?"* — they
+verify schema validation, mock-driven control flow, and type safety. The
+**behavioral checkpoints** answer a different question: *"is the system doing
+something useful?"* A system can have 100% green tests and still produce
+literature summaries that no proposer would read, or have zero traceable
+influence on the architectures the proposer suggests.
+
+Each checkpoint is a human review gate attached to a specific commit. It
+specifies the exact command to run, the artifact it should produce, what to
+inspect in that artifact, and what design decision depends on the answer.
+**No commit with an attached checkpoint is considered done until both the
+test gate is green and the checkpoint review is signed off.** The checkpoint
+artifacts (`docs/paper_resolver_pilot.md`, `docs/paper_extract_pilot.md`,
+`docs/dynamic_search_pilot.md`, `docs/e2e_behavior_pilot.md`) are
+version-controlled so future revisions of the system have a reference for
+what "working" looked like at each stage.
 
 ---
 
@@ -324,6 +359,75 @@ URL switch. **Do not split.**
 Plus: `docs/paper_resolver_pilot.md` exists with **both** resolve-mode and
 search-mode outputs, reviewed by user.
 
+#### 🔍 Behavioral Checkpoint A — Raw paper resolution output
+
+**Trigger**: run this after the test gate passes and `pdfplumber` is
+installed in the venv. This is the gate that decides what fields
+`PaperExtract` (Commit 3) ends up carrying.
+
+**How to run**: with the wrapper green, run it manually against the TIDMAD
+paper, capturing both verbosity tiers:
+
+```python
+from agent.skills.paper_resolver_skill.wrapper import run_skill
+
+# Full text (verbosity=2) — what compression sees in worst case.
+v2 = run_skill(
+    None, mode="resolve", source_type="arxiv",
+    identifier="2302.09309", verbosity=2,
+)
+full_text = v2["data"]["full_text"]
+print(full_text[:3000])  # first 3000 chars
+print("---")
+print(f"Total length: {len(full_text)} chars, "
+      f"≈{len(full_text) // 4} tokens")
+
+# Verbosity=1 — what the LLM compression prompt will receive.
+v1 = run_skill(
+    None, mode="resolve", source_type="arxiv",
+    identifier="2302.09309", verbosity=1,
+)
+print(v1["status"], v1["message"])
+```
+
+**What to inspect**:
+- Is the extracted text readable, or is it garbled (common with multi-column
+  PDF layouts)?
+- Are mathematical equations preserved as LaTeX, rendered as Unicode, or
+  lost entirely?
+- Is section structure identifiable (Introduction / Methods / Results /
+  References)?
+- What fraction of the text is noise: author affiliations, page
+  headers/footers, reference list, figure captions with no context?
+- For a SQUID signal-processing paper specifically: which sections contain
+  information that would actually help a model proposer (architecture
+  choices, preprocessing decisions, training tricks, ablations)?
+- Roughly how many tokens is the full text? Estimate as `len(full_text) / 4`.
+
+**What this decides**: the `PaperExtract` field design in Commit 3.
+Specifically:
+- If equations are preserved as readable LaTeX → add a `key_equations: str`
+  field to `PaperExtract`.
+- If equations are garbled → do not add a structured equation field;
+  instruct the LLM to describe equations in prose instead.
+- If section structure is clean → the LLM compression prompt can reference
+  section names explicitly.
+- If noise ratio is high → the compression prompt must explicitly instruct
+  the LLM to ignore references, affiliations, and figure captions.
+
+**Sign-off requirement**: a human must read the output and answer each
+bullet above in `docs/paper_resolver_pilot.md`. If the text quality is so
+poor that useful information cannot be extracted (e.g. fully garbled
+multi-column layout), we need to evaluate alternative extraction libraries
+(e.g. `pymupdf`, `pypdf2`) before proceeding to Commit 3. **Do not proceed
+until the extraction quality question is settled.**
+
+**Artifact to commit**: `docs/paper_resolver_pilot.md` containing the
+inspection answers, a representative excerpt of the extracted text (first
+500 chars of the methods section if identifiable), and a recommendation on
+equation handling. Same file also captures the search-mode sanity check
+(per the search-pilot bullet above) — single file, two pilots.
+
 **Open questions / decisions needed**:
 - HTTP library — confirm `requests` is the project default by grepping
   before writing. If `httpx` is the convention, switch.
@@ -401,6 +505,78 @@ reviewed**.
 .venv/bin/python -m pyright agent/schemas/literature_review.py agent/prompt_templates/literature_review/__init__.py
 ```
 Plus: real-run `PaperExtract` JSON shown to user and approved.
+
+#### 🔍 Behavioral Checkpoint B — Single paper LLM compression quality
+
+**Trigger**: run this after the test gate passes, using the finalised
+`PaperExtract` schema and the real LLMBridge.
+
+**How to run**: compress the TIDMAD paper text (from Checkpoint A's
+artifact) into a `PaperExtract` and print the result, then repeat on one
+additional paper returned by an S2 keyword search:
+
+```python
+from agent.prompt_templates.literature_review import render_paper_extract_prompt
+from agent.llm_bridge import LLMBridge  # confirm accessor at implementation time
+from agent.schemas.literature_review import PaperExtract
+import json
+
+bridge = LLMBridge.get_instance()  # or the actual project pattern
+
+# Paper 1: TIDMAD (known root paper)
+sys_prompt, user_prompt = render_paper_extract_prompt(tidmad_full_text)
+raw = bridge.generate(sys_prompt, user_prompt)
+extract_tidmad = PaperExtract.model_validate_json(raw)
+print(json.dumps(extract_tidmad.model_dump(), indent=2))
+
+# Paper 2: top hit from a dynamic search to test generalisation.
+search = run_skill(None, mode="search",
+                   query="SQUID denoising neural network", limit=5)
+other_paper_id = search["data"]["results"][0]["externalIds"].get("ArXiv")
+# ... resolve at verbosity=2, then repeat the compression
+```
+
+**What to inspect**:
+- Does `architecture_summary` / `key_methods` capture the core technical
+  contribution, or does it describe the problem setup instead?
+- Does the architecture description contain enough information for a model
+  proposer to understand the rough structure (layer types, connectivity
+  pattern, key design choices)?
+- Does `relevance_to_squid` make a specific argument for why this paper is
+  relevant to TIDMAD denoising, or is it a generic "this paper is about
+  signal processing"?
+- Are there hallucinations — claims that cannot be found in the source text?
+- Are the field lengths appropriate? Too short means information loss; too
+  long means the compression is not doing its job. Check each field against
+  its documented word budget.
+- Is anything important missing that no field captures? This is the signal
+  for whether the field list needs to be extended.
+
+**What this decides**: whether the `PaperExtract` schema and compression
+prompt are ready for use inside the full node. Specifically:
+- If `architecture_summary` is consistently vague → tighten the prompt to
+  ask explicitly for layer types, input/output shapes, and key
+  hyperparameters.
+- If `relevance_to_squid` is generic → add a task-description injection into
+  the compression prompt so the LLM knows what "relevant" means for this
+  specific problem.
+- If a consistently important category of information (e.g. training
+  procedure, data preprocessing) is missing from all fields → add a new
+  field before proceeding.
+- If hallucinations appear → add an explicit anti-hallucination instruction
+  to the prompt and re-run.
+
+**Sign-off requirement**: a human must read both extracts (TIDMAD + one
+dynamic search result) and judge whether the output is specific enough to
+influence architectural proposals. "Good enough" means: a model proposer
+reading **only** the `PaperExtract` (not the original paper) would learn
+something concrete and actionable. If not good enough after one prompt
+revision, escalate to the user before trying a second revision. **Do not
+proceed to Commit 4 until this is signed off.**
+
+**Artifact to commit**: `docs/paper_extract_pilot.md` containing the full
+JSON output of both `PaperExtract` instances, the human judgment on each
+inspection bullet, and any prompt changes made as a result.
 
 **Open questions / decisions needed**:
 - Pilot-dependent (see checklist above): equations field? diagram field?
@@ -503,6 +679,97 @@ Plus: real-run `PaperExtract` JSON shown to user and approved.
 .venv/bin/python -m pyright nodes/ml_literature_review.py
 ```
 Plus: integration test output reviewed by user.
+
+#### 🔍 Behavioral Checkpoint C — Dynamic search loop behavior
+
+**Trigger**: run this after the test gate passes, using a real
+`InterpretationOutput` from the workspace and a real LLM/S2 round trip.
+
+**How to run**: pick the most recent `result_interpretation_*.json` in the
+workspace as the experiment-history seed and run the node with
+`max_rounds=3`, emitting the full per-round decision trace to stdout. If
+the node does not already log every LLM decision, add temporary debug
+logging before running the checkpoint (and remove it before the commit
+closes).
+
+```python
+import json
+from pathlib import Path
+from agent.schemas.interpretation import InterpretationOutput
+from agent.schemas.literature_review import (
+    LiteratureReviewInput, DynamicSearchConfig, PaperSource,
+)
+from nodes import ml_literature_review
+
+# Seed: most recent interpretation output from the workspace.
+interp_path = sorted(Path("./workspace").glob("result_interpretation_*.json"))[-1]
+interp = InterpretationOutput.model_validate_json(interp_path.read_text())
+
+lit_in = LiteratureReviewInput(
+    experiment_history=interp,
+    root_papers=[PaperSource(source_type="arxiv",
+                             identifier="2302.09309", verbosity=1)],
+    dynamic_search=DynamicSearchConfig(
+        enabled=True, max_rounds=3,
+        initial_verbosity=0, escalation_allowed=True,
+    ),
+    storage=...,  # real workspace
+    run_name="checkpoint_c",
+    llm_provider="openai", llm_model_id="gpt-4o-mini",
+)
+out = ml_literature_review.run(lit_in)
+
+# Per the node's contract, every round's decision MUST be printed:
+#   - the query string generated for this round
+#   - the titles of the papers the S2 search returned
+#   - which papers (if any) were upgraded from verbosity=0 to verbosity=1
+#   - the termination decision ({"done": true} or {"query": "..."}) + the
+#     reasoning string the LLM produced alongside it
+```
+
+**What to inspect**:
+- Are the search queries specific and grounded in the experiment history?
+  A good query looks like *"gated Fourier neural operator 1D signal
+  denoising"* or *"low-SNR time-series denoising spectral convolution"*. A
+  bad query looks like *"SQUID signal processing neural network"* (too
+  generic) or *"TIDMAD denoising"* (will only return papers we already have).
+- Does the LLM's query generation visibly use the `key_findings` and
+  `bottlenecks` from the `InterpretationOutput`? If the current bottleneck
+  is "overfitting in the high-frequency band," does the query reflect that?
+- Are the papers selected for verbosity=1 upgrade genuinely more relevant
+  than the ones left at verbosity=0? Read the abstracts of both groups and
+  judge.
+- Does the termination decision make sense, or does the loop stop too early
+  (after one round of weak results) or run unnecessarily long?
+- Do the retrieved papers overlap significantly with models already in
+  `MODEL_REGISTRY` (punet, wavenet, gated_fno, transformer, rnn)? High
+  overlap means queries are too generic and rediscovering what we already
+  have. Zero overlap across all rounds may mean queries are too narrow.
+
+**What this decides**: the dynamic search system prompt. Specifically:
+- If queries are too generic → add an explicit instruction to the prompt:
+  *"your query must reflect a specific architectural gap or failure mode
+  identified in the experiment history, not just the general task domain."*
+- If the LLM ignores `key_findings` → restructure the prompt to present
+  `key_findings` and `bottlenecks` as the primary input, with task
+  description as secondary context.
+- If termination is too early → add a minimum-rounds requirement or
+  rephrase the termination condition.
+- If verbosity=1 selection is poor → add an explicit *"justify your upgrade
+  decision by citing the specific finding in the abstract that makes this
+  paper worth deep-reading"* instruction.
+
+**Sign-off requirement**: a human must read the full loop trace and judge
+whether the search behavior is purposeful. "Good enough" means: the queries
+are visibly grounded in the specific experimental context, and the papers
+retrieved are ones a human ML researcher would actually want to read given
+the same experimental history. If the queries are generic across all three
+rounds, the system prompt needs revision before proceeding to Commit 5.
+**Show the user the full trace before marking this checkpoint done.**
+
+**Artifact to commit**: `docs/dynamic_search_pilot.md` containing the full
+loop trace, a 3-5 line human summary of the `InterpretationOutput` used as
+input (not the full JSON), and the human judgment on each inspection bullet.
 
 **Open questions / decisions needed**:
 - **Node entry shape.** Class-with-`.run()` or module-level `run()`? Check
@@ -668,6 +935,87 @@ as the always-true trigger.
 .venv/bin/python -m ruff check workflows/model_exploration.py configs/lit_review_config.yaml tests/unit/workflows/test_model_exploration_lit_review_wiring.py
 .venv/bin/python -m pyright workflows/model_exploration.py
 ```
+
+#### 🔍 Behavioral Checkpoint D — End-to-end proposer behavior change
+
+**Trigger**: run this after the test gate passes. This is the
+highest-stakes checkpoint — it decides whether the entire lit-review
+addition produces a measurable, traceable improvement in the proposer's
+output.
+
+**How to run**: run two complete workflow iterations back-to-back using the
+same starting state (same model, same experiment history, same seed):
+
+```python
+# Run A: lit review ON.
+proposal_A = run_one_iteration(
+    base_state, should_run_literature_review_override=True,
+)
+
+# Run B: lit review BYPASSED (patch the gate to return False).
+proposal_B = run_one_iteration(
+    base_state, should_run_literature_review_override=False,
+)
+
+print("== Run A (lit review on) ==")
+print(proposal_A.model_dump_json(indent=2))
+print("== Run B (lit review off) ==")
+print(proposal_B.model_dump_json(indent=2))
+```
+
+Print the full `ProposalOutput` from both runs — specifically the proposed
+architecture description and the reasoning trace.
+
+**What to inspect**:
+- Does Run A's proposal reference any specific technique, paper finding, or
+  architectural concept that came from the `ExpertContextItem` list? Look
+  for concrete traces: a specific method name, a training trick, a design
+  rationale that could only have come from the literature.
+- Does Run B produce a qualitatively different proposal, or is it
+  essentially the same with the literature references stripped out?
+- Are the `cite_id` values in Run A's reasoning real — do they match actual
+  `cite_id` values from `LiteratureReviewOutput.findings`? Or has the
+  proposer hallucinated citations?
+- Does the proposal in Run A feel more grounded and specific, or does the
+  literature just add decorative references to an otherwise unchanged
+  proposal?
+- Check the `expert_context` block that was passed to the proposer: are the
+  `ExpertContextItem` entries specific enough to be actionable, or are they
+  generic enough that a proposer would rationally ignore them?
+
+**What this decides**: whether the end-to-end system is working. This is
+the highest-stakes checkpoint. Possible failure modes and responses:
+- If Run A and Run B proposals are nearly identical → the
+  `ExpertContextItem` content is too abstract, or the proposer's system
+  prompt does not give literature findings enough weight. Fix: either
+  tighten the `ExpertContextItem` generation prompt in
+  `ml_literature_review`, or add an explicit instruction in the proposer's
+  system prompt to engage with literature findings before proposing.
+- If Run A has hallucinated `cite_id`s → the proposer is generating
+  plausible-sounding references rather than using the actual ones. Fix: add
+  an explicit instruction to the proposer to only cite `cite_id` values
+  that appear in the provided `expert_context` block.
+- If Run A's proposal is more specific but the specificity comes from the
+  `AgentCard` trust framing rather than the actual findings → the findings
+  themselves are too weak. Return to Checkpoint B and tighten the
+  compression prompt.
+- If Run A is clearly better and the improvement is traceable to specific
+  `ExpertContextItem` entries → the system is working.
+
+**Sign-off requirement**: a human must read both proposals side by side and
+make a judgment: does the literature review produce a meaningful, traceable
+improvement in proposal quality? "Good enough" does *not* mean Run A is
+always better — it means the influence of the literature is visible and
+grounded in real retrieved content. If the system fails this checkpoint,
+**do not merge the workflow integration into the main branch** until the
+root cause is identified and fixed. **Show the user both proposals before
+marking this checkpoint done.**
+
+**Artifact to commit**: `docs/e2e_behavior_pilot.md` containing: the
+`LiteratureReviewOutput` summary (agent card + top 3 findings), the Run A
+proposal summary, the Run B proposal summary, a side-by-side diff of the
+key differences, and the human judgment on whether the improvement is real
+and traceable.
 
 **Open questions / decisions needed**:
 - Helper placement: `merge_external_agent_outputs` and
