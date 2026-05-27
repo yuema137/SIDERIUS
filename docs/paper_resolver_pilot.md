@@ -209,7 +209,7 @@ DenoisingScore = log Λ                                    (7)
 
 1. **No structured equation field.** Equations extract too degraded for a
    reliable `key_equations: str` (LaTeX). Instruct the LLM to **describe key
-   equations in prose** within `key_results` / `architecture_summary`.
+   equations in prose** within `key_results` / `architecture_details`.
 2. **Compression prompt must explicitly tell the LLM to ignore**: author
    affiliations/emails, the rotated arxiv margin stamp, `(cid:NN)` glyph
    artifacts, and Datasheet-appendix TOC dot-leaders.

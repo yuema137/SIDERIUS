@@ -181,8 +181,8 @@ works on every schema. No node, no skill, no LLM yet — just the contract.
         `escalation_allowed: bool = True`.
   - [x] `PaperExtract(BaseModel)` — **provisional** fields with TODO comment
         pointing at Commit 3. Start from spec §5 list: `title`, `authors`,
-        `year`, `core_idea`, `architecture_summary`, `key_results`,
-        `relevance_to_squid`. All `str`. Finalize after pilot.
+        `year`, `core_idea`, `architecture_details`, `key_results`,
+        `relevance_to_task`. All `str`. Finalize after pilot.
   - [x] `RetrievedPaper(BaseModel)`: `paper_id: str`, `source: PaperSource`,
         `s2_metadata: dict[str, Any] | None`, `extract: PaperExtract | None`,
         `full_text: str | None`, `verbosity_achieved: Literal[0,1,2]`,
@@ -516,19 +516,29 @@ reviewed**.
 - New: `tests/unit/agent/prompt_templates/test_literature_review_prompts.py`.
 
 **Checklist**:
+- [x] **Field-name reconciliation (pre-Commit-3, done)** — locked canonical
+      `PaperExtract` fields: `title, authors, year, core_idea,
+      architecture_details, key_results, relevance_to_task`. Renamed
+      `architecture_summary`→`architecture_details` and
+      `relevance_to_squid`→`relevance_to_task` across code + the four docs;
+      dropped `key_methods` and `limitations` (the latter conflicts with
+      `AgentCard.limitations`); `key_findings` is reserved for
+      `InterpretationOutput`/`CacheEntry` and must not be reused on
+      `PaperExtract`.
 - [ ] Read `docs/paper_resolver_pilot.md` end-to-end before changing
       `PaperExtract`.
 - [ ] **Stop and ask** if any of these is true after reading the pilot:
   - PDF text is too noisy for reliable equation capture (no `key_equations`
     field).
-  - Section structure isn't preserved (`architecture_summary` won't work as
+  - Section structure isn't preserved (`architecture_details` won't work as
     a free-text field; may need sub-fields).
-  - Paper-specific oddity (`relevance_to_squid` may need to be neutralised to
-    `relevance_to_domain` for generality).
+  - Domain-name generality — RESOLVED pre-Commit-3: `relevance_to_squid` was
+    renamed to the task-agnostic `relevance_to_task`; the compression prompt
+    injects the concrete task description.
 - [ ] Finalize `PaperExtract` fields based on the pilot. Default candidate
       list (subject to pilot review): `title`, `authors`, `year`,
-      `core_idea` (≤80 words), `architecture_summary` (≤150 words),
-      `key_results` (≤120 words), `relevance_to_squid` (≤100 words).
+      `core_idea` (≤80 words), `architecture_details` (≤150 words),
+      `key_results` (≤120 words), `relevance_to_task` (≤100 words).
       Decide via pilot whether to add `key_equations: str` (LaTeX) and
       `architecture_diagram_md: str`. Document the per-field word budget
       in the docstring.
@@ -595,12 +605,12 @@ other_paper_id = search["data"]["results"][0]["externalIds"].get("ArXiv")
 ```
 
 **What to inspect**:
-- Does `architecture_summary` / `key_methods` capture the core technical
-  contribution, or does it describe the problem setup instead?
+- Does `architecture_details` capture the core technical contribution, or
+  does it describe the problem setup instead?
 - Does the architecture description contain enough information for a model
   proposer to understand the rough structure (layer types, connectivity
   pattern, key design choices)?
-- Does `relevance_to_squid` make a specific argument for why this paper is
+- Does `relevance_to_task` make a specific argument for why this paper is
   relevant to TIDMAD denoising, or is it a generic "this paper is about
   signal processing"?
 - Are there hallucinations — claims that cannot be found in the source text?
@@ -617,10 +627,10 @@ other_paper_id = search["data"]["results"][0]["externalIds"].get("ArXiv")
 
 **What this decides**: whether the `PaperExtract` schema and compression
 prompt are ready for use inside the full node. Specifically:
-- If `architecture_summary` is consistently vague → tighten the prompt to
+- If `architecture_details` is consistently vague → tighten the prompt to
   ask explicitly for layer types, input/output shapes, and key
   hyperparameters.
-- If `relevance_to_squid` is generic → add a task-description injection into
+- If `relevance_to_task` is generic → add a task-description injection into
   the compression prompt so the LLM knows what "relevant" means for this
   specific problem.
 - If a consistently important category of information (e.g. training

@@ -215,11 +215,13 @@ All retrieved papers, regardless of source, use one internal schema:
 
 ```python
 class PaperExtract(BaseModel):
-    key_methods: str
+    title: str
+    authors: str
+    year: str
+    core_idea: str
     architecture_details: str
     key_results: str
-    limitations: str
-    relevance_to_squid: str
+    relevance_to_task: str
 
 class RetrievedPaper(BaseModel):
     paper_id: str

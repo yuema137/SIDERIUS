@@ -151,7 +151,7 @@ class TestPaperExtract:
         e = PaperExtract()
         assert e.title == ""
         assert e.core_idea == ""
-        assert e.relevance_to_squid == ""
+        assert e.relevance_to_task == ""
 
     def test_populated(self):
         e = PaperExtract(
@@ -159,9 +159,9 @@ class TestPaperExtract:
             authors="A. Smith, B. Lee",
             year="2023",
             core_idea="Causal dilated CNN denoiser for time series.",
-            architecture_summary="Stacked dilated causal convolutions ...",
+            architecture_details="Stacked dilated causal convolutions ...",
             key_results="SOTA on dataset X with 30% fewer params.",
-            relevance_to_squid="Receptive-field analysis transfers directly.",
+            relevance_to_task="Receptive-field analysis transfers directly.",
         )
         assert e.title == "Towards Robust Denoising"
         assert e.year == "2023"

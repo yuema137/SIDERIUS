@@ -117,7 +117,7 @@ class PaperExtract(BaseModel):
         default="",
         description="One-paragraph summary of the central contribution (≤80 words).",
     )
-    architecture_summary: str = Field(
+    architecture_details: str = Field(
         default="",
         description="Architectural description: layers, blocks, key design "
         "decisions (≤150 words). PROVISIONAL — pilot may split into "
@@ -127,11 +127,12 @@ class PaperExtract(BaseModel):
         default="",
         description="Headline empirical results (≤120 words).",
     )
-    relevance_to_squid: str = Field(
+    relevance_to_task: str = Field(
         default="",
-        description="How this paper might inform SQUID denoising specifically "
-        "(≤100 words). PROVISIONAL — pilot may neutralise to a generic "
-        "relevance_to_domain.",
+        description="Why this paper is relevant to the downstream task "
+        "(≤100 words). Task-agnostic by name so the framework generalizes "
+        "beyond SQUID; the compression prompt injects the concrete task "
+        "description so the LLM knows what 'task' means in context.",
     )
 
 
