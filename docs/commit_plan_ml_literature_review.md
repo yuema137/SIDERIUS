@@ -36,7 +36,7 @@ commit). A commit is not "done" until both its automated test gate is green
 - [x] **Commit 1** — Schema (`literature_review.py` + `external_agents.py`)
   · gate `tests/unit/agent/schemas/test_literature_review_schemas.py` · committed `c8fe641`
 - [x] **Commit 2** — Paper resolver skill + TIDMAD pilot
-  · gate `tests/unit/agent/skills/test_paper_resolver_skill.py` + `docs/paper_resolver_pilot.md` · committed 2a `a2bd97d` (skill+tests+deps) + 2b (docs+ID-fix)
+  · gate `tests/unit/agent/skills/test_paper_resolver_skill.py` + `docs/paper_resolver_pilot.md` · committed 2a `a2bd97d` (skill+tests+deps) + 2b `5796cea` (docs+ID-fix); field-name lock `a659b47`
   - [x] **Checkpoint A** — Raw paper resolution output · signed off 2026-05-26
 - [ ] **Commit 3** — Finalize `PaperExtract` + compression prompt
   · gate `tests/unit/agent/prompt_templates/test_literature_review_prompts.py` + real-run extract reviewed
@@ -524,7 +524,8 @@ reviewed**.
       dropped `key_methods` and `limitations` (the latter conflicts with
       `AgentCard.limitations`); `key_findings` is reserved for
       `InterpretationOutput`/`CacheEntry` and must not be reused on
-      `PaperExtract`.
+      `PaperExtract`. Gate: `test_literature_review_schemas.py` 25 passed,
+      ruff + pyright clean. Committed `a659b47`.
 - [ ] Read `docs/paper_resolver_pilot.md` end-to-end before changing
       `PaperExtract`.
 - [ ] **Stop and ask** if any of these is true after reading the pilot:
