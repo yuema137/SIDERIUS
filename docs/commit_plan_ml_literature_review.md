@@ -42,7 +42,7 @@ commit). A commit is not "done" until both its automated test gate is green
   · gate 42 passed (schema + prompt suites) + real-run extract reviewed · artifact `docs/paper_extract_pilot.md` · committed `879e90e`
   - [x] **Checkpoint B** — Single paper LLM compression quality · signed off 2026-05-26 (hard requirement passes on both papers; one targeted prompt revision applied)
 - [ ] **Commit 4** — `nodes/ml_literature_review.py` core loop
-  · **4a** (node + 2 prompts + unit tests) complete — 23 unit passed, ruff + `ruff format` + pyright clean (commit pending); **4b** (real-run integration + Checkpoint C) next
+  · **4a** committed `820c548` (node + 2 prompts + unit tests) — 58 unit passed, ruff + `ruff format` + pyright clean; **4b** (real-run integration + Checkpoint C) next
   - [ ] **Checkpoint C** — Dynamic search loop behavior
 - [ ] **Commit 5** — Protocol `ml_literature_review_to_ml_model_propose.py` (audit-only on `local_full_context`)
   · gate `tests/unit/agent/protocols/test_ml_literature_review_to_ml_model_propose.py`
@@ -745,7 +745,7 @@ trace + `docs/dynamic_search_pilot.md`. Mirrors Commit 2/3 staging.
       `{"findings": [...]}`; node wraps each into `ExpertContextItem`
       (source/kind set by node). `new_vocab_candidates=[]`,
       `suggested_mindset=None` for v1.
-- [ ] **Synthesis prompt quality** — revise the 4a `render_synthesis_prompt` +
+- [x] **Synthesis prompt quality** — revise the 4a `render_synthesis_prompt` +
       `_synthesize` to meet this *before committing 4a*. Collection-level prompt
       (reasons across all retrieved papers together, not per-paper). System
       prompt requirements:
@@ -774,14 +774,14 @@ trace + `docs/dynamic_search_pilot.md`. Mirrors Commit 2/3 staging.
       cache miss (resolver called + cache written); compression fallback
       (`verbosity_achieved==0`, `extract is None`, no raise); storage round-trip;
       **plus** an escalation-path test (search hit → deep-read → extract).
-- [ ] Synthesis unit tests (added in the 4a revision):
-  - [ ] mocked synthesis returns a valid `list[ExpertContextItem]` with
+- [x] Synthesis unit tests (added in the 4a revision):
+  - [x] mocked synthesis returns a valid `list[ExpertContextItem]` with
         `confidence` scores — all items validate against the schema.
-  - [ ] papers with no actionable relevance → zero `findings` items (empty list
+  - [x] papers with no actionable relevance → zero `findings` items (empty list
         valid, must not raise).
-  - [ ] a `cite_id` not matching any retrieved `paper_id` is soft-dropped —
+  - [x] a `cite_id` not matching any retrieved `paper_id` is soft-dropped —
         assert the bad item is omitted and the well-cited items remain.
-  - [ ] `render_synthesis_prompt` deterministic content asserts — system prompt
+  - [x] `render_synthesis_prompt` deterministic content asserts — system prompt
         contains the bottleneck-grounding instruction, the omission-over-weak-item
         rule, the cite_id-matching instruction, and the task-description injection.
 - [ ] **(4b)** Integration test (`tests/integration/nodes/test_ml_literature_review.py`,
@@ -790,8 +790,8 @@ trace + `docs/dynamic_search_pilot.md`. Mirrors Commit 2/3 staging.
       one `ExpertContextItem` in `findings`. **Show the user the full output
       before closing the commit.**
 
-**4a gate result (2026-05-27):** 23 unit passed (7 node scenarios + 16 prompt),
-ruff check + `ruff format --check` clean, pyright 0 errors.
+**4a gate result (2026-05-27):** 58 unit passed (node + prompt + schema suites),
+ruff check + `ruff format --check` clean, pyright 0 errors. Committed `820c548`.
 
 **Test gate**:
 ```
@@ -913,9 +913,10 @@ input (not the full JSON), and the human judgment on each inspection bullet.
   (default 10) with the relevance-drop reasoning in its docstring (S2 relevance
   drops sharply past position ~10; ~10 abstracts ≈ 2k tokens is a manageable
   decision surface). Replaces the 4a node constant `SEARCH_LIMIT=8`.
-- **Per-round verbosity escalation cap.** OPEN — the loop currently has no cap
-  (trust LLM + `max_rounds`). Add an explicit cap of N=2 escalations per round
-  to control cost? Lean: yes, cap at 2. **Ask before implementing.**
+- **Per-round verbosity escalation cap.** RESOLVED — added
+  `DynamicSearchConfig.max_escalations_per_round` (default 2); the loop resets
+  the counter on each search round and logs+drops escalation requests beyond
+  the cap. Searches consume the round budget; escalations do not.
 
 ---
 
