@@ -367,6 +367,180 @@ placeholder raising `NotImplementedError` alongside the `local_*` function.
 
 ---
 
+## §5a Full-text and formula extraction strategy
+
+> Supersedes the Commit-2 pilot finding **F3** ("no `key_equations` field;
+> equations in prose") *conditionally*. F3's rationale — `pdfplumber` degrades
+> math (`∑`→`(cid:88)`, flattened sub/superscripts) — holds only for the
+> pdfplumber path. When a clean LaTeX/Markdown source is available (Tiers 1–2),
+> equations and pseudocode are carried verbatim; prose-only applies to Tier 3.
+> The Commit-3 compression prompt's instruction to "describe math in prose" now
+> applies only to the Tier-3 path. For Tier-1 and Tier-2 inputs, the prompt
+> variant must be equation-aware: it should extract equations directly into
+> `key_equations_md` rather than paraphrasing them. This prompt variant is
+> validated in Checkpoint F.
+
+`verbosity ≥ 1` extraction is a **three-tier cascade**, tried best-first. Each
+tier records how the text was obtained in a first-class `extraction_method`
+field so every downstream consumer can calibrate trust.
+
+**Tier 1 — arXiv LaTeX source (primary, ground truth).** For any paper whose
+`externalIds` carry an ArXiv ID, download the source from
+`https://arxiv.org/src/{arxiv_id}` (a `.tar.gz`), extract the main `.tex`, and
+parse `equation` / `align` / `algorithm` / `figure` environments to clean
+LaTeX/Markdown. This is the author's own source — **zero hallucination risk, no
+GPU, no ML model** — and covers the large majority of ML papers.
+`extraction_method="arxiv_source"`.
+
+**Tier 2 — `marker` (fallback for non-arXiv).** For DOI/OpenReview papers with
+no arXiv source, convert the PDF with `marker-pdf` (open-source, ~4 GB VRAM,
+PDF→Markdown with LaTeX preserved; ~10.5/12 on equation extraction vs ~5/12 for
+docling). The lab A100 makes VRAM a non-constraint.
+`extraction_method="marker_pdf"`. Skipped gracefully (→ Tier 3) when `marker`
+is not installed or no GPU exists.
+
+**Tier 3 — `pdfplumber` + LLM reconstruction (last resort).** When neither
+Tier 1 nor Tier 2 is available or succeeds, use the existing `pdfplumber` text
+and let the node's compression call reconstruct equations in prose plus
+*approximate* LaTeX. `extraction_method="pdfplumber_llm"` — the signal that
+equation content here is lower-reliability.
+
+When no PDF is obtainable at all: `extraction_method="abstract_only"`.
+
+**Cascade (skill, `verbosity ≥ 1`):**
+
+    if arxiv_id:       try Tier 1 → "arxiv_source"    (on fail ↓)
+    if pdf available:  try Tier 2 → "marker_pdf"       (on fail / not installed ↓)
+                       Tier 3      → "pdfplumber_llm"
+    if no pdf:         "abstract_only"
+
+The skill returns the extracted Markdown **and** `extraction_method` in its
+response envelope. The node reads `extraction_method` to pick the compression
+prompt variant: Tiers 1–2 (clean input) get equation-aware instructions that
+populate `key_equations_md` / `pseudocode_md` directly; Tier 3 gets "describe
+math in prose, attempt LaTeX only when structure is clear, treat
+`key_equations_md` as unreliable".
+
+**Output format.** All math is Markdown — display `$$…$$`, inline `$…$`;
+pseudocode in fenced ` ```python ` / ` ```algorithm ` blocks. Example:
+
+````markdown
+## Key Equations
+
+The SNR-aware loss is defined as:
+
+$$\mathcal{L}_{\text{SNR}} = -\log\frac{\|s\|^2}{\|s - \hat{s}\|^2}$$
+
+## Algorithm
+
+```python
+# Adaptive hard-sample reweighting
+for segment in batch:
+    weight = compute_snr_weight(segment, noise_floor)
+    loss += weight * reconstruction_loss(pred, target)
+```
+````
+
+**Schema impact** (finalized in Commit 2c; amends the Commit-3 locked 7-field
+set). `PaperExtract` gains:
+- `key_equations_md: Optional[str]` — display/inline LaTeX of core equations.
+- `pseudocode_md: Optional[str]` — fenced pseudocode/algorithm blocks.
+- `extraction_method: Literal["arxiv_source","marker_pdf","pdfplumber_llm","abstract_only"]`
+  — first-class trust signal, default `"abstract_only"`.
+
+**Why Tier-1-first, and why it matters for the `reference_library`.** The
+`reference_library` (planned channel carrying the full `PaperExtract` for each
+verbosity≥1 paper cited in `findings`) is only as useful as the math it carries.
+For *recent* papers whose methods the proposer never saw in training, a finding
+that names a method without its equations/pseudocode is unimplementable — the
+proposer cannot describe or build a method it knows only by name. arXiv source
+is Tier 1 because it is ground-truth author text: no OCR, no font-glyph loss, no
+hallucination. `extraction_method` travels with the content so the proposer (and
+coder) can weight equation fidelity accordingly.
+
+---
+
+## §5b reference_library channel
+
+`findings` and `reference_library` are complementary channels:
+- **`findings`** (`List[ExpertContextItem]`) — LLM-synthesized implications:
+  *what to try*, grounded in the current bottlenecks. Always populated.
+- **`reference_library`** (`List[PaperReference]`) — the raw `PaperExtract` for
+  each cited paper: *how to implement it*, from the original source. Populated
+  only for papers deep-read at verbosity ≥ 1.
+
+A three-part finding tells the proposer a method exists and why it's relevant.
+But for a *recent* paper the proposer never saw in training, that is not enough
+to implement the method — it needs the original equations and pseudocode.
+`reference_library` carries exactly that, looked up by `cite_id`.
+
+**Schema** (`agent/schemas/literature_review.py`):
+
+```python
+class PaperReference(BaseModel):
+    """A single reference_library entry: the full PaperExtract for a paper
+    cited in findings, looked up by cite_id."""
+    paper_id: str            # matches RetrievedPaper.paper_id
+    cite_id: str             # matches ExpertContextItem.cite_id — the lookup key
+    title: str
+    year: str
+    extract: PaperExtract    # full extract incl. key_equations_md, pseudocode_md
+    verbosity_achieved: int  # always >= 1 for a reference_library entry
+    extraction_method: str   # propagated from PaperExtract.extraction_method —
+                             # equation-reliability signal for the proposer
+```
+
+**Population rule.** A `PaperReference` is emitted for exactly the papers that
+are (a) cited by at least one `ExpertContextItem` in `findings` **and** (b) have
+`verbosity_achieved >= 1`. Verbosity-0 (abstract-only) papers never appear — they
+have no `PaperExtract` to contribute. An **empty `reference_library` is valid**
+(every finding cited an abstract-only paper).
+
+**Lookup pattern (pull, not push).** The proposer reads `findings` first; for any
+finding it wants to act on, it takes that item's `cite_id` and looks up the
+matching `PaperReference` for the original equations/pseudocode/architecture. It
+is not required to read every entry — only the ones behind findings it builds on.
+
+**Equation trust hierarchy** (`extraction_method`, descending reliability):
+`arxiv_source` (ground-truth LaTeX) > `marker_pdf` (good) > `pdfplumber_llm`
+(approximate) > `abstract_only` (not present — no reference_library entry).
+
+**Relationship to Commit 2c.** The `reference_library` *structure* lands in
+Commit 2d. Its equation *content* (`key_equations_md`, `pseudocode_md`) is
+reliably populated only once Commit 2c's three-tier extraction lands; before
+that, those fields are typically `None` — the structure is in place, content
+improves when 2c lands.
+
+**Example — a finding and its reference_library entry side by side:**
+
+A finding (in `expert_context`):
+
+    [LITERATURE REFERENCE] (from ml_literature_review, confidence=0.7,
+     cite_id=arxiv:2503.18162)
+      Given the optimization-to-metric mismatch, SNRAware's SNR-unit training
+      aligns the loss with the SNR metric rather than a proxy — try an
+      SNR-normalized reconstruction loss for the hard segments. (rationale:
+      deep-read, on-domain denoising with a clear mechanism transfer.)
+
+The matching reference_library entry (looked up by that `cite_id`):
+
+    paper_id:           arxiv:2503.18162
+    cite_id:            arxiv:2503.18162
+    title:              SNRAware: Improved Deep Learning MRI Denoising ...
+    year:               2025
+    verbosity_achieved: 1
+    extraction_method:  arxiv_source        # equations are ground truth
+    extract.key_equations_md:
+        The SNR-aware loss is:
+        $$\mathcal{L}_{\text{SNR}} = -\log\frac{\|s\|^2}{\|s - \hat{s}\|^2}$$
+    extract.architecture_details:
+        Dual-branch denoiser with an SNR-unit normalization front-end ...
+
+The proposer reads the finding to decide *whether* to pursue an SNR-aligned loss,
+then reads the reference entry to get the *exact* loss form to implement.
+
+---
+
 ## §6 Workflow integration
 
 Two small additions to `workflows/model_exploration.py`.
@@ -563,3 +737,13 @@ Still open:
    S2 is fixed — see `docs/paper_resolver_pilot.md` — so the limiter is genuine
    S2 coverage, not request construction. Confirmed in the Commit 2 pilot: a
    correctly-encoded ICLR forum URL still returns 404.)
+6. **Compression word budgets are hardcoded in the prompt template.** The
+   `PaperExtract` field word budgets (`core_idea ≤80`, `architecture_details
+   ≤150`, `key_results ≤120`, `relevance_to_task ≤100`) are currently literal
+   numbers in `paper_extract_system.md`. These are output-length constraints,
+   not LLM-assigned scores, so they are lower-risk than scores — but for
+   consistency they should move to a configurable `FieldWordBudgets` object
+   following the same pattern as `ConfidenceRubric` (single source of truth in
+   `agent/schemas/`, injected via a placeholder, no numbers in the .md). Deferred
+   because changing them requires re-validating Checkpoint B. See the
+   "Scoring and rubric design invariants" section in `external_agents_architecture.md`.
